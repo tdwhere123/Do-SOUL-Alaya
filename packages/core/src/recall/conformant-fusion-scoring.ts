@@ -10,7 +10,6 @@ import type {
   RecallFusionStream,
   RecallSupplementaryData
 } from "./recall-service-types.js";
-import { normalizeGraphSupport } from "./recall-service-helpers.js";
 
 export const CONFORMANT_AXES: readonly RecallConformantAxis[] = ["object", "path", "evidence"];
 
@@ -93,16 +92,17 @@ type EvidenceCollapseInputs = Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
 }>;
 
-// Normalized independent-support count: the query-orthogonal inbound graph-support tally (∂/∂L=0).
-function independentSupportCount(inputs: EvidenceCollapseInputs): number {
-  return normalizeGraphSupport(inputs.supplementaryData.graphSupportCounts[inputs.candidate.entry.object_id] ?? 0);
+function independentSupportValues(inputs: EvidenceCollapseInputs): readonly number[] {
+  const objectId = inputs.candidate.entry.object_id;
+  const vector = inputs.supplementaryData.evidenceSupportVectorsByMemoryId?.[objectId];
+  return vector?.map((support) => Math.max(0, support.support)).filter((support) => support > 0) ?? [];
 }
 
-// R_E = decay_ev · NOR_ρ(independent inbound graph tally). No stream supports — lexical / evidence_fts
-// views stay in R_lex; ρ_ev is inert until a second orthogonal support is added.
+// R_E = decay_ev · NOR_ρ(independent evidence-source support). No stream supports — lexical /
+// evidence_fts views stay in R_lex; scalar graphSupportCounts stays out of the evidence axis.
 export function collapseEvidenceRelevance(inputs: EvidenceCollapseInputs, rhoEvidence: number): number {
-  const support = [independentSupportCount(inputs)];
-  return EVIDENCE_DECAY * noisyOrDecorrelate(support, [1], rhoEvidence);
+  const support = independentSupportValues(inputs);
+  return EVIDENCE_DECAY * noisyOrDecorrelate(support, support.map(() => 1), rhoEvidence);
 }
 
 export interface ConformantCandidate {
@@ -180,7 +180,14 @@ export function buildConformantAxisContext(params: Readonly<{
     candidateKey,
     objectId: candidate.entry.object_id,
     object: resolveObjectBase(candidate, candidateKey, params.ranksByStream, params.resolved, params.supplementaryData),
-    evidence: quantize(collapseEvidenceRelevance({ candidate, supplementaryData: params.supplementaryData }, rhoEvidence))
+    evidence: evidenceMultEnabled()
+      ? quantize(
+          collapseEvidenceRelevance(
+            { candidate, supplementaryData: params.supplementaryData },
+            rhoEvidence
+          )
+        )
+      : 0
   }));
   const rObjectById = new Map<string, number>();
   for (const candidate of seeded) {

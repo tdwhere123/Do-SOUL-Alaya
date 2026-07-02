@@ -34,16 +34,27 @@ function emptyRecords(): RecallSupplementaryData {
   };
 }
 
-function evidenceInputs(supportCount: number, noise: Partial<RecallSupplementaryData> = {}): {
+function evidenceInputs(supports: readonly number[], noise: Partial<RecallSupplementaryData> = {}): {
   readonly candidate: { readonly entry: MemoryEntry; readonly effectiveFactors: { activation: number; relevance: number } };
   readonly supplementaryData: RecallSupplementaryData;
 } {
+  const evidenceRefs = supports.map((_support, index) => `ev-${index}`);
   return {
     candidate: {
-      entry: { object_id: OID, evidence_refs: [] } as unknown as MemoryEntry,
+      entry: { object_id: OID, evidence_refs: evidenceRefs } as unknown as MemoryEntry,
       effectiveFactors: { activation: 0, relevance: 0 }
     },
-    supplementaryData: { ...emptyRecords(), graphSupportCounts: { [OID]: supportCount }, ...noise }
+    supplementaryData: {
+      ...emptyRecords(),
+      evidenceSupportVectorsByMemoryId: {
+        [OID]: supports.map((support, index) => ({
+          source_kind: "evidence_ref",
+          source_id: evidenceRefs[index]!,
+          support
+        }))
+      },
+      ...noise
+    }
   };
 }
 
@@ -92,8 +103,8 @@ describe("NOR_ρ operator (noisyOrDecorrelate)", () => {
 
 describe("P1 — R_E is query-lexical orthogonal (∂R_E/∂L = 0)", () => {
   it("lexical / source-proximity supplementary fields do not affect R_E", () => {
-    const bare = collapseEvidenceRelevance(evidenceInputs(2), 0.5);
-    const withLexicalNoise = collapseEvidenceRelevance(evidenceInputs(2, {
+    const bare = collapseEvidenceRelevance(evidenceInputs([2 / 3]), 0.5);
+    const withLexicalNoise = collapseEvidenceRelevance(evidenceInputs([2 / 3], {
       ftsRanks: { [OID]: 0.9 }, evidenceFtsRanks: { [OID]: 0.9 },
       trigramFtsRanks: { [OID]: 0.9 }, sourceProximityScores: { [OID]: 0.9 }
     }), 0.5);
@@ -101,17 +112,22 @@ describe("P1 — R_E is query-lexical orthogonal (∂R_E/∂L = 0)", () => {
     expect(withLexicalNoise).toBeCloseTo(bare, 12);
   });
 
-  it("R_E tracks graphSupportCounts only", () => {
-    expect(collapseEvidenceRelevance(evidenceInputs(1), 0.5)).toBeCloseTo(1 / 3, 12);
-    expect(collapseEvidenceRelevance(evidenceInputs(3), 0.5)).toBeCloseTo(1, 12);
-    expect(collapseEvidenceRelevance(evidenceInputs(0), 0.5)).toBeCloseTo(0, 12);
+  it("R_E tracks independent evidence-source vectors only", () => {
+    expect(collapseEvidenceRelevance(evidenceInputs([1 / 3]), 0.5)).toBeCloseTo(1 / 3, 12);
+    expect(collapseEvidenceRelevance(evidenceInputs([1]), 0.5)).toBeCloseTo(1, 12);
+    expect(collapseEvidenceRelevance(evidenceInputs([]), 0.5)).toBeCloseTo(0, 12);
+    expect(collapseEvidenceRelevance(evidenceInputs([], { graphSupportCounts: { [OID]: 3 } }), 0.5)).toBeCloseTo(0, 12);
   });
 
   it("R_E is independent-support count only — ρ_ev is inert until a second support exists", () => {
-    const base = collapseEvidenceRelevance(evidenceInputs(1), 0);
-    const atRhoOne = collapseEvidenceRelevance(evidenceInputs(1), 1);
+    const base = collapseEvidenceRelevance(evidenceInputs([1 / 3]), 0);
+    const atRhoOne = collapseEvidenceRelevance(evidenceInputs([1 / 3]), 1);
     expect(base).toBeCloseTo(1 / 3, 12);
     expect(atRhoOne).toBeCloseTo(base, 12);
+  });
+
+  it("decorrelates multiple evidence sources through NOR_ρ", () => {
+    expect(collapseEvidenceRelevance(evidenceInputs([0.5, 0.5]), 0.5)).toBeCloseTo(0.625, 12);
   });
 });
 

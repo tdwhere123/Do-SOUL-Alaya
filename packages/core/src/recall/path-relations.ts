@@ -98,6 +98,13 @@ export interface DirectionEligiblePathExpansionTarget {
 // stay π=0 and cannot demote an in-pool single_fact gold via free inflow votes.
 const ANSWER_FLOOD_RELATION_KINDS: ReadonlySet<string> = new Set(["answers_with"]);
 
+export function answersWithPathFuelEnabled(): boolean {
+  return (
+    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
+    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
+  );
+}
+
 function isAnswerFloodRelationKind(relationKind: string): boolean {
   return ANSWER_FLOOD_RELATION_KINDS.has(relationKind);
 }
@@ -109,6 +116,9 @@ export function buildPathInflowByTarget(
   paths: readonly Readonly<PathRelation>[],
   candidateIds: ReadonlySet<string>
 ): Readonly<Record<string, PathInflowEdge[]>> {
+  if (!answersWithPathFuelEnabled()) {
+    return Object.freeze({});
+  }
   const inflow: Record<string, PathInflowEdge[]> = {};
   for (const path of paths) {
     if (isPathExcludedFromRecall(path) || !isAnswerFloodRelationKind(path.constitution.relation_kind)) {

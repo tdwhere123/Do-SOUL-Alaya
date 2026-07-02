@@ -142,4 +142,15 @@ describe("apiFetch", () => {
       (error: unknown) => !(error instanceof Error && error.name === "ZodError")
     );
   });
+
+  it("rejects flat config payloads that carry success=false instead of treating them as valid data", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: false, error: "bad config" }), { status: 200 })
+    );
+
+    await expect(apiFetch("/config/:workspaceId/soul")).rejects.toMatchObject({
+      message: "Invalid API response shape",
+      status: 502
+    });
+  });
 });

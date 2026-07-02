@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BoundedJsonObjectSchema,
   BoundedIdSchema,
   BoundedReasonSchema,
   IsoDatetimeStringSchema,
@@ -49,6 +50,19 @@ export const ManifestationBudgetConfigSchema = z
   })
   .strict()
   .readonly();
+
+export const ManifestationBudgetConfigRouteDataSchema = BoundedJsonObjectSchema.superRefine(
+  (value, context) => {
+    const { source, ...config } = value;
+    if (source !== undefined && source !== "default" && source !== "stored") {
+      context.addIssue({ code: "custom", message: "Invalid config payload" });
+      return;
+    }
+    if (!ManifestationBudgetConfigSchema.safeParse(config).success) {
+      context.addIssue({ code: "custom", message: "Invalid config payload" });
+    }
+  }
+);
 
 export const ManifestationDecisionSchema = z
   .object({

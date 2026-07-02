@@ -71,9 +71,9 @@ export function mergeSeedExtractionPath(
         (sum, path) => sum + path.signals_dropped_by_reason.candidate_absent,
         0
       ),
-      materialization_error: present.reduce(
+      materialization_drop: present.reduce(
         (sum, path) =>
-          sum + path.signals_dropped_by_reason.materialization_error,
+          sum + path.signals_dropped_by_reason.materialization_drop,
         0
       )
     }

@@ -12,6 +12,7 @@ import {
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type {
+  EvidenceSupportVector,
   PathInflowEdge,
   RecallServiceDependencies,
   RecallServiceWarnPort,
@@ -85,6 +86,7 @@ export async function collectSupplementaryData(
     pathSuppressionScores: params.coarsePathSuppressionScores,
     embeddingSimilarityScores: Object.freeze({}),
     graphSupportCounts: Object.freeze(graphSupportCounts),
+    evidenceSupportVectorsByMemoryId: Object.freeze(buildEvidenceSupportVectors(candidates)),
     budgetPenaltyFactor,
     plasticityFactors,
     graphAndPathColdScore: coldMetrics.graphAndPathColdScore,
@@ -145,6 +147,25 @@ async function collectGraphSupportCounts(
       }
     })
   );
+}
+
+export function buildEvidenceSupportVectors(
+  candidates: readonly Readonly<MemoryEntry>[]
+): Record<string, readonly EvidenceSupportVector[]> {
+  const vectorsByMemoryId: Record<string, readonly EvidenceSupportVector[]> = {};
+  for (const candidate of candidates) {
+    const evidenceRefs = uniqueStrings(candidate.evidence_refs ?? []);
+    if (evidenceRefs.length > 0) {
+      vectorsByMemoryId[candidate.object_id] = Object.freeze(
+        evidenceRefs.map((source_id) => Object.freeze({
+          source_kind: "evidence_ref" as const,
+          source_id,
+          support: normalizeGraphSupport(1)
+        }))
+      );
+    }
+  }
+  return vectorsByMemoryId;
 }
 
 async function collectRecallEdgeCounts(

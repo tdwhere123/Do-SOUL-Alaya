@@ -19,6 +19,7 @@ import type { QaChatFn } from "./qa-chat.js";
 import type { LongMemEvalQuestionSeedState } from "./runner-question-seeding.js";
 import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
+import { hasLongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;
@@ -84,7 +85,8 @@ function buildDiagnostics(
     isAbstention,
     degradationReason: recallResult.degradation_reason ?? null,
     recallResult,
-    embeddingMode: input.embeddingMode
+    embeddingMode: input.embeddingMode,
+    seedDropReasons: input.seedState.answerSeedDropReasons
   });
 }
 
@@ -168,7 +170,10 @@ function snapshotQuestionField(
       answerSessionIds: [...input.question.answer_session_ids],
       workspaceId: input.workspace.workspaceId,
       runId: input.workspace.runId,
-      sidecar: [...input.seedState.sidecar.values()].map(snapshotSidecarEntry)
+      sidecar: [...input.seedState.sidecar.values()].map(snapshotSidecarEntry),
+      ...(hasLongMemEvalSeedDropReasons(input.seedState.answerSeedDropReasons)
+        ? { answerSeedDropReasons: { ...input.seedState.answerSeedDropReasons } }
+        : {})
     }
   };
 }

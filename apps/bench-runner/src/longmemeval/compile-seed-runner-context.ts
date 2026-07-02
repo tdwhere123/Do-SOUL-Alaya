@@ -93,7 +93,7 @@ function createCompileSeedStats(credentialled: boolean): CompileSeedExtractionSt
     cachedExtractionFailures: 0,
     factsProduced: 0,
     signalsDropped: 0,
-    signalsDroppedByReason: { candidate_absent: 0, materialization_error: 0 },
+    signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
     parseDropped: 0,
     compileOverflowDropped: 0,
     lastTurnRawSignalCount: 0,

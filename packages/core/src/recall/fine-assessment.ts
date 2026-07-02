@@ -22,7 +22,7 @@ import {
   reserveStructuralDeliverySlots
 } from "./fusion-delivery.js";
 import { applyEvidenceSetDelivery } from "./evidence-set-optimizer.js";
-import { composeAndOrderByEntity, composeRecallEnabled } from "./activation-assembly.js";
+import { composeEntityDeliveryHints, composeRecallEnabled } from "./activation-assembly.js";
 import { flatBaselineEnabled } from "./conformant-fusion-scoring.js";
 import { computeEffectiveScoreDetails } from "./scoring.js";
 import {
@@ -143,27 +143,10 @@ function orderFusedFineAssessmentCandidates(
   maxEntries: number
 ): FineAssessmentOrdering {
   const rankedCandidates = [...scoredCandidates].sort(compareFusedRecallCandidates);
-  if (composeRecallEnabled()) {
-    return buildComposedFineAssessmentOrdering(rankedCandidates, scoredCandidates, supplementaryData, maxEntries);
-  }
   if (deliverFusedOrderEnabled()) {
     return buildSingleStageFineAssessmentOrdering(rankedCandidates, rankedCandidates);
   }
   return buildPostFusionFineAssessmentOrdering(rankedCandidates, supplementaryData, maxEntries);
-}
-
-function buildComposedFineAssessmentOrdering(
-  rankedCandidates: readonly FineAssessmentCandidate[],
-  scoredCandidates: readonly FineAssessmentCandidate[],
-  supplementaryData: RecallSupplementaryData,
-  maxEntries: number
-): FineAssessmentOrdering {
-  const deliveryOrderedCandidates = composeAndOrderByEntity(
-    scoredCandidates,
-    supplementaryData,
-    resolveDeliveryReorderWindow(maxEntries)
-  );
-  return buildSingleStageFineAssessmentOrdering(rankedCandidates, deliveryOrderedCandidates);
 }
 
 function buildSingleStageFineAssessmentOrdering(
@@ -187,7 +170,10 @@ function buildPostFusionFineAssessmentOrdering(
   maxEntries: number
 ): FineAssessmentOrdering {
   const window = resolveDeliveryReorderWindow(maxEntries);
-  const featureRerankedCandidates = applyFeatureRerank(rankedCandidates, supplementaryData);
+  const entityHintedCandidates = composeRecallEnabled()
+    ? applyComposeDeliveryHints(rankedCandidates, supplementaryData, window)
+    : rankedCandidates;
+  const featureRerankedCandidates = applyFeatureRerank(entityHintedCandidates, supplementaryData);
   const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
     featureRerankedCandidates,
     supplementaryData,
@@ -218,6 +204,86 @@ function buildPostFusionFineAssessmentOrdering(
     synthesisReservedCandidates,
     deliveryOrderedCandidates
   });
+}
+
+const COMPOSE_HINT_MIN_SCORE_RATIO = 0.75;
+
+function applyComposeDeliveryHints(
+  rankedCandidates: readonly FineAssessmentCandidate[],
+  supplementaryData: RecallSupplementaryData,
+  window: number
+): readonly FineAssessmentCandidate[] {
+  const windowSize = Math.min(Math.max(0, window), rankedCandidates.length);
+  if (windowSize <= 1) {
+    return rankedCandidates;
+  }
+  const rankedWindow = rankedCandidates.slice(0, windowSize);
+  const composedWindow = composeEntityDeliveryHints(rankedWindow, supplementaryData, windowSize);
+  return Object.freeze([
+    ...relevanceGateComposeWindow(rankedWindow, composedWindow),
+    ...rankedCandidates.slice(windowSize)
+  ]);
+}
+
+function relevanceGateComposeWindow(
+  rankedWindow: readonly FineAssessmentCandidate[],
+  composedWindow: readonly FineAssessmentCandidate[]
+): readonly FineAssessmentCandidate[] {
+  const used = new Set<string>();
+  const ordered: FineAssessmentCandidate[] = [];
+  for (const naturalCandidate of rankedWindow) {
+    const hintedCandidate = selectEligibleComposeHint(composedWindow, used, naturalCandidate);
+    const nextCandidate = hintedCandidate ?? firstUnusedCandidate(rankedWindow, used);
+    if (nextCandidate === undefined) {
+      break;
+    }
+    used.add(buildRecallCandidateDedupeKey(nextCandidate));
+    ordered.push(nextCandidate);
+  }
+  return Object.freeze(ordered);
+}
+
+function selectEligibleComposeHint(
+  composedWindow: readonly FineAssessmentCandidate[],
+  used: ReadonlySet<string>,
+  naturalCandidate: FineAssessmentCandidate
+): FineAssessmentCandidate | undefined {
+  for (const candidate of composedWindow) {
+    if (used.has(buildRecallCandidateDedupeKey(candidate))) {
+      continue;
+    }
+    if (isComposeHintEligible(candidate, naturalCandidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function firstUnusedCandidate(
+  rankedWindow: readonly FineAssessmentCandidate[],
+  used: ReadonlySet<string>
+): FineAssessmentCandidate | undefined {
+  return rankedWindow.find((candidate) => !used.has(buildRecallCandidateDedupeKey(candidate)));
+}
+
+function isComposeHintEligible(
+  candidate: FineAssessmentCandidate,
+  naturalCandidate: FineAssessmentCandidate
+): boolean {
+  if (candidate === naturalCandidate) {
+    return true;
+  }
+  return (
+    passesComposeHintScoreRatio(candidate.fusion.fused_score, naturalCandidate.fusion.fused_score) &&
+    passesComposeHintScoreRatio(candidate.effectiveScore, naturalCandidate.effectiveScore)
+  );
+}
+
+function passesComposeHintScoreRatio(candidateScore: number, naturalScore: number): boolean {
+  if (naturalScore <= 0) {
+    return candidateScore > 0;
+  }
+  return candidateScore / naturalScore >= COMPOSE_HINT_MIN_SCORE_RATIO;
 }
 
 function buildFineAssessmentRankDiagnostics(

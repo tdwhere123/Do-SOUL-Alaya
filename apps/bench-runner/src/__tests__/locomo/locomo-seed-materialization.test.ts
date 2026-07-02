@@ -31,7 +31,7 @@ describe("LoCoMo runner", () => {
           signalsDropped: 0,
           signalsDroppedByReason: {
             candidate_absent: 0,
-            materialization_error: 0
+            materialization_drop: 0
           },
           parseDropped: 0,
           compileOverflowDropped: 0,
@@ -128,7 +128,7 @@ describe("LoCoMo runner", () => {
           signalsDropped: 1,
           signalsDroppedByReason: {
             candidate_absent: 1,
-            materialization_error: 0
+            materialization_drop: 0
           },
           parseDropped: 0,
           compileOverflowDropped: 0,

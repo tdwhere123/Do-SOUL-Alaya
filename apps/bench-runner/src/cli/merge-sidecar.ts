@@ -1,6 +1,10 @@
-import { renderCompactDiagnosticsSidecar, summarizeProviderStates, type LongMemEvalDiagnosticsSidecar, type LongMemEvalEmbeddingVectorCacheSummary, type LongMemEvalQueryEmbeddingCacheSummary, type LongMemEvalReportUsageSummary } from "../longmemeval/diagnostics.js";
+import { renderCompactDiagnosticsSidecar, summarizeLongMemEvalMissTaxonomy, summarizeProviderStates, type LongMemEvalDiagnosticsSidecar, type LongMemEvalEmbeddingVectorCacheSummary, type LongMemEvalMissTaxonomySummary, type LongMemEvalQueryEmbeddingCacheSummary, type LongMemEvalReportUsageSummary } from "../longmemeval/diagnostics.js";
 import type { LongMemEvalArchiveEvidenceSummary } from "../longmemeval/archive-evidence.js";
 import type { KpiPayload } from "@do-soul/alaya-eval";
+import {
+  mergeMissTaxonomySummaries,
+  readCompactMissTaxonomySummary
+} from "../longmemeval/diagnostics-miss-taxonomy.js";
 import { ratio } from "./merge-shared.js";
 
 export function buildMergedLongMemEvalDiagnosticsSidecar(
@@ -47,6 +51,7 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
           summary !== undefined
       )
   );
+  const missTaxonomySummary = aggregateMissTaxonomySummary(shardDiagnostics);
 
   const sidecar: LongMemEvalDiagnosticsSidecar = {
     schema_version: 1,
@@ -72,6 +77,9 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
     ...(queryEmbeddingCache === null
       ? {}
       : { query_embedding_cache: queryEmbeddingCache }),
+    ...(missTaxonomySummary === null
+      ? {}
+      : { miss_taxonomy_summary: missTaxonomySummary }),
     provider_state_summary: summarizeProviderStates(questions),
     questions
   };
@@ -144,6 +152,21 @@ function requiredCompactNonNegativeInteger(
     );
   }
   return value;
+}
+
+function aggregateMissTaxonomySummary(
+  shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[]
+): LongMemEvalMissTaxonomySummary | null {
+  const summaries: LongMemEvalMissTaxonomySummary[] = [];
+  for (const diagnostics of shardDiagnostics) {
+    if (diagnostics === null) continue;
+    const summary = Array.isArray(diagnostics.questions)
+      ? summarizeLongMemEvalMissTaxonomy(diagnostics.questions)
+      : readCompactMissTaxonomySummary(diagnostics.miss_taxonomy_summary);
+    if (summary === null) continue;
+    summaries.push(summary);
+  }
+  return summaries.length === 0 ? null : mergeMissTaxonomySummaries(summaries);
 }
 
 export function renderMergedLongMemEvalCompactDiagnosticsSidecar(
@@ -253,4 +276,3 @@ export function aggregateQueryEmbeddingCache(
     ...(lastError === undefined ? {} : { last_error: lastError })
   };
 }
-

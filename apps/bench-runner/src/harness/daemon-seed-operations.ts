@@ -390,7 +390,7 @@ async function seedCompileSignalSafely(
         `threw before memory_entry creation — isolated per-signal, turn batch ` +
         `continues: ${detail}\n`
     );
-    return { kind: "dropped", drop: { reason: "materialization_error", detail } };
+    return { kind: "dropped", drop: { reason: "materialization_drop", detail } };
   }
 }
 

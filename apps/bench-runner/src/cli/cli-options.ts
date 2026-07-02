@@ -109,15 +109,15 @@ function consumeFlagToken(
     return index + 1;
   }
   if (token === "--limit") {
-    state.limit = parsePositiveInt(args[index + 1]);
+    state.limit = parsePositiveInt(args[index + 1], "--limit");
     return index + 1;
   }
   if (token === "--offset") {
-    state.offset = parseNonNegativeInt(args[index + 1]);
+    state.offset = parseNonNegativeInt(args[index + 1], "--offset");
     return index + 1;
   }
   if (token === "--rounds") {
-    state.rounds = parsePositiveInt(args[index + 1]);
+    state.rounds = parsePositiveInt(args[index + 1], "--rounds");
     return index + 1;
   }
   if (token === "--history-root") {
@@ -219,7 +219,8 @@ function consumePathFlags(
   }
   if (matchFlagToken(token, "--concurrency")) {
     state.concurrency = parsePositiveInt(
-      readFlagValue(args, index, token, "--concurrency")
+      readFlagValue(args, index, token, "--concurrency"),
+      "--concurrency"
     );
     return nextIndex(index, token);
   }
@@ -286,23 +287,42 @@ function readRequiredFlagValue(
   return raw;
 }
 
-function parsePositiveInt(raw: string | undefined): number | undefined {
-  return parseIntegerFlag(raw, (value) => value > 0);
+function parsePositiveInt(
+  raw: string | undefined,
+  flag: string
+): number | undefined {
+  return parseIntegerFlag(raw, flag, (value) => value > 0, "positive integer");
 }
 
-function parseNonNegativeInt(raw: string | undefined): number | undefined {
-  return parseIntegerFlag(raw, (value) => value >= 0);
+function parseNonNegativeInt(
+  raw: string | undefined,
+  flag: string
+): number | undefined {
+  return parseIntegerFlag(
+    raw,
+    flag,
+    (value) => value >= 0,
+    "non-negative integer"
+  );
 }
 
 function parseIntegerFlag(
   raw: string | undefined,
-  predicate: (value: number) => boolean
+  flag: string,
+  predicate: (value: number) => boolean,
+  expectation: string
 ): number | undefined {
   if (raw === undefined) {
     return undefined;
   }
-  const parsed = parseInt(raw, 10);
-  return !Number.isNaN(parsed) && predicate(parsed) ? parsed : undefined;
+  if (!/^-?\d+$/u.test(raw)) {
+    throw new Error(`${flag} must be a ${expectation}`);
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || !predicate(parsed)) {
+    throw new Error(`${flag} must be a ${expectation}`);
+  }
+  return parsed;
 }
 
 function parseEmbeddingMode(raw: string): BenchEmbeddingMode {

@@ -10,6 +10,16 @@ const CountDistributionEntrySchema = z
   })
   .strict();
 
+const MissTaxonomyDistributionSchema = z
+  .object({
+    candidate_absent: z.number().int().nonnegative(),
+    materialization_drop: z.number().int().nonnegative(),
+    budget_drop: z.number().int().nonnegative(),
+    delivery_order_drop: z.number().int().nonnegative(),
+    evaluation_or_gold_issue: z.number().int().nonnegative()
+  })
+  .strict();
+
 // Per-plane recall coverage: for one candidate-generating plane, how many
 // gold candidates carried that plane and how many of those landed in the
 // delivered top-5. Plane keys are driven by the planes actually observed in
@@ -184,6 +194,13 @@ export const QualityMetricsSchema = z
     // it wanted (reuses the top-distractor classification, summed over
     // ordinal_1plus missed golds). Optional for older records.
     per_gold_displaced_by: TopDistractorBreakdownSchema.optional(),
+    miss_taxonomy_distribution: MissTaxonomyDistributionSchema.default({
+      candidate_absent: 0,
+      materialization_drop: 0,
+      budget_drop: 0,
+      delivery_order_drop: 0,
+      evaluation_or_gold_issue: 0
+    }),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the
     // LongMemEval-S abstention questions (`question_id` ending `_abs`).
     // Optional so pre-abstention-scoring kpi.json records stay valid; new

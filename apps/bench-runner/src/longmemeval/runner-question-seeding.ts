@@ -14,10 +14,15 @@ import {
   type LongMemEvalSidecarEntry
 } from "./runner-helpers.js";
 import type { QaChatFn } from "./qa-chat.js";
+import {
+  createEmptyLongMemEvalSeedDropReasons,
+  type LongMemEvalSeedDropReasons
+} from "./seed-drop-reasons.js";
 
 export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
   readonly answerSessionSet: Set<string>;
+  answerSeedDropReasons: LongMemEvalSeedDropReasons;
   readonly coherenceMembers: { readonly memoryId: string; readonly sessionId: string }[];
   seedTurnsTruncated: number;
   answerTurnsTruncated: number;
@@ -44,6 +49,7 @@ function createSeedState(question: LongMemEvalQuestion): LongMemEvalQuestionSeed
   return {
     sidecar: new Map(),
     answerSessionSet: new Set(question.answer_session_ids),
+    answerSeedDropReasons: createEmptyLongMemEvalSeedDropReasons(),
     coherenceMembers: [],
     seedTurnsTruncated: 0,
     answerTurnsTruncated: 0,
@@ -106,6 +112,9 @@ async function seedQuestionRound(
 ): Promise<{ readonly nextTurnSeedMemoryIds: readonly string[] }> {
   const round = pairSessionIntoRounds(input.question.haystack_sessions[context.sessionIndex]!)[context.roundIndex]!;
   const evidenceRef = `${input.question.question_id}-s${context.sessionIndex}-r${context.roundIndex}`;
+  const beforeDropReasons = {
+    ...input.seedRunner.stats.signalsDroppedByReason
+  };
   const seedResult = await input.seedRunner.seedTurn({
     daemon: input.workspace,
     turnContent: round.content,
@@ -117,8 +126,33 @@ async function seedQuestionRound(
     ...(context.previousTurnSeedMemoryIds.length === 0 ? {} : { sourceMemoryRefs: context.previousTurnSeedMemoryIds })
   });
   recordTruncation(state, seedResult, round.hasAnswer);
+  recordAnswerSeedDrops(
+    state,
+    round.hasAnswer,
+    beforeDropReasons,
+    input.seedRunner.stats.signalsDroppedByReason
+  );
   addSeedSidecarEntries(input, state, context, round, seedResult);
   return { nextTurnSeedMemoryIds: computeNextTurnSeedRefs(seedResult) };
+}
+
+function recordAnswerSeedDrops(
+  state: LongMemEvalQuestionSeedState,
+  roundHasAnswer: boolean,
+  before: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>,
+  after: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>
+): void {
+  if (!roundHasAnswer) {
+    return;
+  }
+  state.answerSeedDropReasons = {
+    candidate_absent:
+      state.answerSeedDropReasons.candidate_absent +
+      Math.max(0, after.candidate_absent - before.candidate_absent),
+    materialization_drop:
+      state.answerSeedDropReasons.materialization_drop +
+      Math.max(0, after.materialization_drop - before.materialization_drop)
+  };
 }
 
 function recordTruncation(

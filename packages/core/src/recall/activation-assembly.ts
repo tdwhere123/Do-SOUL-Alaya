@@ -157,6 +157,27 @@ export function composeAndOrderByEntity(
 ): FineAssessmentCandidate[] {
   if (scoredCandidates.length === 0) return [];
   const seeds = [...scoredCandidates].sort(compareFusedRecallCandidates);
+  return [...composeEntityDeliveryOrder(scoredCandidates, seeds, supplementaryData, Math.max(maxEntries, DEFAULT_ENTITY_GROUP_CAP))];
+}
+
+export function composeEntityDeliveryHints(
+  scoredCandidates: readonly FineAssessmentCandidate[],
+  supplementaryData: RecallSupplementaryData,
+  maxHints: number
+): readonly FineAssessmentCandidate[] {
+  if (scoredCandidates.length === 0) return [];
+  const hintWindowSize = Math.min(Math.max(0, maxHints), scoredCandidates.length);
+  if (hintWindowSize === 0) return [];
+  const seeds = [...scoredCandidates].sort(compareFusedRecallCandidates).slice(0, hintWindowSize);
+  return composeEntityDeliveryOrder(scoredCandidates, seeds, supplementaryData, Math.max(hintWindowSize, DEFAULT_ENTITY_GROUP_CAP));
+}
+
+function composeEntityDeliveryOrder(
+  scoredCandidates: readonly FineAssessmentCandidate[],
+  seeds: readonly FineAssessmentCandidate[],
+  supplementaryData: RecallSupplementaryData,
+  groupCap: number
+): readonly FineAssessmentCandidate[] {
   const byKey = new Map<string, FineAssessmentCandidate>();
   const entityInputs: EntityCandidate[] = [];
   for (const seed of seeds) {
@@ -166,7 +187,6 @@ export function composeAndOrderByEntity(
     entityInputs.push({ objectId: key, canonicalEntities: seed.entry.canonical_entities });
   }
   // Cap each entity's contribution to the delivery window (≥ default); overflow recovers at the tail.
-  const groupCap = Math.max(maxEntries, DEFAULT_ENTITY_GROUP_CAP);
   const units = composeUnits(entityInputs, byKey, supplementaryData, groupCap);
   return demoteSupersededToTail(deliverByUnitRank(units, seeds), scoredCandidates);
 }

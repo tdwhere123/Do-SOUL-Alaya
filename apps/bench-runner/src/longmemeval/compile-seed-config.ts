@@ -63,7 +63,7 @@ export function toSeedExtractionPathKpi(
     compile_overflow_dropped: stats.compileOverflowDropped,
     signals_dropped_by_reason: {
       candidate_absent: stats.signalsDroppedByReason.candidate_absent,
-      materialization_error: stats.signalsDroppedByReason.materialization_error
+      materialization_drop: stats.signalsDroppedByReason.materialization_drop
     }
   };
 }

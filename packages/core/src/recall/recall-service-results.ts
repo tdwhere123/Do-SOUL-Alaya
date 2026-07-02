@@ -14,6 +14,12 @@ export interface PathInflowEdge {
   readonly weight: number;
 }
 
+export interface EvidenceSupportVector {
+  readonly source_kind: "evidence_ref";
+  readonly source_id: string;
+  readonly support: number;
+}
+
 export interface RecallResult {
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -57,6 +63,7 @@ export interface RecallSupplementaryData {
   readonly pathSuppressionScores: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
+  readonly evidenceSupportVectorsByMemoryId?: Readonly<Record<string, readonly EvidenceSupportVector[]>>;
   readonly budgetPenaltyFactor: number;
   readonly plasticityFactors: Readonly<Record<string, number>>;
   readonly graphAndPathColdScore: number;

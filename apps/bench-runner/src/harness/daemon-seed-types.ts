@@ -17,7 +17,7 @@ export interface SeededSynthesisResult {
   readonly synthesisId: string | null;
 }
 
-export type CompileSeedDropReason = "candidate_absent" | "materialization_error";
+export type CompileSeedDropReason = "candidate_absent" | "materialization_drop";
 
 export interface CompileSeedSignalDrop {
   readonly reason: CompileSeedDropReason;

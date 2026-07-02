@@ -8,12 +8,12 @@
  */
 
 import {
-  ManifestationBudgetConfigSchema,
+  BoundedJsonObjectSchema,
+  ManifestationBudgetConfigRouteDataSchema,
   createConfigRouteResponseSchema,
   isZodValidationError,
   unwrapStandardResponseData
 } from "@do-soul/alaya-protocol";
-import { z, type ZodType } from "zod";
 
 let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
@@ -38,7 +38,7 @@ export const setUnauthorizedHandler = (handler: (() => void) | null) => {
 export interface ApiRequestOptions extends Omit<RequestInit, "body"> {
   params?: Record<string, string>;
   body?: unknown;
-  schema?: ZodType;
+  schema?: ApiSchema;
 }
 
 export interface ApiError extends Error {
@@ -47,41 +47,22 @@ export interface ApiError extends Error {
 
 const CONFIG_PATH_PATTERNS: ReadonlyArray<{
   readonly pattern: RegExp;
-  readonly buildSchema: (options: { readonly allowPatchAck: boolean }) => ZodType;
+  readonly buildSchema: (options: { readonly allowPatchAck: boolean }) => ApiSchema;
 }> = [
   {
     pattern: /\/config\/[^/]+\/manifestation-budget$/u,
     buildSchema: ({ allowPatchAck }) =>
-      createConfigRouteResponseSchema(
-        z.custom<Record<string, unknown>>((value) => isConfigObject(value)).superRefine((data, context) => {
-          if (!isConfigObject(data)) {
-            context.addIssue({ code: "custom", message: "Invalid config payload" });
-            return;
-          }
-          const { source, ...config } = data as { readonly source?: unknown };
-          if (source !== undefined && source !== "default" && source !== "stored") {
-            context.addIssue({ code: "custom", message: "Invalid config payload" });
-            return;
-          }
-          if (!ManifestationBudgetConfigSchema.safeParse(config).success) {
-            context.addIssue({ code: "custom", message: "Invalid config payload" });
-          }
-        }),
-        { allowPatchAck }
-      )
+      createConfigRouteResponseSchema(ManifestationBudgetConfigRouteDataSchema, { allowPatchAck })
   },
   {
     pattern: /\/config\//u,
     buildSchema: ({ allowPatchAck }) =>
-      createConfigRouteResponseSchema(
-        z.custom<Record<string, unknown>>((value) => isConfigObject(value)),
-        { allowPatchAck }
-      )
+      createConfigRouteResponseSchema(BoundedJsonObjectSchema, { allowPatchAck })
   }
 ];
 
-function isConfigObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+interface ApiSchema<T = unknown> {
+  parse(value: unknown): T;
 }
 
 function toApiSchemaError(error: unknown): ApiError {
@@ -216,7 +197,7 @@ async function responsePayload(response: Response): Promise<ApiFetchResult<unkno
   };
 }
 
-function resolveConfigResponseSchema(path: string, method: string): ZodType | undefined {
+function resolveConfigResponseSchema(path: string, method: string): ApiSchema | undefined {
   const apiPath = path.startsWith("http") ? new URL(path).pathname : path.startsWith("/api") ? path : `/api${path}`;
   const allowPatchAck = method.toUpperCase() !== "GET" && method.toUpperCase() !== "HEAD";
   for (const entry of CONFIG_PATH_PATTERNS) {

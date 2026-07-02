@@ -4,7 +4,8 @@ import {
   COMPOSE_COVERAGE_LAMBDA,
   COMPOSE_COVERAGE_SATURATION,
   COMPOSE_EVIDENCE_BETA,
-  composeAndOrderByEntity
+  composeAndOrderByEntity,
+  composeEntityDeliveryHints
 } from "../../recall/activation-assembly.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
@@ -15,9 +16,15 @@ import type { CoarseRecallCandidate, RecallSupplementaryData } from "../../recal
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const FLAG = "ALAYA_RECALL_COMPOSE";
+const COVERAGE_SELECTOR = "ALAYA_RECALL_COVERAGE_SELECTOR";
+const COVERAGE_TARGET_K = "ALAYA_RECALL_COVERAGE_TARGET_K";
+const STRUCTURAL_RESERVE = "ALAYA_RECALL_STRUCTURAL_RESERVE";
 
 afterEach(() => {
   delete process.env[FLAG];
+  delete process.env[COVERAGE_SELECTOR];
+  delete process.env[COVERAGE_TARGET_K];
+  delete process.env[STRUCTURAL_RESERVE];
 });
 
 function scoreFactors(): RecallScoreFactors {
@@ -110,6 +117,14 @@ describe("composeAndOrderByEntity", () => {
     ];
     const out = composeAndOrderByEntity(candidates, supp(), 10);
     expect([...ids(out)].sort()).toEqual(["mem-a", "mem-b", "mem-c", "mem-d"]);
+  });
+
+  it("exposes only a bounded hint window to fine assessment", () => {
+    const a = fac({ id: "mem-a", fused: 0.9, entities: ["postgres"] });
+    const b = fac({ id: "mem-b", fused: 0.8, entities: ["redis"] });
+    const c = fac({ id: "mem-c", fused: 0.7, entities: ["postgres"] });
+    const hints = composeEntityDeliveryHints([c, a, b], supp(), 2);
+    expect(ids(hints)).toEqual(["mem-a", "mem-b"]);
   });
 
   it("recovers cap-overflow members at the tail in fused order (no drop, full permutation)", () => {
@@ -240,23 +255,46 @@ describe("composeAndOrderByEntity", () => {
 
 // OFF byte-identical + ON-wired through the real fineAssess delivery path.
 describe("ALAYA_RECALL_COMPOSE wiring (fineAssess)", () => {
-  function memory(id: string, entities: readonly string[] | null): MemoryEntry {
+  function memory(id: string, entities: readonly string[] | null, runId = "run-1", evidenceRefs: readonly string[] = []): MemoryEntry {
     return createMemoryEntry({
       object_id: id,
       content: "identical pooled recall content for every candidate",
       canonical_entities: entities,
       surface_id: null,
-      run_id: "run-1"
+      run_id: runId,
+      evidence_refs: evidenceRefs
     });
   }
 
-  function coarse(entry: MemoryEntry): CoarseRecallCandidate {
-    return { entry };
+  function coarse(entry: MemoryEntry, scoreMultiplier?: number): CoarseRecallCandidate {
+    return scoreMultiplier === undefined ? { entry } : { entry, scoreMultiplier };
   }
 
   const FTS_RANKS: Readonly<Record<string, number>> = { "mem-a": 1, "mem-b": 0.6, "mem-c": 0.2 };
 
   function deliveredOrder(entries: readonly MemoryEntry[]): readonly string[] {
+    return assess(entries).candidates.map((candidate) => candidate.object_id);
+  }
+
+  function assess(
+    entries: readonly MemoryEntry[],
+    supplementaryData: RecallSupplementaryData = { ...supp(), ftsRanks: FTS_RANKS }
+  ): ReturnType<typeof fineAssess> {
+    const policy = buildRecallPolicy({
+      runtimeId: "11111111-1111-4111-8111-111111111111",
+      taskSurfaceId: "22222222-2222-4222-8222-222222222222",
+      maxResults: 10,
+      filters: { scopeFilter: null, dimensionFilter: null, domainTagFilter: null },
+      conflictAwareness: false,
+      maxTotalTokens: 100000
+    });
+    return assessCoarse(entries.map((entry) => coarse(entry)), supplementaryData);
+  }
+
+  function assessCoarse(
+    candidates: readonly CoarseRecallCandidate[],
+    supplementaryData: RecallSupplementaryData = { ...supp(), ftsRanks: FTS_RANKS }
+  ): ReturnType<typeof fineAssess> {
     const policy = buildRecallPolicy({
       runtimeId: "11111111-1111-4111-8111-111111111111",
       taskSurfaceId: "22222222-2222-4222-8222-222222222222",
@@ -266,15 +304,15 @@ describe("ALAYA_RECALL_COMPOSE wiring (fineAssess)", () => {
       maxTotalTokens: 100000
     });
     const result = fineAssess({
-      candidates: entries.map(coarse),
+      candidates,
       policy,
       winnerMemoryIds: new Set<string>(),
-      supplementaryData: { ...supp(), ftsRanks: FTS_RANKS },
+      supplementaryData,
       tokenEstimator: { estimate: () => 1 },
       now: () => "2026-03-23T00:00:00.000Z",
       warn: () => {}
     });
-    return result.candidates.map((candidate) => candidate.object_id);
+    return result;
   }
 
   const withEntities: readonly MemoryEntry[] = [
@@ -306,5 +344,43 @@ describe("ALAYA_RECALL_COMPOSE wiring (fineAssess)", () => {
     // OFF keeps mem-b ahead of mem-c; ON flips it via entity clustering.
     expect(off.indexOf("mem-b")).toBeLessThan(off.indexOf("mem-c"));
     expect(on.indexOf("mem-c")).toBeLessThan(on.indexOf("mem-b"));
+  });
+
+  it("ON: compose hints cannot lift weak entity novelty over a clearly stronger candidate", () => {
+    process.env[FLAG] = "on";
+    const result = assessCoarse([
+      coarse(memory("mem-a", ["postgres"]), 1),
+      coarse(memory("mem-b", ["redis"]), 1),
+      coarse(memory("mem-c", ["postgres"]), 0.1)
+    ]);
+    const order = result.candidates.map((candidate) => candidate.object_id);
+    expect(order.indexOf("mem-b")).toBeLessThan(order.indexOf("mem-c"));
+  });
+
+  it("ON: compose hints still run through evidence-set delivery", () => {
+    process.env[FLAG] = "on";
+    process.env[COVERAGE_SELECTOR] = "force";
+    process.env[COVERAGE_TARGET_K] = "3";
+
+    const result = assess([
+      memory("mem-a", ["postgres"], "run-1", ["ev-a"]),
+      memory("mem-b", ["redis"], "run-2", ["ev-b"]),
+      memory("mem-c", ["postgres"], "run-1", ["ev-c"])
+    ]);
+    const order = result.candidates.map((candidate) => candidate.object_id);
+
+    expect(order).toEqual(["mem-a", "mem-b", "mem-c"]);
+    const memBDiagnostic = result.diagnostics.find((diagnostic) => diagnostic.object_id === "mem-b");
+    const memCDiagnostic = result.diagnostics.find((diagnostic) => diagnostic.object_id === "mem-c");
+    expect(memCDiagnostic?.rank_after_feature_rerank).toBeLessThan(
+      memBDiagnostic?.rank_after_feature_rerank ?? Number.MAX_SAFE_INTEGER
+    );
+    expect(memBDiagnostic?.rank_after_coverage_selector).toBeLessThan(
+      memCDiagnostic?.rank_after_coverage_selector ?? Number.MAX_SAFE_INTEGER
+    );
+    expect(memBDiagnostic?.coverage_selector_action).toBe("promoted");
+    expect(memCDiagnostic?.coverage_selector_action).toBe("displaced");
+    expect(memBDiagnostic?.rank_after_structural_reserve).toBe(2);
+    expect(memCDiagnostic?.rank_after_structural_reserve).toBe(3);
   });
 });

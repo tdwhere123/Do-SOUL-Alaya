@@ -473,7 +473,8 @@ function buildRecallEvalDiagnostics(
     isAbstention: isAbstentionQuestionId(input.question.questionId),
     degradationReason: recallResult.degradation_reason ?? null,
     recallResult,
-    embeddingMode: recallEvalEmbeddingMode()
+    embeddingMode: recallEvalEmbeddingMode(),
+    seedDropReasons: input.question.answerSeedDropReasons
   });
 }
 

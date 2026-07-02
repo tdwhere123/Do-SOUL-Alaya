@@ -28,6 +28,7 @@ import {
 } from "../../recall/conformant-fusion-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import { classifyRecallIntent } from "../../recall/recall-query-plan.js";
+import { buildEvidenceSupportVectors } from "../../recall/supplementary-data.js";
 import type {
   PathInflowEdge,
   RecallFusionBreakdown,
@@ -95,6 +96,8 @@ interface CandidateSpec {
   readonly path?: number;
   readonly graph?: number;
   readonly graphSupport?: number;
+  readonly evidenceRefs?: readonly string[];
+  readonly evidenceSupports?: readonly number[];
   readonly entity?: number;
   readonly sourceProximity?: number;
   readonly facetTags?: readonly string[];
@@ -118,6 +121,7 @@ async function seedEntries(repo: SqliteMemoryEntryRepo, specs: readonly Candidat
     await repo.create(createMemoryEntry({
       object_id: spec.id,
       content: spec.content ?? "neutral memory content for the recall pool",
+      evidence_refs: spec.evidenceRefs ?? spec.evidenceSupports?.map((_support, index) => `${spec.id}-ev-${index}`) ?? [],
       surface_id: null,
       activation_score: 0.4,
       ...(spec.facetTags !== undefined ? { facet_tags: spec.facetTags.map((facet) => ({ facet })) } : {}),
@@ -132,6 +136,7 @@ async function seedEntries(repo: SqliteMemoryEntryRepo, specs: readonly Candidat
 function buildSupplementaryData(
   query: string,
   specs: readonly CandidateSpec[],
+  entries: readonly MemoryEntry[],
   inflow?: InflowMap
 ): RecallSupplementaryData {
   const record = (pick: (spec: CandidateSpec) => number | undefined): Record<string, number> => {
@@ -160,6 +165,7 @@ function buildSupplementaryData(
     pathSuppressionScores: {},
     embeddingSimilarityScores: record((s) => s.embedding),
     graphSupportCounts: record((s) => s.graphSupport),
+    evidenceSupportVectorsByMemoryId: buildEvidenceSupportVectors(entries),
     budgetPenaltyFactor: 0,
     plasticityFactors: {},
     graphAndPathColdScore: 0,
@@ -178,6 +184,7 @@ async function runFusion(
 ): Promise<ReadonlyMap<string, RecallFusionBreakdown>> {
   const repo = createRealStorage();
   const byId = await seedEntries(repo, specs);
+  const entries = specs.map((spec) => byId.get(spec.id)!);
   return buildRecallFusionDetails({
     candidates: specs.map((spec) => ({
       entry: byId.get(spec.id)!,
@@ -188,7 +195,7 @@ async function runFusion(
       structuralScore: spec.structural ?? 0
     })),
     policy: {} as RecallPolicy,
-    supplementaryData: buildSupplementaryData(query, specs, options.inflow),
+    supplementaryData: buildSupplementaryData(query, specs, entries, options.inflow),
     nowIso: options.nowIso ?? NOW
   });
 }
@@ -280,17 +287,33 @@ describe("conformant compositional combine (real SQLite)", () => {
       .toBeLessThan(fusion.get(keyOf(broadWeak.id))!.fused_rank);
   });
 
-  // R_E is always computed (per_axis_contribution) but only multiplies the delivered score behind
-  // ALAYA_RECALL_EVIDENCE_MULT; here we assert it is wired/computed (graph support also moves the RRF base).
-  it("evidence axis R_E is computed: 0 without graph support, >0 with", async () => {
+  it("builds live evidence support vectors from candidate evidence_refs", async () => {
+    const repo = createRealStorage();
+    const candidateId = objectId(1);
+    const byId = await seedEntries(repo, [
+      { id: candidateId, evidenceRefs: ["ev-a", "ev-b"] }
+    ]);
+    const vectors = buildEvidenceSupportVectors([byId.get(candidateId)!]);
+
+    expect(vectors[candidateId]).toEqual([
+      { source_kind: "evidence_ref", source_id: "ev-a", support: 1 / 3 },
+      { source_kind: "evidence_ref", source_id: "ev-b", support: 1 / 3 }
+    ]);
+  });
+
+  it("keeps the evidence axis score-neutral by default and enables it behind ALAYA_RECALL_EVIDENCE_MULT", async () => {
     const dry = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }])).get(keyOf(objectId(1)))!;
     expect(dry.per_axis_contribution!.evidence).toBe(0);
-    const boosted = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, graphSupport: 3 }])).get(keyOf(objectId(1)))!;
+    const neutralWithEvidence = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] }])).get(keyOf(objectId(1)))!;
+    expect(neutralWithEvidence.per_axis_contribution!.evidence).toBe(0);
+    process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
+    const boosted = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] }])).get(keyOf(objectId(1)))!;
     expect(boosted.per_axis_contribution!.evidence).toBeGreaterThan(0);
   });
 
-  it("evidence axis is populated for a candidate with no lexical or embedding signal", async () => {
-    const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), graphSupport: 3 }])).get(keyOf(objectId(1)))!;
+  it("evidence axis is populated for a candidate with no lexical or embedding signal once enabled", async () => {
+    process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
+    const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), evidenceSupports: [1] }])).get(keyOf(objectId(1)))!;
     expect(candidate.per_axis_contribution!.evidence).toBeGreaterThan(0);
   });
 
@@ -435,7 +458,7 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("ALAYA_RECALL_EVIDENCE_MULT scales the delivered score by (1+β·R_E); default off leaves the base", async () => {
-    const spec: CandidateSpec = { id: objectId(1), lexical: 1, graphSupport: 3 };
+    const spec: CandidateSpec = { id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] };
     const off = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
     process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
     const on = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;

@@ -11,12 +11,15 @@ export type {
   LongMemEvalGoldDiagnostic,
   LongMemEvalGraphExpansionPlaneCountPerEdgeType,
   LongMemEvalGraphExpansionPlaneCountPerHop,
+  LongMemEvalMissTaxonomy,
+  LongMemEvalMissTaxonomyDistribution,
   LongMemEvalQueryEmbeddingCacheSummary,
   LongMemEvalQuestionDiagnostic,
   LongMemEvalRecallEvidenceSummary,
   LongMemEvalReportSideEffectSnapshot,
   LongMemEvalReportSideEffectSummary,
   LongMemEvalReportUsageSummary,
+  LongMemEvalMissTaxonomySummary,
   ProviderStateSummary
 } from "./diagnostics-types.js";
 export {
@@ -35,3 +38,8 @@ export {
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects
 } from "./diagnostics-sidecar.js";
+export {
+  createEmptyMissTaxonomyDistribution,
+  readQuestionMissTaxonomy,
+  summarizeLongMemEvalMissTaxonomy
+} from "./diagnostics-miss-taxonomy.js";

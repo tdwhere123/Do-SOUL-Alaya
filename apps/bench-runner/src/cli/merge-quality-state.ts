@@ -1,5 +1,6 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
 import { buildPerPlaneRecallCoverage, ratio } from "../longmemeval/diagnostics-quality-helpers.js";
+import { createEmptyMissTaxonomyDistribution } from "../longmemeval/diagnostics-miss-taxonomy.js";
 
 type BudgetDropEntry = QualityMetrics["budget_drop_distribution"][string];
 type GoldRankBuckets = NonNullable<QualityMetrics["gold_rank_buckets"]>;
@@ -8,10 +9,12 @@ type ObjectKindDelivery = NonNullable<QualityMetrics["object_kind_delivery"]>;
 type GoldFacetSeparation = Omit<NonNullable<QualityMetrics["gold_facet_separation"]>, "gold_dimension_counts">;
 type PerGoldRankBuckets = NonNullable<QualityMetrics["per_gold_rank_buckets"]>;
 type PerGoldDisplacedBy = NonNullable<QualityMetrics["per_gold_displaced_by"]>;
+type MissTaxonomyDistribution = QualityMetrics["miss_taxonomy_distribution"];
 
 export interface MergeQualityMetricsState {
   readonly budgetCounts: Map<string, BudgetDropEntry>;
   readonly missDistribution: Record<string, number>;
+  readonly missTaxonomyDistribution: MissTaxonomyDistribution;
   readonly planeGoldCounts: Map<string, number>;
   readonly planeHitAt5Counts: Map<string, number>;
   readonly goldRankBuckets: GoldRankBuckets;
@@ -62,6 +65,7 @@ export function createMergeQualityMetricsState(): MergeQualityMetricsState {
   return {
     budgetCounts: new Map(),
     missDistribution: {},
+    missTaxonomyDistribution: createEmptyMissTaxonomyDistribution(),
     planeGoldCounts: new Map(),
     planeHitAt5Counts: new Map(),
     goldRankBuckets: emptyRankTally(),
@@ -99,6 +103,7 @@ export function buildMergedQualityMetrics(
     ...buildStreamQualityMetrics(state),
     ...buildOptionalAttributionBlocks(state),
     ...buildOptionalBreakdownBlocks(state),
+    miss_taxonomy_distribution: state.missTaxonomyDistribution,
     miss_distribution: state.missDistribution
   };
 }
@@ -194,6 +199,7 @@ function accumulateDistributions(
   for (const [key, count] of Object.entries(metric.miss_distribution)) {
     state.missDistribution[key] = (state.missDistribution[key] ?? 0) + count;
   }
+  accumulateRecord(state.missTaxonomyDistribution, metric.miss_taxonomy_distribution);
 }
 
 function accumulateOptionalAttribution(

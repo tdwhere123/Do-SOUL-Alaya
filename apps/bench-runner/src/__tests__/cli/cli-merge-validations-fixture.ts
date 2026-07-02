@@ -103,6 +103,13 @@ export function makeQualityMetrics(
     path_stream_top10_count: Math.ceil(denominator * 0.2),
     path_stream_top10_denominator: denominator,
     per_plane_recall_coverage: {},
+    miss_taxonomy_distribution: {
+      candidate_absent: candidateAbsent,
+      materialization_drop: 0,
+      budget_drop: budgetDropped,
+      delivery_order_drop: 0,
+      evaluation_or_gold_issue: 0
+    },
     miss_distribution: {
       budget_dropped: budgetDropped,
       candidate_absent: candidateAbsent
@@ -124,7 +131,7 @@ export function makeSeedExtractionPath(
     signals_dropped: 0,
     parse_dropped: 0,
     compile_overflow_dropped: 0,
-    signals_dropped_by_reason: { candidate_absent: 0, materialization_error: 0 },
+    signals_dropped_by_reason: { candidate_absent: 0, materialization_drop: 0 },
     ...input
   };
 }
@@ -185,6 +192,13 @@ export function makeShardDiagnostics(
       delivered_plane_counts: {
         first_admitted: { graph_expansion: 1, lexical: 1 },
         winning_admission: { graph_expansion: 1, lexical: 1 }
+      },
+      miss_taxonomy_distribution: {
+        candidate_absent: 0,
+        materialization_drop: 0,
+        budget_drop: 0,
+        delivery_order_drop: 0,
+        evaluation_or_gold_issue: 0
       },
       gold_source_channel_counts: { graph_support: 1 },
       gold_source_plane_counts: { graph_expansion: 1 }

@@ -2,6 +2,7 @@ import type {
   LongMemEvalCompactDiagnosticsSidecar,
   LongMemEvalDiagnosticsSidecar,
   LongMemEvalGraphExpansionPlaneCountPerEdgeType,
+  LongMemEvalMissTaxonomyDistribution,
   LongMemEvalRecallEvidenceSummary,
   LongMemEvalReportSideEffectSummary,
   LongMemEvalQuestionDiagnostic
@@ -12,6 +13,11 @@ import {
   readGraphExpansionPlaneCountPerEdgeType,
   readGraphExpansionPlaneCountPerHop
 } from "./diagnostics-private.js";
+import {
+  createEmptyMissTaxonomyDistribution,
+  readQuestionMissTaxonomy,
+  summarizeLongMemEvalMissTaxonomy
+} from "./diagnostics-miss-taxonomy.js";
 
 export function summarizeLongMemEvalReportSideEffects(input: {
   readonly mode: LongMemEvalReportSideEffectSummary["mode"];
@@ -57,6 +63,7 @@ export function summarizeLongMemEvalRecallEvidence(
   const deliveredWinning: Record<string, number> = {};
   const goldChannels: Record<string, number> = {};
   const goldPlanes: Record<string, number> = {};
+  const missTaxonomyDistribution = createEmptyMissTaxonomyDistribution();
   let deliveredResultCount = 0;
   let graphSupportGoldCount = 0;
   let pathPlasticityGoldCount = 0;
@@ -84,6 +91,10 @@ export function summarizeLongMemEvalRecallEvidence(
     graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
     graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
     graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
+    const missTaxonomy = readQuestionMissTaxonomy(row);
+    if (missTaxonomy !== null) {
+      missTaxonomyDistribution[missTaxonomy] += 1;
+    }
     for (const delivered of row.delivered_results) {
       deliveredResultCount += 1;
       incrementCount(deliveredFirst, delivered.plane_first_admitted ?? "unknown");
@@ -138,6 +149,9 @@ export function summarizeLongMemEvalRecallEvidence(
       first_admitted: deliveredFirst,
       winning_admission: deliveredWinning
     },
+    miss_taxonomy_distribution: freezeMissTaxonomyDistribution(
+      missTaxonomyDistribution
+    ),
     gold_source_channel_counts: goldChannels,
     gold_source_plane_counts: goldPlanes
   };
@@ -146,7 +160,7 @@ export function summarizeLongMemEvalRecallEvidence(
 export function renderDiagnosticsSidecar(
   sidecar: LongMemEvalDiagnosticsSidecar
 ): string {
-  return JSON.stringify(sidecar, null, 2) + "\n";
+  return JSON.stringify(withMissTaxonomy(sidecar), null, 2) + "\n";
 }
 
 export function renderCompactDiagnosticsSidecar(
@@ -154,33 +168,34 @@ export function renderCompactDiagnosticsSidecar(
   fullDiagnosticsArtifactPath: string
 ): string {
   const reportSideEffects = sidecar.report_side_effects;
+  const normalizedSidecar = withMissTaxonomy(sidecar);
   const compact: LongMemEvalCompactDiagnosticsSidecar = {
     schema_version: 1,
     compact_schema_version: 1,
-    bench_name: sidecar.bench_name,
-    split: sidecar.split,
-    run_at: sidecar.run_at,
-    alaya_commit: sidecar.alaya_commit,
-    ...(sidecar.commit_resolution === undefined
+    bench_name: normalizedSidecar.bench_name,
+    split: normalizedSidecar.split,
+    run_at: normalizedSidecar.run_at,
+    alaya_commit: normalizedSidecar.alaya_commit,
+    ...(normalizedSidecar.commit_resolution === undefined
       ? {}
-      : { commit_resolution: sidecar.commit_resolution }),
-    ...(sidecar.recall_pipeline_version === undefined
+      : { commit_resolution: normalizedSidecar.commit_resolution }),
+    ...(normalizedSidecar.recall_pipeline_version === undefined
       ? {}
-      : { recall_pipeline_version: sidecar.recall_pipeline_version }),
-    embedding_provider: sidecar.embedding_provider,
-    embedding_mode: sidecar.embedding_mode,
-    ...(sidecar.policy_shape === undefined ? {} : { policy_shape: sidecar.policy_shape }),
-    ...(sidecar.simulate_report === undefined ? {} : { simulate_report: sidecar.simulate_report }),
-    question_count: sidecar.questions.length,
+      : { recall_pipeline_version: normalizedSidecar.recall_pipeline_version }),
+    embedding_provider: normalizedSidecar.embedding_provider,
+    embedding_mode: normalizedSidecar.embedding_mode,
+    ...(normalizedSidecar.policy_shape === undefined ? {} : { policy_shape: normalizedSidecar.policy_shape }),
+    ...(normalizedSidecar.simulate_report === undefined ? {} : { simulate_report: normalizedSidecar.simulate_report }),
+    question_count: normalizedSidecar.questions.length,
     full_diagnostics_artifact_path: fullDiagnosticsArtifactPath,
-    provider_state_summary: sidecar.provider_state_summary,
-    ...(sidecar.seed_extraction_path === undefined
+    provider_state_summary: normalizedSidecar.provider_state_summary,
+    ...(normalizedSidecar.seed_extraction_path === undefined
       ? {}
-      : { seed_extraction_path: sidecar.seed_extraction_path }),
-    ...(sidecar.report_usage === undefined ? {} : { report_usage: sidecar.report_usage }),
-    ...(sidecar.question_failures === undefined
+      : { seed_extraction_path: normalizedSidecar.seed_extraction_path }),
+    ...(normalizedSidecar.report_usage === undefined ? {} : { report_usage: normalizedSidecar.report_usage }),
+    ...(normalizedSidecar.question_failures === undefined
       ? {}
-      : { question_failures: sidecar.question_failures }),
+      : { question_failures: normalizedSidecar.question_failures }),
     ...(reportSideEffects === undefined
       ? {}
       : {
@@ -195,21 +210,43 @@ export function renderCompactDiagnosticsSidecar(
             snapshot_count: reportSideEffects.snapshots.length
           }
         }),
-    ...(sidecar.scored_recall_evidence === undefined
+    ...(normalizedSidecar.scored_recall_evidence === undefined
       ? {}
-      : { scored_recall_evidence: sidecar.scored_recall_evidence }),
-    ...(sidecar.embedding_vector_cache === undefined
+      : { scored_recall_evidence: normalizedSidecar.scored_recall_evidence }),
+    ...(normalizedSidecar.embedding_vector_cache === undefined
       ? {}
-      : { embedding_vector_cache: sidecar.embedding_vector_cache }),
-    ...(sidecar.query_embedding_cache === undefined
+      : { embedding_vector_cache: normalizedSidecar.embedding_vector_cache }),
+    ...(normalizedSidecar.query_embedding_cache === undefined
       ? {}
-      : { query_embedding_cache: sidecar.query_embedding_cache })
+      : { query_embedding_cache: normalizedSidecar.query_embedding_cache }),
+    miss_taxonomy_summary: normalizedSidecar.miss_taxonomy_summary
   };
   return JSON.stringify(compact, null, 2) + "\n";
 }
 
+function withMissTaxonomy(
+  sidecar: LongMemEvalDiagnosticsSidecar
+): LongMemEvalDiagnosticsSidecar {
+  const questions = sidecar.questions.map((question) => ({
+    ...question,
+    miss_taxonomy: readQuestionMissTaxonomy(question)
+  }));
+  return {
+    ...sidecar,
+    questions,
+    miss_taxonomy_summary:
+      sidecar.miss_taxonomy_summary ?? summarizeLongMemEvalMissTaxonomy(questions)
+  };
+}
+
 function incrementCount(counts: Record<string, number>, key: string): void {
   counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function freezeMissTaxonomyDistribution(
+  input: Record<keyof LongMemEvalMissTaxonomyDistribution, number>
+): LongMemEvalMissTaxonomyDistribution {
+  return Object.freeze({ ...input });
 }
 
 function freezeGraphExpansionPlaneCountPerEdgeType(input: {

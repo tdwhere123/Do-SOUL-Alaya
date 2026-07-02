@@ -53,6 +53,7 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("extraction-fill");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
     expect(stdoutBuf).toContain("--concurrency N");
+    expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
   });
 
   it("recall-eval without --snapshot exits 2 with an actionable message", async () => {
@@ -83,6 +84,13 @@ describe("bench-runner CLI", () => {
     expect(stderrBuf).toMatch(
       /--simulate-report must be one of: none, always-used, gold-only, mixed/
     );
+  });
+
+  it("rejects malformed LongMemEval concurrency values instead of falling back", async () => {
+    const exitCode = await runCli(["longmemeval", "--concurrency", "2.5"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/--concurrency must be a positive integer/);
   });
 
   it("rejects invalid LongMemEval weight overrides before loading data", async () => {

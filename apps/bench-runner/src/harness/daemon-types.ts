@@ -192,7 +192,7 @@ export interface BenchDaemonHandle {
    * A signal the MaterializationRouter routed to evidence_only / deferred (no
    * memory_entry) is recorded with reason=candidate_absent; a signal that
    * THREW before creating memory_entry is isolated per-signal and recorded with
-   * reason=materialization_error — one bad pre-materialization signal never
+   * reason=materialization_drop — one bad pre-materialization signal never
    * aborts its healthy batch-mates. If accept/review fails after memory_entry
    * creation, the harness fails closed because that memory is recallable but
    * absent from the seed sidecar.

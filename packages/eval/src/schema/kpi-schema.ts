@@ -145,7 +145,7 @@ const SeedTruncationSchema = z
 // parsed drafts dropped inside compile() for raw_payload past the 16 KB cap.
 // The remaining drops happen at the materialization seam and are now
 // attributed in signals_dropped_by_reason: candidate_absent (routed to
-// evidence_only / deferred, no memory_entry) and materialization_error (the
+// evidence_only / deferred, no memory_entry) and materialization_drop (the
 // signal threw before memory_entry creation and was isolated PER SIGNAL, so one
 // bad pre-materialization signal no longer drops its whole turn batch — the fix
 // for the silent 1963-signal whole-batch swallow). Post-memory-entry accept /
@@ -153,11 +153,43 @@ const SeedTruncationSchema = z
 // invariant is
 // signals_dropped >= parse_dropped + compile_overflow_dropped
 //   + signals_dropped_by_reason.candidate_absent
-//   + signals_dropped_by_reason.materialization_error,
+//   + signals_dropped_by_reason.materialization_drop,
 // not a clean equality (the >= absorbs any defensive whole-batch backstop drop,
-// which is also attributed to materialization_error only when no materialized
+// which is also attributed to materialization_drop only when no materialized
 // memory_entry could contaminate scoring). see also:
 // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
+
+function normalizeSeedDropReasons(value: unknown): {
+  candidate_absent: number;
+  materialization_drop: number;
+} {
+  if (typeof value !== "object" || value === null) {
+    return { candidate_absent: 0, materialization_drop: 0 };
+  }
+  const record = value as Record<string, unknown>;
+  const candidateAbsent =
+    typeof record.candidate_absent === "number" ? record.candidate_absent : 0;
+  const materializationDrop =
+    typeof record.materialization_drop === "number"
+      ? record.materialization_drop
+      : typeof record.materialization_error === "number"
+        ? record.materialization_error
+        : 0;
+  return { candidate_absent: candidateAbsent, materialization_drop: materializationDrop };
+}
+
+const SeedDropReasonsSchema = z
+  .preprocess(
+    normalizeSeedDropReasons,
+    z
+      .object({
+        candidate_absent: z.number().int().nonnegative(),
+        materialization_drop: z.number().int().nonnegative()
+      })
+      .strict()
+  )
+  .default({ candidate_absent: 0, materialization_drop: 0 });
+
 const SeedExtractionPathSchema = z
   .object({
     path: z.enum(["official_api_compile", "no_credentials_fallback"]),
@@ -173,21 +205,17 @@ const SeedExtractionPathSchema = z
     // Materialization-seam drops by reason (a SUBSET of signals_dropped):
     //   - candidate_absent: routed to evidence_only / deferred (no
     //     memory_entry materialized) — the seed-quality hole the bench surfaces.
-    //   - materialization_error: the signal threw before memory_entry creation
+    //   - materialization_drop: the signal threw before memory_entry creation
     //     and was isolated per-signal, so one bad pre-materialization signal
     //     never drops its batch-mates.
+    // Archives may still carry the legacy materialization_error key; parsing
+    // normalizes it to materialization_drop.
     // Post-memory-entry accept / review failures fail closed before scoring.
     // Optional with a zero default so archives written before this field shipped
     // still parse; new runs always populate it.
     // see also:
     // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats
-    signals_dropped_by_reason: z
-      .object({
-        candidate_absent: z.number().int().nonnegative(),
-        materialization_error: z.number().int().nonnegative()
-      })
-      .strict()
-      .default({ candidate_absent: 0, materialization_error: 0 })
+    signals_dropped_by_reason: SeedDropReasonsSchema
   })
   .strict();
 export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;

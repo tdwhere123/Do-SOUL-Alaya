@@ -1,6 +1,87 @@
-import { describe, expect, it } from "vitest";
-import { scorePathRelationExpansion } from "../../recall/path-relations.js";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  answersWithPathFuelEnabled,
+  buildPathInflowByTarget,
+  scorePathRelationExpansion
+} from "../../recall/path-relations.js";
 import { createPathRelation } from "./recall-service-test-fixtures.js";
+
+afterEach(() => {
+  delete process.env.ALAYA_RECALL_ANSWERS_WITH;
+  delete process.env.ALAYA_EXP_ANSWERS_WITH;
+});
+
+describe("answers_with path inflow", () => {
+  it("is disabled unless ALAYA_RECALL_ANSWERS_WITH=1", () => {
+    expect(answersWithPathFuelEnabled()).toBe(false);
+    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
+    expect(answersWithPathFuelEnabled()).toBe(true);
+  });
+
+  it("accepts the legacy ALAYA_EXP_ANSWERS_WITH alias during the gate migration", () => {
+    process.env.ALAYA_EXP_ANSWERS_WITH = "1";
+    expect(answersWithPathFuelEnabled()).toBe(true);
+  });
+
+  it("uses answers_with as path-flood fuel", () => {
+    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
+    const inflow = buildPathInflowByTarget(
+      [
+        createPathRelation({
+          path_id: "path-answer",
+          sourceId: "seed-memory",
+          targetId: "answer-memory",
+          relationKind: "answers_with",
+          strength: 1,
+          recallBias: 1
+        })
+      ],
+      new Set(["seed-memory", "answer-memory"])
+    );
+
+    expect(inflow["answer-memory"]).toEqual([
+      expect.objectContaining({ seedObjectId: "seed-memory" })
+    ]);
+    expect(inflow["answer-memory"]?.[0]?.weight ?? 0).toBeGreaterThan(0);
+  });
+
+  it("keeps answers_with path-flood fuel inert while the flag is off", () => {
+    const inflow = buildPathInflowByTarget(
+      [
+        createPathRelation({
+          path_id: "path-answer",
+          sourceId: "seed-memory",
+          targetId: "answer-memory",
+          relationKind: "answers_with",
+          strength: 1,
+          recallBias: 1
+        })
+      ],
+      new Set(["seed-memory", "answer-memory"])
+    );
+
+    expect(inflow["answer-memory"]).toBeUndefined();
+  });
+
+  it("keeps non-answer relations inert for path-flood fuel", () => {
+    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
+    const inflow = buildPathInflowByTarget(
+      [
+        createPathRelation({
+          path_id: "path-co-recalled",
+          sourceId: "seed-memory",
+          targetId: "neighbor-memory",
+          relationKind: "co_recalled",
+          strength: 1,
+          recallBias: 1
+        })
+      ],
+      new Set(["seed-memory", "neighbor-memory"])
+    );
+
+    expect(inflow["neighbor-memory"]).toBeUndefined();
+  });
+});
 
 // Equal strength / governance / stability so only relation_kind differs.
 function pathOf(relationKind: string): ReturnType<typeof createPathRelation> {

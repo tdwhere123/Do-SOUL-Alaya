@@ -125,14 +125,53 @@ export async function readLongMemEvalDiagnosticsSidecar(
   benchName: BenchName,
   slug: string
 ): Promise<LongMemEvalDiagnosticsSidecar | null> {
+  const diagnosticsPath = path.join(
+    layout.historyRoot,
+    benchName,
+    slug,
+    LONGMEMEVAL_DIAGNOSTICS_FILENAME
+  );
   try {
-    const raw = await readFile(
-      path.join(layout.historyRoot, benchName, slug, LONGMEMEVAL_DIAGNOSTICS_FILENAME),
-      "utf8"
-    );
-    return JSON.parse(raw) as LongMemEvalDiagnosticsSidecar;
+    const raw = await readFile(diagnosticsPath, "utf8");
+    const parsed = JSON.parse(raw) as LongMemEvalDiagnosticsSidecar;
+    return await resolveExternalDiagnosticsArtifact(diagnosticsPath, parsed);
   } catch (error) {
     if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+async function resolveExternalDiagnosticsArtifact(
+  diagnosticsPath: string,
+  diagnostics: LongMemEvalDiagnosticsSidecar
+): Promise<LongMemEvalDiagnosticsSidecar> {
+  const compact = diagnostics as {
+    readonly compact_schema_version?: unknown;
+    readonly full_diagnostics_artifact_path?: unknown;
+  };
+  if (
+    compact.compact_schema_version !== 1 ||
+    typeof compact.full_diagnostics_artifact_path !== "string"
+  ) {
+    return diagnostics;
+  }
+  const artifactPath = path.isAbsolute(compact.full_diagnostics_artifact_path)
+    ? compact.full_diagnostics_artifact_path
+    : path.resolve(
+        path.dirname(diagnosticsPath),
+        compact.full_diagnostics_artifact_path
+      );
+  if (artifactPath === diagnosticsPath) {
+    return diagnostics;
+  }
+  try {
+    return JSON.parse(
+      await readFile(artifactPath, "utf8")
+    ) as LongMemEvalDiagnosticsSidecar;
+  } catch (error) {
+    if (isNotFound(error)) {
+      return diagnostics;
+    }
     throw error;
   }
 }

@@ -180,6 +180,100 @@ describe("merge-longmemeval validations", () => {
     expect(merged.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
   });
 
+  it("merges diagnostics miss taxonomy distribution while accepting legacy sidecars", async () => {
+    const shardA = path.join(tmpRoot, "shard-taxonomy-a");
+    const shardB = path.join(tmpRoot, "shard-taxonomy-b");
+    const shardLegacy = path.join(tmpRoot, "shard-taxonomy-legacy");
+    const baseEvidence = () =>
+      makeShardDiagnostics().scored_recall_evidence as Record<string, unknown>;
+    const writeTaxonomyShard = (
+      shard: string,
+      questionId: string,
+      hitAt5: boolean,
+      missTaxonomyDistribution: Record<string, number>
+    ) =>
+      writeShardRoot(
+        shard,
+        makeShardKpi({
+          kpi: {
+            ...makeShardKpi().kpi,
+            per_scenario: [{ id: questionId, version: 1, hit_at_5: hitAt5, tier: "warm" }]
+          }
+        }),
+        makeShardDiagnostics({
+          scored_recall_evidence: {
+            ...baseEvidence(),
+            miss_taxonomy_distribution: missTaxonomyDistribution
+          }
+        })
+      );
+    await writeTaxonomyShard(shardA, "q-taxonomy-a", true, {
+      candidate_absent: 1,
+      materialization_drop: 2,
+      budget_drop: 0,
+      delivery_order_drop: 0,
+      evaluation_or_gold_issue: 0
+    });
+    await writeTaxonomyShard(shardB, "q-taxonomy-b", false, {
+      candidate_absent: 0,
+      materialization_drop: 0,
+      budget_drop: 3,
+      delivery_order_drop: 4,
+      evaluation_or_gold_issue: 5
+    });
+    const {
+      miss_taxonomy_distribution: _legacyTaxonomy,
+      ...legacyEvidence
+    } = baseEvidence();
+    await writeShardRoot(
+      shardLegacy,
+      makeShardKpi({
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-taxonomy-legacy", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      makeShardDiagnostics({ scored_recall_evidence: legacyEvidence })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-taxonomy");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB,
+      shardLegacy
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const diagnostics = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, LONGMEMEVAL_DIAGNOSTICS_FILENAME),
+        "utf8"
+      )
+    ) as {
+      scored_recall_evidence?: {
+        miss_taxonomy_distribution?: Record<string, number>;
+      };
+    };
+    expect(diagnostics.scored_recall_evidence?.miss_taxonomy_distribution).toEqual({
+      candidate_absent: 1,
+      materialization_drop: 2,
+      budget_drop: 3,
+      delivery_order_drop: 4,
+      evaluation_or_gold_issue: 5
+    });
+  });
+
   it("refuses shards whose split differs", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");

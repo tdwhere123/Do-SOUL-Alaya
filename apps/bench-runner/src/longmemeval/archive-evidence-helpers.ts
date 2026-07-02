@@ -9,6 +9,7 @@ import type {
   LongMemEvalReportSideEffectSnapshot,
   LongMemEvalReportSideEffectSummary
 } from "./diagnostics.js";
+import { createEmptyMissTaxonomyDistribution } from "./diagnostics-miss-taxonomy.js";
 
 type CompactCompatibleReportSideEffects = Omit<
   LongMemEvalReportSideEffectSummary,
@@ -293,6 +294,7 @@ function aggregateRecallEvidence(
   const winningAdmission: Record<string, number> = {};
   const goldChannels: Record<string, number> = {};
   const goldPlanes: Record<string, number> = {};
+  const missTaxonomyDistribution = createEmptyMissTaxonomyDistribution();
   let deliveredResultCount = 0;
   let graphSupportGoldCount = 0;
   let pathPlasticityGoldCount = 0;
@@ -327,6 +329,10 @@ function aggregateRecallEvidence(
     graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
     mergeCounts(firstAdmitted, item.delivered_plane_counts.first_admitted);
     mergeCounts(winningAdmission, item.delivered_plane_counts.winning_admission);
+    mergeCounts(
+      missTaxonomyDistribution,
+      item.miss_taxonomy_distribution ?? createEmptyMissTaxonomyDistribution()
+    );
     mergeCounts(goldChannels, item.gold_source_channel_counts);
     mergeCounts(goldPlanes, item.gold_source_plane_counts);
   }
@@ -343,6 +349,7 @@ function aggregateRecallEvidence(
       first_admitted: firstAdmitted,
       winning_admission: winningAdmission
     },
+    miss_taxonomy_distribution: missTaxonomyDistribution,
     gold_source_channel_counts: goldChannels,
     gold_source_plane_counts: goldPlanes
   };
