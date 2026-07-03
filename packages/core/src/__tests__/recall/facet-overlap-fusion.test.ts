@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import { buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
@@ -61,30 +61,24 @@ function buildFusion(supplementary: RecallSupplementaryData) {
   });
 }
 
-// The additive facet_overlap stream lives in the flat path, reachable only under the kill-switch (four-axis folds facet into R_O).
-beforeEach(() => {
-  process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
-});
-
 afterEach(() => {
   delete process.env.ALAYA_RECALL_FACET_OVERLAP;
-  delete process.env.ALAYA_RECALL_FLAT_BASELINE;
 });
 
 describe("facet_overlap fusion stream", () => {
-  it("is byte-identical to the no-facet baseline when the flag is off", () => {
+  it("is active whenever query-sought facets are present", () => {
     delete process.env.ALAYA_RECALL_FACET_OVERLAP;
     const withFacets = buildFusion(supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }));
     const baseline = buildFusion(supplementaryData());
 
-    expect([...withFacets.entries()]).toEqual([...baseline.entries()]);
-    for (const breakdown of withFacets.values()) {
-      expect(breakdown.per_stream_rank).not.toHaveProperty("facet_overlap");
-      expect(breakdown.fused_rank_contribution_per_stream).not.toHaveProperty("facet_overlap");
-    }
+    const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
+    expect(withFacets.get(goldKey)?.fused_rank_contribution_per_stream.facet_overlap ?? 0)
+      .toBeGreaterThan(0);
+    expect(withFacets.get(goldKey)?.fused_score ?? 0)
+      .toBeGreaterThan(baseline.get(goldKey)?.fused_score ?? 0);
   });
 
-  it("promotes the facet-bearing candidate above the lexical-lead distractor when the flag is on", () => {
+  it("facet flag is not part of the unified kernel contract", () => {
     const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
     const distractorKey = `workspace_local:memory_entry:${DISTRACTOR_ID}`;
 
@@ -96,7 +90,7 @@ describe("facet_overlap fusion stream", () => {
 
     const goldContribution = on.get(goldKey)?.fused_rank_contribution_per_stream.facet_overlap ?? 0;
     expect(goldContribution).toBeGreaterThan(0);
-    expect(on.get(goldKey)?.fused_score ?? 0).toBeGreaterThan(off.get(goldKey)?.fused_score ?? 0);
+    expect(on.get(goldKey)?.fused_score ?? 0).toBeCloseTo(off.get(goldKey)?.fused_score ?? 0, 12);
     expect((on.get(goldKey)?.fused_rank ?? Number.MAX_SAFE_INTEGER)).toBeLessThan(
       on.get(distractorKey)?.fused_rank ?? Number.MAX_SAFE_INTEGER
     );

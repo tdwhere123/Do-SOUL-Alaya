@@ -63,20 +63,16 @@ export type RecallFusionStream =
   | "existing_score"
   | "embedding_similarity"
   | "graph_expansion"
-  // see also: fusion-delivery.ts scoreRecallFusionStream.
   | "entity_seed"
-  // invariant: path_expansion is the direct multi-session fan-in carrier — earned sparse co_recalled paths fan a query hitting a non-representative cohort member into same-session siblings. see also: fusion-delivery.ts scoreRecallFusionStream.
   | "path_expansion"
   | "temporal_recency"
   | "workspace_activation"
-  // Answer-relevance: count of query-sought facets a candidate carries. Flag-gated (ALAYA_RECALL_FACET_OVERLAP); absent from breakdowns when off.
   | "facet_overlap";
 
 export type RecallFusionStreamRanks = Readonly<Record<RecallFusionStream, number | null>>;
 export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream, number>>;
 
-// Conformant combine's three summed axes (Governance is a cap operator, not an axis). Diagnostics-only.
-export type RecallConformantAxis = "object" | "path" | "evidence";
+export type RecallConformantAxis = "object" | "path" | "evidence" | "temporal" | "control";
 
 export interface RecallFusionBreakdown {
   readonly candidate_key: string;
@@ -87,7 +83,6 @@ export interface RecallFusionBreakdown {
   readonly fused_rank: number;
   readonly fused_score: number;
   readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
-  // Default four-axis assembly only (absent under ALAYA_RECALL_FLAT_BASELINE): per-axis rank and collapsed R_a magnitude.
   readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
   readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { noisyOrDecorrelate } from "../../recall/flood-fusion-scoring.js";
+import { noisyOrDecorrelate } from "../../recall/conformant-evidence-math.js";
 import {
   collapseEvidenceRelevance,
   collapsePathInflow

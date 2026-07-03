@@ -6,14 +6,11 @@ import { createDependencies, createMemoryEntry, createPathRelation, createTaskSu
 
 describe("RecallService", () => {
 describe("structural delivery reserve", () => {
-  // Structural reserve operates on the flat delivery ordering (retained under the kill-switch).
   beforeEach(() => {
     process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on";
-    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
   });
   afterEach(() => {
     delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE;
-    delete process.env.ALAYA_RECALL_FLAT_BASELINE;
   });
 const runStructuralRecall = (service: RecallService, maxEntries: number) => {
       const policy = overridePolicy(

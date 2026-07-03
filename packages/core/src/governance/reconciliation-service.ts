@@ -11,7 +11,7 @@ import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from 
 import { ReconciliationDecider } from "./reconciliation-decider.js";
 import {
   addDecision,
-  encodeAuditContent,
+  auditDroppedContent,
   errorMessage,
   DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD,
   DEFAULT_MAX_LLM_CANDIDATES,
@@ -50,6 +50,17 @@ export type {
   ReconciliationServiceThresholds,
   ReconciliationVerdictApplier
 } from "./reconciliation-service-internal.js";
+export {
+  PreWriteRecallService
+} from "./pre-write-recall-service.js";
+export type {
+  PreWriteCandidateFamily,
+  PreWriteCandidateNeighbor,
+  PreWriteRecallPort,
+  PreWriteRecallResult,
+  PreWriteRelationKind,
+  PreWriteRelationPosterior
+} from "./pre-write-recall-service.js";
 
 function buildProjectionMergeFields(
   existing: Readonly<MemoryEntry>,
@@ -165,7 +176,6 @@ export class ReconciliationService {
     const similarityFloor = thresholds.similarityFloor ?? DEFAULT_SIMILARITY_FLOOR;
     const conflictTagOverlapThreshold =
       thresholds.conflictTagOverlapThreshold ?? DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD;
-    const topK = thresholds.topK ?? DEFAULT_TOP_K;
     const maxLlmCandidates = thresholds.maxLlmCandidates ?? DEFAULT_MAX_LLM_CANDIDATES;
     this.mutex = deps.mutex ?? new KeyedMutex();
     this.lease = deps.lease;
@@ -177,12 +187,10 @@ export class ReconciliationService {
     this.runLookup = deps.runLookup;
     this.warnFn = deps.warn;
     this.decider = new ReconciliationDecider({
-      keywordSearch: deps.keywordSearch,
-      memoryRepo: deps.memoryRepo,
+      preWriteRecall: deps.preWriteRecall,
       llmDecision: deps.llmDecision,
       similarityFloor,
       conflictTagOverlapThreshold,
-      topK,
       maxLlmCandidates,
       warn: (message, meta) => this.warn(message, meta)
     });
@@ -414,15 +422,18 @@ export class ReconciliationService {
       await this.eventLog.append({
         event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
         entity_type: "candidate_memory_signal",
-        entity_id: input.signalId,
+        entity_id: `${input.signalId}:noop_audit`,
         workspace_id: input.workspaceId,
         run_id: input.runId,
-        caused_by: `reconciliation_noop:duplicate_of=${survivingObjectId}:similarity=${similarity.toFixed(3)}:dropped_content=${encodeAuditContent(input.incomingContent)}`,
+        caused_by: "reconciliation_noop",
         payload_json: SoulSignalTriagedPayloadSchema.parse({
           signal_id: input.signalId,
           workspace_id: input.workspaceId,
           run_id: input.runId,
-          triage_result: "dropped"
+          triage_result: "dropped",
+          dropped_content: auditDroppedContent(input.incomingContent),
+          surviving_object_id: survivingObjectId,
+          best_similarity: Number(similarity.toFixed(3))
         })
       });
     } catch (error) {

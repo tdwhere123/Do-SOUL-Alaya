@@ -228,7 +228,7 @@ evt:runtime-governance.ts#SurfaceDriftLeaseReleaseFailedPayloadSchema(failed_at,
 evt:signal.ts#SoulSignalEmittedPayloadSchema(contradicts_refs,exception_to_refs,incompatible_with_refs,raw_payload,run_id,signal_id,signal_kind,source,source_delivery_ids,source_memory_refs,supersedes_refs,workspace_id)#bb458c7
 evt:signal.ts#SoulSignalMaterializedPayloadSchema(created_objects,error,run_id,signal_id,success,workspace_id)#f8c61ca
 evt:signal.ts#SoulSignalNormalizedPayloadSchema(normalized_fields,run_id,signal_id,workspace_id)#a87d9e1
-evt:signal.ts#SoulSignalTriagedPayloadSchema(run_id,signal_id,triage_result,workspace_id)#5043517
+evt:signal.ts#SoulSignalTriagedPayloadSchema(best_similarity,dropped_content,run_id,signal_id,surviving_object_id,triage_result,workspace_id)#7e9396f
 evt:slot.ts#SoulConflictMatrixEdgeCreatedPayloadSchema(edge_type,object_id,object_kind,run_id,source_claim_id,target_claim_id,workspace_id)#f8ad4c1
 evt:slot.ts#SoulSlotCreatedPayloadSchema(claim_kind,governance_subject,object_id,object_kind,run_id,scope_class,winner_claim_id,workspace_id)#df34027
 evt:slot.ts#SoulSlotWinnerChangedPayloadSchema(caused_by,evidence_refs,from_claim_id,object_id,object_kind,occurred_at,reason_code,run_id,to_claim_id,workspace_id)#9d00af9

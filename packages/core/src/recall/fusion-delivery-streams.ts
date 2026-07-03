@@ -1,5 +1,4 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
 import type { RecallFusionStream } from "./recall-service-types.js";
 
 export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
@@ -29,9 +28,7 @@ export function facetSliceEnabled(): boolean {
 }
 
 export function activeFusionStreams(): readonly RecallFusionStream[] {
-  return facetOverlapEnabled() || fourAxisAssemblyEnabled()
-    ? RECALL_FUSION_STREAMS
-    : RECALL_FUSION_STREAMS.filter((stream) => stream !== "facet_overlap");
+  return RECALL_FUSION_STREAMS;
 }
 
 export function facetOverlapCountFor(

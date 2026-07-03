@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
@@ -151,11 +151,7 @@ afterEach(() => {
 
 // force mode (selector="1"/"force") bypasses the multi-fact gate so the legacy
 // coverage behavior is exercised directly on probe-free pools. Facet coverage is the
-// flat-baseline fallback, so these legacy-contract tests pin the kill-switch on.
 describe("applyEvidenceSetDelivery force mode", () => {
-  beforeEach(() => {
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
-  });
   it("promotes a buried second-session gold (rank 8) into the top 5", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
     const ordered = buildSingleSessionWallPool();
@@ -204,7 +200,7 @@ describe("applyEvidenceSetDelivery force mode", () => {
     expect(ids(result).slice(0, 5)).not.toContain("noise");
   });
 
-  it("admits a buried new-session candidate on a stream hit even below the score ratio", () => {
+  it("does not rescue a buried new-session candidate on stream hit alone below the score ratio", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
     const ordered: FusedCandidate[] = [candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" })];
     for (let rank = 2; rank <= 7; rank += 1) {
@@ -214,7 +210,7 @@ describe("applyEvidenceSetDelivery force mode", () => {
       candidate({ objectId: "emb8", fusedScore: 0.2, surfaceId: "sB", streamRanks: { embedding_similarity: 1 } })
     );
     const result = applyEvidenceSetDelivery(ordered, supplementary(), 10);
-    expect(ids(result).slice(0, 5)).toContain("emb8");
+    expect(ids(result).slice(0, 5)).not.toContain("emb8");
   });
 
   it("stays robust (valid permutation, rank 1 kept) when no candidate carries a session key", () => {
@@ -231,9 +227,6 @@ describe("applyEvidenceSetDelivery force mode", () => {
 });
 
 describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
-  beforeEach(() => {
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
-  });
   it("is a no-op (same reference) on a single-fact query", () => {
     const ordered = [
       candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", content: "the database url is x" }),
@@ -294,9 +287,6 @@ describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
 });
 
 describe("applyEvidenceSetDelivery env matrix", () => {
-  beforeEach(() => {
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
-  });
   it("off ⇒ same reference even for a multi-fact query", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "off");
     const ordered = [
@@ -317,9 +307,6 @@ describe("applyEvidenceSetDelivery env matrix", () => {
 });
 
 describe("applyEvidenceSetDelivery regression locks", () => {
-  beforeEach(() => {
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
-  });
   it("is a no-op (same reference) for a list-cue query when the pool is single-session", () => {
     const ordered = [
       candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", content: "database url" }),
@@ -400,7 +387,7 @@ describe("applyEvidenceSetDelivery regression locks", () => {
     expect(ids(result).slice(0, 5)).not.toContain("sup");
   });
 
-  it("still readmits a buried path-stream candidate when it is not suppressed", () => {
+  it("does not rescue a buried path-stream candidate without evidence-set coverage", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
     const ordered: FusedCandidate[] = [candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" })];
     for (let rank = 2; rank <= 7; rank += 1) {
@@ -410,7 +397,7 @@ describe("applyEvidenceSetDelivery regression locks", () => {
       candidate({ objectId: "path8", fusedScore: 0.2, surfaceId: "sB", streamRanks: { path_expansion: 1 } })
     );
     const result = applyEvidenceSetDelivery(ordered, supplementary(), 10);
-    expect(ids(result).slice(0, 5)).toContain("path8");
+    expect(ids(result).slice(0, 5)).not.toContain("path8");
   });
 });
 
@@ -511,12 +498,10 @@ function s4NoEvidencePool(): FusedCandidate[] {
 }
 
 describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
-  it("flat-baseline kill-switch ⇒ facet-only selection, no R_E rescue", () => {
+  it("evidence-set rescue stays enabled in the unified kernel", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
-    const off = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
-    expect(ids(off).slice(0, 5)).toContain("a4");
-    expect(ids(off).slice(0, 5)).not.toContain("bMate");
+    const result = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
+    expect(ids(result).slice(0, 5)).toContain("bMate");
   });
 
   it("on ⇒ rescues a complementary same-session gold via evidence-anchored session propagation (conformant axis)", () => {
@@ -635,11 +620,10 @@ describe("applyEvidenceSetDelivery S4 convergence locks", () => {
     expect(ids(result)).toEqual(["a1", "a2", "a3", "a4", "bDiverse"]);
   });
 
-  it("flat-baseline ⇒ the same facet-diverse candidate is promoted by facet coverage", () => {
+  it("facet diversity still does not drive delivery reorder", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
     const result = applyEvidenceSetDelivery(facetDiverseNoEvidencePool(), supplementary(), 10);
-    expect(ids(result)).toEqual(["a1", "a2", "bDiverse", "a3", "a4"]);
+    expect(ids(result)).toEqual(["a1", "a2", "a3", "a4", "bDiverse"]);
   });
 
   it("default ⇒ the per-candidate coverage nudge is capped at 0.1 (session + cluster combined)", () => {

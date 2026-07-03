@@ -243,8 +243,6 @@ it("keeps local and global recall candidates with matching ids in separate origi
   });
 
 it("applies embedding hits to the local candidate when a global candidate shares its object id", async () => {
-    // Asserts the flat fusion ordering for the shared-object embedding merge (retained under the kill-switch).
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "1");
     const sharedObjectId = "shared-object-id-embedding";
     const memories = [
       createMemoryEntry({

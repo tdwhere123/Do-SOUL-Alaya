@@ -10,7 +10,7 @@ import {
   compareGraphExpansionCandidateDrafts,
   createMutableGraphExpansionDiagnostics,
   freezeGraphExpansionCandidatesResult,
-  shouldReplaceGraphExpansionCandidate,
+  mergeGraphExpansionCandidate,
   type GraphExpansionCandidateDraft,
   type GraphExpansionCandidateSourceDiagnostic,
   type GraphExpansionCandidatesResult
@@ -170,10 +170,8 @@ async function collectDraftGraphExpansionCandidates(
       warn: params.warn,
       degradationReasons: params.degradationReasons,
       onCandidate: (candidate) => {
-        const current = bestCandidates.get(candidate.entry.object_id);
-        if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-          bestCandidates.set(candidate.entry.object_id, candidate);
-        }
+        const objectId = candidate.entry.object_id;
+        bestCandidates.set(objectId, mergeGraphExpansionCandidate(bestCandidates.get(objectId), candidate));
       }
     });
   }
@@ -214,10 +212,8 @@ async function collectSingleEntitySeedGraphCandidates(
     warn: params.warn,
     degradationReasons: params.degradationReasons,
     onCandidate: (candidate) => {
-      const current = seedMap.get(candidate.entry.object_id);
-      if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-        seedMap.set(candidate.entry.object_id, candidate);
-      }
+      const objectId = candidate.entry.object_id;
+      seedMap.set(objectId, mergeGraphExpansionCandidate(seedMap.get(objectId), candidate));
     }
   });
   return seedMap;
@@ -236,9 +232,7 @@ function mergeEntityFanInCandidates(
       }
       fanInSeen.add(neighborId);
       const current = bestCandidates.get(neighborId);
-      if (current === undefined || shouldReplaceGraphExpansionCandidate(candidate, current)) {
-        bestCandidates.set(neighborId, candidate);
-      }
+      bestCandidates.set(neighborId, mergeGraphExpansionCandidate(current, candidate));
     }
   }
 }

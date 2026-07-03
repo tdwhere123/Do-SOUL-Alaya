@@ -135,35 +135,8 @@ const GOVERNANCE_MANIFESTATION_CEILING: Readonly<
   [PathGovernanceClass.STRICTLY_GOVERNED]: ManifestationState.FULL_ELIGIBLE
 });
 
-// invariant: the manifestation CEILING must trust recall_allowed only when it
-// is grounded in TRUSTED PROVENANCE, never the live plasticity-promoted band.
-// A POSITIVE path's governance_class is agent-pumpable: evolveGovernanceClass
-// auto-promotes attention_only -> recall_allowed at support_events_count >= 8,
-// and support_events_count is driven by agent-supplied report_context_usage
-// "used" receipts (positive promotion is intentionally OPEN for Hebbian recall
-// WEIGHTING). If the content-visibility ceiling consumed that promoted band
-// directly, an agent could pump ~8 reported-used turns and lift a victim
-// memory's ceiling from excerpt to full_eligible, over-surfacing preview
-// content. So a recall_allowed reached via auto-promotion (whose legitimacy
-// .evidence_basis still carries only its BIRTH marker — plasticity rewrites
-// governance_class but never evidence_basis) contributes at most EXCERPT (the
-// attention_only band) to the ceiling. Only a recall_allowed BORN at that band
-// with a trusted-provenance marker contributes full_eligible.
-//
-// Trusted recall_allowed-birth markers (the ONLY producers that mint a POSITIVE
-// recall-eligible path directly at recall_allowed):
-//   - signal_graph_reference
-//     (packages/core/src/path-graph/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE)
-//   - edge_proposal_accept:<id>
-//     (packages/core/src/path-graph/edge-proposal-service.ts:EdgeProposalService.acceptProposal)
-// strictly_governed is user/operator-set, not auto-reachable, so it keeps
-// full_eligible regardless of evidence_basis. The recall-WEIGHTING use of the
-// promoted band (graph_support / plasticity) is unaffected — only the
-// manifestation ceiling's trust source is narrowed here.
-// see also: packages/core/src/path-graph/path-manifestation-policy.ts:evolveGovernanceClass.
-// see also: packages/core/src/path-graph/path-relation-proposal-service.ts:SIGNAL_GRAPH_REF_SEED_PROFILE.
-// see also: packages/core/src/path-graph/edge-proposal-service.ts:EdgeProposalService.acceptProposal.
-// see also: packages/core/src/path-plasticity/helpers.ts:buildUpdatesWithPromotion.
+// invariant: plasticity-promoted recall_allowed may weight recall, but only
+// trusted birth provenance may raise a memory ceiling to full_eligible.
 const TRUSTED_RECALL_ALLOWED_EVIDENCE_MARKERS: ReadonlySet<string> =
   new Set<string>(["signal_graph_reference"]);
 const TRUSTED_RECALL_ALLOWED_EVIDENCE_PREFIXES: readonly string[] = Object.freeze([
@@ -272,17 +245,11 @@ function manifestationRank(state: ManifestationStateValue): number {
   return MEMORY_MANIFESTATION_ORDER.indexOf(state);
 }
 
-// Stability evolution thresholds. The protocol dynamics constants are the
-// single source for cumulative support count gates.
 export const STABILITY_PROMOTION_THRESHOLDS = Object.freeze({
   volatile_to_normal_support_count: DYNAMICS_CONSTANTS.path_plasticity.volatile_to_normal_support_count,
   normal_to_stable_support_count: DYNAMICS_CONSTANTS.path_plasticity.normal_to_stable_support_count
 } as const);
 
-// Governance promotion thresholds. Spec: hint_only -> attention_only after
-// support_events_count >= 3 with contradiction_events_count == 0;
-// attention_only -> recall_allowed after support_events_count >= 8.
-// strictly_governed stays user-set and is never auto-demoted/promoted.
 export const GOVERNANCE_PROMOTION_THRESHOLDS = Object.freeze({
   hint_to_attention_support_count: 3,
   attention_to_recall_support_count: 8
@@ -291,14 +258,11 @@ export const GOVERNANCE_PROMOTION_THRESHOLDS = Object.freeze({
 export interface StabilityEvolutionInput {
   readonly current: StabilityClassValue;
   readonly governance_class: PathGovernanceClassValue;
-  readonly support_events_count: number;
+  readonly support_exposure_count: number;
 }
 
-// Evolves stability_class along volatile -> normal -> stable -> pinned.
-// Returns the input class when no threshold is crossed. `pinned` is only
-// reachable when governance_class === strictly_governed.
 export function evolveStabilityClass(input: StabilityEvolutionInput): StabilityClassValue {
-  const supportCount = input.support_events_count;
+  const supportCount = input.support_exposure_count;
   let next: StabilityClassValue = input.current;
 
   if (
@@ -321,13 +285,10 @@ export function evolveStabilityClass(input: StabilityEvolutionInput): StabilityC
 
 export interface GovernanceEvolutionInput {
   readonly current: PathGovernanceClassValue;
-  readonly support_events_count: number;
+  readonly support_exposure_count: number;
   readonly contradiction_events_count: number;
 }
 
-// Returns the next governance_class along the auto-promotion ladder.
-// strictly_governed is user-set and never auto-promoted/demoted.
-// Promotions require ZERO contradictions; any contradiction halts the ladder.
 export function evolveGovernanceClass(
   input: GovernanceEvolutionInput
 ): PathGovernanceClassValue {
@@ -341,13 +302,13 @@ export function evolveGovernanceClass(
   let next: PathGovernanceClassValue = input.current;
   if (
     next === PathGovernanceClass.HINT_ONLY &&
-    input.support_events_count >= GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count
+    input.support_exposure_count >= GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count
   ) {
     next = PathGovernanceClass.ATTENTION_ONLY;
   }
   if (
     next === PathGovernanceClass.ATTENTION_ONLY &&
-    input.support_events_count >= GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count
+    input.support_exposure_count >= GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count
   ) {
     next = PathGovernanceClass.RECALL_ALLOWED;
   }
@@ -361,6 +322,8 @@ export interface PromotionPlanStep {
   readonly next: PathGovernanceClassValue | StabilityClassValue;
   readonly support_events_count: number;
   readonly contradiction_events_count: number;
+  readonly support_exposure_count: number;
+  readonly contradiction_exposure_count: number;
 }
 
 export interface PromotionPlan {
@@ -372,11 +335,10 @@ export interface PlanPromotionInput {
   readonly path: Readonly<PathRelation>;
   readonly nextSupportEventsCount: number;
   readonly nextContradictionEventsCount: number;
+  readonly nextSupportExposureCount: number;
+  readonly nextContradictionExposureCount: number;
 }
 
-// Computes the promotion plan-step pair for a single path given its post-tick
-// support / contradiction counts. Either step may be null if no promotion
-// crosses a threshold this tick.
 export function planPromotion(input: PlanPromotionInput): PromotionPlan {
   const path = input.path;
   const currentStability = path.plasticity_state.stability_class;
@@ -385,7 +347,7 @@ export function planPromotion(input: PlanPromotionInput): PromotionPlan {
   const nextStability = evolveStabilityClass({
     current: currentStability,
     governance_class: nextGovernance,
-    support_events_count: input.nextSupportEventsCount
+    support_exposure_count: input.nextSupportExposureCount
   });
   return Object.freeze({
     stability: buildPromotionPlanStep(
@@ -410,16 +372,13 @@ function resolveNextPromotionGovernance(
   input: PlanPromotionInput,
   currentGovernance: PathGovernanceClassValue
 ): PathGovernanceClassValue {
-  // invariant: negative paths (effect_vector.recall_bias < 0) never gain
-  // governance_class through plasticity. The support-events ladder is
-  // agent-pumpable, so only birth seeds may grant a negative path
-  // recall_allowed.
+  // invariant: negative paths never gain governance_class through plasticity.
   if (path.effect_vector.recall_bias < 0) {
     return currentGovernance;
   }
   return evolveGovernanceClass({
     current: currentGovernance,
-    support_events_count: input.nextSupportEventsCount,
+    support_exposure_count: input.nextSupportExposureCount,
     contradiction_events_count: input.nextContradictionEventsCount
   });
 }
@@ -440,6 +399,8 @@ function buildPromotionPlanStep(
     previous,
     next,
     support_events_count: input.nextSupportEventsCount,
-    contradiction_events_count: input.nextContradictionEventsCount
+    contradiction_events_count: input.nextContradictionEventsCount,
+    support_exposure_count: input.nextSupportExposureCount,
+    contradiction_exposure_count: input.nextContradictionExposureCount
   });
 }

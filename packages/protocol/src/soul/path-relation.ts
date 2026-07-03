@@ -179,6 +179,8 @@ export const PathPlasticityStateSchema = z
     stability_class: StabilityClassSchema,
     support_events_count: NonNegativeIntSchema,
     contradiction_events_count: NonNegativeIntSchema,
+    support_exposure_count: NonNegativeFiniteNumberSchema.optional(),
+    contradiction_exposure_count: NonNegativeFiniteNumberSchema.optional(),
     last_reinforced_at: IsoDatetimeStringSchema.optional(),
     last_weakened_at: IsoDatetimeStringSchema.optional()
   })

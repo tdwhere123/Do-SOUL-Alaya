@@ -1,6 +1,7 @@
 import {
   ConflictDetectionService,
   EdgeAutoProducerService,
+  PreWriteRecallService,
   ReconciliationService,
   createRuleOnlyReconciliationDecisionPort,
   type PathCandidateSink
@@ -128,11 +129,22 @@ async function createReconciliationRuntime(
   }
   const gardenComputeConfig = await input.rawConfigService.getRuntimeGardenComputeConfig();
   const llmDecisionPort = createReconciliationLlmPortFromConfig(gardenComputeConfig);
-  return new ReconciliationService({
-    keywordSearch: {
+  const preWriteRecall = new PreWriteRecallService({
+    lexicalSearch: {
       searchByKeyword: async (workspaceId, queryText, limit) =>
         await input.memoryEntryRepo.searchByKeyword(workspaceId, queryText, limit)
     },
+    memoryRepo: {
+      findByIds: async (workspaceId, objectIds) =>
+        await input.memoryEntryRepo.findByIds(workspaceId, objectIds),
+      findByWorkspaceId: async (workspaceId, tier, page) =>
+        await input.memoryEntryRepo.findByWorkspaceId(workspaceId, tier, page)
+    },
+    limit: 8,
+    warn: input.warn
+  });
+  return new ReconciliationService({
+    preWriteRecall,
     memoryRepo: {
       findByIds: async (workspaceId, objectIds) =>
         await input.memoryEntryRepo.findByIds(workspaceId, objectIds)

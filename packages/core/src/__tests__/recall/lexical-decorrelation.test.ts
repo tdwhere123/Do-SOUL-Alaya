@@ -29,18 +29,12 @@ const DISTINCT_REF_B = "evidence-distinct-b";
 
 const databases = new Set<StorageDatabase>();
 
-// Legacy lexical-decorr path is reachable only under the flat-baseline kill-switch (four-axis is the default).
-beforeEach(() => {
-  process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
-});
-
 afterEach(() => {
   for (const database of databases) {
     database.close();
   }
   databases.clear();
   delete process.env.ALAYA_RECALL_LEXICAL_DECORR;
-  delete process.env.ALAYA_RECALL_FLAT_BASELINE;
 });
 
 function createRealStorage(): { readonly database: StorageDatabase; readonly memoryEntryRepo: SqliteMemoryEntryRepo } {

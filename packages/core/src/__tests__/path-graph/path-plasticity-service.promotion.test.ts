@@ -177,14 +177,15 @@ function buildUsedReceipts(count: number): readonly UsageProofRecord[] {
 }
 
 describe("PathPlasticityService promotion ladder", () => {
-  it("promotes hint_only to attention_only once cumulative support_events_count reaches 3 with zero contradictions", async () => {
+  it("promotes hint_only to attention_only once cumulative support exposure reaches 3 with zero contradictions", async () => {
     const path = createPath({
       path_id: "path-promo-hint",
       plasticity_state: {
         strength: 0.5,
         direction_bias: "source_to_target",
         stability_class: StabilityClass.NORMAL,
-        support_events_count: 2,
+        support_events_count: 0,
+        support_exposure_count: 2.5,
         contradiction_events_count: 0
       },
       legitimacy: {
@@ -248,14 +249,15 @@ describe("PathPlasticityService promotion ladder", () => {
     expect(updated?.legitimacy.governance_class).toBe(PathGovernanceClass.HINT_ONLY);
   });
 
-  it("promotes attention_only to recall_allowed once cumulative support reaches 8", async () => {
+  it("promotes attention_only to recall_allowed once cumulative support exposure reaches 8", async () => {
     const path = createPath({
       path_id: "path-promo-attention",
       plasticity_state: {
         strength: 0.7,
         direction_bias: "source_to_target",
         stability_class: StabilityClass.NORMAL,
-        support_events_count: 7,
+        support_events_count: 0,
+        support_exposure_count: 7,
         contradiction_events_count: 0
       },
       legitimacy: {
@@ -278,6 +280,49 @@ describe("PathPlasticityService promotion ladder", () => {
     expect(harness.getPath("path-promo-attention")?.legitimacy.governance_class).toBe(
       PathGovernanceClass.RECALL_ALLOWED
     );
+  });
+
+  it("does not promote attention_only from a raw-count-only threshold crossing when automatic trust leaves exposure below 8", async () => {
+    const path = createPath({
+      path_id: "path-raw-threshold-blocked",
+      plasticity_state: {
+        strength: 0.7,
+        direction_bias: "source_to_target",
+        stability_class: StabilityClass.NORMAL,
+        support_events_count: 7,
+        support_exposure_count: 7.25,
+        contradiction_events_count: 0
+      },
+      legitimacy: {
+        evidence_basis: ["evidence-1"],
+        governance_class: PathGovernanceClass.ATTENTION_ONLY
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-auto",
+          used_object_ids: ["obj-target"],
+          trust_mode: "automatic"
+        })
+      ],
+      pathsByObjectId: { "obj-target": [path] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    const promotion = result.promotions.find((row) => row.path_id === "path-raw-threshold-blocked");
+    expect(promotion?.governance_promoted ?? null).toBeNull();
+    expect(harness.getPath("path-raw-threshold-blocked")?.legitimacy.governance_class).toBe(
+      PathGovernanceClass.ATTENTION_ONLY
+    );
+    expect(harness.getPath("path-raw-threshold-blocked")?.plasticity_state).toMatchObject({
+      support_events_count: 8,
+      support_exposure_count: 7.75
+    });
   });
 
   it("never auto-promotes strictly_governed", async () => {
@@ -319,7 +364,8 @@ describe("PathPlasticityService promotion ladder", () => {
         strength: 0.3,
         direction_bias: "source_to_target",
         stability_class: StabilityClass.VOLATILE,
-        support_events_count: 2,
+        support_events_count: 0,
+        support_exposure_count: 2.5,
         contradiction_events_count: 0
       },
       legitimacy: {
@@ -344,14 +390,15 @@ describe("PathPlasticityService promotion ladder", () => {
     );
   });
 
-  it("evolves stability_class normal -> stable at threshold 8", async () => {
+  it("evolves stability_class normal -> stable at threshold 8 exposure", async () => {
     const path = createPath({
       path_id: "path-stability-norm",
       plasticity_state: {
         strength: 0.7,
         direction_bias: "source_to_target",
         stability_class: StabilityClass.NORMAL,
-        support_events_count: 7,
+        support_events_count: 0,
+        support_exposure_count: 7,
         contradiction_events_count: 0
       },
       legitimacy: {
@@ -374,6 +421,43 @@ describe("PathPlasticityService promotion ladder", () => {
     expect(harness.getPath("path-stability-norm")?.plasticity_state.stability_class).toBe(
       StabilityClass.STABLE
     );
+  });
+
+  it("does not promote stability from a raw-count-only threshold crossing when automatic trust leaves exposure below 8", async () => {
+    const path = createPath({
+      path_id: "path-stability-raw-threshold-blocked",
+      plasticity_state: {
+        strength: 0.7,
+        direction_bias: "source_to_target",
+        stability_class: StabilityClass.NORMAL,
+        support_events_count: 7,
+        support_exposure_count: 7.25,
+        contradiction_events_count: 0
+      }
+    });
+    const harness = buildHarness({
+      usageRecords: [
+        createUsageRecord({
+          delivery_id: "delivery-auto-stability",
+          used_object_ids: ["obj-target"],
+          trust_mode: "automatic"
+        })
+      ],
+      pathsByObjectId: { "obj-target": [path] }
+    });
+
+    const result = await harness.service.computeAndApplyPlasticity({
+      workspaceId: "workspace-1",
+      sinceIso: "2026-05-03T00:00:00.000Z"
+    });
+
+    const promotion = result.promotions.find(
+      (row) => row.path_id === "path-stability-raw-threshold-blocked"
+    );
+    expect(promotion?.stability_promoted).toBeNull();
+    expect(
+      harness.getPath("path-stability-raw-threshold-blocked")?.plasticity_state.stability_class
+    ).toBe(StabilityClass.NORMAL);
   });
 
   it("evolves stable -> pinned only when governance_class is strictly_governed", async () => {

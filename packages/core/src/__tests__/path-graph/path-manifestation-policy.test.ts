@@ -128,7 +128,7 @@ describe("evolveStabilityClass", () => {
     const next = evolveStabilityClass({
       current: StabilityClass.VOLATILE,
       governance_class: PathGovernanceClass.HINT_ONLY,
-      support_events_count: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count
+      support_exposure_count: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count
     });
     expect(next).toBe(StabilityClass.NORMAL);
   });
@@ -137,7 +137,7 @@ describe("evolveStabilityClass", () => {
     const next = evolveStabilityClass({
       current: StabilityClass.VOLATILE,
       governance_class: PathGovernanceClass.STRICTLY_GOVERNED,
-      support_events_count: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count - 1
+      support_exposure_count: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count - 1
     });
     expect(next).toBe(StabilityClass.VOLATILE);
   });
@@ -146,7 +146,7 @@ describe("evolveStabilityClass", () => {
     const next = evolveStabilityClass({
       current: StabilityClass.NORMAL,
       governance_class: PathGovernanceClass.RECALL_ALLOWED,
-      support_events_count: STABILITY_PROMOTION_THRESHOLDS.normal_to_stable_support_count
+      support_exposure_count: STABILITY_PROMOTION_THRESHOLDS.normal_to_stable_support_count
     });
     expect(next).toBe(StabilityClass.STABLE);
   });
@@ -155,7 +155,7 @@ describe("evolveStabilityClass", () => {
     const next = evolveStabilityClass({
       current: StabilityClass.VOLATILE,
       governance_class: PathGovernanceClass.RECALL_ALLOWED,
-      support_events_count: STABILITY_PROMOTION_THRESHOLDS.normal_to_stable_support_count
+      support_exposure_count: STABILITY_PROMOTION_THRESHOLDS.normal_to_stable_support_count
     });
     expect(next).toBe(StabilityClass.STABLE);
   });
@@ -165,14 +165,14 @@ describe("evolveStabilityClass", () => {
       evolveStabilityClass({
         current: StabilityClass.STABLE,
         governance_class: PathGovernanceClass.STRICTLY_GOVERNED,
-        support_events_count: 999
+        support_exposure_count: 999
       })
     ).toBe(StabilityClass.PINNED);
     expect(
       evolveStabilityClass({
         current: StabilityClass.STABLE,
         governance_class: PathGovernanceClass.RECALL_ALLOWED,
-        support_events_count: 999
+        support_exposure_count: 999
       })
     ).toBe(StabilityClass.STABLE);
   });
@@ -182,7 +182,7 @@ describe("evolveGovernanceClass promotion ladder", () => {
   it("promotes hint_only to attention_only after support reaches threshold with zero contradictions", () => {
     const next = evolveGovernanceClass({
       current: PathGovernanceClass.HINT_ONLY,
-      support_events_count: GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count,
+      support_exposure_count: GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count,
       contradiction_events_count: 0
     });
     expect(next).toBe(PathGovernanceClass.ATTENTION_ONLY);
@@ -191,7 +191,7 @@ describe("evolveGovernanceClass promotion ladder", () => {
   it("holds hint_only when any contradiction is present", () => {
     const next = evolveGovernanceClass({
       current: PathGovernanceClass.HINT_ONLY,
-      support_events_count: GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count,
+      support_exposure_count: GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count,
       contradiction_events_count: 1
     });
     expect(next).toBe(PathGovernanceClass.HINT_ONLY);
@@ -200,7 +200,7 @@ describe("evolveGovernanceClass promotion ladder", () => {
   it("promotes attention_only to recall_allowed after support reaches threshold", () => {
     const next = evolveGovernanceClass({
       current: PathGovernanceClass.ATTENTION_ONLY,
-      support_events_count: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      support_exposure_count: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
       contradiction_events_count: 0
     });
     expect(next).toBe(PathGovernanceClass.RECALL_ALLOWED);
@@ -209,7 +209,7 @@ describe("evolveGovernanceClass promotion ladder", () => {
   it("walks hint_only straight to recall_allowed when support is past the second threshold", () => {
     const next = evolveGovernanceClass({
       current: PathGovernanceClass.HINT_ONLY,
-      support_events_count: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      support_exposure_count: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
       contradiction_events_count: 0
     });
     expect(next).toBe(PathGovernanceClass.RECALL_ALLOWED);
@@ -218,7 +218,7 @@ describe("evolveGovernanceClass promotion ladder", () => {
   it("never auto-promotes recall_allowed beyond recall_allowed", () => {
     const next = evolveGovernanceClass({
       current: PathGovernanceClass.RECALL_ALLOWED,
-      support_events_count: 999,
+      support_exposure_count: 999,
       contradiction_events_count: 0
     });
     expect(next).toBe(PathGovernanceClass.RECALL_ALLOWED);
@@ -228,14 +228,14 @@ describe("evolveGovernanceClass promotion ladder", () => {
     expect(
       evolveGovernanceClass({
         current: PathGovernanceClass.STRICTLY_GOVERNED,
-        support_events_count: 999,
+        support_exposure_count: 999,
         contradiction_events_count: 0
       })
     ).toBe(PathGovernanceClass.STRICTLY_GOVERNED);
     expect(
       evolveGovernanceClass({
         current: PathGovernanceClass.STRICTLY_GOVERNED,
-        support_events_count: 0,
+        support_exposure_count: 0,
         contradiction_events_count: 99
       })
     ).toBe(PathGovernanceClass.STRICTLY_GOVERNED);
@@ -284,7 +284,9 @@ describe("planPromotion", () => {
     const plan = planPromotion({
       path: createSeedPath(),
       nextSupportEventsCount: GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: GOVERNANCE_PROMOTION_THRESHOLDS.hint_to_attention_support_count,
+      nextContradictionExposureCount: 0
     });
     expect(plan.governance).not.toBeNull();
     expect(plan.governance?.kind).toBe("governance_promotion");
@@ -296,7 +298,9 @@ describe("planPromotion", () => {
     const plan = planPromotion({
       path: createSeedPath(),
       nextSupportEventsCount: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count,
+      nextContradictionExposureCount: 0
     });
     expect(plan.stability).not.toBeNull();
     expect(plan.stability?.kind).toBe("stability_promotion");
@@ -320,7 +324,9 @@ describe("planPromotion", () => {
         }
       }),
       nextSupportEventsCount: 2,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: 2,
+      nextContradictionExposureCount: 0
     });
     expect(plan.stability).toBeNull();
     expect(plan.governance).toBeNull();
@@ -330,7 +336,9 @@ describe("planPromotion", () => {
     const plan = planPromotion({
       path: createSeedPath(),
       nextSupportEventsCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
-      nextContradictionEventsCount: 1
+      nextContradictionEventsCount: 1,
+      nextSupportExposureCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      nextContradictionExposureCount: 1
     });
     expect(plan.governance).toBeNull();
   });
@@ -351,7 +359,9 @@ describe("planPromotion", () => {
         }
       }),
       nextSupportEventsCount: 99,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: 99,
+      nextContradictionExposureCount: 0
     });
     expect(planNonStrict.stability).toBeNull();
 
@@ -370,7 +380,9 @@ describe("planPromotion", () => {
         }
       }),
       nextSupportEventsCount: 99,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: 99,
+      nextContradictionExposureCount: 0
     });
     expect(planStrict.stability).not.toBeNull();
     expect(planStrict.stability?.next).toBe(StabilityClass.PINNED);
@@ -403,7 +415,9 @@ describe("planPromotion", () => {
         }
       }),
       nextSupportEventsCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      nextContradictionExposureCount: 0
     });
     expect(plan.governance).toBeNull();
   });
@@ -435,7 +449,9 @@ describe("planPromotion", () => {
         }
       }),
       nextSupportEventsCount: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: STABILITY_PROMOTION_THRESHOLDS.volatile_to_normal_support_count,
+      nextContradictionExposureCount: 0
     });
     expect(plan.governance).toBeNull();
     expect(plan.stability).not.toBeNull();
@@ -458,10 +474,36 @@ describe("planPromotion", () => {
         }
       }),
       nextSupportEventsCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
-      nextContradictionEventsCount: 0
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: GOVERNANCE_PROMOTION_THRESHOLDS.attention_to_recall_support_count,
+      nextContradictionExposureCount: 0
     });
     expect(plan.governance).not.toBeNull();
     expect(plan.governance?.previous).toBe(PathGovernanceClass.ATTENTION_ONLY);
     expect(plan.governance?.next).toBe(PathGovernanceClass.RECALL_ALLOWED);
+  });
+
+  it("uses support exposure rather than raw support count for promotions", () => {
+    const plan = planPromotion({
+      path: createSeedPath({
+        legitimacy: {
+          evidence_basis: ["evidence-1"],
+          governance_class: PathGovernanceClass.ATTENTION_ONLY
+        },
+        plasticity_state: {
+          strength: 0.5,
+          direction_bias: "source_to_target",
+          stability_class: StabilityClass.NORMAL,
+          support_events_count: 7,
+          contradiction_events_count: 0
+        }
+      }),
+      nextSupportEventsCount: 8,
+      nextContradictionEventsCount: 0,
+      nextSupportExposureCount: 7.5,
+      nextContradictionExposureCount: 0
+    });
+    expect(plan.governance).toBeNull();
+    expect(plan.stability).toBeNull();
   });
 });

@@ -24,12 +24,6 @@ import {
   recordEvidenceSetSelection
 } from "./evidence-set-coverage.js";
 
-// Delivery-time set-coverage: natural ranking buries complementary golds (Any-gold@5 high, Full-gold@5 low).
-// Rewrites the top-K interior (never rank-1, never the reserve tail) as a bounded additive nudge — default
-// uses S4 evidence-set coverage; the flat-baseline kill-switch falls back to facet coverage. Runs only when
-// the query is plausibly multi-fact AND the pool offers cross-session evidence; all signals are delivery-time.
-
-// Facet tokens are prefixed by axis; the prefix maps to its coverage bonus.
 const FACET_PREFIX_WEIGHT: Readonly<Record<string, number>> = {
   "L:": 0.1,
   "S:": 0.0833,
@@ -269,7 +263,6 @@ export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
   return appendRemainder(ordered, selected, selectedSet);
 }
 
-// Default path records evidence-set membership; the flat-baseline fallback accrues facet coverage instead.
 function recordSelection<T extends DeliveryCandidate>(
   candidate: T,
   ctx: FacetContext,
@@ -306,7 +299,6 @@ function selectBestByCoverageUtility<T extends DeliveryCandidate>(
       continue;
     }
     const base = headScore > 0 ? Math.min(1, candidate.fusion.fused_score / headScore) : 0;
-    // Default: S4 evidence-set coverage only (facet is double-counted by R_O); flat-baseline falls back to facet.
     const utility = evidenceState !== null
       ? base + Math.min(MAX_EVIDENCE_SET_BONUS, evidenceSetCoverageBonus(evidenceState, candidate, ctx.supplementaryData))
       : coverageUtility(base, facetSignature(candidate.entry, ctx), covered);

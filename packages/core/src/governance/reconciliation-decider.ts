@@ -7,13 +7,24 @@ import {
   type MemoryEntry,
   type ReconciliationDecision,
   type ReconciliationInput,
-  type ReconciliationKeywordSearchPort,
-  type ReconciliationLlmDecisionPort,
-  type ReconciliationMemoryRepoPort
+  type ReconciliationLlmDecisionPort
 } from "./reconciliation-service-internal.js";
+import type {
+  PreWriteCandidateNeighbor,
+  PreWriteCandidateFamily,
+  PreWriteRecallPort
+} from "./pre-write-recall-service.js";
+
+const LLM_CANDIDATE_FAMILY_ORDER: readonly PreWriteCandidateFamily[] = [
+  "typed_slot",
+  "canonical_entity",
+  "temporal",
+  "lexical",
+  "domain_tag"
+];
 
 interface NeighborCandidate {
-  readonly entry: Readonly<MemoryEntry>;
+  readonly neighbor: PreWriteCandidateNeighbor;
   readonly similarity: number;
 }
 
@@ -25,12 +36,10 @@ interface NeighborAnalysis {
 }
 
 export interface ReconciliationDeciderDependencies {
-  readonly keywordSearch: ReconciliationKeywordSearchPort;
-  readonly memoryRepo: ReconciliationMemoryRepoPort;
+  readonly preWriteRecall: PreWriteRecallPort;
   readonly llmDecision: ReconciliationLlmDecisionPort;
   readonly similarityFloor: number;
   readonly conflictTagOverlapThreshold: number;
-  readonly topK: number;
   readonly maxLlmCandidates: number;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }
@@ -44,12 +53,12 @@ export class ReconciliationDecider {
       return addDecision(0, false, "empty incoming content — no reconciliation");
     }
 
-    const neighbors = await this.retrieveNeighbors(input.workspaceId, incomingContent);
-    if (neighbors.length === 0) {
-      return addDecision(0, false, "no lexically-similar existing memory");
+    const recall = await this.retrievePreWriteRecall(input);
+    if (recall.candidates.length === 0) {
+      return addDecision(0, false, "pre-write recall found no related existing memory");
     }
 
-    const analysis = this.analyzeNeighbors(input, incomingContent, neighbors);
+    const analysis = this.analyzeNeighbors(input, incomingContent, recall.candidates);
 
     if (analysis.best === null) {
       return addDecision(0, analysis.sawConflictNeighbor, "no comparable neighbor content");
@@ -72,43 +81,23 @@ export class ReconciliationDecider {
     );
   }
 
-  private async retrieveNeighbors(workspaceId: string, incomingContent: string): Promise<readonly Readonly<MemoryEntry>[]> {
-    let hits: readonly { readonly object_id: string }[];
+  private async retrievePreWriteRecall(input: ReconciliationInput): Promise<Awaited<ReturnType<PreWriteRecallPort["recall"]>>> {
     try {
-      hits = await this.deps.keywordSearch.searchByKeyword(
-        workspaceId,
-        incomingContent,
-        this.deps.topK
-      );
+      return await this.deps.preWriteRecall.recall(input);
     } catch (error) {
-      this.deps.warn("reconciliation keyword search failed", {
-        workspace_id: workspaceId,
+      this.deps.warn("pre-write recall failed", {
+        workspace_id: input.workspaceId,
+        signal_id: input.signalId,
         error: errorMessage(error)
       });
-      return [];
-    }
-    if (hits.length === 0) {
-      return [];
-    }
-    try {
-      const entries = await this.deps.memoryRepo.findByIds(
-        workspaceId,
-        hits.map((hit) => hit.object_id)
-      );
-      return entries.filter((entry) => entry.lifecycle_state !== "archived");
-    } catch (error) {
-      this.deps.warn("reconciliation neighbor fetch failed", {
-        workspace_id: workspaceId,
-        error: errorMessage(error)
-      });
-      return [];
+      return { candidates: [], uncertainty: 1, auditFeatures: { failed: true } };
     }
   }
 
   private analyzeNeighbors(
     input: ReconciliationInput,
     incomingContent: string,
-    neighbors: readonly Readonly<MemoryEntry>[]
+    neighbors: readonly PreWriteCandidateNeighbor[]
   ): NeighborAnalysis {
     const incomingTokens = tokenize(incomingContent);
     const incomingTagSet = new Set(input.incomingDomainTags);
@@ -119,15 +108,16 @@ export class ReconciliationDecider {
     const ambiguous: NeighborCandidate[] = [];
 
     for (const neighbor of neighbors) {
-      const similarity = jaccardIndex(incomingTokens, tokenize(neighbor.content));
-      best = best === null || similarity > best.similarity ? { entry: neighbor, similarity } : best;
-      if (identical === null && normalizeForIdentity(neighbor.content) === incomingIdentityKey) {
-        identical = neighbor;
+      const lexicalSimilarity = jaccardIndex(incomingTokens, tokenize(neighbor.entry.content));
+      const similarity = Math.max(lexicalSimilarity, neighbor.structuralScore);
+      best = best === null || similarity > best.similarity ? { neighbor, similarity } : best;
+      if (identical === null && normalizeForIdentity(neighbor.entry.content) === incomingIdentityKey) {
+        identical = neighbor.entry;
       }
       if (similarity >= this.deps.similarityFloor) {
-        ambiguous.push({ entry: neighbor, similarity });
+        ambiguous.push({ neighbor, similarity });
       }
-      if (this.isConflictNeighbor(similarity, incomingTagSet, neighbor.domain_tags)) {
+      if (this.isConflictNeighbor(lexicalSimilarity, incomingTagSet, neighbor.entry.domain_tags, neighbor)) {
         sawConflictNeighbor = true;
       }
     }
@@ -138,11 +128,15 @@ export class ReconciliationDecider {
   private isConflictNeighbor(
     similarity: number,
     incomingTagSet: ReadonlySet<string>,
-    domainTags: readonly string[]
+    domainTags: readonly string[],
+    neighbor: PreWriteCandidateNeighbor
   ): boolean {
     return (
-      similarity < this.deps.similarityFloor &&
-      jaccardIndex(incomingTagSet, new Set(domainTags)) >= this.deps.conflictTagOverlapThreshold
+      (similarity < this.deps.similarityFloor &&
+        jaccardIndex(incomingTagSet, new Set(domainTags)) >= this.deps.conflictTagOverlapThreshold) ||
+      neighbor.relationPosteriors.some(
+        (posterior) => posterior.relation === "contradicts" && posterior.probability >= 0.4
+      )
     );
   }
 
@@ -151,19 +145,30 @@ export class ReconciliationDecider {
     incomingContent: string,
     analysis: NeighborAnalysis
   ): Promise<ReconciliationDecision> {
-    analysis.ambiguous.sort((left, right) => right.similarity - left.similarity);
-    const candidates = analysis.ambiguous
-      .slice(0, this.deps.maxLlmCandidates)
-      .map((item) => ({ objectId: item.entry.object_id, content: item.entry.content }));
+    analysis.ambiguous.sort(
+      (left, right) =>
+        right.similarity - left.similarity ||
+        right.neighbor.lexicalScore - left.neighbor.lexicalScore ||
+        right.neighbor.families.length - left.neighbor.families.length
+    );
+    const candidates = selectLlmCandidates(analysis.ambiguous, this.deps.maxLlmCandidates)
+      .map((item) => ({ objectId: item.neighbor.entry.object_id, content: item.neighbor.entry.content }));
     return await this.decideWithLlm(
       input,
       incomingContent,
       candidates,
-      analysis.best!.similarity
+      analysis.best!.similarity,
+      analysis.sawConflictNeighbor
     );
   }
 
-  private async decideWithLlm(input: ReconciliationInput, incomingContent: string, candidates: readonly { readonly objectId: string; readonly content: string }[], bestSimilarity: number): Promise<ReconciliationDecision> {
+  private async decideWithLlm(
+    input: ReconciliationInput,
+    incomingContent: string,
+    candidates: readonly { readonly objectId: string; readonly content: string }[],
+    bestSimilarity: number,
+    runConflictScanOnAdd: boolean
+  ): Promise<ReconciliationDecision> {
     let verdict: Awaited<ReturnType<ReconciliationLlmDecisionPort["decide"]>>;
     try {
       verdict = await this.deps.llmDecision.decide({ incomingContent, candidates });
@@ -182,7 +187,11 @@ export class ReconciliationDecider {
       case "noop":
         return this.buildNoopDecision(input, verdict, candidateIds, bestSimilarity);
       case "add":
-        return addDecision(bestSimilarity, false, verdict.reason ?? "LLM judged the fact distinct");
+        return addDecision(
+          bestSimilarity,
+          runConflictScanOnAdd,
+          verdict.reason ?? "LLM judged the fact distinct"
+        );
     }
   }
 
@@ -255,6 +264,33 @@ function buildIdenticalDecision(
     reason: `normalized-string-identical duplicate of ${identical.object_id}`,
     bestSimilarity
   };
+}
+
+function selectLlmCandidates(
+  ambiguous: readonly NeighborCandidate[],
+  maxCandidates: number
+): readonly NeighborCandidate[] {
+  const limit = Math.max(0, maxCandidates);
+  if (limit === 0) {
+    return [];
+  }
+  const selected = new Map<string, NeighborCandidate>();
+  for (const family of LLM_CANDIDATE_FAMILY_ORDER) {
+    const match = ambiguous.find((item) => item.neighbor.families.includes(family));
+    if (match !== undefined) {
+      selected.set(match.neighbor.entry.object_id, match);
+    }
+    if (selected.size >= limit) {
+      return [...selected.values()];
+    }
+  }
+  for (const item of ambiguous) {
+    selected.set(item.neighbor.entry.object_id, item);
+    if (selected.size >= limit) {
+      break;
+    }
+  }
+  return [...selected.values()];
 }
 
 function isValidTarget(

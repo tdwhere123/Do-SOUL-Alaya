@@ -5,10 +5,10 @@ import { ReconciliationService, createRuleOnlyReconciliationDecisionPort, type R
 import { DecideFn, UpdateFn, baseInput, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 
 describe("ReconciliationService", () => {
-it("degrades to ADD when keyword search throws", async () => {
+it("degrades to ADD when pre-write recall throws", async () => {
     const { deps } = createDeps([], {
-      keywordSearch: {
-        searchByKeyword: async () => {
+      preWriteRecall: {
+        recall: async () => {
           throw new Error("fts unavailable");
         }
       }
@@ -28,13 +28,13 @@ it("serializes concurrent reconciles for the same workspace", async () => {
     let maxActive = 0;
     const neighbor = createMemoryEntry({ content: "unrelated content here" });
     const { deps } = createDeps([neighbor], {
-      keywordSearch: {
-        searchByKeyword: async () => {
+      preWriteRecall: {
+        recall: async () => {
           active += 1;
           maxActive = Math.max(maxActive, active);
           await new Promise((resolve) => setTimeout(resolve, 5));
           active -= 1;
-          return [];
+          return { candidates: [], uncertainty: 1, auditFeatures: { candidate_count: 0 } };
         }
       }
     });
@@ -84,7 +84,7 @@ describe("ReconciliationService storage-level lease", () => {
     // A neighbor that would normally NOOP — proving the lease-busy path
     // short-circuits BEFORE the decision so it never reaches the gate.
     const neighbor = createMemoryEntry({ content: "The user lives in Berlin." });
-    const { deps, decide, searchByKeyword } = createDeps([neighbor]);
+    const { deps, decide, preWriteRecall } = createDeps([neighbor]);
     const lease = {
       tryAcquire: () => null,
       release: vi.fn()
@@ -101,7 +101,7 @@ describe("ReconciliationService storage-level lease", () => {
     expect(decision.runConflictScan).toBe(true);
     expect(driven.appliedVerdicts).toEqual(["add"]);
     // The decide path was never entered — no retrieval, no LLM judge.
-    expect(searchByKeyword).not.toHaveBeenCalled();
+    expect(preWriteRecall).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
     // A lease that was never acquired is never released.
     expect(lease.release).not.toHaveBeenCalled();
@@ -245,13 +245,13 @@ describe("ReconciliationService rule-only (zero-cloud) basis", () => {
     let maxActive = 0;
     const neighbor = createMemoryEntry({ content: "unrelated content here" });
     const { deps } = createRuleOnlyDeps([neighbor], {
-      keywordSearch: {
-        searchByKeyword: async () => {
+      preWriteRecall: {
+        recall: async () => {
           active += 1;
           maxActive = Math.max(maxActive, active);
           await new Promise((resolve) => setTimeout(resolve, 5));
           active -= 1;
-          return [];
+          return { candidates: [], uncertainty: 1, auditFeatures: { candidate_count: 0 } };
         }
       }
     });

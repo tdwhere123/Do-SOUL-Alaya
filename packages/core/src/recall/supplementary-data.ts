@@ -21,8 +21,6 @@ import type {
 import { computeMaxWeightTransferAmount } from "./scoring.js";
 import { uniqueStrings } from "./path-relations.js";
 import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
-import { facetOverlapEnabled } from "./fusion-delivery-scoring.js";
-import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
 import { deriveQuerySoughtFacets } from "./query-facet-router.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
@@ -95,9 +93,7 @@ export async function collectSupplementaryData(
     evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
     governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
     pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
-    querySoughtFacets: facetOverlapEnabled() || fourAxisAssemblyEnabled()
-      ? deriveQuerySoughtFacets(params.queryProbes)
-      : Object.freeze([])
+    querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
   });
 }
 

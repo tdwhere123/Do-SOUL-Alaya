@@ -15,9 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   applyPathSuppressionToFusionScores,
-  buildRecallFusionDetails,
-  flatBaselineEnabled,
-  fourAxisAssemblyEnabled
+  buildRecallFusionDetails
 } from "../../recall/fusion-delivery-scoring.js";
 import {
   compareConformantAxisRa,
@@ -41,9 +39,9 @@ const RUN = "run-1";
 const NOW = "2026-03-20T10:20:30.000Z";
 
 const CONFORMANT_ENV = [
-  "ALAYA_RECALL_FLAT_BASELINE", "ALAYA_RECALL_EVIDENCE_MULT", "ALAYA_RECALL_CONF_W_PATH",
+  "ALAYA_RECALL_CONF_W_PATH",
   "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP", "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
-  "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE", "ALAYA_RECALL_SYNTHESIS",
+  "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE",
   "ALAYA_RECALL_FACET_OVERLAP", "ALAYA_RECALL_FACET_SLICE", "ALAYA_RECALL_PATH_FLOW",
   "ALAYA_RECALL_TEMPORAL_WINDOW"
 ] as const;
@@ -203,8 +201,7 @@ async function runFusion(
 const GENERIC_QUERY = "how does the staging release rotate database credentials and migration tooling";
 
 describe("conformant compositional combine (real SQLite)", () => {
-  it("flat-baseline kill-switch is byte-identical, deterministic, and emits no per_axis_* keys", async () => {
-    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+  it("unified kernel is deterministic and emits all calibrated axes", async () => {
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1, evidence: 1, structural: 1 },
       { id: objectId(2), path: 1, sourceProximity: 1 },
@@ -219,13 +216,24 @@ describe("conformant compositional combine (real SQLite)", () => {
       expect(b.fused_rank).toBe(a.fused_rank);
       expect(b.per_stream_rank).toEqual(a.per_stream_rank);
       expect(b.fused_rank_contribution_per_stream).toEqual(a.fused_rank_contribution_per_stream);
-      expect(a.per_axis_rank).toBeUndefined();
-      expect(a.per_axis_contribution).toBeUndefined();
+      expect(a.per_axis_rank).toEqual({
+        object: null,
+        path: null,
+        evidence: null,
+        temporal: null,
+        control: null
+      });
+      expect(Object.keys(a.per_axis_contribution ?? {}).sort()).toEqual([
+        "control",
+        "evidence",
+        "object",
+        "path",
+        "temporal"
+      ]);
     }
   });
 
-  it("flat-baseline kill-switch ignores an injected inflow adjacency (flat path untouched)", async () => {
-    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+  it("path inflow is part of the unified kernel", async () => {
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1 },
       { id: objectId(2), lexical: 0.2 }
@@ -234,10 +242,9 @@ describe("conformant compositional combine (real SQLite)", () => {
     const withInflow = await runFusion(GENERIC_QUERY, specs, {
       inflow: { [objectId(2)]: [{ seedObjectId: objectId(1), weight: 1 }] }
     });
-    for (const spec of specs) {
-      expect(withInflow.get(keyOf(spec.id))!.fused_score)
-        .toBeCloseTo(without.get(keyOf(spec.id))!.fused_score, 12);
-    }
+    expect(withInflow.get(keyOf(objectId(2)))!.per_axis_contribution!.path).toBeGreaterThan(0);
+    expect(withInflow.get(keyOf(objectId(2)))!.fused_score)
+      .toBeGreaterThan(without.get(keyOf(objectId(2)))!.fused_score);
   });
 
   it("object base is the additive RRF sum: more matching streams raise R_O", async () => {
@@ -256,7 +263,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     const noInflow = await runFusion(GENERIC_QUERY, [seed, target]);
     const targetNoInflow = noInflow.get(keyOf(target.id))!;
     expect(targetNoInflow.per_axis_contribution!.path).toBe(0);
-    expect(targetNoInflow.fused_score).toBe(0);
+    expect(targetNoInflow.fused_score).toBeGreaterThan(0);
 
     const withInflow = await runFusion(GENERIC_QUERY, [seed, target], {
       inflow: { [target.id]: [{ seedObjectId: seed.id, weight: 0.8 }] }
@@ -274,7 +281,10 @@ describe("conformant compositional combine (real SQLite)", () => {
     });
     const lifted = fusion.get(keyOf(target.id))!;
     expect(lifted.per_axis_contribution!.path).toBe(0);
-    expect(lifted.fused_score).toBe(0);
+    expect(lifted.fused_score).toBeCloseTo(
+      (await runFusion(GENERIC_QUERY, [target])).get(keyOf(target.id))!.fused_score,
+      12
+    );
   });
 
   it("a magnitude-dominant candidate outranks a broad-but-individually-weak one under additive RRF", async () => {
@@ -301,18 +311,14 @@ describe("conformant compositional combine (real SQLite)", () => {
     ]);
   });
 
-  it("keeps the evidence axis score-neutral by default and enables it behind ALAYA_RECALL_EVIDENCE_MULT", async () => {
+  it("evidence axis is always populated from independent support", async () => {
     const dry = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }])).get(keyOf(objectId(1)))!;
     expect(dry.per_axis_contribution!.evidence).toBe(0);
-    const neutralWithEvidence = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] }])).get(keyOf(objectId(1)))!;
-    expect(neutralWithEvidence.per_axis_contribution!.evidence).toBe(0);
-    process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
     const boosted = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] }])).get(keyOf(objectId(1)))!;
     expect(boosted.per_axis_contribution!.evidence).toBeGreaterThan(0);
   });
 
-  it("evidence axis is populated for a candidate with no lexical or embedding signal once enabled", async () => {
-    process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
+  it("evidence axis is populated for a candidate with no lexical or embedding signal", async () => {
     const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), evidenceSupports: [1] }])).get(keyOf(objectId(1)))!;
     expect(candidate.per_axis_contribution!.evidence).toBeGreaterThan(0);
   });
@@ -387,25 +393,22 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(withEmbedding).toBeGreaterThan(surfaceOnly);
   });
 
-  it("four-axis default supersedes synthesis even when the synthesis flag is on", async () => {
-    process.env.ALAYA_RECALL_SYNTHESIS = "1";
-    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 }]);
-    expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution).toBeDefined();
-  });
-
-  it("R_a vector tie-break orders object before path before evidence", () => {
+  it("R_a vector tie-break orders object before path before evidence before temporal before control", () => {
     // Object dominates: left ranks ahead despite a weaker path/evidence vector.
     expect(compareConformantAxisRa(
-      { object: 1, path: 0, evidence: 0 },
-      { object: 0.5, path: 1, evidence: 1 }
+      { object: 1, path: 0, evidence: 0, temporal: 0, control: 0 },
+      { object: 0.5, path: 1, evidence: 1, temporal: 1, control: 1 }
     )).toBeLessThan(0);
     // Equal object, path breaks the tie before evidence.
     expect(compareConformantAxisRa(
-      { object: 0.5, path: 1, evidence: 0 },
-      { object: 0.5, path: 0.5, evidence: 1 }
+      { object: 0.5, path: 1, evidence: 0, temporal: 0, control: 0 },
+      { object: 0.5, path: 0.5, evidence: 1, temporal: 1, control: 1 }
     )).toBeLessThan(0);
-    // Absent vectors (flag-off) never reorder.
-    expect(compareConformantAxisRa(undefined, { object: 1, path: 0, evidence: 0 })).toBe(0);
+    expect(compareConformantAxisRa(
+      { object: 0.5, path: 0.5, evidence: 0.5, temporal: 1, control: 0 },
+      { object: 0.5, path: 0.5, evidence: 0.5, temporal: 0.5, control: 1 }
+    )).toBeLessThan(0);
+    expect(compareConformantAxisRa(undefined, { object: 1, path: 0, evidence: 0, temporal: 0, control: 0 })).toBe(0);
   });
 
   it("path-suppression stays a clean demote, not an annihilation, on the delivered score", async () => {
@@ -425,12 +428,11 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(afterHeavy).toBeLessThan(before);
   });
 
-  it("four-axis assembly is the production default and the flat-baseline kill-switch flips it", () => {
-    expect(fourAxisAssemblyEnabled()).toBe(true);
-    expect(flatBaselineEnabled()).toBe(false);
-    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
-    expect(fourAxisAssemblyEnabled()).toBe(false);
-    expect(flatBaselineEnabled()).toBe(true);
+  it("unified assembly is the production algorithm", async () => {
+    const fusion = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, path: 1, sourceProximity: 1 }]);
+    expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution).toEqual(
+      expect.objectContaining({ object: expect.any(Number), path: expect.any(Number), evidence: expect.any(Number) })
+    );
   });
 
   it("tunables default to bounded compositional values", () => {
@@ -440,31 +442,31 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(resolveConformantFloodCapTotal()).toBe(3);
   });
 
-  it("four-axis default delivery equals the flat RRF base when Φ=0 and the evidence multiplier is off", async () => {
+  it("unified delivery includes temporal and control axes even when path is zero", async () => {
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1, evidence: 1, embedding: 0.7 },
       { id: objectId(2), lexical: 0.4, trigram: 0.6 },
       { id: objectId(3), embedding: 0.9, structural: 0.5 }
     ];
-    const fourAxis = await runFusion(GENERIC_QUERY, specs);
-    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
-    const flat = await runFusion(GENERIC_QUERY, specs);
+    const unified = await runFusion(GENERIC_QUERY, specs);
     for (const spec of specs) {
-      expect(fourAxis.get(keyOf(spec.id))!.fused_score)
-        .toBeCloseTo(flat.get(keyOf(spec.id))!.fused_score, 12);
-      expect(fourAxis.get(keyOf(spec.id))!.fused_rank)
-        .toBe(flat.get(keyOf(spec.id))!.fused_rank);
+      const contribution = unified.get(keyOf(spec.id))!.per_axis_contribution!;
+      expect(contribution.temporal).toBeGreaterThanOrEqual(0);
+      expect(contribution.control).toBeGreaterThan(0);
     }
   });
 
-  it("ALAYA_RECALL_EVIDENCE_MULT scales the delivered score by (1+β·R_E); default off leaves the base", async () => {
+  it("unified score is the calibrated additive axis sum", async () => {
     const spec: CandidateSpec = { id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] };
-    const off = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
-    process.env.ALAYA_RECALL_EVIDENCE_MULT = "1";
-    const on = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
-    const rE = on.per_axis_contribution!.evidence;
-    expect(rE).toBeGreaterThan(0);
-    expect(on.fused_score).toBeCloseTo(off.fused_score * (1 + resolveConformantEvidenceBeta() * rE), 9);
-    expect(on.fused_score).toBeGreaterThan(off.fused_score);
+    const candidate = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
+    const axes = candidate.per_axis_contribution!;
+    const expected =
+      axes.object +
+      resolveConformantPathWeight() * axes.path +
+      resolveConformantEvidenceBeta() * axes.evidence +
+      0.35 * axes.temporal +
+      0.2 * axes.control;
+    expect(axes.evidence).toBeGreaterThan(0);
+    expect(candidate.fused_score).toBeCloseTo(expected, 9);
   });
 });

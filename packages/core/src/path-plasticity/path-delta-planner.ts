@@ -9,6 +9,8 @@ import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import {
   clampStrength,
   createRedirectionPublication,
+  getContradictionExposureCount,
+  getSupportExposureCount,
   isDormantPath,
   parsePlasticityState,
   selectDirectionBias,
@@ -30,6 +32,8 @@ interface PathDeltaPlanningContext {
   readonly redirection?: RedirectionPublication;
   readonly nextSupportEventsCount: number;
   readonly nextContradictionEventsCount: number;
+  readonly nextSupportExposureCount: number;
+  readonly nextContradictionExposureCount: number;
   readonly promotion: PromotionPlan;
   readonly netDelta: number;
   readonly retirementEligible: boolean;
@@ -88,6 +92,11 @@ export class PathDeltaPlanner {
     const nextDirectionBias = selectDirectionBias(path.plasticity_state.direction_bias, counts);
     const nextSupportEventsCount = path.plasticity_state.support_events_count + counts.used;
     const nextContradictionEventsCount = path.plasticity_state.contradiction_events_count + counts.notApplicable;
+    const nextSupportExposureCount = getSupportExposureCount(path.plasticity_state) + counts.usedWeight;
+    const nextContradictionExposureCount =
+      getContradictionExposureCount(path.plasticity_state) +
+      counts.skipped +
+      counts.notApplicable;
     return Object.freeze({
       previousStrength,
       proposedStrength,
@@ -96,7 +105,15 @@ export class PathDeltaPlanner {
       redirection: createRedirectionPublication(path.plasticity_state.direction_bias, nextDirectionBias, counts, occurredAt),
       nextSupportEventsCount,
       nextContradictionEventsCount,
-      promotion: planPromotion({ path, nextSupportEventsCount, nextContradictionEventsCount }),
+      nextSupportExposureCount,
+      nextContradictionExposureCount,
+      promotion: planPromotion({
+        path,
+        nextSupportEventsCount,
+        nextContradictionEventsCount,
+        nextSupportExposureCount,
+        nextContradictionExposureCount
+      }),
       netDelta: proposedStrength - previousStrength,
       retirementEligible: proposedStrength <= PATH_PLASTICITY_CONSTANTS.RETIREMENT_STRENGTH_THRESHOLD && this.isInactive(path.plasticity_state.last_reinforced_at, occurredAt)
     });
@@ -263,6 +280,8 @@ export class PathDeltaPlanner {
       direction_bias: planning.nextDirectionBias,
       support_events_count: planning.nextSupportEventsCount,
       contradiction_events_count: planning.nextContradictionEventsCount,
+      support_exposure_count: planning.nextSupportExposureCount,
+      contradiction_exposure_count: planning.nextContradictionExposureCount,
       ...overrides
     });
   }

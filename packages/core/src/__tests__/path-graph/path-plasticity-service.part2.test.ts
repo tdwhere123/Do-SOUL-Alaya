@@ -85,6 +85,11 @@ it("halves the strength signal for automatic trust-mode used receipts", async ()
       support_events_count: 3,
       new_strength: 0.4 + PATH_PLASTICITY_CONSTANTS.USED_DELTA * 0.5
     });
+    expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
+      support_events_count: 3,
+      support_exposure_count: 2.5,
+      contradiction_exposure_count: 0
+    });
   });
 
 it("dedupes a path whose source_anchor and target_anchor object_ids both appear in one usage receipt — exactly one delta and one audit event", async () => {

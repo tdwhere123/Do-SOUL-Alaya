@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
+import { PreWriteRecallService } from "../../governance/pre-write-recall-service.js";
 import { ReconciliationService } from "../../governance/reconciliation-service.js";
 
 import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 
 describe("ReconciliationService", () => {
-it("ADD: appends a genuinely new fact when no similar memory exists", async () => {
+  it("ADD: appends a genuinely new fact when no similar memory exists", async () => {
     const { deps, update, decide } = createDeps([]);
     const service = new ReconciliationService(deps);
 
@@ -18,15 +19,13 @@ it("ADD: appends a genuinely new fact when no similar memory exists", async () =
     expect(decision.kind).toBe("add");
     expect(decision.runConflictScan).toBe(false);
     expect(update).not.toHaveBeenCalled();
-    // Below the similarity floor — zero LLM call.
     expect(decide).not.toHaveBeenCalled();
-    // The router applied an ADD and minted exactly one evidence capsule.
     expect(driven.appliedVerdicts).toEqual(["add"]);
     expect(driven.evidenceMinted()).toBe(1);
   });
 
-it("ADD: empty incoming content returns early without retrieval", async () => {
-    const { deps, searchByKeyword } = createDeps([createMemoryEntry()]);
+  it("ADD: empty incoming content returns early without retrieval", async () => {
+    const { deps, preWriteRecall } = createDeps([createMemoryEntry()]);
     const service = new ReconciliationService(deps);
 
     const decision = await drive(service, {
@@ -35,10 +34,10 @@ it("ADD: empty incoming content returns early without retrieval", async () => {
     }).decision;
 
     expect(decision.kind).toBe("add");
-    expect(searchByKeyword).not.toHaveBeenCalled();
+    expect(preWriteRecall).not.toHaveBeenCalled();
   });
 
-it("ADD: a neighbor below the similarity floor never reaches the LLM", async () => {
+  it("ADD: a neighbor below the similarity floor never reaches the LLM", async () => {
     const neighbor = createMemoryEntry({
       content: "The user owns three cats.",
       domain_tags: ["pets"]
@@ -55,7 +54,95 @@ it("ADD: a neighbor below the similarity floor never reaches the LLM", async () 
     expect(decide).not.toHaveBeenCalled();
   });
 
-	it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call and creates nothing", async () => {
+  it("pre-write recall: structural candidates reach the LLM even when lexical overlap is low", async () => {
+    const neighbor = createMemoryEntry({
+      object_id: "memory-redis",
+      content: "Redis deployment credentials rotate monthly.",
+      canonical_entities: ["redis"],
+      domain_tags: ["ops"]
+    });
+    const decide = vi.fn<DecideFn>(async () => ({ kind: "add", reason: "distinct" }));
+    const preWriteRecall = new PreWriteRecallService({
+      lexicalSearch: { searchByKeyword: async () => [] },
+      memoryRepo: {
+        findByIds: async (_workspaceId, objectIds) =>
+          [neighbor].filter((entry) => objectIds.includes(entry.object_id)),
+        findByWorkspaceId: async () => [neighbor]
+      },
+      limit: 8
+    });
+    const { deps } = createDeps([], {
+      preWriteRecall,
+      llmDecision: { decide }
+    });
+    const service = new ReconciliationService(deps);
+
+    const decision = await drive(service, {
+      incomingContent: "数据库密码每月轮换。",
+      incomingDomainTags: ["ops"],
+      incomingProjectionFields: { canonical_entities: ["redis"] }
+    }).decision;
+
+    expect(decision.kind).toBe("add");
+    expect(decide).toHaveBeenCalledWith({
+      incomingContent: "数据库密码每月轮换。",
+      candidates: [{ objectId: "memory-redis", content: "Redis deployment credentials rotate monthly." }]
+    });
+  });
+
+  it("pre-write recall: typed slot candidates survive noisy domain-tag neighbors", async () => {
+    const tagNeighbors = Array.from({ length: 8 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `memory-tag-${index}`,
+        content: `Ops note ${index}`,
+        domain_tags: ["ops"]
+      })
+    );
+    const typedNeighbor = createMemoryEntry({
+      object_id: "memory-slot",
+      content: "The user prefers Postgres for analytics.",
+      domain_tags: [],
+      preference_subject: "user",
+      preference_predicate: "prefers",
+      preference_object: "postgres"
+    });
+    const allNeighbors = [...tagNeighbors, typedNeighbor];
+    const decide = vi.fn<DecideFn>(async () => ({ kind: "add", reason: "distinct" }));
+    const preWriteRecall = new PreWriteRecallService({
+      lexicalSearch: {
+        searchByKeyword: async (_workspaceId, queryText) =>
+          queryText === "user" || queryText === "prefers" ? [{ object_id: "memory-slot" }] : []
+      },
+      memoryRepo: {
+        findByIds: async (_workspaceId, objectIds) =>
+          allNeighbors.filter((entry) => objectIds.includes(entry.object_id)),
+        findByWorkspaceId: async () => tagNeighbors
+      },
+      limit: 8
+    });
+    const { deps } = createDeps([], {
+      preWriteRecall,
+      llmDecision: { decide }
+    });
+    const service = new ReconciliationService(deps);
+
+    await drive(service, {
+      incomingContent: "The user prefers mysql for analytics.",
+      incomingDomainTags: ["ops"],
+      incomingProjectionFields: {
+        preference_subject: "user",
+        preference_predicate: "prefers",
+        preference_object: "mysql"
+      }
+    }).decision;
+
+    expect(decide.mock.calls[0]?.[0].candidates).toContainEqual({
+      objectId: "memory-slot",
+      content: "The user prefers Postgres for analytics."
+    });
+  });
+
+  it("NOOP: a normalized-string-identical duplicate collapses with zero LLM call and creates nothing", async () => {
     const neighbor = createMemoryEntry({
       content: "The user lives in Berlin.",
       evidence_refs: ["evidence-old"]
@@ -64,8 +151,6 @@ it("ADD: a neighbor below the similarity floor never reaches the LLM", async () 
     const service = new ReconciliationService(deps);
 
     const driven = drive(service, {
-      // Differs only by surrounding whitespace — normalized identity
-      // still holds (case is NOT folded).
       incomingContent: "  The user lives in   Berlin.  ",
       incomingDomainTags: ["bench-seed"]
     });
@@ -78,19 +163,16 @@ it("ADD: a neighbor below the similarity floor never reaches the LLM", async () 
     expect(driven.evidenceMinted()).toBe(0);
     expect(update).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
-    // A NOOP drop emits an auditable EventLog row carrying the dropped
-    // fact text so a wrong drop is reconstructable.
     expect(append).toHaveBeenCalledTimes(1);
     expect(append.mock.calls[0][0].event_type).toBe("soul.signal.triaged");
-    expect((append.mock.calls[0][0].payload_json as { triage_result: string }).triage_result).toBe(
-      "dropped"
-    );
-    // The dropped fact text rides in caused_by, trimmed + URI-encoded so
-    // the colon-delimited structure cannot be corrupted by the fact text.
-    expect(append.mock.calls[0][0].caused_by).toContain(
-      `dropped_content=${encodeURIComponent("The user lives in   Berlin.")}`
-    );
-	  });
+    expect(append.mock.calls[0][0].entity_id).toBe("signal-1:noop_audit");
+    expect(append.mock.calls[0][0].caused_by).toBe("reconciliation_noop");
+    expect(append.mock.calls[0][0].payload_json).toMatchObject({
+      triage_result: "dropped",
+      dropped_content: "The user lives in   Berlin.",
+      surviving_object_id: "memory-existing"
+    });
+  });
 
 	it("rejects a runId from another workspace before NOOP audit append", async () => {
 	    const neighbor = createMemoryEntry({
@@ -299,21 +381,15 @@ it("ambiguous-band fact: LLM NOOP verdict drops the fact, audits it, creates not
     expect(decision.kind).toBe("noop");
     expect(decision.survivingObjectId).toBe("memory-neighbor");
     expect(append).toHaveBeenCalledTimes(1);
-    // The LLM-NOOP creates nothing — no evidence capsule, no memory write.
     expect(driven.evidenceMinted()).toBe(0);
     expect(update).not.toHaveBeenCalled();
-    // The LLM-NOOP drop must carry the dropped fact text for recovery.
-    expect(append.mock.calls[0][0].caused_by).toContain(
-      `dropped_content=${encodeURIComponent("The user lives in Berlin downtown")}`
-    );
+    expect(append.mock.calls[0][0].payload_json).toMatchObject({
+      dropped_content: "The user lives in Berlin downtown",
+      surviving_object_id: "memory-neighbor"
+    });
   });
 
 it("a max-length distilled fact round-trips through the NOOP audit row untruncated", async () => {
-    // The audit cap (AUDIT_DROPPED_CONTENT_MAX_CHARS = 500) must stay at
-    // or above the distilled-fact cap (DISTILLED_FACT_MAX_CHARS = 500) so
-    // a dropped fact at the longest length the ingest path can produce is
-    // still fully reconstructable from caused_by. A 500-char fact must
-    // appear in caused_by byte-for-byte after URI-decoding.
     const maxLengthFact = `Berlin ${"x".repeat(493)}`;
     expect(maxLengthFact.length).toBe(500);
     const neighbor = createMemoryEntry({ content: maxLengthFact });
@@ -327,9 +403,9 @@ it("a max-length distilled fact round-trips through the NOOP audit row untruncat
 
     expect(decision.kind).toBe("noop");
     expect(append).toHaveBeenCalledTimes(1);
-    const causedBy = append.mock.calls[0][0].caused_by ?? "";
-    const encoded = causedBy.slice(causedBy.indexOf("dropped_content=") + "dropped_content=".length);
-    expect(decodeURIComponent(encoded)).toBe(maxLengthFact);
+    expect(append.mock.calls[0][0].payload_json).toMatchObject({
+      dropped_content: maxLengthFact
+    });
   });
 
 it("LLM failure degrades to ADD with the conflict scan flagged", async () => {

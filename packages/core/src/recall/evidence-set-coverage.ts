@@ -1,14 +1,6 @@
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
-import { flatBaselineEnabled } from "./conformant-fusion-scoring.js";
 
-// S4 delivery-time set-coverage (rank-then-cover): keys on set membership/complementarity, not magnitude
-// — a flat nudge for a complementary member of an evidence-anchored session and for joining a selected
-// answers_with cluster. Evidence is read as a boolean anchor flag (R_E not re-scored), never touches
-// fused_score/fused_rank. Production default; ALAYA_RECALL_FLAT_BASELINE=on reverts to legacy coverage.
-
-// Flat, set-membership nudges, each bounded below one strong facet (0.1) and summed under an overall
-// cap, so coverage rescues a buried complementary gold without flipping a clearly-stronger answer.
 const SESSION_COVERAGE_BONUS = 0.06;
 const MAX_CLUSTER_BONUS = 0.06;
 export const MAX_EVIDENCE_SET_BONUS = 0.1;
@@ -17,23 +9,14 @@ export interface EvidenceSetCoverageState {
   readonly clusterWeightMax: number;
   readonly anchorSessions: Set<string>;
   readonly selectedObjectIds: Set<string>;
-  // seedObjectId -> strongest inflow weight among already-selected targets it floods.
   readonly selectedSeeds: Map<string, number>;
 }
 
-// Default-on; the flat-baseline kill-switch reverts to legacy coverage. ALAYA_RECALL_S4_COVERAGE=0
-// independently forces S4 off (the A/C/E ablation arms) without flipping to the legacy flat routing.
 export function evidenceSetCoverageEnabled(): boolean {
-  if (flatBaselineEnabled()) {
-    return false;
-  }
   const override = process.env.ALAYA_RECALL_S4_COVERAGE;
   return override !== "0" && override !== "off" && override !== "false";
 }
 
-// Set-membership flag (boolean, never a magnitude): the candidate carries evidence support via the
-// conformant evidence axis or the flat source-proximity / source-evidence-agreement streams. Used
-// only to decide which sessions anchor; the session bonus is flat, so R_E is never re-scored here.
 function isEvidenceMember(
   candidate: DeliveryCandidate,
   supplementaryData: RecallSupplementaryData

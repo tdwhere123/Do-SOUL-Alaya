@@ -50,6 +50,18 @@ export function computeUsedSignalWeight(
   return repeatWeight * trustWeight;
 }
 
+export function getSupportExposureCount(
+  state: Readonly<PathPlasticityState>
+): number {
+  return state.support_exposure_count ?? state.support_events_count;
+}
+
+export function getContradictionExposureCount(
+  state: Readonly<PathPlasticityState>
+): number {
+  return state.contradiction_exposure_count ?? state.contradiction_events_count;
+}
+
 export function parsePlasticityState(value: PathPlasticityState): Readonly<PathPlasticityState> {
   return PathPlasticityStateSchema.parse(value);
 }

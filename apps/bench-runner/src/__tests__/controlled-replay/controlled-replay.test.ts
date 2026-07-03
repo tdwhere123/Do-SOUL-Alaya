@@ -1,7 +1,7 @@
 import { access, mkdir, mkdtemp, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { entrySlug } from "@do-soul/alaya-eval";
 import {
   controlledReplayTestHooks,
@@ -11,10 +11,6 @@ import {
 const CANONICAL_SLUG_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{6}Z-[0-9a-f]{7,40}$/;
 
 describe("controlled replay runner", () => {
-  // Path-axis answer edges are not seeded in this fixture, so the M0 path-target recall
-  // contract is asserted under the flat-baseline kill switch.
-  beforeEach(() => { process.env.ALAYA_RECALL_FLAT_BASELINE = "on"; });
-  afterEach(() => { delete process.env.ALAYA_RECALL_FLAT_BASELINE; });
   it(
     "archives all M0 scenario labels with real propose/review and recall evidence",
     async () => {

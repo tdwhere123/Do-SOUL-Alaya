@@ -74,9 +74,6 @@ export interface GraphExpansionCandidatesResult {
   readonly candidateSources: ReadonlyMap<string, Readonly<GraphExpansionCandidateSourceDiagnostic>>;
 }
 
-// Traversal admission score magnitude for a PathRelation hop = EDGE_TYPE_RECALL_MODEL[edge].contribution_weight, floored at 0. Strength does NOT scale here — the caller folds strength into hop-1 via scorePathRelationExpansion.
-// note: magnitude matches the static edge-era weight but topology is directed (collectPathGraphNeighbors follows direction_bias), not the retired undirected edge plane; aligned with the hop-1 direction filter on purpose.
-// see also: path-relations.ts collectPathGraphNeighbors, directionEligiblePathExpansionTargets.
 export function graphTraversalScoreFromPath(
   trackedEdgeType: RecallGraphExpansionTrackedEdgeType
 ): number {
@@ -184,10 +181,30 @@ export function mergeGraphExpansionScores(
   for (const id of nextCandidateIds) {
     const score = next[id];
     if (score !== undefined) {
-      merged[id] = Math.max(merged[id] ?? 0, score);
+      merged[id] = noisyOrScores(merged[id] ?? 0, score);
     }
   }
   return Object.freeze(merged);
+}
+
+export function mergeGraphExpansionCandidate(
+  current: Readonly<GraphExpansionCandidateDraft> | undefined,
+  candidate: Readonly<GraphExpansionCandidateDraft>
+): GraphExpansionCandidateDraft {
+  if (current === undefined) {
+    return candidate;
+  }
+  const sourceCarrier = shouldReplaceGraphExpansionCandidate(candidate, current)
+    ? candidate
+    : current;
+  return {
+    ...sourceCarrier,
+    score: noisyOrScores(current.score, candidate.score)
+  };
+}
+
+export function noisyOrScores(left: number, right: number): number {
+  return clamp01(1 - (1 - clamp01(left)) * (1 - clamp01(right)));
 }
 
 function summarizeGraphExpansionCandidateSources(

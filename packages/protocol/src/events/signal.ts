@@ -9,6 +9,7 @@ import {
   BoundedJsonObjectSchema,
   BoundedLabelSchema,
   BoundedReasonSchema,
+  BoundedString,
   IsoDatetimeStringSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
@@ -60,7 +61,10 @@ export const SoulSignalTriagedPayloadSchema = z.object({
   signal_id: BoundedIdSchema,
   workspace_id: BoundedIdSchema,
   run_id: BoundedIdSchema,
-  triage_result: z.enum(triageResultValues)
+  triage_result: z.enum(triageResultValues),
+  dropped_content: BoundedString(500).optional(),
+  surviving_object_id: BoundedIdSchema.optional(),
+  best_similarity: z.number().min(0).max(1).optional()
 }).strict().readonly();
 
 export const SoulSignalMaterializedPayloadSchema = z

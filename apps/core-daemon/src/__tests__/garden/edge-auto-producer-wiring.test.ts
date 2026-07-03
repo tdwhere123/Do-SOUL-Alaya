@@ -18,6 +18,7 @@ import {
   EvidenceService,
   MemoryService,
   PathRelationProposalService,
+  PreWriteRecallService,
   ReconciliationService,
   createRuleOnlyReconciliationDecisionPort,
   type PathCandidateSink
@@ -278,11 +279,21 @@ describe("edge auto producer daemon wiring", () => {
         generateObjectId: () => NEW_MEMORY_ID,
         now: () => "2026-05-25T00:00:00.000Z"
       });
-      const reconciliationService = new ReconciliationService({
-        keywordSearch: {
+      const preWriteRecall = new PreWriteRecallService({
+        lexicalSearch: {
           searchByKeyword: async (workspaceId, queryText, limit) =>
             await memoryRepo.searchByKeyword(workspaceId, queryText, limit)
         },
+        memoryRepo: {
+          findByIds: async (workspaceId, objectIds) =>
+            await memoryRepo.findByIds(workspaceId, objectIds),
+          findByWorkspaceId: async (workspaceId, tier, page) =>
+            await memoryRepo.findByWorkspaceId(workspaceId, tier, page)
+        },
+        limit: 8
+      });
+      const reconciliationService = new ReconciliationService({
+        preWriteRecall,
         memoryRepo: {
           findByIds: async (workspaceId, objectIds) =>
             await memoryRepo.findByIds(workspaceId, objectIds)
@@ -291,7 +302,7 @@ describe("edge auto producer daemon wiring", () => {
           update: async (objectId, fields, reason) =>
             await memoryService.update(objectId, fields, reason)
         },
-	        eventLog: {
+        eventLog: {
 	          append: (event) => eventLogRepo.append(event)
 	        },
 	        runLookup: {

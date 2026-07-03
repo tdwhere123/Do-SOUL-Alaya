@@ -1,9 +1,10 @@
-import { noisyOrDecorrelate } from "./flood-fusion-scoring.js";
+import { noisyOrDecorrelate } from "./conformant-evidence-math.js";
 import {
   resolveFusionContribution as resolveAdaptiveFusionContribution,
   type FusionContributionCandidate,
   type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
+import { scoreTemporalFusion } from "./fusion-delivery-scoring-streams.js";
 import type {
   PathInflowEdge,
   RecallConformantAxis,
@@ -11,31 +12,16 @@ import type {
   RecallSupplementaryData
 } from "./recall-service-types.js";
 
-export const CONFORMANT_AXES: readonly RecallConformantAxis[] = ["object", "path", "evidence"];
+export const CONFORMANT_AXES: readonly RecallConformantAxis[] = [
+  "object",
+  "path",
+  "evidence",
+  "temporal",
+  "control"
+];
 
 const RA_QUANTUM = 1e-9;
-// decay_ev: evidence-axis plasticity decay; identity (1) until a second orthogonal support exists.
 const EVIDENCE_DECAY = 1;
-
-function flagEnabled(name: string): boolean {
-  const raw = process.env[name];
-  return raw === "on" || raw === "1" || raw === "true";
-}
-
-// Kill-switch: ALAYA_RECALL_FLAT_BASELINE=on reverts recall to the legacy flat/flood routing.
-export function flatBaselineEnabled(): boolean {
-  return flagEnabled("ALAYA_RECALL_FLAT_BASELINE");
-}
-
-// Four-axis assembly is the production default; only the flat-baseline kill-switch turns it off.
-export function fourAxisAssemblyEnabled(): boolean {
-  return !flatBaselineEnabled();
-}
-
-// ALAYA_RECALL_EVIDENCE_MULT (default off): apply the evidence gain (1+β·R_E) to the delivered score.
-export function evidenceMultEnabled(): boolean {
-  return flagEnabled("ALAYA_RECALL_EVIDENCE_MULT");
-}
 
 function readUnitEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -63,22 +49,18 @@ export function resolveConformantRhoEvidence(): number {
   return readUnitEnv("ALAYA_RECALL_CONF_RHO_EVIDENCE", 0.5);
 }
 
-// W_P: path-flood weight on the additive object base; bounded so Φ never injects a free vote.
 export function resolveConformantPathWeight(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_W_PATH", 0.6, 0);
 }
 
-// β: evidence multiplicative gain (1+β·R_E), g(0)=1. Evidence supports memory; absence never penalizes.
 export function resolveConformantEvidenceBeta(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0.5, 0);
 }
 
-// cap_src: max π-flood one learned inflow edge may carry before the NOR fold.
 export function resolveConformantFloodCapPerSource(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_FLOOD_CAP", 1, 0);
 }
 
-// cap_tot: ceiling on the folded inflow (NOR≤1 already bounds it; this clamps further when set below 1).
 export function resolveConformantFloodCapTotal(): number {
   return readFloatEnv("ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", 3, 0);
 }
@@ -116,7 +98,7 @@ export interface ConformantAxisContext {
 }
 
 const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
-  Object.freeze({ object: null, path: null, evidence: null });
+  Object.freeze({ object: null, path: null, evidence: null, temporal: null, control: null });
 
 // R_O := RRF_base = Σ active-stream RRF contributions — the proven additive object ranking. The flood
 // seeds from this same base (B1: one scale across the delivered base and the path inflow).
@@ -171,6 +153,7 @@ export function buildConformantAxisContext(params: Readonly<{
   readonly ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>;
   readonly resolved: ResolvedRecallFusionWeights;
   readonly supplementaryData: RecallSupplementaryData;
+  readonly nowIso: string;
 }>): ConformantAxisContext {
   const rhoEvidence = resolveConformantRhoEvidence();
   const rhoPath = resolveConformantRhoPath();
@@ -180,14 +163,14 @@ export function buildConformantAxisContext(params: Readonly<{
     candidateKey,
     objectId: candidate.entry.object_id,
     object: resolveObjectBase(candidate, candidateKey, params.ranksByStream, params.resolved, params.supplementaryData),
-    evidence: evidenceMultEnabled()
-      ? quantize(
-          collapseEvidenceRelevance(
-            { candidate, supplementaryData: params.supplementaryData },
-            rhoEvidence
-          )
-        )
-      : 0
+    evidence: quantize(
+      collapseEvidenceRelevance(
+        { candidate, supplementaryData: params.supplementaryData },
+        rhoEvidence
+      )
+    ),
+    temporal: quantize(scoreTemporalFusion(candidate.entry, params.supplementaryData.queryProbes, params.nowIso)),
+    control: quantize(scoreControlAxis(candidate))
   }));
   const rObjectById = new Map<string, number>();
   for (const candidate of seeded) {
@@ -203,10 +186,27 @@ export function buildConformantAxisContext(params: Readonly<{
     axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
     raByKey.set(
       candidate.candidateKey,
-      Object.freeze({ object: candidate.object, path: flood, evidence: candidate.evidence })
+      Object.freeze({
+        object: candidate.object,
+        path: flood,
+        evidence: candidate.evidence,
+        temporal: candidate.temporal,
+        control: candidate.control
+      })
     );
   }
   return Object.freeze({ axisRankByKey, raByKey });
+}
+
+function scoreControlAxis(candidate: FusionContributionCandidate): number {
+  const manifestation = candidate.entry.manifestation_state;
+  const visibility =
+    manifestation === "full_eligible" ? 1 :
+    manifestation === "excerpt" ? 0.75 :
+    manifestation === "hint" ? 0.35 :
+    manifestation === "hidden" ? 0.05 :
+    0.5;
+  return Math.max(0, visibility * Math.max(0, candidate.entry.confidence ?? 0.5));
 }
 
 // R_a magnitude vector tie-break (object → path → evidence); 0 when either vector is absent (flag-off).

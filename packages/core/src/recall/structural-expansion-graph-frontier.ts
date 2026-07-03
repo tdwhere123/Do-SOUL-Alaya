@@ -170,7 +170,7 @@ function buildGraphExpansionCandidate(
   hop: 1 | 2,
   expandedIds: ReadonlySet<string>
 ): Readonly<GraphExpansionCandidateDraft> | null {
-  const edgeScore = graphTraversalScoreFromPath(neighbor.edgeType);
+  const edgeScore = graphTraversalScoreFromPath(neighbor.edgeType) * neighbor.weight;
   if (edgeScore <= 0 || expandedIds.has(neighbor.neighborId)) {
     return null;
   }

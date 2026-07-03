@@ -8,7 +8,6 @@ const OBJ = "00000000-0000-4000-8000-0000000000d4";
 
 afterEach(() => {
   delete process.env.ALAYA_RECALL_PATH_FLOW;
-  delete process.env.ALAYA_RECALL_FLAT_BASELINE;
 });
 
 function makeAdder(): {
@@ -49,12 +48,11 @@ function admitPathExpansion(
 }
 
 describe("path-axis real flow admission (V3)", () => {
-  it("flat-baseline keeps the edge-strength max and ignores the flow value", () => {
-    process.env.ALAYA_RECALL_FLAT_BASELINE = "1";
+  it("path flow is accumulated by default", () => {
     const { add, pathExpansionScores } = makeAdder();
     admitPathExpansion(add, 0.5, 0.3);
     admitPathExpansion(add, 0.4, 0.9);
-    expect(pathExpansionScores.get(OBJ)).toBeCloseTo(0.5, 9);
+    expect(pathExpansionScores.get(OBJ)).toBeCloseTo(1, 9);
   });
 
   it("flag ON accumulates seed·edge flow across corroborating paths, clamped to 1", () => {

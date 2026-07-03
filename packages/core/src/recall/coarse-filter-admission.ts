@@ -10,7 +10,6 @@ import {
   uniquePlanes,
   type CoarseCandidateDraft
 } from "./coarse-candidates.js";
-import { fourAxisAssemblyEnabled } from "./conformant-fusion-scoring.js";
 
 export type AddCoarseCandidate = (
   entry: Readonly<MemoryEntry>,
@@ -22,12 +21,6 @@ export type AddCoarseCandidate = (
   reachedViaEarnedCoRecalledFanin?: boolean,
   pathFlowScore?: number
 ) => boolean;
-
-// ALAYA_RECALL_PATH_FLOW: route path_expansion to accumulated flow scoring.
-function pathFlowEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_PATH_FLOW;
-  return raw === "on" || raw === "1" || raw === "true";
-}
 
 export interface CoarseCandidateAdderParams {
   readonly drafts: Map<string, CoarseCandidateDraft>;
@@ -173,7 +166,7 @@ function updatePathExpansionScore(
   evidenceStructuralScore: number,
   pathFlowScore: number | undefined
 ): void {
-  if ((pathFlowEnabled() || fourAxisAssemblyEnabled()) && pathFlowScore !== undefined) {
+  if (pathFlowScore !== undefined) {
     addScore(params.pathExpansionScores, objectId, pathFlowScore);
     return;
   }

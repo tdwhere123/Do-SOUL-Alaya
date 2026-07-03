@@ -56,6 +56,8 @@ it("emits PathRelationReinforced and updates plasticity_state when a path's anch
     expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
       strength: 0.4 + PATH_PLASTICITY_CONSTANTS.USED_DELTA,
       support_events_count: 3,
+      support_exposure_count: 3,
+      contradiction_exposure_count: 0,
       last_reinforced_at: NOW_ISO
     });
   });
@@ -103,7 +105,9 @@ it("emits PathRelationRedirected before reinforcement and mutates direction_bias
     expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
       strength: 0.4 + PATH_PLASTICITY_CONSTANTS.USED_DELTA,
       direction_bias: "source_to_target",
-      support_events_count: 1
+      support_events_count: 1,
+      support_exposure_count: 1,
+      contradiction_exposure_count: 0
     });
   });
 
@@ -234,6 +238,8 @@ it("emits PathRelationWeakened and decrements strength when a delivery is `skipp
 
     expect(harness.repoUpdates[0]?.updates.plasticity_state).toMatchObject({
       strength: 0.5 - PATH_PLASTICITY_CONSTANTS.SKIPPED_DELTA,
+      support_exposure_count: 0,
+      contradiction_exposure_count: 1,
       last_weakened_at: NOW_ISO
     });
     expect(harness.repoUpdates[0]?.updates.lifecycle).toMatchObject({

@@ -98,6 +98,8 @@ describe("Phase C shared-contract foundation", () => {
         stability_class: StabilityClass.NORMAL,
         support_events_count: 3,
         contradiction_events_count: 1,
+        support_exposure_count: 2.5,
+        contradiction_exposure_count: 1,
         last_reinforced_at: validTimestamp,
         last_weakened_at: validTimestamp
       },
@@ -242,5 +244,47 @@ describe("Phase C shared-contract foundation", () => {
       revive_strength: 0.2
     });
     expect(Object.isFrozen(DYNAMICS_CONSTANTS.path_plasticity)).toBe(true);
+  });
+
+  it("keeps exposure-conditioned plasticity counters additive and backward-compatible", () => {
+    const relation = PathRelationSchema.parse({
+      path_id: "path-compat",
+      workspace_id: "workspace-1",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-1" },
+        target_anchor: { kind: "object", object_id: "object-2" }
+      },
+      constitution: {
+        relation_kind: "supports",
+        why_this_relation_exists: ["seed"]
+      },
+      effect_vector: {
+        salience: 0.4,
+        recall_bias: 0.1,
+        verification_bias: 0,
+        unfinishedness_bias: 0,
+        default_manifestation_preference: ManifestationPreference.LENS_ENTRY
+      },
+      plasticity_state: {
+        strength: 0.4,
+        direction_bias: DirectionBias.SOURCE_TO_TARGET,
+        stability_class: StabilityClass.NORMAL,
+        support_events_count: 1,
+        contradiction_events_count: 0
+      },
+      lifecycle: {
+        status: PathLifecycleStatus.ACTIVE,
+        retirement_rule: "default"
+      },
+      legitimacy: {
+        evidence_basis: ["evidence-1"],
+        governance_class: PathGovernanceClass.HINT_ONLY
+      },
+      created_at: validTimestamp,
+      updated_at: validTimestamp
+    });
+
+    expect(relation.plasticity_state.support_exposure_count).toBeUndefined();
+    expect(relation.plasticity_state.contradiction_exposure_count).toBeUndefined();
   });
 });

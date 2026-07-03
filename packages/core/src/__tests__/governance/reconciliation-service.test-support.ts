@@ -1,18 +1,16 @@
 import { vi } from "vitest";
 import { MemoryDimension, ScopeClass, type EventLogEntry, type MemoryEntry } from "@do-soul/alaya-protocol";
-import { ReconciliationService, type ReconciliationDecision, type ReconciliationLlmDecisionPort, type ReconciliationServiceDependencies, type ReconciliationVerdictApplier } from "../../governance/reconciliation-service.js";
+import {
+  ReconciliationService,
+  type PreWriteRecallPort,
+  type ReconciliationDecision,
+  type ReconciliationLlmDecisionPort,
+  type ReconciliationServiceDependencies,
+  type ReconciliationVerdictApplier
+} from "../../governance/reconciliation-service.js";
+import { jaccardIndex, tokenize } from "../../governance/reconciliation-service-internal.js";
 
-export // invariant: covers the ingest-reconciliation decision contract — the
-// three-band gate (ADD below the floor, NOOP for a normalized-string-
-// identical neighbor, LLM judge for any other neighbor at or above the
-// floor), the LLM port returning each of ADD / UPDATE / NOOP, the
-// LLM-failure degrade-to-ADD path, the evidence relink + domain_tags
-// refresh on UPDATE, the NOOP audit-event emission, and the decide-then-
-// create discipline (NOOP creates no evidence_capsule; a re-seed of the
-// same fact does not grow the surviving row's evidence_refs).
-// see also: packages/core/src/governance/reconciliation-service.ts
-
-function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
+export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
     object_id: "memory-existing",
     object_kind: "memory_entry",
@@ -49,7 +47,7 @@ function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
 
 export type UpdateFn = ReconciliationServiceDependencies["memoryUpdate"]["update"];
 
-export type SearchFn = ReconciliationServiceDependencies["keywordSearch"]["searchByKeyword"];
+export type RecallFn = PreWriteRecallPort["recall"];
 
 export type AppendFn = ReconciliationServiceDependencies["eventLog"]["append"];
 
@@ -61,7 +59,7 @@ export function createDeps(
 ): {
   readonly deps: ReconciliationServiceDependencies;
   readonly update: ReturnType<typeof vi.fn<UpdateFn>>;
-  readonly searchByKeyword: ReturnType<typeof vi.fn<SearchFn>>;
+  readonly preWriteRecall: ReturnType<typeof vi.fn<RecallFn>>;
   readonly append: ReturnType<typeof vi.fn<AppendFn>>;
   readonly decide: ReturnType<typeof vi.fn<DecideFn>>;
 } {
@@ -75,26 +73,48 @@ export function createDeps(
       ...(fields.evidence_refs === undefined ? {} : { evidence_refs: [...fields.evidence_refs] })
     })
   );
-  const searchByKeyword = vi.fn<SearchFn>(async () =>
-    neighbors.map((entry) => ({ object_id: entry.object_id }))
-  );
+  const preWriteRecall = vi.fn<RecallFn>(async (input) => ({
+    candidates: neighbors
+      .filter((entry) => entry.workspace_id === input.workspaceId && entry.lifecycle_state !== "archived")
+      .map((entry) => {
+        const lexicalScore = jaccardIndex(tokenize(input.incomingContent), tokenize(entry.content));
+        const tagScore = jaccardIndex(new Set(input.incomingDomainTags), new Set(entry.domain_tags));
+        return {
+          entry,
+          families: ["lexical" as const],
+          lexicalScore,
+          structuralScore: tagScore * 0.7,
+          tagScore,
+          entityScore: 0,
+          slotScore: 0,
+          temporalScore: 0,
+          relationPosteriors: []
+        };
+      })
+      .sort(
+        (left, right) =>
+          Math.max(right.lexicalScore, right.structuralScore) -
+          Math.max(left.lexicalScore, left.structuralScore)
+      ),
+    uncertainty: neighbors.length === 0 ? 1 : 0,
+    auditFeatures: { candidate_count: neighbors.length }
+  }));
   const append = vi.fn<AppendFn>(
     async (event) => ({ ...event, event_id: "event-1", created_at: "2026-05-16T00:00:00.000Z", revision: 0 }) as EventLogEntry
   );
   const decide = vi.fn<DecideFn>(async () => ({ kind: "add" as const, reason: "distinct" }));
-	  const deps: ReconciliationServiceDependencies = {
-	    keywordSearch: { searchByKeyword },
-	    memoryRepo: { findByIds },
-	    memoryUpdate: { update },
-	    eventLog: { append },
-	    runLookup: {
-	      getById: async (runId) =>
-	        runId === "run-1" ? { workspace_id: "workspace-1" } : null
-	    },
-	    llmDecision: { decide },
-	    ...overrides
-	  };
-  return { deps, update, searchByKeyword, append, decide };
+  const deps: ReconciliationServiceDependencies = {
+    preWriteRecall: { recall: preWriteRecall },
+    memoryRepo: { findByIds },
+    memoryUpdate: { update },
+    eventLog: { append },
+    runLookup: {
+      getById: async (runId) => (runId === "run-1" ? { workspace_id: "workspace-1" } : null)
+    },
+    llmDecision: { decide },
+    ...overrides
+  };
+  return { deps, update, preWriteRecall, append, decide };
 }
 
 export const baseInput = {
@@ -103,13 +123,7 @@ export const baseInput = {
   signalId: "signal-1"
 } as const;
 
-export // invariant: drives runWithDecision with an applyVerdict callback that
-// stands in for the materialization router — it mints a fresh
-// evidence_capsule id on ADD / UPDATE (NOOP creates nothing), exactly
-// like the live router. Tracks which verdicts were applied and how many
-// evidence capsules were minted so the decide-then-create discipline can
-// be asserted.
-function drive(
+export function drive(
   service: ReconciliationService,
   input: {
     incomingContent: string;

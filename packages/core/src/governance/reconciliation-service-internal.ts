@@ -7,80 +7,16 @@ export type { EventLogEntry, MemoryEntry };
 
 import { KeyedMutex } from "../shared/keyed-mutex.js";
 import type { GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
-
-// invariant: ingest-time reconciliation. Decides ADD / UPDATE / NOOP for
-// an incoming distilled fact against the top-k lexically-similar existing
-// memory_entry rows, before the materialization router appends a new row.
-//
-// The decision is computed FIRST, before any evidence_capsule or
-// memory_entry is created — decide-then-create. The router supplies an
-// applyVerdict callback that creates objects per verdict: ADD creates the
-// evidence_capsule + memory_entry, UPDATE creates the evidence_capsule
-// (so the refined row keeps citing matching evidence), NOOP creates
-// nothing. The whole decide -> applyVerdict -> in-place write sequence is
-// held under one per-workspace lock so no other reconcile for the same
-// workspace can interleave between the decision and the memory write that
-// makes a row visible.
-//
-// The decision is a three-band gate over the FTS pool:
-//   - no neighbor above a low similarity floor      -> ADD  (zero LLM)
-//   - a normalized-string-identical neighbor        -> NOOP (zero LLM)
-//   - any other neighbor at or above the floor      -> LLM-decision port
-// The zero-LLM NOOP fires ONLY for a byte-for-byte (normalized) identical
-// fact: token-Jaccard is lexically unsound for the drop decision — two
-// facts that differ only by a single-char discriminator ("project A" vs
-// "project B") share an identical token set and collapse to Jaccard 1.0,
-// so any non-identical neighbor above the floor must reach the semantic
-// judge instead.
-// The LLM is the only sound semantic judge of "refines" vs "distinct":
-// a token-superset heuristic merges genuinely distinct facts ("lives in
-// Berlin and works in Munich" is a token superset of "lives in Berlin"),
-// which is the catastrophic §18 failure mode — wrongly merging a fact
-// erases an answer. The LLM is allowed at ingest time (it already runs
-// for atomic-fact extraction); it never runs at recall time.
-//
-// DELETE / supersede is NOT decided here: the existing
-// ConflictDetectionService owns contradicts / superseded_by edge
-// production at materialization time. Reconciliation only reports
-// whether the caller should run that conflict scan.
-//
-// see also: packages/soul/src/garden/materialization-router/router.ts
-//   (ReconciliationPort consumer)
-// see also: packages/core/src/governance/conflict-detection-service.ts
-//   (DELETE / supersede machinery)
-// see also: packages/core/src/memory/memory-service/service.ts:MemoryService.update.
-// see also: apps/bench-runner/src/longmemeval/compile-seed.ts
-//   (the disk-cached garden-LLM transport this LLM port mirrors)
+import type { PreWriteRecallPort } from "./pre-write-recall-service.js";
 
 export type ReconciliationDecisionKind = "add" | "update" | "noop";
 
 export interface ReconciliationDecision {
-  /**
-   * - `add`: no near-enough existing memory, or the LLM judged the
-   *   incoming fact distinct — the router creates the evidence_capsule +
-   *   memory_entry.
-   * - `update`: the incoming fact refines an existing row; the router
-   *   creates the evidence_capsule, then the existing row's `content` is
-   *   rewritten in place and that fresh evidence ref is appended to its
-   *   `evidence_refs` so durable content keeps matching evidence.
-   * - `noop`: a normalized-string-identical duplicate carrying no new
-   *   information — nothing is created (no evidence_capsule, no
-   *   memory_entry). The drop is audited against the originating signal.
-   *
-   * For `update` and `noop`, `survivingObjectId` is ALWAYS the id of the
-   * row that ends up holding the fact (the UPDATE target, or the NOOP
-   * duplicate). The bench scoring sidecar remaps `object_id -> answer
-   * turn` through this field; without it a collapsed row's gold id
-   * vanishes and recall is undercounted. For `add` it is undefined (the
-   * surviving row is the one the caller is about to create).
-   */
   readonly kind: ReconciliationDecisionKind;
   readonly survivingObjectId?: string;
-  /** @deprecated alias of `survivingObjectId`; kept for the router port. */
   readonly targetObjectId?: string;
   readonly runConflictScan: boolean;
   readonly reason: string;
-  /** Best lexical similarity observed against the retrieved top-k. */
   readonly bestSimilarity: number;
 }
 
@@ -91,14 +27,9 @@ export interface ReconciliationInput {
   readonly incomingContent: string;
   readonly incomingDomainTags: readonly string[];
   readonly incomingProjectionFields?: ReconciliationMemoryProjectionFields;
-  // content-derived; replaces the survivor's facet_tags on an in-place UPDATE.
-  // could later fold into incomingProjectionFields (same UPDATE-replace shape).
   readonly incomingFacetTags?: MemoryEntry["facet_tags"];
 }
 
-// canonical_entities rides this channel too (the durable recall key): replaced
-// on UPDATE, backfilled on NOOP — the same semantics the temporal/preference
-// fields already get from buildProjectionReplacementFields / buildProjectionMergeFields.
 export type ReconciliationMemoryProjectionFields = Pick<
   MemoryEntry,
   | "projection_schema_version"
@@ -116,23 +47,10 @@ export type ReconciliationMemoryProjectionFields = Pick<
   | "canonical_entities"
 >;
 
-// invariant: the per-verdict object-creation callback the router supplies
-// to runWithDecision. It runs INSIDE the per-workspace lock, after the
-// decision is computed and before any in-place memory write — so the
-// evidence_capsule an UPDATE relinks is created on the same critical
-// path that decided the verdict. Per verdict the router creates:
-//   - add    -> evidence_capsule + memory_entry
-//   - update -> evidence_capsule (the refined row keeps matching evidence)
-//   - noop   -> nothing
-// It returns the freshly created evidence_capsule id for `update` (so the
-// core service can relink it); `add` and `noop` return undefined.
 export type ReconciliationVerdictApplier = (
   verdict: ReconciliationDecision
 ) => Promise<{ readonly incomingEvidenceRef?: string }>;
 
-// invariant: lexical FTS retrieval surface. Mirrors
-// MemoryEntryRepo.searchByKeyword — top-k lexically similar memory_entry
-// rows for a free-text query, workspace-scoped (invariants §29).
 export interface ReconciliationKeywordSearchPort {
   searchByKeyword(
     workspaceId: string,
@@ -148,11 +66,6 @@ export interface ReconciliationMemoryRepoPort {
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
-// invariant: in-place UPDATE applier. The reconciliation UPDATE path
-// rewrites the existing row's `content`, refreshes its `domain_tags` to
-// the refined fact's tags, and extends its `evidence_refs` via
-// MemoryService.update, which emits SOUL_MEMORY_UPDATED to the EventLog
-// — the auditable mutation path (invariants §13).
 export interface ReconciliationMemoryUpdatePort {
   update(
     objectId: string,
@@ -166,11 +79,6 @@ export interface ReconciliationMemoryUpdatePort {
   ): Promise<Readonly<MemoryEntry>>;
 }
 
-// invariant: the EventLog append surface reconciliation needs to audit a
-// NOOP drop. A NOOP discards a proposed durable fact; like an UPDATE's
-// SOUL_MEMORY_UPDATED, the drop must leave an auditable row. It is
-// recorded as SOUL_SIGNAL_TRIAGED triage_result=dropped against the
-// originating signal.
 export interface ReconciliationEventLogPort {
   append(
     event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
@@ -253,7 +161,7 @@ export interface ReconciliationServiceThresholds {
 }
 
 export interface ReconciliationServiceDependencies {
-  readonly keywordSearch: ReconciliationKeywordSearchPort;
+  readonly preWriteRecall: PreWriteRecallPort;
   readonly memoryRepo: ReconciliationMemoryRepoPort;
   readonly memoryUpdate: ReconciliationMemoryUpdatePort;
   readonly eventLog: ReconciliationEventLogPort;
@@ -381,36 +289,22 @@ export function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<strin
   return union === 0 ? 0 : intersection / union;
 }
 
-// invariant: the dropped fact's content rides in the NOOP audit row's
-// `caused_by` so a wrong drop is reconstructable from the event log
-// alone. `caused_by` is colon-delimited (duplicate_of / similarity /
-// dropped_content); the content is URI-encoded so a colon or newline in
-// the fact text cannot corrupt the delimiter structure, and capped so a
-// long fact cannot bloat the audit row unboundedly.
-//
-// invariant: this cap MUST stay >= DISTILLED_FACT_MAX_CHARS (500) in
-// packages/soul/src/garden/materialization-router/router.ts. Every fact that
-// reaches reconciliation is a distilled fact already capped at that
-// value, so 500 >= 500 guarantees the audit content is never truncated
-// and a dropped fact stays fully reconstructable from the event log. If
-// the distilled-fact cap is ever raised above 500, this cap must be
-// raised in lockstep or the audit silently truncates.
-// see also: packages/soul/src/garden/materialization-router/router.ts
-//   buildDistilledFact (DISTILLED_FACT_MAX_CHARS)
+// invariant: NOOP audit content cap matches the distilled fact cap.
 export const AUDIT_DROPPED_CONTENT_MAX_CHARS = 500;
 
-export function encodeAuditContent(content: string): string {
+export function auditDroppedContent(content: string): string {
   const trimmed = content.trim();
-  const capped =
+  return (
     trimmed.length <= AUDIT_DROPPED_CONTENT_MAX_CHARS
       ? trimmed
-      : trimmed.slice(0, AUDIT_DROPPED_CONTENT_MAX_CHARS);
-  return encodeURIComponent(capped);
+      : trimmed.slice(0, AUDIT_DROPPED_CONTENT_MAX_CHARS)
+  );
 }
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
-    return error.message;
+    const cause = error.cause;
+    return cause === undefined ? error.message : `${error.message}: ${errorMessage(cause)}`;
   }
   return String(error);
 }

@@ -30,7 +30,6 @@ describe("bench-runner CLI", () => {
   afterEach(() => {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
-    delete process.env.ALAYA_RECALL_FLAT_BASELINE;
   });
 
   it("mentions controlled-replay in help output", async () => {
@@ -107,9 +106,6 @@ describe("bench-runner CLI", () => {
   it(
     "controlled-replay writes a controlled-replay.json archive under a temp history root",
     async () => {
-      // Path-axis answer edges are not seeded in this fixture, so assert the M0 path-recall
-      // native-health contract under the flat-baseline kill switch.
-      process.env.ALAYA_RECALL_FLAT_BASELINE = "on";
       const historyRoot = await mkdtemp(join(tmpdir(), "alaya-controlled-replay-cli-"));
 
       const exitCode = await runCli(["controlled-replay", "--history-root", historyRoot]);

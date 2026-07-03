@@ -284,13 +284,10 @@ function coverageCandidate(input: {
 function coverageSupplementary(): RecallSupplementaryData {
   return { queryProbes: compileRecallQueryProbes(null) } as unknown as RecallSupplementaryData;
 }
-
-// The band rerank is the flat-baseline fallback now that S4 owns session coverage by default.
 describe("session-coverage delivery rerank", () => {
   beforeEach(() => {
     // force opens the shared coverage gate so the band mechanics run directly.
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-    vi.stubEnv("ALAYA_RECALL_FLAT_BASELINE", "on");
   });
   afterEach(() => {
     vi.unstubAllEnvs();
