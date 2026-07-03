@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MemoryEntry, RecallFusionBreakdown, RecallFusionStream } from "@do-soul/alaya-protocol";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
 import { applySessionCoverageRerank } from "../../recall/fusion-delivery-session-coverage.js";
 import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
 import { RECALL_FUSION_STREAMS } from "../../recall/fusion-delivery-streams.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import type {
+  RecallFusionBreakdown,
+  RecallFusionStream,
+  RecallSupplementaryData
+} from "../../recall/recall-service-types.js";
+import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 type CoverageCandidate = Readonly<{
-  readonly entry: Readonly<MemoryEntry>;
+  readonly entry: ReturnType<typeof createMemoryEntry>;
   readonly originPlane: "workspace_local";
   readonly objectKind: "memory_entry";
   readonly effectiveScore: number;
@@ -30,37 +34,16 @@ function coverageCandidate(input: {
 }): CoverageCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
   return Object.freeze({
-    entry: {
+    entry: createMemoryEntry({
       object_id: input.objectId,
-      object_kind: "memory_entry",
-      schema_version: 1,
-      lifecycle_state: "active",
-      created_at: "2026-03-20T00:00:00.000Z",
-      updated_at: "2026-03-20T00:00:00.000Z",
-      created_by: "system",
       dimension: MemoryDimension.PROCEDURE,
-      source_kind: "user",
-      formation_kind: "explicit",
       scope_class: ScopeClass.PROJECT,
       content: "memory content",
       domain_tags: [],
       evidence_refs: [],
-      workspace_id: "workspace-1",
-      run_id: "run-1",
       surface_id: input.surfaceId,
-      storage_tier: "hot",
       activation_score: 0.5,
-      retention_score: null,
-      manifestation_state: null,
-      retention_state: null,
-      decay_profile: null,
-      confidence: null,
-      last_used_at: null,
-      last_hit_at: null,
-      reinforcement_count: null,
-      contradiction_count: null,
-      superseded_by: null
-    },
+    }),
     originPlane: "workspace_local",
     objectKind: "memory_entry",
     effectiveScore: 0,

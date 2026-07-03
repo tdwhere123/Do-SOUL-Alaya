@@ -1,21 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { EngineStatus, WorkspaceRunEventType, StreamingEventType, type EventLogEntry, type Run } from "@do-soul/alaya-protocol";
+import { EngineStatus, WorkspaceRunEventType, type Run } from "@do-soul/alaya-protocol";
 import { RunHotStateService } from "../../runs/run-hot-state-service.js";
-
-function createEvent(entry: Partial<EventLogEntry> & Pick<EventLogEntry, "event_type" | "entity_type" | "entity_id">): EventLogEntry {
-  return {
-    event_id: entry.event_id ?? `${entry.event_type}-${entry.entity_id}`,
-    created_at: entry.created_at ?? "2026-04-12T00:00:00.000Z",
-    event_type: entry.event_type,
-    entity_type: entry.entity_type,
-    entity_id: entry.entity_id,
-    workspace_id: entry.workspace_id ?? "workspace-1",
-    run_id: entry.run_id ?? "run-1",
-    caused_by: entry.caused_by ?? "system",
-    revision: entry.revision ?? 0,
-    payload_json: entry.payload_json ?? {}
-  };
-}
 
 function createRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -37,37 +22,6 @@ function createRun(overrides: Partial<Run> = {}): Run {
 describe("RunHotStateService", () => {
   it("rehydrates last_message_at from streamed assistant completion events", async () => {
     const run = createRun();
-    const eventLog = [
-      createEvent({
-        event_type: WorkspaceRunEventType.RUN_MESSAGE_APPENDED,
-        entity_type: "message",
-        entity_id: "msg-user-1",
-        created_at: "2026-04-12T00:00:05.000Z",
-        caused_by: "user_action",
-        payload_json: {
-          run_id: "run-1",
-          role: "user",
-          content: "hello",
-          message_id: "msg-user-1"
-        }
-      }),
-      createEvent({
-        event_type: StreamingEventType.MESSAGE_COMPLETED,
-        entity_type: "message",
-        entity_id: "msg-asst-1",
-        created_at: "2026-04-12T00:00:15.000Z",
-        caused_by: "engine",
-        payload_json: {
-          type: "message.completed",
-          runId: "run-1",
-          messageId: "msg-asst-1",
-          content: "world",
-          finishReason: "stop",
-          timestamp: "2026-04-12T00:00:15.000Z"
-        }
-      })
-    ] satisfies readonly EventLogEntry[];
-
     const service = new RunHotStateService({
       runRepo: {
         getById: vi.fn(async (runId: string) => (runId === run.run_id ? run : null))

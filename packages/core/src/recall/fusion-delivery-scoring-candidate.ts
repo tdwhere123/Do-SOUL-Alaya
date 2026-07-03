@@ -1,16 +1,13 @@
 import type {
   MemoryEntry,
-  RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 import type {
   CoarseRecallCandidate,
   RecallConformantAxis,
   RecallFusionBreakdown,
-  RecallFusionStream,
   RecallFusionStreamContributions,
-  RecallFusionStreamRanks,
-  RecallSupplementaryData
+  RecallFusionStreamRanks
 } from "./recall-service-types.js";
 
 export type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {

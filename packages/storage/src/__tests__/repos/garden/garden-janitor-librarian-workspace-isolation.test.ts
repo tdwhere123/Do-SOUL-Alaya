@@ -47,7 +47,9 @@ describe("garden janitor and librarian SQL workspace isolation", () => {
     expect(ws1Candidates.map((row) => row.memory_id)).toEqual(["memory-ws1-dormant"]);
     expect(ws2Candidates.map((row) => row.memory_id)).toEqual(["memory-ws2-dormant"]);
 
-    expect(await ports.dormantDemotionPort.setLifecycleDormant("memory-ws1-dormant")).toBe("demoted");
+    expect(await ports.dormantDemotionPort.setLifecycleDormant("memory-ws1-dormant", "task-1")).toBe(
+      "demoted"
+    );
 
     const ws1Row = database.connection
       .prepare("SELECT lifecycle_state FROM memory_entries WHERE object_id = ? LIMIT 1")

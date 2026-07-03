@@ -35,7 +35,7 @@ describe("DynamicPreparedStatementCache", () => {
     const second = cache.prepare(sql);
 
     expect(first).toBe(second);
-    expect(first.get()).toEqual({ value: 1 });
+    expect(first.all()[0]).toEqual({ value: 1 });
     expect(prepareCount).toBe(1);
   });
 
@@ -66,6 +66,6 @@ describe("DynamicPreparedStatementCache", () => {
 
     expect(prepareCount).toBe(2);
     expect(afterReopen).not.toBe(beforeClose);
-    expect(afterReopen.get()).toEqual({ value: 2 });
+    expect(afterReopen.all()[0]).toEqual({ value: 2 });
   });
 });

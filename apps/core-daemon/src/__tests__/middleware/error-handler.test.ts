@@ -80,6 +80,7 @@ describe("registerErrorHandler", () => {
     registerErrorHandler(app, logger as never);
     app.get("/zod", () => {
       z.object({ workspace_path: z.string() }).parse({ workspace_path: 1 });
+      return new Response(null, { status: 204 });
     });
 
     const response = await app.request("/zod");

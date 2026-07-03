@@ -6,7 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
-import { MEMORY_ENTRY_SELECT_COLUMNS, parseMemoryDimension, parseMemoryEntryRow, parseScopeClass, parseStorageTier, type MemoryEntryRow } from "./row-mapper.js";
+import { parseMemoryDimension, parseMemoryEntryRow, parseScopeClass, parseStorageTier, type MemoryEntryRow } from "./row-mapper.js";
 import type { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { DynamicPreparedStatementCache } from "../../sqlite/dynamic-prepared-statement-cache.js";
 import type { MemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
@@ -30,7 +30,7 @@ export class MemoryEntryReadQueries {
   ) {
     this.conflictQueries = new MemoryEntryConflictReadQueries(() => this.statements);
     const dynamicStatementCache = new DynamicPreparedStatementCache(db, () => this.ensureActiveConnection());
-    this.dynamicQueries = new MemoryEntryDynamicReadQueries(dynamicStatementCache, diagnostics);
+    this.dynamicQueries = new MemoryEntryDynamicReadQueries(dynamicStatementCache, this.diagnostics);
   }
 
   private get statements(): MemoryEntryStatements {

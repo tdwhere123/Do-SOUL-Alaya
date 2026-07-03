@@ -177,10 +177,19 @@ describe("files upload route", () => {
 
   it("returns 201 with upload payload when workspace_id is provided", async () => {
     const notifyEntry = vi.fn();
-    const createWithEvent = vi.fn(async (record: FileRecord) => ({
+    let capturedEvent: Omit<EventLogEntry, "event_id" | "created_at" | "revision"> | undefined;
+    const createWithEvent = vi.fn(
+      async (
+        record: FileRecord,
+        event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+      ) => {
+        capturedEvent = event;
+        return {
       record,
       event: { event_id: "evt-1" } as EventLogEntry
-    }));
+        };
+      }
+    );
     const app = buildUploadApp(createWithEvent, notifyEntry);
     const response = await app.request("/files", {
       method: "POST",
@@ -210,19 +219,19 @@ describe("files upload route", () => {
       workspace_id: "ws-1",
       run_id: null
     });
-    const [recordArg, eventArg] = createWithEvent.mock.calls[0] as [
-      FileRecord,
-      Omit<EventLogEntry, "event_id" | "created_at" | "revision">
-    ];
+    const recordArg = createWithEvent.mock.calls[0]?.[0] as FileRecord | undefined;
+    const eventArg = capturedEvent;
+    expect(recordArg).toBeDefined();
+    expect(eventArg).toBeDefined();
     expect(eventArg).toMatchObject({
       event_type: FileApprovalEventType.FILE_UPLOADED,
       entity_type: "file",
-      entity_id: recordArg.file_id,
+      entity_id: recordArg?.file_id,
       workspace_id: "ws-1",
       run_id: null,
       caused_by: "user_action",
       payload_json: {
-        file_id: recordArg.file_id,
+        file_id: recordArg?.file_id,
         filename: "notes.txt",
         mime_type: "text/plain",
         size_bytes: 5,

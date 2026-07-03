@@ -280,14 +280,6 @@ describe("ALAYA_RECALL_COMPOSE wiring (fineAssess)", () => {
     entries: readonly MemoryEntry[],
     supplementaryData: RecallSupplementaryData = { ...supp(), ftsRanks: FTS_RANKS }
   ): ReturnType<typeof fineAssess> {
-    const policy = buildRecallPolicy({
-      runtimeId: "11111111-1111-4111-8111-111111111111",
-      taskSurfaceId: "22222222-2222-4222-8222-222222222222",
-      maxResults: 10,
-      filters: { scopeFilter: null, dimensionFilter: null, domainTagFilter: null },
-      conflictAwareness: false,
-      maxTotalTokens: 100000
-    });
     return assessCoarse(entries.map((entry) => coarse(entry)), supplementaryData);
   }
 

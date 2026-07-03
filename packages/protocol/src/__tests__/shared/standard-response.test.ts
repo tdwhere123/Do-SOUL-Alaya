@@ -6,8 +6,6 @@ import {
   ConfigPatchAckResponseSchema,
   createConfigRouteResponseSchema,
   isZodValidationError,
-  StandardConfigPatchResponseSchema,
-  StandardResponseSchema,
   unwrapStandardResponseData
 } from "../../shared/standard-response.js";
 

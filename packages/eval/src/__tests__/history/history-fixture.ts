@@ -69,6 +69,13 @@ export function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_
     path_stream_top10_count: 12,
     path_stream_top10_denominator: 100,
     per_plane_recall_coverage: {},
+    miss_taxonomy_distribution: {
+      candidate_absent: 0,
+      materialization_drop: 0,
+      budget_drop: 0,
+      delivery_order_drop: 0,
+      evaluation_or_gold_issue: 0
+    },
     miss_distribution: {}
   };
 }
