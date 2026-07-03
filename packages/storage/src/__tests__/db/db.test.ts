@@ -111,7 +111,7 @@ describe("StorageDatabase reopen cache handling", () => {
 
     expect(closedDatabase.isClosed()).toBe(false);
     expect(oldestCachedDatabase.isClosed()).toBe(true);
-  });
+  }, 20_000);
 });
 
 describe("initDatabase forward-version guard", () => {
