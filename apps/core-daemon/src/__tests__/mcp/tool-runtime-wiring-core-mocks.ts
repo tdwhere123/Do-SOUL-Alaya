@@ -130,6 +130,15 @@ export function buildToolRuntimeWiringCoreMocks(params: {
     createRuleOnlyReconciliationDecisionPort: vi.fn(() => ({
       decide: vi.fn(async () => ({ kind: "add", reason: "mock rule-only" }))
     })),
+    PreWriteRecallService: makeClass({
+      recall: vi.fn(async () => ({
+        candidate_neighbors: [],
+        relation_posteriors: [],
+        action_candidates: [],
+        uncertainty: 1,
+        audit_features: {}
+      }))
+    }),
     ResolutionService: makeClass(),
     DirtyStatePanicService: makeClass(),
     EngineBindingService: makeClass({
