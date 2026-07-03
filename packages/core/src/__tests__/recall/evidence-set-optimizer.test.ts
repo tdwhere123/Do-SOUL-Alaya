@@ -430,7 +430,15 @@ function s4Candidate(input: EvidenceInput): FusedCandidate {
       fused_score: input.fusedScore,
       ...(input.evidenceAxis === undefined
         ? {}
-        : { per_axis_contribution: Object.freeze({ object: 0, path: 0, evidence: input.evidenceAxis }) })
+        : {
+            per_axis_contribution: Object.freeze({
+              object: 0,
+              path: 0,
+              evidence: input.evidenceAxis,
+              temporal: 0,
+              control: 0
+            })
+          })
     })
   });
 }

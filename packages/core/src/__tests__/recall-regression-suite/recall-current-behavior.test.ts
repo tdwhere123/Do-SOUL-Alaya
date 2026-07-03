@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RecallService } from "../../recall/recall-service.js";
 import { selectCandidatesWithinBudgets } from "../../recall/recall-candidate-builder.js";
 import { compareRecallCandidates } from "../../recall/recall-service-helpers.js";

@@ -16,7 +16,6 @@ import {
   DEFAULT_CONFLICT_TAG_OVERLAP_THRESHOLD,
   DEFAULT_MAX_LLM_CANDIDATES,
   DEFAULT_SIMILARITY_FLOOR,
-  DEFAULT_TOP_K,
   RECONCILE_LEASE_TTL_MS,
   type ReconciliationDecision,
   type ReconciliationEventLogPort,

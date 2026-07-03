@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, StorageTier, type RecallPolicy } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { compareRecallCandidates } from "../../recall/recall-service-helpers.js";

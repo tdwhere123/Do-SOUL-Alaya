@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type PathAnchorRef, type PathRelation } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";

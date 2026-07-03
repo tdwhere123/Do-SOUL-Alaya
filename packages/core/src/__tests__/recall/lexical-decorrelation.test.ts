@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
