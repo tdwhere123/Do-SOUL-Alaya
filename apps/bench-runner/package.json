@@ -23,6 +23,7 @@
     "@do-soul/alaya": "workspace:*",
     "@do-soul/alaya-core": "workspace:*",
     "@do-soul/alaya-eval": "workspace:*",
+    "@do-soul/alaya-graph-algorithms": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@do-soul/alaya-soul": "workspace:*",
     "@do-soul/alaya-storage": "workspace:*",

@@ -41,6 +41,9 @@ importers:
       '@do-soul/alaya-eval':
         specifier: workspace:*
         version: link:../../packages/eval
+      '@do-soul/alaya-graph-algorithms':
+        specifier: workspace:*
+        version: link:../../packages/graph-algorithms
       '@do-soul/alaya-protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
