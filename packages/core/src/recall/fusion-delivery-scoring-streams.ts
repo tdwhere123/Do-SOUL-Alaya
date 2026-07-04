@@ -47,7 +47,7 @@ export function scoreTemporalFusion(
   if (temporalQueryWindowEnabled()) {
     const window = parseQueryTimeWindow(queryProbes, nowIso);
     if (window !== null) {
-      return scoreTemporalQueryWindow(entry, window);
+      return scoreTemporalQueryWindow(entry, window, nowIso);
     }
   }
   return scoreTemporalEventTime(entry, nowIso);
@@ -141,7 +141,7 @@ function scoreFacetOverlap(
       matched.add(tag.facet);
     }
   }
-  return matched.size;
+  return clamp01(matched.size);
 }
 
 function scoreEvidenceStructuralAgreement(
@@ -154,7 +154,7 @@ function scoreEvidenceStructuralAgreement(
   if (evidenceScore <= 0 || structuralScore <= 0) {
     return 0;
   }
-  return Math.sqrt(evidenceScore * structuralScore) + Math.min(evidenceScore, structuralScore) * 0.1;
+  return clamp01(Math.sqrt(evidenceScore * structuralScore) + Math.min(evidenceScore, structuralScore) * 0.1);
 }
 
 function scoreSourceEvidenceAgreement(

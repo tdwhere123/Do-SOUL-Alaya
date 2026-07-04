@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 
 import { tmpdir } from "node:os";
 
@@ -197,12 +197,13 @@ describe("tool-runtime relative path handling", () => {
 
   it("executes tools.exec_shell through argv without shell expansion and without leaking ambient secrets", async () => {
     const workspaceDir = await createWorkspace();
+    const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
     process.env.ALAYA_EXEC_SHELL_TEST_SECRET = "sk-env-leak";
     try {
       const result = await executeConversationTool(
         "tools.exec_shell",
         {
-          command: process.execPath,
+          command: nodeExecutable,
           args: [
             "-e",
             "require('node:fs').writeFileSync(1, `${process.argv[1]}|${process.env.ALAYA_EXEC_SHELL_TEST_SECRET ?? 'missing'}`)",
@@ -223,14 +224,55 @@ describe("tool-runtime relative path handling", () => {
     }
   });
 
-  it("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {
+  it("denies tools.exec_shell PATH commands before execFile", async () => {
     const workspaceDir = await createWorkspace();
 
     await expect(
       executeConversationTool(
         "tools.exec_shell",
         {
-          command: process.execPath,
+          command: "sh",
+          args: ["-c", "printf escaped"]
+        },
+        [workspaceDir]
+      )
+    ).resolves.toEqual({
+      ok: false,
+      code: "ACCESS_DENIED",
+      message: "Command must be a real non-symlink executable inside a writable root."
+    });
+  });
+
+  it("denies tools.exec_shell commands that escape through intermediate symlinks", async () => {
+    const workspaceDir = await createWorkspace();
+    const binLink = path.join(workspaceDir, "bin-link");
+    await symlink(path.dirname(process.execPath), binLink, "dir");
+
+    await expect(
+      executeConversationTool(
+        "tools.exec_shell",
+        {
+          command: path.join(binLink, path.basename(process.execPath)),
+          args: ["-e", "require('node:fs').writeFileSync(1, 'escaped')"]
+        },
+        [workspaceDir]
+      )
+    ).resolves.toEqual({
+      ok: false,
+      code: "ACCESS_DENIED",
+      message: "Command must be a real non-symlink executable inside a writable root."
+    });
+  });
+
+  it("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {
+    const workspaceDir = await createWorkspace();
+    const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
+
+    await expect(
+      executeConversationTool(
+        "tools.exec_shell",
+        {
+          command: nodeExecutable,
           args: ["-e", "require('node:fs').writeFileSync(2, 'bad'); process.exit(7)"]
         },
         [workspaceDir]
@@ -246,7 +288,7 @@ describe("tool-runtime relative path handling", () => {
       executeConversationTool(
         "tools.exec_shell",
         {
-          command: process.execPath,
+          command: nodeExecutable,
           args: ["-e", "setTimeout(() => {}, 1000)"],
           timeoutMs: 1
         },
@@ -389,3 +431,12 @@ describe("tool-runtime relative path handling", () => {
     );
   });
 });
+
+async function createContainedNodeExecutable(workspaceDir: string): Promise<string> {
+  const binDir = path.join(workspaceDir, ".tool-bin");
+  await mkdir(binDir, { recursive: true });
+  const nodeExecutable = path.join(binDir, path.basename(process.execPath));
+  await copyFile(process.execPath, nodeExecutable);
+  await chmod(nodeExecutable, 0o755);
+  return nodeExecutable;
+}

@@ -82,7 +82,10 @@ export function applyPathSuppressionToFusionScores(
     const delta = suppressionScores[breakdown.object_id] ?? 0;
     const fusedScore =
       delta > 0 && breakdown.fused_score > 0
-        ? Math.max(PATH_SUPPRESSION_RESIDUAL_FLOOR, breakdown.fused_score - delta)
+        ? Math.min(
+          breakdown.fused_score,
+          Math.max(PATH_SUPPRESSION_RESIDUAL_FLOOR, breakdown.fused_score - delta)
+        )
         : breakdown.fused_score;
     return { breakdown, fusedScore };
   });

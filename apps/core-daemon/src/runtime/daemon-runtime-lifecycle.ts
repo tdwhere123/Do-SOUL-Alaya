@@ -46,7 +46,13 @@ type LifecycleState = {
   startupBackgroundPass: Promise<void> | null;
   shuttingDown: Promise<void> | null;
   signalHandlersInstalled: boolean;
+  signalShutdownHandlers: SignalShutdownHandler[];
 };
+
+type SignalShutdownHandler = Readonly<{
+  signal: "SIGTERM" | "SIGINT";
+  listener: () => void;
+}>;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
@@ -61,7 +67,8 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     backgroundStarted: false,
     startupBackgroundPass: null,
     shuttingDown: null,
-    signalHandlersInstalled: false
+    signalHandlersInstalled: false,
+    signalShutdownHandlers: []
   };
   const startBackgroundServices = createBackgroundServiceStarter(input, state);
   const shutdown = createShutdownHandler(input, state);
@@ -213,22 +220,26 @@ function installSignalShutdownHandlersOnce(
     return;
   }
   state.signalHandlersInstalled = true;
-  installSignalShutdownHandler("SIGTERM", input, shutdown);
-  installSignalShutdownHandler("SIGINT", input, shutdown);
+  state.signalShutdownHandlers.push(
+    installSignalShutdownHandler("SIGTERM", input, shutdown),
+    installSignalShutdownHandler("SIGINT", input, shutdown)
+  );
 }
 
 function installSignalShutdownHandler(
   signal: "SIGTERM" | "SIGINT",
   input: CreateDaemonLifecycleControlsInput,
   shutdown: () => Promise<void>
-): void {
-  process.on(signal, () => {
+): SignalShutdownHandler {
+  const listener = () => {
     void shutdown().catch((error) => {
       input.warnLogger.warn(`daemon shutdown failed after ${signal}`, {
         error: error instanceof Error ? error.message : String(error)
       });
     });
-  });
+  };
+  process.on(signal, listener);
+  return { signal, listener };
 }
 
 function logListeningAddress(
@@ -280,6 +291,7 @@ async function closeRuntimeResources(
   input: CreateDaemonLifecycleControlsInput,
   state: LifecycleState
 ): Promise<void> {
+  unregisterSignalShutdownHandlers(state);
   input.securityStatusService.close();
   await input.daemonMcpRuntimeRegistry.close();
   input.globalMemoryRecallInvalidationSubscription?.dispose();
@@ -291,6 +303,14 @@ async function closeRuntimeResources(
   }
 
   await closeRecallReadWorkerClient(input);
+}
+
+function unregisterSignalShutdownHandlers(state: LifecycleState): void {
+  for (const { signal, listener } of state.signalShutdownHandlers) {
+    process.off(signal, listener);
+  }
+  state.signalShutdownHandlers = [];
+  state.signalHandlersInstalled = false;
 }
 
 function clearLifecycleIntervals(

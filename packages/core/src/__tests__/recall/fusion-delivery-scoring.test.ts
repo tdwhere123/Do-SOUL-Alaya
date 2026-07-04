@@ -156,6 +156,64 @@ describe("buildRecallFusionDetails temporal lane", () => {
 });
 
 describe("buildRecallFusionDetails query-adaptive fusion", () => {
+  it("clamps evidence-structural agreement before stream ranking", () => {
+    const strongerRaw = createMemoryEntry({
+      object_id: "99999999-9999-4999-8999-999999999999",
+      content: "MaterializationRouter evidence and structure match.",
+      created_at: "2026-03-21T00:00:00.000Z"
+    });
+    const earlierTieBreak = createMemoryEntry({
+      object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      content: "MaterializationRouter evidence and structure mostly match.",
+      created_at: "2026-03-20T00:00:00.000Z"
+    });
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        {
+          entry: strongerRaw,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          },
+          structuralScore: 1
+        },
+        {
+          entry: earlierTieBreak,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          },
+          structuralScore: 0.9
+        }
+      ],
+      policy: {} as RecallPolicy,
+      supplementaryData: {
+        ...emptySupplementaryData("how does MaterializationRouter create memory?"),
+        evidenceFtsRanks: {
+          [strongerRaw.object_id]: 1,
+          [earlierTieBreak.object_id]: 1
+        },
+        structuralScores: {
+          [strongerRaw.object_id]: 1,
+          [earlierTieBreak.object_id]: 0.9
+        }
+      },
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    expect(
+      fusion.get(`workspace_local:memory_entry:${earlierTieBreak.object_id}`)
+        ?.per_stream_rank.evidence_structural_agreement
+    ).toBe(1);
+    expect(
+      fusion.get(`workspace_local:memory_entry:${strongerRaw.object_id}`)
+        ?.per_stream_rank.evidence_structural_agreement
+    ).toBe(2);
+  });
+
   it("de-correlates repeated lexical-family hits without global hard damp", () => {
     const policy = {} as RecallPolicy;
     const memory = createMemoryEntry({
@@ -349,7 +407,7 @@ describe("scoreTemporalFusion window gate (ALAYA_RECALL_TEMPORAL_WINDOW)", () =>
     process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
     const probes = compileRecallQueryProbes(query);
     const window = parseQueryTimeWindow(probes, nowIso)!;
-    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalQueryWindow(entry, window));
+    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalQueryWindow(entry, window, nowIso));
     expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(1);
   });
 });

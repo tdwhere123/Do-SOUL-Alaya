@@ -66,6 +66,34 @@ afterEach(() => {
 });
 
 describe("facet_overlap fusion stream", () => {
+  it("clamps facet overlap count before stream ranking", () => {
+    const twoFacetRaw = createMemoryEntry({
+      object_id: GOLD_ID,
+      content: "Two matching facets but later tie-break.",
+      created_at: "2026-03-21T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }, { facet: "location_place" }]
+    });
+    const oneFacetEarlier = createMemoryEntry({
+      object_id: DISTRACTOR_ID,
+      content: "One matching facet but earlier tie-break.",
+      created_at: "2026-03-20T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }]
+    });
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        { entry: twoFacetRaw, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 } },
+        { entry: oneFacetEarlier, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 } }
+      ],
+      policy: POLICY,
+      supplementaryData: supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }),
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    expect(fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`)?.per_stream_rank.facet_overlap).toBe(1);
+    expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.per_stream_rank.facet_overlap).toBe(2);
+  });
+
   it("is active whenever query-sought facets are present", () => {
     delete process.env.ALAYA_RECALL_FACET_OVERLAP;
     const withFacets = buildFusion(supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }));

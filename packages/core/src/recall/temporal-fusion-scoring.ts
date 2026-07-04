@@ -106,14 +106,19 @@ function parseRelativeDateWindow(term: string, anchorMs: number): QueryTimeWindo
 
 export function scoreTemporalQueryWindow(
   entry: Readonly<MemoryEntry>,
-  window: QueryTimeWindow
+  window: QueryTimeWindow,
+  nowIso: string
 ): number {
   const eventStartMs = parseOptionalTime(entry.event_time_start);
   if (eventStartMs === null) {
     return 0;
   }
+  const nowMs = Date.parse(nowIso);
+  if (!Number.isFinite(nowMs)) {
+    return 0;
+  }
   const eventEndMs = parseOptionalTime(entry.event_time_end) ?? eventStartMs;
-  if (!isWithinValidTime(entry, eventStartMs)) {
+  if (!isWithinValidTime(entry, nowMs)) {
     return 0;
   }
   if (eventStartMs <= window.endMs && eventEndMs >= window.startMs) {

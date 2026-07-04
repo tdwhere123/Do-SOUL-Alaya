@@ -20,6 +20,8 @@ import {
   type WorkspaceGitBindingStatus
 } from "./tool-runtime-file-common.js";
 
+const EXEC_COMMAND_CONTAINMENT_MESSAGE = "Command must be a real non-symlink executable inside a writable root.";
+
 export async function writeFile(
   input: WriteFileToolInput,
   writableRoots: readonly string[]
@@ -98,13 +100,17 @@ export async function execShell(
     return createAccessDenied("No writable roots are available for exec containment.");
   }
 
+  const command = await resolveContainedExecutableCommand(input.command, writableRoots);
+  if (!command.ok) {
+    return command;
+  }
   const timeoutMs = normalizeExecTimeout(input.timeoutMs);
   const cwd = writableRoots[0]!;
   const args = input.args !== undefined ? [...input.args] : [];
 
   return await new Promise((resolve) => {
     execFile(
-      input.command,
+      command.resolvedPath,
       args,
       {
         cwd,
@@ -144,6 +150,58 @@ export async function execShell(
       }
     );
   });
+}
+
+async function resolveContainedExecutableCommand(
+  command: string,
+  writableRoots: readonly string[]
+): Promise<{ readonly ok: true; readonly resolvedPath: string } | ReturnType<typeof createAccessDenied>> {
+  const containedPath = resolveContainedPath(command, writableRoots);
+  if (!containedPath.ok) {
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+
+  const entry = await readFileSystemEntry(containedPath.resolvedPath);
+  if (!entry.ok || !entry.stats.isFile() || !hasExecutableMode(entry.stats.mode)) {
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+
+  try {
+    const realCommandPath = await realpath(containedPath.resolvedPath);
+    const realWritableRoots = (
+      await Promise.all(
+        writableRoots.map(async (root) => {
+          try {
+            return await realpath(root);
+          } catch (error) {
+            process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
+              code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
+              detail: JSON.stringify({
+                root,
+                code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
+              })
+            });
+            return null;
+          }
+        })
+      )
+    ).filter((root): root is string => root !== null);
+
+    if (!realWritableRoots.some((root) => isPathWithinRoot(realCommandPath, root))) {
+      return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+    }
+
+    return {
+      ok: true,
+      resolvedPath: realCommandPath
+    };
+  } catch {
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+}
+
+function hasExecutableMode(mode: number | bigint): boolean {
+  return process.platform === "win32" || (Number(mode) & 0o111) !== 0;
 }
 
 function normalizeExecTimeout(value: number | undefined): number {
@@ -247,4 +305,3 @@ export async function resolveWorkspaceGitBindingStatus(
     repo_path: resolvedRepoPath
   };
 }
-

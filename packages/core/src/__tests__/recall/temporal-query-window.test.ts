@@ -180,10 +180,11 @@ describe("parseQueryTimeWindow widened terms (temporal-window flag on)", () => {
 
 describe("scoreTemporalQueryWindow", () => {
   const mayWindow = { startMs: Date.UTC(2023, 4, 1), endMs: Date.UTC(2023, 5, 1) - 1 };
+  const nowIso = "2023-06-15T00:00:00.000Z";
 
   it("scores an event inside the window at full strength", () => {
     const entry = createMemoryEntry({ event_time_start: "2023-05-15T00:00:00.000Z" });
-    expect(scoreTemporalQueryWindow(entry, mayWindow)).toBe(1);
+    expect(scoreTemporalQueryWindow(entry, mayWindow, nowIso)).toBe(1);
   });
 
   it("scores an interval that overlaps the window at full strength", () => {
@@ -191,39 +192,52 @@ describe("scoreTemporalQueryWindow", () => {
       event_time_start: "2023-04-20T00:00:00.000Z",
       event_time_end: "2023-05-05T00:00:00.000Z"
     });
-    expect(scoreTemporalQueryWindow(entry, mayWindow)).toBe(1);
+    expect(scoreTemporalQueryWindow(entry, mayWindow, nowIso)).toBe(1);
   });
 
   it("decays for an event before the window by distance", () => {
     const before = createMemoryEntry({ event_time_start: "2023-04-01T00:00:00.000Z" });
     const farBefore = createMemoryEntry({ event_time_start: "2023-01-01T00:00:00.000Z" });
-    const beforeScore = scoreTemporalQueryWindow(before, mayWindow);
+    const beforeScore = scoreTemporalQueryWindow(before, mayWindow, nowIso);
     expect(beforeScore).toBeGreaterThan(0);
     expect(beforeScore).toBeLessThan(1);
-    expect(scoreTemporalQueryWindow(farBefore, mayWindow)).toBeLessThan(beforeScore);
+    expect(scoreTemporalQueryWindow(farBefore, mayWindow, nowIso)).toBeLessThan(beforeScore);
   });
 
   it("decays for an event after the window by distance", () => {
     const after = createMemoryEntry({ event_time_start: "2023-06-15T00:00:00.000Z" });
-    const score = scoreTemporalQueryWindow(after, mayWindow);
+    const score = scoreTemporalQueryWindow(after, mayWindow, nowIso);
     expect(score).toBeGreaterThan(0);
     expect(score).toBeLessThan(1);
   });
 
   it("clamps to zero past the decay horizon", () => {
     const distant = createMemoryEntry({ event_time_start: "2024-01-01T00:00:00.000Z" });
-    expect(scoreTemporalQueryWindow(distant, mayWindow)).toBe(0);
+    expect(scoreTemporalQueryWindow(distant, mayWindow, nowIso)).toBe(0);
   });
 
-  it("returns zero when the event falls outside its valid interval", () => {
+  it("scores ingested-later historical events when now is inside the valid interval", () => {
     const entry = createMemoryEntry({
       event_time_start: "2023-05-15T00:00:00.000Z",
       valid_from: "2023-06-01T00:00:00.000Z"
     });
-    expect(scoreTemporalQueryWindow(entry, mayWindow)).toBe(0);
+    expect(scoreTemporalQueryWindow(entry, mayWindow, nowIso)).toBe(1);
+  });
+
+  it("returns zero when now falls outside the valid interval", () => {
+    const entry = createMemoryEntry({
+      event_time_start: "2023-05-15T00:00:00.000Z",
+      valid_to: "2023-06-01T00:00:00.000Z"
+    });
+    expect(scoreTemporalQueryWindow(entry, mayWindow, nowIso)).toBe(0);
+  });
+
+  it("returns zero when now is not parseable", () => {
+    const entry = createMemoryEntry({ event_time_start: "2023-05-15T00:00:00.000Z" });
+    expect(scoreTemporalQueryWindow(entry, mayWindow, "not-a-date")).toBe(0);
   });
 
   it("returns zero when the entry carries no event time", () => {
-    expect(scoreTemporalQueryWindow(createMemoryEntry(), mayWindow)).toBe(0);
+    expect(scoreTemporalQueryWindow(createMemoryEntry(), mayWindow, nowIso)).toBe(0);
   });
 });

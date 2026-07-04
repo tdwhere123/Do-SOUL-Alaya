@@ -1,6 +1,6 @@
 # Architecture Handbook
 
-Do-SOUL Alaya is a local-first memory core for CLI agents. It is a port
+Do-SOUL Alaya is a local-first memory plane for CLI agents. It is a port
 of the memory subsystem of the sibling project `do-what-new`. The
 design separates durable memory truth, runtime routing, and per-turn
 projection that consuming agents see over MCP.

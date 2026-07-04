@@ -82,6 +82,30 @@ describe("createDaemonLifecycleControls", () => {
     await server.close();
   });
 
+  it("unregisters installed signal handlers during shutdown", async () => {
+    const beforeSigtermListeners = process.listeners("SIGTERM");
+    const beforeSigintListeners = process.listeners("SIGINT");
+    const { controls } = createControls("ephemeral");
+
+    try {
+      const server = await controls.startHttpServer({
+        port: 0,
+        allowEphemeralRequestToken: true
+      });
+
+      expect(process.listenerCount("SIGTERM")).toBe(beforeSigtermListeners.length + 1);
+      expect(process.listenerCount("SIGINT")).toBe(beforeSigintListeners.length + 1);
+
+      await server.close();
+
+      expect(process.listeners("SIGTERM")).toEqual(beforeSigtermListeners);
+      expect(process.listeners("SIGINT")).toEqual(beforeSigintListeners);
+    } finally {
+      removeUnexpectedListeners("SIGTERM", beforeSigtermListeners);
+      removeUnexpectedListeners("SIGINT", beforeSigintListeners);
+    }
+  });
+
   it("waits for the startup pass before running targeted bulk enrich", async () => {
     let resolveStartup: (() => void) | undefined;
     const runBackgroundPass = vi.fn(
@@ -131,3 +155,11 @@ describe("createDaemonLifecycleControls", () => {
     expect(order).toEqual(["worker", "database"]);
   });
 });
+
+function removeUnexpectedListeners(signal: NodeJS.Signals, expectedListeners: Function[]): void {
+  for (const listener of process.listeners(signal)) {
+    if (!expectedListeners.includes(listener)) {
+      process.off(signal, listener as NodeJS.SignalsListener);
+    }
+  }
+}

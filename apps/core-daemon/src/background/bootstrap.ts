@@ -82,7 +82,17 @@ export class BackgroundServiceManager {
       if (timeoutMs <= 0) {
         await drainPromise;
       } else {
-        await Promise.race([drainPromise, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<void>((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            timeoutHandle = undefined;
+            resolve();
+          }, timeoutMs);
+        });
+        await Promise.race([drainPromise, timeoutPromise]);
+        if (timeoutHandle !== undefined) {
+          clearTimeout(timeoutHandle);
+        }
       }
     }
     this.inFlight.clear();
