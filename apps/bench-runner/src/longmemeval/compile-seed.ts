@@ -10,6 +10,14 @@ export {
   extractContentFromChatCompletionBody
 } from "./compile-seed-http.js";
 export { preflightExtractionCache } from "./compile-seed-preflight.js";
+export { preflightDeepSeekWarmSubstrateCache } from "./deepseek-cache-config.js";
+export {
+  DEEPSEEK_WARM_SUBSTRATE_CACHE_ROOT,
+  DEEPSEEK_WARM_SUBSTRATE_MODEL,
+  isDeepSeekWarmSubstrateCacheRoot
+} from "./deepseek-cache-config.js";
+export { collectBenchSeedFuelInventory } from "./seed-fuel-collector.js";
+export { toSeedFuelInventoryKpi } from "./seed-fuel-inventory-kpi.js";
 export {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,

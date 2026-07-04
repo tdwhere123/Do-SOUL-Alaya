@@ -190,6 +190,17 @@ const SeedDropReasonsSchema = z
   )
   .default({ candidate_absent: 0, materialization_drop: 0 });
 
+const SeedFuelInventorySchema = z
+  .object({
+    objects_total: z.number().int().nonnegative(),
+    evidence_refs_total: z.number().int().nonnegative(),
+    facet_anchors_total: z.number().int().nonnegative(),
+    path_candidates_total: z.number().int().nonnegative(),
+    support_bearing_candidates: z.number().int().nonnegative()
+  })
+  .strict();
+export type SeedFuelInventory = z.infer<typeof SeedFuelInventorySchema>;
+
 const SeedExtractionPathSchema = z
   .object({
     path: z.enum(["official_api_compile", "no_credentials_fallback"]),
@@ -288,6 +299,7 @@ const KpiCoreSchema = z.object({
   // Optional so older kpi.json records (pre seed-extraction disclosure)
   // stay schema-valid; new LongMemEval runs always populate it.
   seed_extraction_path: SeedExtractionPathSchema.optional(),
+  seed_fuel_inventory: SeedFuelInventorySchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
   // Edge Proposal KPI blocks (K3.2 + K3.4). Optional so older kpi.json
   // records stay schema-valid; new bench runs always populate them when

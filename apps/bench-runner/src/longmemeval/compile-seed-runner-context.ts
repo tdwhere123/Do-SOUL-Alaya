@@ -15,6 +15,7 @@ import {
   EXTRACTION_REQUEST_TIMEOUT_MS
 } from "./compile-seed-http.js";
 import { preflightExtractionCache } from "./compile-seed-preflight.js";
+import { preflightDeepSeekWarmSubstrateCache } from "./deepseek-cache-config.js";
 import { normalizeEnvDiagDir } from "./compile-seed-extract.js";
 import type {
   CompileSeedExtractionStats,
@@ -68,6 +69,17 @@ function runExtractionCachePreflight(
   manifest: ReturnType<typeof readExtractionCacheManifest> | undefined
 ): void {
   if (options?.skipPreflight === true) return;
+  preflightDeepSeekWarmSubstrateCache({
+    cacheRoot,
+    config,
+    liveExtractionPossible: credentialled,
+    ...(options?.allowLiveExtraction === undefined
+      ? {}
+      : { allowLiveExtraction: options.allowLiveExtraction }),
+    ...(options?.requiredTurnContents === undefined
+      ? {}
+      : { requiredTurnContents: options.requiredTurnContents })
+  });
   preflightExtractionCache({
     cacheRoot,
     config,

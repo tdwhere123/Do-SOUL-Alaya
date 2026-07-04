@@ -165,6 +165,7 @@ export async function runLongMemEval(
     windowLength: context.window.length,
     collected: execution.collected,
     extractionStats: context.seedRunner.stats,
+    seedFuelInventory: execution.seedFuelInventory,
     alayaVersion: context.alayaVersion,
     commitInfo: context.commitInfo,
     commitSha7: context.commitSha7,
