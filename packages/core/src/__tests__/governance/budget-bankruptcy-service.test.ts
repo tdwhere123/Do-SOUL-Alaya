@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BankruptcyAction, BankruptcyKind, BankruptcyTriggerKind, BudgetEventType, ProposalResolutionState, RuntimeMode, type Proposal } from "@do-soul/alaya-protocol";
-import { BudgetBankruptcyService } from "../../governance/budget-bankruptcy-service.js";
+import { BudgetBankruptcyService } from "../../governance/bankruptcy/budget-bankruptcy-service.js";
 
 import { createDeclareParams, createDeferred, createDependencies, createEventLogEntry, createEventLogRepo, createProposalOption, createProposalPort, createStoredProposal } from "./budget-bankruptcy-service.test-support.js";
 

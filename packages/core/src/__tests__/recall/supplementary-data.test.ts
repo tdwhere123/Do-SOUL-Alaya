@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   collectSupplementaryData,
   SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY
-} from "../../recall/supplementary-data.js";
+} from "../../recall/supplements/supplementary-data.js";
 import {
   createDependencies,
   createMemoryEntry,

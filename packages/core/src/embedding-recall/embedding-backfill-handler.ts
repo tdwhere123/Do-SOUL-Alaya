@@ -1,6 +1,6 @@
 import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../config/install-core-config.js";
-import { toErrorMessage } from "../recall/recall-service-helpers.js";
+import { toErrorMessage } from "../recall/runtime/recall-service-helpers.js";
 import { resolveEmbedText } from "./embed-text-resolver.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {

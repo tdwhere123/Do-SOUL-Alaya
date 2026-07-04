@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
-import { ReconciliationService, createRuleOnlyReconciliationDecisionPort, type ReconciliationServiceDependencies, type ReconciliationVerdictApplier } from "../../governance/reconciliation-service.js";
+import { ReconciliationService, createRuleOnlyReconciliationDecisionPort, type ReconciliationServiceDependencies, type ReconciliationVerdictApplier } from "../../governance/reconciliation/reconciliation-service.js";
 
 import { DecideFn, UpdateFn, baseInput, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 

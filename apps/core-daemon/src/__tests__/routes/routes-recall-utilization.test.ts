@@ -14,7 +14,7 @@ import {
   registerRecallUtilizationRoutes,
   type RecallUtilizationRouteServices,
   type SingleUsedAnchorTelemetryEmitter
-} from "../../routes/recall-utilization.js";
+} from "../../routes/memory/recall-utilization.js";
 
 import type { RecallUtilizationEventLogPort } from "../../services/recall-utilization-service.js";
 

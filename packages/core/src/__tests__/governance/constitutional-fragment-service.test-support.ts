@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ConstitutionalFragmentIdSchema, ConstitutionalFragmentSchema, EventLogEntrySchema, type ConstitutionalFragment, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { expect, vi } from "vitest";
-import { type ConstitutionalFragmentStorePort } from "../../governance/constitutional-fragment-service.js";
+import { type ConstitutionalFragmentStorePort } from "../../governance/policy/constitutional-fragment-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 
 export const FIXED_NOW = "2026-04-17T02:00:00.000Z";

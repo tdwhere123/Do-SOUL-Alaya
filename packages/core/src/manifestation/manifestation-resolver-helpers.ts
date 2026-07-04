@@ -8,7 +8,7 @@ import {
   type ManifestationLevel as ManifestationLevelValue,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { governanceAuthorisesLevel } from "../path-graph/path-manifestation-policy.js";
+import { governanceAuthorisesLevel } from "../path-graph/path-relations/path-manifestation-policy.js";
 import { clamp01 } from "../shared/clamp.js";
 import type {
   BudgetAllocationResult,

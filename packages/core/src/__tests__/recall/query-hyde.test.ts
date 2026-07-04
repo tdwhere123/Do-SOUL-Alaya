@@ -7,7 +7,7 @@ describe("resolveHydeQueryText", () => {
   });
 
   it("returns the query unchanged when no HyDE JSON is set (byte-identical off)", async () => {
-    const { resolveHydeQueryText } = await import("../../recall/query-hyde.js");
+    const { resolveHydeQueryText } = await import("../../recall/query/query-hyde.js");
     expect(resolveHydeQueryText("recommend video editing resources")).toBe(
       "recommend video editing resources"
     );
@@ -18,7 +18,7 @@ describe("resolveHydeQueryText", () => {
     process.env.ALAYA_RECALL_QUERY_HYDE_JSON = JSON.stringify({
       "recommend video editing resources": "The user uses Adobe Premiere Pro."
     });
-    const { resolveHydeQueryText } = await import("../../recall/query-hyde.js");
+    const { resolveHydeQueryText } = await import("../../recall/query/query-hyde.js");
     expect(resolveHydeQueryText("Recommend  Video Editing Resources")).toBe(
       "The user uses Adobe Premiere Pro."
     );

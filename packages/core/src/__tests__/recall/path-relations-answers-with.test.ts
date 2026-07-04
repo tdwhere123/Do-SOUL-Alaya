@@ -3,7 +3,7 @@ import {
   answersWithPathFuelEnabled,
   buildPathInflowByTarget,
   scorePathRelationExpansion
-} from "../../recall/path-relations.js";
+} from "../../recall/expansion/path-relations.js";
 import { createPathRelation } from "./recall-service-test-fixtures.js";
 
 afterEach(() => {

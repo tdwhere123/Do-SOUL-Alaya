@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { registerPathGraphRoutes } from "../../routes/path-graph.js";
+import { registerPathGraphRoutes } from "../../routes/workspace/path-graph.js";
 import {
   GraphContractService,
   type GraphContractServicePathRelationRepoPort

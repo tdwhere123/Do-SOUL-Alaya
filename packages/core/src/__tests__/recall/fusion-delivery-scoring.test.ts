@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails, scoreTemporalFusion } from "../../recall/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import { buildRecallFusionDetails, scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 import {
   parseQueryTimeWindow,
   scoreTemporalEventTime,
   scoreTemporalQueryWindow
-} from "../../recall/temporal-fusion-scoring.js";
-import { classifyRecallIntent } from "../../recall/recall-query-plan.js";
+} from "../../recall/scoring/temporal-fusion-scoring.js";
+import { classifyRecallIntent } from "../../recall/query/recall-query-plan.js";
 
 function emptySupplementaryData(query: string): RecallSupplementaryData {
   return {

@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { ClaimLifecycleState, canonicalGovernanceSubject, type ClaimForm, type EventLogEntry, type Slot } from "@do-soul/alaya-protocol";
-import { type ClaimFormInput, type ClaimServiceDependencies } from "../../governance/claim-service.js";
+import { type ClaimFormInput, type ClaimServiceDependencies } from "../../governance/claims/claim-service.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 
 export function createClaimInput(overrides: Partial<ClaimFormInput> = {}): ClaimFormInput {

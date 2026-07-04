@@ -1,4 +1,4 @@
-import type { RerankCandidate } from "../../recall/recall-feature-rerank.js";
+import type { RerankCandidate } from "../../recall/rerank/recall-feature-rerank.js";
 
 export interface FakeCandidate {
   readonly id: string;

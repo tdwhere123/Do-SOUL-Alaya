@@ -14,7 +14,7 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import type { RecallCandidate, RecallResult } from "../recall/recall-service.js";
-import { makeTokenEstimator, type TokenEstimator } from "../recall/recall-service-types.js";
+import { makeTokenEstimator, type TokenEstimator } from "../recall/runtime/recall-service-types.js";
 
 import {
   compareRecallCandidates,

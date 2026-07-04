@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BankruptcyKind, DYNAMICS_CONSTANTS, MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
-import { mapBudgetPenalty } from "../../recall/recall-service-helpers.js";
+import { mapBudgetPenalty } from "../../recall/runtime/recall-service-helpers.js";
 import { createDependencies, createMemoryEntry, createSlot, createTaskSurface, overridePolicy } from "./recall-8factor-test-fixtures.js";
 
 import { FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD } from "./recall-8factor.test-support.js";

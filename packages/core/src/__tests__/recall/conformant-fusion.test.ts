@@ -16,22 +16,22 @@ import {
 import {
   applyPathSuppressionToFusionScores,
   buildRecallFusionDetails
-} from "../../recall/fusion-delivery-scoring.js";
+} from "../../recall/delivery/fusion-delivery-scoring.js";
 import {
   compareConformantAxisRa,
   resolveConformantEvidenceBeta,
   resolveConformantFloodCapPerSource,
   resolveConformantFloodCapTotal,
   resolveConformantPathWeight
-} from "../../recall/conformant-fusion-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import { classifyRecallIntent } from "../../recall/recall-query-plan.js";
-import { buildEvidenceSupportVectors } from "../../recall/supplementary-data.js";
+} from "../../recall/scoring/conformant-fusion-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import { classifyRecallIntent } from "../../recall/query/recall-query-plan.js";
+import { buildEvidenceSupportVectors } from "../../recall/supplements/supplementary-data.js";
 import type {
   PathInflowEdge,
   RecallFusionBreakdown,
   RecallSupplementaryData
-} from "../../recall/recall-service-types.js";
+} from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const WS = "workspace-1";

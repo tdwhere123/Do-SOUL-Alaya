@@ -5,7 +5,7 @@ import {
   type MemoryEntry,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
+import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 // Minimal active positive-associative PathRelation for the applyVerdict
 // directional-dedup tests; only the fields the dedup guard reads

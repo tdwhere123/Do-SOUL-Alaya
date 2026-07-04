@@ -1,0 +1,457 @@
+import { randomUUID } from "node:crypto";
+import {
+  ControlPlaneObjectKind,
+  GovernanceLeasePiercingConditionKind as GovernanceLeasePiercingConditionKindValue,
+  GovernanceLeaseSchema,
+  GovernanceLeasePiercingConditionKindSchema,
+  GreenGovernanceEventType,
+  RetentionPolicy,
+  SoulGovernanceLeaseAcquiredPayloadSchema,
+  SoulGovernanceLeaseReleasedPayloadSchema,
+  SoulGovernanceLeasePiercedPayloadSchema,
+  type EventLogEntry,
+  type GovernanceLease,
+  type GovernanceLeasePiercingConditionKind,
+  type GreenGovernanceEventTypeValue,
+  type PiercingCondition
+} from "@do-soul/alaya-protocol";
+import { CoreError } from "../../shared/errors.js";
+import { SYSTEM_ACTOR } from "../../shared/actors.js";
+import { addDuration, readNow } from "../../shared/time.js";
+import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../../shared/validators.js";
+import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
+
+const LEASE_DURATION_MS = 5 * 60 * 1000;
+
+const LEASE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_GOVERNANCE_LEASE_REHYDRATE_FAILED";
+
+const HIGH_SIGNAL_PIERCING_CONDITIONS: readonly Readonly<PiercingCondition>[] = Object.freeze([
+  Object.freeze({
+    condition_kind: GovernanceLeasePiercingConditionKindValue.UNSUBMITTED_CHANGES,
+    description: "Critical unsubmitted changes persist across run boundaries"
+  }),
+  Object.freeze({
+    condition_kind: GovernanceLeasePiercingConditionKindValue.SEVERE_DIAGNOSTIC_JUMP,
+    description: "Diagnostic severity jumped 2+ levels"
+  }),
+  Object.freeze({
+    condition_kind: GovernanceLeasePiercingConditionKindValue.EXPLICIT_LIFECYCLE_EVENT,
+    description: "Explicit lifecycle action: commit, branch switch, or session end"
+  })
+]);
+
+export interface GovernanceLeaseServiceEventLogPort {
+  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+  queryByEntity(entityType: string, entityId: string): Promise<readonly EventLogEntry[]>;
+  queryGovernanceLeaseEventsByRun(runId: string): Promise<readonly EventLogEntry[]>;
+}
+
+export interface GovernanceLeaseServiceDependencies {
+  readonly eventLogRepo: GovernanceLeaseServiceEventLogPort;
+  readonly runLookup: GovernanceRunWorkspaceLookup;
+  readonly generateRuntimeId?: () => string;
+  readonly now?: () => string;
+}
+
+/**
+ * Governance leases are ephemeral control-plane objects.
+ * The in-memory store is a cache over EventLog-backed truth so leases can be
+ * reconstructed after daemon restart.
+ */
+export class GovernanceLeaseService {
+  private readonly store = new Map<string, StoredLease>();
+  private readonly pendingLoads = new Map<string, Promise<StoredLease | null>>();
+  private readonly cacheVersions = new Map<string, number>();
+  private readonly generateRuntimeId: () => string;
+
+  public constructor(private readonly dependencies: GovernanceLeaseServiceDependencies) {
+    this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
+  }
+
+  public async acquire(params: {
+    readonly runId: string;
+    readonly workspaceId: string;
+    readonly turnId?: string;
+    readonly expiresAt?: string;
+  }): Promise<Readonly<GovernanceLease>> {
+    const occurredAt = readNow(this.dependencies.now);
+    const runId = parseNonEmptyString(params.runId, "runId");
+    const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
+    await assertGovernanceRunWorkspace(this.dependencies.runLookup, runId, workspaceId);
+    const runtimeId = this.generateRuntimeId();
+    const expiresAt = normalizeExpiresAt(params.expiresAt ?? addDuration(occurredAt, LEASE_DURATION_MS));
+    const turnId = normalizeOptionalNonEmptyString(params.turnId);
+    const lease = parseGovernanceLease({
+      runtime_id: runtimeId,
+      object_kind: ControlPlaneObjectKind.GOVERNANCE_LEASE,
+      task_surface_ref: null,
+      expires_at: expiresAt,
+      derived_from: null,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      lease_id: runtimeId,
+      holder: buildHolder(runId, turnId ?? runtimeId),
+      piercing_conditions: HIGH_SIGNAL_PIERCING_CONDITIONS
+    });
+
+    this.clearExpiredAt(occurredAt);
+    await this.dependencies.eventLogRepo.append({
+      event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED,
+      entity_type: "governance_lease",
+      entity_id: lease.runtime_id,
+      workspace_id: workspaceId,
+      run_id: runId,
+      caused_by: SYSTEM_ACTOR,
+      payload_json: SoulGovernanceLeaseAcquiredPayloadSchema.parse({
+        lease_id: lease.lease_id,
+        holder: lease.holder,
+        run_id: runId,
+        expires_at: lease.expires_at,
+        occurred_at: occurredAt
+      })
+    });
+
+    this.bumpCacheVersion(runId);
+    this.store.set(runId, { lease, workspaceId });
+    return lease;
+  }
+
+  public async release(runId: string): Promise<void> {
+    const parsedRunId = parseNonEmptyString(runId, "runId");
+    const active = await this.resolveStoredLease(parsedRunId);
+
+    if (active === null) {
+      this.bumpCacheVersion(parsedRunId);
+      this.store.delete(parsedRunId);
+      this.clearCacheMetadataIfIdle(parsedRunId);
+      return;
+    }
+
+    const occurredAt = readNow(this.dependencies.now);
+    await this.dependencies.eventLogRepo.append({
+      event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED,
+      entity_type: "governance_lease",
+      entity_id: active.lease.runtime_id,
+      workspace_id: active.workspaceId,
+      run_id: parsedRunId,
+      caused_by: SYSTEM_ACTOR,
+      payload_json: SoulGovernanceLeaseReleasedPayloadSchema.parse({
+        lease_id: active.lease.lease_id,
+        run_id: parsedRunId,
+        occurred_at: occurredAt
+      })
+    });
+
+    this.bumpCacheVersion(parsedRunId);
+    this.store.delete(parsedRunId);
+    this.clearCacheMetadataIfIdle(parsedRunId);
+  }
+
+  public async pierce(params: {
+    readonly runId: string;
+    readonly conditionKind: string;
+    readonly description: string;
+    readonly workspaceId: string;
+  }): Promise<void> {
+    const runId = parseNonEmptyString(params.runId, "runId");
+    const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
+    const conditionKind = parseConditionKind(params.conditionKind);
+    parseNonEmptyString(params.description, "description");
+    const active = await this.getActive(runId);
+
+    if (active === null) {
+      return;
+    }
+
+    const occurredAt = readNow(this.dependencies.now);
+    await this.dependencies.eventLogRepo.append({
+      event_type: GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED,
+      entity_type: "governance_lease",
+      entity_id: active.runtime_id,
+      workspace_id: workspaceId,
+      run_id: runId,
+      caused_by: SYSTEM_ACTOR,
+      payload_json: SoulGovernanceLeasePiercedPayloadSchema.parse({
+        lease_id: active.lease_id,
+        piercing_condition_kind: conditionKind,
+        run_id: runId,
+        occurred_at: occurredAt
+      })
+    });
+
+    this.bumpCacheVersion(runId);
+    this.store.delete(runId);
+    this.clearCacheMetadataIfIdle(runId);
+  }
+
+  public async isHeld(runId: string): Promise<boolean> {
+    return (await this.getActive(runId)) !== null;
+  }
+
+  public async getActive(runId: string): Promise<Readonly<GovernanceLease> | null> {
+    const parsedRunId = normalizeOptionalNonEmptyString(runId);
+
+    if (parsedRunId === null) {
+      return null;
+    }
+
+    return (await this.resolveStoredLease(parsedRunId))?.lease ?? null;
+  }
+
+  public clearExpired(): void {
+    this.clearExpiredAt(readNow(this.dependencies.now));
+  }
+
+  private clearExpiredAt(referenceTime: string): void {
+    for (const [runId, stored] of this.store.entries()) {
+      if (isExpired(stored.lease.expires_at, referenceTime)) {
+        this.bumpCacheVersion(runId);
+        this.store.delete(runId);
+        this.clearCacheMetadataIfIdle(runId);
+      }
+    }
+  }
+
+  private async resolveStoredLease(runId: string): Promise<StoredLease | null> {
+    const referenceTime = readNow(this.dependencies.now);
+    const cached = this.store.get(runId) ?? null;
+
+    if (cached !== null) {
+      return this.resolveCachedLease(runId, cached, referenceTime);
+    }
+
+    const pending = this.pendingLoads.get(runId);
+
+    if (pending !== undefined) {
+      return pending;
+    }
+
+    const versionBeforeLoad = this.getCacheVersion(runId);
+    const loadPromise = this.createLoadPromise(runId, referenceTime, versionBeforeLoad);
+
+    this.pendingLoads.set(runId, loadPromise);
+    return loadPromise;
+  }
+
+  private async rehydrateFromEventLog(runId: string): Promise<StoredLease | null> {
+    let events: readonly EventLogEntry[];
+    try {
+      events = await queryRunEventLog(this.dependencies.eventLogRepo, runId);
+    } catch (error) {
+      // Fail-closed: a read failure must not report "not held" and let a second worker race (§31).
+      process.emitWarning("[GovernanceLeaseService] Failed to rehydrate lease from EventLog", {
+        code: LEASE_REHYDRATE_FAILED_WARNING_CODE,
+        detail: JSON.stringify({
+          run_id: runId,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      });
+      throw new CoreError("CONFLICT", `Failed to rehydrate governance lease for run ${runId}.`, {
+        subCode: "CONCURRENT_MODIFICATION",
+        cause: error instanceof Error ? error : undefined
+      });
+    }
+    let active: StoredLease | null = null;
+    for (const event of events) {
+      active = this.applyPersistedLeaseEvent(active, event);
+    }
+    return active;
+  }
+
+  private getCacheVersion(runId: string): number {
+    return this.cacheVersions.get(runId) ?? 0;
+  }
+
+  private bumpCacheVersion(runId: string): void {
+    this.cacheVersions.set(runId, this.getCacheVersion(runId) + 1);
+  }
+
+  private resolveCachedLease(
+    runId: string,
+    cached: StoredLease,
+    referenceTime: string
+  ): StoredLease | null {
+    if (!isExpired(cached.lease.expires_at, referenceTime)) {
+      return cached;
+    }
+
+    this.bumpCacheVersion(runId);
+    this.store.delete(runId);
+    this.clearCacheMetadataIfIdle(runId);
+    return null;
+  }
+
+  private createLoadPromise(
+    runId: string,
+    referenceTime: string,
+    versionBeforeLoad: number
+  ): Promise<StoredLease | null> {
+    const loadPromise = this.rehydrateFromEventLog(runId)
+      .then((rehydrated) => this.finishLeaseLoad(runId, referenceTime, versionBeforeLoad, rehydrated))
+      .finally(() => {
+        if (this.pendingLoads.get(runId) === loadPromise) {
+          this.pendingLoads.delete(runId);
+        }
+        this.clearCacheMetadataIfIdle(runId);
+      });
+    return loadPromise;
+  }
+
+  private finishLeaseLoad(
+    runId: string,
+    referenceTime: string,
+    versionBeforeLoad: number,
+    rehydrated: StoredLease | null
+  ): StoredLease | null {
+    const normalized =
+      rehydrated !== null && isExpired(rehydrated.lease.expires_at, referenceTime)
+        ? null
+        : rehydrated;
+    if (this.getCacheVersion(runId) !== versionBeforeLoad) {
+      return this.store.get(runId) ?? null;
+    }
+
+    const cachedAfterLoad = this.store.get(runId) ?? null;
+    if (cachedAfterLoad !== null) {
+      return cachedAfterLoad;
+    }
+
+    if (normalized !== null) {
+      this.store.set(runId, normalized);
+    }
+    return normalized;
+  }
+
+  private applyPersistedLeaseEvent(
+    active: StoredLease | null,
+    event: Readonly<EventLogEntry>
+  ): StoredLease | null {
+    if (event.entity_type !== "governance_lease") {
+      return active;
+    }
+    if (event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED) {
+      return this.buildStoredLeaseFromAcquire(event);
+    }
+    if (
+      event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED ||
+      event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+    ) {
+      return this.clearMatchingStoredLease(active, event);
+    }
+    return active;
+  }
+
+  private buildStoredLeaseFromAcquire(event: Readonly<EventLogEntry>): StoredLease {
+    const parsed = parsePersistedGovernanceLeasePayload(
+      SoulGovernanceLeaseAcquiredPayloadSchema,
+      event,
+      GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_ACQUIRED
+    );
+    return {
+      workspaceId: event.workspace_id,
+      lease: parseGovernanceLease({
+        runtime_id: parsed.lease_id,
+        object_kind: ControlPlaneObjectKind.GOVERNANCE_LEASE,
+        task_surface_ref: null,
+        expires_at: parsed.expires_at,
+        derived_from: null,
+        retention_policy: RetentionPolicy.SESSION_ONLY,
+        lease_id: parsed.lease_id,
+        holder: parsed.holder,
+        piercing_conditions: HIGH_SIGNAL_PIERCING_CONDITIONS
+      })
+    };
+  }
+
+  private clearMatchingStoredLease(
+    active: StoredLease | null,
+    event: Readonly<EventLogEntry>
+  ): StoredLease | null {
+    const parsed =
+      event.event_type === GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED
+        ? parsePersistedGovernanceLeasePayload(
+            SoulGovernanceLeaseReleasedPayloadSchema,
+            event,
+            GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_RELEASED
+          )
+        : parsePersistedGovernanceLeasePayload(
+            SoulGovernanceLeasePiercedPayloadSchema,
+            event,
+            GreenGovernanceEventType.SOUL_GOVERNANCE_LEASE_PIERCED
+          );
+    return active?.lease.lease_id === parsed.lease_id ? null : active;
+  }
+
+  private clearCacheMetadataIfIdle(runId: string): void {
+    if (!this.store.has(runId) && !this.pendingLoads.has(runId)) {
+      this.cacheVersions.delete(runId);
+    }
+  }
+}
+
+interface StoredLease {
+  readonly lease: Readonly<GovernanceLease>;
+  readonly workspaceId: string;
+}
+
+function parseGovernanceLease(value: GovernanceLease): Readonly<GovernanceLease> {
+  try {
+    return Object.freeze(GovernanceLeaseSchema.parse(value));
+  } catch (error) {
+    throw new CoreError("VALIDATION", "Invalid governance lease payload", { cause: error });
+  }
+}
+
+async function queryRunEventLog(
+  eventLogRepo: GovernanceLeaseServiceEventLogPort,
+  runId: string
+): Promise<readonly EventLogEntry[]> {
+  return await eventLogRepo.queryGovernanceLeaseEventsByRun(runId);
+}
+
+function parsePersistedGovernanceLeasePayload<T>(
+  schema: {
+    parse(value: unknown): T;
+  },
+  event: Readonly<EventLogEntry>,
+  eventType: GreenGovernanceEventTypeValue
+): T {
+  try {
+    return schema.parse(event.payload_json);
+  } catch (error) {
+    throw new CoreError(
+      "CONFLICT",
+      `Malformed ${eventType} payload persisted at ${event.event_id}.`,
+      { cause: error instanceof Error ? error : undefined }
+    );
+  }
+}
+
+function buildHolder(runId: string, turnId: string): string {
+  return `run:${runId}:turn:${turnId}`;
+}
+
+function parseConditionKind(value: string): GovernanceLeasePiercingConditionKind {
+  try {
+    return GovernanceLeasePiercingConditionKindSchema.parse(parseNonEmptyString(value, "conditionKind"));
+  } catch (error) {
+    throw new CoreError("VALIDATION", "conditionKind must be a supported governance lease piercing condition", {
+      cause: error
+    });
+  }
+}
+
+function normalizeExpiresAt(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return readNow(() => value, "expiresAt");
+}
+
+function isExpired(expiresAt: string | null, referenceTime: string): boolean {
+  if (expiresAt === null) {
+    return false;
+  }
+
+  return Date.parse(expiresAt) <= Date.parse(referenceTime);
+}

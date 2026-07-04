@@ -4,7 +4,7 @@ import {
   groupCandidatesByEntity,
   type EntityCandidate,
   type EntityGroup
-} from "../../recall/entity-expansion.js";
+} from "../../recall/expansion/entity-expansion.js";
 
 function candidate(objectId: string, canonicalEntities: readonly string[] | null | undefined): EntityCandidate {
   return { objectId, canonicalEntities };

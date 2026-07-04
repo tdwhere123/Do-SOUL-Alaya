@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { type EventLogEntry } from "@do-soul/alaya-protocol";
-import { type CoUsageCounterPort, type PathRelationProposalEventPublisherPort } from "../../path-graph/path-relation-proposal-service.js";
+import { type CoUsageCounterPort, type PathRelationProposalEventPublisherPort } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 export interface CounterRow {
   count: number;

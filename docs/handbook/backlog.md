@@ -7,7 +7,7 @@ archived to `docs/archive/backlog-resolved-historical.md`.
 ## Issue Numbering
 
 Issues are numbered `#BL-NNN` in plain decimal sequence.
-**Next available number**: `#BL-060`.
+**Next available number**: `#BL-061`.
 
 ---
 
@@ -60,6 +60,14 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 **Context**: B2 subordinated non-evidence fusion streams to base weight. A warm-seeding A/B harness does not exist (same constraint as R5 gate / #BL-052).
 
 **Close condition**: a warm-seeding A/B confirms no warm recall regression from base-weight priors; or "warm-neutral on real corpus" verdict against R5 archive.
+
+### #BL-060 — SQLite worker queue for blocking storage operations
+
+**Status**: Open (deferred by recall-conformant review fix loop). **Due**: after S7 async SQLite comparison is reviewed.
+
+**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering.
+
+**Close condition**: a worker-thread write queue or reviewed async SQLite replacement keeps EventLog-first / transaction-CAS invariants intact and improves concurrent recall tail latency against the S7 witness.
 
 
 ## Out of Alaya Scope (Permanently Rejected)

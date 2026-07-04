@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseEvidenceSourceChunkRef } from "../../recall/coarse-candidates.js";
+import { parseEvidenceSourceChunkRef } from "../../recall/coarse-filter/coarse-candidates.js";
 
 describe("parseEvidenceSourceChunkRef", () => {
   describe("default (turn/chunk only) — unchanged behavior", () => {

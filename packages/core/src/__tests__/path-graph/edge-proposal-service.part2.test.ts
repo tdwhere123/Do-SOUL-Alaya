@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EdgeProposalStatus, EdgeProposalTriggerSource } from "@do-soul/alaya-protocol";
-import { AUTO_ACCEPT_FLOOR_BY_TRIGGER, AUTO_ACCEPT_REVIEWER_IDENTITY, EdgeProposalService } from "../../path-graph/edge-proposal-service.js";
+import { AUTO_ACCEPT_FLOOR_BY_TRIGGER, AUTO_ACCEPT_REVIEWER_IDENTITY, EdgeProposalService } from "../../path-graph/edge-proposals/edge-proposal-service.js";
 import { createAutoAcceptHarness, createEventPublisher, createMemoryRepo, createPathCandidatePort, createProposalRepo } from "./edge-proposal-service-test-fixtures.js";
 
 describe("EdgeProposalService", () => {

@@ -10,7 +10,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
-import { buildRecallEvidencePack } from "../../recall/recall-evidence-pack.js";
+import { buildRecallEvidencePack } from "../../recall/runtime/recall-evidence-pack.js";
 
 interface RecallFixture {
   readonly fixture_id: string;

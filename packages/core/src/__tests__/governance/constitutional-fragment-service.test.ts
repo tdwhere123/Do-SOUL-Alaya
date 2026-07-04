@@ -1,6 +1,6 @@
 import { ConstitutionalFragmentRegisteredPayloadSchema, ConstitutionalFragmentSchema, ConstitutionalFragmentRegistrationSchema, EventLogEntrySchema, RuntimeGovernanceEventType, type ConstitutionalFragment, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { ConstitutionalFragmentService, type ConstitutionalFragmentStorePort } from "../../governance/constitutional-fragment-service.js";
+import { ConstitutionalFragmentService, type ConstitutionalFragmentStorePort } from "../../governance/policy/constitutional-fragment-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 
 import { FIXED_LATER, FIXED_NOW, createContentAddressedFragmentId, createDefaultFragmentId, createEventPublisher, createStore, hashContent, parseFragmentId } from "./constitutional-fragment-service.test-support.js";

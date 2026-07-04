@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildPathRelation, type MaterializePathRelationInput } from "../../path-graph/path-relation-proposal-materialization.js";
+import { buildPathRelation, type MaterializePathRelationInput } from "../../path-graph/edge-proposals/path-relation-proposal-materialization.js";
 import {
   contentDrivenStrength,
   contentTokenJaccard,
   pathRelContentStrengthEnabled
-} from "../../path-graph/path-content-strength.js";
-import { scorePathRelationExpansion } from "../../recall/path-relations.js";
+} from "../../path-graph/producers/path-content-strength.js";
+import { scorePathRelationExpansion } from "../../recall/expansion/path-relations.js";
 
 const FLAG = "ALAYA_PATHREL_CONTENT_STRENGTH";
 const PATH_ID = "11111111-1111-4111-8111-aaaaaaaaaaaa";

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { CoreError } from "@do-soul/alaya-core";
-import { registerHealthInboxRoutes } from "../../routes/health-inbox.js";
+import { registerHealthInboxRoutes } from "../../routes/garden/health-inbox.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 function buildApp(services: Parameters<typeof registerHealthInboxRoutes>[1]): Hono {

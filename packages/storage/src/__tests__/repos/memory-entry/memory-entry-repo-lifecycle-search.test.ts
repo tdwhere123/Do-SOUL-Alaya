@@ -387,4 +387,61 @@ describe("SqliteMemoryEntryRepo lifecycle search and reference queries", () => {
 
     expect(diagnostics).not.toHaveBeenCalled();
   });
+
+  it("findByEvidenceRefs matches exact JSON values instead of substring patterns", async () => {
+    const { repo } = await createRepo();
+    const exact = createMemoryEntry({
+      object_id: "4a444444-4444-4444-8444-444444444444",
+      evidence_refs: ["ev-1", "ev_%_literal"]
+    });
+    const substringOnly = createMemoryEntry({
+      object_id: "5a555555-5555-4555-8555-555555555555",
+      evidence_refs: ["prefix-ev-1-suffix", "evX%Xliteral"]
+    });
+    await repo.create(exact);
+    await repo.create(substringOnly);
+
+    const rows = await repo.findByEvidenceRefs("workspace-1", ["ev-1", "ev_%_literal"]);
+
+    expect(rows.map((row) => row.object_id)).toEqual([exact.object_id]);
+  });
+
+  it("findByEvidenceRefs follows evidence ref updates through the indexed mapping table", async () => {
+    const { repo } = await createRepo();
+    const entry = await repo.create(
+      createMemoryEntry({
+        object_id: "6a666666-6666-4666-8666-666666666666",
+        evidence_refs: ["old-evidence"]
+      })
+    );
+
+    await repo.update(entry.object_id, {
+      evidence_refs: ["new-evidence"],
+      updated_at: "2026-03-21T07:00:00.000Z"
+    });
+
+    expect((await repo.findByEvidenceRefs("workspace-1", ["old-evidence"])).map((row) => row.object_id)).toEqual([]);
+    expect((await repo.findByEvidenceRefs("workspace-1", ["new-evidence"])).map((row) => row.object_id)).toEqual([
+      entry.object_id
+    ]);
+  });
+
+  it("hard deletes prune the evidence ref index table", async () => {
+    const { database, repo } = await createRepo();
+    const entry = await repo.create(
+      createMemoryEntry({
+        object_id: "7a777777-7777-4777-8777-777777777777",
+        retention_state: "tombstoned",
+        updated_at: "2026-03-19T07:00:00.000Z",
+        evidence_refs: ["delete-evidence"]
+      })
+    );
+
+    await repo.hardDeleteTombstoned(entry.object_id);
+
+    const rows = database.connection
+      .prepare("SELECT memory_id FROM memory_entry_evidence_refs WHERE memory_id = ?")
+      .all(entry.object_id);
+    expect(rows).toEqual([]);
+  });
 });

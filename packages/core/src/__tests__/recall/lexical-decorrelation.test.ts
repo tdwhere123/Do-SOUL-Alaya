@@ -13,9 +13,9 @@ import {
   WorkspaceKind,
   WorkspaceState
 } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import { buildRecallFusionDetails } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const WS = "workspace-1";

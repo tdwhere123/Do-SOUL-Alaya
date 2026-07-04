@@ -3,8 +3,8 @@ import {
   CoherenceEdgeProducerService,
   type CoherenceEdgeMintPort,
   type CoherencePairSourcePort
-} from "../../path-graph/coherence-edge-producer-service.js";
-import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/path-relation-proposal-service.js";
+} from "../../path-graph/producers/coherence-edge-producer-service.js";
+import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 function pairSourceOf(pairs: readonly string[]): CoherencePairSourcePort {
   return {

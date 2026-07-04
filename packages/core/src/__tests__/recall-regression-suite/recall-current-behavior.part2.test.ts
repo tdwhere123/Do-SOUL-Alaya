@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, StorageTier, type RecallPolicy } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
-import { compareRecallCandidates } from "../../recall/recall-service-helpers.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
+import { compareRecallCandidates } from "../../recall/runtime/recall-service-helpers.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { WS, activeConstraint, candidate, deps, memory, pathRelation, task, withBudgets, withEmbedding } from "./recall-current-behavior-test-fixtures.js";
 
 describe("recall regression suite", () => {

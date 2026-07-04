@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ReconciliationService } from "../../governance/reconciliation-service.js";
+import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 
 describe("ReconciliationService projection metadata", () => {

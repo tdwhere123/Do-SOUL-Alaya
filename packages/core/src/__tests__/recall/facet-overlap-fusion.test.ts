@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails } from "../../recall/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import { buildRecallFusionDetails } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const POLICY = {} as RecallPolicy;
@@ -104,6 +104,34 @@ describe("facet_overlap fusion stream", () => {
       .toBeGreaterThan(0);
     expect(withFacets.get(goldKey)?.fused_score ?? 0)
       .toBeGreaterThan(baseline.get(goldKey)?.fused_score ?? 0);
+  });
+
+  it("uses real facet overlap count as the fused-rank tie breaker", () => {
+    const highOverlap = createMemoryEntry({
+      object_id: GOLD_ID,
+      content: "Later memory with two answer facets.",
+      created_at: "2026-03-21T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }, { facet: "location_place" }]
+    });
+    const lowOverlap = createMemoryEntry({
+      object_id: DISTRACTOR_ID,
+      content: "Earlier memory with one answer facet.",
+      created_at: "2026-03-20T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }]
+    });
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        { entry: highOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 } },
+        { entry: lowOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 } }
+      ],
+      policy: POLICY,
+      supplementaryData: supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }),
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.fused_rank).toBe(1);
+    expect(fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`)?.fused_rank).toBe(2);
   });
 
   it("facet flag is not part of the unified kernel contract", () => {

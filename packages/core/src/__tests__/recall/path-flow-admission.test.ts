@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { createCoarseCandidateAdder } from "../../recall/coarse-filter-admission.js";
-import type { CoarseCandidateDraft } from "../../recall/coarse-candidates.js";
+import { createCoarseCandidateAdder } from "../../recall/coarse-filter/coarse-filter-admission.js";
+import type { CoarseCandidateDraft } from "../../recall/coarse-filter/coarse-candidates.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const OBJ = "00000000-0000-4000-8000-0000000000d4";

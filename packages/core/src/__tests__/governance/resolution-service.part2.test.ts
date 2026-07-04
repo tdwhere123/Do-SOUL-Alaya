@@ -8,7 +8,7 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "@do-soul/alaya-storage";
-import { ClaimService, type ClaimServiceDependencies } from "../../governance/claim-service.js";
+import { ClaimService, type ClaimServiceDependencies } from "../../governance/claims/claim-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import {
   REAL_SQLITE_TEST_WORKSPACE_ID,

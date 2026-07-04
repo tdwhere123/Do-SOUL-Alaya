@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   answerCoRelevantPairKeysFromHq,
   normalizeHqTokens
-} from "../../path-graph/hq-answer-overlap.js";
+} from "../../path-graph/producers/hq-answer-overlap.js";
 
 describe("normalizeHqTokens", () => {
   it("lowercases, folds whitespace, and drops question-template + stop words", () => {

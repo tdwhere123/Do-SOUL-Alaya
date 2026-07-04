@@ -14,7 +14,7 @@ import { createManifestationContextLensAssembler } from "../manifestation/contex
 import {
   buildSingleUsedAnchorPayload,
   type SingleUsedAnchorTelemetryEmitter
-} from "../routes/recall-utilization.js";
+} from "../routes/memory/recall-utilization.js";
 import { createRecallUtilizationService } from "../services/recall-utilization-service.js";
 import { createGlobalMemoryRecallCachePort } from "./daemon-runtime-support.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";

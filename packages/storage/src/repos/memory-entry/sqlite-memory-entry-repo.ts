@@ -11,6 +11,7 @@ import {
   createMemoryEntryWithinTransaction,
   type MemoryEntryCreateWorkflowHost
 } from "./create-workflow.js";
+import type { MemoryEntryEvidenceRefIndexHost } from "./evidence-ref-index.js";
 import {
   autonomousTombstone,
   archiveMemoryEntry,
@@ -61,6 +62,7 @@ export class SqliteMemoryEntryRepo
   implements
     MemoryEntryRepo,
     MemoryEntryCreateWorkflowHost,
+    MemoryEntryEvidenceRefIndexHost,
     MemoryEntrySearchWorkflowHost,
     MemoryEntryLifecycleWorkflowHost,
     MemoryEntryUpdateWorkflowHost
@@ -70,6 +72,12 @@ export class SqliteMemoryEntryRepo
   >;
   public get createStatement() {
     return this.statementHolder.active().createStatement;
+  }
+  public get deleteEvidenceRefsByMemoryStatement(): SqliteRunStatement {
+    return this.statementHolder.active().deleteEvidenceRefsByMemoryStatement;
+  }
+  public get insertEvidenceRefStatement(): SqliteRunStatement {
+    return this.statementHolder.active().insertEvidenceRefStatement;
   }
   public get findByIdStatement(): SqliteGetStatement {
     return this.statementHolder.active().findByIdStatement;
@@ -250,6 +258,10 @@ export class SqliteMemoryEntryRepo
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     return await this.readQueries.findByScopeClassAll(workspaceId, scopeClass);
+  }
+
+  public async countByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<number> {
+    return await this.readQueries.countByScopeClass(workspaceId, scopeClass);
   }
 
   public async findByWorkspaceIdWithConflict(

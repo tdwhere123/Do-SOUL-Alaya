@@ -5,7 +5,7 @@ import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
 import {
   isRequestBodyTooLargeError,
   REQUEST_BODY_TOO_LARGE_MESSAGE
-} from "../routes/shared.js";
+} from "../routes/shared/shared.js";
 import { CORRELATION_ID_HEADER, REQUEST_ID_HEADER } from "../runtime/app.js";
 
 const SAFE_PUBLIC_VALIDATION_MESSAGES = new Set([

@@ -266,6 +266,21 @@ export class MemoryEntryReadQueries {
     }
   }
 
+  public async countByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<number> {
+    const parsedScopeClass = parseScopeClass(scopeClass);
+
+    try {
+      const row = this.statements.countByScopeClassHotStatement.get(workspaceId, parsedScopeClass) as CountRow | undefined;
+      return readCount(row);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to count memory entries for workspace ${workspaceId} and scope class ${parsedScopeClass}.`,
+        error
+      );
+    }
+  }
+
   public async findByWorkspaceIdWithConflict(
     workspaceId: string,
     page?: MemoryEntryListPageOptions

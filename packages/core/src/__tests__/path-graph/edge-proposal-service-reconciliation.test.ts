@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EdgeProposalStatus } from "@do-soul/alaya-protocol";
-import { EdgeProposalService } from "../../path-graph/edge-proposal-service.js";
-import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
+import { EdgeProposalService } from "../../path-graph/edge-proposals/edge-proposal-service.js";
+import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 import {
   createEventPublisher,
   createIdGenerator,

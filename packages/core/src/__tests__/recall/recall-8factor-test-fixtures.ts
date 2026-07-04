@@ -16,7 +16,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type { RecallServiceDependencies } from "../../recall/recall-service.js";
-import { PATH_PLASTICITY_WEIGHT } from "../../recall/recall-service-helpers.js";
+import { PATH_PLASTICITY_WEIGHT } from "../../recall/runtime/recall-service-helpers.js";
 
 export function createTaskSurface(displayName = "Implement recall"): TaskObjectSurface {
   return {

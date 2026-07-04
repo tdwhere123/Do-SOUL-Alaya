@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { ConflictDetectionService } from "../../governance/conflict-detection-service.js";
-import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/path-relation-proposal-service.js";
+import { ConflictDetectionService } from "../../governance/reconciliation/conflict-detection-service.js";
+import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 import { createMemoryEntry } from "./conflict-detection-service.test-support.js";
 

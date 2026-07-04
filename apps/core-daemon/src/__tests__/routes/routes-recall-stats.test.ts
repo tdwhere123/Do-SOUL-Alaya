@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { CoreError } from "@do-soul/alaya-core";
-import { registerRecallStatsRoutes } from "../../routes/recall-stats.js";
+import { registerRecallStatsRoutes } from "../../routes/memory/recall-stats.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 const SAMPLE_STATS = {

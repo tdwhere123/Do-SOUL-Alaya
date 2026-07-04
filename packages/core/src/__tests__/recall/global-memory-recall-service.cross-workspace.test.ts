@@ -4,7 +4,7 @@ import { EventPublisher } from "../../runtime/event-publisher.js";
 import {
   createGlobalMemoryRecallPort,
   type GlobalMemoryRecallInvalidationNotifier
-} from "../../recall/global-memory-recall-service.js";
+} from "../../recall/runtime/global-memory-recall-service.js";
 
 describe("GlobalMemoryRecallService cross-workspace invalidation", () => {
   it("invalidates cached recall entries in another workspace view via notifier delivery", async () => {

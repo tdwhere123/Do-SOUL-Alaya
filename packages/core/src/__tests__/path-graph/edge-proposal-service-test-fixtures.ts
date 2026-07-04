@@ -1,9 +1,9 @@
 import { vi } from "vitest";
 import { EdgeProposalStatus, type EdgeProposal } from "@do-soul/alaya-protocol";
-import { EdgeProposalService, type EdgeProposalRepoPort } from "../../path-graph/edge-proposal-service.js";
+import { EdgeProposalService, type EdgeProposalRepoPort } from "../../path-graph/edge-proposals/edge-proposal-service.js";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
-import type { PathCandidateSink } from "../../path-graph/path-candidate-sink.js";
-import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
+import type { PathCandidateSink } from "../../path-graph/producers/path-candidate-sink.js";
+import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 export function createProposalRepo(options: {
   readonly beforeUpdateReview?: (proposalId: string) => void;

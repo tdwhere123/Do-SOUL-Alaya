@@ -4,7 +4,7 @@ import {
   GreenGovernanceEventType,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
-import { GovernanceLeaseService } from "../../governance/governance-lease-service.js";
+import { GovernanceLeaseService } from "../../governance/policy/governance-lease-service.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {

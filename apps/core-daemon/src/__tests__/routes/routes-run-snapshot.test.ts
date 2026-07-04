@@ -10,12 +10,12 @@ import {
   type RunHotState
 } from "@do-soul/alaya-protocol";
 import { runRouteServices } from "../support/route-service-stubs.js";
-import { registerRunRoutes } from "../../routes/runs.js";
+import { registerRunRoutes } from "../../routes/workspace/runs.js";
 import {
   enrichRunSnapshot,
   resetSnapshotCacheForTesting,
   type SnapshotCursorState
-} from "../../routes/run-snapshot.js";
+} from "../../routes/workspace/run-snapshot.js";
 
 afterEach(() => {
   resetSnapshotCacheForTesting();

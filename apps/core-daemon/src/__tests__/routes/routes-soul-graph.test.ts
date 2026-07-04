@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { registerSoulGraphRoutes } from "../../routes/soul-graph.js";
+import { registerSoulGraphRoutes } from "../../routes/memory/soul-graph.js";
 import type { SoulGraph } from "@do-soul/alaya-protocol";
 
 describe("soul graph routes", () => {

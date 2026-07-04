@@ -4,7 +4,7 @@ import { CoreError } from "../../shared/errors.js";
 import {
   DeferredObligationService,
   type DeferredObligationRepoPort
-} from "../../governance/deferred-obligation-service.js";
+} from "../../governance/policy/deferred-obligation-service.js";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
 
 const FIXED_NOW = "2026-04-15T12:00:00.000Z";

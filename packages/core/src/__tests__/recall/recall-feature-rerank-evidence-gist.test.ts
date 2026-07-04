@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import { RECALL_RERANK_EVIDENCE_ONLY_FACTOR, buildRerankPoolIdf, computeRerankFeatures } from "../../recall/recall-feature-rerank.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import { RECALL_RERANK_EVIDENCE_ONLY_FACTOR, buildRerankPoolIdf, computeRerankFeatures } from "../../recall/rerank/recall-feature-rerank.js";
 
 describe("recall feature rerank — evidence-gist field (B2)", () => {
 it("returns identical features when no evidence gist is supplied (regression guard)", () => {

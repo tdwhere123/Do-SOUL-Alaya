@@ -24,7 +24,7 @@ import {
   type ConfigRepo
 } from "@do-soul/alaya-storage";
 
-import { registerConfigRoutes } from "../../routes/config.js";
+import { registerConfigRoutes } from "../../routes/workspace/config.js";
 import { appConfigServiceStub } from "../support/app-config-service-stub.js";
 import { configRouteServices } from "../support/route-service-stubs.js";
 

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   parseQueryTimeWindow,
   scoreTemporalQueryWindow,
   temporalQueryWindowEnabled
-} from "../../recall/temporal-fusion-scoring.js";
+} from "../../recall/scoring/temporal-fusion-scoring.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 describe("temporalQueryWindowEnabled", () => {

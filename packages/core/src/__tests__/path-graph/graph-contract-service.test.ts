@@ -7,7 +7,7 @@ import {
   type PathGraphSnapshot,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { GraphContractService } from "../../path-graph/graph-contract-service.js";
+import { GraphContractService } from "../../path-graph/path-relations/graph-contract-service.js";
 
 describe("GraphContractService", () => {
   it("derives a read-only path graph contract from active PathRelation data", async () => {

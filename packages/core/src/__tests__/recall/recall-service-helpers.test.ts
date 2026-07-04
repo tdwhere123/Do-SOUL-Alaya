@@ -9,8 +9,8 @@ import {
   estimateTokens,
   mapBudgetPenalty,
   resolveActivationWeights
-} from "../../recall/recall-service-helpers.js";
-import { makeTokenEstimator } from "../../recall/recall-service-types.js";
+} from "../../recall/runtime/recall-service-helpers.js";
+import { makeTokenEstimator } from "../../recall/runtime/recall-service-types.js";
 
 function snapshot(overrides: Partial<BudgetSnapshot> = {}): BudgetSnapshot {
   return {

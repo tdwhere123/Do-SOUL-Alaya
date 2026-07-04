@@ -3,10 +3,10 @@ import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
   resolveFusionContribution,
   resolveRrfFusionWeights
-} from "../../recall/fusion-delivery-adaptive-scoring.js";
-import { activeFusionStreams, RECALL_FUSION_DEFAULT_WEIGHTS } from "../../recall/fusion-delivery-streams.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+} from "../../recall/delivery/fusion-delivery-adaptive-scoring.js";
+import { activeFusionStreams, RECALL_FUSION_DEFAULT_WEIGHTS } from "../../recall/delivery/fusion-delivery-streams.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 function emptySupplementaryData(query: string): RecallSupplementaryData {

@@ -3,9 +3,9 @@ import {
   AnswersWithEdgeProducerService,
   type AnswerCoRelevancePairSourcePort,
   type AnswersWithEdgeMintPort
-} from "../../path-graph/answers-with-edge-producer-service.js";
-import { HqAnswerOverlapPairSource } from "../../path-graph/hq-answer-overlap.js";
-import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/path-relation-proposal-service.js";
+} from "../../path-graph/producers/answers-with-edge-producer-service.js";
+import { HqAnswerOverlapPairSource } from "../../path-graph/producers/hq-answer-overlap.js";
+import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 function pairSourceOf(pairs: readonly string[]): AnswerCoRelevancePairSourcePort {
   return { answerCoRelevantPairKeys: async () => new Set(pairs) };

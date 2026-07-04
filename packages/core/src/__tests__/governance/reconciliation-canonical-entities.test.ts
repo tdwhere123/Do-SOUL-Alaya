@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
 import { type SqliteMemoryEntryRepo } from "@do-soul/alaya-storage";
-import { ReconciliationService } from "../../governance/reconciliation-service.js";
+import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 import { baseInput, createDeps, type DecideFn } from "./reconciliation-service.test-support.js";
 import {
   closeReconciliationTestDatabases,

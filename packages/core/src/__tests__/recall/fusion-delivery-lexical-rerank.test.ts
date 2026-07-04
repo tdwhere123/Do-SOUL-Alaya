@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { RecallFusionStream } from "../../recall/recall-service-types.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
-import { prioritizeStrongLexicalDeliveryWindowCandidates } from "../../recall/fusion-delivery-lexical-rerank.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallFusionBreakdown, RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import type { RecallFusionStream } from "../../recall/runtime/recall-service-types.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { prioritizeStrongLexicalDeliveryWindowCandidates } from "../../recall/delivery/fusion-delivery-lexical-rerank.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallFusionBreakdown, RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 type FusedCandidate = Readonly<{

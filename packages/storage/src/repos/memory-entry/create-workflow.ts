@@ -2,10 +2,14 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { buildMemoryEntryCreateParams } from "./create-params.js";
+import {
+  syncMemoryEntryEvidenceRefIndex,
+  type MemoryEntryEvidenceRefIndexHost
+} from "./evidence-ref-index.js";
 import { parseMemoryEntry } from "./row-mapper.js";
 import type { SqliteRunStatement } from "./statement-types.js";
 
-export interface MemoryEntryCreateWorkflowHost {
+export interface MemoryEntryCreateWorkflowHost extends MemoryEntryEvidenceRefIndexHost {
   readonly db: StorageDatabase;
   readonly createStatement: SqliteRunStatement;
   transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
@@ -16,7 +20,7 @@ export async function createMemoryEntry(
   entry: MemoryEntry
 ): Promise<Readonly<MemoryEntry>> {
   const parsedEntry = parseMemoryEntry(entry);
-  runCreateStatement(this, parsedEntry);
+  this.transaction(() => runCreateStatement(this, parsedEntry), { immediate: true });
   return parsedEntry;
 }
 
@@ -43,6 +47,7 @@ function runCreateStatement(
 ): void {
   try {
     host.createStatement.run(...buildMemoryEntryCreateParams(parsedEntry));
+    syncMemoryEntryEvidenceRefIndex(host, parsedEntry);
   } catch (error) {
     throw new StorageError(
       "QUERY_FAILED",

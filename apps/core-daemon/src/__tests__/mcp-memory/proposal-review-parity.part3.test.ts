@@ -19,7 +19,7 @@ import {
 
 import { createApp } from "../../runtime/app.js";
 
-import type { ProposalRouteServices } from "../../routes/proposals.js";
+import type { ProposalRouteServices } from "../../routes/governance/proposals.js";
 
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
 

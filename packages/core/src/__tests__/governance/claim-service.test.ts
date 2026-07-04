@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClaimLifecycleState, TransitionCausedBy, type EventLogEntry, type Slot } from "@do-soul/alaya-protocol";
-import { ClaimService, derivePrecedenceBasis } from "../../governance/claim-service.js";
-import { CanonicalAliasService } from "../../governance/canonical-alias-service.js";
+import { ClaimService, derivePrecedenceBasis } from "../../governance/claims/claim-service.js";
+import { CanonicalAliasService } from "../../governance/claims/canonical-alias-service.js";
 import { StubEventPublisher } from "../support/event-publisher-stub.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 

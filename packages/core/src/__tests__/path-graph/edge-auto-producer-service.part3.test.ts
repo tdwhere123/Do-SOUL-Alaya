@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EdgeAutoProducerService } from "../../path-graph/edge-auto-producer-service.js";
+import { EdgeAutoProducerService } from "../../path-graph/producers/edge-auto-producer-service.js";
 import { createDeps, createMemoryEntry } from "./edge-auto-producer-service-test-fixtures.js";
 
 describe("EdgeAutoProducerService", () => {

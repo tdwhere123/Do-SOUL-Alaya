@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { buildSynonymExpansionTable, compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall/recall-query-probes.js";
+import { buildSynonymExpansionTable, compileRecallQueryProbes, expandLexicalTerms, splitLexicalTokens } from "../../recall/query/recall-query-probes.js";
 import {
   __resetCjkSegmentationStateForTests,
   __setCjkSegmentationLoaderForTests,

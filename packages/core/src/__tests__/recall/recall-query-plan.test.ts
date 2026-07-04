@@ -3,8 +3,8 @@ import {
   classifyRecallIntent,
   extractRecallAnchors,
   intentSplitsByAnchor
-} from "../../recall/recall-query-plan.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
+} from "../../recall/query/recall-query-plan.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 
 const anchorsFor = (query: string) => extractRecallAnchors(compileRecallQueryProbes(query));
 const intentFor = (query: string) => classifyRecallIntent(compileRecallQueryProbes(query));

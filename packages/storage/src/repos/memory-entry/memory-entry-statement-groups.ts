@@ -10,6 +10,11 @@ export interface MemoryEntryCreateStatements {
   readonly createStatement: SqliteStatement;
 }
 
+export interface MemoryEntryEvidenceRefIndexStatements {
+  readonly deleteEvidenceRefsByMemoryStatement: SqliteStatement;
+  readonly insertEvidenceRefStatement: SqliteStatement;
+}
+
 export interface MemoryEntryReadStatements {
   readonly findByIdStatement: SqliteStatement;
   readonly findByWorkspaceHotStatement: SqliteStatement;
@@ -26,6 +31,7 @@ export interface MemoryEntryReadStatements {
   readonly countByDimensionHotStatement: SqliteStatement;
   readonly findByScopeClassHotStatement: SqliteStatement;
   readonly findByScopeClassHotPagedStatement: SqliteStatement;
+  readonly countByScopeClassHotStatement: SqliteStatement;
   readonly findByWorkspaceHotConflictPagedStatement: SqliteStatement;
   readonly countByWorkspaceHotConflictStatement: SqliteStatement;
   readonly findByDimensionHotConflictPagedStatement: SqliteStatement;
@@ -117,6 +123,17 @@ const MEMORY_ENTRY_CREATE_SQL: SqlDefinitionMap<MemoryEntryCreateStatements> = {
         forget_disposition,
         forget_disposition_ref
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `
+};
+
+const MEMORY_ENTRY_EVIDENCE_REF_INDEX_SQL: SqlDefinitionMap<MemoryEntryEvidenceRefIndexStatements> = {
+  deleteEvidenceRefsByMemoryStatement: `
+      DELETE FROM memory_entry_evidence_refs
+      WHERE memory_id = ?
+    `,
+  insertEvidenceRefStatement: `
+      INSERT OR IGNORE INTO memory_entry_evidence_refs(workspace_id, memory_id, evidence_ref)
+      VALUES (?, ?, ?)
     `
 };
 
@@ -212,6 +229,11 @@ ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
 ${ACTIVE_MEMORY_FILTER_SQL}      ORDER BY created_at ASC, object_id ASC
       LIMIT ? OFFSET ?
     `,
+  countByScopeClassHotStatement: `
+      SELECT COUNT(*) AS total
+      FROM memory_entries
+      WHERE workspace_id = ? AND scope_class = ? AND storage_tier = 'hot'
+${ACTIVE_MEMORY_FILTER_SQL}    `,
   findByWorkspaceHotConflictPagedStatement: `
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
@@ -446,6 +468,12 @@ export function prepareMemoryEntryCreateStatements(
   db: StorageDatabase
 ): MemoryEntryCreateStatements {
   return prepareStatementGroup(db, MEMORY_ENTRY_CREATE_SQL);
+}
+
+export function prepareMemoryEntryEvidenceRefIndexStatements(
+  db: StorageDatabase
+): MemoryEntryEvidenceRefIndexStatements {
+  return prepareStatementGroup(db, MEMORY_ENTRY_EVIDENCE_REF_INDEX_SQL);
 }
 
 export function prepareMemoryEntryReadStatements(db: StorageDatabase): MemoryEntryReadStatements {

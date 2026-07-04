@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildPathInflowByTarget,
   scorePathRelationExpansion
-} from "../../recall/path-relations.js";
+} from "../../recall/expansion/path-relations.js";
 import { createPathRelation } from "./recall-service-test-fixtures.js";
 
 const SRC = "memory-src";

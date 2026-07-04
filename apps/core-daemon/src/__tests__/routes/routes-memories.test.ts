@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { registerMemoryRoutes } from "../../routes/memories.js";
+import { registerMemoryRoutes } from "../../routes/memory/memories.js";
 import { memoryRouteServices } from "../support/route-service-stubs.js";
 
 type MemoryRouteFixture = {
@@ -28,6 +28,7 @@ describe("memory routes (HTTP surface narrowed)", () => {
       findByDimension: vi.fn(async () => [{ object_id: "m2" }]),
       countByDimension: vi.fn(async () => 1),
       findByScopeClass: vi.fn(async (): Promise<MemoryRouteFixture[]> => []),
+      countByScopeClass: vi.fn(async () => 0),
       findByScopeClassWithConflict: vi.fn(async (): Promise<MemoryRouteFixture[]> => [
         { object_id: "m-project-conflict-1", dimension: "fact", scope_class: "project", contradiction_count: 2 },
         { object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }
@@ -119,6 +120,24 @@ describe("memory routes (HTTP surface narrowed)", () => {
       success: true,
       data: [{ object_id: "m-project-conflict-2", dimension: "fact", scope_class: "project", contradiction_count: 1 }]
     });
+  });
+
+  it("uses a scope-class count instead of scanning scope-class pages", async () => {
+    const { app, memoryService } = buildApp();
+    memoryService.findByScopeClass.mockResolvedValueOnce([{ object_id: "m-project", scope_class: "project" }]);
+    memoryService.countByScopeClass.mockResolvedValueOnce(9);
+
+    const response = await app.request("/workspaces/ws-1/memories?scope_class=project&limit=1&offset=2");
+
+    expect(response.status).toBe(200);
+    expect(memoryService.findByScopeClass).toHaveBeenCalledTimes(1);
+    expect(memoryService.findByScopeClass).toHaveBeenCalledWith("ws-1", "project", {
+      limit: 1,
+      offset: 2
+    });
+    expect(memoryService.countByScopeClass).toHaveBeenCalledTimes(1);
+    expect(memoryService.countByScopeClass).toHaveBeenCalledWith("ws-1", "project");
+    expect(response.headers.get("x-total-count")).toBe("9");
   });
 
   it("retains GET /runs/:runId/memories with run scoping", async () => {

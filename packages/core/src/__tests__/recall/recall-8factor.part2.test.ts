@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MemoryDimension, RecallContextEventType, type ActivationWeights } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
-import { PATH_PLASTICITY_WEIGHT } from "../../recall/recall-service-helpers.js";
+import { PATH_PLASTICITY_WEIGHT } from "../../recall/runtime/recall-service-helpers.js";
 import { createDependencies, createMemoryEntry, createSlot, createTaskSurface, expectScoreWeightTotalConserved } from "./recall-8factor-test-fixtures.js";
 
 import { FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD } from "./recall-8factor.test-support.js";

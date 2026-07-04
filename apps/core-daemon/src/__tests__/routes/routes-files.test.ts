@@ -13,7 +13,7 @@ import {
   type EventLogEntry,
   type FileRecord
 } from "@do-soul/alaya-protocol";
-import { registerFileRoutes } from "../../routes/files.js";
+import { registerFileRoutes } from "../../routes/workspace/files.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();

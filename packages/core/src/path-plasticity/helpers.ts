@@ -10,7 +10,7 @@ import {
   type UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import { classifyPathImportance } from "../manifestation/importance-gate.js";
-import type { PromotionPlan } from "../path-graph/path-manifestation-policy.js";
+import type { PromotionPlan } from "../path-graph/path-relations/path-manifestation-policy.js";
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import type {
   MutableObjectUsageCounts,

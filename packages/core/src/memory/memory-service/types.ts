@@ -103,6 +103,7 @@ export interface MemoryEntryReadPort {
     workspaceId: string,
     scopeClass: ScopeClass
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  countByScopeClass?(workspaceId: string, scopeClass: ScopeClass): Promise<number>;
   findByWorkspaceIdWithConflict?(
     workspaceId: string,
     page?: MemoryListPageOptions

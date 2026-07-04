@@ -7,7 +7,7 @@ import type {
   UsageProofRecord
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher, EventPublisherInput } from "../runtime/event-publisher.js";
-import type { PromotionPlan } from "../path-graph/path-manifestation-policy.js";
+import type { PromotionPlan } from "../path-graph/path-relations/path-manifestation-policy.js";
 
 export interface UsageProofReaderPort {
   /** invariant: records are listed in `(sinceIso, untilIso]` so watermarks do not double-count. */

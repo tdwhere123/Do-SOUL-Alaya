@@ -9,10 +9,10 @@ import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate,
   type FineAssessmentRankDiagnostics
-} from "../../recall/fine-assessment-selection.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+} from "../../recall/delivery/fine-assessment-selection.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 
 describe("selectFineAssessmentCandidates", () => {
   it("uses a single token estimate per candidate that reaches token-budget evaluation", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
-import { EdgeAutoProducerService } from "../../path-graph/edge-auto-producer-service.js";
-import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
+import { EdgeAutoProducerService } from "../../path-graph/producers/edge-auto-producer-service.js";
+import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 import { createDeps, createMemoryEntry } from "./edge-auto-producer-service-test-fixtures.js";
 
 describe("EdgeAutoProducerService", () => {

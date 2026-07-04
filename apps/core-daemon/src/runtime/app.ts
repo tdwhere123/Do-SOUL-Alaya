@@ -6,57 +6,57 @@ import { cors } from "hono/cors";
 import { readBuildInfo } from "./build-info.js";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
-import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/budget.js";
-import { registerClaimRoutes, type ClaimRouteServices } from "../routes/claims.js";
-import { registerConfigRoutes, type ConfigRouteServices } from "../routes/config.js";
+import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/governance/budget.js";
+import { registerClaimRoutes, type ClaimRouteServices } from "../routes/governance/claims.js";
+import { registerConfigRoutes, type ConfigRouteServices } from "../routes/workspace/config.js";
 import {
   registerConflictMatrixRoutes,
   type ConflictMatrixRouteServices
-} from "../routes/conflict-matrix.js";
+} from "../routes/governance/conflict-matrix.js";
 import {
   registerE2eEventTriggerRoutes,
   type E2eEventTriggerRouteServices
-} from "../routes/e2e-event-triggers.js";
-import { registerEmbeddingStatusRoutes, type EmbeddingStatusRouteServices } from "../routes/embedding-status.js";
-import { registerEvidenceRoutes, type EvidenceRouteServices } from "../routes/evidence.js";
-import { registerFileRoutes, type FileRouteServices } from "../routes/files.js";
-import { registerGardenBacklogRoutes } from "../routes/garden-backlog.js";
-import { registerGlobalMemoryRoutes, type GlobalMemoryRouteServices } from "../routes/global-memory.js";
-import { registerGovernanceRoutes, type GovernanceRouteServices } from "../routes/governance.js";
-import { registerGreenStatusRoutes, type GreenStatusRouteServices } from "../routes/green-status.js";
+} from "../routes/workspace/e2e-event-triggers.js";
+import { registerEmbeddingStatusRoutes, type EmbeddingStatusRouteServices } from "../routes/workspace/embedding-status.js";
+import { registerEvidenceRoutes, type EvidenceRouteServices } from "../routes/memory/evidence.js";
+import { registerFileRoutes, type FileRouteServices } from "../routes/workspace/files.js";
+import { registerGardenBacklogRoutes } from "../routes/garden/garden-backlog.js";
+import { registerGlobalMemoryRoutes, type GlobalMemoryRouteServices } from "../routes/memory/global-memory.js";
+import { registerGovernanceRoutes, type GovernanceRouteServices } from "../routes/governance/governance.js";
+import { registerGreenStatusRoutes, type GreenStatusRouteServices } from "../routes/garden/green-status.js";
 import {
   registerHealthInboxRoutes,
   type HealthInboxRouteServices
-} from "../routes/health-inbox.js";
-import { registerHealthJournalRoutes, type HealthJournalRouteServices } from "../routes/health-journal.js";
-import { registerMemoryRoutes, type MemoryRouteServices } from "../routes/memories.js";
-import { registerOverrideRoutes, type OverrideRouteServices } from "../routes/overrides.js";
+} from "../routes/garden/health-inbox.js";
+import { registerHealthJournalRoutes, type HealthJournalRouteServices } from "../routes/garden/health-journal.js";
+import { registerMemoryRoutes, type MemoryRouteServices } from "../routes/memory/memories.js";
+import { registerOverrideRoutes, type OverrideRouteServices } from "../routes/governance/overrides.js";
 import {
   registerProjectMappingRoutes,
   type ProjectMappingRouteServices
-} from "../routes/project-mapping.js";
-import { registerProposalRoutes, type ProposalRouteServices } from "../routes/proposals.js";
-import { registerRecallRoutes, type RecallRouteServices } from "../routes/recall.js";
+} from "../routes/workspace/project-mapping.js";
+import { registerProposalRoutes, type ProposalRouteServices } from "../routes/governance/proposals.js";
+import { registerRecallRoutes, type RecallRouteServices } from "../routes/memory/recall.js";
 import {
   registerRecallStatsRoutes,
   type RecallStatsRouteServices
-} from "../routes/recall-stats.js";
+} from "../routes/memory/recall-stats.js";
 import {
   registerRecallUtilizationRoutes,
   type RecallUtilizationRouteServices
-} from "../routes/recall-utilization.js";
-import { registerRunRoutes, type RunRouteServices } from "../routes/runs.js";
-import { registerSecurityStatusRoutes, type SecurityStatusRouteServices } from "../routes/security-status.js";
-import { registerSignalRoutes, type SignalRouteServices } from "../routes/signals.js";
-import { registerSlotRoutes, type SlotRouteServices } from "../routes/slots.js";
-import { registerPathGraphRoutes, type PathGraphRouteServices } from "../routes/path-graph.js";
-import { registerSoulGraphRoutes, type SoulGraphRouteServices } from "../routes/soul-graph.js";
-import { registerSoulRoutes, type SoulRouteServices } from "../routes/soul.js";
-import { registerSoulSearchRoutes, type SoulSearchRouteServices } from "../routes/soul-search.js";
-import { registerStatusRoutes, type StatusRouteServices } from "../routes/status.js";
-import { registerSynthesisRoutes, type SynthesisRouteServices } from "../routes/syntheses.js";
-import { registerWorkspaceFileRoutes, type WorkspaceFilesRouteServices } from "../routes/workspace-files.js";
-import { registerWorkspaceRoutes, type WorkspaceRouteServices } from "../routes/workspaces.js";
+} from "../routes/memory/recall-utilization.js";
+import { registerRunRoutes, type RunRouteServices } from "../routes/workspace/runs.js";
+import { registerSecurityStatusRoutes, type SecurityStatusRouteServices } from "../routes/workspace/security-status.js";
+import { registerSignalRoutes, type SignalRouteServices } from "../routes/workspace/signals.js";
+import { registerSlotRoutes, type SlotRouteServices } from "../routes/governance/slots.js";
+import { registerPathGraphRoutes, type PathGraphRouteServices } from "../routes/workspace/path-graph.js";
+import { registerSoulGraphRoutes, type SoulGraphRouteServices } from "../routes/memory/soul-graph.js";
+import { registerSoulRoutes, type SoulRouteServices } from "../routes/memory/soul.js";
+import { registerSoulSearchRoutes, type SoulSearchRouteServices } from "../routes/memory/soul-search.js";
+import { registerStatusRoutes, type StatusRouteServices } from "../routes/workspace/status.js";
+import { registerSynthesisRoutes, type SynthesisRouteServices } from "../routes/memory/syntheses.js";
+import { registerWorkspaceFileRoutes, type WorkspaceFilesRouteServices } from "../routes/workspace/workspace-files.js";
+import { registerWorkspaceRoutes, type WorkspaceRouteServices } from "../routes/workspace/workspaces.js";
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;

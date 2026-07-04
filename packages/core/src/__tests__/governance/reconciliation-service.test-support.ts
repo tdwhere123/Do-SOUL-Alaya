@@ -7,8 +7,8 @@ import {
   type ReconciliationLlmDecisionPort,
   type ReconciliationServiceDependencies,
   type ReconciliationVerdictApplier
-} from "../../governance/reconciliation-service.js";
-import { jaccardIndex, tokenize } from "../../governance/reconciliation-service-internal.js";
+} from "../../governance/reconciliation/reconciliation-service.js";
+import { jaccardIndex, tokenize } from "../../governance/reconciliation/reconciliation-service-internal.js";
 
 export function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {

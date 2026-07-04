@@ -8,7 +8,7 @@ import {
 import {
   GOVERNANCE_CEILING_FAILSAFE_BAND,
   clampManifestationByGovernance,
-  memoryGovernanceCeiling} from "../../path-graph/path-manifestation-policy.js";
+  memoryGovernanceCeiling} from "../../path-graph/path-relations/path-manifestation-policy.js";
 
 describe("memoryGovernanceCeiling — governance HARD CEILING band mapping", () => {
   // Helper: a contribution with a TRUSTED recall_allowed-birth provenance marker

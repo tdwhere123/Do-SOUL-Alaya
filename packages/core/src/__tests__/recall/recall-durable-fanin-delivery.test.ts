@@ -7,14 +7,11 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { RECALL_FUSION_STREAMS, RecallService } from "../../recall/recall-service.js";
-import { applySessionCoverageRerank } from "../../recall/fusion-delivery-session-coverage.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
 import type {
   RecallFusionBreakdown,
-  RecallFusionStream,
-  RecallSupplementaryData
-} from "../../recall/recall-service-types.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
+  RecallFusionStream
+} from "../../recall/runtime/recall-service-types.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -23,8 +20,7 @@ import {
 } from "./recall-service-test-fixtures.js";
 
 // Synthesis-router delivery via the public RecallService.recall() surface
-// (result.candidates + result.diagnostics); session-coverage rerank via its real
-// exported helper.
+// (result.candidates + result.diagnostics).
 
 const WS = "workspace-1";
 
@@ -280,69 +276,3 @@ function coverageCandidate(input: {
     })
   });
 }
-
-function coverageSupplementary(): RecallSupplementaryData {
-  return { queryProbes: compileRecallQueryProbes(null) } as unknown as RecallSupplementaryData;
-}
-describe("session-coverage delivery rerank", () => {
-  beforeEach(() => {
-    // force opens the shared coverage gate so the band mechanics run directly.
-    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("promotes a bottom-of-window distinct-session candidate within the band", () => {
-    const ordered = [
-      coverageCandidate({ objectId: "a", surfaceId: "s1", fusedScore: 1.0 }),
-      coverageCandidate({ objectId: "b", surfaceId: "s1", fusedScore: 0.98 }),
-      coverageCandidate({ objectId: "c", surfaceId: "s1", fusedScore: 0.96 }),
-      coverageCandidate({ objectId: "d", surfaceId: "s1", fusedScore: 0.94 }),
-      coverageCandidate({ objectId: "e", surfaceId: "s2", fusedScore: 0.93 })
-    ];
-    const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 5);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "e", "b", "c", "d"]);
-  });
-
-  it("does not demote a represented session for a much-weaker distinct session outside the band", () => {
-    const ordered = [
-      coverageCandidate({ objectId: "a", surfaceId: "s1", fusedScore: 1.0 }),
-      coverageCandidate({ objectId: "b", surfaceId: "s1", fusedScore: 0.95 }),
-      coverageCandidate({ objectId: "c", surfaceId: "s2", fusedScore: 0.5 })
-    ];
-    const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 3);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("is a no-op when the whole window is one session", () => {
-    const ordered = [
-      coverageCandidate({ objectId: "a", surfaceId: "s1", fusedScore: 1.0 }),
-      coverageCandidate({ objectId: "b", surfaceId: "s1", fusedScore: 0.9 }),
-      coverageCandidate({ objectId: "c", surfaceId: "s1", fusedScore: 0.8 })
-    ];
-    const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 3);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("never pulls a candidate from outside the top-K window into it", () => {
-    const ordered = [
-      coverageCandidate({ objectId: "a", surfaceId: "s1", fusedScore: 1.0 }),
-      coverageCandidate({ objectId: "b", surfaceId: "s1", fusedScore: 0.95 }),
-      coverageCandidate({ objectId: "c", surfaceId: "s2", fusedScore: 0.99 })
-    ];
-    const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 2);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("disables when the band env is 0", () => {
-    vi.stubEnv("ALAYA_RECALL_SESSION_COVERAGE_BAND", "0");
-    const ordered = [
-      coverageCandidate({ objectId: "a", surfaceId: "s1", fusedScore: 1.0 }),
-      coverageCandidate({ objectId: "b", surfaceId: "s1", fusedScore: 0.98 }),
-      coverageCandidate({ objectId: "e", surfaceId: "s2", fusedScore: 0.93 })
-    ];
-    const result = applySessionCoverageRerank(ordered, coverageSupplementary(), 3);
-    expect(result.map((candidate) => candidate.entry.object_id)).toEqual(["a", "b", "e"]);
-  });
-});

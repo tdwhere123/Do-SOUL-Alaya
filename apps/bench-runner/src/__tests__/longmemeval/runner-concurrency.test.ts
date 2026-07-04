@@ -10,7 +10,7 @@ import {
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
-} from "../longmemeval/longmemeval-fixture.js";
+} from "./longmemeval-fixture.js";
 import {
   buildLongMemEvalWorkerShardPlans,
   runLongMemEvalConcurrent,

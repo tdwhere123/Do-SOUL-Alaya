@@ -17,9 +17,9 @@ import {
   type ResolutionServiceClaimServicePort,
   type ResolutionServiceMemoryRepoPort,
   type ResolutionServiceMemoryServicePort
-} from "../../governance/resolution-service.js";
+} from "../../governance/proposals/resolution-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
-import type { DeferredObligationService } from "../../governance/deferred-obligation-service.js";
+import type { DeferredObligationService } from "../../governance/policy/deferred-obligation-service.js";
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 interface Harness {
   readonly service: ResolutionService;

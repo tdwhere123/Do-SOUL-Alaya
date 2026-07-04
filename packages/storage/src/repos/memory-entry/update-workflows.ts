@@ -3,6 +3,10 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString } from "../shared/validators.js";
 import {
+  syncMemoryEntryEvidenceRefIndex,
+  type MemoryEntryEvidenceRefIndexHost
+} from "./evidence-ref-index.js";
+import {
   parseDynamicsUpdateFields,
   parseMemoryEntryRow,
   parseStorageTier,
@@ -17,12 +21,13 @@ import type {
   MemoryEntryRepoUpdateFields
 } from "./types.js";
 
-export interface MemoryEntryUpdateWorkflowHost {
+export interface MemoryEntryUpdateWorkflowHost extends MemoryEntryEvidenceRefIndexHost {
   readonly db: StorageDatabase;
   readonly updateStatement: SqliteRunStatement;
   readonly updateScopedStatement: SqliteRunStatement;
   readonly findByIdStatement: SqliteGetStatement;
   readonly findById: (objectId: string) => Promise<Readonly<MemoryEntry> | null>;
+  transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
 }
 
 interface ParsedTierUpdateRequest {
@@ -67,31 +72,31 @@ export async function updateMemoryEntry(
   const parsedFields = parseUpdateFields(fields);
 
   try {
-    const result = this.updateStatement.run(
-      parsedFields.content ?? null,
-      parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
-      parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
-      parsedFields.storage_tier ?? null,
-      parsedFields.confidence ?? null,
-      parsedFields.retention_state ?? null,
-      parsedFields.last_used_at ?? null,
-      parsedFields.last_hit_at ?? null,
-      ...buildProjectionUpdateParams(parsedFields),
-      parsedFields.updated_at,
-      objectId
-    );
+    return this.transaction(() => {
+      const result = this.updateStatement.run(
+        parsedFields.content ?? null,
+        parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
+        parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
+        parsedFields.storage_tier ?? null,
+        parsedFields.confidence ?? null,
+        parsedFields.retention_state ?? null,
+        parsedFields.last_used_at ?? null,
+        parsedFields.last_hit_at ?? null,
+        ...buildProjectionUpdateParams(parsedFields),
+        parsedFields.updated_at,
+        objectId
+      );
 
-    if (result.changes === 0) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-    }
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+      }
 
-    const updated = await this.findById(objectId);
-
-    if (updated === null) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
-    }
-
-    return updated;
+      const updated = loadUpdatedMemoryEntry(this, objectId, "update");
+      if (parsedFields.evidence_refs !== undefined) {
+        syncMemoryEntryEvidenceRefIndex(this, updated);
+      }
+      return updated;
+    }, { immediate: true });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;
@@ -111,32 +116,35 @@ export async function updateScopedMemoryEntry(
   const parsedFields = parseUpdateFields(fields);
 
   try {
-    const result = this.updateScopedStatement.run(
-      parsedFields.content ?? null,
-      parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
-      parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
-      parsedFields.storage_tier ?? null,
-      parsedFields.confidence ?? null,
-      parsedFields.retention_state ?? null,
-      parsedFields.last_used_at ?? null,
-      parsedFields.last_hit_at ?? null,
-      ...buildProjectionUpdateParams(parsedFields),
-      parsedFields.updated_at,
-      objectId,
-      parsedWorkspaceId
-    );
+    return this.transaction(() => {
+      const result = this.updateScopedStatement.run(
+        parsedFields.content ?? null,
+        parsedFields.domain_tags === undefined ? null : JSON.stringify(parsedFields.domain_tags),
+        parsedFields.evidence_refs === undefined ? null : JSON.stringify(parsedFields.evidence_refs),
+        parsedFields.storage_tier ?? null,
+        parsedFields.confidence ?? null,
+        parsedFields.retention_state ?? null,
+        parsedFields.last_used_at ?? null,
+        parsedFields.last_hit_at ?? null,
+        ...buildProjectionUpdateParams(parsedFields),
+        parsedFields.updated_at,
+        objectId,
+        parsedWorkspaceId
+      );
 
-    if (result.changes === 0) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-    }
+      if (result.changes === 0) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+      }
 
-    const updated = await this.findById(objectId);
-
-    if (updated === null || updated.workspace_id !== parsedWorkspaceId) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
-    }
-
-    return updated;
+      const updated = loadUpdatedMemoryEntry(this, objectId, "scoped update");
+      if (updated.workspace_id !== parsedWorkspaceId) {
+        throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found after update.`);
+      }
+      if (parsedFields.evidence_refs !== undefined) {
+        syncMemoryEntryEvidenceRefIndex(this, updated);
+      }
+      return updated;
+    }, { immediate: true });
   } catch (error) {
     if (error instanceof StorageError) {
       throw error;

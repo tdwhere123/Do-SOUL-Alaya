@@ -14,7 +14,7 @@ import {
   governanceAuthorisesLevel,
   manifestationAuthorityFor,
   planPromotion
-} from "../../path-graph/path-manifestation-policy.js";
+} from "../../path-graph/path-relations/path-manifestation-policy.js";
 
 describe("path-manifestation-policy authority matrix", () => {
   it("hint_only authorises no manifestation levels", () => {

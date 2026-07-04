@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   wrapRecallFaultWarn,
   type RecallFailureHealthInboxPort
-} from "../../recall/recall-failure-health-inbox.js";
+} from "../../recall/runtime/recall-failure-health-inbox.js";
 
 describe("wrapRecallFaultWarn", () => {
   it("records an inbox entry for an unexpected error name and still calls the base warn", async () => {

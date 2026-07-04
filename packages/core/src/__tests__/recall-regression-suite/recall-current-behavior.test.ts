@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RecallService } from "../../recall/recall-service.js";
-import { selectCandidatesWithinBudgets } from "../../recall/recall-candidate-builder.js";
-import { compareRecallCandidates } from "../../recall/recall-service-helpers.js";
+import { selectCandidatesWithinBudgets } from "../../recall/runtime/recall-candidate-builder.js";
+import { compareRecallCandidates } from "../../recall/runtime/recall-service-helpers.js";
 import { WS, candidate, deps, evidenceCapsule, fineConfig, memory, pathRelation, task, withBudgets } from "./recall-current-behavior-test-fixtures.js";
 
 describe("recall regression suite", () => {

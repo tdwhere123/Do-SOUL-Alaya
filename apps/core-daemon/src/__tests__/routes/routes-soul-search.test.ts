@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
-import { registerSoulSearchRoutes } from "../../routes/soul-search.js";
+import { registerSoulSearchRoutes } from "../../routes/memory/soul-search.js";
 
 function buildApp() {
   const app = new Hono();

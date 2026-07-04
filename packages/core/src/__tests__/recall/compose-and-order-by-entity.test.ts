@@ -6,13 +6,13 @@ import {
   COMPOSE_EVIDENCE_BETA,
   composeAndOrderByEntity,
   composeEntityDeliveryHints
-} from "../../recall/activation-assembly.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import { fineAssess } from "../../recall/fine-assessment.js";
+} from "../../recall/scoring/activation-assembly.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildRecallPolicy } from "../../shared/recall-policy.js";
-import type { FineAssessmentCandidate } from "../../recall/fine-assessment-selection.js";
-import type { CoarseRecallCandidate, RecallSupplementaryData } from "../../recall/recall-service-types.js";
+import type { FineAssessmentCandidate } from "../../recall/delivery/fine-assessment-selection.js";
+import type { CoarseRecallCandidate, RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const FLAG = "ALAYA_RECALL_COMPOSE";

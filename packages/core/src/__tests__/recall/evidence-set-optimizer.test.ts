@@ -5,21 +5,21 @@ import {
   type MemoryDimension as MemoryDimensionType,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
-import { applyEvidenceSetDelivery } from "../../recall/evidence-set-optimizer.js";
+import { applyEvidenceSetDelivery } from "../../recall/delivery/evidence-set-optimizer.js";
 import {
   createEvidenceSetCoverageState,
   evidenceSetCoverageBonus,
   evidenceSetCoverageEnabled,
   recordEvidenceSetSelection
-} from "../../recall/evidence-set-coverage.js";
+} from "../../recall/delivery/evidence-set-coverage.js";
 import { RECALL_FUSION_STREAMS } from "../../recall/recall-service.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
 import type {
   RecallFusionBreakdown,
   RecallFusionStream,
   RecallSupplementaryData
-} from "../../recall/recall-service-types.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
+} from "../../recall/runtime/recall-service-types.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 
 function emptyStreamRanks(): Record<RecallFusionStream, number | null> {
   return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, null])) as Record<
@@ -643,6 +643,16 @@ describe("applyEvidenceSetDelivery S4 convergence locks", () => {
     const bonus = evidenceSetCoverageBonus(state, cand, supp);
     expect(bonus).toBeLessThanOrEqual(0.1);
     expect(bonus).toBeCloseTo(0.1, 10);
+  });
+
+  it("does not add a session bonus when no cluster evidence ties the candidate to the selected set", () => {
+    const seed = s4Candidate({ objectId: "seed", fusedScore: 1, surfaceId: "sB", evidenceAxis: 1 });
+    const sameSessionOnly = s4Candidate({ objectId: "same", fusedScore: 0.5, surfaceId: "sB" });
+    const supp = s4Supplementary({});
+    const state = createEvidenceSetCoverageState([seed, sameSessionOnly], supp);
+    recordEvidenceSetSelection(state, seed, supp);
+
+    expect(evidenceSetCoverageBonus(state, sameSessionOnly, supp)).toBe(0);
   });
 
   it("ALAYA_RECALL_S4_COVERAGE=0 forces S4 off without flipping to flat baseline (A/C/E ablation)", () => {

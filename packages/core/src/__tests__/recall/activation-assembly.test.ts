@@ -3,9 +3,9 @@ import type { RecallScoreFactors } from "@do-soul/alaya-protocol";
 import {
   composeRecallEnabled,
   type ComposedActivationCandidate
-} from "../../recall/activation-assembly.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/fusion-delivery-scoring.js";
-import type { FineAssessmentCandidate } from "../../recall/fine-assessment-selection.js";
+} from "../../recall/scoring/activation-assembly.js";
+import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+import type { FineAssessmentCandidate } from "../../recall/delivery/fine-assessment-selection.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 const FLAG = "ALAYA_RECALL_COMPOSE";

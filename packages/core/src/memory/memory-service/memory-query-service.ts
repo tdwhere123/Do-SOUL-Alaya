@@ -177,6 +177,17 @@ export class MemoryQueryService {
     );
   }
 
+  public async countByScopeClass(
+    workspaceId: string,
+    scopeClass: ScopeClass
+  ): Promise<number> {
+    const countByScopeClass = this.memoryEntryRepo.countByScopeClass;
+    if (countByScopeClass !== undefined) {
+      return await countByScopeClass.call(this.memoryEntryRepo, workspaceId, scopeClass);
+    }
+    return (await this.findByScopeClassAll(workspaceId, scopeClass)).length;
+  }
+
   public findByWorkspaceIdWithConflict(
     workspaceId: string,
     page?: MemoryListPageOptions

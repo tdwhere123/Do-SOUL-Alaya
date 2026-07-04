@@ -17,12 +17,12 @@ import {
 import {
   AuditorSchedulingAdvisor,
   type PathVerificationBiasReaderPort
-} from "../../governance/auditor-scheduling-advisor.js";
+} from "../../governance/policy/auditor-scheduling-advisor.js";
 import { ManifestationResolver } from "../../manifestation/manifestation-resolver.js";
 import {
   PathActivationCandidateProducer,
   type PathActivationCandidateProducerPathReaderPort
-} from "../../path-graph/path-activation-candidate-producer.js";
+} from "../../path-graph/producers/path-activation-candidate-producer.js";
 
 const NOW = "2026-04-17T09:00:00.000Z";
 const WORKSPACE = "workspace-alpha";

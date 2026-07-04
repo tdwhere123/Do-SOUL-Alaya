@@ -3,7 +3,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 
-import { type PromotionPlan, planPromotion } from "../path-graph/path-manifestation-policy.js";
+import { type PromotionPlan, planPromotion } from "../path-graph/path-relations/path-manifestation-policy.js";
 
 import { PATH_PLASTICITY_CONSTANTS } from "./constants.js";
 import {

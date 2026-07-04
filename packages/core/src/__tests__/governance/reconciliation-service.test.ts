@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
-import { PreWriteRecallService } from "../../governance/pre-write-recall-service.js";
-import { ReconciliationService } from "../../governance/reconciliation-service.js";
+import { PreWriteRecallService } from "../../governance/reconciliation/pre-write-recall-service.js";
+import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 
 import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
 

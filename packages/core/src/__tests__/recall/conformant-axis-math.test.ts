@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
-import { noisyOrDecorrelate } from "../../recall/conformant-evidence-math.js";
+import { noisyOrDecorrelate } from "../../recall/scoring/conformant-evidence-math.js";
 import {
   collapseEvidenceRelevance,
   collapsePathInflow
-} from "../../recall/conformant-fusion-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/recall-service-types.js";
+} from "../../recall/scoring/conformant-fusion-scoring.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 
 const CONF_ENV = [
   "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP",

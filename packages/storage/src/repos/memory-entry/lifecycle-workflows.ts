@@ -2,6 +2,10 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import {
+  deleteMemoryEntryEvidenceRefIndex,
+  type MemoryEntryEvidenceRefIndexHost
+} from "./evidence-ref-index.js";
+import {
   parseForgetDisposition,
   parseLifecycleState,
   parseMemoryEntryRow,
@@ -11,7 +15,7 @@ import {
 import type { SqliteGetStatement, SqliteRunStatement } from "./statement-types.js";
 import type { AutonomousTombstoneInput } from "./types.js";
 
-export interface MemoryEntryLifecycleWorkflowHost {
+export interface MemoryEntryLifecycleWorkflowHost extends MemoryEntryEvidenceRefIndexHost {
   readonly db: StorageDatabase;
   readonly findByIdStatement: SqliteGetStatement;
   readonly transitionLifecycleStatement: SqliteRunStatement;
@@ -195,6 +199,7 @@ function pruneDeletedMemoryGraph(
   onDeleted: (() => void) | undefined
 ): void {
   onDeleted?.();
+  deleteMemoryEntryEvidenceRefIndex(host, objectId);
   host.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
   host.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
 }
@@ -418,6 +423,7 @@ export async function hardDeleteTombstonedMemoryEntry(
       }
 
       // invariant: ineligible tombstones never strip live path topology.
+      deleteMemoryEntryEvidenceRefIndex(this, objectId);
       this.deleteOrphanedPathRelationsStatement.run(objectId, objectId);
       this.deleteOrphanedCoUsageCountersStatement.run(objectId, objectId);
     });

@@ -209,6 +209,10 @@ export class MemoryService {
     return this.query.findByScopeClassAll(workspaceId, scopeClass);
   }
 
+  public countByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<number> {
+    return this.query.countByScopeClass(workspaceId, scopeClass);
+  }
+
   public findByWorkspaceIdWithConflict(
     workspaceId: string,
     page?: MemoryListPageOptions

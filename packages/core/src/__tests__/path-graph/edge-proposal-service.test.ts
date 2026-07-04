@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EdgeProposalStatus, EdgeProposalTriggerSource } from "@do-soul/alaya-protocol";
-import { EdgeProposalService } from "../../path-graph/edge-proposal-service.js";
-import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
+import { EdgeProposalService } from "../../path-graph/edge-proposals/edge-proposal-service.js";
+import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 import { createAutoAcceptHarness, createEventPublisher, createIdGenerator, createMemoryRepo, createPathCandidatePort, createProposalRepo } from "./edge-proposal-service-test-fixtures.js";
 
 describe("EdgeProposalService", () => {

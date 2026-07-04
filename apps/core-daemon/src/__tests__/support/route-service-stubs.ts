@@ -13,18 +13,18 @@ import type {
   WorkspaceService
 } from "@do-soul/alaya-core";
 import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
-import type { ClaimRouteServices } from "../../routes/claims.js";
-import type { ConflictMatrixRouteServices } from "../../routes/conflict-matrix.js";
-import type { ConfigRouteServices } from "../../routes/config.js";
-import type { EvidenceRouteServices } from "../../routes/evidence.js";
-import type { GlobalMemoryRouteServices } from "../../routes/global-memory.js";
-import type { MemoryRouteServices } from "../../routes/memories.js";
-import type { ProposalRouteServices } from "../../routes/proposals-types.js";
-import type { RecallRouteServices } from "../../routes/recall.js";
-import type { RunRouteServices } from "../../routes/runs.js";
-import type { SignalRouteServices } from "../../routes/signals.js";
-import type { SynthesisRouteServices } from "../../routes/syntheses.js";
-import type { WorkspaceRouteServices } from "../../routes/workspaces.js";
+import type { ClaimRouteServices } from "../../routes/governance/claims.js";
+import type { ConflictMatrixRouteServices } from "../../routes/governance/conflict-matrix.js";
+import type { ConfigRouteServices } from "../../routes/workspace/config.js";
+import type { EvidenceRouteServices } from "../../routes/memory/evidence.js";
+import type { GlobalMemoryRouteServices } from "../../routes/memory/global-memory.js";
+import type { MemoryRouteServices } from "../../routes/memory/memories.js";
+import type { ProposalRouteServices } from "../../routes/governance/proposals-types.js";
+import type { RecallRouteServices } from "../../routes/memory/recall.js";
+import type { RunRouteServices } from "../../routes/workspace/runs.js";
+import type { SignalRouteServices } from "../../routes/workspace/signals.js";
+import type { SynthesisRouteServices } from "../../routes/memory/syntheses.js";
+import type { WorkspaceRouteServices } from "../../routes/workspace/workspaces.js";
 import { implementPort, type LooseStub } from "./implement-port.js";
 
 // Assemble any route-service bag from a structurally-loose override. The

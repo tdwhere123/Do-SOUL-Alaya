@@ -4,18 +4,18 @@ import {
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import { type NodeStrategy } from "../conversation/task-surface-builder.js";
-import { assertActivationWeightsSumToOne } from "./recall-service-helpers.js";
+import { assertActivationWeightsSumToOne } from "./runtime/recall-service-helpers.js";
 import type {
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort
-} from "./recall-service-types.js";
-import { buildDefaultPolicy } from "./orchestration.js";
+} from "./runtime/recall-service-types.js";
+import { buildDefaultPolicy } from "./runtime/orchestration.js";
 import { getCoreConfig } from "../config/install-core-config.js";
-import { executeRecall, type RecallExecutionParams } from "./recall-service-runner.js";
-import { wrapRecallFaultWarn } from "./recall-failure-health-inbox.js";
+import { executeRecall, type RecallExecutionParams } from "./runtime/recall-service-runner.js";
+import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
 
-export { classifyGlobalCandidate } from "./recall-service-helpers.js";
+export { classifyGlobalCandidate } from "./runtime/recall-service-helpers.js";
 export type {
   KeywordSearchResult,
   RecallMemoryListPageOptions,
@@ -38,10 +38,10 @@ export type {
   RecallServiceWarnPort,
   RecallTokenEconomy,
   TokenEstimator
-} from "./recall-service-types.js";
-export { makeTokenEstimator } from "./recall-service-types.js";
-export { computeRecallTokenEconomy } from "./diagnostics.js";
-export { RECALL_FUSION_STREAMS } from "./fusion-delivery.js";
+} from "./runtime/recall-service-types.js";
+export { makeTokenEstimator } from "./runtime/recall-service-types.js";
+export { computeRecallTokenEconomy } from "./runtime/diagnostics.js";
+export { RECALL_FUSION_STREAMS } from "./delivery/fusion-delivery.js";
 
 export class RecallService {
   private readonly generateRuntimeId: () => string;

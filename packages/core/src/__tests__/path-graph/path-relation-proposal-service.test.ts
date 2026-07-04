@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PathRelationSchema, type PathRelation } from "@do-soul/alaya-protocol";
-import { PathRelationProposalService, PATH_RELATION_PROPOSE_THRESHOLD, CO_RECALLED_SEED_PROFILE, type PathRelationProposalRepoPort } from "../../path-graph/path-relation-proposal-service.js";
+import { PathRelationProposalService, PATH_RELATION_PROPOSE_THRESHOLD, CO_RECALLED_SEED_PROFILE, type PathRelationProposalRepoPort } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 import { createCounterStore, createEventPublisher } from "./path-relation-proposal-service.test-support.js";
 

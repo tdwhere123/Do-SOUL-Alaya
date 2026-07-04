@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { type PathAnchorRef, type PathRelation } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
-import type { RecallServicePathExpansionPort } from "../../recall/recall-service-types.js";
+import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {

@@ -7,7 +7,7 @@ import {
 
 import type { EventPublisherInput } from "../runtime/event-publisher.js";
 import { classifyPathImportance } from "../manifestation/importance-gate.js";
-import { type PromotionPlan } from "../path-graph/path-manifestation-policy.js";
+import { type PromotionPlan } from "../path-graph/path-relations/path-manifestation-policy.js";
 
 import {
   buildUpdatesWithPromotion,

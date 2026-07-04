@@ -5,7 +5,7 @@ import { hashMemoryContent } from "../../embedding-recall/helpers.js";
 import type {
   RecallServiceEmbeddingRecallPort,
   RecallServiceMemoryRepoPort
-} from "../../recall/recall-service-types.js";
+} from "../../recall/runtime/recall-service-types.js";
 import {
   createDependencies,
   createMemoryEntry,

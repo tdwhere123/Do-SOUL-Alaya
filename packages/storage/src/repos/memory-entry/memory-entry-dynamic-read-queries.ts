@@ -89,19 +89,19 @@ export class MemoryEntryDynamicReadQueries {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]> {
-    const cappedIds = capEvidenceRefLookupIds(workspaceId, evidenceObjectIds, this.diagnostics);
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
+    const cappedIds = capEvidenceRefLookupIds(parsedWorkspaceId, evidenceObjectIds, this.diagnostics);
     if (cappedIds.length === 0) {
       return Object.freeze([]);
     }
-    const evidenceFilter = buildEvidenceRefsFilter(cappedIds);
     try {
-      const rows = queryEvidenceRefRows(this.statementCache, workspaceId, evidenceFilter);
-      reportEvidenceRefRowCap(workspaceId, cappedIds.length, rows.length, this.diagnostics);
+      const rows = queryEvidenceRefRows(this.statementCache, parsedWorkspaceId, cappedIds);
+      reportEvidenceRefRowCap(parsedWorkspaceId, cappedIds.length, rows.length, this.diagnostics);
       return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to find memory entries by evidence_refs in workspace ${workspaceId}.`,
+        `Failed to find memory entries by evidence_refs in workspace ${parsedWorkspaceId}.`,
         error
       );
     }
@@ -124,25 +124,12 @@ function capEvidenceRefLookupIds(
   return unique.slice(0, FIND_BY_EVIDENCE_REFS_INPUT_CAP);
 }
 
-function buildEvidenceRefsFilter(
-  cappedIds: readonly string[]
-): Readonly<{ readonly sql: string; readonly values: readonly string[] }> {
-  const clauses = cappedIds.map(() => `evidence_refs LIKE ? ESCAPE '\\'`);
-  return {
-    sql: clauses.join(" OR "),
-    values: cappedIds.map(toEvidenceRefLikePattern)
-  };
-}
-
-function toEvidenceRefLikePattern(id: string): string {
-  return `%"${id.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}"%`;
-}
-
 function queryEvidenceRefRows(
   statementCache: DynamicPreparedStatementCache,
   workspaceId: string,
-  evidenceFilter: Readonly<{ readonly sql: string; readonly values: readonly string[] }>
+  evidenceObjectIds: readonly string[]
 ): readonly MemoryEntryRow[] {
+  const placeholders = evidenceObjectIds.map(() => "?").join(", ");
   return statementCache
     .prepare(
       `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -150,11 +137,16 @@ function queryEvidenceRefRows(
        WHERE workspace_id = ?
          AND COALESCE(retention_state, '') != 'tombstoned'
          AND COALESCE(lifecycle_state, '') != 'dormant'
-         AND (${evidenceFilter.sql})
+         AND object_id IN (
+           SELECT memory_id
+           FROM memory_entry_evidence_refs
+           WHERE workspace_id = ?
+             AND evidence_ref IN (${placeholders})
+         )
        ORDER BY object_id ASC
        LIMIT ${FIND_BY_EVIDENCE_REFS_ROW_LIMIT}`
     )
-    .all(workspaceId, ...evidenceFilter.values) as MemoryEntryRow[];
+    .all(workspaceId, workspaceId, ...evidenceObjectIds) as MemoryEntryRow[];
 }
 
 function reportEvidenceRefRowCap(
