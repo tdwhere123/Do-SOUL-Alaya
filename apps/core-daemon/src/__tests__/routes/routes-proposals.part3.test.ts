@@ -38,6 +38,7 @@ import { EventPublisher, PathRelationProposalService } from "@do-soul/alaya-core
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 import { registerProposalRoutes } from "../../routes/proposals.js";
+import { proposalRouteServices } from "../support/route-service-stubs.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -108,12 +109,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
         output: { proposal_id: "proposal-1", status: "created" }
       }))
     };
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
       mcpMemoryToolHandler
-    } as any);
+    }));
     return { app, workspaceService, proposalService, memoryService, mcpMemoryToolHandler };
   }
 
@@ -318,14 +319,14 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       findPending: vi.fn(async () => [])
     };
     const createProposalWithEvents = vi.fn();
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
-      proposalRepo: { createProposalWithEvents },
+      proposalRepo: { createProposalWithEventsIfAbsent: createProposalWithEvents },
       runtimeNotifier: { notifyEntry: vi.fn() },
       mcpMemoryToolHandler: { call: vi.fn() }
-    } as any);
+    }));
 
     const response = await app.request(
       "/workspaces/ws-1/soul/memory/missing/proposals/promote-strictly-governed",
@@ -374,12 +375,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
         input.toolName === "soul.list_pending_proposals" ? await listPending() : await propose()
       )
     };
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
       mcpMemoryToolHandler
-    } as any);
+    }));
 
     const response = await app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/retire", {
       method: "POST"

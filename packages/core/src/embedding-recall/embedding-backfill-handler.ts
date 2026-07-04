@@ -1,9 +1,9 @@
 import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { getCoreConfig } from "../config/install-core-config.js";
 import { toErrorMessage } from "../recall/recall-service-helpers.js";
 import { resolveEmbedText } from "./embed-text-resolver.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
-  BACKFILL_BATCH_CONCURRENCY_ENV,
   BACKFILL_ITEM_RETRY_ATTEMPTS,
   BACKFILL_ITEM_RETRY_DELAY_MS,
   BACKFILL_TIMEOUT_MS,
@@ -67,7 +67,10 @@ export class EmbeddingBackfillHandler {
       dependencies.retryDelayMs === undefined ? BACKFILL_ITEM_RETRY_DELAY_MS : Math.max(0, dependencies.retryDelayMs);
     this.warn = dependencies.warn ?? (() => undefined);
     this.batchConcurrency = resolveBackfillBatchConcurrency(
-      dependencies.batchConcurrency ?? process.env[BACKFILL_BATCH_CONCURRENCY_ENV]
+      dependencies.batchConcurrency ??
+        (getCoreConfig().embedding.backfillConcurrency === undefined
+          ? undefined
+          : String(getCoreConfig().embedding.backfillConcurrency))
     );
   }
 

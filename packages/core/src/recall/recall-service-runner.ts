@@ -2,13 +2,9 @@ import { performance } from "node:perf_hooks";
 import {
   RecallContextEventType,
   SoulRecallCompletedPayloadSchema,
-  type RecallPolicy,
-  type SoulRecallHostContext,
-  type TaskObjectSurface
+  type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import { type NodeStrategy } from "../conversation/task-surface-builder.js";
 import { withEmbeddingSimilarityScores } from "./coarse-candidates.js";
-import { resolveHydeQueryText } from "./query-hyde.js";
 import { fineAssess } from "./fine-assessment.js";
 import {
   applyManifestationBiasSidecar,
@@ -18,27 +14,18 @@ import {
   recordGlobalRecallClassificationsSafely,
   resolvePolicy
 } from "./orchestration.js";
-import { compileRecallQueryProbes, type RecallQueryProbes } from "./recall-query-probes.js";
+import { compileRecallQueryProbes } from "./recall-query-probes.js";
 import {
-  buildRecallDiagnostics,
-  computeRecallTokenEconomy,
   finalizeRecallCandidateDiagnostics,
   resolveEmbeddingProviderDegradationReason,
   resolveEmbeddingProviderStatus
 } from "./diagnostics.js";
-import {
-  normalizeQueryText,
-  type RecallTimeFilter
-} from "./recall-service-helpers.js";
+import { normalizeQueryText } from "./recall-service-helpers.js";
 import type {
-  RecallCandidateDiagnostic,
   RecallDegradationReason,
   RecallEmbeddingProviderStatus,
   RecallResult,
-  RecallServiceDependencies,
-  RecallServiceWarnPort,
-  RecallTokenEconomy,
-  TokenEstimator
+  RecallServiceDependencies
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
 import {
@@ -50,58 +37,24 @@ import {
   type CoarseStageResult,
   type EmbeddingCoarseInjectionResult
 } from "./recall-service-runner-coarse.js";
+import { collectPoolEmbeddingRescore } from "./recall-pool-embedding-rescore.js";
+import { buildRecallResult } from "./recall-result-builder.js";
+import type {
+  FineAssessmentResult,
+  PreparedEmbeddingQuery,
+  PreparedRecallRequest,
+  RecallAssessmentStageResult,
+  RecallExecutionContext,
+  RecallExecutionParams,
+  RecallManifestedResult
+} from "./recall-service-runner-types.js";
+
+export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
+
+type AssessmentStageResult = RecallAssessmentStageResult;
+type ManifestedRecallResult = RecallManifestedResult;
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
-
-export interface RecallExecutionParams {
-  readonly taskSurface: Readonly<TaskObjectSurface>;
-  readonly workspaceId: string;
-  readonly strategy: NodeStrategy;
-  readonly runId?: string | null;
-  readonly policyOverride?: Readonly<RecallPolicy>;
-  readonly timeFilter?: RecallTimeFilter;
-  readonly hostContext?: Readonly<SoulRecallHostContext>;
-  readonly activeConstraintsCap?: number | null;
-}
-
-export interface RecallExecutionContext {
-  readonly dependencies: RecallServiceDependencies;
-  readonly warn: RecallServiceWarnPort;
-  readonly now: () => string;
-  readonly buildDefaultPolicy: (strategy: NodeStrategy, taskSurfaceRef: string) => Readonly<RecallPolicy>;
-  readonly degradationReasons?: Set<RecallDegradationReason>;
-}
-
-type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
-type PreparedEmbeddingQuery = Awaited<ReturnType<typeof prepareEmbeddingSupplementQuery>>;
-type FineAssessmentResult = ReturnType<typeof fineAssess>;
-
-export interface PreparedRecallRequest {
-  readonly policy: Readonly<RecallPolicy>;
-  readonly tokenEstimator: TokenEstimator;
-  readonly queryText: string | null;
-  readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly activeConstraints: ActiveConstraintsResult;
-  readonly winnerMemoryIds: ReadonlySet<string>;
-}
-
-interface AssessmentStageResult {
-  readonly finalAssessment: FineAssessmentResult;
-  readonly supplementaryData: FineAssessmentResult extends never ? never : PreparedRecallSupplementaryData;
-  readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
-  readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
-  readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
-  readonly providerDegradationReason: string | null;
-  readonly recallAfterFusion: number;
-}
-
-type PreparedRecallSupplementaryData = Parameters<typeof fineAssess>[0]["supplementaryData"];
-
-interface ManifestedRecallResult {
-  readonly candidates: RecallResult["candidates"];
-  readonly candidateDiagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-  readonly recallAfterManifestation: number;
-}
 
 export async function executeRecall(
   context: RecallExecutionContext,
@@ -200,44 +153,6 @@ async function assessCandidateStage(
     providerDegradationReason: provider.degradationReason,
     recallAfterFusion: performance.now()
   });
-}
-
-// Default-ON (opt-out via ALAYA_RECALL_EMBED_POOL_RESCORE=off): score pooled candidates by
-// cosine(query, stored-vector) so embedding re-ranks a buried-but-pooled gold — the inverse of
-// injection (which excludes pooled ids). No-op when embedding is disabled. HyDE-aware via
-// resolveHydeQueryText. Paired with embedding_similarity default weight 12 (weight 1 is too weak).
-function embedPoolRescoreEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_EMBED_POOL_RESCORE;
-  return raw !== "off" && raw !== "0" && raw !== "false";
-}
-
-async function collectPoolEmbeddingRescore(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Promise<Readonly<Record<string, number>>> {
-  const service = context.dependencies.embeddingRecallService;
-  if (
-    !embedPoolRescoreEnabled() ||
-    prepared.queryText === null ||
-    service === undefined ||
-    typeof service.scorePoolCandidates !== "function" ||
-    prepared.policy.coarse_filter.semantic_supplement.embedding_enabled !== true
-  ) {
-    return {};
-  }
-  const objectIds = coarse.combinedCoarseCandidates.map((candidate) => candidate.entry.object_id);
-  if (objectIds.length === 0) {
-    return {};
-  }
-  const scores = await service.scorePoolCandidates({
-    workspaceId: params.workspaceId,
-    runId: params.runId ?? null,
-    queryText: resolveHydeQueryText(prepared.queryText)!,
-    objectIds
-  });
-  return Object.fromEntries(scores);
 }
 
 function startEmbeddingSupplementPreparation(
@@ -406,70 +321,5 @@ async function appendRecallCompletedEvent(
       workspace_id: params.workspaceId,
       occurred_at: context.now()
     })
-  });
-}
-
-function buildRecallResult(
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  assessment: AssessmentStageResult,
-  manifested: ManifestedRecallResult,
-  degradationReasons: ReadonlySet<RecallDegradationReason>
-): RecallResult {
-  const phaseLatencyMs = buildPhaseLatencyMs(coarse, assessment, manifested);
-  const tokenEconomy = buildTokenEconomy(assessment, coarse.combinedCoarseCandidates.length, manifested);
-  return Object.freeze({
-    candidates: manifested.candidates,
-    active_constraints: prepared.activeConstraints.constraints,
-    active_constraints_count: prepared.activeConstraints.total_count,
-    total_scanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
-    coarse_filter_count: coarse.combinedCoarseCandidates.length,
-    fine_assessment_count: manifested.candidates.length,
-    degradation_reason: coarse.coarseFilter.degradation_reason,
-    working_projection: null,
-    diagnostics: buildRecallDiagnostics({
-      queryProbes: prepared.queryProbes,
-      totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
-      candidatePoolCount: coarse.combinedCoarseCandidates.length,
-      preBudgetCount: manifested.candidateDiagnostics.length,
-      deliveredCount: manifested.candidates.length,
-      embeddingProviderStatus: assessment.embeddingProviderStatus,
-      providerDegradationReason: assessment.providerDegradationReason,
-      degradationReasons: [...degradationReasons],
-      graphExpansionDiagnostics: coarse.coarseFilter.graphExpansionDiagnostics,
-      candidates: manifested.candidateDiagnostics,
-      tokenEconomy,
-      embeddingWorkspaceScan: assessment.embeddingCoarseInjection.workspaceScan,
-      phaseLatencyMs
-    })
-  });
-}
-
-function buildPhaseLatencyMs(
-  coarse: CoarseStageResult,
-  assessment: AssessmentStageResult,
-  manifested: ManifestedRecallResult
-): Readonly<Record<string, number>> {
-  return Object.freeze({
-    coarse: coarse.recallAfterCoarse - coarse.recallPhaseStart,
-    synthesis: coarse.recallAfterSynthesis - coarse.recallAfterCoarse,
-    fusion: assessment.recallAfterFusion - coarse.recallAfterSynthesis,
-    manifestation: manifested.recallAfterManifestation - assessment.recallAfterFusion
-  });
-}
-
-function buildTokenEconomy(
-  assessment: AssessmentStageResult,
-  coarsePoolSize: number,
-  manifested: ManifestedRecallResult
-): Readonly<RecallTokenEconomy> {
-  const preparedEmbeddingInferenceCalls =
-    assessment.embeddingProviderStatus === "provider_returned" && assessment.preparedEmbeddingQuery.handle?.cacheHit === false ? 1 : 0;
-  return computeRecallTokenEconomy({
-    deliveredCandidates: manifested.candidates,
-    coarsePoolSize,
-    fineEvaluated: coarsePoolSize,
-    preBudgetCandidates: manifested.candidateDiagnostics,
-    embeddingInferenceCalls: assessment.embeddingCoarseInjection.embeddingInferenceCalls + preparedEmbeddingInferenceCalls
   });
 }

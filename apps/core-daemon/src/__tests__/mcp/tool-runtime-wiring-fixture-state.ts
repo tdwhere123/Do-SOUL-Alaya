@@ -73,7 +73,8 @@ const hoisted = vi.hoisted(() => {
       ...((entry as Record<string, unknown>) ?? {})
     })),
     queryByRun: vi.fn(async () => []),
-    queryByRunAll: vi.fn(async () => [])
+    queryByRunAll: vi.fn(async () => []),
+    getStorageConnectionIdentity: () => database
   };
 
   const runtimeNotifier = {

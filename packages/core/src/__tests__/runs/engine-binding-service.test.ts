@@ -10,21 +10,14 @@ import {
   type Workspace
 } from "@do-soul/alaya-protocol";
 import { EngineBindingService } from "../../runs/engine-binding-service.js";
+import { StubEventPublisher, fakeAppendManyWithMutation } from "../support/event-publisher-stub.js";
 
 // Helper: in-test publisher that simulates the appendManyWithMutation contract
 // (sync mutate, batch-array first arg) used by EngineBindingService after #BL-022.
-function fakeAppendManyWithMutation(publishedEvents?: Array<any>) {
-  return vi.fn(async (events: any[], mutate: (entries: any[]) => any) => {
-    if (publishedEvents) {
-      for (const event of events) publishedEvents.push(event);
-    }
-    const persisted = events.map((event, idx) => ({
-      ...event,
-      event_id: `evt_${idx}`,
-      created_at: "2026-03-18T00:00:00.000Z"
-    }));
-    return mutate(persisted);
-  });
+function fakeAppendManyWithMutationForTest(publishedEvents?: Array<unknown>) {
+  return fakeAppendManyWithMutation(
+    publishedEvents as Parameters<typeof fakeAppendManyWithMutation>[0]
+  );
 }
 
 describe("EngineBindingService", () => {
@@ -54,9 +47,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(upsertImpl),
         getById: vi.fn(async (id) => savedRecords.get(id) ?? null)
       },
-      eventPublisher: {
-        appendManyWithMutation: fakeAppendManyWithMutation(publishedEvents)
-      } as any,
+      eventPublisher: new StubEventPublisher(fakeAppendManyWithMutationForTest(publishedEvents)),
       engineTester: {
         testBinding: vi.fn(async () => ({
           provider_type: EngineProvider.OPENAI,
@@ -124,9 +115,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(upsertImpl),
         getById: vi.fn(async (id) => savedRecords.get(id) ?? null)
       },
-      eventPublisher: {
-        appendManyWithMutation: fakeAppendManyWithMutation()
-      } as any,
+      eventPublisher: new StubEventPublisher(fakeAppendManyWithMutationForTest()),
       engineTester: {
         testBinding: vi.fn()
       }
@@ -182,9 +171,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(),
         getById: vi.fn()
       },
-      eventPublisher: {
-        appendManyWithMutation: vi.fn()
-      } as any,
+      eventPublisher: new StubEventPublisher(vi.fn()),
       engineTester
     });
 
@@ -242,9 +229,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(),
         getById: vi.fn(async (id) => records.get(id) ?? null)
       },
-      eventPublisher: {
-        appendManyWithMutation: vi.fn()
-      } as any,
+      eventPublisher: new StubEventPublisher(vi.fn()),
       engineTester: {
         testBinding: vi.fn()
       }
@@ -301,9 +286,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(),
         getById: vi.fn(async (id) => records.get(id) ?? null)
       },
-      eventPublisher: {
-        appendManyWithMutation: vi.fn()
-      } as any,
+      eventPublisher: new StubEventPublisher(vi.fn()),
       engineTester: {
         testBinding: vi.fn()
       }
@@ -343,9 +326,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(),
         getById: vi.fn(async () => foreignBinding)
       },
-      eventPublisher: {
-        appendManyWithMutation: vi.fn()
-      } as any,
+      eventPublisher: new StubEventPublisher(vi.fn()),
       engineTester: {
         testBinding: vi.fn()
       }
@@ -383,9 +364,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(),
         getById: vi.fn(async () => foreignBinding)
       },
-      eventPublisher: {
-        appendManyWithMutation: vi.fn()
-      } as any,
+      eventPublisher: new StubEventPublisher(vi.fn()),
       engineTester: {
         testBinding: vi.fn()
       }
@@ -407,9 +386,7 @@ describe("EngineBindingService", () => {
         upsert: vi.fn(),
         getById: vi.fn(async () => null)
       },
-      eventPublisher: {
-        appendManyWithMutation: vi.fn()
-      } as any,
+      eventPublisher: new StubEventPublisher(vi.fn()),
       engineTester: {
         testBinding: vi.fn()
       }

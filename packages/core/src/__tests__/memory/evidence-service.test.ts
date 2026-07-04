@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { expectFrozenPropertyWriteThrows } from "../support/frozen-mutation.js";
 import {
   EvidenceHealthState,
   MemoryGovernanceEventType,
@@ -312,9 +313,7 @@ describe("EvidenceService", () => {
 
     const created = await service.create(createEvidenceInput());
 
-    expect(() => {
-      (created as any).gist = "mutated";
-    }).toThrow(TypeError);
+    expectFrozenPropertyWriteThrows(created, "gist", "mutated");
   });
 
   it("rejects invalid health transitions", async () => {

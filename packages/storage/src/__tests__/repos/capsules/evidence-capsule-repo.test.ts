@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { expectFrozenPropertyWriteThrows } from "../../support/frozen-mutation.js";
 import {
   EvidenceHealthState,
   RunMode,
@@ -197,9 +198,7 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     const { repo } = await createRepo();
     const created = await repo.create(createEvidenceCapsule());
 
-    expect(() => {
-      (created as any).gist = "mutated";
-    }).toThrow(TypeError);
+    expectFrozenPropertyWriteThrows(created, "gist", "mutated");
   });
 
   it("recalls an English evidence excerpt via the porter word lane", async () => {

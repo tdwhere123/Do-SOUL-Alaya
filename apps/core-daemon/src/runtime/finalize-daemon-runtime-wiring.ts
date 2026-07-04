@@ -2,10 +2,7 @@ import type { AlayaDaemonRuntime } from "./daemon-runtime-types.js";
 import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { HqAnswerOverlapPairSource } from "@do-soul/alaya-core";
-
-type FinalizeDaemonRuntimeWiringInput = {
-  readonly [key: string]: any;
-};
+import type { FinalizeDaemonRuntimeWiringInput } from "../index.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
   input: FinalizeDaemonRuntimeWiringInput
@@ -79,7 +76,8 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
 }
 
 function createCoRecallCoherenceGate(input: FinalizeDaemonRuntimeWiringInput) {
-  if (input.embeddingRecallService === undefined) {
+  const embeddingRecallService = input.embeddingRecallService;
+  if (embeddingRecallService === undefined) {
     return undefined;
   }
 
@@ -88,7 +86,7 @@ function createCoRecallCoherenceGate(input: FinalizeDaemonRuntimeWiringInput) {
       workspaceId: string,
       deliveredObjectIds: readonly string[]
     ): Promise<ReadonlySet<string>> =>
-      input.embeddingRecallService.coherentPairKeys({
+      embeddingRecallService.coherentPairKeys({
         workspaceId,
         runId: null,
         objectIds: deliveredObjectIds,

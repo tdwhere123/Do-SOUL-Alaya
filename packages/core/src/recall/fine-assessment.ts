@@ -3,6 +3,7 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
+import { recallEnvFlagEnabled, readRecallPositiveInt } from "../config/recall-env-access.js";
 import { buildRecallCandidateDedupeKey } from "./recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -125,14 +126,14 @@ function orderFineAssessmentCandidates(
 // Diagnostic (ALAYA_RECALL_DELIVER_FUSED_ORDER): deliver in pure fused-score order,
 // skipping the post-fusion re-rank chain — to measure how much that chain reshapes delivery.
 function deliverFusedOrderEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_DELIVER_FUSED_ORDER;
-  return raw === "on" || raw === "1" || raw === "true";
+  return recallEnvFlagEnabled("ALAYA_RECALL_DELIVER_FUSED_ORDER");
 }
 
 // Opt-in (ALAYA_RECALL_DELIVERY_WINDOW): widen the reorder window past the delivery cap; unset/≤maxEntries → byte-identical.
 function resolveDeliveryReorderWindow(maxEntries: number): number {
-  const raw = Number(process.env.ALAYA_RECALL_DELIVERY_WINDOW);
-  return Number.isFinite(raw) && raw > maxEntries ? Math.floor(raw) : maxEntries;
+  return readRecallPositiveInt("ALAYA_RECALL_DELIVERY_WINDOW", maxEntries) > maxEntries
+    ? readRecallPositiveInt("ALAYA_RECALL_DELIVERY_WINDOW", maxEntries)
+    : maxEntries;
 }
 
 function orderFusedFineAssessmentCandidates(

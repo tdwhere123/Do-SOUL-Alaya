@@ -29,16 +29,25 @@ jobs:
             node: '20.19.0'
             run_hygiene: true
             run_coverage: true
+            run_smoke: false
           - label: ubuntu-node22
             os: ubuntu-latest
             node: '22'
             run_hygiene: false
             run_coverage: false
+            run_smoke: false
           - label: macos-node20
             os: macos-latest
             node: '20.19.0'
             run_hygiene: false
             run_coverage: false
+            run_smoke: false
+          - label: windows-node20
+            os: windows-latest
+            node: '20.19.0'
+            run_hygiene: false
+            run_coverage: false
+            run_smoke: true
     steps:
       - uses: actions/checkout@v4
 
@@ -72,6 +81,18 @@ jobs:
       - name: Hygiene
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:unused
+
+      - name: Guard test as-any
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:test-as-any
+
+      - name: Guard inspector dependency isolation
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run hygiene:inspector-deps
+
+      - name: CLI preflight smoke
+        if: ${{ matrix.run_smoke }}
+        run: node scripts/ci/smoke-built-cli.mjs --preflight-only
 
       - name: Upload coverage baseline
         if: ${{ matrix.run_coverage }}

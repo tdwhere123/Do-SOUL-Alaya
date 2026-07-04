@@ -59,6 +59,8 @@ export interface MemoryEntryRepo {
     }
   ): Readonly<MemoryEntry>;
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
+  // invariant (§7): synchronous read for the single-transaction karma path.
+  findByIdSync?(objectId: string): Readonly<MemoryEntry> | null;
   findByIds(
     workspaceId: string,
     objectIds: readonly string[]
@@ -165,14 +167,30 @@ export interface MemoryEntryRepo {
     fields: MemoryEntryRepoDynamicsUpdateFields,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant (§7): synchronous dynamics write for the single-transaction karma path.
+  updateDynamicsSync?(
+    objectId: string,
+    fields: MemoryEntryRepoDynamicsUpdateFields,
+    updatedAt: string
+  ): Readonly<MemoryEntry>;
   transitionLifecycle(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
     updatedAt: string,
     onTransition?: () => void
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant (§7): synchronous lifecycle transition (revival fallback) for the
+  // single-transaction karma path.
+  transitionLifecycleSync?(
+    objectId: string,
+    lifecycleState: MemoryEntry["lifecycle_state"],
+    updatedAt: string,
+    onTransition?: () => void
+  ): Readonly<MemoryEntry>;
   // invariant (N1): guarded reversible revival; null when the row was not dormant.
   reviveDormant(objectId: string, updatedAt: string): Promise<Readonly<MemoryEntry> | null>;
+  // invariant (§7 + N1): synchronous guarded revival for the single-transaction karma path.
+  reviveDormantSync?(objectId: string, updatedAt: string): Readonly<MemoryEntry> | null;
   // invariant: active -> dormant audit runs in the demotion transaction only on changes>0.
   transitionToDormantIfActive(
     objectId: string,

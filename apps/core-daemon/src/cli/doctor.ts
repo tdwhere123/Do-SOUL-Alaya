@@ -16,7 +16,7 @@ import {
   type GraphHealthSnapshot
 } from "../services/graph-health-service.js";
 import type { BuildInfo } from "../runtime/build-info.js";
-import { doctorArgsSchema, inspectStorage, runBootstrapReconcile, writeHumanSummary } from "./doctor-support.js";
+import { doctorArgsSchema, inspectStorage, inspectStorageGrowth, runBootstrapReconcile, writeHumanSummary } from "./doctor-support.js";
 
 const UNKNOWN_BUILD_INFO: BuildInfo = {
   version: "0.0.0-dev",
@@ -78,8 +78,19 @@ export type GardenKeychainCheck =
       readonly remediation: string;
     }>;
 
+interface RuntimeWiringStatus {
+  readonly request_token_source: "env" | "ephemeral";
+}
+
 export interface DoctorCommandDependencies {
   readonly getToolchainStatus: () => Promise<ToolchainStatus>;
+  /**
+   * Report the daemon's live request-protection wiring (token / origin source).
+   * When omitted, doctor derives a conservative snapshot from process.env using
+   * the same rule as createRequestProtection, so `alaya doctor` still surfaces
+   * an ephemeral-token warning without a running daemon.
+   */
+  readonly getRuntimeWiring?: () => RuntimeWiringStatus | Promise<RuntimeWiringStatus>;
   readonly getEmbeddingStatus?: (workspaceId: string) => Promise<EmbeddingStatus>;
   readonly getMcpHealth?: () => Promise<Readonly<{ transport: "ready" | "not_ready"; enrolled_tools: number }>>;
   readonly getGardenHealth?: () => Promise<Readonly<{ status: "healthy" | "degraded"; last_pass_at: string | null }>>;
@@ -204,6 +215,15 @@ export interface DoctorReport {
     readonly path_plasticity_lookup: Readonly<PathPlasticityLookupTelemetrySnapshot>;
   }>;
   readonly graph_health: Readonly<GraphHealthSnapshot>;
+  // Surfaces the daemon's request-protection wiring so an operator can tell an
+  // ephemeral (process-generated) request token apart from an env-supplied one.
+  readonly runtime_wiring: RuntimeWiringStatus;
+  // Conservative storage-growth signal: the on-disk DB size plus a coarse
+  // advisory. "unknown" when the DB is absent/unreadable.
+  readonly storage_growth: Readonly<{
+    readonly db_size_bytes: number | null;
+    readonly advisory: "ok" | "large" | "unknown";
+  }>;
   readonly attached_profiles: ReadonlyArray<ProfileInstructionsDriftReport>;
   // Present only when --reconcile-bootstrap is requested.
   readonly bootstrap_reconcile?: DoctorBootstrapReconcileSummary;
@@ -290,9 +310,19 @@ async function buildDoctorReport(
       path_plasticity_lookup: services.pathPlasticityLookupTelemetry
     },
     graph_health: services.graphHealth,
+    runtime_wiring: services.runtimeWiring,
+    storage_growth: services.storageGrowth,
     attached_profiles: attachedProfiles,
     ...(bootstrapReconcileSummary === null ? {} : { bootstrap_reconcile: bootstrapReconcileSummary }),
     checks
+  };
+}
+
+function resolveRuntimeWiringFromEnv(env: NodeJS.ProcessEnv): RuntimeWiringStatus {
+  const requestToken = env.ALAYA_REQUEST_TOKEN?.trim();
+  return {
+    request_token_source:
+      requestToken !== undefined && requestToken.length > 0 ? "env" : "ephemeral"
   };
 }
 
@@ -316,8 +346,9 @@ async function readDoctorServices(
   workspaceId: string
 ) {
   const toolchainStatus = await deps.getToolchainStatus();
-  const [storage, embeddingStatus, mcp, garden, gardenCredentialProvenance, gardenCompute, pathPlasticityLookupTelemetry, graphHealth] = await Promise.all([
+  const [storage, storageGrowth, embeddingStatus, mcp, garden, gardenCredentialProvenance, gardenCompute, pathPlasticityLookupTelemetry, graphHealth] = await Promise.all([
     inspectStorage(toolchainStatus.db_path, deps.getSchemaSummary),
+    inspectStorageGrowth(toolchainStatus.db_path),
     deps.getEmbeddingStatus ? await deps.getEmbeddingStatus(workspaceId) : null,
     deps.getMcpHealth ? await deps.getMcpHealth() : defaultDoctorMcpHealth(daemonReady),
     deps.getGardenHealth ? await deps.getGardenHealth() : defaultDoctorGardenHealth(daemonReady),
@@ -326,8 +357,13 @@ async function readDoctorServices(
     (await deps.getPathPlasticityLookupTelemetry?.()) ?? defaultPathPlasticityLookupTelemetry(),
     (await deps.getGraphHealth?.(workspaceId)) ?? createEmptyGraphHealthSnapshot(workspaceId)
   ]);
+  const runtimeWiring = deps.getRuntimeWiring
+    ? await deps.getRuntimeWiring()
+    : resolveRuntimeWiringFromEnv(process.env);
   return {
     storage,
+    storageGrowth,
+    runtimeWiring,
     embeddingStatus,
     mcp,
     garden,

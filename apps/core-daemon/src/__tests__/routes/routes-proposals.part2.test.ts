@@ -38,6 +38,7 @@ import { EventPublisher, PathRelationProposalService } from "@do-soul/alaya-core
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 import { registerProposalRoutes } from "../../routes/proposals.js";
+import { proposalRouteServices } from "../support/route-service-stubs.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -108,12 +109,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
         output: { proposal_id: "proposal-1", status: "created" }
       }))
     };
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
       mcpMemoryToolHandler
-    } as any);
+    }));
     return { app, workspaceService, proposalService, memoryService, mcpMemoryToolHandler };
   }
 
@@ -137,7 +138,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     await memoryEntryRepo.create(createMemoryEntry(governedMemoryId, "ws-1"));
 
     const app = new Hono();
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
       memoryService: {
         findByIdScoped: memoryEntryRepo.findById.bind(memoryEntryRepo)
@@ -149,7 +150,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       proposalRepo,
       runtimeNotifier: { notifyEntry: vi.fn() },
       mcpMemoryToolHandler: { call: vi.fn() }
-    } as any);
+    }));
 
     const createdResponse = await app.request(
       `/workspaces/ws-1/soul/memory/${governedMemoryId}/proposals/promote-strictly-governed`,

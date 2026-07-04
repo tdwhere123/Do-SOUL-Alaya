@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { StubEventPublisher } from "../support/event-publisher-stub.js";
 import {
   RunMode,
   RunState,
@@ -204,11 +205,9 @@ function createService(options: CreateServiceOptions): RunService {
     bindingRepo: {
       getById: vi.fn(async (id) => bindingById[id] ?? null)
     },
-    eventPublisher: {
-      // RunService now uses the atomic appendManyWithMutation primitive
-      // (#BL-022). Mock executes the sync mutate against the first batch entry.
-      appendManyWithMutation: vi.fn(async (inputs, mutate) => {
-        const persisted = inputs.map((entry: any, idx: number) => ({
+    eventPublisher: new StubEventPublisher(
+      vi.fn(async (inputs, mutate) => {
+        const persisted = inputs.map((entry, idx) => ({
           event_id: `evt_${idx}`,
           created_at: "2026-04-15T00:00:00.000Z",
           revision: 0,
@@ -216,7 +215,7 @@ function createService(options: CreateServiceOptions): RunService {
         }));
         return mutate(persisted);
       })
-    } as any,
+    ),
     isPrincipalCodingEngineAvailable: options.isPrincipalCodingEngineAvailable
   });
 }

@@ -1,6 +1,8 @@
 // invariant: ALAYA_RECALL_QUERY_HYDE_JSON maps normalized query text to
 // precomputed hypothetical-answer text; absent, invalid, or missing entries
 // preserve the original query text.
+import { recallEnvRaw } from "../config/recall-env-access.js";
+
 function parseHydeMap(raw: string): Readonly<Record<string, string>> {
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -23,7 +25,7 @@ let hydeCache: Readonly<Record<string, string>> | null = null;
 
 function injectedHyde(): Readonly<Record<string, string>> {
   if (hydeCache === null) {
-    const raw = process.env.ALAYA_RECALL_QUERY_HYDE_JSON;
+    const raw = recallEnvRaw("ALAYA_RECALL_QUERY_HYDE_JSON");
     if (raw === undefined || raw.length === 0) {
       hydeCache = {};
     } else {

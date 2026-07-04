@@ -25,6 +25,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { registerConfigRoutes } from "../../routes/config.js";
+import { configRouteServices } from "../support/route-service-stubs.js";
 
 import { createConfigService } from "../../services/config-service.js";
 
@@ -167,10 +168,10 @@ describe("routes-config port batch", () => {
         generateAuditId: () => "audit-section-live"
       });
       const app = new Hono();
-      registerConfigRoutes(app, {
+      registerConfigRoutes(app, configRouteServices({
         workspaceService: { getById: vi.fn(async () => undefined) },
         configService
-      } as any);
+      }));
 
       const soulPatch = await app.request("/workspaces/ws-section/config/soul", {
         method: "PATCH",

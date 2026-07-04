@@ -5,6 +5,7 @@ import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
   RecallSupplementaryData} from "./recall-service-types.js";
+import { recallEnvRaw } from "../config/recall-env-access.js";
 import { coverageReorderGateOpen } from "./evidence-set-optimizer.js";
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
@@ -20,7 +21,7 @@ const DEFAULT_SESSION_COVERAGE_BAND = 0.1;
 
 // Fraction of the head fused_score within which a lower-ranked, not-yet-represented session may be promoted ahead of it; 0 disables. Env-tunable.
 function resolveSessionCoverageBand(): number {
-  const raw = process.env[SESSION_COVERAGE_BAND_ENV];
+  const raw = recallEnvRaw(SESSION_COVERAGE_BAND_ENV);
   if (raw === undefined || raw.trim() === "") {
     return DEFAULT_SESSION_COVERAGE_BAND;
   }

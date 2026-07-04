@@ -170,7 +170,7 @@ describe("SqliteWorkspaceRepo", () => {
       repo_path: "/tmp/repo-path/.git-root",
       default_engine_binding: null,
       workspace_state: WorkspaceState.ACTIVE
-    } as any);
+    });
 
     expect(created.repo_path).toBe("/tmp/repo-path/.git-root");
 

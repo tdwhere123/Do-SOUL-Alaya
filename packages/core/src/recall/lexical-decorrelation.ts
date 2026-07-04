@@ -1,10 +1,11 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 
+import { recallEnvFlagEnabled } from "../config/recall-env-access.js";
+
 // Opt-in: gate the lane-count discount on orthogonal-field count so distinct-ref corroboration is not damped as redundant.
 export function lexicalDecorrEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_LEXICAL_DECORR;
-  return raw === "on" || raw === "1" || raw === "true";
+  return recallEnvFlagEnabled("ALAYA_RECALL_LEXICAL_DECORR");
 }
 
 // porter+trigram collapse to one content field; each distinct evidence_ref is its own field; evidence^structural is one marker.

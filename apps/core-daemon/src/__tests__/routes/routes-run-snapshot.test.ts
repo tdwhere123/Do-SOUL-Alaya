@@ -9,6 +9,7 @@ import {
   type EventLogEntry,
   type RunHotState
 } from "@do-soul/alaya-protocol";
+import { runRouteServices } from "../support/route-service-stubs.js";
 import { registerRunRoutes } from "../../routes/runs.js";
 import {
   enrichRunSnapshot,
@@ -32,7 +33,7 @@ describe("run snapshot route compaction", () => {
       created_at: "2026-06-24T00:00:00.000Z",
       revision: 1
     }));
-    registerRunRoutes(app, {
+    registerRunRoutes(app, runRouteServices({
       runService: {
         getById: vi.fn(async () => ({ run_id: "run-a", workspace_id: "workspace-a" }))
       },
@@ -49,7 +50,7 @@ describe("run snapshot route compaction", () => {
         queryByRunAll: vi.fn(async () => [])
       },
       warn
-    } as any);
+    }));
 
     const response = await app.request("/runs/run-a/snapshot");
 

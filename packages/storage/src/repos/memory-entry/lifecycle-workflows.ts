@@ -304,6 +304,65 @@ export async function reviveDormantMemoryEntry(
   }
 }
 
+// invariant (§7 + N1): synchronous guarded revival for the single-transaction
+// karma path. Returns the row when it flipped dormant -> active, null when the
+// row was not dormant (changes=0), so an already-active row emits no revival
+// audit row. Runs inside the caller's transaction; no self-transaction here.
+export function reviveDormantMemoryEntrySync(
+  this: MemoryEntryLifecycleWorkflowHost,
+  objectId: string,
+  updatedAt: string
+): Readonly<MemoryEntry> | null {
+  const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+  try {
+    const result = this.reviveDormantStatement.run(parsedUpdatedAt, objectId);
+    if (result.changes === 0) {
+      return null;
+    }
+    return loadMemoryEntryAfterTransition(this, objectId, "revival");
+  } catch (error) {
+    if (error instanceof StorageError) {
+      throw error;
+    }
+    throw new StorageError("QUERY_FAILED", `Failed to revive dormant memory entry ${objectId}.`, error);
+  }
+}
+
+// invariant (§7): synchronous lifecycle transition used as the revival fallback
+// inside the single-transaction karma path. Runs inside the caller's
+// transaction; no self-transaction here.
+export function transitionMemoryEntryLifecycleSync(
+  this: MemoryEntryLifecycleWorkflowHost,
+  objectId: string,
+  lifecycleState: MemoryEntry["lifecycle_state"],
+  updatedAt: string,
+  onTransition?: () => void
+): Readonly<MemoryEntry> {
+  const parsedLifecycleState = parseLifecycleState(lifecycleState);
+  const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+  try {
+    onTransition?.();
+    const statement =
+      parsedLifecycleState === "tombstone"
+        ? this.transitionLifecycleStatement
+        : this.transitionLifecycleClearForgetStatement;
+    const result = statement.run(parsedLifecycleState, parsedUpdatedAt, objectId);
+    if (result.changes === 0) {
+      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
+    }
+    return loadMemoryEntryAfterTransition(this, objectId, "lifecycle update");
+  } catch (error) {
+    if (error instanceof StorageError) {
+      throw error;
+    }
+    throw new StorageError(
+      "QUERY_FAILED",
+      `Failed to transition lifecycle for memory entry ${objectId}.`,
+      error
+    );
+  }
+}
+
 export async function transitionMemoryEntryToDormantIfActive(
   this: MemoryEntryLifecycleWorkflowHost,
   objectId: string,

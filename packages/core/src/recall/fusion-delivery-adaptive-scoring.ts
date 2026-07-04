@@ -3,6 +3,7 @@ import { countOrthogonalLexicalFields, lexicalDecorrEnabled } from "./lexical-de
 import { classifyRecallIntent } from "./recall-query-plan.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { clamp01 } from "./recall-service-helpers.js";
+import { recallEnvRaw } from "../config/recall-env-access.js";
 import type { RecallFusionStream, RecallSupplementaryData } from "./recall-service-types.js";
 import { resolveDefaultFusionWeightForIntent } from "./temporal-fusion-scoring.js";
 
@@ -71,7 +72,7 @@ export function resolveFusionContribution(params: FusionContributionParams): num
 // Diagnostic switch (ALAYA_RECALL_PATH_EMB_MODULATION=off) for the raw-cosine path/graph boost.
 // Default (unset) keeps the raw modulation = byte-identical.
 function pathEmbModulationEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_PATH_EMB_MODULATION;
+  const raw = recallEnvRaw("ALAYA_RECALL_PATH_EMB_MODULATION");
   return raw !== "off" && raw !== "0" && raw !== "false";
 }
 

@@ -54,6 +54,11 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return this.db.connection;
   }
 
+  // wiring-time identity of the backing connection for the atomic-karma guard.
+  public getStorageConnectionIdentity(): StorageDatabase {
+    return this.db;
+  }
+
   public append(event: EventLogAppendInput): EventLogEntry {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.

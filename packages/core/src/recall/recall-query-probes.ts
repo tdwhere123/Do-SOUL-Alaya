@@ -1,4 +1,5 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
+import { recallEnvRaw } from "../config/recall-env-access.js";
 import { isCjkSegmentationCandidate, segmentCjkRun } from "../shared/cjk-segmentation.js";
 import { temporalQueryWindowEnabled } from "./temporal-fusion-scoring.js";
 
@@ -244,7 +245,7 @@ const SYNONYM_CLUSTER_MAX_TOTAL = 256;
 
 // Optional operator clusters (ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS, JSON array of string arrays); fail-loud on malformed JSON so a typo cannot silently disable expansion.
 function readExtraSynonymClusters(): ReadonlyArray<readonly string[]> {
-  const raw = process.env.ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS;
+  const raw = recallEnvRaw("ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS");
   if (raw === undefined || raw.trim() === "") {
     return [];
   }

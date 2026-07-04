@@ -1,4 +1,5 @@
 import { MemoryDimension } from "@do-soul/alaya-protocol";
+import { recallIntentV2Enabled } from "../config/recall-env-access.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 
 export type RecallQueryIntent =
@@ -25,10 +26,9 @@ const PREFERENCE_CUE =
 // Flag-gated recommendation/advice collocations; each requires a preference-bearing phrase, not a bare verb, so single_fact lookups are untouched.
 const EXTENDED_PREFERENCE_CUE =
   /\b(?:recommend(?:ations?|ed|s)?|suggest(?:ions?|ed|s)?|advice|advise|go-to|help me (?:find|pick|choose|decide)|what should i|which\b.{0,40}\bshould i)\b|推荐|建议/iu;
-const INTENT_V2_FLAG = /^(?:1|true|on|yes)$/iu;
 
 function intentV2Enabled(): boolean {
-  return INTENT_V2_FLAG.test(process.env.ALAYA_RECALL_INTENT_V2 ?? "");
+  return recallIntentV2Enabled();
 }
 
 export function classifyRecallIntent(probes: Readonly<RecallQueryProbes>): RecallQueryIntent {

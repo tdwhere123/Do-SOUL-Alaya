@@ -20,11 +20,12 @@ describe("createWarnLogger (pino-backed)", () => {
     vi.restoreAllMocks();
   });
 
-  // pino's default (non-TTY) destination is stdout as NDJSON; capture the line.
+  // Diagnostics go to stderr (fd 2) as NDJSON so stdout stays a clean machine
+  // channel for CLI --json / MCP stdio JSON-RPC; capture the stderr line.
   function captureWarn(message: string, meta: Record<string, unknown>): Record<string, unknown> {
     const lines: string[] = [];
     const writeSpy = vi
-      .spyOn(process.stdout, "write")
+      .spyOn(process.stderr, "write")
       .mockImplementation((chunk: string | Uint8Array): boolean => {
         lines.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
         return true;

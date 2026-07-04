@@ -8,6 +8,18 @@ Open issues and permanently rejected items remain in the handbook backlog.
 
 ## Resolved in v0.3.11
 
+### #BL-059 — `apps/core-daemon` typecheck.json loose-mock red (I4)
+
+**Status**: Resolved (audit-stability closeout, 2026-07-04).
+
+Surfaced as I4 during the B1 karma-retention fix. `apps/core-daemon/tsconfig.typecheck.json` (test-inclusive) reported loose-mock type errors concentrated in daemon route tests under `apps/core-daemon/src/__tests__/routes/`. Fixed as part of the project-wide typecheck repair (155→0 errors): `LooseStub<T>`, `routeServices<T>()` / `workspaceRouteServices()`, and related support-layer patterns in `apps/core-daemon/src/__tests__/support/` — no `as any`, no tsconfig weakening. Whole-project `rtk pnpm run typecheck` is now clean; CI already gates `pnpm run --if-present typecheck` on every push/PR (`.github/workflows/ci.yml` Typecheck step, before Build and Test).
+
+### #BL-058 — Karma async-fallback branch scoped test-only + production-guaranteed atomic
+
+**Status**: Resolved (audit-stability closeout, 2026-07-04).
+
+Cover-or-scope resolved as **scope test-only + guarantee production atomic**. The async fallback in `KarmaTransitionEngine.processKarmaEvent` (`packages/core/src/dynamics/karma-transition-engine.ts`) is retained as the ordering-safe path for test fakes that lack the sync ports, and now carries a one-line test-only rationale. Production can no longer silently use it: the daemon guard `requireAtomicKarmaTransition` (`apps/core-daemon/src/runtime/karma-atomic-wiring-guard.ts`, called from `createDynamicsService` in `daemon-knowledge-foundation.ts`) fails fast at wiring time unless the `EventPublisher` and the karma/memory/event-log repos resolve to one `StorageDatabase` connection — so when wiring succeeds, `canRunAtomicTransition()` is true by construction and the atomic branch is taken. This also closes the **2026-07-04c residual risk #1** (the single-transaction guarantee depended on all four participants sharing one connection with nothing enforcing it): the shared-connection prerequisite is now enforced via `getStorageConnectionIdentity()` identity checks, with regression coverage in `apps/core-daemon/src/__tests__/dynamics/karma-atomic-wiring-guard.test.ts` (atomic-capable when shared; throws on a mismatched second connection).
+
 ### #BL-049 — Forgetting-lifecycle compress arm activated
 
 **Status**: Resolved (closed in the v0.3.11 closeout fix-loop, 2026-06-04).

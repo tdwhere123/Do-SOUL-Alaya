@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass } from "@do-soul/alaya-protocol";
 import { ConflictDetectionService } from "../../governance/conflict-detection-service.js";
-import type { PathMintOutcome } from "../../path-graph/path-relation-proposal-service.js";
+import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/path-relation-proposal-service.js";
 
 import { createMemoryEntry } from "./conflict-detection-service.test-support.js";
 
@@ -15,7 +15,7 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -62,7 +62,7 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
       findByDimension: vi.fn(async () => [ruleExisting]),
       findBySharedDomainTags: vi.fn(async () => [ruleExisting])
     };
-    const ruleSink = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const ruleSink = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const ruleService = new ConflictDetectionService({ memoryRepo: ruleMemoryRepo, pathCandidatePort: ruleSink });
     await ruleService.detectAndLinkConflicts({
       newMemoryId: "mem-B",
@@ -74,9 +74,9 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
       runId: "run-1"
     });
     expect(ruleSink.submitCandidate.mock.calls.length).toBeGreaterThan(0);
-    for (const call of ruleSink.submitCandidate.mock.calls as any[]) {
-      expect(call[0].governanceClass).toBe("attention_only");
-      expect(call[0].governanceClass).not.toBe("strictly_governed");
+    for (const [candidate] of ruleSink.submitCandidate.mock.calls) {
+      expect(candidate.governanceClass).toBe("attention_only");
+      expect(candidate.governanceClass).not.toBe("strictly_governed");
     }
 
     const llmAmbiguous = createMemoryEntry({
@@ -88,7 +88,7 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
       findByDimension: vi.fn(async () => [llmAmbiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const llmSink = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const llmSink = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const llmPort = { classifyPair: vi.fn(async () => "contradicts" as const) };
     const llmService = new ConflictDetectionService({
       memoryRepo: llmMemoryRepo,
@@ -106,9 +106,9 @@ it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable v
       runId: "run-1"
     });
     expect(llmSink.submitCandidate.mock.calls.length).toBeGreaterThan(0);
-    for (const call of llmSink.submitCandidate.mock.calls as any[]) {
-      expect(call[0].governanceClass).toBe("recall_allowed");
-      expect(call[0].governanceClass).not.toBe("strictly_governed");
+    for (const [candidate] of llmSink.submitCandidate.mock.calls) {
+      expect(candidate.governanceClass).toBe("recall_allowed");
+      expect(candidate.governanceClass).not.toBe("strictly_governed");
     }
 
     // Non-vacuous channel-sole-mutation lock. The deps surface
@@ -155,7 +155,7 @@ it("rule-path contradicts does NOT fire supersede_penalty karma (strength-gated 
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const emitKarmaEvent = vi.fn(async () => {});
     const service = new ConflictDetectionService({
       memoryRepo,
@@ -196,7 +196,7 @@ it("llm-path contradicts seeds recall_allowed/0.9 and fires supersede_penalty ka
       findByDimension: vi.fn(async () => [ambiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const emitKarmaEvent = vi.fn(async () => {});
     const llmPort = { classifyPair: vi.fn(async () => "contradicts" as const) };
     const service = new ConflictDetectionService({
@@ -239,7 +239,7 @@ it("skips contradicts when content is nearly identical (high token overlap)", as
       findByDimension: vi.fn(async () => [existing]),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -269,7 +269,7 @@ it("writes an incompatible_with edge across dimensions when tags overlap", async
       findByDimension: vi.fn(async () => []),
       findBySharedDomainTags: vi.fn(async () => [existing])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await service.detectAndLinkConflicts({
@@ -306,7 +306,7 @@ it("calls LLM port for ambiguous neighbors only when rule produced no contradict
       findByDimension: vi.fn(async () => [ambiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
@@ -340,7 +340,7 @@ it("strictNoDrop=true rethrows LLM classifier failures instead of degrading to n
       findByDimension: vi.fn(async () => [ambiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => {
         throw new Error("llm unavailable");
@@ -379,7 +379,7 @@ it("default mode warns and degrades when the LLM classifier fails", async () => 
       findByDimension: vi.fn(async () => [ambiguous]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => {
         throw new Error("llm unavailable");
@@ -427,7 +427,7 @@ it("skips LLM when rule path already produced a contradicts edge", async () => {
       findByDimension: vi.fn(async () => [ruleHit]),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const llmPort = {
       classifyPair: vi.fn(async () => "contradicts" as const)
     };
@@ -461,7 +461,7 @@ it("does not throw when memoryRepo fails to read same-dimension peers", async ()
       }),
       findBySharedDomainTags: vi.fn(async () => [])
     };
-    const pathCandidatePort = { submitCandidate: vi.fn(async (): Promise<PathMintOutcome> => "applied") };
+    const pathCandidatePort = { submitCandidate: vi.fn(async (_input: SubmitCandidateInput): Promise<PathMintOutcome> => "applied") };
     const service = new ConflictDetectionService({ memoryRepo, pathCandidatePort });
 
     await expect(

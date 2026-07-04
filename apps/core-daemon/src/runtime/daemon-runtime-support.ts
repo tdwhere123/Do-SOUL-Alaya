@@ -11,7 +11,6 @@ import {
   type GardenBacklogThresholds
 } from "@do-soul/alaya-protocol";
 import {
-  ArbitrationService,
   CanonicalAliasService,
   ClaimService,
   CoreError,
@@ -64,9 +63,20 @@ type RequestProtectionEnvLike = Readonly<{
   ALLOWED_ORIGIN?: string;
 }>;
 
-export function createRequestProtection(env: RequestProtectionEnvLike = process.env): RequestProtectionConfig {
+export function createRequestProtection(
+  env: RequestProtectionEnvLike = process.env,
+  warn?: (message: string, meta?: Record<string, unknown>) => void
+): RequestProtectionConfig {
   const configuredRequestToken = env.ALAYA_REQUEST_TOKEN?.trim();
   const allowedOrigin = env.ALLOWED_ORIGIN?.trim();
+  const tokenSource =
+    configuredRequestToken !== undefined && configuredRequestToken.length > 0
+      ? "env"
+      : "ephemeral";
+
+  if (tokenSource === "ephemeral") {
+    warn?.("[daemon] ALAYA_REQUEST_TOKEN unset; generated ephemeral request token", { tokenSource });
+  }
 
   return Object.freeze({
     allowedOrigin:
@@ -78,10 +88,7 @@ export function createRequestProtection(env: RequestProtectionEnvLike = process.
         ? configuredRequestToken
         : randomBytes(32).toString("hex"),
     allowDesktopOriginlessRequests: true,
-    tokenSource:
-      configuredRequestToken !== undefined && configuredRequestToken.length > 0
-        ? "env"
-        : "ephemeral"
+    tokenSource
   });
 }
 
@@ -124,11 +131,18 @@ export function createGardenBacklogThresholds(): GardenBacklogThresholds {
   };
 }
 
-export async function loadConfigEnv(envPath: string): Promise<ReadonlyMap<string, string>> {
+export async function loadConfigEnv(
+  envPath: string,
+  warn?: (message: string, meta?: Record<string, unknown>) => void
+): Promise<ReadonlyMap<string, string>> {
   try {
     return parseEnv(await readFile(envPath, "utf8"));
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) {
+      warn?.("[daemon] config env file not found; continuing with process env only", {
+        envPath,
+        source: "missing"
+      });
       return new Map();
     }
     throw error;
@@ -271,10 +285,16 @@ export function createGlobalMemoryRouteService(params: {
 }) {
   return {
     list: async (input: { readonly dimension?: string; readonly scope_class?: string; readonly limit: number }) => {
-      const entries = await params.globalMemoryRepo.list({
-        ...(input.dimension === undefined ? {} : { dimension: input.dimension }),
-        ...(input.scope_class === undefined ? {} : { scope_class: input.scope_class })
-      } as GlobalMemoryListFilters);
+      // loose CLI/HTTP strings bridged to the repo's narrow enum; value-cast only
+      const filters: GlobalMemoryListFilters = {
+        ...(input.dimension === undefined
+          ? {}
+          : { dimension: input.dimension as NonNullable<GlobalMemoryListFilters>["dimension"] }),
+        ...(input.scope_class === undefined
+          ? {}
+          : { scope_class: input.scope_class as NonNullable<GlobalMemoryListFilters>["scope_class"] })
+      };
+      const entries = await params.globalMemoryRepo.list(filters);
 
       return input.limit >= entries.length ? entries : entries.slice(0, input.limit);
     },
@@ -368,13 +388,6 @@ export function createKarmaEventStore(
   warnLogger: ReturnType<typeof createWarnLogger>
 ) {
   return new SqliteKarmaEventStore(karmaEventRepo, warnLogger);
-}
-
-export function patchArbitrationClaimService(arbitrationService: ArbitrationService, claimService: ClaimService): void {
-  const dependencies = (arbitrationService as unknown as { dependencies?: { claimService?: ClaimService } }).dependencies;
-  if (dependencies !== undefined) {
-    dependencies.claimService = claimService;
-  }
 }
 
 function formatSecretResolutionError(label: string, error: ResolveSecretError): string {

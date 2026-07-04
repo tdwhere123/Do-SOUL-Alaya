@@ -80,10 +80,11 @@ export async function addSemanticSupplementCandidates(params: SemanticSupplement
 const MAX_SUBQUERY_ANCHORS = 4;
 const MIN_SUBQUERY_ANCHOR_QUOTA = 8;
 
+import { recallEnvFlagEnabled } from "../config/recall-env-access.js";
+
 // Opt-in flags, default OFF: the anchor lane is recall-neutral and slower.
 function envOptIn(name: string): boolean {
-  const raw = process.env[name];
-  return raw === "on" || raw === "1" || raw === "true";
+  return recallEnvFlagEnabled(name);
 }
 
 type AnchorSearchFn = (

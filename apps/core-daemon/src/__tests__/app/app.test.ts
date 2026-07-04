@@ -8,7 +8,11 @@ import {
   type CoreDaemonServices
 } from "../../runtime/app.js";
 import { createRequestProtection } from "../../runtime/daemon-runtime-support.js";
-import type { AppConfigService } from "../../services/config-service.js";
+import { appConfigServiceStub } from "../support/app-config-service-stub.js";
+import {
+  configRouteServices,
+  conflictMatrixRouteServices
+} from "../support/route-service-stubs.js";
 
 const testRequestProtection = {
   allowedOrigin: "http://localhost",
@@ -223,20 +227,11 @@ describe("createApp", () => {
     );
     const app = createProtectedTestApp({
       routes: {
-        config: {
-          workspaceService: { getById: vi.fn() } as any,
-          configService: {
-            getSoulConfig: vi.fn(),
-            patchSoulConfig: vi.fn(),
-            getStrategyConfig: vi.fn(),
-            patchStrategyConfig: vi.fn(),
-            getEnvironmentConfig: vi.fn(),
-            patchEnvironmentConfig: vi.fn(),
-            getRuntimeEmbeddingConfig: vi.fn(),
-            patchRuntimeEmbeddingConfig,
-            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" as const }))
-          } as unknown as AppConfigService
-        }
+        config: configRouteServices({
+          configService: appConfigServiceStub({
+            patchRuntimeEmbeddingConfig
+          })
+        })
       }
     });
 
@@ -265,26 +260,14 @@ describe("createApp", () => {
     const patchManifestationBudgetConfig = vi.fn(async (patch: unknown) => patch);
     const app = createProtectedTestApp({
       routes: {
-        config: {
+        config: configRouteServices({
           workspaceService: {
             getById: vi.fn(async () => ({ workspace_id: "workspace-1" }))
-          } as any,
-          configService: {
-            getSoulConfig: vi.fn(),
-            patchSoulConfig: vi.fn(),
-            getStrategyConfig: vi.fn(),
-            patchStrategyConfig: vi.fn(),
-            getEnvironmentConfig: vi.fn(),
-            patchEnvironmentConfig: vi.fn(),
-            getManifestationBudgetConfig: vi.fn(),
-            patchManifestationBudgetConfig,
-            getRuntimeEmbeddingConfig: vi.fn(),
-            patchRuntimeEmbeddingConfig: vi.fn(),
-            getRuntimeGardenComputeConfig: vi.fn(),
-            patchRuntimeGardenComputeConfig: vi.fn(),
-            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" as const }))
-          } as unknown as AppConfigService
-        }
+          },
+          configService: appConfigServiceStub({
+            patchManifestationBudgetConfig
+          })
+        })
       }
     });
 
@@ -311,20 +294,11 @@ describe("createApp", () => {
     }));
     const app = createProtectedTestApp({
       routes: {
-        config: {
-          workspaceService: { getById: vi.fn() } as any,
-          configService: {
-            getSoulConfig: vi.fn(),
-            patchSoulConfig: vi.fn(),
-            getStrategyConfig: vi.fn(),
-            patchStrategyConfig: vi.fn(),
-            getEnvironmentConfig: vi.fn(),
-            patchEnvironmentConfig: vi.fn(),
-            getRuntimeEmbeddingConfig: vi.fn(),
-            patchRuntimeEmbeddingConfig,
-            getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" as const }))
-          } as unknown as AppConfigService
-        }
+        config: configRouteServices({
+          configService: appConfigServiceStub({
+            patchRuntimeEmbeddingConfig
+          })
+        })
       }
     });
     const response = await app.request(
@@ -349,15 +323,17 @@ describe("createApp", () => {
     const deleteEdge = vi.fn(async () => undefined);
     const app = createProtectedTestApp({
       routes: {
-        conflictMatrix: {
-          workspaceService: { getById: vi.fn() } as any,
+        conflictMatrix: conflictMatrixRouteServices({
+          workspaceService: {
+            getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
+          },
           arbitrationService: {
             deleteEdge,
             createEdge: vi.fn(),
             listEdgesByWorkspace: vi.fn(),
             rebuildConflictMatrix: vi.fn()
-          } as any
-        }
+          }
+        })
       }
     });
 
@@ -382,15 +358,17 @@ describe("createApp", () => {
     const deleteEdge = vi.fn(async () => undefined);
     const app = createProtectedTestApp({
       routes: {
-        conflictMatrix: {
-          workspaceService: { getById: vi.fn() } as any,
+        conflictMatrix: conflictMatrixRouteServices({
+          workspaceService: {
+            getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
+          },
           arbitrationService: {
             deleteEdge,
             createEdge: vi.fn(),
             listEdgesByWorkspace: vi.fn(),
             rebuildConflictMatrix: vi.fn()
-          } as any
-        }
+          }
+        })
       }
     });
 
@@ -415,15 +393,17 @@ describe("createApp", () => {
     const deleteEdge = vi.fn(async () => undefined);
     const app = createProtectedTestApp({
       routes: {
-        conflictMatrix: {
-          workspaceService: { getById: vi.fn() } as any,
+        conflictMatrix: conflictMatrixRouteServices({
+          workspaceService: {
+            getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
+          },
           arbitrationService: {
             deleteEdge,
             createEdge: vi.fn(),
             listEdgesByWorkspace: vi.fn(),
             rebuildConflictMatrix: vi.fn()
-          } as any
-        }
+          }
+        })
       }
     });
 
@@ -450,15 +430,17 @@ describe("createApp", () => {
     const deleteEdge = vi.fn(async () => undefined);
     const app = createProtectedTestApp({
       routes: {
-        conflictMatrix: {
-          workspaceService: { getById: vi.fn() } as any,
+        conflictMatrix: conflictMatrixRouteServices({
+          workspaceService: {
+            getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
+          },
           arbitrationService: {
             deleteEdge,
             createEdge: vi.fn(),
             listEdgesByWorkspace: vi.fn(),
             rebuildConflictMatrix: vi.fn()
-          } as any
-        }
+          }
+        })
       }
     });
 

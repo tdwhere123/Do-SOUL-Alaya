@@ -8,7 +8,11 @@ import {
   type EventLogEntry,
   type Slot
 } from "@do-soul/alaya-protocol";
-import { SlotService, type SlotServiceDependencies } from "../../surfaces/slot-service.js";
+import {
+  SlotService,
+  type SlotServiceArbitrationResult,
+  type SlotServiceDependencies
+} from "../../surfaces/slot-service.js";
 
 const CLAIM_ID_1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CLAIM_ID_2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -59,7 +63,10 @@ function createSlot(claim: ClaimForm, overrides: Partial<Slot> = {}): Slot {
   };
 }
 
-function createDependencies(seedSlots: readonly Slot[] = []): {
+function createDependencies(
+  seedSlots: readonly Slot[] = [],
+  overrides: Partial<SlotServiceDependencies> = {}
+): {
   readonly dependencies: SlotServiceDependencies;
   readonly order: string[];
   readonly events: EventLogEntry[];
@@ -143,7 +150,8 @@ function createDependencies(seedSlots: readonly Slot[] = []): {
     },
     runtimeNotifier: {
       notifyEntry: notifySpy
-    }
+    },
+    ...overrides
   };
 
   return { dependencies, order, events, notifySpy };
@@ -185,19 +193,21 @@ describe("SlotService", () => {
       winner_claim_id: CLAIM_ID_2,
       updated_at: "2026-03-21T01:00:00.000Z"
     });
+    const arbitrationSpy = vi.fn(
+      async (): Promise<SlotServiceArbitrationResult> => ({
+        slot: arbitrationSlot,
+        decision: "winner_changed",
+        winner_claim_id: CLAIM_ID_2,
+        contested_claim_ids: [],
+        reason: "decisive_edge_priority"
+      })
+    );
 
-    const { dependencies } = createDependencies([existingSlot]);
-    const arbitrationSpy = vi.fn(async () => ({
-      slot: arbitrationSlot,
-      decision: "winner_changed",
-      winner_claim_id: CLAIM_ID_2,
-      contested_claim_ids: [],
-      reason: "decisive_edge_priority"
-    }));
-
-    (dependencies as any).arbitrationService = {
-      arbitrateSlot: arbitrationSpy
-    };
+    const { dependencies } = createDependencies([existingSlot], {
+      arbitrationService: {
+        arbitrateSlot: arbitrationSpy
+      }
+    });
 
     const service = new SlotService(dependencies);
     const result = await service.onClaimActivated(challenger);

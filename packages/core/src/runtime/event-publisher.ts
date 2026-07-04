@@ -12,6 +12,8 @@ export interface EventPublisherEventLogRepoPort {
    * work completes, defeating atomicity.
    */
   transactional<T>(fn: () => T): T;
+  // Optional wiring-time identity of the backing connection; absent on test fakes.
+  getStorageConnectionIdentity?(): object;
 }
 
 export interface RuntimeNotifier {
@@ -45,6 +47,12 @@ export class EventPublisherPropagationError extends Error {
 
 export class EventPublisher {
   public constructor(private readonly dependencies: EventPublisherDependencies) {}
+
+  // Exposes the eventLogRepo's connection identity so a daemon guard can prove
+  // the karma repos share this transaction boundary; undefined on test fakes.
+  public getStorageConnectionIdentity(): object | undefined {
+    return this.dependencies.eventLogRepo.getStorageConnectionIdentity?.();
+  }
 
   /**
    * Append one or more EventLog rows AND run a synchronous mutation in a single
@@ -82,6 +90,49 @@ export class EventPublisher {
     }
 
     return mutateResult;
+  }
+
+  /**
+   * Run `mutate` — a synchronous read-modify-write — inside one SQLite
+   * transaction, then append the EventLog rows it returns in the SAME
+   * transaction. Unlike appendManyWithMutation (which fixes its rows BEFORE the
+   * mutation and hands the persisted entries to the callback), this derives the
+   * rows FROM the mutation result, so a guarded mutation (e.g. a dormant->active
+   * revival that only fires when the row was actually dormant) appends exactly
+   * the audit rows that match what was persisted.
+   *
+   * Constraints mirror appendManyWithMutation: `mutate` MUST be synchronous, and
+   * async preparation must happen before this call. If the mutation or an append
+   * throws, the transaction rolls back and nothing is persisted (no half-commit).
+   * Propagation runs after commit; a propagation failure surfaces as
+   * `EventPublisherPropagationError` but leaves the durable rows in place.
+   */
+  public async mutateThenAppendMany<T>(
+    mutate: () => { readonly events: readonly EventPublisherInput[]; readonly result: T }
+  ): Promise<{ readonly result: T; readonly entries: readonly EventLogEntry[] }> {
+    const repo = this.dependencies.eventLogRepo;
+    const { entries, result } = repo.transactional<{
+      entries: EventLogEntry[];
+      result: T;
+    }>(() => {
+      const produced = mutate();
+      assertSynchronousMutationResult(produced);
+      const collected: EventLogEntry[] = [];
+      for (const input of produced.events) {
+        collected.push(repo.append(input));
+      }
+      return { entries: collected, result: produced.result };
+    });
+
+    for (const entry of entries) {
+      try {
+        await this.propagate(entry);
+      } catch (propagateError) {
+        throw new EventPublisherPropagationError(entry, propagateError, entries);
+      }
+    }
+
+    return { result, entries };
   }
 
   /**

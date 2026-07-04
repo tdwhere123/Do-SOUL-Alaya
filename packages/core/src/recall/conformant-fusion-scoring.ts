@@ -11,6 +11,10 @@ import type {
   RecallFusionStream,
   RecallSupplementaryData
 } from "./recall-service-types.js";
+import {
+  readRecallFloat,
+  readRecallUnitFloat
+} from "../config/recall-env-access.js";
 
 export const CONFORMANT_AXES: readonly RecallConformantAxis[] = [
   "object",
@@ -24,21 +28,11 @@ const RA_QUANTUM = 1e-9;
 const EVIDENCE_DECAY = 1;
 
 function readUnitEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) {
-    return fallback;
-  }
-  const value = Number(raw);
-  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
+  return readRecallUnitFloat(name, fallback);
 }
 
 function readFloatEnv(name: string, fallback: number, min: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) {
-    return fallback;
-  }
-  const value = Number(raw);
-  return Number.isFinite(value) ? Math.max(min, value) : fallback;
+  return readRecallFloat(name, fallback, min);
 }
 
 export function resolveConformantRhoPath(): number {

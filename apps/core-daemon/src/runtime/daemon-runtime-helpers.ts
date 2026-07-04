@@ -117,13 +117,19 @@ function createBasePinoLogger(): Logger {
     level: resolveLogLevel(),
     redact: { paths: [...REDACT_PATHS], censor: "[Redacted]" }
   };
-  // Human-readable transport for interactive (TTY) sessions only; the daemon's
-  // non-TTY prod path stays raw NDJSON. pino-pretty is a devDependency, so this
-  // branch must never run in a deployed daemon (no TTY there).
+  // invariant: diagnostics go to stderr (fd 2), never stdout. stdout is the
+  // machine channel for CLI --json output and MCP stdio JSON-RPC frames; a log
+  // line on stdout corrupts both. Human-readable transport for interactive
+  // (TTY) sessions only; pino-pretty is a devDependency, so it must never run
+  // in a deployed daemon (no TTY there).
   if (process.stdout.isTTY === true) {
-    options.transport = { target: "pino-pretty", options: { colorize: true } };
+    options.transport = {
+      target: "pino-pretty",
+      options: { colorize: true, destination: 2 }
+    };
+    return pino(options);
   }
-  return pino(options);
+  return pino(options, process.stderr);
 }
 
 // Reuse a single base logger across createWarnLogger() calls (pino transports

@@ -2,7 +2,7 @@
   "name": "do-soul-alaya",
   "version": "0.3.11",
   "private": true,
-  "description": "Do-SOUL Alaya — local-first memory core for CLI agents, ported from do-what-new",
+  "description": "Do-SOUL Alaya — local-first memory plane for CLI agents, ported from do-what-new",
   "engines": {
     "node": ">=20.19.0"
   },
@@ -15,9 +15,11 @@
     "test:coverage": "node ./scripts/ci/run-vitest-projects.mjs --coverage.enabled --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=lcov",
     "test:parallel": "vitest run --config vitest.config.mjs",
     "ci:content-contracts": "node ./scripts/ci/check-content-contracts.mjs",
+    "ci:test-as-any": "node ./scripts/ci/check-test-as-any.mjs",
     "ci:self-benchmark-gate": "node ./scripts/ci/self-benchmark-gate.mjs",
     "typecheck": "pnpm --workspace-concurrency=1 --filter @do-soul/alaya-protocol --filter @do-soul/alaya-graph-algorithms --filter @do-soul/alaya-core --filter @do-soul/alaya-storage --filter @do-soul/alaya-engine-gateway --filter @do-soul/alaya-eval --filter @do-soul/alaya-inspector --filter @do-soul/alaya-bench-runner --filter @do-soul/alaya-soul --filter @do-soul/alaya run typecheck",
     "hygiene:unused": "knip --config knip.json --no-progress --no-config-hints",
+    "hygiene:inspector-deps": "node ./scripts/ci/check-inspector-dep-isolation.mjs",
     "release:check-version": "node ./scripts/check-release-version.mjs",
     "fixtures:host-autonomy-witness": "node ./scripts/export-host-autonomy-witness.mjs",
     "alaya": "node ./bin/alaya.mjs",

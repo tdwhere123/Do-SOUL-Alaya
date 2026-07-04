@@ -25,6 +25,8 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { registerConfigRoutes } from "../../routes/config.js";
+import { appConfigServiceStub } from "../support/app-config-service-stub.js";
+import { configRouteServices } from "../support/route-service-stubs.js";
 
 import { createConfigService } from "../../services/config-service.js";
 
@@ -162,10 +164,9 @@ describe("routes-config port batch", () => {
       getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" }))
     };
     const app = new Hono();
-    registerConfigRoutes(app, {
-      workspaceService: { getById: vi.fn() },
+    registerConfigRoutes(app, configRouteServices({
       configService
-    } as any);
+    }));
 
     const body = {
       provider_url: "https://embedding.example.test/v1",
@@ -203,10 +204,9 @@ describe("routes-config port batch", () => {
       getGardenCredentialProvenance: vi.fn(async () => ({ kind: "none" }))
     };
     const app = new Hono();
-    registerConfigRoutes(app, {
-      workspaceService: { getById: vi.fn() },
+    registerConfigRoutes(app, configRouteServices({
       configService
-    } as any);
+    }));
 
     const body = {
       provider_kind: "official_api",
@@ -233,10 +233,10 @@ describe("routes-config port batch", () => {
   it("reads and patches workspace manifestation budget config through the config service and EventLog audit", async () => {
     const harness = await createServiceHarness();
     const app = new Hono();
-    registerConfigRoutes(app, {
+    registerConfigRoutes(app, configRouteServices({
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-budget" })) },
       configService: harness.service
-    } as any);
+    }));
 
     const initial = await app.request("/workspaces/ws-budget/config/manifestation-budget");
     expect(initial.status).toBe(200);

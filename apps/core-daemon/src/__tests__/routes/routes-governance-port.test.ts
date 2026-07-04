@@ -8,8 +8,16 @@ import { registerSecurityStatusRoutes } from "../../routes/security-status.js";
 import { registerConflictMatrixRoutes } from "../../routes/conflict-matrix.js";
 import { registerSlotRoutes } from "../../routes/slots.js";
 import { registerBudgetRoutes } from "../../routes/budget.js";
-import { registerHealthJournalRoutes } from "../../routes/health-journal.js";
+import { registerHealthJournalRoutes, type HealthJournalRouteServices } from "../../routes/health-journal.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
+import type { GovernanceRouteServices } from "../../routes/governance.js";
+import type { GreenStatusRouteServices } from "../../routes/green-status.js";
+import type { OverrideRouteServices } from "../../routes/overrides.js";
+import type { SecurityStatusRouteServices } from "../../routes/security-status.js";
+import type { ConflictMatrixRouteServices } from "../../routes/conflict-matrix.js";
+import type { SlotRouteServices } from "../../routes/slots.js";
+import type { BudgetRouteServices } from "../../routes/budget.js";
+import { routeServices } from "../support/route-service-stubs.js";
 
 describe("routes-governance port batch", () => {
   it("registerGovernanceRoutes aggregates services into governance snapshot", async () => {
@@ -50,7 +58,7 @@ describe("routes-governance port batch", () => {
         }))
       }
     };
-    registerGovernanceRoutes(app, services as any);
+    registerGovernanceRoutes(app, routeServices<GovernanceRouteServices>(services));
 
     const response = await app.request("/runs/run-1/governance-snapshot");
     expect(response.status).toBe(200);
@@ -88,7 +96,7 @@ describe("routes-governance port batch", () => {
         runVerification: vi.fn(async () => ({ status: "updated" }))
       }
     };
-    registerGreenStatusRoutes(app, services as any);
+    registerGreenStatusRoutes(app, routeServices<GreenStatusRouteServices>(services));
 
     const response = await app.request("/workspaces/ws-1/green-statuses/verify", {
       method: "POST",
@@ -121,7 +129,7 @@ describe("routes-governance port batch", () => {
         apply: vi.fn(async () => ({ runtime_id: "override-1", target_object: "memory-1" }))
       }
     };
-    registerOverrideRoutes(app, services as any);
+    registerOverrideRoutes(app, routeServices<OverrideRouteServices>(services));
 
     const response = await app.request("/runs/run-1/overrides", {
       method: "POST",
@@ -149,7 +157,7 @@ describe("routes-governance port batch", () => {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
       securityStatusService: { getStatus: vi.fn(async () => ({ enforcement_mode: "enforced" })) }
     };
-    registerSecurityStatusRoutes(app, services as any);
+    registerSecurityStatusRoutes(app, routeServices<SecurityStatusRouteServices>(services));
 
     const response = await app.request("/workspaces/ws-1/security-status");
     expect(response.status).toBe(200);
@@ -171,7 +179,7 @@ describe("routes-governance port batch", () => {
         rebuildConflictMatrix: vi.fn()
       }
     };
-    registerConflictMatrixRoutes(app, services as any);
+    registerConflictMatrixRoutes(app, routeServices<ConflictMatrixRouteServices>(services));
 
     const response = await app.request("/workspaces/ws-1/conflict-matrix-edges", {
       method: "POST",
@@ -207,7 +215,7 @@ describe("routes-governance port batch", () => {
         rebuildConflictMatrix: vi.fn()
       }
     };
-    registerConflictMatrixRoutes(app, services as any);
+    registerConflictMatrixRoutes(app, routeServices<ConflictMatrixRouteServices>(services));
 
     const response = await app.request("/conflict-matrix-edges", {
       method: "POST",
@@ -235,7 +243,7 @@ describe("routes-governance port batch", () => {
       }
     };
     registerErrorHandler(app, { error: vi.fn() });
-    registerConflictMatrixRoutes(app, services as any);
+    registerConflictMatrixRoutes(app, routeServices<ConflictMatrixRouteServices>(services));
 
     const response = await app.request("/workspaces/ws-1/conflict-matrix-edges", {
       method: "POST",
@@ -260,7 +268,7 @@ describe("routes-governance port batch", () => {
       }
     };
     registerErrorHandler(app, { error: vi.fn() });
-    registerSlotRoutes(app, services as any);
+    registerSlotRoutes(app, routeServices<SlotRouteServices>(services));
 
     const response = await app.request("/workspaces/ws-1/slots/slot-1/resolve", {
       method: "POST",
@@ -282,7 +290,7 @@ describe("routes-governance port batch", () => {
         resolve: vi.fn(async () => ({ proposal_id: "proposal-1" }))
       }
     };
-    registerBudgetRoutes(app, services as any);
+    registerBudgetRoutes(app, routeServices<BudgetRouteServices>(services));
 
     const snapshotResponse = await app.request("/runs/run-1/budget-snapshot");
     expect(snapshotResponse.status).toBe(200);
@@ -312,7 +320,7 @@ describe("routes-governance port batch", () => {
       workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
       healthJournalService: { getRecentEvents: vi.fn(async () => [{ entry_id: "h1" }]) }
     };
-    registerHealthJournalRoutes(app, services as any);
+    registerHealthJournalRoutes(app, routeServices<HealthJournalRouteServices>(services));
 
     const response = await app.request("/workspaces/ws-1/health-journal?kind=pointer_failure&limit=10");
     expect(response.status).toBe(200);

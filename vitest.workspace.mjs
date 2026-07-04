@@ -26,7 +26,7 @@ const benchRunnerAlias = [
   { find: "@do-soul/alaya-eval", replacement: path.resolve(rootDir, "packages/eval/src/index.ts") }
 ];
 
-function packageProject(name, packageDir) {
+function packageProject(name, packageDir, options = {}) {
   const packageRoot = path.resolve(rootDir, packageDir);
   const testDir = path.resolve(rootDir, packageDir, "src/__tests__");
   if (!existsSync(path.resolve(packageRoot, "package.json"))) {
@@ -41,7 +41,8 @@ function packageProject(name, packageDir) {
       name,
       environment: "node",
       include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
-      exclude: ["**/dist/**"]
+      exclude: ["**/dist/**"],
+      ...options
     }
   });
 }
@@ -70,7 +71,9 @@ export default [
   packageProject("@do-soul/alaya-protocol", "packages/protocol"),
   packageProject("@do-soul/alaya-graph-algorithms", "packages/graph-algorithms"),
   packageProject("@do-soul/alaya-storage", "packages/storage"),
-  packageProject("@do-soul/alaya-core", "packages/core"),
+  packageProject("@do-soul/alaya-core", "packages/core", {
+    setupFiles: [path.resolve(rootDir, "packages/core/vitest.setup.ts")]
+  }),
   packageProject("@do-soul/alaya-soul", "packages/soul"),
   packageProject("@do-soul/alaya-engine-gateway", "packages/engine-gateway"),
   packageProject("@do-soul/alaya-eval", "packages/eval"),

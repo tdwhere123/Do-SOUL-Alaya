@@ -1,3 +1,4 @@
+export * from "./config/index.js";
 export * from "./governance/arbitration-service.js";
 export * from "./governance/auditor-scheduling-advisor.js";
 export * from "./governance/budget-bankruptcy-service.js";

@@ -17,7 +17,9 @@ import {
   hardDeleteTombstonedMemoryEntry,
   hardDeleteTombstonedWithDisposition,
   reviveDormantMemoryEntry,
+  reviveDormantMemoryEntrySync,
   transitionMemoryEntryLifecycle,
+  transitionMemoryEntryLifecycleSync,
   transitionMemoryEntryToDormantIfActive,
   type MemoryEntryLifecycleWorkflowHost
 } from "./lifecycle-workflows.js";
@@ -37,6 +39,7 @@ import type {
 import {
   updateMemoryEntry,
   updateMemoryEntryDynamics,
+  updateMemoryEntryDynamicsSync,
   updateMemoryEntryTier,
   updateScopedMemoryEntry,
   type MemoryEntryUpdateWorkflowHost
@@ -160,9 +163,18 @@ export class SqliteMemoryEntryRepo
     return await this.readQueries.findById(objectId);
   }
 
+  public findByIdSync(objectId: string): Readonly<MemoryEntry> | null {
+    return this.readQueries.findByIdSync(objectId);
+  }
+
   private activeConnection(): StorageDatabase["connection"] {
     this.db.reopenIfClosed();
     return this.db.connection;
+  }
+
+  // wiring-time identity of the backing connection for the atomic-karma guard.
+  public getStorageConnectionIdentity(): StorageDatabase {
+    return this.db;
   }
 
   public async findByIds(
@@ -455,6 +467,14 @@ export class SqliteMemoryEntryRepo
     );
   }
 
+  public updateDynamicsSync(
+    objectId: string,
+    fields: MemoryEntryRepoDynamicsUpdateFields,
+    updatedAt: string
+  ): Readonly<MemoryEntry> {
+    return updateMemoryEntryDynamicsSync.call(this, objectId, fields, updatedAt);
+  }
+
   public async transitionLifecycle(
     objectId: string,
     lifecycleState: MemoryEntry["lifecycle_state"],
@@ -475,6 +495,19 @@ export class SqliteMemoryEntryRepo
     updatedAt: string
   ): Promise<Readonly<MemoryEntry> | null> {
     return reviveDormantMemoryEntry.call(this, objectId, updatedAt);
+  }
+
+  public reviveDormantSync(objectId: string, updatedAt: string): Readonly<MemoryEntry> | null {
+    return reviveDormantMemoryEntrySync.call(this, objectId, updatedAt);
+  }
+
+  public transitionLifecycleSync(
+    objectId: string,
+    lifecycleState: MemoryEntry["lifecycle_state"],
+    updatedAt: string,
+    onTransition?: () => void
+  ): Readonly<MemoryEntry> {
+    return transitionMemoryEntryLifecycleSync.call(this, objectId, lifecycleState, updatedAt, onTransition);
   }
 
   public async transitionToDormantIfActive(

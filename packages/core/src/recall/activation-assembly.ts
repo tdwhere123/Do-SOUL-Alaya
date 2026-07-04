@@ -11,14 +11,11 @@ import {
   type EntityCandidate
 } from "./entity-expansion.js";
 
-function flagEnabled(name: string): boolean {
-  const raw = process.env[name];
-  return raw === "on" || raw === "1" || raw === "true";
-}
+import { recallEnvFlagEnabled } from "../config/recall-env-access.js";
 
 // invariant: unset ALAYA_RECALL_COMPOSE preserves the flat candidate ordering path.
 export function composeRecallEnabled(): boolean {
-  return flagEnabled("ALAYA_RECALL_COMPOSE");
+  return recallEnvFlagEnabled("ALAYA_RECALL_COMPOSE");
 }
 
 // Core-only composed unit (protocol owns a different ActivationCandidate). Members are the raw

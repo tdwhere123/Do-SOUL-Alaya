@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   resolveSecretRef,
   type ResolveSecretError
@@ -141,7 +140,7 @@ function formatBenchEmbeddingSecretError(error: ResolveSecretError): string {
 }
 
 export async function closeBenchDaemonResources(resources: {
-  readonly mcpClient?: Client;
+  readonly mcpClient?: { close(): Promise<unknown> };
   readonly server?: { close(): Promise<unknown> };
   readonly runtime?: { shutdown(): Promise<unknown> };
 }): Promise<void> {

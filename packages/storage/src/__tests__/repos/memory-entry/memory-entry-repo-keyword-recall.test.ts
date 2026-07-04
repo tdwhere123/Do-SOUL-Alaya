@@ -32,7 +32,7 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
       })
     );
 
-    const matches = await (repo as any).searchByKeyword("workspace-1", "recall", 5);
+    const matches = await repo.searchByKeyword("workspace-1", "recall", 5);
 
     expect(matches).toEqual([
       expect.objectContaining({

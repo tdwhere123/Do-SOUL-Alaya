@@ -8,10 +8,10 @@ import { scheduleAuditedAsyncSideEffect } from "../runtime/async-side-effect-aud
 import { CoreError } from "../shared/errors.js";
 
 import {
-  appendManifestationChangedEvent,
-  appendRetentionUpdatedEvent,
-  appendStateChangedEvent,
-  broadcastEvents
+  broadcastEvents,
+  buildManifestationChangedEventInput,
+  buildRetentionUpdatedEventInput,
+  buildStateChangedEventInput
 } from "./dynamics-audit-events.js";
 import { determineManifestation } from "./dynamics-constants-runtime.js";
 import {
@@ -23,12 +23,14 @@ import {
   deriveKarmaFieldUpdates,
   hasScoreChanged,
   parseKarmaEventInput,
+  type DynamicsEventLogInput,
   type DynamicsServiceEventLogRepoPort,
   type DynamicsServiceGreenPort,
   type DynamicsServiceKarmaEventRepoPort,
   type DynamicsServiceMemoryRepoPort,
   type DynamicsServiceRuntimeNotifier,
-  type KarmaTransitionComputation
+  type KarmaTransitionComputation,
+  type KarmaTransitionEventPublisherPort
 } from "./dynamics-service-ports.js";
 
 export interface KarmaTransitionEngineDependencies {
@@ -37,28 +39,135 @@ export interface KarmaTransitionEngineDependencies {
   readonly eventLogRepo: DynamicsServiceEventLogRepoPort;
   readonly runtimeNotifier: DynamicsServiceRuntimeNotifier;
   readonly greenService?: DynamicsServiceGreenPort;
+  readonly eventPublisher?: KarmaTransitionEventPublisherPort;
   readonly now: () => string;
 }
 
-// Applies transition math to DB before a fire-and-forget Green re-evaluation.
+export interface KarmaTransitionPlan {
+  readonly parsedEvent: Readonly<KarmaEvent>;
+  readonly memory: Readonly<MemoryEntry>;
+  readonly karmaSum: number;
+  readonly transition: KarmaTransitionComputation;
+}
+
+export interface KarmaTransitionApplyResult {
+  readonly updated: Readonly<MemoryEntry>;
+  readonly revived: boolean;
+}
+
 export class KarmaTransitionEngine {
   public constructor(private readonly deps: KarmaTransitionEngineDependencies) {}
 
   public async processKarmaEvent(event: KarmaEvent): Promise<void> {
+    const plan = await this.computeKarmaTransitionPlan(event);
+    if (this.canRunAtomicTransition()) {
+      await this.processKarmaTransitionAtomic(plan);
+      return;
+    }
+    // test-only: production wiring is guaranteed atomic by requireAtomicKarmaTransition
+    // (daemon); this ordering-safe, non-atomic path serves fakes lacking the sync ports.
+    const applied = await this.applyKarmaTransitionPlan(plan);
+    const events = await this.auditKarmaTransition(applied, plan);
+    await this.notifyKarmaTransition(applied.updated, events);
+  }
+
+  // invariant (§7 + §31): the karma write and its EventLog audit rows commit in
+  // one SQLite transaction, so a failed append rolls the DB mutation back with
+  // no half-commit window. Engaged only when the injected repos expose the
+  // synchronous ports the transaction callback needs.
+  private canRunAtomicTransition(): boolean {
+    const memoryRepo = this.deps.memoryRepo;
+    return (
+      this.deps.eventPublisher !== undefined &&
+      this.deps.karmaEventRepo.createSync !== undefined &&
+      memoryRepo.updateDynamicsSync !== undefined &&
+      memoryRepo.reviveDormantSync !== undefined
+    );
+  }
+
+  private async processKarmaTransitionAtomic(plan: KarmaTransitionPlan): Promise<void> {
+    const eventPublisher = this.deps.eventPublisher;
+    if (eventPublisher === undefined) {
+      throw new CoreError("CONFLICT", "Atomic karma transition requires an event publisher.", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    const { result } = await eventPublisher.mutateThenAppendMany(() => {
+      const applied = this.applyKarmaTransitionPlanSync(plan);
+      return { events: this.buildKarmaAuditInputs(applied, plan), result: applied };
+    });
+    this.scheduleGreenReevaluation(result.updated);
+  }
+
+  private applyKarmaTransitionPlanSync(plan: KarmaTransitionPlan): KarmaTransitionApplyResult {
+    const { memoryRepo, karmaEventRepo } = this.deps;
+    if (karmaEventRepo.createSync === undefined || memoryRepo.updateDynamicsSync === undefined) {
+      throw new CoreError("CONFLICT", "Atomic karma transition requires synchronous repo ports.", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    karmaEventRepo.createSync(plan.parsedEvent);
+    const updated = memoryRepo.updateDynamicsSync(
+      plan.memory.object_id,
+      {
+        activation_score: plan.transition.activationScore,
+        retention_score: plan.transition.retentionScore,
+        manifestation_state: plan.transition.manifestationState,
+        retention_state: plan.transition.retentionState,
+        ...plan.transition.fieldUpdates
+      },
+      plan.transition.now
+    );
+    const revived = this.reviveDormantMemoryFromKarmaSync(plan.memory, plan.parsedEvent, plan.transition.now);
+    return { updated, revived };
+  }
+
+  public async computeKarmaTransitionPlan(event: KarmaEvent): Promise<KarmaTransitionPlan> {
     const parsedEvent = parseKarmaEventInput(event);
     const memory = await this.deps.memoryRepo.findById(parsedEvent.object_id);
-
     if (memory === null) {
       throw new CoreError("NOT_FOUND", `Memory entry not found: ${parsedEvent.object_id}`);
     }
-
-    await this.deps.karmaEventRepo.create(parsedEvent);
-    const karmaSum = await this.deps.karmaEventRepo.sumByObjectId(parsedEvent.object_id);
+    // add own amount: this event is inserted later, so match baseline create-then-sum.
+    const karmaSum =
+      (await this.deps.karmaEventRepo.sumByObjectId(parsedEvent.object_id)) + parsedEvent.amount;
     const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now());
-    const updated = await this.applyKarmaTransition(memory, transition);
-    const revived = await this.reviveDormantMemoryFromKarma(memory, parsedEvent, transition.now);
-    const events = await this.appendKarmaTransitionEvents(updated, parsedEvent, transition, revived);
+    return {
+      parsedEvent,
+      memory,
+      karmaSum,
+      transition
+    };
+  }
 
+  public async applyKarmaTransitionPlan(plan: KarmaTransitionPlan): Promise<KarmaTransitionApplyResult> {
+    await this.deps.karmaEventRepo.create(plan.parsedEvent);
+    const updated = await this.deps.memoryRepo.updateDynamics(
+      plan.memory.object_id,
+      {
+        activation_score: plan.transition.activationScore,
+        retention_score: plan.transition.retentionScore,
+        manifestation_state: plan.transition.manifestationState,
+        retention_state: plan.transition.retentionState,
+        ...plan.transition.fieldUpdates
+      },
+      plan.transition.now
+    );
+    const revived = await this.reviveDormantMemoryFromKarma(plan.memory, plan.parsedEvent, plan.transition.now);
+    return { updated, revived };
+  }
+
+  public async auditKarmaTransition(
+    applyResult: KarmaTransitionApplyResult,
+    plan: KarmaTransitionPlan
+  ): Promise<EventLogEntry[]> {
+    return await this.buildKarmaTransitionAuditEntries(applyResult, plan);
+  }
+
+  public async notifyKarmaTransition(
+    updated: Readonly<MemoryEntry>,
+    events: readonly EventLogEntry[]
+  ): Promise<void> {
     await broadcastEvents(this.deps.runtimeNotifier, events);
     this.scheduleGreenReevaluation(updated);
   }
@@ -121,21 +230,98 @@ export class KarmaTransitionEngine {
     };
   }
 
-  private async applyKarmaTransition(
+  private async buildKarmaTransitionAuditEntries(
+    applyResult: KarmaTransitionApplyResult,
+    plan: KarmaTransitionPlan
+  ): Promise<EventLogEntry[]> {
+    const entries: EventLogEntry[] = [];
+    for (const input of this.buildKarmaAuditInputs(applyResult, plan)) {
+      entries.push(await this.deps.eventLogRepo.append(input));
+    }
+    return entries;
+  }
+
+  private buildKarmaAuditInputs(
+    applyResult: KarmaTransitionApplyResult,
+    plan: KarmaTransitionPlan
+  ): DynamicsEventLogInput[] {
+    const inputs: DynamicsEventLogInput[] = [];
+    const { parsedEvent, transition } = plan;
+    const memory = applyResult.updated;
+
+    if (applyResult.revived) {
+      inputs.push(
+        buildStateChangedEventInput({
+          memory,
+          fromState: "dormant",
+          toState: "active",
+          reasonCode: parsedEvent.kind,
+          occurredAt: transition.now
+        })
+      );
+    }
+
+    if (hasScoreChanged(transition.previousRetention, transition.retentionScore)) {
+      inputs.push(
+        buildRetentionUpdatedEventInput({
+          memory,
+          fromRetention: transition.previousRetention,
+          toRetention: transition.retentionScore,
+          reasonCode: parsedEvent.kind,
+          occurredAt: transition.now
+        })
+      );
+    }
+
+    if (transition.previousRetentionState !== transition.retentionState) {
+      inputs.push(
+        buildStateChangedEventInput({
+          memory,
+          fromState: transition.previousRetentionState,
+          toState: transition.retentionState,
+          reasonCode: parsedEvent.kind,
+          occurredAt: transition.now
+        })
+      );
+    }
+
+    if (transition.previousManifestation !== transition.manifestationState) {
+      inputs.push(
+        buildManifestationChangedEventInput({
+          memory,
+          fromState: transition.previousManifestation,
+          toState: transition.manifestationState,
+          reasonCode: parsedEvent.kind,
+          occurredAt: transition.now
+        })
+      );
+    }
+
+    return inputs;
+  }
+
+  private reviveDormantMemoryFromKarmaSync(
     memory: Readonly<MemoryEntry>,
-    transition: KarmaTransitionComputation
-  ): Promise<Readonly<MemoryEntry>> {
-    return await this.deps.memoryRepo.updateDynamics(
-      memory.object_id,
-      {
-        activation_score: transition.activationScore,
-        retention_score: transition.retentionScore,
-        manifestation_state: transition.manifestationState,
-        retention_state: transition.retentionState,
-        ...transition.fieldUpdates
-      },
-      transition.now
-    );
+    parsedEvent: Readonly<KarmaEvent>,
+    now: string
+  ): boolean {
+    if (parsedEvent.amount <= 0) {
+      return false;
+    }
+
+    // Invoke via the repo so the method keeps its `this`; destructuring the
+    // prototype method detaches its bound SQLite statements.
+    const memoryRepo = this.deps.memoryRepo;
+    if (memoryRepo.reviveDormantSync !== undefined) {
+      return memoryRepo.reviveDormantSync(memory.object_id, now) !== null;
+    }
+
+    if (memory.lifecycle_state === "dormant" && memoryRepo.transitionLifecycleSync !== undefined) {
+      memoryRepo.transitionLifecycleSync(memory.object_id, "active", now);
+      return true;
+    }
+
+    return false;
   }
 
   private async reviveDormantMemoryFromKarma(
@@ -147,77 +333,20 @@ export class KarmaTransitionEngine {
       return false;
     }
 
-    const reviveDormant = this.deps.memoryRepo.reviveDormant;
-    if (reviveDormant !== undefined) {
-      const revivedRow = await reviveDormant(memory.object_id, now);
+    // Invoke via the repo so the method keeps its `this`; destructuring the
+    // prototype method detaches its bound SQLite statements.
+    const memoryRepo = this.deps.memoryRepo;
+    if (memoryRepo.reviveDormant !== undefined) {
+      const revivedRow = await memoryRepo.reviveDormant(memory.object_id, now);
       return revivedRow !== null;
     }
 
-    if (memory.lifecycle_state === "dormant" && this.deps.memoryRepo.transitionLifecycle !== undefined) {
-      await this.deps.memoryRepo.transitionLifecycle(memory.object_id, "active", now);
+    if (memory.lifecycle_state === "dormant" && memoryRepo.transitionLifecycle !== undefined) {
+      await memoryRepo.transitionLifecycle(memory.object_id, "active", now);
       return true;
     }
 
     return false;
-  }
-
-  private async appendKarmaTransitionEvents(
-    updated: Readonly<MemoryEntry>,
-    parsedEvent: Readonly<KarmaEvent>,
-    transition: KarmaTransitionComputation,
-    revived: boolean
-  ): Promise<EventLogEntry[]> {
-    const events: EventLogEntry[] = [];
-
-    if (revived) {
-      events.push(
-        await appendStateChangedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromState: "dormant",
-          toState: "active",
-          reasonCode: parsedEvent.kind,
-          occurredAt: transition.now
-        })
-      );
-    }
-
-    if (hasScoreChanged(transition.previousRetention, transition.retentionScore)) {
-      events.push(
-        await appendRetentionUpdatedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromRetention: transition.previousRetention,
-          toRetention: transition.retentionScore,
-          reasonCode: parsedEvent.kind,
-          occurredAt: transition.now
-        })
-      );
-    }
-
-    if (transition.previousRetentionState !== transition.retentionState) {
-      events.push(
-        await appendStateChangedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromState: transition.previousRetentionState,
-          toState: transition.retentionState,
-          reasonCode: parsedEvent.kind,
-          occurredAt: transition.now
-        })
-      );
-    }
-
-    if (transition.previousManifestation !== transition.manifestationState) {
-      events.push(
-        await appendManifestationChangedEvent(this.deps.eventLogRepo, {
-          memory: updated,
-          fromState: transition.previousManifestation,
-          toState: transition.manifestationState,
-          reasonCode: parsedEvent.kind,
-          occurredAt: transition.now
-        })
-      );
-    }
-
-    return events;
   }
 
   private scheduleGreenReevaluation(updated: Readonly<MemoryEntry>): void {

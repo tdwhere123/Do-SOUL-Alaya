@@ -42,6 +42,12 @@ export class MemoryEntryReadQueries {
   }
 
   public async findById(objectId: string): Promise<Readonly<MemoryEntry> | null> {
+    return this.findByIdSync(objectId);
+  }
+
+  // invariant (§7): synchronous read shared with the async wrapper so the karma
+  // transition can re-read the mutated row inside a single EventLog transaction.
+  public findByIdSync(objectId: string): Readonly<MemoryEntry> | null {
     try {
       const row = this.statements.findByIdStatement.get(objectId) as MemoryEntryRow | undefined;
       return row === undefined ? null : parseMemoryEntryRow(row);

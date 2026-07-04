@@ -53,7 +53,11 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
     SqliteSignalRepo: makeRepo(),
     SqliteEdgeProposalRepo: makeRepo(),
     SqliteEvidenceCapsuleRepo: makeRepo(),
-    SqliteMemoryEntryRepo: makeRepo(),
+    SqliteMemoryEntryRepo: vi.fn().mockImplementation(function SqliteMemoryEntryRepo() {
+      return {
+        getStorageConnectionIdentity: () => hoisted.database
+      };
+    }),
     SqliteOrphanRadarRepo: makeRepo(),
     SqliteProjectMappingAnchorRepo: makeRepo(),
     SqliteSynthesisCapsuleRepo: makeRepo(),
@@ -76,7 +80,11 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
       findByWorkspace: vi.fn(async () => [])
     }),
     SqliteFileRepo: makeRepo(),
-    SqliteKarmaEventRepo: makeRepo(),
+    SqliteKarmaEventRepo: vi.fn().mockImplementation(function SqliteKarmaEventRepo() {
+      return {
+        getStorageConnectionIdentity: () => hoisted.database
+      };
+    }),
     SqliteConfigRepo: makeRepo(),
     SqliteHandoffGapRepo: makeRepo({
       findExpiredObjectsByWorkspace: vi.fn(async () => []),

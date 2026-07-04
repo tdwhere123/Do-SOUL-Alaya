@@ -31,6 +31,7 @@ import {
 } from "./dynamics-service-ports.js";
 
 export type {
+  DynamicsEventLogInput,
   DynamicsServiceDependencies,
   DynamicsServiceEventLogRepoPort,
   DynamicsServiceGreenPort,
@@ -39,7 +40,8 @@ export type {
   DynamicsServiceRuntimeNotifier,
   DynamicsUpdateFields,
   KarmaDerivedFieldUpdates,
-  KarmaTransitionComputation
+  KarmaTransitionComputation,
+  KarmaTransitionEventPublisherPort
 } from "./dynamics-service-ports.js";
 
 export class DynamicsService {
@@ -61,6 +63,7 @@ export class DynamicsService {
       eventLogRepo: dependencies.eventLogRepo,
       runtimeNotifier: dependencies.runtimeNotifier,
       greenService: dependencies.greenService,
+      eventPublisher: dependencies.eventPublisher,
       now: this.now
     });
     this.retentionScanner = new RetentionDecayScanner({

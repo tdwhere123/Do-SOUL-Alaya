@@ -1,4 +1,6 @@
+import { vi } from "vitest";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type { SignalServiceDependencies } from "../../memory/signal-service-types.js";
 
 export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
   const { signal_state, ...restOverrides } = overrides;
@@ -26,5 +28,26 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
     },
     created_at: "2026-03-18T00:00:00.000Z",
     ...restOverrides
+  };
+}
+
+export function signalServiceDependencies(
+  overrides: Partial<SignalServiceDependencies> = {}
+): SignalServiceDependencies {
+  return {
+    eventLogRepo: {
+      append: vi.fn(),
+      queryByEntity: vi.fn(async () => [])
+    },
+    signalRepo: {
+      create: vi.fn(),
+      getById: vi.fn(async () => null),
+      listByRun: vi.fn(async () => []),
+      updateState: vi.fn()
+    },
+    runtimeNotifier: {
+      notifyEntry: vi.fn()
+    },
+    ...overrides
   };
 }

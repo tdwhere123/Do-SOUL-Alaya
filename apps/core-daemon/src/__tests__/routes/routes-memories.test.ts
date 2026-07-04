@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { registerMemoryRoutes } from "../../routes/memories.js";
+import { memoryRouteServices } from "../support/route-service-stubs.js";
 
 type MemoryRouteFixture = {
   readonly object_id: string;
@@ -44,7 +45,7 @@ describe("memory routes (HTTP surface narrowed)", () => {
         throw new Error("findById must not be reachable from HTTP /memories/:id");
       })
     };
-    registerMemoryRoutes(app, { workspaceService, runService, memoryService } as any);
+    registerMemoryRoutes(app, memoryRouteServices({ workspaceService, runService, memoryService }));
     return { app, workspaceService, runService, memoryService };
   }
 

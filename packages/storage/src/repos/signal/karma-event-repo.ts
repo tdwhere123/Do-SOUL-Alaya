@@ -13,6 +13,9 @@ export type { KarmaEvent, KarmaEventKind } from "@do-soul/alaya-protocol";
 
 export interface KarmaEventRepo {
   create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>>;
+  // invariant (§7): synchronous insert so the karma transition can persist the
+  // karma event + its EventLog audit rows in one SQLite transaction.
+  createSync?(event: Readonly<KarmaEvent>): Readonly<KarmaEvent>;
   findByObjectIdPage?(
     objectId: string,
     page: KarmaEventListPageOptions
@@ -139,7 +142,16 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
     `);
   }
 
+  // wiring-time identity of the backing connection for the atomic-karma guard.
+  public getStorageConnectionIdentity(): StorageDatabase {
+    return this.db;
+  }
+
   public async create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>> {
+    return this.createSync(event);
+  }
+
+  public createSync(event: Readonly<KarmaEvent>): Readonly<KarmaEvent> {
     const parsed = parseKarmaEvent(event);
 
     try {

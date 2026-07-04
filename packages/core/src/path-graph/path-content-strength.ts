@@ -2,12 +2,13 @@
 // writes the fixed seed-profile constants; when enabled, relation_kind bands map
 // the content-classification score to strength and recall_bias magnitude.
 
+import { getCoreConfig } from "../config/install-core-config.js";
 import { clamp01 } from "../shared/clamp.js";
 
 // invariant: only an explicit truthy ALAYA_PATHREL_CONTENT_STRENGTH enables
 // content-driven path strength.
 export function pathRelContentStrengthEnabled(): boolean {
-  const raw = process.env.ALAYA_PATHREL_CONTENT_STRENGTH;
+  const raw = getCoreConfig().pathGraph.pathrelContentStrength;
   return raw === "on" || raw === "1" || raw === "true";
 }
 

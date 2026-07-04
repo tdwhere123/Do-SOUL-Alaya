@@ -19,7 +19,7 @@ import {
 
 import { createApp } from "../../runtime/app.js";
 
-import type { ProposalRouteServices } from "../../routes/proposals.js";
+import { proposalRouteServices } from "../support/route-service-stubs.js";
 
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
 
@@ -70,15 +70,15 @@ describe("proposal review inspector cli parity", () => {
         requestToken: "daemon-request-token"
       },
       routes: {
-        proposals: {
-          workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) } as any,
-          memoryService: { findByIdScoped: vi.fn(async () => null) } as any,
+        proposals: proposalRouteServices({
+          workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) },
+          memoryService: { findByIdScoped: vi.fn(async () => null) },
           proposalService: {
             findByWorkspaceId: vi.fn(async () => []),
             findPending: vi.fn(async () => [])
-          } as any,
+          },
           mcpMemoryToolHandler: createReviewHandler()
-        } as unknown as ProposalRouteServices
+        })
       }
     });
 

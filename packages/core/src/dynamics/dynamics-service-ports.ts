@@ -42,6 +42,19 @@ export interface DynamicsUpdateFields {
   readonly superseded_by?: string;
 }
 
+export type DynamicsEventLogInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+// invariant (§7): the karma write and its EventLog audit rows commit in one
+// SQLite transaction. `mutate` runs the synchronous read-modify-write and
+// returns the audit rows it produced (guarded revival emits its row only when
+// the row was actually dormant), which append inside the same transaction. A
+// failed append or mutation rolls the whole thing back — no half-commit.
+export interface KarmaTransitionEventPublisherPort {
+  mutateThenAppendMany<T>(
+    mutate: () => { readonly events: readonly DynamicsEventLogInput[]; readonly result: T }
+  ): Promise<{ readonly result: T; readonly entries: readonly EventLogEntry[] }>;
+}
+
 export interface DynamicsServiceMemoryRepoPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
   findByWorkspaceId(
@@ -61,6 +74,24 @@ export interface DynamicsServiceMemoryRepoPort {
     fields: DynamicsUpdateFields,
     updatedAt: string
   ): Promise<Readonly<MemoryEntry>>;
+  // invariant (§7): synchronous dynamics write so the karma transition can run
+  // inside a single EventLog transaction. Optional; absent => async fallback.
+  updateDynamicsSync?(
+    objectId: string,
+    fields: DynamicsUpdateFields,
+    updatedAt: string
+  ): Readonly<MemoryEntry>;
+  // Synchronous guarded revival for the single-transaction karma path; returns
+  // the row when it transitioned dormant -> active, null when the row was not
+  // dormant (mirrors reviveDormant). Optional; absent => async fallback.
+  reviveDormantSync?(objectId: string, updatedAt: string): Readonly<MemoryEntry> | null;
+  // Synchronous lifecycle transition used as the revival fallback inside the
+  // single-transaction karma path when reviveDormantSync is absent.
+  transitionLifecycleSync?(
+    objectId: string,
+    lifecycleState: MemoryEntry["lifecycle_state"],
+    updatedAt: string
+  ): Readonly<MemoryEntry>;
   // invariant: REVERSIBLE revival path. Optional so narrow test fakes need not
   // implement it; when present, a positive karma event on a dormant memory
   // flips lifecycle_state dormant -> active so a used memory re-enters recall.
@@ -80,6 +111,9 @@ export interface DynamicsServiceMemoryRepoPort {
 
 export interface DynamicsServiceKarmaEventRepoPort {
   create(event: Readonly<KarmaEvent>): Promise<Readonly<KarmaEvent>>;
+  // invariant (§7): synchronous karma-event write so the karma transition can
+  // run inside a single EventLog transaction. Optional; absent => async fallback.
+  createSync?(event: Readonly<KarmaEvent>): Readonly<KarmaEvent>;
   sumByObjectId(objectId: string): Promise<number>;
   sumByObjectIds(objectIds: readonly string[]): Promise<Readonly<Record<string, number>>>;
   findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]>;
@@ -107,6 +141,9 @@ export interface DynamicsServiceDependencies {
   readonly eventLogRepo: DynamicsServiceEventLogRepoPort;
   readonly runtimeNotifier: DynamicsServiceRuntimeNotifier;
   readonly greenService?: DynamicsServiceGreenPort;
+  // invariant (§7): when present alongside the sync repo ports, karma
+  // transitions persist the karma write + EventLog audit rows atomically.
+  readonly eventPublisher?: KarmaTransitionEventPublisherPort;
   readonly generateEventId?: () => string;
   readonly now?: () => string;
 }

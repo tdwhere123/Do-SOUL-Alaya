@@ -4,6 +4,10 @@ import { clamp01 } from "./recall-service-helpers.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { classifyRecallIntent } from "./recall-query-plan.js";
 import type { RecallFusionStream } from "./recall-service-types.js";
+import {
+  recallProjectionScoringEnabled,
+  recallTemporalWindowEnabled
+} from "../config/recall-env-access.js";
 
 export function resolveDefaultFusionWeightForIntent(
   stream: RecallFusionStream,
@@ -23,12 +27,10 @@ export function resolveDefaultFusionWeightForIntent(
   return intent === "temporal" || intent === "knowledge_update" ? 4 : baseWeight;
 }
 
-export function recallProjectionScoringEnabled(): boolean {
-  return !/^(?:0|false|off|no)$/iu.test(process.env.ALAYA_RECALL_PROJECTIONS ?? "on");
-}
+export { recallProjectionScoringEnabled } from "../config/recall-env-access.js";
 
 export function temporalQueryWindowEnabled(): boolean {
-  return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_TEMPORAL_WINDOW ?? "");
+  return recallTemporalWindowEnabled();
 }
 
 export interface QueryTimeWindow {

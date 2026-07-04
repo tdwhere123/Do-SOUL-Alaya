@@ -314,7 +314,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
 
     await closeBenchDaemonResources({
-      mcpClient: { close: vi.fn(async () => { throw new Error("mcp close failed"); }) } as any,
+      mcpClient: { close: vi.fn(async () => { throw new Error("mcp close failed"); }) },
       server: { close: vi.fn(async () => { throw new Error("server close failed"); }) },
       runtime: { shutdown: vi.fn(async () => { throw new Error("runtime shutdown failed"); }) }
     });

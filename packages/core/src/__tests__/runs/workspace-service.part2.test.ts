@@ -124,7 +124,7 @@ describe("WorkspaceService.reconcileBootstrapPaths", () => {
       }),
       appendManyWithMutation: async (_events, mutate) => {
         recordPersisted = true;
-        mutate();
+        mutate([]);
       }
     });
 
@@ -157,7 +157,7 @@ describe("WorkspaceService.reconcileBootstrapPaths", () => {
     const harness = makeReconcileService({
       appendManyWithMutation: async (events, mutate) => {
         seenEvents.push(events as ReadonlyArray<{ readonly caused_by: string }>);
-        mutate();
+        mutate([]);
       }
     });
 

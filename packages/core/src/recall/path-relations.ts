@@ -3,6 +3,7 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
+import { recallAnswersWithEnabled } from "../config/recall-env-access.js";
 import { clamp01 } from "./recall-service-helpers.js";
 import type {
   PathInflowEdge,
@@ -94,10 +95,7 @@ export interface DirectionEligiblePathExpansionTarget {
 const ANSWER_FLOOD_RELATION_KINDS: ReadonlySet<string> = new Set(["answers_with"]);
 
 export function answersWithPathFuelEnabled(): boolean {
-  return (
-    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
-    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
-  );
+  return recallAnswersWithEnabled();
 }
 
 function isAnswerFloodRelationKind(relationKind: string): boolean {

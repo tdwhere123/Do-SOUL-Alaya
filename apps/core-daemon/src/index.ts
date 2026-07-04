@@ -1,5 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { installCoreConfigFromProcessEnv } from "@do-soul/alaya-core";
 import { initDatabase } from "@do-soul/alaya-storage";
 import {
   type AlayaDaemonListenOptions,
@@ -63,17 +64,22 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
 }
 
 async function createRuntimeBootstrapContext() {
-  validateDaemonEnv(process.env);
   const startupSteps: DaemonStartupStepRecord[] = [];
   const validatedEnv = validateDaemonEnv(process.env);
   const warnLogger = createWarnLogger();
   startCjkSegmentationWarmup(warnLogger);
   installUnhandledRejectionHandler(warnLogger);
   const runtimeNotifier = createRuntimeNotifier();
-  const requestProtection = createRequestProtection(validatedEnv);
+  const requestProtection = createRequestProtection(validatedEnv, (message, meta) => {
+    warnLogger.warn(message, meta ?? {});
+  });
   const remoteDaemonOptInEnabled = isRemoteDaemonOptInEnabled(process.env);
   const configPaths = resolveAlayaConfigPaths(resolveAlayaConfigDir({ env: process.env }));
-  const configEnv = await loadConfigEnv(configPaths.envPath);
+  const configEnvResult = await loadConfigEnv(configPaths.envPath, (message, meta) => {
+    warnLogger.warn(message, meta ?? {});
+  });
+  // Core/recall config must read the full env; validatedEnv is only the daemon server key subset and would drop every ALAYA_RECALL_* flag.
+  installCoreConfigFromProcessEnv(process.env, configEnvResult);
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const database = initDatabase({ filename: dbPath });
@@ -86,7 +92,7 @@ async function createRuntimeBootstrapContext() {
     requestProtection,
     remoteDaemonOptInEnabled,
     configPaths,
-    configEnv,
+    configEnv: configEnvResult,
     filesDirectory,
     database
   };
@@ -267,7 +273,31 @@ async function finalizeRuntime(
   runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
   gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
 ) {
-  return await finalizeDaemonRuntimeFromWiring({
+  return await finalizeDaemonRuntimeFromWiring(
+    buildFinalizeDaemonRuntimeWiringInput(
+      bootstrap,
+      repositories,
+      foundation,
+      runtimeWiring,
+      gardenWiring
+    )
+  );
+}
+
+// The wiring input type is inferred from this builder so a missing or
+// mistyped field is a tsc error at the call site rather than silent `any`.
+export type FinalizeDaemonRuntimeWiringInput = ReturnType<
+  typeof buildFinalizeDaemonRuntimeWiringInput
+>;
+
+function buildFinalizeDaemonRuntimeWiringInput(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
+  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
+  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
+) {
+  return {
     requestProtection: bootstrap.requestProtection,
     runtimeNotifier: bootstrap.runtimeNotifier,
     startupSteps: bootstrap.startupSteps,
@@ -344,7 +374,7 @@ async function finalizeRuntime(
     embeddingRecallService: runtimeWiring.recallWiring.embeddingRecallService,
     graphHealthService: foundation.graphHealthService,
     initialGardenLastPassAt: gardenWiring.initialGardenLastPassAt
-  });
+  };
 }
 
 async function createGardenAndFinalRuntime(

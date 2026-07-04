@@ -1,4 +1,5 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { recallEnvFlagEnabled } from "../config/recall-env-access.js";
 import type { RecallFusionStream } from "./recall-service-types.js";
 
 export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
@@ -18,13 +19,11 @@ export const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, 
 });
 
 export function facetOverlapEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_FACET_OVERLAP;
-  return raw === "on" || raw === "1" || raw === "true";
+  return recallEnvFlagEnabled("ALAYA_RECALL_FACET_OVERLAP");
 }
 
 export function facetSliceEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_FACET_SLICE;
-  return raw === "on" || raw === "1" || raw === "true";
+  return recallEnvFlagEnabled("ALAYA_RECALL_FACET_SLICE");
 }
 
 export function activeFusionStreams(): readonly RecallFusionStream[] {

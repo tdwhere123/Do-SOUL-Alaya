@@ -244,18 +244,8 @@ export async function updateMemoryEntryDynamics(
   fields: MemoryEntryRepoDynamicsUpdateFields,
   updatedAt: string
 ): Promise<Readonly<MemoryEntry>> {
-  const parsedFields = parseDynamicsUpdateFields(fields);
-  const parsedUpdatedAt = parseUpdatedAt(updatedAt);
-  const dynamicUpdate = buildDynamicUpdateParts(parsedFields, parsedUpdatedAt, objectId);
-
   try {
-    const result = this.db.connection
-      .prepare(`UPDATE memory_entries SET ${dynamicUpdate.setClauses.join(", ")} WHERE object_id = ?`)
-      .run(...dynamicUpdate.params);
-
-    if (result.changes === 0) {
-      throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
-    }
+    runDynamicsUpdateStatement(this, objectId, fields, updatedAt);
 
     const updated = await this.findById(objectId);
 
@@ -274,6 +264,50 @@ export async function updateMemoryEntryDynamics(
       `Failed to update dynamics for memory entry ${objectId}.`,
       error
     );
+  }
+}
+
+// invariant (§7): synchronous dynamics write so the karma transition can run
+// inside a single EventLog transaction. Uses the sync findByIdStatement re-read
+// because an `await` inside the outer transaction would commit early.
+export function updateMemoryEntryDynamicsSync(
+  this: MemoryEntryUpdateWorkflowHost,
+  objectId: string,
+  fields: MemoryEntryRepoDynamicsUpdateFields,
+  updatedAt: string
+): Readonly<MemoryEntry> {
+  try {
+    runDynamicsUpdateStatement(this, objectId, fields, updatedAt);
+    return loadUpdatedMemoryEntry(this, objectId, "dynamics update");
+  } catch (error) {
+    if (error instanceof StorageError) {
+      throw error;
+    }
+
+    throw new StorageError(
+      "QUERY_FAILED",
+      `Failed to update dynamics for memory entry ${objectId}.`,
+      error
+    );
+  }
+}
+
+function runDynamicsUpdateStatement(
+  host: MemoryEntryUpdateWorkflowHost,
+  objectId: string,
+  fields: MemoryEntryRepoDynamicsUpdateFields,
+  updatedAt: string
+): void {
+  const parsedFields = parseDynamicsUpdateFields(fields);
+  const parsedUpdatedAt = parseUpdatedAt(updatedAt);
+  const dynamicUpdate = buildDynamicUpdateParts(parsedFields, parsedUpdatedAt, objectId);
+
+  const result = host.db.connection
+    .prepare(`UPDATE memory_entries SET ${dynamicUpdate.setClauses.join(", ")} WHERE object_id = ?`)
+    .run(...dynamicUpdate.params);
+
+  if (result.changes === 0) {
+    throw new StorageError("NOT_FOUND", `Memory entry ${objectId} was not found.`);
   }
 }
 

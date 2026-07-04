@@ -10,6 +10,16 @@ import { registerErrorHandler } from "../../middleware/error-handler.js";
 import { registerProposalRoutes } from "../../routes/proposals.js";
 import { registerGlobalMemoryRoutes } from "../../routes/global-memory.js";
 import { registerSignalRoutes } from "../../routes/signals.js";
+import {
+  claimRouteServices,
+  evidenceRouteServices,
+  globalMemoryRouteServices,
+  memoryRouteServices,
+  proposalRouteServices,
+  recallRouteServices,
+  signalRouteServices,
+  synthesisRouteServices
+} from "../support/route-service-stubs.js";
 
 describe("routes-memory port batch", () => {
   it("registerMemoryRoutes lists workspace memories via typed service bag", async () => {
@@ -26,7 +36,7 @@ describe("routes-memory port batch", () => {
     };
 
     const app = new Hono();
-    registerMemoryRoutes(app, { workspaceService, runService, memoryService } as any);
+    registerMemoryRoutes(app, memoryRouteServices({ workspaceService, runService, memoryService }));
 
     const response = await app.request("/workspaces/ws-1/memories?dimension=fact");
     expect(response.status).toBe(200);
@@ -61,12 +71,15 @@ describe("routes-memory port batch", () => {
     };
 
     const app = new Hono();
-    registerRecallRoutes(app, {
-      recallService,
-      taskSurfaceBuilder,
-      runService,
-      workspaceService
-    } as any);
+    registerRecallRoutes(
+      app,
+      recallRouteServices({
+        recallService,
+        taskSurfaceBuilder,
+        runService,
+        workspaceService
+      })
+    );
 
     const response = await app.request("/runs/run-1/recall-candidates?strategy=build");
     expect(response.status).toBe(200);
@@ -85,16 +98,14 @@ describe("routes-memory port batch", () => {
 
   it("registerEvidenceRoutes resolves evidence through the workspace-scoped pointer path", async () => {
     const app = new Hono();
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      runService: { getById: vi.fn(async () => ({ run_id: "run-1" })) },
-      evidenceService: {
-        findByWorkspaceId: vi.fn(),
-        findByRunId: vi.fn(),
-        findByIdScoped: vi.fn(async () => ({ object_id: "e1", workspace_id: "ws-1" }))
-      }
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const runService = { getById: vi.fn(async () => ({ run_id: "run-1" })) };
+    const evidenceService = {
+      findByWorkspaceId: vi.fn(),
+      findByRunId: vi.fn(),
+      findByIdScoped: vi.fn(async () => ({ object_id: "e1", workspace_id: "ws-1" }))
     };
-    registerEvidenceRoutes(app, services as any);
+    registerEvidenceRoutes(app, evidenceRouteServices({ workspaceService, runService, evidenceService }));
 
     const response = await app.request("/workspaces/ws-1/evidence/e1");
     expect(response.status).toBe(200);
@@ -102,38 +113,37 @@ describe("routes-memory port batch", () => {
       success: true,
       data: { object_id: "e1", workspace_id: "ws-1" }
     });
-    expect(services.workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(services.evidenceService.findByIdScoped).toHaveBeenCalledWith("e1", "ws-1");
+    expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
+    expect(evidenceService.findByIdScoped).toHaveBeenCalledWith("e1", "ws-1");
   });
 
   it("registerEvidenceRoutes does not expose unscoped evidence by id", async () => {
     const app = new Hono();
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      runService: { getById: vi.fn(async () => ({ run_id: "run-1" })) },
-      evidenceService: {
-        findByWorkspaceId: vi.fn(),
-        findByRunId: vi.fn(),
-        findById: vi.fn()
-      }
+    const evidenceService = {
+      findByWorkspaceId: vi.fn(),
+      findByRunId: vi.fn(),
+      findById: vi.fn()
     };
-    registerEvidenceRoutes(app, services as any);
+    registerEvidenceRoutes(
+      app,
+      evidenceRouteServices({
+        evidenceService
+      })
+    );
 
     const response = await app.request("/evidence/e1");
     expect(response.status).toBe(404);
-    expect(services.evidenceService.findById).not.toHaveBeenCalled();
+    expect(evidenceService.findById).not.toHaveBeenCalled();
   });
 
   it("registerClaimRoutes resolves claims by workspace-scoped id", async () => {
     const app = new Hono();
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      claimService: {
-        findByWorkspaceId: vi.fn(),
-        findByIdScoped: vi.fn(async () => ({ object_id: "c1", workspace_id: "ws-1" }))
-      }
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const claimService = {
+      findByWorkspaceId: vi.fn(),
+      findByIdScoped: vi.fn(async () => ({ object_id: "c1", workspace_id: "ws-1" }))
     };
-    registerClaimRoutes(app, services as any);
+    registerClaimRoutes(app, claimRouteServices({ workspaceService, claimService }));
 
     const response = await app.request("/workspaces/ws-1/claims/c1");
     expect(response.status).toBe(200);
@@ -141,37 +151,43 @@ describe("routes-memory port batch", () => {
       success: true,
       data: { object_id: "c1", workspace_id: "ws-1" }
     });
-    expect(services.workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(services.claimService.findByIdScoped).toHaveBeenCalledWith("c1", "ws-1");
+    expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
+    expect(claimService.findByIdScoped).toHaveBeenCalledWith("c1", "ws-1");
   });
 
   it("registerClaimRoutes returns 404 for a claim bound to a foreign workspace", async () => {
     const app = new Hono();
     registerErrorHandler(app, { error: vi.fn() });
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-b" })) },
-      claimService: {
-        findByWorkspaceId: vi.fn(),
-        findByIdScoped: vi.fn(async () => null)
-      }
+    const claimService = {
+      findByWorkspaceId: vi.fn(),
+      findByIdScoped: vi.fn(async () => null)
     };
-    registerClaimRoutes(app, services as any);
+    registerClaimRoutes(
+      app,
+      claimRouteServices({
+        workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-b" })) },
+        claimService
+      })
+    );
 
     const response = await app.request("/workspaces/ws-b/claims/c1");
     expect(response.status).toBe(404);
-    expect(services.claimService.findByIdScoped).toHaveBeenCalledWith("c1", "ws-b");
+    expect(claimService.findByIdScoped).toHaveBeenCalledWith("c1", "ws-b");
   });
 
   it("registerSynthesisRoutes resolves syntheses by workspace-scoped id", async () => {
     const app = new Hono();
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      synthesisService: {
-        findByWorkspaceId: vi.fn(),
-        findByIdScoped: vi.fn(async () => ({ object_id: "s1", workspace_id: "ws-1" }))
-      }
+    const synthesisService = {
+      findByWorkspaceId: vi.fn(),
+      findByIdScoped: vi.fn(async () => ({ object_id: "s1", workspace_id: "ws-1" }))
     };
-    registerSynthesisRoutes(app, services as any);
+    registerSynthesisRoutes(
+      app,
+      synthesisRouteServices({
+        workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
+        synthesisService
+      })
+    );
 
     const response = await app.request("/workspaces/ws-1/syntheses/s1");
     expect(response.status).toBe(200);
@@ -179,42 +195,46 @@ describe("routes-memory port batch", () => {
       success: true,
       data: { object_id: "s1", workspace_id: "ws-1" }
     });
-    expect(services.synthesisService.findByIdScoped).toHaveBeenCalledWith("s1", "ws-1");
+    expect(synthesisService.findByIdScoped).toHaveBeenCalledWith("s1", "ws-1");
   });
 
   it("registerSynthesisRoutes returns 404 for a capsule bound to a foreign workspace", async () => {
     const app = new Hono();
     registerErrorHandler(app, { error: vi.fn() });
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-b" })) },
-      synthesisService: {
-        findByWorkspaceId: vi.fn(),
-        findByIdScoped: vi.fn(async () => null)
-      }
+    const synthesisService = {
+      findByWorkspaceId: vi.fn(),
+      findByIdScoped: vi.fn(async () => null)
     };
-    registerSynthesisRoutes(app, services as any);
+    registerSynthesisRoutes(
+      app,
+      synthesisRouteServices({
+        workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-b" })) },
+        synthesisService
+      })
+    );
 
     const response = await app.request("/workspaces/ws-b/syntheses/s1");
     expect(response.status).toBe(404);
-    expect(services.synthesisService.findByIdScoped).toHaveBeenCalledWith("s1", "ws-b");
+    expect(synthesisService.findByIdScoped).toHaveBeenCalledWith("s1", "ws-b");
   });
 
   it("registerProposalRoutes does not expose POST /proposals/:id/review", async () => {
     const app = new Hono();
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      proposalService: {
-        findByWorkspaceId: vi.fn(),
-        findPending: vi.fn(),
-        countByWorkspaceId: vi.fn(),
-        countPending: vi.fn(),
-        findById: vi.fn(),
-        review: vi.fn(async () => {
-          throw new Error("review must not be reachable from HTTP");
-        })
-      }
-    };
-    registerProposalRoutes(app, services as any);
+    const review = vi.fn(async () => {
+      throw new Error("review must not be reachable from HTTP");
+    });
+    registerProposalRoutes(
+      app,
+      proposalRouteServices({
+        proposalService: {
+          findByWorkspaceId: vi.fn(),
+          findPending: vi.fn(),
+          countByWorkspaceId: vi.fn(),
+          countPending: vi.fn(),
+          findById: vi.fn()
+        }
+      })
+    );
 
     const response = await app.request("/proposals/p1/review", {
       method: "POST",
@@ -229,23 +249,21 @@ describe("routes-memory port batch", () => {
     });
 
     expect(response.status).toBe(404);
-    expect(services.proposalService.review).not.toHaveBeenCalled();
+    expect(review).not.toHaveBeenCalled();
   });
 
   it("registerGlobalMemoryRoutes parses filters and applies default accepted_by", async () => {
     const app = new Hono();
-    const services = {
-      workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) },
-      globalMemoryService: {
-        list: vi.fn(async () => [{ object_id: "global-1" }]),
-        adopt: vi.fn(async () => ({ object_id: "anchor-1" }))
-      }
+    const workspaceService = { getById: vi.fn(async () => ({ workspace_id: "ws-1" })) };
+    const globalMemoryService = {
+      list: vi.fn(async () => [{ object_id: "global-1" }]),
+      adopt: vi.fn(async () => ({ object_id: "anchor-1" }))
     };
-    registerGlobalMemoryRoutes(app, services as any);
+    registerGlobalMemoryRoutes(app, globalMemoryRouteServices({ workspaceService, globalMemoryService }));
 
     const listResponse = await app.request("/soul/global-memory-entries?dimension=fact&scope_class=project&limit=5");
     expect(listResponse.status).toBe(200);
-    expect(services.globalMemoryService.list).toHaveBeenCalledWith({
+    expect(globalMemoryService.list).toHaveBeenCalledWith({
       dimension: "fact",
       scope_class: "project",
       limit: 5
@@ -259,8 +277,8 @@ describe("routes-memory port batch", () => {
       })
     });
     expect(adoptResponse.status).toBe(200);
-    expect(services.workspaceService.getById).toHaveBeenCalledWith("ws-1");
-    expect(services.globalMemoryService.adopt).toHaveBeenCalledWith("global-1", {
+    expect(workspaceService.getById).toHaveBeenCalledWith("ws-1");
+    expect(globalMemoryService.adopt).toHaveBeenCalledWith("global-1", {
       workspace_id: "ws-1",
       accepted_by: AcceptedBy.USER
     });
@@ -268,15 +286,13 @@ describe("routes-memory port batch", () => {
 
   it("registerSignalRoutes lists run signals through signal service", async () => {
     const app = new Hono();
-    const services = {
-      runService: { getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: "ws-1" })) },
-      signalService: {
-        listByRun: vi.fn(async () => [{ signal_id: "sig-1" }]),
-        countByRun: vi.fn(async () => 1),
-        receiveSignal: vi.fn()
-      }
+    const runService = { getById: vi.fn(async () => ({ run_id: "run-1", workspace_id: "ws-1" })) };
+    const signalService = {
+      listByRun: vi.fn(async () => [{ signal_id: "sig-1" }]),
+      countByRun: vi.fn(async () => 1),
+      receiveSignal: vi.fn()
     };
-    registerSignalRoutes(app, services as any);
+    registerSignalRoutes(app, signalRouteServices({ runService, signalService }));
 
     const response = await app.request("/runs/run-1/signals");
     expect(response.status).toBe(200);
@@ -284,11 +300,11 @@ describe("routes-memory port batch", () => {
       success: true,
       data: [{ signal_id: "sig-1" }]
     });
-    expect(services.runService.getById).toHaveBeenCalledWith("run-1");
-    expect(services.signalService.listByRun).toHaveBeenCalledWith("run-1", {
+    expect(runService.getById).toHaveBeenCalledWith("run-1");
+    expect(signalService.listByRun).toHaveBeenCalledWith("run-1", {
       limit: 200,
       offset: 0
     });
-    expect(services.signalService.countByRun).toHaveBeenCalledWith("run-1");
+    expect(signalService.countByRun).toHaveBeenCalledWith("run-1");
   });
 });

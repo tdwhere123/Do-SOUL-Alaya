@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { expectFrozenPropertyWriteThrows } from "../../support/frozen-mutation.js";
 import {
   StorageTier} from "@do-soul/alaya-protocol";
 import { StorageError } from "../../../shared/errors.js";
@@ -111,9 +112,7 @@ describe("SqliteMemoryEntryRepo lifecycle search and reference queries", () => {
     const { repo } = await createRepo();
     const created = await repo.create(createMemoryEntry());
 
-    expect(() => {
-      (created as any).content = "mutated";
-    }).toThrow(TypeError);
+    expectFrozenPropertyWriteThrows(created, "content", "mutated");
   });
 
   it("matches an English query through the porter word-stemmed FTS index", async () => {

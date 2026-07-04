@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { SignalService } from "../../memory/signal-service.js";
 
-import { createSignal } from "./signal-service.test-support.js";
+import { createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
 
 describe("SignalService", () => {
 it("marks the signal failed when post-triage materializer throws", async () => {
@@ -50,21 +50,18 @@ it("marks the signal failed when post-triage materializer throws", async () => {
   });
 
 it("lists persisted signals for a run", async () => {
-    const service = new SignalService({
+    const service = new SignalService(signalServiceDependencies({
       eventLogRepo: {
         append: vi.fn(),
         queryByEntity: vi.fn()
-      } as any,
+      },
       signalRepo: {
         create: vi.fn(),
         getById: vi.fn(),
         listByRun: vi.fn(async () => [createSignal(), createSignal({ signal_id: "signal-2" })]),
         updateState: vi.fn()
-      } as any,
-      runtimeNotifier: {
-        notifyEntry: vi.fn()
-      } as any
-    });
+      }
+    }));
 
     await expect(service.listByRun("run-1")).resolves.toHaveLength(2);
   });

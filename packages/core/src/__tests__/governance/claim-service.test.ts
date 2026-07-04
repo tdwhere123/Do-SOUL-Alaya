@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { ClaimLifecycleState, TransitionCausedBy, type ClaimForm, type EventLogEntry, type Slot } from "@do-soul/alaya-protocol";
+import { ClaimLifecycleState, TransitionCausedBy, type EventLogEntry, type Slot } from "@do-soul/alaya-protocol";
 import { ClaimService, derivePrecedenceBasis } from "../../governance/claim-service.js";
 import { CanonicalAliasService } from "../../governance/canonical-alias-service.js";
+import { StubEventPublisher } from "../support/event-publisher-stub.js";
 import type { SlotElectionResult } from "../../surfaces/slot-service.js";
 
 import { createClaimForm, createClaimInput, createDependencies, createEventLogHistory } from "./claim-service.test-support.js";
@@ -55,7 +56,7 @@ describe("ClaimService", () => {
     const appendManyWithMutation = vi.fn(
       async (
         events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
-        mutate: (entries: readonly EventLogEntry[]) => Readonly<ClaimForm>
+        mutate: (entries: readonly EventLogEntry[]) => unknown
       ) => {
         publishedBatches.push(events);
         const persisted = events.map((event, idx) => ({
@@ -87,10 +88,8 @@ describe("ClaimService", () => {
             }
           ]
         }
-      } as any),
-      eventPublisher: {
-        appendManyWithMutation
-      } as any
+      }),
+      eventPublisher: new StubEventPublisher(appendManyWithMutation)
     });
 
     const service = new ClaimService(dependencies);
@@ -171,7 +170,7 @@ describe("ClaimService", () => {
     const appendManyWithMutation = vi.fn(
       async (
         events: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
-        mutate: (entries: readonly EventLogEntry[]) => Readonly<ClaimForm>
+        mutate: (entries: readonly EventLogEntry[]) => unknown
       ) => {
         publishedBatches.push(events);
         const persisted = events.map((event, idx) => ({
@@ -195,9 +194,7 @@ describe("ClaimService", () => {
         }),
         updateStatusSync
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any
+      eventPublisher: new StubEventPublisher(appendManyWithMutation)
     });
 
     const service = new ClaimService(dependencies);

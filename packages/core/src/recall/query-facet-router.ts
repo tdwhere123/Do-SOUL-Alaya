@@ -1,4 +1,5 @@
 import { FACET_VOCABULARY } from "@do-soul/alaya-protocol";
+import { recallEnvRaw } from "../config/recall-env-access.js";
 import { deriveFacetsFromText } from "./facet-keywords.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 
@@ -6,7 +7,7 @@ import type { RecallQueryProbes } from "./recall-query-probes.js";
 let injectedFacetsCache: Readonly<Record<string, readonly string[]>> | null = null;
 function injectedQueryFacets(): Readonly<Record<string, readonly string[]>> {
   if (injectedFacetsCache === null) {
-    const raw = process.env.ALAYA_RECALL_QUERY_FACETS_JSON;
+    const raw = recallEnvRaw("ALAYA_RECALL_QUERY_FACETS_JSON");
     try {
       injectedFacetsCache = raw === undefined || raw.length === 0 ? {} : JSON.parse(raw);
     } catch {

@@ -209,6 +209,9 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
     },
     getGardenCredentialProvenance: async () =>
       await runtime.services.configService.getGardenCredentialProvenance(),
+    getRuntimeWiring: () => ({
+      request_token_source: runtime.requestProtection.tokenSource ?? "ephemeral"
+    }),
     getGardenCompute: async () => await resolveGardenComputeStatus(runtime),
     getGraphHealth: async (workspaceId) =>
       await runtime.services.graphHealthService.getStatus(workspaceId),

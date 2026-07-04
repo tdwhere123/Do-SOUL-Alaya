@@ -1,5 +1,9 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallFusionBreakdown } from "./recall-service-types.js";
+import {
+  readRecallPositiveInt,
+  readRecallRatio
+} from "../config/recall-env-access.js";
 
 // Shared delivery-coverage primitives for evidence-set-optimizer.ts; provider/policy-free so the optimizer and its admissibility gate share one copy.
 
@@ -20,13 +24,11 @@ export type DeliveryCandidate = Readonly<{
 }>;
 
 export function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = Number(process.env[name]);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+  return readRecallPositiveInt(name, fallback);
 }
 
 export function readRatioEnv(name: string, fallback: number): number {
-  const raw = Number(process.env[name]);
-  return Number.isFinite(raw) && raw >= 0 ? raw : fallback;
+  return readRecallRatio(name, fallback);
 }
 
 export function sessionKeyOf(entry: Readonly<MemoryEntry>): string {

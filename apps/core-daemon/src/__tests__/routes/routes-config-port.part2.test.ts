@@ -25,6 +25,7 @@ import {
 } from "@do-soul/alaya-storage";
 
 import { registerConfigRoutes } from "../../routes/config.js";
+import { configRouteServices } from "../support/route-service-stubs.js";
 
 import { createConfigService } from "../../services/config-service.js";
 
@@ -276,10 +277,9 @@ describe("routes-config port batch", () => {
       const app = new Hono();
       const plaintext = "sk-live-route-secret";
       const secretPath = path.join(paths.secretsDir, "openai");
-      registerConfigRoutes(app, {
-        workspaceService: { getById: vi.fn() },
+      registerConfigRoutes(app, configRouteServices({
         configService
-      } as any);
+      }));
 
       const response = await app.request("/config/runtime/embedding-supplement", {
         method: "PATCH",

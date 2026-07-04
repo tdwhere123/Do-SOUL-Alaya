@@ -229,7 +229,7 @@ describe("SqliteMemoryEntryRepo filtering and updates", () => {
         retention_score: 0.8,
         manifestation_state: "full_eligible",
         retention_state: "canon"
-      } as any,
+      },
       "2026-03-21T05:00:00.000Z"
     );
 

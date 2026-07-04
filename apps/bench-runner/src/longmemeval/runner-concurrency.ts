@@ -35,6 +35,12 @@ export interface LongMemEvalConcurrencyDeps {
   readonly resolveCliPath?: () => string;
 }
 
+export function freezeProcessEnvForWorkers(
+  env: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  return Object.freeze({ ...env });
+}
+
 export function resolveLongMemEvalConcurrency(opts: LongMemEvalRunOptions): number {
   const raw = opts.concurrency ?? 1;
   return Math.max(1, Math.floor(raw));
@@ -133,7 +139,7 @@ export async function runLongMemEvalConcurrent(
         const status = await spawnWorker({
           cliPath,
           args: buildWorkerCliArgs(opts, plan),
-          env: { ...process.env },
+          env: freezeProcessEnvForWorkers(),
           logPath
         });
         if (status !== 0) {

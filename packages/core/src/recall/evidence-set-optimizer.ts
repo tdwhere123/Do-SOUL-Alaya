@@ -1,4 +1,5 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { recallEnvRaw } from "../config/recall-env-access.js";
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { collectQueryTermHits, normalizeEvidenceText } from "./query-evidence-scoring.js";
@@ -43,7 +44,7 @@ type SelectorMode = "off" | "force" | "default";
 type FacetAxis = "session" | "source_cohort" | "evidence_ref" | "date_bucket" | "dimension" | "entity" | "lexical_term";
 
 function resolveSelectorMode(): SelectorMode {
-  const raw = process.env[COVERAGE_SELECTOR_ENV];
+  const raw = recallEnvRaw(COVERAGE_SELECTOR_ENV);
   if (raw === undefined) {
     return "default";
   }

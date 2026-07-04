@@ -1,6 +1,12 @@
 import { vi } from "vitest";
 import { WorkspaceKind, WorkspaceState, type BootstrappingRecord, type PathRelation, type Workspace } from "@do-soul/alaya-protocol";
 import { WorkspaceService } from "../../runs/workspace-service.js";
+import {
+  StubEventPublisher,
+  fakeAppendManyWithMutation,
+  type AppendManyWithMutationErased,
+  type AppendManyWithMutationMock
+} from "../support/event-publisher-stub.js";
 
 export // Duck-typed shape that mirrors @do-soul/alaya-storage StorageError
 // without importing the storage package — core may not depend on
@@ -22,23 +28,7 @@ function createDuplicateKeyError(workspaceId: string, cause?: unknown): Error & 
   return error;
 }
 
-export // Helper: in-test publisher that simulates the appendManyWithMutation
-// contract (sync mutate, batch-array first arg) used by WorkspaceService
-// after #BL-022.
-function fakeAppendManyWithMutation(publishedEvents?: Array<unknown>) {
-  return vi.fn(async (events: any[], mutate: (entries: any[]) => any) => {
-    if (publishedEvents) {
-      for (const event of events) publishedEvents.push(event);
-    }
-    const persisted = events.map((event, idx) => ({
-      ...event,
-      event_id: `evt_${idx}`,
-      created_at: "2026-04-20T00:00:00.000Z",
-      revision: idx
-    }));
-    return mutate(persisted);
-  });
-}
+export { fakeAppendManyWithMutation };
 
 export interface ReconcileHarnessOptions {
   readonly withBootstrapping?: boolean;
@@ -50,7 +40,7 @@ export interface ReconcileHarnessOptions {
     readonly relations: readonly PathRelation[];
     readonly record: BootstrappingRecord;
   }>;
-  readonly appendManyWithMutation?: (events: unknown[], mutate: () => void) => Promise<unknown>;
+  readonly appendManyWithMutation?: AppendManyWithMutationErased;
 }
 
 export function makeReconcileService(options: ReconcileHarnessOptions = {}) {
@@ -83,9 +73,9 @@ export function makeReconcileService(options: ReconcileHarnessOptions = {}) {
         }))
     )
   };
-  const appendManyWithMutation = vi.fn(
-    options.appendManyWithMutation ?? fakeAppendManyWithMutation()
-  );
+  const appendManyWithMutation: AppendManyWithMutationMock = options.appendManyWithMutation
+    ? vi.fn(options.appendManyWithMutation)
+    : fakeAppendManyWithMutation();
   const service = new WorkspaceService({
     workspaceRepo: {
       create: vi.fn(),
@@ -97,7 +87,7 @@ export function makeReconcileService(options: ReconcileHarnessOptions = {}) {
       })
     },
     runRepo: { listByWorkspace: vi.fn(async () => []) },
-    eventPublisher: { appendManyWithMutation } as any,
+    eventPublisher: new StubEventPublisher(appendManyWithMutation),
     ...(options.withBootstrapping === false
       ? {}
       : {

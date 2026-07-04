@@ -5,11 +5,16 @@ import { registerRunRoutes } from "../../routes/runs.js";
 import { registerSignalRoutes } from "../../routes/signals.js";
 import { registerWorkspaceRoutes } from "../../routes/workspaces.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
+import {
+  runRouteServices,
+  signalRouteServices,
+  workspaceRouteServices
+} from "../support/route-service-stubs.js";
 
 describe("route list pagination", () => {
   it("paginates GET /workspaces/:id/runs", async () => {
     const app = new Hono();
-    registerRunRoutes(app, {
+    registerRunRoutes(app, runRouteServices({
       runService: {
         create: vi.fn(),
         listByWorkspace: vi.fn(async (_workspaceId, page) => {
@@ -21,7 +26,7 @@ describe("route list pagination", () => {
       },
       conversationService: {},
       runHotStateService: {}
-    } as any);
+    }));
 
     const response = await app.request("/workspaces/ws-1/runs?limit=1&offset=2");
 
@@ -39,7 +44,7 @@ describe("route list pagination", () => {
     const app = new Hono();
     const listByWorkspace = vi.fn();
     registerErrorHandler(app, { error: vi.fn() });
-    registerRunRoutes(app, {
+    registerRunRoutes(app, runRouteServices({
       runService: {
         create: vi.fn(),
         listByWorkspace,
@@ -48,7 +53,7 @@ describe("route list pagination", () => {
       },
       conversationService: {},
       runHotStateService: {}
-    } as any);
+    }));
 
     const response = await app.request("/workspaces/ws-1/runs?offset=1000001");
 
@@ -64,7 +69,7 @@ describe("route list pagination", () => {
     const app = new Hono();
     const rename = vi.fn();
     registerErrorHandler(app, { error: vi.fn() });
-    registerRunRoutes(app, {
+    registerRunRoutes(app, runRouteServices({
       runService: {
         create: vi.fn(),
         listByWorkspace: vi.fn(),
@@ -73,7 +78,7 @@ describe("route list pagination", () => {
       },
       conversationService: {},
       runHotStateService: {}
-    } as any);
+    }));
 
     const response = await app.request("/runs/run-1", {
       method: "PATCH",
@@ -91,7 +96,7 @@ describe("route list pagination", () => {
 
   it("paginates GET /runs/:id/messages", async () => {
     const app = new Hono();
-    registerRunRoutes(app, {
+    registerRunRoutes(app, runRouteServices({
       runService: {
         create: vi.fn(),
         listByWorkspace: vi.fn(),
@@ -107,7 +112,7 @@ describe("route list pagination", () => {
         countMessages: vi.fn(async () => 2)
       },
       runHotStateService: {}
-    } as any);
+    }));
 
     const response = await app.request("/runs/run-1/messages?limit=1&offset=1");
 
@@ -121,7 +126,7 @@ describe("route list pagination", () => {
 
   it("paginates GET /runs/:id/signals", async () => {
     const app = new Hono();
-    registerSignalRoutes(app, {
+    registerSignalRoutes(app, signalRouteServices({
       runService: { getById: vi.fn(async () => ({ run_id: "run-1" })) },
       signalService: {
         listByRun: vi.fn(async (_runId, page) => {
@@ -130,7 +135,7 @@ describe("route list pagination", () => {
         }),
         countByRun: vi.fn(async () => 3)
       }
-    } as any);
+    }));
 
     const response = await app.request("/runs/run-1/signals?limit=2&offset=1");
 
@@ -144,7 +149,7 @@ describe("route list pagination", () => {
 
   it("paginates GET /workspaces", async () => {
     const app = new Hono();
-    registerWorkspaceRoutes(app, {
+    registerWorkspaceRoutes(app, workspaceRouteServices({
       workspaceService: {
         create: vi.fn(),
         list: vi.fn(async (page) => {
@@ -157,7 +162,7 @@ describe("route list pagination", () => {
         count: vi.fn(async () => 3),
         getById: vi.fn()
       }
-    } as any);
+    }));
 
     const response = await app.request("/workspaces?limit=2&offset=1");
 
@@ -181,7 +186,7 @@ describe("run route workspace isolation", () => {
       runService: { getById }
     });
     registerErrorHandler(app, { error: vi.fn() });
-    registerRunRoutes(app, services as any);
+    registerRunRoutes(app, services);
 
     const response = await app.request("/runs/run-foreign");
 
@@ -200,7 +205,7 @@ describe("run route workspace isolation", () => {
       }
     });
     registerErrorHandler(app, { error: vi.fn() });
-    registerRunRoutes(app, services as any);
+    registerRunRoutes(app, services);
 
     const response = await app.request("/runs/run-foreign", {
       method: "PATCH",
@@ -223,7 +228,7 @@ describe("run route workspace isolation", () => {
       conversationService: { sendMessageStreaming }
     });
     registerErrorHandler(app, { error: vi.fn() });
-    registerRunRoutes(app, services as any);
+    registerRunRoutes(app, services);
 
     const response = await app.request("/runs/run-foreign/messages/stream", {
       method: "POST",
@@ -241,7 +246,7 @@ function createRunIsolationServices(overrides: {
   readonly runService?: Record<string, unknown>;
   readonly conversationService?: Record<string, unknown>;
 } = {}) {
-  return {
+  return runRouteServices({
     runService: {
       create: vi.fn(),
       listByWorkspace: vi.fn(),
@@ -262,5 +267,5 @@ function createRunIsolationServices(overrides: {
       ...overrides.conversationService
     },
     runHotStateService: {}
-  };
+  });
 }

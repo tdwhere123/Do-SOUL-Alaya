@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SignalService } from "../../memory/signal-service.js";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 
-import { createSignal } from "./signal-service.test-support.js";
+import { createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
 
 describe("SignalService", () => {
 it("writes emitted/triaged events in order and moves accepted signals to triaged", async () => {
@@ -294,25 +294,18 @@ it("does not replay materialization side effects for post-triage signal states",
         throw new Error("should not rerun materialization");
       });
       const warn = vi.fn();
-      const service = new SignalService({
-        eventLogRepo: {
-          append: vi.fn(),
-          queryByEntity: vi.fn(async () => [])
-        } as any,
+      const service = new SignalService(signalServiceDependencies({
         signalRepo: {
           create: vi.fn(),
           getById: vi.fn(async () => createSignal({ signal_state: state })),
           listByRun: vi.fn(async () => []),
           updateState: vi.fn()
-        } as any,
-        runtimeNotifier: {
-          notifyEntry: vi.fn()
-        } as any,
+        },
         postTriageMaterializer: {
           materialize
         },
         warn
-      });
+      }));
 
       const result = await service.receiveSignal(createSignal());
 
@@ -330,11 +323,7 @@ it("does not replay materialization side effects for post-triage signal states",
   });
 
 it("rejects an idempotent replay whose candidate content changed", async () => {
-    const service = new SignalService({
-      eventLogRepo: {
-        append: vi.fn(),
-        queryByEntity: vi.fn(async () => [])
-      } as any,
+    const service = new SignalService(signalServiceDependencies({
       signalRepo: {
         create: vi.fn(),
         getById: vi.fn(async () => createSignal({
@@ -342,11 +331,8 @@ it("rejects an idempotent replay whose candidate content changed", async () => {
         })),
         listByRun: vi.fn(async () => []),
         updateState: vi.fn()
-      } as any,
-      runtimeNotifier: {
-        notifyEntry: vi.fn()
-      } as any
-    });
+      }
+    }));
 
     await expect(
       service.receiveSignal(createSignal({

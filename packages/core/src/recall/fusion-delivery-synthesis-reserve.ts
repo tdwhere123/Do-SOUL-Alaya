@@ -1,6 +1,7 @@
 import type {
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
+import { recallEnvFlagEnabled } from "../config/recall-env-access.js";
 import {
   buildRecallCandidateDedupeKey,
   compareMemoryEntries} from "./recall-service-helpers.js";
@@ -170,8 +171,7 @@ export function isStructuralRescueCandidate(
 // Default-off: topology-dominant reserve promotes co-occurrence noise into delivery (−3.2 any@10 on answer-relation
 // recall); structurally-connected golds are surfaced by the object-seeded path flood instead. Opt-in to re-enable.
 function structuralReserveEnabled(): boolean {
-  const raw = process.env.ALAYA_RECALL_STRUCTURAL_RESERVE;
-  return raw === "on" || raw === "1" || raw === "true";
+  return recallEnvFlagEnabled("ALAYA_RECALL_STRUCTURAL_RESERVE");
 }
 
 // invariant: structural reserve inserts above the synthesis tail and caps combined reserve slots at maxEntries - 1.

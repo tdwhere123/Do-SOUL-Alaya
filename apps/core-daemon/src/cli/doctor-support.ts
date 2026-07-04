@@ -1,4 +1,4 @@
-import { access, constants as fsConstants } from "node:fs/promises";
+import { access, constants as fsConstants, stat } from "node:fs/promises";
 import type { WorkspaceBootstrapReconcileResult } from "@do-soul/alaya-core";
 import type { GardenCredentialProvenance } from "../services/config-service.js";
 import type { GraphHealthWarning } from "../services/graph-health-service.js";
@@ -120,6 +120,29 @@ export async function inspectStorage(
   return await inspectStorageSchema(normalizedPath, getSchemaSummary);
 }
 
+// Coarse storage-growth advisory: warn once the SQLite DB crosses this size so
+// an operator notices unbounded growth before it degrades tail latency. Not a
+// hard limit — a diagnostic signal only.
+const STORAGE_GROWTH_LARGE_BYTES = 1_073_741_824;
+
+export async function inspectStorageGrowth(
+  dbPath: string
+): Promise<DoctorReport["storage_growth"]> {
+  const normalizedPath = dbPath.trim();
+  if (normalizedPath.length === 0) {
+    return { db_size_bytes: null, advisory: "unknown" };
+  }
+  try {
+    const stats = await stat(normalizedPath);
+    return {
+      db_size_bytes: stats.size,
+      advisory: stats.size >= STORAGE_GROWTH_LARGE_BYTES ? "large" : "ok"
+    };
+  } catch {
+    return { db_size_bytes: null, advisory: "unknown" };
+  }
+}
+
 export function writeHumanSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {
   writeDoctorCoreSummary(stream, report);
   writeGardenComputeSummary(stream, report);
@@ -203,9 +226,26 @@ function writeDoctorCoreSummary(stream: NodeJS.WritableStream, report: DoctorRep
         })\n`
     );
   }
+  stream.write(
+    `storage growth: db_size_bytes=${report.storage_growth.db_size_bytes ?? "unknown"}` +
+      ` advisory=${report.storage_growth.advisory}\n`
+  );
+  if (report.storage_growth.advisory === "large") {
+    stream.write(
+      "storage growth WARNING: the SQLite DB has grown past the advisory" +
+        " threshold; monitor tail latency and plan compaction/retention.\n"
+    );
+  }
   stream.write(`mcp transport: ${report.mcp.transport}\n`);
   stream.write(`garden status: ${report.garden.status}\n`);
   stream.write(`garden credential provenance: ${formatGardenCredentialProvenance(report.garden.credential_provenance)}\n`);
+  stream.write(`runtime wiring: request_token=${report.runtime_wiring.request_token_source}\n`);
+  if (report.runtime_wiring.request_token_source === "ephemeral") {
+    stream.write(
+      "runtime wiring WARNING: ALAYA_REQUEST_TOKEN unset; using a process-generated" +
+        " ephemeral request token (rotates each restart — set ALAYA_REQUEST_TOKEN for a stable token).\n"
+    );
+  }
 }
 
 function writeGardenComputeSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {

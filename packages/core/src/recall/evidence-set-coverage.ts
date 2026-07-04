@@ -1,3 +1,4 @@
+import { recallEnvRaw } from "../config/recall-env-access.js";
 import type { RecallSupplementaryData } from "./recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
 
@@ -13,7 +14,7 @@ export interface EvidenceSetCoverageState {
 }
 
 export function evidenceSetCoverageEnabled(): boolean {
-  const override = process.env.ALAYA_RECALL_S4_COVERAGE;
+  const override = recallEnvRaw("ALAYA_RECALL_S4_COVERAGE");
   return override !== "0" && override !== "off" && override !== "false";
 }
 

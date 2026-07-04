@@ -1,3 +1,4 @@
+import type { AuditorEventLogPort, EventLogEntry } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { GardenRole, GardenTaskKind, GardenTier, GardenEventType, type GardenTaskDescriptor } from "@do-soul/alaya-protocol";
 import {
@@ -133,19 +134,24 @@ describe("Janitor", () => {
   // per demoted entry inside the same SQLite transaction as the
   // storage_tier UPDATE.
   it("emits SOUL_MEMORY_TIER_CHANGED for each demoted entry alongside the demote", async () => {
-    const appendManyWithMutation = vi.fn(async (entries: readonly unknown[], mutate: (rows: readonly unknown[]) => unknown) => {
-      const persisted = entries.map((entry, idx) => ({
-        ...(entry as object),
-        event_id: `evt-${idx}`,
-        created_at: "2026-03-27T00:00:00.000Z",
-        revision: idx
-      }));
-      mutate(persisted);
-      return undefined;
-    });
-    const eventLogRepo = {
+    const appendManyWithMutation = vi.fn(
+      async <T>(
+        entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
+        mutate: (rows: readonly EventLogEntry[]) => T
+      ): Promise<T> => {
+        const persisted: EventLogEntry[] = entries.map((entry, idx) => ({
+          ...entry,
+          event_id: `evt-${idx}`,
+          created_at: "2026-03-27T00:00:00.000Z",
+          revision: idx
+        }));
+        return mutate(persisted);
+      }
+    );
+    const eventLogRepo: AuditorEventLogPort = {
       append: vi.fn(),
-      appendManyWithMutation
+      // vi.fn cannot carry the generic <T> call signature of the port method.
+      appendManyWithMutation: appendManyWithMutation as AuditorEventLogPort["appendManyWithMutation"]
     };
     const tieringPort = {
       findHotDemotionCandidates: vi.fn(async () => [
@@ -163,8 +169,7 @@ describe("Janitor", () => {
       cleanupPort,
       tieringPort,
       scheduler,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      eventLogRepo: eventLogRepo as any,
+      eventLogRepo,
       now: () => "2026-03-27T00:00:00.000Z"
     });
 

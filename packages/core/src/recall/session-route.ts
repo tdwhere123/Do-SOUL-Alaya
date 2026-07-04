@@ -1,11 +1,12 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import { recallSessionRouteEnabled } from "../config/recall-env-access.js";
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { compareMemoryEntries } from "./recall-service-helpers.js";
 import { uniqueStrings } from "./path-relations.js";
 
 // Opt-in: NL queries carry no `surface-` token, so inject the dominant foothold session's surface_id to wake exact-cohort.
 export function sessionRouteEnabled(): boolean {
-  return /^(?:1|true|on|yes)$/iu.test(process.env.ALAYA_RECALL_SESSION_ROUTE ?? "");
+  return recallSessionRouteEnabled();
 }
 
 const SESSION_ROUTE_FOOTHOLD_TOP_K = 12;

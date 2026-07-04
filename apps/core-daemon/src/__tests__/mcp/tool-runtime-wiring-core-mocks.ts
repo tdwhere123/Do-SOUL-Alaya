@@ -1,7 +1,59 @@
 import type { ToolProvider } from "@do-soul/alaya-protocol";
+import type { CoreConfig } from "@do-soul/alaya-core";
 import { vi } from "vitest";
 
 type ToolRuntimeWiringHoisted = Record<string, any>;
+
+// Minimal typed CoreConfig so the installCoreConfigFromProcessEnv mock returns
+// the real shape; a field drift in CoreConfig surfaces here as a tsc error
+// instead of hiding behind an untyped `{}`.
+function createStubCoreConfig(): CoreConfig {
+  return {
+    recall: {
+      compose: false,
+      embedPoolRescore: false,
+      s4Coverage: undefined,
+      coverageSelector: undefined,
+      coveragePoolK: undefined,
+      coverageTargetK: undefined,
+      coverageMinScoreRatio: undefined,
+      sessionCoverageBand: undefined,
+      facetOverlap: undefined,
+      facetSlice: undefined,
+      confRhoPath: undefined,
+      confRhoEvidence: undefined,
+      confWPath: undefined,
+      confEvidenceBeta: undefined,
+      confFloodCap: undefined,
+      confFloodCapTotal: undefined,
+      answersWith: false,
+      expAnswersWith: false,
+      pathEmbModulation: undefined,
+      structuralReserve: undefined,
+      projectionsEnabled: true,
+      temporalWindowEnabled: false,
+      lexicalDecorr: undefined,
+      deliverFusedOrder: undefined,
+      deliveryWindow: undefined,
+      intentV2: false,
+      queryHydeJson: undefined,
+      queryFacetsJson: undefined,
+      extraSynonymClusters: undefined,
+      nowIso: undefined,
+      sessionRoute: false,
+      coarseFilterSemanticFlags: {},
+      activationAssemblyFlags: {}
+    },
+    embedding: {
+      backfillConcurrency: undefined,
+      recallTiersRaw: undefined,
+      workspaceScanCap: undefined
+    },
+    pathGraph: {
+      pathrelContentStrength: undefined
+    }
+  };
+}
 
 export function buildToolRuntimeWiringCoreMocks(params: {
   readonly hoisted: ToolRuntimeWiringHoisted;
@@ -104,6 +156,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       // fixture exposes an inert subscription so bootstrap does not throw.
       subscribeToInvalidations: vi.fn(() => ({ dispose: vi.fn() }))
     })),
+    installCoreConfigFromProcessEnv: vi.fn((): CoreConfig => createStubCoreConfig()),
     rebuildCountersFromEventLog: hoisted.rebuildCountersFromEventLog,
     scheduleAuditedAsyncSideEffect: vi.fn((work: Promise<unknown> | null | undefined) => {
       void work?.catch(() => undefined);
@@ -151,7 +204,15 @@ export function buildToolRuntimeWiringCoreMocks(params: {
         config: {}
       }))
     }),
-    EventPublisher: makeClass(),
+    EventPublisher: vi.fn().mockImplementation(function EventPublisher(deps: {
+      readonly eventLogRepo: { getStorageConnectionIdentity?(): object };
+    }) {
+      return {
+        getStorageConnectionIdentity(): object | undefined {
+          return deps.eventLogRepo.getStorageConnectionIdentity?.();
+        }
+      };
+    }),
     EvidenceService: makeClass(),
     EdgeAutoProducerService: makeClass({
       produceForNewMemory: vi.fn(async () => undefined)

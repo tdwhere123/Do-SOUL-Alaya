@@ -39,6 +39,7 @@ import { EventPublisher, PathRelationProposalService, ProposalService } from "@d
 import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
 
 import { registerProposalRoutes } from "../../routes/proposals.js";
+import { proposalRouteServices } from "../support/route-service-stubs.js";
 
 const databases = new Set<StorageDatabase>();
 
@@ -118,12 +119,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
         output: { proposal_id: "proposal-1", status: "created" }
       }))
     };
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
       mcpMemoryToolHandler
-    } as any);
+    }));
     return { app, workspaceService, proposalService, memoryService, mcpMemoryToolHandler };
   }
 
@@ -276,12 +277,12 @@ describe("proposal routes (HTTP surface narrowed)", () => {
         input.toolName === "soul.list_pending_proposals" ? await listPending() : await propose()
       )
     };
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
       mcpMemoryToolHandler
-    } as any);
+    }));
 
     const response = await app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/retire", {
       method: "POST"
@@ -315,7 +316,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       status: "created" as const
     }));
     const notifyEntry = vi.fn();
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
@@ -323,7 +324,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo: { append: createAuditEventLogAppend() },
       runtimeNotifier: { notifyEntry },
       mcpMemoryToolHandler
-    } as any);
+    }));
 
     const response = await app.request(
       "/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed",
@@ -400,7 +401,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     };
     const createProposalWithEventsIfAbsent = vi.fn();
     const notifyEntry = vi.fn();
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
@@ -408,7 +409,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo: { append: createAuditEventLogAppend() },
       runtimeNotifier: { notifyEntry },
       mcpMemoryToolHandler: { call: vi.fn() }
-    } as any);
+    }));
 
     const response = await app.request(
       "/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed",
@@ -443,7 +444,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       runtimeNotifier: { notifyEntry }
     });
     const app = new Hono();
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService: {
         getById: vi.fn(async () => ({ workspace_id: "ws-1" }))
       },
@@ -455,7 +456,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo,
       runtimeNotifier: { notifyEntry },
       mcpMemoryToolHandler: { call: vi.fn() }
-    } as any);
+    }));
 
     const [first, second] = await Promise.all([
       app.request("/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed", {
@@ -500,7 +501,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     const notifyEntry = vi.fn(async () => {
       throw new Error("notifier unavailable");
     });
-    registerProposalRoutes(app, {
+    registerProposalRoutes(app, proposalRouteServices({
       workspaceService,
       memoryService,
       proposalService,
@@ -508,7 +509,7 @@ describe("proposal routes (HTTP surface narrowed)", () => {
       eventLogRepo: { append },
       runtimeNotifier: { notifyEntry },
       mcpMemoryToolHandler: { call: vi.fn() }
-    } as any);
+    }));
 
     const response = await app.request(
       "/workspaces/ws-1/soul/memory/mem-1/proposals/promote-strictly-governed",

@@ -7,7 +7,7 @@ archived to `docs/archive/backlog-resolved-historical.md`.
 ## Issue Numbering
 
 Issues are numbered `#BL-NNN` in plain decimal sequence.
-**Next available number**: `#BL-058`.
+**Next available number**: `#BL-060`.
 
 ---
 
@@ -61,7 +61,6 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 **Close condition**: a warm-seeding A/B confirms no warm recall regression from base-weight priors; or "warm-neutral on real corpus" verdict against R5 archive.
 
----
 
 ## Out of Alaya Scope (Permanently Rejected)
 

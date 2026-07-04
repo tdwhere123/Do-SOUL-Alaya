@@ -20,6 +20,7 @@ import {
   createPathFailureHealthInbox,
   createRecallFailureHealthInbox
 } from "./daemon-service-wiring.js";
+import { requireAtomicKarmaTransition } from "./karma-atomic-wiring-guard.js";
 import type { DaemonServiceFoundationInput } from "./daemon-service-foundation.js";
 
 type FoundationEventPublisher = ReturnType<
@@ -38,7 +39,7 @@ export function createKnowledgeFoundation(
   });
   const healthJournalService = createHealthJournalService(input);
   const greenService = createGreenService(input, governanceLeaseService);
-  const dynamicsService = createDynamicsService(input, greenService);
+  const dynamicsService = createDynamicsService(input, greenService, eventPublisher);
   dynamicsServiceRef.current = dynamicsService;
   const memoryService = createMemoryService(input, evidenceService, dynamicsService, greenService);
   const interactionRuntime = createKnowledgeInteractionRuntime(input, eventPublisher);
@@ -134,14 +135,23 @@ function createGreenService(
 
 function createDynamicsService(
   input: DaemonServiceFoundationInput,
-  greenService: GreenService
+  greenService: GreenService,
+  eventPublisher: FoundationEventPublisher
 ) {
+  // Fail fast if the karma path is not single-transaction-atomic (residual #1).
+  requireAtomicKarmaTransition({
+    eventPublisher,
+    eventLogRepo: input.eventLogRepo,
+    karmaEventRepo: input.karmaEventRepo,
+    memoryRepo: input.memoryEntryRepo
+  });
   return new DynamicsService({
     memoryRepo: input.memoryEntryRepo,
     karmaEventRepo: input.karmaEventRepo,
     eventLogRepo: input.eventLogRepo,
     runtimeNotifier: input.runtimeNotifier,
-    greenService
+    greenService,
+    eventPublisher
   });
 }
 

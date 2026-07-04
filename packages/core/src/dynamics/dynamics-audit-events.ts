@@ -10,7 +10,11 @@ import {
   type RetentionState
 } from "@do-soul/alaya-protocol";
 
-import type { DynamicsServiceEventLogRepoPort, DynamicsServiceRuntimeNotifier } from "./dynamics-service-ports.js";
+import type {
+  DynamicsEventLogInput,
+  DynamicsServiceEventLogRepoPort,
+  DynamicsServiceRuntimeNotifier
+} from "./dynamics-service-ports.js";
 
 export interface RetentionUpdatedAudit {
   readonly memory: Readonly<MemoryEntry>;
@@ -36,11 +40,8 @@ export interface ManifestationChangedAudit {
   readonly occurredAt: string;
 }
 
-export async function appendRetentionUpdatedEvent(
-  eventLogRepo: DynamicsServiceEventLogRepoPort,
-  audit: RetentionUpdatedAudit
-): Promise<EventLogEntry> {
-  return await eventLogRepo.append({
+export function buildRetentionUpdatedEventInput(audit: RetentionUpdatedAudit): DynamicsEventLogInput {
+  return {
     event_type: MemoryGovernanceEventType.SOUL_MEMORY_RETENTION_UPDATED,
     entity_type: "memory_entry",
     entity_id: audit.memory.object_id,
@@ -60,14 +61,11 @@ export async function appendRetentionUpdatedEvent(
       occurred_at: audit.occurredAt,
       retention_score: audit.toRetention
     })
-  });
+  };
 }
 
-export async function appendStateChangedEvent(
-  eventLogRepo: DynamicsServiceEventLogRepoPort,
-  audit: StateChangedAudit
-): Promise<EventLogEntry> {
-  return await eventLogRepo.append({
+export function buildStateChangedEventInput(audit: StateChangedAudit): DynamicsEventLogInput {
+  return {
     event_type: MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED,
     entity_type: "memory_entry",
     entity_id: audit.memory.object_id,
@@ -86,14 +84,11 @@ export async function appendStateChangedEvent(
       evidence_refs: null,
       occurred_at: audit.occurredAt
     })
-  });
+  };
 }
 
-export async function appendManifestationChangedEvent(
-  eventLogRepo: DynamicsServiceEventLogRepoPort,
-  audit: ManifestationChangedAudit
-): Promise<EventLogEntry> {
-  return await eventLogRepo.append({
+export function buildManifestationChangedEventInput(audit: ManifestationChangedAudit): DynamicsEventLogInput {
+  return {
     event_type: MemoryGovernanceEventType.SOUL_MEMORY_MANIFESTATION_CHANGED,
     entity_type: "memory_entry",
     entity_id: audit.memory.object_id,
@@ -112,7 +107,28 @@ export async function appendManifestationChangedEvent(
       evidence_refs: null,
       occurred_at: audit.occurredAt
     })
-  });
+  };
+}
+
+export async function appendRetentionUpdatedEvent(
+  eventLogRepo: DynamicsServiceEventLogRepoPort,
+  audit: RetentionUpdatedAudit
+): Promise<EventLogEntry> {
+  return await eventLogRepo.append(buildRetentionUpdatedEventInput(audit));
+}
+
+export async function appendStateChangedEvent(
+  eventLogRepo: DynamicsServiceEventLogRepoPort,
+  audit: StateChangedAudit
+): Promise<EventLogEntry> {
+  return await eventLogRepo.append(buildStateChangedEventInput(audit));
+}
+
+export async function appendManifestationChangedEvent(
+  eventLogRepo: DynamicsServiceEventLogRepoPort,
+  audit: ManifestationChangedAudit
+): Promise<EventLogEntry> {
+  return await eventLogRepo.append(buildManifestationChangedEventInput(audit));
 }
 
 export async function broadcastEvents(

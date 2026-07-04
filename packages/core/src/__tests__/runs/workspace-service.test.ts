@@ -3,6 +3,7 @@ import { WorkspaceKind, WorkspaceState, type BootstrappingRecord, type PathRelat
 import { WorkspaceService } from "../../runs/workspace-service.js";
 
 import { createBootstrappingRecord, createDuplicateKeyError, createPathRelation, createWorkspace, fakeAppendManyWithMutation } from "./workspace-service.test-support.js";
+import { StubEventPublisher } from "../support/event-publisher-stub.js";
 
 describe("WorkspaceService", () => {
   it("bootstraps conservative path relations during workspace creation", async () => {
@@ -40,9 +41,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any,
+      eventPublisher: new StubEventPublisher(appendManyWithMutation),
       bootstrappingPlanner,
       pathRelationRepo,
       bootstrappingRecordRepo
@@ -95,9 +94,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any,
+      eventPublisher: new StubEventPublisher(appendManyWithMutation),
       bootstrappingPlanner,
       pathRelationRepo,
       bootstrappingRecordRepo
@@ -146,9 +143,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any
+      eventPublisher: new StubEventPublisher(appendManyWithMutation)
     });
 
     const first = await service.ensureLocalWorkspace({
@@ -207,9 +202,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any
+      eventPublisher: new StubEventPublisher(appendManyWithMutation)
     });
 
     const ensured = await service.ensureLocalWorkspace({
@@ -264,9 +257,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any
+      eventPublisher: new StubEventPublisher(appendManyWithMutation)
     });
 
     const ensured = await service.ensureLocalWorkspace({
@@ -328,9 +319,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation
-      } as any,
+      eventPublisher: new StubEventPublisher(appendManyWithMutation),
       bootstrappingPlanner: {
         planBootstrap: vi.fn(async () => ({
           relations: [createPathRelation({ workspace_id: persistedWorkspace.workspace_id })],
@@ -400,9 +389,7 @@ describe("WorkspaceService", () => {
       runRepo: {
         listByWorkspace: vi.fn(async () => [])
       },
-      eventPublisher: {
-        appendManyWithMutation: fakeAppendManyWithMutation()
-      } as any,
+      eventPublisher: new StubEventPublisher(fakeAppendManyWithMutation()),
       bootstrappingPlanner: {
         planBootstrap: vi.fn(async (workspaceId: string) => ({
           relations: [
