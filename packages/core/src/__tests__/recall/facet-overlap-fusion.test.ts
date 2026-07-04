@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { buildRecallFusionDetails, buildEmptyRecallFusionBreakdown, compareFusedRecallCandidates } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
@@ -132,6 +132,28 @@ describe("facet_overlap fusion stream", () => {
 
     expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.fused_rank).toBe(1);
     expect(fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`)?.fused_rank).toBe(2);
+  });
+
+  it("uses fused_rank as the delivery tie-break when fused_score ties", () => {
+    const highOverlap = createMemoryEntry({
+      object_id: GOLD_ID,
+      content: "Later memory with two answer facets.",
+      created_at: "2026-03-21T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }, { facet: "location_place" }]
+    });
+    const lowOverlap = createMemoryEntry({
+      object_id: DISTRACTOR_ID,
+      content: "Earlier memory with one answer facet.",
+      created_at: "2026-03-20T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }]
+    });
+    const tiedScore = 0.42;
+    const goldFusion = { ...buildEmptyRecallFusionBreakdown(GOLD_ID), fused_score: tiedScore, fused_rank: 1 };
+    const distractorFusion = { ...buildEmptyRecallFusionBreakdown(DISTRACTOR_ID), fused_score: tiedScore, fused_rank: 2 };
+    expect(compareFusedRecallCandidates(
+      { entry: highOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 }, fusion: goldFusion },
+      { entry: lowOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 }, fusion: distractorFusion }
+    )).toBeLessThan(0);
   });
 
   it("facet flag is not part of the unified kernel contract", () => {

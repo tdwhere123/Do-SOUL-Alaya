@@ -346,6 +346,8 @@ export class SqliteProposalRepo implements ProposalRepo {
       findByIdStatement: this.connectionHost.findByIdStatement,
       findMemoryEntryByIdStatement: this.connectionHost.findMemoryEntryByIdStatement,
       updateMemoryEntryStatement: this.connectionHost.updateMemoryEntryStatement,
+      deleteEvidenceRefsByMemoryStatement: this.connectionHost.deleteEvidenceRefsByMemoryStatement,
+      insertEvidenceRefStatement: this.connectionHost.insertEvidenceRefStatement,
       findRevokableGreenStatusStatement: this.connectionHost.findRevokableGreenStatusStatement,
       revokeGreenStatusStatement: this.connectionHost.revokeGreenStatusStatement,
       updatePendingResolutionStatement: this.connectionHost.updatePendingResolutionStatement,

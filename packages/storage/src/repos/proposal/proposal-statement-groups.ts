@@ -1,4 +1,8 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
+import {
+  prepareMemoryEntryEvidenceRefIndexStatements,
+  type MemoryEntryEvidenceRefIndexStatements
+} from "../memory-entry/memory-entry-statement-groups.js";
 import { MEMORY_ENTRY_SELECT_COLUMNS } from "../memory-entry/row-mapper.js";
 import { PROPOSAL_SELECT_COLUMNS } from "./rows.js";
 
@@ -39,12 +43,16 @@ export interface ProposalResolutionStatements {
   readonly updatePendingResolutionWithIdentityStatement: SqliteStatement;
 }
 
-export interface ProposalMemoryApplyStatements {
+export interface ProposalMemoryApplyCoreStatements {
   readonly findMemoryEntryByIdStatement: SqliteStatement;
   readonly updateMemoryEntryStatement: SqliteStatement;
   readonly findRevokableGreenStatusStatement: SqliteStatement;
   readonly revokeGreenStatusStatement: SqliteStatement;
 }
+
+export interface ProposalMemoryApplyStatements
+  extends ProposalMemoryApplyCoreStatements,
+    MemoryEntryEvidenceRefIndexStatements {}
 
 export interface ProposalPathRelationApplyStatements {
   readonly findPathRelationByAnchorMemoryIdStatement: SqliteStatement;
@@ -198,7 +206,7 @@ const PROPOSAL_RESOLUTION_SQL: SqlDefinitionMap<ProposalResolutionStatements> = 
     `
 };
 
-const PROPOSAL_MEMORY_APPLY_SQL: SqlDefinitionMap<ProposalMemoryApplyStatements> = {
+const PROPOSAL_MEMORY_APPLY_SQL: SqlDefinitionMap<ProposalMemoryApplyCoreStatements> = {
   findMemoryEntryByIdStatement: `
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
@@ -329,7 +337,10 @@ export function prepareProposalResolutionStatements(
 export function prepareProposalMemoryApplyStatements(
   db: StorageDatabase
 ): ProposalMemoryApplyStatements {
-  return prepareStatementGroup(db, PROPOSAL_MEMORY_APPLY_SQL);
+  return {
+    ...prepareStatementGroup(db, PROPOSAL_MEMORY_APPLY_SQL),
+    ...prepareMemoryEntryEvidenceRefIndexStatements(db)
+  };
 }
 
 export function prepareProposalPathRelationApplyStatements(

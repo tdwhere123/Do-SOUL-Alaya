@@ -296,6 +296,10 @@ export function compareFusedRecallCandidates(
   if (fusionDelta !== 0) {
     return fusionDelta;
   }
+  const rankDelta = left.fusion.fused_rank - right.fusion.fused_rank;
+  if (rankDelta !== 0) {
+    return rankDelta;
+  }
   const axisDelta = compareConformantAxisRa(left.fusion.per_axis_contribution, right.fusion.per_axis_contribution);
   if (axisDelta !== 0) {
     return axisDelta;

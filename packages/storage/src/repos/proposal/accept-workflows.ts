@@ -37,6 +37,7 @@ import type {
 } from "./types.js";
 import type { ProposalRow } from "./rows.js";
 import { upsertStrictlyGovernedPathRelation } from "./path-relation-accept-workflow.js";
+import type { MemoryEntryEvidenceRefIndexHost } from "../memory-entry/evidence-ref-index.js";
 
 interface SqliteStatement {
   run(...args: readonly unknown[]): { readonly changes: number };
@@ -44,7 +45,7 @@ interface SqliteStatement {
   all(...args: readonly unknown[]): readonly unknown[];
 }
 
-export interface SqliteProposalWorkflowContext {
+export interface SqliteProposalWorkflowContext extends MemoryEntryEvidenceRefIndexHost {
   readonly db: StorageDatabase;
   transaction<T>(fn: () => T, options?: { readonly immediate?: boolean }): T;
   readonly eventLogWriter: Parameters<typeof insertEventLogEntry>[0];

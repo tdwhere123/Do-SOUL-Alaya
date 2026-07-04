@@ -84,6 +84,14 @@ export class ProposalConnectionHost implements ProposalStatements {
     return this.activeStatements().updateMemoryEntryStatement;
   }
 
+  public get deleteEvidenceRefsByMemoryStatement() {
+    return this.activeStatements().deleteEvidenceRefsByMemoryStatement;
+  }
+
+  public get insertEvidenceRefStatement() {
+    return this.activeStatements().insertEvidenceRefStatement;
+  }
+
   public get findRevokableGreenStatusStatement() {
     return this.activeStatements().findRevokableGreenStatusStatement;
   }

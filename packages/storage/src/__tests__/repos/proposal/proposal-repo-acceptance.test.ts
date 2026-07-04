@@ -128,6 +128,9 @@ describe("SqliteProposalRepo acceptance workflows", () => {
       updated_at: "2026-03-21T03:00:00.000Z"
     });
     expect(countGreenPiercedEvents(database, proposal.derived_from ?? "")).toBe(1);
+    await expect(memoryRepo.findByEvidenceRefs("workspace-1", ["evidence-1"])).resolves.toEqual([]);
+    const byNewRef = await memoryRepo.findByEvidenceRefs("workspace-1", ["evidence-2"]);
+    expect(byNewRef.map((entry) => entry.object_id)).toEqual([proposal.derived_from ?? ""]);
   });
 
   it("accepts Inspector trust and retire proposals only through audited apply", async () => {

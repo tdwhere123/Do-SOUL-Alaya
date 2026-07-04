@@ -8,6 +8,7 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import { StorageError } from "../../shared/errors.js";
+import { syncMemoryEntryEvidenceRefIndex } from "../memory-entry/evidence-ref-index.js";
 import { parseMemoryEntryRow, type MemoryEntryRow } from "../memory-entry/row-mapper.js";
 import { insertEventLogEntry } from "../shared/event-log-writer.js";
 import {
@@ -68,6 +69,9 @@ export function applyAcceptedMemoryUpdate(
       ? undefined
       : insertAndApplyGreenRevocation(ctx, updatedAt, existingMemory, memoryUpdate, revokableGreenStatus);
   const updatedMemory = loadUpdatedMemory(ctx, memoryUpdate.target_object_id);
+  if (memoryUpdate.proposed_changes.evidence_refs !== undefined) {
+    syncMemoryEntryEvidenceRefIndex(ctx, updatedMemory);
+  }
 
   return {
     memory: updatedMemory,
