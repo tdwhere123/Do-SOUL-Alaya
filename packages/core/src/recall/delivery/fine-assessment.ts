@@ -3,7 +3,6 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { recallEnvFlagEnabled, readRecallPositiveInt } from "../../config/recall-env-access.js";
 import { buildRecallCandidateDedupeKey } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -13,16 +12,11 @@ import type {
   TokenEstimator
 } from "../runtime/recall-service-types.js";
 import {
-  applyFeatureRerank,
   applyPathSuppressionToFusionScores,
   buildEmptyRecallFusionBreakdown,
-  buildRecallFusionDetails,
-  compareFusedRecallCandidates,
-  prioritizeStrongLexicalDeliveryWindowCandidates,
-  reserveStructuralDeliverySlots
+  buildRecallFusionDetails
 } from "./fusion-delivery.js";
-import { applyEvidenceSetDelivery } from "./evidence-set-optimizer.js";
-import { composeEntityDeliveryHints, composeRecallEnabled } from "../scoring/activation-assembly.js";
+import { applyDeliverySelection } from "./delivery-selection.js";
 import { computeEffectiveScoreDetails } from "../scoring/scoring.js";
 import {
   selectFineAssessmentCandidates,
@@ -52,19 +46,23 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   }
   const config = params.policy.fine_assessment;
   const scoredCandidates = scoreFineAssessmentCandidates(params);
-  const ordering = orderFineAssessmentCandidates(
+  const fusedCandidates = fuseFineAssessmentCandidates(
     scoredCandidates,
     params.policy,
     params.supplementaryData,
-    params.now(),
+    params.now()
+  );
+  const delivery = applyDeliverySelection(
+    fusedCandidates,
+    params.supplementaryData,
     config.budgets.max_entries
   );
   return selectFineAssessmentCandidates({
-    deliveryOrderedCandidates: ordering.deliveryOrderedCandidates,
+    deliveryOrderedCandidates: delivery.ordering.deliveryOrderedCandidates,
     config,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
-    ranks: buildFineAssessmentRankDiagnostics(ordering)
+    ranks: toFineAssessmentRankDiagnostics(delivery.ranks)
   });
 }
 
@@ -72,16 +70,6 @@ type AdditiveScoredCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
 }>;
-
-interface FineAssessmentOrdering {
-  readonly rankedCandidates: readonly FineAssessmentCandidate[];
-  readonly featureRerankedCandidates: readonly FineAssessmentCandidate[];
-  readonly prioritizedCandidates: readonly FineAssessmentCandidate[];
-  readonly coverageSelectedCandidates: readonly FineAssessmentCandidate[];
-  readonly coverageOrderedCandidates: readonly FineAssessmentCandidate[];
-  readonly synthesisReservedCandidates: readonly FineAssessmentCandidate[];
-  readonly deliveryOrderedCandidates: readonly FineAssessmentCandidate[];
-}
 
 function scoreFineAssessmentCandidates(params: FineAssessParams): readonly AdditiveScoredCandidate[] {
   return params.candidates.map((candidate) => {
@@ -101,209 +89,34 @@ function scoreFineAssessmentCandidates(params: FineAssessParams): readonly Addit
   });
 }
 
-function orderFineAssessmentCandidates(
+function fuseFineAssessmentCandidates(
   additiveScoredCandidates: readonly AdditiveScoredCandidate[],
   policy: Readonly<RecallPolicy>,
   supplementaryData: RecallSupplementaryData,
-  nowIso: string,
-  maxEntries: number
-): FineAssessmentOrdering {
-  // The conformant fused_score (activation·(1+β·R_E)) stays small-magnitude, so the absolute ≤0.27 path-suppression deltas stay meaningful.
+  nowIso: string
+): readonly FineAssessmentCandidate[] {
   const fusionByCandidateKey = applyPathSuppressionToFusionScores(
     buildRecallFusionDetails({ candidates: additiveScoredCandidates, policy, supplementaryData, nowIso }),
     supplementaryData.pathSuppressionScores
   );
-  return orderFusedFineAssessmentCandidates(
-    additiveScoredCandidates.map((candidate) => Object.freeze({
-      ...candidate,
-      fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
-    })),
-    supplementaryData,
-    maxEntries
-  );
+  return additiveScoredCandidates.map((candidate) => Object.freeze({
+    ...candidate,
+    fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
+  }));
 }
 
-// Diagnostic (ALAYA_RECALL_DELIVER_FUSED_ORDER): deliver in pure fused-score order,
-// skipping the post-fusion re-rank chain — to measure how much that chain reshapes delivery.
-function deliverFusedOrderEnabled(): boolean {
-  return recallEnvFlagEnabled("ALAYA_RECALL_DELIVER_FUSED_ORDER");
-}
-
-// Opt-in (ALAYA_RECALL_DELIVERY_WINDOW): widen the reorder window past the delivery cap; unset/≤maxEntries → byte-identical.
-function resolveDeliveryReorderWindow(maxEntries: number): number {
-  return readRecallPositiveInt("ALAYA_RECALL_DELIVERY_WINDOW", maxEntries) > maxEntries
-    ? readRecallPositiveInt("ALAYA_RECALL_DELIVERY_WINDOW", maxEntries)
-    : maxEntries;
-}
-
-function orderFusedFineAssessmentCandidates(
-  scoredCandidates: readonly FineAssessmentCandidate[],
-  supplementaryData: RecallSupplementaryData,
-  maxEntries: number
-): FineAssessmentOrdering {
-  const rankedCandidates = [...scoredCandidates].sort(compareFusedRecallCandidates);
-  if (deliverFusedOrderEnabled()) {
-    return buildSingleStageFineAssessmentOrdering(rankedCandidates, rankedCandidates);
-  }
-  return buildPostFusionFineAssessmentOrdering(rankedCandidates, supplementaryData, maxEntries);
-}
-
-function buildSingleStageFineAssessmentOrdering(
-  rankedCandidates: readonly FineAssessmentCandidate[],
-  deliveryOrderedCandidates: readonly FineAssessmentCandidate[]
-): FineAssessmentOrdering {
-  return Object.freeze({
-    rankedCandidates,
-    featureRerankedCandidates: deliveryOrderedCandidates,
-    prioritizedCandidates: deliveryOrderedCandidates,
-    coverageSelectedCandidates: deliveryOrderedCandidates,
-    coverageOrderedCandidates: deliveryOrderedCandidates,
-    synthesisReservedCandidates: deliveryOrderedCandidates,
-    deliveryOrderedCandidates
-  });
-}
-
-function buildPostFusionFineAssessmentOrdering(
-  rankedCandidates: readonly FineAssessmentCandidate[],
-  supplementaryData: RecallSupplementaryData,
-  maxEntries: number
-): FineAssessmentOrdering {
-  const window = resolveDeliveryReorderWindow(maxEntries);
-  const entityHintedCandidates = composeRecallEnabled()
-    ? applyComposeDeliveryHints(rankedCandidates, supplementaryData, window)
-    : rankedCandidates;
-  const featureRerankedCandidates = applyFeatureRerank(entityHintedCandidates, supplementaryData);
-  const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
-    featureRerankedCandidates,
-    supplementaryData,
-    window
-  );
-  const coverageSelectedCandidates = applyEvidenceSetDelivery(
-    prioritizedCandidates,
-    supplementaryData,
-    window
-  );
-  const coverageOrderedCandidates = coverageSelectedCandidates;
-  const synthesisReservedCandidates = coverageOrderedCandidates;
-  const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
-    synthesisReservedCandidates,
-    supplementaryData,
-    window,
-    0
-  );
-  return Object.freeze({
-    rankedCandidates,
-    featureRerankedCandidates,
-    prioritizedCandidates,
-    coverageSelectedCandidates,
-    coverageOrderedCandidates,
-    synthesisReservedCandidates,
-    deliveryOrderedCandidates
-  });
-}
-
-const COMPOSE_HINT_MIN_SCORE_RATIO = 0.75;
-
-function applyComposeDeliveryHints(
-  rankedCandidates: readonly FineAssessmentCandidate[],
-  supplementaryData: RecallSupplementaryData,
-  window: number
-): readonly FineAssessmentCandidate[] {
-  const windowSize = Math.min(Math.max(0, window), rankedCandidates.length);
-  if (windowSize <= 1) {
-    return rankedCandidates;
-  }
-  const rankedWindow = rankedCandidates.slice(0, windowSize);
-  const composedWindow = composeEntityDeliveryHints(rankedWindow, supplementaryData, windowSize);
-  return Object.freeze([
-    ...relevanceGateComposeWindow(rankedWindow, composedWindow),
-    ...rankedCandidates.slice(windowSize)
-  ]);
-}
-
-function relevanceGateComposeWindow(
-  rankedWindow: readonly FineAssessmentCandidate[],
-  composedWindow: readonly FineAssessmentCandidate[]
-): readonly FineAssessmentCandidate[] {
-  const used = new Set<string>();
-  const ordered: FineAssessmentCandidate[] = [];
-  for (const naturalCandidate of rankedWindow) {
-    const hintedCandidate = selectEligibleComposeHint(composedWindow, used, naturalCandidate);
-    const nextCandidate = hintedCandidate ?? firstUnusedCandidate(rankedWindow, used);
-    if (nextCandidate === undefined) {
-      break;
-    }
-    used.add(buildRecallCandidateDedupeKey(nextCandidate));
-    ordered.push(nextCandidate);
-  }
-  return Object.freeze(ordered);
-}
-
-function selectEligibleComposeHint(
-  composedWindow: readonly FineAssessmentCandidate[],
-  used: ReadonlySet<string>,
-  naturalCandidate: FineAssessmentCandidate
-): FineAssessmentCandidate | undefined {
-  for (const candidate of composedWindow) {
-    if (used.has(buildRecallCandidateDedupeKey(candidate))) {
-      continue;
-    }
-    if (isComposeHintEligible(candidate, naturalCandidate)) {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-
-function firstUnusedCandidate(
-  rankedWindow: readonly FineAssessmentCandidate[],
-  used: ReadonlySet<string>
-): FineAssessmentCandidate | undefined {
-  return rankedWindow.find((candidate) => !used.has(buildRecallCandidateDedupeKey(candidate)));
-}
-
-function isComposeHintEligible(
-  candidate: FineAssessmentCandidate,
-  naturalCandidate: FineAssessmentCandidate
-): boolean {
-  if (candidate === naturalCandidate) {
-    return true;
-  }
-  return (
-    passesComposeHintScoreRatio(candidate.fusion.fused_score, naturalCandidate.fusion.fused_score) &&
-    passesComposeHintScoreRatio(candidate.effectiveScore, naturalCandidate.effectiveScore)
-  );
-}
-
-function passesComposeHintScoreRatio(candidateScore: number, naturalScore: number): boolean {
-  if (naturalScore <= 0) {
-    return candidateScore > 0;
-  }
-  return candidateScore / naturalScore >= COMPOSE_HINT_MIN_SCORE_RATIO;
-}
-
-function buildFineAssessmentRankDiagnostics(
-  ordering: FineAssessmentOrdering
+function toFineAssessmentRankDiagnostics(
+  ranks: ReturnType<typeof applyDeliverySelection>["ranks"]
 ): FineAssessmentRankDiagnostics {
   return Object.freeze({
-    rankAfterFusion: buildStageRankMap(ordering.rankedCandidates),
-    rankAfterFeatureRerank: buildStageRankMap(ordering.featureRerankedCandidates),
-    rankAfterLexicalPriority: buildStageRankMap(ordering.prioritizedCandidates),
-    rankAfterCoverageSelector: buildStageRankMap(ordering.coverageSelectedCandidates),
-    rankAfterSessionCoverage: buildStageRankMap(ordering.coverageOrderedCandidates),
-    rankAfterSynthesisReserve: buildStageRankMap(ordering.synthesisReservedCandidates),
-    rankAfterStructuralReserve: buildStageRankMap(ordering.deliveryOrderedCandidates),
-    coverageSelectorNoop: ordering.coverageSelectedCandidates === ordering.prioritizedCandidates,
-    sessionCoverageNoop: ordering.coverageOrderedCandidates === ordering.coverageSelectedCandidates
+    rankAfterFusion: ranks.rankAfterFusion,
+    rankAfterFeatureRerank: ranks.rankAfterFeatureRerank,
+    rankAfterLexicalPriority: ranks.rankAfterLexicalPriority,
+    rankAfterCoverageSelector: ranks.rankAfterCoverageSelector,
+    rankAfterSessionCoverage: ranks.rankAfterSessionCoverage,
+    rankAfterSynthesisReserve: ranks.rankAfterSynthesisReserve,
+    rankAfterStructuralReserve: ranks.rankAfterStructuralReserve,
+    coverageSelectorNoop: ranks.coverageSelectorNoop,
+    sessionCoverageNoop: ranks.sessionCoverageNoop
   });
-}
-
-function buildStageRankMap(
-  ordered: readonly Readonly<CoarseRecallCandidate>[]
-): ReadonlyMap<string, number> {
-  const ranks = new Map<string, number>();
-  ordered.forEach((item, index) => {
-    ranks.set(buildRecallCandidateDedupeKey(item), index + 1);
-  });
-  return ranks;
 }
