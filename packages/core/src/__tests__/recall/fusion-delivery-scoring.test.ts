@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails, scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { buildRecallFusionDetails, compareFusedRecallCandidates, scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
@@ -409,5 +409,44 @@ describe("scoreTemporalFusion window gate (ALAYA_RECALL_TEMPORAL_WINDOW)", () =>
     const window = parseQueryTimeWindow(probes, nowIso)!;
     expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalQueryWindow(entry, window, nowIso));
     expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(1);
+  });
+});
+
+describe("compareFusedRecallCandidates", () => {
+  it("orders by fused_rank before fused_score so delivery matches metadata", () => {
+    const betterRank = {
+      entry: createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" }),
+      effectiveScore: 0.5,
+      effectiveFactors: { activation: 0, relevance: 0 },
+      fusion: {
+        candidate_key: "workspace_local:memory_entry:11111111-1111-4111-8111-111111111111",
+        object_id: "11111111-1111-4111-8111-111111111111",
+        object_kind: "memory_entry" as const,
+        origin_plane: "workspace_local" as const,
+        per_stream_rank: {},
+        fused_rank: 1,
+        fused_score: 0.2,
+        fused_rank_contribution_per_stream: {}
+      }
+    };
+    const worseRank = {
+      entry: createMemoryEntry({ object_id: "22222222-2222-4222-8222-222222222222" }),
+      effectiveScore: 0.4,
+      effectiveFactors: { activation: 0, relevance: 0 },
+      fusion: {
+        candidate_key: "workspace_local:memory_entry:22222222-2222-4222-8222-222222222222",
+        object_id: "22222222-2222-4222-8222-222222222222",
+        object_kind: "memory_entry" as const,
+        origin_plane: "workspace_local" as const,
+        per_stream_rank: {},
+        fused_rank: 2,
+        fused_score: 0.9,
+        fused_rank_contribution_per_stream: {}
+      }
+    };
+
+    const ordered = [worseRank, betterRank].sort(compareFusedRecallCandidates);
+    expect(ordered[0]?.fusion.fused_rank).toBe(1);
+    expect(ordered[1]?.fusion.fused_rank).toBe(2);
   });
 });

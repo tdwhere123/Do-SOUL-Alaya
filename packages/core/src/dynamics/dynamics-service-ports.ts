@@ -57,6 +57,9 @@ export interface KarmaTransitionEventPublisherPort {
 
 export interface DynamicsServiceMemoryRepoPort {
   findById(objectId: string): Promise<Readonly<MemoryEntry> | null>;
+  // invariant (§31): synchronous read so karma/decay transitions can re-read
+  // inside the same SQLite transaction as the write. Optional; absent => async fallback.
+  findByIdSync?(objectId: string): Readonly<MemoryEntry> | null;
   findByWorkspaceId(
     workspaceId: string,
     tier?: StorageTier,
@@ -115,6 +118,9 @@ export interface DynamicsServiceKarmaEventRepoPort {
   // run inside a single EventLog transaction. Optional; absent => async fallback.
   createSync?(event: Readonly<KarmaEvent>): Readonly<KarmaEvent>;
   sumByObjectId(objectId: string): Promise<number>;
+  // invariant (§31): synchronous sum so karma/decay transitions can re-read
+  // inside the same SQLite transaction as the write. Optional; absent => async fallback.
+  sumByObjectIdSync?(objectId: string): number;
   sumByObjectIds(objectIds: readonly string[]): Promise<Readonly<Record<string, number>>>;
   findByObjectId(objectId: string): Promise<readonly Readonly<KarmaEvent>[]>;
 }

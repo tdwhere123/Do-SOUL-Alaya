@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   parseQueryTimeWindow,
+  scoreTemporalEventTime,
   scoreTemporalQueryWindow,
   temporalQueryWindowEnabled
 } from "../../recall/scoring/temporal-fusion-scoring.js";
@@ -239,5 +240,20 @@ describe("scoreTemporalQueryWindow", () => {
 
   it("returns zero when the entry carries no event time", () => {
     expect(scoreTemporalQueryWindow(createMemoryEntry(), mayWindow, nowIso)).toBe(0);
+  });
+
+  it("normalizes inverted event_time_start/end intervals", () => {
+    const canonical = createMemoryEntry({
+      event_time_start: "2023-05-15T00:00:00.000Z",
+      event_time_end: "2023-05-16T23:59:59.999Z"
+    });
+    const inverted = createMemoryEntry({
+      event_time_start: "2023-05-16T23:59:59.999Z",
+      event_time_end: "2023-05-15T00:00:00.000Z"
+    });
+    expect(scoreTemporalQueryWindow(inverted, mayWindow, nowIso)).toBe(
+      scoreTemporalQueryWindow(canonical, mayWindow, nowIso)
+    );
+    expect(scoreTemporalEventTime(inverted, nowIso)).toBe(scoreTemporalEventTime(canonical, nowIso));
   });
 });

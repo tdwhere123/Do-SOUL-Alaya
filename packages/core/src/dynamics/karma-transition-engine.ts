@@ -59,13 +59,14 @@ export class KarmaTransitionEngine {
   public constructor(private readonly deps: KarmaTransitionEngineDependencies) {}
 
   public async processKarmaEvent(event: KarmaEvent): Promise<void> {
-    const plan = await this.computeKarmaTransitionPlan(event);
+    const parsedEvent = parseKarmaEventInput(event);
     if (this.canRunAtomicTransition()) {
-      await this.processKarmaTransitionAtomic(plan);
+      await this.processKarmaTransitionAtomic(parsedEvent);
       return;
     }
     // test-only: production wiring is guaranteed atomic by requireAtomicKarmaTransition
     // (daemon); this ordering-safe, non-atomic path serves fakes lacking the sync ports.
+    const plan = await this.computeKarmaTransitionPlanFromParsed(parsedEvent);
     const applied = await this.applyKarmaTransitionPlan(plan);
     const events = await this.auditKarmaTransition(applied, plan);
     await this.notifyKarmaTransition(applied.updated, events);
@@ -80,12 +81,14 @@ export class KarmaTransitionEngine {
     return (
       this.deps.eventPublisher !== undefined &&
       this.deps.karmaEventRepo.createSync !== undefined &&
+      this.deps.karmaEventRepo.sumByObjectIdSync !== undefined &&
+      memoryRepo.findByIdSync !== undefined &&
       memoryRepo.updateDynamicsSync !== undefined &&
       memoryRepo.reviveDormantSync !== undefined
     );
   }
 
-  private async processKarmaTransitionAtomic(plan: KarmaTransitionPlan): Promise<void> {
+  private async processKarmaTransitionAtomic(parsedEvent: Readonly<KarmaEvent>): Promise<void> {
     const eventPublisher = this.deps.eventPublisher;
     if (eventPublisher === undefined) {
       throw new CoreError("CONFLICT", "Atomic karma transition requires an event publisher.", {
@@ -93,6 +96,7 @@ export class KarmaTransitionEngine {
       });
     }
     const { result } = await eventPublisher.mutateThenAppendMany(() => {
+      const plan = this.computeKarmaTransitionPlanSync(parsedEvent);
       const applied = this.applyKarmaTransitionPlanSync(plan);
       return { events: this.buildKarmaAuditInputs(applied, plan), result: applied };
     });
@@ -123,7 +127,12 @@ export class KarmaTransitionEngine {
   }
 
   public async computeKarmaTransitionPlan(event: KarmaEvent): Promise<KarmaTransitionPlan> {
-    const parsedEvent = parseKarmaEventInput(event);
+    return this.computeKarmaTransitionPlanFromParsed(parseKarmaEventInput(event));
+  }
+
+  private async computeKarmaTransitionPlanFromParsed(
+    parsedEvent: Readonly<KarmaEvent>
+  ): Promise<KarmaTransitionPlan> {
     const memory = await this.deps.memoryRepo.findById(parsedEvent.object_id);
     if (memory === null) {
       throw new CoreError("NOT_FOUND", `Memory entry not found: ${parsedEvent.object_id}`);
@@ -131,6 +140,27 @@ export class KarmaTransitionEngine {
     // add own amount: this event is inserted later, so match baseline create-then-sum.
     const karmaSum =
       (await this.deps.karmaEventRepo.sumByObjectId(parsedEvent.object_id)) + parsedEvent.amount;
+    const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now());
+    return {
+      parsedEvent,
+      memory,
+      karmaSum,
+      transition
+    };
+  }
+
+  private computeKarmaTransitionPlanSync(parsedEvent: Readonly<KarmaEvent>): KarmaTransitionPlan {
+    const { memoryRepo, karmaEventRepo } = this.deps;
+    if (memoryRepo.findByIdSync === undefined || karmaEventRepo.sumByObjectIdSync === undefined) {
+      throw new CoreError("CONFLICT", "Atomic karma transition requires synchronous read ports.", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    const memory = memoryRepo.findByIdSync(parsedEvent.object_id);
+    if (memory === null) {
+      throw new CoreError("NOT_FOUND", `Memory entry not found: ${parsedEvent.object_id}`);
+    }
+    const karmaSum = karmaEventRepo.sumByObjectIdSync(parsedEvent.object_id) + parsedEvent.amount;
     const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now());
     return {
       parsedEvent,

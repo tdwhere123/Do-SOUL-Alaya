@@ -153,4 +153,29 @@ describe("karma transition single-transaction atomicity (§7 + §31)", () => {
 
     expect(harness.notifyEntry).not.toHaveBeenCalled();
   });
+
+  it("serializes concurrent karma transitions without lost reinforcement updates", async () => {
+    const harness = createHarness();
+    await harness.memoryEntryRepo.create({
+      ...createDormantMemoryEntry(),
+      lifecycle_state: "active"
+    });
+
+    await Promise.all([
+      harness.dynamicsService.processKarmaEvent({
+        ...createKarmaEvent(),
+        event_id: "karma-concurrent-a"
+      }),
+      harness.dynamicsService.processKarmaEvent({
+        ...createKarmaEvent(),
+        event_id: "karma-concurrent-b"
+      })
+    ]);
+
+    const memory = await harness.memoryEntryRepo.findById(MEMORY_ID);
+    expect(memory?.reinforcement_count).toBe(2);
+
+    const karmaEvents = await harness.karmaEventRepo.findByObjectId(MEMORY_ID);
+    expect(karmaEvents).toHaveLength(2);
+  });
 });

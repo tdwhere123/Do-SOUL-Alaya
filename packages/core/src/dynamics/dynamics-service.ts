@@ -71,6 +71,7 @@ export class DynamicsService {
       karmaEventRepo: dependencies.karmaEventRepo,
       eventLogRepo: dependencies.eventLogRepo,
       runtimeNotifier: dependencies.runtimeNotifier,
+      eventPublisher: dependencies.eventPublisher,
       now: this.now
     });
   }

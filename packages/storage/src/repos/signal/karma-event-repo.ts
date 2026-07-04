@@ -30,6 +30,7 @@ export interface KarmaEventRepo {
   findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]>;
   findByWorkspaceIdAll?(workspaceId: string): Promise<readonly Readonly<KarmaEvent>[]>;
   sumByObjectId(objectId: string): Promise<number>;
+  sumByObjectIdSync(objectId: string): number;
   sumByObjectIds(objectIds: readonly string[]): Promise<Readonly<Record<string, number>>>;
 }
 
@@ -270,6 +271,10 @@ export class SqliteKarmaEventRepo implements KarmaEventRepo {
   }
 
   public async sumByObjectId(objectId: string): Promise<number> {
+    return this.sumByObjectIdSync(objectId);
+  }
+
+  public sumByObjectIdSync(objectId: string): number {
     const parsedObjectId = parseNonEmptyString(objectId, "object id");
 
     try {

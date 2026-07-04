@@ -117,22 +117,24 @@ export function scoreTemporalQueryWindow(
   if (!Number.isFinite(nowMs)) {
     return 0;
   }
-  const eventEndMs = parseOptionalTime(entry.event_time_end) ?? eventStartMs;
+  const { startMs, endMs: eventEndMs } = normalizeEventTimeInterval(
+    eventStartMs,
+    parseOptionalTime(entry.event_time_end)
+  );
   if (!isWithinValidTime(entry, nowMs)) {
     return 0;
   }
-  if (eventStartMs <= window.endMs && eventEndMs >= window.startMs) {
+  if (startMs <= window.endMs && eventEndMs >= window.startMs) {
     return 1;
   }
   const distanceMs =
-    eventEndMs < window.startMs ? window.startMs - eventEndMs : eventStartMs - window.endMs;
+    eventEndMs < window.startMs ? window.startMs - eventEndMs : startMs - window.endMs;
   const distanceDays = Math.max(0, distanceMs / 86_400_000);
   return clamp01(1 - distanceDays / QUERY_WINDOW_DECAY_DAYS);
 }
 
 export function scoreTemporalEventTime(entry: Readonly<MemoryEntry>, nowIso: string): number {
   const eventStartMs = parseOptionalTime(entry.event_time_start);
-  const eventEndMs = parseOptionalTime(entry.event_time_end);
   const nowMs = Date.parse(nowIso);
   if (eventStartMs === null || !Number.isFinite(nowMs)) {
     return 0;
@@ -140,11 +142,14 @@ export function scoreTemporalEventTime(entry: Readonly<MemoryEntry>, nowIso: str
   if (!isWithinValidTime(entry, nowMs)) {
     return 0;
   }
-  const intervalEndMs = eventEndMs ?? eventStartMs;
-  if (nowMs >= eventStartMs && nowMs <= intervalEndMs) {
+  const { startMs, endMs: intervalEndMs } = normalizeEventTimeInterval(
+    eventStartMs,
+    parseOptionalTime(entry.event_time_end)
+  );
+  if (nowMs >= startMs && nowMs <= intervalEndMs) {
     return 1;
   }
-  const distanceMs = nowMs < eventStartMs ? eventStartMs - nowMs : nowMs - intervalEndMs;
+  const distanceMs = nowMs < startMs ? startMs - nowMs : nowMs - intervalEndMs;
   const distanceDays = Math.max(0, distanceMs / 86_400_000);
   return clamp01(1 - distanceDays / 365);
 }
@@ -164,4 +169,15 @@ function parseOptionalTime(value: string | null | undefined): number | null {
   }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeEventTimeInterval(
+  eventStartMs: number,
+  eventEndMs: number | null
+): Readonly<{ readonly startMs: number; readonly endMs: number }> {
+  const endMs = eventEndMs ?? eventStartMs;
+  if (eventStartMs <= endMs) {
+    return Object.freeze({ startMs: eventStartMs, endMs });
+  }
+  return Object.freeze({ startMs: endMs, endMs: eventStartMs });
 }

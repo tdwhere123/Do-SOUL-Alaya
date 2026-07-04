@@ -292,13 +292,13 @@ export function compareFusedRecallCandidates(
   left: FusedRecallCandidateInput,
   right: FusedRecallCandidateInput
 ): number {
-  const fusionDelta = right.fusion.fused_score - left.fusion.fused_score;
-  if (fusionDelta !== 0) {
-    return fusionDelta;
-  }
   const rankDelta = left.fusion.fused_rank - right.fusion.fused_rank;
   if (rankDelta !== 0) {
     return rankDelta;
+  }
+  const fusionDelta = right.fusion.fused_score - left.fusion.fused_score;
+  if (fusionDelta !== 0) {
+    return fusionDelta;
   }
   const axisDelta = compareConformantAxisRa(left.fusion.per_axis_contribution, right.fusion.per_axis_contribution);
   if (axisDelta !== 0) {
