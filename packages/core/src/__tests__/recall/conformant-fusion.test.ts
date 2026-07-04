@@ -263,7 +263,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     const noInflow = await runFusion(GENERIC_QUERY, [seed, target]);
     const targetNoInflow = noInflow.get(keyOf(target.id))!;
     expect(targetNoInflow.per_axis_contribution!.path).toBe(0);
-    expect(targetNoInflow.fused_score).toBeGreaterThan(0);
+    expect(targetNoInflow.fused_score).toBe(0);
 
     const withInflow = await runFusion(GENERIC_QUERY, [seed, target], {
       inflow: { [target.id]: [{ seedObjectId: seed.id, weight: 0.8 }] }
@@ -495,9 +495,16 @@ describe("conformant compositional combine (real SQLite)", () => {
 
   it("tunables default to bounded compositional values", () => {
     expect(resolveConformantPathWeight()).toBe(0.6);
-    expect(resolveConformantEvidenceBeta()).toBe(0.5);
+    expect(resolveConformantEvidenceBeta()).toBe(0);
     expect(resolveConformantFloodCapPerSource()).toBe(1);
     expect(resolveConformantFloodCapTotal()).toBe(3);
+  });
+
+  it("cold-start fused score equals R_obj without path or evidence fuel", async () => {
+    const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }])).get(keyOf(objectId(1)))!;
+    expect(candidate.flood_potential?.fuel_verified).toBe(false);
+    expect(candidate.flood_potential?.Flood).toBe(0);
+    expect(candidate.fused_score).toBeCloseTo(candidate.per_axis_contribution!.object, 12);
   });
 
   it("unified delivery includes temporal and control axes even when path is zero", async () => {
@@ -514,17 +521,17 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("unified score is the calibrated additive axis sum", async () => {
+  it("integrated flood score matches omega * (R_obj + lambda * Flood) with beta disabled", async () => {
     const spec: CandidateSpec = { id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] };
     const candidate = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
     const axes = candidate.per_axis_contribution!;
-    const expected =
-      axes.object +
-      resolveConformantPathWeight() * axes.path +
-      resolveConformantEvidenceBeta() * axes.evidence +
-      0.35 * axes.temporal +
-      0.2 * axes.control;
-    expect(axes.evidence).toBeGreaterThan(0);
+    const flood = candidate.flood_potential!;
+    expect(flood.R_obj).toBeCloseTo(axes.object, 12);
+    expect(flood.beta).toBe(0);
+    expect(flood.e_direct_status).toBe("inactive:beta_disabled");
+    expect(flood.fuel_verified).toBe(true);
+    const expected = flood.omega * (flood.R_obj + flood.lambda * flood.Flood);
     expect(candidate.fused_score).toBeCloseTo(expected, 9);
+    expect(flood.final_score).toBeCloseTo(expected, 9);
   });
 });

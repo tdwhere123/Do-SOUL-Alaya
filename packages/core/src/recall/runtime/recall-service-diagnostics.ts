@@ -74,6 +74,42 @@ export type RecallFusionStreamContributions = Readonly<Record<RecallFusionStream
 
 export type RecallConformantAxis = "object" | "path" | "evidence" | "temporal" | "control";
 
+export type FloodAxisInactiveReason =
+  | "active"
+  | "inactive:no_fuel"
+  | "inactive:no_slice"
+  | "inactive:no_path"
+  | "inactive:no_evidence"
+  | "inactive:pass_through"
+  | "inactive:beta_disabled";
+
+export interface IntegratedFloodCandidateDiagnostics {
+  readonly R_obj: number;
+  readonly Slice: number;
+  readonly A_path: number;
+  readonly B_evidence: number;
+  readonly E_direct: number;
+  readonly omega: number;
+  readonly Flood: number;
+  readonly lambda: number;
+  readonly beta: number;
+  readonly final_score: number;
+  readonly slice_status: FloodAxisInactiveReason;
+  readonly path_status: FloodAxisInactiveReason;
+  readonly evidence_status: FloodAxisInactiveReason;
+  readonly e_direct_status: FloodAxisInactiveReason;
+  readonly fuel_verified: boolean;
+}
+
+export interface FloodFuelCoverageSummary {
+  readonly candidates_total: number;
+  readonly cold_start_count: number;
+  readonly fuel_verified_count: number;
+  readonly slice_active_count: number;
+  readonly path_active_count: number;
+  readonly evidence_active_count: number;
+}
+
 export interface RecallFusionBreakdown {
   readonly candidate_key: string;
   readonly object_id: string;
@@ -85,6 +121,8 @@ export interface RecallFusionBreakdown {
   readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
   readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
   readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
+  readonly flood_potential?: Readonly<IntegratedFloodCandidateDiagnostics>;
+  readonly flood_fuel_coverage?: Readonly<FloodFuelCoverageSummary>;
 }
 
 export interface RecallCandidateDiagnostic {
