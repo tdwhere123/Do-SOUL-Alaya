@@ -48,6 +48,44 @@ describe("BackgroundServiceManager", () => {
     }
   });
 
+  it("waits for in-flight tasks after stop timeout instead of abandoning them", async () => {
+    vi.useFakeTimers();
+    let releaseTask!: () => void;
+    const task = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseTask = resolve;
+        })
+    );
+    const logger = { warn: vi.fn() };
+    const manager = new BackgroundServiceManager(
+      [
+        {
+          name: "test-service",
+          intervalMs: 100,
+          task
+        }
+      ],
+      { logger }
+    );
+
+    try {
+      manager.start();
+      await vi.advanceTimersByTimeAsync(100);
+      const stopPromise = manager.stop({ timeoutMs: 50 });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "background service stop draining timed out; waiting for in-flight tasks",
+        { inFlight: 1 }
+      );
+      releaseTask();
+      await stopPromise;
+      expect(task).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("routes start, overlap, and task-failure warnings through the injected logger", async () => {
     vi.useFakeTimers();
     let releaseTask!: () => void;

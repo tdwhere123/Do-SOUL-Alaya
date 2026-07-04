@@ -1,4 +1,7 @@
-import { chmod, copyFile, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, symlink, unlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import { tmpdir } from "node:os";
 
@@ -262,6 +265,28 @@ describe("tool-runtime relative path handling", () => {
       code: "ACCESS_DENIED",
       message: "Command must be a real non-symlink executable inside a writable root."
     });
+  });
+
+  it("pins the executable inode when the workspace path is swapped before spawn", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const workspaceDir = await createWorkspace();
+    const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
+    const { open } = await import("node:fs/promises");
+    const handle = await open(nodeExecutable, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      await unlink(nodeExecutable);
+      await symlink(process.execPath, nodeExecutable);
+      const execPath = process.platform === "linux" ? `/proc/self/fd/${handle.fd}` : `/dev/fd/${handle.fd}`;
+      const result = await promisify(execFile)(execPath, ["-e", "process.stdout.write('pinned')"], {
+        cwd: workspaceDir
+      });
+      expect(result.stdout).toBe("pinned");
+    } finally {
+      await handle.close();
+    }
   });
 
   it("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {

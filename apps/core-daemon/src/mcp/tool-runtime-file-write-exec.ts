@@ -1,5 +1,12 @@
 import { execFile } from "node:child_process";
-import { readFile as fsReadFile, realpath, writeFile as fsWriteFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  open,
+  readFile as fsReadFile,
+  realpath,
+  writeFile as fsWriteFile,
+  type FileHandle
+} from "node:fs/promises";
 import path from "node:path";
 import type { ExecShellToolInput, WriteFileToolInput } from "@do-soul/alaya-protocol";
 import type { GitBindingValidationOptions } from "./tool-runtime-files.js";
@@ -52,26 +59,7 @@ export async function writeFile(
 
   try {
     const realParentDirectory = await realpath(parentDirectory);
-    const realWritableRoots = (
-      await Promise.all(
-        writableRoots.map(async (root) => {
-          try {
-            return await realpath(root);
-          } catch (error) {
-            // unresolvable root: DROP it, never resolve() back — a non-canonical
-            // root would weaken the symlink boundary. Mirrors workspace-git-binding.
-            process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
-              code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
-              detail: JSON.stringify({
-                root,
-                code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
-              })
-            });
-            return null;
-          }
-        })
-      )
-    ).filter((root): root is string => root !== null);
+    const realWritableRoots = await resolveRealWritableRoots(writableRoots);
 
     if (!realWritableRoots.some((root) => isPathWithinRoot(realParentDirectory, root))) {
       return createAccessDenied("Path is outside the workspace boundary.");
@@ -100,17 +88,17 @@ export async function execShell(
     return createAccessDenied("No writable roots are available for exec containment.");
   }
 
-  const command = await resolveContainedExecutableCommand(input.command, writableRoots);
+  const command = await openContainedExecutableForExec(input.command, writableRoots);
   if (!command.ok) {
     return command;
   }
   const timeoutMs = normalizeExecTimeout(input.timeoutMs);
-  const cwd = writableRoots[0]!;
+  const cwd = await resolveExecCwd(writableRoots);
   const args = input.args !== undefined ? [...input.args] : [];
 
   return await new Promise((resolve) => {
     execFile(
-      command.resolvedPath,
+      command.execPath,
       args,
       {
         cwd,
@@ -121,38 +109,106 @@ export async function execShell(
         windowsHide: true
       },
       (error, stdout, stderr) => {
-        if (error !== null) {
-          if (error.killed === true) {
-            resolve(createFileToolError("TIMEOUT", `Command timed out after ${timeoutMs}ms.`));
+        void command.release().finally(() => {
+          if (error !== null) {
+            if (error.killed === true) {
+              resolve(createFileToolError("TIMEOUT", `Command timed out after ${timeoutMs}ms.`));
+              return;
+            }
+
+            if (typeof error.code === "number") {
+              resolve({
+                ok: true,
+                exitCode: error.code,
+                stdout: truncateExecOutput(stdout),
+                stderr: truncateExecOutput(stderr)
+              });
+              return;
+            }
+
+            resolve(createFileToolError("EXEC_ERROR", error.message));
             return;
           }
 
-          if (typeof error.code === "number") {
-            resolve({
-              ok: true,
-              exitCode: error.code,
-              stdout: truncateExecOutput(stdout),
-              stderr: truncateExecOutput(stderr)
-            });
-            return;
-          }
-
-          resolve(createFileToolError("EXEC_ERROR", error.message));
-          return;
-        }
-
-        resolve({
-          ok: true,
-          exitCode: 0,
-          stdout: truncateExecOutput(stdout),
-          stderr: truncateExecOutput(stderr)
+          resolve({
+            ok: true,
+            exitCode: 0,
+            stdout: truncateExecOutput(stdout),
+            stderr: truncateExecOutput(stderr)
+          });
         });
       }
     );
   });
 }
 
-async function resolveContainedExecutableCommand(
+type ContainedExecutableCommand =
+  | Readonly<{
+      readonly ok: true;
+      readonly execPath: string;
+      readonly release: () => Promise<void>;
+    }>
+  | ReturnType<typeof createAccessDenied>;
+
+async function openContainedExecutableForExec(
+  command: string,
+  writableRoots: readonly string[]
+): Promise<ContainedExecutableCommand> {
+  if (process.platform === "win32") {
+    const resolved = await resolveContainedExecutablePath(command, writableRoots);
+    if (!resolved.ok) {
+      return resolved;
+    }
+    return {
+      ok: true,
+      execPath: resolved.resolvedPath,
+      release: async () => undefined
+    };
+  }
+
+  const containedPath = resolveContainedPath(command, writableRoots);
+  if (!containedPath.ok) {
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+
+  const realWritableRoots = await resolveRealWritableRoots(writableRoots);
+  if (realWritableRoots.length === 0) {
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+
+  let handle: FileHandle;
+  try {
+    handle = await open(containedPath.resolvedPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile() || !hasExecutableMode(stat.mode)) {
+      await handle.close();
+      return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+    }
+    const execPath = fdExecPath(handle.fd);
+    const fdRealPath = await realpath(execPath);
+    if (!realWritableRoots.some((root) => isPathWithinRoot(fdRealPath, root))) {
+      await handle.close();
+      return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+    }
+    return {
+      ok: true,
+      execPath,
+      release: async () => {
+        await handle.close();
+      }
+    };
+  } catch {
+    await handle.close().catch(() => undefined);
+    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  }
+}
+
+async function resolveContainedExecutablePath(
   command: string,
   writableRoots: readonly string[]
 ): Promise<{ readonly ok: true; readonly resolvedPath: string } | ReturnType<typeof createAccessDenied>> {
@@ -168,25 +224,7 @@ async function resolveContainedExecutableCommand(
 
   try {
     const realCommandPath = await realpath(containedPath.resolvedPath);
-    const realWritableRoots = (
-      await Promise.all(
-        writableRoots.map(async (root) => {
-          try {
-            return await realpath(root);
-          } catch (error) {
-            process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
-              code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
-              detail: JSON.stringify({
-                root,
-                code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
-              })
-            });
-            return null;
-          }
-        })
-      )
-    ).filter((root): root is string => root !== null);
-
+    const realWritableRoots = await resolveRealWritableRoots(writableRoots);
     if (!realWritableRoots.some((root) => isPathWithinRoot(realCommandPath, root))) {
       return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
     }
@@ -198,6 +236,36 @@ async function resolveContainedExecutableCommand(
   } catch {
     return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
   }
+}
+
+async function resolveRealWritableRoots(writableRoots: readonly string[]): Promise<readonly string[]> {
+  return (
+    await Promise.all(
+      writableRoots.map(async (root) => {
+        try {
+          return await realpath(root);
+        } catch (error) {
+          process.emitWarning("[ToolRuntime] dropping unresolvable writable root", {
+            code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE",
+            detail: JSON.stringify({
+              root,
+              code: (error as NodeJS.ErrnoException)?.code ?? "unknown"
+            })
+          });
+          return null;
+        }
+      })
+    )
+  ).filter((root): root is string => root !== null);
+}
+
+async function resolveExecCwd(writableRoots: readonly string[]): Promise<string> {
+  const realRoots = await resolveRealWritableRoots(writableRoots);
+  return realRoots[0] ?? writableRoots[0]!;
+}
+
+function fdExecPath(fd: number): string {
+  return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
 }
 
 function hasExecutableMode(mode: number | bigint): boolean {

@@ -44,7 +44,6 @@ const payload = {
     "No research-first comparison recorded for sql.js / @sqlite.org/sqlite-wasm / custom worker queue vs status quo.",
   result: {
     sync_work_duration_ms: result.syncWorkDurationMs,
-    max_event_loop_delay_ms: result.maxEventLoopDelayMs,
     baseline_read_p99_ms: result.baselineReadP99Ms,
     interleaved_read_p99_ms: result.interleavedReadP99Ms,
     interleaved_read_samples_ms: result.interleavedReadSamplesMs,
