@@ -27,7 +27,8 @@ import {
   confidenceByFormationKind,
   parseDimension,
   parseFormationKind,
-  type DynamicsServiceDependencies
+  type DynamicsServiceDependencies,
+  type KarmaTransitionContext
 } from "./dynamics-service-ports.js";
 
 export type {
@@ -41,6 +42,7 @@ export type {
   DynamicsUpdateFields,
   KarmaDerivedFieldUpdates,
   KarmaTransitionComputation,
+  KarmaTransitionContext,
   KarmaTransitionEventPublisherPort
 } from "./dynamics-service-ports.js";
 
@@ -82,17 +84,25 @@ export class DynamicsService {
     readonly workspaceId: string;
     readonly amount?: number;
     readonly runId?: string | null;
+    readonly supersedingObjectId?: string;
   }): Promise<void> {
     const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
-    await this.processKarmaEvent({
-      event_id: this.generateEventId(),
-      kind: input.kind,
-      object_id: input.objectId,
-      amount,
-      created_at: this.now(),
-      workspace_id: input.workspaceId,
-      run_id: input.runId ?? null
-    });
+    const transitionContext =
+      input.supersedingObjectId === undefined
+        ? undefined
+        : Object.freeze({ supersedingObjectId: input.supersedingObjectId });
+    await this.processKarmaEvent(
+      {
+        event_id: this.generateEventId(),
+        kind: input.kind,
+        object_id: input.objectId,
+        amount,
+        created_at: this.now(),
+        workspace_id: input.workspaceId,
+        run_id: input.runId ?? null
+      },
+      transitionContext
+    );
   }
 
   public assignInitialDynamics(params: {
@@ -128,8 +138,11 @@ export class DynamicsService {
     });
   }
 
-  public async processKarmaEvent(event: KarmaEvent): Promise<void> {
-    return this.karmaEngine.processKarmaEvent(event);
+  public async processKarmaEvent(
+    event: KarmaEvent,
+    context?: KarmaTransitionContext
+  ): Promise<void> {
+    return this.karmaEngine.processKarmaEvent(event, context);
   }
 
   public async computeRetentionScore(memory: Readonly<MemoryEntry>): Promise<number> {

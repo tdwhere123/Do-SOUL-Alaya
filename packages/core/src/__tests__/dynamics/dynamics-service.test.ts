@@ -382,6 +382,21 @@ describe("DynamicsService", () => {
     expect(result.updated_count).toBeGreaterThanOrEqual(1);
     expect(result.manifestation_changes).toBeGreaterThanOrEqual(0);
   });
+  it("processKarmaEvent records superseded_by from supersedingObjectId on supersede_penalty", async () => {
+    const { service, entriesById } = createHarness([
+      createMemoryEntry({ object_id: "memory-existing" })
+    ]);
+
+    await service.emitKarmaEvent({
+      kind: "supersede_penalty",
+      objectId: "memory-existing",
+      supersedingObjectId: "memory-new",
+      workspaceId: "workspace-1"
+    });
+
+    expect(entriesById.get("memory-existing")?.superseded_by).toBe("memory-new");
+  });
+
   it("notifies greenService after processing a karma event", async () => {
     const reevaluateSpy = vi.fn(async () => undefined);
     const { service } = createHarness([createMemoryEntry()], {

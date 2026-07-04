@@ -7,7 +7,10 @@ import {
   type HealthJournalRecordPort,
   type OrphanRadar
 } from "@do-soul/alaya-protocol";
-import { ConsolidationExecutor } from "@do-soul/alaya-core";
+import {
+  ConsolidationExecutor,
+  type DynamicsService
+} from "@do-soul/alaya-core";
 import { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
 import {
   Auditor,
@@ -178,6 +181,14 @@ export function createGardenRuntimeJanitor(
       isProtected: async (workspaceId: string, targetEntityType: string, targetEntityId: string) =>
         await input.strongRefService.isProtected(workspaceId, targetEntityType, targetEntityId)
     },
+    ...(input.dynamicsService === undefined
+      ? {}
+      : {
+          retentionDecayPort: {
+            scanRetentionDecay: (workspaceId: string) =>
+              input.dynamicsService!.scanRetentionDecay(workspaceId)
+          }
+        }),
     eventLogRepo: janitorEventLogPort
   });
 }

@@ -84,8 +84,28 @@ describe("Janitor", () => {
     expect(result).toMatchObject({
       success: true,
       objects_affected: ["memory-1", "memory-2"],
-      audit_entries: ["hot_index_demotion: demoted 2 entries to cold storage tier in workspace-1"]
+      audit_entries: [
+        "[SKIPPED] retention_decay_scan: port not wired",
+        "hot_index_demotion: demoted 2 entries to cold storage tier in workspace-1"
+      ]
     });
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
+  it("runs retention decay scan during hot index demotion when the port is wired", async () => {
+    const scanRetentionDecay = vi.fn(async () =>
+      Object.freeze({ updated_count: 3, manifestation_changes: 1 })
+    );
+    const { tieringPort, scheduler, janitor } = createJanitor({
+      hotCandidates: [],
+      retentionDecayPort: { scanRetentionDecay }
+    });
+
+    const result = await janitor.run(createTask({ task_kind: GardenTaskKind.HOT_INDEX_DEMOTION }));
+
+    expect(scanRetentionDecay).toHaveBeenCalledWith("workspace-1");
+    expect(result.audit_entries[0]).toContain("retention_decay_scan: updated 3 hot memories");
+    expect(tieringPort.demoteToWarm).not.toHaveBeenCalled();
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
   });
 
@@ -200,6 +220,7 @@ describe("Janitor", () => {
     expect(result.objects_affected).toEqual([]);
     expect(result.success).toBe(true);
     expect(result.audit_entries).toEqual([
+      "[SKIPPED] retention_decay_scan: port not wired",
       "hot_index_demotion: demoted 0 entries to cold storage tier in workspace-1"
     ]);
     expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
@@ -301,6 +322,12 @@ describe("Janitor", () => {
 function createJanitor(options: {
   readonly expiredObjects?: readonly ExpiredControlPlaneObject[];
   readonly hotCandidates?: readonly HotDemotionCandidate[];
+  readonly retentionDecayPort?: {
+    scanRetentionDecay(workspaceId: string): Promise<Readonly<{
+      readonly updated_count: number;
+      readonly manifestation_changes: number;
+    }>>;
+  };
   readonly findExpiredObjects?: (
     workspaceId: string,
     nowIso: string
@@ -329,6 +356,7 @@ function createJanitor(options: {
       cleanupPort,
       tieringPort,
       scheduler,
+      ...(options.retentionDecayPort === undefined ? {} : { retentionDecayPort: options.retentionDecayPort }),
       now: () => "2026-03-27T00:00:00.000Z"
     })
   };

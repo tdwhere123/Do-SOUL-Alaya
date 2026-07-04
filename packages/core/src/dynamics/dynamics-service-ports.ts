@@ -162,12 +162,18 @@ export type KarmaDerivedFieldUpdates = Readonly<{
   readonly superseded_by?: string;
 }>;
 
+export type KarmaTransitionContext = Readonly<{
+  readonly supersedingObjectId?: string;
+}>;
+
 export function deriveKarmaFieldUpdates(
   memory: Readonly<MemoryEntry>,
-  event: Readonly<KarmaEvent>
+  event: Readonly<KarmaEvent>,
+  context?: KarmaTransitionContext
 ): KarmaDerivedFieldUpdates {
   const now = event.created_at;
   const kind = event.kind;
+  const supersedingObjectId = context?.supersedingObjectId;
 
   return Object.freeze({
     ...(kind === "accept_gain" || kind === "reuse_gain"
@@ -184,7 +190,9 @@ export function deriveKarmaFieldUpdates(
     ...(kind === "supersede_penalty"
       ? {
           contradiction_count: (memory.contradiction_count ?? 0) + 1,
-          superseded_by: event.object_id
+          ...(supersedingObjectId !== undefined && supersedingObjectId !== event.object_id
+            ? { superseded_by: supersedingObjectId }
+            : {})
         }
       : {})
   });

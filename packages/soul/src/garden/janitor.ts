@@ -127,6 +127,13 @@ export interface JanitorSchedulerPort {
   reportCompletion(result: GardenTaskResult): Promise<void>;
 }
 
+export interface JanitorRetentionDecayPort {
+  scanRetentionDecay(workspaceId: string): Promise<Readonly<{
+    readonly updated_count: number;
+    readonly manifestation_changes: number;
+  }>>;
+}
+
 export interface JanitorDependencies {
   readonly cleanupPort: JanitorControlPlaneCleanupPort;
   readonly tieringPort: JanitorMemoryTieringPort;
@@ -135,6 +142,7 @@ export interface JanitorDependencies {
   readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
+  readonly retentionDecayPort?: JanitorRetentionDecayPort;
   // Optional EventLog writer used to commit SOUL_MEMORY_TIER_CHANGED
   // rows in the same SQLite transaction as the storage_tier UPDATE.
   // When undefined the Janitor falls back to the bare UPDATE in legacy
@@ -154,6 +162,7 @@ export class Janitor {
   private readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   private readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   private readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
+  private readonly retentionDecayPort?: JanitorRetentionDecayPort;
   private readonly eventLogRepo?: AuditorEventLogPort;
   private readonly now: () => string;
 
@@ -165,6 +174,7 @@ export class Janitor {
     this.tombstoneGcPort = deps.tombstoneGcPort;
     this.dispositionSweepPort = deps.dispositionSweepPort;
     this.strongRefProtectionPort = deps.strongRefProtectionPort;
+    this.retentionDecayPort = deps.retentionDecayPort;
     this.eventLogRepo = deps.eventLogRepo;
     this.now = deps.now ?? (() => new Date().toISOString());
   }
@@ -225,6 +235,17 @@ export class Janitor {
     task: GardenTaskDescriptor,
     completedAt: string
   ): Promise<GardenTaskResult> {
+    const auditEntries: string[] = [];
+
+    if (this.retentionDecayPort !== undefined) {
+      const decayResult = await this.retentionDecayPort.scanRetentionDecay(task.workspace_id);
+      auditEntries.push(
+        `retention_decay_scan: updated ${decayResult.updated_count} hot memories (${decayResult.manifestation_changes} manifestation changes) in ${task.workspace_id}`
+      );
+    } else {
+      auditEntries.push("[SKIPPED] retention_decay_scan: port not wired");
+    }
+
     const candidates = await this.tieringPort.findHotDemotionCandidates(task.workspace_id, {
       maxLastHitAgeMs: JANITOR_CONSTANTS.HOT_DEMOTION_THRESHOLD_MS,
       minActivationScore: JANITOR_CONSTANTS.HOT_DEMOTION_MIN_ACTIVATION
@@ -263,6 +284,7 @@ export class Janitor {
     }
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
+      ...auditEntries,
       `hot_index_demotion: demoted ${objectIds.length} entries to cold storage tier in ${task.workspace_id}`
     ]);
     await this.scheduler.reportCompletion(result);

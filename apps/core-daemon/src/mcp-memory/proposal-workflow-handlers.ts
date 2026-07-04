@@ -33,6 +33,7 @@ import {
   resolveReviewerIdentity
 } from "./proposal-workflow-reviewer.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
+import { emitProposalReviewKarma } from "./proposal-review-karma.js";
 import {
   SourceDeliveryAnchorValidationError,
   type ProposalCreationEventInput,
@@ -165,6 +166,12 @@ async function reviewMemoryProposal(
     toState,
     buildProposalResolutionEvents(scopedProposal, context, reviewerIdentity, request, reviewedAt, toState),
     acceptedMemoryUpdate
+  );
+  await emitProposalReviewKarma(
+    input.deps,
+    scopedProposal,
+    request.verdict === "accept" ? "accept" : "reject",
+    context
   );
   await notifyResolvedEvents(input.deps, resolved.events);
   return {
