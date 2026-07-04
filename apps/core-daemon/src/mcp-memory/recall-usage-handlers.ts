@@ -32,6 +32,7 @@ import type { GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { enqueuePostTurnExtractTask, enqueueRecallExtractTask } from "./post-turn-extract-queue.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./recall-result.js";
 import { buildRecallPolicy, dedupeDeliveredObjectIdentities, uniqueObjectIds } from "./recall-usage-recall-support.js";
+import { invokeBoundRecall } from "../recall/recall-bound-execution.js";
 import {
   emitContextUsageReportedTelemetry,
   emitRecallDeliveredTelemetry
@@ -233,11 +234,13 @@ async function runRecallService(
   taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>,
   policyOverride: RecallPolicy
 ): Promise<RecallServiceResult> {
-  return await params.deps.recallService.recall({
+  return await invokeBoundRecall({
+    sideEffectMode: "production_mcp",
+    recallService: params.deps.recallService,
     taskSurface,
     workspaceId: context.workspaceId,
-    strategy: "chat",
     runId: context.runId,
+    strategy: "chat",
     policyOverride,
     timeFilter: buildRecallTimeFilter(request),
     hostContext: request.host_context,

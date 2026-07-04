@@ -119,7 +119,7 @@ export function recallOptionsForPolicyShape(
 ): { readonly maxResults: number; readonly conflictAwareness: boolean } {
   return {
     maxResults: resolveBenchRecallMaxK(),
-    conflictAwareness: policyShape === "stress"
+    conflictAwareness: policyShape !== "chat"
   };
 }
 

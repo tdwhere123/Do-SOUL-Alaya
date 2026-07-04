@@ -19,7 +19,7 @@ type WarnFn = RuntimeInput["warn"];
 //   - local_onnx mode with a configured provider attaches a decorator that
 //     opens semantic_supplement (enabled + embedding_enabled true) and
 //     defaults injection_cap/floor while pushing
-//     fusion_weights.embedding_similarity = 6 (or the env override)
+//     fusion_weights.embedding_similarity = 12 (or the env override)
 //   - an explicit injection_cap/floor on the incoming policy is preserved
 //   - ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR forces a full passthrough
 //   - embedding-off mode leaves the decorator absent and policies untouched
@@ -119,7 +119,7 @@ function restoreEnv(): void {
 
 describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () => {
   it(
-    "attaches a decorator that injects fusion_weights.embedding_similarity = 6 when local_onnx is configured and supplement is opted in",
+    "attaches a decorator that injects fusion_weights.embedding_similarity = 12 when local_onnx is configured and supplement is opted in",
     async () => {
       saveEnv();
       const fixture = buildFixture();
@@ -144,7 +144,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         const decorated = defaultPolicyDecorator!(makeBasePolicy());
         const fusionWeights =
           decorated.scoring_weight_overrides?.fusion_weights ?? {};
-        expect(fusionWeights.embedding_similarity).toBe(6);
+        expect(fusionWeights.embedding_similarity).toBe(12);
         const semantic = decorated.coarse_filter.semantic_supplement;
         expect(semantic.embedding_enabled).toBe(true);
         expect(semantic.enabled).toBe(true);
@@ -286,7 +286,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       expect(defaultPolicyDecorator).toBeDefined();
       expect(
         defaultPolicyDecorator!(makeBasePolicy()).scoring_weight_overrides?.fusion_weights?.embedding_similarity
-      ).toBe(6);
+      ).toBe(12);
 
       available = false;
       expect(
@@ -331,7 +331,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
 
       expect(defaultPolicyDecorator).toBeDefined();
       const decorated = defaultPolicyDecorator!(makeBasePolicy());
-      expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(6);
+      expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(12);
       const semantic = decorated.coarse_filter.semantic_supplement;
       expect(semantic.enabled).toBe(true);
       expect(semantic.embedding_enabled).toBe(true);

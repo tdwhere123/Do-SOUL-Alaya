@@ -285,8 +285,8 @@ function applyEmbeddingPolicyDecorator(
     scoring_weight_overrides: {
       ...(policy.scoring_weight_overrides ?? {}),
       fusion_weights: {
-        ...existingFusionWeights,
-        embedding_similarity: embeddingFusionWeight
+        embedding_similarity: embeddingFusionWeight,
+        ...existingFusionWeights
       }
     }
   };
@@ -315,7 +315,7 @@ function createProviderWarmup(
     });
 }
 
-const DEFAULT_EMBEDDING_FUSION_WEIGHT_ON = 6;
+const DEFAULT_EMBEDDING_FUSION_WEIGHT_ON = 12;
 // mirror: packages/core/src/recall/supplements.ts EMBEDDING_MAX_INJECTED_DELIVERY / EMBEDDING_INJECTION_SIMILARITY_FLOOR
 const DEFAULT_EMBEDDING_INJECTION_CAP = 10;
 const DEFAULT_EMBEDDING_INJECTION_FLOOR = 0.5;
