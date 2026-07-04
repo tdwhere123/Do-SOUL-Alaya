@@ -87,6 +87,50 @@ Two homes; wrong placement clutters the tree. Full policy in
 - Experiments / A/B / limit-N / probes → gitignored `.do-it/bench-runs/`(tools under `scripts/`); never commit. Confirmed **full-dataset** baselines only → tracked `docs/bench-history/` via the archive + `latest-*.json` pointer mechanism (compact sidecars only).
 - No hand-named dated dirs in `docs/bench-history/`. Retention: tracked = current pointer targets + ≤7 days; scratch = ≤7 days, keep `scripts/`.
 
+## Cursor Cloud specific instructions
+
+Setup dependencies are refreshed automatically on VM start by the update
+script (`pnpm install --frozen-lockfile`). Standard commands live in
+`## Commands` above and `README.md` §Quickstart; the notes below are only the
+non-obvious caveats for running this repo in the cloud VM.
+
+- **Toolchain drift is fine.** CI pins Node 20.19.0 / pnpm 9.15.9, but the VM's
+  Node 22 + pnpm 10 build, typecheck, lint, and test cleanly (lockfile is
+  `lockfileVersion 9.0`, forward-compatible). There is no `rtk` binary here — run
+  bare `pnpm`/`node` (the `rtk` prefix in `CLAUDE.md`/`RTK.md` is a Codex-only
+  wrapper and is optional).
+- **You must `pnpm build` before running the app.** The `alaya` CLI and
+  `alaya mcp stdio` load compiled artifacts from `apps/core-daemon/dist` (and
+  other `*/dist`); running them without a build fails with "Run ... build first".
+  `pnpm build` also builds the Inspector SPA via Vite.
+- **Lint = `pnpm run hygiene:unused`** (knip). There is no ESLint. Typecheck is
+  `pnpm run --if-present typecheck`; the full test suite is `pnpm test` (iterates
+  vitest per package, ~2–3 min).
+- **Ignored build scripts are intentional.** `pnpm install` prints ignored build
+  scripts for `onnxruntime-node`, `protobufjs`, `sharp` — `onlyBuiltDependencies`
+  (in `pnpm-workspace.yaml`) whitelists only `better-sqlite3` + `esbuild`. Those
+  are for optional local-ONNX embedding / Inspector image work and are not needed
+  for the core MCP/CLI loop. Do not run the interactive `pnpm approve-builds`.
+- **Writes need a run context; reads do not.** MCP write tools
+  (`soul.emit_candidate_signal`, `soul.propose_memory_update`, `soul.resolve`,
+  `soul.report_context_usage`, …) require a run in the call context. Drive them
+  through `alaya mcp stdio` (an attached MCP session auto-creates a session run —
+  the real agent path) or pass `alaya tools call <tool> '<json>' --run <existing-run-id>`.
+  Bare `alaya tools call` for a write fails with "requires a runId"; `soul.recall`
+  and other reads work without one.
+- **`alaya doctor` reads `degraded` on a fresh install** (garden degraded until an
+  agent attaches; `path_relations=0`) and exits 75. This is advisory, not a
+  failure — `storage.schema_ok`, `runtime ready`, and `mcp transport` are the real
+  health signals.
+- **Fastest hello-world (no attach needed):** run `alaya mcp stdio` as an MCP
+  client and do `emit_candidate_signal` (confidence ≥ ~0.9 + `evidence_refs`) →
+  `soul.recall`; the perceived fact is durable and recallable in one round. The
+  `propose_memory_update` verb targets a materialized memory `object_id` (from a
+  recall pointer), not the raw `signal_id`.
+- **Memory Inspector is an optional loopback surface**, not an agent surface. Run
+  it with `pnpm inspector` (`alaya inspect --open`); it serves on port 5174 and
+  talks to a daemon on 5173. Not required for the core product.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
