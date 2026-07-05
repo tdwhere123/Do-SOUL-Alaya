@@ -8,6 +8,7 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   preflightExtractionCache,
+  resolveBenchRequireExtractionCacheManifest,
   type BenchSignalExtractor,
   type CompileSeedExtractionConfig
 } from "../../longmemeval/compile-seed.js";
@@ -190,7 +191,21 @@ describe("preflightExtractionCache", () => {
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
         requireManifest: true
       })
-    ).toThrow(/manifest is missing/u);
+    ).toThrow(/ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0/u);
+  });
+
+  it("defaults runner cache-manifest requirement to fail-closed", () => {
+    expect(resolveBenchRequireExtractionCacheManifest({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "0"
+      } as NodeJS.ProcessEnv)
+    ).toBe(false);
+    expect(
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "false"
+      } as NodeJS.ProcessEnv)
+    ).toBe(false);
   });
 
   it("requires full coverage when minimumCoverage is 1", () => {
@@ -283,7 +298,7 @@ describe("cache-only compile seed smoke", () => {
 
     expect(runner.stats.cacheHits).toBeGreaterThan(0);
     expect(runner.stats.llmCalls).toBe(0);
-    expect(liveExtract).not.toHaveBeenCalled();
+    expect(liveExtract.extract).not.toHaveBeenCalled();
   });
 });
 

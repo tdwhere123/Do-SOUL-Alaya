@@ -45,7 +45,10 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     memoryService: input.memoryService,
     dynamicsService: {
       emitKarmaEvent: (emitInput: Parameters<typeof input.dynamicsService.emitKarmaEvent>[0]) =>
-        input.dynamicsService.emitKarmaEvent(emitInput)
+        input.dynamicsService.emitKarmaEvent(emitInput),
+      emitKarmaEventInCurrentTransaction: (
+        emitInput: Parameters<typeof input.dynamicsService.emitKarmaEventInCurrentTransaction>[0]
+      ) => input.dynamicsService.emitKarmaEventInCurrentTransaction(emitInput)
     },
     memoryEntryRepo: input.memoryEntryRepo,
     evidenceService: input.evidenceService,

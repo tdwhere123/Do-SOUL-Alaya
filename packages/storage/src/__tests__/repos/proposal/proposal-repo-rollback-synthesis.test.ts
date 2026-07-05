@@ -107,6 +107,38 @@ describe("SqliteProposalRepo rollback and synthesis workflows", () => {
     });
   });
 
+  it("rolls back proposal resolution when a transaction mutation fails", async () => {
+    const { repo, database } = createRepo();
+    const proposal = createProposal();
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "memory_entry"
+    });
+
+    await expect(
+      repo.updatePendingResolutionWithEvents(
+        proposal.proposal_id,
+        "accepted",
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(proposal),
+        {
+          reviewerIdentity: "user:alice",
+          applySynchronousResolutionMutation: () => {
+            throw new Error("karma transition failed");
+          }
+        }
+      )
+    ).rejects.toMatchObject({ code: "QUERY_FAILED" });
+
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "pending",
+      last_updated_at: "2026-03-21T00:00:00.000Z"
+    });
+  });
+
   it("rolls back creation events when the proposal row insert fails", async () => {
     const { repo, database } = createRepo();
     const proposal = createProposal();

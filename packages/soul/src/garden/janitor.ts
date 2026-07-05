@@ -11,6 +11,10 @@ import {
   type GardenTaskResult,
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
+import {
+  runJanitorRetentionDecayScan,
+  type JanitorRetentionDecayPort
+} from "./janitor-retention-decay.js";
 
 export const JANITOR_CONSTANTS = {
   HOT_DEMOTION_THRESHOLD_MS: 7 * 86_400_000,
@@ -45,11 +49,10 @@ export interface JanitorMemoryTieringPort {
     workspaceId: string,
     criteria: JanitorHotDemotionCriteria
   ): Promise<readonly HotDemotionCandidate[]>;
-  // Sync so the Janitor can wrap each demote in
-  // EventPublisher.appendManyWithMutation atomically with the
-  // SOUL_MEMORY_TIER_CHANGED EventLog row.
   demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
+
+type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface LowActivityMemoryRecord {
   readonly memory_id: string;
@@ -125,13 +128,6 @@ export interface JanitorStrongRefProtectionPort {
 
 export interface JanitorSchedulerPort {
   reportCompletion(result: GardenTaskResult): Promise<void>;
-}
-
-export interface JanitorRetentionDecayPort {
-  scanRetentionDecay(workspaceId: string): Promise<Readonly<{
-    readonly updated_count: number;
-    readonly manifestation_changes: number;
-  }>>;
 }
 
 export interface JanitorDependencies {
@@ -235,16 +231,10 @@ export class Janitor {
     task: GardenTaskDescriptor,
     completedAt: string
   ): Promise<GardenTaskResult> {
-    const auditEntries: string[] = [];
-
-    if (this.retentionDecayPort !== undefined) {
-      const decayResult = await this.retentionDecayPort.scanRetentionDecay(task.workspace_id);
-      auditEntries.push(
-        `retention_decay_scan: updated ${decayResult.updated_count} hot memories (${decayResult.manifestation_changes} manifestation changes) in ${task.workspace_id}`
-      );
-    } else {
-      auditEntries.push("[SKIPPED] retention_decay_scan: port not wired");
-    }
+    const retentionAudit = await runJanitorRetentionDecayScan(
+      this.retentionDecayPort,
+      task.workspace_id
+    );
 
     const candidates = await this.tieringPort.findHotDemotionCandidates(task.workspace_id, {
       maxLastHitAgeMs: JANITOR_CONSTANTS.HOT_DEMOTION_THRESHOLD_MS,
@@ -253,49 +243,55 @@ export class Janitor {
     const objectIds = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id);
 
     if (objectIds.length > 0) {
-      // Emit one SOUL_MEMORY_TIER_CHANGED row per demoted entry,
-      // atomically with the storage_tier UPDATE. The batch demote runs
-      // once inside the mutate callback and the per-entry events land
-      // in EventLog for audit replay. Storage writes the "cold" tier
-      // (BOUNDARY_COLD_TIER), so keep the audit row consistent.
-      const occurredAt = this.now();
-      const events = objectIds.map((memoryId) => ({
-        event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
-        entity_type: "memory_entry",
-        entity_id: memoryId,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        caused_by: this.role,
-        payload_json: SoulMemoryTierChangedPayloadSchema.parse({
-          object_id: memoryId,
-          object_kind: "memory_entry",
-          workspace_id: task.workspace_id,
-          run_id: task.run_id,
-          from_tier: "hot",
-          to_tier: "cold",
-          reason: "hot_index_demotion",
-          task_id: task.task_id,
-          occurred_at: occurredAt
-        })
-      }));
-      await this.publishEventLogsMutation(events, () => {
-        this.tieringPort.demoteToWarm(task.workspace_id, objectIds);
-      });
+      await this.applyHotIndexDemotion(task, objectIds);
     }
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
-      ...auditEntries,
+      retentionAudit,
       `hot_index_demotion: demoted ${objectIds.length} entries to cold storage tier in ${task.workspace_id}`
     ]);
     await this.scheduler.reportCompletion(result);
     return result;
   }
 
-  // Mirrors the Auditor.publishEventLogMutation pattern but accepts
-  // multiple events so a batch UPDATE can commit atomically with N audit
-  // rows.
+  private async applyHotIndexDemotion(
+    task: GardenTaskDescriptor,
+    objectIds: readonly string[]
+  ): Promise<void> {
+    await this.publishEventLogsMutation(
+      this.buildHotIndexDemotionEvents(task, objectIds, this.now()),
+      () => this.tieringPort.demoteToWarm(task.workspace_id, objectIds)
+    );
+  }
+
+  private buildHotIndexDemotionEvents(
+    task: GardenTaskDescriptor,
+    objectIds: readonly string[],
+    occurredAt: string
+  ): readonly EventLogDraft[] {
+    return objectIds.map((memoryId) => ({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: memoryId,
+      workspace_id: task.workspace_id,
+      run_id: task.run_id,
+      caused_by: this.role,
+      payload_json: SoulMemoryTierChangedPayloadSchema.parse({
+        object_id: memoryId,
+        object_kind: "memory_entry",
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        from_tier: "hot",
+        to_tier: "cold",
+        reason: "hot_index_demotion",
+        task_id: task.task_id,
+        occurred_at: occurredAt
+      })
+    }));
+  }
+
   private async publishEventLogsMutation(
-    events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
+    events: readonly EventLogDraft[],
     mutate: () => void
   ): Promise<void> {
     if (this.eventLogRepo === undefined) {
@@ -427,10 +423,6 @@ export class Janitor {
         skipped += 1;
         continue;
       }
-      // invariant: consult the same strong-ref protection the physical GC checks,
-      // so a dormant memory another object strongly references is never tombstoned
-      // by the sweep (symmetry with executeTombstoneGc; defense in depth alongside
-      // the not-protected backstop at the tombstone authority).
       if (this.strongRefProtectionPort !== undefined) {
         const isProtected = await this.strongRefProtectionPort.isProtected(task.workspace_id, "memory", candidate.memory_id);
         if (isProtected) {

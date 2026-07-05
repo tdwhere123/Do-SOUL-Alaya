@@ -57,6 +57,11 @@ export interface KarmaTransitionApplyResult {
   readonly revived: boolean;
 }
 
+export interface KarmaTransitionTransactionMutation {
+  readonly updated: Readonly<MemoryEntry>;
+  readonly events: readonly DynamicsEventLogInput[];
+}
+
 export class KarmaTransitionEngine {
   public constructor(private readonly deps: KarmaTransitionEngineDependencies) {}
 
@@ -82,14 +87,9 @@ export class KarmaTransitionEngine {
   // no half-commit window. Engaged only when the injected repos expose the
   // synchronous ports the transaction callback needs.
   private canRunAtomicTransition(): boolean {
-    const memoryRepo = this.deps.memoryRepo;
     return (
       this.deps.eventPublisher !== undefined &&
-      this.deps.karmaEventRepo.createSync !== undefined &&
-      this.deps.karmaEventRepo.sumByObjectIdSync !== undefined &&
-      memoryRepo.findByIdSync !== undefined &&
-      memoryRepo.updateDynamicsSync !== undefined &&
-      memoryRepo.reviveDormantSync !== undefined
+      this.canRunSynchronousTransition()
     );
   }
 
@@ -109,6 +109,41 @@ export class KarmaTransitionEngine {
       return { events: this.buildKarmaAuditInputs(applied, plan), result: applied };
     });
     this.scheduleGreenReevaluation(result.updated);
+  }
+
+  public processKarmaEventInCurrentTransaction(
+    event: KarmaEvent,
+    context?: KarmaTransitionContext
+  ): KarmaTransitionTransactionMutation {
+    if (!this.canRunSynchronousTransition()) {
+      throw new CoreError("CONFLICT", "In-transaction karma transition requires synchronous repo ports.", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    const parsedEvent = parseKarmaEventInput(event);
+    const plan = this.computeKarmaTransitionPlanSync(parsedEvent, context);
+    const applied = this.applyKarmaTransitionPlanSync(plan);
+    return {
+      updated: applied.updated,
+      events: this.buildKarmaAuditInputs(applied, plan)
+    };
+  }
+
+  public scheduleKarmaTransactionSideEffects(
+    mutation: Readonly<KarmaTransitionTransactionMutation>
+  ): void {
+    this.scheduleGreenReevaluation(mutation.updated);
+  }
+
+  private canRunSynchronousTransition(): boolean {
+    const memoryRepo = this.deps.memoryRepo;
+    return (
+      this.deps.karmaEventRepo.createSync !== undefined &&
+      this.deps.karmaEventRepo.sumByObjectIdSync !== undefined &&
+      memoryRepo.findByIdSync !== undefined &&
+      memoryRepo.updateDynamicsSync !== undefined &&
+      memoryRepo.reviveDormantSync !== undefined
+    );
   }
 
   private applyKarmaTransitionPlanSync(plan: KarmaTransitionPlan): KarmaTransitionApplyResult {

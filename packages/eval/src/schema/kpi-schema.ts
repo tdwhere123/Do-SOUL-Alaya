@@ -263,7 +263,7 @@ const FullGoldCoverageSchema = z
     pool_recall_at_50: RatioSchema,
     pool_recall_at_100: RatioSchema,
     // Optional so older kpi.json records stay schema-valid; new LongMemEval
-    // runs populate it from core analyzeFullGoldDeliveryContribution.
+    // runs populate it from bench-runner delivery diagnostics.
     delivery_contribution: FullGoldDeliveryContributionSchema.optional()
   })
   .strict();

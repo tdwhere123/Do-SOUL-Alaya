@@ -2,7 +2,7 @@ import { join } from "node:path";
 import {
   deriveSeedFuelInventory,
   type SeedFuelInventory
-} from "@do-soul/alaya-core";
+} from "./seed-fuel-inventory.js";
 import type { MemoryEntry, PathRelation } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -11,7 +11,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { BENCH_DAEMON_DB_FILENAME } from "./snapshot.js";
 
-export type { SeedFuelInventory } from "@do-soul/alaya-core";
+export type { SeedFuelInventory } from "./seed-fuel-inventory.js";
 
 export async function collectBenchSeedFuelInventory(
   dataDir: string

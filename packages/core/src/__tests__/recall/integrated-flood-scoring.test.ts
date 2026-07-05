@@ -63,13 +63,16 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.evidence_status).toBe("inactive:pass_through");
   });
 
-  it("path fuel changes only eligible candidates with verified inflow", () => {
+  it("path fuel changes only eligible candidates with verified path and evidence inflow", () => {
     const cold = createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" });
     const targetId = "22222222-2222-4222-8222-222222222222";
-    const target = createMemoryEntry({ object_id: targetId });
+    const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-a"] });
     const data = supplementary({
       pathInflowByTarget: {
         [targetId]: [{ seedObjectId: cold.object_id, weight: 1 }]
+      },
+      evidenceSupportVectorsByMemoryId: {
+        [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-a", support: 0.6 }]
       }
     });
     const coldResult = computeIntegratedFloodScore({
@@ -79,7 +82,7 @@ describe("computeIntegratedFloodScore", () => {
     });
     const warmResult = computeIntegratedFloodScore({
       entry: target,
-      axisInputs: { R_obj: 0.1, A_path: 0.4, B_evidence: 0 },
+      axisInputs: { R_obj: 0.1, A_path: 0.4, B_evidence: 0.6 },
       supplementaryData: data
     });
     expect(coldResult.diagnostics.fuel_verified).toBe(false);
@@ -90,6 +93,45 @@ describe("computeIntegratedFloodScore", () => {
       9
     );
     expect(warmResult.score).toBeGreaterThan(0.1);
+  });
+
+  it("does not let path inflow act as flood fuel without evidence support", () => {
+    const seed = createMemoryEntry({ object_id: "55555555-5555-4555-8555-555555555555" });
+    const target = createMemoryEntry({ object_id: "66666666-6666-4666-8666-666666666666" });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.3, A_path: 0.7, B_evidence: 0 },
+      supplementaryData: supplementary({
+        pathInflowByTarget: {
+          [target.object_id]: [{ seedObjectId: seed.object_id, weight: 1 }]
+        }
+      })
+    });
+
+    expect(result.diagnostics.path_status).toBe("active");
+    expect(result.diagnostics.evidence_status).toBe("inactive:pass_through");
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.3, 12);
+  });
+
+  it("does not let evidence support act as flood fuel without path potential", () => {
+    const entry = createMemoryEntry({
+      object_id: "44444444-4444-4444-8444-444444444444",
+      evidence_refs: ["ev-a"]
+    });
+    const result = computeIntegratedFloodScore({
+      entry,
+      axisInputs: { R_obj: 0.25, A_path: 0, B_evidence: 0.8 },
+      supplementaryData: supplementary({
+        evidenceSupportVectorsByMemoryId: {
+          [entry.object_id]: [{ source_kind: "evidence_ref", source_id: "ev-a", support: 0.8 }]
+        }
+      })
+    });
+    expect(result.diagnostics.evidence_status).toBe("active");
+    expect(result.diagnostics.path_status).toBe("inactive:pass_through");
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.25, 12);
   });
 
   it("diagnostic names match the integrated flood contract", () => {

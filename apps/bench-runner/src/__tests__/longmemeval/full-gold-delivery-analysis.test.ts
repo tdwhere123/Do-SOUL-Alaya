@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeFullGoldDeliveryContribution } from "../../recall/delivery/full-gold-delivery-analysis.js";
+import { analyzeFullGoldDeliveryContribution } from "../../longmemeval/full-gold-delivery-analysis.js";
 
 describe("analyzeFullGoldDeliveryContribution", () => {
   it("reports delivery contribution separately from core fused order", () => {

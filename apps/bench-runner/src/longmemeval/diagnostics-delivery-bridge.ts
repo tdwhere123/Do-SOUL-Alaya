@@ -1,8 +1,8 @@
 import {
-  analyzeFullGoldDeliveryContribution,
   classifyDeliveryMissTaxonomy,
   type DeliveryMissCandidateInput
-} from "@do-soul/alaya-core";
+} from "./delivery-miss-taxonomy.js";
+import { analyzeFullGoldDeliveryContribution } from "./full-gold-delivery-analysis.js";
 import type { FullGoldDeliveryContribution } from "@do-soul/alaya-eval";
 import type {
   CandidateDiagnostic,
@@ -51,8 +51,6 @@ export function resolveCoreDeliveryRank(
   gold: LongMemEvalGoldDiagnostic
 ): number | null {
   return (
-    gold.rank_after_session_coverage ??
-    gold.rank_after_coverage_selector ??
     gold.rank_after_fusion ??
     gold.fused_rank ??
     gold.pre_budget_rank ??

@@ -261,7 +261,7 @@ export class SqliteProposalRepo implements ProposalRepo {
     const parsed = parsePendingResolutionUpdate(proposalId, state, updatedAt, options);
 
     try {
-      return this.updatePendingResolutionEventsTransaction(parsed, events);
+      return this.updatePendingResolutionEventsTransaction(parsed, events, options);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -362,7 +362,8 @@ export class SqliteProposalRepo implements ProposalRepo {
 
   private updatePendingResolutionEventsTransaction(
     parsed: ParsedPendingResolutionUpdate,
-    events: readonly ProposalResolutionEventInput[]
+    events: readonly ProposalResolutionEventInput[],
+    options: UpdatePendingResolutionOptions
   ): Readonly<{
     readonly proposal: Readonly<Proposal>;
     readonly events: readonly EventLogEntry[];
@@ -377,9 +378,13 @@ export class SqliteProposalRepo implements ProposalRepo {
         throw this.createPendingResolutionFailure(parsed.proposalId);
       }
 
+      const mutationEvents = insertTransactionMutationEvents(
+        this.connectionHost.eventLogWriter,
+        options
+      );
       return deepFreeze({
         proposal: this.findRequiredProposalAfterPendingUpdate(parsed.proposalId),
-        events: storedEvents
+        events: [...storedEvents, ...mutationEvents]
       });
     });
   }
@@ -430,6 +435,14 @@ function parsePendingResolutionUpdate(
     updatedAt: parseUpdatedAt(updatedAt),
     reviewerIdentity: parseReviewerIdentityOption(options)
   };
+}
+
+function insertTransactionMutationEvents(
+  eventLogWriter: Parameters<typeof insertEventLogEntry>[0],
+  options: UpdatePendingResolutionOptions
+): readonly EventLogEntry[] {
+  const mutationEvents = options.applySynchronousResolutionMutation?.() ?? [];
+  return mutationEvents.map((event) => insertEventLogEntry(eventLogWriter, event));
 }
 
 function parseReviewerIdentityOption(options: UpdatePendingResolutionOptions): string | undefined {

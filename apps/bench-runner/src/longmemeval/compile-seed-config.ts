@@ -154,10 +154,10 @@ export function resolveBenchRequireExtractionCacheManifest(
 ): boolean {
   const value = env[REQUIRE_EXTRACTION_CACHE_MANIFEST_ENV];
   if (value === undefined) {
-    return false;
+    return true;
   }
   const normalized = value.trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return !(normalized === "0" || normalized === "false");
 }
 
 function normalizeBaseUrl(url: string): string {

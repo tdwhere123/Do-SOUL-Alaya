@@ -358,16 +358,17 @@ describe("formula and lifecycle regression net", () => {
     expect(cold.diagnostics.fuel_verified).toBe(false);
 
     const targetId = "22222222-2222-4222-8222-222222222222";
-    const target = createRecallFixtureEntry({ object_id: targetId });
+    const target = createRecallFixtureEntry({ object_id: targetId, evidence_refs: ["ev-path"] });
     const inflow: Readonly<Record<string, readonly PathInflowEdge[]>> = {
       [targetId]: [{ seedObjectId: entry.object_id, weight: 1 }]
     };
     const warm = computeIntegratedFloodScore({
       entry: target,
-      axisInputs: { R_obj: 0.1, A_path: 0.5, B_evidence: 0 },
+      axisInputs: { R_obj: 0.1, A_path: 0.5, B_evidence: 1 },
       supplementaryData: supplementary(QUERY, [], [entry, target], { pathInflowByTarget: inflow })
     });
     expect(warm.diagnostics.path_status).toBe("active");
+    expect(warm.diagnostics.evidence_status).toBe("active");
     expect(warm.diagnostics.fuel_verified).toBe(true);
   });
 
@@ -376,8 +377,14 @@ describe("formula and lifecycle regression net", () => {
       object_id: "33333333-3333-4333-8333-333333333333",
       evidence_refs: ["ev-a"]
     });
+    const seed = createRecallFixtureEntry({
+      object_id: "44444444-4444-4444-8444-444444444444"
+    });
     const vectors = {
       [entry.object_id]: [{ source_kind: "evidence_ref" as const, source_id: "ev-a", support: 0.8 }]
+    };
+    const inflow: Readonly<Record<string, readonly PathInflowEdge[]>> = {
+      [entry.object_id]: [{ seedObjectId: seed.object_id, weight: 1 }]
     };
     const result = computeIntegratedFloodScore({
       entry,
@@ -386,13 +393,26 @@ describe("formula and lifecycle regression net", () => {
         evidenceSupportVectorsByMemoryId: vectors
       })
     });
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.25, 12);
+
+    const withPathFuel = computeIntegratedFloodScore({
+      entry,
+      axisInputs: { R_obj: 0.25, A_path: 0.5, B_evidence: 0.8 },
+      supplementaryData: supplementary(QUERY, [], [seed, entry], {
+        evidenceSupportVectorsByMemoryId: vectors,
+        pathInflowByTarget: inflow
+      })
+    });
     expect(resolveConformantEvidenceBeta()).toBe(0);
-    expect(result.diagnostics.e_direct_status).toBe("inactive:beta_disabled");
-    expect(result.diagnostics.beta).toBe(0);
-    expect(result.score).toBeCloseTo(result.diagnostics.final_score, 12);
-    const withBeta = result.diagnostics.omega * (result.diagnostics.R_obj + result.diagnostics.lambda * result.diagnostics.Flood);
-    expect(result.score).toBeCloseTo(withBeta, 9);
-    expect(result.score).not.toBeCloseTo(withBeta * (1 + 0.8), 6);
+    expect(withPathFuel.diagnostics.e_direct_status).toBe("inactive:beta_disabled");
+    expect(withPathFuel.diagnostics.beta).toBe(0);
+    expect(withPathFuel.score).toBeCloseTo(withPathFuel.diagnostics.final_score, 12);
+    const withoutMultiplier =
+      withPathFuel.diagnostics.omega *
+      (withPathFuel.diagnostics.R_obj + withPathFuel.diagnostics.lambda * withPathFuel.diagnostics.Flood);
+    expect(withPathFuel.score).toBeCloseTo(withoutMultiplier, 9);
+    expect(withPathFuel.score).not.toBeCloseTo(withoutMultiplier * (1 + 0.8), 6);
   });
 
   it("protects temporal/control placement: integrated flood target path does not add +T/+C", async () => {

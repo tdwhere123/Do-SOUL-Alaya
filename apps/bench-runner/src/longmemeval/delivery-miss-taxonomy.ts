@@ -1,4 +1,8 @@
-import type { RecallCandidateDropReason } from "../runtime/recall-service-diagnostics.js";
+export type DeliveryMissDropReason =
+  | "duplicate"
+  | "dimension_limit"
+  | "max_entries"
+  | "max_total_tokens";
 
 export const DELIVERY_MISS_TOP_K = 5;
 export const DELIVERY_BUDGET_LOSS_RANK = 10;
@@ -17,7 +21,7 @@ export interface DeliveryMissCandidateInput {
   readonly preBudgetRank: number | null;
   readonly fusedRank: number | null;
   readonly finalRank: number | null;
-  readonly droppedReason: RecallCandidateDropReason | null;
+  readonly droppedReason: DeliveryMissDropReason | null;
   readonly rankAfterFusion: number | null;
   readonly rankAfterCoverageSelector: number | null;
   readonly coverageSelectorAction: DeliveryStageAction | null;

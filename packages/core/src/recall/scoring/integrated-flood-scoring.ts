@@ -110,8 +110,12 @@ function hasPathInflow(
   return inflow !== undefined && inflow.length > 0;
 }
 
-function verifiedFuel(axes: readonly ResolvedFloodAxis[]): boolean {
-  return axes.some((axis) => axis.countsAsFuel);
+function verifiedFloodFuel(
+  slice: ResolvedFloodAxis,
+  path: ResolvedFloodAxis,
+  evidence: ResolvedFloodAxis
+): boolean {
+  return slice.value > 0 && path.countsAsFuel && evidence.countsAsFuel;
 }
 
 export function computeIntegratedFloodScore(params: Readonly<{
@@ -130,7 +134,7 @@ export function computeIntegratedFloodScore(params: Readonly<{
     params.axisInputs.B_evidence,
     hasEvidenceVectors(params.entry.object_id, params.supplementaryData)
   );
-  const fuelVerified = verifiedFuel([slice, path, evidence]);
+  const fuelVerified = verifiedFloodFuel(slice, path, evidence);
   const flood = fuelVerified ? slice.value * path.value * evidence.value : 0;
   const omega = manifestationOmega(
     params.entry,

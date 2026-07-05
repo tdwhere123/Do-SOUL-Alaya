@@ -1,4 +1,4 @@
-import type { SeedFuelInventory } from "@do-soul/alaya-core";
+import type { SeedFuelInventory } from "./seed-fuel-inventory.js";
 
 export interface SeedFuelInventoryKpi {
   readonly objects_total: number;

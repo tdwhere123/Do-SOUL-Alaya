@@ -60,7 +60,7 @@ export function buildLongMemEvalRunPayload(input: {
   readonly windowLength: number;
   readonly aggregate: LongMemEvalRunArchiveAggregate;
   readonly extractionStats: CompileSeedExtractionStats;
-  readonly seedFuelInventory: import("@do-soul/alaya-core").SeedFuelInventory;
+  readonly seedFuelInventory: import("./seed-fuel-inventory.js").SeedFuelInventory;
   readonly alayaVersion: string;
   readonly commitSha7: string;
   readonly runAt: Date;

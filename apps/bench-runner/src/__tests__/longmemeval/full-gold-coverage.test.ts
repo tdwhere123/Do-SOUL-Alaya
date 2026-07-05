@@ -60,22 +60,24 @@ describe("buildLongMemEvalFullGoldCoverage", () => {
     expect(coverage.full_gold_at_5).toBe(1);
   });
 
-  it("reports delivery_contribution from core full-gold analysis", () => {
+  it("reports delivery_contribution from bench full-gold analysis", () => {
     const lift = buildQuestion("q-lift", [
       buildGold({
         object_id: "g1",
         final_rank: 4,
+        rank_after_fusion: 8,
         rank_after_coverage_selector: 8
       }),
-      buildGold({ object_id: "g2", final_rank: 2, rank_after_coverage_selector: 2 })
+      buildGold({ object_id: "g2", final_rank: 2, rank_after_fusion: 2, rank_after_coverage_selector: 2 })
     ]);
     const drop = buildQuestion("q-drop", [
       buildGold({
         object_id: "g3",
         final_rank: 8,
+        rank_after_fusion: 2,
         rank_after_coverage_selector: 2
       }),
-      buildGold({ object_id: "g4", final_rank: 1, rank_after_coverage_selector: 1 })
+      buildGold({ object_id: "g4", final_rank: 1, rank_after_fusion: 1, rank_after_coverage_selector: 1 })
     ]);
     const coverage = buildLongMemEvalFullGoldCoverage([lift, drop]);
     expect(coverage.delivery_contribution).toEqual({

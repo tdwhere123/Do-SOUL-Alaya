@@ -99,7 +99,10 @@ export interface McpMemoryProposalWorkflowDependencies {
       readonly targetAnchor: PathAnchorRef;
     }): Promise<"accepted" | "rejected">;
   };
-  readonly dynamicsService?: Pick<DynamicsService, "emitKarmaEvent">;
+  readonly dynamicsService?: Pick<
+    DynamicsService,
+    "emitKarmaEvent" | "emitKarmaEventInCurrentTransaction"
+  >;
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
 }

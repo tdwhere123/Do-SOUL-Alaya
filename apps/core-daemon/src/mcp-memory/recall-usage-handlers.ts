@@ -32,7 +32,7 @@ import type { GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { enqueuePostTurnExtractTask, enqueueRecallExtractTask } from "./post-turn-extract-queue.js";
 import { buildMemorySearchResult, buildRecallStrategyMix } from "./recall-result.js";
 import { buildRecallPolicy, dedupeDeliveredObjectIdentities, uniqueObjectIds } from "./recall-usage-recall-support.js";
-import { invokeBoundRecall } from "../recall/recall-bound-execution.js";
+import { runProductionBoundRecall } from "./recall-bound-service.js";
 import {
   emitContextUsageReportedTelemetry,
   emitRecallDeliveredTelemetry
@@ -197,7 +197,13 @@ async function executeRecall(
   const recallStartedAt = Date.now();
   const taskSurface = buildTaskSurface(request, params.generateId);
   const policyOverride = buildRecallPolicy(request, taskSurface.runtime_id, params.generateId());
-  const recallResult = await runRecallService(params, request, context, taskSurface, policyOverride);
+  const recallResult = await runProductionBoundRecall({
+    deps: params.deps,
+    request,
+    context,
+    taskSurface,
+    policyOverride
+  });
   const resultCandidates = selectRecallCandidates(recallResult, request.max_results);
   const { results, explainabilityPartial } = buildRecallResults(resultCandidates, policyOverride);
   const delivery = buildRecallDelivery(params, context, results, recallResult);
@@ -224,27 +230,6 @@ function buildTaskSurface(request: SoulMemorySearchRequest, generateId: () => st
     surface_kind: "mcp_memory_tool",
     display_name: request.query,
     context_refs: []
-  });
-}
-
-async function runRecallService(
-  params: RecallHandlerParams,
-  request: SoulMemorySearchRequest,
-  context: RecallUsageToolCallContext,
-  taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>,
-  policyOverride: RecallPolicy
-): Promise<RecallServiceResult> {
-  return await invokeBoundRecall({
-    sideEffectMode: "production_mcp",
-    recallService: params.deps.recallService,
-    taskSurface,
-    workspaceId: context.workspaceId,
-    runId: context.runId,
-    strategy: "chat",
-    policyOverride,
-    timeFilter: buildRecallTimeFilter(request),
-    hostContext: request.host_context,
-    activeConstraintsCap: request.active_constraints_cap ?? null
   });
 }
 
@@ -386,21 +371,6 @@ export function createReportContextUsageHandler(params: Readonly<{
       status: "recorded"
     });
   };
-}
-
-function buildRecallTimeFilter(request: SoulMemorySearchRequest) {
-  if (
-    request.since === undefined &&
-    request.until === undefined &&
-    request.time_field === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    since: request.since ?? null,
-    until: request.until ?? null,
-    field: request.time_field ?? "created_at"
-  } as const;
 }
 
 function buildRecallResults(

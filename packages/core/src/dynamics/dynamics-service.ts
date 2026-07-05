@@ -27,9 +27,15 @@ import {
   confidenceByFormationKind,
   parseDimension,
   parseFormationKind,
+  type DynamicsEventLogInput,
   type DynamicsServiceDependencies,
   type KarmaTransitionContext
 } from "./dynamics-service-ports.js";
+
+export interface KarmaEventTransactionMutation {
+  readonly events: readonly DynamicsEventLogInput[];
+  readonly afterCommit: () => void;
+}
 
 export type {
   DynamicsEventLogInput,
@@ -103,6 +109,37 @@ export class DynamicsService {
       },
       transitionContext
     );
+  }
+
+  public emitKarmaEventInCurrentTransaction(input: {
+    readonly kind: KarmaEventKind;
+    readonly objectId: string;
+    readonly workspaceId: string;
+    readonly amount?: number;
+    readonly runId?: string | null;
+    readonly supersedingObjectId?: string;
+  }): KarmaEventTransactionMutation {
+    const amount = input.amount ?? DYNAMICS_CONSTANTS.karma[input.kind];
+    const transitionContext =
+      input.supersedingObjectId === undefined
+        ? undefined
+        : Object.freeze({ supersedingObjectId: input.supersedingObjectId });
+    const mutation = this.karmaEngine.processKarmaEventInCurrentTransaction(
+      {
+        event_id: this.generateEventId(),
+        kind: input.kind,
+        object_id: input.objectId,
+        amount,
+        created_at: this.now(),
+        workspace_id: input.workspaceId,
+        run_id: input.runId ?? null
+      },
+      transitionContext
+    );
+    return {
+      events: mutation.events,
+      afterCommit: () => this.karmaEngine.scheduleKarmaTransactionSideEffects(mutation)
+    };
   }
 
   public assignInitialDynamics(params: {
