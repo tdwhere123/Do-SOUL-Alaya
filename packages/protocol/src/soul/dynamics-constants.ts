@@ -93,7 +93,7 @@ export const DYNAMICS_CONSTANTS = Object.freeze({
   // These are design-justified thresholds, not bench-tuned literals.
   // - batch_trigger_count: an accumulated pending count of this size triggers a
   //   BULK_ENRICH cycle between the periodic Librarian passes, so enrichment
-  //   never lags an unbounded number of writes behind. Mirrors the S3c design's
+  //   never lags an unbounded number of writes behind. Mirrors the bulk-enrich
   //   "accumulate N=50" trigger.
   // - claim_batch_size: the maximum number of pending markers one BULK_ENRICH
   //   cycle claims and processes, bounding per-cycle work so a large backlog

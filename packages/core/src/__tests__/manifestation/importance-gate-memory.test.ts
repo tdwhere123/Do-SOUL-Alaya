@@ -69,7 +69,7 @@ describe("classifyMemoryImportance keep-criteria", () => {
     expect(result.reason).toBe("evidence_basis");
   });
 
-  // invariant (redteam-I2): a single evidence ref is durable — "durable memories
+  // invariant: a single evidence ref is durable — "durable memories
   // require source AND evidence". A single-evidence fact must NEVER be deleted.
   it("KEEPs (keep) a single-evidence memory — ANY evidence forbids autonomous deletion", () => {
     const result = classifyMemoryImportance(memory({ evidence_refs: ["only-one"], reinforcement_count: 0 }));

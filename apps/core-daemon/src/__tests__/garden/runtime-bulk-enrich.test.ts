@@ -231,7 +231,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
 
-  it("the Librarian (15-min) pass no longer enqueues BULK_ENRICH — the cadence moved to the 60s pass (S3c I2)", async () => {
+  it("the Librarian (15-min) pass no longer enqueues BULK_ENRICH — the cadence moved to the 60s pass", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-1");
     enrichPendingRepo.enqueue("workspace-2", "memory-2");
@@ -252,7 +252,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     ).toHaveLength(0);
   });
 
-  it("the 60s pass enqueues AND drains a BULK_ENRICH for every workspace with pending rows in one pass (S3c I2 + I3)", async () => {
+  it("the 60s pass enqueues AND drains a BULK_ENRICH for every workspace with pending rows in one pass", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-1");
     enrichPendingRepo.enqueue("workspace-2", "memory-2");
@@ -265,7 +265,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       })
     );
 
-    // I3: a single 60s pass enqueues a per-workspace BULK_ENRICH for BOTH
+    // A single 60s pass enqueues a per-workspace BULK_ENRICH for BOTH
     // pending workspaces AND drains every one of them in the bounded drain loop
     // (not one-per-pass), so a multi-workspace backlog clears within the ~1-min
     // bound. Proven by completion for both workspaces and pending draining to 0.
@@ -283,11 +283,11 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-2")).toBe(0);
   });
 
-  // invariant (codex spine-review I3): the ~60s pass drains EVERY BULK_ENRICH
+  // invariant: the ~60s pass drains EVERY BULK_ENRICH
   // queued in the pass, bounded by the per-pass cap, so N workspaces' pending
   // enrichment all clears in a single pass (up to the cap) rather than O(N)
   // passes. This pins the now-true ~1-min bound under a multi-workspace backlog.
-  it("I3: N workspaces' BULK_ENRICH all drain within a single scheduler pass (up to the cap)", async () => {
+  it("N workspaces' BULK_ENRICH all drain within a single scheduler pass (up to the cap)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     const workspaceIds = Array.from({ length: 10 }, (_unused, index) => `workspace-${index + 1}`);
     for (const workspaceId of workspaceIds) {

@@ -334,7 +334,7 @@ async function resolveQaDeliverySelection(input: {
 // Agent-side LLM relevance filter: retrieve WIDE (catch precise-class gold
 // buried at rank 12-15), let an LLM pick the few relevant memories, deliver
 // NARROW clean context. Decouples retrieve-width from deliver-width — the
-// semantic selection fusion ranking can't do (§D wall). Default off.
+// semantic selection fusion ranking can't do. Default off.
 async function applyQaLlmFilter(
   question: string,
   deliveryCandidates: readonly QaDeliveredCandidate[],

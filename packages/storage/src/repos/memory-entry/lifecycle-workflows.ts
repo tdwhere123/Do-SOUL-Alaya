@@ -253,7 +253,7 @@ export async function transitionMemoryEntryLifecycle(
     return this.transaction(() => {
       onTransition?.();
 
-      // invariant (I3): non-tombstone transitions clear the disposition GC marker.
+      // invariant: non-tombstone transitions clear the disposition GC marker.
       const statement =
         parsedLifecycleState === "tombstone"
           ? this.transitionLifecycleStatement

@@ -222,7 +222,7 @@ it("accept mints a governed path relation and reject does not", async () => {
     expect(mintArgs.governanceClass).toBe("recall_allowed");
   });
 
-// invariant (I1): the minted path is the only durable landing for an accepted
+// invariant: the minted path is the only durable landing for an accepted
   // proposal. submitCandidate catches its own materialize errors and returns the
   // transient "failed" outcome; acceptProposal must surface that loudly
   // (CoreError) AND reconcile the review row back to pending so the
@@ -264,7 +264,7 @@ it("accept mints a governed path relation and reject does not", async () => {
     expect(repo.findById(proposal.proposal_id)?.status).toBe(EdgeProposalStatus.PENDING);
   });
 
-// invariant (I1): a transient mint failure is operator-retryable through the
+// invariant: a transient mint failure is operator-retryable through the
   // EXISTING pending review surface and a successful retry lands EXACTLY ONE
   // path (no duplicate, no stuck terminal-accepted-without-path). The path
   // service dedups via findByAnchorMemoryId, but this service must not double
@@ -386,7 +386,7 @@ it("accept mints a governed path relation and reject does not", async () => {
     });
   });
 
-// invariant (I1): a permanent "rejected" outcome (bad anchor — a missing /
+// invariant: a permanent "rejected" outcome (bad anchor — a missing /
   // foreign source or target memory) on an ACCEPTED proposal can NEVER mint a
   // path, so retry is futile. It records the durable mint-failed audit and
   // throws (loud), AND it reconciles the review row to terminal REJECTED so the

@@ -90,7 +90,7 @@ describe("SqliteEdgeProposalRepo", () => {
     ).toThrow("Edge proposal is not pending: proposal-1 (rejected)");
   });
 
-  // invariant (I1): a transient mint failure reconciles an accepted row back to
+  // invariant: a transient mint failure reconciles an accepted row back to
   // pending so it re-surfaces in listPending for operator retry. The partial
   // unique index on (workspace, source, target, type) WHERE status='pending'
   // must permit the revert because no other pending row holds the same tuple.
@@ -124,7 +124,7 @@ describe("SqliteEdgeProposalRepo", () => {
     expect(repo.listPending("workspace-1").map((row) => row.proposal_id)).toEqual(["proposal-1"]);
   });
 
-  // invariant (I1): a permanent anchor rejection reconciles an accepted row to
+  // invariant: a permanent anchor rejection reconciles an accepted row to
   // terminal rejected with the mint-failure review_reason; it leaves the
   // pending list so it can never become a retry poison pill.
   it("reconciles a permanent-rejected accepted proposal to terminal rejected (leaves pending list)", async () => {
@@ -442,7 +442,7 @@ describe("SqliteEdgeProposalRepo", () => {
     }
   });
 
-  // invariant (I1): reconcile is CAS-gated on fromStatus, so a concurrent
+  // invariant: reconcile is CAS-gated on fromStatus, so a concurrent
   // decision cannot be clobbered. A reconcile against a row that is no longer in
   // fromStatus fails closed.
   it("fails closed when reconciling a proposal not in fromStatus", async () => {

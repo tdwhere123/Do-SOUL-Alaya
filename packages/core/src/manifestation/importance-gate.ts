@@ -155,7 +155,7 @@ function isMemoryStrictlyGoverned(memory: Readonly<MemoryEntry>): boolean {
  *   ② retention_state canon/consolidated     => report_only
  *   ③ evidence_refs.length >= 1              => keep (durable: ANY evidence)
  *   ④ reinforcement_count >= 1               => keep (reinforced at least once)
- * invariant (redteam-I2): only a truly source-less (evidence_refs.length === 0)
+ * invariant: only a truly source-less (evidence_refs.length === 0)
  * AND never-reinforced (reinforcement_count === 0) memory is `judged_useless` —
  * the only disposition the autonomous-forgetting sweep may use to tombstone the
  * row. The memory gate is intentionally STRICTER than the path-side gate's
@@ -177,7 +177,7 @@ export function classifyMemoryImportance(
     return Object.freeze({ disposition: "report_only", reason: "strictly_governed" });
   }
 
-  // invariant (redteam-I2): "durable memories require source AND evidence" — so
+  // invariant: "durable memories require source AND evidence" — so
   // ANY valid evidence ref makes the memory durable, not just a rich (>=2) basis.
   // A single-evidence durable fact must NEVER be autonomously deleted. Only a
   // memory that is truly source-less (evidence_refs.length === 0) AND was never

@@ -42,11 +42,11 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
     expect(submitArgs.why?.some((line) => line.includes("source_signal=signal-1"))).toBe(true);
   });
 
-// invariant (codex spine-review B5): a TRANSIENT "failed" outcome on any
+// invariant: a TRANSIENT "failed" outcome on any
   // candidate must surface as a throw so the bulk-enrich worker keeps the row
   // pending and a later cycle retries. Swallowing it would let the worker
   // markProcessed an owed path away.
-  it("B5: throws when a path candidate returns the transient failed outcome", async () => {
+  it("throws when a path candidate returns the transient failed outcome", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",
@@ -69,10 +69,10 @@ it("B-2 proposes supports for strong same-dimension local neighbors", async () =
     ).rejects.toMatchObject({ name: "CoreError", code: "OBLIGATION_VIOLATION" });
   });
 
-// invariant (codex spine-review B5 x B3): a PERMANENT "rejected" outcome is a
+// invariant: a PERMANENT "rejected" outcome is a
   // decided no (bad anchor) — retrying cannot help — so it must NOT throw. The
   // worker then markProcessed the row instead of looping on a poison pill.
-  it("B5xB3: does NOT throw when a path candidate is permanently rejected", async () => {
+  it("does NOT throw when a path candidate is permanently rejected", async () => {
     const newMemory = createMemoryEntry();
     const neighbor = createMemoryEntry({
       object_id: "memory-existing",

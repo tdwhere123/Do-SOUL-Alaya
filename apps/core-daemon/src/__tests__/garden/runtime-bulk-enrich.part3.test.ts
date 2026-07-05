@@ -150,7 +150,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     vi.restoreAllMocks();
   });
 
-  // invariant (codex spine-review B5): a TRANSIENT path-mint failure must not
+  // invariant: a TRANSIENT path-mint failure must not
   // become a processed enrich row. The governed services surface a transient
   // failure by throwing (produceForNewMemory throws when any submitCandidate
   // returns "failed"; detectAndLinkConflicts with strictNoDrop throws when a
@@ -158,7 +158,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
   // per-memory catch must record a TRANSIENT failed attempt — never
   // markProcessed — so the owed path is retried (under the cap), and emit NO
   // processed telemetry for the dropped row.
-  it("B5: a transient path-mint failure + a conflict-repo throw records a failed attempt, keeps the row pending, and emits no processed telemetry", async () => {
+  it("a transient path-mint failure + a conflict-repo throw records a failed attempt, keeps the row pending, and emits no processed telemetry", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-owed");
 
@@ -211,13 +211,13 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     ).toBe(false);
   });
 
-  // invariant (B4-R1): the transient-retry seam is BOUNDED. A sink that ALWAYS
+  // invariant: the transient-retry seam is BOUNDED. A sink that ALWAYS
   // throws transient `failed` dead-letters its marker after exactly MAX_ATTEMPTS
   // failed attempts, emits the SOUL_ENRICH_ABANDONED audit event (governance/
   // runtime drops must be auditable), and thereafter STOPS consuming the per-pass
   // claim budget — proven by a healthy marker, starved behind it under a 1-slot
   // budget, draining once the poison marker is dead-lettered.
-  it("B4-R1: an always-transient-failing marker dead-letters after MAX_ATTEMPTS, emits SOUL_ENRICH_ABANDONED, and frees the budget for a healthy marker behind it", async () => {
+  it("an always-transient-failing marker dead-letters after MAX_ATTEMPTS, emits SOUL_ENRICH_ABANDONED, and frees the budget for a healthy marker behind it", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-poison");
     enrichPendingRepo.enqueue("workspace-1", "memory-healthy");
@@ -302,10 +302,10 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
   });
 
-  // invariant (B4-R1 x B3): a PERMANENT rejection still clean-drops — it must NOT
+  // invariant: a PERMANENT rejection still clean-drops — it must NOT
   // route through the attempt counter and must NOT dead-letter, so a decided "no"
   // never becomes a poison-pill nor an abandon audit event.
-  it("B4-R1xB3: a permanently rejected candidate clean-drops with no attempt increment and no dead-letter", async () => {
+  it("a permanently rejected candidate clean-drops with no attempt increment and no dead-letter", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-rejected");
 
@@ -340,13 +340,13 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
 
-  // invariant (codex spine-review B5 x B3 interaction): a PERMANENT rejection
+  // invariant: a PERMANENT rejection
   // (B3 invalid-anchor refusal) settles silently inside the governed services
   // (submitCandidate returns "rejected", the service does NOT throw), so the
   // worker MUST markProcessed it. Retrying a permanently-rejected candidate can
   // never succeed; treating it like a transient failure would create an
   // infinite poison-pill retry loop. This pins that a rejection is terminal.
-  it("B5xB3: a permanently rejected candidate is marked processed (NOT retried as a poison pill)", async () => {
+  it("a permanently rejected candidate is marked processed (NOT retried as a poison pill)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-rejected");
 
