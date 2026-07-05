@@ -53,8 +53,7 @@ describe("invokeBoundRecall shared input contract", () => {
       max_results: 5,
       scope_class: null,
       dimension: null,
-      domain_tags: null,
-      active_constraints_cap: null
+      domain_tags: null
     };
 
     const mcpResult = await runProductionBoundRecall({
