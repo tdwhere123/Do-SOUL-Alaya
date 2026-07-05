@@ -14,6 +14,7 @@
       "@do-soul/alaya/mcp-server": ["../../apps/core-daemon/src/mcp/mcp-server.ts"],
       "@do-soul/alaya/cli/bridge": ["../../apps/core-daemon/src/cli/bridge.ts"],
       "@do-soul/alaya/cli/register": ["../../apps/core-daemon/src/cli/register.ts"],
+      "@do-soul/alaya/recall/bound-execution": ["../../apps/core-daemon/src/recall/recall-bound-execution.ts"],
       "@do-soul/alaya-eval": ["../../packages/eval/src/index.ts"]
     }
   },
