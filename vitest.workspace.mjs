@@ -94,6 +94,7 @@ export default [
       test: {
         name: "@do-soul/alaya-bench-runner",
         environment: "node",
+        setupFiles: [path.resolve(appRoot, "src/__tests__/vitest-setup.ts")],
         include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
         exclude: ["**/dist/**"]
       }

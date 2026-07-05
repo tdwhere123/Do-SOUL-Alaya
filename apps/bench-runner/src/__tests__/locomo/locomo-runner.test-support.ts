@@ -266,7 +266,10 @@ beforeEach(async () => {
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
   vi.stubEnv("ALAYA_CACHE_ONLY_DUMMY_KEY", "");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", "");
+  vi.stubEnv(
+    "ALAYA_BENCH_EXTRACTION_CACHE_ROOT",
+    await mkdtemp(join(tmpdir(), "locomo-extraction-cache-"))
+  );
   tmpDir = await mkdtemp(join(tmpdir(), "locomo-runner-test-"));
   loadLocomoMock.mockResolvedValue([
     {
