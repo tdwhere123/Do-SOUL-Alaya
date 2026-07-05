@@ -30,7 +30,7 @@ export function resolveExtractionCacheRoot(
 }
 
 // Module-load snapshot for callers that bind once; prefer resolveExtractionCacheRoot()
-// at run boundaries so test env stubs and Card 7 smoke overrides stay isolated.
+// at run boundaries so test env stubs and bench preflight overrides stay isolated.
 export const EXTRACTION_CACHE_ROOT = resolveExtractionCacheRoot();
 
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";

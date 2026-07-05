@@ -34,10 +34,10 @@ const PerPlaneRecallCoverageEntrySchema = z
   })
   .strict();
 
-// Cohort fan-in attribution split (codex I2). The session cohort plane surfaces
-// the most gold of any plane but historically flat-dumped it; this block splits
-// its contribution into the five classes codex defined so the fan-in promotion
-// is readable in the gate archive:
+// Cohort fan-in attribution split. The session cohort plane surfaces the most
+// gold of any plane but historically flat-dumped it; this block splits its
+// contribution into admission/delivery counters so fan-in promotion is readable
+// in the gate archive:
 //   - delivered_plane_count: delivered rows (any rank) carrying the cohort plane
 //   - gold_source_plane_count: gold whose source_planes include the cohort plane
 //   - gold_first_admitted_count: gold whose plane_first_admitted is the cohort plane
@@ -174,16 +174,16 @@ export const QualityMetricsSchema = z
     per_plane_recall_coverage: z
       .record(z.string(), PerPlaneRecallCoverageEntrySchema)
       .default({}),
-    // Cohort fan-in attribution (codex I2). Optional so pre-fan-in kpi.json
-    // records stay valid; new LongMemEval runs always populate it.
-    cohort_attribution: CohortAttributionSchema.optional(),
-    // Path-vs-graph fan-in diagnostic. Optional so pre-R2 kpi.json
-    // records stay valid; new LongMemEval runs always populate it.
-    path_vs_graph_fanin: PathVsGraphFaninSchema.optional(),
-    // Best-gold rank buckets. Optional so pre-R6 kpi.json records stay
+    // Cohort fan-in attribution. Optional so pre-fan-in kpi.json records stay
     // valid; new LongMemEval runs always populate it.
+    cohort_attribution: CohortAttributionSchema.optional(),
+    // Path-vs-graph fan-in diagnostic. Optional so older kpi.json records stay
+    // valid; new LongMemEval runs always populate it.
+    path_vs_graph_fanin: PathVsGraphFaninSchema.optional(),
+    // Best-gold rank buckets. Optional so older kpi.json records stay valid;
+    // new LongMemEval runs always populate it.
     gold_rank_buckets: GoldRankBucketsSchema.optional(),
-    // Top-distractor attribution + apex delivery. Optional for pre-R6 records.
+    // Top-distractor attribution + apex delivery. Optional for older records.
     top_distractor_breakdown: TopDistractorBreakdownSchema.optional(),
     object_kind_delivery: ObjectKindDeliverySchema.optional(),
     gold_facet_separation: GoldFacetSeparationSchema.optional(),
