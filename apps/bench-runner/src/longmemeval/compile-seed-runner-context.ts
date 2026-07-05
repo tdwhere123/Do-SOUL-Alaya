@@ -7,8 +7,8 @@ import {
 import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
 import { createCachingSignalExtractor } from "./compile-seed-cache.js";
 import {
-  EXTRACTION_CACHE_ROOT,
-  resolveCompileSeedExtractionConfig
+  resolveCompileSeedExtractionConfig,
+  resolveExtractionCacheRoot
 } from "./compile-seed-config.js";
 import {
   createGardenHttpExtractor,
@@ -35,7 +35,7 @@ export interface CompileSeedRunnerContext {
 export function createCompileSeedRunnerContext(
   options: CompileSeedRunnerOptions | undefined
 ): CompileSeedRunnerContext {
-  const cacheRoot = options?.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const cacheRoot = options?.cacheRoot ?? resolveExtractionCacheRoot();
   const manifest = options?.config
     ? undefined
     : readExtractionCacheManifest(cacheRoot);

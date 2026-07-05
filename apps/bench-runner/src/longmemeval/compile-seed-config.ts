@@ -20,9 +20,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // until then.
 // ALAYA_BENCH_EXTRACTION_CACHE_ROOT redirects the cache to a gitignored staging dir so a model
 // switch (e.g. deepseek re-seed) does not pollute the git-tracked baseline fixture. Unset → canonical.
-export const EXTRACTION_CACHE_ROOT = process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT
-  ? resolve(process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT)
-  : resolve(__dirname, "../../../../docs/bench-history/datasets/longmemeval-extraction-cache");
+export function resolveExtractionCacheRoot(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const override = readNonEmpty(env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT);
+  return override !== undefined
+    ? resolve(override)
+    : resolve(__dirname, "../../../../docs/bench-history/datasets/longmemeval-extraction-cache");
+}
+
+// Module-load snapshot for callers that bind once; prefer resolveExtractionCacheRoot()
+// at run boundaries so test env stubs and Card 7 smoke overrides stay isolated.
+export const EXTRACTION_CACHE_ROOT = resolveExtractionCacheRoot();
 
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";

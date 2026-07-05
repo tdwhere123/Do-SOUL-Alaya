@@ -81,6 +81,9 @@ export function preflightDeepSeekWarmSubstrateCache(input: {
   if (!isDeepSeekWarmSubstrateCacheRoot(input.cacheRoot)) {
     return;
   }
+  if (input.config.model !== DEEPSEEK_WARM_SUBSTRATE_MODEL) {
+    return;
+  }
   const manifest = assertDeepSeekWarmSubstrateManifestPresent(input.cacheRoot);
   validateDeepSeekWarmSubstrateManifest({ manifest, config: input.config });
 }

@@ -22,6 +22,10 @@ const benchRunnerAlias = [
   { find: "@do-soul/alaya/mcp-server", replacement: path.resolve(rootDir, "apps/core-daemon/src/mcp/mcp-server.ts") },
   { find: "@do-soul/alaya/cli/bridge", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/bridge.ts") },
   { find: "@do-soul/alaya/cli/register", replacement: path.resolve(rootDir, "apps/core-daemon/src/cli/register.ts") },
+  {
+    find: "@do-soul/alaya/recall/bound-execution",
+    replacement: path.resolve(rootDir, "apps/core-daemon/src/recall/recall-bound-execution.ts")
+  },
   { find: "@do-soul/alaya", replacement: path.resolve(rootDir, "apps/core-daemon/src/index.ts") },
   { find: "@do-soul/alaya-eval", replacement: path.resolve(rootDir, "packages/eval/src/index.ts") }
 ];

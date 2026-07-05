@@ -94,6 +94,22 @@ describe("DeepSeek warm-substrate preflight", () => {
     ).not.toThrow();
   });
 
+  it("no-ops when cache root is warm-substrate but extraction model differs", () => {
+    if (!existsSync(DEEPSEEK_WARM_SUBSTRATE_CACHE_ROOT)) {
+      return;
+    }
+    expect(() =>
+      preflightDeepSeekWarmSubstrateCache({
+        cacheRoot: DEEPSEEK_WARM_SUBSTRATE_CACHE_ROOT,
+        config: {
+          providerUrl: "https://example.test/v1",
+          model: "test-extraction-model",
+          apiKey: "test-key"
+        }
+      })
+    ).not.toThrow();
+  });
+
   it("requires coverage=1 for warm-substrate manifests", () => {
     const manifest: ExtractionCacheManifest = {
       schema_version: 1,
