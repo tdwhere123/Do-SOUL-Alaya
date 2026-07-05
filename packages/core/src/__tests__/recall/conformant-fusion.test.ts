@@ -237,13 +237,14 @@ describe("conformant compositional combine (real SQLite)", () => {
   it("path inflow is part of the unified kernel", async () => {
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1 },
-      { id: objectId(2), lexical: 0.2 }
+      { id: objectId(2), lexical: 0.2, evidenceSupports: [0.5] }
     ];
     const without = await runFusion(GENERIC_QUERY, specs);
     const withInflow = await runFusion(GENERIC_QUERY, specs, {
       inflow: { [objectId(2)]: [{ seedObjectId: objectId(1), weight: 1 }] }
     });
     expect(withInflow.get(keyOf(objectId(2)))!.per_axis_contribution!.path).toBeGreaterThan(0);
+    expect(withInflow.get(keyOf(objectId(2)))!.flood_potential!.fuel_verified).toBe(true);
     expect(withInflow.get(keyOf(objectId(2)))!.fused_score)
       .toBeGreaterThan(without.get(keyOf(objectId(2)))!.fused_score);
   });
@@ -259,18 +260,18 @@ describe("conformant compositional combine (real SQLite)", () => {
 
   it("path is compositional: a high-base source floods its target; a candidate with no inflow gets ~0 path", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
-    const target: CandidateSpec = { id: objectId(2) };
+    const target: CandidateSpec = { id: objectId(2), lexical: 0.1, evidenceSupports: [0.4] };
 
     const noInflow = await runFusion(GENERIC_QUERY, [seed, target]);
     const targetNoInflow = noInflow.get(keyOf(target.id))!;
     expect(targetNoInflow.per_axis_contribution!.path).toBe(0);
-    expect(targetNoInflow.fused_score).toBe(0);
 
     const withInflow = await runFusion(GENERIC_QUERY, [seed, target], {
       inflow: { [target.id]: [{ seedObjectId: seed.id, weight: 0.8 }] }
     });
     const targetLifted = withInflow.get(keyOf(target.id))!;
     expect(targetLifted.per_axis_contribution!.path).toBeGreaterThan(0);
+    expect(targetLifted.flood_potential!.fuel_verified).toBe(true);
     expect(targetLifted.fused_score).toBeGreaterThan(targetNoInflow.fused_score);
   });
 
@@ -483,8 +484,11 @@ describe("conformant compositional combine (real SQLite)", () => {
   });
 
   it("integrated flood score matches omega * (R_obj + lambda * Flood) with beta disabled", async () => {
-    const spec: CandidateSpec = { id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] };
-    const candidate = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
+    const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
+    const spec: CandidateSpec = { id: objectId(2), lexical: 1, evidenceSupports: [0.5, 0.5] };
+    const candidate = (await runFusion(GENERIC_QUERY, [seed, spec], {
+      inflow: { [spec.id]: [{ seedObjectId: seed.id, weight: 1 }] }
+    })).get(keyOf(spec.id))!;
     const axes = candidate.per_axis_contribution!;
     const flood = candidate.flood_potential!;
     expect(flood.R_obj).toBeCloseTo(axes.object, 12);
