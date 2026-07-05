@@ -212,6 +212,7 @@ describe("merge-longmemeval validations", () => {
       materialization_drop: 2,
       budget_drop: 0,
       delivery_order_drop: 0,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     });
     await writeTaxonomyShard(shardB, "q-taxonomy-b", false, {
@@ -219,6 +220,7 @@ describe("merge-longmemeval validations", () => {
       materialization_drop: 0,
       budget_drop: 3,
       delivery_order_drop: 4,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 5
     });
     const {
@@ -270,6 +272,7 @@ describe("merge-longmemeval validations", () => {
       materialization_drop: 2,
       budget_drop: 3,
       delivery_order_drop: 4,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 5
     });
   });

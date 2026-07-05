@@ -16,6 +16,7 @@ const MissTaxonomyDistributionSchema = z
     materialization_drop: z.number().int().nonnegative(),
     budget_drop: z.number().int().nonnegative(),
     delivery_order_drop: z.number().int().nonnegative(),
+    answer_set_coverage_drop: z.number().int().nonnegative(),
     evaluation_or_gold_issue: z.number().int().nonnegative()
   })
   .strict();
@@ -199,6 +200,7 @@ export const QualityMetricsSchema = z
       materialization_drop: 0,
       budget_drop: 0,
       delivery_order_drop: 0,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     }),
     // @anchor longmemeval-abstention: calibrated-confidence scoring of the

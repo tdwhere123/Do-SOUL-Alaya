@@ -74,6 +74,7 @@ export function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_
       materialization_drop: 0,
       budget_drop: 0,
       delivery_order_drop: 0,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     },
     miss_distribution: {}

@@ -266,6 +266,7 @@ describe("LongMemEval recall diagnostics", () => {
       "materialization_drop",
       "budget_drop",
       "delivery_order_drop",
+      "answer_set_coverage_drop",
       "evaluation_or_gold_issue"
     ]);
     const materializationDrop = buildQuestionDiagnostic({
@@ -408,6 +409,39 @@ describe("LongMemEval recall diagnostics", () => {
     expect(noGoldMaterializationDrop.miss_taxonomy).toBe("materialization_drop");
     expect(noGoldCandidateAbsent.miss_taxonomy).toBe("candidate_absent");
 
+    const answerSetCoverageDrop = buildQuestionDiagnostic({
+      questionId: "q-answer-set-coverage-drop",
+      goldMemoryIds: ["gold-e"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "gold-e", rank: 8, relevance_score: 0.3 }],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-e",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-e",
+              final_rank: 8,
+              fused_rank: 3,
+              rank_after_fusion: 3,
+              rank_after_coverage_selector: 8,
+              coverage_selector_action: "displaced"
+            }
+          ]
+        }
+      }
+    });
+    expect(answerSetCoverageDrop.miss_taxonomy).toBe("answer_set_coverage_drop");
+    expect(answerSetCoverageDrop.gold[0]?.miss_taxonomy).toBe(
+      "answer_set_coverage_drop"
+    );
+
     const summary = summarizeLongMemEvalRecallEvidence([
       materializationDrop,
       budgetDrop,
@@ -422,6 +456,7 @@ describe("LongMemEval recall diagnostics", () => {
       materialization_drop: 2,
       budget_drop: 1,
       delivery_order_drop: 1,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 1
     });
     expect(

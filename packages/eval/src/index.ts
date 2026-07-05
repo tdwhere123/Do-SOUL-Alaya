@@ -12,6 +12,7 @@ export {
   type EdgeProposalAutoAccept,
   type EdgeProposalRate,
   type FullGoldCoverage,
+  type FullGoldDeliveryContribution,
   type KpiCore,
   type KpiPayload,
   type QualityMetrics,

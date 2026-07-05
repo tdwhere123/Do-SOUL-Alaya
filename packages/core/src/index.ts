@@ -67,6 +67,8 @@ export * from "./governance/proposals/proposal-service.js";
 export * from "./governance/proposals/resolution-service.js";
 export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
+export * from "./recall/delivery/delivery-miss-taxonomy.js";
+export * from "./recall/delivery/full-gold-delivery-analysis.js";
 export * from "./recall/query/recall-query-probes.js";
 export * from "./recall/fuel/seed-fuel-inventory.js";
 export * from "./shared/cjk-segmentation.js";

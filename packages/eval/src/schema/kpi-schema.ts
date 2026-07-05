@@ -233,6 +233,23 @@ export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;
 
 const RatioSchema = z.number().min(0).max(1);
 
+const FullGoldDeliveryContributionSchema = z
+  .object({
+    gold_bearing_questions: z.number().int().nonnegative(),
+    full_gold_at_5: RatioSchema,
+    core_full_gold_at_5: RatioSchema,
+    delivery_lift_questions: z.number().int().nonnegative(),
+    delivery_drop_questions: z.number().int().nonnegative(),
+    gold_coverage_at_5: RatioSchema,
+    core_gold_coverage_at_5: RatioSchema,
+    delivery_lift_golds: z.number().int().nonnegative(),
+    delivery_drop_golds: z.number().int().nonnegative()
+  })
+  .strict();
+export type FullGoldDeliveryContribution = z.infer<
+  typeof FullGoldDeliveryContributionSchema
+>;
+
 const FullGoldCoverageSchema = z
   .object({
     gold_bearing_questions: z.number().int().nonnegative(),
@@ -244,7 +261,10 @@ const FullGoldCoverageSchema = z
     // coverage above: how many golds sit in the candidate pool within rank
     // 50/100 at all — separates retrieval/fusion reach from delivery budget.
     pool_recall_at_50: RatioSchema,
-    pool_recall_at_100: RatioSchema
+    pool_recall_at_100: RatioSchema,
+    // Optional so older kpi.json records stay schema-valid; new LongMemEval
+    // runs populate it from core analyzeFullGoldDeliveryContribution.
+    delivery_contribution: FullGoldDeliveryContributionSchema.optional()
   })
   .strict();
 export type FullGoldCoverage = z.infer<typeof FullGoldCoverageSchema>;

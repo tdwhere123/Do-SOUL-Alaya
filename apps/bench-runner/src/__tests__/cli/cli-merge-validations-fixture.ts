@@ -108,6 +108,7 @@ export function makeQualityMetrics(
       materialization_drop: 0,
       budget_drop: budgetDropped,
       delivery_order_drop: 0,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     },
     miss_distribution: {
@@ -198,6 +199,7 @@ export function makeShardDiagnostics(
         materialization_drop: 0,
         budget_drop: 0,
         delivery_order_drop: 0,
+        answer_set_coverage_drop: 0,
         evaluation_or_gold_issue: 0
       },
       gold_source_channel_counts: { graph_support: 1 },

@@ -1,5 +1,6 @@
 import type { FullGoldCoverage } from "@do-soul/alaya-eval";
 import { isAbstentionQuestionId } from "./abstention.js";
+import { buildLongMemEvalDeliveryContribution } from "./diagnostics-delivery-bridge.js";
 import { ratio } from "./diagnostics-quality-helpers.js";
 import type {
   LongMemEvalGoldDiagnostic,
@@ -56,6 +57,7 @@ export function buildLongMemEvalFullGoldCoverage(
     gold_coverage_at_5: ratio(goldDeliveredAt5, goldTotal),
     gold_coverage_at_10: ratio(goldDeliveredAt10, goldTotal),
     pool_recall_at_50: ratio(goldPoolAt50, goldTotal),
-    pool_recall_at_100: ratio(goldPoolAt100, goldTotal)
+    pool_recall_at_100: ratio(goldPoolAt100, goldTotal),
+    delivery_contribution: buildLongMemEvalDeliveryContribution(diagnostics)
   };
 }

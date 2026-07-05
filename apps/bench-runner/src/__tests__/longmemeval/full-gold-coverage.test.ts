@@ -60,6 +60,37 @@ describe("buildLongMemEvalFullGoldCoverage", () => {
     expect(coverage.full_gold_at_5).toBe(1);
   });
 
+  it("reports delivery_contribution from core full-gold analysis", () => {
+    const lift = buildQuestion("q-lift", [
+      buildGold({
+        object_id: "g1",
+        final_rank: 4,
+        rank_after_coverage_selector: 8
+      }),
+      buildGold({ object_id: "g2", final_rank: 2, rank_after_coverage_selector: 2 })
+    ]);
+    const drop = buildQuestion("q-drop", [
+      buildGold({
+        object_id: "g3",
+        final_rank: 8,
+        rank_after_coverage_selector: 2
+      }),
+      buildGold({ object_id: "g4", final_rank: 1, rank_after_coverage_selector: 1 })
+    ]);
+    const coverage = buildLongMemEvalFullGoldCoverage([lift, drop]);
+    expect(coverage.delivery_contribution).toEqual({
+      gold_bearing_questions: 2,
+      full_gold_at_5: 0.5,
+      core_full_gold_at_5: 0.5,
+      delivery_lift_questions: 1,
+      delivery_drop_questions: 1,
+      gold_coverage_at_5: 0.75,
+      core_gold_coverage_at_5: 0.75,
+      delivery_lift_golds: 1,
+      delivery_drop_golds: 1
+    });
+  });
+
   it("returns zeros (no divide-by-zero) on an empty diagnostics set", () => {
     const coverage = buildLongMemEvalFullGoldCoverage([]);
     expect(coverage.gold_bearing_questions).toBe(0);
