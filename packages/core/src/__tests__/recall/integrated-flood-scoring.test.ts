@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   buildFloodFuelCoverageSummary,

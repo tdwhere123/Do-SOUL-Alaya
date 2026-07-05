@@ -52,11 +52,24 @@ function createDecayHarness(getNow: () => string): {
       })
     },
     karmaEventRepo: {
-      create: vi.fn(async (event: KarmaEvent) => {
+      create: vi.fn(async (event) => {
         karmaEvents.push(event);
+        return Object.freeze({ ...event });
       }),
       sumByObjectId: vi.fn(async (objectId: string) =>
         karmaEvents.filter((event) => event.object_id === objectId).reduce((sum, event) => sum + event.amount, 0)
+      ),
+      sumByObjectIds: vi.fn(async (objectIds: readonly string[]) => {
+        const totals: Record<string, number> = {};
+        for (const objectId of objectIds) {
+          totals[objectId] = karmaEvents
+            .filter((event) => event.object_id === objectId)
+            .reduce((sum, event) => sum + event.amount, 0);
+        }
+        return Object.freeze(totals);
+      }),
+      findByObjectId: vi.fn(async (objectId: string) =>
+        karmaEvents.filter((event) => event.object_id === objectId).map((event) => Object.freeze({ ...event }))
       )
     },
     eventLogRepo: {
@@ -69,7 +82,8 @@ function createDecayHarness(getNow: () => string): {
         };
         appendedEvents.push(created);
         return created;
-      })
+      }),
+      queryByEntity: vi.fn(async () => [])
     },
     runtimeNotifier: {
       notifyEntry: vi.fn(async () => {})

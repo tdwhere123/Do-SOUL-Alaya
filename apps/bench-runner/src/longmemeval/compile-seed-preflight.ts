@@ -80,6 +80,10 @@ export function preflightExtractionCache(input: {
   //   collectDistinctTurnContents (the producer side of the same dedup)
   readonly requiredTurnContents?: readonly string[];
   readonly warn?: (message: string) => void;
+  /** When set, coverage scalar gate uses this floor instead of the 0.95 default. */
+  readonly minimumCoverage?: number;
+  /** Fail loud when manifest.json is absent (cache-only / warm-substrate runs). */
+  readonly requireManifest?: boolean;
 }): void {
   const manifest =
     input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
@@ -91,6 +95,14 @@ export function preflightExtractionCache(input: {
   // category error and must be skipped (the offline fallback covers misses).
   const liveExtractionPossible =
     input.liveExtractionPossible ?? input.config.apiKey !== null;
+  const minimumCoverage = input.minimumCoverage ?? EXTRACTION_CACHE_COVERAGE_THRESHOLD;
+  if (input.requireManifest === true && manifest === undefined) {
+    throw new Error(
+      "[longmemeval preflight] extraction-cache manifest is missing at " +
+        `${input.cacheRoot}. Restore or populate the cache before a cache-only ` +
+        "bench run, or unset ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST."
+    );
+  }
   if (manifest === undefined) {
     warn(
       "[longmemeval preflight] no extraction-cache manifest at " +
@@ -118,7 +130,8 @@ export function preflightExtractionCache(input: {
   assertCoverageScalar(
     manifest.coverage,
     input.allowLiveExtraction === true,
-    liveExtractionPossible
+    liveExtractionPossible,
+    minimumCoverage
   );
 }
 
@@ -198,7 +211,8 @@ function assertWindowContainment(input: {
 function assertCoverageScalar(
   coverage: number | undefined,
   allowLiveExtraction: boolean,
-  liveExtractionPossible: boolean
+  liveExtractionPossible: boolean,
+  minimumCoverage: number
 ): void {
   // A manifest WITHOUT a coverage field is itself a gap: a provenance-only
   // manifest (built before any fill recorded a denominator) cannot prove the
@@ -220,16 +234,14 @@ function assertCoverageScalar(
     return;
   }
   if (
-    coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
+    coverage < minimumCoverage &&
     !allowLiveExtraction &&
     liveExtractionPossible
   ) {
     const coveragePct = (coverage * 100).toFixed(1);
     throw new Error(
       "[longmemeval preflight] extraction cache coverage " +
-        `${coveragePct}% is below the ${(
-          EXTRACTION_CACHE_COVERAGE_THRESHOLD * 100
-        ).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
+        `${coveragePct}% is below the ${(minimumCoverage * 100).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
         "gap. Run extraction-fill to populate the cache, or pass " +
         "--allow-live-extraction to live-extract the gap on purpose."
     );

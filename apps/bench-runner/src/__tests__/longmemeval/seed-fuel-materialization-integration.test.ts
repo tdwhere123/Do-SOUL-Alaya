@@ -51,8 +51,8 @@ function freshStats(): CompileSeedExtractionStats {
 function memoryEntry(
   overrides: Partial<MemoryEntry> & Pick<MemoryEntry, "object_id">
 ): MemoryEntry {
+  const { object_id, ...rest } = overrides;
   return {
-    object_id: overrides.object_id,
     object_kind: "memory_entry",
     schema_version: 1,
     lifecycle_state: "active",
@@ -82,7 +82,8 @@ function memoryEntry(
     contradiction_count: null,
     superseded_by: null,
     facet_tags: [{ facet: "location_place" }],
-    ...overrides
+    object_id,
+    ...rest
   } as MemoryEntry;
 }
 

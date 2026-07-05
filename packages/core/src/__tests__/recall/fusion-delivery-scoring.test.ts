@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { buildRecallFusionDetails, compareFusedRecallCandidates, scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { buildEmptyRecallFusionBreakdown, buildRecallFusionDetails, compareFusedRecallCandidates, scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
@@ -418,31 +418,21 @@ describe("compareFusedRecallCandidates", () => {
       entry: createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" }),
       effectiveScore: 0.5,
       effectiveFactors: { activation: 0, relevance: 0 },
-      fusion: {
-        candidate_key: "workspace_local:memory_entry:11111111-1111-4111-8111-111111111111",
-        object_id: "11111111-1111-4111-8111-111111111111",
-        object_kind: "memory_entry" as const,
-        origin_plane: "workspace_local" as const,
-        per_stream_rank: {},
+      fusion: Object.freeze({
+        ...buildEmptyRecallFusionBreakdown("11111111-1111-4111-8111-111111111111"),
         fused_rank: 1,
-        fused_score: 0.2,
-        fused_rank_contribution_per_stream: {}
-      }
+        fused_score: 0.2
+      })
     };
     const worseRank = {
       entry: createMemoryEntry({ object_id: "22222222-2222-4222-8222-222222222222" }),
       effectiveScore: 0.4,
       effectiveFactors: { activation: 0, relevance: 0 },
-      fusion: {
-        candidate_key: "workspace_local:memory_entry:22222222-2222-4222-8222-222222222222",
-        object_id: "22222222-2222-4222-8222-222222222222",
-        object_kind: "memory_entry" as const,
-        origin_plane: "workspace_local" as const,
-        per_stream_rank: {},
+      fusion: Object.freeze({
+        ...buildEmptyRecallFusionBreakdown("22222222-2222-4222-8222-222222222222"),
         fused_rank: 2,
-        fused_score: 0.9,
-        fused_rank_contribution_per_stream: {}
-      }
+        fused_score: 0.9
+      })
     };
 
     const ordered = [worseRank, betterRank].sort(compareFusedRecallCandidates);

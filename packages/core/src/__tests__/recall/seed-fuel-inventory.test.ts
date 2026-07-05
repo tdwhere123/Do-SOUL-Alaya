@@ -6,6 +6,7 @@ import { createPathRelation } from "./recall-service-test-fixtures.js";
 function memoryEntry(
   overrides: Partial<MemoryEntry> & Pick<MemoryEntry, "object_id">
 ): MemoryEntry {
+  const { object_id, ...rest } = overrides;
   return {
     object_kind: "memory_entry",
     dimension: "fact",
@@ -30,10 +31,10 @@ function memoryEntry(
     reinforcement_count: null,
     contradiction_count: null,
     superseded_by: null,
-    object_id: overrides.object_id,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
-    ...overrides
+    object_id,
+    ...rest
   } as MemoryEntry;
 }
 
@@ -44,7 +45,7 @@ describe("deriveSeedFuelInventory", () => {
         memoryEntry({
           object_id: "mem-a",
           evidence_refs: ["ev-a", "ev-b"],
-          facet_tags: [{ facet: "location_place", confidence: 0.8 }]
+          facet_tags: [{ facet: "location_place", value: "Berlin" }]
         }),
         memoryEntry({
           object_id: "mem-b",

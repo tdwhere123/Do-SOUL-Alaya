@@ -1,17 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
-  ScopeClass,
   SynthesisStatus,
   type MemoryEntry,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { RECALL_FUSION_STREAMS, RecallService } from "../../recall/recall-service.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
-import type {
-  RecallFusionBreakdown,
-  RecallFusionStream
-} from "../../recall/runtime/recall-service-types.js";
 import {
   createDependencies,
   createMemoryEntry,
@@ -192,87 +186,3 @@ describe("synthesis router disables direct capsule delivery", () => {
     expect(result.candidates[0]?.object_kind).toBe("memory_entry");
   });
 });
-
-// Band mechanics can't be isolated through recall() (the evidence-set selector
-// front-runs the same multi-fact gate), so drive the real exported helper.
-function streamRanks(): Record<RecallFusionStream, number | null> {
-  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, null])) as Record<
-    RecallFusionStream,
-    number | null
-  >;
-}
-
-function streamContributions(): Record<RecallFusionStream, number> {
-  return Object.fromEntries(RECALL_FUSION_STREAMS.map((stream) => [stream, 0])) as Record<
-    RecallFusionStream,
-    number
-  >;
-}
-
-type CoverageCandidate = Readonly<{
-  readonly entry: Readonly<MemoryEntry>;
-  readonly originPlane: "workspace_local";
-  readonly objectKind: "memory_entry";
-  readonly effectiveScore: number;
-  readonly effectiveFactors: { readonly relevance: number; readonly activation: number };
-  readonly fusion: Readonly<RecallFusionBreakdown>;
-}>;
-
-function coverageMemory(objectId: string, surfaceId: string | null): MemoryEntry {
-  return {
-    object_id: objectId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-03-20T00:00:00.000Z",
-    updated_at: "2026-03-20T00:00:00.000Z",
-    created_by: "system",
-    dimension: MemoryDimension.PROCEDURE,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: "memory content",
-    domain_tags: [],
-    evidence_refs: [],
-    workspace_id: WS,
-    run_id: "run-1",
-    surface_id: surfaceId,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null
-  };
-}
-
-function coverageCandidate(input: {
-  readonly objectId: string;
-  readonly surfaceId: string | null;
-  readonly fusedScore: number;
-}): CoverageCandidate {
-  const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
-  return Object.freeze({
-    entry: coverageMemory(input.objectId, input.surfaceId),
-    originPlane: "workspace_local" as const,
-    objectKind: "memory_entry" as const,
-    effectiveScore: 0,
-    effectiveFactors: { relevance: 0, activation: 0 },
-    fusion: Object.freeze({
-      ...breakdown,
-      object_kind: "memory_entry",
-      per_stream_rank: Object.freeze(streamRanks()) as RecallFusionBreakdown["per_stream_rank"],
-      fused_rank: 1,
-      fused_score: input.fusedScore,
-      fused_rank_contribution_per_stream: Object.freeze(
-        streamContributions()
-      ) as RecallFusionBreakdown["fused_rank_contribution_per_stream"]
-    })
-  });
-}

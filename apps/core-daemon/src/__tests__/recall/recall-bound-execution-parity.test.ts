@@ -100,6 +100,11 @@ describe("invokeBoundRecall parity", () => {
       "mem-b"
     ]);
     expect(recallService.recall).toHaveBeenCalledTimes(2);
-    expect(recallService.recall.mock.calls[0]?.[0]).toEqual(recallService.recall.mock.calls[1]?.[0]);
+    for (const call of (recallService.recall as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[0]).toMatchObject({
+        workspaceId: "ws-parity",
+        policyOverride: policy
+      });
+    }
   });
 });

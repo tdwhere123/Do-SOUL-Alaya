@@ -8,14 +8,15 @@ import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
 import { createCachingSignalExtractor } from "./compile-seed-cache.js";
 import {
   resolveCompileSeedExtractionConfig,
-  resolveExtractionCacheRoot
+  resolveExtractionCacheRoot,
+  resolveBenchExtractionCacheMinCoverage,
+  resolveBenchRequireExtractionCacheManifest
 } from "./compile-seed-config.js";
 import {
   createGardenHttpExtractor,
   EXTRACTION_REQUEST_TIMEOUT_MS
 } from "./compile-seed-http.js";
 import { preflightExtractionCache } from "./compile-seed-preflight.js";
-import { preflightDeepSeekWarmSubstrateCache } from "./deepseek-cache-config.js";
 import { normalizeEnvDiagDir } from "./compile-seed-extract.js";
 import type {
   CompileSeedExtractionStats,
@@ -69,22 +70,14 @@ function runExtractionCachePreflight(
   manifest: ReturnType<typeof readExtractionCacheManifest> | undefined
 ): void {
   if (options?.skipPreflight === true) return;
-  preflightDeepSeekWarmSubstrateCache({
-    cacheRoot,
-    config,
-    liveExtractionPossible: credentialled,
-    ...(options?.allowLiveExtraction === undefined
-      ? {}
-      : { allowLiveExtraction: options.allowLiveExtraction }),
-    ...(options?.requiredTurnContents === undefined
-      ? {}
-      : { requiredTurnContents: options.requiredTurnContents })
-  });
+  const minimumCoverage = resolveBenchExtractionCacheMinCoverage();
   preflightExtractionCache({
     cacheRoot,
     config,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     liveExtractionPossible: credentialled,
+    requireManifest: resolveBenchRequireExtractionCacheManifest(),
+    ...(minimumCoverage === undefined ? {} : { minimumCoverage }),
     ...(options?.allowLiveExtraction === undefined
       ? {}
       : { allowLiveExtraction: options.allowLiveExtraction }),

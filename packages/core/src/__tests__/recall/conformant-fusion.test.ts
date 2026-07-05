@@ -15,6 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   applyPathSuppressionToFusionScores,
+  buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails
 } from "../../recall/delivery/fusion-delivery-scoring.js";
 import {
@@ -430,55 +431,15 @@ describe("conformant compositional combine (real SQLite)", () => {
 
   it("path-suppression floor never boosts a tiny positive score", () => {
     const tiny = 0.00001;
+    const breakdown = buildEmptyRecallFusionBreakdown("tiny");
     const fusion = new Map<string, RecallFusionBreakdown>([
       [
         "workspace_local:memory_entry:tiny",
-        {
-          candidate_key: "workspace_local:memory_entry:tiny",
-          object_id: "tiny",
-          object_kind: "memory_entry",
-          origin_plane: "workspace_local",
+        Object.freeze({
+          ...breakdown,
           fused_rank: 1,
-          fused_score: tiny,
-          fused_rank_per_stream: {
-            lexical_fts: null,
-            trigram_fts: null,
-            synthesis_fts: null,
-            evidence_fts: null,
-            evidence_structural_agreement: null,
-            source_proximity: null,
-            source_evidence_agreement: null,
-            subject_alignment: null,
-            structural: null,
-            existing_score: null,
-            embedding_similarity: null,
-            graph_expansion: null,
-            entity_seed: null,
-            path_expansion: null,
-            temporal_recency: null,
-            workspace_activation: null,
-            facet_overlap: null
-          },
-          fused_rank_contribution_per_stream: {
-            lexical_fts: 0,
-            trigram_fts: 0,
-            synthesis_fts: 0,
-            evidence_fts: 0,
-            evidence_structural_agreement: 0,
-            source_proximity: 0,
-            source_evidence_agreement: 0,
-            subject_alignment: 0,
-            structural: 0,
-            existing_score: 0,
-            embedding_similarity: 0,
-            graph_expansion: 0,
-            entity_seed: 0,
-            path_expansion: 0,
-            temporal_recency: 0,
-            workspace_activation: 0,
-            facet_overlap: 0
-          }
-        }
+          fused_score: tiny
+        })
       ]
     ]);
 

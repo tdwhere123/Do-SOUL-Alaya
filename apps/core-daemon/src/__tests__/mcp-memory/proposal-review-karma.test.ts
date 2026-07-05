@@ -25,6 +25,7 @@ describe("emitProposalReviewKarma", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+        sessionId: "session-1",
         surfaceId: null
       }
     );
@@ -60,6 +61,7 @@ describe("emitProposalReviewKarma", () => {
         workspaceId: "workspace-1",
         runId: null,
         agentTarget: "codex",
+        sessionId: "session-1",
         surfaceId: null
       }
     );
@@ -95,6 +97,7 @@ describe("emitProposalReviewKarma", () => {
         workspaceId: "workspace-1",
         runId: "run-1",
         agentTarget: "codex",
+        sessionId: "session-1",
         surfaceId: null
       }
     );
