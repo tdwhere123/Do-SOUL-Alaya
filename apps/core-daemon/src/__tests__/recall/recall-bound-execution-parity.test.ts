@@ -48,19 +48,23 @@ describe("invokeBoundRecall shared input contract", () => {
         buildSeededRecallResult(params.taskSurface.display_name)
       )
     };
-    const request = {
+    const request: SoulMemorySearchRequest = {
       query: "deployment rules",
       max_results: 5,
-      filters: {},
+      scope_class: null,
+      dimension: null,
+      domain_tags: null,
       active_constraints_cap: null
-    } as SoulMemorySearchRequest;
+    };
 
     const mcpResult = await runProductionBoundRecall({
       deps: { recallService } as unknown as RecallUsageHandlerDependencies,
       request,
       context: {
         workspaceId: "ws-parity",
-        runId: "run-parity"
+        runId: "run-parity",
+        agentTarget: "codex",
+        sessionId: "session-parity"
       },
       taskSurface,
       policyOverride: policy

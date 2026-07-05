@@ -192,6 +192,8 @@ describe("buildProposalReviewKarmaMutation", () => {
         {
           proposal_id: created.proposal_id,
           verdict: "accept",
+          reason: null,
+          reviewer_identity: "user:reviewer",
           reviewer_token: "reviewer-token"
         },
         { workspaceId: memory.workspace_id, runId: memory.run_id, agentTarget: "codex", sessionId: "session-1" }
