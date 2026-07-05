@@ -1,4 +1,5 @@
 import { DELIVERY_MISS_TOP_K } from "./delivery-miss-taxonomy.js";
+import type { FullGoldDeliveryContribution } from "@do-soul/alaya-eval";
 
 export interface FullGoldDeliveryGoldInput {
   readonly objectId: string;
@@ -9,18 +10,6 @@ export interface FullGoldDeliveryGoldInput {
 export interface FullGoldDeliveryQuestionInput {
   readonly questionId: string;
   readonly gold: readonly FullGoldDeliveryGoldInput[];
-}
-
-export interface FullGoldDeliveryContribution {
-  readonly gold_bearing_questions: number;
-  readonly full_gold_at_5: number;
-  readonly core_full_gold_at_5: number;
-  readonly delivery_lift_questions: number;
-  readonly delivery_drop_questions: number;
-  readonly gold_coverage_at_5: number;
-  readonly core_gold_coverage_at_5: number;
-  readonly delivery_lift_golds: number;
-  readonly delivery_drop_golds: number;
 }
 
 function ratio(numerator: number, denominator: number): number {
@@ -97,5 +86,5 @@ export function analyzeFullGoldDeliveryContribution(
     core_gold_coverage_at_5: ratio(coreGoldDeliveredAt5, goldTotal),
     delivery_lift_golds: deliveryLiftGolds,
     delivery_drop_golds: deliveryDropGolds
-  };
+  } satisfies FullGoldDeliveryContribution;
 }

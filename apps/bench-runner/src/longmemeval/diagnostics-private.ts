@@ -1,3 +1,4 @@
+import { DELIVERY_BUDGET_LOSS_RANK } from "./delivery-miss-taxonomy.js";
 import type {
   BenchEmbeddingProviderState,
   CandidateDiagnostic,
@@ -8,8 +9,6 @@ import type {
   NarrowRecallDiagnostics,
   ReadCandidateDiagnosticsResult
 } from "./diagnostics-types.js";
-
-const DELIVERY_BUDGET_LOSS_RANK = 10;
 
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",

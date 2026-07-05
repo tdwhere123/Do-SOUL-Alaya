@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { analyzeFullGoldDeliveryContribution } from "../../longmemeval/full-gold-delivery-analysis.js";
 
 describe("analyzeFullGoldDeliveryContribution", () => {
-  it("reports delivery contribution separately from core fused order", () => {
+  it("reports delivery contribution separately from fusion-stage order", () => {
     const analysis = analyzeFullGoldDeliveryContribution([
       {
         questionId: "q-lift",

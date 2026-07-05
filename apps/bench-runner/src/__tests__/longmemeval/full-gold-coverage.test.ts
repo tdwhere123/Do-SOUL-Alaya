@@ -60,24 +60,22 @@ describe("buildLongMemEvalFullGoldCoverage", () => {
     expect(coverage.full_gold_at_5).toBe(1);
   });
 
-  it("reports delivery_contribution from bench full-gold analysis", () => {
+  it("reports delivery_contribution from fusion-stage vs delivered ranks", () => {
     const lift = buildQuestion("q-lift", [
       buildGold({
         object_id: "g1",
         final_rank: 4,
-        rank_after_fusion: 8,
-        rank_after_coverage_selector: 8
+        rank_after_fusion: 8
       }),
-      buildGold({ object_id: "g2", final_rank: 2, rank_after_fusion: 2, rank_after_coverage_selector: 2 })
+      buildGold({ object_id: "g2", final_rank: 2, rank_after_fusion: 2 })
     ]);
     const drop = buildQuestion("q-drop", [
       buildGold({
         object_id: "g3",
         final_rank: 8,
-        rank_after_fusion: 2,
-        rank_after_coverage_selector: 2
+        rank_after_fusion: 2
       }),
-      buildGold({ object_id: "g4", final_rank: 1, rank_after_fusion: 1, rank_after_coverage_selector: 1 })
+      buildGold({ object_id: "g4", final_rank: 1, rank_after_fusion: 1 })
     ]);
     const coverage = buildLongMemEvalFullGoldCoverage([lift, drop]);
     expect(coverage.delivery_contribution).toEqual({
@@ -91,6 +89,23 @@ describe("buildLongMemEvalFullGoldCoverage", () => {
       delivery_lift_golds: 1,
       delivery_drop_golds: 1
     });
+  });
+
+  it("does not treat pre_budget_rank alone as core delivery rank", () => {
+    const budgetOnly = buildQuestion("q-budget-core", [
+      buildGold({
+        object_id: "g1",
+        final_rank: null,
+        pre_budget_rank: 4,
+        fused_rank: null,
+        rank_after_fusion: null,
+        budget_drop_reason: "max_entries"
+      })
+    ]);
+    const coverage = buildLongMemEvalFullGoldCoverage([budgetOnly]);
+    expect(coverage.delivery_contribution?.core_gold_coverage_at_5).toBe(0);
+    expect(coverage.delivery_contribution?.delivery_lift_golds).toBe(0);
+    expect(coverage.delivery_contribution?.delivery_drop_golds).toBe(0);
   });
 
   it("returns zeros (no divide-by-zero) on an empty diagnostics set", () => {

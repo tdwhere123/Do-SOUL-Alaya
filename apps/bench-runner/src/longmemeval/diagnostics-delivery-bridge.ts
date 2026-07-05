@@ -50,12 +50,7 @@ export function classifyGoldDeliveryMissTaxonomy(input: {
 export function resolveCoreDeliveryRank(
   gold: LongMemEvalGoldDiagnostic
 ): number | null {
-  return (
-    gold.rank_after_fusion ??
-    gold.fused_rank ??
-    gold.pre_budget_rank ??
-    null
-  );
+  return gold.rank_after_fusion ?? gold.fused_rank ?? null;
 }
 
 export function buildLongMemEvalDeliveryContribution(

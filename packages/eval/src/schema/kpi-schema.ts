@@ -246,6 +246,7 @@ const FullGoldDeliveryContributionSchema = z
     delivery_drop_golds: z.number().int().nonnegative()
   })
   .strict();
+export { FullGoldDeliveryContributionSchema };
 export type FullGoldDeliveryContribution = z.infer<
   typeof FullGoldDeliveryContributionSchema
 >;

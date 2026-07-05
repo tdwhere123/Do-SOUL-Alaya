@@ -70,7 +70,7 @@ describe("classifyDeliveryMissTaxonomy", () => {
     ).toBe("budget_drop");
   });
 
-  it("classifies answer_set_coverage_drop when fused top-5 gold is displaced by S4 coverage", () => {
+  it("classifies answer_set_coverage_drop when fused top-5 gold is displaced by the coverage selector", () => {
     expect(
       classifyDeliveryMissTaxonomy({
         deliveredRank: 8,
@@ -100,5 +100,16 @@ describe("classifyDeliveryMissTaxonomy", () => {
         diagnosticsAvailable: true
       })
     ).toBe("delivery_order_drop");
+  });
+
+  it("returns null when recall diagnostics are unavailable", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: undefined,
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: false
+      })
+    ).toBeNull();
   });
 });

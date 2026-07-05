@@ -41,7 +41,7 @@ export function classifyDeliveryMissTaxonomy(
     return null;
   }
   if (!input.diagnosticsAvailable) {
-    return "delivery_order_drop";
+    return null;
   }
   if (input.candidate === undefined) {
     return input.anyObjectCandidate === undefined

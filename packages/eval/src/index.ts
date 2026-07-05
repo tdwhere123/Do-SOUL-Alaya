@@ -13,6 +13,7 @@ export {
   type EdgeProposalRate,
   type FullGoldCoverage,
   type FullGoldDeliveryContribution,
+  FullGoldDeliveryContributionSchema,
   type KpiCore,
   type KpiPayload,
   type QualityMetrics,
