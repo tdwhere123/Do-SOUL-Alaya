@@ -8,12 +8,12 @@ import {
   createAlayaCliBridge,
   type AlayaCliResult
 } from "../../cli/bridge.js";
-// @ts-expect-error bin/alaya.mjs is plain JS with no .d.ts; typed via usage here.
 import {
   createAlayaCliModuleLoaders,
   loadAlayaCliModules,
   runAlayaCli,
-  resolveAlayaCliDistPaths
+  resolveAlayaCliDistPaths,
+  type LoadedAlayaCliModules
 } from "../../cli/module-loader.js";
 import { pathEndsWithPosixSegments, toPosixPath } from "../support/test-paths.js";
 
@@ -265,12 +265,14 @@ describe("cli bridge", () => {
       list: () => []
     }));
     const registerAlayaCliCommands = vi.fn();
-    const loadModules = vi.fn(async () => ({
-      createAlayaDaemonRuntime,
-      createAlayaCliBridge,
-      registerAlayaCliCommands,
-      softwareExit: ALAYA_SYSEXITS.SOFTWARE
-    }));
+    const loadModules = vi.fn(async () =>
+      ({
+        createAlayaDaemonRuntime,
+        createAlayaCliBridge,
+        registerAlayaCliCommands,
+        softwareExit: ALAYA_SYSEXITS.SOFTWARE
+      }) as unknown as LoadedAlayaCliModules
+    );
 
     const exitCode = await runAlayaCli(["doctor", "--json"], {
       cwd: "/tmp/alaya",
