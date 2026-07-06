@@ -13,7 +13,13 @@ export function readApiKey(
   }
 
   const envName = "api_key_ref" in binding ? binding.api_key_ref : undefined;
-  return typeof envName === "string" ? getEnv(envName) : undefined;
+  if (typeof envName === "string") {
+    // Only allow environment variables ending with _API_KEY and not starting with ALAYA_
+    if (/^[a-z0-9_]+_api_key$/i.test(envName) && !/^alaya_/i.test(envName)) {
+      return getEnv(envName);
+    }
+  }
+  return undefined;
 }
 
 export function resolveApiKey(
