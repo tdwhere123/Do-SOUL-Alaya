@@ -4,16 +4,19 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase } from "../../sqlite/db.js";
 import { DynamicPreparedStatementCache } from "../../sqlite/dynamic-prepared-statement-cache.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 const tempDirs: string[] = [];
+const databases: ReturnType<typeof initDatabase>[] = [];
 
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir !== undefined) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeTempDirectorySync(dir, databases);
     }
   }
+  databases.length = 0;
 });
 
 describe("DynamicPreparedStatementCache", () => {
@@ -21,6 +24,7 @@ describe("DynamicPreparedStatementCache", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-dynamic-prepared-"));
     tempDirs.push(tempDir);
     const db = initDatabase({ filename: path.join(tempDir, "dynamic-prepared.db") });
+    databases.push(db);
     let prepareCount = 0;
     const connection = db.connection;
     const originalPrepare = connection.prepare.bind(connection);
@@ -43,6 +47,7 @@ describe("DynamicPreparedStatementCache", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-dynamic-prepared-"));
     tempDirs.push(tempDir);
     const db = initDatabase({ filename: path.join(tempDir, "dynamic-prepared-reopen.db") });
+    databases.push(db);
     let prepareCount = 0;
     const trackPrepare = (): void => {
       const connection = db.connection;

@@ -4,16 +4,19 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 const tempDirs: string[] = [];
+const databases: ReturnType<typeof initDatabase>[] = [];
 
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir !== undefined) {
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeTempDirectorySync(dir, databases);
     }
   }
+  databases.length = 0;
 });
 
 describe("RefreshableStatementHolder", () => {
@@ -23,6 +26,7 @@ describe("RefreshableStatementHolder", () => {
     const dbPath = path.join(tempDir, "refreshable.db");
 
     const db = initDatabase({ filename: dbPath });
+    databases.push(db);
     let prepareCount = 0;
     const holder = new RefreshableStatementHolder(db, (database) => {
       prepareCount += 1;
@@ -45,6 +49,7 @@ describe("RefreshableStatementHolder", () => {
     const dbPath = path.join(tempDir, "refreshable.db");
 
     const db = initDatabase({ filename: dbPath });
+    databases.push(db);
     let firstPrepareCount = 0;
     let secondPrepareCount = 0;
     const firstHolder = new RefreshableStatementHolder(db, (database) => {

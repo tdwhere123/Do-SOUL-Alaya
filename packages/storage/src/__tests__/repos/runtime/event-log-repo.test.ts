@@ -9,6 +9,7 @@ import {
   StreamingEventType,
   WorkspaceRunEventType
 } from "@do-soul/alaya-protocol";
+import { removeTempDirectorySync } from "../../temp-directory.js";
 import {
   appendAppliedOverride,
   appendEngineResponseEvent,
@@ -21,6 +22,7 @@ import {
   createEventLogRepos,
   registerEventLogRepoCleanup
 } from "./event-log-repo.test-support.js";
+import { trackedDatabases } from "./event-log-repo-fixture.js";
 
 registerEventLogRepoCleanup();
 
@@ -40,11 +42,14 @@ it("append generates a unique event_id and created_at", async () => {
 
 it("append reopens a closed database before starting a transaction", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-event-log-"));
+  let database: Awaited<ReturnType<typeof createEventLogRepos>>["database"] | undefined;
 
   try {
-    const { database, eventLogRepo } = await createEventLogRepos({
+    const repos = await createEventLogRepos({
       filename: path.join(tempDir, "events.db")
     });
+    database = repos.database;
+    const { eventLogRepo } = repos;
     await appendWorkspaceLifecycleEvent(eventLogRepo, {
       workspaceId: "ws_events",
       entityId: "workspace-before-reopen"
@@ -59,7 +64,10 @@ it("append reopens a closed database before starting a transaction", async () =>
     expect(event.entity_id).toBe("workspace-after-reopen");
     await expect(eventLogRepo.queryByEntity("workspace", "workspace-after-reopen")).resolves.toHaveLength(1);
   } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (database !== undefined) {
+      trackedDatabases.delete(database);
+      removeTempDirectorySync(tempDir, [database]);
+    }
   }
 });
 

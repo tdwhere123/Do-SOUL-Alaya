@@ -6,6 +6,7 @@ import { MemoryDimension, ScopeClass, StorageTier } from "@do-soul/alaya-protoco
 import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import { prepareMemoryEntryStatements } from "../../../repos/memory-entry/sqlite-memory-entry-statements.js";
+import { removeTempDirectorySync } from "../../temp-directory.js";
 import {
   createMemoryCreatedEventInput,
   createMemoryEntry,
@@ -76,7 +77,8 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(returned).toEqual(entry);
     expect(database.isClosed()).toBe(false);
     await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    databases.delete(database);
+    removeTempDirectorySync(tempDir, [database]);
   });
 
   it("createWithinTransaction rolls back the EventLog row and memory row when the co-write throws", async () => {
@@ -528,7 +530,8 @@ describe("SqliteMemoryEntryRepo", () => {
 
     expect(rows).toEqual([entry]);
     expect(database.isClosed()).toBe(false);
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    databases.delete(database);
+    removeTempDirectorySync(tempDir, [database]);
   });
 
   it("transitionLifecycle reopens a closed file database before starting the transaction", async () => {
@@ -549,7 +552,8 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(transitioned.lifecycle_state).toBe("dormant");
     expect(transitioned.updated_at).toBe("2026-03-22T00:00:00.000Z");
     expect(database.isClosed()).toBe(false);
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    databases.delete(database);
+    removeTempDirectorySync(tempDir, [database]);
   });
 
 });
