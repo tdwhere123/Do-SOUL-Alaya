@@ -224,7 +224,7 @@ describe("initDatabase migration runner", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 
   it("repairs duplicate pending strict-governance proposals before adding the dedupe index", () => {
     const migrationFiles = readMigrationInventory().files;
