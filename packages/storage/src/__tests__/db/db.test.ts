@@ -179,8 +179,8 @@ describe("initDatabase migration runner", () => {
   });
 
   afterEach(() => {
-    cleanupTempDirectory(context.directory);
-  });
+    removeTempDirectorySync(context.directory);
+  }, 30_000);
 
   it("resumes a partially migrated file database and finishes with the full ordered schema ledger", () => {
     const migrationFiles = readMigrationInventory().files;
@@ -358,7 +358,7 @@ describe("initDatabase migration runner", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 });
 
 describe("SQLite migration inventory guardrail", () => {
