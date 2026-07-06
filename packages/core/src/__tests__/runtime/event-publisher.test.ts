@@ -8,10 +8,10 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   EventPublisher,
-  EventPublisherPropagationError,
   type EventPublisherEventLogRepoPort,
   type EventPublisherInput
 } from "../../runtime/event-publisher.js";
+import { firstDefined, requireAt } from "../helpers/defined.js";
 
 describe("EventPublisher", () => {
   it("publishes A1 worker lifecycle events without requiring Phase 0 parsing", async () => {
@@ -230,7 +230,7 @@ describe("EventPublisher", () => {
         previousState: "active"
       })
     });
-    const mutate = vi.fn((entries: readonly EventLogEntry[]) => entries[0]?.event_id);
+    const mutate = vi.fn((entries: readonly EventLogEntry[]) => firstDefined(entries)?.event_id);
     const publisher = new EventPublisher({
       eventLogRepo: createSingleEntryRepo(entry),
       runHotStateService: { apply: vi.fn() },
@@ -245,8 +245,9 @@ describe("EventPublisher", () => {
     expect(mutate).toHaveBeenCalledWith([entry]);
   });
 
-  it("exposes the full durable batch when propagation fails", async () => {
+  it("reports propagation failure for the full durable batch without failing mutation callers", async () => {
     const recorded: string[] = [];
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const entries = [
       createEventLogEntry({
         event_type: "worker.state_changed",
@@ -283,26 +284,19 @@ describe("EventPublisher", () => {
         notify: vi.fn(),
         notifyEntry: vi.fn(async (entry: EventLogEntry) => {
           recorded.push(`notify:${entry.event_id}`);
-          if (entry.event_id === entries[1].event_id) {
+          if (entry.event_id === requireAt(entries, 1).event_id) {
             throw new Error("notify failed");
           }
         })
       }
     });
 
-    const rejection = await publisher
-      .appendManyWithMutation(entries.map(toEventInput), () => {
-        recorded.push("mutate");
-        return "ok";
-      })
-      .catch((error: unknown) => error);
-
-    expect(rejection).toBeInstanceOf(EventPublisherPropagationError);
-    expect(rejection).toMatchObject({
-      name: "EventPublisherPropagationError",
-      entry: entries[1],
-      entries
+    const result = await publisher.appendManyWithMutation(entries.map(toEventInput), () => {
+      recorded.push("mutate");
+      return "ok";
     });
+
+    expect(result).toBe("ok");
     expect(recorded).toEqual([
       "append:evt_worker-1",
       "append:evt_worker-2",
@@ -310,6 +304,50 @@ describe("EventPublisher", () => {
       "notify:evt_worker-1",
       "notify:evt_worker-2"
     ]);
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[EventPublisher] Propagation failed after commit",
+      expect.objectContaining({
+        code: "ALAYA_EVENT_PROPAGATION_FAILED_AFTER_COMMIT"
+      })
+    );
+    emitWarning.mockRestore();
+  });
+
+  it("keeps append-then-apply ordering in mutateThenAppendMany with apply callback", async () => {
+    const recorded: string[] = [];
+    const entry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: {}
+    });
+    const publisher = new EventPublisher({
+      eventLogRepo: createSingleEntryRepo(entry, recorded),
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: {
+        notify: vi.fn(),
+        notifyEntry: vi.fn(async () => {
+          recorded.push("notify");
+        })
+      }
+    });
+
+    const result = await publisher.mutateThenAppendMany(() => {
+      recorded.push("compute");
+      return {
+        events: [toEventInput(entry)],
+        result: "ok",
+        apply: () => {
+          recorded.push("apply");
+        }
+      };
+    });
+
+    expect(result.result).toBe("ok");
+    expect(recorded).toEqual(["compute", "append", "apply", "notify"]);
   });
 });
 

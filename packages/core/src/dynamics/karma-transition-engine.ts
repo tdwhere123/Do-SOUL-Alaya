@@ -103,12 +103,32 @@ export class KarmaTransitionEngine {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-    const { result } = await eventPublisher.mutateThenAppendMany(() => {
+    let appliedResult: KarmaTransitionApplyResult | undefined;
+    await eventPublisher.mutateThenAppendMany(() => {
       const plan = this.computeKarmaTransitionPlanSync(parsedEvent, context);
-      const applied = this.applyKarmaTransitionPlanSync(plan);
-      return { events: this.buildKarmaAuditInputs(applied, plan), result: applied };
+      const dummyApplyResult: KarmaTransitionApplyResult = {
+        updated: {
+          ...plan.memory,
+          activation_score: plan.transition.activationScore,
+          retention_score: plan.transition.retentionScore,
+          manifestation_state: plan.transition.manifestationState,
+          retention_state: plan.transition.retentionState,
+          ...plan.transition.fieldUpdates
+        },
+        revived: plan.transition.previousRetentionState === "dormant" && plan.transition.retentionState === "active"
+      };
+      const events = this.buildKarmaAuditInputs(dummyApplyResult, plan);
+      return {
+        events,
+        result: undefined,
+        apply: () => {
+          appliedResult = this.applyKarmaTransitionPlanSync(plan);
+        }
+      };
     });
-    this.scheduleGreenReevaluation(result.updated);
+    if (appliedResult) {
+      this.scheduleGreenReevaluation(appliedResult.updated);
+    }
   }
 
   public processKarmaEventInCurrentTransaction(

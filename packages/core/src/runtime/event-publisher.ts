@@ -1,5 +1,5 @@
 import { WorkspaceRunEventSchema, type EventLogEntry, type WorkspaceRunEvent } from "@do-soul/alaya-protocol";
-import { scheduleAuditedAsyncSideEffect } from "./async-side-effect-auditor.js";
+import { reportAsyncSideEffectFailure, scheduleAuditedAsyncSideEffect } from "./async-side-effect-auditor.js";
 
 export type EventPublisherInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
@@ -72,8 +72,8 @@ export class EventPublisher {
    *     repos) MUST happen before this call; pass results in via closure.
    *   - Notifications (runHotState + runtimeNotifier) run AFTER the
    *     transaction commits. If notification throws, the rows are already
-   *     durable; the caller receives `EventPublisherPropagationError` and the
-   *     final-listener pattern (existing) handles replay.
+   *     durable; the failure is recorded as a propagation diagnostic so callers
+   *     do not retry the committed mutation.
    */
   public async appendManyWithMutation<T>(
     eventInputs: readonly EventPublisherInput[],
@@ -85,7 +85,7 @@ export class EventPublisher {
       try {
         await this.propagate(entry);
       } catch (propagateError) {
-        throw new EventPublisherPropagationError(entry, propagateError, entries);
+        await this.reportPostCommitPropagationFailure(entry, propagateError, entries);
       }
     }
 
@@ -104,11 +104,15 @@ export class EventPublisher {
    * Constraints mirror appendManyWithMutation: `mutate` MUST be synchronous, and
    * async preparation must happen before this call. If the mutation or an append
    * throws, the transaction rolls back and nothing is persisted (no half-commit).
-   * Propagation runs after commit; a propagation failure surfaces as
-   * `EventPublisherPropagationError` but leaves the durable rows in place.
+   * Propagation runs after commit; a propagation failure is diagnostic-only
+   * because the durable rows are already committed.
    */
   public async mutateThenAppendMany<T>(
-    mutate: () => { readonly events: readonly EventPublisherInput[]; readonly result: T }
+    mutate: () => {
+      readonly events: readonly EventPublisherInput[];
+      readonly result: T;
+      apply?(): void;
+    }
   ): Promise<{ readonly result: T; readonly entries: readonly EventLogEntry[] }> {
     const repo = this.dependencies.eventLogRepo;
     const { entries, result } = repo.transactional<{
@@ -121,6 +125,9 @@ export class EventPublisher {
       for (const input of produced.events) {
         collected.push(repo.append(input));
       }
+      if (produced.apply) {
+        produced.apply();
+      }
       return { entries: collected, result: produced.result };
     });
 
@@ -128,7 +135,7 @@ export class EventPublisher {
       try {
         await this.propagate(entry);
       } catch (propagateError) {
-        throw new EventPublisherPropagationError(entry, propagateError, entries);
+        await this.reportPostCommitPropagationFailure(entry, propagateError, entries);
       }
     }
 
@@ -233,6 +240,31 @@ export class EventPublisher {
 
     // notifyEntry handles both run-scoped and workspace-scoped in-process listeners.
     await this.dependencies.runtimeNotifier.notifyEntry(entry);
+  }
+
+  private async reportPostCommitPropagationFailure(
+    entry: EventLogEntry,
+    error: unknown,
+    entries: readonly EventLogEntry[]
+  ): Promise<void> {
+    await reportAsyncSideEffectFailure(
+      {
+        source: "EventPublisher",
+        operation: "post_commit_propagation",
+        subjectType: entry.entity_type,
+        subjectId: entry.entity_id,
+        workspaceId: entry.workspace_id,
+        runId: entry.run_id,
+        causedBy: entry.caused_by,
+        committedEventId: entry.event_id,
+        severity: "warning",
+        warningCode: "ALAYA_EVENT_PROPAGATION_FAILED_AFTER_COMMIT",
+        warningMessage: "[EventPublisher] Propagation failed after commit",
+        eventLogRepo: this.dependencies.eventLogRepo,
+        runtimeNotifier: this.dependencies.runtimeNotifier
+      },
+      new EventPublisherPropagationError(entry, error, entries)
+    );
   }
 }
 

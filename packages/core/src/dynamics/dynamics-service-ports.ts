@@ -51,7 +51,11 @@ export type DynamicsEventLogInput = Omit<EventLogEntry, "event_id" | "created_at
 // failed append or mutation rolls the whole thing back — no half-commit.
 export interface KarmaTransitionEventPublisherPort {
   mutateThenAppendMany<T>(
-    mutate: () => { readonly events: readonly DynamicsEventLogInput[]; readonly result: T }
+    mutate: () => {
+      readonly events: readonly DynamicsEventLogInput[];
+      readonly result: T;
+      apply?(): void;
+    }
   ): Promise<{ readonly result: T; readonly entries: readonly EventLogEntry[] }>;
 }
 
