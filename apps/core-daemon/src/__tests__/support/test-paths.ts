@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export function toPosixPath(value: string): string {
   return value.split(path.sep).join("/");
@@ -27,4 +28,15 @@ export function fixturePath(...segments: string[]): string {
 
 export function quoteTomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+export function fileModuleUrl(...segmentsFromCoreDaemon: string[]): string {
+  const modulePath = path.resolve(
+    path.parse(process.cwd()).root,
+    "workspace",
+    "apps",
+    "core-daemon",
+    ...segmentsFromCoreDaemon
+  );
+  return pathToFileURL(modulePath).href;
 }

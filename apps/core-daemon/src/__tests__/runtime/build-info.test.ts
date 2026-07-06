@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readBuildInfo, readRuntimeVersion } from "../../runtime/build-info.js";
-import { pathEndsWithPosixSegments } from "../support/test-paths.js";
+import { fileModuleUrl, pathEndsWithPosixSegments } from "../support/test-paths.js";
 
 describe("build info", () => {
   it("falls back to package metadata when no built build-info.json is available", () => {
     expect(
       readRuntimeVersion({
-        moduleUrl: "file:///workspace/apps/core-daemon/src/runtime/build-info.ts",
+        moduleUrl: fileModuleUrl("src", "runtime", "build-info.ts"),
         readFile: (path) => {
           if (pathEndsWithPosixSegments(path, "apps", "core-daemon", "package.json")) {
             return JSON.stringify({ version: "0.3.11" });
@@ -20,7 +20,7 @@ describe("build info", () => {
   it("reads dist/build-info.json from the built runtime path", () => {
     expect(
       readBuildInfo({
-        moduleUrl: "file:///workspace/apps/core-daemon/dist/runtime/build-info.js",
+        moduleUrl: fileModuleUrl("dist", "runtime", "build-info.js"),
         readFile: (path) => {
           if (pathEndsWithPosixSegments(path, "apps", "core-daemon", "dist", "build-info.json")) {
             return JSON.stringify({
@@ -42,7 +42,7 @@ describe("build info", () => {
   it("rejects non-object JSON payloads at the external parse boundary", () => {
     expect(
       readBuildInfo({
-        moduleUrl: "file:///workspace/apps/core-daemon/dist/runtime/build-info.js",
+        moduleUrl: fileModuleUrl("dist", "runtime", "build-info.js"),
         readFile: (path) => {
           if (pathEndsWithPosixSegments(path, "apps", "core-daemon", "dist", "build-info.json")) {
             return "[]";

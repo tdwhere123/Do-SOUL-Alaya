@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveStoredFilePath } from "@do-soul/alaya-core";
 import { CoreError } from "@do-soul/alaya-core";
 import {
   initDatabase,
@@ -418,7 +419,7 @@ describe("files download route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/plain");
     expect(await response.text()).toBe("hello world");
-    expect(mockedReadFile).toHaveBeenCalledWith(path.join(FILES_DIR, "file-1.txt"));
+    expect(mockedReadFile).toHaveBeenCalledWith(resolveStoredFilePath(FILES_DIR, "file-1.txt"));
   });
 
   it("maps ENOENT read failures to 404", async () => {

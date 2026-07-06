@@ -7,6 +7,9 @@ import { CoreError } from "@do-soul/alaya-core";
 export async function ensurePrivateDirectory(directoryPath: string): Promise<void> {
   await mkdir(directoryPath, { recursive: true, mode: 0o700 });
   const stats = await lstat(directoryPath);
+  if (stats.isSymbolicLink()) {
+    throw new CoreError("CONFLICT", `Private config path is not a directory: ${directoryPath}`);
+  }
   if (!stats.isDirectory()) {
     throw new CoreError("CONFLICT", `Private config path is not a directory: ${directoryPath}`);
   }
@@ -21,6 +24,7 @@ export async function writePrivateTextAtomic(
 ): Promise<void> {
   await ensurePrivateDirectory(path.dirname(filePath));
   const tempPath = `${filePath}.${generateTempId()}.tmp`;
+  await assertWritableRegularFilePath(tempPath);
   const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
   const handle = await open(
     tempPath,
@@ -61,4 +65,21 @@ export async function syncDirectory(directoryPath: string): Promise<void> {
 
 export function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
+}
+
+async function assertWritableRegularFilePath(filePath: string): Promise<void> {
+  try {
+    const stats = await lstat(filePath);
+    if (stats.isSymbolicLink()) {
+      throw new CoreError("CONFLICT", `Refusing to write through symlink: ${filePath}`);
+    }
+    if (!stats.isFile()) {
+      throw new CoreError("CONFLICT", `Refusing to write through non-file path: ${filePath}`);
+    }
+  } catch (error) {
+    if (isNodeErrorWithCode(error, "ENOENT")) {
+      return;
+    }
+    throw error;
+  }
 }

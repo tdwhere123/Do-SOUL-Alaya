@@ -8,7 +8,8 @@ export const REPO_LAYOUT_ROOT = path.join(os.tmpdir(), "Do SOUL Alaya");
 export function createProfileTestEnv(home: string = PROFILE_TEST_HOME): NodeJS.ProcessEnv {
   return {
     HOME: home,
-    USERPROFILE: home
+    USERPROFILE: home,
+    CODEX_HOME: path.join(home, ".codex")
   };
 }
 
@@ -75,5 +76,6 @@ export function expectedInstalledPackageSlashCommand(): string {
 }
 
 export function slashCommandContainsAlayaBin(content: string): boolean {
-  return toPosixPath(content).includes("bin/alaya.mjs");
+  const normalized = content.replace(/\\\\/g, "\\");
+  return /[/\\]bin[/\\]alaya\.mjs/i.test(normalized);
 }

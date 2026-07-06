@@ -372,8 +372,11 @@ describe("routes-config port batch", () => {
   it("uses exclusive temp files so a pre-existing temp symlink blocks secret writes", async () => {
     const harness = await createServiceHarness({ tempIds: ["fixed"] });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
+    const tempPath = `${secretPath}.fixed.tmp`;
+    const symlinkTarget = path.join(tmpdir(), "alaya-secret-target");
     await mkdir(harness.paths.secretsDir, { recursive: true, mode: 0o700 });
-    await symlink(path.join(tmpdir(), "alaya-secret-target"), `${secretPath}.fixed.tmp`);
+    await writeFile(symlinkTarget, "leaked-secret\n", { mode: 0o600 });
+    await symlink(symlinkTarget, tempPath, "file");
 
     await expect(
       applyRuntimeEmbeddingConfigFiles({
