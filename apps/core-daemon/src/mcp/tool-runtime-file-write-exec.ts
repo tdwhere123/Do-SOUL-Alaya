@@ -4,6 +4,7 @@ import {
   open,
   readFile as fsReadFile,
   realpath,
+  unlink,
   writeFile as fsWriteFile,
   type FileHandle
 } from "node:fs/promises";
@@ -57,9 +58,10 @@ export async function writeFile(
     return createFileToolError("WRITE_ERROR", `Parent path is not a directory: ${parentDirectory}`);
   }
 
+  let realWritableRoots: readonly string[];
   try {
     const realParentDirectory = await realpath(parentDirectory);
-    const realWritableRoots = await resolveRealWritableRoots(writableRoots);
+    realWritableRoots = await resolveRealWritableRoots(writableRoots);
 
     if (!realWritableRoots.some((root) => isPathWithinRoot(realParentDirectory, root))) {
       return createAccessDenied("Path is outside the workspace boundary.");
@@ -68,14 +70,53 @@ export async function writeFile(
     return mapFileSystemError(error, parentDirectory, "WRITE_ERROR");
   }
 
+  let handle: FileHandle | undefined;
+  let newlyCreated = false;
   try {
     const buffer = Buffer.from(input.content, "utf8");
-    await fsWriteFile(containedPath.resolvedPath, buffer);
+    if (entry.ok) {
+      // File already exists: open without O_CREAT
+      handle = await open(
+        containedPath.resolvedPath,
+        constants.O_RDWR | constants.O_NOFOLLOW,
+        0o666
+      );
+    } else {
+      // File does not exist: open with O_CREAT | O_EXCL
+      handle = await open(
+        containedPath.resolvedPath,
+        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o666
+      );
+      newlyCreated = true;
+    }
+
+    const resolvedPath = await realpath(containedPath.resolvedPath);
+    if (!realWritableRoots.some((root) => isPathWithinRoot(resolvedPath, root))) {
+      await handle.close();
+      handle = undefined;
+      if (newlyCreated) {
+        await unlink(containedPath.resolvedPath).catch(() => undefined);
+      }
+      return createAccessDenied("Path is outside the workspace boundary.");
+    }
+
+    await handle.truncate(0);
+    await handle.write(buffer, 0, buffer.length, 0);
+    await handle.close();
+    handle = undefined;
+
     return {
       ok: true,
       bytesWritten: buffer.byteLength
     };
   } catch (error) {
+    if (handle) {
+      await handle.close().catch(() => undefined);
+    }
+    if (newlyCreated) {
+      await unlink(containedPath.resolvedPath).catch(() => undefined);
+    }
     return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
   }
 }
