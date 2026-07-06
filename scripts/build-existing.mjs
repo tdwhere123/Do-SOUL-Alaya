@@ -83,7 +83,7 @@ if (existsSync(join(inspectorWebDir, "package.json"))) {
   const inspectorWebBuild = spawnSync(
     "pnpm",
     ["--dir", inspectorWebDir, "build"],
-    { stdio: "inherit" },
+    { stdio: "inherit", shell: process.platform === "win32" },
   );
   if (inspectorWebBuild.status !== 0) {
     process.exit(inspectorWebBuild.status ?? 1);

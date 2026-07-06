@@ -64,6 +64,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install ripgrep for hygiene guards
+        if: ${{ matrix.run_hygiene && runner.os == 'Linux' }}
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Typecheck
         run: pnpm run --if-present typecheck
 
