@@ -23,15 +23,31 @@ type RankedKeywordSearchResult = Readonly<
   MemoryEntryKeywordSearchResult & { readonly sourcePriority: number; readonly sourceOrder: number }
 >;
 
+export type ObjectIdFilterColumn =
+  | "memory_entries.object_id"
+  | "memory_content_fts.object_id"
+  | "memory_content_fts_porter.object_id";
+
+const OBJECT_ID_FILTER_COLUMNS: Readonly<Record<ObjectIdFilterColumn, string>> = Object.freeze({
+  "memory_entries.object_id": "object_id",
+  "memory_content_fts.object_id": "memory_content_fts.object_id",
+  "memory_content_fts_porter.object_id": "memory_content_fts_porter.object_id"
+});
+
 export function buildObjectIdFilterSql(
   objectIds: readonly string[] | undefined,
-  columnName = "object_id"
+  column: ObjectIdFilterColumn = "memory_entries.object_id"
 ): Readonly<{ sql: string; params: readonly string[] }> {
   if (objectIds === undefined || objectIds.length === 0) {
     return Object.freeze({
       sql: "",
       params: []
     });
+  }
+
+  const columnName = OBJECT_ID_FILTER_COLUMNS[column];
+  if (columnName === undefined) {
+    throw new Error(`Invalid object ID filter column: ${column}`);
   }
 
   return Object.freeze({
