@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { createInstallCommand } from "../../cli/install.js";
 import { readSecretLine } from "../../cli/install/masked-stdin.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
+import { supportsPosixFileModeAssertions } from "../support/test-paths.js";
 
 describe("cli install", () => {
   it("parses keychain install flags without accepting secret material in argv", () => {
@@ -119,7 +120,8 @@ describe("cli install", () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-"));
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock()
+      clock: createClock(),
+      platform: "linux"
     });
 
     const result = await command.handler(createContext(), {
@@ -152,7 +154,9 @@ describe("cli install", () => {
     expect(env).toContain("OPENAI_EMBEDDING_MODEL=text-embedding-3-large");
     expect(env).not.toContain("sk-test-secret");
     expect(secret.trim()).toBe("sk-test-secret");
-    expect(secretStat.mode & 0o777).toBe(0o600);
+    if (supportsPosixFileModeAssertions()) {
+      expect(secretStat.mode & 0o777).toBe(0o600);
+    }
     expect(auditFiles).toHaveLength(1);
     const audit = JSON.parse(await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")) as {
       status: string;
@@ -172,7 +176,8 @@ describe("cli install", () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-idempotent-"));
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock()
+      clock: createClock(),
+      platform: "linux"
     });
     const answers = {
       embedding_enabled: true,
@@ -205,7 +210,8 @@ describe("cli install", () => {
     await symlink(leakDir, path.join(configDir, "secrets"));
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock()
+      clock: createClock(),
+      platform: "linux"
     });
 
     const result = await command.handler(createContext(), {
@@ -231,7 +237,8 @@ describe("cli install", () => {
     await symlink(leakDir, configDir);
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock()
+      clock: createClock(),
+      platform: "linux"
     });
 
     const result = await command.handler(createContext(), {

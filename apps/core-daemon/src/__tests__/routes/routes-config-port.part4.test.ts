@@ -317,7 +317,7 @@ describe("routes-config port batch", () => {
   });
 
   it("serializes same-path paste writes without exposing plaintext in responses", async () => {
-    const harness = await createServiceHarness();
+    const harness = await createServiceHarness({ platform: "linux" });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
 
     const [first, second] = await Promise.all([

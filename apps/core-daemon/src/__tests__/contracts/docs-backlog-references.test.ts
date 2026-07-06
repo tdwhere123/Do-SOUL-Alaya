@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { toPosixPath } from "../support/test-paths.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(currentDirectory, "../../../../..");
@@ -81,7 +82,7 @@ function findBacklogReferences(issueId: string): Array<{ file: string; line: str
 function findDocLines(predicate: (line: string) => boolean): Array<{ file: string; line: string }> {
   return listMarkdownFiles(docsRoot)
     .flatMap((filePath) => {
-      const relativePath = path.relative(repositoryRoot, filePath);
+      const relativePath = toPosixPath(path.relative(repositoryRoot, filePath));
       return readFileSync(filePath, "utf8")
         .split(/\r?\n/u)
         .filter(predicate)

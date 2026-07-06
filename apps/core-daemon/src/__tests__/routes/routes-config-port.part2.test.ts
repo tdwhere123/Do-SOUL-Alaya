@@ -32,6 +32,7 @@ import { createConfigService } from "../../services/config-service.js";
 import { applyRuntimeEmbeddingConfigFiles } from "../../services/env-file-service.js";
 
 import { resolveAlayaConfigPaths, type AlayaConfigPaths } from "../../cli/config-files.js";
+import { supportsPosixFileModeAssertions } from "../support/test-paths.js";
 
 async function createServiceHarness(options: {
   readonly platform?: NodeJS.Platform;
@@ -221,7 +222,7 @@ describe("routes-config port batch", () => {
   });
 
   it("normalizes paste mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
-    const harness = await createServiceHarness();
+    const harness = await createServiceHarness({ platform: "linux" });
     const plaintext = "sk-test-plaintext-secret";
     const secretPath = path.join(harness.paths.secretsDir, "openai");
 
@@ -238,8 +239,10 @@ describe("routes-config port batch", () => {
       model_id: "text-embedding-3-small"
     });
     await expect(readFile(secretPath, "utf8")).resolves.toBe(`${plaintext}\n`);
-    expect(((await stat(harness.paths.secretsDir)).mode & 0o777)).toBe(0o700);
-    expect(((await stat(secretPath)).mode & 0o777)).toBe(0o600);
+    if (supportsPosixFileModeAssertions()) {
+      expect(((await stat(harness.paths.secretsDir)).mode & 0o777)).toBe(0o700);
+      expect(((await stat(secretPath)).mode & 0o777)).toBe(0o600);
+    }
 
     const env = await readFile(harness.paths.envPath, "utf8");
     expect(env).toContain(`ALAYA_OPENAI_SECRET_REF=file:${secretPath}`);
@@ -272,7 +275,8 @@ describe("routes-config port batch", () => {
         }),
         configPathsProvider: () => paths,
         clock: () => "2026-05-01T00:00:00.000Z",
-        generateAuditId: () => "audit-live"
+        generateAuditId: () => "audit-live",
+        platform: "linux"
       });
       const app = new Hono();
       const plaintext = "sk-live-route-secret";
@@ -376,7 +380,7 @@ describe("routes-config port batch", () => {
   });
 
   it("uses exclusive temp files so a pre-existing temp symlink blocks secret writes", async () => {
-    const harness = await createServiceHarness({ tempIds: ["fixed"] });
+    const harness = await createServiceHarness({ tempIds: ["fixed"], platform: "linux" });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
     await mkdir(harness.paths.secretsDir, { recursive: true, mode: 0o700 });
     await symlink("/tmp/alaya-secret-target", `${secretPath}.fixed.tmp`);

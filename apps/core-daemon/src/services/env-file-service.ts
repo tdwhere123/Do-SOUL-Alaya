@@ -1,5 +1,6 @@
 import path from "node:path";
 import { CoreError } from "@do-soul/alaya-core";
+import { assertPasteSecretSupported } from "./paste-secret-platform.js";
 import {
   parseSecretRefKeychainTarget,
   type RuntimeEmbeddingConfig,
@@ -238,9 +239,7 @@ function normalizePastedSecretRef<TNormalized extends { secret_ref?: string | nu
   readonly platform: NodeJS.Platform;
   readonly secretPath: string;
 }): Readonly<{ readonly patch: TNormalized; readonly pastedSecret: PastedSecret }> {
-  if (input.platform === "win32") {
-    throw new CoreError("VALIDATION", "paste mode is not supported on win32");
-  }
+  assertPasteSecretSupported(input.platform);
   input.normalized.secret_ref = `file:${input.secretPath}`;
   return {
     patch: input.normalized,

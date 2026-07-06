@@ -98,11 +98,13 @@ async function assertBuiltCliAvailable(): Promise<void> {
 }
 
 function createBuiltCliEnv(tempRoot: string): NodeJS.ProcessEnv {
+  const home = join(tempRoot, "home");
   return {
     ...process.env,
     ALAYA_CONFIG_DIR: join(tempRoot, "config"),
     DATA_DIR: join(tempRoot, "data"),
-    HOME: join(tempRoot, "home"),
+    HOME: home,
+    ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
     CODEX_HOME: join(tempRoot, "codex-home"),
     ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false"
   };

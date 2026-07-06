@@ -5,6 +5,9 @@ import type {
   ProfileMutationAuditWriter,
   ProfileMutationFs
 } from "../../attach/profile-mutation.js";
+import { createProfileTestEnv } from "../support/profile-test-home.js";
+import path from "node:path";
+import os from "node:os";
 
 export class MemoryProfileFs implements ProfileMutationFs {
   public readonly files = new Map<string, string>();
@@ -35,10 +38,10 @@ export class MemoryProfileAuditWriter implements ProfileMutationAuditWriter {
 }
 
 export function createProfileCommandContext(
-  env: NodeJS.ProcessEnv = { HOME: "/tmp/home" }
+  env: NodeJS.ProcessEnv = createProfileTestEnv()
 ): AlayaCliContext {
   return {
-    cwd: "/tmp",
+    cwd: path.join(os.tmpdir(), "alaya-profile-cwd"),
     env,
     argv: [],
     stdin: new PassThrough(),

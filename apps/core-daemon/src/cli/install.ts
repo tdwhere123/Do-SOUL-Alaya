@@ -21,6 +21,7 @@ import {
   ensurePrivateDirectory,
   writePrivateTextAtomic
 } from "../services/private-file-service.js";
+import { assertPasteSecretSupported } from "../services/paste-secret-platform.js";
 import { executeKeychainInstall } from "./install/keychain-install.js";
 import {
   GARDEN_PROVIDER_KIND_ENV,
@@ -326,7 +327,7 @@ async function runNonInteractiveInstall(
       error: null
     });
     auditInitialized = true;
-    await applyInstallConfig(args.answers!, session.paths, partialState);
+    await applyInstallConfig(args.answers!, session.paths, partialState, deps.platform ?? process.platform);
     await finalizeInstallSuccess(ctx, session, partialState);
     return buildInstallSuccessResult(session.paths, session.auditPath);
   } catch (error) {
@@ -372,11 +373,12 @@ async function prepareInstallSession(
 async function applyInstallConfig(
   answers: InstallAnswers,
   paths: AlayaConfigPaths,
-  partialState: PartialStateEntry[]
+  partialState: PartialStateEntry[],
+  platform: NodeJS.Platform
 ): Promise<void> {
   const existing = await readExistingInstallConfig(paths);
   const resolved = resolveInstallAnswers(answers, existing, paths);
-  await persistPastedSecret(paths, resolved.pasted_secret, partialState);
+  await persistPastedSecret(paths, resolved.pasted_secret, partialState, platform);
   await persistInstallTextFiles(paths, resolved, partialState);
   await ensureSchemaReady(resolved.db_path);
 }
@@ -384,11 +386,13 @@ async function applyInstallConfig(
 async function persistPastedSecret(
   paths: AlayaConfigPaths,
   pastedSecret: ResolvedInstallConfig["pasted_secret"],
-  partialState: PartialStateEntry[]
+  partialState: PartialStateEntry[],
+  platform: NodeJS.Platform
 ): Promise<void> {
   if (pastedSecret === null) {
     return;
   }
+  assertPasteSecretSupported(platform);
   await ensurePrivateDirectory(paths.secretsDir);
   const secretBefore = await readOptional(pastedSecret.path);
   await writePrivateTextAtomic(pastedSecret.path, `${pastedSecret.value.trimEnd()}\n`, 0o600);

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { beforeAll, describe, expect, it } from "vitest";
 import { SynthesisStatus } from "@do-soul/alaya-protocol";
@@ -175,7 +175,7 @@ describe("RecallReadWorkerClient", () => {
     );
     const client = createRecallReadWorkerClient({
       databaseFilename: join(directory, "alaya.db"),
-      workerUrl: new URL(`file://${workerPath}`),
+      workerUrl: pathToFileURL(workerPath),
       requestTimeoutMs: 5
     });
 
@@ -209,7 +209,7 @@ describe("RecallReadWorkerClient", () => {
     );
     const client = createRecallReadWorkerClient({
       databaseFilename: join(directory, "alaya.db"),
-      workerUrl: new URL(`file://${workerPath}`),
+      workerUrl: pathToFileURL(workerPath),
       requestTimeoutMs: 5
     });
 

@@ -150,7 +150,7 @@ function createDeferred<T>(): {
 describe("routes-config port batch", () => {
 
   it("rejects a symlinked secrets directory before writing pasted plaintext", async () => {
-    const harness = await createServiceHarness();
+    const harness = await createServiceHarness({ platform: "linux" });
     const leakDir = await mkdtemp(path.join(tmpdir(), "daemon-secret-leak-"));
     await symlink(leakDir, harness.paths.secretsDir);
 
@@ -212,7 +212,8 @@ describe("routes-config port batch", () => {
       repo: {
         ...failingRepo,
         patchParsed
-      }
+      },
+      platform: "linux"
     });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
 
@@ -240,7 +241,7 @@ describe("routes-config port batch", () => {
     const firstPublishStarted = createDeferred<void>();
     const firstPublishCanFail = createDeferred<void>();
     let publishCalls = 0;
-    const harness = await createServiceHarness({ repo: backingRepo });
+    const harness = await createServiceHarness({ repo: backingRepo, platform: "linux" });
     const realAppend = (
       harness.appendManyWithMutation.getMockImplementation()! as (...args: unknown[]) => unknown
     ).bind(harness.appendManyWithMutation);
