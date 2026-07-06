@@ -12,6 +12,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { quoteTomlString } from "../support/test-paths.js";
+
 import {
   FormationKind,
   HealthEventKind,
@@ -390,7 +392,7 @@ describe("P5 v0.1 release loop E2E", () => {
           ...backupBundle,
           config: {
             ...backupBundle.config,
-            alaya_toml: `[storage]\ndb_path = "${hostileDbPath}"\n`
+            alaya_toml: `[storage]\ndb_path = ${quoteTomlString(hostileDbPath)}\n`
           },
           storage: {
             ...backupBundle.storage,

@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
   RuntimeGardenProviderKindSchema,
+  formatFileSecretRef,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import { initDatabase } from "@do-soul/alaya-storage";
@@ -212,10 +213,10 @@ function resolveInstallSecretRef(
   pastedSecret: ResolvedInstallConfig["pasted_secret"]
 ): string | null {
   if (pastedSecret !== null) {
-    return `file:${pastedSecret.path}`;
+    return formatFileSecretRef(pastedSecret.path);
   }
   if (answers.api_key_source === "file") {
-    return `file:${path.resolve(requireNonEmpty(answers.key_file_path, "key_file_path"))}`;
+    return formatFileSecretRef(path.resolve(requireNonEmpty(answers.key_file_path, "key_file_path")));
   }
   if (answers.api_key_source === "env" || existing.secret_ref === null) {
     return `env:${requireNonEmpty(answers.env_var_name ?? "OPENAI_API_KEY", "env_var_name")}`;

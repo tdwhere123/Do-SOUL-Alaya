@@ -1,4 +1,6 @@
 import { PassThrough } from "node:stream";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../../cli/tools.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
@@ -10,6 +12,7 @@ import {
   context as realHandlerContext,
   createDeps
 } from "../mcp-memory/mcp-memory-tool-handler-fixture.js";
+import { fixturePath } from "../support/test-paths.js";
 
 // Parity runs through one real handler (createMcpMemoryToolHandler over the
 // in-memory fixture) so CLI arg-marshalling drift vs the MCP request shape fails
@@ -140,6 +143,7 @@ describe("alaya tools", () => {
   });
 
   it("defaults tools calls to a registered cwd-derived local workspace", async () => {
+    const projectRoot = path.resolve(fixturePath("alaya-project"));
     let observedWorkspaceId: string | null = null;
     const ensureLocalWorkspace = vi.fn(async () => undefined);
     const command = createToolsCommand({
@@ -164,14 +168,14 @@ describe("alaya tools", () => {
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
 
-    const result = await command.handler(createContext({ cwd: "/tmp/alaya-project" }), parsed.data);
+    const result = await command.handler(createContext({ cwd: projectRoot }), parsed.data);
 
     expect(result.exitCode).toBe(0);
     expect(observedWorkspaceId).toMatch(/^local_[a-f0-9]{16}$/);
     expect(ensureLocalWorkspace).toHaveBeenCalledWith({
       workspaceId: observedWorkspaceId,
       name: "alaya-project",
-      rootPath: "/tmp/alaya-project"
+      rootPath: projectRoot
     });
   });
 
@@ -192,7 +196,10 @@ describe("alaya tools", () => {
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
 
-    const result = await command.handler(createContext({ cwd: "/tmp/alaya-project" }), parsed.data);
+    const result = await command.handler(
+      createContext({ cwd: path.resolve(fixturePath("alaya-project")) }),
+      parsed.data
+    );
 
     expect(result.exitCode).toBe(0);
     expect(ensureLocalWorkspace).not.toHaveBeenCalled();

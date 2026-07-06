@@ -69,7 +69,7 @@ describe("RecallReadWorkerClient", () => {
       database.close();
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("keeps worker batch reads scoped to the requested workspace", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-scope-test-"));

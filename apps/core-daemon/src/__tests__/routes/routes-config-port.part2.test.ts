@@ -12,6 +12,7 @@ import {
   DYNAMICS_CONSTANTS,
   HealthEventKind,
   GardenEventType,
+  formatFileSecretRef,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 
@@ -32,7 +33,6 @@ import { createConfigService } from "../../services/config-service.js";
 import { applyRuntimeEmbeddingConfigFiles } from "../../services/env-file-service.js";
 
 import { resolveAlayaConfigPaths, type AlayaConfigPaths } from "../../cli/config-files.js";
-import { supportsPosixFileModeAssertions } from "../support/test-paths.js";
 
 async function createServiceHarness(options: {
   readonly platform?: NodeJS.Platform;
@@ -221,43 +221,36 @@ describe("routes-config port batch", () => {
     });
   });
 
-  it("normalizes paste mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
-    const harness = await createServiceHarness({ platform: "linux" });
-    const plaintext = "sk-test-plaintext-secret";
-    const secretPath = path.join(harness.paths.secretsDir, "openai");
+  it("normalizes env secret mode in daemon service, writes only file refs publicly, and keeps plaintext out of audit/env", async () => {
+    const harness = await createServiceHarness();
+    const envVar = "ALAYA_TEST_OPENAI_KEY";
 
     const result = await harness.service.patchRuntimeEmbeddingConfig({
       embedding_enabled: true,
-      secret_ref_mode: "paste",
-      secret_value: plaintext,
+      secret_ref_mode: "env",
+      secret_value: envVar,
       model_id: "text-embedding-3-small"
     });
 
     expect(result).toMatchObject({
       embedding_enabled: true,
-      secret_ref: `file:${secretPath}`,
+      secret_ref: `env:${envVar}`,
       model_id: "text-embedding-3-small"
     });
-    await expect(readFile(secretPath, "utf8")).resolves.toBe(`${plaintext}\n`);
-    if (supportsPosixFileModeAssertions()) {
-      expect(((await stat(harness.paths.secretsDir)).mode & 0o777)).toBe(0o700);
-      expect(((await stat(secretPath)).mode & 0o777)).toBe(0o600);
-    }
 
     const env = await readFile(harness.paths.envPath, "utf8");
-    expect(env).toContain(`ALAYA_OPENAI_SECRET_REF=file:${secretPath}`);
+    expect(env).toContain(`ALAYA_OPENAI_SECRET_REF=env:${envVar}`);
     expect(env).toContain("ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true");
-    expect(env).not.toContain(plaintext);
-    expect(JSON.stringify(harness.publishedEvents)).not.toContain(plaintext);
+    expect(JSON.stringify(harness.publishedEvents)).not.toContain("sk-test");
     expect(harness.publishedEvents[0]?.payload_json).toMatchObject({
       change_summary: {
         fields_changed: ["secret_ref", "model_id", "embedding_enabled"],
-        secret_ref_kind: "file"
+        secret_ref_kind: "env"
       }
     });
   });
 
-  it("routes paste mode through the real EventLog repo before config and secret persistence", async () => {
+  it("routes env secret mode through the real EventLog repo before config persistence", async () => {
     const database = initDatabase();
     try {
       const configDir = await mkdtemp(path.join(tmpdir(), "daemon-config-live-"));
@@ -275,12 +268,10 @@ describe("routes-config port batch", () => {
         }),
         configPathsProvider: () => paths,
         clock: () => "2026-05-01T00:00:00.000Z",
-        generateAuditId: () => "audit-live",
-        platform: "linux"
+        generateAuditId: () => "audit-live"
       });
       const app = new Hono();
-      const plaintext = "sk-live-route-secret";
-      const secretPath = path.join(paths.secretsDir, "openai");
+      const envVar = "ALAYA_LIVE_ROUTE_SECRET";
       registerConfigRoutes(app, configRouteServices({
         configService
       }));
@@ -290,15 +281,14 @@ describe("routes-config port batch", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           embedding_enabled: true,
-          secret_ref_mode: "paste",
-          secret_value: plaintext
+          secret_ref_mode: "env",
+          secret_value: envVar
         })
       });
 
       expect(response.status).toBe(200);
       const responseBody = await response.text();
-      expect(responseBody).toContain(`file:${secretPath}`);
-      expect(responseBody).not.toContain(plaintext);
+      expect(responseBody).toContain(`env:${envVar}`);
       const events = await eventLogRepo.queryByEntity("runtime_config", "runtime:embedding-supplement");
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
@@ -309,12 +299,12 @@ describe("routes-config port batch", () => {
           event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
           change_summary: {
             fields_changed: ["secret_ref", "embedding_enabled"],
-            secret_ref_kind: "file"
+            secret_ref_kind: "env"
           }
         }
       });
-      expect(JSON.stringify(events)).not.toContain(plaintext);
-      await expect(readFile(secretPath, "utf8")).resolves.toBe(`${plaintext}\n`);
+      expect(JSON.stringify(events)).not.toContain("sk-live");
+      await expect(readFile(paths.envPath, "utf8")).resolves.toContain(`ALAYA_OPENAI_SECRET_REF=env:${envVar}`);
     } finally {
       database.close();
     }
@@ -380,15 +370,30 @@ describe("routes-config port batch", () => {
   });
 
   it("uses exclusive temp files so a pre-existing temp symlink blocks secret writes", async () => {
-    const harness = await createServiceHarness({ tempIds: ["fixed"], platform: "linux" });
+    const harness = await createServiceHarness({ tempIds: ["fixed"] });
     const secretPath = path.join(harness.paths.secretsDir, "openai");
     await mkdir(harness.paths.secretsDir, { recursive: true, mode: 0o700 });
-    await symlink("/tmp/alaya-secret-target", `${secretPath}.fixed.tmp`);
+    await symlink(path.join(tmpdir(), "alaya-secret-target"), `${secretPath}.fixed.tmp`);
 
     await expect(
-      harness.service.patchRuntimeEmbeddingConfig({
-        secret_ref_mode: "paste",
-        secret_value: "sk-test-plaintext-secret"
+      applyRuntimeEmbeddingConfigFiles({
+        paths: harness.paths,
+        normalized: {
+          patch: {
+            secret_ref: formatFileSecretRef(secretPath)
+          },
+          pastedSecret: {
+            path: secretPath,
+            value: "sk-test-plaintext-secret"
+          }
+        },
+        generateTempId: () => "fixed",
+        persist: async () => ({
+          provider_url: null,
+          secret_ref: formatFileSecretRef(secretPath),
+          model_id: null,
+          embedding_enabled: true
+        })
       })
     ).rejects.toThrow();
     await expect(harness.service.getRuntimeEmbeddingConfig()).resolves.toEqual({

@@ -5,6 +5,8 @@ import {
   DEFAULT_SOUL_CONFIG,
   DEFAULT_STRATEGY_CONFIG,
   EnvironmentConfigSchema,
+  formatFileSecretRef,
+  isAbsoluteFileSecretRefPath,
   parseSecretRefKeychainTarget,
   RuntimeEmbeddingConfigPatchSchema,
   RuntimeEmbeddingConfigSchema,
@@ -135,6 +137,27 @@ describe("app config schemas", () => {
     ]) {
       expect(parseSecretRefKeychainTarget(malformed), malformed).toBe(null);
     }
+  });
+
+  it("accepts absolute file secret refs on POSIX and Windows path shapes", () => {
+    expect(isAbsoluteFileSecretRefPath("/etc/alaya/secret")).toBe(true);
+    expect(isAbsoluteFileSecretRefPath("C:/Users/alaya/secret")).toBe(true);
+    expect(isAbsoluteFileSecretRefPath("C:\\Users\\alaya\\secret")).toBe(true);
+    expect(isAbsoluteFileSecretRefPath("\\\\server\\share\\secret")).toBe(true);
+    expect(isAbsoluteFileSecretRefPath("relative/secret")).toBe(false);
+
+    const windowsPath = "C:\\Users\\alaya\\secrets\\openai";
+    const fileRef = formatFileSecretRef(windowsPath);
+    expect(fileRef).toBe("file:C:/Users/alaya/secrets/openai");
+    expect(
+      RuntimeGardenComputeConfigSchema.parse({
+        provider_kind: "official_api",
+        provider_url: null,
+        secret_ref: fileRef,
+        model_id: "gpt-4.1-mini",
+        enabled: true
+      }).secret_ref
+    ).toBe(fileRef);
   });
 
   it("exports runtime embedding and Alaya status schemas for Inspector", () => {

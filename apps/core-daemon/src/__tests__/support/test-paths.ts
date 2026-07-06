@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 
 export function toPosixPath(value: string): string {
@@ -13,13 +14,17 @@ export function pathEndsWith(filePath: string, suffix: string): boolean {
 }
 
 export function pathEndsWithPosixSegments(filePath: string, ...segments: string[]): boolean {
-  return pathEndsWith(filePath, path.join(...segments));
+  return toPosixPath(filePath).endsWith(segments.join("/"));
 }
 
 export function quoteSingle(value: string): string {
   return `'${value.replace(/'/gu, "'\\''")}'`;
 }
 
-export function supportsPosixFileModeAssertions(): boolean {
-  return process.platform !== "win32";
+export function fixturePath(...segments: string[]): string {
+  return path.join(os.tmpdir(), ...segments);
+}
+
+export function quoteTomlString(value: string): string {
+  return JSON.stringify(value);
 }

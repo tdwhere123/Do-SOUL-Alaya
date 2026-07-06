@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ALAYA_OPERATOR_INSTRUCTIONS,
-  ALAYA_SLASH_COMMAND,
   applyProfileMutationPlan,
   buildAttachProfileMutationPlan,
   buildDetachProfileMutationPlan,
@@ -30,6 +29,7 @@ import {
   expectedInstalledPackageSlashCommand,
   expectedMcpLauncher,
   expectedSlashCommand,
+  slashCommandContainsAlayaBin,
   installedPackageBinPath,
   installedPackageDistAttachDir,
   repoBinPath,
@@ -157,9 +157,11 @@ describe("profile mutation", () => {
     });
 
     const preview = renderProfileMutationPreview(plan);
+    const slashAfter = plan.operations.find((operation) => operation.recordKind === "slash_alias")?.after ?? "";
     expect(preview).toContain("claude-code MCP server entry");
     expect(preview).toContain("claude-code /alaya-inspect slash alias");
-    expect(preview).toContain(ALAYA_SLASH_COMMAND);
+    expect(slashCommandContainsAlayaBin(slashAfter)).toBe(true);
+    expect(slashAfter).toContain("inspect --open");
   });
 
   it("stamps the MCP server entry with ALAYA_AGENT_TARGET for both hosts", async () => {
@@ -191,7 +193,8 @@ describe("profile mutation", () => {
     });
     const slashAfter = plan.operations.find((operation) => operation.recordKind === "slash_alias")?.after ?? "";
 
-    expect(toPosixPath(slashAfter)).toMatch(/command = "node '.+bin\/alaya\.mjs' inspect --open"/u);
+    expect(slashCommandContainsAlayaBin(slashAfter)).toBe(true);
+    expect(slashAfter).toContain("inspect --open");
     expect(slashAfter).not.toContain('command = "alaya inspect --open"');
   });
 

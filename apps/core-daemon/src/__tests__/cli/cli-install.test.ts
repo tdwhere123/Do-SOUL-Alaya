@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, stat, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import { createInstallCommand } from "../../cli/install.js";
 import { readSecretLine } from "../../cli/install/masked-stdin.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
-import { supportsPosixFileModeAssertions } from "../support/test-paths.js";
 
 describe("cli install", () => {
   it("parses keychain install flags without accepting secret material in argv", () => {
@@ -116,12 +115,11 @@ describe("cli install", () => {
     expect(rawModeChanges).toEqual([true, false]);
   });
 
-  it("writes config, secret refs, pasted secrets, and audit rows without plaintext .env keys", async () => {
+  it("writes config, secret refs, and audit rows without plaintext .env keys", async () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-"));
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock(),
-      platform: "linux"
+      clock: createClock()
     });
 
     const result = await command.handler(createContext(), {
@@ -130,8 +128,8 @@ describe("cli install", () => {
       keychain: false,
       answers: {
         embedding_enabled: true,
-        api_key_source: "paste",
-        pasted_key: "sk-test-secret",
+        api_key_source: "env",
+        env_var_name: "OPENAI_API_KEY",
         provider_base_url: "https://embedding.example.test/v1",
         model_id: "text-embedding-3-large",
         default_workspace: "work",
@@ -142,21 +140,14 @@ describe("cli install", () => {
     expect(result.exitCode).toBe(0);
     const toml = await readFile(path.join(configDir, "alaya.toml"), "utf8");
     const env = await readFile(path.join(configDir, ".env"), "utf8");
-    const secret = await readFile(path.join(configDir, "secrets", "openai"), "utf8");
-    const secretStat = await stat(path.join(configDir, "secrets", "openai"));
     const auditFiles = await readdir(path.join(configDir, "audit"));
 
     expect(toml).toContain('default_workspace = "work"');
     expect(toml).toContain('provider_base_url = "https://embedding.example.test/v1"');
     expect(toml).toContain('model_id = "text-embedding-3-large"');
-    expect(env).toContain("ALAYA_OPENAI_SECRET_REF=file:");
+    expect(env).toContain("ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY");
     expect(env).toContain("OPENAI_EMBEDDING_PROVIDER_URL=https://embedding.example.test/v1");
     expect(env).toContain("OPENAI_EMBEDDING_MODEL=text-embedding-3-large");
-    expect(env).not.toContain("sk-test-secret");
-    expect(secret.trim()).toBe("sk-test-secret");
-    if (supportsPosixFileModeAssertions()) {
-      expect(secretStat.mode & 0o777).toBe(0o600);
-    }
     expect(auditFiles).toHaveLength(1);
     const audit = JSON.parse(await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")) as {
       status: string;
@@ -165,7 +156,6 @@ describe("cli install", () => {
     expect(audit.status).toBe("succeeded");
     expect(audit.partial_state).toEqual(
       expect.arrayContaining([
-        path.join(configDir, "secrets", "openai"),
         path.join(configDir, "alaya.toml"),
         path.join(configDir, ".env")
       ])
@@ -176,8 +166,7 @@ describe("cli install", () => {
     const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-idempotent-"));
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock(),
-      platform: "linux"
+      clock: createClock()
     });
     const answers = {
       embedding_enabled: true,
@@ -204,32 +193,6 @@ describe("cli install", () => {
     expect(auditFiles).toHaveLength(2);
   });
 
-  it("rejects a symlinked secrets directory before writing pasted plaintext", async () => {
-    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-symlink-"));
-    const leakDir = await mkdtemp(path.join(tmpdir(), "alaya-install-leak-"));
-    await symlink(leakDir, path.join(configDir, "secrets"));
-    const command = createInstallCommand({
-      configDirResolver: () => configDir,
-      clock: createClock(),
-      platform: "linux"
-    });
-
-    const result = await command.handler(createContext(), {
-      nonInteractive: true,
-      force: false,
-      keychain: false,
-      answers: {
-        embedding_enabled: true,
-        api_key_source: "paste",
-        pasted_key: "sk-install-secret"
-      }
-    });
-
-    expect(result.exitCode).not.toBe(0);
-    expect(await readdir(leakDir)).toEqual([]);
-    await expect(readFile(path.join(configDir, ".env"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
   it("rejects a symlinked config directory before writing install artifacts", async () => {
     const parentDir = await mkdtemp(path.join(tmpdir(), "alaya-install-parent-"));
     const leakDir = await mkdtemp(path.join(tmpdir(), "alaya-install-config-leak-"));
@@ -237,8 +200,7 @@ describe("cli install", () => {
     await symlink(leakDir, configDir);
     const command = createInstallCommand({
       configDirResolver: () => configDir,
-      clock: createClock(),
-      platform: "linux"
+      clock: createClock()
     });
 
     const result = await command.handler(createContext(), {
@@ -247,8 +209,9 @@ describe("cli install", () => {
       keychain: false,
       answers: {
         embedding_enabled: true,
-        api_key_source: "paste",
-        pasted_key: "sk-install-secret"
+        api_key_source: "env",
+        env_var_name: "OPENAI_API_KEY",
+        default_workspace: "default"
       }
     });
 
@@ -264,7 +227,7 @@ function createClock(): () => string {
 
 function createContext(): AlayaCliContext {
   return {
-    cwd: "/tmp",
+    cwd: path.join(tmpdir(), "alaya-install-cwd"),
     env: {},
     argv: [],
     stdin: new PassThrough(),

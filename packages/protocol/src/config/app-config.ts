@@ -108,6 +108,23 @@ export function secretRefScheme(ref: string): SecretRefScheme | null {
   return null;
 }
 
+export function isAbsoluteFileSecretRefPath(filePath: string): boolean {
+  if (filePath.length <= 1) {
+    return false;
+  }
+  if (filePath.startsWith("/")) {
+    return true;
+  }
+  if (/^[A-Za-z]:[/\\]/u.test(filePath)) {
+    return true;
+  }
+  return filePath.startsWith("\\\\");
+}
+
+export function formatFileSecretRef(absolutePath: string): string {
+  return `${SECRET_REF_FILE_PREFIX}${absolutePath.replace(/\\/g, "/")}`;
+}
+
 export function parseSecretRefKeychainTarget(ref: string): KeychainRefTarget | null {
   if (!ref.startsWith(SECRET_REF_KEYCHAIN_PREFIX)) {
     return null;
@@ -141,7 +158,7 @@ const RuntimeSecretRefSchema = z
 
     if (value.startsWith(SECRET_REF_FILE_PREFIX)) {
       const filePath = value.slice(SECRET_REF_FILE_PREFIX.length);
-      if (filePath.startsWith("/") && filePath.length > 1) {
+      if (isAbsoluteFileSecretRefPath(filePath)) {
         return;
       }
     }

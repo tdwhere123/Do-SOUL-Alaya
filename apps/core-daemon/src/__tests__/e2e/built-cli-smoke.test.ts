@@ -104,7 +104,7 @@ function createBuiltCliEnv(tempRoot: string): NodeJS.ProcessEnv {
     ALAYA_CONFIG_DIR: join(tempRoot, "config"),
     DATA_DIR: join(tempRoot, "data"),
     HOME: home,
-    ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
+    USERPROFILE: home,
     CODEX_HOME: join(tempRoot, "codex-home"),
     ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false"
   };

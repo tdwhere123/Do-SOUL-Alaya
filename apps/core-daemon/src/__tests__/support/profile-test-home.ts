@@ -1,14 +1,15 @@
 import os from "node:os";
 import path from "node:path";
-import { quoteSingle } from "./test-paths.js";
+import { quoteSingle, toPosixPath } from "./test-paths.js";
 
 export const PROFILE_TEST_HOME = path.join(os.tmpdir(), "alaya-test-profile-home");
 export const REPO_LAYOUT_ROOT = path.join(os.tmpdir(), "Do SOUL Alaya");
 
 export function createProfileTestEnv(home: string = PROFILE_TEST_HOME): NodeJS.ProcessEnv {
-  return process.platform === "win32"
-    ? { HOME: home, USERPROFILE: home }
-    : { HOME: home };
+  return {
+    HOME: home,
+    USERPROFILE: home
+  };
 }
 
 export function codexConfigPath(home: string = PROFILE_TEST_HOME): string {
@@ -71,4 +72,8 @@ export function expectedSlashCommand(repoRoot: string): string {
 
 export function expectedInstalledPackageSlashCommand(): string {
   return `node ${quoteSingle(installedPackageBinPath())} inspect --open`;
+}
+
+export function slashCommandContainsAlayaBin(content: string): boolean {
+  return toPosixPath(content).includes("bin/alaya.mjs");
 }

@@ -12,6 +12,7 @@ import {
   DYNAMICS_CONSTANTS,
   HealthEventKind,
   GardenEventType,
+  formatFileSecretRef,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 
@@ -150,14 +151,25 @@ function createDeferred<T>(): {
 describe("routes-config port batch", () => {
 
   it("rejects a symlinked secrets directory before writing pasted plaintext", async () => {
-    const harness = await createServiceHarness({ platform: "linux" });
+    const harness = await createServiceHarness();
     const leakDir = await mkdtemp(path.join(tmpdir(), "daemon-secret-leak-"));
+    const secretPath = path.join(harness.paths.secretsDir, "openai");
     await symlink(leakDir, harness.paths.secretsDir);
 
     await expect(
-      harness.service.patchRuntimeEmbeddingConfig({
-        secret_ref_mode: "paste",
-        secret_value: "sk-test-plaintext-secret"
+      applyRuntimeEmbeddingConfigFiles({
+        paths: harness.paths,
+        normalized: {
+          patch: { secret_ref: formatFileSecretRef(secretPath) },
+          pastedSecret: { path: secretPath, value: "sk-test-plaintext-secret" }
+        },
+        generateTempId: () => "symlink-test",
+        persist: async () => ({
+          provider_url: null,
+          secret_ref: formatFileSecretRef(secretPath),
+          model_id: null,
+          embedding_enabled: true
+        })
       })
     ).rejects.toThrow("Private config path is not a directory");
 
@@ -204,82 +216,81 @@ describe("routes-config port batch", () => {
   });
 
   it("cleans pasted secrets and env writes when config persistence rejects the mutation", async () => {
-    const failingRepo = createMemoryConfigRepo();
-    const patchParsed = vi.fn(() => {
+    const harness = await createServiceHarness();
+    const secretPath = path.join(harness.paths.secretsDir, "openai");
+    const persist = vi.fn(async () => {
       throw new Error("repo write failed");
     });
-    const harness = await createServiceHarness({
-      repo: {
-        ...failingRepo,
-        patchParsed
-      },
-      platform: "linux"
-    });
-    const secretPath = path.join(harness.paths.secretsDir, "openai");
 
     await expect(
-      harness.service.patchRuntimeEmbeddingConfig({
-        embedding_enabled: true,
-        secret_ref_mode: "paste",
-        secret_value: "sk-test-plaintext-secret"
+      applyRuntimeEmbeddingConfigFiles({
+        paths: harness.paths,
+        normalized: {
+          patch: {
+            embedding_enabled: true,
+            secret_ref: formatFileSecretRef(secretPath)
+          },
+          pastedSecret: { path: secretPath, value: "sk-test-plaintext-secret" }
+        },
+        generateTempId: () => "rollback-test",
+        persist
       })
     ).rejects.toThrow("repo write failed");
 
     await expect(readFile(secretPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(harness.paths.envPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    expect(harness.publishedEvents).toHaveLength(0);
-    expect(patchParsed).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let an earlier rollback clobber a later paste write for the same config files", async () => {
-    // Gate the first call's atomic publish so the second call queues on the
-    // FS lock; when the first call's persist throws, applyRuntimeEmbeddingConfigFiles
-    // restores the FS files, then the second call proceeds and writes its own
-    // pasted secret. The repo write is sync, so the gate lives at the publish
-    // boundary.
-    const backingRepo = createMemoryConfigRepo();
+  it("does not let an earlier rollback clobber a later pasted secret write for the same config files", async () => {
+    const harness = await createServiceHarness();
+    const secretPath = path.join(harness.paths.secretsDir, "openai");
     const firstPublishStarted = createDeferred<void>();
     const firstPublishCanFail = createDeferred<void>();
-    let publishCalls = 0;
-    const harness = await createServiceHarness({ repo: backingRepo, platform: "linux" });
-    const realAppend = (
-      harness.appendManyWithMutation.getMockImplementation()! as (...args: unknown[]) => unknown
-    ).bind(harness.appendManyWithMutation);
-    harness.appendManyWithMutation.mockImplementation(async (events: any, mutate: any) => {
-      publishCalls += 1;
-      if (publishCalls === 1) {
+    const normalized = (secretValue: string) => ({
+      patch: {
+        embedding_enabled: true,
+        secret_ref: formatFileSecretRef(secretPath)
+      },
+      pastedSecret: { path: secretPath, value: secretValue }
+    });
+    const persist = vi.fn(async () => ({
+      provider_url: null,
+      secret_ref: formatFileSecretRef(secretPath),
+      model_id: null,
+      embedding_enabled: true
+    }));
+
+    const first = applyRuntimeEmbeddingConfigFiles({
+      paths: harness.paths,
+      normalized: normalized("sk-first-secret"),
+      generateTempId: () => "first",
+      persist: async () => {
         firstPublishStarted.resolve();
         await firstPublishCanFail.promise;
         throw new Error("first persist failed");
       }
-      return await realAppend(events, mutate);
-    });
-    const secretPath = path.join(harness.paths.secretsDir, "openai");
-
-    const first = harness.service.patchRuntimeEmbeddingConfig({
-      embedding_enabled: true,
-      secret_ref_mode: "paste",
-      secret_value: "sk-first-secret"
     });
     await firstPublishStarted.promise;
-    const second = harness.service.patchRuntimeEmbeddingConfig({
-      embedding_enabled: true,
-      secret_ref_mode: "paste",
-      secret_value: "sk-second-secret"
+    const second = applyRuntimeEmbeddingConfigFiles({
+      paths: harness.paths,
+      normalized: normalized("sk-second-secret"),
+      generateTempId: () => "second",
+      persist
     });
 
     firstPublishCanFail.resolve();
     await expect(first).rejects.toThrow("first persist failed");
     await expect(second).resolves.toMatchObject({
       embedding_enabled: true,
-      secret_ref: `file:${secretPath}`
+      secret_ref: formatFileSecretRef(secretPath)
     });
 
     await expect(readFile(secretPath, "utf8")).resolves.toBe("sk-second-secret\n");
     await expect(readFile(harness.paths.envPath, "utf8")).resolves.toContain(
-      `ALAYA_OPENAI_SECRET_REF=file:${secretPath}`
+      `ALAYA_OPENAI_SECRET_REF=${formatFileSecretRef(secretPath)}`
     );
-    expect(harness.publishedEvents).toHaveLength(1);
+    expect(harness.publishedEvents).toHaveLength(0);
   });
 
   it("honors an OS-visible runtime config lock before snapshotting files", async () => {

@@ -5,8 +5,7 @@ import {
   MemoryProfileAuditWriter,
   MemoryProfileFs
 } from "./profile-command-fixtures.js";
-import { codexConfigPath, codexSlashCommandsPath, claudeJsonPath, claudeSlashCommandsPath, createProfileTestEnv, PROFILE_TEST_HOME } from "../support/profile-test-home.js";
-import path from "node:path";
+import { slashCommandContainsAlayaBin, claudeJsonPath, claudeSlashCommandsPath } from "../support/profile-test-home.js";
 
 describe("attach claude", () => {
   it("writes MCP/slash profile records, audits, and records trust state", async () => {
@@ -30,7 +29,7 @@ describe("attach claude", () => {
 
     expect(result.exitCode).toBe(0);
     expect(fs.files.get(claudeJsonPath())).toContain("\"alaya\"");
-    expect(fs.files.get(claudeSlashCommandsPath())).toContain("bin/alaya.mjs");
+    expect(slashCommandContainsAlayaBin(fs.files.get(claudeSlashCommandsPath()) ?? "")).toBe(true);
     expect(fs.files.get(claudeSlashCommandsPath())).toContain("inspect --open");
     expect(auditWriter.rows).toHaveLength(1);
     expect(trustStateRecorder.recordInstalled).toHaveBeenCalledWith("claude-code");
