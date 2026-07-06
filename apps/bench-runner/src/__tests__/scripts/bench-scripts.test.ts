@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileWithFileCapture } from "./script-capture.js";
@@ -102,16 +102,9 @@ describe("bench maintenance scripts", () => {
   });
 
   it("keeps local ONNX default cache fallback outside the current working tree", async () => {
-    const scriptUrl = pathToFileURL(
-      path.resolve(repoRoot, "scripts/fetch-local-embedding-model.mjs")
-    ).href;
-    const { defaultCacheDir } = (await import(scriptUrl)) as {
-      readonly defaultCacheDir: (
-        env: Record<string, string | undefined>,
-        fallbackHome: string,
-        fallbackTmp: string
-      ) => string;
-    };
+    const { defaultCacheDir } = await import(
+      path.resolve(repoRoot, "scripts/local-embedding-cache-dir.mjs")
+    );
     const checkoutRoot = path.join(tmpDir, "checkout");
     const fallbackTmp = path.join(tmpDir, "tmp");
 

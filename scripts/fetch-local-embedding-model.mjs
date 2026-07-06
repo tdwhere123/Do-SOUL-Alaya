@@ -16,11 +16,12 @@
 
 import { mkdirSync, statSync, createWriteStream } from "node:fs";
 import { rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
-import { pathToFileURL } from "node:url";
+import { defaultCacheDir } from "./local-embedding-cache-dir.mjs";
+
+export { defaultCacheDir } from "./local-embedding-cache-dir.mjs";
 
 const DEFAULT_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 // The q8 feature-extraction pipeline only needs these artifacts.
@@ -54,21 +55,6 @@ function parseArgs(argv) {
     }
   }
   return args;
-}
-
-export function defaultCacheDir(
-  env = process.env,
-  fallbackHome = homedir(),
-  fallbackTmp = tmpdir()
-) {
-  const xdgCacheHome = env.XDG_CACHE_HOME?.trim();
-  const home = fallbackHome.trim();
-  const cacheHome = xdgCacheHome && xdgCacheHome.length > 0
-    ? xdgCacheHome
-    : home.length > 0
-      ? path.join(home, ".cache")
-      : path.join(fallbackTmp, "do-soul-alaya-cache");
-  return path.join(cacheHome, "do-soul-alaya", "models");
 }
 
 function endpointBase() {
