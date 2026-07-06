@@ -5,6 +5,10 @@ import { defineProject } from "vitest/config";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
+function testIncludeGlob(testDir) {
+  return path.resolve(testDir, "**/*.{test,spec}.ts").replaceAll("\\", "/");
+}
+
 const sharedAlias = {
   "@do-soul/alaya-protocol": path.resolve(rootDir, "packages/protocol/src/index.ts"),
   "@do-soul/alaya-graph-algorithms": path.resolve(rootDir, "packages/graph-algorithms/src/index.ts"),
@@ -44,7 +48,7 @@ function packageProject(name, packageDir, options = {}) {
     test: {
       name,
       environment: "node",
-      include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
+      include: [testIncludeGlob(testDir)],
       exclude: ["**/dist/**"],
       ...options
     }
@@ -65,7 +69,7 @@ function appProject(name, appDir) {
     test: {
       name,
       environment: "node",
-      include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
+      include: [testIncludeGlob(testDir)],
       exclude: ["**/dist/**"]
     }
   });
@@ -95,7 +99,7 @@ export default [
         name: "@do-soul/alaya-bench-runner",
         environment: "node",
         setupFiles: [path.resolve(appRoot, "src/__tests__/vitest-setup.ts")],
-        include: [path.resolve(testDir, "**/*.{test,spec}.ts")],
+        include: [testIncludeGlob(testDir)],
         exclude: ["**/dist/**"]
       }
     });
