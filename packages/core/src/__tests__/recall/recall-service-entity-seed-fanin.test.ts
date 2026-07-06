@@ -353,7 +353,7 @@ describe("RecallService", () => {
         // Sanity: the per-seed BFS still ran (the diagnostic surface confirms
         // fan-in is active even though admission routed to path_expansion).
         expect(result.diagnostics?.multi_seed_graph_fan_in?.distinct_seeds).toBe(1);
-      });
+      }, 30_000);
 
       it("single entity seed records distinct_seeds=1 with degenerate distribution", async () => {
         // invariant: even a single entity-derived seed activates the

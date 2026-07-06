@@ -140,8 +140,9 @@ describe("LocalOnnxEmbeddingClient", () => {
 
       await client.embedTexts(["cache probe"], { timeoutMs: 5_000 });
 
-      expect(defaultLocalOnnxCacheDir()).toBe("/tmp/alaya-xdg-cache/do-soul-alaya/models");
-      expect(observedCacheDir).toBe("/tmp/alaya-xdg-cache/do-soul-alaya/models");
+      const expectedCacheDir = path.join("/tmp/alaya-xdg-cache", "do-soul-alaya", "models");
+      expect(defaultLocalOnnxCacheDir()).toBe(expectedCacheDir);
+      expect(observedCacheDir).toBe(expectedCacheDir);
     } finally {
       if (originalXdg === undefined) {
         delete process.env.XDG_CACHE_HOME;

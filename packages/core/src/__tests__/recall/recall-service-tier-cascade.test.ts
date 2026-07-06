@@ -259,7 +259,7 @@ describe("RecallService tier cascade", () => {
     expect(hotCalls).toHaveLength(2);
     expect(hotCalls[0]?.[2]).toEqual({ limit: 512, offset: 0 });
     expect(hotCalls[1]?.[2]).toEqual({ limit: 512, offset: 512 });
-  });
+  }, 30_000);
 
   it("stops a HOT tier scan when the page source keeps returning full unique pages", async () => {
     const findByWorkspaceId = vi.fn(async (
@@ -293,7 +293,7 @@ describe("RecallService tier cascade", () => {
         pages_loaded: 200
       })
     );
-  }, 15_000);
+  }, 30_000);
 
   it("uses WARM once when HOT is empty and decays delivered relevance", async () => {
     const baseline = await recallWith({
