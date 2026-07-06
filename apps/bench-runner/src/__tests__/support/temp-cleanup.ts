@@ -29,7 +29,7 @@ export async function removeTempDirectory(
         error instanceof Error && "code" in error
           ? String((error as NodeJS.ErrnoException).code)
           : undefined;
-      if (code !== "EBUSY" || attempt + 1 >= maxAttempts) {
+      if ((code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") || attempt + 1 >= maxAttempts) {
         throw error;
       }
       await sleep(50);
