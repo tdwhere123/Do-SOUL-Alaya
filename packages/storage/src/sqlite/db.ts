@@ -307,6 +307,9 @@ function evictDatabaseCacheIfNeeded(incomingFilename: string): void {
     return;
   }
   while (databaseCache.size >= MAX_DATABASE_CACHE_ENTRIES) {
-    databaseCache.deleteOldest()?.close();
+    const evicted = databaseCache.deleteOldest();
+    if (evicted) {
+      evicted.close();
+    }
   }
 }

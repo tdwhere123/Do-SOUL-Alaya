@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { EngineProvider, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-protocol";
 import { initDatabase } from "../../../sqlite/db.js";
@@ -89,6 +92,40 @@ describe("SqliteEngineBindingRepo", () => {
     });
   });
 
+  it("persists api_key_ref bindings without an inline api key", async () => {
+    const { workspaceRepo, bindingRepo } = createRepos();
+    await workspaceRepo.create({
+      workspace_id: "ws_ref",
+      name: "ref",
+      root_path: "/tmp/ref",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+
+    const created = await bindingRepo.upsert({
+      binding_id: "binding_ref",
+      workspace_id: "ws_ref",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "",
+      api_key_ref: "OPENAI_API_KEY",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+
+    expect(created).toMatchObject({
+      binding_id: "binding_ref",
+      api_key: "",
+      api_key_ref: "OPENAI_API_KEY"
+    });
+    await expect(bindingRepo.getById("binding_ref")).resolves.toMatchObject({
+      binding_id: "binding_ref",
+      api_key: "",
+      api_key_ref: "OPENAI_API_KEY"
+    });
+  });
+
   it("lists bindings by workspace", async () => {
     const { workspaceRepo, bindingRepo } = createRepos();
     await workspaceRepo.create({
@@ -140,6 +177,49 @@ describe("SqliteEngineBindingRepo", () => {
       expect.objectContaining({ binding_id: "binding_gamma_1" }),
       expect.objectContaining({ binding_id: "binding_gamma_2" })
     ]);
+  });
+
+  it("survives database connection closure and reopening", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-repo-test-"));
+    const tempFile = path.join(tempDir, "alaya.db");
+    try {
+      const database = initDatabase({ filename: tempFile });
+      databases.add(database);
+      const workspaceRepo = new SqliteWorkspaceRepo(database);
+      const bindingRepo = new SqliteEngineBindingRepo(database);
+
+      await workspaceRepo.create({
+        workspace_id: "ws_survive",
+        name: "survive",
+        root_path: "/tmp/survive",
+        workspace_kind: WorkspaceKind.LOCAL_REPO,
+        default_engine_binding: null,
+        workspace_state: WorkspaceState.ACTIVE
+      });
+
+      await bindingRepo.upsert({
+        binding_id: "binding_survive",
+        workspace_id: "ws_survive",
+        provider_type: EngineProvider.OPENAI,
+        base_url: null,
+        api_key: "sk-survive",
+        model: "gpt-4o-mini",
+        config: {}
+      });
+
+      // Close the database connection
+      database.close();
+
+      // Reopen it
+      database.reopenIfClosed();
+
+      // Attempt to access the repo
+      await expect(bindingRepo.getById("binding_survive")).resolves.toMatchObject({
+        binding_id: "binding_survive"
+      });
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

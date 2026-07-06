@@ -92,7 +92,7 @@ describe("StorageDatabase reopen cache handling", () => {
     }
   }, 30_000);
 
-  it("closes a cache-evicted database when reopening into a full file-backed cache", () => {
+  it("closes an evicted database handle when cache pressure evicts its entry, but allows reopening", () => {
     const closedContext = createTempDatabasePath();
     directories.push(closedContext.directory);
     const closedDatabase = initDatabase({ filename: closedContext.filename });
@@ -106,12 +106,16 @@ describe("StorageDatabase reopen cache handling", () => {
       databases.push(database);
       return database;
     });
-    const oldestCachedDatabase = cachedDatabases[0];
+    const oldestCachedDatabase = cachedDatabases[0]!;
 
     closedDatabase.reopenIfClosed();
 
     expect(closedDatabase.isClosed()).toBe(false);
     expect(oldestCachedDatabase.isClosed()).toBe(true);
+
+    oldestCachedDatabase.reopenIfClosed();
+    expect(oldestCachedDatabase.isClosed()).toBe(false);
+    expect(oldestCachedDatabase.connection.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
   }, 20_000);
 });
 
