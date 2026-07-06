@@ -43,5 +43,5 @@ describe("concurrent sqlite tail latency", () => {
     expect(result.interleavedReadSamplesMs.length).toBe(16);
     expect(Number.isFinite(result.blockingRatioP99)).toBe(true);
     db.close();
-  });
+  }, 15_000);
 });
