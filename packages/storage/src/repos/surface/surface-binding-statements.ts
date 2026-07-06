@@ -19,22 +19,18 @@ export interface SurfaceBindingStatements {
 export function prepareSurfaceBindingStatements(db: StorageDatabase): SurfaceBindingStatements {
   return {
     createStatement: db.connection.prepare(CREATE_SURFACE_BINDING_SQL),
-    findByBindingIdStatement: db.connection.prepare(selectSurfaceBindingSql("binding_id = ?", undefined, "LIMIT 1")),
+    findByBindingIdStatement: db.connection.prepare(selectSurfaceBindingSql("byBindingId", undefined, "limitOne")),
     findByObjectIdStatement: db.connection.prepare(
-      selectSurfaceBindingSql("object_id = ? AND workspace_id = ?", "created_at ASC, binding_id ASC")
+      selectSurfaceBindingSql("byObjectId", "created")
     ),
     findPrimaryBindingStatement: db.connection.prepare(
-      selectSurfaceBindingSql(
-        "object_id = ? AND workspace_id = ? AND is_primary = 1 AND binding_state != 'detached'",
-        undefined,
-        "LIMIT 1"
-      )
+      selectSurfaceBindingSql("primaryByObjectId", undefined, "limitOne")
     ),
     findBySurfaceIdStatement: db.connection.prepare(
-      selectSurfaceBindingSql("surface_id = ? AND workspace_id = ?", "created_at ASC, binding_id ASC")
+      selectSurfaceBindingSql("bySurfaceId", "created")
     ),
     findByWorkspaceStatement: db.connection.prepare(
-      selectSurfaceBindingSql("workspace_id = ?", "created_at ASC, binding_id ASC")
+      selectSurfaceBindingSql("byWorkspace", "created")
     ),
     updateStateStatement: db.connection.prepare(`
       UPDATE surface_bindings
@@ -42,16 +38,10 @@ export function prepareSurfaceBindingStatements(db: StorageDatabase): SurfaceBin
       WHERE binding_id = ?
     `),
     findDetachableBySurfaceIdStatement: db.connection.prepare(
-      selectSurfaceBindingSql(
-        "surface_id = ? AND workspace_id = ? AND binding_state != 'detached'",
-        "created_at ASC, binding_id ASC"
-      )
+      selectSurfaceBindingSql("detachableBySurfaceId", "created")
     ),
     findDetachedBySurfaceIdStatement: db.connection.prepare(
-      selectSurfaceBindingSql(
-        "surface_id = ? AND workspace_id = ? AND binding_state = 'detached'",
-        "created_at ASC, binding_id ASC"
-      )
+      selectSurfaceBindingSql("detachedBySurfaceId", "created")
     ),
     cascadeDetachStatement: db.connection.prepare(`
       UPDATE surface_bindings
@@ -61,13 +51,46 @@ export function prepareSurfaceBindingStatements(db: StorageDatabase): SurfaceBin
   };
 }
 
-function selectSurfaceBindingSql(whereClause: string, orderBy?: string, suffix = ""): string {
-  const orderBySql = orderBy === undefined ? "" : `\n      ORDER BY ${orderBy}`;
-  const suffixSql = suffix.length === 0 ? "" : `\n      ${suffix}`;
+type SurfaceBindingWhereKey =
+  | "byBindingId"
+  | "byObjectId"
+  | "primaryByObjectId"
+  | "bySurfaceId"
+  | "byWorkspace"
+  | "detachableBySurfaceId"
+  | "detachedBySurfaceId";
+type SurfaceBindingOrderKey = "created";
+type SurfaceBindingSuffixKey = "limitOne";
+
+const SURFACE_BINDING_WHERE_CLAUSES: Readonly<Record<SurfaceBindingWhereKey, string>> = Object.freeze({
+  byBindingId: "binding_id = ?",
+  byObjectId: "object_id = ? AND workspace_id = ?",
+  primaryByObjectId: "object_id = ? AND workspace_id = ? AND is_primary = 1 AND binding_state != 'detached'",
+  bySurfaceId: "surface_id = ? AND workspace_id = ?",
+  byWorkspace: "workspace_id = ?",
+  detachableBySurfaceId: "surface_id = ? AND workspace_id = ? AND binding_state != 'detached'",
+  detachedBySurfaceId: "surface_id = ? AND workspace_id = ? AND binding_state = 'detached'"
+});
+
+const SURFACE_BINDING_ORDER_BY: Readonly<Record<SurfaceBindingOrderKey, string>> = Object.freeze({
+  created: "created_at ASC, binding_id ASC"
+});
+
+const SURFACE_BINDING_SUFFIXES: Readonly<Record<SurfaceBindingSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1"
+});
+
+function selectSurfaceBindingSql(
+  whereKey: SurfaceBindingWhereKey,
+  orderByKey?: SurfaceBindingOrderKey,
+  suffixKey?: SurfaceBindingSuffixKey
+): string {
+  const orderBySql = orderByKey === undefined ? "" : `\n      ORDER BY ${SURFACE_BINDING_ORDER_BY[orderByKey]}`;
+  const suffixSql = suffixKey === undefined ? "" : `\n      ${SURFACE_BINDING_SUFFIXES[suffixKey]}`;
   return `
       SELECT${SURFACE_BINDING_SELECT_COLUMNS}
       FROM surface_bindings
-      WHERE ${whereClause}${orderBySql}${suffixSql}
+      WHERE ${SURFACE_BINDING_WHERE_CLAUSES[whereKey]}${orderBySql}${suffixSql}
     `;
 }
 

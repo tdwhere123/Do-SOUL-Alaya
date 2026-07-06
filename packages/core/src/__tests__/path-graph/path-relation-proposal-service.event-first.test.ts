@@ -7,6 +7,13 @@ import {
   type CoUsageCounterPort,
   type PathRelationProposalEventPublisherPort
 } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
+import { firstDefined, mockCallAt, requireAt } from "../helpers/defined.js";
+
+type RelationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+function firstMockEventInputs(mock: { mock: { calls: readonly unknown[][] } }): readonly RelationEventInput[] {
+  return requireAt(mockCallAt(mock, 0), 0) as readonly RelationEventInput[];
+}
 
 // invariant: PathRelation row insert and `path.relation_created` EventLog row
 // MUST land in a single SQLite transaction. This locks the contract from the
@@ -80,15 +87,15 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
       "row_insert:path-fixed-1"
     ]);
 
-    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    const eventInputs = firstMockEventInputs(appendManyWithMutation);
     expect(eventInputs).toHaveLength(1);
-    expect(eventInputs[0].event_type).toBe("path.relation_created");
-    expect(eventInputs[0].entity_type).toBe("path_relation");
-    expect(eventInputs[0].entity_id).toBe("path-fixed-1");
+    expect(firstDefined(eventInputs).event_type).toBe("path.relation_created");
+    expect(firstDefined(eventInputs).entity_type).toBe("path_relation");
+    expect(firstDefined(eventInputs).entity_id).toBe("path-fixed-1");
     // Counter-gated co-recall accrues across runs; no single run owns the
     // mint, so the audit row's run attribution stays null.
-    expect(eventInputs[0].run_id).toBeNull();
-    expect(eventInputs[0].payload_json).toMatchObject({
+    expect(firstDefined(eventInputs).run_id).toBeNull();
+    expect(firstDefined(eventInputs).payload_json).toMatchObject({
       path_id: "path-fixed-1",
       workspace_id: "workspace-1",
       relation_kind: "co_recalled",
@@ -145,9 +152,9 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
 
     expect(minted).toBe("applied");
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
-    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
-    expect(eventInputs[0].event_type).toBe("path.relation_created");
-    expect(eventInputs[0].run_id).toBe("run-7f3c");
+    const eventInputs = firstMockEventInputs(appendManyWithMutation);
+    expect(firstDefined(eventInputs).event_type).toBe("path.relation_created");
+    expect(firstDefined(eventInputs).run_id).toBe("run-7f3c");
     expect(capturedRunIds).toEqual(["run-7f3c"]);
   });
 
@@ -158,7 +165,7 @@ describe("PathRelationProposalService — EventLog-first contract", () => {
         eventInputs: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[],
         mutate: (entries: readonly EventLogEntry[]) => T
       ): Promise<T> => {
-        capturedRunId = eventInputs[0]!.run_id;
+        capturedRunId = firstDefined(eventInputs)!.run_id;
         const persisted = eventInputs.map((entry, idx) => ({
           event_id: `evt_${idx}`,
           created_at: "2026-05-16T00:00:00.000Z",

@@ -90,20 +90,31 @@ function composeUnits(
   supplementaryData: RecallSupplementaryData,
   groupCap: number
 ): ComposedActivationCandidate[] {
-  const units: ComposedActivationCandidate[] = groupCandidatesByEntity(entityInputs, { cap: groupCap }).map(
-    (group) => {
+  const units: ComposedActivationCandidate[] = groupCandidatesByEntity(entityInputs, { cap: groupCap }).flatMap(
+    (group): ComposedActivationCandidate[] => {
       const members = group.memberObjectIds
-        .map((memberKey) => byKey.get(memberKey)!)
+        .map((memberKey) => byKey.get(memberKey))
+        .filter((member): member is FineAssessmentCandidate => member !== undefined)
         .sort(compareFusedRecallCandidates);
-      return { key: group.key, members, score: composeGroupScore(members, supplementaryData) };
+      return members.length === 0
+        ? []
+        : [{ key: group.key, members, score: composeGroupScore(members, supplementaryData) }];
     }
   );
   units.sort((left, right) => {
     const scoreDelta = right.score - left.score;
     if (scoreDelta !== 0) return scoreDelta;
-    return compareFusedRecallCandidates(left.members[0], right.members[0]);
+    return compareFusedRecallCandidates(firstUnitMember(left), firstUnitMember(right));
   });
   return units;
+}
+
+function firstUnitMember(unit: ComposedActivationCandidate): FineAssessmentCandidate {
+  const first = unit.members[0];
+  if (first === undefined) {
+    throw new Error("Activation composition invariant violated: composed unit has no members.");
+  }
+  return first;
 }
 
 // Deliver raw members (navigator) in group-rank order, then recover any cap-overflow / ungrouped seed

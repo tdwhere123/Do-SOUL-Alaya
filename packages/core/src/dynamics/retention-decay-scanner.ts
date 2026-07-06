@@ -157,11 +157,12 @@ export class RetentionDecayScanner {
         retention_state: transition.retentionState
       };
       const events = this.buildDecayAuditInputs(dummyUpdatedMemory, transition, now);
+      const updateDynamicsSync = memoryRepo.updateDynamicsSync;
       return {
         events,
         result: undefined,
         apply: () => {
-          memoryRepo.updateDynamicsSync(
+          updateDynamicsSync(
             objectId,
             {
               activation_score: transition.activationScore,

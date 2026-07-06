@@ -134,12 +134,12 @@ describe("daemon tool runtime bootstrap", () => {
     process.env.ALAYA_MCP_SERVER_CONFIG_JSON = JSON.stringify({
       filesystem: {
         transport_type: "stdio",
-        command: "node",
+        command: process.execPath,
         args: ["./mock-filesystem-server.js"]
       },
       github: {
         transport_type: "stdio",
-        command: "node",
+        command: process.execPath,
         args: ["./mock-github-server.js"]
       }
     });

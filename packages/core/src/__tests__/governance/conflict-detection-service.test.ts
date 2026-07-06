@@ -4,6 +4,7 @@ import { ConflictDetectionService } from "../../governance/reconciliation/confli
 import type { PathMintOutcome, SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 import { createMemoryEntry } from "./conflict-detection-service.test-support.js";
+import { requireAt } from "../helpers/defined.js";
 
 describe("ConflictDetectionService", () => {
 it("rule-path contradicts seeds a WEAK attention_only path (agent-controllable verdict, not recall_allowed)", async () => {
@@ -287,7 +288,7 @@ it("writes an incompatible_with edge across dimensions when tags overlap", async
       (call: any[]) => call[0].relationKind === "incompatible_with"
     ) as unknown[][];
     expect(incompatibleCalls).toHaveLength(1);
-    expect(incompatibleCalls[0][0]).toMatchObject({
+    expect(requireAt(incompatibleCalls, 0)[0]).toMatchObject({
       sourceAnchor: { kind: "object", object_id: "mem-B" },
       targetAnchor: { kind: "object", object_id: "mem-A" },
       recallBiasSign: -1

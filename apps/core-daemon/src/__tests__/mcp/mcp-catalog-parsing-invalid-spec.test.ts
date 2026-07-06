@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readDaemonMcpCatalogEnvironment } from "../../mcp/mcp-catalog-parsing.js";
+import {
+  parseDaemonMcpServerRuntimeConfigs,
+  readDaemonMcpCatalogEnvironment
+} from "../../mcp/mcp-catalog-parsing.js";
 
 // invariant: an invalid tool spec in ALAYA_MCP_TOOL_CATALOG_JSON is dropped
 // (correct), but the drop must be observable via ALAYA_MCP_TOOL_SPEC_INVALID
@@ -32,5 +35,70 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
       expect.any(String),
       expect.objectContaining({ code: "ALAYA_MCP_TOOL_SPEC_INVALID" })
     );
+  });
+
+  it("drops stdio server configs with non-absolute commands or blocked env propagation", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(
+      JSON.stringify({
+        relativeCommand: {
+          transport_type: "stdio",
+          command: "node",
+          args: ["./mock-server.js"]
+        },
+        blockedEnv: {
+          transport_type: "stdio",
+          command: process.execPath,
+          env: {
+            PATH: process.env.PATH ?? "/usr/bin",
+            OPENAI_API_KEY: "sk-test"
+          }
+        },
+        shellCommand: {
+          transport_type: "stdio",
+          command: "/bin/sh",
+          args: ["-c", "echo unsafe"]
+        }
+      }),
+      warn
+    );
+
+    expect(configs).toEqual({});
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it("accepts stdio server configs only when command, cwd, and env are strict-safe", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(
+      JSON.stringify({
+        filesystem: {
+          transport_type: "stdio",
+          command: process.execPath,
+          args: ["./mock-filesystem-server.js"],
+          cwd: process.cwd(),
+          env: {
+            PATH: process.env.PATH ?? "/usr/bin",
+            HOME: process.env.HOME ?? "/tmp"
+          }
+        }
+      }),
+      warn
+    );
+
+    expect(configs).toEqual({
+      filesystem: {
+        transportType: "stdio",
+        command: process.execPath,
+        args: ["./mock-filesystem-server.js"],
+        cwd: process.cwd(),
+        env: {
+          PATH: process.env.PATH ?? "/usr/bin",
+          HOME: process.env.HOME ?? "/tmp"
+        }
+      }
+    });
+    expect(warn).not.toHaveBeenCalled();
   });
 });

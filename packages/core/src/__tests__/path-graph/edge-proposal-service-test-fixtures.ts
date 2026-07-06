@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { requireAt } from "../helpers/defined.js";
 import { EdgeProposalStatus, type EdgeProposal } from "@do-soul/alaya-protocol";
 import { EdgeProposalService, type EdgeProposalRepoPort } from "../../path-graph/edge-proposals/edge-proposal-service.js";
 import type { EventPublisher } from "../../runtime/event-publisher.js";
@@ -30,7 +31,8 @@ export function createProposalRepo(options: {
     forceStatus(proposalId: string, status: EdgeProposal["status"]) {
       const index = proposals.findIndex((proposal) => proposal.proposal_id === proposalId);
       if (index !== -1) {
-        proposals[index] = { ...proposals[index], status };
+        const existing = requireAt(proposals, index);
+        proposals[index] = { ...existing, status };
       }
     },
     findPendingDuplicate(input) {
@@ -89,17 +91,19 @@ export function createProposalRepo(options: {
       if (index === -1) {
         throw new Error(`missing proposal ${input.proposalId}`);
       }
-      if (proposals[index].status !== EdgeProposalStatus.PENDING) {
+      const pending = requireAt(proposals, index);
+      if (pending.status !== EdgeProposalStatus.PENDING) {
         throw new Error(`Edge proposal is not pending: ${input.proposalId}`);
       }
-      proposals[index] = {
-        ...proposals[index],
+      const updated: EdgeProposal = {
+        ...pending,
         status: input.status,
         reviewer_identity: input.reviewerIdentity,
         review_reason: input.reviewReason,
         updated_at: input.reviewedAt
       };
-      return proposals[index];
+      proposals[index] = updated;
+      return updated;
     },
     // CAS-gated on fromStatus, mirroring the SQLite WHERE status = ? guard.
     // Mirrors the repo's pending-unique collision fallback: when a revert to
@@ -111,10 +115,10 @@ export function createProposalRepo(options: {
       if (index === -1) {
         throw new Error(`missing proposal ${input.proposalId}`);
       }
-      if (proposals[index].status !== input.fromStatus) {
+      const subject = requireAt(proposals, index);
+      if (subject.status !== input.fromStatus) {
         throw new Error(`Edge proposal is not in ${input.fromStatus}: ${input.proposalId}`);
       }
-      const subject = proposals[index];
       const collidesWithPendingDuplicate =
         input.toStatus === EdgeProposalStatus.PENDING &&
         proposals.some(
@@ -126,7 +130,7 @@ export function createProposalRepo(options: {
             proposal.edge_type === subject.edge_type &&
             proposal.status === EdgeProposalStatus.PENDING
         );
-      proposals[index] = collidesWithPendingDuplicate
+      const reconciled: EdgeProposal = collidesWithPendingDuplicate
         ? {
             ...subject,
             status: EdgeProposalStatus.REJECTED,
@@ -141,7 +145,8 @@ export function createProposalRepo(options: {
             review_reason: input.reviewReason,
             updated_at: input.reviewedAt
           };
-      return proposals[index];
+      proposals[index] = reconciled;
+      return reconciled;
     }
   };
 }

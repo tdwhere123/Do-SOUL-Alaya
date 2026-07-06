@@ -298,7 +298,9 @@ function ensureUnhandledRejectionShutdown(
     .then(() => {
       if (processPort.exit !== undefined) {
         const exitCode = typeof processPort.exitCode === "number" ? processPort.exitCode : 1;
-        processPort.exit(exitCode);
+        if (processPort !== process || process.env.NODE_ENV !== "test") {
+          processPort.exit(exitCode);
+        }
       }
     });
 }
@@ -340,7 +342,11 @@ function ensureFatalShutdownForceExitTimer(
       { timeout_ms: timeoutMs }
     );
     processPort.exitCode = 1;
-    processPort.exit?.(1);
+    if (processPort.exit !== undefined) {
+      if (processPort !== process || process.env.NODE_ENV !== "test") {
+        processPort.exit(1);
+      }
+    }
   }, timeoutMs);
   unrefTimer(timeout);
   processState[FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY] = timeout;

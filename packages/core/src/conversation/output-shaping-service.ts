@@ -115,7 +115,8 @@ export class OutputShapingService {
   }
 
   private compressGroup(group: readonly Readonly<ShapeableOutput>[]): CompressionResult | null {
-    const rule = this.rulesByClass.get(group[0].command_class);
+    const first = firstShapeableOutput(group);
+    const rule = this.rulesByClass.get(first.command_class);
     if (rule === undefined) {
       return null;
     }
@@ -133,7 +134,7 @@ export class OutputShapingService {
     return {
       shapedOutputs,
       decision: {
-        command_class: group[0].command_class,
+        command_class: first.command_class,
         original_count: group.length,
         compressed_to: shapedOutputs.length,
         compression_mode: rule.compression_mode,
@@ -163,7 +164,7 @@ function splitIntoConsecutiveGroups(
     const current = outputs[index];
     const previous = outputs[index - 1];
 
-    if (current !== undefined && current.command_class === previous.command_class) {
+    if (current !== undefined && previous !== undefined && current.command_class === previous.command_class) {
       continue;
     }
 
@@ -178,19 +179,37 @@ function applyCompressionMode(
   group: readonly Readonly<ShapeableOutput>[],
   mode: CompressionModeValue
 ): readonly unknown[] {
+  const first = firstShapeableOutput(group);
+  const last = lastShapeableOutput(group);
   switch (mode) {
     case CompressionMode.COUNT_SUMMARY:
       return [
         {
           type: "output_shaping.count_summary",
-          command_class: group[0].command_class,
+          command_class: first.command_class,
           count: group.length,
-          summary: `${group.length} ${group[0].command_class} outputs compressed`
+          summary: `${group.length} ${first.command_class} outputs compressed`
         }
       ];
     case CompressionMode.LAST_ONLY:
-      return [group[group.length - 1].content];
+      return [last.content];
     case CompressionMode.FIRST_LAST:
-      return [group[0].content, group[group.length - 1].content];
+      return [first.content, last.content];
   }
+}
+
+function firstShapeableOutput(group: readonly Readonly<ShapeableOutput>[]): Readonly<ShapeableOutput> {
+  const first = group[0];
+  if (first === undefined) {
+    throw new Error("Output shaping invariant violated: empty compression group.");
+  }
+  return first;
+}
+
+function lastShapeableOutput(group: readonly Readonly<ShapeableOutput>[]): Readonly<ShapeableOutput> {
+  const last = group[group.length - 1];
+  if (last === undefined) {
+    throw new Error("Output shaping invariant violated: empty compression group.");
+  }
+  return last;
 }

@@ -6,6 +6,16 @@ Open issues and permanently rejected items remain in the handbook backlog.
 
 ---
 
+## Resolved in audit branch (2026-07-07)
+
+### #BL-065 — Finish strict-index test-suite cleanup
+
+**Status**: Resolved (audit branch closeout, 2026-07-07).
+
+`noUncheckedIndexedAccess` remains enabled in `tsconfig.base.json`. `@do-soul/alaya-core` test typecheck is clean via explicit helpers in `packages/core/src/__tests__/helpers/defined.ts` across 27 test files. Evidence: `rtk pnpm --filter @do-soul/alaya-core run typecheck` exit 0 on branch `audit-2026-07-06-full-fix`.
+
+---
+
 ## Resolved in v0.3.11
 
 ### #BL-059 — `apps/core-daemon` typecheck.json loose-mock red (I4)

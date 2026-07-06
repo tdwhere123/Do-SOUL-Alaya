@@ -115,7 +115,7 @@ export class KarmaTransitionEngine {
           retention_state: plan.transition.retentionState,
           ...plan.transition.fieldUpdates
         },
-        revived: plan.transition.previousRetentionState === "dormant" && plan.transition.retentionState === "active"
+        revived: parsedEvent.amount > 0 && plan.memory.lifecycle_state === "dormant"
       };
       const events = this.buildKarmaAuditInputs(dummyApplyResult, plan);
       return {

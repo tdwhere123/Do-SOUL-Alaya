@@ -1,3 +1,4 @@
+import { CoreError } from "@do-soul/alaya-core";
 import {
   ComputeRecallGardenEventType,
   RecallContextEventType,
@@ -157,9 +158,7 @@ async function loadRecallUtilizationPayloads(
   return {
     delivered: parseRecallDeliveredRows(deliveredRows, exclusion),
     usage: parseRecallUsageRows(usageRows, exclusion),
-    embedding: embeddingRows.map((row) =>
-      parseEmbeddingSupplementPayload(row.payload_json as Record<string, unknown>)
-    )
+    embedding: embeddingRows.map((row) => parseEmbeddingSupplementPayload(row))
   };
 }
 
@@ -168,7 +167,7 @@ function parseRecallDeliveredRows(
   exclusion: ReadonlySet<string>
 ): readonly RecallDeliveredPayload[] {
   return rows
-    .map((row) => parseSoulRecallDeliveredPayload(row.payload_json as Record<string, unknown>))
+    .map((row) => parseSoulRecallDeliveredPayload(row))
     .filter((payload) => !exclusion.has(payload.agent_target));
 }
 
@@ -177,7 +176,7 @@ function parseRecallUsageRows(
   exclusion: ReadonlySet<string>
 ): readonly RecallUsagePayload[] {
   return rows
-    .map((row) => parseSoulContextUsagePayload(row.payload_json as Record<string, unknown>))
+    .map((row) => parseSoulContextUsagePayload(row))
     .filter((payload) => !exclusion.has(payload.agent_target));
 }
 
@@ -237,24 +236,52 @@ function buildUsageStats(
   };
 }
 
-function parseSoulRecallDeliveredPayload(payload: Record<string, unknown>) {
-  return parseRecallContextEventPayload(
-    RecallContextEventType.SOUL_RECALL_DELIVERED,
-    payload
-  );
+function parseSoulRecallDeliveredPayload(row: EventLogEntry) {
+  try {
+    return parseRecallContextEventPayload(
+      RecallContextEventType.SOUL_RECALL_DELIVERED,
+      toPayloadRecord(row)
+    );
+  } catch (error) {
+    throw invalidRecallUtilizationPayload(row, error);
+  }
 }
 
-function parseSoulContextUsagePayload(payload: Record<string, unknown>) {
-  return parseRecallContextEventPayload(
-    RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-    payload
-  );
+function parseSoulContextUsagePayload(row: EventLogEntry) {
+  try {
+    return parseRecallContextEventPayload(
+      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+      toPayloadRecord(row)
+    );
+  } catch (error) {
+    throw invalidRecallUtilizationPayload(row, error);
+  }
 }
 
-function parseEmbeddingSupplementPayload(payload: Record<string, unknown>) {
-  return parseComputeRecallGardenEventPayload(
-    ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
-    payload
+function parseEmbeddingSupplementPayload(row: EventLogEntry) {
+  try {
+    return parseComputeRecallGardenEventPayload(
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+      toPayloadRecord(row)
+    );
+  } catch (error) {
+    throw invalidRecallUtilizationPayload(row, error);
+  }
+}
+
+function toPayloadRecord(row: EventLogEntry): Record<string, unknown> {
+  if (row.payload_json === null || typeof row.payload_json !== "object" || Array.isArray(row.payload_json)) {
+    throw new CoreError("VALIDATION", `Event ${row.event_id} payload must be an object`);
+  }
+
+  return row.payload_json;
+}
+
+function invalidRecallUtilizationPayload(row: EventLogEntry, cause: unknown): CoreError {
+  return new CoreError(
+    "VALIDATION",
+    `Invalid recall utilization EventLog payload for ${row.event_type}`,
+    { cause }
   );
 }
 

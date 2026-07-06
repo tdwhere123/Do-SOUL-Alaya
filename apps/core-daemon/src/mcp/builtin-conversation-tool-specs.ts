@@ -104,3 +104,15 @@ export function isBuiltinConversationToolId(
 ): toolId is BuiltinConversationToolId {
   return typeof toolId === "string" && BUILTIN_CONVERSATION_TOOL_ID_LOOKUP.has(toolId);
 }
+
+export function builtinConversationToolRequiresConfirmation(
+  toolId: string | null | undefined
+): boolean {
+  if (!isBuiltinConversationToolId(toolId)) {
+    return false;
+  }
+
+  return BUILTIN_CONVERSATION_TOOL_SPECS.some(
+    (spec) => spec.tool_id === toolId && spec.requires_confirmation
+  );
+}

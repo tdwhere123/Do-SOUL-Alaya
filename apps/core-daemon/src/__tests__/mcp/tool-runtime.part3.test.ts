@@ -141,6 +141,200 @@ afterEach(cleanupToolRuntimeTempDirs);
 
 describe("tool-runtime relative path handling", () => {
 
+  it("denies builtin tools that require confirmation without a valid server receipt", async () => {
+    const workspaceDir = await createWorkspace();
+    const executeTool = vi.fn(async () => ({
+      ok: true,
+      exitCode: 0,
+      stdout: "should-not-run",
+      stderr: ""
+    }));
+
+    const result = await handleConversationToolUse(
+      {
+        type: "tool_use",
+        id: "toolu-confirmation-required",
+        name: "tools.exec_shell",
+        input: {
+          command: "/bin/echo",
+          args: ["unsafe"],
+          _alaya_confirmation: {
+            confirmed: true,
+            token: "wrong-token"
+          }
+        }
+      },
+      createRuntimeContext(),
+      {
+        getById: async () => ({
+          root_path: workspaceDir
+        })
+      },
+      {
+        execute: async () => {
+          throw new Error("must not execute confirmation-required builtin tool");
+        }
+      },
+      {
+        confirmationToken: "server-token",
+        externalToolExecutor: {
+          hasTool: () => true,
+          executeTool
+        }
+      }
+    );
+
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      type: "tool_result",
+      tool_use_id: "toolu-confirmation-required",
+      content: JSON.stringify({
+        ok: false,
+        code: "CONFIRMATION_REQUIRED",
+        message: "Tool tools.exec_shell requires a valid server-verifiable confirmation receipt."
+      }),
+      is_error: true
+    });
+  });
+
+  it("executes confirmation-required builtin tools with a valid server receipt", async () => {
+    const workspaceDir = await createWorkspace();
+    const executeTool = vi.fn(async () => ({
+      ok: true,
+      exitCode: 0,
+      stdout: "confirmed",
+      stderr: ""
+    }));
+
+    const result = await handleConversationToolUse(
+      {
+        type: "tool_use",
+        id: "toolu-confirmed",
+        name: "tools.exec_shell",
+        input: {
+          command: "/bin/echo",
+          args: ["confirmed"],
+          _alaya_confirmation: {
+            confirmed: true,
+            token: "server-token"
+          }
+        }
+      },
+      createRuntimeContext(),
+      {
+        getById: async () => ({
+          root_path: workspaceDir
+        })
+      },
+      {
+        execute: async (request) => ({
+          result: await request.handler({ writableRoots: [request.workspaceRoot] }, request.rawInput)
+        })
+      },
+      {
+        confirmationToken: "server-token",
+        externalToolExecutor: {
+          hasTool: () => true,
+          executeTool
+        }
+      }
+    );
+
+    expect(executeTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rawInput: {
+          command: "/bin/echo",
+          args: ["confirmed"]
+        }
+      })
+    );
+    expect(result).toEqual({
+      type: "tool_result",
+      tool_use_id: "toolu-confirmed",
+      content: JSON.stringify({
+        ok: true,
+        exitCode: 0,
+        stdout: "confirmed",
+        stderr: ""
+      })
+    });
+  });
+
+  it("rejects confirmation-required builtin tools when ALAYA_MCP_TOOL_CONFIRMATION_TOKEN is unset", async () => {
+    const workspaceDir = await createWorkspace();
+    const previousToken = process.env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN;
+    delete process.env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN;
+
+    try {
+      const result = await handleConversationToolUse(
+        {
+          type: "tool_use",
+          id: "toolu-unconfigured-token",
+          name: "tools.exec_shell",
+          input: {
+            command: "/bin/echo",
+            args: ["unsafe"],
+            _alaya_confirmation: {
+              confirmed: true,
+              token: "server-token"
+            }
+          }
+        },
+        createRuntimeContext(),
+        {
+          getById: async () => ({
+            root_path: workspaceDir
+          })
+        },
+        {
+          execute: async () => {
+            throw new Error("must not execute confirmation-required builtin tool");
+          }
+        }
+      );
+
+      expect(result).toEqual({
+        type: "tool_result",
+        tool_use_id: "toolu-unconfigured-token",
+        content: JSON.stringify({
+          ok: false,
+          code: "CONFIRMATION_REQUIRED",
+          message:
+            "Tool tools.exec_shell requires server-verifiable confirmation, but ALAYA_MCP_TOOL_CONFIRMATION_TOKEN is not configured."
+        }),
+        is_error: true
+      });
+    } finally {
+      if (previousToken === undefined) {
+        delete process.env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN;
+      } else {
+        process.env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN = previousToken;
+      }
+    }
+  });
+
+  it("rejects executeConversationToolOrThrow for confirmation-required builtins without receipt", async () => {
+    const workspaceDir = await createWorkspace();
+    const { executeConversationToolOrThrow } = await import("../../mcp/tool-runtime.js");
+
+    await expect(
+      executeConversationToolOrThrow(
+        "tools.exec_shell",
+        {
+          command: "/bin/echo",
+          args: ["unsafe"]
+        },
+        [workspaceDir],
+        { confirmationToken: "server-token" }
+      )
+    ).rejects.toMatchObject({
+      result: {
+        ok: false,
+        code: "CONFIRMATION_REQUIRED"
+      }
+    });
+  });
+
   it("does not execute builtin tools when daemon-owned authority does not expose them", async () => {
     const workspaceDir = await createWorkspace();
     const executeTool = vi.fn(async () => ({

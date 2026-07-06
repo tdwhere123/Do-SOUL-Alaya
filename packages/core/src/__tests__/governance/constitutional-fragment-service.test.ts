@@ -4,6 +4,7 @@ import { ConstitutionalFragmentService, type ConstitutionalFragmentStorePort } f
 import { EventPublisher } from "../../runtime/event-publisher.js";
 
 import { FIXED_LATER, FIXED_NOW, createContentAddressedFragmentId, createDefaultFragmentId, createEventPublisher, createStore, hashContent, parseFragmentId } from "./constitutional-fragment-service.test-support.js";
+import { firstDefined, requireAt } from "../helpers/defined.js";
 
 describe("ConstitutionalFragmentService", () => {
   it("registers immutable fragments, writes constitutional.fragment_registered through EventLog, and filters by workspace/category", async () => {
@@ -80,8 +81,8 @@ describe("ConstitutionalFragmentService", () => {
     ).resolves.toEqual([]);
 
     expect(eventLogEntries).toHaveLength(3);
-    expect(EventLogEntrySchema.parse(eventLogEntries[0])).toEqual(eventLogEntries[0]);
-    expect(eventLogEntries[0]).toEqual(
+    expect(EventLogEntrySchema.parse(firstDefined(eventLogEntries))).toEqual(firstDefined(eventLogEntries));
+    expect(firstDefined(eventLogEntries)).toEqual(
       expect.objectContaining({
         event_type: RuntimeGovernanceEventType.CONSTITUTIONAL_FRAGMENT_REGISTERED,
         entity_type: "constitutional_fragment",
@@ -92,7 +93,7 @@ describe("ConstitutionalFragmentService", () => {
         revision: 0
       })
     );
-    expect(ConstitutionalFragmentRegisteredPayloadSchema.parse(eventLogEntries[0].payload_json)).toEqual({
+    expect(ConstitutionalFragmentRegisteredPayloadSchema.parse(requireAt(eventLogEntries, 0).payload_json)).toEqual({
       fragment_id: "constitutional://workspace-1/hard_constraint/system",
       workspace_id: "workspace-1",
       category: "hard_constraint",
@@ -218,7 +219,7 @@ describe("ConstitutionalFragmentService", () => {
       eventLogReader: {
         queryByEntity: vi.fn(async (entityType: string, entityId: string) =>
           entityType === "constitutional_fragment" && entityId === previousId
-            ? [publishedEvents[0]]
+            ? [requireAt(publishedEvents, 0)]
             : []
         )
       },

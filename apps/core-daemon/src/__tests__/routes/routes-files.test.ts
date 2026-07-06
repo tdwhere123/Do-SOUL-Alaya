@@ -265,6 +265,33 @@ describe("files upload route", () => {
     expect(mockedUnlink).toHaveBeenCalledWith(mockedWriteFile.mock.calls[0]?.[0]);
   });
 
+  it("warns when rollback delete fails after persistence failure", async () => {
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const createWithEvent = vi.fn(async () => {
+      throw new Error("database write failed");
+    });
+    mockedUnlink.mockRejectedValueOnce(new Error("permission denied"));
+    const app = buildUploadApp(createWithEvent);
+    const response = await app.request("/files", {
+      method: "POST",
+      body: uploadFormData({
+        file: new File(["hello"], "notes.txt", { type: "text/plain" }),
+        workspace_id: "ws-1"
+      })
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockedUnlink).toHaveBeenCalledOnce();
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[FileRoute] best-effort upload rollback delete failed",
+      expect.objectContaining({
+        code: "ALAYA_FILE_UPLOAD_ROLLBACK_DELETE_FAILED",
+        detail: expect.stringContaining("permission denied")
+      })
+    );
+    emitWarning.mockRestore();
+  });
+
   it("keeps the written file when post-commit notification fails", async () => {
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const append = createAuditEventLogAppend();

@@ -39,6 +39,26 @@ function makeRow(input: {
   };
 }
 
+function makeMalformedRow(input: {
+  readonly type: RecallContextEventTypeValue | ComputeRecallGardenEventTypeValue;
+  readonly entityId: string;
+  readonly runId: string | null;
+  readonly payload: unknown;
+}): EventLogEntry {
+  return {
+    event_id: `evt_${input.entityId}_${input.type}_malformed`,
+    event_type: input.type,
+    entity_type: "context_delivery",
+    entity_id: input.entityId,
+    workspace_id: WORKSPACE_ID,
+    run_id: input.runId,
+    caused_by: "claude-code",
+    revision: 1,
+    payload_json: input.payload as EventLogEntry["payload_json"],
+    created_at: ISO
+  };
+}
+
 function embeddingQueriedPayload(input: {
   readonly queryId: string;
   readonly runId: string | null;
@@ -150,6 +170,40 @@ describe("recall-utilization-service", () => {
     expect(stats.usage.total).toBe(0);
     expect(stats.usage.used_ratio).toBe(0);
     expect(stats.usage.follow_through_ratio).toBe(0);
+  });
+
+  it.each([
+    {
+      type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+      entityId: "bad-delivered-null",
+      payload: null
+    },
+    {
+      type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+      entityId: "bad-usage-string",
+      payload: "corrupt"
+    },
+    {
+      type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_QUERIED,
+      entityId: "bad-embedding-array",
+      payload: []
+    }
+  ])("throws a typed validation error for malformed $type payload_json", async ({ type, entityId, payload }) => {
+    const service = createRecallUtilizationService({
+      eventLogRepo: fakeEventLogRepo([
+        makeMalformedRow({
+          type,
+          entityId,
+          runId: "run-1",
+          payload
+        })
+      ])
+    });
+
+    await expect(service.getStats({ workspaceId: WORKSPACE_ID })).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: `Invalid recall utilization EventLog payload for ${type}`
+    });
   });
 
   it("aggregates embedding supplement latency percentiles and buckets", async () => {

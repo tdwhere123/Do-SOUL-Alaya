@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { access } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -175,7 +176,7 @@ async function classifyPairWithGardenCache(
   pair: PairInput
 ): Promise<EdgeAutoProducerLlmDecision | null> {
   const requestKey = computeRequestKey(config.model, pair);
-  const cached = readCachedVerdict(cacheRoot, requestKey);
+  const cached = await readCachedVerdict(cacheRoot, requestKey);
   if (cached !== undefined) {
     return materializeDecision(cached.edge_type, cached.confidence, cached.rationale);
   }
@@ -204,7 +205,7 @@ async function requestAndCachePairVerdict(
     return null;
   }
   const parsed = parseVerdict(raw);
-  writeCachedVerdict(cacheRoot, requestKey, {
+  await writeCachedVerdict(cacheRoot, requestKey, {
     model: config.model,
     request_hash: requestKey,
     edge_type: parsed.edgeType,
@@ -247,13 +248,13 @@ function cacheFilePath(cacheRoot: string, requestKey: string): string {
   return join(cacheRoot, requestKey.slice(0, 2), `${requestKey}.json`);
 }
 
-function readCachedVerdict(cacheRoot: string, requestKey: string): CachedVerdict | undefined {
+async function readCachedVerdict(cacheRoot: string, requestKey: string): Promise<CachedVerdict | undefined> {
   const filePath = cacheFilePath(cacheRoot, requestKey);
-  if (!existsSync(filePath)) {
+  if (!(await fileExists(filePath))) {
     return undefined;
   }
   try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedVerdict>;
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<CachedVerdict>;
     if (
       parsed.edge_type !== "supports" &&
       parsed.edge_type !== "derives_from" &&
@@ -283,12 +284,21 @@ function readCachedVerdict(cacheRoot: string, requestKey: string): CachedVerdict
   }
 }
 
-function writeCachedVerdict(cacheRoot: string, requestKey: string, entry: CachedVerdict): void {
+async function writeCachedVerdict(cacheRoot: string, requestKey: string, entry: CachedVerdict): Promise<void> {
   const filePath = cacheFilePath(cacheRoot, requestKey);
-  mkdirSync(dirname(filePath), { recursive: true });
+  await mkdir(dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  renameSync(tempPath, filePath);
+  await writeFile(tempPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
+  await rename(tempPath, filePath);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseVerdict(rawJson: string): {

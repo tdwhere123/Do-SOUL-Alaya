@@ -5,6 +5,7 @@ import { clamp01, compareMemoryEntries } from "../runtime/recall-service-helpers
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
+  RecallServiceWarnPort,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
@@ -55,6 +56,17 @@ export interface CoarseCandidateDraft {
 export interface SourceProximitySeedDraft {
   readonly draft: Readonly<CoarseCandidateDraft>;
   readonly strength: number;
+}
+
+export interface SourceProximitySeedScoreDiagnostic {
+  readonly strength: number;
+  readonly rawStrength: number;
+  readonly floorApplied:
+    | "none"
+    | "evidence_anchor"
+    | "object_probe"
+    | "session_surface_cohort";
+  readonly droppedBelowThreshold: boolean;
 }
 
 export function withEmbeddingSimilarityScores(
@@ -394,13 +406,25 @@ function isWeakEntityOnlyDraft(draft: Readonly<CoarseCandidateDraft>): boolean {
 }
 
 export function selectSourceProximitySeedDrafts(
-  drafts: ReadonlyMap<string, CoarseCandidateDraft>
+  drafts: ReadonlyMap<string, CoarseCandidateDraft>,
+  warn?: RecallServiceWarnPort
 ): readonly SourceProximitySeedDraft[] {
-  return rankCoarseCandidateDrafts([...drafts.values()])
-    .map((draft) => Object.freeze({
-      draft,
-      strength: scoreSourceProximitySeedDraft(draft)
-    }))
+  const floorAppliedByPlane = {
+    evidence_anchor: 0,
+    object_probe: 0,
+    session_surface_cohort: 0
+  };
+  const seeds = rankCoarseCandidateDrafts([...drafts.values()])
+    .map((draft) => {
+      const diagnostic = scoreSourceProximitySeedDraftWithDiagnostics(draft);
+      if (diagnostic.floorApplied !== "none") {
+        floorAppliedByPlane[diagnostic.floorApplied] += 1;
+      }
+      return Object.freeze({
+        draft,
+        strength: diagnostic.strength
+      });
+    })
     .filter((seed) => seed.strength > 0)
     .sort((left, right) => {
       const strengthDelta = right.strength - left.strength;
@@ -410,26 +434,56 @@ export function selectSourceProximitySeedDrafts(
       return compareMemoryEntries(left.draft.entry, right.draft.entry);
     })
     .slice(0, DYNAMIC_RECALL_SOURCE_PROXIMITY_SEED_CAP);
+
+  if (
+    warn !== undefined &&
+    (floorAppliedByPlane.evidence_anchor > 0 ||
+      floorAppliedByPlane.object_probe > 0 ||
+      floorAppliedByPlane.session_surface_cohort > 0)
+  ) {
+    warn("source proximity seed floor applied", {
+      selected_seed_count: seeds.length,
+      evidence_anchor_count: floorAppliedByPlane.evidence_anchor,
+      object_probe_count: floorAppliedByPlane.object_probe,
+      session_surface_cohort_count: floorAppliedByPlane.session_surface_cohort
+    });
+  }
+
+  return seeds;
 }
 
-function scoreSourceProximitySeedDraft(draft: Readonly<CoarseCandidateDraft>): number {
+export function scoreSourceProximitySeedDraftWithDiagnostics(
+  draft: Readonly<CoarseCandidateDraft>
+): SourceProximitySeedScoreDiagnostic {
   let strength = 0;
+  let floorApplied: SourceProximitySeedScoreDiagnostic["floorApplied"] = "none";
   if (draft.admissionPlanes.includes("protected_winner")) {
     strength = 1;
   }
   if (draft.admissionPlanes.includes("evidence_anchor")) {
-    strength = Math.max(strength, 0.95);
+    const next = Math.max(strength, 0.95);
+    floorApplied = next === strength ? floorApplied : "evidence_anchor";
+    strength = next;
   }
   if (draft.admissionPlanes.includes("object_probe")) {
-    strength = Math.max(strength, 0.9);
+    const next = Math.max(strength, 0.9);
+    floorApplied = next === strength ? floorApplied : "object_probe";
+    strength = next;
   }
   if (draft.admissionPlanes.includes("session_surface_cohort")) {
-    strength = Math.max(strength, 0.75);
+    const next = Math.max(strength, 0.75);
+    floorApplied = next === strength ? floorApplied : "session_surface_cohort";
+    strength = next;
   }
   if (draft.admissionPlanes.includes("lexical")) {
     strength = Math.max(strength, draft.structuralScore);
   }
-  return strength >= 0.35 ? clamp01(strength) : 0;
+  return {
+    strength: strength >= 0.35 ? clamp01(strength) : 0,
+    rawStrength: strength,
+    floorApplied,
+    droppedBelowThreshold: strength > 0 && strength < 0.35
+  };
 }
 
 export function resolveSourceProximityAdmissionLimit(maxDeliveryEntries: number | undefined): number {

@@ -161,7 +161,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
 
     expect(result.success).toBe(true);
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
-    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(enrichPendingPort.enqueue.mock.calls[0]![0].memoryId).toBe("memory-1");
     expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
   });
 
@@ -260,7 +260,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
     expect(result.success).toBe(true);
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
     expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly evidence_refs: readonly string[];
     };
     expect(memoryInput.evidence_refs).toEqual(["evidence-1"]);
@@ -290,7 +290,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
       expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
       expect(detectAndLinkConflicts).not.toHaveBeenCalled();
       expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
-      expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+      expect(enrichPendingPort.enqueue.mock.calls[0]![0].memoryId).toBe("memory-1");
     }
   });
 

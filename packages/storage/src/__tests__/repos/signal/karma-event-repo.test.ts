@@ -87,10 +87,10 @@ describe("SqliteKarmaEventRepo", () => {
 
     const byObject = await repo.findByObjectId(attributed.object_id);
     expect(byObject).toHaveLength(1);
-    expect(byObject[0].run_id).toBe("run-7f3c");
+    expect(byObject[0]!.run_id).toBe("run-7f3c");
 
     const byWorkspace = await repo.findByWorkspaceId(attributed.workspace_id);
-    expect(byWorkspace[0].run_id).toBe("run-7f3c");
+    expect(byWorkspace[0]!.run_id).toBe("run-7f3c");
   });
 
   it("read-back materializes a null run_id when none was recorded", async () => {
@@ -98,7 +98,7 @@ describe("SqliteKarmaEventRepo", () => {
     await repo.create(createKarmaEvent({ event_id: "event-null-run" }));
 
     const events = await repo.findByObjectId("memory-1");
-    expect(events[0].run_id).toBeNull();
+    expect(events[0]!.run_id).toBeNull();
   });
 
   it("returns zero sum when no events exist", async () => {
@@ -166,7 +166,7 @@ describe("SqliteKarmaEventRepo", () => {
 
     const events = await repo.findByWorkspaceId("workspace-1");
     expect(events).toHaveLength(1);
-    expect(events[0].workspace_id).toBe("workspace-1");
+    expect(events[0]!.workspace_id).toBe("workspace-1");
     await expect(repo.findByWorkspaceIdPage?.("workspace-1", { limit: 1, offset: 0 })).resolves.toMatchObject([
       { event_id: "event-w1" }
     ]);

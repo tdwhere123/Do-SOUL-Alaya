@@ -46,6 +46,26 @@ function makeRow(input: {
   };
 }
 
+function makeMalformedRow(input: {
+  readonly type: RecallContextEventTypeValue;
+  readonly entityId: string;
+  readonly runId: string | null;
+  readonly payload: unknown;
+}): EventLogEntry {
+  return {
+    event_id: `evt_${input.entityId}_${input.type}_malformed`,
+    event_type: input.type,
+    entity_type: "context_delivery",
+    entity_id: input.entityId,
+    workspace_id: WORKSPACE_ID,
+    run_id: input.runId,
+    caused_by: "claude-code",
+    revision: 1,
+    payload_json: input.payload as EventLogEntry["payload_json"],
+    created_at: ISO
+  };
+}
+
 function deliveredPayload(input: {
   readonly deliveryId: string;
   readonly runId: string | null;
@@ -161,6 +181,45 @@ describe("recall-utilization route", () => {
     });
     const response = await app.request(`/workspaces/ws-missing/recall-utilization`);
     expect(response.status).toBe(404);
+  });
+
+  it.each([
+    {
+      type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+      entityId: "bad-delivered-null",
+      payload: null
+    },
+    {
+      type: RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
+      entityId: "bad-usage-string",
+      payload: "corrupt"
+    },
+    {
+      type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+      entityId: "bad-delivered-array",
+      payload: []
+    }
+  ])("returns a typed validation response for malformed $type payload_json", async ({ type, entityId, payload }) => {
+    const app = buildApp({
+      workspaceService: { getById: vi.fn().mockResolvedValue({ workspace_id: WORKSPACE_ID }) },
+      eventLogRepo: fakeEventLogRepo([
+        makeMalformedRow({
+          type,
+          entityId,
+          runId: "run-1",
+          payload
+        })
+      ])
+    });
+
+    const response = await app.request(`/workspaces/${WORKSPACE_ID}/recall-utilization`);
+    const body = (await response.json()) as { readonly success: boolean; readonly error: string };
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      success: false,
+      error: `Invalid recall utilization EventLog payload for ${type}`
+    });
   });
 
   it("partitions deliveries across delivered_not_reported / skipped_or_na / used", async () => {

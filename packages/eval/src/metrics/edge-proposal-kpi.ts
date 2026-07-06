@@ -335,9 +335,17 @@ function computeMedian(values: readonly number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   if (sorted.length % 2 === 1) {
-    return sorted[mid];
+    return readSortedValue(sorted, mid);
   }
-  return (sorted[mid - 1] + sorted[mid]) / 2;
+  return (readSortedValue(sorted, mid - 1) + readSortedValue(sorted, mid)) / 2;
+}
+
+function readSortedValue(values: readonly number[], index: number): number {
+  const value = values[index];
+  if (value === undefined) {
+    throw new Error("Edge proposal KPI invariant violated: median index out of range.");
+  }
+  return value;
 }
 
 /**

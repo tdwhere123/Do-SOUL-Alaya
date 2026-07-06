@@ -10,6 +10,7 @@ import {
   createAnchor,
   createDependencies
 } from "./project-mapping-service-test-fixtures.js";
+import { requireAt } from "../helpers/defined.js";
 
 describe("ProjectMappingService", () => {
   it("ensures surfaced global anchors idempotently without requiring local memory rows", async () => {
@@ -73,9 +74,9 @@ describe("ProjectMappingService", () => {
       "global-created",
       "global-rejected"
     ]);
-    expect(firstPass[0].mapping_state).toBe(ProjectMappingState.ACCEPTED);
-    expect(firstPass[1].mapping_state).toBe(ProjectMappingState.SUGGESTED);
-    expect(firstPass[2].mapping_state).toBe(ProjectMappingState.REJECTED);
+    expect(requireAt(firstPass, 0).mapping_state).toBe(ProjectMappingState.ACCEPTED);
+    expect(requireAt(firstPass, 1).mapping_state).toBe(ProjectMappingState.SUGGESTED);
+    expect(requireAt(firstPass, 2).mapping_state).toBe(ProjectMappingState.REJECTED);
     expect(secondPass.map((anchor) => anchor.global_object_id)).toEqual([
       "global-created",
       "global-accepted"
@@ -132,8 +133,8 @@ describe("ProjectMappingService", () => {
     expect(appendSpy).toHaveBeenCalledTimes(1);
     expect(firstPass).toHaveLength(1);
     expect(secondPass).toHaveLength(1);
-    expect(firstPass[0]).toEqual(secondPass[0]);
-    expect(firstPass[0]).toMatchObject({
+    expect(requireAt(firstPass, 0)).toEqual(secondPass[0]);
+    expect(requireAt(firstPass, 0)).toMatchObject({
       global_object_id: "global-created",
       mapping_state: ProjectMappingState.SUGGESTED
     });

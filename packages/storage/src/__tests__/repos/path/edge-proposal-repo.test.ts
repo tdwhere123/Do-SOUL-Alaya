@@ -311,8 +311,8 @@ describe("SqliteEdgeProposalRepo", () => {
     // already owning its minted path.
     for (let index = 0; index < HEALTHY; index += 1) {
       const proposalId = `healthy-${String(index).padStart(2, "0")}`;
-      const source = extraMemoryIds[index * 2];
-      const target = extraMemoryIds[index * 2 + 1];
+      const source = extraMemoryIds[index * 2]!;
+      const target = extraMemoryIds[index * 2 + 1]!;
       repo.create(
         createProposalInput(proposalId, source, target, "recalls", `2026-05-24T00:0${index}:00.000Z`)
       );
@@ -328,8 +328,8 @@ describe("SqliteEdgeProposalRepo", () => {
 
     // The genuine orphan: accepted-without-path, ordered AFTER every healthy row
     // (later created_at). No path is minted for it.
-    const orphanSource = extraMemoryIds[HEALTHY * 2];
-    const orphanTarget = extraMemoryIds[HEALTHY * 2 + 1];
+    const orphanSource = extraMemoryIds[HEALTHY * 2]!;
+    const orphanTarget = extraMemoryIds[HEALTHY * 2 + 1]!;
     repo.create(
       createProposalInput("orphan-zz", orphanSource, orphanTarget, "recalls", "2026-05-24T09:00:00.000Z")
     );
@@ -350,10 +350,10 @@ describe("SqliteEdgeProposalRepo", () => {
   it("does not starve an orphan behind a proposal satisfied by derived backing anchors", async () => {
     const extraMemoryIds = [objectId(40), objectId(41), objectId(42), objectId(43)];
     const { repo, pathRepo } = await createRepo(extraMemoryIds);
-    const healthySource = extraMemoryIds[0];
-    const healthyTarget = extraMemoryIds[1];
-    const orphanSource = extraMemoryIds[2];
-    const orphanTarget = extraMemoryIds[3];
+    const healthySource = extraMemoryIds[0]!;
+    const healthyTarget = extraMemoryIds[1]!;
+    const orphanSource = extraMemoryIds[2]!;
+    const orphanTarget = extraMemoryIds[3]!;
 
     repo.create(
       createProposalInput("healthy-derived-anchor", healthySource, healthyTarget, "recalls", "2026-05-24T00:00:00.000Z")

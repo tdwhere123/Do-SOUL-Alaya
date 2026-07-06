@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import type { WorkspaceService } from "@do-soul/alaya-core";
+import { CoreError, type WorkspaceService } from "@do-soul/alaya-core";
 import {
   RecallContextEventType,
   SoulSingleUsedAnchorPayloadSchema,
@@ -150,9 +150,9 @@ interface NormalizedReport {
 
 function projectDeliveries(rows: readonly EventLogEntry[]): readonly NormalizedDelivery[] {
   return rows.map((row) => {
-    const payload = parseRecallContextEventPayload(
-      RecallContextEventType.SOUL_RECALL_DELIVERED,
-      row.payload_json as Record<string, unknown>
+    const payload = parseRecallUtilizationRoutePayload(
+      row,
+      RecallContextEventType.SOUL_RECALL_DELIVERED
     );
     return {
       delivery_id: payload.delivery_id,
@@ -168,9 +168,9 @@ function projectDeliveries(rows: readonly EventLogEntry[]): readonly NormalizedD
 
 function projectReports(rows: readonly EventLogEntry[]): readonly NormalizedReport[] {
   return rows.map((row) => {
-    const payload = parseRecallContextEventPayload(
-      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED,
-      row.payload_json as Record<string, unknown>
+    const payload = parseRecallUtilizationRoutePayload(
+      row,
+      RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
     );
     return {
       delivery_id: payload.delivery_id,
@@ -182,6 +182,29 @@ function projectReports(rows: readonly EventLogEntry[]): readonly NormalizedRepo
       occurred_at: payload.occurred_at
     } as const;
   });
+}
+
+function parseRecallUtilizationRoutePayload<T extends
+  | typeof RecallContextEventType.SOUL_RECALL_DELIVERED
+  | typeof RecallContextEventType.SOUL_CONTEXT_USAGE_REPORTED
+>(row: EventLogEntry, eventType: T): ReturnType<typeof parseRecallContextEventPayload<T>> {
+  try {
+    return parseRecallContextEventPayload(eventType, toPayloadRecord(row));
+  } catch (error) {
+    throw new CoreError(
+      "VALIDATION",
+      `Invalid recall utilization EventLog payload for ${row.event_type}`,
+      { cause: error }
+    );
+  }
+}
+
+function toPayloadRecord(row: EventLogEntry): Record<string, unknown> {
+  if (row.payload_json === null || typeof row.payload_json !== "object" || Array.isArray(row.payload_json)) {
+    throw new CoreError("VALIDATION", `Event ${row.event_id} payload must be an object`);
+  }
+
+  return row.payload_json;
 }
 
 function rollUpByCohort(input: {

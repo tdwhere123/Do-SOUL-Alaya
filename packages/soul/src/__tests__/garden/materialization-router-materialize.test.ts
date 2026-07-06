@@ -71,7 +71,7 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     );
 
     expect(result.success).toBe(true);
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly content: string;
     };
     expect(memoryInput.content).toBe("Always use rtk for repo commands.");
@@ -103,7 +103,7 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     ]);
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(3);
     expect(deps.synthesisService.create).toHaveBeenCalledTimes(1);
-    expect(deps.synthesisService.create.mock.calls[0][0]).toMatchObject({
+    expect(deps.synthesisService.create.mock.calls[0]![0]).toMatchObject({
       source_memory_refs: ["memory-source-1", "memory-source-2"]
     });
 
@@ -115,12 +115,12 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
       }
     );
 
-    expect(evidenceInputs[0].gist).toBe("Never print secrets. msg-1");
-    expect(evidenceInputs[0].physical_anchor?.artifact_ref).toBe("msg-1");
-    expect(evidenceInputs[1].gist).toBe("Never print secrets. msg-2");
-    expect(evidenceInputs[1].physical_anchor?.artifact_ref).toBe("msg-2");
-    expect(evidenceInputs[2].gist).toBe("Never print secrets. msg-3");
-    expect(evidenceInputs[2].physical_anchor?.artifact_ref).toBe("msg-3");
+    expect(evidenceInputs[0]!.gist).toBe("Never print secrets. msg-1");
+    expect(evidenceInputs[0]!.physical_anchor?.artifact_ref).toBe("msg-1");
+    expect(evidenceInputs[1]!.gist).toBe("Never print secrets. msg-2");
+    expect(evidenceInputs[1]!.physical_anchor?.artifact_ref).toBe("msg-2");
+    expect(evidenceInputs[2]!.gist).toBe("Never print secrets. msg-3");
+    expect(evidenceInputs[2]!.physical_anchor?.artifact_ref).toBe("msg-3");
     for (const evidenceInput of evidenceInputs) {
       expect(evidenceInput.gist).not.toContain("[routing:");
       expect(evidenceInput.semantic_anchor.summary).not.toContain("[routing:");
@@ -166,14 +166,14 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
       "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
     );
 
-    const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as {
+    const evidenceInput = deps.evidenceService.create.mock.calls[0]![0] as {
       readonly gist: string;
       readonly semantic_anchor: { readonly summary: string };
     };
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly content: string;
     };
-    const claimInput = deps.claimService.create.mock.calls[0][0] as {
+    const claimInput = deps.claimService.create.mock.calls[0]![0] as {
       readonly proposition_digest: string;
     };
 

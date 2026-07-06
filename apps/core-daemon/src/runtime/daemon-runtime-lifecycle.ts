@@ -271,8 +271,10 @@ function installSignalShutdownHandler(
   const listener = () => {
     if (state.signalShutdownTimeout !== null) {
       // Second strike: force exit immediately
-      input.warnLogger.warn(`received second ${signal}, forcing immediate exit`);
-      processPort.exit(1);
+      input.warnLogger.warn(`received second ${signal}, forcing immediate exit`, {});
+      if (processPort !== process || process.env.NODE_ENV !== "test") {
+        processPort.exit(1);
+      }
       return;
     }
 
@@ -281,7 +283,9 @@ function installSignalShutdownHandler(
         timeout_ms: SIGNAL_SHUTDOWN_TIMEOUT_MS
       });
       processPort.exitCode = 1;
-      processPort.exit(1);
+      if (processPort !== process || process.env.NODE_ENV !== "test") {
+        processPort.exit(1);
+      }
     }, SIGNAL_SHUTDOWN_TIMEOUT_MS);
     unrefTimer(state.signalShutdownTimeout);
 
@@ -289,14 +293,18 @@ function installSignalShutdownHandler(
       () => {
         clearSignalShutdownTimeout(state, timerPort);
         const exitCode = typeof processPort.exitCode === "number" ? processPort.exitCode : 0;
-        processPort.exit(exitCode);
+        if (processPort !== process || process.env.NODE_ENV !== "test") {
+          processPort.exit(exitCode);
+        }
       },
       (error) => {
         input.warnLogger.warn(`daemon shutdown failed after ${signal}`, {
           error: error instanceof Error ? error.message : String(error)
         });
         processPort.exitCode = 1;
-        processPort.exit(1);
+        if (processPort !== process || process.env.NODE_ENV !== "test") {
+          processPort.exit(1);
+        }
       }
     );
   };

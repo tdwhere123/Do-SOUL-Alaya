@@ -4,6 +4,7 @@ import { PreWriteRecallService } from "../../governance/reconciliation/pre-write
 import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 
 import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
+import { requireAt, mockCallAt } from "../helpers/defined.js";
 
 describe("ReconciliationService", () => {
   it("ADD: appends a genuinely new fact when no similar memory exists", async () => {
@@ -164,10 +165,10 @@ describe("ReconciliationService", () => {
     expect(update).not.toHaveBeenCalled();
     expect(decide).not.toHaveBeenCalled();
     expect(append).toHaveBeenCalledTimes(1);
-    expect(append.mock.calls[0][0].event_type).toBe("soul.signal.triaged");
-    expect(append.mock.calls[0][0].entity_id).toBe("signal-1:noop_audit");
-    expect(append.mock.calls[0][0].caused_by).toBe("reconciliation_noop");
-    expect(append.mock.calls[0][0].payload_json).toMatchObject({
+    expect(requireAt(mockCallAt(append, 0), 0).event_type).toBe("soul.signal.triaged");
+    expect(requireAt(mockCallAt(append, 0), 0).entity_id).toBe("signal-1:noop_audit");
+    expect(requireAt(mockCallAt(append, 0), 0).caused_by).toBe("reconciliation_noop");
+    expect(requireAt(mockCallAt(append, 0), 0).payload_json).toMatchObject({
       triage_result: "dropped",
       dropped_content: "The user lives in   Berlin.",
       surviving_object_id: "memory-existing"
@@ -312,7 +313,7 @@ it("a single-char discriminator pair is NOT collapsed — token set stays distin
     }).decision;
 
     expect(decide).toHaveBeenCalledTimes(1);
-    const candidates = decide.mock.calls[0][0].candidates;
+    const candidates = requireAt(mockCallAt(decide, 0), 0).candidates;
     expect(candidates[0]?.content).toBe("The user is admin of project A");
     expect(decision.kind).toBe("add");
   });
@@ -383,7 +384,7 @@ it("ambiguous-band fact: LLM NOOP verdict drops the fact, audits it, creates not
     expect(append).toHaveBeenCalledTimes(1);
     expect(driven.evidenceMinted()).toBe(0);
     expect(update).not.toHaveBeenCalled();
-    expect(append.mock.calls[0][0].payload_json).toMatchObject({
+    expect(requireAt(mockCallAt(append, 0), 0).payload_json).toMatchObject({
       dropped_content: "The user lives in Berlin downtown",
       surviving_object_id: "memory-neighbor"
     });
@@ -403,7 +404,7 @@ it("a max-length distilled fact round-trips through the NOOP audit row untruncat
 
     expect(decision.kind).toBe("noop");
     expect(append).toHaveBeenCalledTimes(1);
-    expect(append.mock.calls[0][0].payload_json).toMatchObject({
+    expect(requireAt(mockCallAt(append, 0), 0).payload_json).toMatchObject({
       dropped_content: maxLengthFact
     });
   });
@@ -507,7 +508,7 @@ it("multi-neighbor: the highest-similarity neighbor is the LLM's first candidate
     }).decision;
 
     expect(decide).toHaveBeenCalledTimes(1);
-    const candidates = decide.mock.calls[0][0].candidates;
+    const candidates = requireAt(mockCallAt(decide, 0), 0).candidates;
     expect(candidates[0]?.objectId).toBe("memory-strong");
   });
 

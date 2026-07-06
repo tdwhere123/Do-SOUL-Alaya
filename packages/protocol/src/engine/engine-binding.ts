@@ -11,6 +11,7 @@ import {
 const engineProviderValues = ["openai", "anthropic", "custom"] as const;
 const EngineBaseUrlSchema = BoundedPathSchema.url();
 const EngineConfigSchema = BoundedJsonObjectSchema;
+const PersistedApiKeySchema = z.string().max(16384);
 
 export const EngineProvider = {
   OPENAI: "openai",
@@ -51,7 +52,8 @@ export const EngineBindingInputSchema = z
   .object({
     provider_type: EngineProviderSchema,
     base_url: EngineBaseUrlSchema.nullable(),
-    api_key: BoundedReasonSchema,
+    api_key: BoundedReasonSchema.optional(),
+    api_key_ref: BoundedIdSchema.nullable().optional(),
     model: BoundedLabelSchema,
     config: EngineConfigSchema.default({}),
     enable_tools: z.boolean().optional()
@@ -65,6 +67,16 @@ export const EngineBindingInputSchema = z
         message: "Custom providers require a base_url."
       });
     }
+    if (
+      (value.api_key === undefined || value.api_key.length === 0) &&
+      (value.api_key_ref === undefined || value.api_key_ref === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["api_key_ref"],
+        message: "Engine bindings require either api_key or api_key_ref."
+      });
+    }
   })
   .readonly();
 
@@ -73,13 +85,22 @@ export const EngineBindingRecordSchema = z.object({
   workspace_id: BoundedIdSchema,
   provider_type: EngineProviderSchema,
   base_url: EngineBaseUrlSchema.nullable(),
-  api_key: BoundedReasonSchema,
+  api_key: PersistedApiKeySchema,
+  api_key_ref: BoundedIdSchema.nullable().optional(),
   model: BoundedLabelSchema,
   config: EngineConfigSchema,
   enable_tools: z.boolean().optional(),
   created_at: IsoDatetimeStringSchema,
   updated_at: IsoDatetimeStringSchema
-}).strict().readonly();
+}).strict().superRefine((value, context) => {
+  if (value.api_key.length === 0 && (value.api_key_ref === undefined || value.api_key_ref === null)) {
+    context.addIssue({
+      code: "custom",
+      path: ["api_key_ref"],
+      message: "Persisted engine bindings require either api_key or api_key_ref."
+    });
+  }
+}).readonly();
 
 export const EngineBindingSummarySchema = z.object({
   provider_type: EngineProviderSchema,

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { access } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
@@ -155,7 +156,7 @@ async function decideWithGardenCache(
   candidates: readonly { readonly objectId: string; readonly content: string }[]
 ): Promise<Awaited<ReturnType<NonNullable<ReconciliationLlmDecisionPort>["decide"]>>> {
   const requestKey = computeRequestKey(config.model, incomingContent, candidates);
-  const cached = readCachedDecision(cacheRoot, requestKey);
+  const cached = await readCachedDecision(cacheRoot, requestKey);
   if (cached !== undefined) {
     return materializeCachedReconciliationDecision(cached, candidates);
   }
@@ -199,7 +200,7 @@ async function requestAndCacheReconciliationDecision(
     parsed.targetObjectId === undefined
       ? undefined
       : candidates.find((candidate) => candidate.objectId === parsed.targetObjectId)?.content;
-  writeCachedDecision(cacheRoot, requestKey, {
+  await writeCachedDecision(cacheRoot, requestKey, {
     model: config.model,
     request_hash: requestKey,
     kind: parsed.kind,
@@ -248,16 +249,16 @@ function cacheFilePath(cacheRoot: string, requestKey: string): string {
   return join(cacheRoot, requestKey.slice(0, 2), `${requestKey}.json`);
 }
 
-function readCachedDecision(
+async function readCachedDecision(
   cacheRoot: string,
   requestKey: string
-): CachedDecision | undefined {
+): Promise<CachedDecision | undefined> {
   const filePath = cacheFilePath(cacheRoot, requestKey);
-  if (!existsSync(filePath)) {
+  if (!(await fileExists(filePath))) {
     return undefined;
   }
   try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedDecision>;
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<CachedDecision>;
     if (parsed.kind !== "add" && parsed.kind !== "update" && parsed.kind !== "noop") {
       return undefined;
     }
@@ -288,13 +289,13 @@ function readCachedDecision(
   }
 }
 
-function writeCachedDecision(
+async function writeCachedDecision(
   cacheRoot: string,
   requestKey: string,
   entry: CachedDecision
-): void {
+): Promise<void> {
   const filePath = cacheFilePath(cacheRoot, requestKey);
-  mkdirSync(dirname(filePath), { recursive: true });
+  await mkdir(dirname(filePath), { recursive: true });
   // Write to a temp file in the same directory then rename onto the
   // final path — rename is atomic on POSIX, so a crash or a concurrent
   // write can never leave a truncated .json that every future run would
@@ -302,8 +303,17 @@ function writeCachedDecision(
   // so two writers racing the same requestKey within one process never
   // collide on the temp path; a crash leaves at most a stale .tmp.
   const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  renameSync(tempPath, filePath);
+  await writeFile(tempPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
+  await rename(tempPath, filePath);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseDecision(

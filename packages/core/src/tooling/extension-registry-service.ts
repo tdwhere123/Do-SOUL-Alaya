@@ -243,55 +243,94 @@ export class ExtensionRegistryService {
     try {
       result = await mutate();
     } catch (error) {
-      if (rollbackMutation !== undefined) {
-        try {
-          await rollbackMutation();
-        } catch (rollbackError) {
-          try {
-            await this.deps.eventLogWriter.append(
-              this.createDescriptorRegistrationCompensationFailedEventEntry(
-                input,
-                entry.event_id
-              )
-            );
-          } catch (compensationError) {
-            throw new CoreError(
-              "CONFLICT",
-              `Failed to roll back ${input.descriptor_type} ${input.descriptor_id} after mutation failure.`,
-              {
-                cause: new AggregateError(
-                  [toError(rollbackError), toError(compensationError)],
-                  "Rollback failed after mutation failure and failure compensation could not be recorded.",
-                  {
-                    cause: toError(error)
-                  }
-                )
-              }
-            );
-          }
-          throw new CoreError(
-            "CONFLICT",
-            `Failed to roll back ${input.descriptor_type} ${input.descriptor_id} after mutation failure.`,
-            {
-              cause: new AggregateError(
-                [toError(rollbackError)],
-                "Rollback failed after mutation failure.",
-                {
-                  cause: toError(error)
-                }
-              )
-            }
-          );
-        }
-      }
-      await this.deps.eventLogWriter.append(
-        this.createDescriptorRegistrationRevertedEventEntry(input, entry.event_id)
-      );
-      throw error;
+      return await this.handleDescriptorMutationFailure(input, entry.event_id, error, rollbackMutation);
     }
 
     await this.deps.runtimeNotifier?.notifyEntry(entry);
     return result;
+  }
+
+  private async handleDescriptorMutationFailure(
+    input: {
+      readonly descriptor_type: "tool_provider" | "skill_package";
+      readonly descriptor_id: string;
+      readonly name: string;
+      readonly source: ToolProvider["source"] | SkillPackage["source"];
+    },
+    originalEventId: string,
+    mutationError: unknown,
+    rollbackMutation?: () => Promise<void>
+  ): Promise<never> {
+    if (rollbackMutation !== undefined) {
+      await this.rollbackDescriptorMutation(input, originalEventId, mutationError, rollbackMutation);
+    }
+    await this.deps.eventLogWriter.append(
+      this.createDescriptorRegistrationRevertedEventEntry(input, originalEventId)
+    );
+    throw mutationError;
+  }
+
+  private async rollbackDescriptorMutation(
+    input: {
+      readonly descriptor_type: "tool_provider" | "skill_package";
+      readonly descriptor_id: string;
+      readonly name: string;
+      readonly source: ToolProvider["source"] | SkillPackage["source"];
+    },
+    originalEventId: string,
+    mutationError: unknown,
+    rollbackMutation: () => Promise<void>
+  ): Promise<void> {
+    try {
+      await rollbackMutation();
+    } catch (rollbackError) {
+      await this.reportDescriptorRollbackFailure(input, originalEventId, mutationError, rollbackError);
+    }
+  }
+
+  private async reportDescriptorRollbackFailure(
+    input: {
+      readonly descriptor_type: "tool_provider" | "skill_package";
+      readonly descriptor_id: string;
+    },
+    originalEventId: string,
+    mutationError: unknown,
+    rollbackError: unknown
+  ): Promise<never> {
+    try {
+      await this.deps.eventLogWriter.append(
+        this.createDescriptorRegistrationCompensationFailedEventEntry(input, originalEventId)
+      );
+    } catch (compensationError) {
+      throw this.createDescriptorRollbackError(input, mutationError, rollbackError, compensationError);
+    }
+    throw this.createDescriptorRollbackError(input, mutationError, rollbackError);
+  }
+
+  private createDescriptorRollbackError(
+    input: {
+      readonly descriptor_type: "tool_provider" | "skill_package";
+      readonly descriptor_id: string;
+    },
+    mutationError: unknown,
+    rollbackError: unknown,
+    compensationError?: unknown
+  ): CoreError {
+    return new CoreError(
+      "CONFLICT",
+      `Failed to roll back ${input.descriptor_type} ${input.descriptor_id} after mutation failure.`,
+      {
+        cause: new AggregateError(
+          compensationError === undefined
+            ? [toError(rollbackError)]
+            : [toError(rollbackError), toError(compensationError)],
+          compensationError === undefined
+            ? "Rollback failed after mutation failure."
+            : "Rollback failed after mutation failure and failure compensation could not be recorded.",
+          { cause: toError(mutationError) }
+        )
+      }
+    );
   }
 
   private createDescriptorRegisteredEventEntry(input: {

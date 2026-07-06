@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { DynamicsService, type DynamicsServiceDependencies } from "../../dynamics/dynamics-service.js";
 import { createKarmaEvent, createMemoryEntry } from "./karma-fixtures.js";
+import { expectDefined, requireAt } from "../helpers/defined.js";
 
 interface FailureHarnessOptions {
   readonly failFirstAppend?: boolean;
@@ -107,8 +108,8 @@ describe("DynamicsService karma transition failure invariants", () => {
     expect(notifyEntrySpy.mock.calls.length).toBeGreaterThan(0);
     // invariant: the durable mutation and every audit append precede the first
     // broadcast, so a subscriber never observes an event before it is persisted.
-    const firstNotifyOrder = notifyEntrySpy.mock.invocationCallOrder[0];
-    expect(updateDynamicsSpy.mock.invocationCallOrder[0]).toBeLessThan(firstNotifyOrder);
+    const firstNotifyOrder = expectDefined(requireAt(notifyEntrySpy.mock.invocationCallOrder, 0), "invocationCallOrder");
+    expect(expectDefined(requireAt(updateDynamicsSpy.mock.invocationCallOrder, 0), "invocationCallOrder")).toBeLessThan(firstNotifyOrder);
     for (const appendOrder of appendSpy.mock.invocationCallOrder) {
       expect(appendOrder).toBeLessThan(firstNotifyOrder);
     }

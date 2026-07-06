@@ -236,6 +236,9 @@ export class Librarian {
           }
 
           const [anchor, ...rest] = group.object_ids;
+          if (anchor === undefined) {
+            continue;
+          }
           for (const neighborId of rest) {
             try {
               await this.graphEdgePort.createEdge({

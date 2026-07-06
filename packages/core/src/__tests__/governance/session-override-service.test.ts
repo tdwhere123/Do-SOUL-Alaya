@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { WorkspaceRunEventType, GreenGovernanceEventType, RunMessageAppendedPayloadSchema, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { SessionOverrideService } from "../../governance/proposals/session-override-service.js";
 import type { TestMock } from "../shared/mock-types.js";
+import { requireAt } from "../helpers/defined.js";
 
 function createEventLogEntry(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry {
   return {
@@ -461,7 +462,7 @@ function createEventLogRepo(overrides: Partial<{
       overrides.getLatestUserRunMessageByRun ??
       vi.fn(async (runId: string) => {
         for (let index = appendedEvents.length - 1; index >= 0; index -= 1) {
-          const event = appendedEvents[index];
+          const event = requireAt(appendedEvents, index);
           if (event.run_id !== runId || event.event_type !== WorkspaceRunEventType.RUN_MESSAGE_APPENDED) {
             continue;
           }

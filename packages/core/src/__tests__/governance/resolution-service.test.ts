@@ -20,6 +20,7 @@ import {
 } from "../../governance/proposals/resolution-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 import type { DeferredObligationService } from "../../governance/policy/deferred-obligation-service.js";
+import { firstDefined } from "../helpers/defined.js";
 const FIXED_NOW = "2026-05-17T00:00:00.000Z";
 interface Harness {
   readonly service: ResolutionService;
@@ -228,10 +229,10 @@ describe("ResolutionService dispatch", () => {
       })
     );
     expect(harness.published).toHaveLength(1);
-    expect(harness.published[0].event_type).toBe(
+    expect(firstDefined(harness.published).event_type).toBe(
       GovernanceResolutionEventType.SOUL_RESOLUTION_CONFIRM_APPLIED
     );
-    expect(harness.published[0].payload_json).toMatchObject({
+    expect(firstDefined(harness.published).payload_json).toMatchObject({
       target_object_id: "claim-1",
       resolution: "confirm",
       activated_claim_id: "claim-1"
@@ -265,7 +266,7 @@ describe("ResolutionService dispatch", () => {
         additionalEventsSink: expect.any(Array)
       })
     );
-    expect(harness.published[0].event_type).toBe(
+    expect(firstDefined(harness.published).event_type).toBe(
       GovernanceResolutionEventType.SOUL_RESOLUTION_REJECT_APPLIED
     );
   });
@@ -371,7 +372,7 @@ describe("ResolutionService dispatch", () => {
       targetEntityId: "claim-1",
       expiresAt: "2026-05-18T00:00:00.000Z"
     });
-    expect(harness.published[0].payload_json).toMatchObject({
+    expect(firstDefined(harness.published).payload_json).toMatchObject({
       resolution: "defer",
       obligation_id: "obligation-1"
     });

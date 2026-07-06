@@ -21,16 +21,16 @@ export interface EvidenceCapsuleStatements {
 export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceCapsuleStatements {
   return {
     createStatement: db.connection.prepare(CREATE_EVIDENCE_CAPSULE_SQL),
-    findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("object_id = ?", "LIMIT 1")),
-    findByRunIdStatement: db.connection.prepare(findEvidenceCapsuleSql("run_id = ?")),
-    findByRunIdPagedStatement: db.connection.prepare(findEvidenceCapsuleSql("run_id = ?", "LIMIT ? OFFSET ?")),
-    findByWorkspaceIdStatement: db.connection.prepare(findEvidenceCapsuleSql("workspace_id = ?")),
+    findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
+    findByRunIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun")),
+    findByRunIdPagedStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun", "paged")),
+    findByWorkspaceIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byWorkspace")),
     findByWorkspaceIdPagedStatement: db.connection.prepare(
-      findEvidenceCapsuleSql("workspace_id = ?", "LIMIT ? OFFSET ?")
+      findEvidenceCapsuleSql("byWorkspace", "paged")
     ),
-    findByHealthStatement: db.connection.prepare(findEvidenceCapsuleSql("evidence_health_state = ?")),
+    findByHealthStatement: db.connection.prepare(findEvidenceCapsuleSql("byHealth")),
     findByHealthPagedStatement: db.connection.prepare(
-      findEvidenceCapsuleSql("evidence_health_state = ?", "LIMIT ? OFFSET ?")
+      findEvidenceCapsuleSql("byHealth", "paged")
     ),
     updateHealthStatement: db.connection.prepare(UPDATE_EVIDENCE_HEALTH_SQL),
     searchByKeywordStatement: db.connection.prepare(SEARCH_EVIDENCE_KEYWORD_SQL),
@@ -38,12 +38,27 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
   };
 }
 
-function findEvidenceCapsuleSql(whereClause: string, suffix = ""): string {
-  const suffixSql = suffix.length === 0 ? "" : `\n      ${suffix}`;
+type EvidenceCapsuleWhereKey = "byId" | "byRun" | "byWorkspace" | "byHealth";
+type EvidenceCapsuleSuffixKey = "limitOne" | "paged";
+
+const EVIDENCE_CAPSULE_WHERE_CLAUSES: Readonly<Record<EvidenceCapsuleWhereKey, string>> = Object.freeze({
+  byId: "object_id = ?",
+  byRun: "run_id = ?",
+  byWorkspace: "workspace_id = ?",
+  byHealth: "evidence_health_state = ?"
+});
+
+const EVIDENCE_CAPSULE_SUFFIXES: Readonly<Record<EvidenceCapsuleSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1",
+  paged: "LIMIT ? OFFSET ?"
+});
+
+function findEvidenceCapsuleSql(whereKey: EvidenceCapsuleWhereKey, suffixKey?: EvidenceCapsuleSuffixKey): string {
+  const suffixSql = suffixKey === undefined ? "" : `\n      ${EVIDENCE_CAPSULE_SUFFIXES[suffixKey]}`;
   return `
       SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
       FROM evidence_capsules
-      WHERE ${whereClause}
+      WHERE ${EVIDENCE_CAPSULE_WHERE_CLAUSES[whereKey]}
       ORDER BY created_at ASC, object_id ASC${suffixSql}
     `;
 }

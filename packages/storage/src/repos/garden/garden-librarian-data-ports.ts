@@ -85,15 +85,18 @@ function findMergeCandidates(
   readonly similarity_score: number;
 }[] {
   const rows = statements.mergeRowsStatement.all(workspaceId) as readonly SubjectRow[];
-  return groupBySubject(rows).map((group) => {
+  return groupBySubject(rows).flatMap((group) => {
     const primary = group.objectIds[0];
+    if (primary === undefined) {
+      return [];
+    }
     const duplicates = group.objectIds.slice(1);
-    return {
+    return [{
       primary_id: primary,
       duplicate_ids: duplicates,
       object_kind: group.objectKind,
       similarity_score: Math.min(0.99, 0.8 + duplicates.length * 0.05)
-    };
+    }];
   });
 }
 
@@ -110,11 +113,16 @@ function findTemplateClusters(
     readonly pattern_description: string;
     readonly object_id: string;
   }[];
-  return groupRows(rows, (row) => row.pattern_description, (row) => row.object_id).map((group) => ({
-    representative_id: group.objectIds[0],
-    member_ids: group.objectIds,
-    pattern_description: group.key
-  }));
+  return groupRows(rows, (row) => row.pattern_description, (row) => row.object_id).flatMap((group) => {
+    const representativeId = group.objectIds[0];
+    return representativeId === undefined
+      ? []
+      : [{
+          representative_id: representativeId,
+          member_ids: group.objectIds,
+          pattern_description: group.key
+        }];
+  });
 }
 
 export function createNeighborPort(context: GardenDataPortFactoryContext): GardenLibrarianNeighborDetectionPort {
@@ -286,6 +294,9 @@ function groupChains(rows: readonly ChainRow[]): readonly {
 
   return Array.from(grouped, ([chainKey, intermediateIds]) => {
     const [chainStart, chainEnd] = chainKey.split("|");
+    if (chainStart === undefined || chainEnd === undefined) {
+      throw new Error("Garden librarian chain invariant violated: malformed chain key.");
+    }
     return {
       chainStart,
       chainEnd,

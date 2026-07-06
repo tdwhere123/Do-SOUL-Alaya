@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EdgeProposalStatus, EdgeProposalTriggerSource } from "@do-soul/alaya-protocol";
 import { AUTO_ACCEPT_FLOOR_BY_TRIGGER, AUTO_ACCEPT_REVIEWER_IDENTITY, EdgeProposalService } from "../../path-graph/edge-proposals/edge-proposal-service.js";
 import { createAutoAcceptHarness, createEventPublisher, createMemoryRepo, createPathCandidatePort, createProposalRepo } from "./edge-proposal-service-test-fixtures.js";
+import { firstDefined } from "../helpers/defined.js";
 
 describe("EdgeProposalService", () => {
 // invariant: submitCandidate is contracted to catch its own materialize
@@ -48,7 +49,7 @@ describe("EdgeProposalService", () => {
       .flatMap((call) => call[0])
       .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
     expect(mintFailedEvents).toHaveLength(1);
-    expect(mintFailedEvents[0].payload_json).toMatchObject({
+    expect(firstDefined(mintFailedEvents).payload_json).toMatchObject({
       proposal_id: proposal.proposal_id,
       failure_kind: "submit_threw",
       failure_detail: "materialize blew up",
@@ -354,7 +355,7 @@ it("clamps MCP explicit proposal confidence to the agent self-report ceiling", a
           events.some((event) => event.event_type === "soul.graph.edge_proposal_reviewed")
         );
       expect(reviewedBatches).toHaveLength(1);
-      const reviewedEvent = reviewedBatches[0].find(
+      const reviewedEvent = firstDefined(reviewedBatches).find(
         (event) => event.event_type === "soul.graph.edge_proposal_reviewed"
       );
       expect(reviewedEvent?.payload_json).toMatchObject({

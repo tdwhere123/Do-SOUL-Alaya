@@ -274,13 +274,24 @@ function pairEntryState(
 
   const entries = contextLens.lens_entries.map((entry, index) => ({
     entry: Object.freeze({ ...entry }),
-    projectionEntry: cloneProjectionEntry(workingProjection.entries[index], entry, index)
+    projectionEntry: cloneProjectionEntry(readProjectionEntry(workingProjection.entries, index), entry, index)
   }));
 
   return {
     entries,
     totalTokens: workingProjection.total_token_estimate
   };
+}
+
+function readProjectionEntry(
+  entries: Readonly<WorkingProjection>["entries"],
+  index: number
+): Readonly<WorkingProjection["entries"][number]> {
+  const entry = entries[index];
+  if (entry === undefined) {
+    throw new Error("ContextLens and WorkingProjection entries must align for degradation assessment");
+  }
+  return entry;
 }
 
 function cloneProjectionEntry(

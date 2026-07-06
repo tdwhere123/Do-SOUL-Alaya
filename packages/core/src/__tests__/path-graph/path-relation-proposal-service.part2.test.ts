@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { PathRelationSchema, type PathRelation } from "@do-soul/alaya-protocol";
+import { PathRelationSchema, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 import { PathRelationProposalService, SUPPORTS_SEED_PROFILE, SHARES_ENTITY_SEED_PROFILE, SIGNAL_GRAPH_REF_SEED_PROFILE, SUPERSEDES_SEED_PROFILE, CONTRADICTS_SEED_PROFILE, EXCEPTION_TO_SEED_PROFILE, type MemoryAnchorExistencePort, type PathRelationProposalRepoPort, type SubmitCandidateInput } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 import { createCounterStore, createEventPublisher } from "./path-relation-proposal-service.test-support.js";
+import { firstDefined, mockCallAt, requireAt } from "../helpers/defined.js";
+
+type RelationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+function firstMockEventInputs(mock: { mock: { calls: readonly unknown[][] } }): readonly RelationEventInput[] {
+  return requireAt(mockCallAt(mock, 0), 0) as readonly RelationEventInput[];
+}
 
 describe("PathRelationProposalService — submitCandidate generalized intake", () => {
   function objectAnchor(id: string) {
@@ -49,7 +56,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
     expect(result).toBe("applied");
     expect(repo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.constitution.relation_kind).toBe("supports");
     expect(written.plasticity_state.strength).toBe(0.5);
     expect(written.legitimacy.governance_class).toBe("attention_only");
@@ -90,12 +97,12 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       })
     );
 
-    const sharesEntity = repo.create.mock.calls[0][0];
+    const sharesEntity = firstDefined(mockCallAt(repo.create, 0));
     expect(sharesEntity.constitution.relation_kind).toBe("shares_entity");
     expect(sharesEntity.plasticity_state.strength).toBe(0.2);
     expect(sharesEntity.legitimacy.governance_class).toBe("hint_only");
 
-    const signalRef = repo.create.mock.calls[1][0];
+    const signalRef = firstDefined(mockCallAt(repo.create, 1));
     expect(signalRef.constitution.relation_kind).toBe("signal_graph_ref");
     expect(signalRef.plasticity_state.strength).toBe(0.6);
     expect(signalRef.legitimacy.governance_class).toBe("recall_allowed");
@@ -136,14 +143,14 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       })
     );
 
-    const supersedes = repo.create.mock.calls[0][0];
+    const supersedes = firstDefined(mockCallAt(repo.create, 0));
     expect(supersedes.constitution.relation_kind).toBe("supersedes");
     expect(supersedes.effect_vector.recall_bias).toBeLessThan(0);
     expect(supersedes.plasticity_state.strength).toBe(0.9);
     expect(supersedes.legitimacy.governance_class).toBe("recall_allowed");
     expect(supersedes.legitimacy.evidence_basis.length).toBeGreaterThanOrEqual(1);
 
-    const contradicts = repo.create.mock.calls[1][0];
+    const contradicts = firstDefined(mockCallAt(repo.create, 1));
     expect(contradicts.effect_vector.recall_bias).toBeLessThan(0);
     expect(contradicts.plasticity_state.strength).toBe(0.9);
   });
@@ -172,7 +179,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
     );
 
     expect(result).toBe("applied");
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.constitution.relation_kind).toBe("exception_to");
     expect(written.effect_vector.recall_bias).toBe(0);
     expect(written.plasticity_state.strength).toBe(0.9);
@@ -203,7 +210,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       })
     );
 
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.effect_vector.recall_bias).toBe(0);
   });
 
@@ -223,7 +230,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
       baseInput({ governanceClass: "strictly_governed" })
     );
 
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.legitimacy.governance_class).toBe("recall_allowed");
     expect(written.legitimacy.governance_class).not.toBe("strictly_governed");
   });
@@ -291,7 +298,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
     expect(result).toBe("applied");
     expect(repo.create).toHaveBeenCalledTimes(1);
-    expect(repo.create.mock.calls[0][0].constitution.relation_kind).toBe("contradicts");
+    expect(firstDefined(mockCallAt(repo.create, 0)).constitution.relation_kind).toBe("contradicts");
   });
 
   it("submitCandidate does not dedup supports against an existing contradicts path", async () => {
@@ -320,7 +327,7 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
 
     expect(result).toBe("applied");
     expect(repo.create).toHaveBeenCalledTimes(1);
-    expect(repo.create.mock.calls[0][0].constitution.relation_kind).toBe("supports");
+    expect(firstDefined(mockCallAt(repo.create, 0)).constitution.relation_kind).toBe("supports");
   });
 
   it("rejects a foreign object_facet backing object before materializing", async () => {
@@ -354,9 +361,9 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
     expect(result).toBe("rejected");
     expect(repo.create).not.toHaveBeenCalled();
     expect(memoryExistence.workspaceOfObject).toHaveBeenCalledWith("mem-foreign");
-    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
-    expect(eventInputs[0].event_type).toBe("path.relation_rejected");
-    expect(eventInputs[0].payload_json.rejection_reason).toBe("object_foreign_workspace");
+    const eventInputs = firstMockEventInputs(appendManyWithMutation);
+    expect(firstDefined(eventInputs).event_type).toBe("path.relation_rejected");
+    expect(firstDefined(eventInputs).payload_json.rejection_reason).toBe("object_foreign_workspace");
   });
 
   it("rejects a missing time_concern backing object before materializing", async () => {
@@ -390,9 +397,9 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
     expect(result).toBe("rejected");
     expect(repo.create).not.toHaveBeenCalled();
     expect(memoryExistence.workspaceOfObject).toHaveBeenCalledWith("mem-missing");
-    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
-    expect(eventInputs[0].event_type).toBe("path.relation_rejected");
-    expect(eventInputs[0].payload_json.rejection_reason).toBe("object_missing");
+    const eventInputs = firstMockEventInputs(appendManyWithMutation);
+    expect(firstDefined(eventInputs).event_type).toBe("path.relation_rejected");
+    expect(firstDefined(eventInputs).payload_json.rejection_reason).toBe("object_missing");
   });
 
   it("submitCandidate swallows a materialize failure and returns failed with a warn", async () => {

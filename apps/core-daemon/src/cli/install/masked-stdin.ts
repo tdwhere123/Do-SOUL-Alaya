@@ -4,11 +4,27 @@ import type { ReadStream as TtyReadStream } from "node:tty";
 type RawModeReadable = NodeJS.ReadableStream &
   Pick<TtyReadStream, "isRaw" | "setRawMode" | "setEncoding" | "resume" | "pause">;
 
+export interface ReadSecretLineOptions {
+  readonly isTTY: boolean;
+}
+
+export async function readSecretLine(
+  stdin: NodeJS.ReadableStream,
+  stderr: NodeJS.WritableStream,
+  options: ReadSecretLineOptions
+): Promise<string>;
+/** @deprecated Pass `{ isTTY }` instead of a bare boolean. */
 export async function readSecretLine(
   stdin: NodeJS.ReadableStream,
   stderr: NodeJS.WritableStream,
   isTTY: boolean
+): Promise<string>;
+export async function readSecretLine(
+  stdin: NodeJS.ReadableStream,
+  stderr: NodeJS.WritableStream,
+  optionsOrIsTTY: ReadSecretLineOptions | boolean
 ): Promise<string> {
+  const isTTY = typeof optionsOrIsTTY === "boolean" ? optionsOrIsTTY : optionsOrIsTTY.isTTY;
   if (isTTY) {
     return await readMaskedTtySecretLine(stdin, stderr);
   }

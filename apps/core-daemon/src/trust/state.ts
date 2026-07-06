@@ -158,7 +158,7 @@ export class TrustStateRecorder {
       (entries) => {
         // invariant: audit_event_id mirrors the EventLog row created in the
         // same transaction.
-        const auditEntry = entries[0];
+        const auditEntry = requireAuditEntry(entries);
         const finalRecord = ContextDeliveryRecordSchema.parse({
           ...draftRecord,
           audit_event_id: auditEntry.event_id
@@ -219,7 +219,7 @@ export class TrustStateRecorder {
       (entries) => {
         // invariant: audit_event_id mirrors the EventLog row created in the
         // same transaction.
-        const auditEntry = entries[0];
+        const auditEntry = requireAuditEntry(entries);
         const finalRecord = UsageProofRecordSchema.parse({
           ...draftRecord,
           audit_event_id: auditEntry.event_id
@@ -377,6 +377,14 @@ export function createTrustStateRecorder(deps: TrustStateRecorderDependencies): 
 
 function resolveWorkspaceId(workspaceId: string | null): string {
   return workspaceId ?? DEFAULT_WORKSPACE_ID;
+}
+
+function requireAuditEntry(entries: readonly EventLogEntry[]): EventLogEntry {
+  const auditEntry = entries[0];
+  if (auditEntry === undefined) {
+    throw new Error("TrustStateRecorder expected appendManyWithMutation to return an audit event.");
+  }
+  return auditEntry;
 }
 
 function incrementCounter(map: Map<string, number>, key: string): void {

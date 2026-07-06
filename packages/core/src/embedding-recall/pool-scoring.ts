@@ -41,7 +41,13 @@ export async function scoreEmbeddingPoolCandidates(params: {
   let queryEmbedding: Float32Array | null;
   try {
     queryEmbedding = await params.queryEngine.resolveQueryEmbeddingNow(params.queryText);
-  } catch {
+  } catch (error) {
+    params.warn("pool embedding rescoring degraded", {
+      workspace_id: params.workspaceId,
+      run_id: params.runId,
+      reason: "query_embedding_failed",
+      error: toErrorMessage(error)
+    });
     return empty;
   }
   if (queryEmbedding === null) {

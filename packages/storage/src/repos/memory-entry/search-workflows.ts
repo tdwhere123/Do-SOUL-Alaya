@@ -14,7 +14,8 @@ import {
   tokenizeFtsQuery,
   type ExactKeywordCandidateRow,
   type ExactKeywordSearchRow,
-  type FtsKeywordSearchRow
+  type FtsKeywordSearchRow,
+  type ObjectIdFilterColumn
 } from "./keyword-search.js";
 import type { SqliteAllStatement } from "./statement-types.js";
 import type { MemoryEntryKeywordSearchResult } from "./types.js";
@@ -127,7 +128,7 @@ function searchAnchorFtsLane(
   limit: number,
   candidateObjectIds: readonly string[]
 ): readonly FtsKeywordSearchRow[] {
-  const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, `${table}.object_id`);
+  const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, objectIdFilterColumnForFtsTable(table));
   return this.db.connection.prepare(`
     SELECT
       ${table}.object_id,
@@ -148,6 +149,14 @@ function searchAnchorFtsLane(
     ...objectIdFilter.params,
     limit
   ) as readonly FtsKeywordSearchRow[];
+}
+
+function objectIdFilterColumnForFtsTable(
+  table: typeof MEMORY_FTS_TRIGRAM | typeof MEMORY_FTS_PORTER
+): ObjectIdFilterColumn {
+  return table === MEMORY_FTS_TRIGRAM
+    ? "memory_content_fts.object_id"
+    : "memory_content_fts_porter.object_id";
 }
 
 function searchKeywordRows(

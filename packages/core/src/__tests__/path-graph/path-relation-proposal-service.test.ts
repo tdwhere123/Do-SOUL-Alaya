@@ -1,8 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { PathRelationSchema, type PathRelation } from "@do-soul/alaya-protocol";
+import { PathRelationSchema, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 import { PathRelationProposalService, PATH_RELATION_PROPOSE_THRESHOLD, CO_RECALLED_SEED_PROFILE, type PathRelationProposalRepoPort } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
 import { createCounterStore, createEventPublisher } from "./path-relation-proposal-service.test-support.js";
+import { firstDefined, mockCallAt, requireAt } from "../helpers/defined.js";
+
+type RelationEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+function firstMockEventInputs(mock: { mock: { calls: readonly unknown[][] } }): readonly RelationEventInput[] {
+  return requireAt(mockCallAt(mock, 0), 0) as readonly RelationEventInput[];
+}
 
 describe("PathRelationProposalService", () => {
   it("does not propose before the threshold is reached", async () => {
@@ -42,7 +49,7 @@ describe("PathRelationProposalService", () => {
 
     expect(repo.create).toHaveBeenCalledTimes(1);
     expect(appendManyWithMutation).toHaveBeenCalledTimes(1);
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.workspace_id).toBe("workspace-1");
     const anchorIds = [
       written.anchors.source_anchor.object_id,
@@ -51,12 +58,12 @@ describe("PathRelationProposalService", () => {
     expect(anchorIds).toEqual(["mem-A", "mem-B"]);
     expect(() => PathRelationSchema.parse(written)).not.toThrow();
 
-    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
+    const eventInputs = firstMockEventInputs(appendManyWithMutation);
     expect(eventInputs).toHaveLength(1);
-    expect(eventInputs[0].event_type).toBe("path.relation_created");
-    expect(eventInputs[0].entity_type).toBe("path_relation");
-    expect(eventInputs[0].entity_id).toBe(written.path_id);
-    expect(eventInputs[0].workspace_id).toBe("workspace-1");
+    expect(firstDefined(eventInputs).event_type).toBe("path.relation_created");
+    expect(firstDefined(eventInputs).entity_type).toBe("path_relation");
+    expect(firstDefined(eventInputs).entity_id).toBe(written.path_id);
+    expect(firstDefined(eventInputs).workspace_id).toBe("workspace-1");
   });
 
   it("mints a co-usage path at attention_only — not a recall-eligible class", async () => {
@@ -80,13 +87,13 @@ describe("PathRelationProposalService", () => {
       await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
     }
 
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.legitimacy.governance_class).toBe("attention_only");
     expect(written.legitimacy.governance_class).not.toBe("recall_allowed");
     expect(written.legitimacy.governance_class).not.toBe("strictly_governed");
 
-    const [eventInputs] = appendManyWithMutation.mock.calls[0]!;
-    expect(eventInputs[0].payload_json.governance_class).toBe("attention_only");
+    const eventInputs = firstMockEventInputs(appendManyWithMutation);
+    expect(firstDefined(eventInputs).payload_json.governance_class).toBe("attention_only");
   });
 
   it("does not double-propose the same pair", async () => {
@@ -330,7 +337,7 @@ describe("PathRelationProposalService", () => {
 
     await service.onCoUsage(["mem-A", "mem-B"], "workspace-1");
 
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.constitution.relation_kind).toBe("co_recalled");
     expect(written.plasticity_state.strength).toBe(CO_RECALLED_SEED_PROFILE.initialStrength);
     expect(written.legitimacy.governance_class).toBe("attention_only");
@@ -358,7 +365,7 @@ describe("PathRelationProposalService — co-recall seeding", () => {
 
     await service.onCoRecall(["mem-A", "mem-B"], "workspace-1");
     expect(repo.create).toHaveBeenCalledTimes(1);
-    const written = repo.create.mock.calls[0][0];
+    const written = firstDefined(mockCallAt(repo.create, 0));
     expect(written.constitution.relation_kind).toBe("co_recalled");
     expect(written.legitimacy.governance_class).toBe("attention_only");
   });

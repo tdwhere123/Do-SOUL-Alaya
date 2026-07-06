@@ -223,7 +223,7 @@ describe("MaterializationRouter ingest reconciliation", () => {
       object_id: "proposal-1"
     });
     expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
-    expect(pathRelationProposalPort.createPathRelationProposal.mock.calls[0][0]).toMatchObject({
+    expect(pathRelationProposalPort.createPathRelationProposal.mock.calls[0]![0]).toMatchObject({
       targetObjectId: "memory-1",
       reason: expect.stringContaining("submitCandidate error: port wiring fault"),
       proposedPathRelation: {

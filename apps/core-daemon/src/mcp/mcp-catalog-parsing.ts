@@ -1,8 +1,10 @@
+import path from "node:path";
 import {
   ToolProviderToolSpecSchema,
   type ToolProviderToolSpec
 } from "@do-soul/alaya-protocol";
 import { isBuiltinConversationToolId, type BuiltinConversationToolId } from "./builtin-conversation-tool-specs.js";
+import { EXEC_CHILD_ENV_ALLOWLIST } from "./tool-runtime-file-constants.js";
 import type { DaemonMcpServerRuntimeConfig } from "./mcp-runtime-registry.js";
 
 export type DaemonMcpRuntimeBinding = Readonly<{
@@ -41,7 +43,7 @@ export function parseDaemonMcpServerRuntimeConfigs(
 
     const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
     for (const [serverName, rawConfig] of Object.entries(parsed as Record<string, unknown>)) {
-      const config = parseDaemonMcpServerRuntimeConfig(rawConfig);
+      const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
       if (config !== null) {
         runtimeConfigs[serverName] = config;
       }
@@ -84,7 +86,9 @@ export function defaultWarn(message: string, meta: Record<string, unknown>): voi
 }
 
 function parseDaemonMcpServerRuntimeConfig(
-  rawConfig: unknown
+  serverName: string,
+  rawConfig: unknown,
+  warn: WarnLogger
 ): DaemonMcpServerRuntimeConfig | null {
   if (typeof rawConfig !== "object" || rawConfig === null || Array.isArray(rawConfig)) {
     return null;
@@ -94,17 +98,38 @@ function parseDaemonMcpServerRuntimeConfig(
   const transportType = readNonEmptyString(candidate["transport_type"]);
   if (transportType === "stdio") {
     const command = readNonEmptyString(candidate["command"]);
-    if (command === null) {
+    if (command === null || !isAllowedDaemonMcpCommand(command)) {
+      warn("dropping MCP stdio runtime config with disallowed command", {
+        serverName,
+        command
+      });
       return null;
     }
 
     const cwd = readNonEmptyString(candidate["cwd"]);
+    if (cwd !== null && !path.isAbsolute(cwd)) {
+      warn("dropping MCP stdio runtime config with non-absolute cwd", {
+        serverName,
+        cwd
+      });
+      return null;
+    }
+
+    const envRecord = candidate["env"] === undefined ? undefined : readStringRecord(candidate["env"]);
+    if (envRecord !== undefined && !hasAllowedDaemonMcpEnv(envRecord)) {
+      warn("dropping MCP stdio runtime config with blocked environment keys", {
+        serverName,
+        envKeys: Object.keys(envRecord)
+      });
+      return null;
+    }
+
     return Object.freeze({
       transportType,
       command,
       ...(candidate["args"] === undefined ? {} : { args: readStringArray(candidate["args"]) }),
       ...(cwd === null ? {} : { cwd }),
-      ...(candidate["env"] === undefined ? {} : { env: readStringRecord(candidate["env"]) })
+      ...(envRecord === undefined ? {} : { env: envRecord })
     });
   }
 
@@ -262,6 +287,42 @@ function readStringRecord(value: unknown): Readonly<Record<string, string>> {
       )
     )
   );
+}
+
+const DISALLOWED_STDIO_COMMAND_BASENAMES = new Set([
+  "ash",
+  "bash",
+  "busybox",
+  "cmd",
+  "cmd.exe",
+  "dash",
+  "env",
+  "fish",
+  "ksh",
+  "node_modules",
+  "npm",
+  "npx",
+  "pnpm",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "sh",
+  "yarn",
+  "zsh"
+]);
+const ALLOWED_DAEMON_MCP_ENV_KEYS = new Set<string>(EXEC_CHILD_ENV_ALLOWLIST);
+
+function isAllowedDaemonMcpCommand(command: string): boolean {
+  if (!path.isAbsolute(command)) {
+    return false;
+  }
+
+  const basename = path.basename(command).toLowerCase();
+  return !DISALLOWED_STDIO_COMMAND_BASENAMES.has(basename);
+}
+
+function hasAllowedDaemonMcpEnv(envRecord: Readonly<Record<string, string>>): boolean {
+  return Object.keys(envRecord).every((key) => ALLOWED_DAEMON_MCP_ENV_KEYS.has(key));
 }
 
 function dedupeStrings(values: readonly string[]): readonly string[] {
