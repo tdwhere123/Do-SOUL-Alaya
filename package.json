@@ -4,7 +4,7 @@
   "private": true,
   "description": "Do-SOUL Alaya — local-first memory plane for CLI agents, ported from do-what-new",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.0.0"
   },
   "bin": {
     "alaya": "./bin/alaya.mjs"

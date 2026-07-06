@@ -4,6 +4,9 @@ import { CoreError } from "@do-soul/alaya-core";
 
 import type { ContextDeliveryRecord, UsageProofRecord } from "@do-soul/alaya-protocol";
 
+import { fixturePath } from "../support/test-paths.js";
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAlayaCliBridge } from "../../cli/bridge.js";
@@ -275,8 +278,9 @@ describe("cli registration", () => {
         } as unknown as AlayaDaemonRuntime["services"]["workspaceService"]
       }
     });
+    const projectRoot = path.resolve(fixturePath("alaya-project"));
     const bridge = createAlayaCliBridge(runtime, {
-      cwd: "/tmp/alaya-project",
+      cwd: projectRoot,
       stdin,
       stdout,
       stderr,
@@ -294,7 +298,7 @@ describe("cli registration", () => {
     expect(ensureLocalWorkspace).toHaveBeenCalledWith({
       workspaceId: expect.stringMatching(/^local_[a-f0-9]{16}$/),
       name: "alaya-project",
-      rootPath: "/tmp/alaya-project"
+      rootPath: projectRoot
     });
     expect(startBackgroundServices).toHaveBeenCalledTimes(1);
     expect(hoisted.runAlayaMcpStdioServer).toHaveBeenCalledTimes(1);

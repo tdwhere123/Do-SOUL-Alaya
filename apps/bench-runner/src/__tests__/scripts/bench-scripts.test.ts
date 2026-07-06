@@ -2,10 +2,11 @@ import { execFile } from "node:child_process";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileWithFileCapture } from "./script-capture.js";
+import { pathIsStrictlyOutside, pathsEqual } from "../support/test-paths.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -101,23 +102,17 @@ describe("bench maintenance scripts", () => {
   });
 
   it("keeps local ONNX default cache fallback outside the current working tree", async () => {
-    const scriptUrl = pathToFileURL(
-      path.resolve(repoRoot, "scripts/fetch-local-embedding-model.mjs")
-    ).href;
-    const { defaultCacheDir } = (await import(scriptUrl)) as {
-      readonly defaultCacheDir: (
-        env: Record<string, string | undefined>,
-        fallbackHome: string,
-        fallbackTmp: string
-      ) => string;
-    };
-    const repoLikeCwd = path.join(tmpDir, "checkout");
+    const { defaultCacheDir } = await import(
+      path.resolve(repoRoot, "scripts/local-embedding-cache-dir.mjs")
+    );
+    const checkoutRoot = path.join(tmpDir, "checkout");
     const fallbackTmp = path.join(tmpDir, "tmp");
 
     const cacheDir = defaultCacheDir({}, "", fallbackTmp);
+    const expected = path.join(fallbackTmp, "do-soul-alaya-cache", "do-soul-alaya", "models");
 
-    expect(cacheDir).toBe(path.join(fallbackTmp, "do-soul-alaya-cache", "do-soul-alaya/models"));
-    expect(cacheDir.startsWith(repoLikeCwd)).toBe(false);
+    expect(pathsEqual(cacheDir, expected)).toBe(true);
+    expect(pathIsStrictlyOutside(checkoutRoot, cacheDir)).toBe(true);
   });
 
   it("does not append degradation backlog after daily runner infrastructure failures", async () => {

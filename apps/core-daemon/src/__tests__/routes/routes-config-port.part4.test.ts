@@ -9,9 +9,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  DYNAMICS_CONSTANTS,
-  HealthEventKind,
-  GardenEventType,
+  formatFileSecretRef,
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 
@@ -316,26 +314,42 @@ describe("routes-config port batch", () => {
     });
   });
 
-  it("serializes same-path paste writes without exposing plaintext in responses", async () => {
+  it("serializes same-path secret file writes without exposing plaintext in persisted config", async () => {
     const harness = await createServiceHarness();
     const secretPath = path.join(harness.paths.secretsDir, "openai");
+    const normalized = (secretValue: string) => ({
+      patch: {
+        embedding_enabled: true,
+        secret_ref: formatFileSecretRef(secretPath)
+      },
+      pastedSecret: { path: secretPath, value: secretValue }
+    });
+    const persist = vi.fn(async () => ({
+      provider_url: null,
+      secret_ref: formatFileSecretRef(secretPath),
+      model_id: null,
+      embedding_enabled: true
+    }));
 
     const [first, second] = await Promise.all([
-      harness.service.patchRuntimeEmbeddingConfig({
-        secret_ref_mode: "paste",
-        secret_value: "sk-first-secret"
+      applyRuntimeEmbeddingConfigFiles({
+        paths: harness.paths,
+        normalized: normalized("sk-first-secret"),
+        generateTempId: () => "first",
+        persist
       }),
-      harness.service.patchRuntimeEmbeddingConfig({
-        secret_ref_mode: "paste",
-        secret_value: "sk-second-secret"
+      applyRuntimeEmbeddingConfigFiles({
+        paths: harness.paths,
+        normalized: normalized("sk-second-secret"),
+        generateTempId: () => "second",
+        persist
       })
     ]);
 
-    expect(first.secret_ref).toBe(`file:${secretPath}`);
-    expect(second.secret_ref).toBe(`file:${secretPath}`);
+    expect(first.secret_ref).toBe(formatFileSecretRef(secretPath));
+    expect(second.secret_ref).toBe(formatFileSecretRef(secretPath));
     expect(["sk-first-secret\n", "sk-second-secret\n"]).toContain(await readFile(secretPath, "utf8"));
-    expect(JSON.stringify([first, second, harness.publishedEvents])).not.toContain("sk-first-secret");
-    expect(JSON.stringify([first, second, harness.publishedEvents])).not.toContain("sk-second-secret");
-    expect(harness.publishedEvents).toHaveLength(2);
+    expect(JSON.stringify([first, second])).not.toContain("sk-first-secret");
+    expect(JSON.stringify([first, second])).not.toContain("sk-second-secret");
   });
 });

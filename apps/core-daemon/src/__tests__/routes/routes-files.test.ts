@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveStoredFilePath } from "@do-soul/alaya-core";
 import { CoreError } from "@do-soul/alaya-core";
 import {
   initDatabase,
@@ -30,6 +32,7 @@ const mockedReadFile = vi.mocked(readFile);
 const mockedWriteFile = vi.mocked(writeFile);
 const mockedUnlink = vi.mocked(unlink);
 const mockedMkdir = vi.mocked(mkdir);
+const FILES_DIR = "/data/files";
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
 afterEach(() => {
@@ -80,7 +83,7 @@ function buildApp(record: FileRecord | null) {
     runtimeNotifier: {
       notifyEntry: vi.fn()
     },
-    filesDirectory: "/data/files"
+    filesDirectory: FILES_DIR
   });
   return app;
 }
@@ -105,7 +108,7 @@ function buildUploadApp(createWithEvent = vi.fn(), notifyEntry = vi.fn(), append
     runtimeNotifier: {
       notifyEntry
     },
-    filesDirectory: "/data/files"
+    filesDirectory: FILES_DIR
   });
   return app;
 }
@@ -209,7 +212,7 @@ describe("files upload route", () => {
         size_bytes: 5
       }
     });
-    expect(mockedMkdir).toHaveBeenCalledWith("/data/files", { recursive: true });
+    expect(mockedMkdir).toHaveBeenCalledWith(FILES_DIR, { recursive: true });
     expect(mockedWriteFile).toHaveBeenCalledOnce();
     expect(createWithEvent).toHaveBeenCalledOnce();
     expect(createWithEvent.mock.calls[0]?.[0]).toMatchObject({
@@ -325,7 +328,7 @@ describe("files upload route", () => {
           throw new Error("notifier unavailable");
         })
       },
-      filesDirectory: "/data/files"
+      filesDirectory: FILES_DIR
     });
 
     const response = await app.request("/files", {
@@ -387,7 +390,7 @@ describe("files download route", () => {
       fileRepo: { findById: vi.fn(async () => makeRecord()) } as never,
       eventLogRepo: { append: createAuditEventLogAppend() },
       runtimeNotifier: { notifyEntry: vi.fn() },
-      filesDirectory: "/data/files"
+      filesDirectory: FILES_DIR
     });
 
     const response = await app.request("/files/file-1?workspace_id=ws-missing");
@@ -416,7 +419,7 @@ describe("files download route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/plain");
     expect(await response.text()).toBe("hello world");
-    expect(mockedReadFile).toHaveBeenCalledWith("/data/files/file-1.txt");
+    expect(mockedReadFile).toHaveBeenCalledWith(resolveStoredFilePath(FILES_DIR, "file-1.txt"));
   });
 
   it("maps ENOENT read failures to 404", async () => {

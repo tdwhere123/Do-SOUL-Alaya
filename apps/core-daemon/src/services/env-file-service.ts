@@ -1,10 +1,12 @@
 import path from "node:path";
 import { CoreError } from "@do-soul/alaya-core";
 import {
+  formatFileSecretRef,
   parseSecretRefKeychainTarget,
   type RuntimeEmbeddingConfig,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
+import { assertPasteSecretSupported } from "./paste-secret-platform.js";
 import type { AlayaConfigPaths } from "../cli/config-files.js";
 import {
   parseRuntimeEmbeddingConfigPatchWithSecretControls,
@@ -229,7 +231,7 @@ function normalizeFileSecretRef(secretValue: string, invalidPatch: () => CoreErr
   if (!path.isAbsolute(filePath)) {
     throw invalidPatch();
   }
-  return `file:${filePath}`;
+  return formatFileSecretRef(filePath);
 }
 
 function normalizePastedSecretRef<TNormalized extends { secret_ref?: string | null }>(input: {
@@ -238,10 +240,8 @@ function normalizePastedSecretRef<TNormalized extends { secret_ref?: string | nu
   readonly platform: NodeJS.Platform;
   readonly secretPath: string;
 }): Readonly<{ readonly patch: TNormalized; readonly pastedSecret: PastedSecret }> {
-  if (input.platform === "win32") {
-    throw new CoreError("VALIDATION", "paste mode is not supported on win32");
-  }
-  input.normalized.secret_ref = `file:${input.secretPath}`;
+  assertPasteSecretSupported(input.platform);
+  input.normalized.secret_ref = formatFileSecretRef(input.secretPath);
   return {
     patch: input.normalized,
     pastedSecret: {

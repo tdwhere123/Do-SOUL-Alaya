@@ -5,6 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
 import { createAlayaOperationsService } from "../../cli/operations-service.js";
+import { quoteTomlString } from "../support/test-paths.js";
 
 describe("alaya operations", () => {
   it("backs up config and storage into a previewable bundle with an audit row", async () => {
@@ -12,7 +13,7 @@ describe("alaya operations", () => {
     const paths = resolveAlayaConfigPaths(configDir);
     const dbPath = path.join(configDir, "alaya.db");
     await mkdir(paths.configDir, { recursive: true });
-    await writeFile(paths.tomlPath, `[storage]\ndb_path = "${dbPath}"\n`, "utf8");
+    await writeFile(paths.tomlPath, `[storage]\ndb_path = ${quoteTomlString(dbPath)}\n`, "utf8");
     await writeFile(paths.envPath, "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\n", "utf8");
     await writeFile(dbPath, "sqlite-bytes");
 
@@ -49,7 +50,7 @@ describe("alaya operations", () => {
     const bundledDbPath = path.join(configDir, "attacker.db");
     const bundlePath = path.join(configDir, "bundle.json");
     await mkdir(paths.configDir, { recursive: true });
-    await writeFile(paths.tomlPath, `[storage]\ndb_path = "${activeDbPath}"\n`, "utf8");
+    await writeFile(paths.tomlPath, `[storage]\ndb_path = ${quoteTomlString(activeDbPath)}\n`, "utf8");
     await writeFile(activeDbPath, "original-bytes");
     await writeFile(
       bundlePath,
@@ -58,7 +59,7 @@ describe("alaya operations", () => {
         kind: "backup",
         created_at: "2026-05-02T00:00:00.000Z",
         config: {
-          alaya_toml: `[storage]\ndb_path = "${bundledDbPath}"\n`,
+          alaya_toml: `[storage]\ndb_path = ${quoteTomlString(bundledDbPath)}\n`,
           env_file: null
         },
         storage: {
@@ -79,6 +80,6 @@ describe("alaya operations", () => {
     expect(result.restored_paths).not.toContain(bundledDbPath);
     await expect(readFile(activeDbPath, "utf8")).resolves.toBe("restored-bytes");
     await expect(readFile(bundledDbPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(paths.tomlPath, "utf8")).resolves.toContain(`db_path = "${activeDbPath}"`);
+    await expect(readFile(paths.tomlPath, "utf8")).resolves.toContain(`db_path = ${quoteTomlString(activeDbPath)}`);
   });
 });

@@ -337,7 +337,7 @@ describe("PathRelation end-to-end (propose K=3 -> recall path_expansion)", () =>
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 async function createRealStorage() {

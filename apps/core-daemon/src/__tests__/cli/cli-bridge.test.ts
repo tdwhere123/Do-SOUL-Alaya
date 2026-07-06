@@ -8,8 +8,14 @@ import {
   createAlayaCliBridge,
   type AlayaCliResult
 } from "../../cli/bridge.js";
-// @ts-expect-error bin/alaya.mjs is plain JS with no .d.ts; typed via usage here.
-import { createAlayaCliModuleLoaders, loadAlayaCliModules, runAlayaCli } from "../../../../../bin/alaya.mjs";
+import {
+  createAlayaCliModuleLoaders,
+  loadAlayaCliModules,
+  runAlayaCli,
+  resolveAlayaCliDistPaths,
+  type LoadedAlayaCliModules
+} from "../../cli/module-loader.js";
+import { pathEndsWithPosixSegments, toPosixPath } from "../support/test-paths.js";
 
 function createTextSink(): { readonly stream: PassThrough; readonly readText: () => string } {
   const stream = new PassThrough();
@@ -259,12 +265,14 @@ describe("cli bridge", () => {
       list: () => []
     }));
     const registerAlayaCliCommands = vi.fn();
-    const loadModules = vi.fn(async () => ({
-      createAlayaDaemonRuntime,
-      createAlayaCliBridge,
-      registerAlayaCliCommands,
-      softwareExit: ALAYA_SYSEXITS.SOFTWARE
-    }));
+    const loadModules = vi.fn(async () =>
+      ({
+        createAlayaDaemonRuntime,
+        createAlayaCliBridge,
+        registerAlayaCliCommands,
+        softwareExit: ALAYA_SYSEXITS.SOFTWARE
+      }) as unknown as LoadedAlayaCliModules
+    );
 
     const exitCode = await runAlayaCli(["doctor", "--json"], {
       cwd: "/tmp/alaya",
@@ -286,27 +294,28 @@ describe("cli bridge", () => {
 
   it("binary module loader binds imports to the fixed CLI dist modules", async () => {
     const importedPaths: string[] = [];
+    const distPaths = resolveAlayaCliDistPaths();
     const loaded = await loadAlayaCliModules(createAlayaCliModuleLoaders(async (modulePath: string) => {
-      importedPaths.push(modulePath.split("\\").join("/"));
-      if (modulePath.endsWith("/cli/bridge.js")) {
+      importedPaths.push(toPosixPath(modulePath));
+      if (pathEndsWithPosixSegments(modulePath, "apps", "core-daemon", "dist", "cli", "bridge.js")) {
         return {
           ALAYA_SYSEXITS: { SOFTWARE: ALAYA_SYSEXITS.SOFTWARE },
           createAlayaCliBridge: vi.fn()
         };
       }
-      if (modulePath.endsWith("/cli/register.js")) {
+      if (pathEndsWithPosixSegments(modulePath, "apps", "core-daemon", "dist", "cli", "register.js")) {
         return { registerAlayaCliCommands: vi.fn() };
       }
-      if (modulePath.endsWith("/index.js")) {
+      if (pathEndsWithPosixSegments(modulePath, "apps", "core-daemon", "dist", "index.js")) {
         return { createAlayaDaemonRuntime: vi.fn() };
       }
       throw new Error(`unexpected import path: ${modulePath}`);
     }));
 
     expect(importedPaths).toEqual([
-      expect.stringMatching(/\/apps\/core-daemon\/dist\/cli\/bridge\.js$/u),
-      expect.stringMatching(/\/apps\/core-daemon\/dist\/cli\/register\.js$/u),
-      expect.stringMatching(/\/apps\/core-daemon\/dist\/index\.js$/u)
+      toPosixPath(distPaths.bridgeDistPath),
+      toPosixPath(distPaths.registerDistPath),
+      toPosixPath(distPaths.daemonDistPath)
     ]);
     expect(loaded.softwareExit).toBe(ALAYA_SYSEXITS.SOFTWARE);
   });

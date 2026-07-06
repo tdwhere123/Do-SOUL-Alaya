@@ -251,7 +251,17 @@ function buildDetachConflict(
 }
 
 function isManagedSlashCommand(existingCommand: string, currentCommand: string): boolean {
-  return existingCommand === currentCommand || existingCommand === ALAYA_LEGACY_SLASH_COMMAND;
+  if (existingCommand === ALAYA_LEGACY_SLASH_COMMAND) {
+    return true;
+  }
+  if (existingCommand === currentCommand) {
+    return true;
+  }
+  return normalizeSlashCommandForCompare(existingCommand) === normalizeSlashCommandForCompare(currentCommand);
+}
+
+function normalizeSlashCommandForCompare(command: string): string {
+  return command.replace(/\\/g, "/").trim().toLowerCase();
 }
 
 function renderCodexMcpBlock(env: NodeJS.ProcessEnv): string {

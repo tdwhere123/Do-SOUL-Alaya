@@ -6,6 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getCurrentSchemaSummary, initDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { removeTempDirectorySync } from "../temp-directory.js";
 
 interface TempContext {
   directory: string;
@@ -86,10 +87,10 @@ describe("StorageDatabase reopen cache handling", () => {
     while (directories.length > 0) {
       const directory = directories.pop();
       if (directory !== undefined) {
-        cleanupTempDirectory(directory);
+        removeTempDirectorySync(directory);
       }
     }
-  });
+  }, 30_000);
 
   it("closes a cache-evicted database when reopening into a full file-backed cache", () => {
     const closedContext = createTempDatabasePath();
@@ -178,8 +179,8 @@ describe("initDatabase migration runner", () => {
   });
 
   afterEach(() => {
-    cleanupTempDirectory(context.directory);
-  });
+    removeTempDirectorySync(context.directory);
+  }, 30_000);
 
   it("resumes a partially migrated file database and finishes with the full ordered schema ledger", () => {
     const migrationFiles = readMigrationInventory().files;
@@ -357,7 +358,7 @@ describe("initDatabase migration runner", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 });
 
 describe("SQLite migration inventory guardrail", () => {

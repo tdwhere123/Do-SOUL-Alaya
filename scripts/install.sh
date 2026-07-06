@@ -22,7 +22,7 @@
 #                   test-only: use local release assets instead of download
 #
 # What it does:
-#   1. checks node >= 20.19, ensures pnpm 9 (corepack); rejects pnpm major != 9
+#   1. checks node >= 22, ensures pnpm 9 (corepack); rejects pnpm major != 9
 #   2. resolves the requested release tag and validates strict semver shape
 #   3. downloads the release tarball + SHA256SUMS over HTTPS-pinned curl
 #   4. verifies sha256 (anchored match) + rejects unsafe paths inside tarball
@@ -85,9 +85,8 @@ for cmd in curl tar node; do
 done
 
 node_major=$(node -p 'process.versions.node.split(".")[0]')
-node_minor=$(node -p 'process.versions.node.split(".")[1]')
-if [ "$node_major" -lt 20 ] || { [ "$node_major" -eq 20 ] && [ "$node_minor" -lt 19 ]; }; then
-  err "node >= 20.19 required (current: $(node -v)). Install via nvm or your system package manager."
+if [ "$node_major" -lt 22 ]; then
+  err "node >= 22 required (current: $(node -v)). Install via nvm or your system package manager."
 fi
 ok "node $(node -v)"
 

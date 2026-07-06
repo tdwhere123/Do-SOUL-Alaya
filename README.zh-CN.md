@@ -544,7 +544,7 @@ GitHub Release / 源码构建分发路径下只显示升级指引；它不会调
 
 ### 方式 B —— 从源码构建
 
-需要 `git`、Node 20+、pnpm 9+。`CLAUDE.md` 里的 `rtk` 引用是
+需要 `git`、Node 22+、pnpm 9+。`CLAUDE.md` 里的 `rtk` 引用是
 Claude Code 的 token 优化，纯 `pnpm` 同样能跑。
 
 ```bash
@@ -553,7 +553,7 @@ git clone https://github.com/tdwhere123/Do-SOUL-Alaya.git
 cd Do-SOUL-Alaya
 
 # 2) 检查宿主依赖
-node --version    # >= 20.19.0
+node --version    # >= 22.0.0
 pnpm --version    # >= 9
 
 # 3) 装依赖

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
-import { RuntimeGardenComputeConfigSchema, type RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
+import { RuntimeGardenComputeConfigSchema, formatFileSecretRef, type RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import { initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
 import { describe, expect, it, vi } from "vitest";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
@@ -147,7 +147,7 @@ describe("install keychain migration", () => {
     const dbPath = path.join(configDir, "alaya.db");
     await mkdir(path.dirname(oldSecretPath), { recursive: true });
     await writeFile(oldSecretPath, "old-secret\n", "utf8");
-    const envBefore = `ALAYA_OPENAI_SECRET_REF=file:${oldSecretPath}\n`;
+    const envBefore = `ALAYA_OPENAI_SECRET_REF=${formatFileSecretRef(oldSecretPath)}\n`;
     await writeFile(path.join(configDir, ".env"), envBefore, "utf8");
     await writeFile(
       path.join(configDir, "alaya.toml"),
@@ -159,7 +159,7 @@ describe("install keychain migration", () => {
       provider_kind: "official_api",
       model_id: "gpt-4.1-mini",
       provider_url: "https://api.openai.test/v1",
-      secret_ref: `file:${oldSecretPath}`,
+      secret_ref: formatFileSecretRef(oldSecretPath),
       enabled: true
     }, RuntimeGardenComputeConfigSchema);
     const command = createInstallCommand({
@@ -249,7 +249,7 @@ describe("install keychain migration", () => {
       provider_kind: "host_worker",
       model_id: "gpt-4.1-mini",
       provider_url: "https://api.openai.test/v1",
-      secret_ref: `file:${oldSecretPath}`,
+      secret_ref: formatFileSecretRef(oldSecretPath),
       enabled: false
     }, RuntimeGardenComputeConfigSchema);
     const command = createInstallCommand({
@@ -293,7 +293,7 @@ describe("install keychain migration", () => {
         before: {
           provider_kind: "host_worker",
           enabled: false,
-          secret_ref: `file:${oldSecretPath}`
+          secret_ref: formatFileSecretRef(oldSecretPath)
         },
         after: {
           provider_kind: "host_worker",

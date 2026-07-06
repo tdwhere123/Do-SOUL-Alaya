@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +24,7 @@ import {
 } from "../../longmemeval/compile-seed.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../longmemeval/snapshot.js";
 import { signalsEnvelope } from "./compile-seed-fixture.js";
+import { removeTempDirectory } from "../support/temp-cleanup.js";
 
 const WS = "seed-fuel-ws";
 const RUN = "seed-fuel-run";
@@ -170,15 +171,17 @@ async function seedMaterializedBenchDb(dataDir: string): Promise<void> {
 }
 
 describe("materialization fuel inventory integration", () => {
-  let dataDir: string;
-  let cacheRoot: string;
+  let dataDir: string | undefined;
+  let cacheRoot: string | undefined;
 
   afterEach(async () => {
     if (dataDir !== undefined) {
-      await rm(dataDir, { recursive: true, force: true });
+      await removeTempDirectory(dataDir, [BENCH_DAEMON_DB_FILENAME]);
+      dataDir = undefined;
     }
     if (cacheRoot !== undefined) {
-      await rm(cacheRoot, { recursive: true, force: true });
+      await removeTempDirectory(cacheRoot, []);
+      cacheRoot = undefined;
     }
   });
 

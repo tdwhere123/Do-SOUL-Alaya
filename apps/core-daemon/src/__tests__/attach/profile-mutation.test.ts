@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ALAYA_OPERATOR_INSTRUCTIONS,
-  ALAYA_SLASH_COMMAND,
   applyProfileMutationPlan,
   buildAttachProfileMutationPlan,
   buildDetachProfileMutationPlan,
@@ -16,6 +15,28 @@ import {
   type ProfileMutationAuditWriter,
   type ProfileMutationFs
 } from "../../attach/profile-mutation.js";
+
+import {
+  PROFILE_TEST_HOME,
+  REPO_LAYOUT_ROOT,
+  claudeJsonPath,
+  claudeSlashCommandsInCommandsDir,
+  claudeSlashCommandsPath,
+  codexConfigPath,
+  codexSlashCommandsInCommandsDir,
+  codexSlashCommandsPath,
+  createProfileTestEnv,
+  expectedInstalledPackageSlashCommand,
+  expectedMcpLauncher,
+  expectedSlashCommand,
+  slashCommandContainsAlayaBin,
+  installedPackageBinPath,
+  installedPackageDistAttachDir,
+  repoBinPath,
+  repoDistAttachDir,
+  repoSourceAttachDir
+} from "../support/profile-test-home.js";
+import { pathsEqual, toPosixPath } from "../support/test-paths.js";
 
 class MemoryProfileFs implements ProfileMutationFs {
   public readonly files = new Map<string, string>();
@@ -99,7 +120,7 @@ describe("profile mutation", () => {
 
     const fs = new MemoryProfileFs();
     const plan = await buildAttachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     const rendered = plan.operations.map((operation) => operation.after ?? "").join("\n");
@@ -112,40 +133,42 @@ describe("profile mutation", () => {
 
   it("detects active slash path candidates for codex and claude", async () => {
     const fs = new MemoryProfileFs();
-    fs.files.set("/tmp/home/.codex/commands/slash-commands.toml", "existing = true\n");
-    fs.files.set("/tmp/home/.claude/commands/slash-commands.json", "{}\n");
+    fs.files.set(codexSlashCommandsInCommandsDir(), "existing = true\n");
+    fs.files.set(claudeSlashCommandsInCommandsDir(), "{}\n");
 
     const codex = await resolveProfilePaths("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     const claude = await resolveProfilePaths("claude-code", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
 
-    expect(codex.slashCommandsPath).toBe("/tmp/home/.codex/commands/slash-commands.toml");
-    expect(claude.slashCommandsPath).toBe("/tmp/home/.claude/commands/slash-commands.json");
+    expect(codex.slashCommandsPath).toBe(codexSlashCommandsInCommandsDir());
+    expect(claude.slashCommandsPath).toBe(claudeSlashCommandsInCommandsDir());
   });
 
   it("preview surfaces both MCP and slash changes", async () => {
     const fs = new MemoryProfileFs();
     const plan = await buildAttachProfileMutationPlan("claude-code", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
 
     const preview = renderProfileMutationPreview(plan);
+    const slashAfter = plan.operations.find((operation) => operation.recordKind === "slash_alias")?.after ?? "";
     expect(preview).toContain("claude-code MCP server entry");
     expect(preview).toContain("claude-code /alaya-inspect slash alias");
-    expect(preview).toContain(ALAYA_SLASH_COMMAND);
+    expect(slashCommandContainsAlayaBin(slashAfter)).toBe(true);
+    expect(slashAfter).toContain("inspect --open");
   });
 
   it("stamps the MCP server entry with ALAYA_AGENT_TARGET for both hosts", async () => {
     const fs = new MemoryProfileFs();
 
     const claudePlan = await buildAttachProfileMutationPlan("claude-code", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     const claudeAfter = claudePlan.operations.find((op) => op.recordKind === "mcp_server_entry")?.after ?? "";
@@ -153,7 +176,7 @@ describe("profile mutation", () => {
     expect(claudeEntry.mcpServers.alaya.env).toEqual({ ALAYA_AGENT_TARGET: "claude-code" });
 
     const codexPlan = await buildAttachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     const codexAfter = codexPlan.operations.find((op) => op.recordKind === "mcp_server_entry")?.after ?? "";
@@ -161,54 +184,51 @@ describe("profile mutation", () => {
   });
 
   it("renders the slash alias through an absolute node launcher", async () => {
-    expect(resolveAlayaSlashCommand({}, "/tmp/Do SOUL Alaya")).toBe(
-      "node '/tmp/Do SOUL Alaya/bin/alaya.mjs' inspect --open"
-    );
+    expect(resolveAlayaSlashCommand({}, REPO_LAYOUT_ROOT)).toBe(expectedSlashCommand(REPO_LAYOUT_ROOT));
 
     const fs = new MemoryProfileFs();
     const plan = await buildAttachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     const slashAfter = plan.operations.find((operation) => operation.recordKind === "slash_alias")?.after ?? "";
 
-    expect(slashAfter).toMatch(/command = "node '.+\/bin\/alaya\.mjs' inspect --open"/u);
+    expect(slashCommandContainsAlayaBin(slashAfter)).toBe(true);
+    expect(slashAfter).toContain("inspect --open");
     expect(slashAfter).not.toContain('command = "alaya inspect --open"');
   });
 
   it("resolves repo source layout launchers to the checkout root bin", () => {
-    const sourceDir = "/tmp/Do SOUL Alaya/apps/core-daemon/src/attach";
+    const sourceDir = repoSourceAttachDir();
 
-    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: sourceDir })).toEqual({
-      command: "node",
-      args: ["/tmp/Do SOUL Alaya/bin/alaya.mjs", "mcp", "stdio"]
-    });
+    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: sourceDir })).toEqual(
+      expectedMcpLauncher(REPO_LAYOUT_ROOT)
+    );
     expect(resolveAlayaSlashCommand({}, { importMetaDirname: sourceDir })).toBe(
-      "node '/tmp/Do SOUL Alaya/bin/alaya.mjs' inspect --open"
+      expectedSlashCommand(REPO_LAYOUT_ROOT)
     );
   });
 
   it("resolves repo built layout launchers to the checkout root bin", () => {
-    const distDir = "/tmp/Do SOUL Alaya/apps/core-daemon/dist/attach";
+    const distDir = repoDistAttachDir();
 
-    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual({
-      command: "node",
-      args: ["/tmp/Do SOUL Alaya/bin/alaya.mjs", "mcp", "stdio"]
-    });
+    expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual(
+      expectedMcpLauncher(REPO_LAYOUT_ROOT)
+    );
     expect(resolveAlayaSlashCommand({}, { importMetaDirname: distDir })).toBe(
-      "node '/tmp/Do SOUL Alaya/bin/alaya.mjs' inspect --open"
+      expectedSlashCommand(REPO_LAYOUT_ROOT)
     );
   });
 
   it("resolves installed package dist layout launchers to the package bin", () => {
-    const distDir = "/tmp/install root/node_modules/@do-soul/alaya/dist/attach";
+    const distDir = installedPackageDistAttachDir();
 
     expect(resolveAlayaMcpLauncher({}, { importMetaDirname: distDir })).toEqual({
       command: "node",
-      args: ["/tmp/install root/node_modules/@do-soul/alaya/bin/alaya.mjs", "mcp", "stdio"]
+      args: [installedPackageBinPath(), "mcp", "stdio"]
     });
     expect(resolveAlayaSlashCommand({}, { importMetaDirname: distDir })).toBe(
-      "node '/tmp/install root/node_modules/@do-soul/alaya/bin/alaya.mjs' inspect --open"
+      expectedInstalledPackageSlashCommand()
     );
   });
 
@@ -253,12 +273,12 @@ describe("profile mutation", () => {
 
   it("rolls back first write if second write fails", async () => {
     const fs = new MemoryProfileFs();
-    fs.files.set("/tmp/home/.codex/config.toml", "existing = true\n");
+    fs.files.set(codexConfigPath(), "existing = true\n");
     const plan = await buildAttachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
-    fs.failOnWritePath = "/tmp/home/.codex/slash-commands.toml";
+    fs.failOnWritePath = codexSlashCommandsPath();
 
     await expect(
       applyProfileMutationPlan(plan, {
@@ -267,19 +287,19 @@ describe("profile mutation", () => {
       })
     ).rejects.toThrow("write failed");
 
-    expect(fs.files.get("/tmp/home/.codex/config.toml")).toBe("existing = true\n");
-    expect(fs.files.has("/tmp/home/.codex/slash-commands.toml")).toBe(false);
+    expect(fs.files.get(codexConfigPath())).toBe("existing = true\n");
+    expect(fs.files.has(codexSlashCommandsPath())).toBe(false);
   });
 
   it("supports audit-before-write with rollback when writer supports rollback", async () => {
     const fs = new MemoryProfileFs();
-    fs.files.set("/tmp/home/.codex/config.toml", "existing = true\n");
+    fs.files.set(codexConfigPath(), "existing = true\n");
     const writer = new MemoryAuditWriter();
     const plan = await buildAttachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
-    fs.failOnWritePath = "/tmp/home/.codex/slash-commands.toml";
+    fs.failOnWritePath = codexSlashCommandsPath();
 
     await expect(
       applyProfileMutationPlan(plan, {
@@ -297,14 +317,14 @@ describe("profile mutation", () => {
 
   it("rolls back profile writes when audit append fails in after-write mode", async () => {
     const fs = new MemoryProfileFs();
-    fs.files.set("/tmp/home/.claude.json", "{\n  \"existing\": true\n}\n");
+    fs.files.set(claudeJsonPath(), "{\n  \"existing\": true\n}\n");
     const writer: ProfileMutationAuditWriter = {
       append: async () => {
         throw new Error("audit append failed");
       }
     };
     const plan = await buildAttachProfileMutationPlan("claude-code", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
 
@@ -316,15 +336,15 @@ describe("profile mutation", () => {
       })
     ).rejects.toThrow("audit append failed");
 
-    expect(fs.files.get("/tmp/home/.claude.json")).toBe("{\n  \"existing\": true\n}\n");
-    expect(fs.files.has("/tmp/home/.claude/slash-commands.json")).toBe(false);
+    expect(fs.files.get(claudeJsonPath())).toBe("{\n  \"existing\": true\n}\n");
+    expect(fs.files.has(claudeSlashCommandsPath())).toBe(false);
   });
 
   it("detach no-op does not write an audit row", async () => {
     const fs = new MemoryProfileFs();
     const writer = new MemoryAuditWriter();
     const plan = await buildDetachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
 
@@ -341,11 +361,11 @@ describe("profile mutation", () => {
   it("surfaces custom slash conflict and requires explicit conflict allowance", async () => {
     const fs = new MemoryProfileFs();
     fs.files.set(
-      "/tmp/home/.codex/slash-commands.toml",
+      codexSlashCommandsPath(),
       '[slash_commands.alaya-inspect]\ncommand = "custom command"\n'
     );
     const plan = await buildDetachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
 
@@ -402,7 +422,7 @@ operator_instructions = ${JSON.stringify(stale)}
   it("reports absent when host profile has no alaya entry", async () => {
     const fs = new MemoryProfileFs();
     const report = await detectAttachedProfileInstructionsDrift("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     expect(report.status).toBe("absent");
@@ -413,13 +433,13 @@ operator_instructions = ${JSON.stringify(stale)}
     const fs = new MemoryProfileFs();
     // Seed the codex profile with a freshly-attached entry.
     const plan = await buildAttachProfileMutationPlan("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     await applyProfileMutationPlan(plan, { fs });
 
     const report = await detectAttachedProfileInstructionsDrift("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     expect(report.status).toBe("in_sync");
@@ -429,13 +449,13 @@ operator_instructions = ${JSON.stringify(stale)}
   it("reports drifted when attached instructions differ from current source", async () => {
     const fs = new MemoryProfileFs();
     // Pre-seed a stale entry directly (simulating an older attach).
-    const stalePath = "/tmp/home/.codex/config.toml";
+    const stalePath = codexConfigPath();
     fs.files.set(
       stalePath,
       `[mcp_servers.alaya]\ncommand = "node"\nargs = ["x"]\noperator_instructions = ${JSON.stringify("old text from a prior release")}\n`
     );
     const report = await detectAttachedProfileInstructionsDrift("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     expect(report.status).toBe("drifted");
@@ -446,18 +466,18 @@ operator_instructions = ${JSON.stringify(stale)}
   it("reports drifted when instructions match but the ALAYA_AGENT_TARGET stamp is missing", async () => {
     const fs = new MemoryProfileFs();
     fs.files.set(
-      "/tmp/home/.codex/config.toml",
+      codexConfigPath(),
       `[mcp_servers.alaya]\ncommand = "node"\nargs = ["x"]\noperator_instructions = ${JSON.stringify(ALAYA_OPERATOR_INSTRUCTIONS)}\n`
     );
-    const codexReport = await detectAttachedProfileInstructionsDrift("codex", { env: { HOME: "/tmp/home" }, fs });
+    const codexReport = await detectAttachedProfileInstructionsDrift("codex", { env: createProfileTestEnv(), fs });
     expect(codexReport.status).toBe("drifted");
     expect(codexReport.attached_preview).toBe("ALAYA_AGENT_TARGET=(missing)");
 
     fs.files.set(
-      "/tmp/home/.claude.json",
+      claudeJsonPath(),
       JSON.stringify({ mcpServers: { alaya: { command: "node", args: ["x"], operatorInstructions: ALAYA_OPERATOR_INSTRUCTIONS } } }, null, 2)
     );
-    const claudeReport = await detectAttachedProfileInstructionsDrift("claude-code", { env: { HOME: "/tmp/home" }, fs });
+    const claudeReport = await detectAttachedProfileInstructionsDrift("claude-code", { env: createProfileTestEnv(), fs });
     expect(claudeReport.status).toBe("drifted");
     expect(claudeReport.attached_preview).toBe("ALAYA_AGENT_TARGET=(missing)");
   });
@@ -465,9 +485,9 @@ operator_instructions = ${JSON.stringify(stale)}
   it("reports in_sync after a fresh attach (instructions + ALAYA_AGENT_TARGET stamp)", async () => {
     const fs = new MemoryProfileFs();
     for (const target of ["codex", "claude-code"] as const) {
-      const plan = await buildAttachProfileMutationPlan(target, { env: { HOME: "/tmp/home" }, fs });
+      const plan = await buildAttachProfileMutationPlan(target, { env: createProfileTestEnv(), fs });
       await applyProfileMutationPlan(plan, { fs });
-      const report = await detectAttachedProfileInstructionsDrift(target, { env: { HOME: "/tmp/home" }, fs });
+      const report = await detectAttachedProfileInstructionsDrift(target, { env: createProfileTestEnv(), fs });
       expect(report.status).toBe("in_sync");
       expect(report.attached_preview).toBeNull();
     }
@@ -477,11 +497,11 @@ operator_instructions = ${JSON.stringify(stale)}
     const fs = new MemoryProfileFs();
     const long = "x".repeat(500);
     fs.files.set(
-      "/tmp/home/.codex/config.toml",
+      codexConfigPath(),
       `[mcp_servers.alaya]\noperator_instructions = ${JSON.stringify(long)}\n`
     );
     const report = await detectAttachedProfileInstructionsDrift("codex", {
-      env: { HOME: "/tmp/home" },
+      env: createProfileTestEnv(),
       fs
     });
     expect(report.status).toBe("drifted");

@@ -12,6 +12,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { quoteTomlString, pathsEqual } from "../support/test-paths.js";
+
 import {
   FormationKind,
   HealthEventKind,
@@ -99,6 +101,7 @@ describe("P5 v0.1 release loop E2E", () => {
     process.env.ALAYA_CONFIG_DIR = join(dataDir, "config");
     process.env.CODEX_HOME = join(dataDir, "codex-home");
     process.env.HOME = join(dataDir, "home");
+    process.env.USERPROFILE = join(dataDir, "home");
     process.env.ALAYA_REVIEWER_IDENTITY = "user:p5-release-loop";
     process.env.ALAYA_REVIEWER_TOKEN = "p5-release-review-token";
     await seedReleaseFixture(dataDir);
@@ -390,7 +393,7 @@ describe("P5 v0.1 release loop E2E", () => {
           ...backupBundle,
           config: {
             ...backupBundle.config,
-            alaya_toml: `[storage]\ndb_path = "${hostileDbPath}"\n`
+            alaya_toml: `[storage]\ndb_path = ${quoteTomlString(hostileDbPath)}\n`
           },
           storage: {
             ...backupBundle.storage,
@@ -399,15 +402,13 @@ describe("P5 v0.1 release loop E2E", () => {
         }),
         "utf8"
       );
+      await runtime.shutdown();
       const hostileImport = await dispatchCli(runtime, ["import", hostileImportPath, "--yes", "--json"]);
       transcript.push({ step: "alaya import hostile db_path --json", evidence: hostileImport.json });
       expect(hostileImport.exitCode).toBe(0);
-      expect(
-        (hostileImport.json as { readonly restored_paths: readonly string[] }).restored_paths
-      ).toContain(join(dataDir, "alaya.db"));
-      expect(
-        (hostileImport.json as { readonly restored_paths: readonly string[] }).restored_paths
-      ).not.toContain(hostileDbPath);
+      const restoredPaths = (hostileImport.json as { readonly restored_paths: readonly string[] }).restored_paths;
+      expect(restoredPaths.some((entry) => pathsEqual(entry, join(dataDir, "alaya.db")))).toBe(true);
+      expect(restoredPaths.some((entry) => pathsEqual(entry, hostileDbPath))).toBe(false);
       await expect(readFile(hostileDbPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 
       transcript.push({
@@ -446,7 +447,7 @@ describe("P5 v0.1 release loop E2E", () => {
     } finally {
       await client.close();
       await server.close();
-      await runtime.shutdown();
+      await runtime.shutdown().catch(() => undefined);
     }
   }, RELEASE_LOOP_TIMEOUT_MS);
 });

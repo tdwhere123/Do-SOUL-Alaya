@@ -75,8 +75,27 @@ export function extractCodexSlashCommand(content: string): string | undefined {
   if (block === undefined) {
     return undefined;
   }
-  const match = /^\s*command\s*=\s*"([^"]*)"\s*$/mu.exec(block);
-  return match?.[1];
+  for (const line of block.split(/\r?\n/gu)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("command")) {
+      continue;
+    }
+    const equalsIndex = trimmed.indexOf("=");
+    if (equalsIndex < 0) {
+      continue;
+    }
+    const rawValue = trimmed.slice(equalsIndex + 1).trim();
+    if (!rawValue.startsWith("\"")) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(rawValue) as unknown;
+      return typeof parsed === "string" ? parsed : undefined;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 export function normalizeFileText(content: string | undefined): string {
