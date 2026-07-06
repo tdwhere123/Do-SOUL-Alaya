@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { DynamicsService } from "@do-soul/alaya-core";
 import type { MemoryEntryMutableFields, PathAnchorRef, SynthesisCapsule } from "@do-soul/alaya-protocol";
 import type {
   McpMemoryToolCallContext,
@@ -98,6 +99,10 @@ export interface McpMemoryProposalWorkflowDependencies {
       readonly targetAnchor: PathAnchorRef;
     }): Promise<"accepted" | "rejected">;
   };
+  readonly dynamicsService?: Pick<
+    DynamicsService,
+    "emitKarmaEvent" | "emitKarmaEventInCurrentTransaction"
+  >;
   readonly now?: () => string;
   readonly generateObjectId?: () => string;
 }

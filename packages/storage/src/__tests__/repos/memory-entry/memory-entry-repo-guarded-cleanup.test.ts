@@ -108,7 +108,7 @@ describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
     ]);
   });
 
-  it("I3: transitionLifecycle to a NON-tombstone state clears the forget marker", async () => {
+  it("transitionLifecycle to a NON-tombstone state clears the forget marker", async () => {
     const { repo } = await createRepo();
     // A row that carries a stale terminal-removal marker (e.g. import-carried, or
     // tombstoned then revived). Any non-tombstone transition must strip it so the
@@ -127,7 +127,7 @@ describe("SqliteMemoryEntryRepo guarded lifecycle cleanup", () => {
     expect(revived.forget_disposition_ref).toBeNull();
   });
 
-  it("I3: transitionLifecycle to tombstone KEEPS the forget marker (GC authorization)", async () => {
+  it("transitionLifecycle to tombstone KEEPS the forget marker (GC authorization)", async () => {
     const { repo } = await createRepo();
     const marked = createMemoryEntry({
       object_id: "dddddddd-0000-4000-8000-000000000002",

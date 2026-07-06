@@ -121,6 +121,12 @@ export const SQLITE_VARIABLE_CHUNK_SIZE = 900;
 
 export interface UpdatePendingResolutionOptions {
   readonly reviewerIdentity?: string;
+  // Synchronous same-connection extension point for proposal resolution side
+  // effects that must commit or roll back with the proposal row and audit rows.
+  // Callers must only perform storage mutations backed by the same SQLite
+  // connection and return their EventLog drafts. No async work, network I/O, or
+  // fire-and-forget side effects belong here.
+  readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
 }
 
 export interface AcceptedMemoryUpdateInput {

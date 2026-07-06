@@ -9,6 +9,7 @@ import type {
   SoulConfig
 } from "@do-soul/alaya-protocol";
 import type {
+  DynamicsService,
   EmbeddingBackfillHandler,
   EventPublisher,
   PathPlasticityService,
@@ -208,6 +209,7 @@ export type CreateGardenRuntimeInput = {
   readonly enrichSignalRefReplayPort?: BulkEnrichSignalRefReplayPort;
   readonly edgeProposalReconcile?: EdgeProposalReconcilePort;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  readonly dynamicsService?: Pick<DynamicsService, "scanRetentionDecay">;
 };
 
 export type GardenRuntime = Readonly<{

@@ -341,6 +341,7 @@ describe("karma producers (reuse_gain / evidence_gain / supersede_penalty)", () 
       expect(contradictsCalls[0]?.[0]).toEqual({
         kind: "supersede_penalty",
         objectId: "memory-existing",
+        supersedingObjectId: "memory-new",
         workspaceId: "workspace-1",
         runId: "run-1"
       });

@@ -47,7 +47,7 @@ const EVIDENCE_ID = "33333333-3333-4333-8333-333333333333";
 // invariant: the edge auto-producer folds into the governed path candidate
 // intake. A supports verdict becomes a weak attention_only path_relations row
 // that only earns recall eligibility through plasticity reinforcement. Post
-// S3c decouple this runs in the BULK_ENRICH worker, not inline: the router
+// After decoupling, this runs in the BULK_ENRICH worker, not inline: the router
 // enqueues an enrich_pending marker and the worker (here driven directly, as
 // the daemon dispatch branch does) runs produceForNewMemory off-path. This
 // wiring test pins the full decoupled chain: materialize enqueues, drain mints

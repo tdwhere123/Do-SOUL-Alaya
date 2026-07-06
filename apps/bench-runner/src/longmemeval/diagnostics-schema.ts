@@ -37,6 +37,7 @@ export const LongMemEvalMissTaxonomySchema = z.enum([
   "materialization_drop",
   "budget_drop",
   "delivery_order_drop",
+  "answer_set_coverage_drop",
   "evaluation_or_gold_issue"
 ]);
 

@@ -11,8 +11,7 @@ export type { BenchReviewerCredentials } from "./daemon-environment.js";
 export {
   benchSessionSurfacesEnabled,
   callMcpTool,
-  makeDispatchCli,
-  withEmbeddingFusionWeightInjected
+  makeDispatchCli
 } from "./daemon-mcp-support.js";
 export {
   buildBenchDiagnosticRecallPolicy,

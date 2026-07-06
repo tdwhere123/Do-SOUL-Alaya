@@ -113,7 +113,7 @@ it("autonomousHardDeleteTombstoned REFUSES a judged_useless delete when the atom
     expect(notifySpy).toHaveBeenCalledTimes(1);
   });
 
-// invariant (B1): a `compressed` member is hard-deleted ONLY when its
+// invariant: a `compressed` member is hard-deleted ONLY when its
   // preserving capsule is re-verified LIVE + still referencing the member at
   // delete time (>=24h after marking). Each capsule-archived/superseded/
   // dropped-member/deleted variant during the grace window MUST refuse the
@@ -186,7 +186,7 @@ function liveCapsule(overrides: Record<string, unknown> = {}) {
     });
   }
 
-it("B1: hard-deletes a compressed member only when the capsule is STILL live + references it", async () => {
+it("hard-deletes a compressed member only when the capsule is STILL live + references it", async () => {
     const hardDeleteSpy = compressedHardDeleteSuccessSpy();
     const { dependencies, appendSpy, notifySpy } = compressedDeps({
       capsuleFindById: async () => liveCapsule(),
@@ -252,7 +252,7 @@ it("I-2: the deleted-audit append runs INSIDE the delete (onDeleted) so an appen
     expect(notifySpy).not.toHaveBeenCalled();
   });
 
-it("B5: REFUSES the delete (memory survives) when the capsule is revoked AFTER the pre-check but the atomic guarded delete removes 0 rows", async () => {
+it("REFUSES the delete (memory survives) when the capsule is revoked AFTER the pre-check but the atomic guarded delete removes 0 rows", async () => {
     // The lookup port reports the capsule LIVE (pre-check passes), but the atomic
     // guarded delete matches 0 rows — a concurrent capsule archive/tombstone/
     // member-drop that raced past the pre-check. The row must survive (recoverable)
@@ -299,7 +299,7 @@ it.each([
     ["capsule dropped the member during grace", async () => liveCapsule({ source_memory_refs: [] })],
     ["capsule cascade-deleted during grace", async () => null]
   ])(
-    "B1: REFUSES the physical delete (memory survives, recoverable) when %s",
+    "REFUSES the physical delete (memory survives, recoverable) when %s",
     async (_label, capsuleFindById) => {
       const hardDeleteSpy = vi.fn(async () => true);
       const { dependencies, appendSpy, notifySpy } = compressedDeps({
@@ -328,7 +328,7 @@ it.each([
     }
   );
 
-it("B1: REFUSES the delete when the capsule-lookup port is unwired (fail-closed)", async () => {
+it("REFUSES the delete when the capsule-lookup port is unwired (fail-closed)", async () => {
     const hardDeleteSpy = vi.fn(async () => true);
     const { dependencies } = createDependencies({
       memoryEntryRepo: {

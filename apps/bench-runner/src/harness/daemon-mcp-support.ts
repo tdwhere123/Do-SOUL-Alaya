@@ -3,7 +3,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { type AlayaDaemonRuntime } from "@do-soul/alaya";
 import { createAlayaCliBridge } from "@do-soul/alaya/cli/bridge";
 import { registerAlayaCliCommands } from "@do-soul/alaya/cli/register";
-import type { BenchRecallWeightOverrides } from "./recall-weight-overrides.js";
 
 export function makeDispatchCli(
   runtime: AlayaDaemonRuntime
@@ -51,71 +50,6 @@ export async function callMcpTool<TOutput>(
   return structured.output;
 }
 
-const DEFAULT_EMBEDDING_FUSION_WEIGHT_ON = 6;
-const EMBEDDING_FUSION_WEIGHT_ENV = "ALAYA_EMBEDDING_FUSION_WEIGHT_ON";
-
-// Mirror of apps/core-daemon/src/daemon-embedding-runtime.ts
-// readEmbeddingFusionWeightOverride — the daemon's defaultPolicyDecorator
-// reads the same env var to override fusion_weights.embedding_similarity in
-// live recall. The bench harness drives recallService.recall directly with
-// policyOverride (bypassing the decorator), so we inject the equivalent
-// override here when embeddingMode === "env".
-function readBenchEmbeddingFusionWeight(): number {
-  const raw = process.env[EMBEDDING_FUSION_WEIGHT_ENV];
-  if (raw === undefined || raw.trim().length === 0) {
-    return DEFAULT_EMBEDDING_FUSION_WEIGHT_ON;
-  }
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return DEFAULT_EMBEDDING_FUSION_WEIGHT_ON;
-  }
-  return parsed;
-}
-
-export function withEmbeddingFusionWeightInjected(
-  existing: BenchRecallWeightOverrides | undefined
-): BenchRecallWeightOverrides {
-  const fusionWeight = readBenchEmbeddingFusionWeight();
-  // A user-supplied embedding_similarity fusion weight (from CLI/env JSON)
-  // wins over the harness default so bench tuning sweeps remain authoritative.
-  const baseFusionWeights = existing?.fusionWeights ?? {};
-  const mergedFusionWeights: Readonly<Record<string, number>> = Object.freeze({
-    embedding_similarity: fusionWeight,
-    ...baseFusionWeights
-  });
-
-  // Preserve the source of the user-supplied override when present; otherwise
-  // tag the harness-injected slice as env-sourced for the summary log.
-  const source: "cli" | "env" = existing?.source ?? "env";
-
-  const summary = {
-    source,
-    ...(existing?.summary.activation_weights_phase4b === undefined
-      ? {}
-      : { activation_weights_phase4b: existing.summary.activation_weights_phase4b }),
-    ...(existing?.summary.additive === undefined
-      ? {}
-      : { additive: existing.summary.additive }),
-    fusion_weights: mergedFusionWeights
-  };
-
-  return Object.freeze({
-    source,
-    ...(existing?.activationWeightsPatch === undefined
-      ? {}
-      : { activationWeightsPatch: existing.activationWeightsPatch }),
-    ...(existing?.additive === undefined
-      ? {}
-      : { additive: existing.additive }),
-    fusionWeights: mergedFusionWeights,
-    summary
-  });
-}
-
-// The LongMemEval / LoCoMo seeders stamp a per-session surface_id so delivery-
-// time session coverage has the grouping axis production already has (durable
-// memories carry context.surface_id). Default on for fidelity; explicit
-// off/0/false/no strips surfaces for an A/B against single-session corpora.
 export function benchSessionSurfacesEnabled(): boolean {
   const raw = process.env.ALAYA_BENCH_SESSION_SURFACES?.trim().toLowerCase();
   if (raw === undefined || raw === "") {

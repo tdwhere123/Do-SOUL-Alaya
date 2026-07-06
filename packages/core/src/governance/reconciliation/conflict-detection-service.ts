@@ -312,6 +312,7 @@ export class ConflictDetectionService {
         await this.deps.karmaEmitter.emitKarmaEvent({
           kind: "supersede_penalty",
           objectId: targetMemoryId,
+          supersedingObjectId: sourceMemoryId,
           workspaceId,
           runId
         });

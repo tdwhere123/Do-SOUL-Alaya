@@ -1,3 +1,4 @@
+import { DELIVERY_BUDGET_LOSS_RANK } from "./delivery-miss-taxonomy.js";
 import type {
   BenchEmbeddingProviderState,
   CandidateDiagnostic,
@@ -8,8 +9,6 @@ import type {
   NarrowRecallDiagnostics,
   ReadCandidateDiagnosticsResult
 } from "./diagnostics-types.js";
-
-const DELIVERY_BUDGET_LOSS_RANK = 10;
 
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",
@@ -25,9 +24,9 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "semantic_supplement"
 ] as const);
 
-// Recall admission-plane label for the multi-session cohort plane. The cohort
-// fan-in attribution split (codex I2) keys on this plane to measure how the
-// session cohort representative converts to delivered top-5 gold.
+// Recall admission-plane label for the multi-session cohort plane. Cohort
+// fan-in KPIs key on this plane to measure how the session cohort
+// representative converts to delivered top-5 gold.
 // see also: packages/core/src/recall/recall-service.ts addContentDerivedExpansionCandidates.
 export const COHORT_PLANE = "session_surface_cohort";
 

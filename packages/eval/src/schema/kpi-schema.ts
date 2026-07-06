@@ -190,6 +190,17 @@ const SeedDropReasonsSchema = z
   )
   .default({ candidate_absent: 0, materialization_drop: 0 });
 
+const SeedFuelInventorySchema = z
+  .object({
+    objects_total: z.number().int().nonnegative(),
+    evidence_refs_total: z.number().int().nonnegative(),
+    facet_anchors_total: z.number().int().nonnegative(),
+    path_candidates_total: z.number().int().nonnegative(),
+    support_bearing_candidates: z.number().int().nonnegative()
+  })
+  .strict();
+export type SeedFuelInventory = z.infer<typeof SeedFuelInventorySchema>;
+
 const SeedExtractionPathSchema = z
   .object({
     path: z.enum(["official_api_compile", "no_credentials_fallback"]),
@@ -222,6 +233,24 @@ export type SeedExtractionPath = z.infer<typeof SeedExtractionPathSchema>;
 
 const RatioSchema = z.number().min(0).max(1);
 
+const FullGoldDeliveryContributionSchema = z
+  .object({
+    gold_bearing_questions: z.number().int().nonnegative(),
+    full_gold_at_5: RatioSchema,
+    core_full_gold_at_5: RatioSchema,
+    delivery_lift_questions: z.number().int().nonnegative(),
+    delivery_drop_questions: z.number().int().nonnegative(),
+    gold_coverage_at_5: RatioSchema,
+    core_gold_coverage_at_5: RatioSchema,
+    delivery_lift_golds: z.number().int().nonnegative(),
+    delivery_drop_golds: z.number().int().nonnegative()
+  })
+  .strict();
+export { FullGoldDeliveryContributionSchema };
+export type FullGoldDeliveryContribution = z.infer<
+  typeof FullGoldDeliveryContributionSchema
+>;
+
 const FullGoldCoverageSchema = z
   .object({
     gold_bearing_questions: z.number().int().nonnegative(),
@@ -233,7 +262,10 @@ const FullGoldCoverageSchema = z
     // coverage above: how many golds sit in the candidate pool within rank
     // 50/100 at all — separates retrieval/fusion reach from delivery budget.
     pool_recall_at_50: RatioSchema,
-    pool_recall_at_100: RatioSchema
+    pool_recall_at_100: RatioSchema,
+    // Optional so older kpi.json records stay schema-valid; new LongMemEval
+    // runs populate it from bench-runner delivery diagnostics.
+    delivery_contribution: FullGoldDeliveryContributionSchema.optional()
   })
   .strict();
 export type FullGoldCoverage = z.infer<typeof FullGoldCoverageSchema>;
@@ -288,6 +320,7 @@ const KpiCoreSchema = z.object({
   // Optional so older kpi.json records (pre seed-extraction disclosure)
   // stay schema-valid; new LongMemEval runs always populate it.
   seed_extraction_path: SeedExtractionPathSchema.optional(),
+  seed_fuel_inventory: SeedFuelInventorySchema.optional(),
   quality_metrics: QualityMetricsSchema.optional(),
   // Edge Proposal KPI blocks (K3.2 + K3.4). Optional so older kpi.json
   // records stay schema-valid; new bench runs always populate them when

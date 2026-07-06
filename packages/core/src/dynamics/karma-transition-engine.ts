@@ -30,6 +30,7 @@ import {
   type DynamicsServiceMemoryRepoPort,
   type DynamicsServiceRuntimeNotifier,
   type KarmaTransitionComputation,
+  type KarmaTransitionContext,
   type KarmaTransitionEventPublisherPort
 } from "./dynamics-service-ports.js";
 
@@ -48,6 +49,7 @@ export interface KarmaTransitionPlan {
   readonly memory: Readonly<MemoryEntry>;
   readonly karmaSum: number;
   readonly transition: KarmaTransitionComputation;
+  readonly context?: KarmaTransitionContext;
 }
 
 export interface KarmaTransitionApplyResult {
@@ -55,18 +57,26 @@ export interface KarmaTransitionApplyResult {
   readonly revived: boolean;
 }
 
+export interface KarmaTransitionTransactionMutation {
+  readonly updated: Readonly<MemoryEntry>;
+  readonly events: readonly DynamicsEventLogInput[];
+}
+
 export class KarmaTransitionEngine {
   public constructor(private readonly deps: KarmaTransitionEngineDependencies) {}
 
-  public async processKarmaEvent(event: KarmaEvent): Promise<void> {
+  public async processKarmaEvent(
+    event: KarmaEvent,
+    context?: KarmaTransitionContext
+  ): Promise<void> {
     const parsedEvent = parseKarmaEventInput(event);
     if (this.canRunAtomicTransition()) {
-      await this.processKarmaTransitionAtomic(parsedEvent);
+      await this.processKarmaTransitionAtomic(parsedEvent, context);
       return;
     }
     // test-only: production wiring is guaranteed atomic by requireAtomicKarmaTransition
     // (daemon); this ordering-safe, non-atomic path serves fakes lacking the sync ports.
-    const plan = await this.computeKarmaTransitionPlanFromParsed(parsedEvent);
+    const plan = await this.computeKarmaTransitionPlanFromParsed(parsedEvent, context);
     const applied = await this.applyKarmaTransitionPlan(plan);
     const events = await this.auditKarmaTransition(applied, plan);
     await this.notifyKarmaTransition(applied.updated, events);
@@ -77,18 +87,16 @@ export class KarmaTransitionEngine {
   // no half-commit window. Engaged only when the injected repos expose the
   // synchronous ports the transaction callback needs.
   private canRunAtomicTransition(): boolean {
-    const memoryRepo = this.deps.memoryRepo;
     return (
       this.deps.eventPublisher !== undefined &&
-      this.deps.karmaEventRepo.createSync !== undefined &&
-      this.deps.karmaEventRepo.sumByObjectIdSync !== undefined &&
-      memoryRepo.findByIdSync !== undefined &&
-      memoryRepo.updateDynamicsSync !== undefined &&
-      memoryRepo.reviveDormantSync !== undefined
+      this.canRunSynchronousTransition()
     );
   }
 
-  private async processKarmaTransitionAtomic(parsedEvent: Readonly<KarmaEvent>): Promise<void> {
+  private async processKarmaTransitionAtomic(
+    parsedEvent: Readonly<KarmaEvent>,
+    context?: KarmaTransitionContext
+  ): Promise<void> {
     const eventPublisher = this.deps.eventPublisher;
     if (eventPublisher === undefined) {
       throw new CoreError("CONFLICT", "Atomic karma transition requires an event publisher.", {
@@ -96,11 +104,46 @@ export class KarmaTransitionEngine {
       });
     }
     const { result } = await eventPublisher.mutateThenAppendMany(() => {
-      const plan = this.computeKarmaTransitionPlanSync(parsedEvent);
+      const plan = this.computeKarmaTransitionPlanSync(parsedEvent, context);
       const applied = this.applyKarmaTransitionPlanSync(plan);
       return { events: this.buildKarmaAuditInputs(applied, plan), result: applied };
     });
     this.scheduleGreenReevaluation(result.updated);
+  }
+
+  public processKarmaEventInCurrentTransaction(
+    event: KarmaEvent,
+    context?: KarmaTransitionContext
+  ): KarmaTransitionTransactionMutation {
+    if (!this.canRunSynchronousTransition()) {
+      throw new CoreError("CONFLICT", "In-transaction karma transition requires synchronous repo ports.", {
+        subCode: "PORT_UNAVAILABLE"
+      });
+    }
+    const parsedEvent = parseKarmaEventInput(event);
+    const plan = this.computeKarmaTransitionPlanSync(parsedEvent, context);
+    const applied = this.applyKarmaTransitionPlanSync(plan);
+    return {
+      updated: applied.updated,
+      events: this.buildKarmaAuditInputs(applied, plan)
+    };
+  }
+
+  public scheduleKarmaTransactionSideEffects(
+    mutation: Readonly<KarmaTransitionTransactionMutation>
+  ): void {
+    this.scheduleGreenReevaluation(mutation.updated);
+  }
+
+  private canRunSynchronousTransition(): boolean {
+    const memoryRepo = this.deps.memoryRepo;
+    return (
+      this.deps.karmaEventRepo.createSync !== undefined &&
+      this.deps.karmaEventRepo.sumByObjectIdSync !== undefined &&
+      memoryRepo.findByIdSync !== undefined &&
+      memoryRepo.updateDynamicsSync !== undefined &&
+      memoryRepo.reviveDormantSync !== undefined
+    );
   }
 
   private applyKarmaTransitionPlanSync(plan: KarmaTransitionPlan): KarmaTransitionApplyResult {
@@ -126,12 +169,16 @@ export class KarmaTransitionEngine {
     return { updated, revived };
   }
 
-  public async computeKarmaTransitionPlan(event: KarmaEvent): Promise<KarmaTransitionPlan> {
-    return this.computeKarmaTransitionPlanFromParsed(parseKarmaEventInput(event));
+  public async computeKarmaTransitionPlan(
+    event: KarmaEvent,
+    context?: KarmaTransitionContext
+  ): Promise<KarmaTransitionPlan> {
+    return this.computeKarmaTransitionPlanFromParsed(parseKarmaEventInput(event), context);
   }
 
   private async computeKarmaTransitionPlanFromParsed(
-    parsedEvent: Readonly<KarmaEvent>
+    parsedEvent: Readonly<KarmaEvent>,
+    context?: KarmaTransitionContext
   ): Promise<KarmaTransitionPlan> {
     const memory = await this.deps.memoryRepo.findById(parsedEvent.object_id);
     if (memory === null) {
@@ -140,16 +187,20 @@ export class KarmaTransitionEngine {
     // add own amount: this event is inserted later, so match baseline create-then-sum.
     const karmaSum =
       (await this.deps.karmaEventRepo.sumByObjectId(parsedEvent.object_id)) + parsedEvent.amount;
-    const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now());
+    const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now(), context);
     return {
       parsedEvent,
       memory,
       karmaSum,
-      transition
+      transition,
+      ...(context === undefined ? {} : { context })
     };
   }
 
-  private computeKarmaTransitionPlanSync(parsedEvent: Readonly<KarmaEvent>): KarmaTransitionPlan {
+  private computeKarmaTransitionPlanSync(
+    parsedEvent: Readonly<KarmaEvent>,
+    context?: KarmaTransitionContext
+  ): KarmaTransitionPlan {
     const { memoryRepo, karmaEventRepo } = this.deps;
     if (memoryRepo.findByIdSync === undefined || karmaEventRepo.sumByObjectIdSync === undefined) {
       throw new CoreError("CONFLICT", "Atomic karma transition requires synchronous read ports.", {
@@ -161,12 +212,13 @@ export class KarmaTransitionEngine {
       throw new CoreError("NOT_FOUND", `Memory entry not found: ${parsedEvent.object_id}`);
     }
     const karmaSum = karmaEventRepo.sumByObjectIdSync(parsedEvent.object_id) + parsedEvent.amount;
-    const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now());
+    const transition = this.computeKarmaTransition(memory, parsedEvent, karmaSum, this.deps.now(), context);
     return {
       parsedEvent,
       memory,
       karmaSum,
-      transition
+      transition,
+      ...(context === undefined ? {} : { context })
     };
   }
 
@@ -206,7 +258,8 @@ export class KarmaTransitionEngine {
     memory: Readonly<MemoryEntry>,
     parsedEvent: Readonly<KarmaEvent>,
     karmaSum: number,
-    now: string
+    now: string,
+    context?: KarmaTransitionContext
   ): KarmaTransitionComputation {
     const previousRetention = memory.retention_score ?? 0;
     const previousRetentionState =
@@ -223,7 +276,7 @@ export class KarmaTransitionEngine {
     const previousManifestation =
       memory.manifestation_state ?? determineManifestation(memory.activation_score ?? 0);
     const retentionScore = computeRetentionFromKarma(memory, karmaSum, now);
-    const fieldUpdates = deriveKarmaFieldUpdates(memory, parsedEvent);
+    const fieldUpdates = deriveKarmaFieldUpdates(memory, parsedEvent, context);
     const retentionState = resolveRetentionState({
       memory,
       retentionScore,

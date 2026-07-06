@@ -9,7 +9,7 @@ import {
   type SubmitCandidateInput
 } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 
-// invariant (codex spine-review B3): an agent/Garden candidate may PROPOSE a
+// invariant: an agent/Garden candidate may PROPOSE a
 // path, but Alaya DECIDES durable truth. A path object anchor naming a memory
 // that is missing from, or owned by a workspace other than, the relation
 // workspace must be REFUSED at the durable mint sink — before any

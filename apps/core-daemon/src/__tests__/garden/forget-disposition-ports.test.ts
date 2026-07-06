@@ -22,7 +22,7 @@ function memory(overrides: Partial<MemoryEntry> = {}): Readonly<MemoryEntry> {
     scope_class: "project",
     content: "noise",
     domain_tags: [],
-    // invariant (redteam-I2): source-less + never-reinforced is the only
+    // invariant: source-less + never-reinforced is the only
     // judged_useless shape. The default fixture is that shape so the gate-failing
     // cases below resolve to judged_useless / null disposition.
     evidence_refs: [],

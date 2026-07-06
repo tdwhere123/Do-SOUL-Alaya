@@ -11,10 +11,12 @@ import {
 import {
   buildConformantAxisContext,
   compareConformantAxisRa,
-  resolveConformantEvidenceBeta,
-  resolveConformantPathWeight,
   type ConformantAxisContext
 } from "../scoring/conformant-fusion-scoring.js";
+import {
+  buildFloodFuelCoverageSummary,
+  computeIntegratedFloodScore
+} from "../scoring/integrated-flood-scoring.js";
 import {
   activeFusionStreams,
   facetOverlapCountFor,
@@ -31,7 +33,8 @@ import type {
   RecallFusionStream,
   RecallFusionStreamContributions,
   RecallFusionStreamRanks,
-  RecallSupplementaryData
+  RecallSupplementaryData,
+  IntegratedFloodCandidateDiagnostics
 } from "../runtime/recall-service-types.js";
 
 export {
@@ -67,7 +70,7 @@ export function buildRecallFusionDetails(params: Readonly<{
   });
   const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, axisContext);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
-  return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey);
+  return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey, params.supplementaryData);
 }
 
 // Path suppression only demotes fused_score and recomputes rank order.
@@ -175,7 +178,7 @@ function buildPreliminaryFusionCandidate(
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
   const perStreamRank = buildEmptyFusionStreamRanks();
   const contributions = buildEmptyFusionStreamContributions();
-  const fusedScore = accumulateFusionContributions({
+  const fused = scoreIntegratedFusionCandidate({
     candidate,
     supplementaryData,
     resolved,
@@ -196,14 +199,15 @@ function buildPreliminaryFusionCandidate(
     effectiveScore: candidate.effectiveScore,
     perStreamRank: Object.freeze(perStreamRank) as RecallFusionStreamRanks,
     contributions: Object.freeze(contributions) as RecallFusionStreamContributions,
-    fusedScore,
+    fusedScore: fused.score,
     facetOverlapCount: facetOverlapCountFor(candidate.entry, supplementaryData.querySoughtFacets),
+    floodPotential: fused.diagnostics,
     ...(axisRank !== undefined ? { axisRank } : {}),
     ...(axisRa !== undefined ? { axisRa } : {})
   });
 }
 
-function accumulateFusionContributions(params: Readonly<{
+function scoreIntegratedFusionCandidate(params: Readonly<{
   readonly candidate: RecallFusionCandidateInput;
   readonly supplementaryData: RecallSupplementaryData;
   readonly resolved: ResolvedRecallFusionWeights;
@@ -212,7 +216,7 @@ function accumulateFusionContributions(params: Readonly<{
   readonly perStreamRank: Record<RecallFusionStream, number | null>;
   readonly contributions: Record<RecallFusionStream, number>;
   readonly axisContext: ConformantAxisContext;
-}>): number {
+}>): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
   for (const stream of activeFusionStreams()) {
     const rank = params.ranksByStream.get(stream)?.get(params.candidateKey) ?? null;
     params.perStreamRank[stream] = rank;
@@ -227,15 +231,16 @@ function accumulateFusionContributions(params: Readonly<{
     }
   }
   const ra = params.axisContext.raByKey.get(params.candidateKey);
-  return (
-    (ra?.object ?? 0) +
-    resolveConformantPathWeight() * (ra?.path ?? 0) +
-    resolveConformantEvidenceBeta() * (ra?.evidence ?? 0) +
-    0.35 * (ra?.temporal ?? 0) +
-    0.2 * (ra?.control ?? 0)
-  );
+  return computeIntegratedFloodScore({
+    entry: params.candidate.entry,
+    axisInputs: {
+      R_obj: ra?.object ?? 0,
+      A_path: ra?.path ?? 0,
+      B_evidence: ra?.evidence ?? 0
+    },
+    supplementaryData: params.supplementaryData
+  });
 }
-
 
 function buildFusedRankByCandidateKey(
   prelim: readonly PreliminaryFusionCandidate[]
@@ -264,8 +269,12 @@ function buildFusedRankByCandidateKey(
 
 function finalizeRecallFusionDetails(
   prelim: readonly PreliminaryFusionCandidate[],
-  fusedRankByCandidateKey: ReadonlyMap<string, number>
+  fusedRankByCandidateKey: ReadonlyMap<string, number>,
+  _supplementaryData: RecallSupplementaryData
 ): ReadonlyMap<string, RecallFusionBreakdown> {
+  const fuelCoverage = buildFloodFuelCoverageSummary(
+    prelim.map((candidate) => candidate.floodPotential).filter((row) => row !== undefined)
+  );
   return Object.freeze(
     new Map(
       prelim.map((candidate) => [
@@ -280,7 +289,9 @@ function finalizeRecallFusionDetails(
           fused_score: candidate.fusedScore,
           fused_rank_contribution_per_stream: candidate.contributions,
           ...(candidate.axisRank !== undefined ? { per_axis_rank: candidate.axisRank } : {}),
-          ...(candidate.axisRa !== undefined ? { per_axis_contribution: candidate.axisRa } : {})
+          ...(candidate.axisRa !== undefined ? { per_axis_contribution: candidate.axisRa } : {}),
+          ...(candidate.floodPotential !== undefined ? { flood_potential: candidate.floodPotential } : {}),
+          ...(prelim.length > 0 ? { flood_fuel_coverage: fuelCoverage } : {})
         })
       ] as const)
     )

@@ -7,8 +7,10 @@ import {
 import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
 import { createCachingSignalExtractor } from "./compile-seed-cache.js";
 import {
-  EXTRACTION_CACHE_ROOT,
-  resolveCompileSeedExtractionConfig
+  resolveCompileSeedExtractionConfig,
+  resolveExtractionCacheRoot,
+  resolveBenchExtractionCacheMinCoverage,
+  resolveBenchRequireExtractionCacheManifest
 } from "./compile-seed-config.js";
 import {
   createGardenHttpExtractor,
@@ -34,7 +36,7 @@ export interface CompileSeedRunnerContext {
 export function createCompileSeedRunnerContext(
   options: CompileSeedRunnerOptions | undefined
 ): CompileSeedRunnerContext {
-  const cacheRoot = options?.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const cacheRoot = options?.cacheRoot ?? resolveExtractionCacheRoot();
   const manifest = options?.config
     ? undefined
     : readExtractionCacheManifest(cacheRoot);
@@ -68,11 +70,14 @@ function runExtractionCachePreflight(
   manifest: ReturnType<typeof readExtractionCacheManifest> | undefined
 ): void {
   if (options?.skipPreflight === true) return;
+  const minimumCoverage = resolveBenchExtractionCacheMinCoverage();
   preflightExtractionCache({
     cacheRoot,
     config,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     liveExtractionPossible: credentialled,
+    requireManifest: resolveBenchRequireExtractionCacheManifest(),
+    ...(minimumCoverage === undefined ? {} : { minimumCoverage }),
     ...(options?.allowLiveExtraction === undefined
       ? {}
       : { allowLiveExtraction: options.allowLiveExtraction }),

@@ -142,6 +142,10 @@ function createToolSpec(toolId: ToolSpec["tool_id"]): ToolSpec {
 
 afterEach(cleanupToolRuntimeTempDirs);
 
+function skipUnlessLinuxExecShellCopy(): boolean {
+  return process.platform !== "linux";
+}
+
 describe("tool-runtime relative path handling", () => {
 
   it("reads a relative tools.read_file path from the workspace root through the live handler contract", async () => {
@@ -199,6 +203,9 @@ describe("tool-runtime relative path handling", () => {
   });
 
   it("executes tools.exec_shell through argv without shell expansion and without leaking ambient secrets", async () => {
+    if (skipUnlessLinuxExecShellCopy()) {
+      return;
+    }
     const workspaceDir = await createWorkspace();
     const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
     process.env.ALAYA_EXEC_SHELL_TEST_SECRET = "sk-env-leak";
@@ -268,7 +275,7 @@ describe("tool-runtime relative path handling", () => {
   });
 
   it("pins the executable inode when the workspace path is swapped before spawn", async () => {
-    if (process.platform === "win32") {
+    if (skipUnlessLinuxExecShellCopy()) {
       return;
     }
 
@@ -290,6 +297,9 @@ describe("tool-runtime relative path handling", () => {
   });
 
   it("maps tools.exec_shell nonzero exits and timeouts to structured results", async () => {
+    if (skipUnlessLinuxExecShellCopy()) {
+      return;
+    }
     const workspaceDir = await createWorkspace();
     const nodeExecutable = await createContainedNodeExecutable(workspaceDir);
 

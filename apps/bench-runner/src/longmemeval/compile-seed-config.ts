@@ -19,10 +19,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // created lazily on the first credentialled run; it is empty (absent)
 // until then.
 // ALAYA_BENCH_EXTRACTION_CACHE_ROOT redirects the cache to a gitignored staging dir so a model
-// switch (e.g. deepseek re-seed) does not pollute the git-tracked baseline fixture. Unset → canonical.
-export const EXTRACTION_CACHE_ROOT = process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT
-  ? resolve(process.env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT)
-  : resolve(__dirname, "../../../../docs/bench-history/datasets/longmemeval-extraction-cache");
+// switch (e.g. alternate-model re-seed) does not pollute the git-tracked baseline fixture. Unset → canonical.
+export function resolveExtractionCacheRoot(
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  const override = readNonEmpty(env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT);
+  return override !== undefined
+    ? resolve(override)
+    : resolve(__dirname, "../../../../docs/bench-history/datasets/longmemeval-extraction-cache");
+}
+
+// Module-load snapshot for callers that bind once; prefer resolveExtractionCacheRoot()
+// at run boundaries so test env stubs and bench preflight overrides stay isolated.
+export const EXTRACTION_CACHE_ROOT = resolveExtractionCacheRoot();
 
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
@@ -119,6 +128,36 @@ export function resolveCompileSeedExtractionConfig(
     return { providerUrl, model, apiKey: resolved.value };
   }
   return { providerUrl, model, apiKey: null };
+}
+
+const EXTRACTION_CACHE_MIN_COVERAGE_ENV = "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE";
+const REQUIRE_EXTRACTION_CACHE_MANIFEST_ENV = "ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST";
+
+export function resolveBenchExtractionCacheMinCoverage(
+  env: NodeJS.ProcessEnv = process.env
+): number | undefined {
+  const raw = readNonEmpty(env[EXTRACTION_CACHE_MIN_COVERAGE_ENV]);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
+    throw new Error(
+      `${EXTRACTION_CACHE_MIN_COVERAGE_ENV} must be a number in (0, 1]; received "${raw}".`
+    );
+  }
+  return parsed;
+}
+
+export function resolveBenchRequireExtractionCacheManifest(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  const value = env[REQUIRE_EXTRACTION_CACHE_MANIFEST_ENV];
+  if (value === undefined) {
+    return true;
+  }
+  const normalized = value.trim().toLowerCase();
+  return !(normalized === "0" || normalized === "false");
 }
 
 function normalizeBaseUrl(url: string): string {

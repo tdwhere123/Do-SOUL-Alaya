@@ -1,13 +1,13 @@
 import type { FullGoldCoverage } from "@do-soul/alaya-eval";
 import { isAbstentionQuestionId } from "./abstention.js";
+import { buildLongMemEvalDeliveryContribution } from "./diagnostics-delivery-bridge.js";
 import { ratio } from "./diagnostics-quality-helpers.js";
 import type {
   LongMemEvalGoldDiagnostic,
   LongMemEvalQuestionDiagnostic
 } from "./diagnostics-types.js";
 
-// full_gold/gold_coverage use delivered rank (what the agent saw); pool_recall
-// uses pool rank (pre-budget reach) so a budget-dropped gold still counts as found.
+// Delivered rank drives full_gold; pre-budget pool rank drives pool_recall; fusion rank drives delivery_contribution.
 function deliveredWithin(gold: LongMemEvalGoldDiagnostic, k: number): boolean {
   return gold.final_rank !== null && gold.final_rank <= k;
 }
@@ -56,6 +56,7 @@ export function buildLongMemEvalFullGoldCoverage(
     gold_coverage_at_5: ratio(goldDeliveredAt5, goldTotal),
     gold_coverage_at_10: ratio(goldDeliveredAt10, goldTotal),
     pool_recall_at_50: ratio(goldPoolAt50, goldTotal),
-    pool_recall_at_100: ratio(goldPoolAt100, goldTotal)
+    pool_recall_at_100: ratio(goldPoolAt100, goldTotal),
+    delivery_contribution: buildLongMemEvalDeliveryContribution(diagnostics)
   };
 }

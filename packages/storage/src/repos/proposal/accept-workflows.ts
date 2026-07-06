@@ -67,6 +67,7 @@ interface ParsedAcceptRequest {
   readonly proposalId: string;
   readonly updatedAt: string;
   readonly reviewerIdentity: string | undefined;
+  readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
 }
 
 export async function acceptPendingMemoryUpdateWithEvents(
@@ -180,11 +181,12 @@ function acceptMemoryUpdateTransaction(
     existingMemory,
     memoryUpdate
   );
+  const mutationEvents = insertTransactionMutationEvents(ctx, request);
 
   return deepFreeze({
     proposal: loadUpdatedProposal(ctx, request.proposalId),
     memory: memoryResult.memory,
-    events: [...storedReviewEvents, ...memoryResult.events]
+    events: [...storedReviewEvents, ...memoryResult.events, ...mutationEvents]
   });
 }
 
@@ -205,14 +207,15 @@ function acceptPathRelationGovernanceTransaction(
   const storedReviewEvents = insertReviewEvents(ctx, events);
   resolvePendingProposal(ctx, request);
   const pathApply = upsertStrictlyGovernedPathRelation(ctx, pathRelationGovernance, proposalRow);
+  const mutationEvents = insertTransactionMutationEvents(ctx, request);
 
   return deepFreeze({
     proposal: loadUpdatedProposal(ctx, request.proposalId),
     path_relation: pathApply.pathRelation,
     events:
       pathApply.event === null
-        ? storedReviewEvents
-        : [...storedReviewEvents, pathApply.event]
+        ? [...storedReviewEvents, ...mutationEvents]
+        : [...storedReviewEvents, pathApply.event, ...mutationEvents]
   });
 }
 
@@ -233,11 +236,12 @@ function acceptSynthesisCreateTransaction(
   resolvePendingProposal(ctx, request);
   const synthesisEvent = insertSynthesisCreatedEvent(ctx, synthesisCreate.capsule);
   insertSynthesisCapsule(ctx, synthesisCreate.capsule);
+  const mutationEvents = insertTransactionMutationEvents(ctx, request);
 
   return deepFreeze({
     proposal: loadUpdatedProposal(ctx, request.proposalId),
     synthesis: synthesisCreate.capsule,
-    events: [...storedReviewEvents, synthesisEvent]
+    events: [...storedReviewEvents, synthesisEvent, ...mutationEvents]
   });
 }
 
@@ -252,7 +256,10 @@ function parseAcceptRequest(
     reviewerIdentity:
       options.reviewerIdentity === undefined
         ? undefined
-        : parseNonEmptyString(options.reviewerIdentity, "reviewer_identity")
+        : parseNonEmptyString(options.reviewerIdentity, "reviewer_identity"),
+    ...(options.applySynchronousResolutionMutation === undefined
+      ? {}
+      : { applySynchronousResolutionMutation: options.applySynchronousResolutionMutation })
   };
 }
 
@@ -299,6 +306,14 @@ function insertReviewEvents(
   events: readonly ProposalResolutionEventInput[]
 ): readonly EventLogEntry[] {
   return events.map((event) => insertEventLogEntry(ctx.eventLogWriter, event));
+}
+
+function insertTransactionMutationEvents(
+  ctx: SqliteProposalWorkflowContext,
+  request: ParsedAcceptRequest
+): readonly EventLogEntry[] {
+  const mutationEvents = request.applySynchronousResolutionMutation?.() ?? [];
+  return mutationEvents.map((event) => insertEventLogEntry(ctx.eventLogWriter, event));
 }
 
 function insertSynthesisCreatedEvent(

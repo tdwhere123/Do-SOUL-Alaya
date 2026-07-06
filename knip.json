@@ -13,7 +13,8 @@
     "scripts/compute-cohort-from-archive.mjs",
     "scripts/fetch-local-embedding-model.mjs",
     "scripts/run-full-bench-v0311.mjs",
-    "scripts/run-full-bench-v0311-cli.mjs"
+    "scripts/run-full-bench-v0311-cli.mjs",
+    "scripts/bench-sqlite-concurrency.mjs"
   ],
   "ignoreWorkspaces": ["vendor/**"],
   "entry": [

@@ -33,11 +33,17 @@ import {
   resolveReviewerIdentity
 } from "./proposal-workflow-reviewer.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
+import { buildProposalReviewKarmaMutation } from "./proposal-review-karma.js";
 import {
   SourceDeliveryAnchorValidationError,
   type ProposalCreationEventInput,
   type ProposalResolutionEventInput
 } from "./proposal-workflow-types.js";
+
+type ProposalReviewResolutionOptions = Readonly<{
+  readonly reviewerIdentity: string;
+  readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
+}>;
 
 export function createProposalWorkflowHandlers(input: Readonly<{
   readonly deps: McpMemoryProposalWorkflowDependencies;
@@ -157,6 +163,12 @@ async function reviewMemoryProposal(
           input.generateObjectId
         )
       : undefined;
+  const karmaMutation = buildProposalReviewKarmaMutation(
+    input.deps,
+    scopedProposal,
+    request.verdict === "accept" ? "accept" : "reject",
+    context
+  );
   const resolved = await applyProposalReviewResolution(
     input.deps,
     scopedProposal,
@@ -164,8 +176,13 @@ async function reviewMemoryProposal(
     reviewedAt,
     toState,
     buildProposalResolutionEvents(scopedProposal, context, reviewerIdentity, request, reviewedAt, toState),
-    acceptedMemoryUpdate
+    acceptedMemoryUpdate,
+    buildProposalReviewResolutionOptions(
+      reviewerIdentity,
+      karmaMutation?.applySynchronousResolutionMutation
+    )
   );
+  karmaMutation?.afterCommit();
   await notifyResolvedEvents(input.deps, resolved.events);
   return {
     proposal_id: resolved.proposal.proposal_id,
@@ -233,7 +250,8 @@ async function applyProposalReviewResolution(
   reviewedAt: string,
   toState: Proposal["resolution_state"],
   reviewEvents: readonly ProposalResolutionEventInput[],
-  acceptedMemoryUpdate: Awaited<ReturnType<typeof prepareAcceptedProposalApply>> | undefined
+  acceptedMemoryUpdate: Awaited<ReturnType<typeof prepareAcceptedProposalApply>> | undefined,
+  options: ProposalReviewResolutionOptions
 ): Promise<Readonly<{
   readonly proposal: Readonly<Proposal>;
   readonly events: readonly EventLogEntry[];
@@ -245,7 +263,7 @@ async function applyProposalReviewResolution(
         toState,
         reviewedAt,
         reviewEvents,
-        { reviewerIdentity }
+        options
       );
     }
     if (acceptedMemoryUpdate.kind === "memory_update") {
@@ -255,7 +273,7 @@ async function applyProposalReviewResolution(
         reviewedAt,
         reviewEvents,
         acceptedMemoryUpdate.memoryUpdate,
-        reviewerIdentity
+        options
       );
     }
     if (acceptedMemoryUpdate.kind === "path_relation_governance") {
@@ -265,7 +283,7 @@ async function applyProposalReviewResolution(
         reviewedAt,
         reviewEvents,
         acceptedMemoryUpdate.pathRelationGovernance,
-        reviewerIdentity
+        options
       );
     }
     return await acceptProposalWithDurableSynthesisCreate(
@@ -274,11 +292,23 @@ async function applyProposalReviewResolution(
       reviewedAt,
       reviewEvents,
       acceptedMemoryUpdate.synthesisCreate,
-      reviewerIdentity
+      options
     );
   } catch (error) {
     throw normalizeResolutionError(error);
   }
+}
+
+function buildProposalReviewResolutionOptions(
+  reviewerIdentity: string,
+  applySynchronousResolutionMutation: (() => readonly ProposalResolutionEventInput[]) | undefined
+): ProposalReviewResolutionOptions {
+  return {
+    reviewerIdentity,
+    ...(applySynchronousResolutionMutation === undefined
+      ? {}
+      : { applySynchronousResolutionMutation })
+  };
 }
 
 function buildProposalCreationEvents(

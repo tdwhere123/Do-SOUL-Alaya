@@ -36,6 +36,10 @@
     "./cli/register": {
       "import": "./dist/cli/register.js",
       "types": "./dist/cli/register.d.ts"
+    },
+    "./recall/bound-execution": {
+      "import": "./dist/recall/recall-bound-execution.js",
+      "types": "./dist/recall/recall-bound-execution.d.ts"
     }
   },
   "engines": {

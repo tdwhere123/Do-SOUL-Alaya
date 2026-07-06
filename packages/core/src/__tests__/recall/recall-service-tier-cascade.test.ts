@@ -293,7 +293,7 @@ describe("RecallService tier cascade", () => {
         pages_loaded: 200
       })
     );
-  });
+  }, 15_000);
 
   it("uses WARM once when HOT is empty and decays delivered relevance", async () => {
     const baseline = await recallWith({

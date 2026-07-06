@@ -1,15 +1,22 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
+  createCompileSeedRunner,
   preflightExtractionCache,
+  resolveBenchRequireExtractionCacheManifest,
   type BenchSignalExtractor,
   type CompileSeedExtractionConfig
 } from "../../longmemeval/compile-seed.js";
+import {
+  cacheFilePath,
+  computeCacheKey
+} from "../../longmemeval/compile-seed-cache.js";
+import { buildCompileSeedDaemon, CREDENTIALLED_CONFIG } from "./compile-seed-fixture.js";
 import {
   computeSystemPromptSha256,
   writeExtractionCacheManifest,
@@ -174,6 +181,124 @@ describe("preflightExtractionCache", () => {
         allowLiveExtraction: true
       })
     ).not.toThrow();
+  });
+
+  it("throws when requireManifest is set and manifest is absent", () => {
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requireManifest: true
+      })
+    ).toThrow(/ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0/u);
+  });
+
+  it("defaults runner cache-manifest requirement to fail-closed", () => {
+    expect(resolveBenchRequireExtractionCacheManifest({} as NodeJS.ProcessEnv)).toBe(true);
+    expect(
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "0"
+      } as NodeJS.ProcessEnv)
+    ).toBe(false);
+    expect(
+      resolveBenchRequireExtractionCacheManifest({
+        ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST: "false"
+      } as NodeJS.ProcessEnv)
+    ).toBe(false);
+  });
+
+  it("requires full coverage when minimumCoverage is 1", () => {
+    writeExtractionCacheManifest(
+      cacheRoot,
+      manifestFor({ cached_turns: 99, coverage: 0.99 })
+    );
+    expect(() =>
+      preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        minimumCoverage: 1
+      })
+    ).toThrow(/below the 100% threshold/u);
+  });
+});
+
+function writeCacheShard(
+  cacheRoot: string,
+  model: string,
+  turnContent: string,
+  rawJson: string
+): void {
+  const cacheKey = computeCacheKey(model, OFFICIAL_API_SYSTEM_PROMPT, turnContent);
+  const filePath = cacheFilePath(cacheRoot, cacheKey);
+  mkdirSync(join(cacheRoot, cacheKey.slice(0, 2)), { recursive: true });
+  writeFileSync(
+    filePath,
+    `${JSON.stringify({
+      model,
+      cache_key: cacheKey,
+      raw_json: rawJson,
+      extracted_at: "2026-07-01T00:00:00Z"
+    })}\n`,
+    "utf8"
+  );
+}
+
+describe("cache-only compile seed smoke", () => {
+  let cacheRoot: string;
+
+  beforeEach(async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "extraction-cache-smoke-"));
+    writeExtractionCacheManifest(cacheRoot, manifestFor({ extraction_model: CREDENTIALLED_CONFIG.model }));
+  });
+
+  afterEach(async () => {
+    await rm(cacheRoot, { recursive: true, force: true });
+  });
+
+  it("reports cacheHits>0 and llmCalls=0 without calling the live extractor", async () => {
+    const turnContent = "I moved to Berlin and started a new job in March 2024.";
+    writeCacheShard(
+      cacheRoot,
+      CREDENTIALLED_CONFIG.model,
+      turnContent,
+      '{"signals":[{"distilled":"Alice lives in Berlin.","matched":"moved to Berlin"}]}'
+    );
+
+    const liveExtract: BenchSignalExtractor = {
+      extract: vi.fn(async () => {
+        throw new Error("live extraction must not run in cache-only smoke");
+      })
+    };
+
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      requiredTurnContents: [turnContent],
+      extractorFactory: () => liveExtract
+    });
+    const daemon = buildCompileSeedDaemon(() => ({
+      memoryId: "memory-cache-smoke",
+      signalId: "signal-cache-smoke",
+      proposalId: "proposal-cache-smoke",
+      evidenceId: "evidence-cache-smoke",
+      truncated: false,
+      charsClipped: 0
+    }));
+
+    await runner.seedTurn({
+      daemon,
+      turnContent,
+      evidenceRefBase: "q-smoke-t0",
+      seedIndex: 0,
+      workspaceId: "ws-smoke",
+      runId: "run-smoke"
+    });
+
+    expect(runner.stats.cacheHits).toBeGreaterThan(0);
+    expect(runner.stats.llmCalls).toBe(0);
+    expect(liveExtract.extract).not.toHaveBeenCalled();
   });
 });
 

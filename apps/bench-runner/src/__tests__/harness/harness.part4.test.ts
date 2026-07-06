@@ -168,7 +168,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   it(
     "a query hitting a NON-representative co-recall member fans into its sibling via graph_expansion at hop-2",
     async () => {
-      // red-team Important 3: the mechanism R2 depends on. An earned co_recalled
+      // An earned co_recalled
       // edge is minted with direction_bias=bidirectional_asymmetric, so
       // graph_expansion (collectPathGraphNeighbors) traverses it in BOTH
       // directions. A query that surfaces ONE member of an earned pair must

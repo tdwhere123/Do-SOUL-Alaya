@@ -43,6 +43,7 @@ export interface ConflictDetectionKarmaEmitterPort {
   emitKarmaEvent(input: {
     readonly kind: "supersede_penalty";
     readonly objectId: string;
+    readonly supersedingObjectId: string;
     readonly workspaceId: string;
     readonly runId?: string | null;
   }): Promise<void>;

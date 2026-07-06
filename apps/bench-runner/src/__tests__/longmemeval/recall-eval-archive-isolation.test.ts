@@ -14,7 +14,7 @@ import {
   selectFullRunBaseline
 } from "../../longmemeval/recall-eval-archive.js";
 
-// @anchor recall-eval-archive-isolation — I3: a fast-loop recall-eval archive
+// @anchor recall-eval-archive-isolation — a fast-loop recall-eval archive
 // shares the public/ bench + (split, policy, simulate, provider) bucket with
 // full runs, but never paid extraction/materialization. It must carry an
 // explicit discriminator and must never be selected as a full-run baseline.
@@ -48,6 +48,7 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
       materialization_drop: 0,
       budget_drop: 0,
       delivery_order_drop: 0,
+      answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     },
     miss_distribution: {}

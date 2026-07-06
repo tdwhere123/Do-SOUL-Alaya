@@ -13,6 +13,10 @@ import type { McpMemoryToolCallContext } from "./tool-handler.js";
 import type { McpMemoryProposalWorkflowDependencies } from "./proposal-workflow.js";
 
 type ProposalResolutionEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+type ProposalReviewResolutionOptions = Readonly<{
+  readonly reviewerIdentity: string;
+  readonly applySynchronousResolutionMutation?: () => readonly ProposalResolutionEventInput[];
+}>;
 type AcceptedProposalApply =
   | Readonly<{
       readonly kind: "memory_update";
@@ -133,7 +137,7 @@ export async function acceptProposalWithDurableMemoryUpdate(
     readonly caused_by: string;
     readonly expected_baseline_updated_at: string | null;
   }>,
-  reviewerIdentity: string
+  options: ProposalReviewResolutionOptions
 ): Promise<Readonly<{
   readonly proposal: Readonly<Proposal>;
   readonly events: readonly EventLogEntry[];
@@ -153,7 +157,7 @@ export async function acceptProposalWithDurableMemoryUpdate(
       ...memoryUpdate,
       updated_at: reviewedAt
     },
-    { reviewerIdentity }
+    options
   );
 }
 
@@ -168,7 +172,7 @@ export async function acceptProposalWithDurablePathRelationGovernance(
     readonly path_id_on_create: string;
     readonly caused_by: string;
   }>,
-  reviewerIdentity: string
+  options: ProposalReviewResolutionOptions
 ): Promise<Readonly<{
   readonly proposal: Readonly<Proposal>;
   readonly events: readonly EventLogEntry[];
@@ -188,7 +192,7 @@ export async function acceptProposalWithDurablePathRelationGovernance(
       ...pathRelationGovernance,
       updated_at: reviewedAt
     },
-    { reviewerIdentity }
+    options
   );
 }
 
@@ -202,7 +206,7 @@ export async function acceptProposalWithDurableSynthesisCreate(
     readonly capsule: SynthesisCapsule;
     readonly caused_by: string;
   }>,
-  reviewerIdentity: string
+  options: ProposalReviewResolutionOptions
 ): Promise<Readonly<{
   readonly proposal: Readonly<Proposal>;
   readonly events: readonly EventLogEntry[];
@@ -219,7 +223,7 @@ export async function acceptProposalWithDurableSynthesisCreate(
     reviewedAt,
     reviewEvents,
     synthesisCreate,
-    { reviewerIdentity }
+    options
   );
 }
 

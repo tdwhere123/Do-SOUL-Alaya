@@ -230,7 +230,7 @@ it("ruleEnabled=false with no llmPort produces no edges", async () => {
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
-// invariant (codex spine-review B5): strict no-drop mode must surface a
+// invariant: strict no-drop mode must surface a
   // candidate-query failure as a throw so the bulk-enrich worker releases the
   // claim and a later cycle retries — it must NOT degrade to an empty candidate
   // set that silently drops every owed conflict edge for this memory.
@@ -259,7 +259,7 @@ it("ruleEnabled=false with no llmPort produces no edges", async () => {
     expect(pathCandidatePort.submitCandidate).not.toHaveBeenCalled();
   });
 
-// invariant (codex spine-review B5): strict no-drop mode must surface a
+// invariant: strict no-drop mode must surface a
   // transient path-mint "failed" as an OBLIGATION_VIOLATION throw so the owed
   // path is retried, never markProcessed away.
   it("strictNoDrop=true throws OBLIGATION_VIOLATION when submitCandidate returns a transient failed", async () => {

@@ -78,7 +78,8 @@ async function prepareRecallRequest(
     strategy: params.strategy,
     taskSurfaceRef: params.taskSurface.runtime_id,
     policyOverride: params.policyOverride,
-    buildDefaultPolicy: context.buildDefaultPolicy
+    buildDefaultPolicy: context.buildDefaultPolicy,
+    defaultPolicyDecorator: context.dependencies.defaultPolicyDecorator
   });
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);

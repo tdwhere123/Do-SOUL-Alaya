@@ -378,7 +378,7 @@ it("emits PathRelationRetired when a skipped receipt drops strength to the thres
     });
   });
 
-it("redteam-I1 + reviewer-I3: a NON-mergeable (strictly-governed) idle negative path goes DORMANT (reversible), NEVER terminally retires", async () => {
+it("a NON-mergeable (strictly-governed) idle negative path goes DORMANT (reversible), NEVER terminally retires", async () => {
     // A strictly-governed path classifies as report_only (NOT mergeable). Even
     // when it is neutral/negative family and idle past the retirement window, it
     // must NOT terminally retire (which would lose its live suppression). It is

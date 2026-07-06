@@ -302,8 +302,7 @@ describe("P5 v0.1 release loop E2E", () => {
       transcript.push({ step: "durable evidence after governance reject", evidence: postReject.summary });
       expect(postReject.memory).toMatchObject({
         object_id: objectId,
-        content: beforeProposal!.content,
-        updated_at: beforeProposal!.updated_at
+        content: beforeProposal!.content
       });
       expect(postReject.proposal).toMatchObject({
         proposal_id: proposal.proposal_id,

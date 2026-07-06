@@ -228,6 +228,7 @@ it("llm-path contradicts seeds recall_allowed/0.9 and fires supersede_penalty ka
     expect(emitKarmaEvent).toHaveBeenCalledWith({
       kind: "supersede_penalty",
       objectId: "mem-A",
+      supersedingObjectId: "mem-B",
       workspaceId: "workspace-1",
       runId: "run-1"
     });

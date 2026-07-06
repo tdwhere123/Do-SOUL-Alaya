@@ -113,6 +113,7 @@ function buildDaemonMcpMemoryProposalWorkflow(
     | "objectAnchorGate"
     | "synthesisEvidenceReader"
     | "synthesisMemberResolver"
+    | "dynamicsService"
   >,
   reviewerIdentityBinding: ReviewerIdentityBinding | undefined
 ) {
@@ -145,6 +146,7 @@ function buildDaemonMcpMemoryProposalWorkflow(
     ...(input.synthesisMemberResolver === undefined
       ? {}
       : { synthesisMemberResolver: input.synthesisMemberResolver }),
+    ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding })
   });
 }

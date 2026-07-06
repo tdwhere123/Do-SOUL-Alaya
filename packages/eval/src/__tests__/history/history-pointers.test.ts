@@ -296,7 +296,7 @@ describe("history archive", () => {
   });
 
   // @anchor seed-extraction-release-blocker
-  // Round-2 §B1: even when the live-gates sidecar passes, a degraded
+  // invariant: even when the live-gates sidecar passes, a degraded
   // seed_extraction_path (no_credentials_fallback or offline_fallbacks > 0)
   // must block live strict-real archives from latest-passing.
 

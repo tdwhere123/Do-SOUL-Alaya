@@ -180,7 +180,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
 
-  it("below batch_trigger_count the unconditional 60s drain still enriches (S3c I2: ~1-min bound, not held for the threshold)", async () => {
+  it("below batch_trigger_count the unconditional 60s drain still enriches (~1-min bound, not held for the threshold)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     const belowThreshold = DYNAMICS_CONSTANTS.enrich.batch_trigger_count - 1;
     for (let i = 0; i < belowThreshold; i += 1) {
@@ -335,7 +335,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
 
-  it("B1: a fresh claim younger than the TTL is NOT reclaimed (a live in-flight cycle is never pulled out from under itself)", async () => {
+  it("a fresh claim younger than the TTL is NOT reclaimed (a live in-flight cycle is never pulled out from under itself)", async () => {
     const enrichPendingRepo = new FakeEnrichPendingRepo();
     enrichPendingRepo.enqueue("workspace-1", "memory-1");
     const runtime = createGardenRuntime(

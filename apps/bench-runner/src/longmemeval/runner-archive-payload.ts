@@ -30,6 +30,7 @@ import {
 } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions } from "./runner.js";
 import { toSeedExtractionPathKpi, type CompileSeedExtractionStats } from "./compile-seed.js";
+import { toSeedFuelInventoryKpi } from "./seed-fuel-inventory-kpi.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 
 const LONGMEMEVAL_SEED_POLICY = Object.freeze({
@@ -59,6 +60,7 @@ export function buildLongMemEvalRunPayload(input: {
   readonly windowLength: number;
   readonly aggregate: LongMemEvalRunArchiveAggregate;
   readonly extractionStats: CompileSeedExtractionStats;
+  readonly seedFuelInventory: import("./seed-fuel-inventory.js").SeedFuelInventory;
   readonly alayaVersion: string;
   readonly commitSha7: string;
   readonly runAt: Date;
@@ -196,6 +198,7 @@ function buildKpi(
       seed_chars_clipped: input.aggregate.truncCharsTotal
     },
     seed_extraction_path: toSeedExtractionPathKpi(input.extractionStats),
+    seed_fuel_inventory: toSeedFuelInventoryKpi(input.seedFuelInventory),
     full_gold_coverage: buildLongMemEvalFullGoldCoverage(input.aggregate.questionDiagnostics),
     quality_metrics: buildLongMemEvalQualityMetrics(input.aggregate.questionDiagnostics),
     ...(edgeProposalRate === undefined ? {} : { edge_proposal_rate: edgeProposalRate }),

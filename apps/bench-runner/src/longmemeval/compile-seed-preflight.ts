@@ -28,9 +28,10 @@ const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
  * actionable throw.
  *
  * Behaviour by case:
- *   - NO manifest (first-ever build, before any fill pass): allow live, log
- *     loudly to stderr. This is the only path that may legitimately live-
- *     extract from an empty cache.
+ *   - NO manifest with requireManifest=false (first-ever build, before any
+ *     fill pass): allow live, log loudly to stderr. Runner contexts default
+ *     requireManifest=true; operators must set
+ *     ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0/false for this path.
  *   - manifest present, `config.model !== manifest.extraction_model`: throw,
  *     naming both values — the cache would 0-hit and the run would be a full
  *     live extraction.
@@ -48,7 +49,7 @@ const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
  *
  * cross-file: apps/bench-runner/src/longmemeval/extraction-cache-manifest.ts
  */
-export function preflightExtractionCache(input: {
+export interface ExtractionCachePreflightInput {
   readonly cacheRoot: string;
   readonly config: CompileSeedExtractionConfig;
   readonly systemPrompt: string;
@@ -80,30 +81,22 @@ export function preflightExtractionCache(input: {
   //   collectDistinctTurnContents (the producer side of the same dedup)
   readonly requiredTurnContents?: readonly string[];
   readonly warn?: (message: string) => void;
-}): void {
-  const manifest =
-    input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
-  const warn =
-    input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
-  // Single source for "could this run live-extract?": explicit caller flag, else
-  // the credentials presence the runner derives `credentialled` from. Offline
-  // (apiKey null) -> no LLM call possible -> the coverage-gap guards are a
-  // category error and must be skipped (the offline fallback covers misses).
-  const liveExtractionPossible =
-    input.liveExtractionPossible ?? input.config.apiKey !== null;
+  /** When set, coverage scalar gate uses this floor instead of the 0.95 default. */
+  readonly minimumCoverage?: number;
+  /** Fail loud when manifest.json is absent (cache-only / warm-substrate runs). */
+  readonly requireManifest?: boolean;
+}
+
+export function preflightExtractionCache(input: ExtractionCachePreflightInput): void {
+  const manifest = input.manifest ?? readExtractionCacheManifest(input.cacheRoot);
+  const warn = input.warn ?? ((message: string) => process.stderr.write(`${message}\n`));
+  const liveExtractionPossible = input.liveExtractionPossible ?? input.config.apiKey !== null;
+  const minimumCoverage = input.minimumCoverage ?? EXTRACTION_CACHE_COVERAGE_THRESHOLD;
   if (manifest === undefined) {
-    warn(
-      "[longmemeval preflight] no extraction-cache manifest at " +
-        `${input.cacheRoot}; treating as first-ever build. The cache cannot ` +
-        "be validated and a credentialled run will live-extract every turn. " +
-        "After this run, build/commit the cache manifest so later runs fail " +
-        "loud on model/prompt drift instead of silently re-extracting."
-    );
+    handleMissingManifest(input.cacheRoot, input.requireManifest === true, warn);
     return;
   }
-  if (liveExtractionPossible) {
-    assertExtractionConfigDrift(input.config.model, input.systemPrompt, manifest);
-  }
+  assertExtractionConfigDrift(input.config.model, input.systemPrompt, manifest);
   if (input.requiredTurnContents !== undefined) {
     assertWindowContainment({
       cacheRoot: input.cacheRoot,
@@ -118,13 +111,32 @@ export function preflightExtractionCache(input: {
   assertCoverageScalar(
     manifest.coverage,
     input.allowLiveExtraction === true,
-    liveExtractionPossible
+    liveExtractionPossible,
+    minimumCoverage
   );
 }
 
-// Offline (no live extraction possible) means a model/prompt mismatch cannot
-// trigger the 466h live re-extraction these guards exist to prevent — the
-// offline fallback covers every miss — so callers skip this when offline.
+function handleMissingManifest(
+  cacheRoot: string,
+  requireManifest: boolean,
+  warn: (message: string) => void
+): void {
+  if (requireManifest) {
+    throw new Error(
+      "[longmemeval preflight] extraction-cache manifest is missing at " +
+        `${cacheRoot}. Restore or populate the cache before a cache-only ` +
+        "bench run, or set ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0 " +
+        "for an explicit first-fill/live extraction run."
+    );
+  }
+  warn(
+    "[longmemeval preflight] no extraction-cache manifest at " +
+      `${cacheRoot}; treating as first-ever build. The cache cannot be validated ` +
+      "and a credentialled run will live-extract every turn. After this run, " +
+      "build/commit the cache manifest so later runs fail loud on drift."
+  );
+}
+
 function assertExtractionConfigDrift(
   model: string,
   systemPrompt: string,
@@ -198,7 +210,8 @@ function assertWindowContainment(input: {
 function assertCoverageScalar(
   coverage: number | undefined,
   allowLiveExtraction: boolean,
-  liveExtractionPossible: boolean
+  liveExtractionPossible: boolean,
+  minimumCoverage: number
 ): void {
   // A manifest WITHOUT a coverage field is itself a gap: a provenance-only
   // manifest (built before any fill recorded a denominator) cannot prove the
@@ -220,16 +233,14 @@ function assertCoverageScalar(
     return;
   }
   if (
-    coverage < EXTRACTION_CACHE_COVERAGE_THRESHOLD &&
+    coverage < minimumCoverage &&
     !allowLiveExtraction &&
     liveExtractionPossible
   ) {
     const coveragePct = (coverage * 100).toFixed(1);
     throw new Error(
       "[longmemeval preflight] extraction cache coverage " +
-        `${coveragePct}% is below the ${(
-          EXTRACTION_CACHE_COVERAGE_THRESHOLD * 100
-        ).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
+        `${coveragePct}% is below the ${(minimumCoverage * 100).toFixed(0)}% threshold; this run would live-extract the uncovered ` +
         "gap. Run extraction-fill to populate the cache, or pass " +
         "--allow-live-extraction to live-extract the gap on purpose."
     );

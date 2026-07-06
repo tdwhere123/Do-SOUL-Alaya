@@ -48,7 +48,7 @@ export function resolveConformantPathWeight(): number {
 }
 
 export function resolveConformantEvidenceBeta(): number {
-  return readFloatEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0.5, 0);
+  return readFloatEnv("ALAYA_RECALL_CONF_EVIDENCE_BETA", 0, 0);
 }
 
 export function resolveConformantFloodCapPerSource(): number {

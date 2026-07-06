@@ -21,6 +21,7 @@ export async function finalizeLongMemEvalRun(input: {
   readonly windowLength: number;
   readonly collected: readonly LongMemEvalWorkerResult[];
   readonly extractionStats: CompileSeedExtractionStats;
+  readonly seedFuelInventory: import("./seed-fuel-inventory.js").SeedFuelInventory;
   readonly alayaVersion: string;
   readonly commitInfo: BenchCommitInfo;
   readonly commitSha7: string;

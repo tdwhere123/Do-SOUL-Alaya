@@ -58,6 +58,7 @@ import {
   resolveBenchRecallDegradationReason,
   shouldRunBenchEdgePlane
 } from "./daemon-handle-ops-support.js";
+import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
 
 const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
@@ -135,7 +136,9 @@ function createBenchRecallOperation(
       opts,
       input.recallWeightOverrides
     );
-    const recallResult = await input.activeRuntime.services.recallService.recall({
+    const recallResult = await invokeBoundRecall({
+      sideEffectMode: "benchmark",
+      recallService: input.activeRuntime.services.recallService,
       taskSurface,
       workspaceId: input.activeContext.workspaceId,
       runId: input.activeContext.runId,

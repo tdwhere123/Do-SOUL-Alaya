@@ -11,6 +11,12 @@ export {
 } from "./compile-seed-http.js";
 export { preflightExtractionCache } from "./compile-seed-preflight.js";
 export {
+  resolveBenchExtractionCacheMinCoverage,
+  resolveBenchRequireExtractionCacheManifest
+} from "./compile-seed-config.js";
+export { collectBenchSeedFuelInventory } from "./seed-fuel-collector.js";
+export { toSeedFuelInventoryKpi } from "./seed-fuel-inventory-kpi.js";
+export {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
   type SessionSeededTurn

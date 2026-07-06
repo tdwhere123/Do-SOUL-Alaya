@@ -1,0 +1,183 @@
+import { describe, expect, it } from "vitest";
+import { FullGoldDeliveryContributionSchema } from "@do-soul/alaya-eval";
+import {
+  classifyGoldDeliveryMissTaxonomy,
+  resolveCoreDeliveryRank,
+  toDeliveryMissCandidateInput
+} from "../../longmemeval/diagnostics-delivery-bridge.js";
+import type { CandidateDiagnostic } from "../../longmemeval/diagnostics-types.js";
+
+function sampleCandidate(
+  overrides: Partial<CandidateDiagnostic> = {}
+): CandidateDiagnostic {
+  return {
+    candidateKey: "workspace_local:memory_entry:gold-a",
+    objectId: "gold-a",
+    objectKind: "memory_entry",
+    dimension: null,
+    originPlane: "workspace_local",
+    preBudgetRank: 4,
+    selectionOrder: null,
+    finalRank: null,
+    fusedRank: 4,
+    fusedScore: 0.4,
+    perStreamRank: null,
+    fusedRankContributionPerStream: null,
+    planeFirstAdmitted: null,
+    planeWinningAdmission: null,
+    sourcePlanes: [],
+    lexicalRank: null,
+    structuralScore: null,
+    scoreFactors: null,
+    sourceChannels: [],
+    budgetDropReason: "max_entries",
+    rankAfterFusion: 4,
+    rankAfterFeatureRerank: null,
+    rankAfterLexicalPriority: null,
+    rankAfterSynthesisReserve: null,
+    rankAfterStructuralReserve: null,
+    rankAfterCoverageSelector: null,
+    rankAfterSessionCoverage: null,
+    coverageSelectorAction: null,
+    sessionCoverageAction: null,
+    sessionKey: null,
+    sourceCohortKey: null,
+    reservedBy: null,
+    ...overrides
+  };
+}
+
+describe("diagnostics-delivery-bridge", () => {
+  it("maps candidate diagnostics into delivery miss inputs", () => {
+    expect(toDeliveryMissCandidateInput(sampleCandidate())).toEqual({
+      objectKind: "memory_entry",
+      preBudgetRank: 4,
+      fusedRank: 4,
+      finalRank: null,
+      droppedReason: "max_entries",
+      rankAfterFusion: 4,
+      rankAfterCoverageSelector: null,
+      coverageSelectorAction: null
+    });
+  });
+
+  it("rejects unknown budget drop reason strings", () => {
+    expect(
+      toDeliveryMissCandidateInput(
+        sampleCandidate({ budgetDropReason: "unknown_reason" })
+      ).droppedReason
+    ).toBeNull();
+  });
+
+  it("uses fusion-stage ranks only for core delivery rank", () => {
+    expect(
+      resolveCoreDeliveryRank({
+        object_id: "g1",
+        candidate_status: "candidate_not_delivered",
+        dimension: null,
+        final_rank: null,
+        active_constraint_rank: null,
+        pre_budget_rank: 4,
+        selection_order: null,
+        fused_rank: null,
+        fused_score: null,
+        per_stream_rank: null,
+        fused_rank_contribution_per_stream: null,
+        plane_first_admitted: null,
+        plane_winning_admission: null,
+        source_planes: [],
+        miss_taxonomy: null,
+        lexical_rank: null,
+        structural_score: null,
+        score_factors: null,
+        source_channels: [],
+        budget_drop_reason: "max_entries",
+        rank_after_fusion: null,
+        rank_after_feature_rerank: null,
+        rank_after_lexical_priority: null,
+        rank_after_synthesis_reserve: null,
+        rank_after_structural_reserve: null,
+        rank_after_coverage_selector: null,
+        rank_after_session_coverage: null,
+        coverage_selector_action: null,
+        session_coverage_action: null,
+        session_key: null,
+        source_cohort_key: null,
+        reserved_by: null
+      })
+    ).toBeNull();
+    expect(
+      resolveCoreDeliveryRank({
+        object_id: "g2",
+        candidate_status: "delivered",
+        dimension: null,
+        final_rank: 3,
+        active_constraint_rank: null,
+        pre_budget_rank: 40,
+        selection_order: null,
+        fused_rank: 8,
+        fused_score: null,
+        per_stream_rank: null,
+        fused_rank_contribution_per_stream: null,
+        plane_first_admitted: null,
+        plane_winning_admission: null,
+        source_planes: [],
+        miss_taxonomy: null,
+        lexical_rank: null,
+        structural_score: null,
+        score_factors: null,
+        source_channels: [],
+        budget_drop_reason: null,
+        rank_after_fusion: 3,
+        rank_after_feature_rerank: null,
+        rank_after_lexical_priority: null,
+        rank_after_synthesis_reserve: null,
+        rank_after_structural_reserve: null,
+        rank_after_coverage_selector: 8,
+        rank_after_session_coverage: null,
+        coverage_selector_action: "displaced",
+        session_coverage_action: null,
+        session_key: null,
+        source_cohort_key: null,
+        reserved_by: null
+      })
+    ).toBe(3);
+  });
+
+  it("returns null gold taxonomy when diagnostics are unavailable", () => {
+    expect(
+      classifyGoldDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: undefined,
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: false
+      })
+    ).toBeNull();
+  });
+});
+
+describe("FullGoldDeliveryContributionSchema", () => {
+  it("accepts analyze output shape from buildLongMemEvalFullGoldCoverage", async () => {
+    const { buildLongMemEvalFullGoldCoverage } = await import(
+      "../../longmemeval/diagnostics.js"
+    );
+    const { buildGoldDiagnostic, buildQuestionDiagnosticFixture } = await import(
+      "./gold-diagnostic-fixture.js"
+    );
+    const question = buildQuestionDiagnosticFixture({
+      questionId: "q-schema",
+      gold: [
+        buildGoldDiagnostic({
+          object_id: "g1",
+          final_rank: 4,
+          rank_after_fusion: 8
+        })
+      ]
+    });
+    const contribution = buildLongMemEvalFullGoldCoverage([question])
+      .delivery_contribution;
+    expect(
+      FullGoldDeliveryContributionSchema.safeParse(contribution).success
+    ).toBe(true);
+  });
+});

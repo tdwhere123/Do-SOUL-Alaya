@@ -173,6 +173,7 @@ function createGardenSchedulerRuntime(
       ? {}
       : { enrichConflictDetectionPort: input.conflictDetectionService }),
     edgeProposalReconcile: input.edgeProposalService,
+    ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     warn: input.warnLogger.warn
   });
 }

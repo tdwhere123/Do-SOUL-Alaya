@@ -175,6 +175,9 @@ function buildDiagnosticsPayload(
     policy_shape: input.payload.policy_shape,
     simulate_report: input.payload.simulate_report,
     seed_extraction_path: input.payload.kpi.seed_extraction_path,
+    ...(input.payload.kpi.seed_fuel_inventory === undefined
+      ? {}
+      : { seed_fuel_inventory: input.payload.kpi.seed_fuel_inventory }),
     report_usage: {
       mode: input.payload.simulate_report,
       reports_attempted: input.build.reportUsage.reportsAttempted,

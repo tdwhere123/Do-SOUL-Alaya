@@ -98,7 +98,7 @@ export class SqliteMemoryEntryRepo
   public get transitionLifecycleStatement(): SqliteRunStatement {
     return this.statementHolder.active().transitionLifecycleStatement;
   }
-  // invariant (I3): a revived / non-tombstone transition clears the terminal
+  // invariant: a revived / non-tombstone transition clears the terminal
   // forget marker so an active/dormant row never carries a removal disposition.
   public get transitionLifecycleClearForgetStatement(): SqliteRunStatement {
     return this.statementHolder.active().transitionLifecycleClearForgetStatement;

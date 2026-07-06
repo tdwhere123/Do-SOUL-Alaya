@@ -1,3 +1,4 @@
+import { classifyGoldDeliveryMissTaxonomy } from "./diagnostics-delivery-bridge.js";
 import type {
   CandidateDiagnostic,
   LongMemEvalGoldDiagnostic,
@@ -7,8 +8,6 @@ import type {
 } from "./diagnostics-types.js";
 import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
 
-const DELIVERY_BUDGET_LOSS_RANK = 10;
-
 type MutableMissTaxonomySummary = Record<LongMemEvalMissTaxonomy, number>;
 
 export function createEmptyMissTaxonomyDistribution(): MutableMissTaxonomySummary {
@@ -17,6 +16,7 @@ export function createEmptyMissTaxonomyDistribution(): MutableMissTaxonomySummar
     materialization_drop: 0,
     budget_drop: 0,
     delivery_order_drop: 0,
+    answer_set_coverage_drop: 0,
     evaluation_or_gold_issue: 0
   };
 }
@@ -34,6 +34,7 @@ export function mergeMissTaxonomySummaries(
     merged.materialization_drop += summary.materialization_drop;
     merged.budget_drop += summary.budget_drop;
     merged.delivery_order_drop += summary.delivery_order_drop;
+    merged.answer_set_coverage_drop += summary.answer_set_coverage_drop;
     merged.evaluation_or_gold_issue += summary.evaluation_or_gold_issue;
   }
   return Object.freeze({ ...merged });
@@ -66,6 +67,10 @@ export function readCompactMissTaxonomySummary(
       record.delivery_order_drop,
       "miss_taxonomy_summary.delivery_order_drop"
     ),
+    answer_set_coverage_drop: optionalCompactNonNegativeInteger(
+      record.answer_set_coverage_drop,
+      "miss_taxonomy_summary.answer_set_coverage_drop"
+    ),
     evaluation_or_gold_issue: requiredCompactNonNegativeInteger(
       record.evaluation_or_gold_issue,
       "miss_taxonomy_summary.evaluation_or_gold_issue"
@@ -79,21 +84,7 @@ export function classifyGoldMissTaxonomy(input: {
   readonly anyObjectCandidate: CandidateDiagnostic | undefined;
   readonly diagnosticsAvailable: boolean;
 }): LongMemEvalMissTaxonomy | null {
-  if (input.deliveredRank !== null && input.deliveredRank <= 5) {
-    return null;
-  }
-  if (!input.diagnosticsAvailable) {
-    return "evaluation_or_gold_issue";
-  }
-  if (input.candidate === undefined) {
-    return input.anyObjectCandidate === undefined
-      ? "candidate_absent"
-      : "materialization_drop";
-  }
-  if (isCandidateBudgetDrop(input.candidate)) {
-    return "budget_drop";
-  }
-  return "delivery_order_drop";
+  return classifyGoldDeliveryMissTaxonomy(input);
 }
 
 export function classifyQuestionMissTaxonomy(input: {
@@ -125,6 +116,7 @@ export function classifyQuestionMissTaxonomy(input: {
   return (
     firstPresentTaxonomy(goldTaxonomies, "materialization_drop") ??
     firstPresentTaxonomy(goldTaxonomies, "budget_drop") ??
+    firstPresentTaxonomy(goldTaxonomies, "answer_set_coverage_drop") ??
     firstPresentTaxonomy(goldTaxonomies, "delivery_order_drop") ??
     firstPresentTaxonomy(goldTaxonomies, "candidate_absent") ??
     "evaluation_or_gold_issue"
@@ -161,14 +153,6 @@ export function summarizeLongMemEvalMissTaxonomy(
   return Object.freeze({ ...summary });
 }
 
-function isCandidateBudgetDrop(candidate: CandidateDiagnostic): boolean {
-  if (candidate.budgetDropReason === null) {
-    return false;
-  }
-  const candidateRank = candidate.preBudgetRank ?? candidate.fusedRank;
-  return candidateRank !== null && candidateRank <= DELIVERY_BUDGET_LOSS_RANK;
-}
-
 function firstPresentTaxonomy(
   taxonomies: readonly LongMemEvalMissTaxonomy[],
   target: LongMemEvalMissTaxonomy
@@ -190,4 +174,14 @@ function requiredCompactNonNegativeInteger(
     );
   }
   return value;
+}
+
+function optionalCompactNonNegativeInteger(
+  value: unknown,
+  fieldName: string
+): number {
+  if (value === undefined || value === null) {
+    return 0;
+  }
+  return requiredCompactNonNegativeInteger(value, fieldName);
 }

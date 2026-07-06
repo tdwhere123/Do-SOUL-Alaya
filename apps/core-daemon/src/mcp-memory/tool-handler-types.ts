@@ -1,3 +1,4 @@
+import type { DynamicsService } from "@do-soul/alaya-core";
 import {
   SoulBatchReviewEdgeProposalsResponseSchema,
   SoulListPendingEdgeProposalsResponseSchema,
@@ -113,16 +114,12 @@ export interface McpMemoryToolHandlerDependencies {
       fields: MemoryEntryMutableFields
     ): Promise<void>;
   };
-  // invariant: reuse_gain producer call site. see also:
-  // DynamicsService.emitKarmaEvent.
-  readonly dynamicsService?: {
-    emitKarmaEvent(input: {
-      readonly kind: "reuse_gain";
-      readonly objectId: string;
-      readonly workspaceId: string;
-      readonly runId?: string | null;
-    }): Promise<void>;
-  };
+  // invariant: karma producer call site. Proposal review uses the in-transaction
+  // variant so resolution and karma cannot half-commit. see also: DynamicsService.
+  readonly dynamicsService?: Pick<
+    DynamicsService,
+    "emitKarmaEvent" | "emitKarmaEventInCurrentTransaction"
+  >;
   // Evidence resolver used by soul.open_pointer to dereference
   // evidence_refs[] from a MemoryEntry back to its raw EvidenceCapsule
   // (gist / excerpt). Scoped lookup mirrors memoryService.findByIdScoped.

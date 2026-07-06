@@ -11,6 +11,10 @@ import {
   type GardenTaskResult,
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
+import {
+  runJanitorRetentionDecayScan,
+  type JanitorRetentionDecayPort
+} from "./janitor-retention-decay.js";
 
 export const JANITOR_CONSTANTS = {
   HOT_DEMOTION_THRESHOLD_MS: 7 * 86_400_000,
@@ -45,11 +49,10 @@ export interface JanitorMemoryTieringPort {
     workspaceId: string,
     criteria: JanitorHotDemotionCriteria
   ): Promise<readonly HotDemotionCandidate[]>;
-  // Sync so the Janitor can wrap each demote in
-  // EventPublisher.appendManyWithMutation atomically with the
-  // SOUL_MEMORY_TIER_CHANGED EventLog row.
   demoteToWarm(workspaceId: string, memoryEntryIds: readonly string[]): void;
 }
+
+type EventLogDraft = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface LowActivityMemoryRecord {
   readonly memory_id: string;
@@ -135,6 +138,7 @@ export interface JanitorDependencies {
   readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
+  readonly retentionDecayPort?: JanitorRetentionDecayPort;
   // Optional EventLog writer used to commit SOUL_MEMORY_TIER_CHANGED
   // rows in the same SQLite transaction as the storage_tier UPDATE.
   // When undefined the Janitor falls back to the bare UPDATE in legacy
@@ -154,6 +158,7 @@ export class Janitor {
   private readonly tombstoneGcPort?: JanitorTombstoneGcPort;
   private readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   private readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
+  private readonly retentionDecayPort?: JanitorRetentionDecayPort;
   private readonly eventLogRepo?: AuditorEventLogPort;
   private readonly now: () => string;
 
@@ -165,6 +170,7 @@ export class Janitor {
     this.tombstoneGcPort = deps.tombstoneGcPort;
     this.dispositionSweepPort = deps.dispositionSweepPort;
     this.strongRefProtectionPort = deps.strongRefProtectionPort;
+    this.retentionDecayPort = deps.retentionDecayPort;
     this.eventLogRepo = deps.eventLogRepo;
     this.now = deps.now ?? (() => new Date().toISOString());
   }
@@ -225,6 +231,11 @@ export class Janitor {
     task: GardenTaskDescriptor,
     completedAt: string
   ): Promise<GardenTaskResult> {
+    const retentionAudit = await runJanitorRetentionDecayScan(
+      this.retentionDecayPort,
+      task.workspace_id
+    );
+
     const candidates = await this.tieringPort.findHotDemotionCandidates(task.workspace_id, {
       maxLastHitAgeMs: JANITOR_CONSTANTS.HOT_DEMOTION_THRESHOLD_MS,
       minActivationScore: JANITOR_CONSTANTS.HOT_DEMOTION_MIN_ACTIVATION
@@ -232,48 +243,55 @@ export class Janitor {
     const objectIds = candidates.slice(0, JANITOR_CONSTANTS.BATCH_SIZE).map((entry) => entry.memory_entry_id);
 
     if (objectIds.length > 0) {
-      // Emit one SOUL_MEMORY_TIER_CHANGED row per demoted entry,
-      // atomically with the storage_tier UPDATE. The batch demote runs
-      // once inside the mutate callback and the per-entry events land
-      // in EventLog for audit replay. Storage writes the "cold" tier
-      // (BOUNDARY_COLD_TIER), so keep the audit row consistent.
-      const occurredAt = this.now();
-      const events = objectIds.map((memoryId) => ({
-        event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
-        entity_type: "memory_entry",
-        entity_id: memoryId,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        caused_by: this.role,
-        payload_json: SoulMemoryTierChangedPayloadSchema.parse({
-          object_id: memoryId,
-          object_kind: "memory_entry",
-          workspace_id: task.workspace_id,
-          run_id: task.run_id,
-          from_tier: "hot",
-          to_tier: "cold",
-          reason: "hot_index_demotion",
-          task_id: task.task_id,
-          occurred_at: occurredAt
-        })
-      }));
-      await this.publishEventLogsMutation(events, () => {
-        this.tieringPort.demoteToWarm(task.workspace_id, objectIds);
-      });
+      await this.applyHotIndexDemotion(task, objectIds);
     }
 
     const result = this.createSuccessResult(task, completedAt, objectIds, [
+      retentionAudit,
       `hot_index_demotion: demoted ${objectIds.length} entries to cold storage tier in ${task.workspace_id}`
     ]);
     await this.scheduler.reportCompletion(result);
     return result;
   }
 
-  // Mirrors the Auditor.publishEventLogMutation pattern but accepts
-  // multiple events so a batch UPDATE can commit atomically with N audit
-  // rows.
+  private async applyHotIndexDemotion(
+    task: GardenTaskDescriptor,
+    objectIds: readonly string[]
+  ): Promise<void> {
+    await this.publishEventLogsMutation(
+      this.buildHotIndexDemotionEvents(task, objectIds, this.now()),
+      () => this.tieringPort.demoteToWarm(task.workspace_id, objectIds)
+    );
+  }
+
+  private buildHotIndexDemotionEvents(
+    task: GardenTaskDescriptor,
+    objectIds: readonly string[],
+    occurredAt: string
+  ): readonly EventLogDraft[] {
+    return objectIds.map((memoryId) => ({
+      event_type: MemoryGovernanceEventType.SOUL_MEMORY_TIER_CHANGED,
+      entity_type: "memory_entry",
+      entity_id: memoryId,
+      workspace_id: task.workspace_id,
+      run_id: task.run_id,
+      caused_by: this.role,
+      payload_json: SoulMemoryTierChangedPayloadSchema.parse({
+        object_id: memoryId,
+        object_kind: "memory_entry",
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        from_tier: "hot",
+        to_tier: "cold",
+        reason: "hot_index_demotion",
+        task_id: task.task_id,
+        occurred_at: occurredAt
+      })
+    }));
+  }
+
   private async publishEventLogsMutation(
-    events: ReadonlyArray<Omit<EventLogEntry, "event_id" | "created_at" | "revision">>,
+    events: readonly EventLogDraft[],
     mutate: () => void
   ): Promise<void> {
     if (this.eventLogRepo === undefined) {
@@ -405,10 +423,6 @@ export class Janitor {
         skipped += 1;
         continue;
       }
-      // invariant: consult the same strong-ref protection the physical GC checks,
-      // so a dormant memory another object strongly references is never tombstoned
-      // by the sweep (symmetry with executeTombstoneGc; defense in depth alongside
-      // the not-protected backstop at the tombstone authority).
       if (this.strongRefProtectionPort !== undefined) {
         const isProtected = await this.strongRefProtectionPort.isProtected(task.workspace_id, "memory", candidate.memory_id);
         if (isProtected) {

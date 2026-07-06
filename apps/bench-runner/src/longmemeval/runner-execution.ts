@@ -7,6 +7,7 @@ import {
   type BenchDaemonHandle
 } from "../harness/daemon.js";
 import type { BenchRecallWeightOverrides } from "../harness/recall-weight-overrides.js";
+import { collectBenchSeedFuelInventory } from "./seed-fuel-collector.js";
 import { collectDistinctTurnContents } from "./extraction-fill.js";
 import { loadDataset } from "./fetch.js";
 import {
@@ -55,6 +56,9 @@ export interface LongMemEvalExecutionResult {
   readonly collected: readonly LongMemEvalWorkerResult[];
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly seedFuelInventory: Awaited<
+    ReturnType<typeof import("./seed-fuel-collector.js").collectBenchSeedFuelInventory>
+  >;
 }
 
 export async function prepareLongMemEvalRun(
@@ -102,11 +106,13 @@ export async function executeLongMemEvalRun(
   try {
     daemon = await startLongMemEvalDaemon(context);
     await runLongMemEvalWindow(context, daemon, execution);
+    const seedFuelInventory = await collectBenchSeedFuelInventory(daemon.dataDir);
     await writeLongMemEvalSnapshotIfRequested(context, execution.snapshotQuestions);
     return {
       collected: execution.collected,
       questionFailures: execution.questionFailures,
-      failedQuestionIds: execution.failedQuestionIds
+      failedQuestionIds: execution.failedQuestionIds,
+      seedFuelInventory
     };
   } finally {
     try {

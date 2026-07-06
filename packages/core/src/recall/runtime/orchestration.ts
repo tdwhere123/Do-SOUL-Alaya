@@ -70,12 +70,14 @@ export function resolvePolicy(params: Readonly<{
   readonly taskSurfaceRef: string;
   readonly policyOverride?: Readonly<RecallPolicy>;
   readonly buildDefaultPolicy: (strategy: NodeStrategy, taskSurfaceRef: string) => Readonly<RecallPolicy>;
+  readonly defaultPolicyDecorator?: RecallServiceDependencies["defaultPolicyDecorator"];
 }>): Readonly<RecallPolicy> {
-  if (params.policyOverride === undefined) {
-    return params.buildDefaultPolicy(params.strategy, params.taskSurfaceRef);
-  }
-
-  return parseRecallPolicy(params.policyOverride);
+  const base =
+    params.policyOverride === undefined
+      ? params.buildDefaultPolicy(params.strategy, params.taskSurfaceRef)
+      : parseRecallPolicy(params.policyOverride);
+  const decorator = params.defaultPolicyDecorator;
+  return decorator === undefined ? base : parseRecallPolicy(decorator(base));
 }
 
 export async function loadActiveConstraints(params: Readonly<{

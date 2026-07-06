@@ -46,8 +46,7 @@ import {
   requireBenchOpenAiSecretRef,
   resolveBenchOpenAiSecretRef,
   resolveBenchReviewerCredentials,
-  restoreEnv,
-  withEmbeddingFusionWeightInjected
+  restoreEnv
 } from "./daemon-support.js";
 import { createBenchWorkspaceManager } from "./daemon-workspace-manager.js";
 
@@ -109,10 +108,7 @@ async function createBenchDaemonState(
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const embeddingProviderKind =
     opts.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
-  const recallWeightOverrides =
-    embeddingMode === "env"
-      ? withEmbeddingFusionWeightInjected(opts.recallWeightOverrides)
-      : opts.recallWeightOverrides;
+  const recallWeightOverrides = opts.recallWeightOverrides;
   const dataDir = opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
   const savedEnv = snapshotManagedEnv();
   const effectiveOpenAiSecretRef =

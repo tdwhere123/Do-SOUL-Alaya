@@ -1,7 +1,7 @@
 /**
  * @anchor longmemeval-qa-llm-filter — agent-side semantic relevance filter.
  *
- * The recall §D wall: precise-class gold (temporal/preference) and its
+ * Precise-class gold (temporal/preference) and its
  * co-topical distractors are lexical/embedding neighbours, so fusion ranking
  * cannot separate them — but a reading LLM CAN (it knows an "Adobe Premiere"
  * preference answers a "video-editing resources" request). Per the invariant

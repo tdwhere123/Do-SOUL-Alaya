@@ -15,6 +15,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   applyPathSuppressionToFusionScores,
+  buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails
 } from "../../recall/delivery/fusion-delivery-scoring.js";
 import {
@@ -236,13 +237,14 @@ describe("conformant compositional combine (real SQLite)", () => {
   it("path inflow is part of the unified kernel", async () => {
     const specs: readonly CandidateSpec[] = [
       { id: objectId(1), lexical: 1 },
-      { id: objectId(2), lexical: 0.2 }
+      { id: objectId(2), lexical: 0.2, evidenceSupports: [0.5] }
     ];
     const without = await runFusion(GENERIC_QUERY, specs);
     const withInflow = await runFusion(GENERIC_QUERY, specs, {
       inflow: { [objectId(2)]: [{ seedObjectId: objectId(1), weight: 1 }] }
     });
     expect(withInflow.get(keyOf(objectId(2)))!.per_axis_contribution!.path).toBeGreaterThan(0);
+    expect(withInflow.get(keyOf(objectId(2)))!.flood_potential!.fuel_verified).toBe(true);
     expect(withInflow.get(keyOf(objectId(2)))!.fused_score)
       .toBeGreaterThan(without.get(keyOf(objectId(2)))!.fused_score);
   });
@@ -258,18 +260,18 @@ describe("conformant compositional combine (real SQLite)", () => {
 
   it("path is compositional: a high-base source floods its target; a candidate with no inflow gets ~0 path", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
-    const target: CandidateSpec = { id: objectId(2) };
+    const target: CandidateSpec = { id: objectId(2), lexical: 0.1, evidenceSupports: [0.4] };
 
     const noInflow = await runFusion(GENERIC_QUERY, [seed, target]);
     const targetNoInflow = noInflow.get(keyOf(target.id))!;
     expect(targetNoInflow.per_axis_contribution!.path).toBe(0);
-    expect(targetNoInflow.fused_score).toBeGreaterThan(0);
 
     const withInflow = await runFusion(GENERIC_QUERY, [seed, target], {
       inflow: { [target.id]: [{ seedObjectId: seed.id, weight: 0.8 }] }
     });
     const targetLifted = withInflow.get(keyOf(target.id))!;
     expect(targetLifted.per_axis_contribution!.path).toBeGreaterThan(0);
+    expect(targetLifted.flood_potential!.fuel_verified).toBe(true);
     expect(targetLifted.fused_score).toBeGreaterThan(targetNoInflow.fused_score);
   });
 
@@ -430,55 +432,15 @@ describe("conformant compositional combine (real SQLite)", () => {
 
   it("path-suppression floor never boosts a tiny positive score", () => {
     const tiny = 0.00001;
+    const breakdown = buildEmptyRecallFusionBreakdown("tiny");
     const fusion = new Map<string, RecallFusionBreakdown>([
       [
         "workspace_local:memory_entry:tiny",
-        {
-          candidate_key: "workspace_local:memory_entry:tiny",
-          object_id: "tiny",
-          object_kind: "memory_entry",
-          origin_plane: "workspace_local",
+        Object.freeze({
+          ...breakdown,
           fused_rank: 1,
-          fused_score: tiny,
-          fused_rank_per_stream: {
-            lexical_fts: null,
-            trigram_fts: null,
-            synthesis_fts: null,
-            evidence_fts: null,
-            evidence_structural_agreement: null,
-            source_proximity: null,
-            source_evidence_agreement: null,
-            subject_alignment: null,
-            structural: null,
-            existing_score: null,
-            embedding_similarity: null,
-            graph_expansion: null,
-            entity_seed: null,
-            path_expansion: null,
-            temporal_recency: null,
-            workspace_activation: null,
-            facet_overlap: null
-          },
-          fused_rank_contribution_per_stream: {
-            lexical_fts: 0,
-            trigram_fts: 0,
-            synthesis_fts: 0,
-            evidence_fts: 0,
-            evidence_structural_agreement: 0,
-            source_proximity: 0,
-            source_evidence_agreement: 0,
-            subject_alignment: 0,
-            structural: 0,
-            existing_score: 0,
-            embedding_similarity: 0,
-            graph_expansion: 0,
-            entity_seed: 0,
-            path_expansion: 0,
-            temporal_recency: 0,
-            workspace_activation: 0,
-            facet_overlap: 0
-          }
-        }
+          fused_score: tiny
+        })
       ]
     ]);
 
@@ -495,9 +457,16 @@ describe("conformant compositional combine (real SQLite)", () => {
 
   it("tunables default to bounded compositional values", () => {
     expect(resolveConformantPathWeight()).toBe(0.6);
-    expect(resolveConformantEvidenceBeta()).toBe(0.5);
+    expect(resolveConformantEvidenceBeta()).toBe(0);
     expect(resolveConformantFloodCapPerSource()).toBe(1);
     expect(resolveConformantFloodCapTotal()).toBe(3);
+  });
+
+  it("cold-start fused score equals R_obj without path or evidence fuel", async () => {
+    const candidate = (await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }])).get(keyOf(objectId(1)))!;
+    expect(candidate.flood_potential?.fuel_verified).toBe(false);
+    expect(candidate.flood_potential?.Flood).toBe(0);
+    expect(candidate.fused_score).toBeCloseTo(candidate.per_axis_contribution!.object, 12);
   });
 
   it("unified delivery includes temporal and control axes even when path is zero", async () => {
@@ -514,17 +483,20 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("unified score is the calibrated additive axis sum", async () => {
-    const spec: CandidateSpec = { id: objectId(1), lexical: 1, evidenceSupports: [0.5, 0.5] };
-    const candidate = (await runFusion(GENERIC_QUERY, [spec])).get(keyOf(spec.id))!;
+  it("integrated flood score matches omega * (R_obj + lambda * Flood) with beta disabled", async () => {
+    const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
+    const spec: CandidateSpec = { id: objectId(2), lexical: 1, evidenceSupports: [0.5, 0.5] };
+    const candidate = (await runFusion(GENERIC_QUERY, [seed, spec], {
+      inflow: { [spec.id]: [{ seedObjectId: seed.id, weight: 1 }] }
+    })).get(keyOf(spec.id))!;
     const axes = candidate.per_axis_contribution!;
-    const expected =
-      axes.object +
-      resolveConformantPathWeight() * axes.path +
-      resolveConformantEvidenceBeta() * axes.evidence +
-      0.35 * axes.temporal +
-      0.2 * axes.control;
-    expect(axes.evidence).toBeGreaterThan(0);
+    const flood = candidate.flood_potential!;
+    expect(flood.R_obj).toBeCloseTo(axes.object, 12);
+    expect(flood.beta).toBe(0);
+    expect(flood.e_direct_status).toBe("inactive:beta_disabled");
+    expect(flood.fuel_verified).toBe(true);
+    const expected = flood.omega * (flood.R_obj + flood.lambda * flood.Flood);
     expect(candidate.fused_score).toBeCloseTo(expected, 9);
+    expect(flood.final_score).toBeCloseTo(expected, 9);
   });
 });

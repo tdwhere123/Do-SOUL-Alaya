@@ -183,6 +183,13 @@ export interface LongMemEvalDiagnosticsSidecar {
       readonly materialization_drop: number;
     };
   };
+  readonly seed_fuel_inventory?: {
+    readonly objects_total: number;
+    readonly evidence_refs_total: number;
+    readonly facet_anchors_total: number;
+    readonly path_candidates_total: number;
+    readonly support_bearing_candidates: number;
+  };
   readonly report_usage?: LongMemEvalReportUsageSummary;
   readonly question_failures?: LongMemEvalQuestionFailureSummary;
   readonly report_side_effects?: LongMemEvalReportSideEffectSummary;
