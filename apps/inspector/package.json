@@ -15,7 +15,7 @@
   "main": "dist/runtime/server.js",
   "types": "dist/runtime/server.d.ts",
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "build": "tsc -b && pnpm --dir web build",

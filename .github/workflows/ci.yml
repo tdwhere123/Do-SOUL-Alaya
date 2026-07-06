@@ -24,27 +24,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: ubuntu-node20
+          - label: ubuntu-node22
             os: ubuntu-latest
-            node: '20.19.0'
+            node: '22'
             run_hygiene: true
             run_coverage: true
             run_smoke: false
-          - label: ubuntu-node22
-            os: ubuntu-latest
+          - label: macos-node22
+            os: macos-latest
             node: '22'
             run_hygiene: false
             run_coverage: false
             run_smoke: false
-          - label: macos-node20
-            os: macos-latest
-            node: '20.19.0'
-            run_hygiene: false
-            run_coverage: false
-            run_smoke: false
-          - label: windows-node20
+          - label: windows-node22
             os: windows-latest
-            node: '20.19.0'
+            node: '22'
             run_hygiene: false
             run_coverage: false
             run_smoke: true
@@ -114,7 +108,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.19.0'
+          node-version: '22'
 
       - name: Check bench-history contract
         run: node scripts/ci/check-content-contracts.mjs
@@ -132,7 +126,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.19.0'
+          node-version: '22'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
