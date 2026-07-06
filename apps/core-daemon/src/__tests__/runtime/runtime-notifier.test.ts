@@ -88,11 +88,14 @@ describe("RuntimeNotifier", () => {
 
       expect(calls).toEqual(["a", "b"]);
       expect(consoleWarnSpy).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith("[runtime-notifier] listener threw; continuing fan-out", {
-        errorName: "Error",
-        errorMessageRedacted: true
-      });
-      expect(JSON.stringify(warn.mock.calls)).not.toContain("listener-a-down");
+      expect(warn).toHaveBeenCalledWith(
+        "[runtime-notifier] listener threw; continuing fan-out",
+        expect.objectContaining({
+          errorName: "Error",
+          errorMessage: "listener-a-down",
+          errorStack: expect.stringContaining("listener-a-down")
+        })
+      );
     } finally {
       consoleWarnSpy.mockRestore();
       cleanup();
@@ -134,13 +137,91 @@ describe("RuntimeNotifier", () => {
 
       expect(runListener).toHaveBeenCalledTimes(1);
       expect(consoleWarnSpy).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith("[runtime-notifier] listener threw; continuing fan-out", {
-        errorName: "Error",
-        errorMessageRedacted: true
-      });
-      expect(JSON.stringify(warn.mock.calls)).not.toContain("workspace-down");
+      expect(warn).toHaveBeenCalledWith(
+        "[runtime-notifier] listener threw; continuing fan-out",
+        expect.objectContaining({
+          errorName: "Error",
+          errorMessage: "workspace-down",
+          errorStack: expect.stringContaining("workspace-down")
+        })
+      );
     } finally {
       consoleWarnSpy.mockRestore();
+      cleanup();
+    }
+  });
+
+  it("sanitizes listener exception diagnostics without fully redacting them", async () => {
+    const warn = vi.fn();
+    const { createRuntimeNotifier: createIsolatedRuntimeNotifier, cleanup } =
+      await importRuntimeNotifierWithMockedWarnLogger(warn);
+    const notifier = createIsolatedRuntimeNotifier();
+    notifier.subscribeEntries(async () => {
+      throw new Error("failed with token=abc123 and api_key:xyz");
+    });
+
+    try {
+      await notifier.notifyEntry({
+        event_id: "event-sensitive-1",
+        event_type: "memory.created" as EventLogEntry["event_type"],
+        entity_type: "memory_entry",
+        entity_id: "memory-sensitive-1",
+        workspace_id: "ws-sensitive",
+        run_id: null,
+        caused_by: "test",
+        revision: 1,
+        created_at: "2026-04-30T00:00:00.000Z",
+        payload_json: {}
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        "[runtime-notifier] listener threw; continuing fan-out",
+        expect.objectContaining({
+          errorName: "Error",
+          errorMessage: "failed with token=[Redacted] and api_key:[Redacted]",
+          errorStack: expect.stringContaining("token=[Redacted]")
+        })
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("abc123");
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("api_key:xyz");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("sanitizes JSON quoted sensitive keys and multi-word values containing spaces", async () => {
+    const warn = vi.fn();
+    const { createRuntimeNotifier: createIsolatedRuntimeNotifier, cleanup } =
+      await importRuntimeNotifierWithMockedWarnLogger(warn);
+    const notifier = createIsolatedRuntimeNotifier();
+    notifier.subscribeEntries(async () => {
+      throw new Error(JSON.stringify({ password: "my secret passphrase", authorization: "Bearer some long token" }));
+    });
+
+    try {
+      await notifier.notifyEntry({
+        event_id: "event-sensitive-2",
+        event_type: "memory.created" as EventLogEntry["event_type"],
+        entity_type: "memory_entry",
+        entity_id: "memory-sensitive-2",
+        workspace_id: "ws-sensitive",
+        run_id: null,
+        caused_by: "test",
+        revision: 1,
+        created_at: "2026-04-30T00:00:00.000Z",
+        payload_json: {}
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        "[runtime-notifier] listener threw; continuing fan-out",
+        expect.objectContaining({
+          errorName: "Error",
+          errorMessage: '{"password":"[Redacted]","authorization":"Bearer [Redacted]"}'
+        })
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("my secret passphrase");
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("some long token");
+    } finally {
       cleanup();
     }
   });
