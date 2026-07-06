@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execFileWithFileCapture } from "./script-capture.js";
+import { pathIsStrictlyOutside, pathsEqual } from "../support/test-paths.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -111,13 +112,14 @@ describe("bench maintenance scripts", () => {
         fallbackTmp: string
       ) => string;
     };
-    const repoLikeCwd = path.join(tmpDir, "checkout");
+    const checkoutRoot = path.join(tmpDir, "checkout");
     const fallbackTmp = path.join(tmpDir, "tmp");
 
     const cacheDir = defaultCacheDir({}, "", fallbackTmp);
+    const expected = path.join(fallbackTmp, "do-soul-alaya-cache", "do-soul-alaya", "models");
 
-    expect(cacheDir).toBe(path.join(fallbackTmp, "do-soul-alaya-cache", "do-soul-alaya/models"));
-    expect(cacheDir.startsWith(repoLikeCwd)).toBe(false);
+    expect(pathsEqual(cacheDir, expected)).toBe(true);
+    expect(pathIsStrictlyOutside(checkoutRoot, cacheDir)).toBe(true);
   });
 
   it("does not append degradation backlog after daily runner infrastructure failures", async () => {

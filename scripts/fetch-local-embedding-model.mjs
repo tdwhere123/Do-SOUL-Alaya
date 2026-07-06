@@ -68,7 +68,7 @@ export function defaultCacheDir(
     : home.length > 0
       ? path.join(home, ".cache")
       : path.join(fallbackTmp, "do-soul-alaya-cache");
-  return path.join(cacheHome, "do-soul-alaya/models");
+  return path.join(cacheHome, "do-soul-alaya", "models");
 }
 
 function endpointBase() {

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { pathEndsWithPosixSegments, pathsEqual } from "../support/test-paths.js";
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../");
 
 // EXTRACTION_CACHE_ROOT reads the env at module-load, so each case resets modules + re-imports.
 describe("EXTRACTION_CACHE_ROOT cache-root override", () => {
@@ -9,16 +14,31 @@ describe("EXTRACTION_CACHE_ROOT cache-root override", () => {
   });
 
   it("redirects to ALAYA_BENCH_EXTRACTION_CACHE_ROOT (staging) when set", async () => {
-    vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", "/tmp/alaya-staging-cache");
+    const staging = join(tmpdir(), "alaya-staging-cache");
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", staging);
     vi.resetModules();
     const { EXTRACTION_CACHE_ROOT } = await import("../../longmemeval/compile-seed-config.js");
-    expect(EXTRACTION_CACHE_ROOT).toBe(resolve("/tmp/alaya-staging-cache"));
+    expect(pathsEqual(EXTRACTION_CACHE_ROOT, resolve(staging))).toBe(true);
   });
 
   it("falls back to the canonical git-tracked fixture path when unset", async () => {
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", undefined as unknown as string);
     vi.resetModules();
     const { EXTRACTION_CACHE_ROOT } = await import("../../longmemeval/compile-seed-config.js");
-    expect(EXTRACTION_CACHE_ROOT.endsWith("docs/bench-history/datasets/longmemeval-extraction-cache")).toBe(true);
+    expect(
+      pathEndsWithPosixSegments(
+        EXTRACTION_CACHE_ROOT,
+        "docs",
+        "bench-history",
+        "datasets",
+        "longmemeval-extraction-cache"
+      )
+    ).toBe(true);
+    expect(
+      pathsEqual(
+        EXTRACTION_CACHE_ROOT,
+        resolve(repoRoot, "docs/bench-history/datasets/longmemeval-extraction-cache")
+      )
+    ).toBe(true);
   });
 });

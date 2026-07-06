@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { applyBenchFastPragmaIfRequested } from "../../harness/daemon.js";
+import { removeTempDirectory } from "../support/temp-cleanup.js";
 
 // Bench-only SQLite tuning is layered on top of the production storage
 // hardening (see packages/storage/src/sqlite/db.ts). The production pragmas are
@@ -21,7 +22,7 @@ afterEach(async () => {
   delete process.env.ALAYA_BENCH_FAST_PRAGMA;
   delete process.env.ALAYA_BENCH_TEMP_STORE;
   for (const root of tmpRoots.splice(0)) {
-    await rm(root, { recursive: true, force: true });
+    await removeTempDirectory(root);
   }
 });
 

@@ -20,11 +20,12 @@ import {
 
 describe("buildLongMemEvalWorkerShardPlans", () => {
   it("splits the window evenly across process-backed workers", () => {
+    const shardRoot = join(tmpdir(), "lme-shards");
     const plans = buildLongMemEvalWorkerShardPlans({
       windowLength: 10,
       baseOffset: 5,
       concurrency: 3,
-      shardRoot: "/tmp/shards"
+      shardRoot
     });
 
     expect(plans).toEqual([
@@ -32,19 +33,19 @@ describe("buildLongMemEvalWorkerShardPlans", () => {
         shardIndex: 0,
         offset: 5,
         limit: 4,
-        historyRoot: "/tmp/shards/shard-0"
+        historyRoot: join(shardRoot, "shard-0")
       },
       {
         shardIndex: 1,
         offset: 9,
         limit: 4,
-        historyRoot: "/tmp/shards/shard-1"
+        historyRoot: join(shardRoot, "shard-1")
       },
       {
         shardIndex: 2,
         offset: 13,
         limit: 2,
-        historyRoot: "/tmp/shards/shard-2"
+        historyRoot: join(shardRoot, "shard-2")
       }
     ]);
   });
