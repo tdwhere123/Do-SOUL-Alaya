@@ -78,9 +78,13 @@ describe("SqliteWriteQueuePort contract", () => {
     };
 
     const cloned = structuredClone(job);
+    const firstStatement = cloned.payload.statements[0];
+    if (firstStatement === undefined) {
+      throw new Error("expected cloned write job to keep its first statement");
+    }
     expect(cloned.jobId).toBe("job-serial-1");
-    expect(cloned.payload.statements[0].sql).toBe("INSERT INTO test_table (id, val) VALUES (?, ?)");
-    expect(cloned.payload.statements[0].params).toEqual([1, "test-value"]);
+    expect(firstStatement.sql).toBe("INSERT INTO test_table (id, val) VALUES (?, ?)");
+    expect(firstStatement.params).toEqual([1, "test-value"]);
   });
 
   it("rejects jobs that set both execute and payload", async () => {

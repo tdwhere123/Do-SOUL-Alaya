@@ -175,7 +175,11 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
       (result) => result.task_kind === GardenTaskKind.BULK_ENRICH
     );
     expect(completions).toHaveLength(1);
-    expect(completions[0].workspace_id).toBe("workspace-1");
+    const firstCompletion = completions[0];
+    if (firstCompletion === undefined) {
+      throw new Error("expected one BULK_ENRICH completion");
+    }
+    expect(firstCompletion.workspace_id).toBe("workspace-1");
     expect(produceForNewMemory).toHaveBeenCalledTimes(count);
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });
@@ -330,7 +334,11 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     await getService(runtime, "GardenScheduler").task();
 
     expect(produceForNewMemory).toHaveBeenCalledTimes(1);
-    expect(produceForNewMemory.mock.calls[0][0].newMemoryId).toBe("memory-stranded");
+    const firstProduceCall = produceForNewMemory.mock.calls[0];
+    if (firstProduceCall === undefined) {
+      throw new Error("expected one produceForNewMemory call");
+    }
+    expect(firstProduceCall[0].newMemoryId).toBe("memory-stranded");
     expect(detectAndLinkConflicts).toHaveBeenCalledTimes(1);
     expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
   });

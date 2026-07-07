@@ -7,15 +7,17 @@ import {
   warnOnRejectedBackgroundTask
 } from "../../runtime/daemon-runtime-helpers.js";
 
+type ExitMock = ReturnType<typeof vi.fn> & ((code?: number) => void);
+
 type FakeProcess = EventEmitter & {
   exitCode?: number;
-  exit: ReturnType<typeof vi.fn>;
+  exit: ExitMock;
 };
 
 function createFakeProcess(): FakeProcess {
   return Object.assign(new EventEmitter(), {
     exitCode: undefined as number | undefined,
-    exit: vi.fn()
+    exit: vi.fn() as ExitMock
   });
 }
 

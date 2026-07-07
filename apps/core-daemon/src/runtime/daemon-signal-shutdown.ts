@@ -8,7 +8,7 @@ export type LifecycleProcessPort = {
   on(event: "SIGTERM" | "SIGINT", listener: () => void): unknown;
   off(event: "SIGTERM" | "SIGINT", listener: () => void): unknown;
   exitCode?: number | string | null;
-  exit(code?: number): never;
+  exit(code?: number): void;
 };
 
 export type SignalShutdownHandler = Readonly<{

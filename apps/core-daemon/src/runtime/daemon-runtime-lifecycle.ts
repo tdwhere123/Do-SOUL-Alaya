@@ -1,6 +1,6 @@
-import { serve, type ServerType } from "@hono/node-server";
+import { serve } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "./app.js";
-import { closeServer } from "./daemon-server-close.js";
+import { closeServer, type CloseableHttpServer } from "./daemon-server-close.js";
 import {
   clearSignalShutdownTimeout,
   installSignalShutdownHandler,
@@ -17,7 +17,7 @@ import { resolveDaemonHostFromEnv } from "./server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
-type DaemonServerFactory = typeof serve;
+type DaemonServerFactory = (options: Parameters<typeof serve>[0]) => CloseableHttpServer;
 
 type GardenRuntimeLifecycle = Readonly<{
   backgroundManager: Readonly<{
@@ -54,7 +54,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
 }>;
 
 type LifecycleState = {
-  server: ServerType | null;
+  server: CloseableHttpServer | null;
   backgroundStarted: boolean;
   startupBackgroundPass: Promise<void> | null;
   shuttingDown: Promise<void> | null;

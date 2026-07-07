@@ -348,7 +348,11 @@ describe("proposal routes (HTTP surface narrowed)", () => {
     expect(body.data.target_object_id).toBe("mem-1");
 
     expect(createProposalWithEventsIfAbsent).toHaveBeenCalledTimes(1);
-    const callInput = createProposalWithEventsIfAbsent.mock.calls[0][0] as unknown as {
+    const firstProposalCall = createProposalWithEventsIfAbsent.mock.calls[0];
+    if (firstProposalCall === undefined) {
+      throw new Error("expected createProposalWithEventsIfAbsent to be called once");
+    }
+    const callInput = firstProposalCall[0] as unknown as {
       target_object_kind: string;
       proposed_change_summary: string;
       proposal: { derived_from: string; dossier_ref: string; resolution_state: string };

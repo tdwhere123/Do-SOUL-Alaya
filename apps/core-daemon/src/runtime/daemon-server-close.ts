@@ -1,4 +1,3 @@
-import type { ServerType } from "@hono/node-server";
 import { type LifecycleTimerPort, unrefTimer } from "./daemon-runtime-timing.js";
 
 export type CloseServerResult =
@@ -6,6 +5,12 @@ export type CloseServerResult =
   | "closed_after_idle_connections"
   | "closed_after_force_close"
   | "timed_out";
+
+export type CloseableHttpServer = {
+  close(callback?: (error?: Error) => void): void;
+  closeIdleConnections?(): void;
+  closeAllConnections?(): void;
+};
 
 type ServerCloseOutcome =
   | Readonly<{ status: "closed" }>
@@ -15,7 +20,7 @@ const SERVER_CLOSE_TIMEOUT_MS = 10_000;
 const SERVER_CLOSE_FORCE_GRACE_MS = 1_000;
 
 export async function closeServer(
-  server: ServerType,
+  server: CloseableHttpServer,
   timerPort: LifecycleTimerPort
 ): Promise<CloseServerResult> {
   const closeResult = beginServerClose(server);
@@ -38,7 +43,7 @@ export async function closeServer(
   return afterForce.status === "closed" ? "closed_after_force_close" : "timed_out";
 }
 
-function beginServerClose(server: ServerType): Promise<ServerCloseOutcome> {
+function beginServerClose(server: CloseableHttpServer): Promise<ServerCloseOutcome> {
   const close = server.close.bind(server) as (callback?: (error?: Error) => void) => void;
   if (close.length === 0) {
     return Promise.resolve(closeServerWithoutCallback(close));
@@ -100,7 +105,7 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function closeServerConnections(server: ServerType, mode: "idle" | "all"): void {
+function closeServerConnections(server: CloseableHttpServer, mode: "idle" | "all"): void {
   const methodName = mode === "idle" ? "closeIdleConnections" : "closeAllConnections";
   const candidate = server as Record<typeof methodName, unknown>;
   const method = candidate[methodName];

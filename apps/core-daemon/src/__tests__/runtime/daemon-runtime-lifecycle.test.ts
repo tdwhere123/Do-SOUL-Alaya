@@ -2,16 +2,18 @@ import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDaemonLifecycleControls } from "../../runtime/daemon-runtime-lifecycle.js";
 
+type ExitMock = ReturnType<typeof vi.fn> & ((code?: number) => void);
+
 type FakeSignalProcess = EventEmitter & {
   exitCode?: number | string | null;
-  exit: ReturnType<typeof vi.fn>;
+  exit: ExitMock;
   emitSignal(signal: "SIGTERM" | "SIGINT"): void;
 };
 
 function createFakeSignalProcess(): FakeSignalProcess {
   const emitter = new EventEmitter() as FakeSignalProcess;
   emitter.exitCode = undefined;
-  emitter.exit = vi.fn();
+  emitter.exit = vi.fn() as ExitMock;
   emitter.emitSignal = (signal) => {
     emitter.emit(signal);
   };

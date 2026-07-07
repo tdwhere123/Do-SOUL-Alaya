@@ -317,7 +317,9 @@ describe("tool-runtime relative path handling", () => {
           root_path: workspaceDir
         })
       },
-      createAutoConfirmingBuiltinToolExecutor(["tools.write_file"]),
+      {
+        execute: vi.fn(async () => ({ result: { ok: true } }))
+      },
       {
         confirmationToken: "server-token"
       }

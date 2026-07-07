@@ -38,7 +38,7 @@ type UnhandledRejectionProcessPort = {
   exitCode?: number | string | null;
   on(event: "unhandledRejection", listener: UnhandledRejectionListener): unknown;
   on(event: "uncaughtException", listener: UncaughtExceptionListener): unknown;
-  exit?(code?: number): never;
+  exit?(code?: number): void;
 };
 
 type UnhandledRejectionHandlerOptions = Readonly<{

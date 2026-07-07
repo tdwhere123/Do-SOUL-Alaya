@@ -28,7 +28,11 @@ describe("createAttachSurfaceRegistrar", () => {
     await registrar.ensureAgentSurface({ workspaceId: "ws1", agentTarget: "codex" });
     expect(surfaceService.createSurface).toHaveBeenCalledTimes(1);
     expect(created).toEqual([{ surface_id: "agent:codex", workspace_id: "ws1" }]);
-    const callArgs = surfaceService.createSurface.mock.calls[0][0];
+    const firstCreateCall = surfaceService.createSurface.mock.calls[0];
+    if (firstCreateCall === undefined) {
+      throw new Error("expected createSurface to be called once");
+    }
+    const callArgs = firstCreateCall[0];
     expect(callArgs.surface_kind).toBe("mcp_agent_attach");
     expect(callArgs.created_by).toBe("attach:codex");
   });
