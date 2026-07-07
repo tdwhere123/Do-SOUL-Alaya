@@ -6,7 +6,6 @@ import {
   readFile as fsReadFile,
   realpath,
   unlink,
-  writeFile as fsWriteFile,
   type FileHandle
 } from "node:fs/promises";
 import path from "node:path";

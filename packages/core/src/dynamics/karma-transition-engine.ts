@@ -373,17 +373,7 @@ export class KarmaTransitionEngine {
     const { parsedEvent, transition } = plan;
     const memory = applyResult.updated;
 
-    if (applyResult.revived) {
-      inputs.push(
-        buildStateChangedEventInput({
-          memory,
-          fromState: "dormant",
-          toState: "active",
-          reasonCode: parsedEvent.kind,
-          occurredAt: transition.now
-        })
-      );
-    }
+    inputs.push(...this.buildKarmaRevivalAuditInputs(applyResult, plan));
 
     if (hasScoreChanged(transition.previousRetention, transition.retentionScore)) {
       inputs.push(

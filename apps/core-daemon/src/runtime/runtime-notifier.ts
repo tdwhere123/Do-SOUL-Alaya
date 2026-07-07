@@ -153,47 +153,46 @@ function sanitizeErrorDiagnostic(value: string): string {
   let redacted = value;
   redacted = redacted.replace(
     /(["']?authorization["']?\s*[:=]\s*)(?:(["'](?:bearer\s+)?[^"'\r\n]+["'])|((?:bearer\s+)?[^\s"'\r\n,;{}]+))/giu,
-    (match, p1, p2, p3) => {
-      const p = p2 || p3;
-      const isBearer = p.toLowerCase().includes("bearer ");
-      const prefix = isBearer ? (p.match(/bearer\s+/i)?.[0] || "Bearer ") : "";
-      if (p.startsWith('"') && p.endsWith('"')) {
-        return `${p1}"${prefix}[Redacted]"`;
-      }
-      if (p.startsWith("'") && p.endsWith("'")) {
-        return `${p1}'${prefix}[Redacted]'`;
-      }
-      return `${p1}${prefix}[Redacted]`;
-    }
+    (_match, prefix, quoted, unquoted) =>
+      redactSensitiveAssignment(prefix, quoted, unquoted, { preserveBearerPrefix: true })
   );
   redacted = redacted.replace(
     /(["']?(?:password|secret)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\r\n,;{}]+))/giu,
-    (match, p1, p2, p3) => {
-      const p = p2 || p3;
-      if (p.startsWith('"') && p.endsWith('"')) {
-        return `${p1}"[Redacted]"`;
-      }
-      if (p.startsWith("'") && p.endsWith("'")) {
-        return `${p1}'[Redacted]'`;
-      }
-      return `${p1}[Redacted]`;
-    }
+    (_match, prefix, quoted, unquoted) => redactSensitiveAssignment(prefix, quoted, unquoted)
   );
   redacted = redacted.replace(
     /(["']?(?:api[_-]?key|token)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\s"'\r\n,;{}]+))/giu,
-    (match, p1, p2, p3) => {
-      const p = p2 || p3;
-      if (p.startsWith('"') && p.endsWith('"')) {
-        return `${p1}"[Redacted]"`;
-      }
-      if (p.startsWith("'") && p.endsWith("'")) {
-        return `${p1}'[Redacted]'`;
-      }
-      return `${p1}[Redacted]`;
-    }
+    (_match, prefix, quoted, unquoted) => redactSensitiveAssignment(prefix, quoted, unquoted)
   );
   if (redacted.length <= MAX_ERROR_DIAGNOSTIC_LENGTH) {
     return redacted;
   }
   return `${redacted.slice(0, MAX_ERROR_DIAGNOSTIC_LENGTH)}...`;
+}
+
+function redactSensitiveAssignment(
+  prefix: string,
+  quoted: string | undefined,
+  unquoted: string | undefined,
+  options: { readonly preserveBearerPrefix?: boolean } = {}
+): string {
+  const captured = quoted ?? unquoted ?? "";
+  if (options.preserveBearerPrefix) {
+    const isBearer = captured.toLowerCase().includes("bearer ");
+    const bearerPrefix = isBearer ? (captured.match(/bearer\s+/i)?.[0] ?? "Bearer ") : "";
+    if (quoted?.startsWith('"') && quoted.endsWith('"')) {
+      return `${prefix}"${bearerPrefix}[Redacted]"`;
+    }
+    if (quoted?.startsWith("'") && quoted.endsWith("'")) {
+      return `${prefix}'${bearerPrefix}[Redacted]'`;
+    }
+    return `${prefix}${bearerPrefix}[Redacted]`;
+  }
+  if (captured.startsWith('"') && captured.endsWith('"')) {
+    return `${prefix}"[Redacted]"`;
+  }
+  if (captured.startsWith("'") && captured.endsWith("'")) {
+    return `${prefix}'[Redacted]'`;
+  }
+  return `${prefix}[Redacted]`;
 }

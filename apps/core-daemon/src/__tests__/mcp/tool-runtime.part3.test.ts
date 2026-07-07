@@ -25,6 +25,7 @@ import {
 import {
   cleanupToolRuntimeTempDirs,
   createBuiltinToolExecutor,
+  createConversationToolSpec,
   createDeferred,
   createRuntimeContext,
   createWorkspace,
@@ -118,23 +119,6 @@ function extractAffectedPaths(
   }
 
   return undefined;
-}
-
-function createToolSpec(toolId: ToolSpec["tool_id"]): ToolSpec {
-  return {
-    tool_id: toolId,
-    category: toolId === "tools.exec_shell" ? "exec" : "write",
-    description: `Spec for ${toolId}`,
-    scope_guard: toolId === "tools.exec_shell" ? "project" : "workspace",
-    read_only: false,
-    destructive: toolId === "tools.exec_shell",
-    concurrency_safe: false,
-    interrupt_behavior: toolId === "tools.exec_shell" ? "abort" : "wait",
-    requires_confirmation: toolId === "tools.exec_shell" || toolId === "tools.write_file",
-    requires_evidence_reopen: false,
-    rollback_support: "none",
-    fast_path_eligible: false
-  };
 }
 
 afterEach(cleanupToolRuntimeTempDirs);
@@ -479,8 +463,8 @@ describe("tool-runtime relative path handling", () => {
     const lookupGate = createDeferred<void>();
     const startedLookups: string[] = [];
     const specs = [
-      createToolSpec("tools.write_file"),
-      createToolSpec("tools.exec_shell")
+      createConversationToolSpec("tools.write_file"),
+      createConversationToolSpec("tools.exec_shell")
     ] as const;
     const service = {
       findById: vi.fn(async (toolId: string) => {
@@ -511,8 +495,8 @@ describe("tool-runtime relative path handling", () => {
     const writeGate = createDeferred<void>();
     const writesStarted: string[] = [];
     const specs = [
-      createToolSpec("tools.write_file"),
-      createToolSpec("tools.exec_shell")
+      createConversationToolSpec("tools.write_file"),
+      createConversationToolSpec("tools.exec_shell")
     ] as const;
     const service = {
       findById: vi.fn(async (toolId: string) => {

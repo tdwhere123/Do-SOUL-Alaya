@@ -25,6 +25,7 @@ import {
 import {
   cleanupToolRuntimeTempDirs,
   createBuiltinToolExecutor,
+  createConversationToolSpec,
   createDeferred,
   createRuntimeContext,
   createWorkspace,
@@ -122,23 +123,6 @@ function extractAffectedPaths(
   return undefined;
 }
 
-function createToolSpec(toolId: ToolSpec["tool_id"]): ToolSpec {
-  return {
-    tool_id: toolId,
-    category: toolId === "tools.exec_shell" ? "exec" : "write",
-    description: `Spec for ${toolId}`,
-    scope_guard: toolId === "tools.exec_shell" ? "project" : "workspace",
-    read_only: false,
-    destructive: toolId === "tools.exec_shell",
-    concurrency_safe: false,
-    interrupt_behavior: toolId === "tools.exec_shell" ? "abort" : "wait",
-    requires_confirmation: toolId === "tools.exec_shell" || toolId === "tools.write_file",
-    requires_evidence_reopen: false,
-    rollback_support: "none",
-    fast_path_eligible: false
-  };
-}
-
 afterEach(cleanupToolRuntimeTempDirs);
 
 describe("tool-runtime relative path handling", () => {
@@ -149,7 +133,7 @@ describe("tool-runtime relative path handling", () => {
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     await mkdir(path.join(repoDir, "src"), { recursive: true });
     const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
-      createToolSpec("tools.write_file")
+      createConversationToolSpec("tools.write_file")
     );
 
     const result = await handleConversationToolUse(
@@ -195,7 +179,7 @@ describe("tool-runtime relative path handling", () => {
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
-      createToolSpec("mcp__filesystem__write_file")
+      createConversationToolSpec("mcp__filesystem__write_file")
     );
 
     const result = await handleConversationToolUse(
@@ -247,7 +231,7 @@ describe("tool-runtime relative path handling", () => {
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
-      createToolSpec("mcp__filesystem__write_file")
+      createConversationToolSpec("mcp__filesystem__write_file")
     );
 
     const result = await handleConversationToolUse(
