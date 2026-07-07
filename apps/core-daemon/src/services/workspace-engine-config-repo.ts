@@ -105,7 +105,7 @@ export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRep
       input.binding.provider_type,
       input.binding.base_url,
       input.binding.api_key ?? "",
-      input.binding.api_key_ref ?? null,
+      "api_key_ref" in input.binding ? input.binding.api_key_ref ?? null : null,
       input.binding.model,
       JSON.stringify(input.binding.config),
       input.binding.enable_tools !== undefined ? (input.binding.enable_tools ? 1 : 0) : null,

@@ -1,4 +1,8 @@
-import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
+import {
+  type CandidateMemorySignal,
+  type MemoryEntry,
+  type TransitionCausedBy
+} from "@do-soul/alaya-protocol";
 import {
   AnswersWithEdgeProducerService,
   CoherenceEdgeProducerService,
@@ -10,22 +14,87 @@ import {
 } from "@do-soul/alaya-core";
 import {
   SqliteGardenTaskRepo,
-  createGardenBackgroundDataPorts
+  createGardenBackgroundDataPorts,
+  type StorageDatabase
 } from "@do-soul/alaya-storage";
 import {
   createTombstoneDispositionSweepPort,
   createTombstoneGcPort
 } from "../garden/forget-disposition-ports.js";
 import { createGardenRuntime } from "../garden/runtime.js";
-import { reconcileBootstrapPathsForAllWorkspaces } from "./daemon-runtime-helpers.js";
+import {
+  reconcileBootstrapPathsForAllWorkspaces,
+  type WarnLogger
+} from "./daemon-runtime-helpers.js";
 import { createOptionalMemoryHqRepo, recordStartupStep } from "./daemon-runtime-support.js";
 import {
   resolvePersistedGardenLastPassAt
 } from "./garden-compute-support.js";
+import type { createDaemonRepositories } from "./daemon-repositories.js";
+import type { createDaemonServiceFoundation } from "./daemon-service-foundation.js";
+import type { createDaemonCoreServices } from "./daemon-service-wiring.js";
+import type { DaemonStartupStepRecord } from "./daemon-runtime-types.js";
+import type { createRecallMaterializationWiring } from "./recall-materialization-wiring.js";
+import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
-type GardenRuntimeWiringInput = {
-  readonly [key: string]: any;
-};
+type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
+type DaemonServiceFoundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
+type DaemonCoreServices = Awaited<ReturnType<typeof createDaemonCoreServices>>;
+type RecallMaterializationWiring = Awaited<ReturnType<typeof createRecallMaterializationWiring>>;
+
+type GardenRuntimeWiringInput = Readonly<{
+  database: StorageDatabase;
+  startupSteps: DaemonStartupStepRecord[];
+  runtimeNotifier: AlayaRuntimeNotifier;
+  warnLogger: WarnLogger;
+  dynamicsService?: DaemonServiceFoundation["dynamicsService"];
+}> &
+  Pick<
+    DaemonRepositories,
+    | "eventLogRepo"
+    | "memoryEntryRepo"
+    | "synthesisCapsuleRepo"
+    | "healthJournalRepo"
+    | "sqliteHandoffGapRepo"
+    | "orphanDetectionEnabled"
+    | "orphanRadarRepo"
+    | "pathGraphSnapshotRepo"
+    | "pathRelationRepo"
+    | "pathPlasticityWatermarkRepo"
+    | "workspaceRepo"
+    | "enrichPendingRepo"
+    | "signalRepo"
+  > &
+  Pick<
+    DaemonServiceFoundation,
+    | "eventPublisher"
+    | "memoryService"
+    | "healthJournalService"
+    | "healthIssueGroupRepo"
+    | "strongRefService"
+    | "edgeProposalService"
+    | "securedWorkspaceService"
+    | "trustStateRecorder"
+  > &
+  Pick<
+    DaemonCoreServices,
+    | "gardenBacklogThresholds"
+    | "pathPlasticityService"
+    | "configService"
+    | "officialGardenProvider"
+    | "localHeuristicsProvider"
+  > &
+  Pick<
+    RecallMaterializationWiring,
+    | "embeddingBackfillHandler"
+    | "signalService"
+    | "materializationRouter"
+    | "edgeAutoProducerService"
+    | "embeddingRecallService"
+    | "pathRelationProposalService"
+    | "conflictDetectionService"
+    | "edgeClassifyQueueRepoHolder"
+  >;
 
 export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput) {
   const forgetTombstoneAuthority = createForgetTombstoneAuthority(input);
@@ -104,7 +173,7 @@ function createCoherenceCrystallizer(input: GardenRuntimeWiringInput) {
   return new CoherenceEdgeProducerService({
     pairSource: input.embeddingRecallService,
     mintPort: input.pathRelationProposalService,
-    warn: (message: string, meta: Record<string, unknown>) => console.warn(message, meta)
+    warn: input.warnLogger.warn
   });
 }
 
@@ -121,7 +190,7 @@ function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
   return new AnswersWithEdgeProducerService({
     pairSource: new HqAnswerOverlapPairSource(hqRepo),
     mintPort: input.pathRelationProposalService,
-    warn: (message: string, meta: Record<string, unknown>) => console.warn(message, meta)
+    warn: input.warnLogger.warn
   });
 }
 
@@ -198,7 +267,7 @@ function createTombstoneDispositionSweepInput(
 
 function createEnrichSignalRefReplayPort(input: GardenRuntimeWiringInput) {
   return {
-    replaySignalRefs: async ({ newMemoryId, signal }: { readonly newMemoryId: string; readonly signal: unknown }) => {
+    replaySignalRefs: async ({ newMemoryId, signal }: { readonly newMemoryId: string; readonly signal: CandidateMemorySignal }) => {
       await input.materializationRouter.replaySignalRefs({ newObjectId: newMemoryId, signal });
     }
   };

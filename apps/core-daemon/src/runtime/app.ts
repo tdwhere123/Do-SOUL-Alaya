@@ -9,6 +9,7 @@ import {
   registerSecurityHeadersMiddleware,
   type CoreDaemonRateLimitConfig
 } from "../middleware/register-security-middleware.js";
+import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
 import { readBuildInfo } from "./build-info.js";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
@@ -152,7 +153,7 @@ export function createApp(
   registerProtectedRequestMiddleware(app, services.requestProtection, requestProtection);
   registerRateLimitMiddleware(app, services.rateLimit);
   registerFileUploadLimitMiddleware(app, bodyLimits.fileUploadBodyLimit);
-  registerRequestBodyLimitMiddleware(app, bodyLimits.requestBodyLimit);
+  registerRequestBodyLimitMiddleware(app);
 
   registerErrorHandler(app, services.logger ?? createWarnLogger());
   registerLivenessRoute(app);
@@ -233,11 +234,6 @@ function createRequestBodyLimits() {
       maxSize: MAX_FILE_SIZE_BYTES,
       onError: (context) =>
         context.json({ success: false, error: "File exceeds the 20 MB limit" }, 413)
-    }),
-    requestBodyLimit: bodyLimit({
-      maxSize: MAX_REQUEST_BODY_BYTES,
-      onError: (context) =>
-        context.json({ success: false, error: "Request body exceeds the 10 MB limit" }, 413)
     })
   };
 }
@@ -344,10 +340,7 @@ function registerFileUploadLimitMiddleware(
   });
 }
 
-function registerRequestBodyLimitMiddleware(
-  app: Hono,
-  requestBodyLimit: ReturnType<typeof bodyLimit>
-): void {
+function registerRequestBodyLimitMiddleware(app: Hono): void {
   app.use("*", async (context, next) => {
     if (!isBodyLimitedMethod(context.req.method) || context.req.path === "/files") {
       await next();
@@ -359,7 +352,8 @@ function registerRequestBodyLimitMiddleware(
         413
       );
     }
-    await requestBodyLimit(context, next);
+    applyLazyRequestBodyLimit(context, MAX_REQUEST_BODY_BYTES);
+    await next();
   });
 }
 

@@ -12,8 +12,8 @@ export default defineConfig({
     // Ensure the bundle is small
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
+        manualChunks(id) {
+          return /node_modules\/(react|react-dom|react-router-dom)\//.test(id) ? 'vendor' : undefined;
         },
       },
     },

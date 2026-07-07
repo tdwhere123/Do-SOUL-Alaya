@@ -1,11 +1,7 @@
-// invariant: a per-key in-process async mutex. Serializes async critical
-// sections that share a key so a read-decide-write sequence cannot
-// interleave with another for the same key. Closes a TOCTOU window when
-// the work cannot be wrapped in a single DB transaction (e.g. the
-// decision step makes a network call). The Garden runs fire-and-forget
-// in one process, so a process-local lock is sufficient — there is no
-// second writer process to coordinate with.
-// see also: packages/core/src/governance/reconciliation-service.ts
+// invariant: a per-key in-process async mutex. This is defense-in-depth
+// for one process only; storage-level CAS or lease ports carry durable
+// multi-process correctness for read-decide-write paths.
+// see also: packages/core/src/governance/reconciliation/reconciliation-service.ts
 
 export class KeyedMutex {
   // Per key: the tail of the promise chain. A new acquirer awaits the

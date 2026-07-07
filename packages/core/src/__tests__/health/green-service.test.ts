@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, GreenGovernanceEventType, RevokeReason, ScopeClass, VerificationBasis, VerificationVerdict, type EventLogEntry } from "@do-soul/alaya-protocol";
 
 import { createEvent, createGreenStatus, createHarness, createMemoryEntry } from "./green-service.test-support.js";
@@ -448,6 +448,44 @@ it("runVerification() stops retrying after three consecutive no-go verdicts", as
         maxEntries: 1
       }
     );
+  });
+
+  it("uses process warnings for consecutive no-go eviction when no warn port is injected", async () => {
+    const firstTargetObjectId = "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+    const secondTargetObjectId = "80a0b18b-5f8b-4fd2-a1b0-97ce48113fca";
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const { service } = createHarness({
+      consecutiveNoGoMaxEntries: 1,
+      omitWarn: true,
+      memories: [
+        createMemoryEntry({ object_id: firstTargetObjectId }),
+        createMemoryEntry({ object_id: secondTargetObjectId })
+      ]
+    });
+
+    try {
+      await service.runVerification({
+        targetObjectId: firstTargetObjectId,
+        workspaceId: "workspace-1",
+        verdict: VerificationVerdict.NO_GO,
+        microCorrectionHint: "retry",
+        necessaryPatch: null
+      });
+      await service.runVerification({
+        targetObjectId: secondTargetObjectId,
+        workspaceId: "workspace-1",
+        verdict: VerificationVerdict.NO_GO,
+        microCorrectionHint: "retry",
+        necessaryPatch: null
+      });
+
+      expect(emitWarning).toHaveBeenCalledWith(
+        "[GreenService] consecutive No-Go cache entry evicted.",
+        expect.objectContaining({ code: "ALAYA_GREEN_SERVICE_WARNING" })
+      );
+    } finally {
+      emitWarning.mockRestore();
+    }
   });
 
   it("setGrace() audits and notifies an eligible-to-grace transition with dedicated grace event", async () => {

@@ -70,6 +70,7 @@ export function createHarness(options: {
   readonly initialEvents?: readonly EventLogEntry[];
   readonly memories?: readonly MemoryEntry[];
   readonly consecutiveNoGoMaxEntries?: number;
+  readonly omitWarn?: boolean;
 } = {}): {
   readonly service: GreenService;
   readonly statuses: Map<string, GreenStatus>;
@@ -109,7 +110,7 @@ export function createHarness(options: {
   const dependencies: GreenServiceDependencies = {
     now: () => "2026-03-24T00:00:00.000Z",
     generateObjectId: createObjectIdGenerator(),
-    warn,
+    ...(options.omitWarn === true ? {} : { warn }),
     runtimeNotifier: {
       notifyEntry
     },

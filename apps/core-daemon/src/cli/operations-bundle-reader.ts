@@ -56,7 +56,7 @@ function parseBundleJson(rawText: string): Record<string, unknown> & {
 } {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(rawText) as unknown;
+    parsed = JSON.parse(rawText);
   } catch {
     throw new AlayaOperationError("DATAERR", "Bundle JSON is malformed.");
   }

@@ -91,8 +91,8 @@ export interface ReconciliationEventLogPort {
 // lease instead: tryAcquire INSERTs-OR-CONFLICTs a row keyed by
 // workspace_id and wins only when no live lease exists (or the existing
 // one is expired and reclaimable). The daemon wires
-// SqliteReconciliationLeaseRepo; in a single-process Garden deployment
-// the port may be omitted and the in-process KeyedMutex alone suffices.
+// SqliteReconciliationLeaseRepo; the in-process KeyedMutex is only a
+// local defense layer and is not a substitute for this storage lease.
 export interface ReconciliationLeasePort {
   tryAcquire(
     leaseKey: string,
@@ -171,17 +171,14 @@ export interface ReconciliationServiceDependencies {
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   /**
    * Optional shared mutex so a caller can serialize reconciliation
-   * across multiple service instances; defaults to a fresh per-instance
-   * mutex (sufficient when one instance handles all ingest).
+   * across multiple service instances inside one process.
    */
   readonly mutex?: KeyedMutex;
   /**
    * Optional storage-level advisory lease. When wired, the whole
-   * decide->write section is additionally guarded by a per-workspace
-   * compare-and-set lease so a second daemon (or out-of-process Garden
-   * worker) cannot interleave a concurrent reconcile. When omitted, only
-   * the in-process KeyedMutex guards — sufficient for a single-process
-   * deployment.
+   * decide->write section is guarded by a per-workspace compare-and-set
+   * lease so a second daemon or out-of-process Garden worker cannot
+   * interleave a concurrent reconcile.
    */
   readonly lease?: ReconciliationLeasePort;
   /** Lease TTL in milliseconds; defaults to RECONCILE_LEASE_TTL_MS. */

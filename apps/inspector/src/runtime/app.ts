@@ -3,8 +3,8 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { isZodValidationError } from "@do-soul/alaya-protocol";
-import { bodyLimit } from "hono/body-limit";
 import { createInspectorAuthMiddleware } from "../middleware/auth.js";
+import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
 import { registerInspectorBenchSummaryRoutes } from "../routes/bench-summary.js";
 import { registerInspectorConfigRoutes } from "../routes/config.js";
 import { registerInspectorGraphRoutes } from "../routes/graph.js";
@@ -79,7 +79,6 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
 }
 
 function registerInspectorMiddleware(app: Hono, token: string): void {
-  const requestBodyLimit = createRequestBodyLimit();
   registerRequestIdMiddleware(app);
   registerErrorHandler(app);
   app.use("/api/*", createInspectorAuthMiddleware(token));
@@ -91,14 +90,8 @@ function registerInspectorMiddleware(app: Hono, token: string): void {
     if (hasDeclaredOversizeBody(context.req.header("content-length"), MAX_INSPECTOR_REQUEST_BODY_BYTES)) {
       return context.json({ error: "request_body_too_large" }, 413);
     }
-    await requestBodyLimit(context, next);
-  });
-}
-
-function createRequestBodyLimit() {
-  return bodyLimit({
-    maxSize: MAX_INSPECTOR_REQUEST_BODY_BYTES,
-    onError: (context) => context.json({ error: "request_body_too_large" }, 413)
+    applyLazyRequestBodyLimit(context, MAX_INSPECTOR_REQUEST_BODY_BYTES);
+    await next();
   });
 }
 

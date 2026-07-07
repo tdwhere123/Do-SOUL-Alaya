@@ -1,24 +1,27 @@
 import { randomUUID } from "node:crypto";
 import {
-  ConfirmationPolicy,
   ObjectKind,
   ObjectLifecycleState,
   ProjectMappingEventType,
   ProjectMappingState,
   SoulProjectMappingStateChangedPayloadSchema,
   SoulProjectMappingSuggestedPayloadSchema,
-  getConfirmationPolicy as getProtocolConfirmationPolicy,
   type AcceptedBy as AcceptedByType,
   type ConfirmationPolicy as ConfirmationPolicyType,
-  type MemoryEntry,
   type ProjectMappingAnchor,
   type ProjectMappingState as ProjectMappingStateType
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
+import { ProjectMappingAnchorEnsurer } from "./project-mapping-anchor-ensurer.js";
+import {
+  findStrictConfirmationMappingIds,
+  resolveProjectMappingConfirmationPolicy
+} from "./project-mapping-confirmation.js";
 import {
   StrictConfirmationRequired,
   type ProjectMappingServiceDependencies
 } from "./project-mapping-service-types.js";
+import { resolveProjectMappingFromState } from "./project-mapping-transition.js";
 export type {
   ProjectMappingServiceDependencies,
   ProjectMappingServiceEventLogRepoPort,
@@ -31,12 +34,17 @@ export { StrictConfirmationRequired } from "./project-mapping-service-types.js";
 export class ProjectMappingService {
   private readonly generateObjectId: () => string;
   private readonly now: () => string;
-  private readonly pendingAnchorCreations = new Map<string, Promise<Readonly<ProjectMappingAnchor>>>();
-  private readonly pendingAnchorRevivals = new Map<string, Promise<Readonly<ProjectMappingAnchor>>>();
+  private readonly anchorEnsurer: ProjectMappingAnchorEnsurer;
 
   public constructor(private readonly dependencies: ProjectMappingServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.anchorEnsurer = new ProjectMappingAnchorEnsurer({
+      projectMappingRepo: dependencies.projectMappingRepo,
+      createSuggestedAnchor: async (globalObjectId, workspaceId, createdBy) =>
+        await this.createSuggestedAnchor(globalObjectId, workspaceId, createdBy),
+      transitionExistingAnchor: async (anchor, options) => await this.transitionExistingAnchor(anchor, options)
+    });
   }
 
   public async findByWorkspace(
@@ -161,97 +169,7 @@ export class ProjectMappingService {
       readonly reviveRejected: boolean;
     }
   ): Promise<Readonly<ProjectMappingAnchor>> {
-    const existing = await this.dependencies.projectMappingRepo.findByGlobalObjectId(
-      globalObjectId,
-      workspaceId
-    );
-
-    if (existing !== null) {
-      if (existing.mapping_state === ProjectMappingState.REJECTED && options.reviveRejected) {
-        return await this.reviveRejectedAnchor(existing, createdBy);
-      }
-
-      return existing;
-    }
-
-    return await this.runPendingAnchorOperation(
-      this.pendingAnchorCreations,
-      this.getAnchorOperationKey(globalObjectId, workspaceId),
-      async () => {
-        const current = await this.dependencies.projectMappingRepo.findByGlobalObjectId(
-          globalObjectId,
-          workspaceId
-        );
-
-        if (current !== null) {
-          if (current.mapping_state === ProjectMappingState.REJECTED && options.reviveRejected) {
-            return await this.reviveRejectedAnchor(current, createdBy);
-          }
-
-          return current;
-        }
-
-        return await this.createSuggestedAnchor(globalObjectId, workspaceId, createdBy);
-      }
-    );
-  }
-
-  private async reviveRejectedAnchor(
-    anchor: Readonly<ProjectMappingAnchor>,
-    createdBy: string
-  ): Promise<Readonly<ProjectMappingAnchor>> {
-    return await this.runPendingAnchorOperation(
-      this.pendingAnchorRevivals,
-      this.getAnchorOperationKey(anchor.global_object_id, anchor.workspace_id),
-      async () => {
-        const current = await this.dependencies.projectMappingRepo.findByGlobalObjectId(
-          anchor.global_object_id,
-          anchor.workspace_id
-        );
-
-        if (current === null) {
-          return await this.createSuggestedAnchor(anchor.global_object_id, anchor.workspace_id, createdBy);
-        }
-
-        if (current.mapping_state !== ProjectMappingState.REJECTED) {
-          return current;
-        }
-
-        return await this.transitionExistingAnchor(current, {
-          targetState: ProjectMappingState.SUGGESTED,
-          acceptedBy: null,
-          causedBy: createdBy,
-          fallbackFromState: ProjectMappingState.REJECTED
-        });
-      }
-    );
-  }
-
-  private getAnchorOperationKey(globalObjectId: string, workspaceId: string): string {
-    return `${workspaceId}::${globalObjectId}`;
-  }
-
-  private async runPendingAnchorOperation(
-    pendingOperations: Map<string, Promise<Readonly<ProjectMappingAnchor>>>,
-    operationKey: string,
-    factory: () => Promise<Readonly<ProjectMappingAnchor>>
-  ): Promise<Readonly<ProjectMappingAnchor>> {
-    const inFlight = pendingOperations.get(operationKey);
-
-    if (inFlight !== undefined) {
-      return await inFlight;
-    }
-
-    const operation = factory();
-    pendingOperations.set(operationKey, operation);
-
-    try {
-      return await operation;
-    } finally {
-      if (pendingOperations.get(operationKey) === operation) {
-        pendingOperations.delete(operationKey);
-      }
-    }
+    return await this.anchorEnsurer.ensureAnchor(globalObjectId, workspaceId, createdBy, options);
   }
 
   public async accept(
@@ -337,15 +255,7 @@ export class ProjectMappingService {
       )
     ).flat();
     const memoryById = new Map(memories.map((memory) => [memory.object_id, memory] as const));
-    const strictMappingIds: string[] = [];
-
-    for (const anchor of anchors) {
-      const policy = this.getConfirmationPolicyForLoadedMemory(memoryById.get(anchor.global_object_id) ?? null);
-
-      if (policy === ConfirmationPolicy.STRICT) {
-        strictMappingIds.push(anchor.object_id);
-      }
-    }
+    const strictMappingIds = findStrictConfirmationMappingIds(anchors, memoryById);
 
     if (strictMappingIds.length > 0) {
       throw new StrictConfirmationRequired(strictMappingIds);
@@ -380,17 +290,7 @@ export class ProjectMappingService {
     anchor: Readonly<ProjectMappingAnchor>
   ): Promise<ConfirmationPolicyType> {
     const memory = await this.dependencies.memoryRepo.findById(anchor.global_object_id);
-    return this.getConfirmationPolicyForLoadedMemory(memory);
-  }
-
-  private getConfirmationPolicyForLoadedMemory(
-    memory: Readonly<MemoryEntry> | null
-  ): ConfirmationPolicyType {
-    if (memory === null || memory.lifecycle_state === ObjectLifecycleState.TOMBSTONE) {
-      return ConfirmationPolicy.PER_ITEM;
-    }
-
-    return getProtocolConfirmationPolicy(memory.dimension);
+    return resolveProjectMappingConfirmationPolicy(memory);
   }
 
   private async getAnchorsByIds(mappingIds: readonly string[]): Promise<readonly Readonly<ProjectMappingAnchor>[]> {
@@ -435,7 +335,7 @@ export class ProjectMappingService {
       readonly fallbackFromState?: ProjectMappingStateType;
     }
   ): Promise<Readonly<ProjectMappingAnchor>> {
-    const fromState = this.resolveFromState(anchor.mapping_state, options);
+    const fromState = resolveProjectMappingFromState(anchor.mapping_state, options);
     const transitionedAt = this.now();
 
     // EventLog-first is intentional: project-mapping transitions are at-least-once. If repo
@@ -475,29 +375,4 @@ export class ProjectMappingService {
     });
   }
 
-  private resolveFromState(
-    currentState: ProjectMappingStateType,
-    options: {
-      readonly targetState: ProjectMappingStateType;
-      readonly allowedFromStates?: readonly ProjectMappingStateType[];
-      readonly fallbackFromState?: ProjectMappingStateType;
-    }
-  ): ProjectMappingStateType {
-    if (options.allowedFromStates === undefined) {
-      return currentState;
-    }
-
-    if (options.allowedFromStates.includes(currentState)) {
-      return currentState;
-    }
-
-    if (currentState === options.targetState && options.fallbackFromState !== undefined) {
-      return options.fallbackFromState;
-    }
-
-    throw new CoreError(
-      "CONFLICT",
-      `Project mapping transition ${currentState} -> ${options.targetState} is not allowed.`
-    );
-  }
 }
