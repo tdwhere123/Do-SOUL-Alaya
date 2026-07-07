@@ -1,27 +1,23 @@
 import { serve, type ServerType } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "./app.js";
+import { closeServer } from "./daemon-server-close.js";
+import {
+  clearSignalShutdownTimeout,
+  installSignalShutdownHandler,
+  type LifecycleProcessPort,
+  type LifecycleWarnLogger,
+  type SignalShutdownHandler
+} from "./daemon-signal-shutdown.js";
+import {
+  defaultLifecycleTimerPort,
+  delay,
+  type LifecycleTimerPort
+} from "./daemon-runtime-timing.js";
 import { resolveDaemonHostFromEnv } from "./server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
 type DaemonServerFactory = typeof serve;
-
-type LifecycleWarnLogger = Readonly<{
-  warn(message: string, meta: Record<string, unknown>): void;
-}>;
-
-type LifecycleProcessPort = {
-  on(event: "SIGTERM" | "SIGINT", listener: () => void): unknown;
-  off(event: "SIGTERM" | "SIGINT", listener: () => void): unknown;
-  exitCode?: number | string | null;
-  exit(code?: number): never;
-};
-
-type LifecycleTimerPort = Readonly<{
-  now(): number;
-  setTimeout(callback: () => void, ms: number): ReturnType<typeof setTimeout>;
-  clearTimeout(timeout: ReturnType<typeof setTimeout>): void;
-}>;
 
 type GardenRuntimeLifecycle = Readonly<{
   backgroundManager: Readonly<{
@@ -67,24 +63,10 @@ type LifecycleState = {
   signalShutdownTimeout: ReturnType<typeof setTimeout> | null;
 };
 
-type SignalShutdownHandler = Readonly<{
-  signal: "SIGTERM" | "SIGINT";
-  listener: () => void;
-}>;
-
-type CloseServerResult =
-  | "closed"
-  | "closed_after_idle_connections"
-  | "closed_after_force_close"
-  | "timed_out";
-
 const REQUEST_DRAIN_TIMEOUT_MS = 30_000;
 const REQUEST_DRAIN_POLL_MIN_MS = 25;
 const REQUEST_DRAIN_POLL_MAX_MS = 250;
 const BACKGROUND_STOP_TIMEOUT_MS = 30_000;
-const SERVER_CLOSE_TIMEOUT_MS = 10_000;
-const SERVER_CLOSE_FORCE_GRACE_MS = 1_000;
-const SIGNAL_SHUTDOWN_TIMEOUT_MS = 60_000;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
@@ -254,62 +236,26 @@ function installSignalShutdownHandlersOnce(
     return;
   }
   state.signalHandlersInstalled = true;
-  state.signalShutdownHandlers.push(
-    installSignalShutdownHandler("SIGTERM", input, state, shutdown),
-    installSignalShutdownHandler("SIGINT", input, state, shutdown)
-  );
-}
-
-function installSignalShutdownHandler(
-  signal: "SIGTERM" | "SIGINT",
-  input: CreateDaemonLifecycleControlsInput,
-  state: LifecycleState,
-  shutdown: () => Promise<void>
-): SignalShutdownHandler {
   const processPort = input.processPort ?? process;
   const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
-  const listener = () => {
-    if (state.signalShutdownTimeout !== null) {
-      // Second strike: force exit immediately
-      input.warnLogger.warn(`received second ${signal}, forcing immediate exit`, {});
-      if (processPort !== process || process.env.NODE_ENV !== "test") {
-        processPort.exit(1);
-      }
-      return;
-    }
-
-    state.signalShutdownTimeout = timerPort.setTimeout(() => {
-      input.warnLogger.warn(`daemon shutdown timed out after ${signal}`, {
-        timeout_ms: SIGNAL_SHUTDOWN_TIMEOUT_MS
-      });
-      processPort.exitCode = 1;
-      if (processPort !== process || process.env.NODE_ENV !== "test") {
-        processPort.exit(1);
-      }
-    }, SIGNAL_SHUTDOWN_TIMEOUT_MS);
-    unrefTimer(state.signalShutdownTimeout);
-
-    void shutdown().then(
-      () => {
-        clearSignalShutdownTimeout(state, timerPort);
-        const exitCode = typeof processPort.exitCode === "number" ? processPort.exitCode : 0;
-        if (processPort !== process || process.env.NODE_ENV !== "test") {
-          processPort.exit(exitCode);
-        }
-      },
-      (error) => {
-        input.warnLogger.warn(`daemon shutdown failed after ${signal}`, {
-          error: error instanceof Error ? error.message : String(error)
-        });
-        processPort.exitCode = 1;
-        if (processPort !== process || process.env.NODE_ENV !== "test") {
-          processPort.exit(1);
-        }
-      }
-    );
-  };
-  processPort.on(signal, listener);
-  return { signal, listener };
+  state.signalShutdownHandlers.push(
+    installSignalShutdownHandler({
+      signal: "SIGTERM",
+      processPort,
+      timerPort,
+      warnLogger: input.warnLogger,
+      state,
+      shutdown
+    }),
+    installSignalShutdownHandler({
+      signal: "SIGINT",
+      processPort,
+      timerPort,
+      warnLogger: input.warnLogger,
+      state,
+      shutdown
+    })
+  );
 }
 
 function logListeningAddress(
@@ -465,129 +411,6 @@ function parsePort(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
-async function closeServer(
-  server: ServerType,
-  timerPort: LifecycleTimerPort
-): Promise<CloseServerResult> {
-  const close = server.close.bind(server) as (callback?: (error?: Error) => void) => void;
-
-  if (close.length === 0) {
-    try {
-      close();
-      return "closed";
-    } catch (error) {
-      if (isServerNotRunningError(error)) {
-        return "closed";
-      }
-      throw toError(error);
-    }
-  }
-
-  const closeResult = new Promise<
-    Readonly<{ status: "closed" }> | Readonly<{ status: "error"; error: Error }>
-  >((resolveClose) => {
-    try {
-      close((error?: Error) => {
-        if (error !== undefined) {
-          if (isServerNotRunningError(error)) {
-            resolveClose({ status: "closed" });
-            return;
-          }
-          resolveClose({ status: "error", error });
-          return;
-        }
-
-        resolveClose({ status: "closed" });
-      });
-    } catch (error) {
-      if (isServerNotRunningError(error)) {
-        resolveClose({ status: "closed" });
-        return;
-      }
-      resolveClose({ status: "error", error: toError(error) });
-    }
-  });
-
-  const initial = await waitForCloseResult(closeResult, SERVER_CLOSE_TIMEOUT_MS, timerPort);
-  if (initial.status === "error") {
-    throw initial.error;
-  }
-  if (initial.status === "closed") {
-    return "closed";
-  }
-
-  closeIdleConnections(server);
-  const afterIdle = await waitForCloseResult(closeResult, SERVER_CLOSE_FORCE_GRACE_MS, timerPort);
-  if (afterIdle.status === "error") {
-    throw afterIdle.error;
-  }
-  if (afterIdle.status === "closed") {
-    return "closed_after_idle_connections";
-  }
-
-  closeAllConnections(server);
-  const afterForce = await waitForCloseResult(closeResult, SERVER_CLOSE_FORCE_GRACE_MS, timerPort);
-  if (afterForce.status === "error") {
-    throw afterForce.error;
-  }
-  if (afterForce.status === "closed") {
-    return "closed_after_force_close";
-  }
-
-  return "timed_out";
-}
-
-function isServerNotRunningError(error: unknown): boolean {
-  const code = error instanceof Error ? (error as { code?: unknown }).code : undefined;
-  return (
-    error instanceof Error &&
-    (error.message === "Server is not running." || code === "ERR_SERVER_NOT_RUNNING")
-  );
-}
-
-function toError(error: unknown): Error {
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-function closeIdleConnections(server: ServerType): void {
-  const candidate = server as { closeIdleConnections?: unknown };
-  if (typeof candidate.closeIdleConnections === "function") {
-    candidate.closeIdleConnections();
-  }
-}
-
-function closeAllConnections(server: ServerType): void {
-  const candidate = server as { closeAllConnections?: unknown };
-  if (typeof candidate.closeAllConnections === "function") {
-    candidate.closeAllConnections();
-  }
-}
-
-async function waitForCloseResult(
-  closeResult: Promise<
-    Readonly<{ status: "closed" }> | Readonly<{ status: "error"; error: Error }>
-  >,
-  timeoutMs: number,
-  timerPort: LifecycleTimerPort
-): Promise<
-  | Readonly<{ status: "closed" }>
-  | Readonly<{ status: "error"; error: Error }>
-  | Readonly<{ status: "timeout" }>
-> {
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const timeoutResult = new Promise<Readonly<{ status: "timeout" }>>((resolve) => {
-    timeoutHandle = timerPort.setTimeout(() => {
-      resolve({ status: "timeout" });
-    }, timeoutMs);
-    unrefTimer(timeoutHandle);
-  });
-  const result = await Promise.race([closeResult, timeoutResult]);
-  if (timeoutHandle !== undefined) {
-    timerPort.clearTimeout(timeoutHandle);
-  }
-  return result;
-}
-
 function closeRuntimeResourceStep(
   input: CreateDaemonLifecycleControlsInput,
   message: string,
@@ -615,35 +438,3 @@ async function closeRuntimeResourceStepAsync(
     });
   }
 }
-
-function clearSignalShutdownTimeout(
-  state: LifecycleState,
-  timerPort: LifecycleTimerPort
-): void {
-  if (state.signalShutdownTimeout === null) {
-    return;
-  }
-  timerPort.clearTimeout(state.signalShutdownTimeout);
-  state.signalShutdownTimeout = null;
-}
-
-async function delay(ms: number, timerPort: LifecycleTimerPort): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timeout = timerPort.setTimeout(resolve, ms);
-    unrefTimer(timeout);
-  });
-}
-
-function unrefTimer(timeout: ReturnType<typeof setTimeout>): void {
-  if (typeof timeout === "object" && timeout !== null && "unref" in timeout && typeof timeout.unref === "function") {
-    timeout.unref();
-  }
-}
-
-const defaultLifecycleTimerPort: LifecycleTimerPort = Object.freeze({
-  now: () => Date.now(),
-  setTimeout: (...args) => setTimeout(...args),
-  clearTimeout: (timeout) => {
-    clearTimeout(timeout);
-  }
-});

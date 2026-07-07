@@ -1,10 +1,8 @@
-import path from "node:path";
 import {
   ToolProviderToolSpecSchema,
   type ToolProviderToolSpec
 } from "@do-soul/alaya-protocol";
 import { isBuiltinConversationToolId, type BuiltinConversationToolId } from "./builtin-conversation-tool-specs.js";
-import { EXEC_CHILD_ENV_ALLOWLIST } from "./tool-runtime-file-constants.js";
 import type { DaemonMcpServerRuntimeConfig } from "./mcp-runtime-registry.js";
 
 export type DaemonMcpRuntimeBinding = Readonly<{
@@ -97,45 +95,38 @@ function parseDaemonMcpServerRuntimeConfig(
   const candidate = rawConfig as Record<string, unknown>;
   const transportType = readNonEmptyString(candidate["transport_type"]);
   if (transportType === "stdio") {
-    const command = readNonEmptyString(candidate["command"]);
-    if (command === null || !isAllowedDaemonMcpCommand(command)) {
-      warn("dropping MCP stdio runtime config with disallowed command", {
-        serverName,
-        command
-      });
-      return null;
-    }
-
-    const cwd = readNonEmptyString(candidate["cwd"]);
-    if (cwd !== null && !path.isAbsolute(cwd)) {
-      warn("dropping MCP stdio runtime config with non-absolute cwd", {
-        serverName,
-        cwd
-      });
-      return null;
-    }
-
-    const envRecord = candidate["env"] === undefined ? undefined : readStringRecord(candidate["env"]);
-    if (envRecord !== undefined && !hasAllowedDaemonMcpEnv(envRecord)) {
-      warn("dropping MCP stdio runtime config with blocked environment keys", {
-        serverName,
-        envKeys: Object.keys(envRecord)
-      });
-      return null;
-    }
-
-    return Object.freeze({
-      transportType,
-      command,
-      ...(candidate["args"] === undefined ? {} : { args: readStringArray(candidate["args"]) }),
-      ...(cwd === null ? {} : { cwd }),
-      ...(envRecord === undefined ? {} : { env: envRecord })
+    warn("dropping MCP stdio runtime config from environment", {
+      serverName
     });
+    return null;
   }
 
   if (transportType === "http") {
     const endpoint = readNonEmptyString(candidate["endpoint"]);
     if (endpoint === null) {
+      warn("dropping MCP HTTP runtime config without endpoint", {
+        serverName,
+      });
+      return null;
+    }
+
+    try {
+      const url = new URL(endpoint);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("unsupported protocol");
+      }
+      if (!isLoopbackMcpEndpoint(url)) {
+        warn("dropping MCP HTTP runtime config with non-local endpoint", {
+          serverName,
+          endpoint
+        });
+        return null;
+      }
+    } catch {
+      warn("dropping MCP HTTP runtime config with invalid endpoint", {
+        serverName,
+        endpoint
+      });
       return null;
     }
 
@@ -149,6 +140,25 @@ function parseDaemonMcpServerRuntimeConfig(
   }
 
   return null;
+}
+
+function isLoopbackMcpEndpoint(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "[::1]" || hostname === "::1") {
+    return true;
+  }
+  const parts = hostname.split(".");
+  return (
+    parts.length === 4 &&
+    parts[0] === "127" &&
+    parts.every((part) => {
+      if (!/^\d+$/.test(part)) {
+        return false;
+      }
+      const value = Number(part);
+      return value >= 0 && value <= 255;
+    })
+  );
 }
 
 function parseMcpToolCatalogByServer(
@@ -287,42 +297,6 @@ function readStringRecord(value: unknown): Readonly<Record<string, string>> {
       )
     )
   );
-}
-
-const DISALLOWED_STDIO_COMMAND_BASENAMES = new Set([
-  "ash",
-  "bash",
-  "busybox",
-  "cmd",
-  "cmd.exe",
-  "dash",
-  "env",
-  "fish",
-  "ksh",
-  "node_modules",
-  "npm",
-  "npx",
-  "pnpm",
-  "powershell",
-  "powershell.exe",
-  "pwsh",
-  "sh",
-  "yarn",
-  "zsh"
-]);
-const ALLOWED_DAEMON_MCP_ENV_KEYS = new Set<string>(EXEC_CHILD_ENV_ALLOWLIST);
-
-function isAllowedDaemonMcpCommand(command: string): boolean {
-  if (!path.isAbsolute(command)) {
-    return false;
-  }
-
-  const basename = path.basename(command).toLowerCase();
-  return !DISALLOWED_STDIO_COMMAND_BASENAMES.has(basename);
-}
-
-function hasAllowedDaemonMcpEnv(envRecord: Readonly<Record<string, string>>): boolean {
-  return Object.keys(envRecord).every((key) => ALLOWED_DAEMON_MCP_ENV_KEYS.has(key));
 }
 
 function dedupeStrings(values: readonly string[]): readonly string[] {

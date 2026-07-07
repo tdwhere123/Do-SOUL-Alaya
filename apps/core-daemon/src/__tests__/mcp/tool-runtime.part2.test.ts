@@ -24,7 +24,7 @@ import {
 
 import {
   cleanupToolRuntimeTempDirs,
-  createBuiltinToolExecutor,
+  createAutoConfirmingBuiltinToolExecutor,
   createConversationToolSpec,
   createDeferred,
   createRuntimeContext,
@@ -159,7 +159,7 @@ describe("tool-runtime relative path handling", () => {
         gitBindingValidation: {
           currentWorkingDirectory: workspaceDir
         },
-        externalToolExecutor: createBuiltinToolExecutor(["tools.write_file"])
+        externalToolExecutor: createAutoConfirmingBuiltinToolExecutor(["tools.write_file"])
       }
     );
 

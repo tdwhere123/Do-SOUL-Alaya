@@ -7,9 +7,9 @@ archived to `docs/archive/backlog-resolved-historical.md`.
 ## Issue Numbering
 
 Issues are numbered `#BL-NNN` in plain decimal sequence.
-**Next available number**: `#BL-067`.
+**Next available number**: `#BL-069`.
 
-**Audit branch progress (2026-07-07, `audit-2026-07-06-full-fix`)**: see `.do-it/review/audit-2026-07-06-closeout.md`. `#BL-065` resolved on branch; `#BL-060`–`#BL-064` and `#BL-066` have partial/spike landings documented below.
+**Audit branch progress (2026-07-07, `audit-2026-07-06-full-fix`)**: see `.do-it/review/audit-2026-07-06-closeout.md`. `#BL-065` resolved on branch; `#BL-060`–`#BL-064` and `#BL-066`–`#BL-068` have partial/spike landings documented below.
 
 ---
 
@@ -110,6 +110,22 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 **Context**: Remaining low/medium audit items include hardcoded tuning constants, FTS/content length policy review, optional TTL policy for DB cache metadata, EventLog append retry policy, Garden raw input validation review, and broad catch/void-promise diagnostics. Branch landed `bestEffortDelete` rollback diagnostics (`ALAYA_FILE_UPLOAD_ROLLBACK_DELETE_FAILED`) in `apps/core-daemon/src/routes/workspace/files.ts` with regression test.
 
 **Close condition**: each item is either closed as stale with file-level evidence or lands a targeted regression; no silent catch in critical paths remains without an explicit diagnostic.
+
+### #BL-067 — MCP external runtime authentication and endpoint policy
+
+**Status**: Open (destructive builtin confirmation and env runtime narrowing landed 2026-07-07). **Due**: before enabling arbitrary external MCP servers.
+
+**Context**: The audit branch added server-verifiable confirmation receipts for builtin tools that mutate state or execute commands. Env-sourced MCP runtime config no longer spawns stdio commands and only accepts loopback HTTP(S) endpoints. This does not implement a full MCP handshake/session authentication layer for every builtin read/list/search call, nor does it define the trust model for arbitrary external stdio or HTTP MCP servers; adding that layer changes host compatibility and belongs in a dedicated protocol migration.
+
+**Close condition**: External MCP sessions authenticate at connection or tool-call boundary with a daemon-owned bearer/capability token, every builtin conversation tool rejects unauthenticated calls in an integration test, env-provided external endpoints and headers have an explicit trust policy, documented host attach profiles pass the token, and unauthenticated legacy clients fail with a typed auth error.
+
+### #BL-068 — Bound audit-reported in-memory caches
+
+**Status**: Open (classification corrected 2026-07-07). **Due**: v0.3 hardening window.
+
+**Context**: `ContextLensAssembler.lensStore` is bounded by expiry and `MAX_LENS_STORE_SIZE`, but the audit-reported session-override maps (`store`, `pendingLoads`, `cacheVersions`) and other long-lived core maps still need explicit owner review. This is separate from the SQLite worker queue and from generic low-risk hardening because the acceptance surface is bounded memory growth on daemon-long-lived in-memory caches.
+
+**Close condition**: every cache named in the 2026-07-06 audit is classified as bounded/stale or gets an explicit max-size/TTL/idle-prune policy with regression tests covering eviction and no loss of durable truth.
 
 
 ## Out of Alaya Scope (Permanently Rejected)

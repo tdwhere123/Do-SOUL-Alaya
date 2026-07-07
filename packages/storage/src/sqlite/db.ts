@@ -326,10 +326,7 @@ function evictDatabaseCacheIfNeeded(incomingFilename: string): void {
       databaseCache.get(oldestKey);
       continue;
     }
-    const evicted = databaseCache.deleteOldest();
-    if (evicted !== undefined) {
-      evicted.close();
-    }
+    databaseCache.deleteOldest();
     break;
   }
 }

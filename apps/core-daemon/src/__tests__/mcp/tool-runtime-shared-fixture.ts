@@ -74,7 +74,7 @@ export function createConversationToolSpec(toolId: ToolSpec["tool_id"]): ToolSpe
   };
 }
 
-export function createBuiltinToolExecutor(toolIds: readonly string[]) {
+export function createAutoConfirmingBuiltinToolExecutor(toolIds: readonly string[]) {
   const registeredToolIds = new Set(toolIds);
 
   return {

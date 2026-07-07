@@ -1,6 +1,6 @@
 # Spike: SQLite worker-thread write queue (#BL-060)
 
-**Status**: design spike only — no worker thread in tree yet.  
+**Status**: design spike only — no worker thread in tree yet.
 **Backlog**: `#BL-060` in `docs/handbook/backlog.md`.
 
 ## Problem

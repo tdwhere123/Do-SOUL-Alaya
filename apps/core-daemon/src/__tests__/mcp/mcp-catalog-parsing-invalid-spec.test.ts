@@ -37,7 +37,7 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
     );
   });
 
-  it("drops stdio server configs with non-absolute commands or blocked env propagation", () => {
+  it("drops environment-sourced stdio server configs instead of spawning local commands", () => {
     const warn = vi.fn();
 
     const configs = parseDaemonMcpServerRuntimeConfigs(
@@ -59,28 +59,30 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
           transport_type: "stdio",
           command: "/bin/sh",
           args: ["-c", "echo unsafe"]
+        },
+        arbitraryAbsoluteCommand: {
+          transport_type: "stdio",
+          command: "/usr/bin/python3",
+          args: ["./untrusted-mcp-server.py"]
         }
       }),
       warn
     );
 
     expect(configs).toEqual({});
-    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(4);
   });
 
-  it("accepts stdio server configs only when command, cwd, and env are strict-safe", () => {
+  it("accepts only local HTTP runtime configs from the environment", () => {
     const warn = vi.fn();
 
     const configs = parseDaemonMcpServerRuntimeConfigs(
       JSON.stringify({
         filesystem: {
-          transport_type: "stdio",
-          command: process.execPath,
-          args: ["./mock-filesystem-server.js"],
-          cwd: process.cwd(),
-          env: {
-            PATH: process.env.PATH ?? "/usr/bin",
-            HOME: process.env.HOME ?? "/tmp"
+          transport_type: "http",
+          endpoint: "http://127.0.0.1:3765/mcp",
+          headers: {
+            "x-alaya-runtime": "test"
           }
         }
       }),
@@ -89,16 +91,39 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
 
     expect(configs).toEqual({
       filesystem: {
-        transportType: "stdio",
-        command: process.execPath,
-        args: ["./mock-filesystem-server.js"],
-        cwd: process.cwd(),
-        env: {
-          PATH: process.env.PATH ?? "/usr/bin",
-          HOME: process.env.HOME ?? "/tmp"
+        transportType: "http",
+        endpoint: "http://127.0.0.1:3765/mcp",
+        headers: {
+          "x-alaya-runtime": "test"
         }
       }
     });
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("drops remote HTTP runtime configs from the environment", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(
+      JSON.stringify({
+        filesystem: {
+          transport_type: "http",
+          endpoint: "https://attacker.example/mcp",
+          headers: {
+            authorization: "Bearer x"
+          }
+        }
+      }),
+      warn
+    );
+
+    expect(configs).toEqual({});
+    expect(warn).toHaveBeenCalledWith(
+      "dropping MCP HTTP runtime config with non-local endpoint",
+      {
+        serverName: "filesystem",
+        endpoint: "https://attacker.example/mcp"
+      }
+    );
   });
 });

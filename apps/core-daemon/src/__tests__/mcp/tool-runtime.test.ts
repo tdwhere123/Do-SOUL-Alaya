@@ -27,7 +27,7 @@ import {
 
 import {
   cleanupToolRuntimeTempDirs,
-  createBuiltinToolExecutor,
+  createAutoConfirmingBuiltinToolExecutor,
   createDeferred,
   createRuntimeContext,
   createWorkspace,
@@ -189,7 +189,7 @@ describe("tool-runtime relative path handling", () => {
         })
       },
       {
-        externalToolExecutor: createBuiltinToolExecutor(["tools.read_file"])
+        externalToolExecutor: createAutoConfirmingBuiltinToolExecutor(["tools.read_file"])
       }
     );
 
@@ -386,7 +386,7 @@ describe("tool-runtime relative path handling", () => {
         gitBindingValidation: {
           currentWorkingDirectory: workspaceDir
         },
-        externalToolExecutor: createBuiltinToolExecutor(["tools.write_file"])
+        externalToolExecutor: createAutoConfirmingBuiltinToolExecutor(["tools.write_file"])
       }
     );
 
@@ -458,7 +458,7 @@ describe("tool-runtime relative path handling", () => {
         gitBindingValidation: {
           currentWorkingDirectory: workspaceDir
         },
-        externalToolExecutor: createBuiltinToolExecutor(["tools.write_file"])
+        externalToolExecutor: createAutoConfirmingBuiltinToolExecutor(["tools.write_file"])
       }
     );
 

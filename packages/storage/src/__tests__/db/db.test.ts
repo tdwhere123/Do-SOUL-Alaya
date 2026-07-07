@@ -92,7 +92,7 @@ describe("StorageDatabase reopen cache handling", () => {
     }
   }, 30_000);
 
-  it("closes an evicted database handle when cache pressure evicts its entry, but allows reopening", () => {
+  it("does not close caller-owned database handles when cache pressure evicts their entries", () => {
     const closedContext = createTempDatabasePath();
     directories.push(closedContext.directory);
     const closedDatabase = initDatabase({ filename: closedContext.filename });
@@ -111,9 +111,6 @@ describe("StorageDatabase reopen cache handling", () => {
     closedDatabase.reopenIfClosed();
 
     expect(closedDatabase.isClosed()).toBe(false);
-    expect(oldestCachedDatabase.isClosed()).toBe(true);
-
-    oldestCachedDatabase.reopenIfClosed();
     expect(oldestCachedDatabase.isClosed()).toBe(false);
     expect(oldestCachedDatabase.connection.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
   }, 20_000);

@@ -15,7 +15,7 @@ import {
 
 import {
   cleanupToolRuntimeTempDirs,
-  createBuiltinToolExecutor,
+  createAutoConfirmingBuiltinToolExecutor,
   createDeferred,
   createRuntimeContext,
   createWorkspace,
@@ -340,7 +340,7 @@ describe("tool-runtime relative path handling", () => {
       },
       {
         ...confirmedToolExecutionOptions,
-        externalToolExecutor: createBuiltinToolExecutor(["tools.write_file"])
+        externalToolExecutor: createAutoConfirmingBuiltinToolExecutor(["tools.write_file"])
       }
     );
 

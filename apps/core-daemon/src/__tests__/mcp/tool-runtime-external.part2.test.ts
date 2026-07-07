@@ -15,7 +15,7 @@ import {
 
 import {
   cleanupToolRuntimeTempDirs,
-  createBuiltinToolExecutor,
+  createAutoConfirmingBuiltinToolExecutor,
   createDeferred,
   createRuntimeContext,
   createWorkspace

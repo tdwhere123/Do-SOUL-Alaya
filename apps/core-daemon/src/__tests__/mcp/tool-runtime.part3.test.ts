@@ -24,7 +24,7 @@ import {
 
 import {
   cleanupToolRuntimeTempDirs,
-  createBuiltinToolExecutor,
+  createAutoConfirmingBuiltinToolExecutor,
   createConversationToolSpec,
   createDeferred,
   createRuntimeContext,
@@ -317,7 +317,7 @@ describe("tool-runtime relative path handling", () => {
           root_path: workspaceDir
         })
       },
-      createBuiltinToolExecutor(["tools.write_file"]),
+      createAutoConfirmingBuiltinToolExecutor(["tools.write_file"]),
       {
         confirmationToken: "server-token"
       }

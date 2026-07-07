@@ -167,7 +167,7 @@ describe("installUnhandledRejectionHandler", () => {
 
     installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown: firstShutdown });
     fakeProcess.emit("unhandledRejection", new Error("first fatal"));
-    
+
     // Wait for the async shutdown chain to finish resolving
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -178,7 +178,7 @@ describe("installUnhandledRejectionHandler", () => {
 
     installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown: secondShutdown });
     fakeProcess.emit("unhandledRejection", new Error("second fatal"));
-    
+
     // Wait for the async shutdown chain to finish resolving
     await new Promise((resolve) => setTimeout(resolve, 20));
 

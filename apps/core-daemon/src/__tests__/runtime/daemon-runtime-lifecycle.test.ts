@@ -288,7 +288,7 @@ describe("createDaemonLifecycleControls", () => {
 
     await controls.startHttpServer({ port: 0 });
     processPort.emitSignal("SIGTERM");
-    
+
     // Wait for the async shutdown chain to finish resolving
     await new Promise((resolve) => setTimeout(resolve, 20));
 
