@@ -18,7 +18,10 @@ import {
   createBuiltinToolExecutor,
   createDeferred,
   createRuntimeContext,
-  createWorkspace
+  createWorkspace,
+  confirmedToolExecutionOptions,
+  TOOL_CONFIRMATION_TOKEN,
+  withToolConfirmation
 } from "./tool-runtime-shared-fixture.js";
 
 afterEach(cleanupToolRuntimeTempDirs);
@@ -263,11 +266,12 @@ describe("tool-runtime relative path handling", () => {
         execute: async () => {
           await executeConversationToolOrThrow(
             "tools.write_file",
-            {
+            withToolConfirmation({
               path: path.join(workspaceDir, "locked"),
               content: "updated"
-            },
-            [workspaceDir]
+            }),
+            [workspaceDir],
+            { confirmationToken: TOOL_CONFIRMATION_TOKEN }
           );
 
           throw new Error("unreachable");
@@ -304,10 +308,10 @@ describe("tool-runtime relative path handling", () => {
         type: "tool_use",
         id: "toolu-builtin-structured-error",
         name: "tools.write_file",
-        input: {
+        input: withToolConfirmation({
           path: "locked",
           content: "updated"
-        }
+        })
       },
       createRuntimeContext(),
       {
@@ -335,6 +339,7 @@ describe("tool-runtime relative path handling", () => {
         })
       },
       {
+        ...confirmedToolExecutionOptions,
         externalToolExecutor: createBuiltinToolExecutor(["tools.write_file"])
       }
     );

@@ -13,6 +13,27 @@ const EngineBaseUrlSchema = BoundedPathSchema.url();
 const EngineConfigSchema = BoundedJsonObjectSchema;
 const PersistedApiKeySchema = z.string().max(16384);
 
+export function isAllowedPersistedApiKeyRef(envName: string): boolean {
+  return /^[a-z0-9_]+_api_key$/i.test(envName) && !/^alaya_/i.test(envName);
+}
+
+function validatePersistedApiKeyRef(
+  apiKeyRef: string | null | undefined,
+  context: z.RefinementCtx,
+  path: readonly (string | number)[]
+): void {
+  if (apiKeyRef === undefined || apiKeyRef === null || apiKeyRef.length === 0) {
+    return;
+  }
+  if (!isAllowedPersistedApiKeyRef(apiKeyRef)) {
+    context.addIssue({
+      code: "custom",
+      path: [...path],
+      message: "api_key_ref must name an environment variable ending with _API_KEY and not prefixed with ALAYA_."
+    });
+  }
+}
+
 export const EngineProvider = {
   OPENAI: "openai",
   ANTHROPIC: "anthropic",
@@ -77,6 +98,7 @@ export const EngineBindingInputSchema = z
         message: "Engine bindings require either api_key or api_key_ref."
       });
     }
+    validatePersistedApiKeyRef(value.api_key_ref, context, ["api_key_ref"]);
   })
   .readonly();
 
@@ -100,6 +122,7 @@ export const EngineBindingRecordSchema = z.object({
       message: "Persisted engine bindings require either api_key or api_key_ref."
     });
   }
+  validatePersistedApiKeyRef(value.api_key_ref, context, ["api_key_ref"]);
 }).readonly();
 
 export const EngineBindingSummarySchema = z.object({

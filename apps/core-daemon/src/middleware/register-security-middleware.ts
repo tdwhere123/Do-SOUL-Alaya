@@ -29,18 +29,7 @@ export function registerRateLimitMiddleware(
       skip: (context) => !isProtectedRequest(context.req.method, context.req.path),
       resolveKey: (context) => {
         const token = normalizeTrimmedHeader(context.req.header("x-request-token"));
-        if (token !== undefined) {
-          return `token:${token}`;
-        }
-
-        const forwardedFor = context.req.header("x-forwarded-for");
-        const firstForwarded = forwardedFor?.split(",")[0]?.trim();
-        const remoteIdentity =
-          normalizeTrimmedHeader(firstForwarded) ??
-          normalizeTrimmedHeader(context.req.header("x-real-ip")) ??
-          normalizeTrimmedHeader(context.req.header("cf-connecting-ip")) ??
-          "anonymous";
-        return `remote:${remoteIdentity}`;
+        return token === undefined ? "anonymous" : `token:${token}`;
       }
     })
   );

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import {
   open,
+  lstat,
   readFile as fsReadFile,
   realpath,
   unlink,
@@ -73,26 +74,36 @@ export async function writeFile(
   let handle: FileHandle | undefined;
   let newlyCreated = false;
   try {
-    const buffer = Buffer.from(input.content, "utf8");
     if (entry.ok) {
-      // File already exists: open without O_CREAT
+      try {
+        const linkStat = await lstat(containedPath.resolvedPath);
+        if (linkStat.isSymbolicLink()) {
+          return createAccessDenied("Path is outside the workspace boundary.");
+        }
+      } catch (error) {
+        return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
+      }
+    }
+
+    const buffer = Buffer.from(input.content, "utf8");
+    const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+    if (entry.ok) {
       handle = await open(
         containedPath.resolvedPath,
-        constants.O_RDWR | constants.O_NOFOLLOW,
+        constants.O_RDWR | noFollow,
         0o666
       );
     } else {
-      // File does not exist: open with O_CREAT | O_EXCL
       handle = await open(
         containedPath.resolvedPath,
-        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollow,
         0o666
       );
       newlyCreated = true;
     }
 
-    const resolvedPath = await realpath(containedPath.resolvedPath);
-    if (!realWritableRoots.some((root) => isPathWithinRoot(resolvedPath, root))) {
+    const fdRealPath = await realpath(fdExecPath(handle.fd));
+    if (!realWritableRoots.some((root) => isPathWithinRoot(fdRealPath, root))) {
       await handle.close();
       handle = undefined;
       if (newlyCreated) {

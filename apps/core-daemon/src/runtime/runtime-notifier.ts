@@ -167,7 +167,20 @@ function sanitizeErrorDiagnostic(value: string): string {
     }
   );
   redacted = redacted.replace(
-    /(["']?(?:api[_-]?key|token|secret|password)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\s"'\r\n,;{}]+))/giu,
+    /(["']?(?:password|secret)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\r\n,;{}]+))/giu,
+    (match, p1, p2, p3) => {
+      const p = p2 || p3;
+      if (p.startsWith('"') && p.endsWith('"')) {
+        return `${p1}"[Redacted]"`;
+      }
+      if (p.startsWith("'") && p.endsWith("'")) {
+        return `${p1}'[Redacted]'`;
+      }
+      return `${p1}[Redacted]`;
+    }
+  );
+  redacted = redacted.replace(
+    /(["']?(?:api[_-]?key|token)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\s"'\r\n,;{}]+))/giu,
     (match, p1, p2, p3) => {
       const p = p2 || p3;
       if (p.startsWith('"') && p.endsWith('"')) {

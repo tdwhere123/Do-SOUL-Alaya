@@ -130,7 +130,7 @@ function createToolSpec(toolId: ToolSpec["tool_id"]): ToolSpec {
     destructive: toolId === "tools.exec_shell",
     concurrency_safe: false,
     interrupt_behavior: toolId === "tools.exec_shell" ? "abort" : "wait",
-    requires_confirmation: toolId === "tools.exec_shell",
+    requires_confirmation: toolId === "tools.exec_shell" || toolId === "tools.write_file",
     requires_evidence_reopen: false,
     rollback_support: "none",
     fast_path_eligible: false
@@ -313,6 +313,44 @@ describe("tool-runtime relative path handling", () => {
     }
   });
 
+  it("denies tools.write_file without a valid server confirmation receipt", async () => {
+    const workspaceDir = await createWorkspace();
+    await mkdir(path.join(workspaceDir, "notes"), { recursive: true });
+
+    const result = await handleConversationToolUse(
+      {
+        type: "tool_use",
+        id: "toolu-write-unconfirmed",
+        name: "tools.write_file",
+        input: {
+          path: "notes/test.txt",
+          content: "unsafe"
+        }
+      },
+      createRuntimeContext(),
+      {
+        getById: async () => ({
+          root_path: workspaceDir
+        })
+      },
+      createBuiltinToolExecutor(["tools.write_file"]),
+      {
+        confirmationToken: "server-token"
+      }
+    );
+
+    expect(result).toEqual({
+      type: "tool_result",
+      tool_use_id: "toolu-write-unconfirmed",
+      content: JSON.stringify({
+        ok: false,
+        code: "CONFIRMATION_REQUIRED",
+        message: "Tool tools.write_file requires a valid server-verifiable confirmation receipt."
+      }),
+      is_error: true
+    });
+  });
+
   it("rejects executeConversationToolOrThrow for confirmation-required builtins without receipt", async () => {
     const workspaceDir = await createWorkspace();
     const { executeConversationToolOrThrow } = await import("../../mcp/tool-runtime.js");
@@ -323,6 +361,23 @@ describe("tool-runtime relative path handling", () => {
         {
           command: "/bin/echo",
           args: ["unsafe"]
+        },
+        [workspaceDir],
+        { confirmationToken: "server-token" }
+      )
+    ).rejects.toMatchObject({
+      result: {
+        ok: false,
+        code: "CONFIRMATION_REQUIRED"
+      }
+    });
+
+    await expect(
+      executeConversationToolOrThrow(
+        "tools.write_file",
+        {
+          path: "notes/test.txt",
+          content: "unsafe"
         },
         [workspaceDir],
         { confirmationToken: "server-token" }

@@ -31,7 +31,9 @@ import {
   createDeferred,
   createRuntimeContext,
   createWorkspace,
-  trackToolRuntimeTempDir
+  confirmedToolExecutionOptions,
+  trackToolRuntimeTempDir,
+  withToolConfirmation
 } from "./tool-runtime-shared-fixture.js";
 
 function createRecordingConversationToolExecutor(toolSpec: ToolSpec): {
@@ -364,10 +366,10 @@ describe("tool-runtime relative path handling", () => {
         type: "tool_use",
         id: "toolu-write-bound",
         name: "tools.write_file",
-        input: {
+        input: withToolConfirmation({
           path: "repo/src/index.ts",
           content: "export const value = 1;\n"
-        }
+        })
       },
       createRuntimeContext(),
       {
@@ -380,6 +382,7 @@ describe("tool-runtime relative path handling", () => {
         execute
       },
       {
+        ...confirmedToolExecutionOptions,
         gitBindingValidation: {
           currentWorkingDirectory: workspaceDir
         },
@@ -435,10 +438,10 @@ describe("tool-runtime relative path handling", () => {
         type: "tool_use",
         id: "toolu-write-invalid-binding",
         name: "tools.write_file",
-        input: {
+        input: withToolConfirmation({
           path: "repo/src/index.ts",
           content: "export const value = 1;\n"
-        }
+        })
       },
       createRuntimeContext(),
       {
@@ -451,6 +454,7 @@ describe("tool-runtime relative path handling", () => {
         execute
       },
       {
+        ...confirmedToolExecutionOptions,
         gitBindingValidation: {
           currentWorkingDirectory: workspaceDir
         },

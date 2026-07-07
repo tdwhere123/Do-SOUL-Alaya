@@ -26,6 +26,12 @@ export interface SqliteWriteJob {
   execute?(): void | Promise<void>;
 }
 
+export function assertSqliteWriteJobWorkerShape(job: SqliteWriteJob): void {
+  if (job.execute !== undefined && job.payload !== undefined) {
+    throw new Error("SqliteWriteJob must not set both execute and payload");
+  }
+}
+
 export interface SqliteWriteQueuePort {
   readonly kind: string;
   enqueue(job: SqliteWriteJob): Promise<void>;
@@ -57,6 +63,7 @@ export function createInMemorySqliteWriteQueuePort(): SqliteWriteQueuePort {
       activeFilename === filename || (pendingByFilename.get(filename) ?? 0) > 0,
 
     enqueue: async (job) => {
+      assertSqliteWriteJobWorkerShape(job);
       pending += 1;
       adjustFilenamePending(job.filename, 1);
 

@@ -226,6 +226,41 @@ describe("RuntimeNotifier", () => {
     }
   });
 
+  it("sanitizes unquoted multi-word password values in plain error text", async () => {
+    const warn = vi.fn();
+    const { createRuntimeNotifier: createIsolatedRuntimeNotifier, cleanup } =
+      await importRuntimeNotifierWithMockedWarnLogger(warn);
+    const notifier = createIsolatedRuntimeNotifier();
+    notifier.subscribeEntries(async () => {
+      throw new Error("password=my secret passphrase");
+    });
+
+    try {
+      await notifier.notifyEntry({
+        event_id: "event-sensitive-3",
+        event_type: "memory.created" as EventLogEntry["event_type"],
+        entity_type: "memory_entry",
+        entity_id: "memory-sensitive-3",
+        workspace_id: "ws-sensitive",
+        run_id: null,
+        caused_by: "test",
+        revision: 1,
+        created_at: "2026-04-30T00:00:00.000Z",
+        payload_json: {}
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        "[runtime-notifier] listener threw; continuing fan-out",
+        expect.objectContaining({
+          errorMessage: "password=[Redacted]"
+        })
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("secret passphrase");
+    } finally {
+      cleanup();
+    }
+  });
+
   it("disposes subscriptions", async () => {
     const notifier = createRuntimeNotifier();
     const listener = vi.fn();

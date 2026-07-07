@@ -55,7 +55,7 @@ const WRITE_FILE_TOOL_SPEC: Readonly<ToolSpec> = Object.freeze({
   destructive: false,
   concurrency_safe: false,
   interrupt_behavior: "wait",
-  requires_confirmation: false,
+  requires_confirmation: true,
   requires_evidence_reopen: false,
   rollback_support: "best_effort",
   fast_path_eligible: false

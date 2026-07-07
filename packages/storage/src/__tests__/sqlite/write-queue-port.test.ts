@@ -82,4 +82,31 @@ describe("SqliteWriteQueuePort contract", () => {
     expect(cloned.payload.statements[0].sql).toBe("INSERT INTO test_table (id, val) VALUES (?, ?)");
     expect(cloned.payload.statements[0].params).toEqual([1, "test-value"]);
   });
+
+  it("rejects jobs that set both execute and payload", async () => {
+    const queue = createInMemorySqliteWriteQueuePort();
+    await expect(
+      queue.enqueue({
+        jobId: "job-invalid",
+        kind: "ontology_write",
+        filename: "/tmp/alaya/test.db",
+        payload: { statements: [{ sql: "SELECT 1" }] },
+        execute: async () => undefined
+      })
+    ).rejects.toThrow(/must not set both execute and payload/);
+  });
+
+  it("structuredClone fails when execute is attached to a worker payload job", () => {
+    const job = {
+      jobId: "job-serial-2",
+      kind: "ontology_write" as const,
+      filename: "/tmp/alaya/test.db",
+      payload: {
+        statements: [{ sql: "SELECT 1" }]
+      },
+      execute: async () => undefined
+    };
+
+    expect(() => structuredClone(job)).toThrow();
+  });
 });

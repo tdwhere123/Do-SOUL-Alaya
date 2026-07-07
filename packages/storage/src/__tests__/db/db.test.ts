@@ -4,7 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getCurrentSchemaSummary, initDatabase } from "../../sqlite/db.js";
+import { getCurrentSchemaSummary, initDatabase, configureSqliteWriteQueuePort } from "../../sqlite/db.js";
+import { createInMemorySqliteWriteQueuePort } from "../../sqlite/write-queue-port.js";
 import { StorageError } from "../../shared/errors.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
@@ -116,6 +117,41 @@ describe("StorageDatabase reopen cache handling", () => {
     oldestCachedDatabase.reopenIfClosed();
     expect(oldestCachedDatabase.isClosed()).toBe(false);
     expect(oldestCachedDatabase.connection.prepare("SELECT 1 AS value").get()).toEqual({ value: 1 });
+  }, 20_000);
+
+  it("does not close cached databases while the write queue blocks eviction", async () => {
+    const blockedContext = createTempDatabasePath();
+    directories.push(blockedContext.directory);
+    const blockedDatabase = initDatabase({ filename: blockedContext.filename });
+    databases.push(blockedDatabase);
+
+    const queue = createInMemorySqliteWriteQueuePort();
+    configureSqliteWriteQueuePort(queue);
+    let releaseSlowJob: (() => void) | undefined;
+    const slowJobGate = new Promise<void>((resolve) => {
+      releaseSlowJob = resolve;
+    });
+    const pendingJob = queue.enqueue({
+      jobId: "block-eviction",
+      kind: "event_log_transaction",
+      filename: blockedContext.filename,
+      execute: async () => {
+        await slowJobGate;
+      }
+    });
+
+    expect(queue.blocksEviction(blockedContext.filename)).toBe(true);
+
+    for (let index = 0; index < 32; index += 1) {
+      const context = createTempDatabasePath();
+      directories.push(context.directory);
+      databases.push(initDatabase({ filename: context.filename }));
+    }
+
+    expect(blockedDatabase.isClosed()).toBe(false);
+    releaseSlowJob?.();
+    await pendingJob;
+    configureSqliteWriteQueuePort(null);
   }, 20_000);
 });
 
