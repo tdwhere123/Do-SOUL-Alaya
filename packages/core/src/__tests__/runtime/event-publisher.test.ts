@@ -349,6 +349,60 @@ describe("EventPublisher", () => {
     expect(result.result).toBe("ok");
     expect(recorded).toEqual(["compute", "append", "apply", "notify"]);
   });
+
+  it("appends events returned from apply after the initial append batch", async () => {
+    const recorded: string[] = [];
+    const firstEntry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: {}
+    });
+    const secondEntry = createEventLogEntry({
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-2",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "system",
+      payload_json: {}
+    });
+    const publisher = new EventPublisher({
+      eventLogRepo: createQueuedRepo([firstEntry, secondEntry], recorded),
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: {
+        notify: vi.fn(),
+        notifyEntry: vi.fn(async () => {
+          recorded.push("notify");
+        })
+      }
+    });
+
+    const result = await publisher.mutateThenAppendMany(() => {
+      recorded.push("compute");
+      return {
+        events: [toEventInput(firstEntry)],
+        result: "ok",
+        apply: () => {
+          recorded.push("apply");
+          return [toEventInput(secondEntry)];
+        }
+      };
+    });
+
+    expect(result.result).toBe("ok");
+    expect(recorded).toEqual([
+      "compute",
+      "append:evt_worker-1",
+      "apply",
+      "append:evt_worker-2",
+      "notify",
+      "notify"
+    ]);
+  });
 });
 
 function createEventLogEntry(input: EventPublisherInput, revision = 0): EventLogEntry {

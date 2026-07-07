@@ -4,6 +4,7 @@ import { DynamicsService, EventPublisher, type RuntimeNotifier } from "@do-soul/
 import {
   FormationKind,
   MemoryDimension,
+  MemoryGovernanceEventType,
   ScopeClass,
   SourceKind,
   StorageTier,
@@ -152,6 +153,26 @@ describe("karma transition single-transaction atomicity (§7 + §31)", () => {
     expect(auditRows).toHaveLength(0);
 
     expect(harness.notifyEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not append dormant-to-active revival audit when memory is already active", async () => {
+    const harness = createHarness();
+    await harness.memoryEntryRepo.create({
+      ...createDormantMemoryEntry(),
+      lifecycle_state: "active"
+    });
+
+    await harness.dynamicsService.processKarmaEvent(createKarmaEvent());
+
+    const auditRows = await harness.eventLogRepo.queryByEntity("memory_entry", MEMORY_ID);
+    const revivalAudits = auditRows.filter((row) => {
+      if (row.event_type !== MemoryGovernanceEventType.SOUL_MEMORY_STATE_CHANGED) {
+        return false;
+      }
+      const payload = row.payload_json as { from_state?: string; to_state?: string };
+      return payload.from_state === "dormant" && payload.to_state === "active";
+    });
+    expect(revivalAudits).toHaveLength(0);
   });
 
   it("serializes concurrent karma transitions without lost reinforcement updates", async () => {

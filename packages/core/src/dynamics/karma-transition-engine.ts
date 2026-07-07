@@ -106,7 +106,7 @@ export class KarmaTransitionEngine {
     let appliedResult: KarmaTransitionApplyResult | undefined;
     await eventPublisher.mutateThenAppendMany(() => {
       const plan = this.computeKarmaTransitionPlanSync(parsedEvent, context);
-      const dummyApplyResult: KarmaTransitionApplyResult = {
+      const preApplyResult: KarmaTransitionApplyResult = {
         updated: {
           ...plan.memory,
           activation_score: plan.transition.activationScore,
@@ -115,14 +115,15 @@ export class KarmaTransitionEngine {
           retention_state: plan.transition.retentionState,
           ...plan.transition.fieldUpdates
         },
-        revived: parsedEvent.amount > 0 && plan.memory.lifecycle_state === "dormant"
+        revived: false
       };
-      const events = this.buildKarmaAuditInputs(dummyApplyResult, plan);
+      const events = this.buildKarmaAuditInputs(preApplyResult, plan);
       return {
         events,
         result: undefined,
         apply: () => {
           appliedResult = this.applyKarmaTransitionPlanSync(plan);
+          return this.buildKarmaRevivalAuditInputs(appliedResult, plan);
         }
       };
     });
@@ -342,6 +343,26 @@ export class KarmaTransitionEngine {
       entries.push(await this.deps.eventLogRepo.append(input));
     }
     return entries;
+  }
+
+  private buildKarmaRevivalAuditInputs(
+    applyResult: KarmaTransitionApplyResult,
+    plan: KarmaTransitionPlan
+  ): DynamicsEventLogInput[] {
+    if (!applyResult.revived) {
+      return [];
+    }
+
+    const { parsedEvent, transition } = plan;
+    return [
+      buildStateChangedEventInput({
+        memory: applyResult.updated,
+        fromState: "dormant",
+        toState: "active",
+        reasonCode: parsedEvent.kind,
+        occurredAt: transition.now
+      })
+    ];
   }
 
   private buildKarmaAuditInputs(

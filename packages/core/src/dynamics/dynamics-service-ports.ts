@@ -54,7 +54,7 @@ export interface KarmaTransitionEventPublisherPort {
     mutate: () => {
       readonly events: readonly DynamicsEventLogInput[];
       readonly result: T;
-      apply?(): void;
+      apply?(): void | readonly DynamicsEventLogInput[];
     }
   ): Promise<{ readonly result: T; readonly entries: readonly EventLogEntry[] }>;
 }

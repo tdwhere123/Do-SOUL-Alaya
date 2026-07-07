@@ -111,7 +111,8 @@ export class EventPublisher {
     mutate: () => {
       readonly events: readonly EventPublisherInput[];
       readonly result: T;
-      apply?(): void;
+      /** Runs after pre-apply appends; may return additional rows to append in the same transaction. */
+      apply?(): void | readonly EventPublisherInput[];
     }
   ): Promise<{ readonly result: T; readonly entries: readonly EventLogEntry[] }> {
     const repo = this.dependencies.eventLogRepo;
@@ -126,7 +127,12 @@ export class EventPublisher {
         collected.push(repo.append(input));
       }
       if (produced.apply) {
-        produced.apply();
+        const postApplyEvents = produced.apply();
+        if (postApplyEvents !== undefined && postApplyEvents.length > 0) {
+          for (const input of postApplyEvents) {
+            collected.push(repo.append(input));
+          }
+        }
       }
       return { entries: collected, result: produced.result };
     });
