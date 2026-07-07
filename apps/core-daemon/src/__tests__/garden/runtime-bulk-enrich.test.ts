@@ -179,7 +179,11 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     ]);
     // detectAndLinkConflicts reconstructs the conflict-scan params from the
     // persisted memory row, not from a re-passed signal.
-    expect(detectAndLinkConflicts.mock.calls[0][0]).toMatchObject({
+    const firstConflictScanCall = detectAndLinkConflicts.mock.calls[0];
+    if (firstConflictScanCall === undefined) {
+      throw new Error("expected detectAndLinkConflicts to be called");
+    }
+    expect(firstConflictScanCall[0]).toMatchObject({
       newMemoryDimension: "fact",
       newMemoryContent: "content-for-memory-1"
     });

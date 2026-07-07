@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ProjectMappingState, ScopeClass } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import { createActiveConstraint, createAnchor, createDependencies, createMemoryEntry, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
+import { firstDefined } from "../helpers/defined.js";
 
 describe("RecallService", () => {
 it("applies coarse scope filters to all global-source candidates", async () => {
@@ -290,7 +291,7 @@ it("respects token budget", async () => {
     });
 
     expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0].object_id).toBe("memory-1");
+    expect(firstDefined(result.candidates).object_id).toBe("memory-1");
   });
 
 it("respects max_entries budget", async () => {

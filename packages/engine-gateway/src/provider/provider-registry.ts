@@ -1,6 +1,7 @@
 import {
   EngineError,
   EngineErrorKind,
+  isAllowedPersistedApiKeyRef,
   type EngineBinding
 } from "@do-soul/alaya-protocol";
 
@@ -13,7 +14,10 @@ export function readApiKey(
   }
 
   const envName = "api_key_ref" in binding ? binding.api_key_ref : undefined;
-  return typeof envName === "string" ? getEnv(envName) : undefined;
+  if (typeof envName === "string" && isAllowedPersistedApiKeyRef(envName)) {
+    return getEnv(envName);
+  }
+  return undefined;
 }
 
 export function resolveApiKey(

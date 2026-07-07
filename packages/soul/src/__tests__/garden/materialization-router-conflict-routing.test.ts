@@ -74,7 +74,7 @@ describe("MaterializationRouter potential_conflict routing", () => {
     const result = await router.materializeSignal(signal);
 
     expect(evaluate).toHaveBeenCalledTimes(1);
-    expect(evaluate.mock.calls[0][0]).toMatchObject({
+    expect(evaluate.mock.calls[0]![0]).toMatchObject({
       signalId: "signal-1",
       workspaceId: "workspace-1",
       runId: "run-1",

@@ -149,7 +149,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
       );
 
       expect(deps.claimService.create).toHaveBeenCalledTimes(1);
-      const claimInput = deps.claimService.create.mock.calls[0][0] as Record<string, unknown>;
+      const claimInput = deps.claimService.create.mock.calls[0]![0] as Record<string, unknown>;
       expect(claimInput.precedence_basis).toBe(row.expected);
     });
   }
@@ -172,7 +172,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
     );
 
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
-    const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as Record<string, unknown>;
+    const evidenceInput = deps.evidenceService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(evidenceInput.evidence_kind).toBe("user_statement");
   });
 
@@ -191,7 +191,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
     );
 
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
-    const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as Record<string, unknown>;
+    const evidenceInput = deps.evidenceService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(evidenceInput.evidence_kind).toBe("external_reference");
   });
 
@@ -210,7 +210,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
     );
 
     expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
-    const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as Record<string, unknown>;
+    const evidenceInput = deps.evidenceService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(evidenceInput.evidence_kind).toBe("inferred");
   });
 
@@ -236,7 +236,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
     );
 
     expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as Record<string, unknown>;
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(memoryInput.formation_kind).toBe("derived");
   });
 
@@ -256,7 +256,7 @@ describe("MaterializationRouter producer-side diversifiers", () => {
     );
 
     expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as Record<string, unknown>;
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(memoryInput.formation_kind).toBe("inferred");
   });
 });

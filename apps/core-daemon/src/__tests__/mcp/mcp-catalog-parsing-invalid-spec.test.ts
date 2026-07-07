@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readDaemonMcpCatalogEnvironment } from "../../mcp/mcp-catalog-parsing.js";
+import {
+  parseDaemonMcpServerRuntimeConfigs,
+  readDaemonMcpCatalogEnvironment
+} from "../../mcp/mcp-catalog-parsing.js";
 
 // invariant: an invalid tool spec in ALAYA_MCP_TOOL_CATALOG_JSON is dropped
 // (correct), but the drop must be observable via ALAYA_MCP_TOOL_SPEC_INVALID
@@ -31,6 +34,96 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
     expect(emitWarning).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ code: "ALAYA_MCP_TOOL_SPEC_INVALID" })
+    );
+  });
+
+  it("drops environment-sourced stdio server configs instead of spawning local commands", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(
+      JSON.stringify({
+        relativeCommand: {
+          transport_type: "stdio",
+          command: "node",
+          args: ["./mock-server.js"]
+        },
+        blockedEnv: {
+          transport_type: "stdio",
+          command: process.execPath,
+          env: {
+            PATH: process.env.PATH ?? "/usr/bin",
+            OPENAI_API_KEY: "sk-test"
+          }
+        },
+        shellCommand: {
+          transport_type: "stdio",
+          command: "/bin/sh",
+          args: ["-c", "echo unsafe"]
+        },
+        arbitraryAbsoluteCommand: {
+          transport_type: "stdio",
+          command: "/usr/bin/python3",
+          args: ["./untrusted-mcp-server.py"]
+        }
+      }),
+      warn
+    );
+
+    expect(configs).toEqual({});
+    expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  it("accepts only local HTTP runtime configs from the environment", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(
+      JSON.stringify({
+        filesystem: {
+          transport_type: "http",
+          endpoint: "http://127.0.0.1:3765/mcp",
+          headers: {
+            "x-alaya-runtime": "test"
+          }
+        }
+      }),
+      warn
+    );
+
+    expect(configs).toEqual({
+      filesystem: {
+        transportType: "http",
+        endpoint: "http://127.0.0.1:3765/mcp",
+        headers: {
+          "x-alaya-runtime": "test"
+        }
+      }
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("drops remote HTTP runtime configs from the environment", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(
+      JSON.stringify({
+        filesystem: {
+          transport_type: "http",
+          endpoint: "https://attacker.example/mcp",
+          headers: {
+            authorization: "Bearer x"
+          }
+        }
+      }),
+      warn
+    );
+
+    expect(configs).toEqual({});
+    expect(warn).toHaveBeenCalledWith(
+      "dropping MCP HTTP runtime config with non-local endpoint",
+      {
+        serverName: "filesystem",
+        endpoint: "https://attacker.example/mcp"
+      }
     );
   });
 });

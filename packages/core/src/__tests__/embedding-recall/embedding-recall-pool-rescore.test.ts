@@ -10,6 +10,8 @@ function buildService(input: {
   readonly queryEmbedding: Float32Array;
   readonly storedVectors: readonly EmbeddingVectorRecord[];
   readonly isAvailable?: boolean;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  readonly embedTexts?: (texts: readonly string[]) => Promise<readonly Float32Array[]>;
 }): EmbeddingRecallService {
   return new EmbeddingRecallService({
     embeddingRepo: {
@@ -18,7 +20,10 @@ function buildService(input: {
     },
     provider: createProvider({
       isAvailable: input.isAvailable ?? true,
-      embedTexts: vi.fn(async () => [input.queryEmbedding])
+      embedTexts:
+        input.embedTexts === undefined
+          ? vi.fn(async () => [input.queryEmbedding])
+          : vi.fn(input.embedTexts)
     }),
     eventLogRepo: {
       append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
@@ -30,7 +35,8 @@ function buildService(input: {
       queryByEntity: vi.fn(async () => [])
     },
     generateQueryId: () => "query-pool-1",
-    now: () => "2026-04-23T00:00:00.000Z"
+    now: () => "2026-04-23T00:00:00.000Z",
+    warn: input.warn as ((message: string, meta: Record<string, unknown>) => void) | undefined
   });
 }
 
@@ -69,5 +75,35 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
     expect(
       (await unavailable.scorePoolCandidates({ workspaceId: "w", runId: null, queryText: "q", objectIds: ["aligned"] })).size
     ).toBe(0);
+  });
+
+  it("warns and degrades to an empty map when query embedding resolution fails", async () => {
+    const warn = vi.fn();
+    const service = buildService({
+      queryEmbedding: new Float32Array([1, 0]),
+      storedVectors: [createEmbeddingRecord({ object_id: "aligned", embedding: new Float32Array([1, 0]) })],
+      warn,
+      embedTexts: async () => {
+        throw new Error("query embedding offline");
+      }
+    });
+
+    const scores = await service.scorePoolCandidates({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "anything",
+      objectIds: ["aligned"]
+    });
+
+    expect(scores.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      "pool embedding rescoring degraded",
+      expect.objectContaining({
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        reason: "query_embedding_failed",
+        error: "query embedding offline"
+      })
+    );
   });
 });

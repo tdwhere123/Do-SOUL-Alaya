@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createBootstrappingRecord, createPathRelation, makeReconcileService } from "./workspace-service.test-support.js";
+import { firstDefined, requireAt } from "../helpers/defined.js";
 
 describe("WorkspaceService.reconcileBootstrapPaths", () => {
   it("returns skipped_no_planner when bootstrapping deps are not wired", async () => {
@@ -166,7 +167,7 @@ describe("WorkspaceService.reconcileBootstrapPaths", () => {
     });
 
     expect(seenEvents).toHaveLength(1);
-    expect(seenEvents[0]).toHaveLength(1);
-    expect(seenEvents[0][0].caused_by).toBe("user_action");
+    expect(requireAt(seenEvents, 0)).toHaveLength(1);
+    expect(firstDefined(firstDefined(seenEvents)).caused_by).toBe("user_action");
   });
 });

@@ -18,11 +18,9 @@ export interface SynthesisCapsuleStatements {
 export function prepareSynthesisCapsuleStatements(db: StorageDatabase): SynthesisCapsuleStatements {
   return {
     createStatement: db.connection.prepare(CREATE_SYNTHESIS_CAPSULE_SQL),
-    findByIdStatement: db.connection.prepare(findSynthesisCapsuleSql("object_id = ?", "LIMIT 1")),
-    findByWorkspaceIdStatement: db.connection.prepare(findSynthesisCapsuleSql("workspace_id = ?")),
-    findByTopicKeyStatement: db.connection.prepare(
-      findSynthesisCapsuleSql("workspace_id = ?\n        AND topic_key = ?")
-    ),
+    findByIdStatement: db.connection.prepare(findSynthesisCapsuleSql("byId", "limitOne")),
+    findByWorkspaceIdStatement: db.connection.prepare(findSynthesisCapsuleSql("byWorkspace")),
+    findByTopicKeyStatement: db.connection.prepare(findSynthesisCapsuleSql("byTopic")),
     updateEvidenceRefsStatement: db.connection.prepare(updateRefsSql("evidence_refs")),
     updateSourceMemoryRefsStatement: db.connection.prepare(updateRefsSql("source_memory_refs")),
     updateStatusStatement: db.connection.prepare(`
@@ -35,12 +33,25 @@ export function prepareSynthesisCapsuleStatements(db: StorageDatabase): Synthesi
   };
 }
 
-function findSynthesisCapsuleSql(whereClause: string, suffix = ""): string {
-  const suffixSql = suffix.length === 0 ? "" : `\n      ${suffix}`;
+type SynthesisCapsuleWhereKey = "byId" | "byWorkspace" | "byTopic";
+type SynthesisCapsuleSuffixKey = "limitOne";
+
+const SYNTHESIS_WHERE_CLAUSES: Readonly<Record<SynthesisCapsuleWhereKey, string>> = Object.freeze({
+  byId: "object_id = ?",
+  byWorkspace: "workspace_id = ?",
+  byTopic: "workspace_id = ?\n        AND topic_key = ?"
+});
+
+const SYNTHESIS_SUFFIXES: Readonly<Record<SynthesisCapsuleSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1"
+});
+
+function findSynthesisCapsuleSql(whereKey: SynthesisCapsuleWhereKey, suffixKey?: SynthesisCapsuleSuffixKey): string {
+  const suffixSql = suffixKey === undefined ? "" : `\n      ${SYNTHESIS_SUFFIXES[suffixKey]}`;
   return `
       SELECT${SYNTHESIS_SELECT_COLUMNS}
       FROM synthesis_capsules
-      WHERE ${whereClause}
+      WHERE ${SYNTHESIS_WHERE_CLAUSES[whereKey]}
       ORDER BY created_at ASC, object_id ASC${suffixSql}
     `;
 }

@@ -157,6 +157,66 @@ describe("createApp", () => {
     expect(response.headers.get(CORRELATION_ID_HEADER)).toBe("req-123");
   });
 
+  it("adds defensive security headers to daemon responses", async () => {
+    const app = createProtectedTestApp();
+
+    const response = await app.request("/unknown", {
+      headers: withTestAuthHeaders({ "x-forwarded-proto": "https" })
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("strict-transport-security")).toBe(
+      "max-age=31536000; includeSubDomains"
+    );
+  });
+
+  it("rate limits repeated protected requests in the same window", async () => {
+    const app = createProtectedTestApp({
+      rateLimit: {
+        maxRequests: 2,
+        windowMs: 60_000,
+        nowMs: () => 1_000
+      }
+    });
+
+    const headers = withTestAuthHeaders();
+    expect((await app.request("/unknown", { headers })).status).toBe(404);
+    expect((await app.request("/unknown", { headers })).status).toBe(404);
+
+    const limited = await app.request("/unknown", { headers });
+    expect(limited.status).toBe(429);
+    await expect(limited.json()).resolves.toEqual({
+      success: false,
+      error: "Rate limit exceeded"
+    });
+    expect(limited.headers.get("retry-after")).toBe("60");
+  });
+
+  it("does not consume rate limit quota for requests rejected by token authentication", async () => {
+    const app = createProtectedTestApp({
+      rateLimit: {
+        maxRequests: 1,
+        windowMs: 60_000,
+        nowMs: () => 1_000
+      }
+    });
+
+    // Request with invalid token is rejected with 403
+    const badHeaders1 = { "x-request-token": "wrong-token", "x-alaya-desktop": "1" };
+    expect((await app.request("/unknown", { headers: badHeaders1 })).status).toBe(403);
+    expect((await app.request("/unknown", { headers: badHeaders1 })).status).toBe(403);
+
+    // Request with valid token still succeeds/returns 404 (not 429) because bad token did not consume quota
+    const goodHeaders = withTestAuthHeaders();
+    expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
+  });
+
   it("accepts trimmed allowed-origin values after startup normalization", async () => {
     const app = createApp({
       requestProtection: createRequestProtection({

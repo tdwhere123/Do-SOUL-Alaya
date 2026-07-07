@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryDimension, GreenGovernanceEventType, RevokeReason, ScopeClass, VerificationBasis, VerificationVerdict, type EventLogEntry } from "@do-soul/alaya-protocol";
 
 import { createEvent, createGreenStatus, createHarness, createMemoryEntry } from "./green-service.test-support.js";
+import { expectDefined, requireAt } from "../helpers/defined.js";
 
 describe("GreenService", () => {
 it("grant() creates an eligible status and emits soul.green.granted", async () => {
@@ -490,8 +491,8 @@ it("runVerification() stops retrying after three consecutive no-go verdicts", as
           (candidate.payload_json as Record<string, unknown>).revoke_reason === RevokeReason.REVIEW_OVERDUE
       )
     ).toBe(false);
-    expect(appendEvent.mock.invocationCallOrder[0]).toBeLessThan(upsertStatus.mock.invocationCallOrder[0]);
-    expect(upsertStatus.mock.invocationCallOrder[0]).toBeLessThan(notifyEntry.mock.invocationCallOrder[0]);
+    expect(expectDefined(requireAt(appendEvent.mock.invocationCallOrder, 0), "invocationCallOrder")).toBeLessThan(expectDefined(requireAt(upsertStatus.mock.invocationCallOrder, 0), "invocationCallOrder"));
+    expect(expectDefined(requireAt(upsertStatus.mock.invocationCallOrder, 0), "invocationCallOrder")).toBeLessThan(expectDefined(requireAt(notifyEntry.mock.invocationCallOrder, 0), "invocationCallOrder"));
     expect(notifyEntry).toHaveBeenCalledWith(event);
   });
 

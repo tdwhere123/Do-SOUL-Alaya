@@ -14,17 +14,44 @@ export function resolveDefaultFusionWeightForIntent(
   baseWeight: number,
   queryProbes: Readonly<RecallQueryProbes>
 ): number {
+  return resolveDefaultFusionWeightForIntentWithDiagnostics(stream, baseWeight, queryProbes).weight;
+}
+
+export interface FusionWeightResolutionDiagnostic {
+  readonly weight: number;
+  readonly baseWeight: number;
+  readonly adjustment:
+    | "none"
+    | "subject_alignment_preference_floor"
+    | "temporal_intent_floor";
+}
+
+export function resolveDefaultFusionWeightForIntentWithDiagnostics(
+  stream: RecallFusionStream,
+  baseWeight: number,
+  queryProbes: Readonly<RecallQueryProbes>
+): FusionWeightResolutionDiagnostic {
   if (!recallProjectionScoringEnabled()) {
-    return baseWeight;
+    return { weight: baseWeight, baseWeight, adjustment: "none" };
   }
   const intent = classifyRecallIntent(queryProbes);
   if (stream === "subject_alignment" && intent === "preference") {
-    return Math.max(baseWeight, 2);
+    const weight = Math.max(baseWeight, 2);
+    return {
+      weight,
+      baseWeight,
+      adjustment: weight === baseWeight ? "none" : "subject_alignment_preference_floor"
+    };
   }
   if (stream !== "temporal_recency" || baseWeight > 0) {
-    return baseWeight;
+    return { weight: baseWeight, baseWeight, adjustment: "none" };
   }
-  return intent === "temporal" || intent === "knowledge_update" ? 4 : baseWeight;
+  const weight = intent === "temporal" || intent === "knowledge_update" ? 4 : baseWeight;
+  return {
+    weight,
+    baseWeight,
+    adjustment: weight === baseWeight ? "none" : "temporal_intent_floor"
+  };
 }
 
 export { recallProjectionScoringEnabled } from "../../config/recall-env-access.js";

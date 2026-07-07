@@ -14,6 +14,7 @@ import {
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { requireAt } from "../helpers/defined.js";
 
 function createTaskSurface(): TaskObjectSurface {
   return {
@@ -398,9 +399,9 @@ describe("RecallService global project-mapping filter", () => {
     });
 
     expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0].object_id).toBe("global-unmapped");
-    expect(result.candidates[0].is_advisory).toBeUndefined();
-    expect(result.candidates[0].origin_plane).toBe("workspace_local");
+    expect(requireAt(result.candidates, 0).object_id).toBe("global-unmapped");
+    expect(requireAt(result.candidates, 0).is_advisory).toBeUndefined();
+    expect(requireAt(result.candidates, 0).origin_plane).toBe("workspace_local");
   });
 
 });

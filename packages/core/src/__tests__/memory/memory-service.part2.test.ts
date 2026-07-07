@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RevokeReason, StorageTier, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { MemoryService } from "../../memory/memory-service.js";
 import { createDependencies, createEventLogHistory, createMemoryEntry } from "./memory-service-test-fixtures.js";
+import { firstDefined, mockCallAt } from "../helpers/defined.js";
 
 describe("MemoryService", () => {
 it("writes soul.memory.updated after persistence and before runtime notification with computed revision", async () => {
@@ -69,7 +70,7 @@ it("writes soul.memory.updated after persistence and before runtime notification
     expect(updated.content).toBe("Updated content");
     expect(updated.storage_tier).toBe(StorageTier.COLD);
 
-    const emitted = updateAppendSpy.mock.calls[0][0];
+    const emitted = firstDefined(mockCallAt(updateAppendSpy, 0));
     expect(emitted).not.toHaveProperty("revision");
     expect(emitted.event_type).toBe("soul.memory.updated");
   });

@@ -3,6 +3,7 @@ import { EdgeProposalStatus, EdgeProposalTriggerSource } from "@do-soul/alaya-pr
 import { EdgeProposalService } from "../../path-graph/edge-proposals/edge-proposal-service.js";
 import type { PathMintOutcome } from "../../path-graph/edge-proposals/path-relation-proposal-service.js";
 import { createAutoAcceptHarness, createEventPublisher, createIdGenerator, createMemoryRepo, createPathCandidatePort, createProposalRepo } from "./edge-proposal-service-test-fixtures.js";
+import { firstDefined, mockCallAt } from "../helpers/defined.js";
 
 describe("EdgeProposalService", () => {
 it("creates a pending proposal without writing a durable graph edge", async () => {
@@ -160,7 +161,7 @@ it("accept mints a governed path relation and reject does not", async () => {
       repo.forceStatus(proposal.proposal_id, EdgeProposalStatus.AUTO_ACCEPTED);
       await service.reconcileStuckAccepts({ workspaceId: "workspace-1", limit: 32 });
       expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
-      const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
+      const mintArgs = firstDefined(mockCallAt(pathCandidatePort.submitCandidate, 0));
       expect(mintArgs.relationKind).toBe(edgeType);
       expect(mintArgs.recallBiasSign).toBe(-1);
       expect(mintArgs.governanceClass).toBe("attention_only");
@@ -196,7 +197,7 @@ it("accept mints a governed path relation and reject does not", async () => {
       reviewerIdentity: "user:reviewer"
     });
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
-    const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
+    const mintArgs = firstDefined(mockCallAt(pathCandidatePort.submitCandidate, 0));
     expect(mintArgs.relationKind).toBe("contradicts");
     expect(mintArgs.recallBiasSign).toBe(-1);
     expect(mintArgs.governanceClass).toBe("recall_allowed");
@@ -216,7 +217,7 @@ it("accept mints a governed path relation and reject does not", async () => {
       confidence: 1
     });
     expect(pathCandidatePort.submitCandidate).toHaveBeenCalledTimes(1);
-    const mintArgs = pathCandidatePort.submitCandidate.mock.calls[0][0];
+    const mintArgs = firstDefined(mockCallAt(pathCandidatePort.submitCandidate, 0));
     expect(mintArgs.relationKind).toBe("recalls");
     expect(mintArgs.recallBiasSign).toBe(1);
     expect(mintArgs.governanceClass).toBe("recall_allowed");
@@ -369,12 +370,12 @@ it("accept mints a governed path relation and reject does not", async () => {
       .flatMap((call) => call[0])
       .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
     expect(mintFailedEvents).toHaveLength(1);
-    expect(mintFailedEvents[0]).toMatchObject({
+    expect(firstDefined(mintFailedEvents)).toMatchObject({
       entity_type: "edge_proposal",
       entity_id: proposal.proposal_id,
       caused_by: "user:reviewer"
     });
-    expect(mintFailedEvents[0].payload_json).toMatchObject({
+    expect(firstDefined(mintFailedEvents).payload_json).toMatchObject({
       proposal_id: proposal.proposal_id,
       source_memory_id: "memory-a",
       target_memory_id: "memory-b",
@@ -430,7 +431,7 @@ it("accept mints a governed path relation and reject does not", async () => {
       .flatMap((call) => call[0])
       .filter((event) => event.event_type === "soul.graph.edge_proposal_path_mint_failed");
     expect(mintFailedEvents).toHaveLength(1);
-    expect(mintFailedEvents[0].payload_json).toMatchObject({
+    expect(firstDefined(mintFailedEvents).payload_json).toMatchObject({
       proposal_id: proposal.proposal_id,
       failure_kind: "submit_returned_false",
       workspace_id: "workspace-1"

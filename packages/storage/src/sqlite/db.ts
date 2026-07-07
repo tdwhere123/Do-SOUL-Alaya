@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
 import { LruCache } from "./lru-cache.js";
+import type { SqliteWriteQueuePort } from "./write-queue-port.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
@@ -14,6 +15,12 @@ export interface InitDatabaseOptions {
 const MAX_DATABASE_CACHE_ENTRIES = 32;
 
 const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
+
+let sqliteWriteQueuePort: SqliteWriteQueuePort | null = null;
+
+export function configureSqliteWriteQueuePort(port: SqliteWriteQueuePort | null): void {
+  sqliteWriteQueuePort = port;
+}
 
 interface MigrationStatements {
   readonly isAppliedStatement: {
@@ -306,7 +313,20 @@ function evictDatabaseCacheIfNeeded(incomingFilename: string): void {
   if (databaseCache.has(incomingFilename)) {
     return;
   }
-  while (databaseCache.size >= MAX_DATABASE_CACHE_ENTRIES) {
-    databaseCache.deleteOldest()?.close();
+  const queue = sqliteWriteQueuePort;
+  let spin = 0;
+  const maxSpin = databaseCache.size + 1;
+  while (databaseCache.size >= MAX_DATABASE_CACHE_ENTRIES && spin < maxSpin) {
+    spin += 1;
+    const oldestKey = databaseCache.oldestKey();
+    if (oldestKey === undefined) {
+      break;
+    }
+    if (queue?.blocksEviction(oldestKey) === true) {
+      databaseCache.get(oldestKey);
+      continue;
+    }
+    databaseCache.deleteOldest();
+    break;
   }
 }

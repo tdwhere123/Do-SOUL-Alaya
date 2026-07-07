@@ -62,7 +62,7 @@ describe("MaterializationRouter claim_status draft lock", () => {
     );
 
     expect(deps.claimService.create).toHaveBeenCalledTimes(1);
-    const claimInput = deps.claimService.create.mock.calls[0][0] as Record<string, unknown>;
+    const claimInput = deps.claimService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect("claim_status" in claimInput).toBe(false);
   });
 
@@ -112,7 +112,7 @@ describe("MaterializationRouter claim_status draft lock", () => {
 
       expect(result.route_target).toBe("memory_and_claim_draft");
       expect(deps.claimService.create).toHaveBeenCalledTimes(1);
-      const claimInput = deps.claimService.create.mock.calls[0][0] as Record<string, unknown>;
+      const claimInput = deps.claimService.create.mock.calls[0]![0] as Record<string, unknown>;
       expect(claimInput.claim_kind).toBe(claimCase[1]);
     });
   }

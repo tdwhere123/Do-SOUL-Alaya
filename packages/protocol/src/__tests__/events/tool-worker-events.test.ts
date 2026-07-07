@@ -105,46 +105,46 @@ describe("Phase A1 event registry", () => {
       faultSummary: "Repeated spam-like signal emissions detected."
     } as const;
 
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_CREATED, toolIntentCreatedPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_CREATED!, toolIntentCreatedPayload)).toEqual(
       toolIntentCreatedPayload
     );
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_APPROVED, toolIntentApprovedPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_APPROVED!, toolIntentApprovedPayload)).toEqual(
       toolIntentApprovedPayload
     );
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_DENIED, toolIntentDeniedPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_DENIED!, toolIntentDeniedPayload)).toEqual(
       toolIntentDeniedPayload
     );
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_STARTED, toolCallStartedPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_STARTED!, toolCallStartedPayload)).toEqual(
       toolCallStartedPayload
     );
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED, toolCallCompletedPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED!, toolCallCompletedPayload)).toEqual(
       toolCallCompletedPayload
     );
     expect(
       parseToolWorkerEventPayload(
-        ToolWorkerEventType.TOOL_CALL_COMPLETED,
+        ToolWorkerEventType.TOOL_CALL_COMPLETED!,
         toolCallCompletedPayloadWithAffectedPaths
       )
     ).toEqual(toolCallCompletedPayloadWithAffectedPaths);
     expect(
       parseToolWorkerEventPayload(
-        ToolWorkerEventType.TOOL_CALL_COMPLETED,
+        ToolWorkerEventType.TOOL_CALL_COMPLETED!,
         toolCallCompletedPayloadWithNullAffectedPaths
       )
     ).toEqual(toolCallCompletedPayloadWithNullAffectedPaths);
     expect(
       parseToolWorkerEventPayload(
-        ToolWorkerEventType.TOOL_CALL_COMPLETED,
+        ToolWorkerEventType.TOOL_CALL_COMPLETED!,
         toolCallCompletedPayloadWithEmptyAffectedPaths
       )
     ).toEqual(toolCallCompletedPayloadWithEmptyAffectedPaths);
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED, workerStateChangedPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED!, workerStateChangedPayload)).toEqual(
       workerStateChangedPayload
     );
     expect(
-      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED, workerStateActivatedFromInitPayload)
+      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED!, workerStateActivatedFromInitPayload)
     ).toEqual(workerStateActivatedFromInitPayload);
-    expect(parseToolWorkerEventPayload(ToolWorkerEventType.GOVERNANCE_SPAM_FAULT, governanceSpamFaultPayload)).toEqual(
+    expect(parseToolWorkerEventPayload(ToolWorkerEventType.GOVERNANCE_SPAM_FAULT!, governanceSpamFaultPayload)).toEqual(
       governanceSpamFaultPayload
     );
 
@@ -156,37 +156,37 @@ describe("Phase A1 event registry", () => {
 
     expect(
       ToolWorkerEventUnionSchema.parse({
-        type: ToolWorkerEventType.WORKER_STATE_CHANGED,
+        type: ToolWorkerEventType.WORKER_STATE_CHANGED!,
         payload: workerStateChangedPayload
       })
     ).toEqual({
-      type: ToolWorkerEventType.WORKER_STATE_CHANGED,
+      type: ToolWorkerEventType.WORKER_STATE_CHANGED!,
       payload: workerStateChangedPayload
     });
     expect(
       ToolWorkerEventUnionSchema.parse({
-        type: ToolWorkerEventType.TOOL_CALL_STARTED,
+        type: ToolWorkerEventType.TOOL_CALL_STARTED!,
         payload: toolCallStartedPayload
       })
     ).toEqual({
-      type: ToolWorkerEventType.TOOL_CALL_STARTED,
+      type: ToolWorkerEventType.TOOL_CALL_STARTED!,
       payload: toolCallStartedPayload
     });
     expect(
       ToolWorkerEventUnionSchema.parse({
-        type: ToolWorkerEventType.GOVERNANCE_SPAM_FAULT,
+        type: ToolWorkerEventType.GOVERNANCE_SPAM_FAULT!,
         payload: governanceSpamFaultPayload
       })
     ).toEqual({
-      type: ToolWorkerEventType.GOVERNANCE_SPAM_FAULT,
+      type: ToolWorkerEventType.GOVERNANCE_SPAM_FAULT!,
       payload: governanceSpamFaultPayload
     });
 
-    expect(EventTypeSchema.parse(ToolWorkerEventType.WORKER_STATE_CHANGED)).toBe(ToolWorkerEventType.WORKER_STATE_CHANGED);
-    expect(EventTypeSchema.parse(ToolWorkerEventType.TOOL_CALL_STARTED)).toBe(ToolWorkerEventType.TOOL_CALL_STARTED);
-    expect(EventTypeSchema.parse(ToolWorkerEventType.TOOL_CALL_COMPLETED)).toBe(ToolWorkerEventType.TOOL_CALL_COMPLETED);
-    expect(EventTypeSchema.parse(ToolWorkerEventType.GOVERNANCE_SPAM_FAULT)).toBe(
-      ToolWorkerEventType.GOVERNANCE_SPAM_FAULT
+    expect(EventTypeSchema.parse(ToolWorkerEventType.WORKER_STATE_CHANGED!)).toBe(ToolWorkerEventType.WORKER_STATE_CHANGED!);
+    expect(EventTypeSchema.parse(ToolWorkerEventType.TOOL_CALL_STARTED!)).toBe(ToolWorkerEventType.TOOL_CALL_STARTED!);
+    expect(EventTypeSchema.parse(ToolWorkerEventType.TOOL_CALL_COMPLETED!)).toBe(ToolWorkerEventType.TOOL_CALL_COMPLETED!);
+    expect(EventTypeSchema.parse(ToolWorkerEventType.GOVERNANCE_SPAM_FAULT!)).toBe(
+      ToolWorkerEventType.GOVERNANCE_SPAM_FAULT!
     );
   });
 
@@ -206,14 +206,14 @@ describe("Phase A1 event registry", () => {
     expect(() => ToolWorkerEventTypeSchema.parse("tool.execution.started")).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED!, {
         toolCallId: "tool-call-1",
         statusKind: "success"
       })
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED!, {
         toolCallId: "tool-call-1",
         statusKind: "partial",
         durationMs: 42
@@ -221,7 +221,7 @@ describe("Phase A1 event registry", () => {
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED!, {
         toolCallId: "tool-call-1",
         statusKind: "success",
         durationMs: 42,
@@ -230,7 +230,7 @@ describe("Phase A1 event registry", () => {
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_CALL_COMPLETED!, {
         toolCallId: "tool-call-1",
         statusKind: "success",
         durationMs: 42,
@@ -239,14 +239,14 @@ describe("Phase A1 event registry", () => {
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED!, {
         workerId: "worker-1",
         state: "active"
       })
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED!, {
         workerId: "worker-1",
         state: "suspended",
         previousState: "active",
@@ -255,7 +255,7 @@ describe("Phase A1 event registry", () => {
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED!, {
         workerId: "worker-1",
         state: "init",
         previousState: "active"
@@ -263,7 +263,7 @@ describe("Phase A1 event registry", () => {
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.WORKER_STATE_CHANGED!, {
         workerId: "worker-1",
         state: "active",
         previousState: "init",
@@ -272,14 +272,14 @@ describe("Phase A1 event registry", () => {
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.GOVERNANCE_SPAM_FAULT, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.GOVERNANCE_SPAM_FAULT!, {
         runId: "run-1",
         nodeId: "node-1"
       })
     ).toThrow();
 
     expect(() =>
-      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_DENIED, {
+      parseToolWorkerEventPayload(ToolWorkerEventType.TOOL_INTENT_DENIED!, {
         executionId: "exec-2",
         governanceDecisionRef: "decision-2",
         hardConstraintsPresent: true

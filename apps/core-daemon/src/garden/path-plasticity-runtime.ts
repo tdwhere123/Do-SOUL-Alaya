@@ -173,10 +173,11 @@ export function createPathPlasticityLookupTelemetry(options?: {
 
       const sorted = [...durations].sort((left, right) => left - right);
       const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.99) - 1);
+      const durationP99 = sorted[index] ?? null;
       return Object.freeze({
         lookup_count: lookupCount,
         sample_count: durations.length,
-        duration_p99_ms: sorted[index],
+        duration_p99_ms: durationP99,
         window_size: windowSize
       });
     },

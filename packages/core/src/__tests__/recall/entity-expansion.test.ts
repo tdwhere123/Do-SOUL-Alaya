@@ -5,6 +5,7 @@ import {
   type EntityCandidate,
   type EntityGroup
 } from "../../recall/expansion/entity-expansion.js";
+import { firstDefined } from "../helpers/defined.js";
 
 function candidate(objectId: string, canonicalEntities: readonly string[] | null | undefined): EntityCandidate {
   return { objectId, canonicalEntities };
@@ -89,13 +90,13 @@ describe("groupCandidatesByEntity", () => {
     const second = groupCandidatesByEntity(input);
     expect(first).toEqual(second);
     expect(first.map((g) => g.key)).toEqual(["alice", null, "postgres"]);
-    expect(first[0].memberObjectIds).toEqual(["m1", "m4"]);
+    expect(firstDefined(first).memberObjectIds).toEqual(["m1", "m4"]);
   });
 
   it("defaults the cap to DEFAULT_ENTITY_GROUP_CAP", () => {
     const input = Array.from({ length: DEFAULT_ENTITY_GROUP_CAP + 5 }, (_, i) => candidate(`m${i}`, ["x"]));
     const groups = groupCandidatesByEntity(input);
     expect(groups).toHaveLength(1);
-    expect(groups[0].memberObjectIds).toHaveLength(DEFAULT_ENTITY_GROUP_CAP);
+    expect(firstDefined(groups).memberObjectIds).toHaveLength(DEFAULT_ENTITY_GROUP_CAP);
   });
 });

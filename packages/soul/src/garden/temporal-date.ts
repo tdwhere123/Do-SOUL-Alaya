@@ -14,18 +14,26 @@ export function normalizeTemporalIsoString(value: string): string | null {
 export function parseStrictCalendarDateToUtcDay(value: string): Date | null {
   const iso = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/u.exec(value);
   if (iso !== null) {
-    return buildUtcDate(iso[1], iso[2], iso[3] ?? "1");
+    return buildUtcDate(readCapture(iso, 1), readCapture(iso, 2), iso[3] ?? "1");
   }
   const chinese = /^(\d{4})年(\d{1,2})月(?:(\d{1,2})日)?$/u.exec(value);
   if (chinese !== null) {
-    return buildUtcDate(chinese[1], chinese[2], chinese[3] ?? "1");
+    return buildUtcDate(readCapture(chinese, 1), readCapture(chinese, 2), chinese[3] ?? "1");
   }
   return null;
 }
 
 function hasInvalidCalendarPrefix(value: string): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(value);
-  return match !== null && buildUtcDate(match[1], match[2], match[3]) === null;
+  return match !== null && buildUtcDate(readCapture(match, 1), readCapture(match, 2), readCapture(match, 3)) === null;
+}
+
+function readCapture(match: RegExpExecArray, index: number): string {
+  const value = match[index];
+  if (value === undefined) {
+    throw new Error("Temporal date invariant violated: missing regex capture.");
+  }
+  return value;
 }
 
 function buildUtcDate(yearRaw: string, monthRaw: string, dayRaw: string): Date | null {

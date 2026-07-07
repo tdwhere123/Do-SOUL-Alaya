@@ -7,6 +7,13 @@ interface TarjanState {
   readonly lowLinks: Map<string, number>;
 }
 
+export {
+  parseRelativeTemporalTerm,
+  resolveRelativeTemporalWindow,
+  type RelativeTemporalTerm,
+  type TemporalWindow
+} from "./temporal-window.js";
+
 export function countStronglyConnectedComponents(
   nodeKeys: readonly string[],
   adjacency: ReadonlyMap<string, ReadonlySet<string>>,

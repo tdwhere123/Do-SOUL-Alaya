@@ -89,7 +89,7 @@ describe("Phase 4B protocol schemas", () => {
       workspace_id: "workspace-1",
       occurred_at: validTimestamp
     } as const;
-    expect(parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED, edgeCreatedPayload)).toEqual(
+    expect(parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED!, edgeCreatedPayload)).toEqual(
       edgeCreatedPayload
     );
 
@@ -107,7 +107,7 @@ describe("Phase 4B protocol schemas", () => {
     } as const;
     expect(
       parseGraphAuditorEventPayload(
-        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED,
+        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED!,
         edgeProposalCreatedPayload
       )
     ).toEqual(edgeProposalCreatedPayload);
@@ -122,7 +122,7 @@ describe("Phase 4B protocol schemas", () => {
     } as const;
     expect(
       parseGraphAuditorEventPayload(
-        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
+        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED!,
         edgeProposalReviewedPayload
       )
     ).toEqual(edgeProposalReviewedPayload);
@@ -136,11 +136,11 @@ describe("Phase 4B protocol schemas", () => {
       occurred_at: validTimestamp
     } as const;
     expect(
-      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED, exploreCompletedPayload)
+      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED!, exploreCompletedPayload)
     ).toEqual(exploreCompletedPayload);
 
     expect(
-      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED, {
+      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED!, {
         source_memory_id: "memory-1",
         workspace_id: "workspace-1",
         direction: "both",
@@ -158,7 +158,7 @@ describe("Phase 4B protocol schemas", () => {
       occurred_at: validTimestamp
     } as const;
     expect(
-      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED, topologyExploreCompletedPayload)
+      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED!, topologyExploreCompletedPayload)
     ).toEqual(topologyExploreCompletedPayload);
 
     const pointerHealedPayload = {
@@ -170,7 +170,7 @@ describe("Phase 4B protocol schemas", () => {
       workspace_id: "workspace-1",
       occurred_at: validTimestamp
     } as const;
-    expect(parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED, pointerHealedPayload)).toEqual(
+    expect(parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!, pointerHealedPayload)).toEqual(
       pointerHealedPayload
     );
 
@@ -181,7 +181,7 @@ describe("Phase 4B protocol schemas", () => {
       workspace_id: "workspace-1",
       occurred_at: validTimestamp
     } as const;
-    expect(parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED, orphanReportedPayload)).toEqual(
+    expect(parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED!, orphanReportedPayload)).toEqual(
       orphanReportedPayload
     );
 
@@ -198,39 +198,39 @@ describe("Phase 4B protocol schemas", () => {
     } as const;
     expect(
       parseGraphAuditorEventPayload(
-        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED,
+        GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED!,
         edgeProposalPathMintFailedPayload
       )
     ).toEqual(edgeProposalPathMintFailedPayload);
 
     expect(GraphAuditorEventTypeSchema.options).toEqual([
-      GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED,
-      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED,
-      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED,
-      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED,
-      GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED,
-      GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
-      GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED!,
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_CREATED!,
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED!,
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_PATH_MINT_FAILED!,
+      GraphAuditorEventType.SOUL_GRAPH_EXPLORE_COMPLETED!,
+      GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!,
+      GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED!
     ]);
 
     expect(
       GraphAuditorEventUnionSchema.parse({
-        type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED,
+        type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED!,
         payload: orphanReportedPayload
       })
     ).toEqual({
-      type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED,
+      type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED!,
       payload: orphanReportedPayload
     });
 
-    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED)).toBe(
-      GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED
+    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED!)).toBe(
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_CREATED!
     );
-    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED)).toBe(
-      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED
+    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED!)).toBe(
+      GraphAuditorEventType.SOUL_GRAPH_EDGE_PROPOSAL_REVIEWED!
     );
-    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED)).toBe(
-      GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED
+    expect(EventTypeSchema.parse(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!)).toBe(
+      GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!
     );
   });
 
@@ -243,7 +243,7 @@ describe("Phase 4B protocol schemas", () => {
     ) => unknown;
 
     expect(() =>
-      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED, {
+      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!, {
         source_object_id: "claim-1",
         source_object_kind: "claim_form",
         ref_kind: "evidence_ref",
@@ -254,7 +254,7 @@ describe("Phase 4B protocol schemas", () => {
     ).toThrow();
 
     expect(() =>
-      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED, {
+      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!, {
         source_object_id: "claim-1",
         source_object_kind: "claim_form",
         ref_kind: "evidence_ref",
@@ -265,7 +265,7 @@ describe("Phase 4B protocol schemas", () => {
     ).toThrow();
 
     expect(() =>
-      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED, {
+      parseGraphAuditorEventPayload(GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED!, {
         source_object_id: "claim-1",
         source_object_kind: "claim_form",
         ref_kind: "evidence_ref",

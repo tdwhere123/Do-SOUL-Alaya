@@ -208,8 +208,28 @@ export const PATH_MINT_SUPERSEDED_REVIEW_REASON =
 // operator verdict.
 export const PATH_MINT_SUPERSEDED_REVIEWER_IDENTITY = "system:edge_proposal_mint_reconcile";
 
+export interface AgentReportedConfidenceClampDiagnostic {
+  readonly confidence: number;
+  readonly requestedConfidence: number;
+  readonly capApplied: boolean;
+  readonly cap: number;
+}
+
 export function clampAgentReportedConfidence(confidence: number): number {
-  return Math.min(confidence, 0.5);
+  return clampAgentReportedConfidenceWithDiagnostics(confidence).confidence;
+}
+
+export function clampAgentReportedConfidenceWithDiagnostics(
+  confidence: number
+): AgentReportedConfidenceClampDiagnostic {
+  const cap = 0.5;
+  const clamped = Math.min(confidence, cap);
+  return {
+    confidence: clamped,
+    requestedConfidence: confidence,
+    capApplied: clamped !== confidence,
+    cap
+  };
 }
 
 export function toPendingSummary(proposal: EdgeProposal) {

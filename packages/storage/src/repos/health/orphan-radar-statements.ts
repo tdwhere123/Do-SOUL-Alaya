@@ -18,28 +18,36 @@ export function prepareOrphanRadarStatements(db: StorageDatabase): OrphanRadarSt
   return {
     createStatement: db.connection.prepare(CREATE_ORPHAN_RADAR_SQL),
     createEventLogOrphanStatement: db.connection.prepare(CREATE_EVENT_LOG_ORPHAN_SQL),
-    findByIdStatement: db.connection.prepare(selectOrphanRadarSql("radar_id = ? AND target_event_id IS NULL", "LIMIT 1")),
+    findByIdStatement: db.connection.prepare(selectOrphanRadarSql("byId", "limitOne")),
     findActiveByWorkspaceIdStatement: db.connection.prepare(
-      selectOrphanRadarSql(
-        "workspace_id = ? AND expires_at > ? AND target_event_id IS NULL",
-        `ORDER BY detected_at DESC, radar_id ASC\n       LIMIT ${ORPHAN_RADAR_LIST_LIMIT}`
-      )
+      selectOrphanRadarSql("activeByWorkspace", "listRecent")
     ),
     findByTargetMemoryStatement: db.connection.prepare(
-      selectOrphanRadarSql(
-        "target_memory_id = ? AND workspace_id = ?",
-        `ORDER BY detected_at DESC, radar_id ASC\n       LIMIT ${ORPHAN_RADAR_LIST_LIMIT}`
-      )
+      selectOrphanRadarSql("byTargetMemory", "listRecent")
     ),
     deleteExpiredStatement: db.connection.prepare("DELETE FROM orphan_radar WHERE expires_at <= ?")
   };
 }
 
-function selectOrphanRadarSql(whereClause: string, suffix: string): string {
+type OrphanRadarWhereKey = "byId" | "activeByWorkspace" | "byTargetMemory";
+type OrphanRadarSuffixKey = "limitOne" | "listRecent";
+
+const ORPHAN_RADAR_WHERE_CLAUSES: Readonly<Record<OrphanRadarWhereKey, string>> = Object.freeze({
+  byId: "radar_id = ? AND target_event_id IS NULL",
+  activeByWorkspace: "workspace_id = ? AND expires_at > ? AND target_event_id IS NULL",
+  byTargetMemory: "target_memory_id = ? AND workspace_id = ?"
+});
+
+const ORPHAN_RADAR_SUFFIXES: Readonly<Record<OrphanRadarSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1",
+  listRecent: `ORDER BY detected_at DESC, radar_id ASC\n       LIMIT ${ORPHAN_RADAR_LIST_LIMIT}`
+});
+
+function selectOrphanRadarSql(whereKey: OrphanRadarWhereKey, suffixKey: OrphanRadarSuffixKey): string {
   return `SELECT${ORPHAN_RADAR_SELECT_COLUMNS}
        FROM orphan_radar
-       WHERE ${whereClause}
-       ${suffix}`;
+       WHERE ${ORPHAN_RADAR_WHERE_CLAUSES[whereKey]}
+       ${ORPHAN_RADAR_SUFFIXES[suffixKey]}`;
 }
 
 const ORPHAN_RADAR_SELECT_COLUMNS = `

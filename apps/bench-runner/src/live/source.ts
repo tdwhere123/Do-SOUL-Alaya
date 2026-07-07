@@ -331,6 +331,9 @@ function resolveGitHeadSha(repoRoot: string): string {
     throw new Error(`Unsupported git HEAD format: ${head}`);
   }
   const refName = refMatch[1];
+  if (refName === undefined || refName.length === 0) {
+    throw new Error(`Unsupported git HEAD ref format: ${head}`);
+  }
   const commonDir = resolveCommonGitDir(gitDir);
   for (const root of [gitDir, commonDir]) {
     const refPath = path.join(root, refName);
@@ -356,6 +359,9 @@ export function resolveGitDir(repoRoot: string): string {
     return gitPath;
   }
   const gitDir = gitDirMatch[1];
+  if (gitDir === undefined || gitDir.length === 0) {
+    throw new Error(`Unsupported .git file format: ${raw}`);
+  }
   return path.resolve(repoRoot, gitDir);
 }
 
@@ -377,6 +383,9 @@ function readPackedRef(gitDir: string, refName: string): string | null {
       continue;
     }
     const [sha, name] = line.split(" ");
+    if (sha === undefined || name === undefined) {
+      continue;
+    }
     if (name === refName && /^[0-9a-f]{40}$/iu.test(sha)) {
       return sha;
     }

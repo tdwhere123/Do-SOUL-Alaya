@@ -1,6 +1,7 @@
 import { EngineBindingRecordSchema, type EngineBindingRecord } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 
 export type EngineBindingRecordCreateInput = Omit<EngineBindingRecord, "created_at" | "updated_at">;
 
@@ -16,6 +17,7 @@ interface EngineBindingRow {
   readonly provider_type: string;
   readonly base_url: string | null;
   readonly api_key: string;
+  readonly api_key_ref: string | null;
   readonly model: string;
   readonly config_json: string;
   readonly enable_tools: number | null;
@@ -23,71 +25,87 @@ interface EngineBindingRow {
   readonly updated_at: string;
 }
 
+interface EngineBindingStatements {
+  readonly getByIdStatement: {
+    get(...args: readonly unknown[]): unknown;
+  };
+  readonly listByWorkspaceStatement: {
+    all(...args: readonly unknown[]): unknown[];
+  };
+  readonly upsertStatement: {
+    run(...args: readonly unknown[]): unknown;
+  };
+}
+
 export class SqliteEngineBindingRepo implements EngineBindingRepo {
-  private readonly getByIdStatement;
-  private readonly listByWorkspaceStatement;
-  private readonly upsertStatement;
+  private readonly statementHolder: RefreshableStatementHolder<EngineBindingStatements>;
 
   public constructor(db: StorageDatabase) {
-    this.getByIdStatement = db.connection.prepare(`
-      SELECT
-        binding_id,
-        workspace_id,
-        provider_type,
-        base_url,
-        api_key,
-        model,
-        config_json,
-        enable_tools,
-        created_at,
-        updated_at
-      FROM engine_bindings
-      WHERE binding_id = ?
-      LIMIT 1
-    `);
-    this.listByWorkspaceStatement = db.connection.prepare(`
-      SELECT
-        binding_id,
-        workspace_id,
-        provider_type,
-        base_url,
-        api_key,
-        model,
-        config_json,
-        enable_tools,
-        created_at,
-        updated_at
-      FROM engine_bindings
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, binding_id ASC
-    `);
-    this.upsertStatement = db.connection.prepare(`
-      INSERT INTO engine_bindings (
-        binding_id,
-        workspace_id,
-        provider_type,
-        base_url,
-        api_key,
-        model,
-        config_json,
-        enable_tools,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(binding_id) DO UPDATE SET
-        workspace_id = excluded.workspace_id,
-        provider_type = excluded.provider_type,
-        base_url = excluded.base_url,
-        api_key = excluded.api_key,
-        model = excluded.model,
-        config_json = excluded.config_json,
-        enable_tools = excluded.enable_tools,
-        updated_at = excluded.updated_at
-    `);
+    this.statementHolder = new RefreshableStatementHolder(db, (database) => ({
+      getByIdStatement: database.connection.prepare(`
+        SELECT
+          binding_id,
+          workspace_id,
+          provider_type,
+          base_url,
+          api_key,
+          api_key_ref,
+          model,
+          config_json,
+          enable_tools,
+          created_at,
+          updated_at
+        FROM engine_bindings
+        WHERE binding_id = ?
+        LIMIT 1
+      `),
+      listByWorkspaceStatement: database.connection.prepare(`
+        SELECT
+          binding_id,
+          workspace_id,
+          provider_type,
+          base_url,
+          api_key,
+          api_key_ref,
+          model,
+          config_json,
+          enable_tools,
+          created_at,
+          updated_at
+        FROM engine_bindings
+        WHERE workspace_id = ?
+        ORDER BY created_at ASC, binding_id ASC
+      `),
+      upsertStatement: database.connection.prepare(`
+        INSERT INTO engine_bindings (
+          binding_id,
+          workspace_id,
+          provider_type,
+          base_url,
+          api_key,
+          api_key_ref,
+          model,
+          config_json,
+          enable_tools,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(binding_id) DO UPDATE SET
+          workspace_id = excluded.workspace_id,
+          provider_type = excluded.provider_type,
+          base_url = excluded.base_url,
+          api_key = excluded.api_key,
+          api_key_ref = excluded.api_key_ref,
+          model = excluded.model,
+          config_json = excluded.config_json,
+          enable_tools = excluded.enable_tools,
+          updated_at = excluded.updated_at
+      `)
+    }));
   }
 
   public upsert(data: EngineBindingRecordCreateInput): EngineBindingRecord {
-    const existingRow = this.getByIdStatement.get(data.binding_id) as EngineBindingRow | undefined;
+    const existingRow = this.statementHolder.active().getByIdStatement.get(data.binding_id) as EngineBindingRow | undefined;
     const existing = existingRow === undefined ? null : parseEngineBindingRecord(existingRow);
     const now = new Date().toISOString();
     const record = parseEngineBindingRecord({
@@ -97,12 +115,13 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
     });
 
     try {
-      this.upsertStatement.run(
+      this.statementHolder.active().upsertStatement.run(
         record.binding_id,
         record.workspace_id,
         record.provider_type,
         record.base_url,
         record.api_key,
+        record.api_key_ref ?? null,
         record.model,
         JSON.stringify(record.config),
         record.enable_tools !== undefined ? (record.enable_tools ? 1 : 0) : null,
@@ -118,7 +137,7 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
 
   public async getById(id: string): Promise<EngineBindingRecord | null> {
     try {
-      const row = this.getByIdStatement.get(id) as EngineBindingRow | undefined;
+      const row = this.statementHolder.active().getByIdStatement.get(id) as EngineBindingRow | undefined;
       return row === undefined ? null : parseEngineBindingRecord(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load engine binding ${id}.`, error);
@@ -127,7 +146,7 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
 
   public async listByWorkspace(workspaceId: string): Promise<readonly EngineBindingRecord[]> {
     try {
-      const rows = this.listByWorkspaceStatement.all(workspaceId) as EngineBindingRow[];
+      const rows = this.statementHolder.active().listByWorkspaceStatement.all(workspaceId) as EngineBindingRow[];
       return rows.map((row) => parseEngineBindingRecord(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list engine bindings for workspace ${workspaceId}.`, error);
@@ -148,6 +167,7 @@ function parseEngineBindingRecord(row: EngineBindingRow | EngineBindingRecord): 
       provider_type: row.provider_type,
       base_url: row.base_url,
       api_key: row.api_key,
+      api_key_ref: row.api_key_ref,
       model: row.model,
       config: JSON.parse(rawConfig) as Record<string, unknown>,
       ...(enableTools !== undefined ? { enable_tools: enableTools } : {}),

@@ -15,7 +15,7 @@ export interface WorkerRunStatements {
 export function prepareWorkerRunStatements(db: StorageDatabase): WorkerRunStatements {
   return {
     insertStatement: db.connection.prepare(INSERT_WORKER_RUN_SQL),
-    getByIdStatement: db.connection.prepare(selectWorkerRunSql("worker_run_id = ?", "LIMIT 1")),
+    getByIdStatement: db.connection.prepare(selectWorkerRunSql("byId", "limitOne")),
     deleteIfStateStatement: db.connection.prepare(`
       DELETE FROM worker_runs
       WHERE worker_run_id = ? AND state = ?
@@ -26,7 +26,7 @@ export function prepareWorkerRunStatements(db: StorageDatabase): WorkerRunStatem
       WHERE worker_run_id = ? AND state = ?
     `),
     findActiveByPrincipalRunIdStatement: db.connection.prepare(
-      selectWorkerRunSql("principal_run_id = ? AND state = 'active'", "LIMIT 1", "created_at ASC")
+      selectWorkerRunSql("activeByPrincipalRun", "limitOne", "created")
     ),
     countActiveByRequestingPrincipalStatement: db.connection.prepare(`
       SELECT COUNT(*) AS active_count
@@ -37,13 +37,34 @@ export function prepareWorkerRunStatements(db: StorageDatabase): WorkerRunStatem
   };
 }
 
-function selectWorkerRunSql(whereClause: string, suffix: string, orderBy?: string): string {
-  const orderBySql = orderBy === undefined ? "" : `\n      ORDER BY ${orderBy}`;
+type WorkerRunWhereKey = "byId" | "activeByPrincipalRun";
+type WorkerRunSuffixKey = "limitOne";
+type WorkerRunOrderKey = "created";
+
+const WORKER_RUN_WHERE_CLAUSES: Readonly<Record<WorkerRunWhereKey, string>> = Object.freeze({
+  byId: "worker_run_id = ?",
+  activeByPrincipalRun: "principal_run_id = ? AND state = 'active'"
+});
+
+const WORKER_RUN_SUFFIXES: Readonly<Record<WorkerRunSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1"
+});
+
+const WORKER_RUN_ORDER_BY: Readonly<Record<WorkerRunOrderKey, string>> = Object.freeze({
+  created: "created_at ASC"
+});
+
+function selectWorkerRunSql(
+  whereKey: WorkerRunWhereKey,
+  suffixKey: WorkerRunSuffixKey,
+  orderByKey?: WorkerRunOrderKey
+): string {
+  const orderBySql = orderByKey === undefined ? "" : `\n      ORDER BY ${WORKER_RUN_ORDER_BY[orderByKey]}`;
   return `
       SELECT${WORKER_RUN_SELECT_COLUMNS}
       FROM worker_runs
-      WHERE ${whereClause}${orderBySql}
-      ${suffix}
+      WHERE ${WORKER_RUN_WHERE_CLAUSES[whereKey]}${orderBySql}
+      ${WORKER_RUN_SUFFIXES[suffixKey]}
     `;
 }
 

@@ -46,6 +46,7 @@ interface EngineBindingRow {
   readonly provider_type: string;
   readonly base_url: string | null;
   readonly api_key: string;
+  readonly api_key_ref: string | null;
   readonly model: string;
   readonly config_json: string;
   readonly enable_tools: number | null;
@@ -103,7 +104,8 @@ export class SqliteWorkspaceEngineConfigRepo implements WorkspaceEngineConfigRep
       input.workspace_id,
       input.binding.provider_type,
       input.binding.base_url,
-      input.binding.api_key,
+      input.binding.api_key ?? "",
+      input.binding.api_key_ref ?? null,
       input.binding.model,
       JSON.stringify(input.binding.config),
       input.binding.enable_tools !== undefined ? (input.binding.enable_tools ? 1 : 0) : null,
@@ -197,12 +199,13 @@ function prepareUpsertBindingStatement(db: StorageDatabase): PreparedStatement {
       provider_type,
       base_url,
       api_key,
+      api_key_ref,
       model,
       config_json,
       enable_tools,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 }
 
@@ -241,6 +244,7 @@ function prepareGetBindingByIdStatement(db: StorageDatabase): PreparedStatement 
       provider_type,
       base_url,
       api_key,
+      api_key_ref,
       model,
       config_json,
       enable_tools,
@@ -268,6 +272,7 @@ function parseEngineBinding(row: EngineBindingRow): EngineBindingRecord {
       provider_type: row.provider_type,
       base_url: row.base_url,
       api_key: row.api_key,
+      api_key_ref: row.api_key_ref,
       model: row.model,
       config: JSON.parse(row.config_json) as Record<string, unknown>,
       ...(row.enable_tools !== null ? { enable_tools: row.enable_tools === 1 } : {}),

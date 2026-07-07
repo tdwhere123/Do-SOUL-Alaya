@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { ConstitutionalFragmentIdSchema, ConstitutionalFragmentSchema, EventLogEntrySchema, type ConstitutionalFragment, type EventLogEntry } from "@do-soul/alaya-protocol";
 import { expect, vi } from "vitest";
+import { requireAt } from "../helpers/defined.js";
 import { type ConstitutionalFragmentStorePort } from "../../governance/policy/constitutional-fragment-service.js";
 import { EventPublisher } from "../../runtime/event-publisher.js";
 
@@ -18,8 +19,9 @@ export function createStore(): ConstitutionalFragmentStorePort {
     );
 
     if (existingIndex >= 0) {
-      expect(fragments[existingIndex]).toEqual(parsed);
-      return fragments[existingIndex];
+      const existing = requireAt(fragments, existingIndex);
+      expect(existing).toEqual(parsed);
+      return existing;
     }
 
     fragments.push(parsed);

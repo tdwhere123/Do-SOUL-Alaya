@@ -5,6 +5,7 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, type EventPublisherEventLogRepoPort } from "../../runtime/event-publisher.js";
+import { firstDefined, requireAt } from "../helpers/defined.js";
 
 /**
  * In-memory fake repo that simulates better-sqlite3 transaction semantics:
@@ -128,20 +129,21 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
       ],
       (entries) => {
         captured = entries;
-        return entries[0]?.event_id ?? "<missing>";
+        return firstDefined(entries)?.event_id ?? "<missing>";
       }
     );
 
     expect(captured).not.toBeNull();
     expect(captured!).toHaveLength(1);
-    // The mutate's `entries[0].event_id` is the SAME id as the persisted row.
+    // The mutate's `firstDefined(entries).event_id` is the SAME id as the persisted row.
     // This is the proof that #BL-021's audit_event_id divergence is gone.
-    expect(captured![0].event_id).toBe(repo.rows[0].event_id);
-    expect(result).toBe(repo.rows[0].event_id);
+    expect(firstDefined(captured!).event_id).toBe(firstDefined(repo.rows).event_id);
+    expect(result).toBe(firstDefined(repo.rows).event_id);
   });
 
-  it("propagates after commit; propagation failure does NOT roll back the durable row", async () => {
+  it("reports propagation failure after commit without failing the durable mutation", async () => {
     const repo = buildFakeRepo();
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
     const publisher = new EventPublisher({
       eventLogRepo: repo,
       runHotStateService: { apply: vi.fn() },
@@ -172,10 +174,18 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
         ],
         () => "ok"
       )
-    ).rejects.toMatchObject({ name: "EventPublisherPropagationError" });
+    ).resolves.toBe("ok");
 
     // Transaction committed before propagation, so the row is durable.
-    expect(repo.rows).toHaveLength(1);
+    expect(firstDefined(repo.rows)?.event_id).toBe("evt-0");
+    expect(emitWarning).toHaveBeenCalledWith(
+      "[EventPublisher] Propagation failed after commit",
+      expect.objectContaining({
+        code: "ALAYA_EVENT_PROPAGATION_FAILED_AFTER_COMMIT"
+      })
+    );
+
+    emitWarning.mockRestore();
   });
 
   it("committed/detached mutation returns after commit when propagation never settles", async () => {
@@ -357,9 +367,9 @@ describe("EventPublisher.appendManyWithMutation (atomic)", () => {
       [buildInput("w1"), buildInput("w1"), buildInput("w2")],
       (entries) => {
         expect(entries).toHaveLength(3);
-        expect(entries[0].revision).toBe(0);
-        expect(entries[1].revision).toBe(1);
-        expect(entries[2].revision).toBe(0);
+        expect(requireAt(entries, 0).revision).toBe(0);
+        expect(requireAt(entries, 1).revision).toBe(1);
+        expect(requireAt(entries, 2).revision).toBe(0);
       }
     );
     expect(repo.rows).toHaveLength(3);

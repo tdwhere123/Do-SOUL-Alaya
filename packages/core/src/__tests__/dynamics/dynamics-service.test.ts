@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { DynamicsService, type DynamicsServiceDependencies } from "../../dynamics/dynamics-service.js";
 import { createKarmaEvent, createMemoryEntry } from "./karma-fixtures.js";
+import { expectDefined, requireAt } from "../helpers/defined.js";
 
 function createHarness(memoryEntries: readonly MemoryEntry[], options: { readonly greenService?: { reevaluate(params: { targetObjectId: string; workspaceId: string; }): Promise<unknown>; } } = {}): {
   readonly service: DynamicsService;
@@ -203,8 +204,8 @@ describe("DynamicsService", () => {
       appendedEvents.map((entry) => entry.event_id)
     );
     for (const [index] of appendedEvents.entries()) {
-      expect(appendSpy.mock.invocationCallOrder[index]).toBeLessThan(
-        notifyEntrySpy.mock.invocationCallOrder[index]
+      expect(expectDefined(requireAt(appendSpy.mock.invocationCallOrder, index), "invocationCallOrder")).toBeLessThan(
+        expectDefined(requireAt(notifyEntrySpy.mock.invocationCallOrder, index), "invocationCallOrder")
       );
     }
   });

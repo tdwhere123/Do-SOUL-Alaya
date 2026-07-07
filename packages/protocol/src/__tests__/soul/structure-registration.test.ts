@@ -134,7 +134,7 @@ describe("Structure Registration Schemas", () => {
     const parsed = SlotSchema.parse(slotBase);
     expect(parsed.winner_claim_id).toBeNull();
     expect(parsed.incumbent_since).toBeNull();
-    expect(parsed.flip_conditions[0].threshold).toBeNull();
+    expect(parsed.flip_conditions[0]!.threshold).toBeNull();
   });
 
   it("keeps FlipConditionKind enum complete and closed", () => {

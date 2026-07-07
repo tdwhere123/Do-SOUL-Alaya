@@ -261,15 +261,15 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
     expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
     expect(deps.claimService.create).toHaveBeenCalledTimes(1);
 
-    const evidenceInput = deps.evidenceService.create.mock.calls[0][0] as {
+    const evidenceInput = deps.evidenceService.create.mock.calls[0]![0] as {
       readonly gist: string;
       readonly semantic_anchor: { readonly summary: string };
       readonly physical_anchor: { readonly artifact_ref: string } | null;
     };
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly content: string;
     };
-    const claimInput = deps.claimService.create.mock.calls[0][0] as {
+    const claimInput = deps.claimService.create.mock.calls[0]![0] as {
       readonly proposition_digest: string;
     };
 
@@ -347,7 +347,7 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
 
     await router.materializeSignal(createSignal());
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly enqueueEnrichment?: { readonly runId: string | null; readonly sourceSignalId: string | null };
     };
     expect(memoryInput.enqueueEnrichment).toEqual({ runId: "run-1", sourceSignalId: "signal-1" });
@@ -371,7 +371,7 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
       }
     }));
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly event_time_start?: string;
       readonly event_time_end?: string;
       readonly valid_from?: string;
@@ -406,7 +406,7 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
       }
     }));
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as Record<string, unknown>;
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as Record<string, unknown>;
     expect(memoryInput.projection_schema_version).toBe(1);
     expect(memoryInput.event_time_start).toBeUndefined();
     expect(memoryInput.event_time_end).toBe("2026-03-01T00:00:00.000Z");
@@ -432,7 +432,7 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
       }
     }));
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly preference_subject?: string;
       readonly preference_predicate?: string;
       readonly preference_object?: string;

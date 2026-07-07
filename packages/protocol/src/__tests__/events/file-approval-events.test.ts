@@ -77,7 +77,7 @@ describe("Phase 5 protocol schemas", () => {
       run_id: fileRecord.run_id
     } as const;
 
-    expect(parseFileApprovalEventPayload(FileApprovalEventType.FILE_UPLOADED, uploadedPayload)).toEqual(uploadedPayload);
+    expect(parseFileApprovalEventPayload(FileApprovalEventType.FILE_UPLOADED!, uploadedPayload)).toEqual(uploadedPayload);
     const hintPayload = {
       message_id: "msg_hint_1",
       hint: "Check the governance constraint before continuing.",
@@ -114,48 +114,48 @@ describe("Phase 5 protocol schemas", () => {
       run_id: "run-1"
     } as const;
 
-    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_HINT_EMITTED, hintPayload)).toEqual(hintPayload);
-    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_CORRECTION_ISSUED, correctionPayload)).toEqual(
+    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_HINT_EMITTED!, hintPayload)).toEqual(hintPayload);
+    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_CORRECTION_ISSUED!, correctionPayload)).toEqual(
       correctionPayload
     );
-    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_EXPLANATION_PROVIDED, explanationPayload)).toEqual(
+    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_EXPLANATION_PROVIDED!, explanationPayload)).toEqual(
       explanationPayload
     );
-    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_REQUESTED, approvalRequestedPayload)).toEqual(
+    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_REQUESTED!, approvalRequestedPayload)).toEqual(
       approvalRequestedPayload
     );
-    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED, approvalResolvedPayload)).toEqual(
+    expect(parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED!, approvalResolvedPayload)).toEqual(
       approvalResolvedPayload
     );
     expect(FileApprovalEventTypeSchema.options).toEqual([
-      FileApprovalEventType.FILE_UPLOADED,
-      FileApprovalEventType.SOUL_HINT_EMITTED,
-      FileApprovalEventType.SOUL_CORRECTION_ISSUED,
-      FileApprovalEventType.SOUL_EXPLANATION_PROVIDED,
-      FileApprovalEventType.SOUL_APPROVAL_REQUESTED,
-      FileApprovalEventType.SOUL_APPROVAL_RESOLVED
+      FileApprovalEventType.FILE_UPLOADED!,
+      FileApprovalEventType.SOUL_HINT_EMITTED!,
+      FileApprovalEventType.SOUL_CORRECTION_ISSUED!,
+      FileApprovalEventType.SOUL_EXPLANATION_PROVIDED!,
+      FileApprovalEventType.SOUL_APPROVAL_REQUESTED!,
+      FileApprovalEventType.SOUL_APPROVAL_RESOLVED!
     ]);
     expect(
       FileApprovalEventUnionSchema.parse({
-        type: FileApprovalEventType.FILE_UPLOADED,
+        type: FileApprovalEventType.FILE_UPLOADED!,
         payload: uploadedPayload
       })
     ).toEqual({
-      type: FileApprovalEventType.FILE_UPLOADED,
+      type: FileApprovalEventType.FILE_UPLOADED!,
       payload: uploadedPayload
     });
-    expect(EventTypeSchema.parse(FileApprovalEventType.FILE_UPLOADED)).toBe(FileApprovalEventType.FILE_UPLOADED);
+    expect(EventTypeSchema.parse(FileApprovalEventType.FILE_UPLOADED!)).toBe(FileApprovalEventType.FILE_UPLOADED!);
     expect(
       FileApprovalEventUnionSchema.parse({
-        type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
+        type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED!,
         payload: approvalResolvedPayload
       })
     ).toEqual({
-      type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED,
+      type: FileApprovalEventType.SOUL_APPROVAL_RESOLVED!,
       payload: approvalResolvedPayload
     });
-    expect(EventTypeSchema.parse(FileApprovalEventType.SOUL_APPROVAL_REQUESTED)).toBe(
-      FileApprovalEventType.SOUL_APPROVAL_REQUESTED
+    expect(EventTypeSchema.parse(FileApprovalEventType.SOUL_APPROVAL_REQUESTED!)).toBe(
+      FileApprovalEventType.SOUL_APPROVAL_REQUESTED!
     );
   });
 
@@ -184,7 +184,7 @@ describe("Phase 5 protocol schemas", () => {
     ).toBe(false);
 
     expect(() =>
-      parseFileApprovalEventPayload(FileApprovalEventType.FILE_UPLOADED, {
+      parseFileApprovalEventPayload(FileApprovalEventType.FILE_UPLOADED!, {
         file_id: "11111111-1111-4111-8111-111111111111",
         filename: "bad.bin",
         mime_type: "application/octet-stream",
@@ -195,7 +195,7 @@ describe("Phase 5 protocol schemas", () => {
     ).toThrow();
 
     expect(() =>
-      parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_REQUESTED, {
+      parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_REQUESTED!, {
         message_id: "msg_approval_1",
         approval_id: "approval-1",
         description: "Apply patch",
@@ -205,7 +205,7 @@ describe("Phase 5 protocol schemas", () => {
     ).toThrow();
 
     expect(() =>
-      parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED, {
+      parseFileApprovalEventPayload(FileApprovalEventType.SOUL_APPROVAL_RESOLVED!, {
         message_id: "msg_resolution_1",
         approval_id: "approval-1",
         result: "accepted",

@@ -41,7 +41,7 @@ export function parseDaemonMcpServerRuntimeConfigs(
 
     const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
     for (const [serverName, rawConfig] of Object.entries(parsed as Record<string, unknown>)) {
-      const config = parseDaemonMcpServerRuntimeConfig(rawConfig);
+      const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
       if (config !== null) {
         runtimeConfigs[serverName] = config;
       }
@@ -84,7 +84,9 @@ export function defaultWarn(message: string, meta: Record<string, unknown>): voi
 }
 
 function parseDaemonMcpServerRuntimeConfig(
-  rawConfig: unknown
+  serverName: string,
+  rawConfig: unknown,
+  warn: WarnLogger
 ): DaemonMcpServerRuntimeConfig | null {
   if (typeof rawConfig !== "object" || rawConfig === null || Array.isArray(rawConfig)) {
     return null;
@@ -93,24 +95,38 @@ function parseDaemonMcpServerRuntimeConfig(
   const candidate = rawConfig as Record<string, unknown>;
   const transportType = readNonEmptyString(candidate["transport_type"]);
   if (transportType === "stdio") {
-    const command = readNonEmptyString(candidate["command"]);
-    if (command === null) {
-      return null;
-    }
-
-    const cwd = readNonEmptyString(candidate["cwd"]);
-    return Object.freeze({
-      transportType,
-      command,
-      ...(candidate["args"] === undefined ? {} : { args: readStringArray(candidate["args"]) }),
-      ...(cwd === null ? {} : { cwd }),
-      ...(candidate["env"] === undefined ? {} : { env: readStringRecord(candidate["env"]) })
+    warn("dropping MCP stdio runtime config from environment", {
+      serverName
     });
+    return null;
   }
 
   if (transportType === "http") {
     const endpoint = readNonEmptyString(candidate["endpoint"]);
     if (endpoint === null) {
+      warn("dropping MCP HTTP runtime config without endpoint", {
+        serverName,
+      });
+      return null;
+    }
+
+    try {
+      const url = new URL(endpoint);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("unsupported protocol");
+      }
+      if (!isLoopbackMcpEndpoint(url)) {
+        warn("dropping MCP HTTP runtime config with non-local endpoint", {
+          serverName,
+          endpoint
+        });
+        return null;
+      }
+    } catch {
+      warn("dropping MCP HTTP runtime config with invalid endpoint", {
+        serverName,
+        endpoint
+      });
       return null;
     }
 
@@ -124,6 +140,25 @@ function parseDaemonMcpServerRuntimeConfig(
   }
 
   return null;
+}
+
+function isLoopbackMcpEndpoint(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "[::1]" || hostname === "::1") {
+    return true;
+  }
+  const parts = hostname.split(".");
+  return (
+    parts.length === 4 &&
+    parts[0] === "127" &&
+    parts.every((part) => {
+      if (!/^\d+$/.test(part)) {
+        return false;
+      }
+      const value = Number(part);
+      return value >= 0 && value <= 255;
+    })
+  );
 }
 
 function parseMcpToolCatalogByServer(

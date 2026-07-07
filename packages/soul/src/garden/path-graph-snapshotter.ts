@@ -68,6 +68,9 @@ export function reviewPathGraphSnapshotHistory(
   }
 
   const [latestSnapshot, previousSnapshot] = history;
+  if (latestSnapshot === undefined || previousSnapshot === undefined) {
+    return null;
+  }
   const isolatedAnchorDelta =
     latestSnapshot.connectivity.isolated_anchors - previousSnapshot.connectivity.isolated_anchors;
 

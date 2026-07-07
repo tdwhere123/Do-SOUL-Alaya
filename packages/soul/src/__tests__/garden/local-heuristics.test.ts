@@ -45,7 +45,7 @@ describe("LocalHeuristics", () => {
         validation_result: expect.objectContaining({ status: "valid" })
       })
     });
-    expect(signals[0].raw_payload.field_candidates).toEqual([
+    expect(signals[0]!.raw_payload.field_candidates).toEqual([
       {
         field_name: "preference",
         value: "I always use TypeScript strict mode for application code.",
@@ -53,7 +53,7 @@ describe("LocalHeuristics", () => {
         confidence: 0.6
       }
     ]);
-    expect(UUID_PATTERN.test(signals[0].signal_id)).toBe(true);
+    expect(UUID_PATTERN.test(signals[0]!.signal_id)).toBe(true);
     expect(CandidateMemorySignalSchema.parse(signals[0])).toEqual(signals[0]);
   });
 
@@ -131,7 +131,7 @@ describe("LocalHeuristics", () => {
         detected_object: expect.objectContaining({ object_kind: "fact" })
       })
     });
-    expect(signals[0].raw_payload.field_candidates).toEqual([
+    expect(signals[0]!.raw_payload.field_candidates).toEqual([
       {
         field_name: "fact",
         value: "We reviewed the release blocker yesterday and agreed to keep the fix loop open.",

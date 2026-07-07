@@ -55,7 +55,7 @@ const WRITE_FILE_TOOL_SPEC: Readonly<ToolSpec> = Object.freeze({
   destructive: false,
   concurrency_safe: false,
   interrupt_behavior: "wait",
-  requires_confirmation: false,
+  requires_confirmation: true,
   requires_evidence_reopen: false,
   rollback_support: "best_effort",
   fast_path_eligible: false
@@ -103,4 +103,16 @@ export function isBuiltinConversationToolId(
   toolId: string | null | undefined
 ): toolId is BuiltinConversationToolId {
   return typeof toolId === "string" && BUILTIN_CONVERSATION_TOOL_ID_LOOKUP.has(toolId);
+}
+
+export function builtinConversationToolRequiresConfirmation(
+  toolId: string | null | undefined
+): boolean {
+  if (!isBuiltinConversationToolId(toolId)) {
+    return false;
+  }
+
+  return BUILTIN_CONVERSATION_TOOL_SPECS.some(
+    (spec) => spec.tool_id === toolId && spec.requires_confirmation
+  );
 }

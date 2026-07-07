@@ -103,12 +103,33 @@ export class KarmaTransitionEngine {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-    const { result } = await eventPublisher.mutateThenAppendMany(() => {
+    let appliedResult: KarmaTransitionApplyResult | undefined;
+    await eventPublisher.mutateThenAppendMany(() => {
       const plan = this.computeKarmaTransitionPlanSync(parsedEvent, context);
-      const applied = this.applyKarmaTransitionPlanSync(plan);
-      return { events: this.buildKarmaAuditInputs(applied, plan), result: applied };
+      const preApplyResult: KarmaTransitionApplyResult = {
+        updated: {
+          ...plan.memory,
+          activation_score: plan.transition.activationScore,
+          retention_score: plan.transition.retentionScore,
+          manifestation_state: plan.transition.manifestationState,
+          retention_state: plan.transition.retentionState,
+          ...plan.transition.fieldUpdates
+        },
+        revived: false
+      };
+      const events = this.buildKarmaAuditInputs(preApplyResult, plan);
+      return {
+        events,
+        result: undefined,
+        apply: () => {
+          appliedResult = this.applyKarmaTransitionPlanSync(plan);
+          return this.buildKarmaRevivalAuditInputs(appliedResult, plan);
+        }
+      };
     });
-    this.scheduleGreenReevaluation(result.updated);
+    if (appliedResult) {
+      this.scheduleGreenReevaluation(appliedResult.updated);
+    }
   }
 
   public processKarmaEventInCurrentTransaction(
@@ -324,6 +345,26 @@ export class KarmaTransitionEngine {
     return entries;
   }
 
+  private buildKarmaRevivalAuditInputs(
+    applyResult: KarmaTransitionApplyResult,
+    plan: KarmaTransitionPlan
+  ): DynamicsEventLogInput[] {
+    if (!applyResult.revived) {
+      return [];
+    }
+
+    const { parsedEvent, transition } = plan;
+    return [
+      buildStateChangedEventInput({
+        memory: applyResult.updated,
+        fromState: "dormant",
+        toState: "active",
+        reasonCode: parsedEvent.kind,
+        occurredAt: transition.now
+      })
+    ];
+  }
+
   private buildKarmaAuditInputs(
     applyResult: KarmaTransitionApplyResult,
     plan: KarmaTransitionPlan
@@ -332,17 +373,7 @@ export class KarmaTransitionEngine {
     const { parsedEvent, transition } = plan;
     const memory = applyResult.updated;
 
-    if (applyResult.revived) {
-      inputs.push(
-        buildStateChangedEventInput({
-          memory,
-          fromState: "dormant",
-          toState: "active",
-          reasonCode: parsedEvent.kind,
-          occurredAt: transition.now
-        })
-      );
-    }
+    inputs.push(...this.buildKarmaRevivalAuditInputs(applyResult, plan));
 
     if (hasScoreChanged(transition.previousRetention, transition.retentionScore)) {
       inputs.push(

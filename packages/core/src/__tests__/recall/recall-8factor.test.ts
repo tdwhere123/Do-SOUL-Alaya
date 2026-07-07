@@ -5,6 +5,7 @@ import { mapBudgetPenalty } from "../../recall/runtime/recall-service-helpers.js
 import { createDependencies, createMemoryEntry, createSlot, createTaskSurface, overridePolicy } from "./recall-8factor-test-fixtures.js";
 
 import { FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD } from "./recall-8factor.test-support.js";
+import { requireAt } from "../helpers/defined.js";
 
 describe("RecallService 8-factor scoring", () => {
 it("maps budget pressure to a graduated monotonic penalty", () => {
@@ -35,8 +36,8 @@ it("maps budget pressure to a graduated monotonic penalty", () => {
     ).toBe(0);
     expect(penalties[0]).toBe(0);
     expect(penalties[1]).toBeCloseTo(0.1);
-    expect(penalties[2]).toBeCloseTo(0.4);
-    expect(penalties[3]).toBeGreaterThan(penalties[2]);
+    expect(requireAt(penalties, 2)).toBeCloseTo(0.4);
+    expect(requireAt(penalties, 3)).toBeGreaterThan(requireAt(penalties, 2));
   });
 
 it("keeps the default keyword supplement enabled in default policy", () => {

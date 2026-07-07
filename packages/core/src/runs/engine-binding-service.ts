@@ -82,7 +82,8 @@ export class EngineBindingService {
           workspace_id: workspace.workspace_id,
           provider_type: parsed.provider_type,
           base_url: parsed.base_url,
-          api_key: parsed.api_key,
+          api_key: parsed.api_key ?? "",
+          api_key_ref: parsed.api_key_ref ?? null,
           model: parsed.model,
           config: parsed.config,
           enable_tools: parsed.enable_tools
@@ -182,16 +183,27 @@ function parseEngineBindingInput(input: unknown): EngineBindingInput {
 }
 
 function toConversationBinding(
-  binding: Pick<EngineBindingRecord, "provider_type" | "base_url" | "api_key" | "model" | "config" | "enable_tools">,
+  binding: Pick<EngineBindingInput, "provider_type" | "base_url" | "api_key" | "api_key_ref" | "model" | "config" | "enable_tools">,
   bindingId: string
 ): EngineBinding {
+  const auth =
+    binding.api_key !== undefined && binding.api_key.length > 0
+      ? { api_key: binding.api_key }
+      : { api_key_ref: requireApiKeyRef(binding.api_key_ref) };
   return {
     binding_id: bindingId,
     provider: binding.provider_type,
     base_url: binding.base_url,
-    api_key: binding.api_key,
+    ...auth,
     model: binding.model,
     config: binding.config,
     ...(binding.enable_tools !== undefined ? { enable_tools: binding.enable_tools } : {})
   };
+}
+
+function requireApiKeyRef(apiKeyRef: string | null | undefined): string {
+  if (apiKeyRef === null || apiKeyRef === undefined) {
+    throw new EngineError("Configured engine binding is missing an api_key_ref.", EngineErrorKind.MODEL_ERROR);
+  }
+  return apiKeyRef;
 }

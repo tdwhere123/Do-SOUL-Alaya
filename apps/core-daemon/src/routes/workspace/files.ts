@@ -139,7 +139,10 @@ async function uploadFile(context: Context, services: FileRouteServices): Promis
   try {
     stored = await persistFileRecord(services, record);
   } catch (error) {
-    await bestEffortDelete(absolutePath);
+    await bestEffortDelete(absolutePath, {
+      storagePath: record.storage_path,
+      workspaceId: record.workspace_id
+    });
     throw error;
   }
   await notifyFileUploadEvent(services, stored.record, stored.event);
@@ -423,10 +426,27 @@ function encodeDispositionFilename(filename: string): string {
   return encodeURIComponent(filename).replaceAll("'", "%27").replaceAll("(", "%28").replaceAll(")", "%29").replaceAll("*", "%2A");
 }
 
-async function bestEffortDelete(path: string): Promise<void> {
+interface BestEffortDeleteContext {
+  readonly storagePath: string;
+  readonly workspaceId: string | null;
+}
+
+async function bestEffortDelete(path: string, context: BestEffortDeleteContext): Promise<void> {
   try {
     await unlink(path);
-  } catch {
-    // Best effort cleanup only.
+  } catch (error) {
+    const failure =
+      error instanceof Error
+        ? { error_name: error.name, error_message: error.message }
+        : { error_name: null, error_message: String(error) };
+    process.emitWarning("[FileRoute] best-effort upload rollback delete failed", {
+      code: "ALAYA_FILE_UPLOAD_ROLLBACK_DELETE_FAILED",
+      detail: JSON.stringify({
+        path,
+        storage_path: context.storagePath,
+        workspace_id: context.workspaceId,
+        ...failure
+      })
+    });
   }
 }

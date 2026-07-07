@@ -7,13 +7,23 @@ import {
   warnOnRejectedBackgroundTask
 } from "../../runtime/daemon-runtime-helpers.js";
 
+type ExitMock = ReturnType<typeof vi.fn> & ((code?: number) => void);
+
 type FakeProcess = EventEmitter & {
   exitCode?: number;
+  exit: ExitMock;
 };
 
 function createFakeProcess(): FakeProcess {
-  return Object.assign(new EventEmitter(), { exitCode: undefined as number | undefined });
+  return Object.assign(new EventEmitter(), {
+    exitCode: undefined as number | undefined,
+    exit: vi.fn() as ExitMock
+  });
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("createWarnLogger (pino-backed)", () => {
   afterEach(() => {
@@ -101,6 +111,20 @@ describe("installUnhandledRejectionHandler", () => {
     expect(fakeProcess.exitCode).toBe(1);
   });
 
+  it("handles uncaught exceptions through the same fatal shutdown path", () => {
+    const fakeProcess = createFakeProcess();
+    const error = vi.fn();
+
+    installUnhandledRejectionHandler({ error }, fakeProcess);
+    fakeProcess.emit("uncaughtException", new Error("sync boom"));
+
+    expect(error).toHaveBeenCalledWith(
+      "uncaught exception",
+      expect.objectContaining({ reason: "sync boom" })
+    );
+    expect(fakeProcess.exitCode).toBe(1);
+  });
+
   it("installs one listener per process and updates to the latest logger", () => {
     const fakeProcess = createFakeProcess();
     const firstLogger = { error: vi.fn() };
@@ -111,6 +135,7 @@ describe("installUnhandledRejectionHandler", () => {
     fakeProcess.emit("unhandledRejection", "later failure");
 
     expect(fakeProcess.listenerCount("unhandledRejection")).toBe(1);
+    expect(fakeProcess.listenerCount("uncaughtException")).toBe(1);
     expect(firstLogger.error).not.toHaveBeenCalled();
     expect(secondLogger.error).toHaveBeenCalledWith(
       "unhandled rejection",
@@ -128,10 +153,12 @@ describe("installUnhandledRejectionHandler", () => {
     installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown });
     installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown });
 
-    await Promise.resolve();
+    // Wait for the async shutdown chain to finish resolving
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(shutdown).toHaveBeenCalledTimes(1);
     expect(fakeProcess.exitCode).toBe(1);
+    expect(fakeProcess.exit).toHaveBeenCalledWith(1);
   });
 
   it("re-arms shutdown handling when a later runtime installs a new callback", async () => {
@@ -142,14 +169,46 @@ describe("installUnhandledRejectionHandler", () => {
 
     installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown: firstShutdown });
     fakeProcess.emit("unhandledRejection", new Error("first fatal"));
-    await Promise.resolve();
+
+    // Wait for the async shutdown chain to finish resolving
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(fakeProcess.exit).toHaveBeenCalledWith(1);
+
+    // Reset exit mock to test second call
+    fakeProcess.exit.mockClear();
 
     installUnhandledRejectionHandler({ error }, fakeProcess, { shutdown: secondShutdown });
     fakeProcess.emit("unhandledRejection", new Error("second fatal"));
-    await Promise.resolve();
+
+    // Wait for the async shutdown chain to finish resolving
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(firstShutdown).toHaveBeenCalledTimes(1);
     expect(secondShutdown).toHaveBeenCalledTimes(1);
+    expect(fakeProcess.exit).toHaveBeenCalledWith(1);
+  });
+
+  it("forces exit when fatal shutdown does not settle before the timeout", async () => {
+    vi.useFakeTimers();
+    const fakeProcess = createFakeProcess();
+    const error = vi.fn();
+    const shutdown = vi.fn(async () => await new Promise<void>(() => undefined));
+
+    installUnhandledRejectionHandler({ error }, fakeProcess, {
+      shutdown,
+      forceExitDelayMs: 50
+    });
+    fakeProcess.emit("uncaughtException", new Error("stuck fatal"));
+    await vi.advanceTimersByTimeAsync(50);
+
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(fakeProcess.exitCode).toBe(1);
+    expect(fakeProcess.exit).toHaveBeenCalledWith(1);
+    expect(error).toHaveBeenCalledWith(
+      "fatal process shutdown timed out; forcing exit",
+      expect.objectContaining({ timeout_ms: 50 })
+    );
   });
 });
 

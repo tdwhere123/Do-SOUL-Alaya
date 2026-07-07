@@ -24,6 +24,8 @@ export function createRuntimeNotifier(): AlayaRuntimeNotifier {
 }
 
 const runtimeNotifierWarnLogger = createWarnLogger();
+const MAX_ERROR_DIAGNOSTIC_LENGTH = 600;
+const MAX_STACK_LINES = 6;
 
 class InProcessRuntimeNotifier implements AlayaRuntimeNotifier {
   private readonly runListeners = new Map<string, Set<RuntimeEventListener>>();
@@ -123,8 +125,74 @@ async function notifyAll<TValue>(listeners: ReadonlySet<(value: TValue) => void 
     } catch (error) {
       runtimeNotifierWarnLogger.warn("[runtime-notifier] listener threw; continuing fan-out", {
         errorName: error instanceof Error ? error.name : "NonError",
-        errorMessageRedacted: true
+        errorMessage: summarizeErrorMessage(error),
+        errorStack: summarizeErrorStack(error)
       });
     }
   }
+}
+
+function summarizeErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return sanitizeErrorDiagnostic(error.message);
+  }
+  if (typeof error === "string" && error.trim().length > 0) {
+    return sanitizeErrorDiagnostic(error);
+  }
+  return "Runtime notifier listener failed.";
+}
+
+function summarizeErrorStack(error: unknown): string | undefined {
+  if (!(error instanceof Error) || typeof error.stack !== "string" || error.stack.trim().length === 0) {
+    return undefined;
+  }
+  return sanitizeErrorDiagnostic(error.stack.split("\n").slice(0, MAX_STACK_LINES).join("\n"));
+}
+
+function sanitizeErrorDiagnostic(value: string): string {
+  let redacted = value;
+  redacted = redacted.replace(
+    /(["']?authorization["']?\s*[:=]\s*)(?:(["'](?:bearer\s+)?[^"'\r\n]+["'])|((?:bearer\s+)?[^\s"'\r\n,;{}]+))/giu,
+    (_match, prefix, quoted, unquoted) =>
+      redactSensitiveAssignment(prefix, quoted, unquoted, { preserveBearerPrefix: true })
+  );
+  redacted = redacted.replace(
+    /(["']?(?:password|secret)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\r\n,;{}]+))/giu,
+    (_match, prefix, quoted, unquoted) => redactSensitiveAssignment(prefix, quoted, unquoted)
+  );
+  redacted = redacted.replace(
+    /(["']?(?:api[_-]?key|token)["']?\s*[:=]\s*)(?:(["'][^"'\r\n]+["'])|([^\s"'\r\n,;{}]+))/giu,
+    (_match, prefix, quoted, unquoted) => redactSensitiveAssignment(prefix, quoted, unquoted)
+  );
+  if (redacted.length <= MAX_ERROR_DIAGNOSTIC_LENGTH) {
+    return redacted;
+  }
+  return `${redacted.slice(0, MAX_ERROR_DIAGNOSTIC_LENGTH)}...`;
+}
+
+function redactSensitiveAssignment(
+  prefix: string,
+  quoted: string | undefined,
+  unquoted: string | undefined,
+  options: { readonly preserveBearerPrefix?: boolean } = {}
+): string {
+  const captured = quoted ?? unquoted ?? "";
+  if (options.preserveBearerPrefix) {
+    const isBearer = captured.toLowerCase().includes("bearer ");
+    const bearerPrefix = isBearer ? (captured.match(/bearer\s+/i)?.[0] ?? "Bearer ") : "";
+    if (quoted?.startsWith('"') && quoted.endsWith('"')) {
+      return `${prefix}"${bearerPrefix}[Redacted]"`;
+    }
+    if (quoted?.startsWith("'") && quoted.endsWith("'")) {
+      return `${prefix}'${bearerPrefix}[Redacted]'`;
+    }
+    return `${prefix}${bearerPrefix}[Redacted]`;
+  }
+  if (captured.startsWith('"') && captured.endsWith('"')) {
+    return `${prefix}"[Redacted]"`;
+  }
+  if (captured.startsWith("'") && captured.endsWith("'")) {
+    return `${prefix}'[Redacted]'`;
+  }
+  return `${prefix}[Redacted]`;
 }

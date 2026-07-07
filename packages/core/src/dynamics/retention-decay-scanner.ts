@@ -125,7 +125,8 @@ export class RetentionDecayScanner {
         subCode: "PORT_UNAVAILABLE"
       });
     }
-    const { result } = await eventPublisher.mutateThenAppendMany(() => {
+    let decayResult: DecayTransitionApplyResult | undefined;
+    await eventPublisher.mutateThenAppendMany(() => {
       const { memoryRepo, karmaEventRepo } = this.deps;
       if (
         memoryRepo.findByIdSync === undefined ||
@@ -148,25 +149,37 @@ export class RetentionDecayScanner {
       if (!this.shouldApplyDecayTransition(transition)) {
         return { events: [], result: { updated: false, manifestationChanged: false } };
       }
-      const updated = memoryRepo.updateDynamicsSync(
-        objectId,
-        {
-          activation_score: transition.activationScore,
-          retention_score: transition.retentionScore,
-          manifestation_state: transition.manifestationState,
-          retention_state: transition.retentionState
-        },
-        now
-      );
+      const dummyUpdatedMemory = {
+        ...memory,
+        activation_score: transition.activationScore,
+        retention_score: transition.retentionScore,
+        manifestation_state: transition.manifestationState,
+        retention_state: transition.retentionState
+      };
+      const events = this.buildDecayAuditInputs(dummyUpdatedMemory, transition, now);
+      const updateDynamicsSync = memoryRepo.updateDynamicsSync;
       return {
-        events: this.buildDecayAuditInputs(updated, transition, now),
-        result: {
-          updated: true,
-          manifestationChanged: transition.previousManifestation !== transition.manifestationState
+        events,
+        result: undefined,
+        apply: () => {
+          updateDynamicsSync(
+            objectId,
+            {
+              activation_score: transition.activationScore,
+              retention_score: transition.retentionScore,
+              manifestation_state: transition.manifestationState,
+              retention_state: transition.retentionState
+            },
+            now
+          );
+          decayResult = {
+            updated: true,
+            manifestationChanged: transition.previousManifestation !== transition.manifestationState
+          };
         }
       };
     });
-    return result;
+    return decayResult ?? { updated: false, manifestationChanged: false };
   }
 
   private async applyDecayTransitionAsync(

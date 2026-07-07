@@ -40,7 +40,7 @@ export async function addSourceProximityCandidates(params: Readonly<{
   if (params.drafts.size === 0 || params.admissionLimit <= 0) {
     return Object.freeze({});
   }
-  const seedDrafts = selectSourceProximitySeedDrafts(params.drafts);
+  const seedDrafts = selectSourceProximitySeedDrafts(params.drafts, params.warn);
   if (seedDrafts.length === 0) {
     return Object.freeze({});
   }

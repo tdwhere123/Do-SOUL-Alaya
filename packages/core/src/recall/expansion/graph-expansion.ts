@@ -105,16 +105,24 @@ function percentileOfSorted(samples: readonly number[], percentile: number): num
     return 0;
   }
   if (samples.length === 1) {
-    return samples[0];
+    return readSample(samples, 0);
   }
   const rank = ((samples.length - 1) * percentile) / 100;
   const lower = Math.floor(rank);
   const upper = Math.ceil(rank);
   if (lower === upper) {
-    return samples[lower];
+    return readSample(samples, lower);
   }
   const weight = rank - lower;
-  return samples[lower] * (1 - weight) + samples[upper] * weight;
+  return readSample(samples, lower) * (1 - weight) + readSample(samples, upper) * weight;
+}
+
+function readSample(samples: readonly number[], index: number): number {
+  const value = samples[index];
+  if (value === undefined) {
+    throw new Error("Graph expansion diagnostic invariant violated: percentile index out of range.");
+  }
+  return value;
 }
 
 function freezeGraphExpansionDiagnostics(
@@ -212,10 +220,22 @@ function summarizeGraphExpansionCandidateSources(
 ): Readonly<RecallGraphExpansionDiagnostics> {
   const diagnostics = createMutableGraphExpansionDiagnostics();
   for (const source of sources.values()) {
-    diagnostics.graph_expansion_plane_count_per_hop[source.hop - 1] += 1;
+    incrementGraphExpansionHopCount(diagnostics, source.hop);
     diagnostics.graph_expansion_plane_count_per_edge_type[source.edgeType] += 1;
   }
   return freezeGraphExpansionDiagnostics(diagnostics);
+}
+
+function incrementGraphExpansionHopCount(
+  diagnostics: MutableGraphExpansionDiagnostics,
+  hop: number
+): void {
+  const index = hop - 1;
+  const current = diagnostics.graph_expansion_plane_count_per_hop[index];
+  if (current === undefined) {
+    throw new Error("Graph expansion diagnostic invariant violated: hop index out of range.");
+  }
+  diagnostics.graph_expansion_plane_count_per_hop[index] = current + 1;
 }
 
 // anchor: cascade merge for graph_expansion diagnostics; re-derives hop/edge_type counts from sources. multi_seed_graph_fan_in is not re-derivable, so the tier with more distinct_seeds wins. see also: recall-service.ts mergeCoarseFilters.

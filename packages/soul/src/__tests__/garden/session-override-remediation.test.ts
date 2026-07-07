@@ -51,7 +51,7 @@ describe("SessionOverrideRemediation", () => {
 
     expect(outcome).toBe("candidate");
     expect(deps.claimService.create).toHaveBeenCalledTimes(1);
-    expect(deps.claimService.create.mock.calls[0][0]).toMatchObject({
+    expect(deps.claimService.create.mock.calls[0]![0]).toMatchObject({
       claim_kind: "factual_policy",
       proposition_digest: "Use pnpm instead of npm.",
       source_object_refs: ["memory:build-style"]

@@ -298,12 +298,14 @@ function compareScores(
   left: readonly [number, number, number, number],
   right: readonly [number, number, number, number]
 ): number {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] > right[index]) {
+  for (const index of [0, 1, 2, 3] as const) {
+    const leftScore = left[index];
+    const rightScore = right[index];
+    if (leftScore > rightScore) {
       return 1;
     }
 
-    if (left[index] < right[index]) {
+    if (leftScore < rightScore) {
       return -1;
     }
   }

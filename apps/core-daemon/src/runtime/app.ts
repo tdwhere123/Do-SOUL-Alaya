@@ -3,6 +3,12 @@ import { Hono } from "hono";
 import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
+import {
+  isProtectedRequest,
+  registerRateLimitMiddleware,
+  registerSecurityHeadersMiddleware,
+  type CoreDaemonRateLimitConfig
+} from "../middleware/register-security-middleware.js";
 import { readBuildInfo } from "./build-info.js";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
@@ -62,6 +68,7 @@ export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 export const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
 export const REQUEST_ID_HEADER = "x-request-id";
 export const CORRELATION_ID_HEADER = "x-correlation-id";
+export type { CoreDaemonRateLimitConfig };
 
 export interface RequestProtectionConfig {
   readonly allowedOrigin: string;
@@ -74,6 +81,7 @@ export interface CoreDaemonServices {
   readonly logger?: ErrorLoggerPort;
   readonly requestProtection?: RequestProtectionConfig;
   readonly routes?: CoreDaemonRouteServices;
+  readonly rateLimit?: CoreDaemonRateLimitConfig;
 }
 
 export interface CoreDaemonRouteServices {
@@ -139,8 +147,10 @@ export function createApp(
 
   registerRequestIdMiddleware(app);
   registerDrainMiddleware(app, lifecycle);
+  registerSecurityHeadersMiddleware(app);
   registerCorsMiddleware(app, requestProtection.allowedOrigin);
   registerProtectedRequestMiddleware(app, services.requestProtection, requestProtection);
+  registerRateLimitMiddleware(app, services.rateLimit);
   registerFileUploadLimitMiddleware(app, bodyLimits.fileUploadBodyLimit);
   registerRequestBodyLimitMiddleware(app, bodyLimits.requestBodyLimit);
 
@@ -400,14 +410,6 @@ function registerConfiguredRoutes(app: Hono, routes: CoreDaemonRouteServices | u
   if (routes.globalMemory !== undefined) registerGlobalMemoryRoutes(app, routes.globalMemory);
   if (routes.conflictMatrix !== undefined) registerConflictMatrixRoutes(app, routes.conflictMatrix);
   if (routes.e2eEventTriggers !== undefined) registerE2eEventTriggerRoutes(app, routes.e2eEventTriggers);
-}
-
-function isProtectedRequest(method: string, path: string): boolean {
-  if (path === LIVENESS_PATH) {
-    return false;
-  }
-
-  return method !== "OPTIONS";
 }
 
 function normalizeOrigin(origin: string | undefined): string | undefined {

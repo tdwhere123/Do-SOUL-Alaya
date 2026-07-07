@@ -11,7 +11,7 @@ describe("daemon MCP runtime registry", () => {
         serverConfigs: {
           filesystem: {
             transportType: "stdio",
-            command: "node"
+            command: process.execPath
           }
         },
         createClient: vi.fn(),
@@ -27,7 +27,7 @@ describe("daemon MCP runtime registry", () => {
       serverConfigs: {
         filesystem: {
           transportType: "stdio",
-          command: "node"
+          command: process.execPath
         }
       },
       createClient: vi.fn(),
@@ -64,7 +64,7 @@ describe("daemon MCP runtime registry", () => {
       serverConfigs: {
         filesystem: {
           transportType: "stdio",
-          command: "node",
+          command: process.execPath,
           args: ["./mock-filesystem-server.js"]
         }
       },
@@ -81,7 +81,7 @@ describe("daemon MCP runtime registry", () => {
     });
 
     expect(createStdioTransport).toHaveBeenCalledWith({
-      command: "node",
+      command: process.execPath,
       args: ["./mock-filesystem-server.js"],
       cwd: undefined,
       env: undefined,
@@ -114,7 +114,7 @@ describe("daemon MCP runtime registry", () => {
       serverConfigs: {
         filesystem: {
           transportType: "stdio",
-          command: "node"
+          command: process.execPath
         }
       },
       createClient,
@@ -195,7 +195,7 @@ describe("daemon MCP runtime registry", () => {
       serverConfigs: {
         filesystem: {
           transportType: "stdio",
-          command: "node",
+          command: process.execPath,
           args: ["./mock-filesystem-server.js"]
         }
       },
@@ -294,7 +294,7 @@ describe("daemon MCP runtime registry", () => {
       serverConfigs: {
         filesystem: {
           transportType: "stdio",
-          command: "node",
+          command: process.execPath,
           args: ["./mock-filesystem-server.js"]
         },
         github: {
@@ -336,7 +336,7 @@ describe("daemon MCP runtime registry", () => {
       serverConfigs: {
         filesystem: {
           transportType: "stdio",
-          command: "node",
+          command: process.execPath,
           args: ["./mock-filesystem-server.js"]
         }
       },

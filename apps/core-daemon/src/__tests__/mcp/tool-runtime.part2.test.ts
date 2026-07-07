@@ -24,11 +24,14 @@ import {
 
 import {
   cleanupToolRuntimeTempDirs,
-  createBuiltinToolExecutor,
+  createAutoConfirmingBuiltinToolExecutor,
+  createConversationToolSpec,
   createDeferred,
   createRuntimeContext,
   createWorkspace,
-  trackToolRuntimeTempDir
+  confirmedToolExecutionOptions,
+  trackToolRuntimeTempDir,
+  withToolConfirmation
 } from "./tool-runtime-shared-fixture.js";
 
 function createRecordingConversationToolExecutor(toolSpec: ToolSpec): {
@@ -120,23 +123,6 @@ function extractAffectedPaths(
   return undefined;
 }
 
-function createToolSpec(toolId: ToolSpec["tool_id"]): ToolSpec {
-  return {
-    tool_id: toolId,
-    category: toolId === "tools.exec_shell" ? "exec" : "write",
-    description: `Spec for ${toolId}`,
-    scope_guard: toolId === "tools.exec_shell" ? "project" : "workspace",
-    read_only: false,
-    destructive: toolId === "tools.exec_shell",
-    concurrency_safe: false,
-    interrupt_behavior: toolId === "tools.exec_shell" ? "abort" : "wait",
-    requires_confirmation: toolId === "tools.exec_shell",
-    requires_evidence_reopen: false,
-    rollback_support: "none",
-    fast_path_eligible: false
-  };
-}
-
 afterEach(cleanupToolRuntimeTempDirs);
 
 describe("tool-runtime relative path handling", () => {
@@ -147,7 +133,7 @@ describe("tool-runtime relative path handling", () => {
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     await mkdir(path.join(repoDir, "src"), { recursive: true });
     const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
-      createToolSpec("tools.write_file")
+      createConversationToolSpec("tools.write_file")
     );
 
     const result = await handleConversationToolUse(
@@ -155,10 +141,10 @@ describe("tool-runtime relative path handling", () => {
         type: "tool_use",
         id: "toolu-write-affected",
         name: "tools.write_file",
-        input: {
+        input: withToolConfirmation({
           path: path.join(repoDir, "src/index.ts"),
           content: "export const value = 1;\n"
-        }
+        })
       },
       createRuntimeContext(),
       {
@@ -169,10 +155,11 @@ describe("tool-runtime relative path handling", () => {
       },
       executor,
       {
+        ...confirmedToolExecutionOptions,
         gitBindingValidation: {
           currentWorkingDirectory: workspaceDir
         },
-        externalToolExecutor: createBuiltinToolExecutor(["tools.write_file"])
+        externalToolExecutor: createAutoConfirmingBuiltinToolExecutor(["tools.write_file"])
       }
     );
 
@@ -192,7 +179,7 @@ describe("tool-runtime relative path handling", () => {
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
-      createToolSpec("mcp__filesystem__write_file")
+      createConversationToolSpec("mcp__filesystem__write_file")
     );
 
     const result = await handleConversationToolUse(
@@ -244,7 +231,7 @@ describe("tool-runtime relative path handling", () => {
     const repoDir = path.join(workspaceDir, "repo");
     await mkdir(path.join(repoDir, ".git"), { recursive: true });
     const { appendedEntries, executor, insertedRecords } = createRecordingConversationToolExecutor(
-      createToolSpec("mcp__filesystem__write_file")
+      createConversationToolSpec("mcp__filesystem__write_file")
     );
 
     const result = await handleConversationToolUse(

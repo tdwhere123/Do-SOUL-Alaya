@@ -32,14 +32,20 @@ export type LoggerPort = Readonly<{
 export type WarnLogger = LoggerPort;
 
 type UnhandledRejectionListener = (reason: unknown) => void;
+type UncaughtExceptionListener = (error: unknown) => void;
 
 type UnhandledRejectionProcessPort = {
   exitCode?: number | string | null;
   on(event: "unhandledRejection", listener: UnhandledRejectionListener): unknown;
+  on(event: "uncaughtException", listener: UncaughtExceptionListener): unknown;
+  exit?(code?: number): void;
 };
 
 type UnhandledRejectionHandlerOptions = Readonly<{
   shutdown?: () => Promise<unknown> | unknown;
+  forceExitDelayMs?: number;
+  setTimeout?: typeof setTimeout;
+  clearTimeout?: typeof clearTimeout;
 }>;
 
 const UNHANDLED_REJECTION_LOGGER_KEY = Symbol.for(
@@ -47,6 +53,9 @@ const UNHANDLED_REJECTION_LOGGER_KEY = Symbol.for(
 );
 const UNHANDLED_REJECTION_LISTENER_KEY = Symbol.for(
   "do-soul.alaya.unhandledRejectionListener"
+);
+const UNCAUGHT_EXCEPTION_LISTENER_KEY = Symbol.for(
+  "do-soul.alaya.uncaughtExceptionListener"
 );
 const UNHANDLED_REJECTION_SEEN_KEY = Symbol.for(
   "do-soul.alaya.unhandledRejectionSeen"
@@ -57,13 +66,30 @@ const UNHANDLED_REJECTION_SHUTDOWN_KEY = Symbol.for(
 const UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY = Symbol.for(
   "do-soul.alaya.unhandledRejectionShutdownPromise"
 );
+const FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY = Symbol.for(
+  "do-soul.alaya.fatalShutdownForceExitTimer"
+);
+const FATAL_SHUTDOWN_FORCE_EXIT_DELAY_KEY = Symbol.for(
+  "do-soul.alaya.fatalShutdownForceExitDelay"
+);
+const FATAL_SHUTDOWN_SET_TIMEOUT_KEY = Symbol.for(
+  "do-soul.alaya.fatalShutdownSetTimeout"
+);
+const FATAL_SHUTDOWN_CLEAR_TIMEOUT_KEY = Symbol.for(
+  "do-soul.alaya.fatalShutdownClearTimeout"
+);
 
 type UnhandledRejectionProcessState = UnhandledRejectionProcessPort & {
   [UNHANDLED_REJECTION_LOGGER_KEY]?: Pick<LoggerPort, "error">;
   [UNHANDLED_REJECTION_LISTENER_KEY]?: UnhandledRejectionListener;
+  [UNCAUGHT_EXCEPTION_LISTENER_KEY]?: UncaughtExceptionListener;
   [UNHANDLED_REJECTION_SEEN_KEY]?: boolean;
   [UNHANDLED_REJECTION_SHUTDOWN_KEY]?: () => Promise<unknown> | unknown;
   [UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY]?: Promise<void>;
+  [FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY]?: ReturnType<typeof setTimeout>;
+  [FATAL_SHUTDOWN_FORCE_EXIT_DELAY_KEY]?: number;
+  [FATAL_SHUTDOWN_SET_TIMEOUT_KEY]?: typeof setTimeout;
+  [FATAL_SHUTDOWN_CLEAR_TIMEOUT_KEY]?: typeof clearTimeout;
 };
 
 // Defense-in-depth field redaction. pino paths only match a single level
@@ -178,30 +204,46 @@ export function installUnhandledRejectionHandler(
 ): void {
   const processState = processPort as UnhandledRejectionProcessState;
   processState[UNHANDLED_REJECTION_LOGGER_KEY] = logger;
+  processState[FATAL_SHUTDOWN_FORCE_EXIT_DELAY_KEY] = options.forceExitDelayMs ?? 30_000;
+  processState[FATAL_SHUTDOWN_SET_TIMEOUT_KEY] = options.setTimeout ?? setTimeout;
+  processState[FATAL_SHUTDOWN_CLEAR_TIMEOUT_KEY] = options.clearTimeout ?? clearTimeout;
   if (options.shutdown !== undefined) {
     const priorShutdown = processState[UNHANDLED_REJECTION_SHUTDOWN_KEY];
     if (priorShutdown !== undefined && priorShutdown !== options.shutdown) {
       processState[UNHANDLED_REJECTION_SEEN_KEY] = false;
       processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = undefined;
+      clearFatalShutdownForceExitTimer(processState);
     }
     processState[UNHANDLED_REJECTION_SHUTDOWN_KEY] = options.shutdown;
   }
-  if (processState[UNHANDLED_REJECTION_LISTENER_KEY] !== undefined) {
-    ensureUnhandledRejectionShutdown(processState, processPort);
-    return;
+  if (processState[UNHANDLED_REJECTION_LISTENER_KEY] === undefined) {
+    const listener: UnhandledRejectionListener = (reason) => {
+      handleFatalProcessError(
+        processState,
+        processPort,
+        "unhandled rejection",
+        "unhandled rejection shutdown failed",
+        reason
+      );
+    };
+
+    processPort.on("unhandledRejection", listener);
+    processState[UNHANDLED_REJECTION_LISTENER_KEY] = listener;
   }
+  if (processState[UNCAUGHT_EXCEPTION_LISTENER_KEY] === undefined) {
+    const listener: UncaughtExceptionListener = (error) => {
+      handleFatalProcessError(
+        processState,
+        processPort,
+        "uncaught exception",
+        "uncaught exception shutdown failed",
+        error
+      );
+    };
 
-  const listener: UnhandledRejectionListener = (reason) => {
-    processState[UNHANDLED_REJECTION_SEEN_KEY] = true;
-    processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error("unhandled rejection", {
-      reason: formatUnknownErrorMessage(reason)
-    });
-    processPort.exitCode = 1;
-    ensureUnhandledRejectionShutdown(processState, processPort);
-  };
-
-  processPort.on("unhandledRejection", listener);
-  processState[UNHANDLED_REJECTION_LISTENER_KEY] = listener;
+    processPort.on("uncaughtException", listener);
+    processState[UNCAUGHT_EXCEPTION_LISTENER_KEY] = listener;
+  }
   ensureUnhandledRejectionShutdown(processState, processPort);
 }
 
@@ -235,19 +277,95 @@ function ensureUnhandledRejectionShutdown(
     return;
   }
 
+  ensureFatalShutdownForceExitTimer(processState, processPort);
   processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = Promise.resolve(
     processState[UNHANDLED_REJECTION_SHUTDOWN_KEY]!()
   )
-    .catch((error) => {
-      processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(
-        "unhandled rejection shutdown failed",
-        {
-          error: formatUnknownErrorMessage(error)
+    .then(
+      () => {
+        clearFatalShutdownForceExitTimer(processState);
+      },
+      (error) => {
+        processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(
+          "fatal process shutdown failed",
+          {
+            error: formatUnknownErrorMessage(error)
+          }
+        );
+        processPort.exitCode = 1;
+      }
+    )
+    .then(() => {
+      if (processPort.exit !== undefined) {
+        const exitCode = typeof processPort.exitCode === "number" ? processPort.exitCode : 1;
+        if (processPort !== process || process.env.NODE_ENV !== "test") {
+          processPort.exit(exitCode);
         }
-      );
-      processPort.exitCode = 1;
-    })
-    .then(() => undefined);
+      }
+    });
+}
+
+function handleFatalProcessError(
+  processState: UnhandledRejectionProcessState,
+  processPort: UnhandledRejectionProcessPort,
+  message: string,
+  shutdownFailureMessage: string,
+  reason: unknown
+): void {
+  processState[UNHANDLED_REJECTION_SEEN_KEY] = true;
+  processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(message, {
+    reason: formatUnknownErrorMessage(reason)
+  });
+  processPort.exitCode = 1;
+  processState[UNHANDLED_REJECTION_SHUTDOWN_PROMISE_KEY] = undefined;
+  ensureUnhandledRejectionShutdown(processState, processPort);
+  if (processState[UNHANDLED_REJECTION_SHUTDOWN_KEY] === undefined) {
+    processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(shutdownFailureMessage, {
+      error: "no shutdown handler installed"
+    });
+  }
+}
+
+function ensureFatalShutdownForceExitTimer(
+  processState: UnhandledRejectionProcessState,
+  processPort: UnhandledRejectionProcessPort
+): void {
+  if (processState[FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY] !== undefined) {
+    return;
+  }
+
+  const setTimeoutFn = processState[FATAL_SHUTDOWN_SET_TIMEOUT_KEY] ?? setTimeout;
+  const timeoutMs = processState[FATAL_SHUTDOWN_FORCE_EXIT_DELAY_KEY] ?? 30_000;
+  const timeout = setTimeoutFn(() => {
+    processState[UNHANDLED_REJECTION_LOGGER_KEY]?.error(
+      "fatal process shutdown timed out; forcing exit",
+      { timeout_ms: timeoutMs }
+    );
+    processPort.exitCode = 1;
+    if (processPort.exit !== undefined) {
+      if (processPort !== process || process.env.NODE_ENV !== "test") {
+        processPort.exit(1);
+      }
+    }
+  }, timeoutMs);
+  unrefTimer(timeout);
+  processState[FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY] = timeout;
+}
+
+function clearFatalShutdownForceExitTimer(processState: UnhandledRejectionProcessState): void {
+  if (processState[FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY] === undefined) {
+    return;
+  }
+
+  const clearTimeoutFn = processState[FATAL_SHUTDOWN_CLEAR_TIMEOUT_KEY] ?? clearTimeout;
+  clearTimeoutFn(processState[FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY]);
+  processState[FATAL_SHUTDOWN_FORCE_EXIT_TIMER_KEY] = undefined;
+}
+
+function unrefTimer(timeout: ReturnType<typeof setTimeout>): void {
+  if (typeof timeout === "object" && timeout !== null && "unref" in timeout && typeof timeout.unref === "function") {
+    timeout.unref();
+  }
 }
 
 export type ReconcileBootstrapPathsForAllWorkspacesDeps = Readonly<{

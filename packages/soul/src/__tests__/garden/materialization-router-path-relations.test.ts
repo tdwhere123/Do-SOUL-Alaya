@@ -88,7 +88,7 @@ describe("MaterializationRouter path relations and distillation", () => {
 
     expect(result.success).toBe(true);
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
-    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(enrichPendingPort.enqueue.mock.calls[0]![0].memoryId).toBe("memory-1");
     expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
     expect(result.created_objects).not.toContainEqual(
       expect.objectContaining({ object_kind: "proposal" })
@@ -119,7 +119,7 @@ describe("MaterializationRouter path relations and distillation", () => {
 
     expect(result.success).toBe(true);
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
-    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(enrichPendingPort.enqueue.mock.calls[0]![0].memoryId).toBe("memory-1");
     expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
   });
 
@@ -203,7 +203,7 @@ describe("MaterializationRouter path relations and distillation", () => {
     );
 
     expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0];
     expect(memoryInput.content).toBe("User prefers concise replies.");
   });
 
@@ -219,7 +219,7 @@ describe("MaterializationRouter path relations and distillation", () => {
       })
     );
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0];
     expect(memoryInput.content).toContain("First sentence states the fact.");
     expect(memoryInput.content).toContain("Second sentence adds context.");
     expect(memoryInput.content).not.toContain("Third sentence");
@@ -237,7 +237,7 @@ describe("MaterializationRouter path relations and distillation", () => {
       })
     );
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0];
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0];
     expect(memoryInput.content).toContain("用户偏好简洁的回复");
     expect(memoryInput.content).toContain("同时希望保留中文表达");
     expect(memoryInput.content).not.toContain("第三句");
@@ -254,7 +254,7 @@ describe("MaterializationRouter path relations and distillation", () => {
       })
     );
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly content: string;
     };
     expect(memoryInput.content.length).toBe(DISTILLED_FACT_MAX_CHARS);
@@ -272,7 +272,7 @@ describe("MaterializationRouter path relations and distillation", () => {
       })
     );
 
-    const memoryInput = deps.memoryService.create.mock.calls[0][0] as {
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
       readonly content: string;
     };
     expect(memoryInput.content).toBe(fact);
@@ -395,7 +395,7 @@ describe("MaterializationRouter path relations and distillation", () => {
 
     expect(detectAndLinkConflicts).not.toHaveBeenCalled();
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
-    expect(enrichPendingPort.enqueue.mock.calls[0][0].memoryId).toBe("memory-1");
+    expect(enrichPendingPort.enqueue.mock.calls[0]![0].memoryId).toBe("memory-1");
   });
 
   it("does not enqueue enrichment when enrichPendingPort is absent", async () => {

@@ -278,7 +278,11 @@ export class ArbitrationService {
     }
 
     const candidateIds = new Set(candidates.map((claim) => claim.object_id));
-    const workspaceId = candidates[0].workspace_id;
+    const firstCandidate = candidates[0];
+    if (firstCandidate === undefined) {
+      return [];
+    }
+    const workspaceId = firstCandidate.workspace_id;
     const workspaceEdges = await this.dependencies.conflictMatrixRepo.findByWorkspace(workspaceId);
     const edgesById = new Map<string, Readonly<ConflictMatrixEdge>>();
 

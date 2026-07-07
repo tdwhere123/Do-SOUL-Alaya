@@ -259,13 +259,25 @@ function admitGraphExpansionCandidates(
     if (!admittedByGraphExpansion) {
       continue;
     }
-    diagnostics.graph_expansion_plane_count_per_hop[candidate.hop - 1] += 1;
+    incrementGraphExpansionHopCount(diagnostics, candidate.hop);
     diagnostics.graph_expansion_plane_count_per_edge_type[candidate.edgeType] += 1;
     candidateSources.set(candidate.entry.object_id, Object.freeze({
       hop: candidate.hop,
       edgeType: candidate.edgeType
     }));
   }
+}
+
+function incrementGraphExpansionHopCount(
+  diagnostics: ReturnType<typeof createMutableGraphExpansionDiagnostics>,
+  hop: number
+): void {
+  const index = hop - 1;
+  const current = diagnostics.graph_expansion_plane_count_per_hop[index];
+  if (current === undefined) {
+    throw new Error("Graph expansion diagnostic invariant violated: hop index out of range.");
+  }
+  diagnostics.graph_expansion_plane_count_per_hop[index] = current + 1;
 }
 
 function shouldSkipEntitySeedCollection(params: Readonly<{

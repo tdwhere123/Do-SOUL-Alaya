@@ -2,9 +2,10 @@ import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import {
   open,
+  lstat,
   readFile as fsReadFile,
   realpath,
-  writeFile as fsWriteFile,
+  unlink,
   type FileHandle
 } from "node:fs/promises";
 import path from "node:path";
@@ -57,9 +58,10 @@ export async function writeFile(
     return createFileToolError("WRITE_ERROR", `Parent path is not a directory: ${parentDirectory}`);
   }
 
+  let realWritableRoots: readonly string[];
   try {
     const realParentDirectory = await realpath(parentDirectory);
-    const realWritableRoots = await resolveRealWritableRoots(writableRoots);
+    realWritableRoots = await resolveRealWritableRoots(writableRoots);
 
     if (!realWritableRoots.some((root) => isPathWithinRoot(realParentDirectory, root))) {
       return createAccessDenied("Path is outside the workspace boundary.");
@@ -68,14 +70,63 @@ export async function writeFile(
     return mapFileSystemError(error, parentDirectory, "WRITE_ERROR");
   }
 
+  let handle: FileHandle | undefined;
+  let newlyCreated = false;
   try {
+    if (entry.ok) {
+      try {
+        const linkStat = await lstat(containedPath.resolvedPath);
+        if (linkStat.isSymbolicLink()) {
+          return createAccessDenied("Path is outside the workspace boundary.");
+        }
+      } catch (error) {
+        return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
+      }
+    }
+
     const buffer = Buffer.from(input.content, "utf8");
-    await fsWriteFile(containedPath.resolvedPath, buffer);
+    const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+    if (entry.ok) {
+      handle = await open(
+        containedPath.resolvedPath,
+        constants.O_RDWR | noFollow,
+        0o666
+      );
+    } else {
+      handle = await open(
+        containedPath.resolvedPath,
+        constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | noFollow,
+        0o666
+      );
+      newlyCreated = true;
+    }
+
+    const openedFileRealPath = await resolveOpenedFileRealPath(handle.fd, containedPath.resolvedPath);
+    if (!realWritableRoots.some((root) => isPathWithinRoot(openedFileRealPath, root))) {
+      await handle.close();
+      handle = undefined;
+      if (newlyCreated) {
+        await unlink(containedPath.resolvedPath).catch(() => undefined);
+      }
+      return createAccessDenied("Path is outside the workspace boundary.");
+    }
+
+    await handle.truncate(0);
+    await handle.write(buffer, 0, buffer.length, 0);
+    await handle.close();
+    handle = undefined;
+
     return {
       ok: true,
       bytesWritten: buffer.byteLength
     };
   } catch (error) {
+    if (handle) {
+      await handle.close().catch(() => undefined);
+    }
+    if (newlyCreated) {
+      await unlink(containedPath.resolvedPath).catch(() => undefined);
+    }
     return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
   }
 }
@@ -266,6 +317,10 @@ async function resolveExecCwd(writableRoots: readonly string[]): Promise<string>
 
 function fdExecPath(fd: number): string {
   return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
+}
+
+async function resolveOpenedFileRealPath(fd: number, resolvedPath: string): Promise<string> {
+  return process.platform === "linux" ? await realpath(fdExecPath(fd)) : await realpath(resolvedPath);
 }
 
 function hasExecutableMode(mode: number | bigint): boolean {

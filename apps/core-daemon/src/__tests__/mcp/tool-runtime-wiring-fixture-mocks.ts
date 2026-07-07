@@ -145,14 +145,24 @@ vi.mock("../../handoff/gap-adapter.js", () => ({
 }));
 
 vi.mock("../../mcp/mcp-runtime-registry.js", () => ({
-  createDaemonMcpRuntimeRegistry: vi.fn(() => ({
-    listServerInfos: vi.fn(() => hoisted.mcpRuntimeServerInfos),
-    refresh: hoisted.mcpRuntimeRefresh,
-    close: hoisted.mcpRuntimeClose,
-    getServerTools: vi.fn((serverName: string) => hoisted.mcpRuntimeServerTools.get(serverName) ?? []),
-    listServerTools: vi.fn(async (serverName: string) => hoisted.mcpRuntimeServerTools.get(serverName) ?? []),
-    callTool: hoisted.mcpRuntimeCallTool
-  }))
+  createDaemonMcpRuntimeRegistry: vi.fn((input?: { serverConfigs?: Record<string, unknown> }) => {
+    const configuredServerNames = new Set(Object.keys(input?.serverConfigs ?? {}));
+    const isConfigured = (serverName: string) => configuredServerNames.has(serverName);
+    return {
+      listServerInfos: vi.fn(() =>
+        hoisted.mcpRuntimeServerInfos.filter((serverInfo) => isConfigured(serverInfo.server_name))
+      ),
+      refresh: hoisted.mcpRuntimeRefresh,
+      close: hoisted.mcpRuntimeClose,
+      getServerTools: vi.fn((serverName: string) =>
+        isConfigured(serverName) ? (hoisted.mcpRuntimeServerTools.get(serverName) ?? []) : []
+      ),
+      listServerTools: vi.fn(async (serverName: string) =>
+        isConfigured(serverName) ? (hoisted.mcpRuntimeServerTools.get(serverName) ?? []) : []
+      ),
+      callTool: hoisted.mcpRuntimeCallTool
+    };
+  })
 }));
 
 vi.mock("@do-soul/alaya-storage", async () => {

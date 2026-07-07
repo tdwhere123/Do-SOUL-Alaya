@@ -95,8 +95,12 @@ export function extractAttachedOperatorInstructions(
     if (match === null) {
       return undefined;
     }
+    const encodedInstructions = match[1];
+    if (encodedInstructions === undefined) {
+      return undefined;
+    }
     try {
-      return JSON.parse(match[1]) as string;
+      return JSON.parse(encodedInstructions) as string;
     } catch {
       return undefined;
     }

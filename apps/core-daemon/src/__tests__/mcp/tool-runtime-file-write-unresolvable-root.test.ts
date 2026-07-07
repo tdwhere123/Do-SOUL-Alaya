@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const realpathMock = vi.hoisted(() => ({
   // roots whose realpath() must throw (simulating an unresolvable root)
-  unresolvable: new Set<string>()
+  unresolvable: new Set<string>(),
+  beforeWrite: undefined as undefined | ((target: string) => Promise<void>)
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -25,6 +26,16 @@ vi.mock("node:fs/promises", async (importOriginal) => {
         throw error;
       }
       return await (actual.realpath as (p: string, ...r: unknown[]) => Promise<string>)(target, ...rest);
+    }),
+    open: vi.fn(async (target: string, ...rest: unknown[]) => {
+      await realpathMock.beforeWrite?.(target);
+      return await (actual.open as (p: string, ...r: unknown[]) => Promise<any>)(target, ...rest);
+    }),
+    writeFile: vi.fn(async (target: string, data: string | Uint8Array, ...rest: unknown[]) => {
+      await realpathMock.beforeWrite?.(target);
+      return await (
+        actual.writeFile as (p: string, data: string | Uint8Array, ...r: unknown[]) => Promise<void>
+      )(target, data, ...rest);
     })
   };
 });
@@ -37,11 +48,13 @@ describe("writeFile with an unresolvable writable root", () => {
   beforeEach(() => {
     realRoot = mkdtempSync(join(tmpdir(), "tool-write-root-"));
     realpathMock.unresolvable.clear();
+    realpathMock.beforeWrite = undefined;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     realpathMock.unresolvable.clear();
+    realpathMock.beforeWrite = undefined;
     rmSync(realRoot, { recursive: true, force: true });
   });
 
@@ -76,5 +89,68 @@ describe("writeFile with an unresolvable writable root", () => {
       expect.any(String),
       expect.objectContaining({ code: "ALAYA_WRITABLE_ROOT_UNRESOLVABLE" })
     );
+  });
+
+  it("rejects a write when the parent directory is swapped to a symlink after containment checks", async () => {
+    const outsideRoot = mkdtempSync(join(tmpdir(), "tool-write-outside-"));
+    const subDir = join(realRoot, "sub");
+    const target = join(subDir, "note.txt");
+    const outsideTarget = join(outsideRoot, "note.txt");
+    mkdirSync(subDir, { recursive: true });
+
+    realpathMock.beforeWrite = async (writeTarget) => {
+      if (writeTarget !== target) {
+        return;
+      }
+      rmSync(subDir, { recursive: true, force: true });
+      await import("node:fs/promises").then(({ symlink }) => symlink(outsideRoot, subDir, "dir"));
+    };
+
+    try {
+      const result = (await writeFile({ path: target, content: "escaped" } as never, [realRoot])) as {
+        ok: boolean;
+        code?: string;
+      };
+
+      expect(result.ok).toBe(false);
+      expect(result.code).toBe("ACCESS_DENIED");
+      await expect(readFile(outsideTarget, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not delete or modify an existing file outside the workspace when parent is swapped to a symlink", async () => {
+    const outsideRoot = mkdtempSync(join(tmpdir(), "tool-write-outside-"));
+    const subDir = join(realRoot, "sub");
+    const target = join(subDir, "note.txt");
+    const outsideTarget = join(outsideRoot, "note.txt");
+    mkdirSync(subDir, { recursive: true });
+
+    // Pre-create the outside file with a secret content
+    await import("node:fs/promises").then(({ writeFile: fsWrite }) =>
+      fsWrite(outsideTarget, "pre-existing-content", "utf8")
+    );
+
+    realpathMock.beforeWrite = async (writeTarget) => {
+      if (writeTarget !== target) {
+        return;
+      }
+      rmSync(subDir, { recursive: true, force: true });
+      await import("node:fs/promises").then(({ symlink }) => symlink(outsideRoot, subDir, "dir"));
+    };
+
+    try {
+      const result = (await writeFile({ path: target, content: "malicious-write" } as never, [realRoot])) as {
+        ok: boolean;
+        code?: string;
+      };
+
+      expect(result.ok).toBe(false);
+      // The file was not written to (it remains pre-existing-content) and is not deleted
+      await expect(readFile(outsideTarget, "utf8")).resolves.toBe("pre-existing-content");
+    } finally {
+      rmSync(outsideRoot, { recursive: true, force: true });
+    }
   });
 });

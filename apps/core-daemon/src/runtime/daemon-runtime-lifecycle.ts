@@ -1,13 +1,23 @@
-import { serve, type ServerType } from "@hono/node-server";
+import { serve } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "./app.js";
+import { closeServer, type CloseableHttpServer } from "./daemon-server-close.js";
+import {
+  clearSignalShutdownTimeout,
+  installSignalShutdownHandler,
+  type LifecycleProcessPort,
+  type LifecycleWarnLogger,
+  type SignalShutdownHandler
+} from "./daemon-signal-shutdown.js";
+import {
+  defaultLifecycleTimerPort,
+  delay,
+  type LifecycleTimerPort
+} from "./daemon-runtime-timing.js";
 import { resolveDaemonHostFromEnv } from "./server-options.js";
 import type { AlayaDaemonListenOptions, AlayaDaemonServer } from "./daemon-runtime-types.js";
 
 type DaemonAppFetch = Parameters<typeof serve>[0]["fetch"];
-
-type LifecycleWarnLogger = Readonly<{
-  warn(message: string, meta: Record<string, unknown>): void;
-}>;
+type DaemonServerFactory = (options: Parameters<typeof serve>[0]) => CloseableHttpServer;
 
 type GardenRuntimeLifecycle = Readonly<{
   backgroundManager: Readonly<{
@@ -38,21 +48,25 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   database: Readonly<{ close(): void }>;
   requestProtection: RequestProtectionConfig;
   intervalsToClear?: ReadonlyArray<NodeJS.Timeout>;
+  processPort?: LifecycleProcessPort;
+  serverFactory?: DaemonServerFactory;
+  timerPort?: LifecycleTimerPort;
 }>;
 
 type LifecycleState = {
-  server: ServerType | null;
+  server: CloseableHttpServer | null;
   backgroundStarted: boolean;
   startupBackgroundPass: Promise<void> | null;
   shuttingDown: Promise<void> | null;
   signalHandlersInstalled: boolean;
   signalShutdownHandlers: SignalShutdownHandler[];
+  signalShutdownTimeout: ReturnType<typeof setTimeout> | null;
 };
 
-type SignalShutdownHandler = Readonly<{
-  signal: "SIGTERM" | "SIGINT";
-  listener: () => void;
-}>;
+const REQUEST_DRAIN_TIMEOUT_MS = 30_000;
+const REQUEST_DRAIN_POLL_MIN_MS = 25;
+const REQUEST_DRAIN_POLL_MAX_MS = 250;
+const BACKGROUND_STOP_TIMEOUT_MS = 30_000;
 
 export function createDaemonLifecycleControls(input: CreateDaemonLifecycleControlsInput): Readonly<{
   startBackgroundServices(): void;
@@ -68,7 +82,8 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     startupBackgroundPass: null,
     shuttingDown: null,
     signalHandlersInstalled: false,
-    signalShutdownHandlers: []
+    signalShutdownHandlers: [],
+    signalShutdownTimeout: null
   };
   const startBackgroundServices = createBackgroundServiceStarter(input, state);
   const shutdown = createShutdownHandler(input, state);
@@ -168,7 +183,8 @@ function createHttpServerStarter(
 
     const hostname = options.hostname ?? resolveDaemonHostFromEnv(process.env);
     const port = options.port ?? parsePort(process.env.PORT, 3000);
-    state.server = serve({
+    const serverFactory = input.serverFactory ?? serve;
+    state.server = serverFactory({
       fetch: input.app.fetch,
       hostname,
       port
@@ -220,26 +236,26 @@ function installSignalShutdownHandlersOnce(
     return;
   }
   state.signalHandlersInstalled = true;
+  const processPort = input.processPort ?? process;
+  const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
   state.signalShutdownHandlers.push(
-    installSignalShutdownHandler("SIGTERM", input, shutdown),
-    installSignalShutdownHandler("SIGINT", input, shutdown)
+    installSignalShutdownHandler({
+      signal: "SIGTERM",
+      processPort,
+      timerPort,
+      warnLogger: input.warnLogger,
+      state,
+      shutdown
+    }),
+    installSignalShutdownHandler({
+      signal: "SIGINT",
+      processPort,
+      timerPort,
+      warnLogger: input.warnLogger,
+      state,
+      shutdown
+    })
   );
-}
-
-function installSignalShutdownHandler(
-  signal: "SIGTERM" | "SIGINT",
-  input: CreateDaemonLifecycleControlsInput,
-  shutdown: () => Promise<void>
-): SignalShutdownHandler {
-  const listener = () => {
-    void shutdown().catch((error) => {
-      input.warnLogger.warn(`daemon shutdown failed after ${signal}`, {
-        error: error instanceof Error ? error.message : String(error)
-      });
-    });
-  };
-  process.on(signal, listener);
-  return { signal, listener };
 }
 
 function logListeningAddress(
@@ -256,11 +272,19 @@ function logListeningAddress(
 
 async function drainInFlightRequests(input: CreateDaemonLifecycleControlsInput): Promise<void> {
   input.lifecycleState.drainState.isDraining = true;
-  const drainDeadline = Date.now() + 30_000;
-  while (input.lifecycleState.inFlight.count > 0 && Date.now() < drainDeadline) {
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 25);
-    });
+  const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
+  const drainDeadline = timerPort.now() + REQUEST_DRAIN_TIMEOUT_MS;
+  let attempt = 0;
+  while (input.lifecycleState.inFlight.count > 0 && timerPort.now() < drainDeadline) {
+    const remainingMs = drainDeadline - timerPort.now();
+    await delay(
+      Math.max(
+        REQUEST_DRAIN_POLL_MIN_MS,
+        Math.min(REQUEST_DRAIN_POLL_MIN_MS * 2 ** attempt, REQUEST_DRAIN_POLL_MAX_MS, remainingMs)
+      ),
+      timerPort
+    );
+    attempt += 1;
   }
   if (input.lifecycleState.inFlight.count > 0) {
     input.warnLogger.warn("daemon shutdown drain timed out with in-flight requests", {
@@ -277,12 +301,24 @@ async function stopBackgroundServices(
     return;
   }
 
-  await input.gardenRuntime.backgroundManager.stop({ timeoutMs: 30_000 });
+  try {
+    await input.gardenRuntime.backgroundManager.stop({ timeoutMs: BACKGROUND_STOP_TIMEOUT_MS });
+  } catch (error) {
+    input.warnLogger.warn("garden background manager shutdown failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
   await awaitStartupBackgroundPass(state);
   input.gardenRuntime.setBacklogTelemetryObserver(null);
-  const telemetryStopResult = await input.gardenBacklogTelemetryService.stop();
-  if (telemetryStopResult === "timed_out") {
-    input.warnLogger.warn("garden backlog telemetry shutdown timed out", {});
+  try {
+    const telemetryStopResult = await input.gardenBacklogTelemetryService.stop();
+    if (telemetryStopResult === "timed_out") {
+      input.warnLogger.warn("garden backlog telemetry shutdown timed out", {});
+    }
+  } catch (error) {
+    input.warnLogger.warn("garden backlog telemetry shutdown failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
   state.backgroundStarted = false;
 }
@@ -291,26 +327,44 @@ async function closeRuntimeResources(
   input: CreateDaemonLifecycleControlsInput,
   state: LifecycleState
 ): Promise<void> {
-  unregisterSignalShutdownHandlers(state);
-  input.securityStatusService.close();
-  await input.daemonMcpRuntimeRegistry.close();
-  input.globalMemoryRecallInvalidationSubscription?.dispose();
+  const processPort = input.processPort ?? process;
+  const timerPort = input.timerPort ?? defaultLifecycleTimerPort;
+  unregisterSignalShutdownHandlers(state, processPort, timerPort);
+  closeRuntimeResourceStep(input, "security status shutdown failed", () => {
+    input.securityStatusService.close();
+  });
+  await closeRuntimeResourceStepAsync(input, "daemon MCP runtime registry shutdown failed", async () => {
+    await input.daemonMcpRuntimeRegistry.close();
+  });
+  closeRuntimeResourceStep(input, "global memory invalidation subscription dispose failed", () => {
+    input.globalMemoryRecallInvalidationSubscription?.dispose();
+  });
   clearLifecycleIntervals(input.intervalsToClear);
 
   if (state.server !== null) {
-    await closeServer(state.server);
+    const closeResult = await closeServer(state.server, timerPort);
+    if (closeResult !== "closed") {
+      input.warnLogger.warn("daemon HTTP server shutdown needed compatibility fallback", {
+        result: closeResult
+      });
+    }
     state.server = null;
   }
 
   await closeRecallReadWorkerClient(input);
 }
 
-function unregisterSignalShutdownHandlers(state: LifecycleState): void {
+function unregisterSignalShutdownHandlers(
+  state: LifecycleState,
+  processPort: LifecycleProcessPort,
+  timerPort: LifecycleTimerPort
+): void {
   for (const { signal, listener } of state.signalShutdownHandlers) {
-    process.off(signal, listener);
+    processPort.off(signal, listener);
   }
   state.signalShutdownHandlers = [];
   state.signalHandlersInstalled = false;
+  clearSignalShutdownTimeout(state, timerPort);
 }
 
 function clearLifecycleIntervals(
@@ -357,22 +411,30 @@ function parsePort(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
-async function closeServer(server: ServerType): Promise<void> {
-  const close = server.close.bind(server) as (callback?: (error?: Error) => void) => void;
-
-  if (close.length === 0) {
-    close();
-    return;
-  }
-
-  await new Promise<void>((resolveClose, rejectClose) => {
-    close((error?: Error) => {
-      if (error !== undefined) {
-        rejectClose(error);
-        return;
-      }
-
-      resolveClose();
+function closeRuntimeResourceStep(
+  input: CreateDaemonLifecycleControlsInput,
+  message: string,
+  step: () => void
+): void {
+  try {
+    step();
+  } catch (error) {
+    input.warnLogger.warn(message, {
+      error: error instanceof Error ? error.message : String(error)
     });
-  });
+  }
+}
+
+async function closeRuntimeResourceStepAsync(
+  input: CreateDaemonLifecycleControlsInput,
+  message: string,
+  step: () => Promise<void>
+): Promise<void> {
+  try {
+    await step();
+  } catch (error) {
+    input.warnLogger.warn(message, {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 }

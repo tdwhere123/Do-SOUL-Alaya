@@ -7,7 +7,9 @@ archived to `docs/archive/backlog-resolved-historical.md`.
 ## Issue Numbering
 
 Issues are numbered `#BL-NNN` in plain decimal sequence.
-**Next available number**: `#BL-061`.
+**Next available number**: `#BL-069`.
+
+**Audit branch progress (2026-07-07, `audit-2026-07-06-full-fix`)**: see `.do-it/review/audit-2026-07-06-closeout.md`. `#BL-065` resolved on branch; `#BL-060`–`#BL-064` and `#BL-066`–`#BL-068` have partial/spike landings documented below.
 
 ---
 
@@ -63,11 +65,67 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 ### #BL-060 — SQLite worker queue for blocking storage operations
 
-**Status**: Open (deferred by recall-conformant review fix loop). **Due**: after S7 async SQLite comparison is reviewed.
+**Status**: Open (design spike landed 2026-07-07). **Due**: after S7 async SQLite comparison is reviewed.
 
-**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering.
+**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering. Branch landed typed port stub `packages/storage/src/sqlite/write-queue-port.ts`, contract test, and `docs/handbook/spikes/sqlite-worker-queue.md`.
 
 **Close condition**: a worker-thread write queue or reviewed async SQLite replacement keeps EventLog-first / transaction-CAS invariants intact and improves concurrent recall tail latency against the S7 witness.
+
+### #BL-061 — Audit structural/SRP split wave
+
+**Status**: Open (first card landed 2026-07-07). **Due**: before v0.3 stable.
+
+**Context**: The audit flagged large units and broad facades that are real maintainability debt but unsafe to mix into the security/stability remediation branch: `pre-write-recall-service.ts`, `sqlite-memory-entry-repo.ts`, `green-service.ts`, `event-log-repo.ts`, `memory-entry-statement-groups.ts`, `MemoryService`, `app.ts`, and broad storage barrels. Branch extracted security middleware wiring to `apps/core-daemon/src/middleware/register-security-middleware.ts` (−43 lines from `app.ts`).
+
+**Close condition**: split the listed units under the SRP/file-size thresholds in `AGENTS.md`, preserve package dependency direction, and pass focused regression tests for each moved owner.
+
+### #BL-062 — Audit API ergonomics cleanup wave
+
+**Status**: Open (first slice landed 2026-07-07). **Due**: next compatibility window.
+
+**Context**: Boolean trap parameters, single-letter names, `object` return types, CLI `as unknown as Readable/Writable`, and switch-heavy routing helpers are low-to-medium API clarity issues. They require compatibility review and call-site migration rather than a drive-by patch. Branch migrated `readSecretLine` to `{ isTTY }` options with deprecated boolean overload + migration test.
+
+**Close condition**: replace the reported boolean parameters with option objects, tighten the `EventPublisherEventLogRepoPort.getStorageConnectionIdentity` opaque type, remove CLI stream double-casts, and add migration tests for affected public call sites.
+
+### #BL-063 — Audit test/CI infrastructure hardening
+
+**Status**: Open (route coverage landed 2026-07-07). **Due**: before release-candidate gate.
+
+**Context**: The audit called out console warning suppression, over-mocked tests, wall-clock timeout assertions, single-OS coverage, serial project execution, and residual uncovered route/CLI branches. Branch added `routes-audit-coverage.test.ts`, MemoryQueryService tests, engine-gateway auth edge cases, and score/source-proximity diagnostic tests. Cross-platform CI matrix and console.warn assertion sweep remain.
+
+**Close condition**: warning-producing tests assert or filter expected warnings, flaky wall-clock checks use fake timers or bounded pollers, CI runs the selected cross-platform matrix, and coverage reports show the listed zero-coverage files no longer at 0%.
+
+### #BL-064 — LongMemEval source tree organization
+
+**Status**: Open (blocked on benchmark archive; 2026-07-07). **Due**: after current benchmark evidence is archived.
+
+**Context**: `apps/bench-runner/src/longmemeval/` is intentionally active and currently flat. Moving 70+ files during audit remediation would make benchmark diffs harder to review and risks invalidating in-flight evidence paths. No tracked `docs/bench-history/latest-*.json` pointer refresh observed on branch — reorg deferred.
+
+**Close condition**: move LongMemEval files into domain subdirectories, update imports/scripts/docs, and run the recall-only benchmark preflight plus targeted LongMemEval tests.
+
+### #BL-066 — Remaining audit low-risk hardening
+
+**Status**: Open (partial landing 2026-07-07). **Due**: opportunistic hardening wave.
+
+**Context**: Remaining low/medium audit items include hardcoded tuning constants, FTS/content length policy review, optional TTL policy for DB cache metadata, EventLog append retry policy, Garden raw input validation review, and broad catch/void-promise diagnostics. Branch landed `bestEffortDelete` rollback diagnostics (`ALAYA_FILE_UPLOAD_ROLLBACK_DELETE_FAILED`) in `apps/core-daemon/src/routes/workspace/files.ts` with regression test.
+
+**Close condition**: each item is either closed as stale with file-level evidence or lands a targeted regression; no silent catch in critical paths remains without an explicit diagnostic.
+
+### #BL-067 — MCP external runtime authentication and endpoint policy
+
+**Status**: Open (destructive builtin confirmation and env runtime narrowing landed 2026-07-07). **Due**: before enabling arbitrary external MCP servers.
+
+**Context**: The audit branch added server-verifiable confirmation receipts for builtin tools that mutate state or execute commands. Env-sourced MCP runtime config no longer spawns stdio commands and only accepts loopback HTTP(S) endpoints. This does not implement a full MCP handshake/session authentication layer for every builtin read/list/search call, nor does it define the trust model for arbitrary external stdio or HTTP MCP servers; adding that layer changes host compatibility and belongs in a dedicated protocol migration.
+
+**Close condition**: External MCP sessions authenticate at connection or tool-call boundary with a daemon-owned bearer/capability token, every builtin conversation tool rejects unauthenticated calls in an integration test, env-provided external endpoints and headers have an explicit trust policy, documented host attach profiles pass the token, and unauthenticated legacy clients fail with a typed auth error.
+
+### #BL-068 — Bound audit-reported in-memory caches
+
+**Status**: Open (classification corrected 2026-07-07). **Due**: v0.3 hardening window.
+
+**Context**: `ContextLensAssembler.lensStore` is bounded by expiry and `MAX_LENS_STORE_SIZE`, but the audit-reported session-override maps (`store`, `pendingLoads`, `cacheVersions`) and other long-lived core maps still need explicit owner review. This is separate from the SQLite worker queue and from generic low-risk hardening because the acceptance surface is bounded memory growth on daemon-long-lived in-memory caches.
+
+**Close condition**: every cache named in the 2026-07-06 audit is classified as bounded/stale or gets an explicit max-size/TTL/idle-prune policy with regression tests covering eviction and no loss of durable truth.
 
 
 ## Out of Alaya Scope (Permanently Rejected)

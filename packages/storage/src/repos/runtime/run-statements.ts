@@ -16,10 +16,10 @@ export interface RunStatements {
 export function prepareRunStatements(db: StorageDatabase): RunStatements {
   return {
     createStatement: db.connection.prepare(CREATE_RUN_SQL),
-    getByIdStatement: db.connection.prepare(selectRunSql("run_id = ?", undefined, "LIMIT 1")),
-    listByWorkspaceStatement: db.connection.prepare(selectRunSql("workspace_id = ?", "created_at ASC, run_id ASC")),
+    getByIdStatement: db.connection.prepare(selectRunSql("byId", undefined, "limitOne")),
+    listByWorkspaceStatement: db.connection.prepare(selectRunSql("byWorkspace", "created")),
     listByWorkspacePagedStatement: db.connection.prepare(
-      selectRunSql("workspace_id = ?", "created_at ASC, run_id ASC", "LIMIT ? OFFSET ?")
+      selectRunSql("byWorkspace", "created", "paged")
     ),
     countByWorkspaceStatement: db.connection.prepare(`
       SELECT COUNT(*) AS total
@@ -39,13 +39,31 @@ export function prepareRunStatements(db: StorageDatabase): RunStatements {
   };
 }
 
-function selectRunSql(whereClause: string, orderBy?: string, suffix = ""): string {
-  const orderBySql = orderBy === undefined ? "" : `\n      ORDER BY ${orderBy}`;
-  const suffixSql = suffix.length === 0 ? "" : `\n      ${suffix}`;
+type RunWhereKey = "byId" | "byWorkspace";
+type RunOrderKey = "created";
+type RunSuffixKey = "limitOne" | "paged";
+
+const RUN_WHERE_CLAUSES: Readonly<Record<RunWhereKey, string>> = Object.freeze({
+  byId: "run_id = ?",
+  byWorkspace: "workspace_id = ?"
+});
+
+const RUN_ORDER_BY: Readonly<Record<RunOrderKey, string>> = Object.freeze({
+  created: "created_at ASC, run_id ASC"
+});
+
+const RUN_SUFFIXES: Readonly<Record<RunSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1",
+  paged: "LIMIT ? OFFSET ?"
+});
+
+function selectRunSql(whereKey: RunWhereKey, orderByKey?: RunOrderKey, suffixKey?: RunSuffixKey): string {
+  const orderBySql = orderByKey === undefined ? "" : `\n      ORDER BY ${RUN_ORDER_BY[orderByKey]}`;
+  const suffixSql = suffixKey === undefined ? "" : `\n      ${RUN_SUFFIXES[suffixKey]}`;
   return `
       SELECT${RUN_SELECT_COLUMNS}
       FROM runs
-      WHERE ${whereClause}${orderBySql}${suffixSql}
+      WHERE ${RUN_WHERE_CLAUSES[whereKey]}${orderBySql}${suffixSql}
     `;
 }
 

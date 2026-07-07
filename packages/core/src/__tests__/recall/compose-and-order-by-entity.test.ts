@@ -14,6 +14,7 @@ import { buildRecallPolicy } from "../../shared/recall-policy.js";
 import type { FineAssessmentCandidate } from "../../recall/delivery/fine-assessment-selection.js";
 import type { CoarseRecallCandidate, RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
+import { firstDefined } from "../helpers/defined.js";
 
 const FLAG = "ALAYA_RECALL_COMPOSE";
 const COVERAGE_SELECTOR = "ALAYA_RECALL_COVERAGE_SELECTOR";
@@ -148,7 +149,7 @@ describe("composeAndOrderByEntity", () => {
       fac({ id: "g3", fused: 0.2, entities: ["topic"], surface: "s3" })
     ];
     const out = composeAndOrderByEntity([...group, strong], supp(), 10);
-    expect(out[0].entry.object_id).toBe("gold");
+    expect(firstDefined(out).entry.object_id).toBe("gold");
   });
 
   it("treats a unique-entity strong candidate as a singleton that outranks a weak group", () => {
@@ -158,7 +159,7 @@ describe("composeAndOrderByEntity", () => {
       fac({ id: "g2", fused: 0.25, entities: ["topic"], surface: "s2" })
     ];
     const out = composeAndOrderByEntity([...group, strong], supp(), 10);
-    expect(out[0].entry.object_id).toBe("gold");
+    expect(firstDefined(out).entry.object_id).toBe("gold");
   });
 
   it("a singleton receives no coverage bonus, so two singletons order purely by fused score", () => {
@@ -180,7 +181,7 @@ describe("composeAndOrderByEntity", () => {
     ];
     const out = composeAndOrderByEntity([...flat, ...diverse], supp(), 10);
     // Equal best fused (0.4); the 3-session group's bounded bonus seats it first.
-    expect(out[0].entry.object_id).toBe("x1");
+    expect(firstDefined(out).entry.object_id).toBe("x1");
     expect(ids(out).indexOf("x1")).toBeLessThan(ids(out).indexOf("y1"));
   });
 
@@ -193,7 +194,7 @@ describe("composeAndOrderByEntity", () => {
     // Same surface_id would collapse to one session; cohort keys split x1/x2 into two → bonus lifts x.
     const cohorts = { x1: "cohort-1", x2: "cohort-2" };
     const out = composeAndOrderByEntity([...flat, ...diverse], supp(cohorts), 10);
-    expect(out[0].entry.object_id).toBe("x1");
+    expect(firstDefined(out).entry.object_id).toBe("x1");
   });
 
   it("the coverage bonus is bounded by lambda and cannot flip a clearly stronger group", () => {
@@ -205,7 +206,7 @@ describe("composeAndOrderByEntity", () => {
       fac({ id: `w${i}`, fused: 0.3, entities: ["w"], surface: `sess-${i}` })
     );
     const out = composeAndOrderByEntity([...weakDiverse, stronger], supp(), 10);
-    expect(out[0].entry.object_id).toBe("s");
+    expect(firstDefined(out).entry.object_id).toBe("s");
   });
 
   it("is deterministic across repeated calls", () => {
@@ -233,7 +234,7 @@ describe("composeAndOrderByEntity", () => {
     const strongerBase = fac({ id: "strong", fused: 0.5, entities: ["z"], surface: "s2" });
     // weak gets the max R_E gain (×1.1 = 0.44) but still loses to the stronger base (0.5).
     const out = composeAndOrderByEntity([supported, strongerBase], supp({}, { weak: 3 }), 10);
-    expect(out[0].entry.object_id).toBe("strong");
+    expect(firstDefined(out).entry.object_id).toBe("strong");
   });
 
   it("arbitrateByGovernance: a member superseded by a co-present winner is demoted below live members", () => {

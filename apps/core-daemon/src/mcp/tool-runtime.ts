@@ -14,7 +14,11 @@ import {
   type ToolSpec,
   type ToolUseBlock,
 } from "@do-soul/alaya-protocol";
-import { isBuiltinConversationToolId } from "./builtin-conversation-tool-specs.js";
+import { constantTimeTokenEqual } from "../shared/constant-time-token.js";
+import {
+  builtinConversationToolRequiresConfirmation,
+  isBuiltinConversationToolId
+} from "./builtin-conversation-tool-specs.js";
 import {
   executeBuiltinConversationTool,
   resolveAffectedPathRoots,
@@ -157,6 +161,7 @@ export async function handleConversationToolUse(
   options: {
     readonly externalToolExecutor?: ExternalConversationToolExecutor;
     readonly gitBindingValidation?: GitBindingValidationOptions;
+    readonly confirmationToken?: string;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   } = {}
 ): Promise<ToolResultBlock> {
@@ -167,6 +172,14 @@ export async function handleConversationToolUse(
       toolUse.id,
       "Runtime context is required for MCP tool execution."
     );
+  }
+
+  if (builtinConversationToolRequiresConfirmation(toolUse.name)) {
+    const confirmation = authorizeConfirmedBuiltinTool(toolUse, options.confirmationToken);
+    if (confirmation.ok === false) {
+      return createConversationToolResult(toolUse.id, confirmation, { isBuiltinTool: true });
+    }
+    toolUse = { ...toolUse, input: confirmation.input };
   }
 
   try {
@@ -203,6 +216,49 @@ export async function handleConversationToolUse(
   }
 }
 
+function authorizeConfirmedBuiltinTool(
+  toolUse: ToolUseBlock,
+  configuredToken: string | undefined
+): { readonly ok: true; readonly input: Record<string, unknown> } | StructuredToolErrorResult {
+  const token = normalizeConfirmationToken(configuredToken ?? process.env.ALAYA_MCP_TOOL_CONFIRMATION_TOKEN);
+  if (token === null) {
+    return {
+      ok: false,
+      code: "CONFIRMATION_REQUIRED",
+      message:
+        `Tool ${toolUse.name} requires server-verifiable confirmation, but ` +
+        "ALAYA_MCP_TOOL_CONFIRMATION_TOKEN is not configured."
+    };
+  }
+
+  const input = isRecord(toolUse.input) ? toolUse.input : {};
+  const receipt = isRecord(input["_alaya_confirmation"]) ? input["_alaya_confirmation"] : null;
+  const confirmed = receipt?.["confirmed"] === true;
+  const providedToken = normalizeConfirmationToken(
+    typeof receipt?.["token"] === "string" ? receipt["token"] : undefined
+  );
+  if (!confirmed || providedToken === null || !constantTimeTokenEqual(providedToken, token)) {
+    return {
+      ok: false,
+      code: "CONFIRMATION_REQUIRED",
+      message: `Tool ${toolUse.name} requires a valid server-verifiable confirmation receipt.`
+    };
+  }
+
+  const { _alaya_confirmation: _confirmation, ...strippedInput } = input;
+  void _confirmation;
+  return { ok: true, input: strippedInput };
+}
+
+function normalizeConfirmationToken(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export async function executeConversationTool(
   toolId: string,
   input: unknown,
@@ -214,9 +270,27 @@ export async function executeConversationTool(
 export async function executeConversationToolOrThrow(
   toolId: string,
   input: unknown,
-  writableRoots: readonly string[]
+  writableRoots: readonly string[],
+  options: { readonly confirmationToken?: string } = {}
 ): Promise< unknown> {
-  const result = await executeConversationTool(toolId, input, writableRoots);
+  let effectiveInput = input;
+  if (builtinConversationToolRequiresConfirmation(toolId)) {
+    const confirmation = authorizeConfirmedBuiltinTool(
+      {
+        type: "tool_use",
+        id: "catalog-exec",
+        name: toolId,
+        input: isRecord(input) ? input : {}
+      },
+      options.confirmationToken
+    );
+    if (confirmation.ok === false) {
+      throw new StructuredToolExecutionError(confirmation);
+    }
+    effectiveInput = confirmation.input;
+  }
+
+  const result = await executeConversationTool(toolId, effectiveInput, writableRoots);
 
   if (isStructuredToolError(result)) {
     throw new StructuredToolExecutionError(result);

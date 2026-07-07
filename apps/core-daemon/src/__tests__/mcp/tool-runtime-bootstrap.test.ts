@@ -130,81 +130,114 @@ describe("daemon tool runtime bootstrap", () => {
   it(
     "enrolls only allowed MCP servers into discovery and the model-visible registry",
     async () => {
-    process.env.ALAYA_ALLOWED_MCP_SERVERS = "filesystem";
-    process.env.ALAYA_MCP_SERVER_CONFIG_JSON = JSON.stringify({
-      filesystem: {
-        transport_type: "stdio",
-        command: "node",
-        args: ["./mock-filesystem-server.js"]
-      },
-      github: {
-        transport_type: "stdio",
-        command: "node",
-        args: ["./mock-github-server.js"]
-      }
-    });
-    hoisted.mcpRuntimeServerInfos.push(
-      {
+      process.env.ALAYA_ALLOWED_MCP_SERVERS = "filesystem";
+      process.env.ALAYA_MCP_SERVER_CONFIG_JSON = JSON.stringify({
+        filesystem: {
+          transport_type: "http",
+          endpoint: "http://127.0.0.1:3751/mcp"
+        },
+        github: {
+          transport_type: "http",
+          endpoint: "http://127.0.0.1:3752/mcp"
+        }
+      });
+      hoisted.mcpRuntimeServerInfos.push(
+        {
+          server_name: "filesystem",
+          transport_type: "http",
+          status: "active",
+          registered_at: "2026-04-20T12:00:00.000Z"
+        },
+        {
+          server_name: "github",
+          transport_type: "http",
+          status: "active",
+          registered_at: "2026-04-20T12:00:01.000Z"
+        }
+      );
+      hoisted.mcpRuntimeServerTools.set("filesystem", [
+        {
+          name: "filesystem.read_file",
+          description: "Read file through filesystem MCP."
+        }
+      ]);
+      hoisted.mcpRuntimeServerTools.set("github", [
+        {
+          name: "github.search_issues",
+          description: "Search issues through GitHub MCP."
+        }
+      ]);
+      hoisted.extensionProviders.push({
+        provider_id: "provider.mcp.github",
+        name: "GitHub MCP Provider",
+        source: "mcp_external",
+        tool_specs: [
+          {
+            tool_id: "mcp__github__search_issues",
+            name: "github.search_issues",
+            description: "Search issues through GitHub MCP."
+          }
+        ],
+        requires_permission_check: true,
+        records_execution: true,
+        registered_at: "2026-04-20T11:59:00.000Z"
+      });
+
+      const runtime = await bootDaemonRuntime();
+
+      const mcpDiscoverCalls = hoisted.mcpDiscoverAndRegister.mock.calls as readonly (readonly unknown[])[];
+      expect(
+        (mcpDiscoverCalls[0]?.[0] as readonly { readonly server_name: string }[]).map(
+          (server) => server.server_name
+        )
+      ).toEqual(["filesystem"]);
+
+      expect(
+        (mcpDiscoverCalls.at(-1)?.[0] as readonly { readonly server_name: string }[]).map(
+          (server) => server.server_name
+        )
+      ).toEqual(["filesystem"]);
+      expect(runtime.services.conversationToolCatalog.getSpecs().map((spec) => spec.tool_id)).toContain(
+        "mcp__filesystem__read_file"
+      );
+      expect(runtime.services.conversationToolCatalog.getSpecs().map((spec) => spec.tool_id)).not.toContain(
+        "mcp__github__search_issues"
+      );
+    },
+    BOOTSTRAP_TEST_TIMEOUT_MS
+  );
+
+  it(
+    "does not enroll env-sourced stdio MCP servers into discovery or model-visible tools",
+    async () => {
+      process.env.ALAYA_ALLOWED_MCP_SERVERS = "filesystem";
+      process.env.ALAYA_MCP_SERVER_CONFIG_JSON = JSON.stringify({
+        filesystem: {
+          transport_type: "stdio",
+          command: process.execPath,
+          args: ["./mock-filesystem-server.js"]
+        }
+      });
+      hoisted.mcpRuntimeServerInfos.push({
         server_name: "filesystem",
         transport_type: "stdio",
         status: "active",
         registered_at: "2026-04-20T12:00:00.000Z"
-      },
-      {
-        server_name: "github",
-        transport_type: "stdio",
-        status: "active",
-        registered_at: "2026-04-20T12:00:01.000Z"
-      }
-    );
-    hoisted.mcpRuntimeServerTools.set("filesystem", [
-      {
-        name: "filesystem.read_file",
-        description: "Read file through filesystem MCP."
-      }
-    ]);
-    hoisted.mcpRuntimeServerTools.set("github", [
-      {
-        name: "github.search_issues",
-        description: "Search issues through GitHub MCP."
-      }
-    ]);
-    hoisted.extensionProviders.push({
-      provider_id: "provider.mcp.github",
-      name: "GitHub MCP Provider",
-      source: "mcp_external",
-      tool_specs: [
+      });
+      hoisted.mcpRuntimeServerTools.set("filesystem", [
         {
-          tool_id: "mcp__github__search_issues",
-          name: "github.search_issues",
-          description: "Search issues through GitHub MCP."
+          name: "filesystem.read_file",
+          description: "Read file through filesystem MCP."
         }
-      ],
-      requires_permission_check: true,
-      records_execution: true,
-      registered_at: "2026-04-20T11:59:00.000Z"
-    });
+      ]);
 
-    const runtime = await bootDaemonRuntime();
-
-    const mcpDiscoverCalls = hoisted.mcpDiscoverAndRegister.mock.calls as readonly (readonly unknown[])[];
-    expect(
-      (mcpDiscoverCalls[0]?.[0] as readonly { readonly server_name: string }[]).map(
-        (server) => server.server_name
-      )
-    ).toEqual(["filesystem"]);
-
-    expect(
-      (mcpDiscoverCalls.at(-1)?.[0] as readonly { readonly server_name: string }[]).map(
-        (server) => server.server_name
-      )
-    ).toEqual(["filesystem"]);
-    expect(runtime.services.conversationToolCatalog.getSpecs().map((spec) => spec.tool_id)).toContain(
-      "mcp__filesystem__read_file"
-    );
-    expect(runtime.services.conversationToolCatalog.getSpecs().map((spec) => spec.tool_id)).not.toContain(
-      "mcp__github__search_issues"
-    );
+      const runtime = await bootDaemonRuntime();
+      const mcpDiscoverCalls = hoisted.mcpDiscoverAndRegister.mock.calls as readonly (readonly unknown[])[];
+      expect(mcpDiscoverCalls.length).toBeGreaterThan(0);
+      expect(mcpDiscoverCalls.at(-1)?.[0]).toEqual([]);
+      expect(runtime.services.conversationToolCatalog.getSpecs().map((spec) => spec.tool_id)).not.toContain(
+        "mcp__filesystem__read_file"
+      );
     },
     BOOTSTRAP_TEST_TIMEOUT_MS
   );

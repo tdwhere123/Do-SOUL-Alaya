@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  buildObjectIdFilterSql,
   mergeKeywordSearchRows,
   tokenizeFtsQuery,
   type ExactKeywordSearchRow,
@@ -11,6 +12,41 @@ import {
   segmentCjkRun,
   warmCjkSegmentation
 } from "../../../repos/shared/cjk-segmentation.js";
+
+describe("buildObjectIdFilterSql", () => {
+  it("builds parameterized filters for allowlisted object id columns", () => {
+    expect(buildObjectIdFilterSql(["a", "b"])).toEqual({
+      sql: "AND object_id IN (?, ?)",
+      params: ["a", "b"]
+    });
+    expect(buildObjectIdFilterSql(["x"], "memory_content_fts.object_id")).toEqual({
+      sql: "AND memory_content_fts.object_id IN (?)",
+      params: ["x"]
+    });
+    expect(buildObjectIdFilterSql(["y"], "memory_content_fts_porter.object_id")).toEqual({
+      sql: "AND memory_content_fts_porter.object_id IN (?)",
+      params: ["y"]
+    });
+  });
+
+  it("does not expose arbitrary SQL identifier fragments", () => {
+    // @ts-expect-error arbitrary SQL fragments are intentionally not accepted.
+    expect(() => buildObjectIdFilterSql(["a"], "object_id); DROP TABLE memory_entries; --")).toThrowError(
+      "Invalid object ID filter column"
+    );
+  });
+
+  it("omits the filter when no object ids are supplied", () => {
+    expect(buildObjectIdFilterSql(undefined, "memory_content_fts.object_id")).toEqual({
+      sql: "",
+      params: []
+    });
+    expect(buildObjectIdFilterSql([], "memory_content_fts.object_id")).toEqual({
+      sql: "",
+      params: []
+    });
+  });
+});
 
 describe("mergeKeywordSearchRows trigram_rank passthrough", () => {
   it("surfaces a trigram_rank for objects that matched the trigram lane", () => {

@@ -3,6 +3,7 @@ import { BindingState, CrossCuttingState, SurfaceEventType } from "@do-soul/alay
 import { SurfaceBindingService } from "../../surfaces/surface-binding-service.js";
 
 import { BINDING_ID_1, BINDING_ID_2, createBinding, createDependencies, createPermission } from "./surface-binding-service.test-support.js";
+import { firstDefined } from "../helpers/defined.js";
 
 describe("SurfaceBindingService", () => {
   it("binds first surface with EventLog-first order", async () => {
@@ -361,9 +362,9 @@ describe("SurfaceBindingService", () => {
     expect(order).toEqual(["event_publish_many", "binding_cascade_detach", "event_propagate_many"]);
     expect(eventPublisher.appendManyWithMutation).toHaveBeenCalledTimes(1);
     expect(publishedEvents.many).toHaveLength(1);
-    expect(publishedEvents.many[0]).toHaveLength(2);
+    expect(firstDefined(publishedEvents.many)).toHaveLength(2);
     expect(
-      publishedEvents.many[0].every(
+      firstDefined(publishedEvents.many).every(
         (event) =>
           (event as { readonly event_type?: string }).event_type ===
           SurfaceEventType.SOUL_SURFACE_BINDING_STATE_CHANGED

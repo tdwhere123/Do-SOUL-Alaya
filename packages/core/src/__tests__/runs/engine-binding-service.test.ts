@@ -152,6 +152,58 @@ describe("EngineBindingService", () => {
     });
   });
 
+  it("saves api_key_ref bindings without persisting an inline secret", async () => {
+    let defaultBindingId: string | null = null;
+    const savedRecords = new Map<string, any>();
+    const service = new EngineBindingService({
+      workspaceRepo: {
+        getById: vi.fn(async () => createWorkspace({ default_engine_binding: defaultBindingId })),
+        updateDefaultEngineBinding: vi.fn((_id: string, bindingId: string | null) => {
+          defaultBindingId = bindingId;
+          return createWorkspace({ default_engine_binding: bindingId });
+        })
+      },
+      bindingRepo: {
+        upsert: vi.fn((record: any) => {
+          const persisted = {
+            ...record,
+            created_at: "2026-03-18T00:00:00.000Z",
+            updated_at: "2026-03-18T00:00:00.000Z"
+          };
+          savedRecords.set(persisted.binding_id, persisted);
+          return persisted;
+        }),
+        getById: vi.fn(async (id) => savedRecords.get(id) ?? null)
+      },
+      eventPublisher: new StubEventPublisher(fakeAppendManyWithMutationForTest()),
+      engineTester: {
+        testBinding: vi.fn()
+      }
+    });
+
+    const saved = await service.saveWorkspaceBinding("ws_1", {
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key_ref: "OPENAI_API_KEY",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+
+    expect(saved).toMatchObject({
+      api_key: "",
+      api_key_ref: "OPENAI_API_KEY"
+    });
+    const resolved = await service.resolveConversationBinding(
+      createRun({ engine_binding_id: saved.binding_id }),
+      createWorkspace({ default_engine_binding: null })
+    );
+    expect(resolved).toMatchObject({
+      binding_id: saved.binding_id,
+      api_key_ref: "OPENAI_API_KEY"
+    });
+    expect("api_key" in resolved).toBe(false);
+  });
+
   it("tests a binding through the engine tester and returns normalized status", async () => {
     const workspace = createWorkspace();
     const engineTester = {

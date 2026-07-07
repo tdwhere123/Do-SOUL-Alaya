@@ -79,6 +79,13 @@ export class TopologyService {
 
     const latest = history[0];
     const baseline = history.at(-1) ?? latest;
+    if (latest === undefined || baseline === undefined) {
+      return parseTopologyTrend({
+        snapshot_count: 0,
+        edge_count_trend: "stable",
+        avg_strength_trend: "stable"
+      });
+    }
 
     return parseTopologyTrend({
       snapshot_count: history.length,

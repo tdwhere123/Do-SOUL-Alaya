@@ -17,10 +17,10 @@ export interface WorkspaceStatements {
 export function prepareWorkspaceStatements(db: StorageDatabase): WorkspaceStatements {
   return {
     createStatement: db.connection.prepare(CREATE_WORKSPACE_SQL),
-    getByIdStatement: db.connection.prepare(selectWorkspaceSql("workspace_id = ?", undefined, "LIMIT 1")),
-    listStatement: db.connection.prepare(selectWorkspaceSql(undefined, "created_at ASC, workspace_id ASC")),
+    getByIdStatement: db.connection.prepare(selectWorkspaceSql("byId", undefined, "limitOne")),
+    listStatement: db.connection.prepare(selectWorkspaceSql(undefined, "created")),
     listPagedStatement: db.connection.prepare(
-      selectWorkspaceSql(undefined, "created_at ASC, workspace_id ASC", "LIMIT ? OFFSET ?")
+      selectWorkspaceSql(undefined, "created", "paged")
     ),
     countStatement: db.connection.prepare(`
       SELECT COUNT(*) AS total
@@ -32,10 +32,31 @@ export function prepareWorkspaceStatements(db: StorageDatabase): WorkspaceStatem
   };
 }
 
-function selectWorkspaceSql(whereClause?: string, orderBy?: string, suffix = ""): string {
-  const whereSql = whereClause === undefined ? "" : `\n      WHERE ${whereClause}`;
-  const orderBySql = orderBy === undefined ? "" : `\n      ORDER BY ${orderBy}`;
-  const suffixSql = suffix.length === 0 ? "" : `\n      ${suffix}`;
+type WorkspaceWhereKey = "byId";
+type WorkspaceOrderKey = "created";
+type WorkspaceSuffixKey = "limitOne" | "paged";
+
+const WORKSPACE_WHERE_CLAUSES: Readonly<Record<WorkspaceWhereKey, string>> = Object.freeze({
+  byId: "workspace_id = ?"
+});
+
+const WORKSPACE_ORDER_BY: Readonly<Record<WorkspaceOrderKey, string>> = Object.freeze({
+  created: "created_at ASC, workspace_id ASC"
+});
+
+const WORKSPACE_SUFFIXES: Readonly<Record<WorkspaceSuffixKey, string>> = Object.freeze({
+  limitOne: "LIMIT 1",
+  paged: "LIMIT ? OFFSET ?"
+});
+
+function selectWorkspaceSql(
+  whereKey?: WorkspaceWhereKey,
+  orderByKey?: WorkspaceOrderKey,
+  suffixKey?: WorkspaceSuffixKey
+): string {
+  const whereSql = whereKey === undefined ? "" : `\n      WHERE ${WORKSPACE_WHERE_CLAUSES[whereKey]}`;
+  const orderBySql = orderByKey === undefined ? "" : `\n      ORDER BY ${WORKSPACE_ORDER_BY[orderByKey]}`;
+  const suffixSql = suffixKey === undefined ? "" : `\n      ${WORKSPACE_SUFFIXES[suffixKey]}`;
   return `
       SELECT${WORKSPACE_SELECT_COLUMNS}
       FROM workspaces${whereSql}${orderBySql}${suffixSql}

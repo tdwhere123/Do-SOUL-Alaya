@@ -24,7 +24,7 @@ describe("Phase 4C event schemas", () => {
       initial_state: ProjectMappingState.SUGGESTED,
       suggested_at: validTimestamp
     } as const;
-    expect(parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED, suggestedPayload)).toEqual(
+    expect(parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED!, suggestedPayload)).toEqual(
       suggestedPayload
     );
 
@@ -37,30 +37,30 @@ describe("Phase 4C event schemas", () => {
       accepted_by: "user",
       transitioned_at: validTimestamp
     } as const;
-    expect(parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED, stateChangedPayload)).toEqual(
+    expect(parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!, stateChangedPayload)).toEqual(
       stateChangedPayload
     );
 
     expect(ProjectMappingEventTypeSchema.options).toEqual([
-      ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED,
-      ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED
+      ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED!,
+      ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!
     ]);
 
     expect(
       ProjectMappingEventUnionSchema.parse({
-        type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
+        type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!,
         payload: stateChangedPayload
       })
     ).toEqual({
-      type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED,
+      type: ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!,
       payload: stateChangedPayload
     });
 
-    expect(EventTypeSchema.parse(ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED)).toBe(
-      ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED
+    expect(EventTypeSchema.parse(ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED!)).toBe(
+      ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED!
     );
-    expect(EventTypeSchema.parse(ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED)).toBe(
-      ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED
+    expect(EventTypeSchema.parse(ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!)).toBe(
+      ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!
     );
   });
 
@@ -73,7 +73,7 @@ describe("Phase 4C event schemas", () => {
     ) => unknown;
 
     expect(() =>
-      parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED, {
+      parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_SUGGESTED!, {
         mapping_id: "mapping-1",
         global_object_id: "memory-1",
         workspace_id: "workspace-1",
@@ -82,7 +82,7 @@ describe("Phase 4C event schemas", () => {
     ).toThrow();
 
     expect(() =>
-      parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED, {
+      parseProjectMappingEventPayload(ProjectMappingEventType.PROJECT_MAPPING_STATE_CHANGED!, {
         mapping_id: "mapping-1",
         global_object_id: "memory-1",
         workspace_id: "workspace-1",

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ReconciliationService } from "../../governance/reconciliation/reconciliation-service.js";
 import { DecideFn, createDeps, createMemoryEntry, drive } from "./reconciliation-service.test-support.js";
+import { requireAt, mockCallAt } from "../helpers/defined.js";
 
 describe("ReconciliationService projection metadata", () => {
   it("LLM UPDATE verdict carries projection fields into the survivor update", async () => {
@@ -276,7 +277,7 @@ describe("ReconciliationService projection metadata", () => {
       }
     }).decision;
 
-    expect(update.mock.calls[0][1]).toMatchObject({
+    expect(requireAt(mockCallAt(update, 0), 1)).toMatchObject({
       event_time_start: "2024-01-01T00:00:00.000Z",
       time_precision: "year",
       time_source: "explicit"

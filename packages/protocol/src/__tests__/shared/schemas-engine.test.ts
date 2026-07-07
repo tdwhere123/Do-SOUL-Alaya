@@ -179,11 +179,47 @@ describe("EngineBindingInputSchema", () => {
     expect(EngineBindingInputSchema.parse(engineBindingInputBase)).toEqual(engineBindingInputBase);
   });
 
+  it("accepts a provider-neutral engine binding input with api_key_ref", () => {
+    const input = {
+      ...engineBindingInputBase,
+      api_key: undefined,
+      api_key_ref: "OPENAI_API_KEY"
+    };
+
+    expect(EngineBindingInputSchema.parse(input)).toEqual(input);
+  });
+
+  it("rejects an input without either api_key or api_key_ref", () => {
+    expect(
+      EngineBindingInputSchema.safeParse({
+        ...engineBindingInputBase,
+        api_key: undefined
+      }).success
+    ).toBe(false);
+  });
+
   it("requires base_url for custom providers", () => {
     expect(
       EngineBindingInputSchema.safeParse({
         ...engineBindingInputBase,
         provider_type: EngineProvider.CUSTOM
+      }).success
+    ).toBe(false);
+  });
+
+  it("rejects api_key_ref env names outside the persisted allowlist", () => {
+    expect(
+      EngineBindingInputSchema.safeParse({
+        ...engineBindingInputBase,
+        api_key: undefined,
+        api_key_ref: "PATH"
+      }).success
+    ).toBe(false);
+    expect(
+      EngineBindingInputSchema.safeParse({
+        ...engineBindingInputBase,
+        api_key: undefined,
+        api_key_ref: "ALAYA_MCP_TOOL_CONFIRMATION_TOKEN"
       }).success
     ).toBe(false);
   });
@@ -205,6 +241,40 @@ describe("EngineBindingRecordSchema and EngineConnectionTestResultSchema", () =>
     };
 
     expect(EngineBindingRecordSchema.parse(record)).toEqual(record);
+  });
+
+  it("accepts a persisted engine binding record with api_key_ref and no inline secret", () => {
+    const record = {
+      binding_id: "binding-ref",
+      workspace_id: "workspace-1",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "",
+      api_key_ref: "OPENAI_API_KEY",
+      model: "gpt-4o-mini",
+      config: {},
+      created_at: validTimestamp,
+      updated_at: validTimestamp
+    };
+
+    expect(EngineBindingRecordSchema.parse(record)).toEqual(record);
+  });
+
+  it("rejects persisted api_key_ref env names outside the allowlist", () => {
+    expect(
+      EngineBindingRecordSchema.safeParse({
+        binding_id: "binding-ref",
+        workspace_id: "workspace-1",
+        provider_type: EngineProvider.OPENAI,
+        base_url: null,
+        api_key: "",
+        api_key_ref: "PATH",
+        model: "gpt-4o-mini",
+        config: {},
+        created_at: validTimestamp,
+        updated_at: validTimestamp
+      }).success
+    ).toBe(false);
   });
 
   it("accepts a successful connection test result", () => {
