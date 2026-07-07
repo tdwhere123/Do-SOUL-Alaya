@@ -1,10 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReconciliationLlmDecisionPort } from "@do-soul/alaya-core";
 import { requestGardenChatCompletionContent } from "./garden-chat-completion.js";
+import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-cache.js";
 
 /**
  * @anchor reconciliation-llm-decision
@@ -245,48 +244,41 @@ function computeRequestKey(
   return hash.digest("hex");
 }
 
-function cacheFilePath(cacheRoot: string, requestKey: string): string {
-  return join(cacheRoot, requestKey.slice(0, 2), `${requestKey}.json`);
-}
-
 async function readCachedDecision(
   cacheRoot: string,
   requestKey: string
 ): Promise<CachedDecision | undefined> {
-  const filePath = cacheFilePath(cacheRoot, requestKey);
-  if (!(await fileExists(filePath))) {
+  return readGardenLlmJsonCache({
+    cacheRoot,
+    requestKey,
+    warningMessage: "[Reconciliation] decision cache read failed; treating as miss",
+    warningCode: "ALAYA_RECONCILIATION_CACHE_READ_FAILED",
+    parseEntry: parseCachedDecisionEntry
+  });
+}
+
+function parseCachedDecisionEntry(parsed: unknown, requestKey: string): CachedDecision | undefined {
+  if (typeof parsed !== "object" || parsed === null) {
     return undefined;
   }
-  try {
-    const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<CachedDecision>;
-    if (parsed.kind !== "add" && parsed.kind !== "update" && parsed.kind !== "noop") {
-      return undefined;
-    }
-    // Normalize the target anchor: a missing / non-string value (e.g. a
-    // pre-content-anchor cache file, or an `add` verdict) resolves to a
-    // null target, never undefined, so the hit path's `=== null` guard
-    // is exact.
-    const targetContentHash =
-      typeof parsed.target_content_hash === "string" ? parsed.target_content_hash : null;
-    return {
-      model: typeof parsed.model === "string" ? parsed.model : "",
-      request_hash: typeof parsed.request_hash === "string" ? parsed.request_hash : requestKey,
-      kind: parsed.kind,
-      target_content_hash: targetContentHash,
-      reason: typeof parsed.reason === "string" ? parsed.reason : "",
-      decided_at: typeof parsed.decided_at === "string" ? parsed.decided_at : ""
-    };
-  } catch (error) {
-    // corrupt cache file → treated as a miss, which silently doubles LLM cost
-    process.emitWarning("[Reconciliation] decision cache read failed; treating as miss", {
-      code: "ALAYA_RECONCILIATION_CACHE_READ_FAILED",
-      detail: JSON.stringify({
-        path: filePath,
-        code: (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : "unknown")
-      })
-    });
+  const record = parsed as Partial<CachedDecision>;
+  if (record.kind !== "add" && record.kind !== "update" && record.kind !== "noop") {
     return undefined;
   }
+  // Normalize the target anchor: a missing / non-string value (e.g. a
+  // pre-content-anchor cache file, or an `add` verdict) resolves to a
+  // null target, never undefined, so the hit path's `=== null` guard
+  // is exact.
+  const targetContentHash =
+    typeof record.target_content_hash === "string" ? record.target_content_hash : null;
+  return {
+    model: typeof record.model === "string" ? record.model : "",
+    request_hash: typeof record.request_hash === "string" ? record.request_hash : requestKey,
+    kind: record.kind,
+    target_content_hash: targetContentHash,
+    reason: typeof record.reason === "string" ? record.reason : "",
+    decided_at: typeof record.decided_at === "string" ? record.decided_at : ""
+  };
 }
 
 async function writeCachedDecision(
@@ -294,26 +286,7 @@ async function writeCachedDecision(
   requestKey: string,
   entry: CachedDecision
 ): Promise<void> {
-  const filePath = cacheFilePath(cacheRoot, requestKey);
-  await mkdir(dirname(filePath), { recursive: true });
-  // Write to a temp file in the same directory then rename onto the
-  // final path — rename is atomic on POSIX, so a crash or a concurrent
-  // write can never leave a truncated .json that every future run would
-  // treat as a permanent cache miss. The temp suffix is a per-write UUID
-  // so two writers racing the same requestKey within one process never
-  // collide on the temp path; a crash leaves at most a stale .tmp.
-  const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  await rename(tempPath, filePath);
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+  await writeGardenLlmJsonCache(cacheRoot, requestKey, entry);
 }
 
 function parseDecision(

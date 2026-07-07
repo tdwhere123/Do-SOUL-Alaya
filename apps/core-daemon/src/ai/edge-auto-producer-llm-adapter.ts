@@ -1,13 +1,12 @@
-import { createHash, randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   EdgeAutoProducerLlmDecision,
   EdgeAutoProducerLlmPort
 } from "@do-soul/alaya-core";
 import { requestGardenChatCompletionContent } from "./garden-chat-completion.js";
+import { readGardenLlmJsonCache, writeGardenLlmJsonCache } from "./garden-llm-cache.js";
 
 /**
  * @anchor edge-auto-producer-llm-adapter
@@ -35,11 +34,6 @@ import { requestGardenChatCompletionContent } from "./garden-chat-completion.js"
  * see also: apps/core-daemon/src/ai/reconciliation-llm-decision.ts
  * see also: packages/core/src/path-graph/edge-auto-producer-llm-port.ts
  *
- * anti-patterns-lint-allow: cache + transport helpers structurally
- * mirror reconciliation-llm-decision.ts; extracting a shared
- * garden-llm-cache helper requires touching that file too, which is
- * out of scope here. Tracked for a follow-up commit once both files
- * are in the same write-ownership window.
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -244,61 +238,41 @@ export function computeRequestKey(model: string, pair: PairInput): string {
   return hash.digest("hex");
 }
 
-function cacheFilePath(cacheRoot: string, requestKey: string): string {
-  return join(cacheRoot, requestKey.slice(0, 2), `${requestKey}.json`);
+async function readCachedVerdict(cacheRoot: string, requestKey: string): Promise<CachedVerdict | undefined> {
+  return readGardenLlmJsonCache({
+    cacheRoot,
+    requestKey,
+    warningMessage: "[EdgeAutoProducer] verdict cache read failed; treating as miss",
+    warningCode: "ALAYA_EDGE_AUTO_PRODUCER_CACHE_READ_FAILED",
+    parseEntry: parseCachedVerdictEntry
+  });
 }
 
-async function readCachedVerdict(cacheRoot: string, requestKey: string): Promise<CachedVerdict | undefined> {
-  const filePath = cacheFilePath(cacheRoot, requestKey);
-  if (!(await fileExists(filePath))) {
+function parseCachedVerdictEntry(parsed: unknown, requestKey: string): CachedVerdict | undefined {
+  if (typeof parsed !== "object" || parsed === null) {
     return undefined;
   }
-  try {
-    const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<CachedVerdict>;
-    if (
-      parsed.edge_type !== "supports" &&
-      parsed.edge_type !== "derives_from" &&
-      parsed.edge_type !== "none"
-    ) {
-      return undefined;
-    }
-    const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0;
-    return {
-      model: typeof parsed.model === "string" ? parsed.model : "",
-      request_hash: typeof parsed.request_hash === "string" ? parsed.request_hash : requestKey,
-      edge_type: parsed.edge_type,
-      confidence,
-      rationale: typeof parsed.rationale === "string" ? parsed.rationale : "",
-      decided_at: typeof parsed.decided_at === "string" ? parsed.decided_at : ""
-    };
-  } catch (error) {
-    // corrupt cache file → treated as a miss, which silently doubles LLM cost
-    process.emitWarning("[EdgeAutoProducer] verdict cache read failed; treating as miss", {
-      code: "ALAYA_EDGE_AUTO_PRODUCER_CACHE_READ_FAILED",
-      detail: JSON.stringify({
-        path: filePath,
-        code: (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : "unknown")
-      })
-    });
+  const record = parsed as Partial<CachedVerdict>;
+  if (
+    record.edge_type !== "supports" &&
+    record.edge_type !== "derives_from" &&
+    record.edge_type !== "none"
+  ) {
     return undefined;
   }
+  const confidence = typeof record.confidence === "number" ? record.confidence : 0;
+  return {
+    model: typeof record.model === "string" ? record.model : "",
+    request_hash: typeof record.request_hash === "string" ? record.request_hash : requestKey,
+    edge_type: record.edge_type,
+    confidence,
+    rationale: typeof record.rationale === "string" ? record.rationale : "",
+    decided_at: typeof record.decided_at === "string" ? record.decided_at : ""
+  };
 }
 
 async function writeCachedVerdict(cacheRoot: string, requestKey: string, entry: CachedVerdict): Promise<void> {
-  const filePath = cacheFilePath(cacheRoot, requestKey);
-  await mkdir(dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${randomUUID()}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  await rename(tempPath, filePath);
-}
-
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
+  await writeGardenLlmJsonCache(cacheRoot, requestKey, entry);
 }
 
 function parseVerdict(rawJson: string): {
