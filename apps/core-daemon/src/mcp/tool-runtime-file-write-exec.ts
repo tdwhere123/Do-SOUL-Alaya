@@ -101,8 +101,8 @@ export async function writeFile(
       newlyCreated = true;
     }
 
-    const fdRealPath = await realpath(fdExecPath(handle.fd));
-    if (!realWritableRoots.some((root) => isPathWithinRoot(fdRealPath, root))) {
+    const openedFileRealPath = await resolveOpenedFileRealPath(handle.fd, containedPath.resolvedPath);
+    if (!realWritableRoots.some((root) => isPathWithinRoot(openedFileRealPath, root))) {
       await handle.close();
       handle = undefined;
       if (newlyCreated) {
@@ -317,6 +317,10 @@ async function resolveExecCwd(writableRoots: readonly string[]): Promise<string>
 
 function fdExecPath(fd: number): string {
   return process.platform === "linux" ? `/proc/self/fd/${fd}` : `/dev/fd/${fd}`;
+}
+
+async function resolveOpenedFileRealPath(fd: number, resolvedPath: string): Promise<string> {
+  return process.platform === "linux" ? await realpath(fdExecPath(fd)) : await realpath(resolvedPath);
 }
 
 function hasExecutableMode(mode: number | bigint): boolean {
