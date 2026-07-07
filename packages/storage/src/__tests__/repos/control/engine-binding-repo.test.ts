@@ -182,8 +182,9 @@ describe("SqliteEngineBindingRepo", () => {
   it("survives database connection closure and reopening", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-repo-test-"));
     const tempFile = path.join(tempDir, "alaya.db");
+    let database: ReturnType<typeof initDatabase> | undefined;
     try {
-      const database = initDatabase({ filename: tempFile });
+      database = initDatabase({ filename: tempFile });
       databases.add(database);
       const workspaceRepo = new SqliteWorkspaceRepo(database);
       const bindingRepo = new SqliteEngineBindingRepo(database);
@@ -218,6 +219,10 @@ describe("SqliteEngineBindingRepo", () => {
         binding_id: "binding_survive"
       });
     } finally {
+      if (database !== undefined) {
+        database.close();
+        databases.delete(database);
+      }
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
