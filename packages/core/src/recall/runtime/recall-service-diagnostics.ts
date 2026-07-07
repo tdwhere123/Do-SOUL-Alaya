@@ -141,6 +141,10 @@ export interface RecallCandidateDiagnostic {
   readonly fused_score: number;
   readonly per_stream_rank: RecallFusionStreamRanks;
   readonly fused_rank_contribution_per_stream: RecallFusionStreamContributions;
+  readonly per_axis_rank?: Readonly<Record<RecallConformantAxis, number | null>>;
+  readonly per_axis_contribution?: Readonly<Record<RecallConformantAxis, number>>;
+  readonly flood_potential?: Readonly<IntegratedFloodCandidateDiagnostics>;
+  readonly flood_fuel_coverage?: Readonly<FloodFuelCoverageSummary>;
   readonly final_rank: number | null;
   readonly dropped_reason: RecallCandidateDropReason | null;
   readonly within_budget: boolean;

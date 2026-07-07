@@ -102,12 +102,12 @@ describe("merge-longmemeval release gates", () => {
     );
     expect(report).toContain("Worst verdict: **FAIL**");
     expect(report).toContain(
-      "longmemeval_s_budget_dropped_max_entries budget_dropped_entries: 9 > target 8"
+      "longmemeval_s_budget_dropped_rate budget_dropped_share (9/100 max_entries): 9.00% > target 2.00%"
     );
     expect(findings).toContain("Release hard gate gaps");
   });
 
-  it("fails the hard gate when max_entries budget drops exceed the target even without direct hit loss", async () => {
+  it("fails the hard gate when max_entries budget drop share exceeds the target even without direct hit loss", async () => {
     const shardA = path.join(tmpRoot, "shard-gate-drops-a");
     const shardB = path.join(tmpRoot, "shard-gate-drops-b");
     const rowsA = Array.from({ length: 50 }, (_, index) => ({
@@ -178,7 +178,7 @@ describe("merge-longmemeval release gates", () => {
       "utf8"
     );
     expect(report).toContain(
-      "longmemeval_s_budget_dropped_max_entries budget_dropped_entries: 9 > target 8"
+      "longmemeval_s_budget_dropped_rate budget_dropped_share (9/100 max_entries): 9.00% > target 2.00%"
     );
   });
 });

@@ -229,6 +229,7 @@ export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
   const targetK = resolveCoverageTargetK(maxEntries);
   const poolK = resolveCoveragePoolK(ordered.length, targetK);
   const pool = ordered.slice(0, poolK);
+  const selectionPool = pool.slice(0, targetK);
   const head = pool[0]!;
   const headScore = head.fusion.fused_score;
   const minScoreRatio = readRatioEnv(COVERAGE_MIN_SCORE_RATIO_ENV, DEFAULT_MIN_SCORE_RATIO);
@@ -244,7 +245,7 @@ export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
   };
 
   const evidenceState = evidenceSetCoverageEnabled()
-    ? createEvidenceSetCoverageState(pool, supplementaryData)
+    ? createEvidenceSetCoverageState(selectionPool, supplementaryData)
     : null;
   const covered = new Set<string>();
   const selected: T[] = [head];
@@ -252,7 +253,7 @@ export function applyEvidenceSetDelivery<T extends DeliveryCandidate>(
   recordSelection(head, ctx, covered, evidenceState, supplementaryData);
 
   while (selected.length < targetK) {
-    const best = selectBestByCoverageUtility(pool, selectedSet, covered, ctx, targetK, headScore, minScoreRatio, evidenceState);
+    const best = selectBestByCoverageUtility(selectionPool, selectedSet, covered, ctx, targetK, headScore, minScoreRatio, evidenceState);
     if (best === undefined) {
       break;
     }

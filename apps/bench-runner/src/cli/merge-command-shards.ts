@@ -9,7 +9,10 @@ import {
 } from "@do-soul/alaya-eval";
 import { aggregateBenchTokenMetrics } from "../harness/token-economy.js";
 import type { BenchTokenMetrics } from "../harness/daemon.js";
+import { readLongMemEvalDiagnosticsSidecar } from "../longmemeval/archive-evidence.js";
+import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../shared/version.js";
+import { buildMergedFullGoldCoverage } from "./merge-full-gold.js";
 import { pct } from "./result-format.js";
 import {
   computePercentile,
@@ -28,6 +31,7 @@ export interface ShardArchiveRef {
 export interface LoadedMergeShards {
   readonly payloads: readonly KpiPayload[];
   readonly archiveRefs: readonly ShardArchiveRef[];
+  readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly first: KpiPayload;
 }
 
@@ -77,10 +81,16 @@ export async function loadMergeShards(
 ): Promise<LoadedMergeShards> {
   const payloads: KpiPayload[] = [];
   const archiveRefs: ShardArchiveRef[] = [];
+  const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
   for (const shardRoot of shards) {
-    const { payload, slug } = await readShardPayload(shardRoot);
+    const {
+      payload,
+      slug,
+      questionDiagnostics: shardQuestionDiagnostics
+    } = await readShardPayload(shardRoot);
     payloads.push(payload);
     archiveRefs.push({ root: shardRoot, slug });
+    questionDiagnostics.push(...shardQuestionDiagnostics);
     process.stdout.write(
       `  shard ${shardRoot}: ${payload.evaluated_count} questions, ` +
         `R@5=${pct(payload.kpi.r_at_5)}\n`
@@ -90,12 +100,16 @@ export async function loadMergeShards(
   if (first === undefined) {
     throw new Error("no shards loaded");
   }
-  return { payloads, archiveRefs, first };
+  return { payloads, archiveRefs, questionDiagnostics, first };
 }
 
 async function readShardPayload(
   shardRoot: string
-): Promise<{ readonly payload: KpiPayload; readonly slug: string }> {
+): Promise<{
+  readonly payload: KpiPayload;
+  readonly slug: string;
+  readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
+}> {
   const pointerPath = await resolveShardPointerPath(shardRoot);
   const pointer = JSON.parse(await readFile(pointerPath, "utf8")) as {
     slug?: string;
@@ -109,7 +123,16 @@ async function readShardPayload(
   const payload = KpiPayloadSchema.parse(
     JSON.parse(await readFile(kpiPath, "utf8"))
   );
-  return { payload, slug: pointer.slug };
+  const diagnostics = await readLongMemEvalDiagnosticsSidecar(
+    { historyRoot: shardRoot },
+    "public",
+    pointer.slug
+  );
+  return {
+    payload,
+    slug: pointer.slug,
+    questionDiagnostics: diagnostics?.questions ?? []
+  };
 }
 
 export function buildMergedLongMemEvalPayload(
@@ -123,7 +146,12 @@ export function buildMergedLongMemEvalPayload(
       `merge refused: evaluated_total=${aggregate.evaluatedTotal} > sample_size=${loaded.first.sample_size} (shards collectively over-evaluated; check --offset/--limit ranges)`
     );
   }
-  return buildMergedPayload(loaded.first, loaded.payloads, aggregate);
+  return buildMergedPayload(
+    loaded.first,
+    loaded.payloads,
+    aggregate,
+    loaded.questionDiagnostics
+  );
 }
 
 function assertCompatibleShardIdentities(
@@ -319,7 +347,8 @@ function hasProviderRateFields(shard: KpiPayload): boolean {
 function buildMergedPayload(
   first: KpiPayload,
   payloads: readonly KpiPayload[],
-  aggregate: MergeShardAggregate
+  aggregate: MergeShardAggregate,
+  questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
 ): MergedLongMemEvalBuild {
   const runAt = new Date();
   const commitSha7 = resolveBenchCommitSha7();
@@ -351,7 +380,7 @@ function buildMergedPayload(
       sample_size: first.sample_size,
       evaluated_count: aggregate.evaluatedTotal,
       harness_mode: first.harness_mode,
-      kpi: buildMergedKpi(first, payloads, aggregate, rates)
+      kpi: buildMergedKpi(first, payloads, aggregate, rates, questionDiagnostics)
     }
   };
 }
@@ -387,11 +416,16 @@ function buildMergedKpi(
   first: KpiPayload,
   payloads: readonly KpiPayload[],
   aggregate: MergeShardAggregate,
-  rates: ReturnType<typeof buildMergedRates>
+  rates: ReturnType<typeof buildMergedRates>,
+  questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
 ): KpiPayload["kpi"] {
   const token = buildMergedTokenEconomy(aggregate, payloads.length);
   const qualityMetrics = mergeQualityMetrics(payloads);
   const seedExtractionPath = mergeSeedExtractionPath(payloads);
+  const fullGoldCoverage = buildMergedFullGoldCoverage(
+    questionDiagnostics,
+    aggregate.perScenario
+  );
   return {
     r_at_1: rates.rAt1,
     r_at_5: rates.rAt5,
@@ -417,6 +451,7 @@ function buildMergedKpi(
     },
     ...(seedExtractionPath === undefined ? {} : { seed_extraction_path: seedExtractionPath }),
     ...(qualityMetrics === undefined ? {} : { quality_metrics: qualityMetrics }),
+    ...(fullGoldCoverage === undefined ? {} : { full_gold_coverage: fullGoldCoverage }),
     per_scenario: aggregate.perScenario
   };
 }

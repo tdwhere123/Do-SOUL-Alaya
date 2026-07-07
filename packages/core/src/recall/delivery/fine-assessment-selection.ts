@@ -172,6 +172,18 @@ function createFineAssessmentDiagnostic(
     fused_score: candidate.fusion.fused_score,
     per_stream_rank: candidate.fusion.per_stream_rank,
     fused_rank_contribution_per_stream: candidate.fusion.fused_rank_contribution_per_stream,
+    ...(candidate.fusion.per_axis_rank === undefined
+      ? {}
+      : { per_axis_rank: candidate.fusion.per_axis_rank }),
+    ...(candidate.fusion.per_axis_contribution === undefined
+      ? {}
+      : { per_axis_contribution: candidate.fusion.per_axis_contribution }),
+    ...(candidate.fusion.flood_potential === undefined
+      ? {}
+      : { flood_potential: candidate.fusion.flood_potential }),
+    ...(candidate.fusion.flood_fuel_coverage === undefined
+      ? {}
+      : { flood_fuel_coverage: candidate.fusion.flood_fuel_coverage }),
     final_rank: finalRank,
     dropped_reason: droppedReason,
     within_budget: droppedReason === null,

@@ -46,6 +46,47 @@ const RecallFusionStreamContributionSchema = z
   .strict()
   .readonly();
 
+const RecallConformantAxisRankSchema = z
+  .record(z.string(), z.number().int().positive().nullable())
+  .readonly();
+
+const RecallConformantAxisContributionSchema = z
+  .record(z.string(), z.number().min(0))
+  .readonly();
+
+const RecallIntegratedFloodCandidateDiagnosticsSchema = z
+  .object({
+    R_obj: z.number().min(0),
+    Slice: z.number().min(0),
+    A_path: z.number().min(0),
+    B_evidence: z.number().min(0),
+    E_direct: z.number().min(0),
+    omega: z.number().min(0),
+    Flood: z.number().min(0),
+    lambda: z.number().min(0),
+    beta: z.number().min(0),
+    final_score: z.number().min(0),
+    slice_status: z.string().min(1),
+    path_status: z.string().min(1),
+    evidence_status: z.string().min(1),
+    e_direct_status: z.string().min(1),
+    fuel_verified: z.boolean()
+  })
+  .strict()
+  .readonly();
+
+const RecallFloodFuelCoverageSummarySchema = z
+  .object({
+    candidates_total: z.number().int().nonnegative(),
+    cold_start_count: z.number().int().nonnegative(),
+    fuel_verified_count: z.number().int().nonnegative(),
+    slice_active_count: z.number().int().nonnegative(),
+    path_active_count: z.number().int().nonnegative(),
+    evidence_active_count: z.number().int().nonnegative()
+  })
+  .strict()
+  .readonly();
+
 const RecallDiagnosticPathExpansionSourceSchema = z
   .object({
     path_id: z.string().min(1),
@@ -75,6 +116,10 @@ const RecallCandidateDiagnosticSchema = z
     fused_score: z.number().min(0),
     per_stream_rank: RecallFusionStreamRankSchema,
     fused_rank_contribution_per_stream: RecallFusionStreamContributionSchema,
+    per_axis_rank: RecallConformantAxisRankSchema.optional(),
+    per_axis_contribution: RecallConformantAxisContributionSchema.optional(),
+    flood_potential: RecallIntegratedFloodCandidateDiagnosticsSchema.optional(),
+    flood_fuel_coverage: RecallFloodFuelCoverageSummarySchema.optional(),
     final_rank: z.number().int().positive().nullable(),
     dropped_reason: z.string().min(1).nullable(),
     within_budget: z.boolean(),
@@ -215,7 +260,15 @@ export const BenchRecallDiagnosticsSchema = z
             per_stream_rank: RecallFusionStreamRankSchema,
             fused_rank: z.number().int().positive(),
             fused_score: z.number().min(0),
-            fused_rank_contribution_per_stream: RecallFusionStreamContributionSchema
+            fused_rank_contribution_per_stream:
+              RecallFusionStreamContributionSchema,
+            per_axis_rank: RecallConformantAxisRankSchema.optional(),
+            per_axis_contribution:
+              RecallConformantAxisContributionSchema.optional(),
+            flood_potential:
+              RecallIntegratedFloodCandidateDiagnosticsSchema.optional(),
+            flood_fuel_coverage:
+              RecallFloodFuelCoverageSummarySchema.optional()
           })
           .strict()
           .readonly()

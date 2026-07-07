@@ -188,6 +188,321 @@ describe("LongMemEval recall diagnostics", () => {
     });
   });
 
+  it("accepts conformant axis and flood diagnostics in the strict bench schema", () => {
+    const parsed = BenchRecallDiagnosticsSchema.parse({
+      query_probes: emptyQueryProbes,
+      total_scanned: 1,
+      candidate_pool_count: 1,
+      pre_budget_count: 1,
+      delivered_count: 1,
+      embedding_provider_status: "provider_not_requested",
+      provider_degradation_reason: null,
+      graph_expansion_plane_count_per_hop: [0, 0],
+      graph_expansion_plane_count_per_edge_type: {
+        derives_from: 0,
+        recalls: 0,
+        supports: 0
+      },
+      fusion_breakdown: [
+        {
+          candidate_key: "workspace_local:memory_entry:gold-a",
+          object_id: "gold-a",
+          object_kind: "memory_entry",
+          origin_plane: "workspace_local",
+          per_stream_rank: {
+            lexical_fts: 1,
+            trigram_fts: null,
+            synthesis_fts: null,
+            evidence_fts: null,
+            evidence_structural_agreement: null,
+            source_proximity: null,
+            source_evidence_agreement: null,
+            subject_alignment: null,
+            structural: null,
+            existing_score: null,
+            embedding_similarity: null,
+            graph_expansion: null,
+            entity_seed: null,
+            path_expansion: null,
+            temporal_recency: null,
+            workspace_activation: null,
+            facet_overlap: null
+          },
+          fused_rank: 1,
+          fused_score: 0.23,
+          fused_rank_contribution_per_stream: {
+            lexical_fts: 0.1,
+            trigram_fts: 0,
+            synthesis_fts: 0,
+            evidence_fts: 0,
+            evidence_structural_agreement: 0,
+            source_proximity: 0,
+            source_evidence_agreement: 0,
+            subject_alignment: 0,
+            structural: 0,
+            existing_score: 0,
+            embedding_similarity: 0,
+            graph_expansion: 0,
+            entity_seed: 0,
+            path_expansion: 0,
+            temporal_recency: 0,
+            workspace_activation: 0,
+            facet_overlap: 0
+          },
+          per_axis_rank: {
+            object: 1,
+            path: 2,
+            evidence: null,
+            temporal: null,
+            control: null
+          },
+          per_axis_contribution: {
+            object: 0.2,
+            path: 0.03,
+            evidence: 0,
+            temporal: 0,
+            control: 0
+          },
+          flood_potential: {
+            R_obj: 0.2,
+            Slice: 1,
+            A_path: 0.4,
+            B_evidence: 0.5,
+            E_direct: 0.6,
+            omega: 1,
+            Flood: 0.2,
+            lambda: 0.15,
+            beta: 0,
+            final_score: 0.23,
+            slice_status: "active",
+            path_status: "active",
+            evidence_status: "active",
+            e_direct_status: "inactive:beta_disabled",
+            fuel_verified: true
+          },
+          flood_fuel_coverage: {
+            candidates_total: 1,
+            cold_start_count: 0,
+            fuel_verified_count: 1,
+            slice_active_count: 1,
+            path_active_count: 1,
+            evidence_active_count: 1
+          }
+        }
+      ],
+      candidates: [],
+      token_economy: {
+        delivered_context_tokens_estimate: 0,
+        coarse_pool_size: 1,
+        fine_evaluated: 1,
+        fusion_streams_with_hits: 1,
+        embedding_inference_calls: 0
+      }
+    });
+
+    expect(parsed.fusion_breakdown[0]?.per_axis_rank).toMatchObject({
+      object: 1,
+      path: 2
+    });
+    expect(parsed.fusion_breakdown[0]?.flood_potential?.fuel_verified).toBe(true);
+    expect(parsed.fusion_breakdown[0]?.flood_fuel_coverage?.fuel_verified_count).toBe(1);
+  });
+
+  it("joins fusion breakdown details into delivered and gold diagnostics", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-fusion-breakdown",
+      questionType: "temporal-reasoning",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "gold-a",
+          rank: 1,
+          relevance_score: 0.9
+        }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      isAbstention: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          fusion_breakdown: [
+            {
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              per_axis_rank: { object: 1, path: 2, evidence: null },
+              per_axis_contribution: { object: 0.2, path: 0.03, evidence: 0 },
+              flood_potential: {
+                R_obj: 0.2,
+                Slice: 1,
+                A_path: 0.4,
+                B_evidence: 0.5,
+                E_direct: 0.6,
+                omega: 1,
+                Flood: 0.2,
+                lambda: 0.15,
+                beta: 0,
+                final_score: 0.23,
+                slice_status: "active",
+                path_status: "active",
+                evidence_status: "active",
+                e_direct_status: "inactive:beta_disabled",
+                fuel_verified: true
+              },
+              flood_fuel_coverage: {
+                candidates_total: 1,
+                cold_start_count: 0,
+                fuel_verified_count: 1,
+                slice_active_count: 1,
+                path_active_count: 1,
+                evidence_active_count: 1
+              }
+            }
+          ],
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              final_rank: 1,
+              fused_rank: 1
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.question_type).toBe("temporal-reasoning");
+    expect(row.is_abstention).toBe(false);
+    expect(row.premise_invalid).toBe(false);
+    expect(row.delivered_results[0]).toMatchObject({
+      per_axis_rank: { object: 1, path: 2, evidence: null },
+      flood_potential: { Flood: 0.2, fuel_verified: true },
+      flood_fuel_coverage: { fuel_verified_count: 1 }
+    });
+    expect(row.gold[0]).toMatchObject({
+      per_axis_contribution: { object: 0.2, path: 0.03, evidence: 0 },
+      flood_potential: { Flood: 0.2, fuel_verified: true },
+      flood_fuel_coverage: { fuel_verified_count: 1 }
+    });
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).question_type).toBe(
+      "temporal-reasoning"
+    );
+  });
+
+  it("does not invent per-axis or flood diagnostics when fusion identity does not match", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-unmatched-fusion-breakdown",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "gold-a",
+          rank: 1,
+          relevance_score: 0.9
+        }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          fusion_breakdown: [
+            {
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              object_id: "other-gold",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              per_axis_rank: { object: 1 },
+              flood_fuel_coverage: {
+                candidates_total: 1,
+                cold_start_count: 0,
+                fuel_verified_count: 1,
+                slice_active_count: 1,
+                path_active_count: 1,
+                evidence_active_count: 1
+              }
+            }
+          ],
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              final_rank: 1,
+              fused_rank: 1
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.delivered_results[0]?.per_axis_rank).toBeNull();
+    expect(row.gold[0]?.flood_fuel_coverage).toBeNull();
+  });
+
+  it("does not normalize malformed flood fuel coverage counters", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-malformed-flood-coverage",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "gold-a",
+          rank: 1,
+          relevance_score: 0.9
+        }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          fusion_breakdown: [
+            {
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              flood_fuel_coverage: {
+                candidates_total: 1.5,
+                cold_start_count: 0,
+                fuel_verified_count: 1,
+                slice_active_count: 1,
+                path_active_count: 1,
+                evidence_active_count: 1
+              }
+            }
+          ],
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              final_rank: 1,
+              fused_rank: 1
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.delivered_results[0]?.flood_fuel_coverage).toBeNull();
+    expect(row.gold[0]?.flood_fuel_coverage).toBeNull();
+  });
+
   it("carries graph expansion diagnostics into scored recall evidence summaries", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-graph",

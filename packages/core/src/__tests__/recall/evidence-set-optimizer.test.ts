@@ -129,8 +129,7 @@ function ids(candidates: readonly FusedCandidate[]): string[] {
   return candidates.map((c) => c.entry.object_id);
 }
 
-// Head session "A" with six near-equal members and one stronger second-session
-// "B" gold buried at rank 8 — the canonical full-gold@5 wall.
+// invariant: rank-8 coverage candidates stay behind the natural top-5 floor.
 function buildSingleSessionWallPool(): FusedCandidate[] {
   const pool: FusedCandidate[] = [
     candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" })
@@ -149,14 +148,14 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-// force mode (selector="1"/"force") bypasses the multi-fact gate so the legacy
-// coverage behavior is exercised directly on probe-free pools. Facet coverage is the
+// invariant: force mode bypasses the multi-fact gate but still preserves the natural floor.
 describe("applyEvidenceSetDelivery force mode", () => {
-  it("promotes a buried second-session gold (rank 8) into the top 5", () => {
+  it("does not promote a buried second-session gold (rank 8) into the natural top 5", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
     const ordered = buildSingleSessionWallPool();
     const result = applyEvidenceSetDelivery(ordered, supplementary(), 10);
-    expect(ids(result).slice(0, 5)).toContain("b8");
+    expect(ids(result).slice(0, 5)).toEqual(["a1", "a2", "a3", "a4", "a5"]);
+    expect(ids(result).slice(0, 5)).not.toContain("b8");
   });
 
   it("always keeps natural rank 1 first", () => {
@@ -243,7 +242,7 @@ describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
     expect(result).toBe(ordered);
   });
 
-  it("promotes a complementary second-session gold for a list-cue multi-fact query", () => {
+  it("keeps a rank-6 complementary second-session gold behind the natural top 5", () => {
     const ordered = [
       candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", content: "database decisions here" }),
       candidate({ objectId: "a2", fusedScore: 0.6, surfaceId: "sA", content: "database again" }),
@@ -254,10 +253,11 @@ describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
     ];
     const result = applyEvidenceSetDelivery(ordered, supplementary("list the database and the cache decisions"), 10);
     expect(result[0]!.entry.object_id).toBe("a1");
-    expect(ids(result).slice(0, 5)).toContain("b6");
+    expect(ids(result).slice(0, 5)).not.toContain("b6");
+    expect(ids(result)[5]).toBe("b6");
   });
 
-  it("keeps two distinct-sub-clause golds (different lexical hits) together in the top 5", () => {
+  it("keeps only natural-floor distinct-sub-clause golds in the top 5", () => {
     const ordered = [
       candidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA", content: "database core" }),
       candidate({ objectId: "a2", fusedScore: 0.6, surfaceId: "sA", content: "database notes" }),
@@ -268,7 +268,8 @@ describe("applyEvidenceSetDelivery default mode (multi-fact gate)", () => {
     ];
     const result = applyEvidenceSetDelivery(ordered, supplementary("list database cache and queue"), 10);
     expect(result[0]!.entry.object_id).toBe("a1");
-    expect(ids(result).slice(0, 5)).toEqual(expect.arrayContaining(["b6", "c7"]));
+    expect(ids(result).slice(0, 5)).toContain("b6");
+    expect(ids(result).slice(0, 5)).not.toContain("c7");
   });
 
   it("fires the pool-breadth backstop when the text gives no cue but the pool fans out", () => {
@@ -297,12 +298,14 @@ describe("applyEvidenceSetDelivery env matrix", () => {
     expect(result).toBe(ordered);
   });
 
-  it("force ⇒ diversifies a probe-free pool the default gate would skip", () => {
+  it("force ⇒ opens the gate without promoting outside the natural top 5", () => {
     const ordered = buildSingleSessionWallPool();
     expect(applyEvidenceSetDelivery(ordered, supplementary(), 10)).toBe(ordered);
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const forced = applyEvidenceSetDelivery(ordered, supplementary(), 10);
-    expect(ids(forced).slice(0, 5)).toContain("b8");
+    expect(forced).not.toBe(ordered);
+    expect(ids(forced).slice(0, 5)).toEqual(["a1", "a2", "a3", "a4", "a5"]);
+    expect(ids(forced).slice(0, 5)).not.toContain("b8");
   });
 });
 
@@ -466,9 +469,7 @@ function s4Supplementary(input: {
   } as unknown as RecallSupplementaryData;
 }
 
-// Head session sA (a1..a5) dominates by score; bGold (sB) is the cross-session gold facet-diversity
-// already promotes, and bMate (sB) is its complementary same-session gold buried at rank 6 — facet
-// diversity gives it no fresh facet (sB already covered), so only R_E coverage can rescue it.
+// invariant: bMate is a rank-6 coverage candidate and must not evict natural top-5 member a4.
 function s4ComplementaryPool(evidenceVia: "axis" | "proximity"): FusedCandidate[] {
   const gold = (objectId: string, fusedScore: number): FusedCandidate =>
     s4Candidate({
@@ -489,8 +490,7 @@ function s4ComplementaryPool(evidenceVia: "axis" | "proximity"): FusedCandidate[
   ];
 }
 
-// Same wall but golds carry no evidence magnitude (admissible via stream rank only) — isolates the
-// relationship-cluster / raw-score-flat branches from session propagation.
+// invariant: stream-rank-only coverage candidates still preserve the natural top-5 floor.
 function s4NoEvidencePool(): FusedCandidate[] {
   const gold = (objectId: string, fusedScore: number): FusedCandidate =>
     s4Candidate({ objectId, fusedScore, surfaceId: "sB", streamRanks: { source_proximity: 1 } });
@@ -506,35 +506,46 @@ function s4NoEvidencePool(): FusedCandidate[] {
 }
 
 describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
-  it("evidence-set rescue stays enabled in the unified kernel", () => {
+  it("preserves the natural top-5 delivery floor when S4 sees a rank-6 coverage candidate", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const result = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
-    expect(ids(result).slice(0, 5)).toContain("bMate");
+    expect(ids(result).slice(0, 5)).toContain("a4");
+    expect(ids(result).slice(0, 5)).not.toContain("bMate");
   });
 
-  it("on ⇒ rescues a complementary same-session gold via evidence-anchored session propagation (conformant axis)", () => {
+  it("evidence-set selection appends a rank-6 mate after the preserved natural top 5", () => {
+    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
+    const result = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
+    expect(ids(result).slice(0, 5)).not.toContain("bMate");
+    expect(ids(result)[5]).toBe("bMate");
+  });
+
+  it("on ⇒ preserves the natural floor for evidence-anchored session propagation (conformant axis)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const result = applyEvidenceSetDelivery(s4ComplementaryPool("axis"), s4Supplementary({}), 10);
     expect(result[0]!.entry.object_id).toBe("a1");
-    expect(ids(result).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "bMate"]));
+    expect(ids(result).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "a4"]));
+    expect(ids(result).slice(0, 5)).not.toContain("bMate");
   });
 
-  it("on ⇒ flat fallback: source-proximity contribution drives propagation, absent pathInflow no-ops the cluster", () => {
+  it("on ⇒ flat fallback keeps source-proximity propagation inside the natural floor", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const result = applyEvidenceSetDelivery(s4ComplementaryPool("proximity"), s4Supplementary({}), 10);
     expect(result[0]!.entry.object_id).toBe("a1");
-    expect(ids(result).slice(0, 5)).toContain("bMate");
+    expect(ids(result).slice(0, 5)).not.toContain("bMate");
+    expect(ids(result)[5]).toBe("bMate");
   });
 
-  it("on ⇒ flat fallback uses raw sourceProximityScores when no axis nor contribution is present", () => {
+  it("on ⇒ raw sourceProximityScores do not promote outside the natural floor", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const supp = s4Supplementary({ sourceProximityScores: { bGold: 1, bMate: 1 } });
     const result = applyEvidenceSetDelivery(s4NoEvidencePool(), supp, 10);
     expect(result[0]!.entry.object_id).toBe("a1");
-    expect(ids(result).slice(0, 5)).toContain("bMate");
+    expect(ids(result).slice(0, 5)).not.toContain("bMate");
+    expect(ids(result)[5]).toBe("bMate");
   });
 
-  it("on ⇒ rescues a complementary gold via the answers_with relationship cluster (shared seed)", () => {
+  it("on ⇒ answers_with relationship clusters do not promote outside the natural floor", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const supp = s4Supplementary({
       pathInflowByTarget: {
@@ -544,7 +555,8 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     });
     const result = applyEvidenceSetDelivery(s4NoEvidencePool(), supp, 10);
     expect(result[0]!.entry.object_id).toBe("a1");
-    expect(ids(result).slice(0, 5)).toContain("bMate");
+    expect(ids(result).slice(0, 5)).not.toContain("bMate");
+    expect(ids(result)[5]).toBe("bMate");
   });
 
   it("on ⇒ keeps a clearly-stronger same-session answer above a weak cross-session candidate (bounded nudge)", () => {
@@ -579,10 +591,7 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     expect(top5.indexOf("gold")).toBeLessThan(top5.indexOf("noise"));
   });
 
-  // Dedup against the ranking-stage evidence axis (g(R_E)): the session coverage bonus is keyed on
-  // set membership in an anchored session, NOT on the candidate's own R_E magnitude (already in
-  // rank). Varying bMate's evidence axis (1 / 0.01 / absent) must not change the delivered order,
-  // and a zero-magnitude sibling is rescued by membership alone.
+  // invariant: session coverage is keyed on anchored membership, not the candidate's R_E magnitude.
   it("on ⇒ session rescue is invariant to a sibling's R_E magnitude (flat membership, not re-scored)", () => {
     vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "force");
     const poolWith = (bMateAxis: number | undefined): FusedCandidate[] => [
@@ -605,7 +614,9 @@ describe("applyEvidenceSetDelivery S4 evidence-set coverage", () => {
     const none = applyEvidenceSetDelivery(poolWith(undefined), s4Supplementary({}), 10);
     expect(ids(low)).toEqual(ids(high));
     expect(ids(none)).toEqual(ids(high));
-    expect(ids(high).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "bMate"]));
+    expect(ids(high).slice(0, 5)).toEqual(expect.arrayContaining(["bGold", "a4"]));
+    expect(ids(high).slice(0, 5)).not.toContain("bMate");
+    expect(ids(high)[5]).toBe("bMate");
   });
 });
 

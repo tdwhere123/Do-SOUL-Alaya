@@ -25,9 +25,12 @@ export interface IntegratedFloodAxisInputs {
   readonly B_evidence: number;
 }
 
-interface ResolvedFloodAxis {
+interface ResolvedFloodValueAxis {
   readonly value: number;
   readonly status: FloodAxisInactiveReason;
+}
+
+interface ResolvedFloodFuelAxis extends ResolvedFloodValueAxis {
   readonly countsAsFuel: boolean;
 }
 
@@ -56,25 +59,24 @@ function manifestationOmega(
 function resolveSliceAxis(
   entry: Readonly<MemoryEntry>,
   querySoughtFacets: readonly string[] | undefined
-): ResolvedFloodAxis {
+): ResolvedFloodValueAxis {
   if (!facetSliceEnabled()) {
-    return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
+    return { value: 1, status: "inactive:pass_through" };
   }
   if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return { value: 1, status: "inactive:no_slice", countsAsFuel: false };
+    return { value: 1, status: "inactive:no_slice" };
   }
   const overlap = facetOverlapCountFor(entry, querySoughtFacets);
   if (overlap === 0) {
-    return { value: 0, status: "inactive:no_fuel", countsAsFuel: false };
+    return { value: 0, status: "inactive:no_fuel" };
   }
   return {
     value: clamp01(overlap / querySoughtFacets.length),
-    status: "active",
-    countsAsFuel: true
+    status: "active"
   };
 }
 
-function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodAxis {
+function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodFuelAxis {
   if (!hasInflow) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }
@@ -84,7 +86,7 @@ function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodAxis
   return { value: rawPath, status: "active", countsAsFuel: true };
 }
 
-function resolveEvidenceAxis(rawEvidence: number, hasEvidenceVectors: boolean): ResolvedFloodAxis {
+function resolveEvidenceAxis(rawEvidence: number, hasEvidenceVectors: boolean): ResolvedFloodFuelAxis {
   if (!hasEvidenceVectors) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }
@@ -111,9 +113,9 @@ function hasPathInflow(
 }
 
 function verifiedFloodFuel(
-  slice: ResolvedFloodAxis,
-  path: ResolvedFloodAxis,
-  evidence: ResolvedFloodAxis
+  slice: ResolvedFloodValueAxis,
+  path: ResolvedFloodFuelAxis,
+  evidence: ResolvedFloodFuelAxis
 ): boolean {
   return slice.value > 0 && path.countsAsFuel && evidence.countsAsFuel;
 }

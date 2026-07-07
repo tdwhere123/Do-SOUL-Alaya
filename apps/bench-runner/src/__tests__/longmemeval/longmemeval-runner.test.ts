@@ -394,6 +394,10 @@ describe("LongMemEval runner", () => {
         fused_score: null,
         per_stream_rank: null,
         fused_rank_contribution_per_stream: null,
+        per_axis_rank: null,
+        per_axis_contribution: null,
+        flood_potential: null,
+        flood_fuel_coverage: null,
         plane_first_admitted: "activation",
         plane_winning_admission: "protected_winner",
         score_factors: null
@@ -407,6 +411,10 @@ describe("LongMemEval runner", () => {
         fused_score: null,
         per_stream_rank: null,
         fused_rank_contribution_per_stream: null,
+        per_axis_rank: null,
+        per_axis_contribution: null,
+        flood_potential: null,
+        flood_fuel_coverage: null,
         plane_first_admitted: "lexical",
         plane_winning_admission: "lexical",
         score_factors: null

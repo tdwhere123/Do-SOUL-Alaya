@@ -75,6 +75,7 @@ function buildDiagnostics(
   const recallResult = input.recallCycle.scoredRecallResult;
   return buildQuestionDiagnostic({
     questionId: input.question.question_id,
+    questionType: input.question.question_type,
     goldMemoryIds: input.goldMemoryIds,
     answerSessionIds: input.question.answer_session_ids,
     deliveredResults: deliveredResults(recallResult),

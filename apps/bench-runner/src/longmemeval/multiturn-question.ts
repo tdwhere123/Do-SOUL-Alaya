@@ -330,6 +330,7 @@ function buildMultiturnRoundResult(
     degradationReason: recallResult.degradation_reason ?? null,
     diagnostics: buildQuestionDiagnostic({
       questionId: question.question_id,
+      questionType: question.question_type,
       roundIndex,
       goldMemoryIds,
       answerSessionIds: question.answer_session_ids,

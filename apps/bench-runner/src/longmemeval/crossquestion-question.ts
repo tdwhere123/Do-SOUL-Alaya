@@ -244,6 +244,7 @@ function buildCrossQuestionResult(
     seedCharsClipped: stats.seedCharsClipped,
     diagnostics: buildQuestionDiagnostic({
       questionId: input.question.question_id,
+      questionType: input.question.question_type,
       goldMemoryIds,
       answerSessionIds: input.question.answer_session_ids,
       deliveredResults: recallOutcome.deliveredResults,

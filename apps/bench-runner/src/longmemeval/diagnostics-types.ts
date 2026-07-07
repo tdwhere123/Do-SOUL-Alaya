@@ -24,6 +24,33 @@ export type DiagnosticActiveConstraintResult = z.infer<
 export type DiagnosticScoreFactors = Readonly<Record<string, unknown>>;
 export type DiagnosticStreamRanks = Readonly<Record<string, number | null>>;
 export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
+export type DiagnosticAxisRanks = Readonly<Record<string, number | null>>;
+export type DiagnosticAxisContributions = Readonly<Record<string, number>>;
+export type DiagnosticFloodPotential = Readonly<{
+  readonly R_obj: number;
+  readonly Slice: number;
+  readonly A_path: number;
+  readonly B_evidence: number;
+  readonly E_direct: number;
+  readonly omega: number;
+  readonly Flood: number;
+  readonly lambda: number;
+  readonly beta: number;
+  readonly final_score: number;
+  readonly slice_status: string;
+  readonly path_status: string;
+  readonly evidence_status: string;
+  readonly e_direct_status: string;
+  readonly fuel_verified: boolean;
+}>;
+export type DiagnosticFloodFuelCoverage = Readonly<{
+  readonly candidates_total: number;
+  readonly cold_start_count: number;
+  readonly fuel_verified_count: number;
+  readonly slice_active_count: number;
+  readonly path_active_count: number;
+  readonly evidence_active_count: number;
+}>;
 
 export interface DiagnosticRecallResultInput {
   readonly object_id: string;
@@ -34,6 +61,10 @@ export interface DiagnosticRecallResultInput {
   readonly plane_first_admitted?: string | null;
   readonly plane_winning_admission?: string | null;
   readonly score_factors?: DiagnosticScoreFactors | null;
+  readonly per_axis_rank?: DiagnosticAxisRanks | null;
+  readonly per_axis_contribution?: DiagnosticAxisContributions | null;
+  readonly flood_potential?: DiagnosticFloodPotential | null;
+  readonly flood_fuel_coverage?: DiagnosticFloodFuelCoverage | null;
 }
 
 export type LongMemEvalGoldDiagnostic = z.infer<
@@ -255,6 +286,10 @@ export interface CandidateDiagnostic {
   readonly fusedScore: number | null;
   readonly perStreamRank: DiagnosticStreamRanks | null;
   readonly fusedRankContributionPerStream: DiagnosticStreamContributions | null;
+  readonly perAxisRank: DiagnosticAxisRanks | null;
+  readonly perAxisContribution: DiagnosticAxisContributions | null;
+  readonly floodPotential: DiagnosticFloodPotential | null;
+  readonly floodFuelCoverage: DiagnosticFloodFuelCoverage | null;
   readonly planeFirstAdmitted: string | null;
   readonly planeWinningAdmission: string | null;
   readonly sourcePlanes: readonly string[];

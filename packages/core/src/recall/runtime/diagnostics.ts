@@ -124,7 +124,19 @@ function freezeFusionBreakdown(
       per_stream_rank: candidate.per_stream_rank,
       fused_rank: candidate.fused_rank,
       fused_score: candidate.fused_score,
-      fused_rank_contribution_per_stream: candidate.fused_rank_contribution_per_stream
+      fused_rank_contribution_per_stream: candidate.fused_rank_contribution_per_stream,
+      ...(candidate.per_axis_rank === undefined
+        ? {}
+        : { per_axis_rank: candidate.per_axis_rank }),
+      ...(candidate.per_axis_contribution === undefined
+        ? {}
+        : { per_axis_contribution: candidate.per_axis_contribution }),
+      ...(candidate.flood_potential === undefined
+        ? {}
+        : { flood_potential: candidate.flood_potential }),
+      ...(candidate.flood_fuel_coverage === undefined
+        ? {}
+        : { flood_fuel_coverage: candidate.flood_fuel_coverage })
     }))
   );
 }

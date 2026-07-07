@@ -2,6 +2,10 @@ import { DELIVERY_BUDGET_LOSS_RANK } from "./delivery-miss-taxonomy.js";
 import type {
   BenchEmbeddingProviderState,
   CandidateDiagnostic,
+  DiagnosticAxisContributions,
+  DiagnosticAxisRanks,
+  DiagnosticFloodFuelCoverage,
+  DiagnosticFloodPotential,
   DiagnosticScoreFactors,
   LongMemEvalGoldDiagnostic,
   LongMemEvalGraphExpansionPlaneCountPerEdgeType,
@@ -56,6 +60,16 @@ const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
 
 const DELIVERY_STAGE_ACTIONS = new Set(["noop", "kept", "promoted", "displaced"]);
 
+interface FusionBreakdownDiagnostic {
+  readonly candidateKey: string;
+  readonly objectId: string;
+  readonly objectKind: string;
+  readonly perAxisRank: DiagnosticAxisRanks | null;
+  readonly perAxisContribution: DiagnosticAxisContributions | null;
+  readonly floodPotential: DiagnosticFloodPotential | null;
+  readonly floodFuelCoverage: DiagnosticFloodFuelCoverage | null;
+}
+
 export function readRecallDiagnostics(
   recallResult: unknown,
   embeddingMode: "disabled" | "env"
@@ -92,6 +106,7 @@ function readCandidates(
     readArray(diagnostics.candidates) ??
     readArray(diagnostics.pool) ??
     [];
+  const fusionBreakdown = readFusionBreakdownDiagnostics(diagnostics.fusion_breakdown);
   const byObjectId = new Map<string, CandidateDiagnostic>();
   const byObjectIdentity = new Map<string, CandidateDiagnostic>();
   const byCandidateKey = new Map<string, CandidateDiagnostic>();
@@ -107,8 +122,15 @@ function readCandidates(
     if (objectId === null) continue;
     const originPlane = readString(record.origin_plane) ?? "workspace_local";
     const objectKind = readString(record.object_kind) ?? "memory_entry";
+    const candidateKey =
+      readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`;
+    const fusion = matchingFusionBreakdown(
+      fusionBreakdown.byCandidateKey.get(candidateKey),
+      objectId,
+      objectKind
+    );
     const candidate: CandidateDiagnostic = {
-      candidateKey: readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`,
+      candidateKey,
       objectId,
       objectKind,
       dimension: readString(record.dimension),
@@ -122,6 +144,14 @@ function readCandidates(
       perStreamRank: readNullableNumberRecord(record.per_stream_rank),
       fusedRankContributionPerStream:
         readNumberRecord(record.fused_rank_contribution_per_stream),
+      perAxisRank:
+        readNullableNumberRecord(record.per_axis_rank) ?? fusion?.perAxisRank ?? null,
+      perAxisContribution:
+        readNumberRecord(record.per_axis_contribution) ?? fusion?.perAxisContribution ?? null,
+      floodPotential:
+        readFloodPotential(record.flood_potential) ?? fusion?.floodPotential ?? null,
+      floodFuelCoverage:
+        readFloodFuelCoverage(record.flood_fuel_coverage) ?? fusion?.floodFuelCoverage ?? null,
       planeFirstAdmitted: readString(record.plane_first_admitted),
       planeWinningAdmission:
         readString(record.plane_winning_admission) ??
@@ -181,6 +211,151 @@ function readCandidates(
     byCandidateKey: Object.freeze(byCandidateKey),
     keysByObjectId: Object.freeze(keysByObjectId)
   };
+}
+
+function matchingFusionBreakdown(
+  fusion: FusionBreakdownDiagnostic | undefined,
+  objectId: string,
+  objectKind: string
+): FusionBreakdownDiagnostic | undefined {
+  if (
+    fusion === undefined ||
+    fusion.objectId !== objectId ||
+    fusion.objectKind !== objectKind
+  ) {
+    return undefined;
+  }
+  return fusion;
+}
+
+function readFusionBreakdownDiagnostics(value: unknown): Readonly<{
+  readonly byCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>;
+}> {
+  const source = readArray(value) ?? [];
+  const byCandidateKey = new Map<string, FusionBreakdownDiagnostic>();
+  for (const raw of source) {
+    const record = readRecord(raw);
+    if (record === null) continue;
+    const candidateKey = readString(record.candidate_key);
+    const objectId = readString(record.object_id);
+    if (candidateKey === null || objectId === null) continue;
+    const objectKind = readString(record.object_kind) ?? "memory_entry";
+    const diagnostic: FusionBreakdownDiagnostic = {
+      candidateKey,
+      objectId,
+      objectKind,
+      perAxisRank: readNullableNumberRecord(record.per_axis_rank),
+      perAxisContribution: readNumberRecord(record.per_axis_contribution),
+      floodPotential: readFloodPotential(record.flood_potential),
+      floodFuelCoverage: readFloodFuelCoverage(record.flood_fuel_coverage)
+    };
+    byCandidateKey.set(candidateKey, diagnostic);
+  }
+  return Object.freeze({
+    byCandidateKey: Object.freeze(byCandidateKey)
+  });
+}
+
+function readFloodPotential(value: unknown): DiagnosticFloodPotential | null {
+  const record = readRecord(value);
+  if (record === null) return null;
+  const numeric = readRequiredNumbers(record, [
+    "R_obj",
+    "Slice",
+    "A_path",
+    "B_evidence",
+    "E_direct",
+    "omega",
+    "Flood",
+    "lambda",
+    "beta",
+    "final_score"
+  ]);
+  if (numeric === null) return null;
+  const sliceStatus = readString(record.slice_status);
+  const pathStatus = readString(record.path_status);
+  const evidenceStatus = readString(record.evidence_status);
+  const eDirectStatus = readString(record.e_direct_status);
+  if (
+    sliceStatus === null ||
+    pathStatus === null ||
+    evidenceStatus === null ||
+    eDirectStatus === null ||
+    typeof record.fuel_verified !== "boolean"
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    R_obj: numeric.R_obj,
+    Slice: numeric.Slice,
+    A_path: numeric.A_path,
+    B_evidence: numeric.B_evidence,
+    E_direct: numeric.E_direct,
+    omega: numeric.omega,
+    Flood: numeric.Flood,
+    lambda: numeric.lambda,
+    beta: numeric.beta,
+    final_score: numeric.final_score,
+    slice_status: sliceStatus,
+    path_status: pathStatus,
+    evidence_status: evidenceStatus,
+    e_direct_status: eDirectStatus,
+    fuel_verified: record.fuel_verified
+  });
+}
+
+function readFloodFuelCoverage(value: unknown): DiagnosticFloodFuelCoverage | null {
+  const record = readRecord(value);
+  if (record === null) return null;
+  const numeric = readRequiredNonNegativeIntegers(record, [
+    "candidates_total",
+    "cold_start_count",
+    "fuel_verified_count",
+    "slice_active_count",
+    "path_active_count",
+    "evidence_active_count"
+  ]);
+  if (numeric === null) return null;
+  return Object.freeze({
+    candidates_total: numeric.candidates_total,
+    cold_start_count: numeric.cold_start_count,
+    fuel_verified_count: numeric.fuel_verified_count,
+    slice_active_count: numeric.slice_active_count,
+    path_active_count: numeric.path_active_count,
+    evidence_active_count: numeric.evidence_active_count
+  });
+}
+
+function readRequiredNonNegativeIntegers<T extends string>(
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly T[]
+): Readonly<Record<T, number>> | null {
+  const result = {} as Record<T, number>;
+  for (const key of keys) {
+    const value = record[key];
+    if (
+      typeof value !== "number" ||
+      !Number.isInteger(value) ||
+      value < 0
+    ) {
+      return null;
+    }
+    result[key] = value;
+  }
+  return Object.freeze(result);
+}
+
+function readRequiredNumbers<T extends string>(
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly T[]
+): Readonly<Record<T, number>> | null {
+  const result = {} as Record<T, number>;
+  for (const key of keys) {
+    const value = readNumber(record[key]);
+    if (value === null) return null;
+    result[key] = value;
+  }
+  return Object.freeze(result);
 }
 
 function readDeliveryStageAction(

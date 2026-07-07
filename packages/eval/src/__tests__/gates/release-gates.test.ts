@@ -292,6 +292,76 @@ describe("release hard gates", () => {
     expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
   });
 
+  it("gates LongMemEval budget drops by share while retaining count details", () => {
+    const metrics = passingQualityMetrics();
+    metrics.budget_drop_distribution.max_entries = {
+      count: 9,
+      share: 9 / 500,
+      denominator: 500
+    };
+    const payload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      sample_size: 500,
+      evaluated_count: 500,
+      kpi: {
+        ...buildPayload("abc1234").kpi,
+        r_at_5: 0.95,
+        latency_ms_p95: 110,
+        quality_metrics: metrics
+      }
+    };
+
+    const gate = collectReleaseHardGates(payload).find((item) =>
+      item.id.includes("budget_dropped")
+    );
+
+    expect(gate).toMatchObject({
+      id: "longmemeval_s_budget_dropped_rate",
+      label: "budget_dropped_share (9/500 max_entries)",
+      current: 9 / 500,
+      target: 0.02,
+      unit: "ratio",
+      passed: true
+    });
+  });
+
+  it("fails LongMemEval budget drops when the share exceeds the rate target", () => {
+    const metrics = passingQualityMetrics();
+    metrics.budget_drop_distribution.max_entries = {
+      count: 11,
+      share: 11 / 500,
+      denominator: 500
+    };
+    const payload: KpiPayload = {
+      ...buildPayload("abc1234"),
+      bench_name: "public",
+      split: "longmemeval-s",
+      sample_size: 500,
+      evaluated_count: 500,
+      kpi: {
+        ...buildPayload("abc1234").kpi,
+        r_at_5: 0.95,
+        latency_ms_p95: 110,
+        quality_metrics: metrics
+      }
+    };
+
+    const gate = collectReleaseHardGates(payload).find((item) =>
+      item.id.includes("budget_dropped")
+    );
+
+    expect(gate).toMatchObject({
+      id: "longmemeval_s_budget_dropped_rate",
+      label: "budget_dropped_share (11/500 max_entries)",
+      current: 11 / 500,
+      target: 0.02,
+      unit: "ratio",
+      passed: false
+    });
+  });
+
   // @anchor seed-extraction-release-blocker
   // Finding B0-1: latest_passing must also consult the seed-extraction
   // blocker, not only the bench-runner CLI exit. Otherwise a degraded

@@ -23,6 +23,45 @@ const DiagnosticStreamContributionsSchema = z
   .record(z.string(), z.number())
   .readonly();
 
+const DiagnosticAxisRanksSchema = z
+  .record(z.string(), z.number().nullable())
+  .readonly();
+
+const DiagnosticAxisContributionsSchema = z
+  .record(z.string(), z.number())
+  .readonly();
+
+const DiagnosticFloodPotentialSchema = z
+  .object({
+    R_obj: z.number(),
+    Slice: z.number(),
+    A_path: z.number(),
+    B_evidence: z.number(),
+    E_direct: z.number(),
+    omega: z.number(),
+    Flood: z.number(),
+    lambda: z.number(),
+    beta: z.number(),
+    final_score: z.number(),
+    slice_status: z.string(),
+    path_status: z.string(),
+    evidence_status: z.string(),
+    e_direct_status: z.string(),
+    fuel_verified: z.boolean()
+  })
+  .readonly();
+
+const DiagnosticFloodFuelCoverageSchema = z
+  .object({
+    candidates_total: z.number().int().nonnegative(),
+    cold_start_count: z.number().int().nonnegative(),
+    fuel_verified_count: z.number().int().nonnegative(),
+    slice_active_count: z.number().int().nonnegative(),
+    path_active_count: z.number().int().nonnegative(),
+    evidence_active_count: z.number().int().nonnegative()
+  })
+  .readonly();
+
 const DiagnosticScoreFactorsSchema = z.record(z.string(), z.unknown()).readonly();
 
 const DeliveryStageActionSchema = z.enum([
@@ -77,6 +116,12 @@ export const DiagnosticRecallResultSchema = z
     per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
     fused_rank_contribution_per_stream:
       DiagnosticStreamContributionsSchema.nullable(),
+    per_axis_rank: DiagnosticAxisRanksSchema.nullable().default(null),
+    per_axis_contribution:
+      DiagnosticAxisContributionsSchema.nullable().default(null),
+    flood_potential: DiagnosticFloodPotentialSchema.nullable().default(null),
+    flood_fuel_coverage:
+      DiagnosticFloodFuelCoverageSchema.nullable().default(null),
     plane_first_admitted: z.string().nullable(),
     plane_winning_admission: z.string().nullable(),
     score_factors: DiagnosticScoreFactorsSchema.nullable()
@@ -113,6 +158,12 @@ export const LongMemEvalGoldDiagnosticSchema = z
     per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
     fused_rank_contribution_per_stream:
       DiagnosticStreamContributionsSchema.nullable(),
+    per_axis_rank: DiagnosticAxisRanksSchema.nullable().default(null),
+    per_axis_contribution:
+      DiagnosticAxisContributionsSchema.nullable().default(null),
+    flood_potential: DiagnosticFloodPotentialSchema.nullable().default(null),
+    flood_fuel_coverage:
+      DiagnosticFloodFuelCoverageSchema.nullable().default(null),
     plane_first_admitted: z.string().nullable(),
     plane_winning_admission: z.string().nullable(),
     source_planes: z.array(z.string()).readonly(),
@@ -154,6 +205,9 @@ export const LongMemEvalMissClassificationSchema = z.enum([
 export const LongMemEvalQuestionDiagnosticSchema = z
   .object({
     question_id: z.string(),
+    question_type: z.string().nullable().default(null),
+    is_abstention: z.boolean().default(false),
+    premise_invalid: z.boolean().default(false),
     round_index: z.number().nullable(),
     gold_memory_ids: z.array(z.string()).readonly(),
     answer_session_ids: z.array(z.string()).readonly(),

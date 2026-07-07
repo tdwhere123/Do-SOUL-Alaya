@@ -27,6 +27,7 @@ import {
 
 export function buildQuestionDiagnostic(input: {
   readonly questionId: string;
+  readonly questionType?: string | null;
   readonly goldMemoryIds: readonly string[];
   readonly answerSessionIds: readonly string[];
   readonly deliveredResults: readonly DiagnosticRecallResultInput[];
@@ -39,6 +40,7 @@ export function buildQuestionDiagnostic(input: {
   // and miss classification is `abstained_correctly` /
   // `abstain_false_confident` instead of `no_gold`.
   readonly isAbstention?: boolean;
+  readonly premiseInvalid?: boolean;
   readonly degradationReason: string | null;
   readonly recallResult: unknown;
   readonly embeddingMode: "disabled" | "env";
@@ -69,6 +71,9 @@ export function buildQuestionDiagnostic(input: {
 
   return {
     question_id: input.questionId,
+    question_type: input.questionType ?? null,
+    is_abstention: input.isAbstention === true,
+    premise_invalid: input.premiseInvalid === true,
     round_index: input.roundIndex ?? null,
     gold_memory_ids: input.goldMemoryIds,
     answer_session_ids: input.answerSessionIds,
@@ -152,6 +157,10 @@ function buildGoldDiagnostics(input: {
       per_stream_rank: candidate?.perStreamRank ?? null,
       fused_rank_contribution_per_stream:
         candidate?.fusedRankContributionPerStream ?? null,
+      per_axis_rank: candidate?.perAxisRank ?? null,
+      per_axis_contribution: candidate?.perAxisContribution ?? null,
+      flood_potential: candidate?.floodPotential ?? null,
+      flood_fuel_coverage: candidate?.floodFuelCoverage ?? null,
       plane_first_admitted: candidate?.planeFirstAdmitted ?? null,
       plane_winning_admission: candidate?.planeWinningAdmission ?? null,
       source_planes: candidate?.sourcePlanes ?? [],
@@ -216,6 +225,12 @@ function normalizeDeliveredResults(
       per_stream_rank: candidate?.perStreamRank ?? null,
       fused_rank_contribution_per_stream:
         candidate?.fusedRankContributionPerStream ?? null,
+      per_axis_rank: result.per_axis_rank ?? candidate?.perAxisRank ?? null,
+      per_axis_contribution:
+        result.per_axis_contribution ?? candidate?.perAxisContribution ?? null,
+      flood_potential: result.flood_potential ?? candidate?.floodPotential ?? null,
+      flood_fuel_coverage:
+        result.flood_fuel_coverage ?? candidate?.floodFuelCoverage ?? null,
       plane_first_admitted:
         result.plane_first_admitted ?? candidate?.planeFirstAdmitted ?? null,
       plane_winning_admission:

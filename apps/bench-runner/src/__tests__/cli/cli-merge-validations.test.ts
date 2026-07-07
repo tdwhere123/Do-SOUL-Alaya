@@ -11,6 +11,10 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import { runCli } from "../../cli/index.js";
 
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from "./cli-merge-validations-fixture.js";
+import {
+  buildGoldDiagnostic,
+  buildQuestionDiagnosticFixture
+} from "../longmemeval/gold-diagnostic-fixture.js";
 
 import {
   makeQualityMetrics,
@@ -174,6 +178,143 @@ describe("merge-longmemeval validations", () => {
       )
     ) as KpiPayload;
     expect(merged.evaluated_count).toBe(10);
+  });
+
+  it("rebuilds merged full_gold_coverage from shard diagnostics", async () => {
+    const shardA = path.join(tmpRoot, "shard-full-gold-a");
+    const shardB = path.join(tmpRoot, "shard-full-gold-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          per_scenario: [
+            { id: "q-full-gold-a", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      makeShardDiagnostics({
+        questions: [
+          buildQuestionDiagnosticFixture({
+            questionId: "q-full-gold-a",
+            gold: [
+              buildGoldDiagnostic({ object_id: "gold-a-1", final_rank: 1 }),
+              buildGoldDiagnostic({ object_id: "gold-a-2", final_rank: 4 })
+            ]
+          })
+        ]
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 0,
+          per_scenario: [
+            { id: "q-full-gold-b", version: 1, hit_at_5: false, tier: "warm" }
+          ]
+        }
+      }),
+      makeShardDiagnostics({
+        questions: [
+          buildQuestionDiagnosticFixture({
+            questionId: "q-full-gold-b",
+            gold: [
+              buildGoldDiagnostic({ object_id: "gold-b-1", final_rank: 7 }),
+              buildGoldDiagnostic({
+                object_id: "gold-b-2",
+                final_rank: null,
+                pre_budget_rank: 80
+              })
+            ]
+          })
+        ]
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-full-gold");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(merged.kpi.full_gold_coverage).toMatchObject({
+      gold_bearing_questions: 2,
+      full_gold_at_5: 0.5,
+      full_gold_at_10: 0.5,
+      gold_coverage_at_5: 0.5,
+      gold_coverage_at_10: 0.75,
+      pool_recall_at_50: 0.75,
+      pool_recall_at_100: 1
+    });
+  });
+
+  it("omits merged full_gold_coverage when diagnostics question ids do not match merged rows", async () => {
+    const shard = path.join(tmpRoot, "shard-full-gold-mismatch");
+    await writeShardRoot(
+      shard,
+      makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_5: 1,
+          per_scenario: [
+            { id: "q-full-gold-expected", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      makeShardDiagnostics({
+        questions: [
+          buildQuestionDiagnosticFixture({
+            questionId: "q-full-gold-wrong",
+            gold: [buildGoldDiagnostic({ object_id: "gold-a-1", final_rank: 1 })]
+          })
+        ]
+      })
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-full-gold-mismatch");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shard
+    ]);
+
+    expect(exitCode).toBe(0);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(merged.kpi.full_gold_coverage).toBeUndefined();
   });
 
   it("accepts latest-passing and legacy latest-baseline shard pointers", async () => {

@@ -2,6 +2,8 @@ import type { KpiPayload, QualityMetrics, Verdict } from "../schema/kpi-schema.j
 import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 import { rollupWorstVerdict } from "./thresholds.js";
 
+const LONGMEMEVAL_BUDGET_DROPPED_RATE_TARGET = 0.02;
+
 export interface BenchmarkHardGate {
   readonly id: string;
   readonly label: string;
@@ -197,7 +199,13 @@ function pushLongMemEvalPipelineGates(
   }
   gates.push(
     maxGate("longmemeval_s_non_monotonic_rate", "non_monotonic_rate", metrics?.non_monotonic_rate ?? null, 0.1, "ratio"),
-    maxGate("longmemeval_s_budget_dropped_max_entries", "budget_dropped_entries", readBudgetDroppedEntries(metrics), 8, "count"),
+    maxGate(
+      "longmemeval_s_budget_dropped_rate",
+      budgetDropGateLabel(metrics),
+      readBudgetDroppedShare(metrics),
+      LONGMEMEVAL_BUDGET_DROPPED_RATE_TARGET,
+      "ratio"
+    ),
     maxGate("longmemeval_s_candidate_absent", "candidate_absent", metrics?.candidate_absent_count ?? null, 6, "count"),
     minGate("longmemeval_s_evidence_stream_gold_delivery", "evidence stream gold delivery", metrics?.evidence_stream_gold_delivery_rate ?? null, 0.15, "ratio")
   );
@@ -335,11 +343,17 @@ function usesV0311LatestPassingPolicy(current: KpiPayload): boolean {
   return patch >= 11;
 }
 
-function readBudgetDroppedEntries(
+function readBudgetDroppedShare(
   metrics: QualityMetrics | undefined
 ): number | null {
   if (metrics === undefined) return null;
-  return metrics.budget_drop_distribution.max_entries?.count ?? 0;
+  return metrics.budget_drop_distribution.max_entries?.share ?? 0;
+}
+
+function budgetDropGateLabel(metrics: QualityMetrics | undefined): string {
+  const maxEntries = metrics?.budget_drop_distribution.max_entries;
+  if (maxEntries === undefined) return "budget_dropped_share";
+  return `budget_dropped_share (${maxEntries.count}/${maxEntries.denominator} max_entries)`;
 }
 
 function minGate(
