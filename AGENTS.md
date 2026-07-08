@@ -28,18 +28,22 @@ files: `docs/handbook/README.md`.
 
 ## Code quality
 
-- State assumptions explicitly when scope is ambiguous.
-- Surgical changes only — stay inside the approved scope.
-- **Build + test is a hard gate:** `rtk pnpm build` and the relevant
-  `rtk pnpm exec vitest run` must pass before claiming done.
-- **Comments:** terse, why-not-what only. No ticket IDs, wave labels, or
-  narrative restatement of the code.
-- **SRP:** one reason to change per unit.
-  - Source files: under 500 lines (over 800 is High severity — split first).
-  - Functions: under 50 lines (over 100 is High severity — extract phases).
-  - Split rule: DB + compute + I/O + EventLog + side effects in one function
-    is a violation — use compute / apply / audit phases.
-  - Oversized units: `docs/handbook/backlog.md` (`#BL-061`).
+- State assumptions when scope is ambiguous; keep diffs surgical.
+- **Build + test** must pass (`rtk pnpm build` + targeted vitest) before claiming done.
+- **Comments:** why-not-what only; no ticket, wave, or experiment labels in source.
+- **One reason to change** per module, class, and function. Do not grow an
+  already-large unit — extract a focused owner first, then add behavior there.
+- **Phases, not piles:** separate DB access, computation, EventLog append, and
+  other side effects (`compute` → `apply` → `audit`). A function that mixes
+  them is a split candidate before you extend it.
+- **Flat files are fine** when names share a clear prefix or subdirectory phase
+  and each file still has a single modification reason. Prefer extraction over
+  nesting when the only gain is folder depth.
+- **After you change code, re-check:** Can this block move into an existing
+  helper? Did you introduce parallel logic that should be one shared path?
+  Should scattered copies become one module instead of another near-duplicate file?
+- **Reuse before repeat:** If the same rule, transform, or port contract already
+  exists, extend or call it — do not fork a second home for the same truth.
 
 ## Architecture (one line)
 

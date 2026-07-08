@@ -78,7 +78,9 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 **Context**: The audit flagged large units and broad facades that are real maintainability debt but unsafe to mix into the security/stability remediation branch: `pre-write-recall-service.ts`, `sqlite-memory-entry-repo.ts`, `green-service.ts`, `event-log-repo.ts`, `memory-entry-statement-groups.ts`, `MemoryService`, `app.ts`, and broad storage barrels. Branch extracted security middleware wiring to `apps/core-daemon/src/middleware/register-security-middleware.ts` (−43 lines from `app.ts`).
 
-**Close condition**: split the listed units under the SRP thresholds in `AGENTS.md`, preserve package dependency direction, and pass focused regression tests for each moved owner.
+**Close condition**: split the listed units so each obeys the module and phase
+rules in `AGENTS.md` §Code quality, preserve package dependency direction,
+and pass focused regression tests for each moved owner.
 
 ### #BL-062 — Audit API ergonomics cleanup wave
 
