@@ -1,11 +1,20 @@
 # AGENTS.md
 
-Agent entry point. Code-quality thresholds and file rules: `CLAUDE.md`.
+Canonical agent instructions for this repository. `CLAUDE.md` adds Plan Mode
+only.
+
+## File rules
+
+- Repository markdown in this file is English-only.
+- Read and write source as UTF-8 without BOM.
+- Do not read files larger than 30 KB in full; use targeted reads or `rg`.
 
 ## Repository
 
-Do-SOUL Alaya is a **local-first memory plane for CLI agents** — MCP and CLI
-only, no GUI, no conversation TUI.
+Do-SOUL Alaya is a **local-first memory plane for CLI agents**
+(`@do-soul/alaya-*`) — MCP and CLI only, no GUI, no conversation TUI.
+Memory Inspector is loopback tooling, not an agent surface. Public copy uses
+"memory plane" (invariant §21a).
 
 - Memory objects are ontology; surfaces, scopes, paths, and projections route
   or filter them — they are not truth.
@@ -14,14 +23,33 @@ only, no GUI, no conversation TUI.
 - Signal ingestion is dual-track: explicit candidate emission and post-turn
   Garden heuristic extraction.
 
-## Handbook
+Required before code changes: `docs/handbook/invariants.md`. Other handbook
+files: `docs/handbook/README.md`.
 
-Required before code changes: `docs/handbook/invariants.md`.
+## Code quality
 
-Other project truth (architecture, release snapshot, backlog, terms):
-`docs/handbook/README.md`.
+- State assumptions explicitly when scope is ambiguous.
+- Surgical changes only — stay inside the approved scope.
+- **Build + test is a hard gate:** `rtk pnpm build` and the relevant
+  `rtk pnpm exec vitest run` must pass before claiming done.
+- **Comments:** terse, why-not-what only. No ticket IDs, wave labels, or
+  narrative restatement of the code.
+- **SRP:** one reason to change per unit.
+  - Source files: under 500 lines (over 800 is High severity — split first).
+  - Functions: under 50 lines (over 100 is High severity — extract phases).
+  - Split rule: DB + compute + I/O + EventLog + side effects in one function
+    is a violation — use compute / apply / audit phases.
+  - Oversized units: `docs/handbook/backlog.md` (`#BL-061`).
+
+## Architecture (one line)
+
+`@do-soul/alaya-protocol` → leaf types; `@do-soul/alaya-core` → truth
+boundary; EventLog → DB → broadcast; `apps/core-daemon` wires; Garden is
+fire-and-forget. Detail: `docs/handbook/architecture.md`.
 
 ## Commands
+
+CLI quickstart: `README.md`.
 
 ```bash
 rtk pnpm install
@@ -38,13 +66,19 @@ rtk pnpm exec alaya tools list
 rtk pnpm exec alaya tools call --json
 ```
 
+`rtk pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH
+outside the monorepo.
+
+## Generated paths
+
+Do not treat as source truth: `dist/`, `var/`, `data/`, `node_modules/`.
+
 ## Benchmark artifacts
 
 Policy: `docs/bench-history/README.md`.
 
 - Experiments → gitignored `.do-it/bench-runs/`; never commit.
-- Confirmed full-dataset baselines → `docs/bench-history/` via `latest-*.json`
-  pointers only.
+- Full-dataset baselines → `docs/bench-history/` via `latest-*.json` only.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
