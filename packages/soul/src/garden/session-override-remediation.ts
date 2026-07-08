@@ -98,6 +98,13 @@ export interface SessionOverrideRemediationDependencies {
   readonly warn?: SessionOverrideRemediationWarnPort;
 }
 
+function defaultSessionOverrideRemediationWarn(message: string, meta: Record<string, unknown>): void {
+  process.emitWarning(message, {
+    code: "ALAYA_SESSION_OVERRIDE_REMEDIATION_WARNING",
+    detail: JSON.stringify(meta)
+  });
+}
+
 export class SessionOverrideRemediation {
   private readonly now: () => string;
   private readonly warn: SessionOverrideRemediationWarnPort;
@@ -106,7 +113,7 @@ export class SessionOverrideRemediation {
 
   public constructor(private readonly dependencies: SessionOverrideRemediationDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
+    this.warn = dependencies.warn ?? defaultSessionOverrideRemediationWarn;
   }
 
   public async evaluate(params: {

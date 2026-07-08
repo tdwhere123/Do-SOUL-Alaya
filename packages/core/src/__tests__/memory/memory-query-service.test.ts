@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { MemoryQueryService } from "../../memory/memory-service/memory-query-service.js";
 import type { MemoryEntryReadPort } from "../../memory/memory-service/types.js";
+import { CoreError } from "../../shared/errors.js";
 import { createMemoryEntry } from "./memory-service-test-fixtures.js";
 import { requireAt } from "../helpers/defined.js";
 
@@ -54,12 +55,26 @@ describe("MemoryQueryService", () => {
   it("throws clearly when optional conflict query ports are absent", async () => {
     const service = new MemoryQueryService({ memoryEntryRepo: createReadRepo() });
 
-    await expect(service.countByWorkspaceIdWithConflict("workspace-1")).rejects.toThrow(
-      "countByWorkspaceIdWithConflict is not supported by memory entry repo"
-    );
-    expect(() =>
-      service.findByScopeClassAndDimensionWithConflict("workspace-1", ScopeClass.PROJECT, MemoryDimension.FACT)
-    ).toThrow("findByScopeClassAndDimensionWithConflict is not supported by memory entry repo");
+    await expect(service.countByWorkspaceIdWithConflict("workspace-1")).rejects.toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      subCode: "PORT_UNAVAILABLE",
+      message: "countByWorkspaceIdWithConflict is not supported by memory entry repo"
+    });
+
+    let thrown: unknown;
+    try {
+      service.findByScopeClassAndDimensionWithConflict("workspace-1", ScopeClass.PROJECT, MemoryDimension.FACT);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(CoreError);
+    expect(thrown).toMatchObject({
+      name: "CoreError",
+      code: "CONFLICT",
+      subCode: "PORT_UNAVAILABLE",
+      message: "findByScopeClassAndDimensionWithConflict is not supported by memory entry repo"
+    });
   });
 });
 

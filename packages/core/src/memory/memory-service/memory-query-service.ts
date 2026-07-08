@@ -1,4 +1,5 @@
 import type { MemoryEntry, ScopeClass } from "@do-soul/alaya-protocol";
+import { CoreError } from "../../shared/errors.js";
 import type { MemoryEntryReadPort, MemoryListPageOptions } from "./types.js";
 
 const MEMORY_SERVICE_SCAN_PAGE_LIMIT = 500;
@@ -18,6 +19,12 @@ async function collectMemoryPages(
     }
   }
   return Object.freeze(rows);
+}
+
+function throwUnsupportedConflictQueryPort(portName: string): never {
+  throw new CoreError("CONFLICT", `${portName} is not supported by memory entry repo`, {
+    subCode: "PORT_UNAVAILABLE"
+  });
 }
 
 export interface MemoryQueryServiceDependencies {
@@ -194,7 +201,7 @@ export class MemoryQueryService {
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const find = this.memoryEntryRepo.findByWorkspaceIdWithConflict;
     if (find === undefined) {
-      throw new Error("findByWorkspaceIdWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("findByWorkspaceIdWithConflict");
     }
     return find.call(this.memoryEntryRepo, workspaceId, page);
   }
@@ -202,7 +209,7 @@ export class MemoryQueryService {
   public async countByWorkspaceIdWithConflict(workspaceId: string): Promise<number> {
     const count = this.memoryEntryRepo.countByWorkspaceIdWithConflict;
     if (count === undefined) {
-      throw new Error("countByWorkspaceIdWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("countByWorkspaceIdWithConflict");
     }
     return await count.call(this.memoryEntryRepo, workspaceId);
   }
@@ -214,7 +221,7 @@ export class MemoryQueryService {
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const find = this.memoryEntryRepo.findByDimensionWithConflict;
     if (find === undefined) {
-      throw new Error("findByDimensionWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("findByDimensionWithConflict");
     }
     return find.call(this.memoryEntryRepo, workspaceId, dimension, page);
   }
@@ -225,7 +232,7 @@ export class MemoryQueryService {
   ): Promise<number> {
     const count = this.memoryEntryRepo.countByDimensionWithConflict;
     if (count === undefined) {
-      throw new Error("countByDimensionWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("countByDimensionWithConflict");
     }
     return await count.call(this.memoryEntryRepo, workspaceId, dimension);
   }
@@ -237,7 +244,7 @@ export class MemoryQueryService {
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const find = this.memoryEntryRepo.findByScopeClassWithConflict;
     if (find === undefined) {
-      throw new Error("findByScopeClassWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("findByScopeClassWithConflict");
     }
     return find.call(this.memoryEntryRepo, workspaceId, scopeClass, page);
   }
@@ -248,7 +255,7 @@ export class MemoryQueryService {
   ): Promise<number> {
     const count = this.memoryEntryRepo.countByScopeClassWithConflict;
     if (count === undefined) {
-      throw new Error("countByScopeClassWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("countByScopeClassWithConflict");
     }
     return await count.call(this.memoryEntryRepo, workspaceId, scopeClass);
   }
@@ -261,7 +268,7 @@ export class MemoryQueryService {
   ): Promise<readonly Readonly<MemoryEntry>[]> {
     const find = this.memoryEntryRepo.findByScopeClassAndDimensionWithConflict;
     if (find === undefined) {
-      throw new Error("findByScopeClassAndDimensionWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("findByScopeClassAndDimensionWithConflict");
     }
     return find.call(this.memoryEntryRepo, workspaceId, scopeClass, dimension, page);
   }
@@ -273,7 +280,7 @@ export class MemoryQueryService {
   ): Promise<number> {
     const count = this.memoryEntryRepo.countByScopeClassAndDimensionWithConflict;
     if (count === undefined) {
-      throw new Error("countByScopeClassAndDimensionWithConflict is not supported by memory entry repo");
+      throwUnsupportedConflictQueryPort("countByScopeClassAndDimensionWithConflict");
     }
     return await count.call(this.memoryEntryRepo, workspaceId, scopeClass, dimension);
   }

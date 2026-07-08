@@ -642,7 +642,7 @@ durable memory database and audit log).
 
 ### Option B — build from source
 
-You need `git`, Node 22+, and pnpm 9+. The `rtk` references in
+You need `git`, Node 24+, and pnpm 9+. The `rtk` references in
 `CLAUDE.md` are a Claude Code optimisation; bare `pnpm` works the same.
 
 ```bash
@@ -651,7 +651,7 @@ git clone https://github.com/tdwhere123/Do-SOUL-Alaya.git
 cd Do-SOUL-Alaya
 
 # 2) Verify host requirements
-node --version    # >= 22.0.0
+node --version    # >= 24.0.0
 pnpm --version    # >= 9
 
 # 3) Install workspace dependencies

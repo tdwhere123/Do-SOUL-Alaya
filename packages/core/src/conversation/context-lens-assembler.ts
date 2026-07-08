@@ -46,6 +46,13 @@ export type {
   LensAssemblerWarnPort
 } from "./context-lens-assembler-ports.js";
 
+function defaultContextLensWarn(message: string, meta: Record<string, unknown>): void {
+  process.emitWarning(message, {
+    code: "ALAYA_CONTEXT_LENS_WARNING",
+    detail: JSON.stringify(meta)
+  });
+}
+
 export class ContextLensAssembler {
   public readonly lensStore = new Map<string, Readonly<ContextLens>>();
 
@@ -62,7 +69,7 @@ export class ContextLensAssembler {
   public constructor(public readonly dependencies: LensAssemblerDependencies) {
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
+    this.warn = dependencies.warn ?? defaultContextLensWarn;
     this.projectionBuilder = new ContextLensProjectionBuilder({
       generateRuntimeId: this.generateRuntimeId
     });

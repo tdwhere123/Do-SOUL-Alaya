@@ -15,7 +15,7 @@
   "main": "dist/runtime/server.js",
   "types": "dist/runtime/server.d.ts",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "build": "tsc -b && pnpm --dir web build",
@@ -26,6 +26,6 @@
     "@do-soul/alaya-eval": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@hono/node-server": "^1.13.8",
-    "hono": "^4.6.10"
+    "hono": "^4.12.28"
   }
 }

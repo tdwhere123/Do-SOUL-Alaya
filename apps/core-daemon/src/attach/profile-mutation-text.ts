@@ -6,7 +6,7 @@ export function parseJsonObject(content: string | undefined, label: string): Rec
   }
 
   try {
-    const parsed = JSON.parse(content) as unknown;
+    const parsed: unknown = JSON.parse(content);
     if (!isRecord(parsed)) {
       throw new Error("must contain a JSON object");
     }
@@ -89,7 +89,7 @@ export function extractCodexSlashCommand(content: string): string | undefined {
       continue;
     }
     try {
-      const parsed = JSON.parse(rawValue) as unknown;
+      const parsed: unknown = JSON.parse(rawValue);
       return typeof parsed === "string" ? parsed : undefined;
     } catch {
       continue;
