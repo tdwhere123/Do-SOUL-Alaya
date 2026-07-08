@@ -25,7 +25,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '24'
   PNPM_VERSION: '9.15.9'
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
@@ -54,6 +54,9 @@ jobs:
 
       - name: Validate release versions
         run: pnpm run release:check-version -- "$RELEASE_TAG"
+
+      - name: High severity dependency audit
+        run: pnpm run ci:audit-high
 
       - name: Typecheck
         run: pnpm run --if-present typecheck

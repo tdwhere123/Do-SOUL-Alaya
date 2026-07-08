@@ -6,6 +6,7 @@ import path from "node:path";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const patterns = [String.raw`\bas any\b`];
+const testFileGlobs = ["*test*.ts", "*test*.tsx", "**/__tests__/**/*.ts", "**/__tests__/**/*.tsx"];
 
 let files = [];
 try {
@@ -13,8 +14,7 @@ try {
     "rg",
     [
       "--files-with-matches",
-      "-g",
-      "*test*.ts",
+      ...testFileGlobs.flatMap((glob) => ["-g", glob]),
       "-g",
       "!**/node_modules/**",
       "-g",
@@ -39,8 +39,7 @@ if (files.length > 0) {
     "rg",
     [
       "-n",
-      "-g",
-      "*test*.ts",
+      ...testFileGlobs.flatMap((glob) => ["-g", glob]),
       "-g",
       "!**/node_modules/**",
       "-g",
@@ -56,4 +55,4 @@ if (files.length > 0) {
   process.exit(1);
 }
 
-console.log("check-test-as-any: ok (0 matches in *test*.ts)");
+console.log("check-test-as-any: ok (0 matches in test files and __tests__ fixtures)");

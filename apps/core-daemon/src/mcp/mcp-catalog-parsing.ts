@@ -34,7 +34,7 @@ export function parseDaemonMcpServerRuntimeConfigs(
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as unknown;
+    const parsed: unknown = JSON.parse(rawValue);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error("expected a JSON object mapping server name -> runtime config");
     }
@@ -170,7 +170,7 @@ function parseMcpToolCatalogByServer(
   }
 
   try {
-    const parsed = JSON.parse(rawValue) as unknown;
+    const parsed: unknown = JSON.parse(rawValue);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error("expected a JSON object mapping server name -> tool array");
     }

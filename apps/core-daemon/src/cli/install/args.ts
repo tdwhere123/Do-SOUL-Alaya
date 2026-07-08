@@ -106,7 +106,7 @@ function parseInstallAnswersJson(
   flags: Readonly<{ keychain: boolean; force: boolean }>
 ) {
   try {
-    const parsed = JSON.parse(rawToken) as unknown;
+    const parsed: unknown = JSON.parse(rawToken);
     if (!isRecord(parsed)) {
       throw new Error("answers must be an object");
     }

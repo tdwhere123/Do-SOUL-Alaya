@@ -218,7 +218,7 @@ function parseCallToolsArgs(
   let parsedInput: unknown = {};
   if (rawJson !== undefined) {
     try {
-      parsedInput = JSON.parse(rawJson) as unknown;
+      parsedInput = JSON.parse(rawJson);
     } catch {
       return { ok: false, message: "tools call JSON argument is malformed." };
     }

@@ -108,7 +108,7 @@ Benchmark output has two homes — putting a run in the wrong one is how the tre
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Do-SOUL-Alaya** (30638 symbols, 53883 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Do-SOUL-Alaya** (31125 symbols, 54652 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

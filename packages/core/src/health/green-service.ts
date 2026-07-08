@@ -1,21 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  ControlPlaneObjectKind,
   GreenState,
   GreenStatusSchema,
   GreenGovernanceEventType,
-  MemoryDimension,
   RevokeReason,
   SoulGreenGraceEnteredPayloadSchema,
   SoulGreenGrantedPayloadSchema,
   SoulGreenPiercedPayloadSchema,
-  SoulVerificationCompletedPayloadSchema,
-  VerificationBasis,
-  VerificationResultSchema,
-  VerificationVerdict,
   type GreenStatus,
-  type MemoryEntry,
   type RevokeReason as RevokeReasonType,
   type ScopeClass,
   type VerificationBasis as VerificationBasisType,
@@ -28,13 +21,14 @@ import { parseNonEmptyString, parseObjectId } from "../shared/validators.js";
 
 import { GreenGrantGuard } from "./green-grant-guard.js";
 import {
+  defaultGreenWarn,
+  normalizePositiveInteger
+} from "./green-service-consecutive-no-go.js";
+import { reevaluateGreenStatus } from "./green-service-reevaluation.js";
+import { runGreenVerification } from "./green-service-verification.js";
+import {
   ACTIVE_LIFECYCLE,
   LOW_SIGNAL_REASONS,
-  calculateGraceUntil,
-  calculateValidUntil,
-  determineReevaluationBasis,
-  determineVerifiedByForBasis,
-  isExpired,
   normalizeBoundSurfaces,
   resolveVerifiedBy,
   type GreenServiceDependencies,
@@ -53,15 +47,6 @@ export type {
   GreenServiceStatusResolverPort,
   GreenWarnPort
 } from "./green-service-ports.js";
-
-interface ReevaluationContext {
-  readonly targetObjectId: string;
-  readonly workspaceId: string;
-  readonly memory: Readonly<MemoryEntry>;
-  readonly existing: Readonly<GreenStatus> | null;
-  readonly nowIso: string;
-  readonly runId?: string;
-}
 
 const DEFAULT_CONSECUTIVE_NO_GO_MAX_ENTRIES = 10_000;
 
@@ -82,7 +67,7 @@ export class GreenService {
   public constructor(public readonly dependencies: GreenServiceDependencies) {
     this.generateObjectId = dependencies.generateObjectId ?? (() => randomUUID());
     this.now = dependencies.now ?? (() => new Date().toISOString());
-    this.warn = dependencies.warn ?? ((message, meta) => console.warn(message, meta));
+    this.warn = dependencies.warn ?? defaultGreenWarn;
     this.consecutiveNoGoMaxEntries = normalizePositiveInteger(
       dependencies.consecutiveNoGoMaxEntries,
       DEFAULT_CONSECUTIVE_NO_GO_MAX_ENTRIES
@@ -274,114 +259,18 @@ export class GreenService {
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     const memory = await this.guard.getMemoryOrThrow(targetObjectId);
     const existing = await this.dependencies.greenStatusRepo.findByTargetObjectId(targetObjectId);
-    const ctx: ReevaluationContext = {
+    return await reevaluateGreenStatus({
       targetObjectId,
       workspaceId,
       memory,
       existing,
       nowIso: this.now(),
-      runId: params.runId
-    };
-
-    if (existing?.green_state === GreenState.GRACE && isExpired(existing.valid_until, ctx.nowIso)) {
-      return this.reevaluateExpiredGrace(ctx, existing);
-    }
-
-    if (existing?.green_state === GreenState.ELIGIBLE && isExpired(existing.valid_until, ctx.nowIso)) {
-      return this.reevaluateExpiredEligible(ctx);
-    }
-
-    const piercingOutcome = await this.reevaluatePiercing(ctx);
-    if (piercingOutcome !== null) {
-      return piercingOutcome;
-    }
-
-    if (existing?.green_state === GreenState.ELIGIBLE) {
-      return "unchanged";
-    }
-
-    return this.reevaluateGrant(ctx);
-  }
-
-  private async reevaluateExpiredGrace(
-    ctx: ReevaluationContext,
-    existing: Readonly<GreenStatus>
-  ): Promise<GreenServiceReevaluationOutcome> {
-    const pierced = await this.pierce({
-      targetObjectId: ctx.targetObjectId,
-      workspaceId: ctx.workspaceId,
-      reason: RevokeReason.REVIEW_OVERDUE,
-      runId: ctx.runId
+      runId: params.runId,
+      evaluatePiercingReason: async (input) => await this.guard.evaluatePiercingReason(input),
+      grant: async (input) => await this.grant(input),
+      pierce: async (input) => await this.pierce(input),
+      setGrace: async (input) => await this.setGrace(input)
     });
-    return pierced === null || pierced.green_state === existing.green_state ? "unchanged" : "pierced";
-  }
-
-  private async reevaluateExpiredEligible(
-    ctx: ReevaluationContext
-  ): Promise<GreenServiceReevaluationOutcome> {
-    const graceUntil = calculateGraceUntil(ctx.memory.dimension, ctx.nowIso);
-    if (graceUntil === null) {
-      return "unchanged";
-    }
-
-    const grace = await this.setGrace({
-      targetObjectId: ctx.targetObjectId,
-      workspaceId: ctx.workspaceId,
-      until: graceUntil,
-      runId: ctx.runId ?? ctx.memory.run_id,
-      reason: "valid_until_expired"
-    });
-    return grace === null ? "unchanged" : "grace";
-  }
-
-  private async reevaluatePiercing(
-    ctx: ReevaluationContext
-  ): Promise<GreenServiceReevaluationOutcome | null> {
-    const piercingReason =
-      ctx.existing === null
-        ? null
-        : await this.guard.evaluatePiercingReason({
-            existing: ctx.existing,
-            memory: ctx.memory,
-            workspaceId: ctx.workspaceId
-          });
-
-    if (piercingReason === null) {
-      return null;
-    }
-
-    const pierced = await this.pierce({
-      targetObjectId: ctx.targetObjectId,
-      workspaceId: ctx.workspaceId,
-      reason: piercingReason,
-      runId: ctx.runId
-    });
-    return pierced === null ? "unchanged" : "pierced";
-  }
-
-  private async reevaluateGrant(
-    ctx: ReevaluationContext
-  ): Promise<GreenServiceReevaluationOutcome> {
-    if (ctx.memory.lifecycle_state !== ACTIVE_LIFECYCLE || ctx.memory.evidence_refs.length === 0) {
-      return "unchanged";
-    }
-
-    const basis = determineReevaluationBasis(ctx.memory, ctx.existing);
-    if (basis === null) {
-      return "unchanged";
-    }
-
-    await this.grant({
-      targetObjectId: ctx.targetObjectId,
-      workspaceId: ctx.workspaceId,
-      basis,
-      validUntil: calculateValidUntil(ctx.memory.dimension, ctx.nowIso),
-      verifiedBy: determineVerifiedByForBasis(basis),
-      boundSurfaces: ctx.memory.surface_id === null ? null : [ctx.memory.surface_id],
-      boundScopeClass: ctx.memory.scope_class
-    });
-
-    return "granted";
   }
 
   public async runVerification(params: {
@@ -394,103 +283,25 @@ export class GreenService {
     const targetObjectId = parseObjectId(params.targetObjectId);
     const workspaceId = parseNonEmptyString(params.workspaceId, "workspaceId");
     const memory = await this.guard.getMemoryOrThrow(targetObjectId);
-    const currentCount = this.readConsecutiveNoGo(targetObjectId);
     const timestamp = this.now();
 
-    let count = currentCount;
-    let hint = params.microCorrectionHint;
-
-    if (params.verdict === VerificationVerdict.NO_GO) {
-      const maxNoGo = GreenService.VERIFICATION_MAX_CONSECUTIVE_NO_GO;
-      if (currentCount >= maxNoGo) {
-        count = maxNoGo;
-        hint = "max retries reached";
-      } else {
-        count = currentCount + 1;
-        this.writeConsecutiveNoGo(targetObjectId, count);
-        await this.pierce({
-          targetObjectId,
-          workspaceId,
-          reason: RevokeReason.VERIFICATION_FAIL,
-          runId: memory.run_id
-        });
-      }
-    } else {
-      this.consecutiveNoGo.delete(targetObjectId);
-      count = 0;
-      const basis =
-        memory.dimension === MemoryDimension.HAZARD
-          ? VerificationBasis.USER_RECONFIRM
-          : VerificationBasis.ACTIVE_VERIFICATION;
-      await this.grant({
-        targetObjectId,
-        workspaceId,
-        basis,
-        validUntil: calculateValidUntil(memory.dimension, timestamp),
-        verifiedBy: determineVerifiedByForBasis(basis),
-        boundSurfaces: memory.surface_id === null ? null : [memory.surface_id],
-        boundScopeClass: memory.scope_class
-      });
-    }
-
-    const verificationResult = VerificationResultSchema.parse({
-      runtime_id: this.generateObjectId(),
-      object_kind: ControlPlaneObjectKind.VERIFICATION_RESULT,
-      task_surface_ref: null,
-      expires_at: null,
-      derived_from: targetObjectId,
-      retention_policy: "session_only",
+    return await runGreenVerification({
+      targetObjectId,
+      workspaceId,
       verdict: params.verdict,
-      micro_correction_hint: hint,
-      necessary_patch: params.necessaryPatch
+      microCorrectionHint: params.microCorrectionHint,
+      necessaryPatch: params.necessaryPatch,
+      memory,
+      timestamp,
+      maxConsecutiveNoGo: GreenService.VERIFICATION_MAX_CONSECUTIVE_NO_GO,
+      consecutiveNoGo: this.consecutiveNoGo,
+      consecutiveNoGoMaxEntries: this.consecutiveNoGoMaxEntries,
+      warn: this.warn,
+      generateObjectId: this.generateObjectId,
+      dependencies: this.dependencies,
+      grant: async (input) => await this.grant(input),
+      pierce: async (input) => await this.pierce(input)
     });
-    const event = await this.dependencies.eventLogRepo.append({
-      event_type: GreenGovernanceEventType.SOUL_VERIFICATION_COMPLETED,
-      entity_type: "verification_result",
-      entity_id: verificationResult.runtime_id,
-      workspace_id: workspaceId,
-      run_id: memory.run_id,
-      caused_by: "system",
-      payload_json: SoulVerificationCompletedPayloadSchema.parse({
-        target_object_id: targetObjectId,
-        verdict: verificationResult.verdict,
-        micro_correction_hint: verificationResult.micro_correction_hint,
-        consecutive_no_go_count: count,
-        workspace_id: workspaceId,
-        occurred_at: timestamp
-      })
-    });
-
-    await this.dependencies.runtimeNotifier.notifyEntry(event);
-    return verificationResult;
-  }
-
-  private readConsecutiveNoGo(targetObjectId: string): number {
-    const count = this.consecutiveNoGo.get(targetObjectId);
-    if (count === undefined) {
-      return 0;
-    }
-    this.consecutiveNoGo.delete(targetObjectId);
-    this.consecutiveNoGo.set(targetObjectId, count);
-    return count;
-  }
-
-  private writeConsecutiveNoGo(targetObjectId: string, count: number): void {
-    if (this.consecutiveNoGo.has(targetObjectId)) {
-      this.consecutiveNoGo.delete(targetObjectId);
-    }
-    while (this.consecutiveNoGo.size >= this.consecutiveNoGoMaxEntries) {
-      const oldestTargetObjectId = this.consecutiveNoGo.keys().next().value;
-      if (typeof oldestTargetObjectId !== "string") {
-        break;
-      }
-      this.consecutiveNoGo.delete(oldestTargetObjectId);
-      this.warn("[GreenService] consecutive No-Go cache entry evicted.", {
-        targetObjectId: oldestTargetObjectId,
-        maxEntries: this.consecutiveNoGoMaxEntries
-      });
-    }
-    this.consecutiveNoGo.set(targetObjectId, count);
   }
 
   public async getStatus(targetObjectId: string): Promise<Readonly<GreenStatus> | null> {
@@ -508,11 +319,4 @@ export class GreenService {
   public async findAll(workspaceId: string): Promise<readonly Readonly<GreenStatus>[]> {
     return await this.dependencies.greenStatusRepo.findByWorkspaceId(parseNonEmptyString(workspaceId, "workspaceId"));
   }
-}
-
-function normalizePositiveInteger(value: number | undefined, fallback: number): number {
-  if (value === undefined) {
-    return fallback;
-  }
-  return Number.isInteger(value) && value > 0 ? value : fallback;
 }

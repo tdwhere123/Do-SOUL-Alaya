@@ -68,7 +68,7 @@ function resolvePackageJsonPath(moduleUrl: string): string {
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> {
-  const parsed = JSON.parse(raw) as unknown;
+  const parsed: unknown = JSON.parse(raw);
   if (!isRecord(parsed)) {
     throw new TypeError("Expected a JSON object.");
   }

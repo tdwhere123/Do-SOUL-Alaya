@@ -79,12 +79,12 @@ export async function runReviewParityScenario(
     },
     routes: {
       proposals: {
-        workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) } as any,
-        memoryService: { findByIdScoped: vi.fn(async () => null) } as any,
+        workspaceService: { getById: vi.fn(async () => ({ workspace_id: "ws1" })) } as unknown as ProposalRouteServices["workspaceService"],
+        memoryService: { findByIdScoped: vi.fn(async () => null) } as unknown as ProposalRouteServices["memoryService"],
         proposalService: {
           findByWorkspaceId: vi.fn(async () => []),
           findPending: vi.fn(async () => [])
-        } as any,
+        } as unknown as ProposalRouteServices["proposalService"],
         mcpMemoryToolHandler: buildHandler()
       } as unknown as ProposalRouteServices
     }

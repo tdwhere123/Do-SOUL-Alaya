@@ -82,7 +82,8 @@ export function createGardenRuntimeCore(
     input,
     schedulerEventLogPort,
     healthJournalPort,
-    gardenTaskRepo
+    gardenTaskRepo,
+    warn
   );
   const runtimeGardenScheduler = gardenScheduler as RuntimeGardenScheduler;
   const consolidationExecutor = createConsolidationExecutor(input);

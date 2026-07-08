@@ -23,7 +23,7 @@ export async function readGardenLlmJsonCache<T>(
   }
 
   try {
-    const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+    const parsed: unknown = JSON.parse(await readFile(filePath, "utf8"));
     return options.parseEntry(parsed, options.requestKey);
   } catch (error) {
     process.emitWarning(options.warningMessage, {

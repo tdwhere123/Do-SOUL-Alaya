@@ -24,21 +24,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: ubuntu-node22
+          - label: ubuntu-node24
             os: ubuntu-latest
-            node: '22'
+            node: '24'
             run_hygiene: true
             run_coverage: true
             run_smoke: false
-          - label: macos-node22
+          - label: macos-node24
             os: macos-latest
-            node: '22'
+            node: '24'
             run_hygiene: false
             run_coverage: false
             run_smoke: false
-          - label: windows-node22
+          - label: windows-node24
             os: windows-latest
-            node: '22'
+            node: '24'
             run_hygiene: false
             run_coverage: false
             run_smoke: true
@@ -84,6 +84,10 @@ jobs:
         if: ${{ matrix.run_hygiene }}
         run: pnpm run ci:test-as-any
 
+      - name: Dependency audit high severity
+        if: ${{ matrix.run_hygiene }}
+        run: pnpm run ci:audit-high
+
       - name: Guard inspector dependency isolation
         if: ${{ matrix.run_hygiene }}
         run: pnpm run hygiene:inspector-deps
@@ -108,7 +112,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Check bench-history contract
         run: node scripts/ci/check-content-contracts.mjs
@@ -126,7 +130,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 

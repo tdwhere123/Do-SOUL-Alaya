@@ -48,6 +48,13 @@ export type {
 
 const IN_PROCESS_GARDEN_CLAIMANT = "in-process";
 
+function defaultGardenSchedulerWarn(message: string, meta: Record<string, unknown>): void {
+  process.emitWarning(message, {
+    code: "ALAYA_GARDEN_SCHEDULER_WARNING",
+    detail: JSON.stringify(meta)
+  });
+}
+
 export class GardenScheduler {
   private readonly coolingMap = new Map<string, string>();
   private readonly coolingPeriodMs: number;
@@ -66,7 +73,7 @@ export class GardenScheduler {
   ) {
     this.coolingPeriodMs = config.coolingPeriodMs ?? 86_400_000;
     this.now = config.now ?? (() => new Date().toISOString());
-    this.warn = config.warn ?? ((message, meta) => console.warn(message, meta));
+    this.warn = config.warn ?? defaultGardenSchedulerWarn;
     this.backlogWarningThresholds = config.backlogWarningThresholds ?? null;
   }
 
