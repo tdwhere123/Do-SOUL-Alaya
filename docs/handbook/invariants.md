@@ -171,9 +171,8 @@ These rules always win over lower-level docs and task-card convenience.
 
     Removing a public symbol requires `@deprecated` JSDoc on the
     schema at least one minor release before removal, a
-    `docs/handbook/maintenance.md` entry naming the symbol and target
-    removal version, and a sibling-compat smoke test asserting the old
-    shape still parses. Earliest removal is the next minor after the
+    `CHANGELOG.md` entry naming the symbol and target removal version, and a
+    sibling-compat smoke test asserting the old shape still parses. Earliest removal is the next minor after the
     deprecation minor.
 
     Sibling consumers pin `@do-soul/alaya-protocol` to the minor, for
@@ -202,8 +201,7 @@ Genealogy for the upstream commit pinned at port time. New work uses
 The following three invariants were extracted from the Cause Class
 Aggregation step of `p5-system-review-r1`. Each was a Cause Class that
 appeared in ≥2 independent findings; abstracting them here is the
-required防复发 step per `docs/handbook/workflow/review-protocol.md`
-§Cause Class Aggregation.
+required防复发 step per the `do-it-review-loop` skill Cause Class Aggregation.
 
 29. **Default Scope Invariant.** All Alaya-redesign / clean-room
     storage paths, MCP tool inputs, HTTP routes, and resource access

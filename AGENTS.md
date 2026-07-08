@@ -18,8 +18,10 @@ Read in this order:
 2. The task card or initiative README you are touching
 3. `docs/handbook/invariants.md`
 4. `docs/handbook/runtime-snapshot.md` when touching readiness or release claims
-5. `docs/handbook/workflow/agent-workflow.md` — Task-Type Reading Matrix row for your task
-6. `docs/handbook/backlog.md` when touching an area with tracked issues
+5. `docs/handbook/backlog.md` when touching an area with tracked issues
+
+Agent execution and review: load `do-it-router` at task start; use
+`do-it-review-loop` before claiming done.
 
 ## Role Framing
 
@@ -30,14 +32,14 @@ Agents (Codex) implement and review in this repository.
   - **Blocking**: architecture violation, unmet acceptance criteria, broken build or test, data or state risk.
   - **Important**: likely bug, regression, missing meaningful coverage, or misleading status.
   - **Nice-to-have**: optional cleanup or follow-up.
-- A worker's `DONE` is not acceptance. Only a fresh reviewer pass closes the loop. See `docs/handbook/workflow/review-protocol.md` for the full checklist.
+- A worker's `DONE` is not acceptance. Only a fresh reviewer pass closes the loop (`do-it-review-loop`).
 
 ## Code Quality
 
 - State assumptions explicitly when scope is ambiguous; do not pick silently.
 - Keep changes surgical and inside the approved task scope.
 - Write a short plan before implementing, then verify with the task card or handbook guidance.
-- **Build + test is a hard gate.** Do not claim done until `rtk pnpm build` and the relevant `rtk pnpm exec vitest run` both pass, and the Review Protocol checklist reports zero Blocking / Important findings.
+- **Build + test is a hard gate.** Do not claim done until `rtk pnpm build` and the relevant `rtk pnpm exec vitest run` both pass, and the `do-it-review-loop` checklist reports zero Blocking / Important findings.
 - **Single Responsibility (SRP).** One reason to change per unit.Source files under 500 lines; functions under 50 lines. If a function mixes DB queries, computation, I/O, and event-log appends, split it into compute / apply / audit phases. Before adding logic to an already-large unit, extract a smaller one first — new logic lands in a new unit; the original unit shrinks. See `CLAUDE.md` §Code Quality for concrete hotspots.
 
 ## Working Style
@@ -74,10 +76,7 @@ rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 - `docs/handbook/invariants.md` — architecture non-negotiables
 - `docs/handbook/architecture.md` — stable system shape
 - `docs/handbook/runtime-snapshot.md` — current release and readiness
-- `docs/handbook/workflow/agent-workflow.md` — per-card pipeline, reading matrix
-- `docs/handbook/workflow/review-protocol.md` — severity, checklist
 - `docs/handbook/backlog.md` — tracked issues
-- `docs/handbook/maintenance.md` — doc-edit protocol
 - `docs/archive/port-protocol-historical.md` — port lineage (archaeology)
 
 ## Benchmark Artifacts

@@ -28,9 +28,8 @@ Read in this order:
 3. `docs/handbook/README.md`
 4. `docs/handbook/invariants.md`
 5. `docs/handbook/runtime-snapshot.md` when touching readiness or release claims
-6. `docs/handbook/workflow/agent-workflow.md` — Task-Type Reading Matrix row for your task
-7. `docs/handbook/backlog.md` for the area you are touching
-8. The specific task or PR scope you are working on
+6. `docs/handbook/backlog.md` for the area you are touching
+7. The specific task or PR scope you are working on
 
 ## Plan Mode And Language
 
@@ -40,18 +39,15 @@ Read in this order:
 
 ## Workflow
 
-Follow the per-card and per-wave pipelines in `docs/handbook/workflow/agent-workflow.md`. It owns the full Anti-Tail R1-R5 and Discipline D1-D4 rules; do not mirror them here.
-Sub-agent dispatch for multi-card port work:
-`docs/archive/handbook-historical/workflow/subagent-dispatch.md`.
-
-Review: every implementation result goes through reviewer mode; every fix loop goes through it again. A worker's `DONE` is never acceptance.
-See `docs/handbook/workflow/review-protocol.md` for severity (Blocking / Important / Nice-to-have) and the checklist.
+Load `do-it-router` at the start of non-trivial work. Review and acceptance use
+`do-it-review-loop`; verification claims use `do-it-verification-gate`. A
+worker's `DONE` is never acceptance.
 
 ## Code Quality
 
 - **Think before coding.** State assumptions explicitly. If scope is ambiguous, surface interpretations — do not pick one silently.
 - **Surgical changes only.** Touch only files in the PR or task scope.
-- **Build + test is a hard gate.** Do not claim done until `rtk pnpm build` and the relevant `rtk pnpm exec vitest run` both pass and the Review Protocol checklist reports zero Blocking / Important findings.
+- **Build + test is a hard gate.** Do not claim done until `rtk pnpm build` and the relevant `rtk pnpm exec vitest run` both pass and the `do-it-review-loop` checklist reports zero Blocking / Important findings.
 - **Comment discipline — terse, why-not-what.** Default to no comment; add one only when the _why_ is non-obvious, and keep it to a single short line. Forbidden in source: multi-line narrative or sales-pitch comments, restating what the code already says, and ephemeral worklog/experiment labels (e.g. `B2(d)`, `ARC`, ticket IDs, "now we…", "as discussed"). Prefer smaller, well-named functions over a long comment explaining long code — if a block needs a paragraph to explain, split or rename it instead.
 - **Single Responsibility (SRP).** Every module, class, and function must have exactly one reason to change. Concrete thresholds:
   - Source files: keep under 500 lines. Files over 800 lines are a High-severity finding — split them before adding more logic. Current hotspots: `packages/core/src/recall/recall-service.ts` (1079L), `packages/core/src/memory/memory-service/service.ts` (1040L), `apps/core-daemon/src/index.ts` (1013L), and all audit-flagged files in `docs/handbook/backlog.md`.
@@ -85,9 +81,6 @@ root bins; use `pnpm link --global` to add `alaya` to PATH outside the monorepo.
 - `docs/handbook/invariants.md` — architecture non-negotiables and Package Dependency Direction
 - `docs/handbook/architecture.md` — stable system shape
 - `docs/handbook/runtime-snapshot.md` — current release and readiness
-- `docs/handbook/workflow/agent-workflow.md` — per-card pipeline, reading matrix, R1-R5
-- `docs/handbook/workflow/review-protocol.md` — severity, checklist, atomic fix commits
-- `docs/archive/handbook-historical/workflow/subagent-dispatch.md` — historical dispatch policy
 - `docs/handbook/backlog.md` — unresolved issues
 - `docs/archive/port-protocol-historical.md` — retired Port-First discipline (archaeology)
 

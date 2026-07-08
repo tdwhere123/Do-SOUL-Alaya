@@ -67,7 +67,7 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 **Status**: Open (design spike landed 2026-07-07). **Due**: after S7 async SQLite comparison is reviewed.
 
-**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering. Branch landed typed port stub `packages/storage/src/sqlite/write-queue-port.ts`, contract test, and `docs/handbook/spikes/sqlite-worker-queue.md`.
+**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering. Branch landed typed port stub `packages/storage/src/sqlite/write-queue-port.ts`, contract test, and `docs/archive/handbook-historical/spikes/sqlite-worker-queue.md`.
 
 **Close condition**: a worker-thread write queue or reviewed async SQLite replacement keeps EventLog-first / transaction-CAS invariants intact and improves concurrent recall tail latency against the S7 witness.
 
