@@ -1,57 +1,25 @@
 # AGENTS.md
 
-> **AGENTS.md** is the agent entry point. For detailed rules, hotspots, and SRP thresholds, see `CLAUDE.md`. File rules, project genealogy, and architecture are defined there and not repeated here.
+Agent entry point. Code-quality thresholds and file rules: `CLAUDE.md`.
 
-## Repository Context
+## Repository
 
-Do-SOUL Alaya is a **local-first memory plane for CLI agents** — MCP and CLI only, no GUI, no conversation TUI.
+Do-SOUL Alaya is a **local-first memory plane for CLI agents** — MCP and CLI
+only, no GUI, no conversation TUI.
 
-- Memory objects are ontology; surfaces, scopes, paths, and projections route or filter them — they are not truth.
-- Evidence discipline and explicit governance matter; control-plane outputs must not silently become durable memory.
-- Signal ingestion is dual-track: explicit candidate emission and post-turn Garden heuristic extraction.
+- Memory objects are ontology; surfaces, scopes, paths, and projections route
+  or filter them — they are not truth.
+- Evidence and governance are explicit; control-plane outputs must not silently
+  become durable memory.
+- Signal ingestion is dual-track: explicit candidate emission and post-turn
+  Garden heuristic extraction.
 
-## Before You Code
+## Handbook
 
-Read in this order:
+Required before code changes: `docs/handbook/invariants.md`.
 
-1. `RTK.md` for repository command wrapping rules when available.
-2. The task card or initiative README you are touching
-3. `docs/handbook/invariants.md`
-4. `docs/handbook/runtime-snapshot.md` when touching readiness or release claims
-5. `docs/handbook/backlog.md` when touching an area with tracked issues
-
-Agent execution and review: load `do-it-router` at task start; use
-`do-it-review-loop` before claiming done.
-
-## Role Framing
-
-Agents (Codex) implement and review in this repository.
-
-- Default to implementation, debugging, and verification when the user gives a build or fix task.
-- When the user asks for review, switch to reviewer mode and report findings **first**, ordered by severity, with precise file references:
-  - **Blocking**: architecture violation, unmet acceptance criteria, broken build or test, data or state risk.
-  - **Important**: likely bug, regression, missing meaningful coverage, or misleading status.
-  - **Nice-to-have**: optional cleanup or follow-up.
-- A worker's `DONE` is not acceptance. Only a fresh reviewer pass closes the loop (`do-it-review-loop`).
-
-## Code Quality
-
-- State assumptions explicitly when scope is ambiguous; do not pick silently.
-- Keep changes surgical and inside the approved task scope.
-- Write a short plan before implementing, then verify with the task card or handbook guidance.
-- **Build + test is a hard gate.** Do not claim done until `rtk pnpm build` and the relevant `rtk pnpm exec vitest run` both pass, and the `do-it-review-loop` checklist reports zero Blocking / Important findings.
-- **Single Responsibility (SRP).** One reason to change per unit.Source files under 500 lines; functions under 50 lines. If a function mixes DB queries, computation, I/O, and event-log appends, split it into compute / apply / audit phases. Before adding logic to an already-large unit, extract a smaller one first — new logic lands in a new unit; the original unit shrinks. See `CLAUDE.md` §Code Quality for concrete hotspots.
-
-## Working Style
-
-- Task card sections 2, 3, 4, and 5 define scope; section 6 defines verification.
-- Primary environment is WSL/Linux; prefer standard Linux shell behavior and `rtk` wrapping per `RTK.md`.
-- For docs-only work, run targeted `rtk rg` sweeps for changed paths, events, readiness labels, phase gates, and legacy references.
-- If the task card requires a completion report, write it to `docs/<initiative>/reports/`.
-
-## Architecture (one line)
-
-`@do-soul/alaya-protocol` is the zod-only leaf; `@do-soul/alaya-core` is the truth boundary; EventLog → DB → broadcast; `apps/core-daemon` wires everything; Garden runs fire-and-forget. Full rules and the Package Dependency Direction live in `docs/handbook/invariants.md` and `docs/handbook/architecture.md`.
+Other project truth (architecture, release snapshot, backlog, terms):
+`docs/handbook/README.md`.
 
 ## Commands
 
@@ -61,31 +29,22 @@ rtk pnpm build
 rtk pnpm test
 rtk pnpm exec vitest run --project @do-soul/alaya-<package>
 
-rtk pnpm --dir apps/core-daemon dev  # daemon dev
-rtk pnpm exec alaya doctor           # CLI diagnostic
-rtk pnpm exec alaya install          # install profile
-rtk pnpm exec alaya attach codex     # attach to a target agent
-rtk pnpm exec alaya status           # status report
-rtk pnpm exec alaya tools list       # CLI fallback: list MCP memory tools
-rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
+rtk pnpm --dir apps/core-daemon dev
+rtk pnpm exec alaya doctor
+rtk pnpm exec alaya install
+rtk pnpm exec alaya attach codex
+rtk pnpm exec alaya status
+rtk pnpm exec alaya tools list
+rtk pnpm exec alaya tools call --json
 ```
 
-## Pointers
+## Benchmark artifacts
 
-- `docs/handbook/README.md` — documentation entry point
-- `docs/handbook/invariants.md` — architecture non-negotiables
-- `docs/handbook/architecture.md` — stable system shape
-- `docs/handbook/runtime-snapshot.md` — current release and readiness
-- `docs/handbook/backlog.md` — tracked issues
-- `docs/archive/port-protocol-historical.md` — port lineage (archaeology)
+Policy: `docs/bench-history/README.md`.
 
-## Benchmark Artifacts
-
-Two homes; wrong placement clutters the tree. Full policy in
-`docs/bench-history/README.md` §Storage policy.
-
-- Experiments / A/B / limit-N / probes → gitignored `.do-it/bench-runs/`(tools under `scripts/`); never commit. Confirmed **full-dataset** baselines only → tracked `docs/bench-history/` via the archive + `latest-*.json` pointer mechanism (compact sidecars only).
-- No hand-named dated dirs in `docs/bench-history/`. Retention: tracked = current pointer targets + ≤7 days; scratch = ≤7 days, keep `scripts/`.
+- Experiments → gitignored `.do-it/bench-runs/`; never commit.
+- Confirmed full-dataset baselines → `docs/bench-history/` via `latest-*.json`
+  pointers only.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

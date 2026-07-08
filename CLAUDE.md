@@ -1,104 +1,73 @@
 # CLAUDE.md
 
-## File Rules
+## File rules
 
-- Keep this file English-only.
+- English only in this file.
 - Read and write repository files as UTF-8 without BOM.
-- Localized product content, fixtures, and tests may use non-English text when the behavior under test requires it.
-- Do not read files larger than 30 KB in full. Use targeted section reads through RTK-wrapped search/read commands.
+- Do not read files larger than 30 KB in full; use targeted reads or `rg`.
 
-## Project Context
+## Project
 
-Do-SOUL Alaya is a **local-first memory plane for CLI agents**. The package namespace is `@do-soul/alaya-*` and the consuming agents are Codex, Claude Code, and similar CLI tools that attach over MCP or via plain CLI commands. (Use "memory plane" in public-facing copy per invariants §21a;"memory core" was the pre-v0.1-closeout phrasing and is retired.)
+Do-SOUL Alaya is a **local-first memory plane for CLI agents**
+(`@do-soul/alaya-*`). Surfaces: MCP attach and `alaya` CLI (13 verbs).
+Memory Inspector is loopback tooling only — not an agent surface. Public
+copy uses "memory plane" (invariant §21a).
 
-Key invariants (full set: `docs/handbook/invariants.md`):
+Full rules: `docs/handbook/invariants.md`.
 
-- Memory ontology is durable truth; projections and surfaces are not truth.
-- Embedding is recall supplement only; it never decides durable truth.
-- LLMs and agents propose; Alaya decides durable truth through governance.
-- **No agent-frontend GUI, no conversation TUI.** Agent surfaces: MCP (attach) and the `alaya` CLI (13 verbs). Memory Inspector is a memory-tooling loopback surface, not an agent surface.
-- Public-facing copy describes Alaya as a memory plane for CLI agents only (invariant §21a).
-
-## Before You Code
-
-Read in this order:
-
-1. `RTK.md`
-2. `README.md`
-3. `docs/handbook/README.md`
-4. `docs/handbook/invariants.md`
-5. `docs/handbook/runtime-snapshot.md` when touching readiness or release claims
-6. `docs/handbook/backlog.md` for the area you are touching
-7. The specific task or PR scope you are working on
-
-## Plan Mode And Language
+## Plan mode
 
 - Reply in Chinese.
 - Plan Mode requires explicit user approval via `ExitPlanMode` before executing.
-- The only file Claude may edit in Plan Mode is the plan file named in the plan-mode system message.
+- The only file Claude may edit in Plan Mode is the plan file named in the
+  plan-mode system message.
 
-## Workflow
+## Code quality
 
-Load `do-it-router` at the start of non-trivial work. Review and acceptance use
-`do-it-review-loop`; verification claims use `do-it-verification-gate`. A
-worker's `DONE` is never acceptance.
-
-## Code Quality
-
-- **Think before coding.** State assumptions explicitly. If scope is ambiguous, surface interpretations — do not pick one silently.
-- **Surgical changes only.** Touch only files in the PR or task scope.
-- **Build + test is a hard gate.** Do not claim done until `rtk pnpm build` and the relevant `rtk pnpm exec vitest run` both pass and the `do-it-review-loop` checklist reports zero Blocking / Important findings.
-- **Comment discipline — terse, why-not-what.** Default to no comment; add one only when the _why_ is non-obvious, and keep it to a single short line. Forbidden in source: multi-line narrative or sales-pitch comments, restating what the code already says, and ephemeral worklog/experiment labels (e.g. `B2(d)`, `ARC`, ticket IDs, "now we…", "as discussed"). Prefer smaller, well-named functions over a long comment explaining long code — if a block needs a paragraph to explain, split or rename it instead.
-- **Single Responsibility (SRP).** Every module, class, and function must have exactly one reason to change. Concrete thresholds:
-  - Source files: keep under 500 lines. Files over 800 lines are a High-severity finding — split them before adding more logic. Current hotspots: `packages/core/src/recall/recall-service.ts` (1079L), `packages/core/src/memory/memory-service/service.ts` (1040L), `apps/core-daemon/src/index.ts` (1013L), and all audit-flagged files in `docs/handbook/backlog.md`.
-  - Functions: keep under 50 lines. Functions over 100 lines are a High-severity finding — extract phases before extending. Current hotspots: `processKarmaEvent` (210L), `dispatch` in serial-delegation-service (230L), `materializeAcceptedSignal` (145L), `runCycle` (146L).
-  - **Split rule:** a function that mixes DB queries, computation, I/O, event-log appends, and side-effect triggers is an automatic SRP violation — extract compute / apply / audit phases.
-  - **Before extending a large unit, split it first.** New logic lands in a new, focused unit; the original unit shrinks.
+- State assumptions explicitly when scope is ambiguous.
+- Surgical changes only — stay inside the approved scope.
+- **Build + test is a hard gate:** `rtk pnpm build` and the relevant
+  `rtk pnpm exec vitest run` must pass before claiming done.
+- **Comments:** terse, why-not-what only. No ticket IDs, wave labels, or
+  narrative restatement of the code.
+- **SRP:** one reason to change per unit.
+  - Source files: under 500 lines (over 800 is High severity — split first).
+  - Functions: under 50 lines (over 100 is High severity — extract phases).
+  - Split rule: DB + compute + I/O + EventLog + side effects in one function
+    is a violation — use compute / apply / audit phases.
+  - Oversized units flagged in `docs/handbook/backlog.md` (`#BL-061`).
 
 ## Architecture (one line)
 
-`@do-soul/alaya-protocol` is the zod-only leaf; `@do-soul/alaya-core` is the truth boundary; EventLog → DB → SSE-or-equivalent broadcast;
-`apps/core-daemon` wires everything; Garden runs fire-and-forget. Full rules and the Package Dependency Direction live in `docs/handbook/invariants.md` and `docs/handbook/architecture.md`.
+`@do-soul/alaya-protocol` → leaf types; `@do-soul/alaya-core` → truth
+boundary; EventLog → DB → broadcast; `apps/core-daemon` wires; Garden is
+fire-and-forget. Detail: `docs/handbook/architecture.md`.
 
 ## Commands
 
-The full CLI surface (13 verbs) and the Quickstart live in `README.md` (§CLI commands, §Quickstart). Outside of those, agent contributors only need a few extras:
+CLI quickstart: `README.md`. Agent extras:
 
 ```bash
 rtk pnpm install
 rtk pnpm build
 rtk pnpm test
 rtk pnpm exec vitest run --project @do-soul/alaya-<package>
-rtk pnpm --dir apps/core-daemon dev   # daemon dev
+rtk pnpm --dir apps/core-daemon dev
 ```
 
-`rtk pnpm alaya` wraps the root npm script. pnpm does not auto-expose private
-root bins; use `pnpm link --global` to add `alaya` to PATH outside the monorepo.
+`rtk pnpm alaya` wraps the root script. Use `pnpm link --global` for PATH
+outside the monorepo.
 
-## Pointers
+## Generated paths
 
-- `docs/handbook/README.md` — maintained documentation entry point
-- `docs/handbook/invariants.md` — architecture non-negotiables and Package Dependency Direction
-- `docs/handbook/architecture.md` — stable system shape
-- `docs/handbook/runtime-snapshot.md` — current release and readiness
-- `docs/handbook/backlog.md` — unresolved issues
-- `docs/archive/port-protocol-historical.md` — retired Port-First discipline (archaeology)
+Do not treat as source truth: `dist/`, `var/`, `data/`, `node_modules/`.
 
-## Generated Paths
+## Benchmark artifacts
 
-- `dist/`: generated build output
-- `var/` / `data/`: local runtime data
-- `node_modules/`: local package dependencies
+Policy: `docs/bench-history/README.md`.
 
-Do not treat generated paths as source truth.
-
-## Benchmark Artifacts
-
-Benchmark output has two homes — putting a run in the wrong one is how the tree gets cluttered. Full policy + retention in `docs/bench-history/README.md` §Storage policy.
-
-- Experiments / A/B sweeps / limit-N / oracle-QA-temporal probes → gitignored `.do-it/bench-runs/` (reusable tools under `scripts/`). Never commit these.
-- Only confirmed **full-dataset** baselines → tracked `docs/bench-history/`, via the archive + `latest-*.json` pointer mechanism, compact sidecars only.
-- Do NOT create hand-named dated dirs in `docs/bench-history/` (e.g. the retired `v0311-lever-ab-2026-06-17/`). Retention: tracked = current pointer targets + ≤7 days; gitignored scratch = ≤7 days, keeping `scripts/`.
+- Experiments → `.do-it/bench-runs/` (gitignored).
+- Full-dataset baselines → `docs/bench-history/` via `latest-*.json` only.
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence

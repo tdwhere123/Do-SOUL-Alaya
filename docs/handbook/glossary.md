@@ -234,15 +234,3 @@ port wave. Definitions are preserved at
 `docs/archive/port-protocol-historical.md` for reading port-era task
 cards under `docs/archive/v0.1-port-record/phase-*-briefs/`. Forward (post-v0.1.0) work
 does not use these terms.
-
-## Process (do-it skills)
-
-Execution, review, and verification vocabulary is owned by do-it skills
-(`do-it-router`, `do-it-review-loop`, `do-it-planning`, …). Retired handbook
-copies: `docs/archive/handbook-historical/workflow/`.
-
-**Anti-Tail Rule R1-R5** — Deferrals cite `#BL-NNN` in `backlog.md`; no silent
-scope expansion; gates need fresh evidence.
-
-**Findings First** — Reviewer reports Blocking / Important / Nice-to-have
-before summaries (`do-it-review-loop`).

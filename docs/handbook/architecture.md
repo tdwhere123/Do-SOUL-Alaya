@@ -318,14 +318,3 @@ Alaya tracks per-session trust state distinct from durable memory:
 
 **Delivered ≠ used.** Trust summaries report only states the runtime
 can prove.
-
-## Where To Look
-
-- Rules: `docs/handbook/invariants.md`
-- System shape: `docs/handbook/architecture.md` (this file)
-- Vocabulary: `docs/handbook/glossary.md`
-- Current readiness: `docs/handbook/runtime-snapshot.md`
-- Open issues: `docs/handbook/backlog.md`
-- Code locations: `rg`, GitNexus, or targeted reads — no persistent code map
-- Historical bulk: `docs/archive/handbook-historical/`
-- Port-era cards: `docs/archive/v0.1-port-record/INDEX.md`

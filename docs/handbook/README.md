@@ -1,38 +1,22 @@
-# Do-SOUL Alaya Handbook
+# Handbook
 
-Six files. Everything else is archive (`.do-it/` for task notes, `docs/archive/` for history).
-
-## Read when needed
-
-| File | When |
+| File | Owns |
 |---|---|
-| [`invariants.md`](invariants.md) | Always before code changes |
-| [`architecture.md`](architecture.md) | Package boundaries, surfaces, governance routes |
-| [`runtime-snapshot.md`](runtime-snapshot.md) | Release posture, readiness claims |
-| [`backlog.md`](backlog.md) | Open `#BL-NNN` issues in your area |
-| [`glossary.md`](glossary.md) | Unfamiliar SOUL / Alaya terms |
+| [`invariants.md`](invariants.md) | Rules that always win |
+| [`architecture.md`](architecture.md) | Package shape, surfaces, write model, governance routes |
+| [`runtime-snapshot.md`](runtime-snapshot.md) | Current release posture and readiness claims |
+| [`backlog.md`](backlog.md) | Open `#BL-NNN` issues and close conditions |
+| [`glossary.md`](glossary.md) | Stable SOUL / Alaya vocabulary |
 
-## Agent workflow
+## When to edit
 
-Execution, review, planning, and verification live in **do-it skills** (e.g.
-`do-it-router`, `do-it-review-loop`, `do-it-planning`, `do-it-verification-gate`).
-Do not duplicate that process here. Retired handbook workflow copies:
-`docs/archive/handbook-historical/workflow/`.
-
-## Maintenance
-
-| Change | Update |
+| You changed | Edit |
 |---|---|
-| Rule / boundary | `invariants.md` or `architecture.md` |
-| Release or witness | `runtime-snapshot.md` |
-| Issue open/close | `backlog.md` |
-| Stable term | `glossary.md` |
-| Code location | `rg` / GitNexus — no code map |
+| An invariant or dependency rule | `invariants.md` |
+| A surface, package boundary, or governance route | `architecture.md` |
+| A release gate, version, or readiness witness | `runtime-snapshot.md` |
+| An issue opened, deferred, or closed | `backlog.md` |
+| A stable term | `glossary.md` |
 
-Keep each file under ~15 KB. Operator notes (Codex slash, keychain): see
-`runtime-snapshot.md` and archived `docs/archive/handbook-historical/maintenance.md`.
-
-## Historical
-
-Port cards: `docs/archive/v0.1-port-record/`. Bulk retired handbook:
-`docs/archive/handbook-historical/`.
+Keep each file under ~15 KB. Code locations are not documented here — use
+`rg` or GitNexus.
