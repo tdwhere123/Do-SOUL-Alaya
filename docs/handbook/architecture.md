@@ -266,6 +266,36 @@ appears to promote, retire, or relink routes through one of the two
 typed-resolution paths above. Invariants §21 / §21b are unchanged;
 invariants §35 / §36 codify the two-route shape.
 
+## Governance Route Families
+
+Runtime code exposes five compatible surfaces; reason about them as four
+governance route families. New governance work must join one family
+instead of adding another route.
+
+1. **Scoring pressure** — classify risk or contradiction before a durable
+   decision exists without blocking the turn (`ConflictDetectionService.evaluate`,
+   supersede penalties). Output is score pressure or candidate metadata.
+2. **Recall-time warning** — the agent must see a stop-time warning while
+   answering (`staged_warnings[]` on recall payloads). Warnings do not
+   mutate durable memory.
+3. **Out-of-band review queue** — human or reviewer inspects after the turn
+   (`HealthIssueGroup`, `Proposal` / `soul.propose_memory_update`).
+4. **Inline typed resolution** — immediate typed decision in the active turn
+   (`soul.resolve`: confirm, reject, correct, stale, defer, not_relevant).
+   Durable promotion requires EventLog + storage CAS.
+
+**Decision rule:** ranking-only signal → scoring pressure; must warn before
+answering → recall-time warning; can wait for triage → review queue;
+deciding now with a typed resolution → inline typed resolution. Do not add
+a new MCP verb, Inspector mutation path, EventLog family, or storage table
+until this rule fails; then update this section and `invariants.md` first.
+
+**Current mapping:** `ConflictDetectionService` + supersede penalty →
+scoring pressure; `staged_warnings[]` → recall-time warning;
+`HealthIssueGroup` + Inspector Health Inbox → review queue;
+`Proposal` / `soul.propose_memory_update` → review queue; `soul.resolve` →
+inline typed resolution.
+
 ## Control Plane Discipline
 
 Runtime control objects can guide execution, request review, and shape
@@ -291,8 +321,11 @@ can prove.
 
 ## Where To Look
 
-- Current invariants: `docs/handbook/invariants.md`
-- Current code map: `docs/handbook/code-map.md`
-- Current runtime status: `docs/handbook/runtime-status.md`
-- Historical port-era task cards: `docs/archive/v0.1-port-record/INDEX.md`
-- Retired port discipline: `docs/archive/port-protocol-historical.md`
+- Rules: `docs/handbook/invariants.md`
+- System shape: `docs/handbook/architecture.md` (this file)
+- Vocabulary: `docs/handbook/glossary.md`
+- Current readiness: `docs/handbook/runtime-snapshot.md`
+- Open issues: `docs/handbook/backlog.md`
+- Code locations: `rg`, GitNexus, or targeted reads — no persistent code map
+- Historical bulk: `docs/archive/handbook-historical/`
+- Port-era cards: `docs/archive/v0.1-port-record/INDEX.md`

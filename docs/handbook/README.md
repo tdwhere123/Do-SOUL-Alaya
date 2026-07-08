@@ -1,75 +1,50 @@
 # Do-SOUL Alaya Handbook
 
-This handbook is the current, low-token navigation hub for Alaya
-implementation and review work. It points to the maintained rules,
-code maps, and workflow documents. Historical v0.1 port-era task
-cards live under `docs/archive/v0.1-port-record/` (preserved as record); forward work
-runs through `docs/handbook/backlog.md` and normal PR/issue flow.
+Public, maintained project truth for contributors and agents. Keep files
+short and anchored to `main`; day-to-day notes and task cards live under
+`.do-it/` and are not required reading for every change.
 
-For required read order and task-type-specific minimum reads, use
-`docs/handbook/workflow/agent-workflow.md` and follow the `Task-Type
-Reading Matrix`. Do not treat this page as a second workflow table.
+## Read Order
 
-## Start Here
+1. `invariants.md` — rules that always win
+2. `architecture.md` — stable system shape (includes governance routes)
+3. `runtime-snapshot.md` — current release posture and readiness claims
+4. `backlog.md` — open cross-cutting issues (`#BL-NNN`)
+5. `glossary.md` — long-stable vocabulary
+6. `workflow/review-protocol.md` — when reviewing or accepting work
+7. `workflow/agent-workflow.md` — contributor execution loop
 
-- `docs/handbook/invariants.md` for rules that always win.
-- `docs/handbook/workflow/agent-workflow.md` for execution flow,
-  required reads, and Anti-Tail / Discipline rules.
-- `docs/handbook/workflow/review-protocol.md` for reviewer mode and
-  evidence expectations.
-- `docs/handbook/backlog.md` for tracked issues and the close
-  conditions on each.
-- `docs/archive/v0.1-port-record/INDEX.md` for the historical v0.1 port-era task-card
-  index (the vendor paths inside those cards point to a directory
-  that has been removed by Phase E vendor cleanup; use `git log`
-  against the v0.1.0 tag for source verification).
+Task-specific plans: `.do-it/plans/` or the PR brief. Historical port
+cards: `docs/archive/v0.1-port-record/`.
 
-## Source Of Truth
+## Source-Of-Truth Map
 
-- `workflow/agent-workflow.md` defines the required reading order and
-  workflow rules for active work.
-- `workflow/review-protocol.md` defines review mode, severity, and
-  evidence requirements.
-- `architecture.md` defines stable system shape.
-- `invariants.md` defines rules that always win.
-- `code-map.md` tracks current implementation locations and should be
-  refreshed whenever package structure, routes, repos, migrations, or
-  runtime wiring change.
-- `runtime-status.md` tracks current implementation status and known
-  wiring gaps.
-- `governance-routes.md` defines the four governance route families and
-  maps the five compatible runtime surfaces onto them.
-- `backlog.md` tracks unresolved cross-area issues. Resolved issues are
-  archived to `docs/archive/backlog-resolved-historical.md`.
-- `glossary.md` defines the Alaya / SOUL vocabulary.
-- `task-card-template.md` is the post-v0.1.0 lightweight task-card
-  template for non-trivial work.
+| Concern | File | Update when |
+|---|---|---|
+| Architecture invariants | `invariants.md` | Any rule that always wins changes |
+| System shape | `architecture.md` | Package boundaries, surfaces, write model |
+| Readiness / release | `runtime-snapshot.md` | Gate result, surface witness, version bump |
+| Issues | `backlog.md` | Issue opened, deferred, or closed |
+| Terms | `glossary.md` | Stable vocabulary changes |
+| Review | `workflow/review-protocol.md` | Severity or evidence rules change |
 
-## Operator Discussion Baseline
+**Not maintained here:** persistent code maps and phase-by-phase readiness
+tables. Use `rg` / GitNexus for locations; archived bulk lives in
+`docs/archive/handbook-historical/`.
 
-Use these boundaries before opening new planning threads:
+## Operator Baseline
 
-- `architecture.md` owns the surface model: MCP is the agent memory
-  surface, CLI is the fallback/operator surface, and Memory Inspector
-  is memory tooling only.
-- `runtime-status.md` owns readiness labels. Do not infer
-  `mcp-consumable`, `cli-consumable`, or host slash-command support
-  from source code or profile-file writes alone.
-- `/alaya-inspect` is a fixed host slash boot trigger for Memory
-  Inspector, not an MCP tool, MCP prompt, or Codex skill. Host
-  recognition is tracked separately from Alaya writing a profile entry.
-- Install mode matters: a source checkout uses the absolute
-  `node <repo>/bin/alaya.mjs ...` launcher written by attach. The
-  supported release channel is GitHub Release source tarball / local
-  build; npm/global install is not an active distribution path.
+- **Agent surfaces:** MCP (attach) + `alaya` CLI. Memory Inspector is
+  tooling only, not an agent surface.
+- **Readiness claims:** use `runtime-snapshot.md` vocabulary; do not infer
+  from code presence or profile writes alone.
+- **`/alaya-inspect`:** optional host slash boot trigger, not an MCP tool.
+  Recognition is host/version-specific; fallback is `alaya inspect --open`.
+- **Install:** source checkout uses `node <repo>/bin/alaya.mjs`; release
+  channel is GitHub tarball / local build, not npm global.
 
-## Project Genealogy (Historical)
+## Genealogy (historical)
 
-Alaya v0.1 was ported from the sibling project `do-what-new`
-(upstream commit `6ed846341f66ff98bfcddbb940db74cfc10133ca`,
-snapshotted 2026-04-28). The port wave closed with v0.1.0; the
-working snapshot directory has been removed by the Phase E vendor
-cleanup. The retired Port-First discipline lives at
-`docs/archive/port-protocol-historical.md` and the retired port-era
-task-card template lives at
-`docs/archive/task-card-template-historical.md` for archaeology.
+Ported from `do-what-new` at upstream `6ed8463` (2026-04-28). v0.1.0
+closed the port; vendor snapshot removed in Phase E. Retired discipline:
+`docs/archive/port-protocol-historical.md`.

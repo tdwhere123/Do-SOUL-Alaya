@@ -598,7 +598,7 @@ pnpm alaya tools call soul.recall \
 某一步失败时，`pnpm alaya doctor` 会告诉你具体哪一项检查失败
 （版本、环境、storage、daemon、MCP 传输）——第一站。完整的仓库
 布局看
-[docs/handbook/code-map.md](docs/handbook/code-map.md)。
+[docs/handbook/architecture.md](docs/handbook/architecture.md)。
 
 ---
 

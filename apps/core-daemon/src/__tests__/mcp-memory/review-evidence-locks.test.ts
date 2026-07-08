@@ -85,7 +85,9 @@ describe("P5 final-review status", () => {
 
   it("marks Phase 5 closed without pulling benchmark work into Gate-5", () => {
     const index = readRepoFile("docs/archive/v0.1-port-record/INDEX.md");
-    const runtimeStatus = readRepoFile("docs/handbook/runtime-status.md");
+    const runtimeStatus = readRepoFile(
+      "docs/archive/handbook-historical/runtime-status.md",
+    );
     const backlog = readRepoFile("docs/handbook/backlog.md");
     const resolvedBacklog = readRepoFile("docs/archive/backlog-resolved-historical.md");
 

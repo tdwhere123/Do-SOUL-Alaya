@@ -27,9 +27,10 @@ Read in this order:
 2. `README.md`
 3. `docs/handbook/README.md`
 4. `docs/handbook/invariants.md`
-5. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type Reading Matrix; pick the row for your task type
-6. `docs/handbook/backlog.md` for the area you are touching
-7. The specific task or PR scope you are working on
+5. `docs/handbook/runtime-snapshot.md` when touching readiness or release claims
+6. `docs/handbook/workflow/agent-workflow.md` — Task-Type Reading Matrix row for your task
+7. `docs/handbook/backlog.md` for the area you are touching
+8. The specific task or PR scope you are working on
 
 ## Plan Mode And Language
 
@@ -40,7 +41,8 @@ Read in this order:
 ## Workflow
 
 Follow the per-card and per-wave pipelines in `docs/handbook/workflow/agent-workflow.md`. It owns the full Anti-Tail R1-R5 and Discipline D1-D4 rules; do not mirror them here.
-Sub-agent dispatch: for Phase 1+ multi-card port work the main thread freezes the task card scope first, then dispatches sub-agents (or codex instances) one card each. See `docs/handbook/workflow/subagent-dispatch.md`.
+Sub-agent dispatch for multi-card port work:
+`docs/archive/handbook-historical/workflow/subagent-dispatch.md`.
 
 Review: every implementation result goes through reviewer mode; every fix loop goes through it again. A worker's `DONE` is never acceptance.
 See `docs/handbook/workflow/review-protocol.md` for severity (Blocking / Important / Nice-to-have) and the checklist.
@@ -60,7 +62,7 @@ See `docs/handbook/workflow/review-protocol.md` for severity (Blocking / Importa
 ## Architecture (one line)
 
 `@do-soul/alaya-protocol` is the zod-only leaf; `@do-soul/alaya-core` is the truth boundary; EventLog → DB → SSE-or-equivalent broadcast;
-`apps/core-daemon` wires everything; Garden runs fire-and-forget. Full rules and the Package Dependency Direction live in `docs/handbook/invariants.md` and `docs/handbook/code-map.md`.
+`apps/core-daemon` wires everything; Garden runs fire-and-forget. Full rules and the Package Dependency Direction live in `docs/handbook/invariants.md` and `docs/handbook/architecture.md`.
 
 ## Commands
 
@@ -81,11 +83,11 @@ root bins; use `pnpm link --global` to add `alaya` to PATH outside the monorepo.
 
 - `docs/handbook/README.md` — maintained documentation entry point
 - `docs/handbook/invariants.md` — architecture non-negotiables and Package Dependency Direction
-- `docs/handbook/code-map.md` — current code ownership, Project Map
-- `docs/handbook/runtime-status.md` — current runtime status and wiring gaps
+- `docs/handbook/architecture.md` — stable system shape
+- `docs/handbook/runtime-snapshot.md` — current release and readiness
 - `docs/handbook/workflow/agent-workflow.md` — per-card pipeline, reading matrix, R1-R5
 - `docs/handbook/workflow/review-protocol.md` — severity, checklist, atomic fix commits
-- `docs/handbook/workflow/subagent-dispatch.md` — dispatch policy, failure modes
+- `docs/archive/handbook-historical/workflow/subagent-dispatch.md` — historical dispatch policy
 - `docs/handbook/backlog.md` — unresolved issues
 - `docs/archive/port-protocol-historical.md` — retired Port-First discipline (archaeology)
 

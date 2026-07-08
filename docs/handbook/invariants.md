@@ -195,7 +195,7 @@ modes, no-self-rewrite rule) closed with v0.1.0 and the vendor
 snapshot was removed by Phase E vendor cleanup. See
 `docs/archive/port-protocol-historical.md` and `CLAUDE.md` §Project
 Genealogy for the upstream commit pinned at port time. New work uses
-the lightweight template at `docs/handbook/task-card-template.md`.
+`.do-it/plans/` task cards or the PR brief.
 
 ## Defense-against-recurrence (added 2026-05-03 in p5-system-review-r1)
 
@@ -275,4 +275,4 @@ required防复发 step per `docs/handbook/workflow/review-protocol.md`
     "single proposal route" wording in lower-level docs.
 
     For the broader governance route map, see
-    `docs/handbook/governance-routes.md`.
+    `docs/handbook/architecture.md` §Governance Route Families.

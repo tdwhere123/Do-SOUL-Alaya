@@ -17,8 +17,9 @@ Read in this order:
 1. `RTK.md` for repository command wrapping rules when available.
 2. The task card or initiative README you are touching
 3. `docs/handbook/invariants.md`
-4. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type Reading Matrix; pick the row for your task type (Backend / Docs / Review) and add its required reads
-5. `docs/handbook/backlog.md` when touching an area with tracked issues
+4. `docs/handbook/runtime-snapshot.md` when touching readiness or release claims
+5. `docs/handbook/workflow/agent-workflow.md` — Task-Type Reading Matrix row for your task
+6. `docs/handbook/backlog.md` when touching an area with tracked issues
 
 ## Role Framing
 
@@ -48,7 +49,7 @@ Agents (Codex) implement and review in this repository.
 
 ## Architecture (one line)
 
-`@do-soul/alaya-protocol` is the zod-only leaf; `@do-soul/alaya-core` is the truth boundary; EventLog → DB → broadcast; `apps/core-daemon` wires everything; Garden runs fire-and-forget. Full rules and the Package Dependency Direction live in `docs/handbook/invariants.md` and `docs/handbook/code-map.md`.
+`@do-soul/alaya-protocol` is the zod-only leaf; `@do-soul/alaya-core` is the truth boundary; EventLog → DB → broadcast; `apps/core-daemon` wires everything; Garden runs fire-and-forget. Full rules and the Package Dependency Direction live in `docs/handbook/invariants.md` and `docs/handbook/architecture.md`.
 
 ## Commands
 
@@ -71,8 +72,8 @@ rtk pnpm exec alaya tools call --json # CLI fallback: call a memory tool
 
 - `docs/handbook/README.md` — documentation entry point
 - `docs/handbook/invariants.md` — architecture non-negotiables
-- `docs/handbook/code-map.md` — code ownership, project map
-- `docs/handbook/runtime-status.md` — current runtime status and wiring gaps
+- `docs/handbook/architecture.md` — stable system shape
+- `docs/handbook/runtime-snapshot.md` — current release and readiness
 - `docs/handbook/workflow/agent-workflow.md` — per-card pipeline, reading matrix
 - `docs/handbook/workflow/review-protocol.md` — severity, checklist
 - `docs/handbook/backlog.md` — tracked issues

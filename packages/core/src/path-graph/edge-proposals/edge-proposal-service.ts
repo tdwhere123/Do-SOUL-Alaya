@@ -68,7 +68,7 @@ export {
 // recall_allowed), so a floor row for them would be dead config.
 // see also: apps/core-daemon/src/index.ts (graphEdgePort.createEdge ->
 //   proposeEdge wiring; EdgeAutoProducerService / ConflictDetectionService
-//   wired to pathCandidatePort), docs/handbook/runtime-status.md.
+//   wired to pathCandidatePort), docs/handbook/runtime-snapshot.md.
 export const AUTO_ACCEPT_FLOOR_BY_TRIGGER: Readonly<
   Partial<Record<EdgeProposalTriggerSourceValue, number>>
 > = Object.freeze({
