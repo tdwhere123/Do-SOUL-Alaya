@@ -234,34 +234,3 @@ port wave. Definitions are preserved at
 `docs/archive/port-protocol-historical.md` for reading port-era task
 cards under `docs/archive/v0.1-port-record/phase-*-briefs/`. Forward (post-v0.1.0) work
 does not use these terms.
-
-## Workflow
-
-**Per-Card Pipeline** — 11-step execution flow per task card. Lives
-in `workflow/agent-workflow.md`.
-
-**Per-Wave Pipeline** — Coordination flow when multiple cards run in
-parallel within a Wave.
-
-**Anti-Tail Rule R1-R5** — Process discipline: atomic fix commits,
-deferral with backlog issue, schema-only changes need a live consumer,
-post-landing amendments need a docs-scoped commit, live-ready claims
-need integration evidence.
-
-**Discipline Rule D1-D4** — Quality discipline: fix-then-review
-closure, end-to-end fix validation, verify-before-port, two-layer
-agent workflow.
-
-**Findings First** — Reviewer reports findings before summaries,
-ordered by severity (Blocking / Important / Nice-to-have).
-
-**Review Finding Record** — 8-field shape every reviewer finding
-must use (ID / Severity / Headline / Location / Observed / Expected /
-Repro-Witness / Cause-Class).
-
-**Fix Commit Body Template** — 5-field body every fix commit must
-carry (Finding / Cause / Fix / Verify / Follow-up).
-
-**Stateful Mutation Checklist** — 6-item checklist for tasks that
-touch durable state, runtime lifecycle, or live producer → consumer
-paths.

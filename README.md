@@ -698,8 +698,8 @@ from inside the agent.
 
 If a step fails, `pnpm alaya doctor` tells you which check failed
 (version, env, storage, daemon, MCP transport) — it is the first
-place to look. The full project layout is documented in
-[docs/handbook/code-map.md](docs/handbook/code-map.md).
+place to look. Package layout and dependency direction are in
+[docs/handbook/architecture.md](docs/handbook/architecture.md).
 
 ---
 

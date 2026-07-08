@@ -3,8 +3,8 @@
 Use reviewer mode before the next batch and after every fix loop. A
 worker report is never acceptance by itself.
 
-For parallel or repeated-failure work, also follow
-[`subagent-dispatch.md`](./subagent-dispatch.md).
+For parallel or repeated-failure work, see
+`docs/archive/handbook-historical/workflow/subagent-dispatch.md`.
 
 ## Findings First
 
@@ -65,7 +65,8 @@ Required fields:
                     expose the bug if exercised. "Inspection only" is
                     rejected except for pure documentation findings.>
     Cause Class:    <optional. Map to a numbered failure mode from
-                    subagent-dispatch.md §Failure Modes when one fits;
+                    `docs/archive/handbook-historical/workflow/subagent-dispatch.md`
+                    §Failure Modes when one fits;
                     leave blank otherwise.>
 
 ## Read Before Reviewing

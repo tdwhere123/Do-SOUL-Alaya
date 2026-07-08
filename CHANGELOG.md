@@ -102,7 +102,7 @@ lease-pierce governance-cache hot-path hook; `#BL-055` Inspector label/filter fo
 ## Earlier releases
 
 Earlier release detail is recorded under `docs/archive/v0.3-historical/`, `docs/archive/v0.2/`, and
-`docs/handbook/runtime-status.md` (per-release sections). Highlights:
+`docs/archive/handbook-historical/runtime-status.md` (historical per-release sections). Highlights:
 
 - **v0.3.9** (2026-05-17) — three-layer trust-loop closure: Garden's only legal
   claim output is `claim_status = draft`; new `soul.resolve` MCP verb; additive

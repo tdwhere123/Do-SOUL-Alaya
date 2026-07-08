@@ -9,7 +9,8 @@ archived to `docs/archive/backlog-resolved-historical.md`.
 Issues are numbered `#BL-NNN` in plain decimal sequence.
 **Next available number**: `#BL-069`.
 
-**Audit branch progress (2026-07-07, `audit-2026-07-06-full-fix`)**: see `.do-it/review/audit-2026-07-06-closeout.md`. `#BL-065` resolved on branch; `#BL-060`–`#BL-064` and `#BL-066`–`#BL-068` have partial/spike landings documented below.
+**Audit branch progress (2026-07-07)**: `#BL-065` resolved; `#BL-060`–`#BL-064` and
+`#BL-066`–`#BL-068` have partial landings documented below.
 
 ---
 
@@ -67,7 +68,7 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 **Status**: Open (design spike landed 2026-07-07). **Due**: after S7 async SQLite comparison is reviewed.
 
-**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering. Branch landed typed port stub `packages/storage/src/sqlite/write-queue-port.ts`, contract test, and `docs/handbook/spikes/sqlite-worker-queue.md`.
+**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering. Branch landed typed port stub `packages/storage/src/sqlite/write-queue-port.ts` and contract test.
 
 **Close condition**: a worker-thread write queue or reviewed async SQLite replacement keeps EventLog-first / transaction-CAS invariants intact and improves concurrent recall tail latency against the S7 witness.
 
@@ -77,7 +78,9 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 **Context**: The audit flagged large units and broad facades that are real maintainability debt but unsafe to mix into the security/stability remediation branch: `pre-write-recall-service.ts`, `sqlite-memory-entry-repo.ts`, `green-service.ts`, `event-log-repo.ts`, `memory-entry-statement-groups.ts`, `MemoryService`, `app.ts`, and broad storage barrels. Branch extracted security middleware wiring to `apps/core-daemon/src/middleware/register-security-middleware.ts` (−43 lines from `app.ts`).
 
-**Close condition**: split the listed units under the SRP/file-size thresholds in `AGENTS.md`, preserve package dependency direction, and pass focused regression tests for each moved owner.
+**Close condition**: split the listed units to meet `AGENTS.md` §Code quality size
+and layout limits, preserve package dependency direction, and pass focused
+regression tests for each moved owner.
 
 ### #BL-062 — Audit API ergonomics cleanup wave
 

@@ -1,40 +1,15 @@
 # CLAUDE.md
 
-## File Rules
+All agent instructions: **`AGENTS.md`**.
 
-- Keep this file English-only.
-- Read and write repository files as UTF-8 without BOM.
-- Localized product content, fixtures, and tests may use non-English text when the behavior under test requires it.
-- Do not read files larger than 30 KB in full. Use targeted section reads through RTK-wrapped search/read commands.
-
-## Project Context
-
-Do-SOUL Alaya is a **local-first memory plane for CLI agents**. The package namespace is `@do-soul/alaya-*` and the consuming agents are Codex, Claude Code, and similar CLI tools that attach over MCP or via plain CLI commands. (Use "memory plane" in public-facing copy per invariants §21a;"memory core" was the pre-v0.1-closeout phrasing and is retired.)
-
-Key invariants (full set: `docs/handbook/invariants.md`):
-
-- Memory ontology is durable truth; projections and surfaces are not truth.
-- Embedding is recall supplement only; it never decides durable truth.
-- LLMs and agents propose; Alaya decides durable truth through governance.
-- **No agent-frontend GUI, no conversation TUI.** Agent surfaces: MCP (attach) and the `alaya` CLI (13 verbs). Memory Inspector is a memory-tooling loopback surface, not an agent surface.
-- Public-facing copy describes Alaya as a memory plane for CLI agents only (invariant §21a).
-
-## Before You Code
-
-Read in this order:
-
-1. `RTK.md`
-2. `README.md`
-3. `docs/handbook/README.md`
-4. `docs/handbook/invariants.md`
-5. `docs/handbook/workflow/agent-workflow.md` — includes the Task-Type Reading Matrix; pick the row for your task type
-6. `docs/handbook/backlog.md` for the area you are touching
-7. The specific task or PR scope you are working on
-
-## Plan Mode And Language
+## Plan mode
 
 - Reply in Chinese.
 - Plan Mode requires explicit user approval via `ExitPlanMode` before executing.
+<<<<<<< HEAD
+- The only file Claude may edit in Plan Mode is the plan file named in the
+  plan-mode system message.
+=======
 - The only file Claude may edit in Plan Mode is the plan file named in the plan-mode system message.
 
 ## Workflow
@@ -148,3 +123,4 @@ This project is indexed by GitNexus as **Do-SOUL-Alaya** (31125 symbols, 54652 r
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+>>>>>>> origin/main
