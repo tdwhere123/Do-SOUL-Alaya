@@ -317,6 +317,7 @@ describe("LongMemEval recall diagnostics", () => {
           object_id: "gold-a",
           object_kind: "memory_entry",
           origin_plane: "workspace_local",
+          facet_overlap: 2,
           per_stream_rank: {
             lexical_fts: 1,
             trigram_fts: null,

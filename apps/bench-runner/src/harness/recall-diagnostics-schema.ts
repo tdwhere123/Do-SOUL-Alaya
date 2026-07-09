@@ -259,6 +259,8 @@ export const BenchRecallDiagnosticsSchema = z
             object_id: z.string().min(1),
             object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
             origin_plane: z.enum(["workspace_local", "global"]),
+            // Mirrors RecallFusionBreakdown.facet_overlap from core diagnostics.
+            facet_overlap: z.number().int().nonnegative(),
             per_stream_rank: RecallFusionStreamRankSchema,
             fused_rank: z.number().int().positive(),
             fused_score: z.number().min(0),
