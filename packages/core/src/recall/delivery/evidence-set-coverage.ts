@@ -1,4 +1,4 @@
-import { recallEnvRaw } from "../../config/recall-env-access.js";
+import { recallEnvRaw, recallAnswersWithEnabled } from "../../config/recall-env-access.js";
 import type { RecallSupplementaryData } from "../runtime/recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
 
@@ -83,9 +83,14 @@ export function evidenceSetCoverageBonus(
   if (state.anchorSessions.has(sessionKeyOf(candidate.entry)) && isEvidenceMember(candidate, supplementaryData)) {
     bonus += SESSION_COVERAGE_BONUS;
   }
-  const clusterWeight = bestClusterWeight(state, candidate, supplementaryData);
-  if (clusterWeight > 0 && state.clusterWeightMax > 0) {
-    bonus += Math.min(MAX_CLUSTER_BONUS, (clusterWeight / state.clusterWeightMax) * MAX_CLUSTER_BONUS);
+  // When answers_with flood is live, path π already votes via A_path (and was
+  // deduped out of path_expansion RRF). Re-applying cluster weight here is a
+  // third count of the same edge — withhold it while flood fuel is on.
+  if (!recallAnswersWithEnabled()) {
+    const clusterWeight = bestClusterWeight(state, candidate, supplementaryData);
+    if (clusterWeight > 0 && state.clusterWeightMax > 0) {
+      bonus += Math.min(MAX_CLUSTER_BONUS, (clusterWeight / state.clusterWeightMax) * MAX_CLUSTER_BONUS);
+    }
   }
   return Math.min(bonus, MAX_EVIDENCE_SET_BONUS);
 }

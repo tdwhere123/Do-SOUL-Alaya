@@ -656,6 +656,17 @@ describe("applyEvidenceSetDelivery S4 convergence locks", () => {
     expect(bonus).toBeCloseTo(0.1, 10);
   });
 
+  it("answers_with flood on ⇒ path-cluster bonus is withheld to avoid triple-counting A_path", () => {
+    vi.stubEnv("ALAYA_RECALL_ANSWERS_WITH", "1");
+    const seed = s4Candidate({ objectId: "seed", fusedScore: 1, surfaceId: "sB", evidenceAxis: 1 });
+    const cand = s4Candidate({ objectId: "cand", fusedScore: 0.5, surfaceId: "sB", streamRanks: { source_proximity: 1 } });
+    const supp = s4Supplementary({ pathInflowByTarget: { cand: [{ seedObjectId: "seed", weight: 1 }] } });
+    const state = createEvidenceSetCoverageState([seed, cand], supp);
+    recordEvidenceSetSelection(state, seed, supp);
+    // Session membership still nudges; path-cluster weight must not re-apply flood π.
+    expect(evidenceSetCoverageBonus(state, cand, supp)).toBeCloseTo(0.06, 10);
+  });
+
   it("does not add a session bonus when no cluster evidence ties the candidate to the selected set", () => {
     const seed = s4Candidate({ objectId: "seed", fusedScore: 1, surfaceId: "sB", evidenceAxis: 1 });
     const sameSessionOnly = s4Candidate({ objectId: "same", fusedScore: 0.5, surfaceId: "sB" });

@@ -42,7 +42,7 @@ function candidate(
 }
 
 describe("replay-longmemeval-diagnostics script", () => {
-  it("reports weighted A/B any, full-gold, and gold-coverage metrics using facet-overlap first", async () => {
+  it("reports weighted A/B metrics with legacy facet-overlap-first ordering when requested", async () => {
     const diagnosticsPath = await writeReplayDiagnostics([
       {
         question_id: "q-one",
@@ -76,7 +76,9 @@ describe("replay-longmemeval-diagnostics script", () => {
       "--diagnostics",
       diagnosticsPath,
       "--weights",
-      "lexical_fts=1"
+      "lexical_fts=1",
+      "--facet-order",
+      "first"
     ], { cwd: rootDir });
 
     const report = JSON.parse(stdout);
@@ -88,7 +90,40 @@ describe("replay-longmemeval-diagnostics script", () => {
       full_gold_at_5_count: 1,
       full_gold_at_5: 0.5,
       gold_coverage_at_5_count: 2,
-      gold_coverage_at_5: 2 / 3
+      gold_coverage_at_5: 2 / 3,
+      facet_order: "first"
+    });
+  });
+
+  it("defaults to facet-overlap as a score tie-break to match production fused rank", async () => {
+    const diagnosticsPath = await writeReplayDiagnostics([
+      {
+        question_id: "q-facet-default",
+        candidate_pool_complete: true,
+        gold: [{ object_id: "gold-score", final_rank: null }],
+        candidates: [
+          candidate("d1", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d2", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d3", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d4", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d5", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("gold-score", { facetOverlap: 1, streams: { lexical_fts: 99 } })
+        ]
+      }
+    ]);
+
+    const { stdout } = await execFileAsync("node", [
+      "apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs",
+      "--diagnostics",
+      diagnosticsPath,
+      "--weights",
+      "lexical_fts=1"
+    ], { cwd: rootDir });
+
+    const report = JSON.parse(stdout);
+    expect(report.ab).toMatchObject({
+      any_at_5_count: 1,
+      facet_order: "tie-break"
     });
   });
 

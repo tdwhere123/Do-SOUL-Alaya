@@ -58,6 +58,7 @@ function fusedCandidate(input: {
   readonly effectiveScore?: number;
   readonly surfaceId?: string | null;
   readonly streamRanks?: Partial<Record<RecallFusionStream, number | null>>;
+  readonly fuelVerified?: boolean;
 }): DeliverySelectionCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
   const fusion: RecallFusionBreakdown = Object.freeze({
@@ -67,7 +68,28 @@ function fusedCandidate(input: {
     per_stream_rank: Object.freeze({
       ...breakdown.per_stream_rank,
       ...(input.streamRanks ?? {})
-    })
+    }),
+    ...(input.fuelVerified === undefined
+      ? {}
+      : {
+          flood_potential: Object.freeze({
+            R_obj: input.fusedScore,
+            Slice: 1,
+            A_path: 0.5,
+            B_evidence: 0.5,
+            E_direct: 0.5,
+            omega: 1,
+            Flood: 0.25,
+            lambda: 1,
+            beta: 0,
+            final_score: input.fusedScore,
+            slice_status: "active" as const,
+            path_status: "active" as const,
+            evidence_status: "active" as const,
+            e_direct_status: "active" as const,
+            fuel_verified: input.fuelVerified
+          })
+        })
   });
   return Object.freeze({
     entry: memory({
@@ -220,6 +242,47 @@ describe("applyDeliverySelection", () => {
       "a4",
       "weak-rank-5",
       "single-stream-rank-6"
+    ]);
+  });
+
+  it("does not displace a fuel-verified flood incumbent during likelihood tail rescue", () => {
+    const ordered = [
+      fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
+      fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
+      fusedCandidate({ objectId: "a3", fusedRank: 3, fusedScore: 0.8 }),
+      fusedCandidate({ objectId: "a4", fusedRank: 4, fusedScore: 0.7 }),
+      fusedCandidate({
+        objectId: "flood-rank-5",
+        fusedRank: 5,
+        fusedScore: 0.6,
+        fuelVerified: true,
+        streamRanks: {
+          lexical_fts: 12,
+          embedding_similarity: 12,
+          evidence_fts: 12
+        }
+      }),
+      fusedCandidate({
+        objectId: "likelihood-rank-6",
+        fusedRank: 6,
+        fusedScore: 0.5,
+        streamRanks: {
+          lexical_fts: 3,
+          embedding_similarity: 1,
+          evidence_fts: 30
+        }
+      })
+    ];
+
+    const result = applyDeliverySelection(ordered, supplementary(), 10);
+
+    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "flood-rank-5",
+      "likelihood-rank-6"
     ]);
   });
 });

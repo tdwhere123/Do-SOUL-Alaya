@@ -106,17 +106,18 @@ describe("facet_overlap fusion stream", () => {
       .toBeGreaterThan(baseline.get(goldKey)?.fused_score ?? 0);
   });
 
-  it("uses real facet overlap count as the fused-rank tie breaker", () => {
+  it("uses facet overlap only as a fused-score tie-break, not the primary rank key", () => {
+    const createdAt = "2026-03-20T00:00:00.000Z";
     const highOverlap = createMemoryEntry({
       object_id: GOLD_ID,
-      content: "Later memory with two answer facets.",
-      created_at: "2026-03-21T00:00:00.000Z",
+      content: "Memory with two answer facets.",
+      created_at: createdAt,
       facet_tags: [{ facet: "occupation_work" }, { facet: "location_place" }]
     });
     const lowOverlap = createMemoryEntry({
       object_id: DISTRACTOR_ID,
-      content: "Earlier memory with one answer facet.",
-      created_at: "2026-03-20T00:00:00.000Z",
+      content: "Memory with one answer facet.",
+      created_at: createdAt,
       facet_tags: [{ facet: "occupation_work" }]
     });
 
@@ -130,8 +131,61 @@ describe("facet_overlap fusion stream", () => {
       nowIso: "2026-03-20T10:20:30.000Z"
     });
 
-    expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.fused_rank).toBe(1);
-    expect(fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`)?.fused_rank).toBe(2);
+    const gold = fusion.get(`workspace_local:memory_entry:${GOLD_ID}`);
+    const distractor = fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`);
+    // Facet stream contributes into fused_score; rank follows score, not raw overlap count.
+    expect(gold?.facet_overlap).toBe(2);
+    expect(distractor?.facet_overlap).toBe(1);
+    expect(gold?.fused_score ?? 0).toBeGreaterThan(distractor?.fused_score ?? 0);
+    expect(gold?.fused_rank).toBe(1);
+    expect(distractor?.fused_rank).toBe(2);
+  });
+
+  it("lets fused_score outrank a higher facet-overlap count across tiers", () => {
+    const highOverlapWeak = createMemoryEntry({
+      object_id: GOLD_ID,
+      content: "Two facets but weak lexical lead.",
+      created_at: "2026-03-21T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }, { facet: "location_place" }]
+    });
+    const lowOverlapStrong = createMemoryEntry({
+      object_id: DISTRACTOR_ID,
+      content: "One facet but strong embedding lead.",
+      created_at: "2026-03-20T00:00:00.000Z",
+      facet_tags: [{ facet: "occupation_work" }]
+    });
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [
+        {
+          entry: highOverlapWeak,
+          effectiveScore: 0.01,
+          effectiveFactors: { activation: 0, relevance: 0, embedding_similarity: 0.01 }
+        },
+        {
+          entry: lowOverlapStrong,
+          effectiveScore: 0.99,
+          effectiveFactors: { activation: 0, relevance: 0, embedding_similarity: 0.99 }
+        }
+      ],
+      policy: POLICY,
+      supplementaryData: supplementaryData({
+        querySoughtFacets: ["occupation_work", "location_place"],
+        embeddingSimilarityScores: {
+          [GOLD_ID]: 0.01,
+          [DISTRACTOR_ID]: 0.99
+        }
+      }),
+      nowIso: "2026-03-20T10:20:30.000Z"
+    });
+
+    const strongKey = `workspace_local:memory_entry:${DISTRACTOR_ID}`;
+    const weakKey = `workspace_local:memory_entry:${GOLD_ID}`;
+    expect(fusion.get(strongKey)?.fused_score ?? 0).toBeGreaterThan(fusion.get(weakKey)?.fused_score ?? 0);
+    expect(fusion.get(strongKey)?.facet_overlap).toBe(1);
+    expect(fusion.get(weakKey)?.facet_overlap).toBe(2);
+    expect(fusion.get(strongKey)?.fused_rank).toBe(1);
+    expect(fusion.get(weakKey)?.fused_rank).toBe(2);
   });
 
   it("uses fused_rank as the delivery tie-break when fused_score ties", () => {
