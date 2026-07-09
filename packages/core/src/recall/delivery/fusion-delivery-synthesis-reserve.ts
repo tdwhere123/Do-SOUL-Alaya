@@ -54,26 +54,6 @@ export function selectUncoveredSynthesisCapsules<T extends FusedRecallCandidateI
   );
 }
 
-// invariant: synthesis tail count is visible so structural reserve cannot overrun the same delivery tail.
-export function synthesisReserveCount(
-  deliveryOrdered: readonly FusedRecallCandidateInput[],
-  maxEntries: number
-): number {
-  void deliveryOrdered;
-  void maxEntries;
-  return 0;
-}
-
-export function reserveSynthesisDeliverySlots<T extends FusedRecallCandidateInput>(
-  deliveryOrdered: readonly T[],
-  supplementaryData: RecallSupplementaryData,
-  maxEntries: number
-): readonly T[] {
-  void supplementaryData;
-  void maxEntries;
-  return deliveryOrdered;
-}
-
 // invariant: structural streams are only graph/path topology reach; generic structuralScore and entity/evidence terms are excluded. see also: fusion-delivery.ts reserveStructuralDeliverySlots.
 const STRUCTURAL_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = new Set([
   "graph_expansion",

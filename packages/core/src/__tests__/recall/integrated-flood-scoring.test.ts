@@ -64,6 +64,59 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.diagnostics.evidence_status).toBe("inactive:pass_through");
   });
 
+  it("default FACET_SLICE off still allows fuel_verified when path+evidence fuel present", () => {
+    delete process.env.ALAYA_RECALL_FACET_SLICE;
+    const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-slice"] });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0.7 },
+      supplementaryData: supplementary({
+        pathInflowByTarget: {
+          [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+        },
+        evidenceSupportVectorsByMemoryId: {
+          [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-slice", support: 0.7 }]
+        }
+      })
+    });
+    expect(result.diagnostics.slice_status).toBe("inactive:pass_through");
+    expect(result.diagnostics.Slice).toBe(1);
+    expect(result.diagnostics.fuel_verified).toBe(true);
+    expect(result.score).toBeGreaterThan(0.2);
+  });
+
+  it("FACET_SLICE on with zero facet overlap withholds fuel_verified", () => {
+    process.env.ALAYA_RECALL_FACET_SLICE = "1";
+    const seed = createMemoryEntry({ object_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
+    const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const target = createMemoryEntry({
+      object_id: targetId,
+      evidence_refs: ["ev-slice-miss"],
+      facet_tags: []
+    });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: 0.5, B_evidence: 0.7 },
+      supplementaryData: supplementary({
+        querySoughtFacets: ["location_place"],
+        pathInflowByTarget: {
+          [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+        },
+        evidenceSupportVectorsByMemoryId: {
+          [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-slice-miss", support: 0.7 }]
+        }
+      })
+    });
+    expect(result.diagnostics.slice_status).toBe("inactive:no_fuel");
+    expect(result.diagnostics.Slice).toBe(0);
+    expect(result.diagnostics.path_status).toBe("active");
+    expect(result.diagnostics.evidence_status).toBe("active");
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBeCloseTo(0.2, 12);
+  });
+
   it("path fuel changes only eligible candidates with verified path and evidence inflow", () => {
     const cold = createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" });
     const targetId = "22222222-2222-4222-8222-222222222222";

@@ -56,23 +56,26 @@ function manifestationOmega(
   }
 }
 
+// Slice pass_through / no_slice mean "gate open" (feature off or no query facets),
+// unlike path pass_through which means "no path graph present" and withholds fuel.
 function resolveSliceAxis(
   entry: Readonly<MemoryEntry>,
   querySoughtFacets: readonly string[] | undefined
-): ResolvedFloodValueAxis {
+): ResolvedFloodFuelAxis {
   if (!facetSliceEnabled()) {
-    return { value: 1, status: "inactive:pass_through" };
+    return { value: 1, status: "inactive:pass_through", countsAsFuel: true };
   }
   if (querySoughtFacets === undefined || querySoughtFacets.length === 0) {
-    return { value: 1, status: "inactive:no_slice" };
+    return { value: 1, status: "inactive:no_slice", countsAsFuel: true };
   }
   const overlap = facetOverlapCountFor(entry, querySoughtFacets);
   if (overlap === 0) {
-    return { value: 0, status: "inactive:no_fuel" };
+    return { value: 0, status: "inactive:no_fuel", countsAsFuel: false };
   }
   return {
     value: clamp01(overlap / querySoughtFacets.length),
-    status: "active"
+    status: "active",
+    countsAsFuel: true
   };
 }
 
@@ -113,11 +116,11 @@ function hasPathInflow(
 }
 
 function verifiedFloodFuel(
-  slice: ResolvedFloodValueAxis,
+  slice: ResolvedFloodFuelAxis,
   path: ResolvedFloodFuelAxis,
   evidence: ResolvedFloodFuelAxis
 ): boolean {
-  return slice.value > 0 && path.countsAsFuel && evidence.countsAsFuel;
+  return slice.countsAsFuel && slice.value > 0 && path.countsAsFuel && evidence.countsAsFuel;
 }
 
 /**

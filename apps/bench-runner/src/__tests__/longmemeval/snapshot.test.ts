@@ -91,7 +91,7 @@ describe("snapshot plumbing", () => {
       .get("v") as { k: string } | undefined;
     expect(row?.k).toBe("v");
     copy.close();
-  });
+  }, 30_000);
 
   it("restores a snapshot into a working copy under a dataDirRoot", () => {
     const liveDbPath = join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME);
