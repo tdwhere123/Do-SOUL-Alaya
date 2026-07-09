@@ -1142,10 +1142,17 @@ describe("LongMemEval recall diagnostics", () => {
         embedding_provider: "local_onnx",
         embedding_mode: "env",
         provider_state_summary: {
+          total: 1,
           provider_returned: 0,
-          provider_unavailable: 0,
+          provider_pending: 0,
+          provider_failed: 0,
           provider_not_requested: 1,
-          unknown: 0
+          unknown: 0,
+          provider_returned_rate: 0,
+          provider_pending_rate: 0,
+          provider_failed_rate: 0,
+          provider_not_requested_rate: 1,
+          unknown_rate: 0
         },
         questions: [question]
       });
@@ -1153,7 +1160,7 @@ describe("LongMemEval recall diagnostics", () => {
       expect(stripped.questions[0]?.candidate_pool_complete).toBe(false);
       const rendered = renderDiagnosticsSidecar(stripped);
       expect(rendered).not.toContain("workspace_local:memory_entry:gold-a");
-      expect(rendered.length).toBeLessThan(4_000);
+      expect(rendered.length).toBeLessThan(8_000);
     } finally {
       if (previous === undefined) {
         delete process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL;

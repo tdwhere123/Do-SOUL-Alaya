@@ -8,6 +8,7 @@ import type {
 } from "../../recall/runtime/recall-service-types.js";
 
 const emptyQueryProbes = Object.freeze({
+  normalized_query: "",
   object_ids: [],
   subject_hints: [],
   evidence_refs: [],
@@ -60,9 +61,11 @@ describe("recall diagnostics", () => {
       object_kind: "memory_entry",
       dimension: "fact",
       origin_plane: "workspace_local",
-      admission_planes: ["activation"],
-      plane_first_admitted: "activation",
-      plane_winning_admission: "activation",
+      created_at: "2026-07-07T00:00:00.000Z",
+      facet_overlap: 0,
+      admission_planes: ["activation"] as RecallCandidateDiagnostic["admission_planes"],
+      plane_first_admitted: "activation" as RecallCandidateDiagnostic["plane_first_admitted"],
+      plane_winning_admission: "activation" as RecallCandidateDiagnostic["plane_winning_admission"],
       pre_budget_rank: 1,
       selection_order: 1,
       fused_rank: 1,
@@ -77,7 +80,7 @@ describe("recall diagnostics", () => {
       relevance_score: 0.8,
       lexical_rank: 1,
       structural_score: 0.1,
-      score_factors: {},
+      score_factors: { activation: 0.5, relevance: 0.8 },
       source_channels: [],
       path_expansion_sources: [],
       per_axis_rank: { object: 1, path: 2, evidence: null, temporal: null, control: null },

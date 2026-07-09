@@ -5,7 +5,10 @@ import {
   resolveCoreDeliveryRank,
   toDeliveryMissCandidateInput
 } from "../../longmemeval/diagnostics-delivery-bridge.js";
-import type { CandidateDiagnostic } from "../../longmemeval/diagnostics-types.js";
+import type {
+  CandidateDiagnostic,
+  LongMemEvalGoldDiagnostic
+} from "../../longmemeval/diagnostics-types.js";
 
 function sampleCandidate(
   overrides: Partial<CandidateDiagnostic> = {}
@@ -14,6 +17,8 @@ function sampleCandidate(
     candidateKey: "workspace_local:memory_entry:gold-a",
     objectId: "gold-a",
     objectKind: "memory_entry",
+    createdAt: null,
+    facetOverlap: null,
     dimension: null,
     originPlane: "workspace_local",
     preBudgetRank: 4,
@@ -23,6 +28,10 @@ function sampleCandidate(
     fusedScore: 0.4,
     perStreamRank: null,
     fusedRankContributionPerStream: null,
+    perAxisRank: null,
+    perAxisContribution: null,
+    floodPotential: null,
+    floodFuelCoverage: null,
     planeFirstAdmitted: null,
     planeWinningAdmission: null,
     sourcePlanes: [],
@@ -43,6 +52,50 @@ function sampleCandidate(
     sessionKey: null,
     sourceCohortKey: null,
     reservedBy: null,
+    ...overrides
+  };
+}
+
+function sampleGold(
+  overrides: Partial<LongMemEvalGoldDiagnostic> = {}
+): LongMemEvalGoldDiagnostic {
+  return {
+    object_id: "g1",
+    candidate_status: "candidate_not_delivered",
+    dimension: null,
+    final_rank: null,
+    active_constraint_rank: null,
+    pre_budget_rank: 4,
+    selection_order: null,
+    fused_rank: null,
+    fused_score: null,
+    per_stream_rank: null,
+    fused_rank_contribution_per_stream: null,
+    per_axis_rank: null,
+    per_axis_contribution: null,
+    flood_potential: null,
+    flood_fuel_coverage: null,
+    plane_first_admitted: null,
+    plane_winning_admission: null,
+    source_planes: [],
+    miss_taxonomy: null,
+    lexical_rank: null,
+    structural_score: null,
+    score_factors: null,
+    source_channels: [],
+    budget_drop_reason: "max_entries",
+    rank_after_fusion: null,
+    rank_after_feature_rerank: null,
+    rank_after_lexical_priority: null,
+    rank_after_synthesis_reserve: null,
+    rank_after_structural_reserve: null,
+    rank_after_coverage_selector: null,
+    rank_after_session_coverage: null,
+    coverage_selector_action: null,
+    session_coverage_action: null,
+    session_key: null,
+    source_cohort_key: null,
+    reserved_by: null,
     ...overrides
   };
 }
@@ -70,77 +123,21 @@ describe("diagnostics-delivery-bridge", () => {
   });
 
   it("uses fusion-stage ranks only for core delivery rank", () => {
+    expect(resolveCoreDeliveryRank(sampleGold())).toBeNull();
     expect(
-      resolveCoreDeliveryRank({
-        object_id: "g1",
-        candidate_status: "candidate_not_delivered",
-        dimension: null,
-        final_rank: null,
-        active_constraint_rank: null,
-        pre_budget_rank: 4,
-        selection_order: null,
-        fused_rank: null,
-        fused_score: null,
-        per_stream_rank: null,
-        fused_rank_contribution_per_stream: null,
-        plane_first_admitted: null,
-        plane_winning_admission: null,
-        source_planes: [],
-        miss_taxonomy: null,
-        lexical_rank: null,
-        structural_score: null,
-        score_factors: null,
-        source_channels: [],
-        budget_drop_reason: "max_entries",
-        rank_after_fusion: null,
-        rank_after_feature_rerank: null,
-        rank_after_lexical_priority: null,
-        rank_after_synthesis_reserve: null,
-        rank_after_structural_reserve: null,
-        rank_after_coverage_selector: null,
-        rank_after_session_coverage: null,
-        coverage_selector_action: null,
-        session_coverage_action: null,
-        session_key: null,
-        source_cohort_key: null,
-        reserved_by: null
-      })
-    ).toBeNull();
-    expect(
-      resolveCoreDeliveryRank({
-        object_id: "g2",
-        candidate_status: "delivered",
-        dimension: null,
-        final_rank: 3,
-        active_constraint_rank: null,
-        pre_budget_rank: 40,
-        selection_order: null,
-        fused_rank: 8,
-        fused_score: null,
-        per_stream_rank: null,
-        fused_rank_contribution_per_stream: null,
-        plane_first_admitted: null,
-        plane_winning_admission: null,
-        source_planes: [],
-        miss_taxonomy: null,
-        lexical_rank: null,
-        structural_score: null,
-        score_factors: null,
-        source_channels: [],
-        budget_drop_reason: null,
-        rank_after_fusion: 3,
-        rank_after_feature_rerank: null,
-        rank_after_lexical_priority: null,
-        rank_after_synthesis_reserve: null,
-        rank_after_structural_reserve: null,
-        rank_after_coverage_selector: 8,
-        rank_after_session_coverage: null,
-        coverage_selector_action: "displaced",
-        session_coverage_action: null,
-        session_key: null,
-        source_cohort_key: null,
-        reserved_by: null
-      })
+      resolveCoreDeliveryRank(
+        sampleGold({
+          object_id: "g2",
+          candidate_status: "delivered",
+          final_rank: 3,
+          pre_budget_rank: 40,
+          fused_rank: 8,
+          budget_drop_reason: null,
+          rank_after_fusion: 3,
+          rank_after_coverage_selector: 8,
+          coverage_selector_action: "displaced"
+        })
+      )
     ).toBe(3);
   });
 
@@ -177,7 +174,7 @@ describe("FullGoldDeliveryContributionSchema", () => {
     const contribution = buildLongMemEvalFullGoldCoverage([question])
       .delivery_contribution;
     expect(
-      FullGoldDeliveryContributionSchema.safeParse(contribution).success
-    ).toBe(true);
+      FullGoldDeliveryContributionSchema.parse(contribution)
+    ).toBeTruthy();
   });
 });
