@@ -151,6 +151,20 @@ const COMPOSE_HINT_MIN_SCORE_RATIO = 0.75;
 const LIKELIHOOD_HEAD_RESCUE_SIZE = 5;
 const LIKELIHOOD_TAIL_RESCUE_MULTIPLIER = 2;
 
+function fusionRankFloorEnabled(): boolean {
+  return recallEnvFlagEnabled("ALAYA_RECALL_FUSION_RANK_FLOOR");
+}
+
+// Card E I1: fusion-rank ≤ headSize incumbents must not be hard-evicted by
+// likelihood tail-rescue. Default-off; opt in for A/B.
+function isFusionRankFloorProtected(
+  candidate: DeliverySelectionCandidate,
+  headSize: number
+): boolean {
+  const rank = candidate.fusion.fused_rank;
+  return typeof rank === "number" && rank > 0 && rank <= headSize;
+}
+
 function applyLikelihoodTailRescue(
   orderedCandidates: readonly DeliverySelectionCandidate[],
   maxEntries: number
@@ -168,6 +182,9 @@ function applyLikelihoodTailRescue(
   const incumbentIndex = headSize - 1;
   const incumbent = orderedCandidates[incumbentIndex];
   if (incumbent === undefined || !isWeakLikelihoodIncumbent(incumbent)) {
+    return orderedCandidates;
+  }
+  if (fusionRankFloorEnabled() && isFusionRankFloorProtected(incumbent, headSize)) {
     return orderedCandidates;
   }
 

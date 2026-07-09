@@ -39,6 +39,8 @@ export function recallEnvRaw(name: string): string | undefined {
       return recall.pathEmbModulation;
     case "ALAYA_RECALL_STRUCTURAL_RESERVE":
       return recall.structuralReserve;
+    case "ALAYA_RECALL_FUSION_RANK_FLOOR":
+      return recall.fusionRankFloor;
     case "ALAYA_RECALL_PROJECTIONS":
       return recall.projectionsEnabled ? "on" : "off";
     case "ALAYA_RECALL_TEMPORAL_WINDOW":

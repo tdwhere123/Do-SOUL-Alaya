@@ -30,6 +30,7 @@ function createStubCoreConfig(): CoreConfig {
       expAnswersWith: false,
       pathEmbModulation: undefined,
       structuralReserve: undefined,
+      fusionRankFloor: undefined,
       projectionsEnabled: true,
       temporalWindowEnabled: false,
       lexicalDecorr: undefined,

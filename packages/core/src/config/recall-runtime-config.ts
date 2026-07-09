@@ -19,6 +19,8 @@ export interface RecallRuntimeConfig {
   readonly expAnswersWith: boolean;
   readonly pathEmbModulation: string | undefined;
   readonly structuralReserve: string | undefined;
+  /** Card E I1: refuse delivery stages that hard-evict fusion rank ≤K. Default off. */
+  readonly fusionRankFloor: string | undefined;
   readonly projectionsEnabled: boolean;
   readonly temporalWindowEnabled: boolean;
   readonly lexicalDecorr: string | undefined;
@@ -95,6 +97,7 @@ export function parseRecallRuntimeConfigFromEnv(
     expAnswersWith: env.ALAYA_EXP_ANSWERS_WITH === "1",
     pathEmbModulation: env.ALAYA_RECALL_PATH_EMB_MODULATION,
     structuralReserve: env.ALAYA_RECALL_STRUCTURAL_RESERVE,
+    fusionRankFloor: env.ALAYA_RECALL_FUSION_RANK_FLOOR,
     projectionsEnabled: defaultOn(env.ALAYA_RECALL_PROJECTIONS),
     temporalWindowEnabled: yesEnabled(env.ALAYA_RECALL_TEMPORAL_WINDOW),
     lexicalDecorr: env.ALAYA_RECALL_LEXICAL_DECORR,

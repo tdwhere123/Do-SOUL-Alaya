@@ -186,6 +186,47 @@ describe("applyDeliverySelection", () => {
     expect(result.ranks.rankAfterStructuralReserve.get("workspace_local:memory_entry:weak-rank-5")).toBe(6);
   });
 
+  it("I1 fusion-rank floor blocks likelihood rescue from displacing fused_rank≤5", () => {
+    vi.stubEnv("ALAYA_RECALL_FUSION_RANK_FLOOR", "1");
+    const ordered = [
+      fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
+      fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
+      fusedCandidate({ objectId: "a3", fusedRank: 3, fusedScore: 0.8 }),
+      fusedCandidate({ objectId: "a4", fusedRank: 4, fusedScore: 0.7 }),
+      fusedCandidate({
+        objectId: "weak-rank-5",
+        fusedRank: 5,
+        fusedScore: 0.6,
+        streamRanks: {
+          lexical_fts: 12,
+          embedding_similarity: 12,
+          evidence_fts: 12
+        }
+      }),
+      fusedCandidate({
+        objectId: "likelihood-rank-6",
+        fusedRank: 6,
+        fusedScore: 0.5,
+        streamRanks: {
+          lexical_fts: 3,
+          embedding_similarity: 1,
+          evidence_fts: 30
+        }
+      })
+    ];
+
+    const result = applyDeliverySelection(ordered, supplementary(), 10);
+
+    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "weak-rank-5",
+      "likelihood-rank-6"
+    ]);
+  });
+
   it("does not rescue a tail candidate with only one strong likelihood stream", () => {
     const ordered = [
       fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
