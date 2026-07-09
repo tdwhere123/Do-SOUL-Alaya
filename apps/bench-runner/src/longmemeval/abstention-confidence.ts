@@ -1,5 +1,5 @@
 /**
- * @anchor abstention-confidence — fused-margin answerability confidence for
+ * @anchor:abstention-confidence — fused-margin answerability confidence for
  * LongMemEval `_abs` scoring.
  *
  * `relevance_score` is saturated effectiveScore and must never feed this
@@ -15,8 +15,8 @@
  * see also: apps/bench-runner/src/longmemeval/abstention.ts
  */
 
-/** Scale that maps a unit fused-score margin onto [0, 1] confidence. */
-export const ABSTENTION_FUSED_MARGIN_SCALE = 1;
+/** RRF default k=60; maps realistic fused margins onto [0, 1] confidence. */
+export const ABSTENTION_FUSED_MARGIN_SCALE = 1 / 60;
 
 export interface FusedScorePointer {
   readonly fused_score?: number | null;

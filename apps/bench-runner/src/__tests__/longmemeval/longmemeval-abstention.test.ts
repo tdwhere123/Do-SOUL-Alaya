@@ -37,13 +37,24 @@ function deliveredResult(
 
 describe("abstention confidence producer (fused-margin)", () => {
   it("maps a large fused top1-top2 margin to high confidence", () => {
-    const score = computeAbstentionConfidenceScore([2.5, 0.5, 0.4, 0.3]);
+    // RRF-scale dominance: top1≈1/61, top2≈1/1000 → margin / (1/60) ≥ 0.91.
+    const score = computeAbstentionConfidenceScore([
+      1 / 61,
+      1 / 1000,
+      1 / 1200,
+      1 / 1500
+    ]);
     expect(score).toBeGreaterThanOrEqual(THR);
     expect(score).toBeLessThanOrEqual(1);
   });
 
   it("maps a tiny fused margin to low confidence", () => {
-    const score = computeAbstentionConfidenceScore([1.01, 1.0, 0.99, 0.98]);
+    const score = computeAbstentionConfidenceScore([
+      1 / 60,
+      1 / 61,
+      1 / 62,
+      1 / 63
+    ]);
     expect(score).not.toBeNull();
     expect(score!).toBeLessThan(0.1);
   });
@@ -70,7 +81,7 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
     expect(isAbstentionQuestionId("gpt4_59c863d7")).toBe(false);
   });
 
-  it("keeps premise_invalid as an intentional Phase-1 false stub", () => {
+  it("keeps premise_invalid always false via the invariant helper", () => {
     expect(resolvePremiseInvalid()).toBe(false);
   });
 
@@ -245,8 +256,8 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
     const verdict = resolveLongMemEvalHitVerdict({
       isAbstention: true,
       results: [
-        { object_id: "decoy-a", relevance_score: 1, fused_score: 2.5 },
-        { object_id: "decoy-b", relevance_score: 1, fused_score: 0.4 }
+        { object_id: "decoy-a", relevance_score: 1, fused_score: 1 / 61 },
+        { object_id: "decoy-b", relevance_score: 1, fused_score: 1 / 1000 }
       ],
       sidecar: new Map(),
       answerSessionIds: new Set()
@@ -258,8 +269,8 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
     const verdict = resolveLongMemEvalHitVerdict({
       isAbstention: true,
       results: [
-        { object_id: "decoy-a", relevance_score: 1, fused_score: 1.02 },
-        { object_id: "decoy-b", relevance_score: 1, fused_score: 1.0 }
+        { object_id: "decoy-a", relevance_score: 1, fused_score: 1 / 60 },
+        { object_id: "decoy-b", relevance_score: 1, fused_score: 1 / 61 }
       ],
       sidecar: new Map(),
       answerSessionIds: new Set()

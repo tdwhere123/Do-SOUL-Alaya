@@ -177,7 +177,6 @@ describe("facet_overlap fusion stream", () => {
     expect(fusion.get(strongKey)?.fused_score ?? 0).toBeGreaterThan(fusion.get(weakKey)?.fused_score ?? 0);
     expect(fusion.get(strongKey)?.facet_overlap).toBe(1);
     expect(fusion.get(weakKey)?.facet_overlap).toBe(2);
-    // Facet tier still wins: score-first was negatived on flood-on 100Q/500Q (F1).
     expect(fusion.get(weakKey)?.fused_rank).toBe(1);
     expect(fusion.get(strongKey)?.fused_rank).toBe(2);
   });

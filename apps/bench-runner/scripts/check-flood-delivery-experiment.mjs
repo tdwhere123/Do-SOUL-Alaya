@@ -10,7 +10,7 @@ function usage() {
     "Usage:",
     `  node ${basename(process.argv[1])} [--diagnostics <longmemeval-diagnostics.json>] [--embedding env|disabled]`,
     "",
-    "Checks the safe Card E flood-supply experiment preconditions:",
+    "Checks the safe flood-supply experiment preconditions:",
     "answers_with/flood is always on; benchmark --embedding env is required.",
     "When diagnostics are provided, reports flood_fuel_coverage blocks if present."
   ].join("\n");

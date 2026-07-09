@@ -124,7 +124,7 @@ function verifiedFloodFuel(
 }
 
 /**
- * Card D L-gate: structural/flood prior must not overturn high object likelihood.
+ * invariant: structural/flood prior must not overturn high object likelihood.
  * g(L)=1−R_obj closes the flood bonus as R_obj → 1 (Π_eff shrinks toward identity).
  */
 export function structuralLikelihoodGate(R_obj: number): number {

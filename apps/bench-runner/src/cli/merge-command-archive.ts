@@ -93,15 +93,21 @@ export async function writeMergedLongMemEvalArchive(input: {
 
 async function readShardDiagnostics(
   shardArchiveRefs: readonly ShardArchiveRef[]
-): Promise<ShardDiagnostics[]> {
+): Promise<NonNullable<ShardDiagnostics>[]> {
   return Promise.all(
-    shardArchiveRefs.map((shard) =>
-      readLongMemEvalDiagnosticsSidecar(
+    shardArchiveRefs.map(async (shard) => {
+      const diagnostics = await readLongMemEvalDiagnosticsSidecar(
         { historyRoot: shard.root },
         "public",
         shard.slug
-      )
-    )
+      );
+      if (diagnostics === null) {
+        throw new Error(
+          `merge refused: missing diagnostics sidecar for shard root=${shard.root} slug=${shard.slug}`
+        );
+      }
+      return diagnostics;
+    })
   );
 }
 

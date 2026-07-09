@@ -2,12 +2,18 @@ import { execFile } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { RECALL_FUSION_STREAMS } from "@do-soul/alaya-core";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(__dirname, "../../../../..");
 const scriptPath = "apps/bench-runner/scripts/evaluate-abstention-calibration.mjs";
+const libPath = path.join(
+  rootDir,
+  "apps/bench-runner/scripts/evaluate-abstention-calibration-lib.mjs"
+);
 
 function deliveredResult(
   objectId: string,
@@ -103,6 +109,28 @@ async function runReport(diagnosticsPath: string) {
 }
 
 describe("evaluate-abstention-calibration script", () => {
+  it("covers every RECALL_FUSION_STREAMS member in likelihood ∪ structural ∪ other", async () => {
+    const {
+      LIKELIHOOD_STREAMS,
+      STRUCTURAL_STREAMS,
+      OTHER_STREAMS
+    } = await import(pathToFileURL(libPath).href);
+    const classified = new Set([
+      ...LIKELIHOOD_STREAMS,
+      ...STRUCTURAL_STREAMS,
+      ...OTHER_STREAMS
+    ]);
+    for (const stream of RECALL_FUSION_STREAMS) {
+      expect(classified.has(stream), `unclassified fusion stream: ${stream}`).toBe(true);
+    }
+    for (const stream of LIKELIHOOD_STREAMS) {
+      expect(STRUCTURAL_STREAMS.has(stream)).toBe(false);
+      expect(OTHER_STREAMS.has(stream)).toBe(false);
+    }
+    for (const stream of STRUCTURAL_STREAMS) {
+      expect(OTHER_STREAMS.has(stream)).toBe(false);
+    }
+  });
   it("reports separate raw, margin, and likelihood ROC/AUC evidence without training on true abstentions", async () => {
     const diagnosticsPath = await writeDiagnosticsFixture();
     const report = await runReport(diagnosticsPath);
@@ -120,8 +148,13 @@ describe("evaluate-abstention-calibration script", () => {
     expect(report.signal_comparison.isotonic).toContain("isotonic_top1_top2_fused_margin");
     expect(report.runtime_handoff).toMatchObject({
       scorer_field: "abstention_confidence_score",
-      scorer_threshold: 0.91
+      scorer_threshold: 0.91,
+      fused_margin_scale: 1 / 60
     });
+    expect(report.runtime_handoff.threshold_reflection).toMatch(/scale=1\/60/);
+    expect(report.runtime_handoff.threshold_reflection).toMatch(
+      /without claiming a production AUC/
+    );
 
     const rawThresholds = report.signals
       .find((signal: { signal: string }) => signal.signal === "top1_relevance_score")

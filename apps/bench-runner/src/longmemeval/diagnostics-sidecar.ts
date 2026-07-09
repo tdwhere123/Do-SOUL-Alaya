@@ -59,101 +59,142 @@ export function summarizeLongMemEvalReportSideEffects(input: {
 export function summarizeLongMemEvalRecallEvidence(
   diagnostics: readonly LongMemEvalQuestionDiagnostic[]
 ): LongMemEvalRecallEvidenceSummary {
-  const deliveredFirst: Record<string, number> = {};
-  const deliveredWinning: Record<string, number> = {};
-  const goldChannels: Record<string, number> = {};
-  const goldPlanes: Record<string, number> = {};
-  const missTaxonomyDistribution = createEmptyMissTaxonomyDistribution();
-  let deliveredResultCount = 0;
-  let graphSupportGoldCount = 0;
-  let pathPlasticityGoldCount = 0;
-  let graphExpansionPlaneCount = 0;
-  let pathExpansionPlaneCount = 0;
-  let graphExpansionHop1Count = 0;
-  let graphExpansionHop2Count = 0;
-  const graphExpansionEdgeTypes = {
-    ...createEmptyGraphExpansionPlaneCountPerEdgeType()
-  };
-
+  const state = createRecallEvidenceAccumulator();
   for (const row of diagnostics) {
-    const graphExpansionHopCounts =
-      readGraphExpansionPlaneCountPerHop(
-        (row as { readonly graph_expansion_plane_count_per_hop?: unknown })
-          .graph_expansion_plane_count_per_hop
-      ) ?? createEmptyGraphExpansionPlaneCountPerHop();
-    const graphExpansionEdgeTypeCounts =
-      readGraphExpansionPlaneCountPerEdgeType(
-        (row as { readonly graph_expansion_plane_count_per_edge_type?: unknown })
-          .graph_expansion_plane_count_per_edge_type
-      ) ?? createEmptyGraphExpansionPlaneCountPerEdgeType();
-    graphExpansionHop1Count += graphExpansionHopCounts[0];
-    graphExpansionHop2Count += graphExpansionHopCounts[1];
-    graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
-    graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
-    graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
-    const missTaxonomy = readQuestionMissTaxonomy(row);
-    if (missTaxonomy !== null) {
-      missTaxonomyDistribution[missTaxonomy] += 1;
+    accumulateRecallEvidenceRow(state, row);
+  }
+  return freezeRecallEvidenceSummary(state);
+}
+
+interface RecallEvidenceAccumulator {
+  readonly deliveredFirst: Record<string, number>;
+  readonly deliveredWinning: Record<string, number>;
+  readonly goldChannels: Record<string, number>;
+  readonly goldPlanes: Record<string, number>;
+  // Mutable tallies while accumulating; frozen only in freezeRecallEvidenceSummary.
+  readonly missTaxonomyDistribution: Record<
+    keyof LongMemEvalMissTaxonomyDistribution,
+    number
+  >;
+  deliveredResultCount: number;
+  graphSupportGoldCount: number;
+  pathPlasticityGoldCount: number;
+  graphExpansionPlaneCount: number;
+  pathExpansionPlaneCount: number;
+  graphExpansionHop1Count: number;
+  graphExpansionHop2Count: number;
+  readonly graphExpansionEdgeTypes: {
+    derives_from: number;
+    recalls: number;
+    supports: number;
+  };
+}
+
+function createRecallEvidenceAccumulator(): RecallEvidenceAccumulator {
+  return {
+    deliveredFirst: {},
+    deliveredWinning: {},
+    goldChannels: {},
+    goldPlanes: {},
+    missTaxonomyDistribution: createEmptyMissTaxonomyDistribution(),
+    deliveredResultCount: 0,
+    graphSupportGoldCount: 0,
+    pathPlasticityGoldCount: 0,
+    graphExpansionPlaneCount: 0,
+    pathExpansionPlaneCount: 0,
+    graphExpansionHop1Count: 0,
+    graphExpansionHop2Count: 0,
+    graphExpansionEdgeTypes: {
+      ...createEmptyGraphExpansionPlaneCountPerEdgeType()
     }
-    for (const delivered of row.delivered_results) {
-      deliveredResultCount += 1;
-      incrementCount(deliveredFirst, delivered.plane_first_admitted ?? "unknown");
-      incrementCount(deliveredWinning, delivered.plane_winning_admission ?? "unknown");
-      if (
-        delivered.plane_first_admitted === "graph_expansion" ||
-        delivered.plane_winning_admission === "graph_expansion"
-      ) {
-        graphExpansionPlaneCount += 1;
-      }
-      if (
-        delivered.plane_first_admitted === "path_expansion" ||
-        delivered.plane_winning_admission === "path_expansion"
-      ) {
-        pathExpansionPlaneCount += 1;
-      }
+  };
+}
+
+function accumulateRecallEvidenceRow(
+  state: RecallEvidenceAccumulator,
+  row: LongMemEvalQuestionDiagnostic
+): void {
+  const graphExpansionHopCounts =
+    readGraphExpansionPlaneCountPerHop(
+      (row as { readonly graph_expansion_plane_count_per_hop?: unknown })
+        .graph_expansion_plane_count_per_hop
+    ) ?? createEmptyGraphExpansionPlaneCountPerHop();
+  const graphExpansionEdgeTypeCounts =
+    readGraphExpansionPlaneCountPerEdgeType(
+      (row as { readonly graph_expansion_plane_count_per_edge_type?: unknown })
+        .graph_expansion_plane_count_per_edge_type
+    ) ?? createEmptyGraphExpansionPlaneCountPerEdgeType();
+  state.graphExpansionHop1Count += graphExpansionHopCounts[0];
+  state.graphExpansionHop2Count += graphExpansionHopCounts[1];
+  state.graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
+  state.graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
+  state.graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
+  const missTaxonomy = readQuestionMissTaxonomy(row);
+  if (missTaxonomy !== null) {
+    state.missTaxonomyDistribution[missTaxonomy] += 1;
+  }
+  for (const delivered of row.delivered_results) {
+    state.deliveredResultCount += 1;
+    incrementCount(state.deliveredFirst, delivered.plane_first_admitted ?? "unknown");
+    incrementCount(state.deliveredWinning, delivered.plane_winning_admission ?? "unknown");
+    if (
+      delivered.plane_first_admitted === "graph_expansion" ||
+      delivered.plane_winning_admission === "graph_expansion"
+    ) {
+      state.graphExpansionPlaneCount += 1;
     }
-    for (const gold of row.gold) {
-      if (gold.source_channels.includes("graph_support")) {
-        graphSupportGoldCount += 1;
-      }
-      if (gold.source_channels.includes("path_plasticity")) {
-        pathPlasticityGoldCount += 1;
-      }
-      for (const channel of gold.source_channels) {
-        incrementCount(goldChannels, channel);
-      }
-      for (const plane of gold.source_planes) {
-        incrementCount(goldPlanes, plane);
-        if (plane === "graph_expansion") {
-          graphExpansionPlaneCount += 1;
-        } else if (plane === "path_expansion") {
-          pathExpansionPlaneCount += 1;
-        }
+    if (
+      delivered.plane_first_admitted === "path_expansion" ||
+      delivered.plane_winning_admission === "path_expansion"
+    ) {
+      state.pathExpansionPlaneCount += 1;
+    }
+  }
+  for (const gold of row.gold) {
+    if (gold.source_channels.includes("graph_support")) {
+      state.graphSupportGoldCount += 1;
+    }
+    if (gold.source_channels.includes("path_plasticity")) {
+      state.pathPlasticityGoldCount += 1;
+    }
+    for (const channel of gold.source_channels) {
+      incrementCount(state.goldChannels, channel);
+    }
+    for (const plane of gold.source_planes) {
+      incrementCount(state.goldPlanes, plane);
+      if (plane === "graph_expansion") {
+        state.graphExpansionPlaneCount += 1;
+      } else if (plane === "path_expansion") {
+        state.pathExpansionPlaneCount += 1;
       }
     }
   }
+}
 
+function freezeRecallEvidenceSummary(
+  state: RecallEvidenceAccumulator
+): LongMemEvalRecallEvidenceSummary {
   return {
-    delivered_result_count: deliveredResultCount,
-    graph_support_gold_count: graphSupportGoldCount,
-    path_plasticity_gold_count: pathPlasticityGoldCount,
-    graph_expansion_plane_count: graphExpansionPlaneCount,
-    path_expansion_plane_count: pathExpansionPlaneCount,
+    delivered_result_count: state.deliveredResultCount,
+    graph_support_gold_count: state.graphSupportGoldCount,
+    path_plasticity_gold_count: state.pathPlasticityGoldCount,
+    graph_expansion_plane_count: state.graphExpansionPlaneCount,
+    path_expansion_plane_count: state.pathExpansionPlaneCount,
     graph_expansion_plane_count_per_hop: Object.freeze([
-      graphExpansionHop1Count,
-      graphExpansionHop2Count
+      state.graphExpansionHop1Count,
+      state.graphExpansionHop2Count
     ]),
     graph_expansion_plane_count_per_edge_type:
-      freezeGraphExpansionPlaneCountPerEdgeType(graphExpansionEdgeTypes),
+      freezeGraphExpansionPlaneCountPerEdgeType(state.graphExpansionEdgeTypes),
     delivered_plane_counts: {
-      first_admitted: deliveredFirst,
-      winning_admission: deliveredWinning
+      first_admitted: state.deliveredFirst,
+      winning_admission: state.deliveredWinning
     },
     miss_taxonomy_distribution: freezeMissTaxonomyDistribution(
-      missTaxonomyDistribution
+      state.missTaxonomyDistribution
     ),
-    gold_source_channel_counts: goldChannels,
-    gold_source_plane_counts: goldPlanes
+    gold_source_channel_counts: state.goldChannels,
+    gold_source_plane_counts: state.goldPlanes
   };
 }
 
@@ -161,7 +202,7 @@ export function summarizeLongMemEvalRecallEvidence(
  * Default gate archives omit per-question replay `candidates[]`.
  * A 250Q shard with complete pools is ~500MB+ and can throw
  * `Invalid string length` on one-shot JSON.stringify.
- * Set ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL=1 for Card D offline dumps.
+ * Set ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL=1 for offline replay dumps.
  */
 export function includeReplayCandidatePoolInDiagnosticsWrite(): boolean {
   const raw = process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL?.trim().toLowerCase();

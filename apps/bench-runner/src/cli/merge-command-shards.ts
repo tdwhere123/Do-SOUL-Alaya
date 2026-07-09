@@ -128,10 +128,15 @@ async function readShardPayload(
     "public",
     pointer.slug
   );
+  if (diagnostics === null) {
+    throw new Error(
+      `merge refused: missing diagnostics sidecar for shard root=${shardRoot} slug=${pointer.slug}`
+    );
+  }
   return {
     payload,
     slug: pointer.slug,
-    questionDiagnostics: diagnostics?.questions ?? []
+    questionDiagnostics: diagnostics.questions ?? []
   };
 }
 

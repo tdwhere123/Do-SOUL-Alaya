@@ -41,8 +41,8 @@ export function isAbstentionQuestionId(questionId: string): boolean {
 }
 
 /**
- * Phase-1 premise-invalid stub: always false until a real premise detector
- * exists. Call sites must use this helper so the bit is intentional.
+ * invariant: premise_invalid is always false; call sites use this helper so
+ * the bit stays intentional rather than an ad-hoc literal.
  */
 export function resolvePremiseInvalid(): false {
   return false;

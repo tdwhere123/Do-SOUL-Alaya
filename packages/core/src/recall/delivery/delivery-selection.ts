@@ -155,8 +155,8 @@ function fusionRankFloorEnabled(): boolean {
   return recallEnvFlagEnabled("ALAYA_RECALL_FUSION_RANK_FLOOR");
 }
 
-// Card E I1: fusion-rank ≤ headSize incumbents must not be hard-evicted by
-// likelihood tail-rescue. Default-off; opt in for A/B.
+// invariant: when fusion-rank floor is on, fused_rank ≤ headSize incumbents
+// must not be hard-evicted by likelihood tail-rescue. Default off.
 function isFusionRankFloorProtected(
   candidate: DeliverySelectionCandidate,
   headSize: number

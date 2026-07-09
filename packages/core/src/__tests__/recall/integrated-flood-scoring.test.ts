@@ -254,7 +254,7 @@ describe("computeIntegratedFloodScore", () => {
     expect(result.score).toBeCloseTo(rObj + lambda * omega * Flood * lGate, 12);
   });
 
-  it("applies Card D L-gate: high R_obj shrinks flood bonus toward zero", () => {
+  it("applies L-gate: high R_obj shrinks flood bonus toward zero", () => {
     const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
     const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const target = createMemoryEntry({

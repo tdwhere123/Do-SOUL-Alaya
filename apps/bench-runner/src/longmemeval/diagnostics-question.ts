@@ -65,7 +65,6 @@ export function buildQuestionDiagnostic(input: {
   const activeConstraintRankById = new Map(
     activeConstraintResults.map((result) => [result.object_id, result.rank])
   );
-
   const gold = buildGoldDiagnostics({
     goldMemoryIds: input.goldMemoryIds,
     deliveredRankById,
@@ -73,12 +72,46 @@ export function buildQuestionDiagnostic(input: {
     diagnostics
   });
   const candidates = diagnostics === null ? [] : buildReplayCandidates(diagnostics);
+  return assembleQuestionDiagnostic(input, {
+    diagnostics,
+    deliveredResults,
+    activeConstraintResults,
+    gold,
+    candidates
+  });
+}
 
+function assembleQuestionDiagnostic(
+  input: {
+    readonly questionId: string;
+    readonly questionType?: string | null;
+    readonly goldMemoryIds: readonly string[];
+    readonly answerSessionIds: readonly string[];
+    readonly hitAt1: boolean;
+    readonly hitAt5: boolean;
+    readonly hitAt10: boolean;
+    readonly isAbstention?: boolean;
+    readonly premiseInvalid?: boolean;
+    readonly degradationReason: string | null;
+    readonly embeddingMode: "disabled" | "env";
+    readonly roundIndex?: number;
+    readonly seedDropReasons?: LongMemEvalSeedDropReasons;
+  },
+  parts: {
+    readonly diagnostics: NarrowRecallDiagnostics | null;
+    readonly deliveredResults: readonly DiagnosticRecallResult[];
+    readonly activeConstraintResults: readonly DiagnosticActiveConstraintResult[];
+    readonly gold: readonly LongMemEvalGoldDiagnostic[];
+    readonly candidates: readonly LongMemEvalReplayCandidate[];
+  }
+): LongMemEvalQuestionDiagnostic {
+  const { diagnostics, deliveredResults, activeConstraintResults, gold, candidates } =
+    parts;
   return {
     question_id: input.questionId,
     question_type: input.questionType ?? null,
     is_abstention: input.isAbstention === true,
-    // Phase-1 stub: always false unless an explicit override is passed.
+    // invariant: premise_invalid is false unless an explicit override is passed.
     premise_invalid:
       input.premiseInvalid === true ? true : resolvePremiseInvalid(),
     round_index: input.roundIndex ?? null,

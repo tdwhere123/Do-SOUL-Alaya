@@ -1,6 +1,7 @@
 import type {
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
+import { recallEnvFlagEnabled } from "../../config/recall-env-access.js";
 import { rerankTopN, type RerankCandidate } from "../rerank/recall-feature-rerank.js";
 import {
   clamp01} from "../runtime/recall-service-helpers.js";
@@ -67,10 +68,9 @@ export function applyFeatureRerank<T extends FusedRecallCandidateInput>(
   supplementaryData: RecallSupplementaryData,
   maxEntries: number
 ): readonly T[] {
-  const protectedTopK = Math.min(
-    Math.max(0, maxEntries),
-    FEATURE_RERANK_PROTECTED_DELIVERY_HEAD
-  );
+  const protectedTopK = recallEnvFlagEnabled("ALAYA_RECALL_FUSION_RANK_FLOOR")
+    ? Math.min(Math.max(0, maxEntries), FEATURE_RERANK_PROTECTED_DELIVERY_HEAD)
+    : 0;
   const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) => {
     const gist = supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id];
     const hasGist = typeof gist === "string" && gist.length > 0;

@@ -3,7 +3,7 @@ import type { RecallSupplementaryData } from "../runtime/recall-service-types.js
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
 
 // Evidence-set completion nudge for same-session evidence members already
-// anchored in the selected set. Historical name SESSION_COVERAGE_BONUS.
+// anchored in the selected set.
 const EVIDENCE_SET_COMPLETION_BONUS = 0.06;
 export const MAX_EVIDENCE_SET_BONUS = 0.1;
 

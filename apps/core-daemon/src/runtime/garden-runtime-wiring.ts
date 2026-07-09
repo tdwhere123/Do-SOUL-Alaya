@@ -177,8 +177,8 @@ function createCoherenceCrystallizer(input: GardenRuntimeWiringInput) {
   });
 }
 
-// S2 answers_with: always-on when HQ repo is available. Null hqRepo →
-// undefined → no port → backfill follow-up no-ops → no answers_with edges minted.
+// invariant: answers_with crystallizer is always-on when the HQ repo is
+// present; null hqRepo → undefined → no mint.
 function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
   const hqRepo = createOptionalMemoryHqRepo(input.database);
   if (hqRepo === null) {

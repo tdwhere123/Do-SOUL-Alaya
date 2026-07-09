@@ -228,7 +228,7 @@ type ShardPointerKind = "run" | "passing" | "baseline";
 export async function writeShardRoot(
   root: string,
   kpi: KpiPayload,
-  diagnostics?: unknown,
+  diagnostics: unknown = makeShardDiagnostics(),
   pointerKinds: readonly ShardPointerKind[] = ["run"]
 ): Promise<void> {
   const slug = "2026-05-14T100000Z-" + kpi.alaya_commit;
@@ -240,7 +240,7 @@ export async function writeShardRoot(
     "utf8"
   );
   await writeFile(path.join(entryRoot, "report.md"), "report\n", "utf8");
-  if (diagnostics !== undefined) {
+  if (diagnostics !== null) {
     await writeFile(
       path.join(entryRoot, LONGMEMEVAL_DIAGNOSTICS_FILENAME),
       JSON.stringify(diagnostics, null, 2) + "\n",

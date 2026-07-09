@@ -245,9 +245,8 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
 function buildFusedRankByCandidateKey(
   prelim: readonly PreliminaryFusionCandidate[]
 ): ReadonlyMap<string, number> {
-  // Facet overlap stays lexicographic-first: on LongMemEval flood-on, score-first
-  // let fuel_verified topic neighbors occupy top5 (F1 100Q −3pp / 500Q −0.8pp).
-  // Flood/RRF fused_score reorders only within the same facet-overlap tier.
+  // invariant: facet overlap is lexicographic-first; flood/RRF fused_score
+  // reorders only within the same facet-overlap tier.
   const ranked = [...prelim].sort((left, right) => {
     const facetDelta = right.facetOverlapCount - left.facetOverlapCount;
     if (facetDelta !== 0) {

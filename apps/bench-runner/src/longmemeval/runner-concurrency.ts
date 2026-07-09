@@ -42,6 +42,26 @@ export function freezeProcessEnvForWorkers(
   return Object.freeze({ ...env, ...overrides });
 }
 
+/** Shared ONNX single-flight lock for concurrent env-embedding workers. */
+export function buildLongMemEvalWorkerEnvOverrides(input: {
+  readonly concurrency: number;
+  readonly embeddingMode: LongMemEvalRunOptions["embeddingMode"];
+  readonly shardRoot: string;
+  readonly historyRoot: string;
+}): NodeJS.ProcessEnv {
+  const overrides: NodeJS.ProcessEnv = {
+    ALAYA_BENCH_ARTIFACT_ROOT: join(input.historyRoot, ".bench-artifacts")
+  };
+  if (input.concurrency > 1 && input.embeddingMode === "env") {
+    overrides.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
+    overrides.ALAYA_LOCAL_ONNX_LOCK_PATH = join(
+      input.shardRoot,
+      "local-onnx-inference.lock"
+    );
+  }
+  return overrides;
+}
+
 export function resolveLongMemEvalConcurrency(opts: LongMemEvalRunOptions): number {
   const raw = opts.concurrency ?? 1;
   return Math.max(1, Math.floor(raw));
@@ -140,9 +160,15 @@ export async function runLongMemEvalConcurrent(
         const status = await spawnWorker({
           cliPath,
           args: buildWorkerCliArgs(opts, plan),
-          env: freezeProcessEnvForWorkers(process.env, {
-            ALAYA_BENCH_ARTIFACT_ROOT: join(plan.historyRoot, ".bench-artifacts")
-          }),
+          env: freezeProcessEnvForWorkers(
+            process.env,
+            buildLongMemEvalWorkerEnvOverrides({
+              concurrency,
+              embeddingMode: opts.embeddingMode,
+              shardRoot,
+              historyRoot: plan.historyRoot
+            })
+          ),
           logPath
         });
         if (status !== 0) {

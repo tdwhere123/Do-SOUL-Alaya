@@ -1,74 +1,27 @@
 import { DELIVERY_BUDGET_LOSS_RANK } from "./delivery-miss-taxonomy.js";
 import type {
   BenchEmbeddingProviderState,
-  CandidateDiagnostic,
-  DiagnosticAxisContributions,
-  DiagnosticAxisRanks,
-  DiagnosticFloodFuelCoverage,
-  DiagnosticFloodPotential,
-  DiagnosticScoreFactors,
   LongMemEvalGoldDiagnostic,
   LongMemEvalGraphExpansionPlaneCountPerEdgeType,
   LongMemEvalGraphExpansionPlaneCountPerHop,
-  NarrowRecallDiagnostics,
-  ReadCandidateDiagnosticsResult
+  NarrowRecallDiagnostics
 } from "./diagnostics-types.js";
+import {
+  buildObjectIdentityKey,
+  readCandidates,
+  readNumber,
+  readNumberRecord,
+  readRecord,
+  readString
+} from "./diagnostics-candidate-readers.js";
 
-const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
-  "protected_winner",
-  "activation",
-  "object_probe",
-  "lexical",
-  "evidence_anchor",
-  "domain_tag_cluster",
-  "session_surface_cohort",
-  "source_proximity",
-  "graph_expansion",
-  "path_expansion",
-  "semantic_supplement"
-] as const);
+export { buildObjectIdentityKey };
 
 // Recall admission-plane label for the multi-session cohort plane. Cohort
 // fan-in KPIs key on this plane to measure how the session cohort
 // representative converts to delivered top-5 gold.
 // see also: packages/core/src/recall/recall-service.ts addContentDerivedExpansionCandidates.
 export const COHORT_PLANE = "session_surface_cohort";
-
-const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
-  ...DIAGNOSTIC_ADMISSION_PLANES,
-  ...DIAGNOSTIC_ADMISSION_PLANES.map((plane) => `plane:${plane}`),
-  "query_probe_lexical",
-  "warm_cascade",
-  "cold_cascade",
-  "semantic_supplement",
-  "graph_support",
-  "path_plasticity",
-  "ranked_recall",
-  "workspace_local",
-  "project",
-  "global",
-  "advisory",
-  // Lexical-coverage source channels: word-level/exact lexical FTS,
-  // deterministic query-expansion hits, and the evidence-capsule FTS join.
-  // Listed so per-plane coverage counts them. The trigram substring lane is
-  // a fusion stream (per_stream_rank.trigram_fts), not a source channel, so
-  // it is intentionally absent here.
-  "lexical",
-  "lexical_expanded",
-  "evidence_fts"
-]);
-
-const DELIVERY_STAGE_ACTIONS = new Set(["noop", "kept", "promoted", "displaced"]);
-
-interface FusionBreakdownDiagnostic {
-  readonly candidateKey: string;
-  readonly objectId: string;
-  readonly objectKind: string;
-  readonly perAxisRank: DiagnosticAxisRanks | null;
-  readonly perAxisContribution: DiagnosticAxisContributions | null;
-  readonly floodPotential: DiagnosticFloodPotential | null;
-  readonly floodFuelCoverage: DiagnosticFloodFuelCoverage | null;
-}
 
 export function readRecallDiagnostics(
   recallResult: unknown,
@@ -99,339 +52,10 @@ export function readRecallDiagnostics(
   };
 }
 
-function readCandidates(
-  diagnostics: Readonly<Record<string, unknown>>
-): ReadCandidateDiagnosticsResult {
-  const source =
-    readArray(diagnostics.candidate_pool) ??
-    readArray(diagnostics.candidates) ??
-    readArray(diagnostics.pool);
-  const fusionBreakdown = readFusionBreakdownDiagnostics(diagnostics.fusion_breakdown);
-  const byObjectId = new Map<string, CandidateDiagnostic>();
-  const byObjectIdentity = new Map<string, CandidateDiagnostic>();
-  const byCandidateKey = new Map<string, CandidateDiagnostic>();
-  const mutableKeysByObjectId = new Map<string, string[]>();
-  const rows = source ?? [];
-  for (let i = 0; i < rows.length; i++) {
-    const raw = rows[i];
-    if (raw === null || typeof raw !== "object") continue;
-    const record = raw as Readonly<Record<string, unknown>>;
-    const objectId =
-      readString(record.object_id) ??
-      readString(record.memory_id) ??
-      readString(record.id);
-    if (objectId === null) continue;
-    const originPlane = readString(record.origin_plane) ?? "workspace_local";
-    const objectKind = readString(record.object_kind) ?? "memory_entry";
-    const candidateKey =
-      readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`;
-    const fusion = matchingFusionBreakdown(
-      fusionBreakdown.byCandidateKey.get(candidateKey),
-      objectId,
-      objectKind
-    );
-    const candidate: CandidateDiagnostic = {
-      candidateKey,
-      objectId,
-      objectKind,
-      createdAt: readString(record.created_at),
-      facetOverlap: readNumber(record.facet_overlap),
-      dimension: readString(record.dimension),
-      originPlane,
-      preBudgetRank:
-        readNumber(record.pre_budget_rank) ?? readNumber(record.internal_rank),
-      selectionOrder: readNumber(record.selection_order),
-      finalRank: readNumber(record.final_rank) ?? readNumber(record.rank),
-      fusedRank: readNumber(record.fused_rank),
-      fusedScore: readNumber(record.fused_score),
-      perStreamRank: readNullableNumberRecord(record.per_stream_rank),
-      fusedRankContributionPerStream:
-        readNumberRecord(record.fused_rank_contribution_per_stream),
-      perAxisRank:
-        readNullableNumberRecord(record.per_axis_rank) ?? fusion?.perAxisRank ?? null,
-      perAxisContribution:
-        readNumberRecord(record.per_axis_contribution) ?? fusion?.perAxisContribution ?? null,
-      floodPotential:
-        readFloodPotential(record.flood_potential) ?? fusion?.floodPotential ?? null,
-      floodFuelCoverage:
-        readFloodFuelCoverage(record.flood_fuel_coverage) ?? fusion?.floodFuelCoverage ?? null,
-      planeFirstAdmitted: readString(record.plane_first_admitted),
-      planeWinningAdmission:
-        readString(record.plane_winning_admission) ??
-        lastString(readStringArray(record.admission_planes)),
-      sourcePlanes:
-        readDiagnosticLabelArray(record.source_planes) ??
-        readDiagnosticLabelArray(record.planes) ??
-        readDiagnosticLabelArray(record.admission_planes) ??
-        [],
-      lexicalRank: readNumber(record.lexical_rank),
-      structuralScore: readNumber(record.structural_score),
-      scoreFactors: readScoreFactors(record.score_factors),
-      sourceChannels: readDiagnosticLabelArray(record.source_channels) ?? [],
-      budgetDropReason:
-        readString(record.budget_drop_reason) ??
-        readString(record.drop_reason) ??
-        readString(record.dropped_reason),
-      rankAfterFusion: readNumber(record.rank_after_fusion),
-      rankAfterFeatureRerank: readNumber(record.rank_after_feature_rerank),
-      rankAfterLexicalPriority: readNumber(record.rank_after_lexical_priority),
-      rankAfterSynthesisReserve: readNumber(record.rank_after_synthesis_reserve),
-      rankAfterStructuralReserve: readNumber(record.rank_after_structural_reserve),
-      rankAfterCoverageSelector: readNumber(record.rank_after_coverage_selector),
-      rankAfterSessionCoverage: readNumber(record.rank_after_session_coverage),
-      coverageSelectorAction: readDeliveryStageAction(record.coverage_selector_action),
-      sessionCoverageAction: readDeliveryStageAction(record.session_coverage_action),
-      sessionKey: readString(record.session_key),
-      sourceCohortKey: readString(record.source_cohort_key),
-      reservedBy: readString(record.reserved_by)
-    };
-    const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);
-    byCandidateKey.set(candidate.candidateKey, candidate);
-    const existingByIdentity = byObjectIdentity.get(objectIdentityKey);
-    if (
-      existingByIdentity === undefined ||
-      shouldPreferCandidateDiagnostic(candidate, existingByIdentity)
-    ) {
-      byObjectIdentity.set(objectIdentityKey, candidate);
-    }
-    const keysForObject = mutableKeysByObjectId.get(objectId) ?? [];
-    keysForObject.push(candidate.candidateKey);
-    mutableKeysByObjectId.set(objectId, keysForObject);
-    const existing = byObjectId.get(objectId);
-    if (existing === undefined || shouldPreferCandidateDiagnostic(candidate, existing)) {
-      byObjectId.set(objectId, candidate);
-    }
-  }
-  const keysByObjectId = new Map(
-    [...mutableKeysByObjectId.entries()].map(([objectId, keys]) => [
-      objectId,
-      Object.freeze([...keys].sort())
-    ] as const)
-  );
-  return {
-    candidatePoolComplete: source !== null,
-    byObjectId: Object.freeze(byObjectId),
-    byObjectIdentity: Object.freeze(byObjectIdentity),
-    byCandidateKey: Object.freeze(byCandidateKey),
-    keysByObjectId: Object.freeze(keysByObjectId)
-  };
-}
-
-function matchingFusionBreakdown(
-  fusion: FusionBreakdownDiagnostic | undefined,
-  objectId: string,
-  objectKind: string
-): FusionBreakdownDiagnostic | undefined {
-  if (
-    fusion === undefined ||
-    fusion.objectId !== objectId ||
-    fusion.objectKind !== objectKind
-  ) {
-    return undefined;
-  }
-  return fusion;
-}
-
-function readFusionBreakdownDiagnostics(value: unknown): Readonly<{
-  readonly byCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>;
-}> {
-  const source = readArray(value) ?? [];
-  const byCandidateKey = new Map<string, FusionBreakdownDiagnostic>();
-  for (const raw of source) {
-    const record = readRecord(raw);
-    if (record === null) continue;
-    const candidateKey = readString(record.candidate_key);
-    const objectId = readString(record.object_id);
-    if (candidateKey === null || objectId === null) continue;
-    const objectKind = readString(record.object_kind) ?? "memory_entry";
-    const diagnostic: FusionBreakdownDiagnostic = {
-      candidateKey,
-      objectId,
-      objectKind,
-      perAxisRank: readNullableNumberRecord(record.per_axis_rank),
-      perAxisContribution: readNumberRecord(record.per_axis_contribution),
-      floodPotential: readFloodPotential(record.flood_potential),
-      floodFuelCoverage: readFloodFuelCoverage(record.flood_fuel_coverage)
-    };
-    byCandidateKey.set(candidateKey, diagnostic);
-  }
-  return Object.freeze({
-    byCandidateKey: Object.freeze(byCandidateKey)
-  });
-}
-
-function readFloodPotential(value: unknown): DiagnosticFloodPotential | null {
-  const record = readRecord(value);
-  if (record === null) return null;
-  const numeric = readRequiredNumbers(record, [
-    "R_obj",
-    "Slice",
-    "A_path",
-    "B_evidence",
-    "E_direct",
-    "omega",
-    "Flood",
-    "lambda",
-    "beta",
-    "final_score"
-  ]);
-  if (numeric === null) return null;
-  const sliceStatus = readString(record.slice_status);
-  const pathStatus = readString(record.path_status);
-  const evidenceStatus = readString(record.evidence_status);
-  const eDirectStatus = readString(record.e_direct_status);
-  if (
-    sliceStatus === null ||
-    pathStatus === null ||
-    evidenceStatus === null ||
-    eDirectStatus === null ||
-    typeof record.fuel_verified !== "boolean"
-  ) {
-    return null;
-  }
-  return Object.freeze({
-    R_obj: numeric.R_obj,
-    Slice: numeric.Slice,
-    A_path: numeric.A_path,
-    B_evidence: numeric.B_evidence,
-    E_direct: numeric.E_direct,
-    omega: numeric.omega,
-    Flood: numeric.Flood,
-    lambda: numeric.lambda,
-    beta: numeric.beta,
-    final_score: numeric.final_score,
-    slice_status: sliceStatus,
-    path_status: pathStatus,
-    evidence_status: evidenceStatus,
-    e_direct_status: eDirectStatus,
-    fuel_verified: record.fuel_verified
-  });
-}
-
-function readFloodFuelCoverage(value: unknown): DiagnosticFloodFuelCoverage | null {
-  const record = readRecord(value);
-  if (record === null) return null;
-  const numeric = readRequiredNonNegativeIntegers(record, [
-    "candidates_total",
-    "cold_start_count",
-    "fuel_verified_count",
-    "slice_active_count",
-    "path_active_count",
-    "evidence_active_count"
-  ]);
-  if (numeric === null) return null;
-  return Object.freeze({
-    candidates_total: numeric.candidates_total,
-    cold_start_count: numeric.cold_start_count,
-    fuel_verified_count: numeric.fuel_verified_count,
-    slice_active_count: numeric.slice_active_count,
-    path_active_count: numeric.path_active_count,
-    evidence_active_count: numeric.evidence_active_count
-  });
-}
-
-function readRequiredNonNegativeIntegers<T extends string>(
-  record: Readonly<Record<string, unknown>>,
-  keys: readonly T[]
-): Readonly<Record<T, number>> | null {
-  const result = {} as Record<T, number>;
-  for (const key of keys) {
-    const value = record[key];
-    if (
-      typeof value !== "number" ||
-      !Number.isInteger(value) ||
-      value < 0
-    ) {
-      return null;
-    }
-    result[key] = value;
-  }
-  return Object.freeze(result);
-}
-
-function readRequiredNumbers<T extends string>(
-  record: Readonly<Record<string, unknown>>,
-  keys: readonly T[]
-): Readonly<Record<T, number>> | null {
-  const result = {} as Record<T, number>;
-  for (const key of keys) {
-    const value = readNumber(record[key]);
-    if (value === null) return null;
-    result[key] = value;
-  }
-  return Object.freeze(result);
-}
-
-function readDeliveryStageAction(
-  value: unknown
-): "noop" | "kept" | "promoted" | "displaced" | null {
-  const raw = readString(value);
-  if (raw === null || !DELIVERY_STAGE_ACTIONS.has(raw)) {
-    return null;
-  }
-  return raw as "noop" | "kept" | "promoted" | "displaced";
-}
-
-export function buildObjectIdentityKey(objectKind: string, objectId: string): string {
-  return `${objectKind}:${objectId}`;
-}
-
 export function isLongMemEvalGoldEligibleDiagnosticResult(
   result: Readonly<{ readonly object_kind?: string | null }>
 ): boolean {
   return (result.object_kind ?? "memory_entry") === "memory_entry";
-}
-
-function shouldPreferCandidateDiagnostic(
-  candidate: CandidateDiagnostic,
-  existing: CandidateDiagnostic
-): boolean {
-  const candidateFinal = candidate.finalRank ?? Number.MAX_SAFE_INTEGER;
-  const existingFinal = existing.finalRank ?? Number.MAX_SAFE_INTEGER;
-  if (candidateFinal !== existingFinal) {
-    return candidateFinal < existingFinal;
-  }
-
-  const candidateFused = candidate.fusedRank ?? Number.MAX_SAFE_INTEGER;
-  const existingFused = existing.fusedRank ?? Number.MAX_SAFE_INTEGER;
-  if (candidateFused !== existingFused) {
-    return candidateFused < existingFused;
-  }
-
-  if (candidate.originPlane !== existing.originPlane) {
-    return candidate.originPlane === "workspace_local";
-  }
-
-  return candidate.candidateKey.localeCompare(existing.candidateKey) < 0;
-}
-
-function readScoreFactors(value: unknown): DiagnosticScoreFactors | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Readonly<Record<string, unknown>>;
-  const result: Record<string, unknown> = {};
-  for (const [key, raw] of Object.entries(record)) {
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      result[key] = raw;
-      continue;
-    }
-    const nested = readNumberRecord(raw);
-    if (nested !== null) {
-      result[key] = nested;
-    }
-  }
-  return Object.keys(result).length === 0 ? null : Object.freeze(result);
-}
-
-function readNumberRecord(value: unknown): Readonly<Record<string, number>> | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Readonly<Record<string, unknown>>;
-  const result: Record<string, number> = {};
-  for (const [key, raw] of Object.entries(record)) {
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      result[key] = raw;
-    }
-  }
-  return Object.keys(result).length === 0 ? null : Object.freeze(result);
 }
 
 export function readGraphExpansionPlaneCountPerHop(
@@ -484,20 +108,6 @@ function freezeGraphExpansionPlaneCountPerEdgeType(input: {
     recalls: input.recalls,
     supports: input.supports
   });
-}
-
-function readNullableNumberRecord(value: unknown): Readonly<Record<string, number | null>> | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Readonly<Record<string, unknown>>;
-  const result: Record<string, number | null> = {};
-  for (const [key, raw] of Object.entries(record)) {
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      result[key] = raw;
-    } else if (raw === null) {
-      result[key] = null;
-    }
-  }
-  return Object.keys(result).length === 0 ? null : Object.freeze(result);
 }
 
 function readProviderState(
@@ -603,40 +213,3 @@ export function hasStructuralPlane(planes: readonly string[]): boolean {
   );
 }
 
-function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Readonly<Record<string, unknown>>;
-}
-
-function readArray(value: unknown): readonly unknown[] | null {
-  return Array.isArray(value) ? value : null;
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function readNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function readStringArray(value: unknown): readonly string[] | null {
-  if (!Array.isArray(value)) return null;
-  const strings = value.filter(
-    (item): item is string => typeof item === "string" && item.length > 0
-  );
-  return strings.length === value.length ? strings : null;
-}
-
-function readDiagnosticLabelArray(value: unknown): readonly string[] | null {
-  const strings = readStringArray(value);
-  if (strings === null) return null;
-  return strings.filter((item) => DIAGNOSTIC_SOURCE_LABELS.has(item));
-}
-
-function lastString(values: readonly string[] | null): string | null {
-  if (values === null || values.length === 0) return null;
-  return values[values.length - 1] ?? null;
-}

@@ -74,8 +74,8 @@ export interface AlayaDaemonRuntimeServices {
     EmbeddingRecallService,
     "warmQueryEmbeddings" | "coherentPairKeys"
   >;
-  // S2 answers_with: HQ answer-overlap pair source over memory_hq; null when the
-  // store is unavailable. Inert until a flag-gated producer (bench/garden) drives it.
+  // invariant: answers_with crystallizer is always-on when the HQ repo is
+  // present; null hqRepo → no mint.
   readonly answersWithPairSource?: AnswerCoRelevancePairSourcePort;
   readonly graphHealthService: GraphHealthService;
   readonly configService: Pick<AppConfigService, "getGardenCredentialProvenance" | "getRuntimeGardenComputeConfig">;

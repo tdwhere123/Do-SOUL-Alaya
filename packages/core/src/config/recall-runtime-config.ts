@@ -17,7 +17,7 @@ export interface RecallRuntimeConfig {
   readonly confFloodCapTotal: number | undefined;
   readonly pathEmbModulation: string | undefined;
   readonly structuralReserve: string | undefined;
-  /** Card E I1: refuse delivery stages that hard-evict fusion rank ≤K. Default off. */
+  /** Refuse delivery stages that hard-evict fusion rank ≤K. Default off. */
   readonly fusionRankFloor: string | undefined;
   readonly projectionsEnabled: boolean;
   readonly temporalWindowEnabled: boolean;

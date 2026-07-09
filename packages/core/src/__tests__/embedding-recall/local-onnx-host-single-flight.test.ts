@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   localOnnxHostSingleFlightEnabled,
   resolveLocalOnnxHostLockPath,
+  shouldAttemptStaleLockReclaim,
   withLocalOnnxHostSingleFlight
 } from "../../embedding-recall/local-onnx-host-single-flight.js";
 
@@ -87,5 +88,38 @@ describe("local-onnx-host-single-flight", () => {
         }
       })
     ).rejects.toThrow(/timed out/);
+  });
+
+  it("reclaims a lock whose first line is a dead PID", async () => {
+    const root = mkdtempSync(join(tmpdir(), "alaya-onnx-lock-"));
+    roots.push(root);
+    const lockPath = join(root, "stale.lock");
+    // PID 1<<30 is far outside typical OS pid ranges and is not running.
+    writeFileSync(lockPath, `${1 << 30}\n2020-01-01T00:00:00.000Z\n`, { flag: "wx" });
+    const value = await withLocalOnnxHostSingleFlight(async () => "reclaimed", {
+      enabled: true,
+      lockPath,
+      retryMs: 5,
+      timeoutMs: 2_000
+    });
+    expect(value).toBe("reclaimed");
+  });
+
+  it("throttles reclaim attempts to at most once per interval", () => {
+    // First attempt always allowed; subsequent polls within 1000ms are skipped.
+    expect(shouldAttemptStaleLockReclaim(undefined, 0, 1_000)).toBe(true);
+    expect(shouldAttemptStaleLockReclaim(0, 25, 1_000)).toBe(false);
+    expect(shouldAttemptStaleLockReclaim(0, 999, 1_000)).toBe(false);
+    expect(shouldAttemptStaleLockReclaim(0, 1_000, 1_000)).toBe(true);
+    // ~100 polls at 25ms over 2500ms → at most 3 reclaim windows, not 100.
+    let lastReclaimAt: number | undefined;
+    let reclaimAttempts = 0;
+    for (let t = 0; t <= 2_500; t += 25) {
+      if (shouldAttemptStaleLockReclaim(lastReclaimAt, t, 1_000)) {
+        reclaimAttempts += 1;
+        lastReclaimAt = t;
+      }
+    }
+    expect(reclaimAttempts).toBe(3);
   });
 });

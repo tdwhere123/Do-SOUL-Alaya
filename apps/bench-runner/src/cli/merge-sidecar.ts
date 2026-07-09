@@ -12,9 +12,14 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
   shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
   evidence: LongMemEvalArchiveEvidenceSummary
 ): MergedLongMemEvalDiagnosticsPayload {
-  const questions = shardDiagnostics.flatMap(
-    (diagnostics) => diagnostics?.questions ?? []
-  );
+  const questions = shardDiagnostics.flatMap((diagnostics) => {
+    if (diagnostics === null) {
+      throw new Error(
+        "merge refused: missing diagnostics sidecar for one or more shards"
+      );
+    }
+    return diagnostics.questions ?? [];
+  });
   assertMergedDiagnosticsQuestionsMatchKpi(payload, questions);
   const questionCount = shardDiagnostics.reduce(
     (sum, diagnostics) => sum + diagnosticQuestionCount(diagnostics),

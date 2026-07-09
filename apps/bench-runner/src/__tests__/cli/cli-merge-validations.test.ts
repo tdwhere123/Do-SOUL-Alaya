@@ -317,6 +317,39 @@ describe("merge-longmemeval validations", () => {
     expect(merged.kpi.full_gold_coverage).toBeUndefined();
   });
 
+  it("fails merge when a shard is missing its diagnostics sidecar", async () => {
+    const shard = path.join(tmpRoot, "shard-missing-diagnostics");
+    await writeShardRoot(
+      shard,
+      makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-missing-diag", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      null
+    );
+
+    const historyRoot = path.join(tmpRoot, "history-missing-diagnostics");
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      historyRoot,
+      "--shards",
+      shard
+    ]);
+
+    expect(exitCode).not.toBe(0);
+    expect(stderrBuf).toMatch(
+      /missing diagnostics sidecar for shard root=.*slug=/
+    );
+  });
+
   it("accepts latest-passing and legacy latest-baseline shard pointers", async () => {
     const shardA = path.join(tmpRoot, "shard-passing");
     const shardB = path.join(tmpRoot, "shard-baseline");

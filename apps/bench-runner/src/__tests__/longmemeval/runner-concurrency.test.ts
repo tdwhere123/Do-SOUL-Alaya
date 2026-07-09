@@ -12,11 +12,52 @@ import {
   writeLongMemEvalFixtureDataset
 } from "./longmemeval-fixture.js";
 import {
+  buildLongMemEvalWorkerEnvOverrides,
   buildLongMemEvalWorkerShardPlans,
+  freezeProcessEnvForWorkers,
   runLongMemEvalConcurrent,
   validateLongMemEvalConcurrency,
   type LongMemEvalWorkerSpawnOptions
 } from "../../longmemeval/runner-concurrency.js";
+
+describe("buildLongMemEvalWorkerEnvOverrides", () => {
+  it("adds shared ONNX single-flight env when concurrency>1 and embeddingMode=env", () => {
+    const shardRoot = "/tmp/lme-shards";
+    const historyRoot = join(shardRoot, "shard-0");
+    const env = freezeProcessEnvForWorkers(
+      {},
+      buildLongMemEvalWorkerEnvOverrides({
+        concurrency: 2,
+        embeddingMode: "env",
+        shardRoot,
+        historyRoot
+      })
+    );
+    expect(env.ALAYA_BENCH_ARTIFACT_ROOT).toBe(
+      join(historyRoot, ".bench-artifacts")
+    );
+    expect(env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBe("1");
+    expect(env.ALAYA_LOCAL_ONNX_LOCK_PATH).toBe(
+      join(shardRoot, "local-onnx-inference.lock")
+    );
+  });
+
+  it("preserves artifact root only when embedding is disabled", () => {
+    const shardRoot = "/tmp/lme-shards";
+    const historyRoot = join(shardRoot, "shard-0");
+    const env = buildLongMemEvalWorkerEnvOverrides({
+      concurrency: 2,
+      embeddingMode: "disabled",
+      shardRoot,
+      historyRoot
+    });
+    expect(env.ALAYA_BENCH_ARTIFACT_ROOT).toBe(
+      join(historyRoot, ".bench-artifacts")
+    );
+    expect(env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBeUndefined();
+    expect(env.ALAYA_LOCAL_ONNX_LOCK_PATH).toBeUndefined();
+  });
+});
 
 describe("buildLongMemEvalWorkerShardPlans", () => {
   it("splits the window evenly across process-backed workers", () => {
@@ -162,10 +203,11 @@ describe("runLongMemEvalConcurrent", () => {
     expect(spawnCalls).toHaveLength(2);
     expect(spawnCalls[0]?.args).not.toContain("--concurrency");
     for (const call of spawnCalls) {
-      const shardRoot = call.args[call.args.indexOf("--history-root") + 1];
+      const shardHistoryRoot = call.args[call.args.indexOf("--history-root") + 1];
       expect(call.env.ALAYA_BENCH_ARTIFACT_ROOT).toBe(
-        join(shardRoot as string, ".bench-artifacts")
+        join(shardHistoryRoot as string, ".bench-artifacts")
       );
+      expect(call.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBeUndefined();
     }
     expect(result.payload.evaluated_count).toBe(4);
     expect(result.kpiPath).toContain(historyRoot);
