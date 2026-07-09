@@ -27,7 +27,9 @@ export interface DeliverySelectionOrdering {
   readonly featureRerankedCandidates: readonly DeliverySelectionCandidate[];
   readonly prioritizedCandidates: readonly DeliverySelectionCandidate[];
   readonly coverageSelectedCandidates: readonly DeliverySelectionCandidate[];
+  /** Identity alias of coverageSelectedCandidates (session_coverage stage is noop). */
   readonly coverageOrderedCandidates: readonly DeliverySelectionCandidate[];
+  /** Post likelihood-tail-rescue order; wire name remains synthesis_reserve for compat. */
   readonly synthesisReservedCandidates: readonly DeliverySelectionCandidate[];
   readonly deliveryOrderedCandidates: readonly DeliverySelectionCandidate[];
 }
@@ -120,13 +122,15 @@ function buildPostFusionDeliveryOrdering(
     supplementaryData,
     window
   );
-  const coverageOrderedCandidates = coverageSelectedCandidates;
-  const synthesisReservedCandidates = applyLikelihoodTailRescue(
-    coverageOrderedCandidates,
+  // session_coverage is intentionally identity: keep diagnostic slots
+  // (rank_after_session_coverage / session_coverage_action) for warm-readiness
+  // without a second reorder pass.
+  const likelihoodRescuedCandidates = applyLikelihoodTailRescue(
+    coverageSelectedCandidates,
     maxEntries
   );
   const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
-    synthesisReservedCandidates,
+    likelihoodRescuedCandidates,
     supplementaryData,
     window,
     0
@@ -136,8 +140,9 @@ function buildPostFusionDeliveryOrdering(
     featureRerankedCandidates,
     prioritizedCandidates,
     coverageSelectedCandidates,
-    coverageOrderedCandidates,
-    synthesisReservedCandidates,
+    // Compat aliases: wire/diagnostics still say session_coverage / synthesis_reserve.
+    coverageOrderedCandidates: coverageSelectedCandidates,
+    synthesisReservedCandidates: likelihoodRescuedCandidates,
     deliveryOrderedCandidates
   });
 }

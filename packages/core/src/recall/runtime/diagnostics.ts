@@ -194,16 +194,27 @@ export function finalizeRecallCandidateDiagnostics(
         return Object.freeze({
           ...diagnostic,
           final_rank: deliveredRank,
+          post_rank: deliveredRank,
+          in_final_packet: true,
+          eviction_reason: null,
           dropped_reason: null,
           within_budget: true
         });
       }
       if (diagnostic.dropped_reason !== null) {
-        return diagnostic;
+        return Object.freeze({
+          ...diagnostic,
+          post_rank: diagnostic.final_rank,
+          in_final_packet: false,
+          eviction_reason: diagnostic.dropped_reason
+        });
       }
       return Object.freeze({
         ...diagnostic,
         final_rank: null,
+        post_rank: null,
+        in_final_packet: false,
+        eviction_reason: "max_entries" as const,
         dropped_reason: "max_entries" as const,
         within_budget: false
       });

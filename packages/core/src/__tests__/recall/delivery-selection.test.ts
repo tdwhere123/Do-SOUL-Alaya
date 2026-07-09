@@ -139,6 +139,9 @@ describe("applyDeliverySelection", () => {
     const result = applyDeliverySelection(ordered, supplementary(), 10);
     expect(result.ordering.deliveryOrderedCandidates[0]?.entry.object_id).toBe("a1");
     expect(result.ranks.rankAfterFusion.get("workspace_local:memory_entry:a1")).toBe(1);
+    // session_coverage remains an identity diagnostic slot (noop), not a reorder stage.
+    expect(result.ranks.sessionCoverageNoop).toBe(true);
+    expect(result.ordering.coverageOrderedCandidates).toBe(result.ordering.coverageSelectedCandidates);
   });
 
   it("rescues a rank-6 candidate with two strong likelihood streams over a weak rank-5", () => {

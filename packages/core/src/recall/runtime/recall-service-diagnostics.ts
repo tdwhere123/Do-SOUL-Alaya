@@ -149,6 +149,12 @@ export interface RecallCandidateDiagnostic {
   readonly flood_potential?: Readonly<IntegratedFloodCandidateDiagnostics>;
   readonly flood_fuel_coverage?: Readonly<FloodFuelCoverageSummary>;
   readonly final_rank: number | null;
+  /** MemTrace alias of final_rank after delivery selection. */
+  readonly post_rank?: number | null;
+  /** MemTrace alias of within_budget. */
+  readonly in_final_packet?: boolean;
+  /** MemTrace alias of dropped_reason. */
+  readonly eviction_reason?: RecallCandidateDropReason | null;
   readonly dropped_reason: RecallCandidateDropReason | null;
   readonly within_budget: boolean;
   readonly relevance_score: number;

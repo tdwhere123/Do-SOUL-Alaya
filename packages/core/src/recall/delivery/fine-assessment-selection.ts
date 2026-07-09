@@ -187,6 +187,10 @@ function createFineAssessmentDiagnostic(
       ? {}
       : { flood_fuel_coverage: candidate.fusion.flood_fuel_coverage }),
     final_rank: finalRank,
+    // MemTrace attribution aliases (Card E): derived from existing delivery fields.
+    post_rank: finalRank,
+    in_final_packet: droppedReason === null,
+    eviction_reason: droppedReason,
     dropped_reason: droppedReason,
     within_budget: droppedReason === null,
     relevance_score: candidate.effectiveScore,
@@ -270,6 +274,7 @@ function resolveReservedBy(
   rankAfterStruct: number | undefined,
   maxEntries: number
 ): "none" | "synthesis" | "structural" {
+  // Wire value "synthesis" means likelihood tail-rescue (historical stage name).
   if (rankAfterSyn !== undefined && rankAfterSyn <= maxEntries && (rankAfterLex === undefined || rankAfterLex > maxEntries)) {
     return "synthesis";
   }

@@ -183,6 +183,52 @@ describe("bench-run .do-it abstention and flood scripts", () => {
     });
   });
 
+  it("fails when diagnostics declare flood fuel coverage with zero fuel_verified_count", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "alaya-flood-zero-fuel-"));
+    const diagnosticsPath = path.join(dir, "longmemeval-diagnostics.json");
+    await writeFile(
+      diagnosticsPath,
+      JSON.stringify({
+        schema_version: 1,
+        embedding_mode: "env",
+        questions: [
+          {
+            question_id: "q-cold",
+            delivered_results: [
+              {
+                object_id: "cold-1",
+                flood_fuel_coverage: {
+                  candidates_total: 3,
+                  cold_start_count: 3,
+                  fuel_verified_count: 0,
+                  slice_active_count: 0,
+                  path_active_count: 0,
+                  evidence_active_count: 0
+                }
+              }
+            ]
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    await expect(
+      execFileAsync("node", [
+        "apps/bench-runner/scripts/check-flood-delivery-experiment.mjs",
+        "--diagnostics",
+        diagnosticsPath,
+        "--embedding",
+        "env"
+      ], {
+        cwd: rootDir,
+        env: { ...process.env, ALAYA_RECALL_ANSWERS_WITH: "1" }
+      })
+    ).rejects.toMatchObject({
+      stdout: expect.stringContaining("\"fuel_verified_ok\": false")
+    });
+  });
+
   it("does not let CLI embedding mode override diagnostics provenance", async () => {
     const diagnosticsPath = await writeDiagnosticsFixture({ embeddingMode: "disabled" });
 

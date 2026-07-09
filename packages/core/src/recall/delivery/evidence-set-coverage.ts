@@ -2,7 +2,9 @@ import { recallEnvRaw, recallAnswersWithEnabled } from "../../config/recall-env-
 import type { RecallSupplementaryData } from "../runtime/recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
 
-const SESSION_COVERAGE_BONUS = 0.06;
+// Evidence-set completion nudge for same-session evidence members already
+// anchored in the selected set. Historical name SESSION_COVERAGE_BONUS.
+const EVIDENCE_SET_COMPLETION_BONUS = 0.06;
 const MAX_CLUSTER_BONUS = 0.06;
 export const MAX_EVIDENCE_SET_BONUS = 0.1;
 
@@ -81,7 +83,7 @@ export function evidenceSetCoverageBonus(
 ): number {
   let bonus = 0;
   if (state.anchorSessions.has(sessionKeyOf(candidate.entry)) && isEvidenceMember(candidate, supplementaryData)) {
-    bonus += SESSION_COVERAGE_BONUS;
+    bonus += EVIDENCE_SET_COMPLETION_BONUS;
   }
   // When answers_with flood is live, path π already votes via A_path (and was
   // deduped out of path_expansion RRF). Re-applying cluster weight here is a
