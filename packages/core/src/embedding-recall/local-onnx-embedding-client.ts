@@ -1,4 +1,5 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
+import { withLocalOnnxHostSingleFlight } from "./local-onnx-host-single-flight.js";
 import { withTimeout } from "./local-onnx-embedding-timeout.js";
 import os from "node:os";
 import path from "node:path";
@@ -143,33 +144,37 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
       return Object.freeze([]);
     }
 
-    const extractor = await this.loadExtractor();
-    const run = extractor([...texts], { pooling: "mean", normalize: true });
-    const output = await withTimeout(run, options.timeoutMs, options.signal);
-    const rows = output.tolist();
-    if (rows.length !== texts.length) {
-      throw new Error(
-        `Local ONNX embedding returned ${rows.length} vectors for ${texts.length} inputs.`
-      );
-    }
-
-    const vectors = rows.map((row, index) => {
-      if (!Array.isArray(row) || row.length === 0) {
-        throw new Error(`Local ONNX embedding row ${index} was empty.`);
-      }
-      if (row.length !== LOCAL_ONNX_EMBEDDING_DIMENSIONS) {
+    // Host single-flight (env-gated) serializes ONNX inference across shard
+    // processes so parallel LongMemEval gates do not oversubscribe CPUs.
+    return withLocalOnnxHostSingleFlight(async () => {
+      const extractor = await this.loadExtractor();
+      const run = extractor([...texts], { pooling: "mean", normalize: true });
+      const output = await withTimeout(run, options.timeoutMs, options.signal);
+      const rows = output.tolist();
+      if (rows.length !== texts.length) {
         throw new Error(
-          `Local ONNX embedding row ${index} had ${row.length} dimensions; ` +
-            `expected ${LOCAL_ONNX_EMBEDDING_DIMENSIONS}.`
+          `Local ONNX embedding returned ${rows.length} vectors for ${texts.length} inputs.`
         );
       }
-      return new Float32Array(row);
+
+      const vectors = rows.map((row, index) => {
+        if (!Array.isArray(row) || row.length === 0) {
+          throw new Error(`Local ONNX embedding row ${index} was empty.`);
+        }
+        if (row.length !== LOCAL_ONNX_EMBEDDING_DIMENSIONS) {
+          throw new Error(
+            `Local ONNX embedding row ${index} had ${row.length} dimensions; ` +
+              `expected ${LOCAL_ONNX_EMBEDDING_DIMENSIONS}.`
+          );
+        }
+        return new Float32Array(row);
+      });
+      // A successful pipeline run resets the dynamic health state — even if
+      // the provider was in the backoff window after a prior failure run.
+      this.currentlyAvailable = true;
+      this.consecutiveLoadFailures = 0;
+      return Object.freeze(vectors);
     });
-    // A successful pipeline run resets the dynamic health state — even if
-    // the provider was in the backoff window after a prior failure run.
-    this.currentlyAvailable = true;
-    this.consecutiveLoadFailures = 0;
-    return Object.freeze(vectors);
   }
 
   private loadExtractor(): Promise<LocalOnnxFeatureExtractor> {

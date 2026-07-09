@@ -31,6 +31,7 @@ export * from "./path-graph/edge-proposals/edge-proposal-service.js";
 export * from "./embedding-recall/embedding-recall-service.js";
 export * from "./embedding-recall/embed-text-resolver.js";
 export * from "./embedding-recall/local-onnx-embedding-client.js";
+export * from "./embedding-recall/local-onnx-host-single-flight.js";
 export * from "./runs/engine-binding-service.js";
 export * from "./shared/errors.js";
 export * from "./runtime/async-side-effect-auditor.js";
