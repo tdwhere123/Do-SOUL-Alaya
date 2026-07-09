@@ -162,13 +162,7 @@ function applyLikelihoodTailRescue(
 
   const incumbentIndex = headSize - 1;
   const incumbent = orderedCandidates[incumbentIndex];
-  // Fuel-verified flood incumbents already carry structural corroboration;
-  // lexical tail rescue must not evict them from the delivery head.
-  if (
-    incumbent === undefined ||
-    !isWeakLikelihoodIncumbent(incumbent) ||
-    incumbent.fusion.flood_potential?.fuel_verified === true
-  ) {
+  if (incumbent === undefined || !isWeakLikelihoodIncumbent(incumbent)) {
     return orderedCandidates;
   }
 
