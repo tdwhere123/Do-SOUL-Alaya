@@ -14,6 +14,7 @@ export interface LongMemEvalHitScoringInput {
     readonly object_id: string;
     readonly object_kind?: string;
     readonly relevance_score: number;
+    readonly abstention_confidence_score?: number | null;
   }[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
   readonly answerSessionIds: ReadonlySet<string>;

@@ -6,7 +6,8 @@ import {
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import type {
   EmbeddingRecallServiceDependencies,
-  EmbeddingVectorRecord
+  EmbeddingVectorRecord,
+  PreparedEmbeddingQuerySnapshot
 } from "./types.js";
 
 export async function scoreEmbeddingPoolCandidates(params: {
@@ -16,7 +17,8 @@ export async function scoreEmbeddingPoolCandidates(params: {
   readonly objectIds: readonly string[];
   readonly embeddingRepo: EmbeddingRecallServiceDependencies["embeddingRepo"];
   readonly provider: EmbeddingRecallServiceDependencies["provider"];
-  readonly queryEngine: Pick<QueryEmbeddingEngine, "resolveQueryEmbeddingNow">;
+  readonly queryEngine: Pick<QueryEmbeddingEngine, "prepareQueryEmbedding">;
+  readonly queryTimeoutMs: number;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }): Promise<ReadonlyMap<string, number>> {
   const empty: ReadonlyMap<string, number> = new Map<string, number>();
@@ -40,7 +42,7 @@ export async function scoreEmbeddingPoolCandidates(params: {
   }
   let queryEmbedding: Float32Array | null;
   try {
-    queryEmbedding = await params.queryEngine.resolveQueryEmbeddingNow(params.queryText);
+    queryEmbedding = await resolvePoolQueryEmbedding(params);
   } catch (error) {
     params.warn("pool embedding rescoring degraded", {
       workspace_id: params.workspaceId,
@@ -54,6 +56,36 @@ export async function scoreEmbeddingPoolCandidates(params: {
     return empty;
   }
   return scoreMatchedVectors(queryEmbedding, storedVectors, params.provider);
+}
+
+async function resolvePoolQueryEmbedding(params: {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryText: string;
+  readonly queryEngine: Pick<QueryEmbeddingEngine, "prepareQueryEmbedding">;
+  readonly queryTimeoutMs: number;
+}): Promise<Float32Array> {
+  const preparedQuery = params.queryEngine.prepareQueryEmbedding({
+    workspaceId: params.workspaceId,
+    runId: params.runId,
+    queryText: params.queryText
+  });
+  const initialSnapshot = preparedQuery.getSnapshot();
+  const snapshot =
+    initialSnapshot.status === "pending" && typeof preparedQuery.waitForSnapshot === "function"
+      ? await preparedQuery.waitForSnapshot(params.queryTimeoutMs)
+      : initialSnapshot;
+  return embeddingFromSnapshot(snapshot);
+}
+
+function embeddingFromSnapshot(snapshot: PreparedEmbeddingQuerySnapshot): Float32Array {
+  if (snapshot.status === "ready") {
+    return snapshot.embedding;
+  }
+  if (snapshot.status === "failed") {
+    throw new Error(snapshot.error_message ?? snapshot.reason);
+  }
+  throw new Error("query_embedding_pending");
 }
 
 function scoreMatchedVectors(

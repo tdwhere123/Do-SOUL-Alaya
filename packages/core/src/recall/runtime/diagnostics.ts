@@ -121,6 +121,7 @@ function freezeFusionBreakdown(
       object_id: candidate.object_id,
       object_kind: candidate.object_kind,
       origin_plane: candidate.origin_plane,
+      facet_overlap: candidate.facet_overlap,
       per_stream_rank: candidate.per_stream_rank,
       fused_rank: candidate.fused_rank,
       fused_score: candidate.fused_score,

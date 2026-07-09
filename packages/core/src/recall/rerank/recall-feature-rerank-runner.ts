@@ -10,7 +10,8 @@ import { computeRerankFeatures } from "./recall-feature-rerank-scoring.js";
 export function rerankTopN<T>(
   query: Readonly<RecallQueryProbes>,
   candidates: readonly RerankCandidate<T>[],
-  topN: number = RECALL_RERANK_TOP_N
+  topN: number = RECALL_RERANK_TOP_N,
+  protectedTopK: number = 0
 ): readonly T[] {
   if (candidates.length === 0) {
     return Object.freeze([]);
@@ -27,7 +28,8 @@ export function rerankTopN<T>(
   const poolIdf = buildRerankPoolIdf(head.map((candidate) => candidate.text.content));
   const maxFusion = resolveHeadMaxFusionScore(head);
   const reordered = rankRerankHead(query, head, poolIdf, maxFusion);
-  return appendRerankTail(reordered, tail);
+  const protectedHead = applyProtectedHeadFloor(head, reordered, protectedTopK);
+  return appendRerankTail(protectedHead, tail);
 }
 
 function resolveRerankCut(topN: number, candidateCount: number): number {
@@ -84,5 +86,32 @@ function appendRerankTail<T>(
   return Object.freeze([
     ...reordered.map((entry) => entry.item),
     ...tail.map((candidate) => candidate.item)
+  ]);
+}
+
+function applyProtectedHeadFloor<T>(
+  naturalHead: readonly RerankCandidate<T>[],
+  reorderedHead: readonly Readonly<{ readonly fusionIndex: number; readonly item: T }>[],
+  protectedTopK: number
+): readonly Readonly<{ readonly item: T }>[] {
+  const floor = Math.max(0, Math.min(protectedTopK, naturalHead.length));
+  if (floor <= 1) {
+    return reorderedHead;
+  }
+
+  const protectedIndexes = new Set<number>();
+  for (let index = 0; index < floor; index += 1) {
+    protectedIndexes.add(index);
+  }
+
+  const protectedEntries = reorderedHead.filter((entry) =>
+    protectedIndexes.has(entry.fusionIndex)
+  );
+  const unprotectedEntries = reorderedHead.filter(
+    (entry) => !protectedIndexes.has(entry.fusionIndex)
+  );
+  return Object.freeze([
+    ...protectedEntries,
+    ...unprotectedEntries
   ]);
 }

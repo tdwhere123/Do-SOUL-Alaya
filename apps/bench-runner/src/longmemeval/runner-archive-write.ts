@@ -10,8 +10,10 @@ import {
   type KpiPayload
 } from "@do-soul/alaya-eval";
 import {
+  includeReplayCandidatePoolInDiagnosticsWrite,
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
+  stripReplayCandidatePoolsForGateWrite,
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects
 } from "./diagnostics.js";
@@ -127,15 +129,20 @@ async function buildDiagnosticsSidecar(input: {
 }): Promise<{ readonly compact: string; readonly currentEvidence: ReturnType<typeof buildCurrentEvidence> }> {
   const currentEvidence = buildCurrentEvidence(input);
   const diagnosticsPayload = buildDiagnosticsPayload(input, currentEvidence);
+  // Evidence summaries already computed from in-memory questions (with pools).
+  // Persist a gate-safe sidecar by default so large-N runs do not OOM stringify.
+  const persistedPayload = includeReplayCandidatePoolInDiagnosticsWrite()
+    ? diagnosticsPayload
+    : stripReplayCandidatePoolsForGateWrite(diagnosticsPayload);
   const diagnosticsArtifactPath = await writeExternalDiagnosticsArtifact({
     historyRoot: input.opts.historyRoot,
     benchName: "public",
     slug: input.slug,
     filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-    contents: renderDiagnosticsSidecar(diagnosticsPayload)
+    contents: renderDiagnosticsSidecar(persistedPayload)
   });
   return {
-    compact: renderCompactDiagnosticsSidecar(diagnosticsPayload, diagnosticsArtifactPath),
+    compact: renderCompactDiagnosticsSidecar(persistedPayload, diagnosticsArtifactPath),
     currentEvidence
   };
 }

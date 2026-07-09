@@ -10,6 +10,7 @@ import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-de
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type {
   RecallFusionBreakdown,
+  RecallFusionStream,
   RecallSupplementaryData
 } from "../../recall/runtime/recall-service-types.js";
 
@@ -53,13 +54,20 @@ const EMPTY_FACTORS = {} as RecallScoreFactors;
 function fusedCandidate(input: {
   readonly objectId: string;
   readonly fusedScore: number;
+  readonly fusedRank?: number;
   readonly effectiveScore?: number;
   readonly surfaceId?: string | null;
+  readonly streamRanks?: Partial<Record<RecallFusionStream, number | null>>;
 }): DeliverySelectionCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
   const fusion: RecallFusionBreakdown = Object.freeze({
     ...breakdown,
-    fused_score: input.fusedScore
+    fused_rank: input.fusedRank ?? breakdown.fused_rank,
+    fused_score: input.fusedScore,
+    per_stream_rank: Object.freeze({
+      ...breakdown.per_stream_rank,
+      ...(input.streamRanks ?? {})
+    })
   });
   return Object.freeze({
     entry: memory({
@@ -131,5 +139,87 @@ describe("applyDeliverySelection", () => {
     const result = applyDeliverySelection(ordered, supplementary(), 10);
     expect(result.ordering.deliveryOrderedCandidates[0]?.entry.object_id).toBe("a1");
     expect(result.ranks.rankAfterFusion.get("workspace_local:memory_entry:a1")).toBe(1);
+  });
+
+  it("rescues a rank-6 candidate with two strong likelihood streams over a weak rank-5", () => {
+    const ordered = [
+      fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
+      fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
+      fusedCandidate({ objectId: "a3", fusedRank: 3, fusedScore: 0.8 }),
+      fusedCandidate({ objectId: "a4", fusedRank: 4, fusedScore: 0.7 }),
+      fusedCandidate({
+        objectId: "weak-rank-5",
+        fusedRank: 5,
+        fusedScore: 0.6,
+        streamRanks: {
+          lexical_fts: 12,
+          embedding_similarity: 12,
+          evidence_fts: 12
+        }
+      }),
+      fusedCandidate({
+        objectId: "likelihood-rank-6",
+        fusedRank: 6,
+        fusedScore: 0.5,
+        streamRanks: {
+          lexical_fts: 3,
+          embedding_similarity: 1,
+          evidence_fts: 30
+        }
+      })
+    ];
+
+    const result = applyDeliverySelection(ordered, supplementary(), 10);
+
+    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "likelihood-rank-6",
+      "weak-rank-5"
+    ]);
+    expect(result.ranks.rankAfterStructuralReserve.get("workspace_local:memory_entry:likelihood-rank-6")).toBe(5);
+    expect(result.ranks.rankAfterStructuralReserve.get("workspace_local:memory_entry:weak-rank-5")).toBe(6);
+  });
+
+  it("does not rescue a tail candidate with only one strong likelihood stream", () => {
+    const ordered = [
+      fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
+      fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
+      fusedCandidate({ objectId: "a3", fusedRank: 3, fusedScore: 0.8 }),
+      fusedCandidate({ objectId: "a4", fusedRank: 4, fusedScore: 0.7 }),
+      fusedCandidate({
+        objectId: "weak-rank-5",
+        fusedRank: 5,
+        fusedScore: 0.6,
+        streamRanks: {
+          lexical_fts: 12,
+          embedding_similarity: 12,
+          evidence_fts: 12
+        }
+      }),
+      fusedCandidate({
+        objectId: "single-stream-rank-6",
+        fusedRank: 6,
+        fusedScore: 0.5,
+        streamRanks: {
+          lexical_fts: 1,
+          embedding_similarity: 20,
+          evidence_fts: 20
+        }
+      })
+    ];
+
+    const result = applyDeliverySelection(ordered, supplementary(), 10);
+
+    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
+      "a1",
+      "a2",
+      "a3",
+      "a4",
+      "weak-rank-5",
+      "single-stream-rank-6"
+    ]);
   });
 });

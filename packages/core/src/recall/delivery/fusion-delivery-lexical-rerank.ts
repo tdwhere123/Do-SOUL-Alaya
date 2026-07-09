@@ -11,6 +11,7 @@ import type {
 } from "../runtime/recall-service-types.js";
 
 const STRONG_LEXICAL_DELIVERY_RANK = 0.9;
+const FEATURE_RERANK_PROTECTED_DELIVERY_HEAD = 5;
 
 type RecallFusionCandidateInput = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -63,8 +64,13 @@ export function prioritizeStrongLexicalDeliveryWindowCandidates<T extends FusedR
 
 export function applyFeatureRerank<T extends FusedRecallCandidateInput>(
   rankedCandidates: readonly T[],
-  supplementaryData: RecallSupplementaryData
+  supplementaryData: RecallSupplementaryData,
+  maxEntries: number
 ): readonly T[] {
+  const protectedTopK = Math.min(
+    Math.max(0, maxEntries),
+    FEATURE_RERANK_PROTECTED_DELIVERY_HEAD
+  );
   const rerankInputs: readonly RerankCandidate<T>[] = rankedCandidates.map((candidate) => {
     const gist = supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id];
     const hasGist = typeof gist === "string" && gist.length > 0;
@@ -81,7 +87,12 @@ export function applyFeatureRerank<T extends FusedRecallCandidateInput>(
       })
     });
   });
-  return rerankTopN(supplementaryData.queryProbes, rerankInputs);
+  return rerankTopN(
+    supplementaryData.queryProbes,
+    rerankInputs,
+    undefined,
+    protectedTopK
+  );
 }
 
 function isStrongLexicalCandidate(

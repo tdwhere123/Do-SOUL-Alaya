@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   buildFloodFuelCoverageSummary,
-  computeIntegratedFloodScore
+  computeIntegratedFloodScore,
+  structuralLikelihoodGate
 } from "../../recall/scoring/integrated-flood-scoring.js";
 import { resolveConformantPathWeight } from "../../recall/scoring/conformant-fusion-scoring.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
@@ -89,7 +90,11 @@ describe("computeIntegratedFloodScore", () => {
     expect(coldResult.score).toBeCloseTo(0.5, 12);
     expect(warmResult.diagnostics.fuel_verified).toBe(true);
     expect(warmResult.score).toBeCloseTo(
-      warmResult.diagnostics.omega * (0.1 + resolveConformantPathWeight() * warmResult.diagnostics.Flood),
+      0.1 +
+        resolveConformantPathWeight() *
+          warmResult.diagnostics.omega *
+          warmResult.diagnostics.Flood *
+          structuralLikelihoodGate(0.1),
       9
     );
     expect(warmResult.score).toBeGreaterThan(0.1);
@@ -162,6 +167,75 @@ describe("computeIntegratedFloodScore", () => {
         final_score: expect.any(Number),
         e_direct_status: "inactive:beta_disabled"
       })
+    );
+  });
+
+  it("keeps fuel activation monotone: omega scales the flood bonus, never base R_obj", () => {
+    const seed = createMemoryEntry({ object_id: "77777777-7777-4777-8777-777777777777" });
+    const targetId = "88888888-8888-4888-8888-888888888888";
+    const target = createMemoryEntry({
+      object_id: targetId,
+      evidence_refs: ["ev-excerpt"],
+      manifestation_state: "excerpt"
+    });
+    const data = supplementary({
+      pathInflowByTarget: {
+        [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+      },
+      evidenceSupportVectorsByMemoryId: {
+        [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-excerpt", support: 0.8 }]
+      }
+    });
+    const rObj = 0.42;
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: rObj, A_path: 0.5, B_evidence: 0.8 },
+      supplementaryData: data
+    });
+    const { omega, Flood, lambda, beta } = result.diagnostics;
+    expect(result.diagnostics.fuel_verified).toBe(true);
+    expect(omega).toBeLessThan(1);
+    expect(beta).toBe(0);
+    expect(result.score).toBeGreaterThanOrEqual(rObj);
+    const lGate = structuralLikelihoodGate(rObj);
+    expect(result.score).toBeCloseTo(rObj + lambda * omega * Flood * lGate, 12);
+  });
+
+  it("applies Card D L-gate: high R_obj shrinks flood bonus toward zero", () => {
+    const seed = createMemoryEntry({ object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" });
+    const targetId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const target = createMemoryEntry({
+      object_id: targetId,
+      evidence_refs: ["ev-l"],
+      manifestation_state: "full_eligible"
+    });
+    const data = supplementary({
+      pathInflowByTarget: {
+        [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }]
+      },
+      evidenceSupportVectorsByMemoryId: {
+        [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-l", support: 1 }]
+      }
+    });
+    const low = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: 1, B_evidence: 1 },
+      supplementaryData: data
+    });
+    const high = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.9, A_path: 1, B_evidence: 1 },
+      supplementaryData: data
+    });
+    expect(low.diagnostics.fuel_verified).toBe(true);
+    expect(high.diagnostics.fuel_verified).toBe(true);
+    const lowBonus = low.score - 0.2;
+    const highBonus = high.score - 0.9;
+    expect(lowBonus).toBeGreaterThan(highBonus);
+    expect(structuralLikelihoodGate(0.9)).toBeCloseTo(0.1, 12);
+    expect(highBonus).toBeCloseTo(
+      resolveConformantPathWeight() * high.diagnostics.Flood * 0.1,
+      12
     );
   });
 

@@ -97,13 +97,22 @@ function pathOf(relationKind: string): ReturnType<typeof createPathRelation> {
 }
 
 describe("scorePathRelationExpansion answers_with weighting", () => {
-  it("ranks answers_with above coheres_with at identical strength/governance", () => {
+  it("does not add answers_with bonus when flood fuel flag is off", () => {
+    expect(scorePathRelationExpansion(pathOf("answers_with"))).toBeCloseTo(
+      scorePathRelationExpansion(pathOf("coheres_with")),
+      10
+    );
+  });
+
+  it("ranks answers_with above coheres_with when ALAYA_RECALL_ANSWERS_WITH=1", () => {
+    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
     expect(scorePathRelationExpansion(pathOf("answers_with"))).toBeGreaterThan(
       scorePathRelationExpansion(pathOf("coheres_with"))
     );
   });
 
-  it("adds exactly the modest additive bonus over a co-occurrence edge", () => {
+  it("adds exactly the modest additive bonus over a co-occurrence edge when fuel is on", () => {
+    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
     const answersWith = scorePathRelationExpansion(pathOf("answers_with"));
     const cohereWith = scorePathRelationExpansion(pathOf("coheres_with"));
     expect(answersWith - cohereWith).toBeCloseTo(0.1, 10);
@@ -117,6 +126,7 @@ describe("scorePathRelationExpansion answers_with weighting", () => {
   });
 
   it("clamps to 1 when the bonus would overflow", () => {
+    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
     const saturated = createPathRelation({
       sourceId: "src",
       targetId: "tgt",

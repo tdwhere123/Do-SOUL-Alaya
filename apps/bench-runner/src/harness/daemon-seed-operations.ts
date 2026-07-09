@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
   CandidateMemorySignalSchema,
   ScopeClass,
@@ -9,6 +10,7 @@ import {
   type SoulReviewMemoryProposalResponse
 } from "@do-soul/alaya-protocol";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
+import { initDatabase, SqliteMemoryHqRepo } from "@do-soul/alaya-storage";
 import {
   createUnscoredMaterializedSeedError,
   isUnscoredMaterializedSeedError
@@ -55,6 +57,7 @@ type BenchSignalReceiveResult = {
     readonly created_objects: readonly BenchSignalMaterializedObject[];
   } | null;
 };
+const BENCH_ANSWER_HQ_MAX = 5;
 
 export async function acceptSeededMemory(
   input: CreateBenchSeedOpsInput,
@@ -328,6 +331,7 @@ async function seedOneCompileSignal(
     memoryObject.object_id,
     signalInput.evidenceRef
   );
+  await persistBenchAnswerHq(input, memoryObject.object_id, signalInput);
   return {
     kind: "seeded",
     result: seededMemoryResult(
@@ -340,6 +344,64 @@ async function seedOneCompileSignal(
       clip
     )
   };
+}
+
+async function persistBenchAnswerHq(
+  input: CreateBenchSeedOpsInput,
+  memoryId: string,
+  signalInput: BenchSignalSeedInput
+): Promise<void> {
+  if (!answersWithBenchHqEnabled()) return;
+  const hqs = collectBenchAnswerHqs(signalInput);
+  if (hqs.length === 0) return;
+  const repo = new SqliteMemoryHqRepo(
+    initDatabase({ filename: join(input.dataDir, "alaya.db") })
+  );
+  const now = new Date().toISOString();
+  await repo.upsert({
+    object_id: memoryId,
+    workspace_id: input.activeContext.workspaceId,
+    hqs,
+    created_at: now,
+    updated_at: now
+  });
+}
+
+function answersWithBenchHqEnabled(): boolean {
+  return (
+    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
+    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
+  );
+}
+
+function collectBenchAnswerHqs(signalInput: BenchSignalSeedInput): readonly string[] {
+  const values = new Set<string>();
+  for (const raw of readStringArrayField(signalInput.productionRawPayload, "hqs")) {
+    addBenchAnswerHq(values, raw);
+  }
+  for (const raw of readStringArrayField(signalInput.productionRawPayload, "hypothetical_questions")) {
+    addBenchAnswerHq(values, raw);
+  }
+  for (const raw of readStringArrayField(signalInput.productionRawPayload, "hypotheticalQuestions")) {
+    addBenchAnswerHq(values, raw);
+  }
+  addBenchAnswerHq(values, signalInput.distilledFact);
+  return [...values].slice(0, BENCH_ANSWER_HQ_MAX);
+}
+
+function readStringArrayField(
+  rawPayload: Readonly<Record<string, unknown>> | undefined,
+  key: string
+): readonly string[] {
+  const value = rawPayload?.[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function addBenchAnswerHq(values: Set<string>, value: string): void {
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  if (normalized.length > 0) {
+    values.add(normalized);
+  }
 }
 
 async function acceptCompileSeededMemory(

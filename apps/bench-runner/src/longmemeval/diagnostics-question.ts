@@ -6,6 +6,8 @@ import type {
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
   DiagnosticRecallResultInput,
+  CandidateDiagnostic,
+  LongMemEvalReplayCandidate,
   LongMemEvalGoldDiagnostic,
   LongMemEvalQuestionDiagnostic,
   NarrowRecallDiagnostics,
@@ -68,6 +70,7 @@ export function buildQuestionDiagnostic(input: {
     activeConstraintRankById,
     diagnostics
   });
+  const candidates = diagnostics === null ? [] : buildReplayCandidates(diagnostics);
 
   return {
     question_id: input.questionId,
@@ -115,9 +118,66 @@ export function buildQuestionDiagnostic(input: {
     graph_expansion_plane_count_per_edge_type:
       diagnostics?.graphExpansionPlaneCountPerEdgeType ??
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
+    candidate_pool_complete:
+      diagnostics?.candidatePoolComplete === true &&
+      candidates.every(isReplayCandidateComplete),
+    candidates,
     candidate_key_collisions: buildCandidateKeyCollisions(diagnostics),
     gold
   };
+}
+
+function buildReplayCandidates(
+  diagnostics: NarrowRecallDiagnostics
+): readonly LongMemEvalReplayCandidate[] {
+  return [...diagnostics.candidatesByCandidateKey.values()]
+    .sort(compareReplayCandidateDiagnostics)
+    .map((candidate): LongMemEvalReplayCandidate => ({
+      object_id: candidate.objectId,
+      ...(candidate.objectKind === "memory_entry"
+        ? {}
+        : { object_kind: candidate.objectKind }),
+      candidate_key: candidate.candidateKey,
+      dimension: candidate.dimension,
+      final_rank: candidate.finalRank,
+      pre_budget_rank: candidate.preBudgetRank,
+      selection_order: candidate.selectionOrder,
+      fused_rank: candidate.fusedRank,
+      fused_score: candidate.fusedScore,
+      per_stream_rank: candidate.perStreamRank,
+      fused_rank_contribution_per_stream:
+        candidate.fusedRankContributionPerStream,
+      score_factors: {
+        ...(candidate.scoreFactors ?? {}),
+        ...(candidate.facetOverlap === null
+          ? {}
+          : { facet_overlap: candidate.facetOverlap }),
+        ...(candidate.createdAt === null ? {} : { created_at: candidate.createdAt })
+      }
+    }));
+}
+
+function compareReplayCandidateDiagnostics(
+  left: CandidateDiagnostic,
+  right: CandidateDiagnostic
+): number {
+  const leftOrder = left.selectionOrder ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.selectionOrder ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  const leftFused = left.fusedRank ?? Number.MAX_SAFE_INTEGER;
+  const rightFused = right.fusedRank ?? Number.MAX_SAFE_INTEGER;
+  if (leftFused !== rightFused) return leftFused - rightFused;
+  return left.candidateKey.localeCompare(right.candidateKey);
+}
+
+function isReplayCandidateComplete(candidate: LongMemEvalReplayCandidate): boolean {
+  return (
+    candidate.per_stream_rank !== null &&
+    candidate.fused_rank_contribution_per_stream !== null &&
+    candidate.score_factors.activation !== undefined &&
+    candidate.score_factors.facet_overlap !== undefined &&
+    candidate.score_factors.created_at !== undefined
+  );
 }
 
 function buildGoldDiagnostics(input: {

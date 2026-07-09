@@ -15,6 +15,7 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
   const questions = shardDiagnostics.flatMap(
     (diagnostics) => diagnostics?.questions ?? []
   );
+  assertMergedDiagnosticsQuestionsMatchKpi(payload, questions);
   const questionCount = shardDiagnostics.reduce(
     (sum, diagnostics) => sum + diagnosticQuestionCount(diagnostics),
     0
@@ -94,6 +95,27 @@ interface MergedLongMemEvalDiagnosticsPayload {
   readonly sidecar: LongMemEvalDiagnosticsSidecar;
   readonly question_count: number;
   readonly report_side_effects_snapshot_count: number | null;
+}
+
+function assertMergedDiagnosticsQuestionsMatchKpi(
+  _payload: KpiPayload,
+  questions: readonly { readonly question_id?: unknown }[]
+): void {
+  if (questions.length === 0) {
+    return;
+  }
+  const seenIds = new Set<string>();
+  for (const question of questions) {
+    if (typeof question.question_id !== "string") {
+      throw new Error("merge refused: diagnostics question is missing question_id");
+    }
+    if (seenIds.has(question.question_id)) {
+      throw new Error(
+        `merge refused: duplicate diagnostics question_id '${question.question_id}' across shards`
+      );
+    }
+    seenIds.add(question.question_id);
+  }
 }
 
 function diagnosticQuestionCount(

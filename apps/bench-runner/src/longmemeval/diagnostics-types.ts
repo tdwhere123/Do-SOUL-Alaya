@@ -52,6 +52,21 @@ export type DiagnosticFloodFuelCoverage = Readonly<{
   readonly evidence_active_count: number;
 }>;
 
+export type LongMemEvalReplayCandidate = Readonly<{
+  readonly object_id: string;
+  readonly object_kind?: string;
+  readonly candidate_key: string;
+  readonly dimension: string | null;
+  readonly final_rank: number | null;
+  readonly pre_budget_rank: number | null;
+  readonly selection_order: number | null;
+  readonly fused_rank: number | null;
+  readonly fused_score: number | null;
+  readonly per_stream_rank: DiagnosticStreamRanks | null;
+  readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
+  readonly score_factors: DiagnosticScoreFactors;
+}>;
+
 export interface DiagnosticRecallResultInput {
   readonly object_id: string;
   readonly object_kind?: string | null;
@@ -262,6 +277,7 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
 
 export interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
+  readonly candidatePoolComplete: boolean;
   readonly candidatesByObjectId: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidatesByObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidatesByCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
@@ -277,6 +293,8 @@ export interface CandidateDiagnostic {
   readonly candidateKey: string;
   readonly objectId: string;
   readonly objectKind: string;
+  readonly createdAt: string | null;
+  readonly facetOverlap: number | null;
   readonly dimension: string | null;
   readonly originPlane: string;
   readonly preBudgetRank: number | null;
@@ -315,6 +333,7 @@ export interface CandidateDiagnostic {
 export type DeliveryStageAction = "noop" | "kept" | "promoted" | "displaced";
 
 export interface ReadCandidateDiagnosticsResult {
+  readonly candidatePoolComplete: boolean;
   readonly byObjectId: ReadonlyMap<string, CandidateDiagnostic>;
   readonly byObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
   readonly byCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;

@@ -3,6 +3,7 @@ import type { AlayaDaemonRuntime } from "@do-soul/alaya";
 export interface CreateBenchSeedOpsInput {
   readonly activeRuntime: AlayaDaemonRuntime;
   readonly activeContext: { workspaceId: string; runId: string };
+  readonly dataDir: string;
   readonly callMcpTool: <TOutput>(
     name: string,
     args: Record<string, unknown>

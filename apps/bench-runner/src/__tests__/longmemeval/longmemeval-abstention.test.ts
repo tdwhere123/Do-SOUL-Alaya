@@ -15,11 +15,18 @@ import {
 
 const THR = ABSTENTION_FALSE_CONFIDENT_THRESHOLD;
 
-function deliveredResult(rank: number, relevanceScore: number) {
+function deliveredResult(
+  rank: number,
+  relevanceScore: number,
+  abstentionConfidenceScore?: number
+) {
   return {
     object_id: `obj-${rank}`,
     rank,
-    relevance_score: relevanceScore
+    relevance_score: relevanceScore,
+    ...(abstentionConfidenceScore === undefined
+      ? {}
+      : { abstention_confidence_score: abstentionConfidenceScore })
   };
 }
 
@@ -30,10 +37,11 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
     expect(isAbstentionQuestionId("gpt4_59c863d7")).toBe(false);
   });
 
-  it("scores a correct abstention: recall stays below the threshold at every k", () => {
+  it("scores a correct abstention: explicit confidence stays below the threshold at every k", () => {
     const result = scoreAbstentionQuestion({
       results: Array.from({ length: 10 }, (_, i) => ({
-        relevance_score: THR - 0.05 - i * 0.01
+        relevance_score: 1,
+        abstention_confidence_score: THR - 0.05 - i * 0.01
       }))
     });
     expect(result).toMatchObject({
@@ -47,7 +55,7 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
   it("scores a false-confident abstention: top-1 crosses the threshold", () => {
     const result = scoreAbstentionQuestion({
       results: [
-        { relevance_score: THR + 0.02 },
+        { relevance_score: 1, abstention_confidence_score: THR + 0.02 },
         ...Array.from({ length: 9 }, () => ({ relevance_score: 0.1 }))
       ]
     });
@@ -55,6 +63,17 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
       correctAt1: false,
       correctAt5: false,
       correctAt10: false
+    });
+  });
+
+  it("does not treat saturated retrieval relevance as answerability confidence", () => {
+    const result = scoreAbstentionQuestion({
+      results: [{ relevance_score: 1 }]
+    });
+    expect(result).toMatchObject({
+      correctAt1: true,
+      correctAt5: true,
+      correctAt10: true
     });
   });
 
@@ -69,7 +88,8 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
 
   it("applies the per-k boundary: a cross at rank 5 spares R@1 but fails R@5/R@10", () => {
     const results = Array.from({ length: 10 }, (_, i) => ({
-      relevance_score: i === 4 ? THR + 0.01 : THR - 0.1
+      relevance_score: 1,
+      abstention_confidence_score: i === 4 ? THR + 0.01 : THR - 0.1
     }));
     const result = scoreAbstentionQuestion({ results });
     expect(result.correctAt1).toBe(true);
@@ -79,7 +99,8 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
 
   it("applies the per-k boundary: a cross at rank 6 spares R@1/R@5 but fails R@10", () => {
     const results = Array.from({ length: 10 }, (_, i) => ({
-      relevance_score: i === 5 ? THR + 0.01 : THR - 0.1
+      relevance_score: 1,
+      abstention_confidence_score: i === 5 ? THR + 0.01 : THR - 0.1
     }));
     const result = scoreAbstentionQuestion({ results });
     expect(result.correctAt1).toBe(true);
@@ -89,14 +110,15 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
 
   it("treats a score exactly at the threshold as false-confident", () => {
     const result = scoreAbstentionQuestion({
-      results: [{ relevance_score: THR }]
+      results: [{ relevance_score: 1, abstention_confidence_score: THR }]
     });
     expect(result.correctAt1).toBe(false);
   });
 
   it("ignores a cross at rank 11+ (only top-10 is delivered)", () => {
     const results = Array.from({ length: 12 }, (_, i) => ({
-      relevance_score: i >= 10 ? THR + 0.05 : THR - 0.1
+      relevance_score: 1,
+      abstention_confidence_score: i >= 10 ? THR + 0.05 : THR - 0.1
     }));
     const result = scoreAbstentionQuestion({ results });
     expect(result).toMatchObject({
@@ -151,7 +173,13 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
   it("re-scores abstention questions by calibrated confidence", () => {
     const verdict = resolveLongMemEvalHitVerdict({
       isAbstention: true,
-      results: [{ object_id: "decoy", relevance_score: THR + 0.02 }],
+      results: [
+        {
+          object_id: "decoy",
+          relevance_score: 0.2,
+          abstention_confidence_score: THR + 0.02
+        }
+      ],
       sidecar: new Map(),
       answerSessionIds: new Set()
     });
@@ -166,7 +194,7 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
   it("credits an abstention question that stayed unconfident", () => {
     const verdict = resolveLongMemEvalHitVerdict({
       isAbstention: true,
-      results: [{ object_id: "decoy", relevance_score: THR - 0.2 }],
+      results: [{ object_id: "decoy", relevance_score: 1 }],
       sidecar: new Map(),
       answerSessionIds: new Set()
     });

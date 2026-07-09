@@ -115,6 +115,7 @@ export interface RecallFusionBreakdown {
   readonly object_id: string;
   readonly object_kind: RecallCandidate["object_kind"];
   readonly origin_plane: RecallOriginPlane;
+  readonly facet_overlap: number;
   readonly per_stream_rank: RecallFusionStreamRanks;
   readonly fused_rank: number;
   readonly fused_score: number;
@@ -129,6 +130,8 @@ export interface RecallCandidateDiagnostic {
   readonly candidate_key: string;
   readonly object_id: string;
   readonly object_kind: RecallCandidate["object_kind"];
+  readonly created_at: string;
+  readonly facet_overlap: number;
   // Object's memory dimension (typed facet) — for facet-separation diagnostics. Provenance only.
   readonly dimension: string;
   readonly origin_plane: RecallOriginPlane;

@@ -11,8 +11,10 @@ import {
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
+  includeReplayCandidatePoolInDiagnosticsWrite,
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
+  stripReplayCandidatePoolsForGateWrite,
   summarizeLongMemEvalRecallEvidence,
   summarizeProviderStates,
   type LongMemEvalQuestionDiagnostic
@@ -141,6 +143,112 @@ describe("LongMemEval recall diagnostics", () => {
         coverage_selector_action: "applied"
       })
     ).toThrow();
+  });
+
+  it("persists complete replay candidate rows when raw recall diagnostics carry replay inputs", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-replay-candidates",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [
+        {
+          object_id: "gold-a",
+          rank: 1,
+          relevance_score: 0.9
+        }
+      ],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              created_at: "2026-07-07T00:00:00.000Z",
+              facet_overlap: 2,
+              pre_budget_rank: 1,
+              selection_order: 1,
+              fused_rank: 1,
+              fused_score: 0.4,
+              final_rank: 1,
+              per_stream_rank: {
+                lexical_fts: 1,
+                facet_overlap: 1
+              },
+              fused_rank_contribution_per_stream: {
+                lexical_fts: 0.3,
+                facet_overlap: 0.2
+              },
+              score_factors: {
+                activation: 0.7,
+                relevance: 0.9
+              }
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.candidate_pool_complete).toBe(true);
+    expect(row.candidates[0]).toMatchObject({
+      object_id: "gold-a",
+      candidate_key: "workspace_local:memory_entry:gold-a",
+      score_factors: {
+        activation: 0.7,
+        facet_overlap: 2,
+        created_at: "2026-07-07T00:00:00.000Z"
+      }
+    });
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidates[0]?.score_factors).toMatchObject({
+      facet_overlap: 2,
+      created_at: "2026-07-07T00:00:00.000Z"
+    });
+  });
+
+  it("does not declare replay candidate pools complete when tie-break inputs are missing", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-incomplete-replay-candidates",
+      goldMemoryIds: ["gold-a"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidates: [
+            {
+              object_id: "gold-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:gold-a",
+              pre_budget_rank: 1,
+              selection_order: 1,
+              fused_rank: 1,
+              fused_score: 0.4,
+              final_rank: null,
+              per_stream_rank: { lexical_fts: 1 },
+              fused_rank_contribution_per_stream: { lexical_fts: 0.3 },
+              score_factors: {
+                activation: 0.7,
+                relevance: 0.9
+              }
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.candidate_pool_complete).toBe(false);
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidate_pool_complete).toBe(false);
   });
 
   it("persists phase latency into per-question diagnostics", () => {
@@ -982,5 +1090,90 @@ describe("LongMemEval recall diagnostics", () => {
 
     expect(metrics.non_monotonic_count).toBe(1);
     expect(metrics.non_monotonic_rate).toBe(1);
+  });
+
+  it("strips replay candidate pools for default gate writes", () => {
+    const previous = process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL;
+    delete process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL;
+    try {
+      expect(includeReplayCandidatePoolInDiagnosticsWrite()).toBe(false);
+      const question = buildQuestionDiagnostic({
+        questionId: "q-pool",
+        goldMemoryIds: ["gold-a"],
+        answerSessionIds: ["session-a"],
+        deliveredResults: [
+          { object_id: "gold-a", rank: 1, relevance_score: 0.9 }
+        ],
+        hitAt1: true,
+        hitAt5: true,
+        hitAt10: true,
+        degradationReason: null,
+        embeddingMode: "disabled",
+        recallResult: {
+          diagnostics: {
+            candidates: [
+              {
+                object_id: "gold-a",
+                object_kind: "memory_entry",
+                origin_plane: "workspace_local",
+                candidate_key: "workspace_local:memory_entry:gold-a",
+                created_at: "2026-07-07T00:00:00.000Z",
+                facet_overlap: 2,
+                pre_budget_rank: 1,
+                selection_order: 1,
+                fused_rank: 1,
+                fused_score: 0.4,
+                final_rank: 1,
+                per_stream_rank: { lexical_fts: 1 },
+                fused_rank_contribution_per_stream: { lexical_fts: 0.3 },
+                score_factors: { activation: 0.7 }
+              }
+            ]
+          }
+        }
+      });
+      expect(question.candidates.length).toBeGreaterThan(0);
+      const stripped = stripReplayCandidatePoolsForGateWrite({
+        schema_version: 1,
+        bench_name: "public",
+        split: "longmemeval_s",
+        run_at: "2026-07-09T00:00:00.000Z",
+        alaya_commit: "deadbeef",
+        embedding_provider: "local_onnx",
+        embedding_mode: "env",
+        provider_state_summary: {
+          provider_returned: 0,
+          provider_unavailable: 0,
+          provider_not_requested: 1,
+          unknown: 0
+        },
+        questions: [question]
+      });
+      expect(stripped.questions[0]?.candidates).toEqual([]);
+      expect(stripped.questions[0]?.candidate_pool_complete).toBe(false);
+      const rendered = renderDiagnosticsSidecar(stripped);
+      expect(rendered).not.toContain("workspace_local:memory_entry:gold-a");
+      expect(rendered.length).toBeLessThan(4_000);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL;
+      } else {
+        process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL = previous;
+      }
+    }
+  });
+
+  it("keeps replay candidate pools when ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL=1", () => {
+    const previous = process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL;
+    process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL = "1";
+    try {
+      expect(includeReplayCandidatePoolInDiagnosticsWrite()).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL;
+      } else {
+        process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL = previous;
+      }
+    }
   });
 });

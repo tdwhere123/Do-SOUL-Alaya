@@ -36,9 +36,10 @@ export interface LongMemEvalConcurrencyDeps {
 }
 
 export function freezeProcessEnvForWorkers(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: NodeJS.ProcessEnv = {}
 ): NodeJS.ProcessEnv {
-  return Object.freeze({ ...env });
+  return Object.freeze({ ...env, ...overrides });
 }
 
 export function resolveLongMemEvalConcurrency(opts: LongMemEvalRunOptions): number {
@@ -139,7 +140,9 @@ export async function runLongMemEvalConcurrent(
         const status = await spawnWorker({
           cliPath,
           args: buildWorkerCliArgs(opts, plan),
-          env: freezeProcessEnvForWorkers(),
+          env: freezeProcessEnvForWorkers(process.env, {
+            ALAYA_BENCH_ARTIFACT_ROOT: join(plan.historyRoot, ".bench-artifacts")
+          }),
           logPath
         });
         if (status !== 0) {

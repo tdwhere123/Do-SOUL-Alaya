@@ -82,6 +82,7 @@ export function readRecallDiagnostics(
   const candidates = readCandidates(record);
   return {
     keys: Object.keys(record).sort(),
+    candidatePoolComplete: candidates.candidatePoolComplete,
     candidatesByObjectId: candidates.byObjectId,
     candidatesByObjectIdentity: candidates.byObjectIdentity,
     candidatesByCandidateKey: candidates.byCandidateKey,
@@ -104,15 +105,15 @@ function readCandidates(
   const source =
     readArray(diagnostics.candidate_pool) ??
     readArray(diagnostics.candidates) ??
-    readArray(diagnostics.pool) ??
-    [];
+    readArray(diagnostics.pool);
   const fusionBreakdown = readFusionBreakdownDiagnostics(diagnostics.fusion_breakdown);
   const byObjectId = new Map<string, CandidateDiagnostic>();
   const byObjectIdentity = new Map<string, CandidateDiagnostic>();
   const byCandidateKey = new Map<string, CandidateDiagnostic>();
   const mutableKeysByObjectId = new Map<string, string[]>();
-  for (let i = 0; i < source.length; i++) {
-    const raw = source[i];
+  const rows = source ?? [];
+  for (let i = 0; i < rows.length; i++) {
+    const raw = rows[i];
     if (raw === null || typeof raw !== "object") continue;
     const record = raw as Readonly<Record<string, unknown>>;
     const objectId =
@@ -133,6 +134,8 @@ function readCandidates(
       candidateKey,
       objectId,
       objectKind,
+      createdAt: readString(record.created_at),
+      facetOverlap: readNumber(record.facet_overlap),
       dimension: readString(record.dimension),
       originPlane,
       preBudgetRank:
@@ -206,6 +209,7 @@ function readCandidates(
     ] as const)
   );
   return {
+    candidatePoolComplete: source !== null,
     byObjectId: Object.freeze(byObjectId),
     byObjectIdentity: Object.freeze(byObjectIdentity),
     byCandidateKey: Object.freeze(byCandidateKey),

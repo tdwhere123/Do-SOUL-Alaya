@@ -29,6 +29,7 @@ function usage() {
     "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <longmemeval-diagnostics.json>",
     "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <file> --weights stream=multiplier[,stream=multiplier...]",
     "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <file> --weights stream=multiplier[,stream=multiplier...] --rrf-k <k>",
+    "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <file> --weights stream=multiplier[,stream=multiplier...] --facet-order first|tie-break",
     "",
     "Baseline mode reproduces gold-bearing any@5 from persisted gold final_rank fields.",
     "A/B mode is refused unless every gold-bearing question explicitly declares a complete candidate pool and carries tie-break fields.",
@@ -37,7 +38,7 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  const args = { diagnostics: null, weights: null, rrfK: null };
+  const args = { diagnostics: null, weights: null, rrfK: null, facetOrder: "first" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--diagnostics") {
@@ -50,6 +51,10 @@ function parseArgs(argv) {
     }
     if (arg === "--rrf-k") {
       args.rrfK = parsePositiveNumber(argv[++index] ?? "", "--rrf-k");
+      continue;
+    }
+    if (arg === "--facet-order") {
+      args.facetOrder = parseFacetOrder(argv[++index] ?? "");
       continue;
     }
     if (arg === "--help" || arg === "-h") {
@@ -67,6 +72,13 @@ function parseArgs(argv) {
     throw new Error("--diagnostics is required");
   }
   return args;
+}
+
+function parseFacetOrder(raw) {
+  if (raw === "first" || raw === "tie-break") {
+    return raw;
+  }
+  throw new Error("--facet-order must be one of: first, tie-break");
 }
 
 function isCandidateRetrievalArg(arg) {
@@ -227,6 +239,7 @@ function replayWeightedAb(questions, weights, options) {
     gold_coverage_at_5_count: goldAt5,
     gold_coverage_at_5: ratio(goldAt5, goldTotal),
     weights: Object.fromEntries(weights),
+    facet_order: options.facetOrder,
     ...(options.rrfK === null ? {} : { rrf_k: options.rrfK })
   };
 }
@@ -283,9 +296,10 @@ function compareReplayCandidates(left, right, weights, options) {
   const leftFactors = left.score_factors;
   const rightFactors = right.score_factors;
   const facetDelta = Number(rightFactors.facet_overlap) - Number(leftFactors.facet_overlap);
-  if (facetDelta !== 0) return facetDelta;
+  if (options.facetOrder === "first" && facetDelta !== 0) return facetDelta;
   const scoreDelta = weightedScore(right, weights, options) - weightedScore(left, weights, options);
   if (scoreDelta !== 0) return scoreDelta;
+  if (options.facetOrder === "tie-break" && facetDelta !== 0) return facetDelta;
   const activationDelta = Number(rightFactors.activation) - Number(leftFactors.activation);
   if (activationDelta !== 0) return activationDelta;
   const createdDelta = String(leftFactors.created_at).localeCompare(
@@ -334,7 +348,10 @@ async function main() {
   const baseline = replayBaseline(questions);
   const output = { baseline };
   if (args.weights !== null || args.rrfK !== null) {
-    output.ab = replayWeightedAb(questions, args.weights ?? new Map(), { rrfK: args.rrfK });
+    output.ab = replayWeightedAb(questions, args.weights ?? new Map(), {
+      rrfK: args.rrfK,
+      facetOrder: args.facetOrder
+    });
   }
   console.log(JSON.stringify(output, null, 2));
 }

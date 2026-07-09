@@ -30,8 +30,13 @@ export function scorePathRelationExpansion(path: Readonly<PathRelation>): number
     path.plasticity_state.stability_class === "pinned"
       ? 0.1
       : 0;
+  // Gate the answers_with bonus on the same flag as flood fuel. Otherwise the
+  // +0.1 prior stays live in path_expansion RRF while flood A_path is off, and
+  // when flood is on the same π is counted twice (RRF stream + A_path).
   const answerhoodBoost =
-    path.constitution.relation_kind === "answers_with" ? ANSWERS_WITH_EXPANSION_BONUS : 0;
+    path.constitution.relation_kind === "answers_with" && recallAnswersWithEnabled()
+      ? ANSWERS_WITH_EXPANSION_BONUS
+      : 0;
   return clamp01(
     path.plasticity_state.strength * 0.55 +
       path.effect_vector.recall_bias * 0.25 +

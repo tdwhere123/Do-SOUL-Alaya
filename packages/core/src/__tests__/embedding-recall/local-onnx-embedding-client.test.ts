@@ -7,6 +7,7 @@ import {
   LOCAL_ONNX_UNAVAILABLE_RETRY_BACKOFF_MS,
   LocalOnnxEmbeddingClient,
   defaultLocalOnnxCacheDir,
+  resolveLocalOnnxSessionOptionsFromEnv,
   type LocalOnnxFeatureExtractor
 } from "../../embedding-recall/local-onnx-embedding-client.js";
 
@@ -122,6 +123,40 @@ describe("LocalOnnxEmbeddingClient", () => {
     await client.embedTexts(["a"], { timeoutMs: 5_000 });
     await client.embedTexts(["b"], { timeoutMs: 5_000 });
     expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it("threads bounded ONNX session options from the environment into the pipeline loader", async () => {
+    const originalThreads = process.env.ALAYA_LOCAL_ONNX_THREADS;
+    process.env.ALAYA_LOCAL_ONNX_THREADS = "2";
+    const loader = vi.fn(async () => stubExtractor([[dimRow(1)]]).extractor);
+    try {
+      const client = new LocalOnnxEmbeddingClient({ pipelineLoader: loader });
+      await client.embedTexts(["a"], { timeoutMs: 5_000 });
+    } finally {
+      if (originalThreads === undefined) {
+        delete process.env.ALAYA_LOCAL_ONNX_THREADS;
+      } else {
+        process.env.ALAYA_LOCAL_ONNX_THREADS = originalThreads;
+      }
+    }
+
+    expect(loader).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      {
+        sessionOptions: {
+          intraOpNumThreads: 2,
+          interOpNumThreads: 1,
+          executionMode: "sequential"
+        }
+      }
+    );
+  });
+
+  it("ignores missing or invalid ONNX thread limits", () => {
+    expect(resolveLocalOnnxSessionOptionsFromEnv({})).toBeUndefined();
+    expect(resolveLocalOnnxSessionOptionsFromEnv({ ALAYA_LOCAL_ONNX_THREADS: "0" })).toBeUndefined();
+    expect(resolveLocalOnnxSessionOptionsFromEnv({ ALAYA_LOCAL_ONNX_THREADS: "abc" })).toBeUndefined();
   });
 
   it("defaults the model cache outside the repository under XDG cache", async () => {

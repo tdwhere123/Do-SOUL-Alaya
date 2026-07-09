@@ -120,6 +120,14 @@ function verifiedFloodFuel(
   return slice.value > 0 && path.countsAsFuel && evidence.countsAsFuel;
 }
 
+/**
+ * Card D L-gate: structural/flood prior must not overturn high object likelihood.
+ * g(L)=1−R_obj closes the flood bonus as R_obj → 1 (Π_eff shrinks toward identity).
+ */
+export function structuralLikelihoodGate(R_obj: number): number {
+  return clamp01(1 - clamp01(R_obj));
+}
+
 export function computeIntegratedFloodScore(params: Readonly<{
   readonly entry: Readonly<MemoryEntry>;
   readonly axisInputs: IntegratedFloodAxisInputs;
@@ -146,8 +154,12 @@ export function computeIntegratedFloodScore(params: Readonly<{
   const eDirectStatus: FloodAxisInactiveReason =
     beta <= 0 ? "inactive:beta_disabled" : eDirect > 0 ? "active" : "inactive:no_evidence";
   const base = params.axisInputs.R_obj;
+  const lGate = structuralLikelihoodGate(base);
+  // Invariant: fuel activation is monotone — final score never drops below the
+  // pass-through base. ω scales only the flood bonus; L-gate further shrinks
+  // that bonus when object likelihood is already high.
   const score = fuelVerified
-    ? omega * (base + lambda * flood) * (1 + beta * eDirect)
+    ? (base + lambda * omega * flood * lGate) * (1 + beta * eDirect)
     : base;
   const diagnostics = Object.freeze({
     R_obj: base,

@@ -106,4 +106,36 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
       })
     );
   });
+
+  it("reuses a warmed query embedding instead of calling the provider again", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map(() => new Float32Array([1, 0]))
+    );
+    const service = buildService({
+      queryEmbedding: new Float32Array([1, 0]),
+      storedVectors: [
+        createEmbeddingRecord({ object_id: "aligned", embedding: new Float32Array([1, 0]) })
+      ],
+      embedTexts
+    });
+
+    const warmup = await service.warmQueryEmbeddings({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryTexts: ["cached pool query"]
+    });
+    const scores = await service.scorePoolCandidates({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "cached pool query",
+      objectIds: ["aligned"]
+    });
+
+    expect(warmup).toMatchObject({
+      ready_count: 1,
+      provider_requested_count: 1
+    });
+    expect(scores.get("aligned")).toBeCloseTo(1, 5);
+    expect(embedTexts).toHaveBeenCalledTimes(1);
+  });
 });

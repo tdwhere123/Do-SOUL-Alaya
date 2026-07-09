@@ -100,6 +100,75 @@ describe("merge-longmemeval validations", () => {
     );
   });
 
+  it("fails closed when merged full diagnostics duplicate question ids", async () => {
+    const shardA = path.join(tmpRoot, "shard-diagnostics-a");
+    const shardB = path.join(tmpRoot, "shard-diagnostics-b");
+    await writeShardRoot(
+      shardA,
+      makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-diagnostics-a", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      makeShardDiagnostics({
+        questions: [
+          {
+            question_id: "q-diagnostics-a",
+            gold_memory_ids: ["gold-a"],
+            delivered_memory_ids: ["delivered-a"],
+            delivered_gold_ids: ["gold-a"],
+            miss_reasons: [],
+            provider_state: "provider_not_requested"
+          }
+        ]
+      })
+    );
+    await writeShardRoot(
+      shardB,
+      makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          per_scenario: [
+            { id: "q-diagnostics-b", version: 1, hit_at_5: true, tier: "warm" }
+          ]
+        }
+      }),
+      makeShardDiagnostics({
+        questions: [
+          {
+            question_id: "q-diagnostics-a",
+            gold_memory_ids: ["gold-b"],
+            delivered_memory_ids: ["delivered-b"],
+            delivered_gold_ids: ["gold-b"],
+            miss_reasons: [],
+            provider_state: "provider_not_requested"
+          }
+        ]
+      })
+    );
+
+    const exitCode = await runCli([
+      "merge-longmemeval",
+      "--variant",
+      "s",
+      "--history-root",
+      path.join(tmpRoot, "history-duplicate-diagnostics"),
+      "--shards",
+      shardA,
+      shardB
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toContain(
+      "merge refused: duplicate diagnostics question_id 'q-diagnostics-a' across shards"
+    );
+  });
+
   it("diffs merged public archives against the newest passing baseline", async () => {
     const shardA = path.join(tmpRoot, "shard-a");
     const shardB = path.join(tmpRoot, "shard-b");

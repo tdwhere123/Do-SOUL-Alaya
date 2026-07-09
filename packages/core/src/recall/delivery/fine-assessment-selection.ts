@@ -161,6 +161,8 @@ function createFineAssessmentDiagnostic(
     candidate_key: candidateKey,
     object_id: candidate.entry.object_id,
     object_kind: candidate.objectKind ?? "memory_entry",
+    created_at: candidate.entry.created_at,
+    facet_overlap: candidate.fusion.facet_overlap,
     dimension: candidate.entry.dimension,
     origin_plane: candidate.originPlane ?? "workspace_local",
     admission_planes: admissionPlanes,

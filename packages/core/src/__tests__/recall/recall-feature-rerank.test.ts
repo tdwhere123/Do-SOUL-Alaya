@@ -222,6 +222,31 @@ describe("recall feature rerank — rerankTopN", () => {
     expect(ids(result)).toEqual(["near-strong", "near-weak"]);
   });
 
+  it("keeps protected fusion-head members inside the protected head", () => {
+    const query = compileRecallQueryProbes("favorite text editor");
+    const candidates = [
+      candidate("head-1", "unrelated first head member", { fusionScore: 0.3 }),
+      candidate("head-2", "unrelated second head member", { fusionScore: 0.3 }),
+      candidate("head-3", "unrelated third head member", { fusionScore: 0.3 }),
+      candidate("head-4", "unrelated fourth head member", { fusionScore: 0.3 }),
+      candidate("head-5", "unrelated fifth head member", { fusionScore: 0.3 }),
+      candidate("rank-6-exact", "their favorite text editor is Helix", {
+        fusionScore: 0.29
+      })
+    ];
+
+    const result = rerankTopN(query, candidates, RECALL_RERANK_TOP_N, 5);
+
+    expect(ids(result).slice(0, 5)).toEqual([
+      "head-1",
+      "head-2",
+      "head-3",
+      "head-4",
+      "head-5"
+    ]);
+    expect(result[5]?.id).toBe("rank-6-exact");
+  });
+
   it("keeps a candidate outside the top-N at its fusion position", () => {
     const query = compileRecallQueryProbes("exact target phrase");
     const head: RerankCandidate<FakeCandidate>[] = [];
@@ -490,4 +515,3 @@ describe("recall feature rerank — IDF tie-break in rerankTopN", () => {
     expect(result[0]?.id).toBe("gold-rank-31");
   });
 });
-

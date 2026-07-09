@@ -4,6 +4,7 @@ import { buildRecallCandidateDedupeKey } from "../runtime/recall-service-helpers
 import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown,
+  RecallFusionStream,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
 import {
@@ -104,7 +105,11 @@ function buildPostFusionDeliveryOrdering(
   const entityHintedCandidates = composeRecallEnabled()
     ? applyComposeDeliveryHints(rankedCandidates, supplementaryData, window)
     : rankedCandidates;
-  const featureRerankedCandidates = applyFeatureRerank(entityHintedCandidates, supplementaryData);
+  const featureRerankedCandidates = applyFeatureRerank(
+    entityHintedCandidates,
+    supplementaryData,
+    maxEntries
+  );
   const prioritizedCandidates = prioritizeStrongLexicalDeliveryWindowCandidates(
     featureRerankedCandidates,
     supplementaryData,
@@ -116,7 +121,10 @@ function buildPostFusionDeliveryOrdering(
     window
   );
   const coverageOrderedCandidates = coverageSelectedCandidates;
-  const synthesisReservedCandidates = coverageOrderedCandidates;
+  const synthesisReservedCandidates = applyLikelihoodTailRescue(
+    coverageOrderedCandidates,
+    maxEntries
+  );
   const deliveryOrderedCandidates = reserveStructuralDeliverySlots(
     synthesisReservedCandidates,
     supplementaryData,
@@ -135,6 +143,70 @@ function buildPostFusionDeliveryOrdering(
 }
 
 const COMPOSE_HINT_MIN_SCORE_RATIO = 0.75;
+const LIKELIHOOD_HEAD_RESCUE_SIZE = 5;
+const LIKELIHOOD_TAIL_RESCUE_MULTIPLIER = 2;
+
+function applyLikelihoodTailRescue(
+  orderedCandidates: readonly DeliverySelectionCandidate[],
+  maxEntries: number
+): readonly DeliverySelectionCandidate[] {
+  const packetSize = Math.min(
+    Math.max(0, maxEntries),
+    orderedCandidates.length,
+    LIKELIHOOD_HEAD_RESCUE_SIZE * LIKELIHOOD_TAIL_RESCUE_MULTIPLIER
+  );
+  const headSize = Math.min(LIKELIHOOD_HEAD_RESCUE_SIZE, packetSize);
+  if (headSize <= 0 || packetSize <= headSize) {
+    return orderedCandidates;
+  }
+
+  const incumbentIndex = headSize - 1;
+  const incumbent = orderedCandidates[incumbentIndex];
+  if (incumbent === undefined || !isWeakLikelihoodIncumbent(incumbent)) {
+    return orderedCandidates;
+  }
+
+  const challengerOffset = orderedCandidates
+    .slice(headSize, packetSize)
+    .findIndex(isLikelihoodTailRescueCandidate);
+  if (challengerOffset < 0) {
+    return orderedCandidates;
+  }
+
+  const challengerIndex = headSize + challengerOffset;
+  const rescued = [...orderedCandidates];
+  rescued[incumbentIndex] = orderedCandidates[challengerIndex] ?? incumbent;
+  rescued[challengerIndex] = incumbent;
+  return Object.freeze(rescued);
+}
+
+function isLikelihoodTailRescueCandidate(candidate: DeliverySelectionCandidate): boolean {
+  return (
+    (streamRankAtMost(candidate, "lexical_fts", 3) &&
+      streamRankAtMost(candidate, "embedding_similarity", 3)) ||
+    (streamRankAtMost(candidate, "lexical_fts", 2) &&
+      streamRankAtMost(candidate, "evidence_fts", 5)) ||
+    (streamRankAtMost(candidate, "embedding_similarity", 2) &&
+      streamRankAtMost(candidate, "evidence_fts", 5))
+  );
+}
+
+function isWeakLikelihoodIncumbent(candidate: DeliverySelectionCandidate): boolean {
+  return !(
+    streamRankAtMost(candidate, "lexical_fts", 3) ||
+    streamRankAtMost(candidate, "embedding_similarity", 3) ||
+    streamRankAtMost(candidate, "evidence_fts", 3)
+  );
+}
+
+function streamRankAtMost(
+  candidate: DeliverySelectionCandidate,
+  stream: RecallFusionStream,
+  threshold: number
+): boolean {
+  const rank = candidate.fusion.per_stream_rank[stream];
+  return typeof rank === "number" && rank <= threshold;
+}
 
 function applyComposeDeliveryHints(
   rankedCandidates: readonly DeliverySelectionCandidate[],

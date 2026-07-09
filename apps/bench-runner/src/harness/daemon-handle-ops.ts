@@ -281,6 +281,7 @@ function createBenchSeedOperations(
   const seedInput = {
     activeRuntime: input.activeRuntime,
     activeContext: input.activeContext,
+    dataDir: input.dataDir,
     callMcpTool: async <TOutput>(
       name: string,
       args: Record<string, unknown>

@@ -234,6 +234,7 @@ export class EmbeddingRecallService {
       embeddingRepo: this.dependencies.embeddingRepo,
       provider: this.dependencies.provider,
       queryEngine: this.queryEngine,
+      queryTimeoutMs: this.queryTimeoutMs,
       warn: this.warn
     });
   }

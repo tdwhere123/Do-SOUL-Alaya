@@ -483,7 +483,7 @@ describe("conformant compositional combine (real SQLite)", () => {
     }
   });
 
-  it("integrated flood score matches omega * (R_obj + lambda * Flood) with beta disabled", async () => {
+  it("integrated flood score matches R_obj + lambda * omega * Flood with beta disabled", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const spec: CandidateSpec = { id: objectId(2), lexical: 1, evidenceSupports: [0.5, 0.5] };
     const candidate = (await runFusion(GENERIC_QUERY, [seed, spec], {
@@ -495,7 +495,8 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(flood.beta).toBe(0);
     expect(flood.e_direct_status).toBe("inactive:beta_disabled");
     expect(flood.fuel_verified).toBe(true);
-    const expected = flood.omega * (flood.R_obj + flood.lambda * flood.Flood);
+    const expected =
+      flood.R_obj + flood.lambda * flood.omega * flood.Flood * (1 - flood.R_obj);
     expect(candidate.fused_score).toBeCloseTo(expected, 9);
     expect(flood.final_score).toBeCloseTo(expected, 9);
   });

@@ -128,6 +128,24 @@ export const DiagnosticRecallResultSchema = z
   })
   .readonly();
 
+const LongMemEvalReplayCandidateSchema = z
+  .object({
+    object_id: z.string(),
+    object_kind: z.string().optional(),
+    candidate_key: z.string(),
+    dimension: z.string().nullable().default(null),
+    final_rank: z.number().nullable(),
+    pre_budget_rank: z.number().nullable(),
+    selection_order: z.number().nullable(),
+    fused_rank: z.number().nullable(),
+    fused_score: z.number().nullable(),
+    per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
+    fused_rank_contribution_per_stream:
+      DiagnosticStreamContributionsSchema.nullable(),
+    score_factors: DiagnosticScoreFactorsSchema
+  })
+  .readonly();
+
 export const DiagnosticActiveConstraintResultSchema = z
   .object({
     object_id: z.string(),
@@ -231,6 +249,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z
       GraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:
       GraphExpansionPlaneCountPerEdgeTypeSchema,
+    candidate_pool_complete: z.boolean().default(false),
+    candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),
     candidate_key_collisions: z
       .array(
         z

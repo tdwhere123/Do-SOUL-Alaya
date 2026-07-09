@@ -92,6 +92,58 @@ describe("replay-longmemeval-diagnostics script", () => {
     });
   });
 
+  it("can demote facet-overlap to a score tie-break for E2 replay", async () => {
+    const diagnosticsPath = await writeReplayDiagnostics([
+      {
+        question_id: "q-facet-order",
+        candidate_pool_complete: true,
+        gold: [{ object_id: "gold-score", final_rank: null }],
+        candidates: [
+          candidate("d1", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d2", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d3", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d4", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("d5", { facetOverlap: 2, streams: { lexical_fts: 0.01 } }),
+          candidate("gold-score", { facetOverlap: 1, streams: { lexical_fts: 99 } })
+        ]
+      }
+    ]);
+
+    const { stdout } = await execFileAsync("node", [
+      "apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs",
+      "--diagnostics",
+      diagnosticsPath,
+      "--weights",
+      "lexical_fts=1",
+      "--facet-order",
+      "tie-break"
+    ], { cwd: rootDir });
+
+    const report = JSON.parse(stdout);
+    expect(report.ab).toMatchObject({
+      any_at_5_count: 1,
+      facet_order: "tie-break"
+    });
+  });
+
+  it("rejects unknown facet ordering modes", async () => {
+    const diagnosticsPath = await writeReplayDiagnostics([]);
+
+    await expect(
+      execFileAsync("node", [
+        "apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs",
+        "--diagnostics",
+        diagnosticsPath,
+        "--weights",
+        "lexical_fts=1",
+        "--facet-order",
+        "off"
+      ], { cwd: rootDir })
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("--facet-order must be one of: first, tie-break")
+    });
+  });
+
   it("recomputes stream contribution from per-stream rank when --rrf-k is supplied", async () => {
     const diagnosticsPath = await writeReplayDiagnostics([
       {

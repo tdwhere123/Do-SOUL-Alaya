@@ -157,6 +157,30 @@ export function summarizeLongMemEvalRecallEvidence(
   };
 }
 
+/**
+ * Default gate archives omit per-question replay `candidates[]`.
+ * A 250Q shard with complete pools is ~500MB+ and can throw
+ * `Invalid string length` on one-shot JSON.stringify.
+ * Set ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL=1 for Card D offline dumps.
+ */
+export function includeReplayCandidatePoolInDiagnosticsWrite(): boolean {
+  const raw = process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+export function stripReplayCandidatePoolsForGateWrite(
+  sidecar: LongMemEvalDiagnosticsSidecar
+): LongMemEvalDiagnosticsSidecar {
+  return {
+    ...sidecar,
+    questions: sidecar.questions.map((question) => ({
+      ...question,
+      candidate_pool_complete: false,
+      candidates: []
+    }))
+  };
+}
+
 export function renderDiagnosticsSidecar(
   sidecar: LongMemEvalDiagnosticsSidecar
 ): string {

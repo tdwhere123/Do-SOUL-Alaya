@@ -409,8 +409,11 @@ describe("formula and lifecycle regression net", () => {
     expect(withPathFuel.diagnostics.beta).toBe(0);
     expect(withPathFuel.score).toBeCloseTo(withPathFuel.diagnostics.final_score, 12);
     const withoutMultiplier =
-      withPathFuel.diagnostics.omega *
-      (withPathFuel.diagnostics.R_obj + withPathFuel.diagnostics.lambda * withPathFuel.diagnostics.Flood);
+      withPathFuel.diagnostics.R_obj +
+      withPathFuel.diagnostics.lambda *
+        withPathFuel.diagnostics.omega *
+        withPathFuel.diagnostics.Flood *
+        (1 - withPathFuel.diagnostics.R_obj);
     expect(withPathFuel.score).toBeCloseTo(withoutMultiplier, 9);
     expect(withPathFuel.score).not.toBeCloseTo(withoutMultiplier * (1 + 0.8), 6);
   });

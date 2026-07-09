@@ -21,8 +21,19 @@ export interface LocalOnnxFeatureExtractor {
 
 export type LocalOnnxPipelineLoader = (
   modelId: string,
-  cacheDir: string | null
+  cacheDir: string | null,
+  options: LocalOnnxPipelineOptions
 ) => Promise<LocalOnnxFeatureExtractor>;
+
+export interface LocalOnnxSessionOptions {
+  readonly intraOpNumThreads?: number;
+  readonly interOpNumThreads?: number;
+  readonly executionMode?: "sequential" | "parallel";
+}
+
+export interface LocalOnnxPipelineOptions {
+  readonly sessionOptions?: LocalOnnxSessionOptions;
+}
 
 export interface LocalOnnxEmbeddingClientOptions {
   /**
@@ -179,7 +190,13 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
         )
       );
     }
-    this.extractorPromise = this.pipelineLoader(this.modelId, this.cacheDir).catch((error) => {
+    this.extractorPromise = this.pipelineLoader(
+      this.modelId,
+      this.cacheDir,
+      {
+        sessionOptions: resolveLocalOnnxSessionOptionsFromEnv(process.env)
+      }
+    ).catch((error) => {
       // Reset so a later call can retry instead of permanently caching a
       // transient load failure (e.g. a cold cache directory).
       this.extractorPromise = null;
@@ -211,7 +228,10 @@ type TransformersModule = {
   readonly pipeline: (
     task: "feature-extraction",
     model: string,
-    options: { readonly dtype: string }
+    options: {
+      readonly dtype: string;
+      readonly session_options?: LocalOnnxSessionOptions;
+    }
   ) => Promise<LocalOnnxFeatureExtractor>;
 };
 
@@ -233,7 +253,8 @@ async function importTransformers(): Promise<TransformersModule> {
 
 async function defaultLocalOnnxPipelineLoader(
   modelId: string,
-  cacheDir: string | null
+  cacheDir: string | null,
+  options: LocalOnnxPipelineOptions
 ): Promise<LocalOnnxFeatureExtractor> {
   const transformers = await importTransformers();
   // invariant: embedding is a recall supplement; the on-device provider must
@@ -243,5 +264,35 @@ async function defaultLocalOnnxPipelineLoader(
     transformers.env.cacheDir = cacheDir;
     transformers.env.localModelPath = cacheDir;
   }
-  return transformers.pipeline("feature-extraction", modelId, { dtype: "q8" });
+  return transformers.pipeline("feature-extraction", modelId, {
+    dtype: "q8",
+    ...(options.sessionOptions === undefined
+      ? {}
+      : { session_options: options.sessionOptions })
+  });
+}
+
+export function resolveLocalOnnxSessionOptionsFromEnv(
+  env: { readonly ALAYA_LOCAL_ONNX_THREADS?: string }
+): LocalOnnxSessionOptions | undefined {
+  const threads = readPositiveThreadCount(env.ALAYA_LOCAL_ONNX_THREADS);
+  if (threads === null) {
+    return undefined;
+  }
+  return Object.freeze({
+    intraOpNumThreads: threads,
+    interOpNumThreads: 1,
+    executionMode: "sequential"
+  });
+}
+
+function readPositiveThreadCount(raw: string | undefined): number | null {
+  if (raw === undefined) {
+    return null;
+  }
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.min(parsed, 64);
 }

@@ -161,6 +161,12 @@ describe("runLongMemEvalConcurrent", () => {
 
     expect(spawnCalls).toHaveLength(2);
     expect(spawnCalls[0]?.args).not.toContain("--concurrency");
+    for (const call of spawnCalls) {
+      const shardRoot = call.args[call.args.indexOf("--history-root") + 1];
+      expect(call.env.ALAYA_BENCH_ARTIFACT_ROOT).toBe(
+        join(shardRoot as string, ".bench-artifacts")
+      );
+    }
     expect(result.payload.evaluated_count).toBe(4);
     expect(result.kpiPath).toContain(historyRoot);
     expect(result.diagnosticsPath).not.toBeNull();
