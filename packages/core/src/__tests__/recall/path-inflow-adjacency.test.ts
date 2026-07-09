@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildPathInflowByTarget,
   scorePathRelationExpansion
@@ -7,14 +7,6 @@ import { createPathRelation } from "./recall-service-test-fixtures.js";
 
 const SRC = "memory-src";
 const TGT = "memory-tgt";
-
-beforeEach(() => {
-  process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
-});
-
-afterEach(() => {
-  delete process.env.ALAYA_RECALL_ANSWERS_WITH;
-});
 
 // Distinctive non-clamped weight (0.8*0.55 + 0.4*0.25 + 0.1 answers_with boost = 0.64) so a
 // weight-source swap to e.g. the suppression scorer (0 on positive paths) cannot coincide.

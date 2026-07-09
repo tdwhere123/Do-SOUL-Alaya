@@ -26,8 +26,6 @@ function createStubCoreConfig(): CoreConfig {
       confEvidenceBeta: undefined,
       confFloodCap: undefined,
       confFloodCapTotal: undefined,
-      answersWith: false,
-      expAnswersWith: false,
       pathEmbModulation: undefined,
       structuralReserve: undefined,
       fusionRankFloor: undefined,

@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   ABSTENTION_FALSE_CONFIDENT_THRESHOLD,
   isAbstentionQuestionId,
+  resolvePremiseInvalid,
   scoreAbstentionQuestion
 } from "../../longmemeval/abstention.js";
+import {
+  ABSTENTION_FUSED_MARGIN_SCALE,
+  computeAbstentionConfidenceScore
+} from "../../longmemeval/abstention-confidence.js";
 import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic
@@ -30,11 +35,43 @@ function deliveredResult(
   };
 }
 
+describe("abstention confidence producer (fused-margin)", () => {
+  it("maps a large fused top1-top2 margin to high confidence", () => {
+    const score = computeAbstentionConfidenceScore([2.5, 0.5, 0.4, 0.3]);
+    expect(score).toBeGreaterThanOrEqual(THR);
+    expect(score).toBeLessThanOrEqual(1);
+  });
+
+  it("maps a tiny fused margin to low confidence", () => {
+    const score = computeAbstentionConfidenceScore([1.01, 1.0, 0.99, 0.98]);
+    expect(score).not.toBeNull();
+    expect(score!).toBeLessThan(0.1);
+  });
+
+  it("returns null when fewer than two fused scores exist", () => {
+    expect(computeAbstentionConfidenceScore([])).toBeNull();
+    expect(computeAbstentionConfidenceScore([1.2])).toBeNull();
+    expect(computeAbstentionConfidenceScore([null, undefined])).toBeNull();
+  });
+
+  it("never uses relevance_score and clamps to [0, 1]", () => {
+    const score = computeAbstentionConfidenceScore([
+      ABSTENTION_FUSED_MARGIN_SCALE * 3,
+      0
+    ]);
+    expect(score).toBe(1);
+  });
+});
+
 describe("LongMemEval abstention scoring (calibrated confidence)", () => {
   it("detects abstention question ids by the `_abs` suffix", () => {
     expect(isAbstentionQuestionId("0862e8bf_abs")).toBe(true);
     expect(isAbstentionQuestionId("76d63226")).toBe(false);
     expect(isAbstentionQuestionId("gpt4_59c863d7")).toBe(false);
+  });
+
+  it("keeps premise_invalid as an intentional Phase-1 false stub", () => {
+    expect(resolvePremiseInvalid()).toBe(false);
   });
 
   it("scores a correct abstention: explicit confidence stays below the threshold at every k", () => {
@@ -183,7 +220,6 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
       sidecar: new Map(),
       answerSessionIds: new Set()
     });
-    // A false-confident top-1 makes the abstention question a miss at k.
     expect(verdict).toMatchObject({
       hitAt1: false,
       hitAt5: false,
@@ -204,6 +240,32 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
       hitAt10: true
     });
   });
+
+  it("derives false-confident from a large fused_score margin", () => {
+    const verdict = resolveLongMemEvalHitVerdict({
+      isAbstention: true,
+      results: [
+        { object_id: "decoy-a", relevance_score: 1, fused_score: 2.5 },
+        { object_id: "decoy-b", relevance_score: 1, fused_score: 0.4 }
+      ],
+      sidecar: new Map(),
+      answerSessionIds: new Set()
+    });
+    expect(verdict.hitAt1).toBe(false);
+  });
+
+  it("derives correct abstention from a tiny fused_score margin", () => {
+    const verdict = resolveLongMemEvalHitVerdict({
+      isAbstention: true,
+      results: [
+        { object_id: "decoy-a", relevance_score: 1, fused_score: 1.02 },
+        { object_id: "decoy-b", relevance_score: 1, fused_score: 1.0 }
+      ],
+      sidecar: new Map(),
+      answerSessionIds: new Set()
+    });
+    expect(verdict.hitAt1).toBe(true);
+  });
 });
 
 describe("abstention miss classification and KPI breakdown", () => {
@@ -222,6 +284,7 @@ describe("abstention miss classification and KPI breakdown", () => {
       recallResult: { diagnostics: { candidate_pool: [] } }
     });
     expect(row.miss_classification).toBe("abstained_correctly");
+    expect(row.premise_invalid).toBe(false);
   });
 
   it("classifies a false-confident abstention as `abstain_false_confident`", () => {
@@ -239,7 +302,6 @@ describe("abstention miss classification and KPI breakdown", () => {
       recallResult: { diagnostics: { candidate_pool: [] } }
     });
     expect(row.miss_classification).toBe("abstain_false_confident");
-    // An `_abs` row must never fall back to `no_gold` once it is scored.
     expect(row.miss_classification).not.toBe("no_gold");
   });
 
@@ -266,7 +328,6 @@ describe("abstention miss classification and KPI breakdown", () => {
         deliveredResult(2, THR - 0.2),
         deliveredResult(3, THR + 0.02)
       ],
-      // top-1 clean, rank-3 crosses: correct@1, false@5 and false@10.
       hitAt1: true,
       hitAt5: false,
       hitAt10: false,
@@ -291,7 +352,42 @@ describe("abstention miss classification and KPI breakdown", () => {
       abstained_correctly: 1,
       abstain_false_confident: 1
     });
-    // Abstention rows never inflate the `no_gold` counter.
     expect(metrics.no_gold_count).toBe(0);
+  });
+
+  it("persists fused-margin abstention_confidence_score on delivered_results", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-abs_abs",
+      goldMemoryIds: [],
+      answerSessionIds: [],
+      deliveredResults: [
+        {
+          object_id: "decoy-a",
+          rank: 1,
+          relevance_score: 0.99,
+          fused_score: 2.4
+        },
+        {
+          object_id: "decoy-b",
+          rank: 2,
+          relevance_score: 0.98,
+          fused_score: 0.5
+        }
+      ],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+    expect(row.premise_invalid).toBe(false);
+    expect(row.delivered_results[0]?.abstention_confidence_score).toBeGreaterThanOrEqual(
+      THR
+    );
+    expect(row.delivered_results[0]?.abstention_confidence_score).toBe(
+      row.delivered_results[1]?.abstention_confidence_score
+    );
   });
 });

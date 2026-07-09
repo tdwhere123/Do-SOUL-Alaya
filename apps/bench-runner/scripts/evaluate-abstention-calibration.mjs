@@ -29,11 +29,19 @@ const SIGNAL_DEFINITIONS = [
   { signal: "top1_top5_mean_relevance_margin", family: "relevance_margin", comparison_group: "margin" },
   { signal: "top1_top2_fused_margin", family: "fused_margin", comparison_group: "margin" },
   { signal: "top1_top5_mean_fused_margin", family: "fused_margin", comparison_group: "margin" },
+  { signal: "abstention_confidence_score", family: "runtime_confidence", comparison_group: "runtime_confidence" },
   { signal: "likelihood_stream_support_count", family: "likelihood_support", comparison_group: "likelihood_support" },
   { signal: "structural_stream_support_count", family: "structural_support", comparison_group: "structural_support" }
 ];
 
 const SIGNALS = SIGNAL_DEFINITIONS.map((definition) => definition.signal);
+
+/** Fused-margin signals that receive an isotonic (PAVA) calibration pass. */
+const ISOTONIC_SOURCE_SIGNALS = [
+  "top1_top2_fused_margin",
+  "top1_top5_mean_fused_margin",
+  "abstention_confidence_score"
+];
 
 function usage() {
   return [
@@ -146,12 +154,19 @@ function featureVector(results) {
   const relevance = marginFeatures(results, "relevance_score");
   const fused = marginFeatures(results, "fused_score");
   const support = streamSupport(results[0]);
+  const confidenceScores = results
+    .map((result) => numberOrNull(result?.abstention_confidence_score))
+    .filter((value) => value !== null);
+  // List-level confidence is identical across delivered rows when produced;
+  // take the first finite value.
+  const abstentionConfidence = confidenceScores[0] ?? null;
   const missing = [];
   if (relevance.top1Top2 === null) missing.push("top1_top2_relevance_margin");
   if (relevance.top1Top5Mean === null) missing.push("top1_top5_mean_relevance_margin");
   if (fused.top1 === null) missing.push("top1_fused_score");
   if (fused.top1Top2 === null) missing.push("top1_top2_fused_margin");
   if (fused.top1Top5Mean === null) missing.push("top1_top5_mean_fused_margin");
+  if (abstentionConfidence === null) missing.push("abstention_confidence_score");
   missing.push(...support.missing);
   return {
     result_count: results.length,
@@ -161,6 +176,7 @@ function featureVector(results) {
     top1_fused_score: fused.top1,
     top1_top2_fused_margin: fused.top1Top2,
     top1_top5_mean_fused_margin: fused.top1Top5Mean,
+    abstention_confidence_score: abstentionConfidence,
     likelihood_stream_support_count: support.likelihood,
     structural_stream_support_count: support.structural,
     premise_invalid: false,
@@ -432,11 +448,117 @@ function summarizeSignalComparison() {
   return comparison;
 }
 
+/**
+ * Pool Adjacent Violators Algorithm (PAVA) for non-decreasing isotonic
+ * regression of binary labels onto a sorted score axis.
+ * Fit only on the training split (answerable + synthetic negatives).
+ */
+function fitIsotonicPava(examples, signal) {
+  const points = examples
+    .map((example) => ({
+      x: numberOrNull(example.features[signal]),
+      y: example.should_answer ? 1 : 0
+    }))
+    .filter((point) => point.x !== null)
+    .sort((left, right) => left.x - right.x || left.y - right.y);
+  if (points.length === 0) {
+    return { signal, blocks: [], fitted_count: 0 };
+  }
+  const blocks = points.map((point) => ({
+    xMin: point.x,
+    xMax: point.x,
+    sum: point.y,
+    weight: 1,
+    mean: point.y
+  }));
+  let index = 0;
+  while (index < blocks.length - 1) {
+    if (blocks[index].mean <= blocks[index + 1].mean) {
+      index += 1;
+      continue;
+    }
+    const merged = {
+      xMin: blocks[index].xMin,
+      xMax: blocks[index + 1].xMax,
+      sum: blocks[index].sum + blocks[index + 1].sum,
+      weight: blocks[index].weight + blocks[index + 1].weight,
+      mean: 0
+    };
+    merged.mean = merged.sum / merged.weight;
+    blocks.splice(index, 2, merged);
+    if (index > 0) index -= 1;
+  }
+  return {
+    signal,
+    fitted_count: points.length,
+    blocks: blocks.map((block) => ({
+      x_min: block.xMin,
+      x_max: block.xMax,
+      calibrated: block.mean,
+      weight: block.weight
+    }))
+  };
+}
+
+function applyIsotonic(fit, rawValue) {
+  if (rawValue === null || fit.blocks.length === 0) return null;
+  if (rawValue <= fit.blocks[0].x_min) return fit.blocks[0].calibrated;
+  for (const block of fit.blocks) {
+    if (rawValue >= block.x_min && rawValue <= block.x_max) {
+      return block.calibrated;
+    }
+  }
+  return fit.blocks[fit.blocks.length - 1].calibrated;
+}
+
+function withCalibratedFeature(examples, signal, fit, calibratedKey) {
+  return examples.map((example) => {
+    const raw = numberOrNull(example.features[signal]);
+    return {
+      ...example,
+      features: {
+        ...example.features,
+        [calibratedKey]: applyIsotonic(fit, raw)
+      }
+    };
+  });
+}
+
+function calibratedSignalName(signal) {
+  return `isotonic_${signal}`;
+}
+
+function summarizeIsotonic(examples) {
+  const fits = {};
+  const roc = [];
+  const signals = [];
+  for (const signal of ISOTONIC_SOURCE_SIGNALS) {
+    const fit = fitIsotonicPava(examples.training, signal);
+    fits[signal] = fit;
+    const calibratedKey = calibratedSignalName(signal);
+    const answerable = withCalibratedFeature(examples.answerable, signal, fit, calibratedKey);
+    const holdout = withCalibratedFeature(examples.holdoutAbstentions, signal, fit, calibratedKey);
+    const training = withCalibratedFeature(examples.training, signal, fit, calibratedKey);
+    signals.push(
+      summarizeSignal(training, holdout, calibratedKey, { includeSweep: false })
+    );
+    roc.push({
+      signal: calibratedKey,
+      source_signal: signal,
+      family: "isotonic_calibrated",
+      comparison_group: "isotonic",
+      ...summarizeRocAuc(answerable, holdout, calibratedKey)
+    });
+  }
+  return { fits, signals, roc };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const sidecar = JSON.parse(await readFile(args.diagnostics, "utf8"));
   const questions = readQuestions(sidecar);
   const examples = buildExamples(questions);
+  const isotonic = summarizeIsotonic(examples);
   const report = {
     schema_version: "abstention-calibration-eval.v1",
     diagnostics_path: args.diagnostics,
@@ -462,20 +584,46 @@ async function main() {
       synthetic_negative_strategy: "leave_gold_out_delivered_results_only",
       premise_invalid_available: false,
       premise_invalid_default: false,
+      isotonic_fit_uses_true_abs_holdout: false,
       limitation:
         "This sidecar does not expose premise-validity labels; premise_invalid is reported false and excluded from threshold search."
     },
-    signal_comparison: summarizeSignalComparison(),
+    runtime_handoff: {
+      scorer_field: "abstention_confidence_score",
+      scorer_threshold: 0.91,
+      producer:
+        "apps/bench-runner/src/longmemeval/abstention-confidence.ts — fused_score ranking dominance (top1−top2 and top1−mean(top2..top5)), never relevance_score",
+      missing_confidence_behavior:
+        "scoreAbstentionQuestion treats missing/null confidence as correct abstention (auto-pass)",
+      threshold_reflection:
+        "Threshold stays 0.91 until a live LongMemEval reflection run; this script reports ROC/AUC for raw fused margins, runtime confidence, and isotonic-calibrated variants without claiming a production AUC."
+    },
+    signal_comparison: {
+      ...summarizeSignalComparison(),
+      isotonic: ISOTONIC_SOURCE_SIGNALS.map(calibratedSignalName)
+    },
     feature_availability: summarizeFeatureAvailability(examples),
-    signals: SIGNALS.map((signal) =>
-      summarizeSignal(examples.training, examples.holdoutAbstentions, signal, {
-        includeSweep: args.includeSweep
-      })
-    ),
-    roc_auc: SIGNALS.map((signal) => ({
-      ...signalDefinition(signal),
-      ...summarizeRocAuc(examples.answerable, examples.holdoutAbstentions, signal)
-    }))
+    signals: [
+      ...SIGNALS.map((signal) =>
+        summarizeSignal(examples.training, examples.holdoutAbstentions, signal, {
+          includeSweep: args.includeSweep
+        })
+      ),
+      ...isotonic.signals
+    ],
+    roc_auc: [
+      ...SIGNALS.map((signal) => ({
+        ...signalDefinition(signal),
+        ...summarizeRocAuc(examples.answerable, examples.holdoutAbstentions, signal)
+      })),
+      ...isotonic.roc
+    ],
+    isotonic_calibration: {
+      algorithm: "pava",
+      fit_split: "answerable_plus_synthetic_leave_gold_out",
+      holdout: "true_abstention_only",
+      fits: isotonic.fits
+    }
   };
   console.log(JSON.stringify(report, null, 2));
 }

@@ -434,7 +434,9 @@ async function buildRecallEvalQuestionResult(
     isAbstention: isAbstentionQuestionId(input.question.questionId),
     results,
     sidecar,
-    answerSessionIds: answerSessionSet
+    answerSessionIds: answerSessionSet,
+    recallResult,
+    embeddingMode: recallEvalEmbeddingMode()
   });
   return {
     questionId: input.question.questionId,

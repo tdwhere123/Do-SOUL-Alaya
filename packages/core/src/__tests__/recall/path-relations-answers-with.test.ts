@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   answersWithPathFuelEnabled,
   buildPathInflowByTarget,
@@ -6,25 +6,12 @@ import {
 } from "../../recall/expansion/path-relations.js";
 import { createPathRelation } from "./recall-service-test-fixtures.js";
 
-afterEach(() => {
-  delete process.env.ALAYA_RECALL_ANSWERS_WITH;
-  delete process.env.ALAYA_EXP_ANSWERS_WITH;
-});
-
 describe("answers_with path inflow", () => {
-  it("is disabled unless ALAYA_RECALL_ANSWERS_WITH=1", () => {
-    expect(answersWithPathFuelEnabled()).toBe(false);
-    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
-    expect(answersWithPathFuelEnabled()).toBe(true);
-  });
-
-  it("accepts the legacy ALAYA_EXP_ANSWERS_WITH alias during the gate migration", () => {
-    process.env.ALAYA_EXP_ANSWERS_WITH = "1";
+  it("path fuel is always on", () => {
     expect(answersWithPathFuelEnabled()).toBe(true);
   });
 
   it("uses answers_with as path-flood fuel", () => {
-    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
     const inflow = buildPathInflowByTarget(
       [
         createPathRelation({
@@ -45,26 +32,7 @@ describe("answers_with path inflow", () => {
     expect(inflow["answer-memory"]?.[0]?.weight ?? 0).toBeGreaterThan(0);
   });
 
-  it("keeps answers_with path-flood fuel inert while the flag is off", () => {
-    const inflow = buildPathInflowByTarget(
-      [
-        createPathRelation({
-          path_id: "path-answer",
-          sourceId: "seed-memory",
-          targetId: "answer-memory",
-          relationKind: "answers_with",
-          strength: 1,
-          recallBias: 1
-        })
-      ],
-      new Set(["seed-memory", "answer-memory"])
-    );
-
-    expect(inflow["answer-memory"]).toBeUndefined();
-  });
-
   it("keeps non-answer relations inert for path-flood fuel", () => {
-    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
     const inflow = buildPathInflowByTarget(
       [
         createPathRelation({
@@ -97,28 +65,19 @@ function pathOf(relationKind: string): ReturnType<typeof createPathRelation> {
 }
 
 describe("scorePathRelationExpansion answers_with weighting", () => {
-  it("does not add answers_with bonus when flood fuel flag is off", () => {
-    expect(scorePathRelationExpansion(pathOf("answers_with"))).toBeCloseTo(
-      scorePathRelationExpansion(pathOf("coheres_with")),
-      10
-    );
-  });
-
-  it("ranks answers_with above coheres_with when ALAYA_RECALL_ANSWERS_WITH=1", () => {
-    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
+  it("ranks answers_with above coheres_with", () => {
     expect(scorePathRelationExpansion(pathOf("answers_with"))).toBeGreaterThan(
       scorePathRelationExpansion(pathOf("coheres_with"))
     );
   });
 
-  it("adds exactly the modest additive bonus over a co-occurrence edge when fuel is on", () => {
-    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
+  it("adds exactly the modest additive bonus over a co-occurrence edge", () => {
     const answersWith = scorePathRelationExpansion(pathOf("answers_with"));
     const cohereWith = scorePathRelationExpansion(pathOf("coheres_with"));
     expect(answersWith - cohereWith).toBeCloseTo(0.1, 10);
   });
 
-  it("off = byte-equivalent: a non-answers_with edge scores the bonus-free formula", () => {
+  it("non-answers_with edges score the bonus-free formula", () => {
     // 0.8*0.55 + 0.4*0.25 + 0.15 (recall_allowed) + 0 (volatile) + 0 (no answerhood bonus).
     expect(scorePathRelationExpansion(pathOf("coheres_with"))).toBeCloseTo(0.69, 10);
     expect(scorePathRelationExpansion(pathOf("co_recalled"))).toBeCloseTo(0.69, 10);
@@ -126,7 +85,6 @@ describe("scorePathRelationExpansion answers_with weighting", () => {
   });
 
   it("clamps to 1 when the bonus would overflow", () => {
-    process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
     const saturated = createPathRelation({
       sourceId: "src",
       targetId: "tgt",

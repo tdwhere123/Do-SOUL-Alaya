@@ -1,11 +1,10 @@
-import { recallEnvRaw, recallAnswersWithEnabled } from "../../config/recall-env-access.js";
+import { recallEnvRaw } from "../../config/recall-env-access.js";
 import type { RecallSupplementaryData } from "../runtime/recall-service-types.js";
 import { type DeliveryCandidate, sessionKeyOf } from "./coverage-delivery-signals.js";
 
 // Evidence-set completion nudge for same-session evidence members already
 // anchored in the selected set. Historical name SESSION_COVERAGE_BONUS.
 const EVIDENCE_SET_COMPLETION_BONUS = 0.06;
-const MAX_CLUSTER_BONUS = 0.06;
 export const MAX_EVIDENCE_SET_BONUS = 0.1;
 
 export interface EvidenceSetCoverageState {
@@ -85,31 +84,8 @@ export function evidenceSetCoverageBonus(
   if (state.anchorSessions.has(sessionKeyOf(candidate.entry)) && isEvidenceMember(candidate, supplementaryData)) {
     bonus += EVIDENCE_SET_COMPLETION_BONUS;
   }
-  // When answers_with flood is live, path π already votes via A_path (and was
-  // deduped out of path_expansion RRF). Re-applying cluster weight here is a
-  // third count of the same edge — withhold it while flood fuel is on.
-  if (!recallAnswersWithEnabled()) {
-    const clusterWeight = bestClusterWeight(state, candidate, supplementaryData);
-    if (clusterWeight > 0 && state.clusterWeightMax > 0) {
-      bonus += Math.min(MAX_CLUSTER_BONUS, (clusterWeight / state.clusterWeightMax) * MAX_CLUSTER_BONUS);
-    }
-  }
+  // answers_with flood is always on: path π already votes via A_path (and was
+  // deduped out of path_expansion RRF). Re-applying cluster weight here would
+  // be a third count of the same edge — withhold permanently.
   return Math.min(bonus, MAX_EVIDENCE_SET_BONUS);
-}
-
-// Strongest answers_with edge tying this candidate to the selected set: as a seed flooding a
-// selected target, as a target flooded by a selected object, or via a shared seed.
-function bestClusterWeight(
-  state: EvidenceSetCoverageState,
-  candidate: DeliveryCandidate,
-  supplementaryData: RecallSupplementaryData
-): number {
-  const objectId = candidate.entry.object_id;
-  let best = state.selectedSeeds.get(objectId) ?? 0;
-  for (const edge of supplementaryData.pathInflowByTarget?.[objectId] ?? []) {
-    if (state.selectedObjectIds.has(edge.seedObjectId) || state.selectedSeeds.has(edge.seedObjectId)) {
-      best = Math.max(best, edge.weight);
-    }
-  }
-  return best;
 }

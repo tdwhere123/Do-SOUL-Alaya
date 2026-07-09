@@ -1,4 +1,9 @@
 import { scoreAbstentionQuestion } from "./abstention.js";
+import { computeAbstentionConfidenceScore } from "./abstention-confidence.js";
+import {
+  buildObjectIdentityKey,
+  readRecallDiagnostics
+} from "./diagnostics-private.js";
 
 export interface LongMemEvalSidecarEntry {
   readonly objectId: string;
@@ -14,10 +19,14 @@ export interface LongMemEvalHitScoringInput {
     readonly object_id: string;
     readonly object_kind?: string;
     readonly relevance_score: number;
+    readonly fused_score?: number | null;
     readonly abstention_confidence_score?: number | null;
   }[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
   readonly answerSessionIds: ReadonlySet<string>;
+  /** Optional raw recall payload so fused_score can be joined from diagnostics. */
+  readonly recallResult?: unknown;
+  readonly embeddingMode?: "disabled" | "env";
 }
 
 export interface LongMemEvalHitScoringResult {
@@ -33,8 +42,11 @@ export function resolveLongMemEvalHitVerdict(
   if (!input.isAbstention) {
     return scoreLongMemEvalRecallHits(input);
   }
-  const abstention = scoreAbstentionQuestion({ results: input.results });
-  const firstResult = input.results[0];
+  const results = enrichAbstentionConfidence(
+    joinFusedScoresOntoResults(input.results, input.recallResult, input.embeddingMode)
+  );
+  const abstention = scoreAbstentionQuestion({ results });
+  const firstResult = results[0];
   return {
     hitAt1: abstention.correctAt1,
     hitAt5: abstention.correctAt5,
@@ -42,6 +54,63 @@ export function resolveLongMemEvalHitVerdict(
     firstTier:
       firstResult === undefined ? "cold" : inferTier(firstResult.relevance_score)
   };
+}
+
+/**
+ * Join candidate fused_score onto delivered pointers when the pointer itself
+ * lacks it. Used before abstention confidence so the producer sees fusion.
+ */
+export function joinFusedScoresOntoResults<
+  T extends {
+    readonly object_id: string;
+    readonly object_kind?: string | null;
+    readonly fused_score?: number | null;
+  }
+>(
+  results: readonly T[],
+  recallResult: unknown,
+  embeddingMode: "disabled" | "env" = "env"
+): readonly (T & { readonly fused_score: number | null })[] {
+  const diagnostics =
+    recallResult === undefined
+      ? null
+      : readRecallDiagnostics(recallResult, embeddingMode);
+  return results.map((result) => {
+    if (result.fused_score !== undefined && result.fused_score !== null) {
+      return { ...result, fused_score: result.fused_score };
+    }
+    const objectKind = result.object_kind ?? "memory_entry";
+    const candidate = diagnostics?.candidatesByObjectIdentity.get(
+      buildObjectIdentityKey(objectKind, result.object_id)
+    );
+    return {
+      ...result,
+      fused_score: candidate?.fusedScore ?? result.fused_score ?? null
+    };
+  });
+}
+
+/**
+ * Prefer an explicit confidence channel; otherwise derive from fused_score
+ * ranking dominance. Never falls back to relevance_score.
+ */
+export function enrichAbstentionConfidence<
+  T extends {
+    readonly relevance_score: number;
+    readonly fused_score?: number | null;
+    readonly abstention_confidence_score?: number | null;
+  }
+>(results: readonly T[]): readonly T[] {
+  if (results.some((result) => result.abstention_confidence_score !== undefined)) {
+    return results;
+  }
+  const confidence = computeAbstentionConfidenceScore(
+    results.map((result) => result.fused_score)
+  );
+  return results.map((result) => ({
+    ...result,
+    abstention_confidence_score: confidence
+  }));
 }
 
 export function scoreLongMemEvalRecallHits(

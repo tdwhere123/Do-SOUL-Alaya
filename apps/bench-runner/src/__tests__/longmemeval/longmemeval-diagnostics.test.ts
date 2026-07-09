@@ -495,6 +495,11 @@ describe("LongMemEval recall diagnostics", () => {
       flood_potential: { Flood: 0.2, fuel_verified: true },
       flood_fuel_coverage: { fuel_verified_count: 1 }
     });
+    // Phase-1: confidence may be null without fused dominance; never invent from relevance.
+    expect(
+      row.delivered_results[0]?.abstention_confidence_score === null ||
+        typeof row.delivered_results[0]?.abstention_confidence_score === "number"
+    ).toBe(true);
     expect(row.gold[0]).toMatchObject({
       per_axis_contribution: { object: 0.2, path: 0.03, evidence: 0 },
       flood_potential: { Flood: 0.2, fuel_verified: true },

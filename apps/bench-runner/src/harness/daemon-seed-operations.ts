@@ -351,7 +351,6 @@ async function persistBenchAnswerHq(
   memoryId: string,
   signalInput: BenchSignalSeedInput
 ): Promise<void> {
-  if (!answersWithBenchHqEnabled()) return;
   const hqs = collectBenchAnswerHqs(signalInput);
   if (hqs.length === 0) return;
   const repo = new SqliteMemoryHqRepo(
@@ -365,13 +364,6 @@ async function persistBenchAnswerHq(
     created_at: now,
     updated_at: now
   });
-}
-
-function answersWithBenchHqEnabled(): boolean {
-  return (
-    process.env.ALAYA_RECALL_ANSWERS_WITH === "1" ||
-    process.env.ALAYA_EXP_ANSWERS_WITH === "1"
-  );
 }
 
 function collectBenchAnswerHqs(signalInput: BenchSignalSeedInput): readonly string[] {

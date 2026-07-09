@@ -113,6 +113,9 @@ export const DiagnosticRecallResultSchema = z
     relevance_score: z.number(),
     fused_rank: z.number().nullable(),
     fused_score: z.number().nullable(),
+    // Fused-margin answerability confidence; optional so older sidecars parse.
+    // Never derived from relevance_score (saturated effectiveScore).
+    abstention_confidence_score: z.number().min(0).max(1).nullable().optional(),
     per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
     fused_rank_contribution_per_stream:
       DiagnosticStreamContributionsSchema.nullable(),

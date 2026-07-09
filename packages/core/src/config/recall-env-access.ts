@@ -93,9 +93,9 @@ export function recallEmbedPoolRescoreEnabled(): boolean {
   return getCoreConfig().recall.embedPoolRescore;
 }
 
+/** answers_with / flood path fuel is always on; no closable off-switch. */
 export function recallAnswersWithEnabled(): boolean {
-  const recall = getCoreConfig().recall;
-  return recall.answersWith || recall.expAnswersWith;
+  return true;
 }
 
 export function readRecallPositiveInt(name: string, fallback: number): number {

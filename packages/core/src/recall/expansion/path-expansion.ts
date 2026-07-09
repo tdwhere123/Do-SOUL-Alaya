@@ -13,7 +13,6 @@ import {
 import { EARNED_CO_RECALLED_FANIN_RELATION_KIND } from "./graph-expansion.js";
 import {
   PATH_SUPPRESSION_MAX_PER_TARGET,
-  answersWithPathFuelEnabled,
   directionEligiblePathExpansionTargets,
   firstTimeConcernSeedId,
   isPathExcludedFromRecall,
@@ -206,12 +205,9 @@ function admitPathExpansionTargets(
   seedRelevanceById: ReadonlyMap<string, number>,
   initialAdded: number
 ): number {
-  // When answers_with flood fuel is on, those edges feed A_path only. Keeping
-  // them in path_expansion RRF double-counts the same π into R_obj.
-  if (
-    answersWithPathFuelEnabled() &&
-    path.constitution.relation_kind === "answers_with"
-  ) {
+  // answers_with flood is always on: those edges feed A_path only. Keeping
+  // them in path_expansion RRF would double-count the same π into R_obj.
+  if (path.constitution.relation_kind === "answers_with") {
     return initialAdded;
   }
   let added = initialAdded;

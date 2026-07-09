@@ -3,7 +3,6 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 
-const REQUIRED_ANSWERS_WITH = "1";
 const REQUIRED_EMBEDDING_MODE = "env";
 
 function usage() {
@@ -12,7 +11,7 @@ function usage() {
     `  node ${basename(process.argv[1])} [--diagnostics <longmemeval-diagnostics.json>] [--embedding env|disabled]`,
     "",
     "Checks the safe Card E flood-supply experiment preconditions:",
-    "ALAYA_RECALL_ANSWERS_WITH=1 and benchmark --embedding env.",
+    "answers_with/flood is always on; benchmark --embedding env is required.",
     "When diagnostics are provided, reports flood_fuel_coverage blocks if present."
   ].join("\n");
 }
@@ -120,8 +119,8 @@ async function main() {
     typeof sidecar?.embedding_mode === "string" ? sidecar.embedding_mode : null;
   const requestedEmbeddingMode = args.embedding ?? null;
   const effectiveEmbeddingMode = sidecarEmbeddingMode ?? requestedEmbeddingMode;
-  const answersWith = process.env.ALAYA_RECALL_ANSWERS_WITH ?? null;
-  const answersWithOk = answersWith === REQUIRED_ANSWERS_WITH;
+  // Flood/answers_with is hard-enabled in runtime; env is informational only.
+  const answersWith = process.env.ALAYA_RECALL_ANSWERS_WITH ?? "always-on";
   const embeddingOk =
     sidecar === null
       ? effectiveEmbeddingMode === REQUIRED_EMBEDDING_MODE
@@ -134,9 +133,9 @@ async function main() {
       : fuelCoverage.fuel_verified_count !== null && fuelCoverage.fuel_verified_count > 0;
   const report = {
     schema_version: "flood-delivery-experiment-check.v1",
-    ok: answersWithOk && embeddingOk && (fuelVerifiedOk ?? true),
+    ok: embeddingOk && (fuelVerifiedOk ?? true),
     required: {
-      ALAYA_RECALL_ANSWERS_WITH: REQUIRED_ANSWERS_WITH,
+      answers_with: "always-on",
       embedding_mode: REQUIRED_EMBEDDING_MODE
     },
     observed: {
@@ -147,12 +146,12 @@ async function main() {
       diagnostics_path: args.diagnostics
     },
     checks: {
-      answers_with_env_ok: answersWithOk,
+      answers_with_env_ok: true,
       embedding_env_ok: embeddingOk,
       fuel_verified_ok: fuelVerifiedOk
     },
     command_hint:
-      "ALAYA_RECALL_ANSWERS_WITH=1 rtk pnpm exec alaya-bench-runner longmemeval --embedding env ...",
+      "rtk pnpm exec alaya-bench-runner longmemeval --embedding env ...",
     fuel_coverage: fuelCoverage,
     diagnostics_note:
       fuelCoverageRows.length === 0

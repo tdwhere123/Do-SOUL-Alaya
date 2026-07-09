@@ -645,25 +645,24 @@ describe("applyEvidenceSetDelivery S4 convergence locks", () => {
     expect(ids(result)).toEqual(["a1", "a2", "a3", "a4", "bDiverse"]);
   });
 
-  it("default ⇒ the per-candidate coverage nudge is capped at 0.1 (session + cluster combined)", () => {
+  it("session completion nudge alone is capped; path-cluster bonus stays withheld under always-on flood", () => {
     const seed = s4Candidate({ objectId: "seed", fusedScore: 1, surfaceId: "sB", evidenceAxis: 1 });
     const cand = s4Candidate({ objectId: "cand", fusedScore: 0.5, surfaceId: "sB", streamRanks: { source_proximity: 1 } });
     const supp = s4Supplementary({ pathInflowByTarget: { cand: [{ seedObjectId: "seed", weight: 1 }] } });
     const state = createEvidenceSetCoverageState([seed, cand], supp);
     recordEvidenceSetSelection(state, seed, supp);
     const bonus = evidenceSetCoverageBonus(state, cand, supp);
+    // Session membership still nudges; path-cluster weight must not re-apply flood π.
     expect(bonus).toBeLessThanOrEqual(0.1);
-    expect(bonus).toBeCloseTo(0.1, 10);
+    expect(bonus).toBeCloseTo(0.06, 10);
   });
 
-  it("answers_with flood on ⇒ path-cluster bonus is withheld to avoid triple-counting A_path", () => {
-    vi.stubEnv("ALAYA_RECALL_ANSWERS_WITH", "1");
+  it("answers_with flood always on ⇒ path-cluster bonus is withheld to avoid triple-counting A_path", () => {
     const seed = s4Candidate({ objectId: "seed", fusedScore: 1, surfaceId: "sB", evidenceAxis: 1 });
     const cand = s4Candidate({ objectId: "cand", fusedScore: 0.5, surfaceId: "sB", streamRanks: { source_proximity: 1 } });
     const supp = s4Supplementary({ pathInflowByTarget: { cand: [{ seedObjectId: "seed", weight: 1 }] } });
     const state = createEvidenceSetCoverageState([seed, cand], supp);
     recordEvidenceSetSelection(state, seed, supp);
-    // Session membership still nudges; path-cluster weight must not re-apply flood π.
     expect(evidenceSetCoverageBonus(state, cand, supp)).toBeCloseTo(0.06, 10);
   });
 

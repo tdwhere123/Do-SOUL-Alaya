@@ -3,7 +3,6 @@ import {
   type PathAnchorRef,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-import { recallAnswersWithEnabled } from "../../config/recall-env-access.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import type {
   PathInflowEdge,
@@ -30,13 +29,11 @@ export function scorePathRelationExpansion(path: Readonly<PathRelation>): number
     path.plasticity_state.stability_class === "pinned"
       ? 0.1
       : 0;
-  // Gate the answers_with bonus on the same flag as flood fuel. Otherwise the
-  // +0.1 prior stays live in path_expansion RRF while flood A_path is off, and
-  // when flood is on the same π is counted twice (RRF stream + A_path).
+  // answers_with flood is always on: A_path carries these edges, and
+  // path_expansion RRF skips them. The +0.1 prior stays on the shared scorer
+  // so inflow weight and any residual path math stay aligned.
   const answerhoodBoost =
-    path.constitution.relation_kind === "answers_with" && recallAnswersWithEnabled()
-      ? ANSWERS_WITH_EXPANSION_BONUS
-      : 0;
+    path.constitution.relation_kind === "answers_with" ? ANSWERS_WITH_EXPANSION_BONUS : 0;
   return clamp01(
     path.plasticity_state.strength * 0.55 +
       path.effect_vector.recall_bias * 0.25 +
@@ -99,8 +96,9 @@ export interface DirectionEligiblePathExpansionTarget {
 // invariant: only answer relations carry path inflow.
 const ANSWER_FLOOD_RELATION_KINDS: ReadonlySet<string> = new Set(["answers_with"]);
 
+/** Always-on flood fuel; retained for call-site clarity / tests. */
 export function answersWithPathFuelEnabled(): boolean {
-  return recallAnswersWithEnabled();
+  return true;
 }
 
 function isAnswerFloodRelationKind(relationKind: string): boolean {
@@ -114,9 +112,6 @@ export function buildPathInflowByTarget(
   paths: readonly Readonly<PathRelation>[],
   candidateIds: ReadonlySet<string>
 ): Readonly<Record<string, PathInflowEdge[]>> {
-  if (!answersWithPathFuelEnabled()) {
-    return Object.freeze({});
-  }
   const inflow: Record<string, PathInflowEdge[]> = {};
   for (const path of paths) {
     if (isPathExcludedFromRecall(path) || !isAnswerFloodRelationKind(path.constitution.relation_kind)) {

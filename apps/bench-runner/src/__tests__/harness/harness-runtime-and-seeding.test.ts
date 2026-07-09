@@ -108,49 +108,39 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
   it(
     "answers-with compile seed persists HQ rows for path-fuel pairing",
     async () => {
-      const previous = process.env.ALAYA_RECALL_ANSWERS_WITH;
-      process.env.ALAYA_RECALL_ANSWERS_WITH = "1";
-      try {
-        const daemon = await startBenchDaemon({
-          workspaceId: "harness-answers-with-hq-ws",
-          runId: "harness-answers-with-hq-run"
-        });
-        handles.push(daemon);
+      const daemon = await startBenchDaemon({
+        workspaceId: "harness-answers-with-hq-ws",
+        runId: "harness-answers-with-hq-run"
+      });
+      handles.push(daemon);
 
-        const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals([
-          {
-            signalKind: "potential_claim",
-            objectKind: "fact",
-            confidence: 0.9,
-            distilledFact: "Mira uses oat milk in coffee.",
-            turnContent: "Mira uses oat milk in coffee.",
-            evidenceRef: "answers-with-hq-q0",
-            turnSeedIndex: 1,
-            extractionProvider: "official_api_compile",
-            productionRawPayload: {
-              matched_text: "Mira uses oat milk in coffee.",
-              hqs: ["What milk does Mira use in coffee?"]
-            }
+      const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals([
+        {
+          signalKind: "potential_claim",
+          objectKind: "fact",
+          confidence: 0.9,
+          distilledFact: "Mira uses oat milk in coffee.",
+          turnContent: "Mira uses oat milk in coffee.",
+          evidenceRef: "answers-with-hq-q0",
+          turnSeedIndex: 1,
+          extractionProvider: "official_api_compile",
+          productionRawPayload: {
+            matched_text: "Mira uses oat milk in coffee.",
+            hqs: ["What milk does Mira use in coffee?"]
           }
-        ]);
-
-        expect(dropped).toEqual([]);
-        expect(seeds).toHaveLength(1);
-        const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
-        const hqById = await new SqliteMemoryHqRepo(db).getHqByObjectIds([
-          seeds[0]!.memoryId
-        ]);
-        expect(hqById.get(seeds[0]!.memoryId)).toEqual([
-          "What milk does Mira use in coffee?",
-          "Mira uses oat milk in coffee."
-        ]);
-      } finally {
-        if (previous === undefined) {
-          delete process.env.ALAYA_RECALL_ANSWERS_WITH;
-        } else {
-          process.env.ALAYA_RECALL_ANSWERS_WITH = previous;
         }
-      }
+      ]);
+
+      expect(dropped).toEqual([]);
+      expect(seeds).toHaveLength(1);
+      const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+      const hqById = await new SqliteMemoryHqRepo(db).getHqByObjectIds([
+        seeds[0]!.memoryId
+      ]);
+      expect(hqById.get(seeds[0]!.memoryId)).toEqual([
+        "What milk does Mira use in coffee?",
+        "Mira uses oat milk in coffee."
+      ]);
     },
     60_000
   );

@@ -40,6 +40,14 @@ export function isAbstentionQuestionId(questionId: string): boolean {
   return questionId.endsWith("_abs");
 }
 
+/**
+ * Phase-1 premise-invalid stub: always false until a real premise detector
+ * exists. Call sites must use this helper so the bit is intentional.
+ */
+export function resolvePremiseInvalid(): false {
+  return false;
+}
+
 export interface AbstentionScoringInput {
   /**
    * Delivered recall results in rank order (rank 1 first). Only the first

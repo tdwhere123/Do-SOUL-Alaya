@@ -177,12 +177,9 @@ function createCoherenceCrystallizer(input: GardenRuntimeWiringInput) {
   });
 }
 
-// S2 answers_with: flag-gated (ALAYA_RECALL_ANSWERS_WITH). Off → undefined → no
-// port → backfill follow-up no-ops → no answers_with edges minted.
+// S2 answers_with: always-on when HQ repo is available. Null hqRepo →
+// undefined → no port → backfill follow-up no-ops → no answers_with edges minted.
 function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
-  if (process.env.ALAYA_RECALL_ANSWERS_WITH !== "1") {
-    return undefined;
-  }
   const hqRepo = createOptionalMemoryHqRepo(input.database);
   if (hqRepo === null) {
     return undefined;

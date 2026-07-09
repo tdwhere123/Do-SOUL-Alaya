@@ -2,6 +2,8 @@ import {
   classifyGoldMissTaxonomy,
   classifyQuestionMissTaxonomy
 } from "./diagnostics-miss-taxonomy.js";
+import { resolvePremiseInvalid } from "./abstention.js";
+import { computeAbstentionConfidenceScore } from "./abstention-confidence.js";
 import type {
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
@@ -76,7 +78,9 @@ export function buildQuestionDiagnostic(input: {
     question_id: input.questionId,
     question_type: input.questionType ?? null,
     is_abstention: input.isAbstention === true,
-    premise_invalid: input.premiseInvalid === true,
+    // Phase-1 stub: always false unless an explicit override is passed.
+    premise_invalid:
+      input.premiseInvalid === true ? true : resolvePremiseInvalid(),
     round_index: input.roundIndex ?? null,
     gold_memory_ids: input.goldMemoryIds,
     answer_session_ids: input.answerSessionIds,
@@ -269,11 +273,16 @@ function normalizeDeliveredResults(
   deliveredResults: readonly DiagnosticRecallResultInput[],
   diagnostics: NarrowRecallDiagnostics | null
 ): readonly DiagnosticRecallResult[] {
-  return deliveredResults.map((result): DiagnosticRecallResult => {
+  const joined = deliveredResults.map((result): DiagnosticRecallResult => {
     const objectKind = result.object_kind ?? "memory_entry";
     const candidate = diagnostics?.candidatesByObjectIdentity.get(
       buildObjectIdentityKey(objectKind, result.object_id)
     );
+    const fusedScore = result.fused_score ?? candidate?.fusedScore ?? null;
+    const confidence =
+      result.abstention_confidence_score !== undefined
+        ? result.abstention_confidence_score
+        : null;
     return {
       object_id: result.object_id,
       ...(objectKind === "memory_entry" ? {} : { object_kind: objectKind }),
@@ -281,7 +290,8 @@ function normalizeDeliveredResults(
       rank: result.rank,
       relevance_score: result.relevance_score,
       fused_rank: result.fused_rank ?? candidate?.fusedRank ?? null,
-      fused_score: candidate?.fusedScore ?? null,
+      fused_score: fusedScore,
+      abstention_confidence_score: confidence,
       per_stream_rank: candidate?.perStreamRank ?? null,
       fused_rank_contribution_per_stream:
         candidate?.fusedRankContributionPerStream ?? null,
@@ -299,6 +309,20 @@ function normalizeDeliveredResults(
         result.score_factors ?? candidate?.scoreFactors ?? null
     };
   });
+  // Prefer caller-supplied confidence; otherwise derive from joined fused scores.
+  const anyCallerConfidence = deliveredResults.some(
+    (result) => result.abstention_confidence_score !== undefined
+  );
+  if (anyCallerConfidence) {
+    return joined;
+  }
+  const derived = computeAbstentionConfidenceScore(
+    joined.map((result) => result.fused_score)
+  );
+  return joined.map((result) => ({
+    ...result,
+    abstention_confidence_score: derived
+  }));
 }
 
 export function summarizeProviderStates(

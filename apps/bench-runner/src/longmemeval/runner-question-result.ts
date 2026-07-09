@@ -62,7 +62,9 @@ async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionRe
     isAbstention,
     results: recallResult.results,
     sidecar: input.seedState.sidecar,
-    answerSessionIds: input.seedState.answerSessionSet
+    answerSessionIds: input.seedState.answerSessionSet,
+    recallResult,
+    embeddingMode: input.embeddingMode
   });
   return { isAbstention, qaVerdict, hits, diagnostics: buildDiagnostics(input, isAbstention, hits) };
 }

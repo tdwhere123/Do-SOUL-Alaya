@@ -73,6 +73,8 @@ export interface DiagnosticRecallResultInput {
   readonly rank: number;
   readonly relevance_score: number;
   readonly fused_rank?: number | null;
+  readonly fused_score?: number | null;
+  readonly abstention_confidence_score?: number | null;
   readonly plane_first_admitted?: string | null;
   readonly plane_winning_admission?: string | null;
   readonly score_factors?: DiagnosticScoreFactors | null;
