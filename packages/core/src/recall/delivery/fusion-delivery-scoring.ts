@@ -245,16 +245,17 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
 function buildFusedRankByCandidateKey(
   prelim: readonly PreliminaryFusionCandidate[]
 ): ReadonlyMap<string, number> {
-  // Flood / RRF fused_score is the primary key so structural fuel can reorder
-  // across facet tiers. Facet overlap is a near-tie nudge only.
+  // Facet overlap stays lexicographic-first: on LongMemEval flood-on, score-first
+  // let fuel_verified topic neighbors occupy top5 (F1 100Q −3pp / 500Q −0.8pp).
+  // Flood/RRF fused_score reorders only within the same facet-overlap tier.
   const ranked = [...prelim].sort((left, right) => {
-    const fusionDelta = right.fusedScore - left.fusedScore;
-    if (fusionDelta !== 0) {
-      return fusionDelta;
-    }
     const facetDelta = right.facetOverlapCount - left.facetOverlapCount;
     if (facetDelta !== 0) {
       return facetDelta;
+    }
+    const fusionDelta = right.fusedScore - left.fusedScore;
+    if (fusionDelta !== 0) {
+      return fusionDelta;
     }
     const axisDelta = compareConformantAxisRa(left.axisRa, right.axisRa);
     if (axisDelta !== 0) {

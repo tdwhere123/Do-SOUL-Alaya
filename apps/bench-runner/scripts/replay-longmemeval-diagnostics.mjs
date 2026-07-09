@@ -30,7 +30,7 @@ function usage() {
     "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <file> --weights stream=multiplier[,stream=multiplier...]",
     "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <file> --weights stream=multiplier[,stream=multiplier...] --rrf-k <k>",
     "  node apps/bench-runner/scripts/replay-longmemeval-diagnostics.mjs --diagnostics <file> --weights stream=multiplier[,stream=multiplier...] --facet-order first|tie-break",
-    "  Default --facet-order is tie-break (matches production fused-rank: score first, facet nudge).",
+    "  Default --facet-order is first (matches production fused-rank lexicographic facet key).",
     "",
     "Baseline mode reproduces gold-bearing any@5 from persisted gold final_rank fields.",
     "A/B mode is refused unless every gold-bearing question explicitly declares a complete candidate pool and carries tie-break fields.",
@@ -39,8 +39,8 @@ function usage() {
 }
 
 function parseArgs(argv) {
-  // Default matches production fused-rank order: fused score first, facet as tie-break.
-  const args = { diagnostics: null, weights: null, rrfK: null, facetOrder: "tie-break" };
+  // Default matches production fused-rank order: facet overlap first, score within tier.
+  const args = { diagnostics: null, weights: null, rrfK: null, facetOrder: "first" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--diagnostics") {
