@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __setApiKeyCipherKeyMaterialForTests,
   __setMachineKeyIdPathForTests,
+  __setPlatformMachineIdForTests,
   decryptApiKeyAtRest,
   encryptApiKeyAtRest,
   isEncryptedApiKeyAtRest
@@ -15,6 +16,7 @@ import {
 afterEach(() => {
   __setApiKeyCipherKeyMaterialForTests(null);
   __setMachineKeyIdPathForTests(null);
+  __setPlatformMachineIdForTests(undefined);
 });
 
 describe("api-key-cipher", () => {
@@ -82,6 +84,7 @@ describe("api-key-cipher", () => {
   it("creates a durable machine-key-id when platform ids are missing", () => {
     vi.stubEnv("VITEST", "");
     vi.stubEnv("NODE_ENV", "production");
+    __setPlatformMachineIdForTests(null);
     const durablePath = path.join(os.tmpdir(), `alaya-machine-key-${process.pid}.id`);
     __setMachineKeyIdPathForTests(durablePath);
     fs.rmSync(durablePath, { force: true });
