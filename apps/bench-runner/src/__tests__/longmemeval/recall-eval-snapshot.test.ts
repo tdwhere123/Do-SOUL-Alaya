@@ -19,7 +19,10 @@ import {
   buildLongMemEvalFixtureQuestion as buildQuestion,
   writeLongMemEvalFixtureDataset
 } from "./longmemeval-fixture.js";
-import { removeTempDirectory } from "../support/temp-cleanup.js";
+import {
+  isTransientFsLockError,
+  removeTempDirectory
+} from "../support/temp-cleanup.js";
 
 // @anchor recall-eval-end-to-end: seed a tiny dataset through the real bench
 // daemon (no LLM — no-credentials offline seed path), snapshot the seeded DB,
@@ -69,7 +72,13 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  await removeTempDirectory(tmpDir);
+  try {
+    await removeTempDirectory(tmpDir);
+  } catch (error) {
+    if (!isTransientFsLockError(error)) {
+      throw error;
+    }
+  }
 });
 
 describe("recall-eval against a seeded-DB snapshot", () => {

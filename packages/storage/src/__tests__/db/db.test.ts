@@ -4,7 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentSchemaSummary, initDatabase } from "../../sqlite/db.js";
+import {
+  closeCachedDatabase,
+  getCurrentSchemaSummary,
+  initDatabase
+} from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
 
@@ -57,6 +61,32 @@ describe("getCurrentSchemaSummary schema version read", () => {
       });
     } finally {
       database.close();
+    }
+  });
+});
+
+describe("closeCachedDatabase", () => {
+  it("does not create or open a missing file-backed path", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-db-close-miss-"));
+    const filename = path.join(directory, "missing.db");
+    try {
+      expect(() => closeCachedDatabase(filename)).not.toThrow();
+      expect(fs.existsSync(filename)).toBe(false);
+    } finally {
+      cleanupTempDirectory(directory);
+    }
+  });
+
+  it("closes a cached handle without leaving the path open", () => {
+    const context = createTempDatabasePath();
+    try {
+      const database = initDatabase({ filename: context.filename });
+      expect(database.isClosed()).toBe(false);
+      closeCachedDatabase(context.filename);
+      expect(database.isClosed()).toBe(true);
+      expect(() => closeCachedDatabase(context.filename)).not.toThrow();
+    } finally {
+      cleanupTempDirectory(context.directory);
     }
   });
 });

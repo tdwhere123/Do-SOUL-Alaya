@@ -1,7 +1,10 @@
 import { access, mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { removeTempDirectory } from "./temp-directory-cleanup.js";
+import {
+  isTransientFsLockError,
+  removeTempDirectory
+} from "./temp-directory-cleanup.js";
 
 const FAILED_ROOT_KEEP_COUNT = 3;
 const FAILED_ROOT_MAX_BYTES = 512 * 1024 * 1024;
@@ -35,7 +38,19 @@ export async function finalizeOwnedTempRoot(
     warn(`[bench temp-root] retained failed run evidence at ${root.path}`);
     return;
   }
-  await removeTempDirectory(root.path);
+  try {
+    await removeTempDirectory(root.path);
+  } catch (error) {
+    // Successful recall-eval must not exit 2 solely because Windows still
+    // holds alaya.db / -wal / -shm after daemon shutdown.
+    if (isTransientFsLockError(error)) {
+      warn(
+        `[bench temp-root] deferred cleanup of ${root.path}: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return;
+    }
+    throw error;
+  }
 }
 
 async function ensureFailedRootMarker(rootPath: string): Promise<void> {

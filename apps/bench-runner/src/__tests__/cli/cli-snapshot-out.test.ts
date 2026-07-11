@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,10 @@ import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset
 } from "../longmemeval/longmemeval-fixture.js";
+import {
+  isTransientFsLockError,
+  removeTempDirectory
+} from "../support/temp-cleanup.js";
 
 // @anchor cli-snapshot-out-e2e — producer half of the recall-eval fast
 // loop must be CLI-reachable. Drives `longmemeval --snapshot-out` through the
@@ -70,7 +74,13 @@ afterEach(async () => {
   process.stderr.write = originalStderrWrite;
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  await rm(tmpDir, { recursive: true, force: true });
+  try {
+    await removeTempDirectory(tmpDir);
+  } catch (error) {
+    if (!isTransientFsLockError(error)) {
+      throw error;
+    }
+  }
 });
 
 describe("longmemeval --snapshot-out CLI", () => {

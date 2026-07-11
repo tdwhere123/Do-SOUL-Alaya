@@ -103,6 +103,18 @@ export class StorageDatabase {
   }
 }
 
+/** Close a cached DB handle if present. Never opens or migrates a path. */
+export function closeCachedDatabase(filename: string): void {
+  if (filename === ":memory:") {
+    return;
+  }
+  const cached = databaseCache.get(filename);
+  if (cached === undefined) {
+    return;
+  }
+  cached.close();
+}
+
 export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase {
   const filename = options.filename ?? ":memory:";
 
