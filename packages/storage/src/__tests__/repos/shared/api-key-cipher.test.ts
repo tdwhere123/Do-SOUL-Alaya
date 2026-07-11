@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs, { statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -86,10 +86,14 @@ describe("api-key-cipher", () => {
     __setMachineKeyIdPathForTests(durablePath);
     fs.rmSync(durablePath, { force: true });
 
-    const realExistsSync = fs.existsSync.bind(fs);
     const existsSync = vi.spyOn(fs, "existsSync").mockImplementation((filePath) => {
       if (filePath === durablePath) {
-        return realExistsSync(filePath);
+        try {
+          statSync(filePath);
+          return true;
+        } catch {
+          return false;
+        }
       }
       return false;
     });
