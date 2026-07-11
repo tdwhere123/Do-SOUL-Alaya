@@ -26,7 +26,8 @@ describe("RecallReadWorkerClient", () => {
 
   it("keeps the daemon event loop available during a file-backed SQLite recall read", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-test-"));
-    const database = initDatabase({ filename: join(directory, "alaya.db") });
+    const databasePath = join(directory, "alaya.db");
+    const database = initDatabase({ filename: databasePath });
     const repo = new SqliteMemoryEntryRepo(database);
     const workspaceId = "workspace-1";
     const rowCount = 900;
@@ -40,9 +41,12 @@ describe("RecallReadWorkerClient", () => {
           activation_score: 1 - index / rowCount
         }));
       }
+      // Parent must release the file before the worker opens it; Windows can
+      // hang worker RPC while the parent still holds the same SQLite handle.
+      database.close();
 
       const client = createRecallReadWorkerClient({
-        databaseFilename: database.filename,
+        databaseFilename: databasePath,
         workerUrl: builtWorkerUrl
       });
       expect(client).not.toBeNull();
@@ -66,14 +70,17 @@ describe("RecallReadWorkerClient", () => {
         await client.close();
       }
     } finally {
-      database.close();
+      if (!database.isClosed()) {
+        database.close();
+      }
       rmSync(directory, { recursive: true, force: true });
     }
   }, 30_000);
 
   it("keeps worker batch reads scoped to the requested workspace", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-scope-test-"));
-    const database = initDatabase({ filename: join(directory, "alaya.db") });
+    const databasePath = join(directory, "alaya.db");
+    const database = initDatabase({ filename: databasePath });
     const memoryRepo = new SqliteMemoryEntryRepo(database);
     const synthesisRepo = new SqliteSynthesisCapsuleRepo(database);
     const workspaceMemoryId = randomUUID();
@@ -104,9 +111,10 @@ describe("RecallReadWorkerClient", () => {
         workspace_id: "workspace-2",
         run_id: "run-2"
       }));
+      database.close();
 
       const client = createRecallReadWorkerClient({
-        databaseFilename: database.filename,
+        databaseFilename: databasePath,
         workerUrl: builtWorkerUrl
       });
       expect(client).not.toBeNull();
@@ -131,10 +139,12 @@ describe("RecallReadWorkerClient", () => {
         await client.close();
       }
     } finally {
-      database.close();
+      if (!database.isClosed()) {
+        database.close();
+      }
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("rejects worker page requests above the bounded read limit", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-page-test-"));
