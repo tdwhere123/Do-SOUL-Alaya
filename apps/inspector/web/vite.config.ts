@@ -13,6 +13,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (/node_modules\/react-force-graph-3d\//.test(id)) {
+            return 'force-graph-3d';
+          }
           return /node_modules\/(react|react-dom|react-router-dom)\//.test(id) ? 'vendor' : undefined;
         },
       },

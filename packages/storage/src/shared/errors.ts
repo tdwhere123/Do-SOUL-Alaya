@@ -1,3 +1,5 @@
+import { AlayaError, type AlayaErrorOptions } from "@do-soul/alaya-protocol";
+
 export type StorageErrorCode =
   | "DATABASE_OPEN_FAILED"
   | "MIGRATION_NOT_FOUND"
@@ -13,25 +15,25 @@ export type StorageErrorCode =
   // structured code rather than string-matching sqlite driver messages.
   | "DUPLICATE_KEY";
 
-export class StorageError extends Error {
-  public readonly code: StorageErrorCode;
+export class StorageError extends AlayaError {
+  declare public readonly code: StorageErrorCode;
 
-  public constructor(code: StorageErrorCode, message: string, options?: ErrorOptions);
+  public constructor(code: StorageErrorCode, message: string, options?: AlayaErrorOptions);
   public constructor(code: StorageErrorCode, message: string, cause?: unknown);
   public constructor(
     code: StorageErrorCode,
     message: string,
-    optionsOrCause?: ErrorOptions | unknown
+    optionsOrCause?: AlayaErrorOptions | unknown
   ) {
     const options = normalizeStorageErrorOptions(optionsOrCause);
-    super(message, options);
+    super(code, message, options);
     this.name = "StorageError";
-    this.code = code;
-    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
-function normalizeStorageErrorOptions(optionsOrCause: ErrorOptions | unknown): ErrorOptions | undefined {
+function normalizeStorageErrorOptions(
+  optionsOrCause: AlayaErrorOptions | unknown
+): AlayaErrorOptions | undefined {
   if (optionsOrCause === undefined) {
     return undefined;
   }
@@ -43,7 +45,7 @@ function normalizeStorageErrorOptions(optionsOrCause: ErrorOptions | unknown): E
   return { cause: optionsOrCause };
 }
 
-function isPlainErrorOptions(value: unknown): value is ErrorOptions {
+function isPlainErrorOptions(value: unknown): value is AlayaErrorOptions {
   if (typeof value !== "object" || value === null) {
     return false;
   }

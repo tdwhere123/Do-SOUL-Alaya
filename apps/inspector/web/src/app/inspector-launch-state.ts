@@ -6,7 +6,7 @@ import {
   setUnauthorizedHandler,
   setWorkspaceId
 } from "../api";
-import { useCommandPaletteHotkey } from "../components/CommandPalette";
+import { useCommandPaletteHotkey } from "../components/command-palette";
 
 export interface InspectorLaunchState {
   readonly authError: string | null;

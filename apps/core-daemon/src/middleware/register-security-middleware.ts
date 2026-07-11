@@ -1,5 +1,8 @@
 import type { Hono } from "hono";
-import { createFixedWindowRateLimitMiddleware } from "./rate-limit.js";
+import {
+  createFixedWindowRateLimitMiddleware,
+  resolveProtectedRateLimitKey
+} from "./rate-limit.js";
 import { createApiSecurityHeadersMiddleware } from "./security-headers.js";
 
 const LIVENESS_PATH = "/health";
@@ -20,6 +23,8 @@ export function registerRateLimitMiddleware(
   app: Hono,
   config: CoreDaemonRateLimitConfig | undefined
 ): void {
+  // Fixed-window cap on protected routes; /health exempt.
+  // see also: resolveProtectedRateLimitKey — loopback anonymous socket bucket.
   app.use(
     "*",
     createFixedWindowRateLimitMiddleware({
@@ -27,10 +32,7 @@ export function registerRateLimitMiddleware(
       windowMs: config?.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
       ...(config?.nowMs === undefined ? {} : { nowMs: config.nowMs }),
       skip: (context) => !isProtectedRequest(context.req.method, context.req.path),
-      resolveKey: (context) => {
-        const token = normalizeTrimmedHeader(context.req.header("x-request-token"));
-        return token === undefined ? "anonymous" : `token:${token}`;
-      }
+      resolveKey: resolveProtectedRateLimitKey
     })
   );
 }
@@ -41,9 +43,4 @@ export function isProtectedRequest(method: string, path: string): boolean {
   }
 
   return method !== "OPTIONS";
-}
-
-function normalizeTrimmedHeader(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized === undefined || normalized.length === 0 ? undefined : normalized;
 }

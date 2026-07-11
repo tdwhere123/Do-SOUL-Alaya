@@ -10,6 +10,7 @@ import {
   type SessionOverride
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
+import { isExpired } from "../../shared/time.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 
@@ -368,21 +369,6 @@ function addHours(iso: string, hours: number): string {
   }
 
   return new Date(epoch + hours * 60 * 60 * 1000).toISOString();
-}
-
-function isExpired(expiresAt: string | null, referenceTime: string): boolean {
-  if (expiresAt === null) {
-    return false;
-  }
-
-  const expiryEpoch = Date.parse(expiresAt);
-  const referenceEpoch = Date.parse(referenceTime);
-
-  if (!Number.isFinite(expiryEpoch) || !Number.isFinite(referenceEpoch)) {
-    return false;
-  }
-
-  return expiryEpoch <= referenceEpoch;
 }
 
 function compareOverrides(left: Readonly<SessionOverride>, right: Readonly<SessionOverride>): number {

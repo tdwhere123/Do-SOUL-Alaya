@@ -6,10 +6,15 @@ import { EngineProvider, WorkspaceKind, WorkspaceState } from "@do-soul/alaya-pr
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteEngineBindingRepo } from "../../../repos/control/engine-binding-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import {
+  __setApiKeyCipherKeyMaterialForTests,
+  isEncryptedApiKeyAtRest
+} from "../../../repos/shared/api-key-cipher.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
 afterEach(() => {
+  __setApiKeyCipherKeyMaterialForTests(null);
   for (const database of databases) {
     database.close();
   }
@@ -18,6 +23,39 @@ afterEach(() => {
 });
 
 describe("SqliteEngineBindingRepo", () => {
+  it("stores api keys as machine-bound ciphertext at rest", async () => {
+    __setApiKeyCipherKeyMaterialForTests("repo-test-machine:repo-test-user:do-soul-alaya:engine-binding-api-key:v1");
+    const { database, workspaceRepo, bindingRepo } = createRepos();
+    await workspaceRepo.create({
+      workspace_id: "ws_cipher",
+      name: "cipher",
+      root_path: "/tmp/cipher",
+      workspace_kind: WorkspaceKind.LOCAL_REPO,
+      default_engine_binding: null,
+      workspace_state: WorkspaceState.ACTIVE
+    });
+
+    await bindingRepo.upsert({
+      binding_id: "binding_cipher",
+      workspace_id: "ws_cipher",
+      provider_type: EngineProvider.OPENAI,
+      base_url: null,
+      api_key: "sk-alpha",
+      model: "gpt-4o-mini",
+      config: {}
+    });
+
+    const stored = database.connection
+      .prepare("SELECT api_key FROM engine_bindings WHERE binding_id = ?")
+      .get("binding_cipher") as Readonly<{ readonly api_key: string }>;
+
+    expect(stored.api_key).not.toContain("sk-alpha");
+    expect(isEncryptedApiKeyAtRest(stored.api_key)).toBe(true);
+    await expect(bindingRepo.getById("binding_cipher")).resolves.toMatchObject({
+      api_key: "sk-alpha"
+    });
+  });
+
   it("upserts and reloads a binding record", async () => {
     const { workspaceRepo, bindingRepo } = createRepos();
     await workspaceRepo.create({
@@ -229,6 +267,7 @@ describe("SqliteEngineBindingRepo", () => {
 });
 
 function createRepos(): {
+  readonly database: ReturnType<typeof initDatabase>;
   readonly workspaceRepo: SqliteWorkspaceRepo;
   readonly bindingRepo: SqliteEngineBindingRepo;
 } {
@@ -236,6 +275,7 @@ function createRepos(): {
   databases.add(database);
 
   return {
+    database,
     workspaceRepo: new SqliteWorkspaceRepo(database),
     bindingRepo: new SqliteEngineBindingRepo(database)
   };

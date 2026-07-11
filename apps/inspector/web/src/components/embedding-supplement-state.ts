@@ -5,7 +5,7 @@ import {
   type RuntimeEmbeddingConfig
 } from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
-import type { ToastInput } from "./Toast";
+import type { ToastInput } from "./toast";
 import {
   buildSecretPatch,
   buildSecretRef,

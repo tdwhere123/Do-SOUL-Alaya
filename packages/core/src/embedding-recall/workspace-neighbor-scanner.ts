@@ -152,7 +152,7 @@ export class WorkspaceNeighborScanner {
       const snapshot = initialSnapshot.status === "pending" && typeof preparedQuery.waitForSnapshot === "function"
         ? await preparedQuery.waitForSnapshot(this.deps.queryTimeoutMs)
         : initialSnapshot;
-      return resolveWorkspaceNeighborQuerySnapshot(snapshot, queryEmbeddingCacheHit);
+      return resolveWorkspaceNeighborQuerySnapshot(snapshot, { queryEmbeddingCacheHit });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.deps.warn("embedding workspace neighbor scan failed", {
@@ -161,7 +161,12 @@ export class WorkspaceNeighborScanner {
         reason: "query_embedding_failed",
         error: message
       });
-      return failedWorkspaceNeighborQuery(queryEmbeddingCacheHit, "provider_failed", "query_embedding_failed", message);
+      return failedWorkspaceNeighborQuery(
+        { queryEmbeddingCacheHit },
+        "provider_failed",
+        "query_embedding_failed",
+        message
+      );
     }
   }
 
@@ -216,12 +221,20 @@ export class WorkspaceNeighborScanner {
   }
 }
 
-function resolveWorkspaceNeighborQuerySnapshot(snapshot: PreparedEmbeddingQuerySnapshot, cacheHit: boolean): WorkspaceQueryEmbeddingResolution {
+interface WorkspaceNeighborQuerySnapshotOptions {
+  readonly queryEmbeddingCacheHit: boolean;
+}
+
+function resolveWorkspaceNeighborQuerySnapshot(
+  snapshot: PreparedEmbeddingQuerySnapshot,
+  options: WorkspaceNeighborQuerySnapshotOptions
+): WorkspaceQueryEmbeddingResolution {
+  const { queryEmbeddingCacheHit } = options;
   if (snapshot.status === "ready") {
     return {
       queryEmbedding: snapshot.embedding,
-      queryEmbeddingCacheHit: cacheHit,
-      embeddingInferenceCalls: cacheHit ? 0 : 1,
+      queryEmbeddingCacheHit,
+      embeddingInferenceCalls: queryEmbeddingCacheHit ? 0 : 1,
       queryEmbeddingStatus: "provider_returned",
       queryEmbeddingDegradationReason: null,
       queryEmbeddingError: null
@@ -229,19 +242,29 @@ function resolveWorkspaceNeighborQuerySnapshot(snapshot: PreparedEmbeddingQueryS
   }
   if (snapshot.status === "failed") {
     return failedWorkspaceNeighborQuery(
-      cacheHit,
+      { queryEmbeddingCacheHit },
       "provider_failed",
       snapshot.reason,
       snapshot.error_message ?? snapshot.reason
     );
   }
-  return failedWorkspaceNeighborQuery(cacheHit, "provider_pending", "query_embedding_pending", "query_embedding_pending");
+  return failedWorkspaceNeighborQuery(
+    { queryEmbeddingCacheHit },
+    "provider_pending",
+    "query_embedding_pending",
+    "query_embedding_pending"
+  );
 }
 
-function failedWorkspaceNeighborQuery(cacheHit: boolean, status: WorkspaceQueryEmbeddingResolution["queryEmbeddingStatus"] = "provider_failed", reason = "query_embedding_failed", error = reason): WorkspaceQueryEmbeddingResolution {
+function failedWorkspaceNeighborQuery(
+  options: WorkspaceNeighborQuerySnapshotOptions,
+  status: WorkspaceQueryEmbeddingResolution["queryEmbeddingStatus"] = "provider_failed",
+  reason = "query_embedding_failed",
+  error = reason
+): WorkspaceQueryEmbeddingResolution {
   return Object.freeze({
     queryEmbedding: null,
-    queryEmbeddingCacheHit: cacheHit,
+    queryEmbeddingCacheHit: options.queryEmbeddingCacheHit,
     embeddingInferenceCalls: 0,
     queryEmbeddingStatus: status,
     queryEmbeddingDegradationReason: reason,

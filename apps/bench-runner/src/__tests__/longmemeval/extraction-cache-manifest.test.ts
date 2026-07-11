@@ -7,6 +7,7 @@ import {
   computeSystemPromptSha256,
   extractionCacheManifestPath,
   readExtractionCacheManifest,
+  resolveBenchExtractionModel,
   writeExtractionCacheManifest,
   type ExtractionCacheManifest
 } from "../../longmemeval/extraction-cache-manifest.js";
@@ -110,5 +111,24 @@ describe("extraction-cache-manifest", () => {
     expect(a).toBe(b);
     expect(a).not.toBe(c);
     expect(a).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  it("resolveBenchExtractionModel prefers env over manifest", () => {
+    const model = resolveBenchExtractionModel(
+      { OFFICIAL_API_GARDEN_MODEL: "env-model" },
+      BASE_MANIFEST
+    );
+    expect(model).toBe("env-model");
+  });
+
+  it("resolveBenchExtractionModel falls back to manifest extraction_model", () => {
+    const model = resolveBenchExtractionModel({}, BASE_MANIFEST);
+    expect(model).toBe("gpt-5.4-mini");
+  });
+
+  it("resolveBenchExtractionModel throws instead of silently defaulting", () => {
+    expect(() => resolveBenchExtractionModel({})).toThrow(
+      /extraction model is unresolved/u
+    );
   });
 });

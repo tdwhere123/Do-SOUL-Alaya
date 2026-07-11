@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getCurrentSchemaSummary, initDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { removeTempDirectorySync } from "../temp-directory.js";
@@ -22,6 +22,44 @@ function createTempDatabasePath(): TempContext {
 function cleanupTempDirectory(directory: string): void {
   fs.rmSync(directory, { recursive: true, force: true });
 }
+
+describe("getCurrentSchemaSummary schema version read", () => {
+  let context: TempContext;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    context = createTempDatabasePath();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    cleanupTempDirectory(context.directory);
+  });
+
+  it("warns and falls back to null when schema_version cannot be read", () => {
+    const database = initDatabase({ filename: context.filename });
+    try {
+      database.connection.exec("DROP TABLE schema_version");
+
+      const summary = getCurrentSchemaSummary(database);
+      const migrationFiles = readMigrationInventory().files;
+      const knownMaxVersion = migrationFiles.at(-1)?.version ?? 0;
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "sqlite/db: failed to read schema_version max; treating as unknown",
+        expect.anything()
+      );
+      expect(summary).toEqual({
+        persistedMaxVersion: null,
+        knownMaxVersion,
+        schemaOk: false
+      });
+    } finally {
+      database.close();
+    }
+  });
+});
 
 describe("initDatabase PRAGMA hardening", () => {
   let context: TempContext;
@@ -72,6 +110,26 @@ describe("initDatabase PRAGMA hardening", () => {
       expect(Number(foreignKeys)).toBe(1);
     } finally {
       database.close();
+    }
+  });
+
+  it("fails closed when schema_version cannot be read during initialization", () => {
+    const originalPrepare = BetterSqlite3.prototype.prepare;
+    vi.spyOn(BetterSqlite3.prototype, "prepare").mockImplementation(function (
+      this: BetterSqlite3.Database,
+      sql: string,
+      ...args: unknown[]
+    ) {
+      if (sql.includes("MAX(version)") && sql.includes("schema_version")) {
+        throw new Error("database disk image is malformed");
+      }
+      return originalPrepare.call(this, sql, ...(args as []));
+    });
+
+    try {
+      expect(() => initDatabase({ filename: context.filename })).toThrow(StorageError);
+    } finally {
+      vi.restoreAllMocks();
     }
   });
 });
@@ -421,7 +479,10 @@ describe("SQLite migration inventory guardrail", () => {
 });
 
 const INTENTIONAL_MIGRATION_GAPS = new Set([70, 75]);
-const INTENTIONAL_NOOP_MIGRATIONS = new Set(["074-claim-kind-expanded.sql"]);
+const INTENTIONAL_NOOP_MIGRATIONS = new Set([
+  "074-claim-kind-expanded.sql",
+  "104-engine-bindings-api-key-encrypt.sql",
+]);
 
 function readMigrationInventory(): {
   readonly files: readonly { readonly name: string; readonly version: number; readonly sql: string }[];

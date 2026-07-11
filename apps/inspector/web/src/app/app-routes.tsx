@@ -1,17 +1,17 @@
 import { Suspense, lazy, type ReactNode } from "react";
 import { Navigate, Route, Routes, useSearchParams } from "react-router-dom";
 import { getWorkspaceId } from "../api";
-import BenchTrendPage from "../pages/BenchTrend";
-import GovernancePage from "../pages/Governance";
-import MemoryBrowserPage from "../pages/MemoryBrowser";
-import OverviewPage from "../pages/Overview";
-import RecallPage from "../pages/Recall";
-import SystemPage from "../pages/System";
-import Layout from "../components/Layout";
-import NoWorkspaceAlert from "../components/NoWorkspaceAlert";
-import ErrorBoundary from "./ErrorBoundary";
+import BenchTrendPage from "../pages/bench-trend";
+import GovernancePage from "../pages/governance";
+import MemoryBrowserPage from "../pages/memory-browser";
+import OverviewPage from "../pages/overview";
+import RecallPage from "../pages/recall";
+import SystemPage from "../pages/system";
+import Layout from "../components/layout";
+import NoWorkspaceAlert from "../components/no-workspace-alert";
+import ErrorBoundary from "./error-boundary";
 
-const GraphPage = lazy(() => import("../pages/Graph"));
+const GraphPage = lazy(() => import("../pages/graph"));
 
 export function InspectorRoutes() {
   return (

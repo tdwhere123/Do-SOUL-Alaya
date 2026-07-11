@@ -1,5 +1,10 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
+import { parseOptionalRow, parseRows, readRecord } from "../shared/parse-row.js";
+import {
+  MemoryEmbeddingMetadataRowParser,
+  MemoryEmbeddingRowParser
+} from "../shared/sqlite-row-schemas.js";
 import {
   MEMORY_EMBEDDING_METADATA_COLUMNS,
   chunkObjectIds,
@@ -123,12 +128,11 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     parsedRecord: Readonly<MemoryEmbeddingRecord>
   ) => Readonly<MemoryEmbeddingRecord> | null {
     return this.db.connection.transaction((parsedRecord: Readonly<MemoryEmbeddingRecord>) => {
-      const currentMemory = this.findCurrentMemoryContentStatement.get(
-        parsedRecord.object_id,
-        parsedRecord.workspace_id
-      ) as { readonly content: string } | undefined;
+      const currentMemory = parseMemoryContentProbe(
+        this.findCurrentMemoryContentStatement.get(parsedRecord.object_id, parsedRecord.workspace_id)
+      );
 
-      if (currentMemory === undefined || hashMemoryContent(currentMemory.content) !== parsedRecord.content_hash) {
+      if (currentMemory === null || hashMemoryContent(currentMemory.content) !== parsedRecord.content_hash) {
         return null;
       }
 
@@ -138,8 +142,12 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   }
 
   private findRequiredPersistedEmbedding(objectId: string): Readonly<MemoryEmbeddingRecord> {
-    const persisted = this.findByObjectIdStatement.get(objectId) as MemoryEmbeddingRow | undefined;
-    if (persisted === undefined) {
+    const persisted = parseOptionalRow(
+      this.findByObjectIdStatement.get(objectId),
+      MemoryEmbeddingRowParser,
+      "memory embedding row"
+    );
+    if (persisted === null) {
       throw new StorageError(
         "QUERY_FAILED",
         `Persisted memory embedding ${objectId} could not be reloaded.`
@@ -200,8 +208,12 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     const parsedObjectId = parseObjectId(objectId);
 
     try {
-      const row = this.findByObjectIdStatement.get(parsedObjectId) as MemoryEmbeddingRow | undefined;
-      return row === undefined ? null : parseMemoryEmbeddingRow(row);
+      const row = parseOptionalRow(
+        this.findByObjectIdStatement.get(parsedObjectId),
+        MemoryEmbeddingRowParser,
+        "memory embedding row"
+      );
+      return row === null ? null : parseMemoryEmbeddingRow(row);
     } catch (error) {
       if (error instanceof StorageError) {
         throw error;
@@ -232,7 +244,9 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
           FROM memory_embeddings
           WHERE object_id IN (${placeholders})
         `);
-        rows.push(...(statement.all(...chunk) as MemoryEmbeddingMetadataRow[]));
+        rows.push(
+          ...parseRows(statement.all(...chunk), MemoryEmbeddingMetadataRowParser, "memory embedding metadata row")
+        );
       }
       return Object.freeze(
         rows
@@ -260,12 +274,20 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
 
     try {
       if (usesDefaultWorkspaceEmbeddingQuery(options)) {
-        const rows = this.listByWorkspaceStatement.all(parsedWorkspaceId) as MemoryEmbeddingRow[];
+        const rows = parseRows(
+          this.listByWorkspaceStatement.all(parsedWorkspaceId),
+          MemoryEmbeddingRowParser,
+          "memory embedding row"
+        );
         return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
       }
 
       const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options);
-      const rows = this.db.connection.prepare(query.sql).all(...query.args) as MemoryEmbeddingRow[];
+      const rows = parseRows(
+        this.db.connection.prepare(query.sql).all(...query.args),
+        MemoryEmbeddingRowParser,
+        "memory embedding row"
+      );
       return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -292,10 +314,11 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     }
 
     try {
-      const rows = this.listByObjectIdFilterStatement.all(
-        JSON.stringify(parsedObjectIds),
-        parsedWorkspaceId
-      ) as MemoryEmbeddingRow[];
+      const rows = parseRows(
+        this.listByObjectIdFilterStatement.all(JSON.stringify(parsedObjectIds), parsedWorkspaceId),
+        MemoryEmbeddingRowParser,
+        "memory embedding row"
+      );
       return Object.freeze(
         rows
           .map((row) => parseMemoryEmbeddingRow(row))
@@ -394,3 +417,20 @@ const WORKSPACE_EMBEDDING_SELECT_SQL = `
           e.updated_at
         FROM memory_embeddings e
         INNER JOIN memory_entries m ON m.object_id = e.object_id`;
+
+function parseMemoryContentProbe(value: unknown): { readonly content: string } | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const record = readRecord(value, "memory content row");
+  const content = record.content;
+  if (typeof content !== "string") {
+    throw new StorageError("VALIDATION_FAILED", "Failed to validate content.");
+  }
+  if (content.length === 0) {
+    return null;
+  }
+
+  return { content };
+}

@@ -62,6 +62,8 @@ export function createInMemorySqliteWriteQueuePort(): SqliteWriteQueuePort {
     blocksEviction: (filename) =>
       activeFilename === filename || (pendingByFilename.get(filename) ?? 0) > 0,
 
+    // Port-level observability uses process.emitWarning so storage stays free of
+    // daemon logger wiring. Callers must await enqueue() to surface job failures.
     enqueue: async (job) => {
       assertSqliteWriteJobWorkerShape(job);
       pending += 1;
@@ -81,7 +83,16 @@ export function createInMemorySqliteWriteQueuePort(): SqliteWriteQueuePort {
       };
 
       const ticket = chain.then(run, run);
-      chain = ticket.catch(() => {});
+      // invariant: a failed job does not poison the queue — serialize-continue.
+      chain = ticket.catch((error) => {
+        process.emitWarning(
+          `SQLite write queue job failed (jobId=${job.jobId}, kind=${job.kind})`,
+          {
+            code: "ALAYA_SQLITE_WRITE_QUEUE_JOB_FAILED",
+            detail: error instanceof Error ? error.message : String(error)
+          }
+        );
+      });
       await ticket;
     }
   };

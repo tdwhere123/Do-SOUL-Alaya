@@ -7,6 +7,7 @@ import {
   MemoryGraphEdgeType,
   type GardenRoleValue,
   type GardenTaskDescriptor,
+  type GardenTaskKindValue,
   type GardenTaskResult,
   type GardenTierValue,
   type HealthJournalRecordPort
@@ -20,6 +21,13 @@ import {
   type PathPlasticityComputePort,
   type PathPlasticityPendingPort
 } from "./path-plasticity-task.js";
+import {
+  createGardenFailureResult,
+  createGardenSuccessResult,
+  formatGardenTaskError,
+  type GardenTaskHandler,
+  safeRunGardenTask
+} from "./garden-task-runner.js";
 
 export const LIBRARIAN_CONSTANTS = {
   MERGE_THRESHOLD: 0.85,
@@ -124,6 +132,7 @@ export class Librarian {
   private readonly pathPlasticityPendingPort: PathPlasticityPendingPort | null;
   private readonly pathPlasticityBudgetMs: number;
   private readonly now: () => string;
+  private readonly taskHandlers: ReadonlyMap<GardenTaskKindValue, GardenTaskHandler>;
 
   public constructor(deps: LibrarianDependencies) {
     this.mergePort = deps.mergePort;
@@ -138,47 +147,25 @@ export class Librarian {
     this.pathPlasticityBudgetMs =
       deps.pathPlasticityBudgetMs ?? PATH_PLASTICITY_TASK_DEFAULTS.MAX_EXECUTION_MS;
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.taskHandlers = new Map<GardenTaskKindValue, GardenTaskHandler>([
+      [GardenTaskKind.MERGE_PROPOSAL, this.executeMergeProposal.bind(this)],
+      [GardenTaskKind.SUBJECT_NEIGHBOR_DETECT, this.executeSubjectNeighborDetect.bind(this)],
+      [GardenTaskKind.PATH_COMPRESSION, this.executePathCompression.bind(this)],
+      [GardenTaskKind.TEMPLATE_CANDIDATE, this.executeTemplateCandidate.bind(this)],
+      [GardenTaskKind.SYNTHESIS_REVIEW, this.executeSynthesisReview.bind(this)],
+      [GardenTaskKind.PATH_PLASTICITY_UPDATE, this.executePathPlasticityUpdate.bind(this)]
+    ]);
   }
 
   public async run(task: GardenTaskDescriptor): Promise<GardenTaskResult> {
-    const completedAt = this.now();
-
-    try {
-      switch (task.task_kind) {
-        case GardenTaskKind.MERGE_PROPOSAL:
-          return await this.executeMergeProposal(task, completedAt);
-        case GardenTaskKind.SUBJECT_NEIGHBOR_DETECT:
-          return await this.executeSubjectNeighborDetect(task, completedAt);
-        case GardenTaskKind.PATH_COMPRESSION:
-          return await this.executePathCompression(task, completedAt);
-        case GardenTaskKind.TEMPLATE_CANDIDATE:
-          return await this.executeTemplateCandidate(task, completedAt);
-        case GardenTaskKind.SYNTHESIS_REVIEW:
-          return await this.executeSynthesisReview(task, completedAt);
-        case GardenTaskKind.PATH_PLASTICITY_UPDATE:
-          return await this.executePathPlasticityUpdate(task, completedAt);
-        default:
-          throw new Error(`Librarian does not handle task kind: ${task.task_kind}`);
-      }
-    } catch (error) {
-      const result = this.createFailureResult(task, completedAt, error);
-      // A reportCompletion failure must not mask the original task error.
-      try {
-        await this.scheduler.reportCompletion(result);
-      } catch (reportError) {
-        process.emitWarning("[Librarian] reportCompletion failed for failed task", {
-          code: "ALAYA_GARDEN_REPORT_COMPLETION_FAILED",
-          detail: JSON.stringify({
-            task_id: task.task_id,
-            task_kind: task.task_kind,
-            workspace_id: task.workspace_id,
-            task_error: error instanceof Error ? error.message : String(error),
-            report_error: reportError instanceof Error ? reportError.message : String(reportError)
-          })
-        });
-      }
-      return result;
-    }
+    return safeRunGardenTask({
+      roleLabel: "Librarian",
+      task,
+      completedAt: this.now(),
+      handlers: this.taskHandlers,
+      createFailureResult: this.createFailureResult.bind(this),
+      reportCompletion: (result) => this.scheduler.reportCompletion(result)
+    });
   }
 
   private async executeMergeProposal(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
@@ -399,18 +386,13 @@ export class Librarian {
     objectIds: readonly string[],
     auditEntries: readonly string[]
   ): GardenTaskResult {
-    return {
-      task_id: task.task_id,
-      task_kind: task.task_kind,
-      role: this.role,
-      tier: this.tier,
-      workspace_id: task.workspace_id,
-      success: true,
-      objects_affected: [...objectIds],
-      audit_entries: [...auditEntries],
-      error_message: null,
-      completed_at: completedAt
-    };
+    return createGardenSuccessResult(
+      { role: this.role, tier: this.tier },
+      task,
+      completedAt,
+      objectIds,
+      auditEntries
+    );
   }
 
   private createFailureResult(
@@ -418,18 +400,7 @@ export class Librarian {
     completedAt: string,
     error: unknown
   ): GardenTaskResult {
-    return {
-      task_id: task.task_id,
-      task_kind: task.task_kind,
-      role: this.role,
-      tier: this.tier,
-      workspace_id: task.workspace_id,
-      success: false,
-      objects_affected: [],
-      audit_entries: [],
-      error_message: error instanceof Error ? error.message : String(error),
-      completed_at: completedAt
-    };
+    return createGardenFailureResult({ role: this.role, tier: this.tier }, task, completedAt, error);
   }
 }
 
@@ -442,7 +413,7 @@ function emitLibrarianProjectionWarning(
     code: "ALAYA_LIBRARIAN_PROJECTION_FAILED",
     detail: JSON.stringify({
       operation,
-      error: error instanceof Error ? error.message : String(error),
+      error: formatGardenTaskError(error),
       ...detail
     })
   });

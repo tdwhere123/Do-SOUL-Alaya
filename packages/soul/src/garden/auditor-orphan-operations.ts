@@ -58,7 +58,7 @@ export abstract class AuditorOrphanOperations extends AuditorCore {
           confidence: orphan.orphan_confidence
         });
 
-        await this.publishEventLogMutation(
+        await this.appendEventLogAndMutate(
           {
             event_type: GraphAuditorEventType.SOUL_ORPHAN_RADAR_REPORTED,
             entity_type: "orphan_radar",
@@ -120,7 +120,7 @@ export abstract class AuditorOrphanOperations extends AuditorCore {
           detected_at: completedAt
         });
 
-        await this.publishEventLogMutation(
+        await this.appendEventLogAndMutate(
           {
             event_type: SoulGardenEventLogOrphanDetectedEventType.SOUL_GARDEN_EVENT_LOG_ORPHAN_DETECTED,
             entity_type: "orphan_radar",

@@ -232,13 +232,15 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
   // signals array) is a genuine total failure of the extraction call, so it
   // still throws hard. A malformed single *entry* is one bad fact among
   // many — it is dropped, never allowed to abort the turn's good signals.
-  const envelope = OfficialApiSignalsEnvelopeSchema.safeParse(parsed);
-  if (!envelope.success) {
+  let envelope: z.infer<typeof OfficialApiSignalsEnvelopeSchema>;
+  try {
+    envelope = OfficialApiSignalsEnvelopeSchema.parse(parsed);
+  } catch {
     throw new Error("signals array missing");
   }
 
   const drafts: OfficialApiSignalDraft[] = [];
-  for (const candidate of envelope.data.signals.slice(0, MAX_OFFICIAL_API_SIGNALS)) {
+  for (const candidate of envelope.signals.slice(0, MAX_OFFICIAL_API_SIGNALS)) {
     const draft = parseOfficialApiSignalEntry(candidate);
     if (draft !== null) {
       drafts.push(draft);
@@ -268,6 +270,9 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
     } catch {
       // A single corrupt element (bad escape / unescaped quote / malformed
       // key) — skip it, keep walking the clean siblings.
+      continue;
+    }
+    if (!UnknownRecordSchema.safeParse(candidate).success) {
       continue;
     }
     const draft = parseOfficialApiSignalEntry(candidate);

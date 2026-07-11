@@ -223,10 +223,3 @@ function addHours(nowIso: string, hours: number): string {
   return timestamp.toISOString();
 }
 
-export function isExpired(timestamp: string | null, nowIso: string): boolean {
-  if (timestamp === null) {
-    return false;
-  }
-
-  return new Date(timestamp).getTime() <= new Date(nowIso).getTime();
-}

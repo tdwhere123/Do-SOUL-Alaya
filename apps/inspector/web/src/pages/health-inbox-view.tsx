@@ -1,5 +1,5 @@
 import { RefreshCcw } from "lucide-react";
-import { useI18n } from "../i18n/Locale";
+import { useI18n } from "../i18n/locale";
 import type { DictKey } from "../i18n/dict";
 import type { HealthInboxState } from "./health-inbox-state";
 import {

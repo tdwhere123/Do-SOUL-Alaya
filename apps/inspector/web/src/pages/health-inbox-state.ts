@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { apiFetch } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
-import { useToasts } from "../components/Toast";
+import { useToasts } from "../components/toast";
 import type {
   CauseFilter,
   HealthInboxEnvelope,

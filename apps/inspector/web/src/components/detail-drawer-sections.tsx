@@ -2,7 +2,7 @@ import { Check, Copy, Edit3, Terminal, Trash2, TrendingDown, X } from "lucide-re
 import { clsx } from "clsx";
 import type { GraphNode } from "../types/graph";
 import { formatRelativeTime } from "../utils/graph";
-import { useI18n } from "../i18n/Locale";
+import { useI18n } from "../i18n/locale";
 import type { DictKey } from "../i18n/dict";
 import type { DetailDrawerState } from "./detail-drawer-state";
 

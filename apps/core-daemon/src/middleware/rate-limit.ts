@@ -1,4 +1,7 @@
+import { emitWarning } from "node:process";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, MiddlewareHandler } from "hono";
+import { LruCache } from "./lru-cache.js";
 
 type Bucket = {
   startedAtMs: number;
@@ -8,6 +11,7 @@ type Bucket = {
 export interface FixedWindowRateLimitOptions {
   readonly maxRequests: number;
   readonly windowMs: number;
+  readonly maxBuckets?: number;
   readonly nowMs?: () => number;
   readonly skip?: (context: Context) => boolean;
   readonly resolveKey?: (context: Context) => string;
@@ -19,11 +23,17 @@ const DEFAULT_RESPONSE_BODY = {
 } as const;
 
 const CLEANUP_INTERVAL = 128;
+const DEFAULT_MAX_BUCKETS = 4_096;
+// When unique clients exceed maxBuckets, LRU eviction drops the oldest bucket
+// and the next request from that client starts a fresh window — a deliberate
+// memory cap tradeoff for local-first daemons under connection churn.
+
+let rateLimitEvictionWarningEmitted = false;
 
 export function createFixedWindowRateLimitMiddleware(
   options: FixedWindowRateLimitOptions
 ): MiddlewareHandler {
-  const buckets = new Map<string, Bucket>();
+  const buckets = new LruCache<string, Bucket>(options.maxBuckets ?? DEFAULT_MAX_BUCKETS);
   const nowMs = options.nowMs ?? Date.now;
   let requestsSinceCleanup = 0;
 
@@ -56,8 +66,17 @@ export function createFixedWindowRateLimitMiddleware(
   };
 }
 
+export function readSocketRemoteAddress(context: Context): string | undefined {
+  try {
+    const address = getConnInfo(context).remote.address;
+    return normalizeRemoteAddress(address);
+  } catch {
+    return undefined;
+  }
+}
+
 function cleanupExpiredBuckets(
-  buckets: Map<string, Bucket>,
+  buckets: LruCache<string, Bucket>,
   now: number,
   windowMs: number,
   requestsSinceCleanup: number
@@ -66,15 +85,15 @@ function cleanupExpiredBuckets(
     return;
   }
 
-  for (const [key, bucket] of buckets.entries()) {
+  buckets.forEach((bucket, key) => {
     if (now - bucket.startedAtMs >= windowMs) {
       buckets.delete(key);
     }
-  }
+  });
 }
 
 function readBucket(
-  buckets: Map<string, Bucket>,
+  buckets: LruCache<string, Bucket>,
   key: string,
   now: number,
   windowMs: number
@@ -82,36 +101,40 @@ function readBucket(
   const existing = buckets.get(key);
   if (existing === undefined || now - existing.startedAtMs >= windowMs) {
     const fresh = { startedAtMs: now, count: 0 };
-    buckets.set(key, fresh);
+    buckets.setWithEvictionNotice(key, fresh, (evictedKey, evictedBucket) => {
+      if (now - evictedBucket.startedAtMs < windowMs && !rateLimitEvictionWarningEmitted) {
+        rateLimitEvictionWarningEmitted = true;
+        emitWarning(
+          `rate-limit LRU evicted active bucket for key ${String(evictedKey)}; client may receive a fresh window`
+        );
+      }
+    });
     return fresh;
   }
 
   return existing;
 }
 
-function defaultRateLimitKey(context: Context): string {
-  const headers = [
-    context.req.header("x-request-token"),
-    readFirstForwardedValue(context.req.header("x-forwarded-for")),
-    context.req.header("x-real-ip"),
-    context.req.header("cf-connecting-ip")
-  ];
-  for (const value of headers) {
-    const normalized = normalizeHeader(value);
-    if (normalized !== undefined) {
-      return normalized;
-    }
+export function resolveProtectedRateLimitKey(context: Context): string {
+  const token = normalizeHeader(context.req.header("x-request-token"));
+  const socket = readSocketRemoteAddress(context) ?? "anonymous";
+  if (token !== undefined) {
+    return `token:${token}:${socket}`;
   }
-
-  return "anonymous";
+  return socket;
 }
 
-function readFirstForwardedValue(value: string | undefined): string | undefined {
-  if (value === undefined) {
+function defaultRateLimitKey(context: Context): string {
+  return resolveProtectedRateLimitKey(context);
+}
+
+function normalizeRemoteAddress(address: string | undefined): string | undefined {
+  const trimmed = address?.trim();
+  if (trimmed === undefined || trimmed.length === 0) {
     return undefined;
   }
-  const first = value.split(",")[0];
-  return first?.trim();
+
+  return trimmed.startsWith("::ffff:") ? trimmed.slice("::ffff:".length) : trimmed;
 }
 
 function normalizeHeader(value: string | undefined): string | undefined {

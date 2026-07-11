@@ -121,6 +121,23 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     );
   });
 
+  it("throws when SSE content parses as JSON but fails Zod signal validation", async () => {
+    const invalidBody =
+      'data: {"choices":[{"delta":{"content":"{\\"signals\\":\\"not-an-array\\"}"}}]}\n\n' +
+      "data: [DONE]\n\n";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => makeSseResponse(invalidBody));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+    await expect(
+      extractor.extract({ systemPrompt: "s", userPrompt: "t" })
+    ).rejects.toThrow(/garden extraction returned unparseable content/i);
+  });
+
   it("skips a malformed mid-stream chunk but keeps surrounding content", async () => {
     // Partial keep-alive noise must not throw; a defensively-skipped bad frame
     // still yields the real content from the good frames.

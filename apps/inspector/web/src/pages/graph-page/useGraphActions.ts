@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch, type ApiError } from "../../api";
-import type { ToastInput } from "../../components/Toast";
-import { useI18n } from "../../i18n/Locale";
+import type { ToastInput } from "../../components/toast";
+import { useI18n } from "../../i18n/locale";
 
 type ShowToast = (input: ToastInput) => void;
 type Translate = ReturnType<typeof useI18n>["t"];

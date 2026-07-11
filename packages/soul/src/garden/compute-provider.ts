@@ -3,6 +3,7 @@ import {
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
   SignalSource,
+  AlayaError,
   readErrorMessage,
   type CandidateMemorySignal,
   type ConversationMessage
@@ -86,14 +87,17 @@ const DEFAULT_DIAGNOSTIC_DIR_REL = "data/diagnostics/seed-extraction-failures";
 const DIAGNOSTIC_BODY_PREFIX_MAX_CHARS = 4_096;
 const DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS = 512;
 
-export class GardenProviderError extends Error {
+export class GardenProviderError extends AlayaError {
+  public readonly kind: GardenProviderErrorKind;
+
   public constructor(
     message: string,
-    public readonly kind: GardenProviderErrorKind,
+    kind: GardenProviderErrorKind,
     options?: { readonly cause?: unknown }
   ) {
-    super(message, options);
+    super(kind, message, options);
     this.name = "GardenProviderError";
+    this.kind = kind;
   }
 }
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;

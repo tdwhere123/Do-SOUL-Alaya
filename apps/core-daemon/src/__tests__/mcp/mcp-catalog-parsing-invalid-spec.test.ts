@@ -126,4 +126,31 @@ describe("readDaemonMcpCatalogEnvironment invalid tool spec", () => {
       }
     );
   });
+
+  it("ignores MCP runtime config when the JSON envelope is not an object", () => {
+    const warn = vi.fn();
+
+    const configs = parseDaemonMcpServerRuntimeConfigs(JSON.stringify(["not", "an", "object"]), warn);
+
+    expect(configs).toEqual({});
+    expect(warn).toHaveBeenCalledWith(
+      "failed to parse ALAYA_MCP_SERVER_CONFIG_JSON; ignoring MCP runtime config",
+      expect.objectContaining({ error: expect.anything() })
+    );
+  });
+
+  it("ignores MCP tool catalog when the JSON envelope is not an object", () => {
+    const warn = vi.fn();
+
+    const snapshot = readDaemonMcpCatalogEnvironment(
+      { ALAYA_MCP_TOOL_CATALOG_JSON: JSON.stringify(42) },
+      warn
+    );
+
+    expect(snapshot.rawToolCatalog.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      "failed to parse ALAYA_MCP_TOOL_CATALOG_JSON; ignoring MCP discovery catalog",
+      expect.objectContaining({ error: expect.anything() })
+    );
+  });
 });

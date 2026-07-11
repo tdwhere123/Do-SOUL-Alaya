@@ -56,7 +56,8 @@ export function createGardenSchedulerRuntimeSupport(
     enqueueForAllWorkspaces: input.enqueueForAllWorkspaces,
     requestBacklogTelemetryCapture: input.requestBacklogTelemetryCapture,
     runAuditorTask: input.runAuditorTask,
-    runtimeGardenScheduler: input.runtimeGardenScheduler
+    runtimeGardenScheduler: input.runtimeGardenScheduler,
+    warn: input.warn
   });
 
   return {

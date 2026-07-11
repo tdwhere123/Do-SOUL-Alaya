@@ -6,8 +6,11 @@ export type {
   EnrichPendingPort,
   GraphEdgeCreationPort,
   MaterializationCreatedObject,
+  MaterializationFailureResult,
   MaterializationResult,
+  MaterializationResultFields,
   MaterializationRouterDeps,
+  MaterializationSuccessResult,
   MaterializationTarget,
   MemoryMaterializationCreatedObject,
   PathCandidateMintOutcome,
@@ -19,3 +22,10 @@ export type {
   RouteTarget,
   SignalRefSeedSpec
 } from "./materialization-router/contracts.js";
+export {
+  MaterializationPartialFailureError,
+  isMaterializationFailure,
+  materializationFailure,
+  materializationSuccess,
+  readPartialFailureCreatedObjects
+} from "./materialization-router/materialization-results.js";

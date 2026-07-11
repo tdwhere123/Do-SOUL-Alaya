@@ -187,7 +187,17 @@ Daemon startup is sequenced; out-of-order initialization is a Blocking
 review finding:
 
 1. **Storage**: open SQLite, run pending migrations, hand back a
-   `SqliteConnection`.
+   `SqliteConnection`. The database file is confidential local state.
+   Inline engine API keys are encrypted at rest with a key derived from a
+   platform machine id (Linux `/etc/machine-id` or `/var/lib/dbus/machine-id`;
+   macOS `IOPlatformUUID` via `ioreg`; Windows `MachineGuid` from registry), the
+   OS username, and a fixed salt. When no platform id is available, a durable
+   random UUID is created once at `~/.config/alaya/machine-key-id` (or the
+   platform config dir). Ciphertext is **not portable** across machines, users,
+   or copied database files; decryption fails closed on host or user drift.
+   Workspace git diff/log routes use a separate per-workspace rate limiter
+   (`createWorkspaceGitRateLimiter`); the daemon-wide HTTP rate limit applies
+   to all other protected routes (see `registerRateLimitMiddleware`).
 2. **Protocol-level types**: ready by virtue of import; no runtime init.
 3. **Core services** (in dependency order, leaf services first):
    - HealthJournalService, EventPublisher, RuntimeEventNormalizer

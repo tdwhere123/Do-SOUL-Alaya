@@ -22,6 +22,7 @@ import {
   createAccessDenied,
   createFileToolError,
   isPathWithinRoot,
+  isNodeErrorWithCode,
   mapFileSystemError,
   readFileSystemEntry,
   resolveContainedPath,
@@ -29,6 +30,42 @@ import {
 } from "./tool-runtime-file-common.js";
 
 const EXEC_COMMAND_CONTAINMENT_MESSAGE = "Command must be a real non-symlink executable inside a writable root.";
+
+function warnExecContainmentFailure(operation: string, error: unknown): void {
+  process.emitWarning(`[ToolRuntime] exec containment ${operation} failed`, {
+    code: "ALAYA_EXEC_CONTAINMENT_FAILED",
+    detail: JSON.stringify({
+      operation,
+      errno: isNodeErrorWithCode(error) ? error.code : "unknown"
+    })
+  });
+}
+
+function warnBestEffortCleanup(operation: string, error: unknown): void {
+  process.emitWarning(`[ToolRuntime] best-effort ${operation} failed`, {
+    code: "ALAYA_TOOL_RUNTIME_CLEANUP_FAILED",
+    detail: JSON.stringify({
+      operation,
+      errno: isNodeErrorWithCode(error) ? error.code : "unknown"
+    })
+  });
+}
+
+function swallowBestEffortCleanup(operation: string): (error: unknown) => undefined {
+  return (error) => {
+    warnBestEffortCleanup(operation, error);
+    return undefined;
+  };
+}
+
+function mapExecContainmentOpenError(error: unknown): ReturnType<typeof createAccessDenied> {
+  if (isNodeErrorWithCode(error)) {
+    if (error.code === "ENOSPC" || error.code === "EIO" || error.code === "EMFILE" || error.code === "ENFILE") {
+      return mapFileSystemError(error, "exec command", "READ_ERROR");
+    }
+  }
+  return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+}
 
 export async function writeFile(
   input: WriteFileToolInput,
@@ -106,7 +143,7 @@ export async function writeFile(
       await handle.close();
       handle = undefined;
       if (newlyCreated) {
-        await unlink(containedPath.resolvedPath).catch(() => undefined);
+        await unlink(containedPath.resolvedPath).catch(swallowBestEffortCleanup("unlink-new-file"));
       }
       return createAccessDenied("Path is outside the workspace boundary.");
     }
@@ -122,10 +159,10 @@ export async function writeFile(
     };
   } catch (error) {
     if (handle) {
-      await handle.close().catch(() => undefined);
+      await handle.close().catch(swallowBestEffortCleanup("close-write-handle"));
     }
     if (newlyCreated) {
-      await unlink(containedPath.resolvedPath).catch(() => undefined);
+      await unlink(containedPath.resolvedPath).catch(swallowBestEffortCleanup("unlink-rolled-back-file"));
     }
     return mapFileSystemError(error, containedPath.resolvedPath, "WRITE_ERROR");
   }
@@ -230,8 +267,9 @@ async function openContainedExecutableForExec(
   let handle: FileHandle;
   try {
     handle = await open(containedPath.resolvedPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
+  } catch (error) {
+    warnExecContainmentFailure("open", error);
+    return mapExecContainmentOpenError(error);
   }
 
   try {
@@ -253,8 +291,9 @@ async function openContainedExecutableForExec(
         await handle.close();
       }
     };
-  } catch {
-    await handle.close().catch(() => undefined);
+  } catch (error) {
+    await handle.close().catch(swallowBestEffortCleanup("close-exec-handle"));
+    warnExecContainmentFailure("validate", error);
     return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
   }
 }
@@ -284,7 +323,8 @@ async function resolveContainedExecutablePath(
       ok: true,
       resolvedPath: realCommandPath
     };
-  } catch {
+  } catch (error) {
+    warnExecContainmentFailure("resolve", error);
     return createAccessDenied(EXEC_COMMAND_CONTAINMENT_MESSAGE);
   }
 }

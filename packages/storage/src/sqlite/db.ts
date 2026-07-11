@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
+import { migrateEngineBindingApiKeysToCiphertext } from "../repos/shared/api-key-cipher.js";
 import { LruCache } from "./lru-cache.js";
 import type { SqliteWriteQueuePort } from "./write-queue-port.js";
 
@@ -188,7 +189,7 @@ function ensureSchemaVersionTable(database: SqliteConnection): void {
 }
 
 function assertSchemaVersionNotAhead(database: SqliteConnection, knownMaxVersion: number): void {
-  const persistedMaxVersion = readPersistedMaxVersion(database);
+  const persistedMaxVersion = readPersistedMaxVersionForMigration(database);
   if (persistedMaxVersion !== null && persistedMaxVersion > knownMaxVersion) {
     throw new StorageError(
       "STORAGE_VERSION_AHEAD",
@@ -198,11 +199,38 @@ function assertSchemaVersionNotAhead(database: SqliteConnection, knownMaxVersion
   }
 }
 
+function readPersistedMaxVersionForMigration(database: SqliteConnection): number | null {
+  try {
+    const row = database
+      .prepare("SELECT MAX(version) AS max_version FROM schema_version")
+      .get() as Readonly<{ max_version: number | null }> | undefined;
+    return row?.max_version ?? null;
+  } catch (error) {
+    if (isSqliteNoSuchTableError(error)) {
+      return null;
+    }
+    throw new StorageError(
+      "DATABASE_OPEN_FAILED",
+      "Failed to read schema_version during database initialization.",
+      error
+    );
+  }
+}
+
 function readPersistedMaxVersion(database: SqliteConnection): number | null {
-  const row = database
-    .prepare("SELECT MAX(version) AS max_version FROM schema_version")
-    .get() as Readonly<{ max_version: number | null }> | undefined;
-  return row?.max_version ?? null;
+  try {
+    const row = database
+      .prepare("SELECT MAX(version) AS max_version FROM schema_version")
+      .get() as Readonly<{ max_version: number | null }> | undefined;
+    return row?.max_version ?? null;
+  } catch (error) {
+    console.warn("sqlite/db: failed to read schema_version max; treating as unknown", error);
+    return null;
+  }
+}
+
+function isSqliteNoSuchTableError(error: unknown): boolean {
+  return error instanceof Error && /no such table/i.test(error.message);
 }
 
 function prepareMigrationStatements(database: SqliteConnection): MigrationStatements {
@@ -226,10 +254,22 @@ function applyMigrationIfPending(
   try {
     database.transaction(() => {
       database.exec(migrationSql);
+      runDataMigrationIfPresent(database, version);
       statements.markAppliedStatement.run(version, new Date().toISOString());
     })();
   } catch (error) {
     throw new StorageError("MIGRATION_FAILED", `Failed to apply migration ${fileName}`, error);
+  }
+}
+
+const DATA_MIGRATIONS: Readonly<Partial<Record<number, (database: SqliteConnection) => void>>> = {
+  104: migrateEngineBindingApiKeysToCiphertext
+};
+
+function runDataMigrationIfPresent(database: SqliteConnection, version: number): void {
+  const migrate = DATA_MIGRATIONS[version];
+  if (migrate !== undefined) {
+    migrate(database);
   }
 }
 
@@ -261,15 +301,7 @@ export function getCurrentSchemaSummary(
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
     .map((entry) => entry.name);
   const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
-  let persistedMaxVersion: number | null = null;
-  try {
-    const row = database.connection
-      .prepare("SELECT MAX(version) AS max_version FROM schema_version")
-      .get() as { max_version: number | null } | undefined;
-    persistedMaxVersion = row?.max_version ?? null;
-  } catch {
-    persistedMaxVersion = null;
-  }
+  const persistedMaxVersion = readPersistedMaxVersion(database.connection);
   return {
     persistedMaxVersion,
     knownMaxVersion,

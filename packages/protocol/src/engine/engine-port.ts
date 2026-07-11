@@ -2,6 +2,7 @@ import type { EngineBinding, EngineBindingSummary } from "./engine-binding.js";
 import { z } from "zod";
 import { EngineBindingSchema } from "./engine-binding.js";
 import type { MessageDeltaEvent } from "../events/message-delta.js";
+import { AlayaError } from "../shared/alaya-error.js";
 import {
   BOUNDED_DEFAULT_ARRAY_MAX,
   BoundedContentSchema,
@@ -125,14 +126,14 @@ export type EngineResult = z.infer<typeof EngineResultSchema>;
 export type EngineErrorData = z.infer<typeof EngineErrorSchema>;
 
 /** Runtime error used by engine implementations and adapters. */
-export class EngineError extends Error {
+export class EngineError extends AlayaError {
   readonly kind: EngineErrorKind;
 
   constructor(message: string, kind: EngineErrorKind) {
-    super(message);
+    // kind is the structured code for engine failures; keep `.kind` for callers.
+    super(kind, message);
     this.name = "EngineError";
     this.kind = kind;
-    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 

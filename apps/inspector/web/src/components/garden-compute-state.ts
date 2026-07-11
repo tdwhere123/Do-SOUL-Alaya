@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
-import type { ToastInput } from "./Toast";
+import type { ToastInput } from "./toast";
 import {
   buildSecretPatch,
   buildSecretRef,
