@@ -26,16 +26,65 @@ function distinctivePath(
 }
 
 describe("buildPathInflowByTarget (conformant flood adjacency)", () => {
+  it("projects the directed PathRelation anchors immutably onto the live edge", () => {
+    const base = distinctivePath({ directionBias: "source_to_target" });
+    const path = {
+      ...base,
+      anchors: {
+        source_anchor: {
+          kind: "object_facet" as const,
+          object_id: SRC,
+          facet_key: "location_place"
+        },
+        target_anchor: base.anchors.target_anchor
+      }
+    };
+
+    const edge = buildPathInflowByTarget([path], new Set([SRC, TGT]))[TGT]?.[0];
+
+    expect(edge).toEqual(expect.objectContaining({
+      seedAnchor: path.anchors.source_anchor,
+      targetAnchor: path.anchors.target_anchor,
+      pathSourceVersion: path.updated_at
+    }));
+    expect(edge?.seedAnchor).not.toBe(path.anchors.source_anchor);
+    expect(Object.isFrozen(edge?.seedAnchor)).toBe(true);
+    expect(edge?.targetAnchor).not.toBe(path.anchors.target_anchor);
+    expect(Object.isFrozen(edge?.targetAnchor)).toBe(true);
+  });
+
   it("source_to_target: edge seed = source, keyed under target (both in pool)", () => {
     const path = distinctivePath({ directionBias: "source_to_target" });
     const inflow = buildPathInflowByTarget([path], new Set([SRC, TGT]));
-    expect(inflow).toEqual({ [TGT]: [{ seedObjectId: SRC, weight: scorePathRelationExpansion(path) }] });
+    expect(inflow).toEqual({
+      [TGT]: [{
+        pathId: path.path_id,
+        relationKind: "answers_with",
+        seedObjectId: SRC,
+        targetObjectId: TGT,
+        seedAnchor: path.anchors.source_anchor,
+        targetAnchor: path.anchors.target_anchor,
+        pathSourceVersion: path.updated_at,
+        weight: scorePathRelationExpansion(path)
+      }]
+    });
   });
 
   it("target_to_source: edge seed = target, keyed under source (both in pool)", () => {
     const path = distinctivePath({ directionBias: "target_to_source" });
     const inflow = buildPathInflowByTarget([path], new Set([SRC, TGT]));
-    expect(inflow).toEqual({ [SRC]: [{ seedObjectId: TGT, weight: scorePathRelationExpansion(path) }] });
+    expect(inflow).toEqual({
+      [SRC]: [{
+        pathId: path.path_id,
+        relationKind: "answers_with",
+        seedObjectId: TGT,
+        targetObjectId: SRC,
+        seedAnchor: path.anchors.target_anchor,
+        targetAnchor: path.anchors.source_anchor,
+        pathSourceVersion: path.updated_at,
+        weight: scorePathRelationExpansion(path)
+      }]
+    });
   });
 
   it("bidirectional_asymmetric: yields both directions (both in pool)", () => {
@@ -43,8 +92,26 @@ describe("buildPathInflowByTarget (conformant flood adjacency)", () => {
     const weight = scorePathRelationExpansion(path);
     const inflow = buildPathInflowByTarget([path], new Set([SRC, TGT]));
     expect(inflow).toEqual({
-      [TGT]: [{ seedObjectId: SRC, weight }],
-      [SRC]: [{ seedObjectId: TGT, weight }]
+      [TGT]: [{
+        pathId: path.path_id,
+        relationKind: "answers_with",
+        seedObjectId: SRC,
+        targetObjectId: TGT,
+        seedAnchor: path.anchors.source_anchor,
+        targetAnchor: path.anchors.target_anchor,
+        pathSourceVersion: path.updated_at,
+        weight
+      }],
+      [SRC]: [{
+        pathId: path.path_id,
+        relationKind: "answers_with",
+        seedObjectId: TGT,
+        targetObjectId: SRC,
+        seedAnchor: path.anchors.target_anchor,
+        targetAnchor: path.anchors.source_anchor,
+        pathSourceVersion: path.updated_at,
+        weight
+      }]
     });
   });
 

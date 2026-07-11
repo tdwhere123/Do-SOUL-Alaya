@@ -12,6 +12,19 @@ import type {
 } from "./scheduler-runtime-types.js";
 
 const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
+const ERROR_MESSAGE_MAX_LENGTH = 240;
+const ERROR_CAUSE_MAX_DEPTH = 3;
+
+interface SafeCausalError {
+  readonly name: string;
+  readonly code: string | null;
+  readonly message: string;
+  readonly cause_chain: readonly Readonly<{
+    name: string;
+    code: string | null;
+    message: string;
+  }>[];
+}
 
 export function createEmbeddingBackfillRuntimeSupport(
   input: CreateGardenSchedulerRuntimeSupportInput
@@ -92,36 +105,78 @@ async function runEmbeddingBackfillTask(
   task: Readonly<GardenTaskDescriptor>
 ): Promise<EmbeddingBackfillTaskOutcome> {
   const completedAt = new Date().toISOString();
+  let outcome: EmbeddingBackfillTaskOutcome;
   try {
     const result = await resolveEmbeddingBackfillResult(input, task);
     await runEmbeddingCoherenceFollowUp(input, task, result.objectsAffected);
     await runEmbeddingAnswersWithFollowUp(input, task, result.objectsAffected);
-    await reportEmbeddingBackfillCompletion(input, task, completedAt, true, result.auditEntries, null, result.objectsAffected);
-    return Object.freeze({
+    outcome = Object.freeze({
       success: true,
       objectsAffected: Object.freeze([...result.objectsAffected]),
       auditEntries: Object.freeze([...result.auditEntries]),
       errorMessage: null
     });
   } catch (error) {
-    const failure = buildEmbeddingBackfillFailure(error);
-    await reportEmbeddingBackfillCompletion(
-      input,
-      task,
-      completedAt,
-      false,
-      failure.auditEntries,
-      failure.errorMessage,
-      failure.objectsAffected
-    );
+    outcome = buildEmbeddingBackfillFailure(error);
     input.warn("embedding backfill task failed; continuing Garden background pass", {
       workspace_id: task.workspace_id,
-      error: failure.errorMessage
+      phase: "backfill",
+      error: serializeCausalError(error)
     });
-    return Object.freeze(failure);
+  }
+  try {
+    await persistEmbeddingBackfillCompletion(input, task, completedAt, outcome);
+    return outcome;
   } finally {
     pendingWorkspaces.delete(task.workspace_id);
   }
+}
+
+async function persistEmbeddingBackfillCompletion(
+  input: CreateGardenSchedulerRuntimeSupportInput,
+  task: Readonly<GardenTaskDescriptor>,
+  completedAt: string,
+  outcome: EmbeddingBackfillTaskOutcome
+): Promise<void> {
+  const failures: unknown[] = [];
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await reportEmbeddingBackfillCompletion(
+        input,
+        task,
+        completedAt,
+        outcome.success,
+        outcome.auditEntries,
+        sanitizeDurableErrorMessage(outcome.errorMessage),
+        outcome.objectsAffected
+      );
+      if (failures.length > 0) {
+        input.warn("embedding backfill completion retry succeeded", {
+          workspace_id: task.workspace_id,
+          phase: "completion",
+          attempt,
+          error: serializeCausalError(failures[0])
+        });
+      }
+      return;
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  input.warn("embedding backfill completion persistence failed", {
+    workspace_id: task.workspace_id,
+    phase: "completion",
+    attempts: failures.length,
+    error: serializeCausalError(failures.at(-1))
+  });
+  throw new AggregateError(
+    failures,
+    "embedding backfill completion persistence failed"
+  );
+}
+
+function sanitizeDurableErrorMessage(message: string | null): string | null {
+  return message === null ? null : sanitizeErrorText(message);
 }
 
 async function resolveEmbeddingBackfillResult(
@@ -157,7 +212,8 @@ async function runEmbeddingCoherenceFollowUp(
   } catch (coherenceError) {
     input.warn("coherence crystallization failed after embedding backfill", {
       workspace_id: task.workspace_id,
-      error: coherenceError instanceof Error ? coherenceError.message : String(coherenceError)
+      phase: "coherence",
+      error: serializeCausalError(coherenceError)
     });
   }
 }
@@ -179,9 +235,65 @@ async function runEmbeddingAnswersWithFollowUp(
   } catch (answersWithError) {
     input.warn("answers_with crystallization failed after embedding backfill", {
       workspace_id: task.workspace_id,
-      error: answersWithError instanceof Error ? answersWithError.message : String(answersWithError)
+      phase: "answers_with",
+      error: serializeCausalError(answersWithError)
     });
   }
+}
+
+function serializeCausalError(error: unknown): SafeCausalError {
+  const seen = new Set<unknown>();
+  const root = readSafeError(error);
+  const causeChain: Array<Omit<SafeCausalError, "cause_chain">> = [];
+  let cause = readCause(error);
+  while (
+    cause !== undefined &&
+    causeChain.length < ERROR_CAUSE_MAX_DEPTH &&
+    !seen.has(cause)
+  ) {
+    seen.add(cause);
+    causeChain.push(readSafeError(cause));
+    cause = readCause(cause);
+  }
+  return Object.freeze({ ...root, cause_chain: Object.freeze(causeChain) });
+}
+
+function readSafeError(error: unknown): Omit<SafeCausalError, "cause_chain"> {
+  if (!(error instanceof Error)) {
+    return { name: "UnknownError", code: null, message: sanitizeErrorText(String(error)) };
+  }
+  return {
+    name: sanitizeErrorName(error.name),
+    code: readSafeErrorCode(error),
+    message: sanitizeErrorText(error.message)
+  };
+}
+
+function readCause(error: unknown): unknown {
+  if (typeof error !== "object" || error === null || !("cause" in error)) {
+    return undefined;
+  }
+  return (error as { readonly cause?: unknown }).cause;
+}
+
+function readSafeErrorCode(error: Error): string | null {
+  const code = (error as Error & { readonly code?: unknown }).code;
+  return typeof code === "string" && /^[A-Z0-9_:-]{1,64}$/u.test(code)
+    ? code
+    : null;
+}
+
+function sanitizeErrorName(name: string): string {
+  return /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name) ? name : "Error";
+}
+
+function sanitizeErrorText(message: string): string {
+  const redacted = message
+    .replace(/\b(?:authorization|password|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+/giu, "credential=[redacted]")
+    .replace(/https?:\/\/[^\s]+/giu, "[redacted-url]")
+    .replace(/[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s]*/gu, "[redacted-path]")
+    .replace(/(?:\/[A-Za-z0-9._~+-]+){2,}/gu, "[redacted-path]");
+  return redacted.slice(0, ERROR_MESSAGE_MAX_LENGTH);
 }
 
 function buildEmbeddingBackfillFailure(error: unknown): EmbeddingBackfillTaskOutcome {

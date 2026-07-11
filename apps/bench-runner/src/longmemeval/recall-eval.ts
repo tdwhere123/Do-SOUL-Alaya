@@ -1,12 +1,8 @@
 import { appendFileSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname } from "node:path";
 import {
-  benchArchiveDiscriminator,
   buildDiffVsPrevious,
   diffKpis,
-  entrySlug,
   renderFindings,
   renderReport,
   writeEntry,
@@ -24,21 +20,11 @@ import {
 import {
   startBenchDaemon,
   type BenchDaemonHandle,
-  type BenchEmbeddingMode,
-  type BenchEmbeddingProviderKind,
   type BenchRecallOptions,
   type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
-
-// bench-only: ALAYA_RECALL_EVAL_EMBEDDING=env turns on the embedding stream vs the snapshot's stored vectors.
-function recallEvalEmbeddingMode(): BenchEmbeddingMode {
-  return process.env.ALAYA_RECALL_EVAL_EMBEDDING === "env" ? "env" : "disabled";
-}
-function recallEvalEmbeddingProviderKind(): BenchEmbeddingProviderKind {
-  return recallEvalEmbeddingMode() === "env" ? "local_onnx" : "openai";
-}
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
@@ -52,10 +38,13 @@ import {
 } from "./diagnostics.js";
 import { isAbstentionQuestionId } from "./abstention.js";
 import {
-  RECALL_EVAL_ARCHIVE_MARKER,
   selectRecallEvalBaseline
 } from "./recall-eval-archive.js";
 import { assembleRecallEvalKpi } from "./recall-eval-kpi.js";
+import {
+  buildPerQuestionDelivered,
+  buildRecallEvalArchiveSlug
+} from "./kpi/recall-eval-archive.js";
 import { extractRecallTokenEconomy } from "./recall-token-economy.js";
 import { runLongMemEvalRecallCycle } from "./runner.js";
 import {
@@ -66,35 +55,25 @@ import {
 } from "./runner.js";
 import {
   assertSnapshotVersionMatch,
+  assertSnapshotConsumerBinding,
   readSnapshotManifest,
   readSnapshotSidecar,
-  restoreSnapshotToDataDir,
   type LongMemEvalSnapshotManifest,
   type LongMemEvalSnapshotQuestion
 } from "./snapshot.js";
 import type { LongMemEvalVariant } from "./dataset.js";
-
-/**
- * @anchor longmemeval-recall-eval
- *
- * Layer 2+3 (fast, every iteration). Restores a seeded-DB snapshot into a
- * working dataDirRoot, attaches the daemon to it, and runs PURE Layer-3 recall
- * per question — no LLM, no extraction, no materialization. Minutes for 100Q.
- *
- * It re-uses the seed-time scoring sidecar persisted alongside the snapshot, so
- * it never re-runs the seed loop. Recall-derived KPI fields (r_at_*, per-plane,
- * per-hop, per-edge-type, recall_token_economy, token_economy,
- * edge_proposal_rate) are computed from this run's recall; gate-only fields
- * (seed_extraction_path / seed_truncation / embedding warmup) are INHERITED
- * from the snapshot manifest's extraction provenance, marked
- * provenance-inherited, never recomputed.
- *
- * cross-file: apps/bench-runner/src/longmemeval/snapshot.ts (produce/restore)
- * cross-file: apps/bench-runner/src/longmemeval/runner.ts (shared scoring +
- *   recall cycle the slow path also uses)
- * cross-file: apps/bench-runner/src/longmemeval/recall-eval-archive.ts
- *   (RECALL_EVAL_ARCHIVE_MARKER — the fast-loop archive discriminator)
- */
+import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
+import { throwLifecycleErrors } from "./lifecycle/errors.js";
+import { writeRecallEvalProgress } from "./lifecycle/recall-eval-progress.js";
+import { writeRecallEvalRankIdentity } from "./provenance/recall-eval-rank-identity.js";
+import { writeRecallEvalRunProvenance } from "./provenance/recall-eval-run.js";
+import {
+  prepareRecallEvalDataDir,
+  buildRecallEvalRuntimeAttribution,
+  recallEvalEmbeddingMode,
+  recallEvalEmbeddingProviderLabel,
+  recallEvalEmbeddingProviderKind
+} from "./lifecycle/recall-eval-runtime.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -105,14 +84,9 @@ export interface RecallEvalOptions {
   readonly policyShape?: BenchPolicyShape;
   readonly simulateReport?: BenchSimulateReportMode;
   readonly weightOverridesJson?: string;
-  /**
-   * Override the restore directory (tests). Production allocates an mkdtemp
-   * working copy so the frozen snapshot is never mutated by appended
-   * delivery / lens events.
-   */
+  /** Override the restore directory in tests. */
   readonly dataDirRoot?: string;
 }
-
 export interface RecallEvalResult {
   readonly slug: string;
   readonly kpiPath: string;
@@ -120,11 +94,8 @@ export interface RecallEvalResult {
   readonly findingsPath: string;
   readonly payload: KpiPayload;
   readonly snapshotManifest: LongMemEvalSnapshotManifest;
-  // invariant: questionId -> delivered object_ids in rank order; rank-identical
-  // across two runs on a fixed snapshot (asserted in recall-eval-snapshot.test.ts).
   readonly perQuestionDelivered: ReadonlyMap<string, readonly string[]>;
 }
-
 export interface RecallEvalQuestionResult {
   readonly questionId: string;
   readonly hitAt1: boolean;
@@ -137,18 +108,15 @@ export interface RecallEvalQuestionResult {
   readonly tokenMetrics: BenchTokenMetrics;
   readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
   readonly edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
-  // Delivered object_ids in rank order (rank 1 first). Surfaced so a
-  // determinism test can prove randomUUID never perturbs ordering at rank
-  // granularity, not just hit/miss. cross-file: recall-eval-snapshot.test.ts
   readonly deliveredObjectIds: readonly string[];
 }
-
 interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
   readonly manifest: LongMemEvalSnapshotManifest;
   readonly window: readonly LongMemEvalSnapshotQuestion[];
   readonly sidecarQuestionCount: number;
   readonly dataDirRoot: string;
+  readonly ownsDataDirRoot: boolean;
   readonly policyShape: BenchPolicyShape;
   readonly simulateReport: BenchSimulateReportMode;
   readonly recallOptions: BenchRecallOptions;
@@ -156,14 +124,9 @@ interface RecallEvalRunContext {
   readonly commitSha7: string;
   readonly runAt: Date;
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
+  readonly runtimeAttribution: Awaited<ReturnType<typeof buildRecallEvalRuntimeAttribution>>;
 }
-
-/**
- * Run the recall-only feedback loop against a seeded-DB snapshot. Restores a
- * working copy, asserts the snapshot's code/migration version matches the
- * running binary, then recalls + scores every persisted question and emits the
- * normal KPI artifact for the recall-derived fields.
- */
+/** Run recall-only scoring against an integrity-checked working snapshot copy. */
 export async function runRecallEval(
   options: RecallEvalOptions
 ): Promise<RecallEvalResult> {
@@ -178,8 +141,28 @@ export async function runRecallEval(
   }
 
   const context = await prepareRecallEvalRun(options, recallWeightOverrides);
-  const collected = await executeRecallEvalRun(context);
-  return writeRecallEvalArtifacts(context, collected);
+  let succeeded = false;
+  let result: RecallEvalResult | undefined;
+  let primaryError: unknown;
+  try {
+    const collected = await executeRecallEvalRun(context);
+    result = await writeRecallEvalArtifacts(context, collected);
+    succeeded = true;
+  } catch (error) {
+    primaryError = error;
+  }
+  let cleanupError: unknown;
+  try {
+    await finalizeOwnedTempRoot(
+      { path: context.dataDirRoot, owned: context.ownsDataDirRoot },
+      succeeded
+    );
+  } catch (error) {
+    cleanupError = error;
+  }
+  throwLifecycleErrors("recall-eval lifecycle failed", [primaryError, cleanupError]);
+  if (result === undefined) throw new Error("recall-eval produced no result");
+  return result;
 }
 
 async function prepareRecallEvalRun(
@@ -188,29 +171,44 @@ async function prepareRecallEvalRun(
 ): Promise<RecallEvalRunContext> {
   const manifest = readSnapshotManifest(options.snapshotDbPath);
   const sidecarFile = readSnapshotSidecar(options.snapshotDbPath);
-  const dataDirRoot =
-    options.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-recall-eval-")));
-  restoreSnapshotToDataDir({
+  assertSnapshotConsumerBinding({
     snapshotDbPath: options.snapshotDbPath,
-    dataDirRoot
+    manifest,
+    sidecar: sidecarFile,
+    variant: options.variant
   });
-  assertSnapshotVersionMatch(manifest, join(dataDirRoot, "alaya.db"));
+  const commitSha7 = resolveBenchCommitSha7();
+  const runtimeAttribution = await buildRecallEvalRuntimeAttribution(
+    manifest,
+    process.env,
+    commitSha7
+  );
+  const window = selectRecallEvalWindow(sidecarFile.questions, options);
+  const alayaVersion = resolveBenchRunnerVersion();
+  const dataDir = await prepareRecallEvalDataDir({
+    snapshotDbPath: options.snapshotDbPath,
+    requestedRoot: options.dataDirRoot,
+    artifactIntegrity: manifest.artifact_integrity,
+    validateRestoredDb: (dbPath) => assertSnapshotVersionMatch(manifest, dbPath)
+  });
   return {
     options,
     manifest,
-    window: selectRecallEvalWindow(sidecarFile.questions, options),
+    window,
     sidecarQuestionCount: sidecarFile.questions.length,
-    dataDirRoot,
+    dataDirRoot: dataDir.path,
+    ownsDataDirRoot: dataDir.owned,
     policyShape: options.policyShape ?? "stress",
     simulateReport: options.simulateReport ?? "none",
     recallOptions: {
       maxResults: Number(process.env.ALAYA_RECALL_EVAL_MAX_RESULTS) || 10,
       conflictAwareness: (options.policyShape ?? "stress") !== "chat"
     },
-    alayaVersion: resolveBenchRunnerVersion(),
-    commitSha7: resolveBenchCommitSha7(),
+    alayaVersion,
+    commitSha7,
     runAt: new Date(),
-    recallWeightOverrides
+    recallWeightOverrides,
+    runtimeAttribution
   };
 }
 
@@ -224,6 +222,7 @@ async function executeRecallEvalRun(
     embeddingProviderKind: recallEvalEmbeddingProviderKind(),
     recallWeightOverrides: context.recallWeightOverrides
   });
+  let primaryError: unknown;
   try {
     for (let i = 0; i < context.window.length; i += 1) {
       const question = context.window[i];
@@ -238,9 +237,16 @@ async function executeRecallEvalRun(
       collected.push(result);
       writeRecallEvalProgress(i, context.window.length, question.questionId, result);
     }
-  } finally {
-    await daemon.shutdown();
+  } catch (error) {
+    primaryError = error;
   }
+  let shutdownError: unknown;
+  try {
+    await daemon.shutdown();
+  } catch (error) {
+    shutdownError = error;
+  }
+  throwLifecycleErrors("recall-eval daemon lifecycle failed", [primaryError, shutdownError]);
   return collected;
 }
 
@@ -251,18 +257,6 @@ function selectRecallEvalWindow(
   const offset = Math.max(0, options.offset ?? 0);
   const sliceEnd = options.limit !== undefined ? offset + options.limit : questions.length;
   return questions.slice(offset, sliceEnd);
-}
-
-function writeRecallEvalProgress(
-  questionIndex: number,
-  totalQuestions: number,
-  questionId: string,
-  result: RecallEvalQuestionResult
-): void {
-  process.stdout.write(
-    `[recall-eval ${questionIndex + 1}/${totalQuestions}] ${questionId.slice(0, 8)} ` +
-      `R@5=${result.hitAt5 ? "✓" : "✗"} latency=${result.latencyMs}ms\n`
-  );
 }
 
 async function writeRecallEvalArtifacts(
@@ -280,7 +274,9 @@ async function writeRecallEvalArtifacts(
     simulateReport: context.simulateReport,
     sampleSize: context.sidecarQuestionCount,
     evaluatedCount: context.window.length,
-    recallWeightOverrides: context.recallWeightOverrides
+    recallWeightOverrides: context.recallWeightOverrides,
+    embeddingProviderLabel: recallEvalEmbeddingProviderLabel(),
+    runtimeAttribution: context.runtimeAttribution
   });
   const layout: HistoryLayout = { historyRoot: context.options.historyRoot };
   const previous = await selectRecallEvalBaseline(layout, "public", {
@@ -306,7 +302,7 @@ async function persistRecallEvalArtifacts(
   previous: KpiPayload | null,
   diff: ReturnType<typeof diffKpis>
 ): Promise<RecallEvalResult> {
-  const slug = buildRecallEvalSlug(context);
+  const slug = buildRecallEvalArchiveSlug(context);
   const entry = await writeEntry(
     layout,
     "public",
@@ -315,6 +311,23 @@ async function persistRecallEvalArtifacts(
     renderReport(payload, previous, diff),
     renderFindings(payload, diff)
   );
+  await writeRecallEvalRankIdentity(dirname(entry.kpiPath), collected, {
+    expectedQuestionCount: context.manifest.question_count,
+    expectedQuestionIdDigest: context.manifest.question_id_digest ?? null,
+    requireFullSnapshotMatch:
+      context.manifest.attribution?.status === "attributed" &&
+      context.options.offset === undefined &&
+      context.options.limit === undefined
+  });
+  await writeRecallEvalRunProvenance(dirname(entry.kpiPath), {
+    manifest: context.manifest,
+    runtimeAttribution: context.runtimeAttribution,
+    evaluatedCount: context.window.length,
+    offset: context.options.offset ?? 0,
+    limit: context.options.limit ?? null,
+    commitSha7: context.commitSha7,
+    env: process.env
+  });
   return {
     slug,
     kpiPath: entry.kpiPath,
@@ -324,22 +337,6 @@ async function persistRecallEvalArtifacts(
     snapshotManifest: context.manifest,
     perQuestionDelivered: buildPerQuestionDelivered(collected)
   };
-}
-
-function buildRecallEvalSlug(context: RecallEvalRunContext): string {
-  return entrySlug(
-    context.runAt,
-    context.commitSha7,
-    `${benchArchiveDiscriminator(context.policyShape, context.simulateReport)}-${RECALL_EVAL_ARCHIVE_MARKER}`
-  );
-}
-
-function buildPerQuestionDelivered(
-  collected: readonly RecallEvalQuestionResult[]
-): ReadonlyMap<string, readonly string[]> {
-  return new Map<string, readonly string[]>(
-    collected.map((result) => [result.questionId, result.deliveredObjectIds] as const)
-  );
 }
 
 async function recallEvalOneQuestion(input: {

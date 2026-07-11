@@ -292,6 +292,57 @@ describe("computeIntegratedFloodScore", () => {
     );
   });
 
+  it("clamps an active non-default flood score and diagnostics to one", () => {
+    process.env.ALAYA_RECALL_CONF_W_PATH = "2";
+    process.env.ALAYA_RECALL_CONF_EVIDENCE_BETA = "3";
+    const seed = createMemoryEntry({ object_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
+    const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-safe"] });
+    const data = supplementary({
+      pathInflowByTarget: { [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }] },
+      evidenceSupportVectorsByMemoryId: {
+        [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-safe", support: 1 }]
+      }
+    });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: 1, B_evidence: 1 },
+      supplementaryData: data
+    });
+
+    expect(result.diagnostics.lambda).toBe(1);
+    expect(result.diagnostics.beta).toBe(1);
+    expect(result.diagnostics.path_status).toBe("active");
+    expect(result.diagnostics.evidence_status).toBe("active");
+    expect(result.diagnostics.fuel_verified).toBe(true);
+    expect(result.diagnostics.Flood).toBe(1);
+    expect(result.score).toBe(1);
+    expect(result.diagnostics.final_score).toBe(1);
+  });
+
+  it("fails non-finite path fuel closed without changing the base score", () => {
+    process.env.ALAYA_RECALL_CONF_W_PATH = "2";
+    process.env.ALAYA_RECALL_CONF_EVIDENCE_BETA = "3";
+    const seed = createMemoryEntry({ object_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" });
+    const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const target = createMemoryEntry({ object_id: targetId, evidence_refs: ["ev-safe"] });
+    const result = computeIntegratedFloodScore({
+      entry: target,
+      axisInputs: { R_obj: 0.2, A_path: Number.POSITIVE_INFINITY, B_evidence: 2 },
+      supplementaryData: supplementary({
+        pathInflowByTarget: { [targetId]: [{ seedObjectId: seed.object_id, weight: 1 }] },
+        evidenceSupportVectorsByMemoryId: {
+          [targetId]: [{ source_kind: "evidence_ref", source_id: "ev-safe", support: 1 }]
+        }
+      })
+    });
+
+    expect(result.diagnostics.path_status).toBe("inactive:no_fuel");
+    expect(result.diagnostics.fuel_verified).toBe(false);
+    expect(result.score).toBe(0.2);
+    expect(result.diagnostics.final_score).toBe(0.2);
+  });
+
   it("summarizes fuel coverage across candidates", () => {
     const summary = buildFloodFuelCoverageSummary([
       {

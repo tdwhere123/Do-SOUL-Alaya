@@ -1,4 +1,5 @@
 import type {
+  BenchEdgeFormationMember,
   BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import { benchSessionSurfacesEnabled } from "../harness/daemon-support.js";
@@ -23,7 +24,7 @@ export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
   readonly answerSessionSet: Set<string>;
   answerSeedDropReasons: LongMemEvalSeedDropReasons;
-  readonly coherenceMembers: { readonly memoryId: string; readonly sessionId: string }[];
+  readonly coherenceMembers: BenchEdgeFormationMember[];
   seedTurnsTruncated: number;
   answerTurnsTruncated: number;
   seedCharsClipped: number;
@@ -173,7 +174,7 @@ function addSeedSidecarEntries(
   round: ReturnType<typeof pairSessionIntoRounds>[number],
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
-  for (const seed of seedResult.seeds) {
+  for (const [seedOrdinal, seed] of seedResult.seeds.entries()) {
     state.sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
       objectId: seed.memoryId,
       objectKind: "memory_entry",
@@ -183,8 +184,27 @@ function addSeedSidecarEntries(
     });
     context.sessionTurns.push({ turnContent: round.content, evidenceId: seed.evidenceId });
     context.sessionMemberMemoryIds.push(seed.memoryId);
-    state.coherenceMembers.push({ memoryId: seed.memoryId, sessionId: context.sessionId });
+    state.coherenceMembers.push({
+      memoryId: seed.memoryId,
+      sessionId: context.sessionId,
+      formationKey: buildBenchFormationKey(context, seedOrdinal)
+    });
   }
+}
+
+function buildBenchFormationKey(
+  context: Pick<Parameters<typeof seedQuestionRound>[2], "sessionId" | "sessionIndex" | "roundIndex">,
+  seedOrdinal: number
+): string {
+  // Fixed-width ordinals preserve numeric formation order under the core's
+  // opaque lexical-key comparison, including sessions with 10+ rounds.
+  const ordinal = (value: number) => String(value).padStart(12, "0");
+  return JSON.stringify([
+    ordinal(context.sessionIndex),
+    ordinal(context.roundIndex),
+    ordinal(seedOrdinal),
+    context.sessionId
+  ]);
 }
 
 function optionalSeedContent(

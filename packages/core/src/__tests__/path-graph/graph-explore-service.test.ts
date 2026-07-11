@@ -65,6 +65,7 @@ function createPath(overrides: {
 function createPathRepo(paths: readonly PathRelation[] = []) {
   return {
     findByAnchors: vi.fn(async () => paths),
+    findByBackingObjectId: vi.fn(async () => paths),
     findByTargetAnchor: vi.fn(async (_workspaceId: string, anchorRef: { kind: string; object_id?: string }) =>
       paths.filter((path) => {
         const target = path.anchors.target_anchor;
@@ -193,13 +194,12 @@ describe("GraphExploreService", () => {
       code: "VALIDATION",
       message: "Invalid edge_type"
     });
-    expect(pathRepo.findByAnchors).not.toHaveBeenCalled();
+    expect(pathRepo.findByBackingObjectId).not.toHaveBeenCalled();
   });
 });
 
-// invariant: graph_support counts read the path plane (target-anchored
-// recall-eligible paths), are positive-only, and are weight-equivalent to the
-// equivalent positive edge graph (zero-drift). Negatives never enter here.
+// invariant: graph_support counts read positive recall-eligible paths. Ordered
+// kinds contribute at the target; unordered semantic kinds at both endpoints.
 describe("GraphExploreService countInbound* on the path plane", () => {
   const TARGET = "memory-target";
 
@@ -281,7 +281,7 @@ describe("GraphExploreService countInbound* on the path plane", () => {
     expect(await service.countInboundRecalls(TARGET, "workspace-1")).toBe(2);
   });
 
-  it("ignores source-anchored-only paths (inbound = target anchor only)", async () => {
+  it("ignores the source endpoint of directional paths", async () => {
     const service = createServiceWithInboundPaths([
       // TARGET is the SOURCE here, so this is outbound, not inbound.
       createPath({ pathId: "p-outbound", sourceMemoryId: TARGET, targetMemoryId: "other", relationKind: "supports" })
@@ -289,5 +289,33 @@ describe("GraphExploreService countInbound* on the path plane", () => {
 
     expect(await service.countInboundEdgesWeighted(TARGET, "workspace-1")).toBe(0);
     expect(await service.countInboundRecalls(TARGET, "workspace-1")).toBe(0);
+  });
+
+  it("credits both endpoints of bidirectional semantic paths", async () => {
+    const service = createServiceWithInboundPaths([
+      createPath({ pathId: "p-answer", sourceMemoryId: TARGET, targetMemoryId: "answer-peer", relationKind: "answers_with" }),
+      createPath({ pathId: "p-coherent", sourceMemoryId: TARGET, targetMemoryId: "coherent-peer", relationKind: "coheres_with" }),
+      createPath({ pathId: "p-corecalled", sourceMemoryId: TARGET, targetMemoryId: "recall-peer", relationKind: "co_recalled" }),
+      createPath({ pathId: "p-directional", sourceMemoryId: TARGET, targetMemoryId: "support-peer", relationKind: "supports" })
+    ]);
+
+    expect(await service.countInboundEdgesWeighted(TARGET, "workspace-1")).toBeCloseTo(0.9);
+    expect(await service.countInboundRecalls(TARGET, "workspace-1")).toBe(3);
+  });
+
+  it("gives either endpoint the same contribution for one unordered path", async () => {
+    const peer = "memory-peer";
+    const service = createServiceWithInboundPaths([
+      createPath({
+        pathId: "p-answer",
+        sourceMemoryId: TARGET,
+        targetMemoryId: peer,
+        relationKind: "answers_with"
+      })
+    ]);
+
+    const sourceContribution = await service.countInboundEdgesWeighted(TARGET, "workspace-1");
+    const targetContribution = await service.countInboundEdgesWeighted(peer, "workspace-1");
+    expect(sourceContribution).toBe(targetContribution);
   });
 });

@@ -16,6 +16,7 @@ import {
   type BacklogPressureThresholds
 } from "./backlog-telemetry.js";
 import { InMemoryGardenTaskRepo } from "./in-memory-garden-task-repo.js";
+import { buildGardenCompletionEventPayload } from "./events/completion-payload.js";
 import {
   buildCoolingKey,
   countByStatus,
@@ -236,16 +237,7 @@ export class GardenScheduler {
           workspace_id: result.workspace_id,
           run_id: null,
           caused_by: "garden-scheduler",
-          payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
-            task_id: result.task_id,
-            task_kind: result.task_kind,
-            role: result.role,
-            tier: result.tier,
-            success: result.success,
-            objects_affected: result.objects_affected,
-            workspace_id: result.workspace_id,
-            occurred_at: nowIso
-          })
+          payload_json: buildGardenCompletionEventPayload(result, nowIso)
         }
       ],
       IN_PROCESS_GARDEN_CLAIMANT

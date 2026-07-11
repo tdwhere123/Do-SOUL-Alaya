@@ -377,6 +377,34 @@ export const HarnessMode = z.enum([
 ]);
 export type HarnessMode = z.infer<typeof HarnessMode>;
 
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+export const RecallEvalAttributionSchema = z
+  .object({
+    status: z.enum(["attributed", "legacy_unattributed"]),
+    gate_eligible: z.boolean(),
+    node_version: z.string().min(1),
+    platform: z.string().min(1),
+    arch: z.string().min(1),
+    embedding_mode: z.enum(["disabled", "env"]),
+    embedding_provider_kind: z.enum(["openai", "local_onnx"]),
+    embedding_provider_label: z.string().min(1),
+    onnx_threads: z.number().int().positive().nullable(),
+    onnx_model_artifact_sha256: Sha256Schema.nullable(),
+    snapshot_binding: z.object({
+      commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u).nullable(),
+      gate_sha256: Sha256Schema.nullable(),
+      worktree_state_sha256: Sha256Schema.nullable(),
+      extraction_cache_manifest_sha256: Sha256Schema.nullable(),
+      extraction_cache_requested_turns: z.number().int().nonnegative().nullable(),
+      extraction_cache_cached_turns: z.number().int().nonnegative().nullable(),
+      extraction_cache_coverage: RatioSchema.nullable(),
+      dataset_sha256: Sha256Schema.nullable(),
+      question_id_digest: Sha256Schema.nullable()
+    }).strict()
+  })
+  .strict();
+export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
+
 export const KpiPayloadSchema = z
   .object({
     bench_name: BenchName,
@@ -390,6 +418,7 @@ export const KpiPayloadSchema = z
     policy_shape: BenchPolicyShapeSchema.default("stress"),
     simulate_report: BenchSimulateReportModeSchema.default("none"),
     recall_weight_overrides: RecallWeightOverridesSummarySchema.optional(),
+    recall_eval_attribution: RecallEvalAttributionSchema.optional(),
     seed_policy: SeedPolicySchema.optional(),
     dataset: z.object({
       name: z.string(),

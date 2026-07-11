@@ -64,7 +64,7 @@ export interface EdgeClassifyQueuePort {
 // exact ordered pair?" so the verdict becomes a no-op refinement instead.
 // Optional: when unwired (e.g. unit fakes) applyVerdict falls back to the
 // sink's same-family dedup only — the family-swap guard is daemon-wired.
-// see also: packages/protocol/src/soul/path-relation.ts pathRelationIdentityFamily.
+// see also: packages/protocol/src/soul/path-relation.ts pathRelationMatchesIdentity.
 export interface EdgeClassifyExistingPathReaderPort {
   findByBackingObjectId(
     workspaceId: string,

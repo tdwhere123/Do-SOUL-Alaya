@@ -39,6 +39,29 @@ not independent subsystems.
 An object, index, or state may be source of truth on only one axis.
 Other axes may reference it but must not silently replace it.
 
+## Recall Routing Projections
+
+`PathRelation` is the durable, governed conditional structure. Flood
+transfer is a query-time decision to carry potential along one directed
+edge under the current routing conditions. The object's `fused_score` is
+the aggregate projection produced after those edge decisions; it is not
+the flood or a new durable fact.
+
+SliceKey is a workspace-scoped, versioned, rebuildable routing view over
+existing projections. Its seed taxonomy is extensible and keeps typed
+provenance: event time stays a time interval or bucket, canonical entities
+and object anchors stay typed identities, spatial values stay spatial, and
+`facet_tags` contribute semantic facets rather than acting as a universal
+container. Query-time compatibility is the intersection of query, source,
+and target keys. A query with no valid key follows the neutral existing path;
+a keyed query with no three-way match may reject only the experimental edge
+decision, never rewrite the underlying memory or `PathRelation`.
+
+Single-edge transfer is the required baseline. Any bounded two-edge traversal
+must be earned by miss evidence, remain deterministic and budgeted, and pass
+the same governance and release gates; it is not implied by the existence of
+durable paths.
+
 ## Package Shape
 
 ```text

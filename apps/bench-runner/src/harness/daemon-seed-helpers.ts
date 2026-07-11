@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import {
-  BENCH_FULL_TURN_CONTENT_KEY,
+  BENCH_FULL_TURN_CHAR_COUNT_KEY,
+  BENCH_FULL_TURN_SHA256_KEY,
+  BENCH_FULL_TURN_TOKENS_KEY,
   BENCH_SEED_MARKER_KEY,
-  BENCH_STORED_CONTENT_KEY,
+  BENCH_STORED_CONTENT_TOKENS_KEY,
   BENCH_TURN_SEED_INDEX_KEY
 } from "./token-economy.js";
 
@@ -26,25 +29,23 @@ export function benchTokenEconomyPayload(input: {
   readonly fullTurnContent: string;
   readonly storedContent: string;
   readonly turnSeedIndex?: number;
-  readonly excerptSibling?: string;
-  readonly distilledFactSibling?: string;
 }): Record<string, unknown> {
-  const storedDuplicatesSibling =
-    input.storedContent === input.distilledFactSibling ||
-    (input.distilledFactSibling === undefined &&
-      input.storedContent === input.excerptSibling);
   return {
     [BENCH_SEED_MARKER_KEY]: true,
-    ...(input.fullTurnContent === input.excerptSibling
-      ? {}
-      : { [BENCH_FULL_TURN_CONTENT_KEY]: input.fullTurnContent }),
-    ...(storedDuplicatesSibling
-      ? {}
-      : { [BENCH_STORED_CONTENT_KEY]: input.storedContent }),
+    [BENCH_FULL_TURN_TOKENS_KEY]: estimateBenchTokens(input.fullTurnContent),
+    [BENCH_STORED_CONTENT_TOKENS_KEY]: estimateBenchTokens(input.storedContent),
+    [BENCH_FULL_TURN_CHAR_COUNT_KEY]: input.fullTurnContent.length,
+    [BENCH_FULL_TURN_SHA256_KEY]: `sha256:${createHash("sha256")
+      .update(input.fullTurnContent, "utf8")
+      .digest("hex")}`,
     ...(input.turnSeedIndex === undefined
       ? {}
       : { [BENCH_TURN_SEED_INDEX_KEY]: input.turnSeedIndex })
   };
+}
+
+function estimateBenchTokens(text: string): number {
+  return Math.ceil(text.length / 4);
 }
 
 export function buildSourceMemoryRefsField(

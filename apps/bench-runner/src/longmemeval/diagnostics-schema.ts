@@ -31,7 +31,41 @@ const DiagnosticAxisContributionsSchema = z
   .record(z.string(), z.number())
   .readonly();
 
-const DiagnosticFloodPotentialSchema = z
+export const DiagnosticFloodEdgeTraceV1Schema = z
+  .object({
+    schema_version: z.literal(1),
+    path_id: z.string().min(1),
+    relation_kind: z.string().min(1),
+    seed_object_id: z.string().min(1),
+    target_object_id: z.string().min(1),
+    input_potential: z.number().min(0),
+    edge_conductance: z.number(),
+    slice_compatibility: z.enum([
+      "not_evaluated",
+      "no_query_key",
+      "missing_source_key",
+      "missing_target_key",
+      "missing_source_and_target_key",
+      "no_slice_match",
+      "slice_match"
+    ]),
+    raw_transfer: z.number(),
+    capped_transfer: z.number().min(0),
+    decision: z.enum(["transferred", "rejected"]),
+    reason: z.enum([
+      "transferred",
+      "capped",
+      "self_loop",
+      "missing_edge_provenance",
+      "missing_or_zero_input",
+      "non_positive_conductance",
+      "no_slice_match"
+    ])
+  })
+  .strict()
+  .readonly();
+
+export const DiagnosticFloodPotentialSchema = z
   .object({
     R_obj: z.number(),
     Slice: z.number(),
@@ -47,8 +81,11 @@ const DiagnosticFloodPotentialSchema = z
     path_status: z.string(),
     evidence_status: z.string(),
     e_direct_status: z.string(),
-    fuel_verified: z.boolean()
+    fuel_verified: z.boolean(),
+    edge_traces: z.array(DiagnosticFloodEdgeTraceV1Schema).max(16).readonly().optional(),
+    edge_trace_truncated_count: z.number().int().nonnegative().optional()
   })
+  .strict()
   .readonly();
 
 const DiagnosticFloodFuelCoverageSchema = z

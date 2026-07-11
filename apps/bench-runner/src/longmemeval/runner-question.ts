@@ -1,6 +1,7 @@
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind,
+  BenchEdgeFormationMember,
   BenchEmbeddingWarmupSummary,
   BenchQueryEmbeddingWarmupSummary,
   BenchRecallOptions,
@@ -38,6 +39,7 @@ import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { QaChatFn } from "./qa-chat.js";
 import { seedLongMemEvalQuestion } from "./runner-question-seeding.js";
 import { buildLongMemEvalQuestionResult } from "./runner-question-result.js";
+import { buildLongMemEvalQuestionRuntimeIdentity } from "./selection/question-runtime-identity.js";
 
 export interface LongMemEvalWorkerResult {
   readonly questionId: string;
@@ -81,13 +83,14 @@ export async function runLongMemEvalQuestion(
 ): Promise<LongMemEvalWorkerResult> {
   const profileEnabled = isBenchProfileEnabled();
   const phase = createPhaseTimer();
+  const identity = buildLongMemEvalQuestionRuntimeIdentity(input.question.question_id);
   const workspace: BenchWorkspaceHandle = await runQuestionPhase(
     phase,
     "workspace_attach",
     () =>
       input.daemon.attachWorkspace({
-        workspaceId: `lme-${input.question.question_id.slice(0, 8)}`,
-        runId: `run-${input.question.question_id.slice(0, 8)}`
+        workspaceId: identity.workspaceId,
+        runId: identity.runId
       })
   );
   try {
@@ -208,7 +211,7 @@ async function warmQuestionEmbeddingCaches(
 async function runCoherenceEdgesIfEnabled(
   input: LongMemEvalQuestionRunInput,
   workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
-  members: readonly { readonly memoryId: string; readonly sessionId: string }[]
+  members: readonly BenchEdgeFormationMember[]
 ): Promise<void> {
   if (
     input.embeddingMode !== "env" ||
@@ -231,7 +234,7 @@ async function runCoherenceEdgesIfEnabled(
 async function runAnswersWithEdgesIfEnabled(
   input: LongMemEvalQuestionRunInput,
   workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
-  members: readonly { readonly memoryId: string; readonly sessionId: string }[]
+  members: readonly BenchEdgeFormationMember[]
 ): Promise<void> {
   // Flood/answers_with is always on; only embeddingMode gates bench edge mint.
   if (input.embeddingMode !== "env") {

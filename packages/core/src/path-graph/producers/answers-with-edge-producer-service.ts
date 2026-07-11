@@ -1,6 +1,13 @@
 import type { PathMintOutcome, SubmitCandidateInput } from "../edge-proposals/path-relation-proposal-service.js";
 import { ANSWERS_WITH_SEED_PROFILE } from "../edge-proposals/path-relation-proposal-service.js";
-import { buildSessionMap, sparsifyPairs, splitPairKey } from "./path-pair-sparsify.js";
+import {
+  buildObjectFormationOrder,
+  buildSessionMap,
+  parsePathPairKeys,
+  type PathPair,
+  type PathPairObject,
+  sparsifyPairs
+} from "./path-pair-sparsify.js";
 
 // Source of object↔object answer-co-relevance pairs (HQ answer-overlap >= bar,
 // canonical `${low}|${high}` keys). The overlap math lives behind this port; the
@@ -27,7 +34,7 @@ export interface AnswersWithEdgeProducerDeps {
 export interface AnswersWithCrystallizeInput {
   readonly workspaceId: string;
   readonly runId: string | null;
-  readonly objects: readonly { readonly objectId: string; readonly sessionId?: string | null }[];
+  readonly objects: readonly PathPairObject[];
   readonly bar: number;
   readonly capPerNode: number;
   readonly crossSessionOnly: boolean;
@@ -45,7 +52,7 @@ const EMPTY_RESULT: AnswersWithCrystallizeResult = Object.freeze({
   minted: 0
 });
 
-// S2: crystallize answers_with edges from HQ answer-overlap — two memories that
+// Crystallize answers_with edges from HQ answer-overlap — two memories that
 // answer the same batch of questions become answer-co-relevant. Mirrors
 // CoherenceEdgeProducerService (same sparsify + mint path) but feeds the path
 // axis an answer-relation edge instead of a co-occurrence one. Sparsified
@@ -59,16 +66,24 @@ export class AnswersWithEdgeProducerService {
     }
     const objectIds = input.objects.map((object) => object.objectId);
     const sessionById = buildSessionMap(input.objects);
-    const coRelevant = await this.loadCoRelevantPairs(input, objectIds);
-    if (coRelevant.size === 0) {
+    const objectOrder = buildObjectFormationOrder(input.objects);
+    const pairKeys = await this.loadCoRelevantPairs(input, objectIds);
+    if (pairKeys.size === 0) {
       return EMPTY_RESULT;
     }
-    const kept = sparsifyPairs(coRelevant, sessionById, input.capPerNode, input.crossSessionOnly);
-    if (kept.size === 0) {
-      return Object.freeze({ coRelevantPairs: coRelevant.size, keptPairs: 0, minted: 0 });
+    const coRelevant = parsePathPairKeys(pairKeys);
+    const kept = sparsifyPairs(
+      coRelevant,
+      sessionById,
+      objectOrder,
+      input.capPerNode,
+      input.crossSessionOnly
+    );
+    if (kept.length === 0) {
+      return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: 0, minted: 0 });
     }
     const minted = await this.mintCoRelevantPairs(input, kept);
-    return Object.freeze({ coRelevantPairs: coRelevant.size, keptPairs: kept.size, minted });
+    return Object.freeze({ coRelevantPairs: coRelevant.length, keptPairs: kept.length, minted });
   }
 
   private async loadCoRelevantPairs(
@@ -94,15 +109,14 @@ export class AnswersWithEdgeProducerService {
 
   private async mintCoRelevantPairs(
     input: AnswersWithCrystallizeInput,
-    kept: ReadonlySet<string>
+    kept: readonly PathPair[]
   ): Promise<number> {
     let minted = 0;
-    for (const pairKey of kept) {
-      const [low, high] = splitPairKey(pairKey);
+    for (const [source, target] of kept) {
       const outcome = await this.deps.mintPort.submitCandidate({
         workspaceId: input.workspaceId,
-        sourceAnchor: { kind: "object", object_id: low },
-        targetAnchor: { kind: "object", object_id: high },
+        sourceAnchor: { kind: "object", object_id: source },
+        targetAnchor: { kind: "object", object_id: target },
         relationKind: ANSWERS_WITH_SEED_PROFILE.relationKind,
         initialStrength: ANSWERS_WITH_SEED_PROFILE.initialStrength,
         governanceClass: ANSWERS_WITH_SEED_PROFILE.governanceClass,

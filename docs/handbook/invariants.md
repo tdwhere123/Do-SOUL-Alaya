@@ -53,7 +53,12 @@ These rules always win over lower-level docs and task-card convenience.
     ontology. Surfaces, scopes, and projections are routing or
     visibility structures. The Path axis represents learnable
     conditional relation structures; recall, prediction, and reminder
-    are runtime manifestations of paths, not paths themselves.
+    are runtime manifestations of paths, not paths themselves. A
+    `PathRelation` is durable governed structure; a query-time transfer
+    along one of its directed edges and the resulting fused score are
+    runtime decisions and projections. Rebuildable SliceKey routing
+    views remain workspace-scoped projections, not a second memory
+    ontology or an authority for durable truth.
 13. Evidence and governance changes must be explicit, structured, and
     auditable, including path plasticity changes (reinforcement,
     weakening, redirection, retirement).

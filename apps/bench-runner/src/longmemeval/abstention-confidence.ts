@@ -1,5 +1,5 @@
 /**
- * @anchor:abstention-confidence — fused-margin answerability confidence for
+ * @anchor:abstention-confidence — uncalibrated fused-margin heuristic for
  * LongMemEval `_abs` scoring.
  *
  * `relevance_score` is saturated effectiveScore and must never feed this
@@ -20,10 +20,11 @@ export const ABSTENTION_FUSED_MARGIN_SCALE = 1 / 60;
 
 export interface FusedScorePointer {
   readonly fused_score?: number | null;
+  readonly abstention_confidence_score?: number | null;
 }
 
 /**
- * Question-level abstention confidence from rank-ordered fused scores.
+ * Question-level abstention confidence from the strongest fused scores.
  * Returns null when dominance cannot be measured (vacuous → correct abstain).
  */
 export function computeAbstentionConfidenceScore(
@@ -31,7 +32,8 @@ export function computeAbstentionConfidenceScore(
 ): number | null {
   const values = fusedScores
     .slice(0, 5)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => right - left);
   if (values.length < 2) return null;
   const top1 = values[0];
   if (top1 === undefined) return null;
@@ -57,13 +59,23 @@ export function computeAbstentionConfidenceScore(
 export function attachAbstentionConfidenceScore<T extends FusedScorePointer>(
   results: readonly T[]
 ): readonly (T & { readonly abstention_confidence_score: number | null })[] {
-  const confidence = computeAbstentionConfidenceScore(
-    results.map((result) => result.fused_score)
-  );
+  const confidence = resolveAbstentionConfidenceScore(results);
   return results.map((result) => ({
     ...result,
     abstention_confidence_score: confidence
   }));
+}
+
+export function resolveAbstentionConfidenceScore(
+  results: readonly FusedScorePointer[]
+): number | null {
+  const explicitValues = results.slice(0, 5)
+    .map((result) => result.abstention_confidence_score)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const explicit = explicitValues.length === 0 ? null : Math.max(...explicitValues);
+  return explicit ?? computeAbstentionConfidenceScore(
+    results.map((result) => result.fused_score)
+  );
 }
 
 function clamp01(value: number): number {

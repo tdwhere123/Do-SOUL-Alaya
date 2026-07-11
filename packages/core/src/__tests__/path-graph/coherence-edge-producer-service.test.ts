@@ -29,10 +29,10 @@ function recordingMintPort(outcome: PathMintOutcome = "applied"): {
 }
 
 const OBJECTS = [
-  { objectId: "a", sessionId: "s1" },
-  { objectId: "b", sessionId: "s1" },
-  { objectId: "c", sessionId: "s2" },
-  { objectId: "d", sessionId: "s2" }
+  { objectId: "a", sessionId: "s1", formationKey: "formation:0" },
+  { objectId: "b", sessionId: "s1", formationKey: "formation:1" },
+  { objectId: "c", sessionId: "s2", formationKey: "formation:2" },
+  { objectId: "d", sessionId: "s2", formationKey: "formation:3" }
 ];
 
 describe("CoherenceEdgeProducerService", () => {
@@ -42,7 +42,7 @@ describe("CoherenceEdgeProducerService", () => {
     const result = await producer.crystallize({
       workspaceId: "ws",
       runId: null,
-      objects: [{ objectId: "a", sessionId: "s1" }],
+      objects: [{ objectId: "a", sessionId: "s1", formationKey: "formation:0" }],
       floor: 0.6,
       capPerNode: 3,
       crossSessionOnly: true
@@ -94,9 +94,11 @@ describe("CoherenceEdgeProducerService", () => {
 
   it("caps partners per node", async () => {
     const mint = recordingMintPort();
-    const objects = ["a", "b", "c", "d"].map((id) => ({ objectId: id, sessionId: id }));
+    const objects = ["a", "b", "c", "d"].map((id, index) => ({
+      objectId: id, sessionId: id, formationKey: `formation:${index}`
+    }));
     const producer = new CoherenceEdgeProducerService({
-      // complete graph; capPerNode 2 keeps each node's 2 lexicographically-first partners.
+      // Complete graph; the stable greedy selection must enforce degree <= 2.
       pairSource: pairSourceOf(["a|b", "a|c", "a|d", "b|c", "b|d", "c|d"]),
       mintPort: mint.port
     });

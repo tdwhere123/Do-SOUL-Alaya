@@ -83,6 +83,35 @@ export type FloodAxisInactiveReason =
   | "inactive:pass_through"
   | "inactive:beta_disabled";
 
+export interface RecallFloodEdgeTraceV1 {
+  readonly schema_version: 1;
+  readonly path_id: string;
+  readonly relation_kind: string;
+  readonly seed_object_id: string;
+  readonly target_object_id: string;
+  readonly input_potential: number;
+  readonly edge_conductance: number;
+  readonly slice_compatibility:
+    | "not_evaluated"
+    | "no_query_key"
+    | "missing_source_key"
+    | "missing_target_key"
+    | "missing_source_and_target_key"
+    | "no_slice_match"
+    | "slice_match";
+  readonly raw_transfer: number;
+  readonly capped_transfer: number;
+  readonly decision: "transferred" | "rejected";
+  readonly reason:
+    | "transferred"
+    | "capped"
+    | "self_loop"
+    | "missing_edge_provenance"
+    | "missing_or_zero_input"
+    | "non_positive_conductance"
+    | "no_slice_match";
+}
+
 export interface IntegratedFloodCandidateDiagnostics {
   readonly R_obj: number;
   readonly Slice: number;
@@ -99,6 +128,8 @@ export interface IntegratedFloodCandidateDiagnostics {
   readonly evidence_status: FloodAxisInactiveReason;
   readonly e_direct_status: FloodAxisInactiveReason;
   readonly fuel_verified: boolean;
+  readonly edge_traces?: readonly Readonly<RecallFloodEdgeTraceV1>[];
+  readonly edge_trace_truncated_count?: number;
 }
 
 export interface FloodFuelCoverageSummary {

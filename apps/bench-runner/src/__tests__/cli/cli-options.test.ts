@@ -32,6 +32,7 @@ describe("parseFlags", () => {
       "--snapshot-out=/tmp/out.db",
       "--data-dir-root=/tmp/data-dir",
       "--pinned-meta-root=/tmp/pinned",
+      "--question-manifest=/tmp/questions.json",
       "--extraction-cache-root=/tmp/cache",
       "--concurrency=4"
     ]);
@@ -45,6 +46,7 @@ describe("parseFlags", () => {
     expect(parsed.snapshotOut).toBe("/tmp/out.db");
     expect(parsed.dataDirRoot).toBe("/tmp/data-dir");
     expect(parsed.pinnedMetaRoot).toBe("/tmp/pinned");
+    expect(parsed.questionManifest).toBe("/tmp/questions.json");
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
     expect(parsed.concurrency).toBe(4);
   });
@@ -58,6 +60,9 @@ describe("parseFlags", () => {
     );
     expect(() => parseFlags(["--simulate-report", "goldish"])).toThrow(
       "--simulate-report must be one of: none, always-used, gold-only, mixed"
+    );
+    expect(() => parseFlags(["--question-manifest"])).toThrow(
+      "--question-manifest requires a path"
     );
   });
 });

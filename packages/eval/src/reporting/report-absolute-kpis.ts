@@ -159,7 +159,7 @@ function pushSeedAndQualityKpis(lines: string[], current: KpiPayload): void {
     const abstention = metrics.abstention;
     if (abstention !== undefined && abstention.total > 0) {
       lines.push(
-        `- Abstention (calibrated confidence, threshold=${abstention.false_confident_threshold}): ${abstention.total} questions, correct@1=${abstention.correct_at_1} correct@5=${abstention.correct_at_5} correct@10=${abstention.correct_at_10}; these correct-at-k counts are credited to the recall@k numerator (denominator unchanged).`
+        `- Abstention (uncalibrated fused-margin heuristic, shared top-5 verdict, threshold=${abstention.false_confident_threshold}): ${abstention.total} questions, correct@1=${abstention.correct_at_1} correct@5=${abstention.correct_at_5} correct@10=${abstention.correct_at_10}; these compatibility counts carry the same question-level verdict and are credited to each recall@k numerator (denominator unchanged).`
       );
     }
   }

@@ -140,9 +140,8 @@ describe("diagnostics schema", () => {
 // correct verdict and guards against a future regression.
 describe("abstention miss classification", () => {
   it("classifies a correct abstention as abstained_correctly, not no_gold", () => {
-    // For an `_abs` question the hit booleans carry the calibrated
-    // correct-at-k verdict, not an id-equality hit; hit_at_5 true means
-    // recall stayed appropriately unconfident.
+    // For an `_abs` question the hit booleans carry one uncalibrated top-5
+    // fused-margin verdict, not independent per-k or id-equality hits.
     const row = buildQuestionDiagnostic({
       questionId: "0862e8bf_abs",
       goldMemoryIds: [],

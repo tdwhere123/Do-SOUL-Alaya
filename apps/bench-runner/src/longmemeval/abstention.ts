@@ -1,5 +1,5 @@
 /**
- * @anchor longmemeval-abstention — calibrated-confidence scoring for the
+ * @anchor longmemeval-abstention — uncalibrated fused-margin scoring for the
  * LongMemEval-S abstention questions (`question_id` ending `_abs`).
  *
  * An abstention question's haystack genuinely does NOT contain the answer,
@@ -29,7 +29,7 @@
  * delivered pointer relevance, and that score has no premise-validity signal.
  *
  * Tune this when the recall pipeline or the benchmark dataset changes: it
- * is the single knob behind the calibrated abstention score, and the
+ * is the single knob behind the uncalibrated abstention heuristic, and the
  * diagnostics `abstention` block records the value used by each run so the
  * number can be re-derived.
  */
@@ -50,8 +50,8 @@ export function resolvePremiseInvalid(): false {
 
 export interface AbstentionScoringInput {
   /**
-   * Delivered recall results in rank order (rank 1 first). Only the first
-   * 10 are consulted; callers may pass the full delivered slice.
+   * Delivered recall results in rank order. Only the top-five prefix defines
+   * the question-level heuristic; callers may pass the full delivered slice.
    */
   readonly results: readonly {
     readonly relevance_score: number;
@@ -62,47 +62,39 @@ export interface AbstentionScoringInput {
 }
 
 export interface AbstentionScoringResult {
-  /** Correct at R@1: the top-1 result stays below the threshold. */
+  /** Question-level heuristic stays below the threshold. */
   readonly correctAt1: boolean;
-  /** Correct at R@5: none of the top-5 results cross the threshold. */
+  /** Same question-level verdict, projected onto the R@5 field. */
   readonly correctAt5: boolean;
-  /** Correct at R@10: none of the top-10 results cross the threshold. */
+  /** Same question-level verdict, projected onto the R@10 field. */
   readonly correctAt10: boolean;
   /** The threshold actually applied (for diagnostics auditability). */
   readonly threshold: number;
 }
 
 /**
- * Per-k calibrated-confidence verdict for one abstention question.
+ * One question-level fused-margin verdict for an abstention question.
  *
- * "Correct at k" means none of the top-k delivered results has an explicit
- * `abstention_confidence_score` at or above the threshold. So R@1 only
- * requires the top-1 to stay below; R@10 requires all of top-10. A question
- * with no delivered results, or only rank-only relevance scores, is correct
- * at every k because recall did not surface an answerability signal.
+ * The top-five prefix yields one heuristic value and therefore one verdict
+ * projected to all three legacy R@k fields. Later ranks cannot change it.
  */
 export function scoreAbstentionQuestion(
   input: AbstentionScoringInput
 ): AbstentionScoringResult {
   const threshold = input.threshold ?? ABSTENTION_FALSE_CONFIDENT_THRESHOLD;
-  let crossedWithin1 = false;
-  let crossedWithin5 = false;
-  let crossedWithin10 = false;
-  for (let rank = 0; rank < input.results.length && rank < 10; rank++) {
-    const result = input.results[rank];
-    if (result === undefined) continue;
-    const confidence = result.abstention_confidence_score;
-    if (confidence === undefined || confidence === null) continue;
-    if (confidence >= threshold) {
-      if (rank < 1) crossedWithin1 = true;
-      if (rank < 5) crossedWithin5 = true;
-      crossedWithin10 = true;
-    }
-  }
+  const confidence = maxTopFiveConfidence(input.results);
+  const correct = confidence === null || confidence < threshold;
   return {
-    correctAt1: !crossedWithin1,
-    correctAt5: !crossedWithin5,
-    correctAt10: !crossedWithin10,
+    correctAt1: correct,
+    correctAt5: correct,
+    correctAt10: correct,
     threshold
   };
+}
+
+function maxTopFiveConfidence(results: AbstentionScoringInput["results"]): number | null {
+  const values = results.slice(0, 5)
+    .map((result) => result.abstention_confidence_score)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return values.length === 0 ? null : Math.max(...values);
 }

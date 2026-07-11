@@ -72,9 +72,23 @@ describe("abstention confidence producer (fused-margin)", () => {
     ]);
     expect(score).toBe(1);
   });
+
+  it("is invariant to post-fusion delivery ordering", () => {
+    const scores = [0.540067, 0.548017, 0.522949, 0.49932, 0.467685];
+    expect(computeAbstentionConfidenceScore(scores)).toBe(
+      computeAbstentionConfidenceScore([scores[1], scores[0], ...scores.slice(2)])
+    );
+  });
+
+  it("uses only the delivered top-five prefix", () => {
+    const prefix = [0.2, 0.2, 0.2, 0.2, 0.2];
+    expect(computeAbstentionConfidenceScore([...prefix, 1])).toBe(
+      computeAbstentionConfidenceScore(prefix)
+    );
+  });
 });
 
-describe("LongMemEval abstention scoring (calibrated confidence)", () => {
+describe("LongMemEval abstention scoring (uncalibrated fused-margin heuristic)", () => {
   it("detects abstention question ids by the `_abs` suffix", () => {
     expect(isAbstentionQuestionId("0862e8bf_abs")).toBe(true);
     expect(isAbstentionQuestionId("76d63226")).toBe(false);
@@ -134,18 +148,18 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
     });
   });
 
-  it("applies the per-k boundary: a cross at rank 5 spares R@1 but fails R@5/R@10", () => {
+  it("applies one question verdict when the top-five prefix crosses", () => {
     const results = Array.from({ length: 10 }, (_, i) => ({
       relevance_score: 1,
       abstention_confidence_score: i === 4 ? THR + 0.01 : THR - 0.1
     }));
     const result = scoreAbstentionQuestion({ results });
-    expect(result.correctAt1).toBe(true);
+    expect(result.correctAt1).toBe(false);
     expect(result.correctAt5).toBe(false);
     expect(result.correctAt10).toBe(false);
   });
 
-  it("applies the per-k boundary: a cross at rank 6 spares R@1/R@5 but fails R@10", () => {
+  it("ignores an explicit confidence outside the top-five prefix", () => {
     const results = Array.from({ length: 10 }, (_, i) => ({
       relevance_score: 1,
       abstention_confidence_score: i === 5 ? THR + 0.01 : THR - 0.1
@@ -153,7 +167,7 @@ describe("LongMemEval abstention scoring (calibrated confidence)", () => {
     const result = scoreAbstentionQuestion({ results });
     expect(result.correctAt1).toBe(true);
     expect(result.correctAt5).toBe(true);
-    expect(result.correctAt10).toBe(false);
+    expect(result.correctAt10).toBe(true);
   });
 
   it("treats a score exactly at the threshold as false-confident", () => {
@@ -218,7 +232,7 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
     });
   });
 
-  it("re-scores abstention questions by calibrated confidence", () => {
+  it("re-scores abstention questions by the fused-margin heuristic", () => {
     const verdict = resolveLongMemEvalHitVerdict({
       isAbstention: true,
       results: [
@@ -263,6 +277,22 @@ describe("resolveLongMemEvalHitVerdict — abstention routing", () => {
       answerSessionIds: new Set()
     });
     expect(verdict.hitAt1).toBe(false);
+  });
+
+  it("derives from fused scores when delivered confidence is explicitly null", () => {
+    const verdict = resolveLongMemEvalHitVerdict({
+      isAbstention: true,
+      results: [
+        { object_id: "decoy-a", relevance_score: 1, fused_score: 0.2,
+          abstention_confidence_score: null },
+        { object_id: "decoy-b", relevance_score: 1, fused_score: 0.01,
+          abstention_confidence_score: null }
+      ],
+      sidecar: new Map(),
+      answerSessionIds: new Set()
+    });
+
+    expect(verdict).toMatchObject({ hitAt1: false, hitAt5: false, hitAt10: false });
   });
 
   it("derives correct abstention from a tiny fused_score margin", () => {
@@ -399,6 +429,32 @@ describe("abstention miss classification and KPI breakdown", () => {
     );
     expect(row.delivered_results[0]?.abstention_confidence_score).toBe(
       row.delivered_results[1]?.abstention_confidence_score
+    );
+  });
+
+  it("replaces null diagnostic confidence with the fused-margin derivation", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-null_abs",
+      goldMemoryIds: [],
+      answerSessionIds: [],
+      deliveredResults: [
+        { object_id: "a", rank: 1, relevance_score: 1, fused_score: 0.2,
+          abstention_confidence_score: null },
+        { object_id: "b", rank: 2, relevance_score: 1, fused_score: 0.01,
+          abstention_confidence_score: null }
+      ],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+
+    expect(row.delivered_results[0]?.abstention_confidence_score).toBeGreaterThanOrEqual(THR);
+    expect(row.delivered_results[1]?.abstention_confidence_score).toBe(
+      row.delivered_results[0]?.abstention_confidence_score
     );
   });
 });

@@ -80,7 +80,7 @@ describe("pathRelationMatchesIdentity", () => {
     };
   }
 
-  it("keeps recalls-tier duplicate matching inside the positive recalls family", () => {
+  it("does not collapse different positive recalls-tier relation kinds", () => {
     expect(
       pathRelationMatchesIdentity(relation("shares_entity", 0.5), {
         sourceAnchor: { kind: "object" as const, object_id: "object-2" },
@@ -88,7 +88,119 @@ describe("pathRelationMatchesIdentity", () => {
         relationKind: "co_recalled",
         recallBias: 0.5
       })
+    ).toBe(false);
+  });
+
+  it("deduplicates reversed anchors for exact bidirectional relation kinds", () => {
+    for (const relationKind of ["answers_with", "coheres_with", "co_recalled"]) {
+      expect(
+        pathRelationMatchesIdentity(relation(relationKind, 0.5), {
+          sourceAnchor: { kind: "object" as const, object_id: "object-2" },
+          targetAnchor: { kind: "object" as const, object_id: "object-1" },
+          relationKind,
+          recallBias: 0.5
+        })
+      ).toBe(true);
+    }
+  });
+
+  it("keeps directional relation identities ordered", () => {
+    expect(
+      pathRelationMatchesIdentity(relation("supports", 0.5), {
+        sourceAnchor: { kind: "object" as const, object_id: "object-2" },
+        targetAnchor: { kind: "object" as const, object_id: "object-1" },
+        relationKind: "supports",
+        recallBias: 0.5
+      })
+    ).toBe(false);
+  });
+
+  it("keeps distinct typed conditions on the same backing object separate", () => {
+    const existing = {
+      anchors: {
+        source_anchor: {
+          kind: "object_facet" as const,
+          object_id: "object-1",
+          facet_key: "status"
+        },
+        target_anchor: {
+          kind: "time_concern" as const,
+          source_object_id: "object-2",
+          window_digest: "next_week"
+        }
+      },
+      constitution: { relation_kind: "supports" },
+      effect_vector: { recall_bias: 0.5 }
+    };
+
+    expect(
+      pathRelationMatchesIdentity(existing, {
+        sourceAnchor: {
+          kind: "object_facet",
+          object_id: "object-1",
+          facet_key: "priority"
+        },
+        targetAnchor: {
+          kind: "time_concern",
+          source_object_id: "object-2",
+          window_digest: "next_week"
+        },
+        relationKind: "supports",
+        recallBias: 0.5
+      })
+    ).toBe(false);
+    expect(
+      pathRelationMatchesIdentity(existing, {
+        sourceAnchor: existing.anchors.source_anchor,
+        targetAnchor: {
+          kind: "time_concern",
+          source_object_id: "object-2",
+          window_digest: "next_month"
+        },
+        relationKind: "supports",
+        recallBias: 0.5
+      })
+    ).toBe(false);
+  });
+
+  it("reverse-deduplicates unordered relations only for exact full anchors", () => {
+    const existing = {
+      anchors: {
+        source_anchor: {
+          kind: "object_facet" as const,
+          object_id: "object-1",
+          facet_key: "status"
+        },
+        target_anchor: {
+          kind: "time_concern" as const,
+          source_object_id: "object-2",
+          window_digest: "next_week"
+        }
+      },
+      constitution: { relation_kind: "coheres_with" },
+      effect_vector: { recall_bias: 0.5 }
+    };
+
+    expect(
+      pathRelationMatchesIdentity(existing, {
+        sourceAnchor: existing.anchors.target_anchor,
+        targetAnchor: existing.anchors.source_anchor,
+        relationKind: "coheres_with",
+        recallBias: 0.5
+      })
     ).toBe(true);
+    expect(
+      pathRelationMatchesIdentity(existing, {
+        sourceAnchor: {
+          kind: "time_concern",
+          source_object_id: "object-2",
+          window_digest: "next_month"
+        },
+        targetAnchor: existing.anchors.source_anchor,
+        relationKind: "coheres_with",
+        recallBias: 0.5
+      })
+    ).toBe(false);
   });
 
   it("does not let positive recalls-tier paths satisfy negative or different-kind identities", () => {

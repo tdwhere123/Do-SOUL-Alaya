@@ -263,6 +263,65 @@ describe("PathRelationProposalService — submitCandidate generalized intake", (
     expect(repo.create).not.toHaveBeenCalled();
   });
 
+  it("dedups reversed answers_with anchors as one unordered relation", async () => {
+    const existing = {
+      anchors: {
+        source_anchor: objectAnchor("mem-A"),
+        target_anchor: objectAnchor("mem-B")
+      },
+      constitution: { relation_kind: "answers_with" },
+      effect_vector: { recall_bias: 0.5 }
+    } as PathRelation;
+    const repo = {
+      create: vi.fn((relation: PathRelation) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [existing])
+    };
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      counterStore: createCounterStore(),
+      eventPublisher: publisher
+    });
+
+    const result = await service.submitCandidate(baseInput({
+      sourceAnchor: objectAnchor("mem-B"),
+      targetAnchor: objectAnchor("mem-A"),
+      relationKind: "answers_with"
+    }));
+
+    expect(result).toBe("already_present");
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it("does not dedup co_recalled against a shares_entity path for the same pair", async () => {
+    const existing = {
+      anchors: {
+        source_anchor: objectAnchor("mem-A"),
+        target_anchor: objectAnchor("mem-B")
+      },
+      constitution: { relation_kind: "shares_entity" },
+      effect_vector: { recall_bias: 0.2 }
+    } as PathRelation;
+    const repo = {
+      create: vi.fn((relation: PathRelation) => relation),
+      findByAnchorMemoryId: vi.fn(async () => [existing])
+    };
+    const { publisher } = createEventPublisher();
+    const service = new PathRelationProposalService({
+      repo,
+      counterStore: createCounterStore(),
+      eventPublisher: publisher
+    });
+
+    const result = await service.submitCandidate(baseInput({
+      relationKind: "co_recalled"
+    }));
+
+    expect(result).toBe("applied");
+    expect(repo.create).toHaveBeenCalledTimes(1);
+    expect(firstDefined(mockCallAt(repo.create, 0)).constitution.relation_kind).toBe("co_recalled");
+  });
+
   it("submitCandidate does not dedup contradicts against an existing co_recalled path", async () => {
     const existing = {
       anchors: {

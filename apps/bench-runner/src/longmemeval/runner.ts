@@ -62,6 +62,7 @@ export interface LongMemEvalRunOptions {
   // callers should leave this undefined so the canonical
   // docs/bench-history/datasets path is used.
   readonly pinnedMetaRoot?: string;
+  readonly questionManifest?: string;
   // @anchor longmemeval-offset: skip the first N questions before
   // `limit`. Pairs with process-level sharding in
   // apps/bench-runner/scripts/run-full-public-bench.sh.

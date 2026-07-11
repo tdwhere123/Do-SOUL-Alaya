@@ -83,20 +83,22 @@ function resolvePathAxis(rawPath: number, hasInflow: boolean): ResolvedFloodFuel
   if (!hasInflow) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }
-  if (rawPath <= 0) {
+  const value = clamp01(rawPath);
+  if (value <= 0) {
     return { value: 0, status: "inactive:no_fuel", countsAsFuel: false };
   }
-  return { value: rawPath, status: "active", countsAsFuel: true };
+  return { value, status: "active", countsAsFuel: true };
 }
 
 function resolveEvidenceAxis(rawEvidence: number, hasEvidenceVectors: boolean): ResolvedFloodFuelAxis {
   if (!hasEvidenceVectors) {
     return { value: 1, status: "inactive:pass_through", countsAsFuel: false };
   }
-  if (rawEvidence <= 0) {
+  const value = clamp01(rawEvidence);
+  if (value <= 0) {
     return { value: 0, status: "inactive:no_evidence", countsAsFuel: false };
   }
-  return { value: rawEvidence, status: "active", countsAsFuel: true };
+  return { value, status: "active", countsAsFuel: true };
 }
 
 function hasEvidenceVectors(
@@ -131,11 +133,30 @@ export function structuralLikelihoodGate(R_obj: number): number {
   return clamp01(1 - clamp01(R_obj));
 }
 
-export function computeIntegratedFloodScore(params: Readonly<{
+type IntegratedFloodScoreParams = Readonly<{
   readonly entry: Readonly<MemoryEntry>;
   readonly axisInputs: IntegratedFloodAxisInputs;
   readonly supplementaryData: RecallSupplementaryData;
-}>): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
+}>;
+
+interface ResolvedIntegratedFloodScore {
+  readonly lambda: number;
+  readonly beta: number;
+  readonly slice: ResolvedFloodFuelAxis;
+  readonly path: ResolvedFloodFuelAxis;
+  readonly evidence: ResolvedFloodFuelAxis;
+  readonly fuelVerified: boolean;
+  readonly flood: number;
+  readonly omega: number;
+  readonly eDirect: number;
+  readonly eDirectStatus: FloodAxisInactiveReason;
+  readonly base: number;
+  readonly lGate: number;
+}
+
+function resolveIntegratedFloodScore(
+  params: IntegratedFloodScoreParams
+): ResolvedIntegratedFloodScore {
   const lambda = resolveConformantPathWeight();
   const beta = resolveConformantEvidenceBeta();
   const slice = resolveSliceAxis(params.entry, params.supplementaryData.querySoughtFacets);
@@ -153,35 +174,57 @@ export function computeIntegratedFloodScore(params: Readonly<{
     params.entry,
     params.supplementaryData.governanceCeilingByMemoryId[params.entry.object_id]
   );
-  const eDirect = params.axisInputs.B_evidence;
+  const eDirect = clamp01(params.axisInputs.B_evidence);
   const eDirectStatus: FloodAxisInactiveReason =
     beta <= 0 ? "inactive:beta_disabled" : eDirect > 0 ? "active" : "inactive:no_evidence";
-  const base = params.axisInputs.R_obj;
+  const base = clamp01(params.axisInputs.R_obj);
   const lGate = structuralLikelihoodGate(base);
-  // Invariant: fuel activation is monotone — final score never drops below the
-  // pass-through base. ω scales only the flood bonus; L-gate further shrinks
-  // that bonus when object likelihood is already high.
-  const score = fuelVerified
-    ? (base + lambda * omega * flood * lGate) * (1 + beta * eDirect)
-    : base;
-  const diagnostics = Object.freeze({
-    R_obj: base,
-    Slice: slice.value,
-    A_path: path.value,
-    B_evidence: evidence.value,
-    E_direct: eDirect,
-    omega,
-    Flood: flood,
-    lambda,
-    beta,
+  return {
+    lambda, beta, slice, path, evidence, fuelVerified, flood, omega,
+    eDirect, eDirectStatus, base, lGate
+  };
+}
+
+function computeFinalFloodScore(resolved: ResolvedIntegratedFloodScore): number {
+  // invariant: flood activation cannot demote the pass-through base.
+  return clamp01(resolved.fuelVerified
+    ? (resolved.base + resolved.lambda * resolved.omega * resolved.flood * resolved.lGate) *
+      (1 + resolved.beta * resolved.eDirect)
+    : resolved.base);
+}
+
+function buildIntegratedFloodDiagnostics(
+  resolved: ResolvedIntegratedFloodScore,
+  score: number
+): IntegratedFloodCandidateDiagnostics {
+  return Object.freeze({
+    R_obj: resolved.base,
+    Slice: resolved.slice.value,
+    A_path: resolved.path.value,
+    B_evidence: resolved.evidence.value,
+    E_direct: resolved.eDirect,
+    omega: resolved.omega,
+    Flood: resolved.flood,
+    lambda: resolved.lambda,
+    beta: resolved.beta,
     final_score: score,
-    slice_status: slice.status,
-    path_status: path.status,
-    evidence_status: evidence.status,
-    e_direct_status: eDirectStatus,
-    fuel_verified: fuelVerified
+    slice_status: resolved.slice.status,
+    path_status: resolved.path.status,
+    evidence_status: resolved.evidence.status,
+    e_direct_status: resolved.eDirectStatus,
+    fuel_verified: resolved.fuelVerified
   });
-  return Object.freeze({ score, diagnostics });
+}
+
+export function computeIntegratedFloodScore(
+  params: IntegratedFloodScoreParams
+): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
+  const resolved = resolveIntegratedFloodScore(params);
+  const score = computeFinalFloodScore(resolved);
+  return Object.freeze({
+    score,
+    diagnostics: buildIntegratedFloodDiagnostics(resolved, score)
+  });
 }
 
 export function buildFloodFuelCoverageSummary(

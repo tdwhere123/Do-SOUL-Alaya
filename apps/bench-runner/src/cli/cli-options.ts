@@ -28,6 +28,7 @@ export interface ParsedFlags {
   readonly snapshotOut?: string;
   readonly dataDirRoot?: string;
   readonly pinnedMetaRoot?: string;
+  readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
   readonly concurrency?: number;
   // --qa: gate the end-to-end QA harness (answer-LLM + LLM-judge). Default off
@@ -56,6 +57,7 @@ interface ParsedFlagsState {
   snapshotOut?: string;
   dataDirRoot?: string;
   pinnedMetaRoot?: string;
+  questionManifest?: string;
   extractionCacheRoot?: string;
   concurrency?: number;
   qa: boolean;
@@ -183,6 +185,34 @@ function consumePathAndBooleanFlags(
 }
 
 function consumePathFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
+  const manifestIndex = consumeQuestionManifestFlag(args, index, token, state);
+  if (manifestIndex !== undefined) return manifestIndex;
+  return consumeOtherPathFlags(args, index, token, state);
+}
+
+function consumeQuestionManifestFlag(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
+  if (!matchFlagToken(token, "--question-manifest")) return undefined;
+  state.questionManifest = readRequiredFlagValue(
+    args,
+    index,
+    token,
+    "--question-manifest",
+    "--question-manifest requires a path"
+  );
+  return nextIndex(index, token);
+}
+
+function consumeOtherPathFlags(
   args: ReadonlyArray<string>,
   index: number,
   token: string,
@@ -388,6 +418,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     snapshotOut: state.snapshotOut,
     dataDirRoot: state.dataDirRoot,
     pinnedMetaRoot: state.pinnedMetaRoot,
+    questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
     concurrency: state.concurrency,
     qa: state.qa,

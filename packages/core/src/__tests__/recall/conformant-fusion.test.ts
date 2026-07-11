@@ -18,13 +18,6 @@ import {
   buildEmptyRecallFusionBreakdown,
   buildRecallFusionDetails
 } from "../../recall/delivery/fusion-delivery-scoring.js";
-import {
-  compareConformantAxisRa,
-  resolveConformantEvidenceBeta,
-  resolveConformantFloodCapPerSource,
-  resolveConformantFloodCapTotal,
-  resolveConformantPathWeight
-} from "../../recall/scoring/conformant-fusion-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { classifyRecallIntent } from "../../recall/query/recall-query-plan.js";
 import { buildEvidenceSupportVectors } from "../../recall/supplements/supplementary-data.js";
@@ -328,18 +321,17 @@ describe("conformant compositional combine (real SQLite)", () => {
   it("governance caps the per-source flood without compressing the object seed", async () => {
     const seed: CandidateSpec = { id: objectId(1), lexical: 1 };
     const target: CandidateSpec = { id: objectId(2), lexical: 1 };
-    // weight 10 makes base(seed)·weight overshoot a tight per-source cap.
-    const inflow: InflowMap = { [target.id]: [{ seedObjectId: seed.id, weight: 10 }] };
+    const inflow: InflowMap = { [target.id]: [{ seedObjectId: seed.id, weight: 1 }] };
 
     const wide = await runFusion(GENERIC_QUERY, [seed, target], { inflow });
-    process.env.ALAYA_RECALL_CONF_FLOOD_CAP = "0.1";
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP = "0.01";
     const capped = await runFusion(GENERIC_QUERY, [seed, target], { inflow });
 
     const wideTarget = wide.get(keyOf(target.id))!;
     const cappedTarget = capped.get(keyOf(target.id))!;
     // The cap bounds the flood term...
     expect(cappedTarget.per_axis_contribution!.path).toBeLessThan(wideTarget.per_axis_contribution!.path);
-    expect(cappedTarget.per_axis_contribution!.path).toBeCloseTo(0.1, 9);
+    expect(cappedTarget.per_axis_contribution!.path).toBeCloseTo(0.01, 9);
     // ...but never touches the object seed.
     expect(cappedTarget.per_axis_contribution!.object)
       .toBeCloseTo(wideTarget.per_axis_contribution!.object, 12);
@@ -350,20 +342,32 @@ describe("conformant compositional combine (real SQLite)", () => {
     const seedA: CandidateSpec = { id: objectId(1), lexical: 1 };
     const seedB: CandidateSpec = { id: objectId(2), lexical: 1 };
     const target: CandidateSpec = { id: objectId(3), lexical: 0.1 };
-    // Large weights drive each per-source flood past cap_src=1 so both saturate before the fold.
     const inflow: InflowMap = {
       [target.id]: [
-        { seedObjectId: seedA.id, weight: 100 },
-        { seedObjectId: seedB.id, weight: 100 }
+        { seedObjectId: seedA.id, weight: 1 },
+        { seedObjectId: seedB.id, weight: 1 }
       ]
     };
-    // Two saturating sources fold by NOR to ≤1 — never the additive 2.
+    const fromA = await runFusion(GENERIC_QUERY, [seedA, seedB, target], {
+      inflow: { [target.id]: [inflow[target.id]![0]!] }
+    });
+    const fromB = await runFusion(GENERIC_QUERY, [seedA, seedB, target], {
+      inflow: { [target.id]: [inflow[target.id]![1]!] }
+    });
     const folded = await runFusion(GENERIC_QUERY, [seedA, seedB, target], { inflow });
-    expect(folded.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(1, 9);
+    const supportA = fromA.get(keyOf(target.id))!.per_axis_contribution!.path;
+    const supportB = fromB.get(keyOf(target.id))!.per_axis_contribution!.path;
+    const foldedPath = folded.get(keyOf(target.id))!.per_axis_contribution!.path;
+    const stronger = Math.max(supportA, supportB);
+    const weaker = Math.min(supportA, supportB);
+    const expectedNor = 1 - (1 - stronger) * (1 - 0.5 * weaker);
+    expect(foldedPath).toBeCloseTo(expectedNor, 9);
+    expect(foldedPath).not.toBeCloseTo(supportA + supportB, 9);
+    expect(foldedPath).not.toBeCloseTo(stronger, 9);
 
-    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "0.5";
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "0.05";
     const clamped = await runFusion(GENERIC_QUERY, [seedA, seedB, target], { inflow });
-    expect(clamped.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(0.5, 9);
+    expect(clamped.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(0.05, 9);
   });
 
   // B2 regression lock: single_fact gold (lexical answer + its own embedding) must out-rank a purely
@@ -393,24 +397,6 @@ describe("conformant compositional combine (real SQLite)", () => {
     const withEmbedding = fusion.get(keyOf(objectId(2)))!.per_axis_contribution!.object;
     expect(surfaceOnly).toBeGreaterThan(0);
     expect(withEmbedding).toBeGreaterThan(surfaceOnly);
-  });
-
-  it("R_a vector tie-break orders object before path before evidence before temporal before control", () => {
-    // Object dominates: left ranks ahead despite a weaker path/evidence vector.
-    expect(compareConformantAxisRa(
-      { object: 1, path: 0, evidence: 0, temporal: 0, control: 0 },
-      { object: 0.5, path: 1, evidence: 1, temporal: 1, control: 1 }
-    )).toBeLessThan(0);
-    // Equal object, path breaks the tie before evidence.
-    expect(compareConformantAxisRa(
-      { object: 0.5, path: 1, evidence: 0, temporal: 0, control: 0 },
-      { object: 0.5, path: 0.5, evidence: 1, temporal: 1, control: 1 }
-    )).toBeLessThan(0);
-    expect(compareConformantAxisRa(
-      { object: 0.5, path: 0.5, evidence: 0.5, temporal: 1, control: 0 },
-      { object: 0.5, path: 0.5, evidence: 0.5, temporal: 0.5, control: 1 }
-    )).toBeLessThan(0);
-    expect(compareConformantAxisRa(undefined, { object: 1, path: 0, evidence: 0, temporal: 0, control: 0 })).toBe(0);
   });
 
   it("path-suppression stays a clean demote, not an annihilation, on the delivered score", async () => {
@@ -453,13 +439,6 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(fusion.get(keyOf(objectId(1)))!.per_axis_contribution).toEqual(
       expect.objectContaining({ object: expect.any(Number), path: expect.any(Number), evidence: expect.any(Number) })
     );
-  });
-
-  it("tunables default to bounded compositional values", () => {
-    expect(resolveConformantPathWeight()).toBe(0.6);
-    expect(resolveConformantEvidenceBeta()).toBe(0);
-    expect(resolveConformantFloodCapPerSource()).toBe(1);
-    expect(resolveConformantFloodCapTotal()).toBe(3);
   });
 
   it("cold-start fused score equals R_obj without path or evidence fuel", async () => {

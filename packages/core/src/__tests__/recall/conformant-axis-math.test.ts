@@ -1,22 +1,31 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { noisyOrDecorrelate } from "../../recall/scoring/conformant-evidence-math.js";
 import {
+  buildConformantAxisContext,
   collapseEvidenceRelevance,
   collapsePathInflow
 } from "../../recall/scoring/conformant-fusion-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
+import type { ResolvedRecallFusionWeights } from "../../recall/delivery/fusion-delivery-adaptive-scoring.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
+import { resetCoreConfigForTests } from "../../config/install-core-config.js";
 
 const CONF_ENV = [
   "ALAYA_RECALL_CONF_W_PATH", "ALAYA_RECALL_CONF_EVIDENCE_BETA", "ALAYA_RECALL_CONF_FLOOD_CAP",
-  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE"
+  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL", "ALAYA_RECALL_CONF_RHO_PATH", "ALAYA_RECALL_CONF_RHO_EVIDENCE",
+  "ALAYA_RECALL_CONF_SLICE_COMPATIBILITY"
 ] as const;
+
+beforeEach(() => {
+  resetCoreConfigForTests();
+});
 
 afterEach(() => {
   for (const name of CONF_ENV) {
     delete process.env[name];
   }
+  resetCoreConfigForTests();
 });
 
 const OID = "o1";
@@ -170,3 +179,124 @@ describe("P2 — Φ path-flood identity (collapsePathInflow)", () => {
     expect(folded).toBeCloseTo(1, 12);
   });
 });
+
+describe("single-hop SliceKey wiring", () => {
+  it("observes a typed event-time mismatch while default transfer stays enabled", () => {
+    const context = sliceContext("2026-04-20T00:00:00.000Z");
+
+    expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
+    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
+      slice_compatibility: "no_slice_match",
+      decision: "transferred"
+    }));
+  });
+
+  it("keeps the default path value identical to explicit false", () => {
+    const defaultPath = sliceContext("2026-04-20T00:00:00.000Z").raByKey.get("target")?.path;
+    const explicitFalsePath = sliceContext("2026-04-20T00:00:00.000Z", false)
+      .raByKey.get("target")?.path;
+
+    expect(Object.is(defaultPath, explicitFalsePath)).toBe(true);
+  });
+
+  it("rejects the mismatched edge only when the call-level option is enabled", () => {
+    const context = sliceContext("2026-04-20T00:00:00.000Z", true);
+
+    expect(context.raByKey.get("target")?.path).toBe(0);
+    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
+      slice_compatibility: "no_slice_match",
+      decision: "rejected",
+      reason: "no_slice_match"
+    }));
+  });
+
+  it("rejects the mismatched edge when the internal env flag is enabled", () => {
+    process.env.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY = "on";
+
+    const context = sliceContext("2026-04-20T00:00:00.000Z");
+
+    expect(context.raByKey.get("target")?.path).toBe(0);
+    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
+      decision: "rejected",
+      reason: "no_slice_match"
+    }));
+  });
+
+  it("honors explicit false when the internal env flag is enabled", () => {
+    process.env.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY = "on";
+
+    const context = sliceContext("2026-04-20T00:00:00.000Z", false);
+
+    expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
+    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
+      decision: "transferred"
+    }));
+  });
+
+  it("transfers through a matching typed event-time slice", () => {
+    const context = sliceContext("2026-03-19T22:00:00.000Z", true);
+
+    expect(context.raByKey.get("target")?.path).toBeGreaterThan(0);
+    expect(context.edgeTraceByKey.get("target")?.traces[0]).toEqual(expect.objectContaining({
+      slice_compatibility: "slice_match",
+      decision: "transferred"
+    }));
+  });
+});
+
+function sliceContext(targetEventTime: string, enforceSliceCompatibility?: boolean) {
+  const seed = sliceEntry("seed", "2026-03-19T01:00:00.000Z");
+  const target = sliceEntry("target", targetEventTime);
+  return buildConformantAxisContext({
+    candidates: [candidate("seed", seed), candidate("target", target)],
+    ranksByStream: new Map([[
+      "lexical_fts",
+      new Map([["seed", 1], ["target", 2]])
+    ]]),
+    resolved: {
+      kByStream: { lexical_fts: 60 },
+      weights: { lexical_fts: 1 }
+    } as unknown as ResolvedRecallFusionWeights,
+    supplementaryData: {
+      ...emptyRecords(),
+      queryProbes: compileRecallQueryProbes("what happened on 2026-03-19"),
+      pathInflowByTarget: {
+        target: [{
+          pathId: "path-a",
+          relationKind: "answers_with",
+          seedObjectId: "seed",
+          targetObjectId: "target",
+          seedAnchor: { kind: "object", object_id: "seed" },
+          targetAnchor: { kind: "object", object_id: "target" },
+          pathSourceVersion: "2026-03-20T00:00:00.000Z",
+          weight: 1
+        }]
+      }
+    },
+    nowIso: "2026-03-20T00:00:00.000Z",
+    ...(enforceSliceCompatibility === undefined ? {} : { enforceSliceCompatibility })
+  });
+}
+
+function sliceEntry(objectId: string, eventTime: string): MemoryEntry {
+  return {
+    object_id: objectId,
+    workspace_id: "workspace-a",
+    event_time_start: eventTime,
+    event_time_end: eventTime,
+    evidence_refs: [],
+    facet_tags: [],
+    canonical_entities: [],
+    projection_schema_version: 1,
+    updated_at: "2026-03-20T00:00:00.000Z",
+    manifestation_state: "full_eligible",
+    confidence: 1
+  } as unknown as MemoryEntry;
+}
+
+function candidate(candidateKey: string, entry: MemoryEntry) {
+  return {
+    candidateKey,
+    candidate: { entry, effectiveFactors: { activation: 0, relevance: 0 } }
+  };
+}

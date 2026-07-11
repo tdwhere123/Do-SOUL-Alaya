@@ -203,14 +203,14 @@ export const QualityMetricsSchema = z
       answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     }),
-    // @anchor longmemeval-abstention: calibrated-confidence scoring of the
-    // LongMemEval-S abstention questions (`question_id` ending `_abs`).
+    // invariant: LongMemEval-S abstention metrics use an uncalibrated
+    // fused-margin heuristic for questions whose id ends in `_abs`.
     // Optional so pre-abstention-scoring kpi.json records stay valid; new
-    // LongMemEval runs always populate it. correct_at_k counts the `_abs`
-    // questions whose top-k delivered results all stayed below
-    // false_confident_threshold (recall stayed appropriately unconfident);
-    // these are credited to the recall@k numerator without changing the
-    // 500-question denominator.
+    // LongMemEval runs always populate it. One question-level verdict is
+    // derived from the delivered top-5 fused-score margin. The correct_at_k
+    // and false_confident_at_k fields are compatibility projections of that
+    // same verdict, not independently calibrated per-k measurements; they are
+    // credited to each recall@k numerator without changing the denominator.
     abstention: z
       .object({
         schema_version: z.literal("bench-abstention.v1"),

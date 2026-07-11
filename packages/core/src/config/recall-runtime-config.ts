@@ -15,6 +15,7 @@ export interface RecallRuntimeConfig {
   readonly confEvidenceBeta: number | undefined;
   readonly confFloodCap: number | undefined;
   readonly confFloodCapTotal: number | undefined;
+  readonly confSliceCompatibility: boolean;
   readonly pathEmbModulation: string | undefined;
   readonly structuralReserve: string | undefined;
   /** Refuse delivery stages that hard-evict fusion rank ≤K. Default off. */
@@ -91,6 +92,7 @@ export function parseRecallRuntimeConfigFromEnv(
     confEvidenceBeta: readOptionalNumber(env.ALAYA_RECALL_CONF_EVIDENCE_BETA),
     confFloodCap: readOptionalNumber(env.ALAYA_RECALL_CONF_FLOOD_CAP),
     confFloodCapTotal: readOptionalNumber(env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL),
+    confSliceCompatibility: flagEnabled(env.ALAYA_RECALL_CONF_SLICE_COMPATIBILITY),
     pathEmbModulation: env.ALAYA_RECALL_PATH_EMB_MODULATION,
     structuralReserve: env.ALAYA_RECALL_STRUCTURAL_RESERVE,
     fusionRankFloor: env.ALAYA_RECALL_FUSION_RANK_FLOOR,

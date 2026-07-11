@@ -36,6 +36,7 @@ import type { createDaemonCoreServices } from "./daemon-service-wiring.js";
 import type { DaemonStartupStepRecord } from "./daemon-runtime-types.js";
 import type { createRecallMaterializationWiring } from "./recall-materialization-wiring.js";
 import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
+import { loadBackfillFormationObjects } from "./path-formation-order.js";
 
 type DaemonRepositories = ReturnType<typeof createDaemonRepositories>;
 type DaemonServiceFoundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;
@@ -198,8 +199,6 @@ function createGardenSchedulerRuntime(
   coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
   answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
 ) {
-  const coherenceEdgeProducerPort = createCoherenceEdgeProducerPort(coherenceCrystallizer);
-  const answersWithEdgeProducerPort = createAnswersWithEdgeProducerPort(answersWithCrystallizer);
   return createGardenRuntime({
     databaseConnection: input.database.connection,
     backlogThresholds: input.gardenBacklogThresholds,
@@ -226,6 +225,26 @@ function createGardenSchedulerRuntime(
       createTombstoneDispositionSweepInput(input, forgetTombstoneAuthority)
     ),
     tombstoneGcPort: createTombstoneGcPort({ tombstoneAuthority: forgetTombstoneAuthority }),
+    ...createGardenEnrichmentPorts(input, coherenceCrystallizer, answersWithCrystallizer),
+    ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
+    warn: input.warnLogger.warn
+  });
+}
+
+function createGardenEnrichmentPorts(
+  input: GardenRuntimeWiringInput,
+  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
+  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
+) {
+  const coherenceEdgeProducerPort = createCoherenceEdgeProducerPort(
+    coherenceCrystallizer,
+    input.memoryEntryRepo
+  );
+  const answersWithEdgeProducerPort = createAnswersWithEdgeProducerPort(
+    answersWithCrystallizer,
+    input.memoryEntryRepo
+  );
+  return {
     enrichPendingRepo: input.enrichPendingRepo,
     enrichMemoryLookup: createEnrichMemoryLookup(input),
     enrichSourceSignalLookup: {
@@ -238,10 +257,8 @@ function createGardenSchedulerRuntime(
     ...(input.conflictDetectionService === null
       ? {}
       : { enrichConflictDetectionPort: input.conflictDetectionService }),
-    edgeProposalReconcile: input.edgeProposalService,
-    ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
-    warn: input.warnLogger.warn
-  });
+    edgeProposalReconcile: input.edgeProposalService
+  };
 }
 
 function createTombstoneDispositionSweepInput(
@@ -291,50 +308,64 @@ function createEnrichMemoryLookup(input: GardenRuntimeWiringInput) {
 }
 
 function createCoherenceEdgeProducerPort(
-  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>
+  coherenceCrystallizer: ReturnType<typeof createCoherenceCrystallizer>,
+  memoryEntryRepo: GardenRuntimeWiringInput["memoryEntryRepo"]
 ) {
   if (coherenceCrystallizer === undefined) {
     return undefined;
   }
 
   return {
-    crystallizeForBackfill: (params: {
+    crystallizeForBackfill: async (params: {
       readonly workspaceId: string;
       readonly runId: string | null;
       readonly objectIds: readonly string[];
-    }) =>
-      coherenceCrystallizer.crystallize({
+    }) => {
+      const objects = await loadBackfillFormationObjects(
+        memoryEntryRepo,
+        params.workspaceId,
+        params.objectIds
+      );
+      return await coherenceCrystallizer.crystallize({
         workspaceId: params.workspaceId,
         runId: params.runId,
-        objects: params.objectIds.map((objectId) => ({ objectId, sessionId: null })),
+        objects,
         floor: 0.6,
         capPerNode: 3,
         crossSessionOnly: false
-      })
+      });
+    }
   };
 }
 
 function createAnswersWithEdgeProducerPort(
-  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>
+  answersWithCrystallizer: ReturnType<typeof createAnswersWithCrystallizer>,
+  memoryEntryRepo: GardenRuntimeWiringInput["memoryEntryRepo"]
 ) {
   if (answersWithCrystallizer === undefined) {
     return undefined;
   }
 
   return {
-    crystallizeForBackfill: (params: {
+    crystallizeForBackfill: async (params: {
       readonly workspaceId: string;
       readonly runId: string | null;
       readonly objectIds: readonly string[];
-    }) =>
-      answersWithCrystallizer.crystallize({
+    }) => {
+      const objects = await loadBackfillFormationObjects(
+        memoryEntryRepo,
+        params.workspaceId,
+        params.objectIds
+      );
+      return await answersWithCrystallizer.crystallize({
         workspaceId: params.workspaceId,
         runId: params.runId,
-        objects: params.objectIds.map((objectId) => ({ objectId, sessionId: null })),
+        objects,
         bar: DEFAULT_ANSWER_OVERLAP_BAR,
         capPerNode: 3,
         crossSessionOnly: false
-      })
+      });
+    }
   };
 }
 

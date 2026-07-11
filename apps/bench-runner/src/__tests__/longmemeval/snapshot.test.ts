@@ -150,9 +150,24 @@ describe("snapshot plumbing", () => {
 
     const readManifest = readSnapshotManifest(snapshotDbPath);
     expect(readManifest.recall_pipeline_version).toBe(RECALL_PIPELINE_VERSION);
+    expect(readManifest.attribution).toEqual({
+      status: "legacy_unattributed",
+      gate_eligible: false
+    });
     const readSidecar = readSnapshotSidecar(snapshotDbPath);
     expect(readSidecar.questions).toHaveLength(1);
     expect(readSidecar.questions[0]?.sidecar[0]?.objectId).toBe("mem-1");
+  });
+
+  it("rejects an attributed manifest when its binding evidence is incomplete", () => {
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+      attribution: { status: "attributed", gate_eligible: false }
+    }));
+
+    expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
+      /attributed snapshot manifest.*incomplete/u
+    );
   });
 
   it("passes the version-binding guard when pipeline + migration match", () => {

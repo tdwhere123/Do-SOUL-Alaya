@@ -71,6 +71,12 @@ export interface BenchRecallOptions {
   readonly conflictAwareness?: boolean;
 }
 
+export interface BenchEdgeFormationMember {
+  readonly memoryId: string;
+  readonly sessionId: string;
+  readonly formationKey: string;
+}
+
 export interface BenchDaemonHandle {
   readonly runtime: AlayaDaemonRuntime;
   readonly mcpClient: Client;
@@ -268,7 +274,7 @@ export interface BenchDaemonHandle {
    * see also: packages/core/src/embedding-recall/service.ts:EmbeddingRecallService.coherentPairKeys
    */
   accrueCoherenceCoRecall(
-    members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+    members: readonly BenchEdgeFormationMember[],
     options: {
       readonly floor: number;
       readonly capPerNode: number;
@@ -286,7 +292,7 @@ export interface BenchDaemonHandle {
    * see also: packages/core/src/path-graph/hq-answer-overlap.ts
    */
   accrueAnswersWithCoRelevance(
-    members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+    members: readonly BenchEdgeFormationMember[],
     options: {
       readonly bar: number;
       readonly capPerNode: number;

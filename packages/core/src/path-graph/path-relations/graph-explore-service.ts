@@ -3,6 +3,8 @@ import {
   MemoryGraphEdgeTypeSchema,
   EDGE_TYPE_RECALL_MODEL,
   GraphAuditorEventType,
+  getPathAnchorBackingObjectId,
+  isUnorderedPathRelationKind,
   SoulGraphExploreCompletedPayloadSchema,
   isPathActiveForRecall,
   isPathRecallEligible,
@@ -21,9 +23,9 @@ import { parseObjectId } from "../../shared/validators.js";
 // memory_graph_edges. One-hop neighbors are PathRelation rows anchored on
 // the source memory; relation_kind projects to the strict GraphNeighbor
 // edge_type enum (mapRelationKindToGraphEdgeType) and path_id is the
-// edge_id. countInbound* below also read the path plane: they count
-// target-anchored recall-eligible paths (isPathRecallEligible) arriving at a
-// candidate memory and feed recall graph_support scoring
+// edge_id. countInbound* below also read the path plane: directional paths
+// contribute at their target, while unordered semantic paths contribute at
+// both endpoints, and feed recall graph_support scoring
 // (RecallServiceGraphSupportPort). The result is positive-only: negative
 // paths (recall_bias < 0) never contribute here — active suppression is the
 // governance-gated recall-plane channel, not graph_support. This service is
@@ -36,6 +38,10 @@ export interface GraphExploreServicePathRepoPort {
   findByTargetAnchor(
     workspaceId: string,
     anchorRef: PathAnchorRef
+  ): Promise<readonly Readonly<PathRelation>[]>;
+  findByBackingObjectId(
+    workspaceId: string,
+    objectId: string
   ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
@@ -68,9 +74,10 @@ export class GraphExploreService {
     options: GraphExploreOptions = {}
   ): Promise<readonly GraphNeighbor[]> {
     const parsed = parseGraphExploreInput(memoryId, workspaceId, options);
-    const relations = await this.dependencies.pathRepo.findByAnchors(parsed.workspaceId, [
-      { kind: "object", object_id: parsed.memoryId }
-    ]);
+    const relations = await this.dependencies.pathRepo.findByBackingObjectId(
+      parsed.workspaceId,
+      parsed.memoryId
+    );
     const neighbors = buildGraphNeighbors(
       relations,
       parsed.memoryId,
@@ -114,7 +121,7 @@ export class GraphExploreService {
   /** @deprecated use `countInboundEdgesWeighted` for recall scoring;
    * retained for diagnostic surfaces only. */
   public async countInboundSupports(memoryId: string, workspaceId: string): Promise<number> {
-    const paths = await this.findInboundRecallEligiblePaths(memoryId, workspaceId);
+    const paths = await this.findRecallContributionPaths(memoryId, workspaceId);
     return paths.reduce(
       (count, path) =>
         mapRelationKindToGraphEdgeType(path.constitution.relation_kind) === "supports" ? count + 1 : count,
@@ -130,7 +137,7 @@ export class GraphExploreService {
   // unification, not a pure zero-drift replacement.
   //
   // invariant (deliberate asymmetry): graph_support (positive amplification)
-  // is intentionally NOT governance-gated — findInboundRecallEligiblePaths
+  // is intentionally NOT governance-gated — findRecallContributionPaths
   // filters only on active + recall_bias > 0, never on governance_class —
   // while negative-path suppression IS governance-gated (recall-service.ts).
   // Rationale: suppression can ERASE a true memory (high harm, so gated);
@@ -139,7 +146,7 @@ export class GraphExploreService {
   // scaled by a small graph_support weight), and is the intended Hebbian
   // recall mechanism. The asymmetry is by design, not an oversight.
   public async countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number> {
-    const paths = await this.findInboundRecallEligiblePaths(memoryId, workspaceId);
+    const paths = await this.findRecallContributionPaths(memoryId, workspaceId);
     return paths.reduce((sum, path) => {
       const edgeType = mapRelationKindToGraphEdgeType(path.constitution.relation_kind);
       return sum + EDGE_TYPE_RECALL_MODEL[edgeType].contribution_weight;
@@ -147,13 +154,13 @@ export class GraphExploreService {
   }
 
   // The edge world counted literal edge_type='recalls'; on the path plane this
-  // counts paths whose mapped edge_type === "recalls", so the recalls-tier
+  // counts contributing paths whose mapped edge_type === "recalls", so the recalls-tier
   // associative kinds (co_recalled / shares_entity / signal_graph_ref) that
   // mapRelationKindToGraphEdgeType folds to "recalls" now also count here. This
   // is mapper-consistent with countInboundEdgesWeighted (one mapper, one
   // semantic) and feeds the RECALLS_EDGE_COLD_THRESHOLD cold-start signal.
   public async countInboundRecalls(memoryId: string, workspaceId: string): Promise<number> {
-    const paths = await this.findInboundRecallEligiblePaths(memoryId, workspaceId);
+    const paths = await this.findRecallContributionPaths(memoryId, workspaceId);
     return paths.reduce(
       (count, path) =>
         mapRelationKindToGraphEdgeType(path.constitution.relation_kind) === "recalls" ? count + 1 : count,
@@ -161,20 +168,29 @@ export class GraphExploreService {
     );
   }
 
-  // Inbound = paths whose TARGET anchor is the candidate memory. Filtered to
-  // recall-eligible (active lifecycle AND recall_bias > 0) so graph_support is
-  // positive-only; negative paths are handled solely by the governance-gated
-  // active-suppression channel in recall-service.ts.
-  private async findInboundRecallEligiblePaths(
+  // Directional relations contribute at their target; unordered semantic
+  // relations contribute equally at both endpoints.
+  private async findRecallContributionPaths(
     memoryId: string,
     workspaceId: string
   ): Promise<readonly Readonly<PathRelation>[]> {
-    const paths = await this.dependencies.pathRepo.findByTargetAnchor(parseObjectId(workspaceId), {
-      kind: "object",
-      object_id: parseObjectId(memoryId)
-    });
-    return paths.filter((path) => isPathRecallEligible(path));
+    const parsedMemoryId = parseObjectId(memoryId);
+    const paths = await this.dependencies.pathRepo.findByBackingObjectId(
+      parseObjectId(workspaceId),
+      parsedMemoryId
+    );
+    return [...new Map(paths
+      .filter((path) => isPathRecallEligible(path))
+      .filter((path) => pathContributesToObject(path, parsedMemoryId))
+      .map((path) => [path.path_id, path] as const)).values()];
   }
+}
+
+function pathContributesToObject(path: Readonly<PathRelation>, objectId: string): boolean {
+  const targetId = getPathAnchorBackingObjectId(path.anchors.target_anchor);
+  if (targetId === objectId) return true;
+  return isUnorderedPathRelationKind(path.constitution.relation_kind) &&
+    getPathAnchorBackingObjectId(path.anchors.source_anchor) === objectId;
 }
 
 function parseGraphExploreInput(

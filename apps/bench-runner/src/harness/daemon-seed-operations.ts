@@ -32,6 +32,10 @@ import type {
 } from "./daemon-types.js";
 import type { CreateBenchSeedOpsInput } from "./daemon-seed-ops-types.js";
 import type { SeedObjectKind } from "./seed-rotation.js";
+import {
+  isRawPayloadBoundError,
+  projectCompileRawPayload
+} from "./seeding/compile-raw-payload.js";
 
 export {
   accrueAnswersWithCoRelevance,
@@ -133,10 +137,7 @@ function buildSignalRawPayload(
   const tokenEconomy = benchTokenEconomyPayload({
     fullTurnContent: safeExcerpt,
     storedContent: safeDistilledFact,
-    turnSeedIndex: signalInput.turnSeedIndex,
-    ...(signalInput.productionRawPayload === undefined
-      ? { excerptSibling: safeExcerpt, distilledFactSibling: safeDistilledFact }
-      : {})
+    turnSeedIndex: signalInput.turnSeedIndex
   });
   if (signalInput.productionRawPayload === undefined) {
     return {
@@ -185,9 +186,7 @@ export async function proposeMemory(
           : { distilled_fact: safeDistilledFact }),
         ...benchTokenEconomyPayload({
           fullTurnContent: clip.safe,
-          storedContent: safeDistilledFact ?? clip.safe,
-          excerptSibling: clip.safe,
-          distilledFactSibling: safeDistilledFact
+          storedContent: safeDistilledFact ?? clip.safe
         })
       }
     }
@@ -259,24 +258,31 @@ function buildCompileSignal(
   signalInput: BenchSignalSeedInput,
   rawPayload: Record<string, unknown>
 ): CandidateMemorySignal {
-  return normalizeSchemaGroundedSignal(
-    CandidateMemorySignalSchema.parse({
-      signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
-      workspace_id: input.activeContext.workspaceId,
-      run_id: input.activeContext.runId,
-      surface_id: signalInput.surfaceId ?? null,
-      source: SignalSource.GARDEN_COMPILE,
-      signal_kind: signalInput.signalKind,
-      object_kind: signalInput.objectKind,
-      scope_hint: ScopeClass.PROJECT,
-      domain_tags: ["bench-seed"],
-      confidence: signalInput.confidence,
-      evidence_refs: [signalInput.evidenceRef],
-      ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
-      raw_payload: rawPayload,
-      created_at: new Date().toISOString()
-    })
-  );
+  const candidate = {
+    signal_id: `bench_signal_${randomUUID().replace(/-/gu, "")}`,
+    workspace_id: input.activeContext.workspaceId,
+    run_id: input.activeContext.runId,
+    surface_id: signalInput.surfaceId ?? null,
+    source: SignalSource.GARDEN_COMPILE,
+    signal_kind: signalInput.signalKind,
+    object_kind: signalInput.objectKind,
+    scope_hint: ScopeClass.PROJECT,
+    domain_tags: ["bench-seed"],
+    confidence: signalInput.confidence,
+    evidence_refs: [signalInput.evidenceRef],
+    ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
+    raw_payload: rawPayload,
+    created_at: new Date().toISOString()
+  };
+  try {
+    return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse(candidate));
+  } catch (error) {
+    if (!isRawPayloadBoundError(error)) throw error;
+    return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
+      ...candidate,
+      raw_payload: projectCompileRawPayload(rawPayload)
+    }));
+  }
 }
 
 function droppedCompileSignal(

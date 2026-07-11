@@ -19,16 +19,11 @@ const BENCH_CHARS_PER_TOKEN = 4;
  * @anchor bench-token-economy-payload-keys — the seed raw_payload keys and
  * their EventLog-summary counterparts used by the bench token-economy flow.
  *
- * The production raw_payload only carries `turn_content_excerpt`, a narrow
- * matched-text window — never the full turn — so the fold cannot derive
- * raw_history_tokens from production fields. The full-turn / stored content
- * keys carry the harness's own ground truth, but are stamped ONLY when they
- * would not byte-duplicate a sibling field (`excerpt` / `distilled_fact`):
- * on the no-credentials path `excerpt` IS the full turn and `distilled_fact`
- * IS the durable fact, so a second copy would near-double raw_payload and
- * risk an over-cap drop. SignalService then converts that raw shape into a
- * redacted EventLog summary that preserves only bench_summary_* markers plus
- * numeric token counts, and deriveBenchTokenMetrics reads that summary shape.
+ * The harness keeps source text as runner input and persists only numeric
+ * token projections plus a length and digest identity. Copying a long source
+ * turn into production raw_payload can exceed its bounded persistence
+ * contract after schema grounding. SignalService accepts the old content-key
+ * shape for artifact compatibility and emits the same numeric summary shape.
  */
 export const BENCH_FULL_TURN_CONTENT_KEY = "bench_full_turn_content";
 export const BENCH_STORED_CONTENT_KEY = "bench_stored_content";
@@ -38,6 +33,8 @@ export const BENCH_SUMMARY_SEED_MARKER_KEY = "bench_summary_seeded";
 export const BENCH_SUMMARY_TURN_SEED_INDEX_KEY = "bench_summary_turn_seed_index";
 export const BENCH_FULL_TURN_TOKENS_KEY = "bench_full_turn_tokens";
 export const BENCH_STORED_CONTENT_TOKENS_KEY = "bench_stored_content_tokens";
+export const BENCH_FULL_TURN_CHAR_COUNT_KEY = "bench_full_turn_char_count";
+export const BENCH_FULL_TURN_SHA256_KEY = "bench_full_turn_sha256";
 
 /**
  * The minimal shape of an EventLog row the token-economy derivation reads.

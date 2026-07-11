@@ -1,0 +1,76 @@
+import type { LongMemEvalRunProvenance } from "../provenance/run.js";
+import type {
+  LongMemEvalSnapshotManifest,
+  SnapshotExtractionProvenance
+} from "../snapshot.js";
+import type { SnapshotArtifactIntegrity } from "./integrity.js";
+
+export function deriveSnapshotAttribution(input: {
+  readonly artifactIntegrity?: SnapshotArtifactIntegrity;
+  readonly runProvenance?: LongMemEvalRunProvenance;
+  readonly questionIdDigest?: string;
+  readonly datasetSha256?: string;
+  readonly extractionProvenance?: SnapshotExtractionProvenance | null;
+}): NonNullable<LongMemEvalSnapshotManifest["attribution"]> {
+  if (!hasCompleteBinding(input)) {
+    return { status: "legacy_unattributed", gate_eligible: false };
+  }
+  const provenance = input.runProvenance!;
+  return {
+    status: "attributed",
+    gate_eligible:
+      provenance.code.gate_sha256 !== null &&
+      provenance.code.worktree_state_sha256 !== null &&
+      hasGateEligibleExtractionCache(
+        provenance,
+        input.datasetSha256,
+        input.extractionProvenance
+      ) &&
+      (provenance.runtime.embedding_provider_kind !== "local_onnx" ||
+        provenance.runtime.onnx_model_artifact_sha256 !== undefined)
+  };
+}
+
+function hasCompleteBinding(input: Parameters<typeof deriveSnapshotAttribution>[0]): boolean {
+  return (
+    input.artifactIntegrity !== undefined &&
+    input.runProvenance !== undefined &&
+    input.questionIdDigest !== undefined &&
+    input.datasetSha256 !== undefined
+  );
+}
+
+function hasGateEligibleExtractionCache(
+  provenance: LongMemEvalRunProvenance,
+  datasetSha256: string | undefined,
+  snapshotCache: SnapshotExtractionProvenance | null | undefined
+): boolean {
+  const cache = provenance.extraction_cache;
+  const provenanceDatasetSha = resolveProvenanceDatasetSha(provenance);
+  return (
+    cache !== null && snapshotCache != null &&
+    provenanceDatasetSha !== undefined &&
+    datasetSha256 === provenanceDatasetSha &&
+    snapshotCache.extraction_model === cache.extraction_model &&
+    snapshotCache.provider_url === cache.provider_url &&
+    snapshotCache.system_prompt_sha256 === cache.system_prompt_sha256 &&
+    snapshotCache.dataset === cache.dataset &&
+    snapshotCache.dataset_revision === cache.dataset_revision &&
+    cache.requested_turns !== undefined && cache.cached_turns !== undefined &&
+    cache.coverage === 1 && cache.cached_turns >= cache.requested_turns &&
+    snapshotCache.requested_turns === cache.requested_turns &&
+    snapshotCache.cached_turns === cache.cached_turns &&
+    snapshotCache.coverage === cache.coverage
+  );
+}
+
+function resolveProvenanceDatasetSha(
+  provenance: LongMemEvalRunProvenance
+): string | undefined {
+  const manifestSha = provenance.question_manifest?.dataset_sha256;
+  if (manifestSha !== undefined) return manifestSha;
+  const revision = provenance.extraction_cache?.dataset_revision;
+  return revision !== undefined && /^[a-f0-9]{64}$/u.test(revision)
+    ? revision
+    : undefined;
+}

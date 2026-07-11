@@ -324,6 +324,43 @@ describe("Phase 4A protocol schemas", () => {
     );
   });
 
+  it("parses additive completion truncation metadata and rejects an invalid digest", () => {
+    const payload = {
+      task_id: "task-2",
+      task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+      role: GardenRole.AUDITOR,
+      tier: GardenTier.TIER_1,
+      success: true,
+      objects_affected: ["green-1"],
+      objects_affected_total_count: 600,
+      objects_affected_sha256: "e2607f053c56cc67422d3a5dffbbfd997b811024ffea9bc85046d13b8557ca94",
+      workspace_id: "workspace-1",
+      occurred_at: validTimestamp
+    } as const;
+
+    expect(parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, payload)).toEqual(
+      payload
+    );
+    expect(() =>
+      parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+        ...payload,
+        objects_affected_sha256: "not-a-sha256"
+      })
+    ).toThrow();
+    expect(() =>
+      parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+        ...payload,
+        objects_affected_sha256: undefined
+      })
+    ).toThrow();
+    expect(() =>
+      parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_COMPLETED, {
+        ...payload,
+        objects_affected_total_count: payload.objects_affected.length
+      })
+    ).toThrow();
+  });
+
   it("parses GardenTaskResult without run_id", () => {
     const result = {
       task_id: "task-2",

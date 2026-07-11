@@ -62,9 +62,33 @@ export const SoulGardenTaskCompletedPayloadSchema = z
     tier: GardenTierSchema,
     success: z.boolean(),
     objects_affected: z.array(NonEmptyStringSchema).readonly(),
+    // invariant: these fields appear together only when objects_affected is a
+    // truncated prefix; the digest covers the full ordered ID list with each
+    // UTF-8 value framed by its 8-byte big-endian byte length.
+    objects_affected_total_count: NonNegativeIntSchema.optional(),
+    objects_affected_sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
     candidate_signals_count: NonNegativeIntSchema.optional(),
     workspace_id: NonEmptyStringSchema,
     occurred_at: IsoDatetimeStringSchema
+  })
+  .superRefine((payload, ctx) => {
+    const hasTotal = payload.objects_affected_total_count !== undefined;
+    const hasDigest = payload.objects_affected_sha256 !== undefined;
+    if (hasTotal !== hasDigest) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Completion truncation metadata must include both total count and SHA-256 digest."
+      });
+    }
+    if (
+      payload.objects_affected_total_count !== undefined &&
+      payload.objects_affected_total_count <= payload.objects_affected.length
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Completion truncation total must exceed the emitted objects_affected prefix."
+      });
+    }
   })
   .readonly();
 

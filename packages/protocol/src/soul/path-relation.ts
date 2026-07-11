@@ -9,6 +9,7 @@ import {
   SignedRatioSchema,
   NonNegativeIntSchema
 } from "../shared/schema-primitives.js";
+import { serializePathAnchorRef } from "./path-anchor-identity.js";
 
 const stabilityClassValues = ["volatile", "normal", "stable", "pinned"] as const;
 const directionBiasValues = [
@@ -243,12 +244,15 @@ export type PathEffectVector = z.infer<typeof PathEffectVectorSchema>;
 export type PathRelation = z.infer<typeof PathRelationSchema>;
 export type PathPlasticityState = z.infer<typeof PathPlasticityStateSchema>;
 
-const recallsTierRelationKinds = new Set([
-  "recalls",
-  "co_recalled",
-  "shares_entity",
-  "signal_graph_ref"
+const unorderedPathRelationKinds = new Set([
+  "answers_with",
+  "coheres_with",
+  "co_recalled"
 ]);
+
+export function isUnorderedPathRelationKind(relationKind: string): boolean {
+  return unorderedPathRelationKinds.has(relationKind);
+}
 
 export interface PathRelationIdentityCandidate {
   readonly sourceAnchor: PathAnchorRef;
@@ -286,37 +290,41 @@ export function pathRelationMatchesIdentity(
   relation: PathRelationIdentitySubject,
   candidate: PathRelationIdentityCandidate
 ): boolean {
-  const relationFamily = pathRelationIdentityFamily(
-    relation.constitution.relation_kind,
-    relation.effect_vector.recall_bias
-  );
-  const candidateFamily = pathRelationIdentityFamily(
-    candidate.relationKind,
-    candidate.recallBias
-  );
-  if (relationFamily !== candidateFamily) {
+  if (
+    relation.constitution.relation_kind !== candidate.relationKind ||
+    recallBiasSign(relation.effect_vector.recall_bias) !== recallBiasSign(candidate.recallBias)
+  ) {
     return false;
   }
 
-  const relationSource = getPathAnchorBackingObjectId(relation.anchors.source_anchor);
-  const relationTarget = getPathAnchorBackingObjectId(relation.anchors.target_anchor);
-  const candidateSource = getPathAnchorBackingObjectId(candidate.sourceAnchor);
-  const candidateTarget = getPathAnchorBackingObjectId(candidate.targetAnchor);
+  const relationSource = serializePathAnchorRef(relation.anchors.source_anchor);
+  const relationTarget = serializePathAnchorRef(relation.anchors.target_anchor);
+  const candidateSource = serializePathAnchorRef(candidate.sourceAnchor);
+  const candidateTarget = serializePathAnchorRef(candidate.targetAnchor);
 
-  if (relationFamily === "positive:recalls") {
-    return (
-      (relationSource === candidateSource && relationTarget === candidateTarget) ||
-      (relationSource === candidateTarget && relationTarget === candidateSource)
+  if (isUnorderedPathRelationKind(candidate.relationKind)) {
+    return unorderedEndpointsMatch(
+      relationSource,
+      relationTarget,
+      candidateSource,
+      candidateTarget
     );
   }
-
   return relationSource === candidateSource && relationTarget === candidateTarget;
 }
 
-function pathRelationIdentityFamily(relationKind: string, recallBias: number): string {
-  const sign = recallBias > 0 ? "positive" : recallBias < 0 ? "negative" : "neutral";
-  if (sign === "positive" && recallsTierRelationKinds.has(relationKind)) {
-    return "positive:recalls";
-  }
-  return `${sign}:${relationKind}`;
+function unorderedEndpointsMatch(
+  relationSource: string,
+  relationTarget: string,
+  candidateSource: string,
+  candidateTarget: string
+): boolean {
+  return (
+    (relationSource === candidateSource && relationTarget === candidateTarget) ||
+    (relationSource === candidateTarget && relationTarget === candidateSource)
+  );
+}
+
+function recallBiasSign(recallBias: number): "positive" | "negative" | "neutral" {
+  return recallBias > 0 ? "positive" : recallBias < 0 ? "negative" : "neutral";
 }

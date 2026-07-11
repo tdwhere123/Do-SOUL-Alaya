@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-
 import {
   GardenRole,
   GardenTaskKind,
@@ -12,15 +11,13 @@ import {
   type GardenTierValue,
   type PathRelation
 } from "@do-soul/alaya-protocol";
-
 import {
   ConsolidationExecutor,
   ConsolidationPlanner,
   EmbeddingBackfillPartialFailureError
 } from "@do-soul/alaya-core";
-
+import { StorageError } from "@do-soul/alaya-storage";
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
-
 import {
   createConsolidationCapableConnection,
   createDormantPath,
@@ -224,7 +221,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     );
     const scheduler = currentScheduler();
 
-    // The targeted pass must leave non-embedding maintenance kinds in the queue.
     seedQueueTask(scheduler, GardenTaskKind.BULK_ENRICH, "task-bulk-enrich");
     seedQueueTask(scheduler, GardenTaskKind.MERGE_PROPOSAL, "task-merge");
     seedQueueTask(scheduler, GardenTaskKind.PATH_PLASTICITY_UPDATE, "task-plasticity");
@@ -233,13 +229,11 @@ describe("garden runtime targeted embedding backfill pass", () => {
 
     await runtime.runEmbeddingBackfillPass("workspace-1");
 
-    // The handler ran and reached all-ready for the workspace in one O(n) call.
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledWith(
       expect.objectContaining({ workspace_id: "workspace-1" })
     );
 
-    // ONLY the self-enqueued EMBEDDING_BACKFILL was completed.
     expect(scheduler.completions).toHaveLength(1);
     expect(scheduler.completions[0]).toEqual(
       expect.objectContaining({
@@ -250,9 +244,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
       })
     );
 
-    // Every other maintenance kind is left untouched in the queue: the targeted
-    // drain did not run BULK_ENRICH / merge / plasticity / snapshot /
-    // consolidation that the full Garden pass would have run.
     const remainingKinds = scheduler.queue.map((task) => task.task_kind).sort();
     expect(remainingKinds).toEqual(
       [
@@ -264,14 +255,10 @@ describe("garden runtime targeted embedding backfill pass", () => {
       ].sort()
     );
 
-    // The targeted drain is not a Garden maintenance cadence tick, so it must
-    // not advance last_pass_at the way runBackgroundPass does.
     expect(runtime.getStatus().last_pass_at).toBeNull();
   });
 
   it("drains only the requested workspace's EMBEDDING_BACKFILL and leaves another workspace's same-kind task queued", async () => {
-    // invariant: targeted embedding warmup is workspace-scoped even when another
-    // workspace already has pending same-kind work.
     const embeddingBackfillHandler = {
       handle: vi.fn(async (task: { workspace_id: string }) => ({
         objectsAffected: [`memory-${task.workspace_id}`],
@@ -291,18 +278,15 @@ describe("garden runtime targeted embedding backfill pass", () => {
     );
     const scheduler = currentScheduler();
 
-    // Older pending EMBEDDING_BACKFILL for a different workspace (workspace-B).
     seedQueueTask(scheduler, GardenTaskKind.EMBEDDING_BACKFILL, "task-backfill-B", "workspace-B");
 
     await runtime.runEmbeddingBackfillPass("workspace-A");
 
-    // The handler ran exactly once, for the requested workspace only.
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledTimes(1);
     expect(embeddingBackfillHandler.handle).toHaveBeenCalledWith(
       expect.objectContaining({ workspace_id: "workspace-A" })
     );
 
-    // Only workspace-A's backfill was completed.
     expect(scheduler.completions).toHaveLength(1);
     expect(scheduler.completions[0]).toEqual(
       expect.objectContaining({
@@ -312,7 +296,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
       })
     );
 
-    // The other workspace's same-kind task is untouched in the queue.
     const remaining = scheduler.queue.filter(
       (task) => task.task_kind === GardenTaskKind.EMBEDDING_BACKFILL
     );
@@ -388,6 +371,129 @@ describe("garden runtime targeted embedding backfill pass", () => {
         success: true,
         audit_entries: ["embedding_backfill_skipped:provider_unavailable"]
       })
+    );
+  });
+
+  it("logs a bounded secret-safe causal chain and the failing backfill phase", async () => {
+    const warn = vi.fn();
+    const cause = Object.assign(
+      new Error("sqlite write failed at /home/alice/private.db token=super-secret"),
+      { code: "SQLITE_CONSTRAINT" }
+    );
+    const error = new Error("Failed to append event log entry.", { cause });
+    const runtime = createGardenRuntime({
+      ...createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler: { handle: vi.fn(async () => { throw error; }) }
+      }),
+      warn
+    });
+
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(
+      "Failed to append event log entry."
+    );
+
+    expect(warn).toHaveBeenCalledWith(
+      "embedding backfill task failed; continuing Garden background pass",
+      expect.objectContaining({
+        workspace_id: "workspace-1",
+        phase: "backfill",
+        error: {
+          name: "Error",
+          code: null,
+          message: "Failed to append event log entry.",
+          cause_chain: [{
+            name: "Error",
+            code: "SQLITE_CONSTRAINT",
+            message: expect.not.stringMatching(/alice|private\.db|super-secret/u)
+          }]
+        }
+      })
+    );
+    const completion = currentScheduler().completions.at(-1);
+    expect(completion?.error_message).not.toMatch(/alice|private\.db|super-secret/u);
+  });
+
+  it("identifies coherence, answers_with, and completion warning phases", async () => {
+    const warn = vi.fn();
+    const runtime = createGardenRuntime({
+      ...createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler: {
+          handle: vi.fn(async () => ({
+            objectsAffected: ["memory-1", "memory-2"],
+            auditEntries: []
+          }))
+        }
+      }),
+      coherenceEdgeProducerPort: {
+        crystallizeForBackfill: vi.fn(async () => { throw new Error("coherence failed"); })
+      },
+      answersWithEdgeProducerPort: {
+        crystallizeForBackfill: vi.fn(async () => { throw new Error("answers failed"); })
+      },
+      warn
+    });
+    const scheduler = currentScheduler();
+    const reportCompletion = scheduler.reportCompletion.bind(scheduler);
+    const sqliteBusy = Object.assign(new Error("database is locked"), {
+      code: "SQLITE_BUSY"
+    });
+    vi.spyOn(scheduler, "reportCompletion")
+      .mockRejectedValueOnce(
+        new StorageError("QUERY_FAILED", "Failed to append event log entry.", sqliteBusy)
+      )
+      .mockImplementation(reportCompletion);
+
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).resolves.toBeUndefined();
+
+    expect(warn.mock.calls.map((call) => call[1]?.phase)).toEqual([
+      "coherence",
+      "answers_with",
+      "completion"
+    ]);
+    expect(scheduler.completions).toContainEqual(
+      expect.objectContaining({ success: true })
+    );
+  });
+
+  it("fails loud without rewriting the work outcome when completion retries exhaust", async () => {
+    const warn = vi.fn();
+    const runtime = createGardenRuntime({
+      ...createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        embeddingBackfillHandler: {
+          handle: vi.fn(async () => ({ objectsAffected: ["memory-1"], auditEntries: [] }))
+        }
+      }),
+      warn
+    });
+    const scheduler = currentScheduler();
+    vi.spyOn(scheduler, "reportCompletion").mockRejectedValue(
+      Object.assign(new Error("database is busy"), { code: "SQLITE_BUSY" })
+    );
+
+    await expect(runtime.runEmbeddingBackfillPass("workspace-1")).rejects.toThrow(
+      /completion persistence failed/u
+    );
+    expect(warn).not.toHaveBeenCalledWith(
+      "embedding backfill task failed; continuing Garden background pass",
+      expect.anything()
     );
   });
 });

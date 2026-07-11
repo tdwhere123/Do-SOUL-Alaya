@@ -125,10 +125,34 @@ export function buildPathInflowByTarget(
       if (!candidateIds.has(target.targetId)) {
         continue;
       }
-      (inflow[target.targetId] ??= []).push({ seedObjectId: target.seedId, weight });
+      const directedAnchors = projectDirectedPathAnchors(path, target.seedId);
+      (inflow[target.targetId] ??= []).push({
+        pathId: path.path_id,
+        relationKind: path.constitution.relation_kind,
+        seedObjectId: target.seedId,
+        targetObjectId: target.targetId,
+        seedAnchor: directedAnchors.seed,
+        targetAnchor: directedAnchors.target,
+        pathSourceVersion: path.updated_at,
+        weight
+      });
     }
   }
   return inflow;
+}
+
+function projectDirectedPathAnchors(
+  path: Readonly<PathRelation>,
+  seedObjectId: string
+): Readonly<{ seed: Readonly<PathAnchorRef>; target: Readonly<PathAnchorRef> }> {
+  const sourceIsSeed = anchorMemoryId(path.anchors.source_anchor) === seedObjectId;
+  const seed = sourceIsSeed ? path.anchors.source_anchor : path.anchors.target_anchor;
+  const target = sourceIsSeed ? path.anchors.target_anchor : path.anchors.source_anchor;
+  return Object.freeze({ seed: freezePathAnchor(seed), target: freezePathAnchor(target) });
+}
+
+function freezePathAnchor(anchor: Readonly<PathAnchorRef>): Readonly<PathAnchorRef> {
+  return Object.freeze({ ...anchor }) as Readonly<PathAnchorRef>;
 }
 
 export interface PathGraphNeighbor {

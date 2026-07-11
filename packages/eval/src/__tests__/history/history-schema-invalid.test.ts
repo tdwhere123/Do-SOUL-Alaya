@@ -32,6 +32,45 @@ describe("history archive schema-invalid baselines", () => {
     await expect(readEntry(layout, "self", slug)).rejects.toBeInstanceOf(ZodError);
   });
 
+  it("readEntry preserves typed recall-eval runtime and cache attribution", async () => {
+    const slug = "2026-05-31T003313Z-0ff0ff1";
+    const attribution = {
+      status: "attributed" as const,
+      gate_eligible: true,
+      node_version: "v24.0.0",
+      platform: "linux",
+      arch: "x64",
+      embedding_mode: "env" as const,
+      embedding_provider_kind: "local_onnx" as const,
+      embedding_provider_label: "local_onnx:Xenova/test",
+      onnx_threads: 1,
+      onnx_model_artifact_sha256: "a".repeat(64),
+      snapshot_binding: {
+        commit_sha7: "0ff0ff1",
+        gate_sha256: "b".repeat(64),
+        worktree_state_sha256: "c".repeat(64),
+        extraction_cache_manifest_sha256: "d".repeat(64),
+        extraction_cache_requested_turns: 10,
+        extraction_cache_cached_turns: 10,
+        extraction_cache_coverage: 1,
+        dataset_sha256: "e".repeat(64),
+        question_id_digest: "f".repeat(64)
+      }
+    };
+    await writeEntry(
+      layout,
+      "self",
+      slug,
+      { ...buildPayload("0ff0ff1"), recall_eval_attribution: attribution },
+      "# report\n",
+      null
+    );
+
+    await expect(readEntry(layout, "self", slug)).resolves.toMatchObject({
+      recall_eval_attribution: attribution
+    });
+  });
+
   it("readEntryForDiff degrades a schema-invalid archive to no-baseline with a warning", async () => {
     const slug = "2026-05-31T003312Z-0ff0ff0";
     await plantSchemaInvalidArchive(root, slug);

@@ -1,5 +1,5 @@
 import { scoreAbstentionQuestion } from "./abstention.js";
-import { computeAbstentionConfidenceScore } from "./abstention-confidence.js";
+import { attachAbstentionConfidenceScore } from "./abstention-confidence.js";
 import {
   buildObjectIdentityKey,
   readRecallDiagnostics
@@ -101,16 +101,7 @@ export function enrichAbstentionConfidence<
     readonly abstention_confidence_score?: number | null;
   }
 >(results: readonly T[]): readonly T[] {
-  if (results.some((result) => result.abstention_confidence_score !== undefined)) {
-    return results;
-  }
-  const confidence = computeAbstentionConfidenceScore(
-    results.map((result) => result.fused_score)
-  );
-  return results.map((result) => ({
-    ...result,
-    abstention_confidence_score: confidence
-  }));
+  return attachAbstentionConfidenceScore(results);
 }
 
 export function scoreLongMemEvalRecallHits(

@@ -31,6 +31,9 @@ import type { BenchCommitInfo } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 import type { LongMemEvalPayloadBuild } from "./runner-archive-payload.js";
+import {
+  buildLongMemEvalRunProvenanceSidecar
+} from "./provenance/run.js";
 
 export async function writeLongMemEvalRunArchive(input: {
   readonly opts: LongMemEvalRunOptions;
@@ -106,12 +109,20 @@ async function buildLongMemEvalArchiveSidecars(input: {
   const diff = diffKpis(input.payload, previous);
   const diagnostics = await buildDiagnosticsSidecar(input);
   const comparison = await buildComparisonSidecar(input, diagnostics.currentEvidence);
+  const runProvenanceSidecar = await buildLongMemEvalRunProvenanceSidecar({
+    opts: input.opts,
+    evaluatedCount: input.payload.evaluated_count,
+    commitSha7: input.payload.alaya_commit,
+    embeddingProviderLabel: input.payload.embedding_provider,
+    env: process.env
+  });
   return {
     report: appendSeedExtractionReleaseBlockerToReport(renderReport(input.payload, previous, diff), input.payload),
     findings: appendSeedExtractionReleaseBlockerToFindings(renderFindings(input.payload, diff), input.payload),
     sidecars: [
       { filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME, contents: diagnostics.compact },
-      { filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: comparison }
+      { filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: comparison },
+      runProvenanceSidecar
     ]
   };
 }

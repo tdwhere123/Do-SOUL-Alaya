@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +16,9 @@ import {
 import { loadDataset } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
+import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
+import { throwLifecycleErrors } from "./lifecycle/errors.js";
+import { preserveShardRunProvenance } from "./provenance/shard-aggregate.js";
 
 export interface LongMemEvalWorkerShardPlan {
   readonly shardIndex: number;
@@ -33,6 +41,16 @@ export type LongMemEvalWorkerSpawner = (
 export interface LongMemEvalConcurrencyDeps {
   readonly spawnWorker?: LongMemEvalWorkerSpawner;
   readonly resolveCliPath?: () => string;
+}
+
+interface LongMemEvalConcurrentContext {
+  readonly opts: LongMemEvalRunOptions;
+  readonly concurrency: number;
+  readonly shardRoot: string;
+  readonly plans: readonly LongMemEvalWorkerShardPlan[];
+  readonly cliPath: string;
+  readonly spawnWorker: LongMemEvalWorkerSpawner;
+  readonly logDir: string;
 }
 
 export function freezeProcessEnvForWorkers(
@@ -115,6 +133,12 @@ export function validateLongMemEvalConcurrency(opts: LongMemEvalRunOptions): voi
         "each worker needs an isolated daemon DB."
     );
   }
+  if (opts.questionManifest !== undefined) {
+    throw new Error(
+      "longmemeval --question-manifest is incompatible with --concurrency > 1; " +
+        "run the manifest with a single worker."
+    );
+  }
 }
 
 export async function runLongMemEvalConcurrent(
@@ -122,6 +146,35 @@ export async function runLongMemEvalConcurrent(
   deps: LongMemEvalConcurrencyDeps = {}
 ): Promise<LongMemEvalRunResult> {
   validateLongMemEvalConcurrency(opts);
+  const context = await prepareLongMemEvalConcurrentRun(opts, deps);
+  let succeeded = false;
+  let result: LongMemEvalRunResult | undefined;
+  let primaryError: unknown;
+  try {
+    await runLongMemEvalConcurrentWorkers(context);
+    result = await mergeLongMemEvalConcurrentRun(context);
+    succeeded = true;
+  } catch (error) {
+    primaryError = error;
+  }
+  let cleanupError: unknown;
+  try {
+    await finalizeOwnedTempRoot({ path: context.shardRoot, owned: true }, succeeded);
+  } catch (error) {
+    cleanupError = error;
+  }
+  throwLifecycleErrors("LongMemEval concurrent lifecycle failed", [
+    primaryError,
+    cleanupError
+  ]);
+  if (result === undefined) throw new Error("LongMemEval concurrent run produced no result");
+  return result;
+}
+
+async function prepareLongMemEvalConcurrentRun(
+  opts: LongMemEvalRunOptions,
+  deps: LongMemEvalConcurrencyDeps
+): Promise<LongMemEvalConcurrentContext> {
   const concurrency = resolveLongMemEvalConcurrency(opts);
   const questions = await loadDataset(opts.variant, {
     dataDir: opts.dataDir,
@@ -151,73 +204,78 @@ export async function runLongMemEvalConcurrent(
     `[longmemeval concurrency] process-backed workers=${plans.length} ` +
       `window=${windowLength} cli=${cliPath}\n`
   );
+  return { opts, concurrency, shardRoot, plans, cliPath, spawnWorker, logDir };
+}
 
-  let exitFail = 0;
-  try {
-    const results = await Promise.all(
-      plans.map(async (plan) => {
-        const logPath = join(logDir, `shard-${plan.shardIndex}.log`);
-        const status = await spawnWorker({
-          cliPath,
-          args: buildWorkerCliArgs(opts, plan),
-          env: freezeProcessEnvForWorkers(
-            process.env,
-            buildLongMemEvalWorkerEnvOverrides({
-              concurrency,
-              embeddingMode: opts.embeddingMode,
-              shardRoot,
-              historyRoot: plan.historyRoot
-            })
-          ),
-          logPath
-        });
-        if (status !== 0) {
-          const mergeableGateFailure =
-            status === 1 && (await shardHasMergeableKpi(plan.historyRoot));
-          if (mergeableGateFailure) {
-            process.stderr.write(
-              `[longmemeval concurrency] shard ${plan.shardIndex} exited status=1 ` +
-                `after writing KPI; allowing merge log=${logPath}\n`
-            );
-          } else {
-            process.stderr.write(
-              `[longmemeval concurrency] shard ${plan.shardIndex} exited status=${status} ` +
-                `log=${logPath}\n`
-            );
-            exitFail = 1;
-          }
-        }
-        return status;
-      })
+async function runLongMemEvalConcurrentWorkers(
+  context: LongMemEvalConcurrentContext
+): Promise<void> {
+  const results = await Promise.all(
+    context.plans.map((plan) => runLongMemEvalConcurrentWorker(context, plan))
+  );
+  if (results.some((result) => result.fatal)) {
+    throw new Error(
+      `longmemeval --concurrency: one or more worker processes failed (${results.map((result) => result.status).join(",")})`
     );
-    if (exitFail !== 0) {
-      throw new Error(
-        `longmemeval --concurrency: one or more worker processes failed (${results.join(",")})`
-      );
-    }
-
-    const shardRoots = plans.map((plan) => plan.historyRoot);
-    process.stdout.write(
-      `[longmemeval concurrency] merging ${shardRoots.length} shard(s) -> ${opts.historyRoot}\n`
-    );
-    const loaded = await loadMergeShards(shardRoots);
-    const build = buildMergedLongMemEvalPayload(loaded);
-    const archive = await writeMergedLongMemEvalArchive({
-      historyRoot: opts.historyRoot,
-      build,
-      shardArchiveRefs: loaded.archiveRefs
-    });
-    return {
-      slug: archive.slug,
-      kpiPath: archive.kpiPath,
-      reportPath: join(dirname(archive.kpiPath), "report.md"),
-      findingsPath: join(dirname(archive.kpiPath), "findings.md"),
-      diagnosticsPath: archive.diagnosticsPath,
-      payload: archive.merged
-    };
-  } finally {
-    await rm(shardRoot, { recursive: true, force: true });
   }
+}
+
+async function runLongMemEvalConcurrentWorker(
+  context: LongMemEvalConcurrentContext,
+  plan: LongMemEvalWorkerShardPlan
+): Promise<{ readonly status: number; readonly fatal: boolean }> {
+  const logPath = join(context.logDir, `shard-${plan.shardIndex}.log`);
+  const status = await context.spawnWorker({
+    cliPath: context.cliPath,
+    args: buildWorkerCliArgs(context.opts, plan),
+    env: freezeProcessEnvForWorkers(
+      process.env,
+      buildLongMemEvalWorkerEnvOverrides({
+        concurrency: context.concurrency,
+        embeddingMode: context.opts.embeddingMode,
+        shardRoot: context.shardRoot,
+        historyRoot: plan.historyRoot
+      })
+    ),
+    logPath
+  });
+  const mergeable = status === 1 && await shardHasMergeableKpi(plan.historyRoot);
+  if (status !== 0) {
+    process.stderr.write(mergeable
+      ? `[longmemeval concurrency] shard ${plan.shardIndex} exited status=1 after writing KPI; allowing merge log=${logPath}\n`
+      : `[longmemeval concurrency] shard ${plan.shardIndex} exited status=${status} log=${logPath}\n`);
+  }
+  return { status, fatal: status !== 0 && !mergeable };
+}
+
+async function mergeLongMemEvalConcurrentRun(
+  context: LongMemEvalConcurrentContext
+): Promise<LongMemEvalRunResult> {
+  const shardRoots = context.plans.map((plan) => plan.historyRoot);
+  process.stdout.write(
+    `[longmemeval concurrency] merging ${shardRoots.length} shard(s) -> ${context.opts.historyRoot}\n`
+  );
+  const loaded = await loadMergeShards(shardRoots);
+  const build = buildMergedLongMemEvalPayload(loaded);
+  const archive = await writeMergedLongMemEvalArchive({
+    historyRoot: context.opts.historyRoot,
+    build,
+    shardArchiveRefs: loaded.archiveRefs
+  });
+  await preserveShardRunProvenance({
+    shardArchiveRefs: loaded.archiveRefs,
+    plans: context.plans,
+    mergedArchiveRoot: dirname(archive.kpiPath),
+    requestedConcurrency: context.concurrency
+  });
+  return {
+    slug: archive.slug,
+    kpiPath: archive.kpiPath,
+    reportPath: join(dirname(archive.kpiPath), "report.md"),
+    findingsPath: join(dirname(archive.kpiPath), "findings.md"),
+    diagnosticsPath: archive.diagnosticsPath,
+    payload: archive.merged
+  };
 }
 
 function resolveDefaultBenchRunnerCliPath(): string {

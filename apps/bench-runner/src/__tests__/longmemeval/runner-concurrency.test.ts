@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   makeShardDiagnostics,
@@ -19,6 +19,71 @@ import {
   validateLongMemEvalConcurrency,
   type LongMemEvalWorkerSpawnOptions
 } from "../../longmemeval/runner-concurrency.js";
+import type { LongMemEvalRunProvenance } from "../../longmemeval/provenance/run.js";
+
+function makeShardProvenance(
+  offset: number,
+  limit: number
+): LongMemEvalRunProvenance {
+  return {
+    schema_version: 1,
+    code: {
+      commit_sha7: "05d98df",
+      gate_sha256: "a".repeat(64),
+      worktree_state_sha256: "b".repeat(64)
+    },
+    extraction_cache: {
+      manifest_sha256: "c".repeat(64),
+      schema_version: 1,
+      extraction_model: "fixture-model",
+      provider_url: `sha256:${"d".repeat(64)}`,
+      system_prompt_sha256: "e".repeat(64),
+      cache_key_algo: "fixture-v1",
+      dataset: "longmemeval-s",
+      dataset_revision: "f".repeat(64),
+      requested_turns: 10,
+      cached_turns: 10,
+      coverage: 1,
+      storage: "git-tracked",
+      built_at: "2026-07-01T00:00:00.000Z",
+      builder: "test"
+    },
+    runtime: {
+      node_version: "v24.0.0",
+      platform: "linux",
+      arch: "x64",
+      embedding_mode: "disabled",
+      embedding_provider_kind: "openai",
+      embedding_provider_label: "none",
+      onnx_threads: null,
+      paired_env: {}
+    },
+    execution: {
+      protocol: "sequential",
+      concurrency: 1,
+      offset,
+      limit,
+      evaluated_count: limit
+    },
+    recall_config: { conf_slice_compatibility: false },
+    question_manifest: null
+  };
+}
+
+function makeRangeKpi(offset: number, limit: number) {
+  return makeShardKpi({
+    evaluated_count: limit,
+    kpi: {
+      ...makeShardKpi().kpi,
+      per_scenario: Array.from({ length: limit }, (_, index) => ({
+        id: `range-${offset + index}`,
+        version: 1,
+        hit_at_5: true,
+        tier: "warm" as const
+      }))
+    }
+  });
+}
 
 describe("buildLongMemEvalWorkerEnvOverrides", () => {
   it("adds shared ONNX single-flight env when concurrency>1 and embeddingMode=env", () => {
@@ -125,6 +190,17 @@ describe("validateLongMemEvalConcurrency", () => {
       })
     ).toThrow(/--concurrency > 1 is incompatible with --qa/);
   });
+
+  it("rejects question manifests instead of silently sharding a different sample", () => {
+    expect(() =>
+      validateLongMemEvalConcurrency({
+        variant: "longmemeval_s",
+        historyRoot: "/tmp/history",
+        concurrency: 2,
+        questionManifest: "/tmp/questions.json"
+      })
+    ).toThrow(/question-manifest.*concurrency/u);
+  });
 });
 
 describe("runLongMemEvalConcurrent", () => {
@@ -195,6 +271,16 @@ describe("runLongMemEvalConcurrent", () => {
               }
             })
           );
+          await writeFile(
+            join(
+              shardRoot,
+              "public",
+              "2026-05-14T100000Z-abc1234",
+              "longmemeval-run-provenance.json"
+            ),
+            `${JSON.stringify(makeShardProvenance(offset, limit), null, 2)}\n`,
+            "utf8"
+          );
           return 0;
         }
       }
@@ -212,6 +298,25 @@ describe("runLongMemEvalConcurrent", () => {
     expect(result.payload.evaluated_count).toBe(4);
     expect(result.kpiPath).toContain(historyRoot);
     expect(result.diagnosticsPath).not.toBeNull();
+    const archiveRoot = dirname(result.kpiPath);
+    await expect(readFile(
+      join(archiveRoot, "longmemeval-run-provenance.shard-0.json"),
+      "utf8"
+    )).resolves.toContain(`"offset": 0`);
+    await expect(readFile(
+      join(archiveRoot, "longmemeval-run-provenance.shard-1.json"),
+      "utf8"
+    )).resolves.toContain(`"offset": 2`);
+    const aggregate = JSON.parse(await readFile(
+      join(archiveRoot, "longmemeval-run-provenance.json"),
+      "utf8"
+    )) as Record<string, unknown>;
+    expect(aggregate).toMatchObject({
+      kind: "longmemeval_sharded_run_provenance",
+      gate_eligible: true,
+      requested_concurrency: 2,
+      effective_concurrency: 2
+    });
   });
 
   it("still merges shard archives when a worker exits 1 after writing KPI evidence", async () => {
@@ -261,6 +366,16 @@ describe("runLongMemEvalConcurrent", () => {
               }))
             })
           );
+          const provenance = makeShardProvenance(offset, limit);
+          const { coverage: _coverage, ...cacheWithoutCoverage } = provenance.extraction_cache!;
+          await writeFile(
+            join(shardRoot, "public", "2026-05-14T100000Z-abc1234", "longmemeval-run-provenance.json"),
+            `${JSON.stringify({
+              ...provenance,
+              extraction_cache: cacheWithoutCoverage
+            })}\n`,
+            "utf8"
+          );
           return offset === 0 ? 1 : 0;
         }
       }
@@ -269,5 +384,86 @@ describe("runLongMemEvalConcurrent", () => {
     expect(result.payload.evaluated_count).toBe(4);
     expect(result.kpiPath).toContain(historyRoot);
     expect(result.diagnosticsPath).not.toBeNull();
+    const aggregate = JSON.parse(await readFile(
+      join(dirname(result.kpiPath), "longmemeval-run-provenance.json"),
+      "utf8"
+    )) as { gate_eligible: boolean };
+    expect(aggregate.gate_eligible).toBe(false);
+  });
+
+  it("fails the concurrent run when a worker exits without mergeable evidence", async () => {
+    await expect(runLongMemEvalConcurrent(
+      {
+        variant: "longmemeval_s",
+        limit: 4,
+        historyRoot: join(tmpRoot, "fatal-worker-history"),
+        dataDir,
+        pinnedMetaRoot,
+        concurrency: 2
+      },
+      { spawnWorker: async () => 2 }
+    )).rejects.toThrow(/worker processes failed \(2,2\)/u);
+  });
+
+  it("fails loud when a present shard provenance sidecar is malformed", async () => {
+    await expect(runLongMemEvalConcurrent(
+      {
+        variant: "longmemeval_s",
+        limit: 4,
+        historyRoot: join(tmpRoot, "invalid-provenance-history"),
+        dataDir,
+        pinnedMetaRoot,
+        concurrency: 2
+      },
+      {
+        spawnWorker: async (options) => {
+          const offset = Number(options.args[options.args.indexOf("--offset") + 1]);
+          const limit = Number(options.args[options.args.indexOf("--limit") + 1]);
+          const shardRoot = options.args[options.args.indexOf("--history-root") + 1]!;
+          await writeShardRoot(shardRoot, makeRangeKpi(offset, limit));
+          await writeFile(
+            join(shardRoot, "public", "2026-05-14T100000Z-abc1234", "longmemeval-run-provenance.json"),
+            offset === 0 ? "{}\n" : `${JSON.stringify(makeShardProvenance(offset, limit))}\n`,
+            "utf8"
+          );
+          return 0;
+        }
+      }
+    )).rejects.toThrow(/invalid shard run provenance/u);
+  });
+
+  it("fails loud when parsed shard provenance identities disagree", async () => {
+    await expect(runLongMemEvalConcurrent(
+      {
+        variant: "longmemeval_s",
+        limit: 4,
+        historyRoot: join(tmpRoot, "incoherent-provenance-history"),
+        dataDir,
+        pinnedMetaRoot,
+        concurrency: 2
+      },
+      {
+        spawnWorker: async (options) => {
+          const offset = Number(options.args[options.args.indexOf("--offset") + 1]);
+          const limit = Number(options.args[options.args.indexOf("--limit") + 1]);
+          const shardRoot = options.args[options.args.indexOf("--history-root") + 1]!;
+          await writeShardRoot(shardRoot, makeRangeKpi(offset, limit));
+          const base = makeShardProvenance(offset, limit);
+          const provenance = offset === 0 ? base : {
+            ...base,
+            runtime: {
+              ...base.runtime,
+              paired_env: { ...base.runtime.paired_env, ALAYA_RECALL_COVERAGE_SELECTOR: "drift" }
+            }
+          };
+          await writeFile(
+            join(shardRoot, "public", "2026-05-14T100000Z-abc1234", "longmemeval-run-provenance.json"),
+            `${JSON.stringify(provenance)}\n`,
+            "utf8"
+          );
+          return 0;
+        }
+      }
+    )).rejects.toThrow(/run provenance is incoherent/u);
   });
 });

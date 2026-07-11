@@ -1,31 +1,19 @@
 import { readFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { BenchPolicyShape } from "@do-soul/alaya-eval";
 import {
-  resolveBenchCommitInfo,
-  RECALL_PIPELINE_VERSION,
-  resolveBenchRunnerVersion
+  resolveBenchCommitInfo
 } from "../shared/version.js";
-import type {
-  BenchPolicyShape
-} from "@do-soul/alaya-eval";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind,
   BenchEmbeddingWarmupSummary,
   BenchQueryEmbeddingWarmupSummary
 } from "../harness/daemon.js";
-import {
-  BENCH_DAEMON_DB_FILENAME,
-  RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-  checkpointAndCopyBenchDb,
-  readSchemaMigrationVersion,
-  writeSnapshotManifest,
-  writeSnapshotSidecar,
-  type LongMemEvalSnapshotQuestion,
-  type SnapshotExtractionProvenance
-} from "./snapshot.js";
-import { readExtractionCacheManifest } from "./extraction-cache-manifest.js";
+import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
+import type { LongMemEvalRunProvenance } from "./provenance/run.js";
+import { writeRecallEvalSnapshotArtifacts } from "./snapshot/writer.js";
 import type {
   LongMemEvalEmbeddingVectorCacheSummary,
   LongMemEvalQueryEmbeddingCacheSummary
@@ -132,50 +120,9 @@ export function writeRecallEvalSnapshot(input: {
   readonly commitSha7: string;
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
-}): void {
-  const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
-  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
-  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
-
-  const extractionManifest = readExtractionCacheManifest(input.extractionCacheRoot);
-  const extractionProvenance: SnapshotExtractionProvenance | null =
-    extractionManifest === undefined
-      ? null
-      : {
-          extraction_model: extractionManifest.extraction_model,
-          provider_url: extractionManifest.provider_url,
-          system_prompt_sha256: extractionManifest.system_prompt_sha256,
-          dataset: extractionManifest.dataset,
-          dataset_revision: extractionManifest.dataset_revision,
-          ...(extractionManifest.coverage === undefined
-            ? {}
-            : { coverage: extractionManifest.coverage }),
-          ...(extractionManifest.cached_turns === undefined
-            ? {}
-            : { cached_turns: extractionManifest.cached_turns }),
-          ...(extractionManifest.requested_turns === undefined
-            ? {}
-            : { requested_turns: extractionManifest.requested_turns })
-        };
-
-  writeSnapshotSidecar(input.snapshotOut, {
-    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-    variant: input.variant,
-    questions: input.snapshotQuestions
-  });
-  writeSnapshotManifest(input.snapshotOut, {
-    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-    variant: input.variant,
-    question_count: input.snapshotQuestions.length,
-    recall_pipeline_version: RECALL_PIPELINE_VERSION,
-    schema_migration_version: schemaMigrationVersion,
-    bench_runner_version: resolveBenchRunnerVersion(),
-    alaya_commit: input.commitSha7,
-    db_filename: basename(input.snapshotOut),
-    sidecar_filename: `${basename(input.snapshotOut)}.sidecar.json`,
-    built_at: new Date().toISOString(),
-    extraction_provenance: extractionProvenance
-  });
+  readonly runProvenance: LongMemEvalRunProvenance;
+}): Promise<void> {
+  return writeRecallEvalSnapshotArtifacts(input);
 }
 
 export function readLongMemEvalPinnedMeta(

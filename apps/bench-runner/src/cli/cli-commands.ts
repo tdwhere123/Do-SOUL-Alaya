@@ -8,7 +8,11 @@ import { fetchLongMemEval } from "../longmemeval/fetch.js";
 import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
 import { runLongMemEvalCrossQuestion } from "../longmemeval/crossquestion.js";
 import { runLiveBench } from "../live/runner.js";
-import { runLongMemEval } from "../longmemeval/runner.js";
+import {
+  runLongMemEval,
+  type LongMemEvalQaRunOption,
+  type LongMemEvalRunResult
+} from "../longmemeval/runner.js";
 import {
   createGardenChatFn,
   resolveQaChatConfig,
@@ -57,85 +61,10 @@ export async function runFetchLongMemEval(opts: ParsedFlags): Promise<number> {
 
 export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
   try {
-    // --qa: construct the garden chat fn from env (fail-loud on missing creds).
-    // Off => qaOption undefined => runner makes zero LLM calls. Each --qa
-    // question costs 2 chat calls (answer + judge) — real money.
-    const qaOption = opts.qa
-      ? (() => {
-          const config = resolveQaChatConfig();
-          const judgeConfig = resolveQaJudgeChatConfig();
-          return {
-            chat: createGardenChatFn(config),
-            judgeChat: createGardenChatFn(judgeConfig),
-            answerModel: config.model,
-            judgeModel: judgeConfig.model
-          };
-        })()
-      : undefined;
-    process.stdout.write(
-      `Running LongMemEval ${opts.variant}` +
-        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
-        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
-        (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
-        ` policy_shape=${opts.policyShape}` +
-        (opts.simulateReport !== "none" ? ` simulate_report=${opts.simulateReport}` : "") +
-        (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
-        (qaOption !== undefined ? " qa=on" : "") +
-        (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
-        "...\n"
-    );
-    const result = await runLongMemEval({
-      variant: opts.variant,
-      limit: opts.limit,
-      offset: opts.offset,
-      historyRoot: opts.historyRoot,
-      dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind,
-      policyShape: opts.policyShape,
-      simulateReport: opts.simulateReport,
-      weightOverridesJson: opts.weightOverridesJson,
-      ...(qaOption === undefined ? {} : { qa: qaOption }),
-      // @anchor longmemeval-snapshot-out-cli: producer half of the recall-eval
-      // fast loop. When set, runLongMemEval pins the seeded DB and writes
-      // <db> + .manifest.json + .sidecar.json, which recall-eval --snapshot
-      // consumes. cross-file: longmemeval/runner.ts (snapshotOut/dataDirRoot)
-      ...(opts.snapshotOut === undefined ? {} : { snapshotOut: opts.snapshotOut }),
-      ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
-      ...(opts.pinnedMetaRoot === undefined
-        ? {}
-        : { pinnedMetaRoot: opts.pinnedMetaRoot }),
-      ...(opts.extractionCacheRoot === undefined
-        ? {}
-        : { extractionCacheRoot: opts.extractionCacheRoot }),
-      ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency })
-    });
-    const kpi = result.payload.kpi;
-    process.stdout.write(
-      `Done. Slug: ${result.slug}\n` +
-        `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
-        `  Simulate report: ${result.payload.simulate_report ?? "none"}\n` +
-        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
-        (kpi.full_gold_coverage === undefined
-          ? ""
-          : `  full-gold@5=${pct(kpi.full_gold_coverage.full_gold_at_5)} ` +
-            `cov@5=${pct(kpi.full_gold_coverage.gold_coverage_at_5)} ` +
-            `pool@50=${pct(kpi.full_gold_coverage.pool_recall_at_50)} ` +
-            `pool@100=${pct(kpi.full_gold_coverage.pool_recall_at_100)} ` +
-            `(official R@5 counts ANY gold; this needs ALL ${kpi.full_gold_coverage.gold_bearing_questions}q)\n`) +
-        (kpi.qa_metrics === undefined
-          ? ""
-          : `  QA accuracy=${pct(kpi.qa_metrics.qa_accuracy)} ` +
-            `(${kpi.qa_metrics.qa_correct}/${kpi.qa_metrics.qa_total})` +
-            ` | abstention ${kpi.qa_metrics.qa_abstention_correct}/${kpi.qa_metrics.qa_abstention_total}\n` +
-            Object.entries(parseQaByType(kpi.qa_metrics.qa_by_type))
-              .map(
-                ([type, t]) => `    ${type}: ${t.correct}/${t.total}\n`
-              )
-              .join("")) +
-        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
-        `  KPI: ${result.kpiPath}\n`
-    );
+    const qaOption = buildLongMemEvalQaOption(opts);
+    process.stdout.write(renderLongMemEvalStart(opts, qaOption));
+    const result = await runLongMemEval(buildLongMemEvalRunOptions(opts, qaOption));
+    process.stdout.write(renderLongMemEvalResult(result));
     return exitCodeForBenchmarkResult(result.payload);
   } catch (err) {
     process.stderr.write(
@@ -143,6 +72,97 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
     );
     return 2;
   }
+}
+
+function buildLongMemEvalQaOption(
+  opts: ParsedFlags
+): LongMemEvalQaRunOption | undefined {
+  if (!opts.qa) return undefined;
+  const config = resolveQaChatConfig();
+  const judgeConfig = resolveQaJudgeChatConfig();
+  return {
+    chat: createGardenChatFn(config),
+    judgeChat: createGardenChatFn(judgeConfig),
+    answerModel: config.model,
+    judgeModel: judgeConfig.model
+  };
+}
+
+function renderLongMemEvalStart(
+  opts: ParsedFlags,
+  qaOption: LongMemEvalQaRunOption | undefined
+): string {
+  return `Running LongMemEval ${opts.variant}` +
+    (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
+    (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
+    (opts.questionManifest !== undefined ? ` manifest=${opts.questionManifest}` : "") +
+    (opts.embeddingMode !== "disabled" ? ` embedding=${opts.embeddingMode}` : "") +
+    ` policy_shape=${opts.policyShape}` +
+    (opts.simulateReport !== "none" ? ` simulate_report=${opts.simulateReport}` : "") +
+    (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
+    (qaOption !== undefined ? " qa=on" : "") +
+    (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+    "...\n";
+}
+
+function buildLongMemEvalRunOptions(
+  opts: ParsedFlags,
+  qaOption: LongMemEvalQaRunOption | undefined
+): Parameters<typeof runLongMemEval>[0] {
+  return {
+    variant: opts.variant,
+    limit: opts.limit,
+    offset: opts.offset,
+    historyRoot: opts.historyRoot,
+    dataDir: opts.dataDir,
+    embeddingMode: opts.embeddingMode,
+    embeddingProviderKind: opts.embeddingProviderKind,
+    policyShape: opts.policyShape,
+    simulateReport: opts.simulateReport,
+    weightOverridesJson: opts.weightOverridesJson,
+    ...(opts.questionManifest === undefined ? {} : { questionManifest: opts.questionManifest }),
+    ...(qaOption === undefined ? {} : { qa: qaOption }),
+    ...(opts.snapshotOut === undefined ? {} : { snapshotOut: opts.snapshotOut }),
+    ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
+    ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
+    ...(opts.extractionCacheRoot === undefined ? {} : { extractionCacheRoot: opts.extractionCacheRoot }),
+    ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency })
+  };
+}
+
+function renderLongMemEvalResult(result: LongMemEvalRunResult): string {
+  const kpi = result.payload.kpi;
+  return `Done. Slug: ${result.slug}\n` +
+    `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
+    `  Simulate report: ${result.payload.simulate_report ?? "none"}\n` +
+    `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
+    renderFullGoldCoverage(kpi.full_gold_coverage) +
+    renderLongMemEvalQaMetrics(kpi.qa_metrics) +
+    `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+    `  KPI: ${result.kpiPath}\n`;
+}
+
+function renderFullGoldCoverage(
+  coverage: KpiPayload["kpi"]["full_gold_coverage"]
+): string {
+  if (coverage === undefined) return "";
+  return `  full-gold@5=${pct(coverage.full_gold_at_5)} ` +
+    `cov@5=${pct(coverage.gold_coverage_at_5)} ` +
+    `pool@50=${pct(coverage.pool_recall_at_50)} ` +
+    `pool@100=${pct(coverage.pool_recall_at_100)} ` +
+    `(official R@5 counts ANY gold; this needs ALL ${coverage.gold_bearing_questions}q)\n`;
+}
+
+function renderLongMemEvalQaMetrics(
+  metrics: KpiPayload["kpi"]["qa_metrics"]
+): string {
+  if (metrics === undefined) return "";
+  return `  QA accuracy=${pct(metrics.qa_accuracy)} ` +
+    `(${metrics.qa_correct}/${metrics.qa_total})` +
+    ` | abstention ${metrics.qa_abstention_correct}/${metrics.qa_abstention_total}\n` +
+    Object.entries(parseQaByType(metrics.qa_by_type))
+      .map(([type, row]) => `    ${type}: ${row.correct}/${row.total}\n`)
+      .join("");
 }
 
 function parseQaByType(value: unknown): Readonly<Record<string, { readonly correct: number; readonly total: number }>> {

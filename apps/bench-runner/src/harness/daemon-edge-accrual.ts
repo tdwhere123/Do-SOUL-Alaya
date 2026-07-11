@@ -5,6 +5,7 @@ import {
 } from "@do-soul/alaya-core";
 import { planSessionCoRecallWarmup } from "./co-recall-warmup.js";
 import type { CreateBenchSeedOpsInput } from "./daemon-seed-ops-types.js";
+import type { BenchEdgeFormationMember } from "./daemon-types.js";
 
 export async function accrueSessionCoRecall(
   input: CreateBenchSeedOpsInput,
@@ -37,7 +38,7 @@ export async function accrueSessionCoRecall(
 
 export async function accrueCoherenceCoRecall(
   input: CreateBenchSeedOpsInput,
-  members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+  members: readonly BenchEdgeFormationMember[],
   options: {
     readonly floor: number;
     readonly capPerNode: number;
@@ -57,7 +58,8 @@ export async function accrueCoherenceCoRecall(
     runId: input.activeContext.runId,
     objects: members.map((member) => ({
       objectId: member.memoryId,
-      sessionId: member.sessionId
+      sessionId: member.sessionId,
+      formationKey: member.formationKey
     })),
     floor: options.floor,
     capPerNode: options.capPerNode,
@@ -69,7 +71,7 @@ export async function accrueCoherenceCoRecall(
 // it never reseeds memories or regenerates embeddings.
 export async function accrueAnswersWithCoRelevance(
   input: CreateBenchSeedOpsInput,
-  members: readonly { readonly memoryId: string; readonly sessionId: string }[],
+  members: readonly BenchEdgeFormationMember[],
   options: {
     readonly bar: number;
     readonly capPerNode: number;
@@ -89,7 +91,8 @@ export async function accrueAnswersWithCoRelevance(
     runId: input.activeContext.runId,
     objects: members.map((member) => ({
       objectId: member.memoryId,
-      sessionId: member.sessionId
+      sessionId: member.sessionId,
+      formationKey: member.formationKey
     })),
     bar: options.bar,
     capPerNode: options.capPerNode,

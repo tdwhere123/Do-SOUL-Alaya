@@ -1,16 +1,25 @@
 import type {
   ManifestationState,
   MemoryEntry,
+  PathAnchorRef,
   RecallCandidate,
   RecallOriginPlane,
   SoulActiveConstraint,
-  SoulMemorySearchDegradationReason} from "@do-soul/alaya-protocol";
+  SoulMemorySearchDegradationReason
+} from "@do-soul/alaya-protocol";
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 
-// One compositional inflow edge: seed object flooding the target with learned-edge weight π.
+/** Immutable scoring provenance prevents diagnostics from re-querying mutable path state. */
 export interface PathInflowEdge {
+  /** Optional only for legacy or synthetic callers; PathRelation producers populate these fields. */
+  readonly pathId?: string;
+  readonly relationKind?: string;
   readonly seedObjectId: string;
+  readonly targetObjectId?: string;
+  readonly seedAnchor?: Readonly<PathAnchorRef>;
+  readonly targetAnchor?: Readonly<PathAnchorRef>;
+  readonly pathSourceVersion?: string;
   readonly weight: number;
 }
 

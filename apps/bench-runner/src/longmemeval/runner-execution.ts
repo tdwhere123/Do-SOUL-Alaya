@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { resolveBenchRunnerVersion } from "../shared/version.js";
 import {
   startBenchDaemon,
@@ -16,6 +13,7 @@ import {
   resolveBenchAllowLiveExtraction
 } from "./compile-seed.js";
 import { QaChatError } from "./qa-chat.js";
+import { loadQuestionManifestSelection } from "./selection/question-manifest.js";
 import {
   recallOptionsForPolicyShape,
   resolveBenchEmbeddingProviderLabel,
@@ -28,6 +26,13 @@ import {
 } from "./runner-question.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { LongMemEvalRunOptions } from "./runner.js";
+import {
+  createOwnedTempRoot,
+  externalTempRoot,
+  finalizeOwnedTempRoot
+} from "./lifecycle/owned-temp-root.js";
+import { buildLongMemEvalRunProvenance } from "./provenance/run.js";
+import { throwLifecycleErrors } from "./lifecycle/errors.js";
 
 type LongMemEvalQuestions = Awaited<ReturnType<typeof loadDataset>>;
 type LongMemEvalQuestion = LongMemEvalQuestions[number];
@@ -57,7 +62,7 @@ export interface LongMemEvalExecutionResult {
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
   readonly seedFuelInventory: Awaited<
-    ReturnType<typeof import("./seed-fuel-collector.js").collectBenchSeedFuelInventory>
+    ReturnType<typeof collectBenchSeedFuelInventory>
   >;
 }
 
@@ -69,12 +74,23 @@ export async function prepareLongMemEvalRun(
     dataDir: opts.dataDir,
     pinnedMetaRoot: opts.pinnedMetaRoot
   });
+  const selectedQuestions = opts.questionManifest === undefined
+    ? questions
+    : await loadQuestionManifestSelection({
+        manifestPath: opts.questionManifest,
+        questions,
+        variant: opts.variant,
+        ...(opts.pinnedMetaRoot === undefined
+          ? {}
+          : { pinnedMetaRoot: opts.pinnedMetaRoot })
+      });
+  const window = selectQuestionWindow(selectedQuestions, opts);
   const commitInfo = resolveCommitInfo();
   const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
   return {
     opts,
     questions,
-    window: selectQuestionWindow(questions, opts),
+    window,
     alayaVersion: resolveBenchRunnerVersion(),
     commitInfo,
     commitSha7: commitInfo.sha7,
@@ -88,7 +104,7 @@ export async function prepareLongMemEvalRun(
     simulateReport: opts.simulateReport ?? "none",
     recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
     seedRunner: createLongMemEvalSeedRunner(
-      selectQuestionWindow(questions, opts),
+      window,
       extractionCacheRoot
     ),
     captureSnapshot: opts.snapshotOut !== undefined,
@@ -102,25 +118,47 @@ export async function executeLongMemEvalRun(
   context: LongMemEvalRunContext
 ): Promise<LongMemEvalExecutionResult> {
   let daemon: BenchDaemonHandle | undefined;
+  let succeeded = false;
+  let result: LongMemEvalExecutionResult | undefined;
+  let primaryError: unknown;
   const execution = createExecutionState();
   try {
     daemon = await startLongMemEvalDaemon(context);
     await runLongMemEvalWindow(context, daemon, execution);
     const seedFuelInventory = await collectBenchSeedFuelInventory(daemon.dataDir);
     await writeLongMemEvalSnapshotIfRequested(context, execution.snapshotQuestions);
-    return {
+    result = {
       collected: execution.collected,
       questionFailures: execution.questionFailures,
       failedQuestionIds: execution.failedQuestionIds,
       seedFuelInventory
     };
-  } finally {
-    try {
-      await daemon?.shutdown();
-    } finally {
-      await cleanupSeedDataDirRoot(context);
-    }
+    succeeded = execution.questionFailures === 0;
+  } catch (error) {
+    primaryError = error;
   }
+  let shutdownError: unknown;
+  try {
+    if (daemon !== undefined) await daemon.shutdown();
+  } catch (error) {
+    shutdownError = error;
+  }
+  let cleanupError: unknown;
+  try {
+    await cleanupSeedDataDirRoot(
+      context,
+      succeeded && primaryError === undefined && shutdownError === undefined
+    );
+  } catch (error) {
+    cleanupError = error;
+  }
+  throwLifecycleErrors("LongMemEval run lifecycle failed", [
+    primaryError,
+    shutdownError,
+    cleanupError
+  ]);
+  if (result === undefined) throw new Error("LongMemEval run produced no result");
+  return result;
 }
 
 function selectQuestionWindow(
@@ -151,14 +189,13 @@ async function resolveSeedDataDirRoot(
   readonly removeSeedDataDirRoot: boolean;
 }> {
   if (opts.dataDirRoot !== undefined) {
-    return { seedDataDirRoot: opts.dataDirRoot, removeSeedDataDirRoot: false };
+    const root = externalTempRoot(opts.dataDirRoot);
+    return { seedDataDirRoot: root.path, removeSeedDataDirRoot: root.owned };
   }
-  if (opts.snapshotOut === undefined) {
-    return { removeSeedDataDirRoot: false };
-  }
+  const root = await createOwnedTempRoot("alaya-bench-seed-");
   return {
-    seedDataDirRoot: await mkdtemp(join(tmpdir(), "alaya-bench-seed-")),
-    removeSeedDataDirRoot: true
+    seedDataDirRoot: root.path,
+    removeSeedDataDirRoot: root.owned
   };
 }
 
@@ -288,22 +325,34 @@ async function writeLongMemEvalSnapshotIfRequested(
   if (context.opts.snapshotOut === undefined || context.seedDataDirRoot === undefined) {
     return;
   }
-  writeRecallEvalSnapshot({
+  const runProvenance = await buildLongMemEvalRunProvenance({
+    opts: context.opts,
+    evaluatedCount: snapshotQuestions.length,
+    commitSha7: context.commitSha7,
+    embeddingProviderLabel: context.embeddingProviderLabel,
+    env: process.env
+  });
+  await writeRecallEvalSnapshot({
     snapshotOut: context.opts.snapshotOut,
     seedDataDirRoot: context.seedDataDirRoot,
     variant: context.opts.variant,
     commitSha7: context.commitSha7,
     snapshotQuestions,
-    extractionCacheRoot: context.extractionCacheRoot
+    extractionCacheRoot: context.extractionCacheRoot,
+    runProvenance
   });
   process.stdout.write(
     `[longmemeval snapshot] wrote ${snapshotQuestions.length} questions -> ${context.opts.snapshotOut}\n`
   );
 }
 
-async function cleanupSeedDataDirRoot(context: LongMemEvalRunContext): Promise<void> {
-  if (!context.removeSeedDataDirRoot || context.seedDataDirRoot === undefined) {
-    return;
-  }
-  await rm(context.seedDataDirRoot, { recursive: true, force: true });
+async function cleanupSeedDataDirRoot(
+  context: LongMemEvalRunContext,
+  succeeded: boolean
+): Promise<void> {
+  if (context.seedDataDirRoot === undefined) return;
+  await finalizeOwnedTempRoot(
+    { path: context.seedDataDirRoot, owned: context.removeSeedDataDirRoot },
+    succeeded
+  );
 }

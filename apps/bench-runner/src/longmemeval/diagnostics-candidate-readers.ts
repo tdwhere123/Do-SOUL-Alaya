@@ -7,6 +7,7 @@ import type {
   DiagnosticScoreFactors,
   ReadCandidateDiagnosticsResult
 } from "./diagnostics-types.js";
+import { DiagnosticFloodPotentialSchema } from "./diagnostics-schema.js";
 
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",
@@ -101,6 +102,34 @@ function readCandidateRow(
 ): CandidateDiagnostic | null {
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
+  const identity = readCandidateIdentity(record);
+  if (identity === null) return null;
+  const fusion = matchingFusionBreakdown(
+    fusionByCandidateKey.get(identity.candidateKey),
+    identity.objectId,
+    identity.objectKind
+  );
+  return {
+    candidateKey: identity.candidateKey,
+    objectId: identity.objectId,
+    objectKind: identity.objectKind,
+    ...readCandidateBasics(record),
+    originPlane: identity.originPlane,
+    ...readCandidateScoring(record, fusion),
+    ...readCandidateProvenance(record),
+    ...readCandidateDelivery(record)
+  };
+}
+
+function readCandidateBasics(record: Readonly<Record<string, unknown>>) {
+  return {
+    createdAt: readString(record.created_at),
+    facetOverlap: readNumber(record.facet_overlap),
+    dimension: readString(record.dimension)
+  };
+}
+
+function readCandidateIdentity(record: Readonly<Record<string, unknown>>) {
   const objectId =
     readString(record.object_id) ??
     readString(record.memory_id) ??
@@ -110,19 +139,19 @@ function readCandidateRow(
   const objectKind = readString(record.object_kind) ?? "memory_entry";
   const candidateKey =
     readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`;
-  const fusion = matchingFusionBreakdown(
-    fusionByCandidateKey.get(candidateKey),
-    objectId,
-    objectKind
-  );
   return {
     candidateKey,
     objectId,
     objectKind,
-    createdAt: readString(record.created_at),
-    facetOverlap: readNumber(record.facet_overlap),
-    dimension: readString(record.dimension),
-    originPlane,
+    originPlane
+  };
+}
+
+function readCandidateScoring(
+  record: Readonly<Record<string, unknown>>,
+  fusion: FusionBreakdownDiagnostic | undefined
+) {
+  return {
     preBudgetRank:
       readNumber(record.pre_budget_rank) ?? readNumber(record.internal_rank),
     selectionOrder: readNumber(record.selection_order),
@@ -139,7 +168,12 @@ function readCandidateRow(
     floodPotential:
       readFloodPotential(record.flood_potential) ?? fusion?.floodPotential ?? null,
     floodFuelCoverage:
-      readFloodFuelCoverage(record.flood_fuel_coverage) ?? fusion?.floodFuelCoverage ?? null,
+      readFloodFuelCoverage(record.flood_fuel_coverage) ?? fusion?.floodFuelCoverage ?? null
+  };
+}
+
+function readCandidateProvenance(record: Readonly<Record<string, unknown>>) {
+  return {
     planeFirstAdmitted: readString(record.plane_first_admitted),
     planeWinningAdmission:
       readString(record.plane_winning_admission) ??
@@ -156,7 +190,12 @@ function readCandidateRow(
     budgetDropReason:
       readString(record.budget_drop_reason) ??
       readString(record.drop_reason) ??
-      readString(record.dropped_reason),
+      readString(record.dropped_reason)
+  };
+}
+
+function readCandidateDelivery(record: Readonly<Record<string, unknown>>) {
+  return {
     rankAfterFusion: readNumber(record.rank_after_fusion),
     rankAfterFeatureRerank: readNumber(record.rank_after_feature_rerank),
     rankAfterLexicalPriority: readNumber(record.rank_after_lexical_priority),
@@ -241,51 +280,8 @@ function readFusionBreakdownDiagnostics(value: unknown): Readonly<{
 }
 
 function readFloodPotential(value: unknown): DiagnosticFloodPotential | null {
-  const record = readRecord(value);
-  if (record === null) return null;
-  const numeric = readRequiredNumbers(record, [
-    "R_obj",
-    "Slice",
-    "A_path",
-    "B_evidence",
-    "E_direct",
-    "omega",
-    "Flood",
-    "lambda",
-    "beta",
-    "final_score"
-  ]);
-  if (numeric === null) return null;
-  const sliceStatus = readString(record.slice_status);
-  const pathStatus = readString(record.path_status);
-  const evidenceStatus = readString(record.evidence_status);
-  const eDirectStatus = readString(record.e_direct_status);
-  if (
-    sliceStatus === null ||
-    pathStatus === null ||
-    evidenceStatus === null ||
-    eDirectStatus === null ||
-    typeof record.fuel_verified !== "boolean"
-  ) {
-    return null;
-  }
-  return Object.freeze({
-    R_obj: numeric.R_obj,
-    Slice: numeric.Slice,
-    A_path: numeric.A_path,
-    B_evidence: numeric.B_evidence,
-    E_direct: numeric.E_direct,
-    omega: numeric.omega,
-    Flood: numeric.Flood,
-    lambda: numeric.lambda,
-    beta: numeric.beta,
-    final_score: numeric.final_score,
-    slice_status: sliceStatus,
-    path_status: pathStatus,
-    evidence_status: evidenceStatus,
-    e_direct_status: eDirectStatus,
-    fuel_verified: record.fuel_verified
-  });
+  const parsed = DiagnosticFloodPotentialSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function readFloodFuelCoverage(value: unknown): DiagnosticFloodFuelCoverage | null {

@@ -15,6 +15,7 @@ export {
   type BenchDaemonOptions,
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind,
+  type BenchEdgeFormationMember,
   type BenchEmbeddingWarmupOptions,
   type BenchEmbeddingWarmupSummary,
   type BenchQueryEmbeddingWarmupSummary,

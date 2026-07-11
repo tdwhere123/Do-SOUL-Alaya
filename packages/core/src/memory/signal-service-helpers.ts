@@ -18,6 +18,8 @@ const BENCH_FULL_TURN_CONTENT_KEY = "bench_full_turn_content";
 const BENCH_STORED_CONTENT_KEY = "bench_stored_content";
 const BENCH_FULL_TURN_TOKENS_KEY = "bench_full_turn_tokens";
 const BENCH_STORED_CONTENT_TOKENS_KEY = "bench_stored_content_tokens";
+const BENCH_FULL_TURN_CHAR_COUNT_KEY = "bench_full_turn_char_count";
+const BENCH_FULL_TURN_SHA256_KEY = "bench_full_turn_sha256";
 const BENCH_TOKEN_CHARS_PER_TOKEN = 4;
 
 export function mapTriageResultToSignalState(
@@ -162,15 +164,46 @@ function buildBenchTokenPayloadSummary(
     readNonEmptyString(rawPayload[BENCH_STORED_CONTENT_KEY]) ??
     readNonEmptyString(rawPayload.distilled_fact) ??
     excerptSibling;
+  const projectedFullTurnTokens = readNonNegativeInteger(
+    rawPayload[BENCH_FULL_TURN_TOKENS_KEY]
+  );
+  const projectedStoredContentTokens = readNonNegativeInteger(
+    rawPayload[BENCH_STORED_CONTENT_TOKENS_KEY]
+  );
+  const fullTurnTokens =
+    projectedFullTurnTokens ??
+    (fullTurnContent === null ? null : estimateBenchTokens(fullTurnContent));
+  const storedContentTokens =
+    projectedStoredContentTokens ??
+    (storedContent === null ? null : estimateBenchTokens(storedContent));
 
-  if (fullTurnContent !== null) {
-    summary[BENCH_FULL_TURN_TOKENS_KEY] = estimateBenchTokens(fullTurnContent);
+  if (fullTurnTokens !== null) {
+    summary[BENCH_FULL_TURN_TOKENS_KEY] = fullTurnTokens;
   }
-  if (storedContent !== null) {
-    summary[BENCH_STORED_CONTENT_TOKENS_KEY] = estimateBenchTokens(storedContent);
+  if (storedContentTokens !== null) {
+    summary[BENCH_STORED_CONTENT_TOKENS_KEY] = storedContentTokens;
   }
+  copyFullTurnIdentity(summary, rawPayload);
 
   return summary;
+}
+
+function copyFullTurnIdentity(
+  summary: Record<string, unknown>,
+  rawPayload: CandidateMemorySignal["raw_payload"]
+): void {
+  const charCount = readNonNegativeInteger(rawPayload[BENCH_FULL_TURN_CHAR_COUNT_KEY]);
+  const digest = rawPayload[BENCH_FULL_TURN_SHA256_KEY];
+  if (charCount !== null) summary[BENCH_FULL_TURN_CHAR_COUNT_KEY] = charCount;
+  if (typeof digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(digest)) {
+    summary[BENCH_FULL_TURN_SHA256_KEY] = digest;
+  }
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function estimateBenchTokens(text: string): number {

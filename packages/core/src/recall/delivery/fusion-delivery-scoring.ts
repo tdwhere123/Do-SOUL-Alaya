@@ -231,7 +231,7 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
     }
   }
   const ra = params.axisContext.raByKey.get(params.candidateKey);
-  return computeIntegratedFloodScore({
+  const scored = computeIntegratedFloodScore({
     entry: params.candidate.entry,
     axisInputs: {
       R_obj: ra?.object ?? 0,
@@ -239,6 +239,18 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
       B_evidence: ra?.evidence ?? 0
     },
     supplementaryData: params.supplementaryData
+  });
+  const trace = params.axisContext.edgeTraceByKey.get(params.candidateKey);
+  if (trace === undefined) {
+    return scored;
+  }
+  return Object.freeze({
+    score: scored.score,
+    diagnostics: Object.freeze({
+      ...scored.diagnostics,
+      edge_traces: trace.traces,
+      edge_trace_truncated_count: trace.truncatedCount
+    })
   });
 }
 

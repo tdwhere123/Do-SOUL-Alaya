@@ -1,6 +1,13 @@
 import type { PathMintOutcome, SubmitCandidateInput } from "../edge-proposals/path-relation-proposal-service.js";
 import { COHERES_WITH_SEED_PROFILE } from "../edge-proposals/path-relation-proposal-service.js";
-import { buildSessionMap, sparsifyPairs, splitPairKey } from "./path-pair-sparsify.js";
+import {
+  buildObjectFormationOrder,
+  buildSessionMap,
+  parsePathPairKeys,
+  type PathPair,
+  type PathPairObject,
+  sparsifyPairs
+} from "./path-pair-sparsify.js";
 
 // Source of object↔object semantic-coherence pairs (cosine ≥ floor, canonical
 // `${low}|${high}` keys). Embedding math lives behind this port; the producer
@@ -27,7 +34,7 @@ export interface CoherenceEdgeProducerDeps {
 export interface CoherenceCrystallizeInput {
   readonly workspaceId: string;
   readonly runId: string | null;
-  readonly objects: readonly { readonly objectId: string; readonly sessionId?: string | null }[];
+  readonly objects: readonly PathPairObject[];
   readonly floor: number;
   readonly capPerNode: number;
   readonly crossSessionOnly: boolean;
@@ -45,7 +52,7 @@ const EMPTY_RESULT: CoherenceCrystallizeResult = Object.freeze({
   minted: 0
 });
 
-// Design S: crystallize coheres_with edges at formation from object↔object
+// Crystallize coheres_with edges at formation from object↔object
 // cosine. Shared by the production embedding-ready hook and the bench harness so
 // both mint via the same truth-boundary path. Sparsified (cross-session + per-node
 // cap) so a dense coherent cluster cannot flood the graph.
@@ -58,16 +65,24 @@ export class CoherenceEdgeProducerService {
     }
     const objectIds = input.objects.map((object) => object.objectId);
     const sessionById = buildSessionMap(input.objects);
-    const coherent = await this.loadCoherentPairs(input, objectIds);
-    if (coherent.size === 0) {
+    const objectOrder = buildObjectFormationOrder(input.objects);
+    const pairKeys = await this.loadCoherentPairs(input, objectIds);
+    if (pairKeys.size === 0) {
       return EMPTY_RESULT;
     }
-    const kept = sparsifyPairs(coherent, sessionById, input.capPerNode, input.crossSessionOnly);
-    if (kept.size === 0) {
-      return Object.freeze({ coherentPairs: coherent.size, keptPairs: 0, minted: 0 });
+    const coherent = parsePathPairKeys(pairKeys);
+    const kept = sparsifyPairs(
+      coherent,
+      sessionById,
+      objectOrder,
+      input.capPerNode,
+      input.crossSessionOnly
+    );
+    if (kept.length === 0) {
+      return Object.freeze({ coherentPairs: coherent.length, keptPairs: 0, minted: 0 });
     }
     const minted = await this.mintCoherentPairs(input, kept);
-    return Object.freeze({ coherentPairs: coherent.size, keptPairs: kept.size, minted });
+    return Object.freeze({ coherentPairs: coherent.length, keptPairs: kept.length, minted });
   }
 
   private async loadCoherentPairs(
@@ -93,15 +108,14 @@ export class CoherenceEdgeProducerService {
 
   private async mintCoherentPairs(
     input: CoherenceCrystallizeInput,
-    kept: ReadonlySet<string>
+    kept: readonly PathPair[]
   ): Promise<number> {
     let minted = 0;
-    for (const pairKey of kept) {
-      const [low, high] = splitPairKey(pairKey);
+    for (const [source, target] of kept) {
       const outcome = await this.deps.mintPort.submitCandidate({
         workspaceId: input.workspaceId,
-        sourceAnchor: { kind: "object", object_id: low },
-        targetAnchor: { kind: "object", object_id: high },
+        sourceAnchor: { kind: "object", object_id: source },
+        targetAnchor: { kind: "object", object_id: target },
         relationKind: COHERES_WITH_SEED_PROFILE.relationKind,
         initialStrength: COHERES_WITH_SEED_PROFILE.initialStrength,
         governanceClass: COHERES_WITH_SEED_PROFILE.governanceClass,

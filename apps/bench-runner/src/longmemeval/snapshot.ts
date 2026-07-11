@@ -7,11 +7,15 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { basename, dirname, join } from "node:path";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
+import type { LongMemEvalRunProvenance } from "./provenance/run.js";
+import type { SnapshotArtifactIntegrity } from "./snapshot/integrity.js";
+import { validateSnapshotManifest } from "./snapshot/manifest-validation.js";
+export { deriveSnapshotAttribution } from "./snapshot/attribution.js";
 
 /**
  * @anchor longmemeval-recall-eval-snapshot
@@ -116,6 +120,14 @@ export interface LongMemEvalSnapshotManifest {
    * run resolved an extraction-cache manifest; null otherwise.
    */
   readonly extraction_provenance: SnapshotExtractionProvenance | null;
+  readonly artifact_integrity?: SnapshotArtifactIntegrity;
+  readonly run_provenance?: LongMemEvalRunProvenance;
+  readonly question_id_digest?: string;
+  readonly dataset_sha256?: string;
+  readonly attribution?: Readonly<{
+    status: "attributed" | "legacy_unattributed";
+    gate_eligible: boolean;
+  }>;
 }
 
 /**
@@ -240,6 +252,8 @@ export function readSnapshotSidecar(
   if (
     typeof parsed !== "object" ||
     parsed === null ||
+    (parsed as { schema_version?: unknown }).schema_version !== RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION ||
+    typeof (parsed as { variant?: unknown }).variant !== "string" ||
     !Array.isArray((parsed as { questions?: unknown }).questions)
   ) {
     throw new Error(
@@ -247,6 +261,57 @@ export function readSnapshotSidecar(
     );
   }
   return parsed as LongMemEvalSnapshotSidecarFile;
+}
+
+export function snapshotQuestionIdDigest(
+  questions: readonly Pick<LongMemEvalSnapshotQuestion, "questionId">[]
+): string {
+  const hash = createHash("sha256");
+  for (const question of questions) {
+    const bytes = Buffer.from(question.questionId, "utf8");
+    const size = Buffer.alloc(8);
+    size.writeBigUInt64BE(BigInt(bytes.byteLength));
+    hash.update(size).update(bytes);
+  }
+  return hash.digest("hex");
+}
+
+export function assertSnapshotConsumerBinding(input: {
+  readonly snapshotDbPath: string;
+  readonly manifest: LongMemEvalSnapshotManifest;
+  readonly sidecar: LongMemEvalSnapshotSidecarFile;
+  readonly variant: string;
+}): void {
+  const expectedDb = basename(input.snapshotDbPath);
+  if (input.manifest.variant !== input.variant || input.sidecar.variant !== input.variant) {
+    throw new Error("recall-eval snapshot variant does not match requested variant");
+  }
+  if (
+    input.manifest.db_filename !== expectedDb ||
+    input.manifest.sidecar_filename !== `${expectedDb}.sidecar.json`
+  ) throw new Error("recall-eval snapshot filename binding mismatch");
+  if (input.manifest.question_count !== input.sidecar.questions.length) {
+    throw new Error("recall-eval snapshot question count binding mismatch");
+  }
+  if (new Set(input.sidecar.questions.map((question) => question.questionId)).size !== input.sidecar.questions.length) {
+    throw new Error("recall-eval snapshot contains duplicate question ids");
+  }
+  const digest = snapshotQuestionIdDigest(input.sidecar.questions);
+  if (input.manifest.question_id_digest !== undefined && input.manifest.question_id_digest !== digest) {
+    throw new Error("recall-eval snapshot question digest binding mismatch");
+  }
+  if (input.manifest.attribution?.status === "attributed" && input.manifest.question_id_digest !== digest) {
+    throw new Error("recall-eval attributed snapshot requires a bound question digest");
+  }
+  const provenanceDataset =
+    input.manifest.run_provenance?.question_manifest?.dataset_sha256 ??
+    input.manifest.run_provenance?.extraction_cache?.dataset_revision;
+  if (
+    input.manifest.dataset_sha256 !== undefined &&
+    provenanceDataset !== undefined &&
+    /^[a-f0-9]{64}$/u.test(provenanceDataset) &&
+    input.manifest.dataset_sha256 !== provenanceDataset
+  ) throw new Error("recall-eval snapshot dataset binding mismatch");
 }
 
 /**
@@ -277,29 +342,6 @@ export function assertSnapshotVersionMatch(
         "snapshot was seeded; rebuild the snapshot before recall-eval."
     );
   }
-}
-
-function validateSnapshotManifest(
-  parsed: unknown,
-  filePath: string
-): LongMemEvalSnapshotManifest {
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error(`recall-eval snapshot manifest at ${filePath} is not an object`);
-  }
-  const record = parsed as Record<string, unknown>;
-  const recallPipelineVersion = record.recall_pipeline_version;
-  const schemaMigrationVersion = record.schema_migration_version;
-  if (typeof recallPipelineVersion !== "string" || recallPipelineVersion.length === 0) {
-    throw new Error(
-      `recall-eval snapshot manifest at ${filePath} missing recall_pipeline_version`
-    );
-  }
-  if (typeof schemaMigrationVersion !== "number" || Number.isNaN(schemaMigrationVersion)) {
-    throw new Error(
-      `recall-eval snapshot manifest at ${filePath} missing schema_migration_version`
-    );
-  }
-  return parsed as LongMemEvalSnapshotManifest;
 }
 
 function atomicWriteJson(filePath: string, value: unknown): void {
