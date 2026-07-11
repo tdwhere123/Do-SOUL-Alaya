@@ -144,7 +144,7 @@ export class ConflictDetectionService {
     strictNoDrop: boolean
   ): Promise<void> {
     try {
-      const verdict = await this.deps.llmPort!.classifyPair({
+      const verdict = await this.requireLlmPort().classifyPair({
         newContent: params.newMemoryContent,
         existingContent: candidate.content,
         dimension: params.newMemoryDimension,
@@ -325,6 +325,13 @@ export class ConflictDetectionService {
         });
       }
     }
+  }
+
+  private requireLlmPort(): NonNullable<ConflictDetectionServiceDeps["llmPort"]> {
+    if (this.deps.llmPort === undefined) {
+      throw new CoreError("CONFLICT", "LLM port is required for conflict pair classification");
+    }
+    return this.deps.llmPort;
   }
 
   private warn(message: string, meta: Record<string, unknown>): void {

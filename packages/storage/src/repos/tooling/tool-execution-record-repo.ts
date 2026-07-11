@@ -2,6 +2,7 @@ import { ToolExecutionRecordSchema, type ToolExecutionRecord } from "@do-soul/al
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { toSqliteBoolean } from "../shared/sqlite-utils.js";
 
 export interface ToolExecutionRecordRepo {
   insert(record: ToolExecutionRecord): Promise<Readonly<ToolExecutionRecord>>;
@@ -260,10 +261,6 @@ function parseAffectedPaths(value: string | null): readonly string[] | null | un
       error
     );
   }
-}
-
-function toSqliteBoolean(value: boolean): number {
-  return value ? 1 : 0;
 }
 
 function serializeAffectedPaths(value: readonly string[] | null | undefined): string | null {

@@ -83,9 +83,11 @@ describe("applyBenchFastPragmaIfRequested", () => {
   });
 
   it("skips on common falsy spellings", async () => {
+    // One migrated DB is enough: the gate only reads env. Opening five fresh
+    // file DBs on Windows CI exceeds the default 5s timeout under load.
+    const dataDir = await newDataDir();
     for (const spelling of ["false", "FALSE", "off", "no", " 0 "]) {
       process.env.ALAYA_BENCH_FAST_PRAGMA = spelling;
-      const dataDir = await newDataDir();
       const result = applyBenchFastPragmaIfRequested(dataDir);
       expect(result.applied).toBe(false);
     }

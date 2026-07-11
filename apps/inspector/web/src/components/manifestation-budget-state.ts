@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ManifestationBudgetConfig } from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
-import { useToasts } from "./Toast";
+import { useToasts } from "./toast";
 
 interface ManifestationBudgetConfigEnvelope {
   readonly success?: boolean;

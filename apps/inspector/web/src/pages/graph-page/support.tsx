@@ -1,6 +1,6 @@
 import { Box, Square } from "lucide-react";
 import type { SoulPathGraphContract } from "@do-soul/alaya-protocol";
-import { useI18n } from "../../i18n/Locale";
+import { useI18n } from "../../i18n/locale";
 import type { DictKey } from "../../i18n/dict";
 import type { GraphLink, GraphNode } from "../../types/graph";
 import {

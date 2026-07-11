@@ -323,6 +323,68 @@ describe("createDaemonLifecycleControls", () => {
 
     resolveShutdown?.();
   });
+
+  it("rethrows startup background pass failures to targeted garden callers", async () => {
+    const startupError = new Error("startup-pass-failed");
+    const runBackgroundPass = vi.fn(async () => {
+      throw startupError;
+    });
+    const runBulkEnrichPass = vi.fn(async () => undefined);
+    const { controls, warn } = createControls("env", {
+      runBackgroundPass,
+      runBulkEnrichPass
+    });
+
+    controls.startBackgroundServices();
+    await expect(controls.runGardenBulkEnrichPass("workspace-1")).rejects.toBe(startupError);
+
+    expect(warn).toHaveBeenCalledWith(
+      "garden startup background pass failed",
+      expect.objectContaining({ error: "startup-pass-failed" })
+    );
+    expect(runBulkEnrichPass).not.toHaveBeenCalled();
+  });
+
+  it("completes shutdown when the startup background pass failed", async () => {
+    const startupError = new Error("startup-pass-failed");
+    const runBackgroundPass = vi.fn(async () => {
+      throw startupError;
+    });
+    const database = { close: vi.fn() };
+    const { controls, warn } = createControls("env", {
+      runBackgroundPass,
+      database
+    });
+
+    controls.startBackgroundServices();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controls.shutdown()).resolves.toBeUndefined();
+
+    expect(database.close).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "garden startup background pass failed during shutdown",
+      expect.objectContaining({ error: "startup-pass-failed" })
+    );
+  });
+
+  it("retries runGardenBackgroundPass after a failed startup pass", async () => {
+    let passCount = 0;
+    const runBackgroundPass = vi.fn(async () => {
+      passCount += 1;
+      if (passCount === 1) {
+        throw new Error("startup-pass-failed");
+      }
+    });
+    const { controls } = createControls("env", { runBackgroundPass });
+
+    controls.startBackgroundServices();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(controls.runGardenBackgroundPass()).resolves.toBeUndefined();
+    expect(runBackgroundPass).toHaveBeenCalledTimes(2);
+
+    await expect(controls.runGardenBulkEnrichPass("workspace-1")).resolves.toBeUndefined();
+  });
 });
 
 function removeUnexpectedListeners(signal: NodeJS.Signals, expectedListeners: Function[]): void {

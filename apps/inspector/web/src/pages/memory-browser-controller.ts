@@ -9,7 +9,7 @@ import {
   type SetStateAction
 } from "react";
 import { apiFetch, type ApiError } from "../api";
-import type { ToastInput } from "../components/Toast";
+import type { ToastInput } from "../components/toast";
 import { useApiQuery } from "../hooks/useApiQuery";
 import { fetchMemoryPage, type MemoryFilterState } from "./memory-browser-api";
 import {

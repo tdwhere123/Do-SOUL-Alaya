@@ -9,13 +9,13 @@ import {
   type VerifiedBy as VerifiedByType
 } from "@do-soul/alaya-protocol";
 
+import { isExpired } from "../shared/time.js";
 import {
   ACTIVE_LIFECYCLE,
   calculateGraceUntil,
   calculateValidUntil,
   determineReevaluationBasis,
   determineVerifiedByForBasis,
-  isExpired,
   type GreenServiceReevaluationOutcome
 } from "./green-service-ports.js";
 

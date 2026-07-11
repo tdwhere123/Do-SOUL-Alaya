@@ -18,6 +18,7 @@ import {
 } from "./signal-service-helpers.js";
 import type {
   SignalListPageOptions,
+  SignalMaterializationFailureResult,
   SignalMaterializationResult,
   SignalServiceDependencies,
   SignalServicePostTriageMaterializer,
@@ -27,7 +28,10 @@ import type {
 } from "./signal-service-types.js";
 export type {
   SignalListPageOptions,
+  SignalMaterializationFailureResult,
   SignalMaterializationResult,
+  SignalMaterializationResultFields,
+  SignalMaterializationSuccessResult,
   SignalMaterializationTargetKind,
   SignalMaterializedObject,
   SignalRuntimeNotifier,
@@ -224,7 +228,7 @@ export class SignalService {
         created_objects: [],
         success: false,
         error: readErrorMessage(error, "Unknown materialization error")
-      } satisfies SignalMaterializationResult;
+      } satisfies SignalMaterializationFailureResult;
 
       this.warn("Signal materialization failed.", {
         signal_id: triagedSignal.signal_id,
@@ -260,7 +264,7 @@ export class SignalService {
         run_id: triagedSignal.run_id,
         created_objects: materialization.created_objects,
         success: materialization.success,
-        ...(materialization.error !== undefined ? { error: materialization.error } : {})
+        ...(materialization.success === false ? { error: materialization.error } : {})
       })
     });
   }

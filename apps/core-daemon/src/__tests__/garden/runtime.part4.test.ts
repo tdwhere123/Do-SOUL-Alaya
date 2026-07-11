@@ -30,6 +30,7 @@ const hoisted = vi.hoisted(() => {
   const schedulers: Array<{
     queue: GardenTaskDescriptor[];
     completions: GardenTaskResult[];
+    reportCompletion(result: GardenTaskResult): Promise<void>;
   }> = [];
   const tierOrder: Record<GardenTierValue, number> = {
     tier_0: 0,

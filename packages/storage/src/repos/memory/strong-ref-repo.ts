@@ -2,6 +2,8 @@ import { StrongRefSchema, type StrongRef } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseOptionalRow, parseRows, readNonNegativeIntField, readRecord } from "../shared/parse-row.js";
+import { StrongRefRowParser, type StrongRefRow } from "../shared/sqlite-row-schemas.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 
 export interface StrongRefRepo {
@@ -25,17 +27,6 @@ const STRONG_REF_SELECT_COLUMNS = `
       reason,
       created_at
 `;
-
-interface StrongRefRow {
-  readonly ref_id: string;
-  readonly source_entity_type: string;
-  readonly source_entity_id: string;
-  readonly target_entity_type: string;
-  readonly target_entity_id: string;
-  readonly workspace_id: string;
-  readonly reason: StrongRef["reason"];
-  readonly created_at: string;
-}
 
 export class SqliteStrongRefRepo implements StrongRefRepo {
   private readonly createStatement;
@@ -139,7 +130,11 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     const parsedTargetEntityId = parseNonEmptyString(targetEntityId, "target entity id");
 
     try {
-      const rows = this.findByTargetStatement.all(parsedWorkspaceId, parsedTargetEntityType, parsedTargetEntityId) as StrongRefRow[];
+      const rows = parseRows(
+        this.findByTargetStatement.all(parsedWorkspaceId, parsedTargetEntityType, parsedTargetEntityId),
+        StrongRefRowParser,
+        "strong ref row"
+      );
       return rows.map((row) => parseStrongRefRow(row));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -172,7 +167,11 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     `);
 
     try {
-      const rows = statement.all(parsedWorkspaceId, parsedTargetEntityType, ...parsedTargetEntityIds) as StrongRefRow[];
+      const rows = parseRows(
+        statement.all(parsedWorkspaceId, parsedTargetEntityType, ...parsedTargetEntityIds),
+        StrongRefRowParser,
+        "strong ref row"
+      );
       return rows.map((row) => parseStrongRefRow(row));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -187,7 +186,11 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     const parsedSourceEntityId = parseNonEmptyString(sourceEntityId, "source entity id");
 
     try {
-      const rows = this.findBySourceStatement.all(parsedSourceEntityId) as StrongRefRow[];
+      const rows = parseRows(
+        this.findBySourceStatement.all(parsedSourceEntityId),
+        StrongRefRowParser,
+        "strong ref row"
+      );
       return rows.map((row) => parseStrongRefRow(row));
     } catch (error) {
       if (error instanceof StorageError) {
@@ -235,7 +238,11 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
     `);
 
     try {
-      const row = statement.get(parsedWorkspaceId, parsedTargetEntityType, ...parsedTargetEntityIds) as { readonly protected_count: number } | undefined;
+      const row = parseOptionalRow(
+        statement.get(parsedWorkspaceId, parsedTargetEntityType, ...parsedTargetEntityIds),
+        ProtectedCountRowParser,
+        "strong ref protected count row"
+      );
       const protectedCount = row?.protected_count ?? 0;
       return protectedCount === parsedTargetEntityIds.length;
     } catch (error) {
@@ -247,6 +254,13 @@ export class SqliteStrongRefRepo implements StrongRefRepo {
 function normalizeDistinctTargetIds(targetEntityIds: readonly string[]): string[] {
   return [...new Set(targetEntityIds.map((targetEntityId) => parseNonEmptyString(targetEntityId, "target entity id")))];
 }
+
+const ProtectedCountRowParser = {
+  parse(value: unknown): { readonly protected_count: number } {
+    const record = readRecord(value, "strong ref protected count row");
+    return { protected_count: readNonNegativeIntField(record, "protected_count") };
+  }
+};
 
 function parseStrongRef(value: StrongRef): Readonly<StrongRef> {
   try {

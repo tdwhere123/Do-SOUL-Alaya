@@ -2,6 +2,7 @@ import { ToolSpecSchema, type ToolSpec } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { toSqliteBoolean } from "../shared/sqlite-utils.js";
 
 export interface ToolSpecRepo {
   insert(spec: ToolSpec): Promise<Readonly<ToolSpec>>;
@@ -242,6 +243,3 @@ function parseToolSpecRow(row: ToolSpecRow): Readonly<ToolSpec> {
   }
 }
 
-function toSqliteBoolean(value: boolean): number {
-  return value ? 1 : 0;
-}

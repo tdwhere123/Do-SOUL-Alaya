@@ -14,6 +14,11 @@ import {
   type HealthJournalRecordPort
 } from "@do-soul/alaya-protocol";
 import type { AuditorDependencies } from "./auditor-types.js";
+import {
+  createGardenFailureResult,
+  createGardenSuccessResult,
+  formatGardenTaskError
+} from "./garden-task-runner.js";
 
 export function addMillisecondsIso(isoTimestamp: string, deltaMs: number): string {
   return new Date(new Date(isoTimestamp).getTime() + deltaMs).toISOString();
@@ -105,7 +110,7 @@ export abstract class AuditorCore {
     }
   }
 
-  protected async publishEventLogMutation<T>(
+  protected async appendEventLogAndMutate<T>(
     entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">,
     mutate: (entry: EventLogEntry | null) => T
   ): Promise<T> {
@@ -125,18 +130,13 @@ export abstract class AuditorCore {
     objectIds: readonly string[],
     auditEntries: readonly string[]
   ): GardenTaskResult {
-    return {
-      task_id: task.task_id,
-      task_kind: task.task_kind,
-      role: this.role,
-      tier: this.tier,
-      workspace_id: task.workspace_id,
-      success: true,
-      objects_affected: [...objectIds],
-      audit_entries: [...auditEntries],
-      error_message: null,
-      completed_at: completedAt
-    };
+    return createGardenSuccessResult(
+      { role: this.role, tier: this.tier },
+      task,
+      completedAt,
+      objectIds,
+      auditEntries
+    );
   }
 
   protected createFailureResult(
@@ -144,18 +144,7 @@ export abstract class AuditorCore {
     completedAt: string,
     error: unknown
   ): GardenTaskResult {
-    return {
-      task_id: task.task_id,
-      task_kind: task.task_kind,
-      role: this.role,
-      tier: this.tier,
-      workspace_id: task.workspace_id,
-      success: false,
-      objects_affected: [],
-      audit_entries: [],
-      error_message: error instanceof Error ? error.message : String(error),
-      completed_at: completedAt
-    };
+    return createGardenFailureResult({ role: this.role, tier: this.tier }, task, completedAt, error);
   }
 }
 
@@ -168,7 +157,7 @@ function emitAuditorProjectionWarning(
     code: "ALAYA_AUDITOR_PROJECTION_FAILED",
     detail: JSON.stringify({
       operation,
-      error: error instanceof Error ? error.message : String(error),
+      error: formatGardenTaskError(error),
       ...detail
     })
   });

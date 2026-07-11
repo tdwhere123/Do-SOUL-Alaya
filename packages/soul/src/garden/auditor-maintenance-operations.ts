@@ -41,7 +41,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         occurred_at: revokedAt
       });
       try {
-        await this.publishEventLogMutation(
+        await this.appendEventLogAndMutate(
           {
             event_type: GreenGovernanceEventType.SOUL_GREEN_REVOKED,
             entity_type: "memory_entry",
@@ -140,7 +140,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
         task_id: task.task_id
       });
 
-      await this.publishEventLogMutation(
+      await this.appendEventLogAndMutate(
         {
           event_type: GraphAuditorEventType.SOUL_AUDITOR_POINTER_HEALED,
           entity_type: pointer.source_object_kind,
@@ -190,7 +190,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
           task_id: task.task_id,
           occurred_at: renewedAt
         });
-        await this.publishEventLogMutation(
+        await this.appendEventLogAndMutate(
           {
             event_type: GreenGovernanceEventType.SOUL_GREEN_RENEWED,
             entity_type: "green_status",
@@ -387,7 +387,7 @@ export abstract class AuditorMaintenanceOperations extends AuditorOrphanOperatio
       task_id: task.task_id,
       occurred_at: requestedAt
     });
-    await this.publishEventLogMutation(
+    await this.appendEventLogAndMutate(
       {
         event_type: GreenGovernanceEventType.SOUL_GREEN_GRACE_REQUESTED,
         entity_type: "green_status",

@@ -8,6 +8,7 @@ import {
   type EventLogEntry,
   type GardenRoleValue,
   type GardenTaskDescriptor,
+  type GardenTaskKindValue,
   type GardenTaskResult,
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
@@ -15,6 +16,12 @@ import {
   runJanitorRetentionDecayScan,
   type JanitorRetentionDecayPort
 } from "./janitor-retention-decay.js";
+import {
+  createGardenFailureResult,
+  createGardenSuccessResult,
+  type GardenTaskHandler,
+  safeRunGardenTask
+} from "./garden-task-runner.js";
 
 export const JANITOR_CONSTANTS = {
   HOT_DEMOTION_THRESHOLD_MS: 7 * 86_400_000,
@@ -161,6 +168,7 @@ export class Janitor {
   private readonly retentionDecayPort?: JanitorRetentionDecayPort;
   private readonly eventLogRepo?: AuditorEventLogPort;
   private readonly now: () => string;
+  private readonly taskHandlers: ReadonlyMap<GardenTaskKindValue, GardenTaskHandler>;
 
   public constructor(deps: JanitorDependencies) {
     this.cleanupPort = deps.cleanupPort;
@@ -173,43 +181,23 @@ export class Janitor {
     this.retentionDecayPort = deps.retentionDecayPort;
     this.eventLogRepo = deps.eventLogRepo;
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.taskHandlers = new Map<GardenTaskKindValue, GardenTaskHandler>([
+      [GardenTaskKind.TTL_CLEANUP, this.executeTtlCleanup.bind(this)],
+      [GardenTaskKind.HOT_INDEX_DEMOTION, this.executeHotIndexDemotion.bind(this)],
+      [GardenTaskKind.DORMANT_DEMOTION, this.executeDormantDemotion.bind(this)],
+      [GardenTaskKind.TOMBSTONE_GC, this.executeTombstoneGc.bind(this)]
+    ]);
   }
 
   public async run(task: GardenTaskDescriptor): Promise<GardenTaskResult> {
-    const completedAt = this.now();
-
-    try {
-      switch (task.task_kind) {
-        case GardenTaskKind.TTL_CLEANUP:
-          return await this.executeTtlCleanup(task, completedAt);
-        case GardenTaskKind.HOT_INDEX_DEMOTION:
-          return await this.executeHotIndexDemotion(task, completedAt);
-        case GardenTaskKind.DORMANT_DEMOTION:
-          return await this.executeDormantDemotion(task, completedAt);
-        case GardenTaskKind.TOMBSTONE_GC:
-          return await this.executeTombstoneGc(task, completedAt);
-        default:
-          throw new Error(`Janitor does not handle task kind: ${task.task_kind}`);
-      }
-    } catch (error) {
-      const result = this.createFailureResult(task, completedAt, error);
-      // A reportCompletion failure must not mask the original task error.
-      try {
-        await this.scheduler.reportCompletion(result);
-      } catch (reportError) {
-        process.emitWarning("[Janitor] reportCompletion failed for failed task", {
-          code: "ALAYA_GARDEN_REPORT_COMPLETION_FAILED",
-          detail: JSON.stringify({
-            task_id: task.task_id,
-            task_kind: task.task_kind,
-            workspace_id: task.workspace_id,
-            task_error: error instanceof Error ? error.message : String(error),
-            report_error: reportError instanceof Error ? reportError.message : String(reportError)
-          })
-        });
-      }
-      return result;
-    }
+    return safeRunGardenTask({
+      roleLabel: "Janitor",
+      task,
+      completedAt: this.now(),
+      handlers: this.taskHandlers,
+      createFailureResult: this.createFailureResult.bind(this),
+      reportCompletion: (result) => this.scheduler.reportCompletion(result)
+    });
   }
 
   private async executeTtlCleanup(task: GardenTaskDescriptor, completedAt: string): Promise<GardenTaskResult> {
@@ -459,18 +447,13 @@ export class Janitor {
     objectIds: readonly string[],
     auditEntries: readonly string[]
   ): GardenTaskResult {
-    return {
-      task_id: task.task_id,
-      task_kind: task.task_kind,
-      role: this.role,
-      tier: this.tier,
-      workspace_id: task.workspace_id,
-      success: true,
-      objects_affected: [...objectIds],
-      audit_entries: [...auditEntries],
-      error_message: null,
-      completed_at: completedAt
-    };
+    return createGardenSuccessResult(
+      { role: this.role, tier: this.tier },
+      task,
+      completedAt,
+      objectIds,
+      auditEntries
+    );
   }
 
   private createFailureResult(
@@ -478,19 +461,6 @@ export class Janitor {
     completedAt: string,
     error: unknown
   ): GardenTaskResult {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    return {
-      task_id: task.task_id,
-      task_kind: task.task_kind,
-      role: this.role,
-      tier: this.tier,
-      workspace_id: task.workspace_id,
-      success: false,
-      objects_affected: [],
-      audit_entries: [],
-      error_message: errorMessage,
-      completed_at: completedAt
-    };
+    return createGardenFailureResult({ role: this.role, tier: this.tier }, task, completedAt, error);
   }
 }

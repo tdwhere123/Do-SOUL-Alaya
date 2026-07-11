@@ -1,8 +1,8 @@
 import { BrowserRouter } from "react-router-dom";
-import CommandPalette from "../components/CommandPalette";
-import SessionExpired from "../components/SessionExpired";
-import { ToastProvider } from "../components/Toast";
-import { LocaleProvider } from "../i18n/Locale";
+import CommandPalette from "../components/command-palette";
+import SessionExpired from "../components/session-expired";
+import { ToastProvider } from "../components/toast";
+import { LocaleProvider } from "../i18n/locale";
 import { InspectorRoutes } from "./app-routes";
 import { useInspectorLaunchState } from "./inspector-launch-state";
 import type { InspectorLaunchState } from "./inspector-launch-state";

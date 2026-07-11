@@ -1,7 +1,8 @@
-import { readErrorMessage, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import { type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { HandoffGapCreatedObject } from "../handoff-gap-handler.js";
 import type { MaterializationResult, MaterializationTarget } from "./contracts.js";
 import { buildDistilledFact, buildEvidenceInput, buildSynthesisInput, readStringPayload } from "./inputs.js";
+import { materializationFailure, materializationSuccess } from "./materialization-results.js";
 import { MaterializationRouterMemoryRoutes } from "./memory-routes.js";
 
 export class MaterializationRouterRouteHandlers extends MaterializationRouterMemoryRoutes {
@@ -14,15 +15,17 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     try {
       const evidenceRefs = normalizeSynthesisEvidenceRefs(signal.evidence_refs);
       if (evidenceRefs.length < 2) {
-        return {
-          signal_id: signal.signal_id,
-          target_kind: target.kind,
-          route_target: target.route_target,
-          routing_reason: target.routing_reason,
-          created_objects: [],
-          success: false,
-          error: "Synthesis materialization requires at least two evidence_refs"
-        };
+        return materializationFailure(
+          {
+            signal_id: signal.signal_id,
+            target_kind: target.kind,
+            route_target: target.route_target,
+            routing_reason: target.routing_reason,
+            created_objects: []
+          },
+          "Synthesis materialization requires at least two evidence_refs",
+          "Synthesis materialization requires at least two evidence_refs"
+        );
       }
       const evidenceInputs = evidenceRefs.map((evidenceRef) =>
         buildEvidenceInput(signal, evidenceRef, {
@@ -51,24 +54,24 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
       // ids) and by claim resolution downstream. A synthesis-to-memory
       // provenance relation would need a deliberate anchor-domain change.
 
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: target.kind,
         route_target: target.route_target,
         routing_reason: target.routing_reason,
-        created_objects: createdObjects,
-        success: true
-      };
+        created_objects: createdObjects
+      });
     } catch (error) {
-      return {
-        signal_id: signal.signal_id,
-        target_kind: target.kind,
-        route_target: target.route_target,
-        routing_reason: target.routing_reason,
-        created_objects: createdObjects,
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      };
+      return materializationFailure(
+        {
+          signal_id: signal.signal_id,
+          target_kind: target.kind,
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: createdObjects
+        },
+        error
+      );
     }
   }
 
@@ -80,24 +83,24 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
       const createdObject: HandoffGapCreatedObject =
         this.dependencies.handoffGapHandler.createFromSignal(signal);
 
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: target.kind,
         route_target: target.route_target,
         routing_reason: target.routing_reason,
-        created_objects: [createdObject],
-        success: true
-      };
+        created_objects: [createdObject]
+      });
     } catch (error) {
-      return {
-        signal_id: signal.signal_id,
-        target_kind: target.kind,
-        route_target: target.route_target,
-        routing_reason: target.routing_reason,
-        created_objects: [],
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      };
+      return materializationFailure(
+        {
+          signal_id: signal.signal_id,
+          target_kind: target.kind,
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: []
+        },
+        error
+      );
     }
   }
 
@@ -106,14 +109,13 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     signal: CandidateMemorySignal,
     target: MaterializationTarget
   ): MaterializationResult {
-    return {
+    return materializationSuccess({
       signal_id: signal.signal_id,
       target_kind: "deferred",
       route_target: target.route_target,
       routing_reason: target.routing_reason,
-      created_objects: [],
-      success: true
-    };
+      created_objects: []
+    });
   }
 
   protected async materializePathRelationProposal(
@@ -122,25 +124,23 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
   ): Promise<MaterializationResult> {
     const targetObjectId = readStringPayload(signal.raw_payload, "target_object_id");
     if (targetObjectId === null) {
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: "deferred",
         route_target: target.route_target,
         routing_reason: `${target.routing_reason} — deferred: target_object_id missing`,
-        created_objects: [],
-        success: true
-      };
+        created_objects: []
+      });
     }
 
     const created = await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
-    return {
+    return materializationSuccess({
       signal_id: signal.signal_id,
       target_kind: "deferred",
       route_target: target.route_target,
       routing_reason: target.routing_reason,
-      created_objects: created === null ? [] : [created],
-      success: true
-    };
+      created_objects: created === null ? [] : [created]
+    });
   }
 
   // invariant: potential_conflict route sink. evaluate is the only
@@ -155,14 +155,13 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
   ): Promise<MaterializationResult> {
     const port = this.dependencies.conflictDetectionPort;
     if (port === undefined || port.evaluate === undefined) {
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: "deferred",
         route_target: target.route_target,
         routing_reason: `${target.routing_reason} — deferred: evaluate unavailable`,
-        created_objects: [],
-        success: true
-      };
+        created_objects: []
+      });
     }
 
     try {
@@ -176,24 +175,24 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
         domainTags: signal.domain_tags
       });
 
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: "deferred",
         route_target: target.route_target,
         routing_reason: target.routing_reason,
-        created_objects: [],
-        success: true
-      };
+        created_objects: []
+      });
     } catch (error) {
-      return {
-        signal_id: signal.signal_id,
-        target_kind: "deferred",
-        route_target: target.route_target,
-        routing_reason: target.routing_reason,
-        created_objects: [],
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      };
+      return materializationFailure(
+        {
+          signal_id: signal.signal_id,
+          target_kind: "deferred",
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: []
+        },
+        error
+      );
     }
   }
 
@@ -204,24 +203,24 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     try {
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt }));
 
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: target.kind,
         route_target: target.route_target,
         routing_reason: target.routing_reason,
-        created_objects: [{ object_kind: evidence.object_kind, object_id: evidence.object_id }],
-        success: true
-      };
+        created_objects: [{ object_kind: evidence.object_kind, object_id: evidence.object_id }]
+      });
     } catch (error) {
-      return {
-        signal_id: signal.signal_id,
-        target_kind: target.kind,
-        route_target: target.route_target,
-        routing_reason: target.routing_reason,
-        created_objects: [],
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      };
+      return materializationFailure(
+        {
+          signal_id: signal.signal_id,
+          target_kind: target.kind,
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: []
+        },
+        error
+      );
     }
   }
 

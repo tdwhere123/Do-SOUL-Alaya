@@ -311,8 +311,8 @@ describe("Janitor", () => {
       );
       expect(warnCall).toBeDefined();
       const detail = JSON.parse((warnCall?.[1] as { detail: string }).detail) as Record<string, unknown>;
-      expect(detail.task_error).toBe("storage unavailable");
-      expect(detail.report_error).toBe("scheduler offline");
+      expect(detail.task_error).toBe(taskFailure.stack);
+      expect(detail.report_error).toBe(reportFailure.stack);
     } finally {
       emitWarning.mockRestore();
     }

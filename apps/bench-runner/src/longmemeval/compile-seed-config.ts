@@ -2,7 +2,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
 import {
-  type ExtractionCacheManifest
+  type ExtractionCacheManifest,
+  resolveBenchExtractionModel
 } from "./extraction-cache-manifest.js";
 import type {
   CompileSeedExtractionConfig,
@@ -106,19 +107,7 @@ export function resolveCompileSeedExtractionConfig(
       manifest?.provider_url ??
       DEFAULT_GARDEN_PROVIDER_URL
   );
-  const model =
-    readNonEmpty(env[GARDEN_MODEL_ENV]) ?? manifest?.extraction_model;
-  if (model === undefined || model.trim().length === 0) {
-    throw new Error(
-      "bench extraction model is unresolved: neither env " +
-        `${GARDEN_MODEL_ENV} is set nor does the extraction cache manifest ` +
-        "declare extraction_model. Export the extraction model env var " +
-        "in the bench environment or build the " +
-        "cache manifest first. Refusing to fall back to a default model — a " +
-        "wrong default silently misses every cache key and degrades to a " +
-        "full live extraction."
-    );
-  }
+  const model = resolveBenchExtractionModel(env, manifest);
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
     return { providerUrl, model, apiKey: null };

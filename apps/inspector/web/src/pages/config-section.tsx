@@ -3,7 +3,7 @@ import { RotateCcw, Save } from "lucide-react";
 import { clsx } from "clsx";
 import { apiFetch, type ApiError } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
-import { useToasts } from "../components/Toast";
+import { useToasts } from "../components/toast";
 import { ToggleSwitch } from "../components/config-form-fields";
 import type { SectionKey } from "./config-page-state";
 

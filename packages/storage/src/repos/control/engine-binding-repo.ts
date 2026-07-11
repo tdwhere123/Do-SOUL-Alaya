@@ -2,6 +2,10 @@ import { EngineBindingRecordSchema, type EngineBindingRecord } from "@do-soul/al
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
+import {
+  decryptApiKeyAtRest,
+  encryptApiKeyAtRest
+} from "../shared/api-key-cipher.js";
 
 export type EngineBindingRecordCreateInput = Omit<EngineBindingRecord, "created_at" | "updated_at">;
 
@@ -120,7 +124,7 @@ export class SqliteEngineBindingRepo implements EngineBindingRepo {
         record.workspace_id,
         record.provider_type,
         record.base_url,
-        record.api_key,
+        encryptApiKeyAtRest(record.api_key),
         record.api_key_ref ?? null,
         record.model,
         JSON.stringify(record.config),
@@ -160,16 +164,38 @@ function parseEngineBindingRecord(row: EngineBindingRow | EngineBindingRecord): 
     ? typeof row.enable_tools === "number" ? row.enable_tools === 1 : row.enable_tools
     : undefined;
 
+  let decryptedApiKey: string;
+  try {
+    decryptedApiKey = decryptApiKeyAtRest(row.api_key);
+  } catch (error) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "Failed to decrypt engine binding api_key: ciphertext is machine- and user-bound; host or OS-user drift, or a copied database from another machine, prevents decryption.",
+      error
+    );
+  }
+
+  let parsedConfig: Record<string, unknown>;
+  try {
+    parsedConfig = JSON.parse(rawConfig) as Record<string, unknown>;
+  } catch (error) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      `Failed to parse engine binding config_json for binding ${row.binding_id}.`,
+      error
+    );
+  }
+
   try {
     return EngineBindingRecordSchema.parse({
       binding_id: row.binding_id,
       workspace_id: row.workspace_id,
       provider_type: row.provider_type,
       base_url: row.base_url,
-      api_key: row.api_key,
+      api_key: decryptedApiKey,
       api_key_ref: row.api_key_ref,
       model: row.model,
-      config: JSON.parse(rawConfig) as Record<string, unknown>,
+      config: parsedConfig,
       ...(enableTools !== undefined ? { enable_tools: enableTools } : {}),
       created_at: row.created_at,
       updated_at: row.updated_at

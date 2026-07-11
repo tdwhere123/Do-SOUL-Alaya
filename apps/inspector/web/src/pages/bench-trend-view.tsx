@@ -1,5 +1,5 @@
 import { RefreshCcw } from "lucide-react";
-import { useI18n } from "../i18n/Locale";
+import { useI18n } from "../i18n/locale";
 import type { BenchTrendPoint, VisibleBenchTrend } from "./bench-trend-types";
 import type { BenchTrendState } from "./bench-trend-state";
 

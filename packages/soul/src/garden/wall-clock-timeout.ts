@@ -26,18 +26,28 @@
 // the transport phases where the abort cannot terminate the stall.
 // see also: packages/core/src/embedding-recall/openai-client.ts:OpenAIEmbeddingClient.raceFetchAgainstBackstop
 
+import { AlayaError } from "@do-soul/alaya-protocol";
+
 const WALL_CLOCK_TICK_MS = 5_000;
 
-export class WallClockTimeoutError extends Error {
+export class WallClockTimeoutError extends AlayaError {
+  public readonly budgetMs: number;
+  public readonly elapsedMs: number;
+  public readonly trigger: "monotonic" | "wall_clock";
+
   public constructor(
-    public readonly budgetMs: number,
-    public readonly elapsedMs: number,
-    public readonly trigger: "monotonic" | "wall_clock"
+    budgetMs: number,
+    elapsedMs: number,
+    trigger: "monotonic" | "wall_clock"
   ) {
     super(
+      "WALL_CLOCK_TIMEOUT",
       `Wall-clock timeout: budget=${budgetMs}ms elapsed=${elapsedMs}ms trigger=${trigger}`
     );
     this.name = "WallClockTimeoutError";
+    this.budgetMs = budgetMs;
+    this.elapsedMs = elapsedMs;
+    this.trigger = trigger;
   }
 }
 

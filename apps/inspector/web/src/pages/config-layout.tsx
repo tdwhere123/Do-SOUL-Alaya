@@ -1,8 +1,8 @@
 import { Cpu, Globe, KeyRound, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import type { ReactNode } from "react";
-import EmbeddingSupplementForm from "../components/EmbeddingSupplementForm";
-import GardenComputeForm from "../components/GardenComputeForm";
-import ManifestationBudgetForm from "../components/ManifestationBudgetForm";
+import EmbeddingSupplementForm from "../components/embedding-supplement-form";
+import GardenComputeForm from "../components/garden-compute-form";
+import ManifestationBudgetForm from "../components/manifestation-budget-form";
 import { ConfigSection, type SectionMeta } from "./config-section";
 import type { ConfigPageState } from "./config-page-state";
 import type { DictKey } from "../i18n/dict";

@@ -10,6 +10,9 @@ import {
   keychainSubprocessTimeoutReason
 } from "./constants.js";
 
+const CONTROL_CHARS = /[\0\r\n]/;
+const SHELL_META_IN_IDENTIFIER = /[`'"$\\;&|<>()]/;
+
 export function readMacosKeychainSecret(
   service: string,
   account: string,
@@ -44,15 +47,13 @@ export function writeMacosKeychainSecret(
   value: string,
   runner: KeychainSubprocessRunner
 ): KeychainWriteResult {
-  // `security -i` parses stdin line-by-line; a newline in any field splits the
-  // interactive command, so reject CR/LF rather than smuggle a second command.
-  rejectInteractiveNewlines({ service, account, value });
+  const validationError = rejectInvalidMacosKeychainWriteFields(service, account, value);
+  if (validationError !== null) {
+    return validationError;
+  }
+
   const result = runner("security", ["-i"], {
-    // Secrets stay off argv, but any host-level shell transcript or terminal
-    // recording that captures interactive stdin can still observe this input.
-    // Alaya never enables such recording; operators must treat it as an
-    // external host-policy risk, the same way the Windows adapter does.
-    input: `add-generic-password -s ${quoteSecurityInteractiveArg(service)} -a ${quoteSecurityInteractiveArg(account)} -w ${quoteSecurityInteractiveArg(value)} -U\n`,
+    input: buildMacosKeychainWriteScript(service, account, value),
     timeoutMs: KEYCHAIN_SUBPROCESS_TIMEOUT_MS
   });
   if (result.error?.code === "ENOENT") {
@@ -87,6 +88,49 @@ export function checkMacosKeychainAvailable(
     : { ok: true };
 }
 
+function rejectInvalidMacosKeychainWriteFields(
+  service: string,
+  account: string,
+  value: string
+): Extract<KeychainWriteResult, { kind: "keychain_write_failed" }> | null {
+  if (CONTROL_CHARS.test(service) || CONTROL_CHARS.test(account) || CONTROL_CHARS.test(value)) {
+    return macosWriteFailed(service, account, "Keychain fields must not contain null bytes or line breaks.");
+  }
+  if (SHELL_META_IN_IDENTIFIER.test(service)) {
+    return macosWriteFailed(service, account, "Keychain service contains unsupported characters.");
+  }
+  if (SHELL_META_IN_IDENTIFIER.test(account)) {
+    return macosWriteFailed(service, account, "Keychain account contains unsupported characters.");
+  }
+  // security -i is not a shell: stdin is parsed as security(1) commands only.
+  // Reject shell-meta in the password so quoting cannot be broken inside -i.
+  if (SHELL_META_IN_IDENTIFIER.test(value)) {
+    return macosWriteFailed(service, account, "Keychain password contains unsupported characters.");
+  }
+  return null;
+}
+
+function buildMacosKeychainWriteScript(service: string, account: string, password: string): string {
+  return `add-generic-password -s ${escapeSecurityInteractiveArg(service)} -a ${escapeSecurityInteractiveArg(account)} -w ${escapeSecurityInteractiveArg(password)} -U\n`;
+}
+
+function escapeSecurityInteractiveArg(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function macosWriteFailed(
+  service: string,
+  account: string,
+  reason: string
+): Extract<KeychainWriteResult, { kind: "keychain_write_failed" }> {
+  return {
+    kind: "keychain_write_failed",
+    service,
+    account,
+    reason
+  };
+}
+
 function macosToolingUnavailable(
   service: string,
   account: string,
@@ -98,16 +142,4 @@ function macosToolingUnavailable(
     account,
     reason
   };
-}
-
-function quoteSecurityInteractiveArg(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function rejectInteractiveNewlines(fields: Record<string, string>): void {
-  for (const [name, value] of Object.entries(fields)) {
-    if (/[\r\n]/u.test(value)) {
-      throw new Error(`macOS Keychain ${name} must not contain newline characters.`);
-    }
-  }
 }

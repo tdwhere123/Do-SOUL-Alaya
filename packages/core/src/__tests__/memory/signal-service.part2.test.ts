@@ -107,7 +107,7 @@ it("emits a corrective soul.signal.triaged deferred event after materialization 
           target_kind: "deferred" as const,
           routing_reason: "deferred by router",
           created_objects: [],
-          success: true
+          success: true as const
         }))
       }
     });

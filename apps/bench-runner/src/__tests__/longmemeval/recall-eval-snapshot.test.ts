@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -19,6 +19,10 @@ import {
   buildLongMemEvalFixtureQuestion as buildQuestion,
   writeLongMemEvalFixtureDataset
 } from "./longmemeval-fixture.js";
+import {
+  isTransientFsLockError,
+  removeTempDirectory
+} from "../support/temp-cleanup.js";
 
 // @anchor recall-eval-end-to-end: seed a tiny dataset through the real bench
 // daemon (no LLM — no-credentials offline seed path), snapshot the seeded DB,
@@ -68,7 +72,13 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  await rm(tmpDir, { recursive: true, force: true });
+  try {
+    await removeTempDirectory(tmpDir);
+  } catch (error) {
+    if (!isTransientFsLockError(error)) {
+      throw error;
+    }
+  }
 });
 
 describe("recall-eval against a seeded-DB snapshot", () => {

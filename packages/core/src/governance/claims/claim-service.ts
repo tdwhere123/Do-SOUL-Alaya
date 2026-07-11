@@ -269,8 +269,9 @@ export class ClaimService {
   private async createClaimAtomically(
     creation: ClaimCreationContext
   ): Promise<Readonly<ClaimForm>> {
-    return await this.dependencies.eventPublisher!.appendManyWithMutation(
-      [...creation.canonicalizationPlan!.eventInputs, creation.claimCreatedEventInput],
+    const canonicalizationPlan = this.requireCanonicalizationPlan(creation.canonicalizationPlan);
+    return await this.requireEventPublisher().appendManyWithMutation(
+      [...canonicalizationPlan.eventInputs, creation.claimCreatedEventInput],
       () => this.dependencies.claimFormRepo.create(creation.claim)
     );
   }
@@ -355,7 +356,7 @@ export class ClaimService {
     updated: Readonly<ClaimForm>,
     deferredNotificationEvents?: EventLogEntry[]
   ): Promise<Readonly<ClaimForm>> {
-    const election = await this.dependencies.slotService!.onClaimActivated(
+    const election = await this.requireSlotService().onClaimActivated(
       updated,
       deferredNotificationEvents
     );
@@ -394,7 +395,7 @@ export class ClaimService {
     additionalEventsSink: EventLogEntry[] | undefined,
     syncStatusUpdate: NonNullable<ClaimServiceDependencies["claimFormRepo"]["updateStatusSync"]>
   ): Promise<Readonly<ClaimForm>> {
-    return await this.dependencies.eventPublisher!.appendManyWithMutation(
+    return await this.requireEventPublisher().appendManyWithMutation(
       [eventInput, ...additionalEventInputs],
       (persistedEntries) => {
         collectAdditionalEvents(persistedEntries, additionalEventInputs.length, additionalEventsSink);
@@ -407,6 +408,29 @@ export class ClaimService {
         );
       }
     );
+  }
+
+  private requireEventPublisher(): NonNullable<ClaimServiceDependencies["eventPublisher"]> {
+    if (this.dependencies.eventPublisher === undefined) {
+      throw new CoreError("CONFLICT", "Event publisher is required for atomic claim operations");
+    }
+    return this.dependencies.eventPublisher;
+  }
+
+  private requireCanonicalizationPlan(
+    plan: ClaimCanonicalizationPlan | undefined
+  ): ClaimCanonicalizationPlan {
+    if (plan === undefined) {
+      throw new CoreError("CONFLICT", "Canonicalization plan is required for atomic claim creation");
+    }
+    return plan;
+  }
+
+  private requireSlotService(): NonNullable<ClaimServiceDependencies["slotService"]> {
+    if (this.dependencies.slotService === undefined) {
+      throw new CoreError("CONFLICT", "Slot service is required for claim activation");
+    }
+    return this.dependencies.slotService;
   }
 
   private async applyNonAtomicLifecycleTransition(

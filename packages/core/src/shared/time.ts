@@ -43,3 +43,30 @@ export function addDuration(iso: string, durationMs: number): string {
 
   return new Date(epoch + durationMs).toISOString();
 }
+
+/**
+ * Returns whether `expiresAt` is at or before `referenceTime`.
+ *
+ * - `null` expiresAt is not expired (no timestamp bound).
+ * - Unparseable expiresAt is treated as expired so corrupt stored data cannot
+ *   retain validity.
+ * - Unparseable referenceTime throws because the reference clock must be valid.
+ */
+export function isExpired(expiresAt: string | null, referenceTime: string): boolean {
+  if (expiresAt === null) {
+    return false;
+  }
+
+  const expiryEpoch = Date.parse(expiresAt);
+  const referenceEpoch = Date.parse(referenceTime);
+
+  if (!Number.isFinite(referenceEpoch)) {
+    throw new CoreError("VALIDATION", "referenceTime must be a valid ISO timestamp");
+  }
+
+  if (!Number.isFinite(expiryEpoch)) {
+    return true;
+  }
+
+  return expiryEpoch <= referenceEpoch;
+}

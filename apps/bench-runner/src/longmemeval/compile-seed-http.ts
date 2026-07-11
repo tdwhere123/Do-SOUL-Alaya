@@ -1,4 +1,5 @@
 import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
+import { z } from "zod";
 import type {
   BenchRetryClassification,
   BenchSignalExtractor,
@@ -14,6 +15,56 @@ const BENCH_HTTP_MAX_RETRIES = 3;
 const BENCH_HTTP_MAX_TIMEOUT_RETRIES = 1;
 const BENCH_HTTP_JITTER_BASE_MS = 250;
 const BENCH_HTTP_JITTER_MAX_MS = 1500;
+
+const ChatCompletionPayloadSchema = z
+  .object({
+    choices: z
+      .array(
+        z
+          .object({
+            delta: z.object({ content: z.unknown() }).loose().optional(),
+            message: z.object({ content: z.unknown() }).loose().optional()
+          })
+          .loose()
+      )
+      .optional()
+  })
+  .loose()
+  .readonly();
+
+function parseChatCompletionPayload(bodyText: string): z.infer<typeof ChatCompletionPayloadSchema> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    throw new Error("garden extraction chat completion payload is not valid JSON", { cause: error });
+  }
+  const result = ChatCompletionPayloadSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `garden extraction chat completion payload failed schema validation: ${result.error.message}`
+    );
+  }
+  return result.data;
+}
+
+function tryParseChatCompletionSseChunk(
+  chunkText: string
+): z.infer<typeof ChatCompletionPayloadSchema> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(chunkText);
+  } catch {
+    return null;
+  }
+  const result = ChatCompletionPayloadSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(
+      `garden extraction chat completion chunk failed schema validation: ${result.error.message}`
+    );
+  }
+  return result.data;
+}
 
 function computeBenchJitterMs(attempt: number, random: () => number): number {
   const baseMs = Math.min(
@@ -405,16 +456,9 @@ function isSseChatCompletionBody(
 }
 
 function extractContentFromPlainChatCompletionBody(bodyText: string): string {
-  const payload = JSON.parse(bodyText) as ChatCompletionPayload;
+  const payload = parseChatCompletionPayload(bodyText);
   const content = payload.choices?.[0]?.message?.content;
   return typeof content === "string" ? content : "";
-}
-
-interface ChatCompletionPayload {
-  readonly choices?: readonly {
-    readonly delta?: { readonly content?: unknown };
-    readonly message?: { readonly content?: unknown };
-  }[];
 }
 
 function extractContentFromSseChatCompletionBody(bodyText: string): string {
@@ -439,10 +483,8 @@ function readSseDataLine(rawLine: string): string | null {
 }
 
 function extractContentFromSseChunk(chunkText: string): string {
-  let chunk: ChatCompletionPayload;
-  try {
-    chunk = JSON.parse(chunkText) as ChatCompletionPayload;
-  } catch {
+  const chunk = tryParseChatCompletionSseChunk(chunkText);
+  if (chunk === null) {
     return "";
   }
   const choice = chunk.choices?.[0];
