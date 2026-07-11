@@ -13,6 +13,7 @@ const KEY_BYTES = 32;
 
 let keyMaterialOverrideForTests: string | null = null;
 let machineKeyIdPathOverrideForTests: string | null = null;
+let platformMachineIdOverrideForTests: string | null | undefined = undefined;
 
 export function isEncryptedApiKeyAtRest(value: string): boolean {
   return value.startsWith(CIPHER_PREFIX);
@@ -87,6 +88,10 @@ export function __setMachineKeyIdPathForTests(filePath: string | null): void {
   machineKeyIdPathOverrideForTests = filePath;
 }
 
+export function __setPlatformMachineIdForTests(machineId: string | null | undefined): void {
+  platformMachineIdOverrideForTests = machineId;
+}
+
 function deriveApiKeyEncryptionKey(): Buffer {
   const material = keyMaterialOverrideForTests ?? buildKeyMaterial();
   return crypto.scryptSync(material, APP_SALT, KEY_BYTES);
@@ -114,6 +119,10 @@ function readMachineId(): string {
 }
 
 function readPlatformMachineId(): string | null {
+  if (platformMachineIdOverrideForTests !== undefined) {
+    return platformMachineIdOverrideForTests;
+  }
+
   if (process.platform === "linux") {
     return readLinuxMachineId();
   }
