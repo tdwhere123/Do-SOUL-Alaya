@@ -3,7 +3,6 @@ import { StorageError } from "../../shared/errors.js";
 import {
   readBufferField,
   readNonEmptyStringField,
-  readNonNegativeIntField,
   readPositiveIntField,
   readRecord,
   readSqliteBooleanIntField,

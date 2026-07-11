@@ -252,7 +252,7 @@ it("resumes an existing emitted signal through triage and materialization", asyn
       target_kind: "memory_and_claim" as const,
       routing_reason: "retry resumed after signal row creation",
       created_objects: [{ object_kind: "memory_entry", object_id: "memory-1" }],
-      success: true
+      success: true as const
     }));
     const service = new SignalService({
       eventLogRepo: {
@@ -456,7 +456,7 @@ it("materializes accepted signals when post-triage materializer succeeds", async
             { object_kind: "memory_entry", object_id: "memory-1" },
             { object_kind: "claim_form", object_id: "claim-1" }
           ],
-          success: true
+          success: true as const
         }))
       }
     });

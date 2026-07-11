@@ -2,7 +2,7 @@ import { StrongRefSchema, type StrongRef } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
-import { parseOptionalRow, parseRow, parseRows, readNonNegativeIntField, readRecord } from "../shared/parse-row.js";
+import { parseOptionalRow, parseRows, readNonNegativeIntField, readRecord } from "../shared/parse-row.js";
 import { StrongRefRowParser, type StrongRefRow } from "../shared/sqlite-row-schemas.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 

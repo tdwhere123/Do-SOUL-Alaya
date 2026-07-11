@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CoreError } from "../../shared/errors.js";
 import { collectEntityDerivedSeeds } from "../../recall/expansion/structural-expansion.js";
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import type { RecallServiceDependencies } from "../../recall/runtime/recall-service-ports.js";
 
 function createMemoryEntry(objectId: string): MemoryEntry {
   return {
@@ -13,7 +14,7 @@ function createMemoryEntry(objectId: string): MemoryEntry {
     workspace_id: "workspace-1",
     kind: "note",
     version: 1
-  } as MemoryEntry;
+  } as unknown as MemoryEntry;
 }
 
 describe("structural-expansion require helpers", () => {
@@ -27,9 +28,9 @@ describe("structural-expansion require helpers", () => {
         addCandidate: () => true,
         lexicalFtsRanks: new Map(),
         entityExtractionPort: {
-          extract: vi.fn(async () => [{ surface: "alpha", normalized: "alpha", confidence: 1 }])
+          extract: vi.fn(async () => [{ surface: "alpha", normalized: "alpha", confidence: 1, kind: "unknown" as const }])
         },
-        memoryRepo: {},
+        memoryRepo: {} as RecallServiceDependencies["memoryRepo"],
         warn: vi.fn(),
         entityExtractionMaxEntities: 5,
         entitySeedPerEntityTopKStrong: 3,

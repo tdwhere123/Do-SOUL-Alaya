@@ -443,7 +443,6 @@ describe("Memory embedding storage repo", () => {
     const { database, workspaceId, repo } = await createRepoContext();
     const objectId = "11111111-1111-4111-8111-111111111111";
 
-    createMemoryEntry(database, workspaceId, objectId);
     database.connection
       .prepare(
         `

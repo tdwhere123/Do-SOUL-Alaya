@@ -17,8 +17,7 @@ import {
   parseProviderKind,
   parseWorkspaceId,
   runUpsertArgs,
-  type MemoryEmbeddingMetadataRow,
-  type MemoryEmbeddingRow
+  type MemoryEmbeddingMetadataRow
 } from "./memory-embedding-mappers.js";
 import {
   prepareMemoryEmbeddingStatements,

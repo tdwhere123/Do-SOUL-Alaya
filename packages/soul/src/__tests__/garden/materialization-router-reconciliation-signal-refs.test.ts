@@ -71,6 +71,9 @@ describe("MaterializationRouter ingest reconciliation", () => {
     );
 
     expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected materialization failure");
+    }
     expect(result.error).toBe("proposal repo down");
     expect(result.created_objects).toEqual([]);
     expect(pathRelationProposalPort.assertPathRelationProposalAvailable).toHaveBeenCalledTimes(1);
