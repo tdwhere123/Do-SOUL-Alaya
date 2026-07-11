@@ -1,6 +1,7 @@
-import { access, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { removeTempDirectory } from "./temp-directory-cleanup.js";
 
 const FAILED_ROOT_KEEP_COUNT = 3;
 const FAILED_ROOT_MAX_BYTES = 512 * 1024 * 1024;
@@ -34,7 +35,7 @@ export async function finalizeOwnedTempRoot(
     warn(`[bench temp-root] retained failed run evidence at ${root.path}`);
     return;
   }
-  await rm(root.path, { recursive: true, force: true });
+  await removeTempDirectory(root.path);
 }
 
 async function ensureFailedRootMarker(rootPath: string): Promise<void> {
@@ -48,7 +49,7 @@ async function ensureFailedRootMarker(rootPath: string): Promise<void> {
 
 async function boundFailedRoot(rootPath: string): Promise<void> {
   if (await treeSizeBytes(rootPath) <= FAILED_ROOT_MAX_BYTES) return;
-  await rm(rootPath, { recursive: true, force: true });
+  await removeTempDirectory(rootPath);
   await mkdir(rootPath, { recursive: true });
   await writeFile(
     join(rootPath, "FAILED_RUN_EVIDENCE.txt"),
@@ -71,7 +72,7 @@ async function pruneOlderFailedRoots(rootPath: string): Promise<void> {
   candidates.sort((left, right) => right.mtimeMs - left.mtimeMs);
   await Promise.all(
     candidates.slice(FAILED_ROOT_KEEP_COUNT).map((entry) =>
-      rm(entry.path, { recursive: true, force: true })
+      removeTempDirectory(entry.path)
     )
   );
 }
