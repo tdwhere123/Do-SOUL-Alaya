@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../longmemeval/diagnostics-schema.js";
 import {
+  buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   stripReplayCandidatePoolsForGateWrite,
   type LongMemEvalDiagnosticsSidecar
@@ -96,12 +97,25 @@ describe("LongMemEval evidence contract", () => {
     });
 
     const abstention = diagnostic({ id: "q_abs", abstention: true });
-    expect(abstention.miss_taxonomy).toBe("evaluation_or_gold_issue");
+    expect(abstention.miss_taxonomy).toBeNull();
     expect(abstention.cohort_ledger).toMatchObject({
+      measurement_status: "abstention_unscorable",
       dataset_cohort: "abstention",
       retrieval_status: "not_applicable",
       evaluation_issue_reason: null,
       final_verdict: "abstention_uncalibrated"
+    });
+    expect(buildLongMemEvalQualityMetrics([abstention])).toMatchObject({
+      measurement_cohort_counts: {
+        evaluated: 1,
+        non_abstention: 0,
+        abstention: 1,
+        scorable_answerable: 0,
+        unscorable_answerable: 0,
+        hit_at_5: 0,
+        miss_at_5: 0
+      },
+      unscorable_reason_distribution: { abstention_uncalibrated: 1 }
     });
   });
 

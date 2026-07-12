@@ -23,7 +23,10 @@ import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
-import { expandGraphFrontier } from "./structural-expansion-graph-frontier.js";
+import {
+  expandGraphFrontier,
+  expandGraphFrontiersBySeed
+} from "./structural-expansion-graph-frontier.js";
 
 
 type CoarseCandidateAdder = (
@@ -186,37 +189,32 @@ async function collectEntityGraphExpansionCandidates(
 ): Promise<void> {
   if (entitySeedEntries.length > 0) {
     diagnostics.multi_seed_fan_in_distinct_seeds = entitySeedEntries.length;
-    const perSeedCandidates: Map<string, GraphExpansionCandidateDraft>[] = [];
-    for (const seedEntry of entitySeedEntries) {
-      const seedMap = await collectSingleEntitySeedGraphCandidates(params, pathExpansionPort, seedEntry);
+    const perSeedCandidates = entitySeedEntries.map(
+      (): Map<string, GraphExpansionCandidateDraft> => new Map()
+    );
+    await expandGraphFrontiersBySeed({
+      workspaceId: params.workspaceId,
+      byId: params.byId,
+      pathExpansionPort,
+      seedEntries: entitySeedEntries,
+      maxGraphHops: params.maxGraphHops,
+      dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
+      warn: params.warn,
+      degradationReasons: params.degradationReasons,
+      onCandidate: (seedIndex, candidate) => {
+        const seedMap = perSeedCandidates[seedIndex];
+        if (seedMap === undefined) {
+          throw new Error("Graph expansion seed index out of range.");
+        }
+        const objectId = candidate.entry.object_id;
+        seedMap.set(objectId, mergeGraphExpansionCandidate(seedMap.get(objectId), candidate));
+      }
+    });
+    for (const seedMap of perSeedCandidates) {
       diagnostics.multi_seed_fan_in_candidates_per_seed.push(seedMap.size);
-      perSeedCandidates.push(seedMap);
     }
     mergeEntityFanInCandidates(perSeedCandidates, bestCandidates, diagnostics);
   }
-}
-
-async function collectSingleEntitySeedGraphCandidates(
-  params: AddGraphExpansionCandidatesParams,
-  pathExpansionPort: PathExpansionPort,
-  seedEntry: Readonly<MemoryEntry>
-): Promise<Map<string, GraphExpansionCandidateDraft>> {
-  const seedMap = new Map<string, GraphExpansionCandidateDraft>();
-  await expandGraphFrontier({
-    workspaceId: params.workspaceId,
-    byId: params.byId,
-    pathExpansionPort,
-    seedEntries: [seedEntry],
-    maxGraphHops: params.maxGraphHops,
-    dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
-    warn: params.warn,
-    degradationReasons: params.degradationReasons,
-    onCandidate: (candidate) => {
-      const objectId = candidate.entry.object_id;
-      seedMap.set(objectId, mergeGraphExpansionCandidate(seedMap.get(objectId), candidate));
-    }
-  });
-  return seedMap;
 }
 
 function mergeEntityFanInCandidates(

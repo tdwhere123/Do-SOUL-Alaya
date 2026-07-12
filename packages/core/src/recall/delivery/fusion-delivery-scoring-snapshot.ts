@@ -36,8 +36,7 @@ function buildCandidateStreamSnapshot(
   params: Parameters<typeof buildFusionCandidateStreamSnapshots>[0]
 ): RecallFusionCandidateStreamSnapshot {
   const perStreamRank = {} as Record<RecallFusionStream, number | null>;
-  const contributions = {} as Record<RecallFusionStream, number>;
-  let objectBase = 0;
+  const rawContributions = {} as Record<RecallFusionStream, number>;
   for (const stream of activeFusionStreams()) {
     const rank = params.ranksByStream.get(stream)?.get(keyed.candidateKey) ?? null;
     const contribution = rank === null ? 0 : resolveFusionContribution({
@@ -48,13 +47,27 @@ function buildCandidateStreamSnapshot(
       rank
     });
     perStreamRank[stream] = rank;
-    contributions[stream] = contribution;
-    objectBase += contribution;
+    rawContributions[stream] = contribution;
   }
+  const contributions = dedupeContentProjectionContributions(rawContributions);
+  const objectBase = Object.values(contributions).reduce((sum, contribution) => sum + contribution, 0);
   return Object.freeze({
     ...keyed,
     perStreamRank: Object.freeze(perStreamRank) as RecallFusionStreamRanks,
     contributions: Object.freeze(contributions) as RecallFusionStreamContributions,
     objectBase
   });
+}
+
+// invariant: lexical and trigram rank the same memory content projection; evidence agreement lanes retain distinct support.
+function dedupeContentProjectionContributions(
+  raw: Readonly<Record<RecallFusionStream, number>>
+): Record<RecallFusionStream, number> {
+  const effective = { ...raw };
+  if (raw.trigram_fts > raw.lexical_fts) {
+    effective.lexical_fts = 0;
+  } else {
+    effective.trigram_fts = 0;
+  }
+  return effective;
 }

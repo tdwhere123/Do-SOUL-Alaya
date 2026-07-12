@@ -33,6 +33,18 @@ describe("merge LongMemEval measurement contract", () => {
             scored: 0,
             unscorable: 6,
             gate_eligible: false
+          },
+          measurement_cohort_counts: {
+            evaluated: 100,
+            non_abstention: 94,
+            abstention: 6,
+            scorable_answerable: 94,
+            unscorable_answerable: 0,
+            hit_at_5: 94,
+            miss_at_5: 0
+          },
+          unscorable_reason_distribution: {
+            abstention_uncalibrated: 6
           }
         }
       }
@@ -55,6 +67,45 @@ describe("merge LongMemEval measurement contract", () => {
 
     expect(() => mergeQualityMetrics([current, missing])).toThrow(/abstention.*missing/u);
     expect(() => mergeQualityMetrics([current, legacy])).toThrow(/abstention.*schema/u);
+  });
+
+  it("rejects partially present measurement accounting", () => {
+    const current = shard("current", 47, 3);
+    const quality = current.kpi.quality_metrics!;
+    const {
+      measurement_cohort_counts: _cohorts,
+      unscorable_reason_distribution: _reasons,
+      ...legacyQuality
+    } = quality;
+    const legacy = {
+      ...current,
+      kpi: { ...current.kpi, quality_metrics: legacyQuality }
+    };
+
+    expect(() => mergeQualityMetrics([current, legacy])).toThrow(
+      /measurement accounting.*missing/u
+    );
+  });
+
+  it("rejects merged measurement accounting whose reasons do not conserve", () => {
+    const current = shard("current", 47, 3);
+    const inconsistent = {
+      ...current,
+      kpi: {
+        ...current.kpi,
+        quality_metrics: {
+          ...current.kpi.quality_metrics!,
+          unscorable_reason_distribution: { abstention_uncalibrated: 2 }
+        }
+      }
+    };
+
+    expect(() => buildMergedLongMemEvalPayload({
+      payloads: [inconsistent],
+      archiveRefs: [],
+      questionDiagnostics: [],
+      first: inconsistent
+    })).toThrow(/unscorable reason.*conservation/u);
   });
 
   it("rejects all-v1 abstention shards instead of relabeling them as v2", () => {
@@ -138,7 +189,19 @@ function shard(prefix: string, answerable: number, abstention: number): KpiPaylo
       r_at_5: answerable === 0 ? 0 : 1,
       quality_metrics: {
         ...makeQualityMetrics({ denominator: answerable }),
-        abstention: currentAbstention(abstention)
+        abstention: currentAbstention(abstention),
+        measurement_cohort_counts: {
+          evaluated,
+          non_abstention: answerable,
+          abstention,
+          scorable_answerable: answerable,
+          unscorable_answerable: 0,
+          hit_at_5: answerable,
+          miss_at_5: 0
+        },
+        unscorable_reason_distribution: abstention === 0
+          ? {}
+          : { abstention_uncalibrated: abstention }
       },
       per_scenario: Array.from({ length: evaluated }, (_, index) => ({
         id: `${prefix}-${index}`,

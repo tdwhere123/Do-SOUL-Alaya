@@ -25,6 +25,15 @@ interface MeasurementDenominatorPayload {
       readonly no_gold_count: number;
       readonly evaluator_identity_issue_count?: number;
       readonly evaluator_identity_unscorable_count?: number;
+      readonly measurement_cohort_counts?: {
+        readonly evaluated: number;
+        readonly non_abstention: number;
+        readonly abstention: number;
+        readonly scorable_answerable: number;
+        readonly unscorable_answerable: number;
+        readonly hit_at_5: number;
+        readonly miss_at_5: number;
+      };
       readonly abstention?: {
         readonly schema_version: "bench-abstention.v1" | "bench-abstention.v2";
         readonly total: number;
@@ -38,6 +47,7 @@ export function validateMeasurementDenominatorContract(
   context: RefinementCtx
 ): void {
   validateAbstentionAttribution(payload, context);
+  validateMeasurementCohortAgreement(payload, context);
   const attribution = payload.measurement_attribution;
   const claimsEligibility = attribution?.schema_version ===
     "bench-measurement-attribution.v2" &&
@@ -75,6 +85,66 @@ export function validateMeasurementDenominatorContract(
     payload.kpi.quality_metrics?.evaluator_identity_unscorable_count ?? 0;
   addIssue(context, rows.length - scorable === abstentionTotal + identityUnscorable,
     "scorable=false rows must match abstention and evaluator identity unscorable counts");
+}
+
+function validateMeasurementCohortAgreement(
+  payload: MeasurementDenominatorPayload,
+  context: RefinementCtx
+): void {
+  const counts = payload.kpi.quality_metrics?.measurement_cohort_counts;
+  if (counts === undefined) return;
+  const rows = payload.kpi.per_scenario;
+  addMeasurementCohortIssue(
+    context,
+    counts.evaluated === payload.evaluated_count,
+    "evaluated must match evaluated_count"
+  );
+  if (payload.answerable_evaluated_count !== undefined) {
+    addMeasurementCohortIssue(
+      context,
+      counts.scorable_answerable === payload.answerable_evaluated_count,
+      "scorable answerable must match answerable_evaluated_count"
+    );
+  }
+  addMeasurementCohortIssue(
+    context,
+    rows.length === counts.evaluated,
+    "evaluated must match per-scenario rows"
+  );
+  if (rows.some((row) => row.scorable === undefined)) {
+    addMeasurementCohortIssue(context, false, "per-scenario rows require explicit scorable state");
+    return;
+  }
+  const scorableRows = rows.filter((row) => row.scorable === true);
+  const hitCount = scorableRows.filter((row) => row.hit_at_5).length;
+  addMeasurementCohortIssue(
+    context,
+    scorableRows.length === counts.scorable_answerable,
+    "scorable answerable must match per-scenario rows"
+  );
+  addMeasurementCohortIssue(
+    context,
+    hitCount === counts.hit_at_5,
+    "hit_at_5 must match per-scenario rows"
+  );
+  addMeasurementCohortIssue(
+    context,
+    scorableRows.length - hitCount === counts.miss_at_5,
+    "miss_at_5 must match per-scenario rows"
+  );
+}
+
+function addMeasurementCohortIssue(
+  context: RefinementCtx,
+  valid: boolean,
+  detail: string
+): void {
+  addIssue(
+    context,
+    valid,
+    `measurement cohort ${detail}`,
+    ["kpi", "quality_metrics", "measurement_cohort_counts"]
+  );
 }
 
 export function measurementContractAllowsEligibility(

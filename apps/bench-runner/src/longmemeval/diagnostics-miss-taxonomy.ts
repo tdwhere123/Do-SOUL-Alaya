@@ -7,6 +7,7 @@ import type {
   LongMemEvalQuestionDiagnostic
 } from "./diagnostics-types.js";
 import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
+import { classifyQuestionMeasurementStatus } from "./measurement/question-validity.js";
 
 type MutableMissTaxonomySummary = Record<LongMemEvalMissTaxonomy, number>;
 
@@ -98,7 +99,8 @@ export function classifyQuestionMissTaxonomy(input: {
   if (input.hitAt5) {
     return null;
   }
-  if (input.isAbstention || !input.diagnosticsAvailable) {
+  if (input.isAbstention) return null;
+  if (!input.diagnosticsAvailable) {
     return "evaluation_or_gold_issue";
   }
   if (input.goldMemoryIds.length === 0) {
@@ -144,6 +146,7 @@ export function summarizeLongMemEvalMissTaxonomy(
 ): LongMemEvalMissTaxonomySummary {
   const summary = createMutableMissTaxonomySummary();
   for (const row of diagnostics) {
+    if (row.hit_at_5 || classifyQuestionMeasurementStatus(row) !== "scorable") continue;
     const taxonomy = readQuestionMissTaxonomy(row);
     if (taxonomy === null) {
       continue;

@@ -11,7 +11,11 @@ import type {
   LongMemEvalQuestionDiagnostic
 } from "./diagnostics-types.js";
 import { createEmptyMissTaxonomyDistribution } from "./diagnostics-miss-taxonomy.js";
-import { isEvaluatorIdentityUnscorable } from "./measurement/question-validity.js";
+import {
+  classifyQuestionMeasurementStatus,
+  isEvaluatorIdentityUnscorable,
+  type QuestionMeasurementStatus
+} from "./measurement/question-validity.js";
 import {
   classifyGoldRankBucket,
   classifyTopDistractor,
@@ -37,6 +41,8 @@ export interface QualityMetricsState {
     keyof LongMemEvalMissTaxonomyDistribution,
     number
   >;
+  readonly unscorableReasonDistribution: Record<string, number>;
+  readonly measurementCohortCounts: NonNullable<QualityMetrics["measurement_cohort_counts"]>;
   readonly budgetDropCounts: Map<string, number>;
   readonly planeGoldCounts: Map<string, number>;
   readonly planeHitAt5Counts: Map<string, number>;
@@ -79,6 +85,16 @@ export function createQualityMetricsState(): QualityMetricsState {
   return {
     missDistribution: {},
     missTaxonomyDistribution: createEmptyMissTaxonomyDistribution(),
+    unscorableReasonDistribution: {},
+    measurementCohortCounts: {
+      evaluated: 0,
+      non_abstention: 0,
+      abstention: 0,
+      scorable_answerable: 0,
+      unscorable_answerable: 0,
+      hit_at_5: 0,
+      miss_at_5: 0
+    },
     budgetDropCounts: new Map(),
     planeGoldCounts: new Map(),
     planeHitAt5Counts: new Map(),
@@ -153,10 +169,10 @@ function recordQuestionBasics(
 ): void {
   state.missDistribution[question.miss_classification] =
     (state.missDistribution[question.miss_classification] ?? 0) + 1;
-  const missTaxonomy = readQuestionMissTaxonomy(question);
-  if (missTaxonomy !== null) {
-    state.missTaxonomyDistribution[missTaxonomy]++;
-  }
+  const measurementStatus = classifyQuestionMeasurementStatus(question);
+  recordMeasurementCohort(state, question, measurementStatus);
+  if (measurementStatus === "scorable") recordScorableMissTaxonomy(state, question);
+  else recordUnscorableReason(state, question, measurementStatus);
   if (question.miss_classification === "candidate_absent") state.candidateAbsentCount++;
   if (question.miss_classification === "no_gold") state.noGoldCount++;
   if (question.cohort_ledger?.evaluation_issue_reason === "identity_join_error" ||
@@ -175,6 +191,48 @@ function recordQuestionBasics(
       state.nonMonotonicCount++;
     }
   }
+}
+
+function recordMeasurementCohort(
+  state: QualityMetricsState,
+  question: LongMemEvalQuestionDiagnostic,
+  status: QuestionMeasurementStatus
+): void {
+  const counts = state.measurementCohortCounts;
+  counts.evaluated++;
+  if (status === "abstention_unscorable") {
+    counts.abstention++;
+    return;
+  }
+  counts.non_abstention++;
+  if (status === "evaluator_identity_unscorable") {
+    counts.unscorable_answerable++;
+    return;
+  }
+  counts.scorable_answerable++;
+  if (question.hit_at_5) counts.hit_at_5++;
+  else counts.miss_at_5++;
+}
+
+function recordScorableMissTaxonomy(
+  state: QualityMetricsState,
+  question: LongMemEvalQuestionDiagnostic
+): void {
+  if (question.hit_at_5) return;
+  const taxonomy = readQuestionMissTaxonomy(question);
+  if (taxonomy !== null) state.missTaxonomyDistribution[taxonomy]++;
+}
+
+function recordUnscorableReason(
+  state: QualityMetricsState,
+  question: LongMemEvalQuestionDiagnostic,
+  status: Exclude<QuestionMeasurementStatus, "scorable">
+): void {
+  const reason = status === "abstention_unscorable"
+    ? "abstention_uncalibrated"
+    : question.cohort_ledger?.evaluation_issue_reason ?? status;
+  state.unscorableReasonDistribution[reason] =
+    (state.unscorableReasonDistribution[reason] ?? 0) + 1;
 }
 
 function recordAbstentionQuestion(

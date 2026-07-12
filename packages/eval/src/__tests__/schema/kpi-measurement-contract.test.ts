@@ -1,8 +1,117 @@
 import { describe, expect, it } from "vitest";
+import { QualityMetricsSchema } from "../../schema/kpi-quality-schema.js";
 import { KpiPayloadSchema } from "../../schema/kpi-schema.js";
 import { buildFullLongMemEvalPayload } from "../history/history-fixture.js";
 
 describe("KPI measurement denominator contract", () => {
+  it.each([
+    ["counts only", true],
+    ["reasons only", false]
+  ])("rejects unpaired measurement accounting: %s", (_label, includeCounts) => {
+    const quality = buildFullLongMemEvalPayload("public", "abc1234", 1)
+      .kpi.quality_metrics!;
+    const accounting = currentMeasurementAccounting();
+
+    expect(() => QualityMetricsSchema.parse({
+      ...quality,
+      ...(includeCounts
+        ? { measurement_cohort_counts: accounting.measurement_cohort_counts }
+        : { unscorable_reason_distribution: accounting.unscorable_reason_distribution })
+    })).toThrow(/measurement accounting.*paired/u);
+  });
+
+  it("rejects non-conserved unscorable reasons and miss taxonomy", () => {
+    const quality = buildFullLongMemEvalPayload("public", "abc1234", 1)
+      .kpi.quality_metrics!;
+    const counts = {
+      evaluated: 2,
+      non_abstention: 2,
+      abstention: 0,
+      scorable_answerable: 1,
+      unscorable_answerable: 1,
+      hit_at_5: 0,
+      miss_at_5: 1
+    };
+
+    expect(() => QualityMetricsSchema.parse({
+      ...quality,
+      measurement_cohort_counts: counts,
+      unscorable_reason_distribution: {}
+    })).toThrow(/unscorable reason.*conservation/u);
+    expect(() => QualityMetricsSchema.parse({
+      ...quality,
+      measurement_cohort_counts: counts,
+      unscorable_reason_distribution: { empty_gold_identity: 1 }
+    })).toThrow(/miss taxonomy.*conservation/u);
+  });
+
+  it("accepts a fully conserved current measurement payload", () => {
+    expect(() => KpiPayloadSchema.parse(currentMeasurementPayload())).not.toThrow();
+  });
+
+  it.each([
+    ["evaluated_count", (payload: ReturnType<typeof currentMeasurementPayload>) => ({
+      ...payload,
+      evaluated_count: payload.evaluated_count - 1
+    })],
+    ["answerable_evaluated_count", (payload: ReturnType<typeof currentMeasurementPayload>) => ({
+      ...payload,
+      answerable_evaluated_count: payload.answerable_evaluated_count! - 1
+    })],
+    ["per-scenario scorable counts", (payload: ReturnType<typeof currentMeasurementPayload>) => ({
+      ...payload,
+      answerable_evaluated_count: payload.answerable_evaluated_count! - 1,
+      kpi: {
+        ...payload.kpi,
+        per_scenario: payload.kpi.per_scenario.map((row, index) =>
+          index === 0 ? { ...row, hit_at_5: false, scorable: false } : row
+        )
+      }
+    })],
+    ["per-scenario hit counts", (payload: ReturnType<typeof currentMeasurementPayload>) => ({
+      ...payload,
+      kpi: {
+        ...payload.kpi,
+        r_at_5: (payload.answerable_evaluated_count! - 1) /
+          payload.answerable_evaluated_count!,
+        per_scenario: payload.kpi.per_scenario.map((row, index) =>
+          index === 0 ? { ...row, hit_at_5: false } : row
+        )
+      }
+    })],
+    ["abstention total", (payload: ReturnType<typeof currentMeasurementPayload>) => ({
+      ...payload,
+      kpi: {
+        ...payload.kpi,
+        quality_metrics: {
+          ...payload.kpi.quality_metrics!,
+          abstention: {
+            schema_version: "bench-abstention.v2" as const,
+            total: 1,
+            scored: 0 as const,
+            unscorable: 1,
+            method: "fused_margin_diagnostic_only" as const,
+            calibration_status: "uncalibrated" as const,
+            gate_eligible: false as const
+          }
+        }
+      }
+    })],
+    ["identity-unscorable total", (payload: ReturnType<typeof currentMeasurementPayload>) => ({
+      ...payload,
+      kpi: {
+        ...payload.kpi,
+        quality_metrics: {
+          ...payload.kpi.quality_metrics!,
+          evaluator_identity_unscorable_count: 1
+        }
+      }
+    })]
+  ])("rejects measurement cohorts that disagree with %s", (_label, forge) => {
+    expect(() => KpiPayloadSchema.parse(forge(currentMeasurementPayload())))
+      .toThrow(/measurement cohort/u);
+  });
+
   it("binds r_at_5 to scorable per-scenario hit rows", () => {
     const base = buildFullLongMemEvalPayload("public", "abc1234", 1);
     const forged = {
@@ -363,3 +472,28 @@ describe("KPI measurement denominator contract", () => {
     expect(() => KpiPayloadSchema.parse(payload)).not.toThrow();
   });
 });
+
+function currentMeasurementPayload() {
+  const payload = buildFullLongMemEvalPayload("public", "abc1234", 1);
+  return {
+    ...payload,
+    kpi: {
+      ...payload.kpi,
+      quality_metrics: {
+        ...payload.kpi.quality_metrics!,
+        ...currentMeasurementAccounting()
+      }
+    }
+  };
+}
+
+function currentMeasurementAccounting() {
+  return {
+    measurement_cohort_counts: {
+      evaluated: 500, non_abstention: 500, abstention: 0,
+      scorable_answerable: 500, unscorable_answerable: 0,
+      hit_at_5: 500, miss_at_5: 0
+    },
+    unscorable_reason_distribution: {}
+  };
+}

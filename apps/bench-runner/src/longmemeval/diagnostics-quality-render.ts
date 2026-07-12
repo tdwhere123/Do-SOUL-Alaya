@@ -34,6 +34,8 @@ export function buildQualityMetricsFromState(
     per_gold_rank_buckets: state.perGoldRankBuckets,
     per_gold_displaced_by: state.perGoldDisplacedBy,
     miss_taxonomy_distribution: state.missTaxonomyDistribution,
+    unscorable_reason_distribution: state.unscorableReasonDistribution,
+    measurement_cohort_counts: state.measurementCohortCounts,
     miss_distribution: state.missDistribution
   };
 }

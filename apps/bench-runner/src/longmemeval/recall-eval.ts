@@ -6,7 +6,6 @@ import {
   writeEntry,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
-  type EdgeProposalKpiEventRow,
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
@@ -19,10 +18,8 @@ import {
   startBenchDaemon,
   type BenchDaemonHandle,
   type BenchRecallOptions,
-  type BenchTokenMetrics,
   type BenchWorkspaceHandle
 } from "../harness/daemon.js";
-import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
@@ -53,7 +50,6 @@ import {
   type LongMemEvalSidecarEntry
 } from "./runner.js";
 import type { LongMemEvalSnapshotManifest, LongMemEvalSnapshotQuestion } from "./snapshot.js";
-import type { LongMemEvalVariant } from "./dataset.js";
 import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
 import { throwLifecycleErrors } from "./lifecycle/errors.js";
 import { writeRecallEvalProgress } from "./lifecycle/recall-eval-progress.js";
@@ -72,47 +68,17 @@ import { loadRecallEvalSnapshot } from "./snapshot/recall-eval-loader.js";
 import { renderRecallEvalReport } from "./kpi/recall-eval-report.js";
 import { prepareRecallEvalRestoredDb } from "./snapshot/recall-eval-db.js";
 import { restoreLegacySnapshotToDataDir } from "./snapshot/legacy-substrate.js";
+import type {
+  RecallEvalOptions,
+  RecallEvalQuestionResult,
+  RecallEvalResult
+} from "./lifecycle/recall-eval-contract.js";
+export type {
+  RecallEvalOptions,
+  RecallEvalQuestionResult,
+  RecallEvalResult
+} from "./lifecycle/recall-eval-contract.js";
 
-export interface RecallEvalOptions {
-  readonly snapshotDbPath: string;
-  readonly variant: LongMemEvalVariant;
-  readonly limit?: number;
-  readonly offset?: number;
-  readonly historyRoot: string;
-  readonly policyShape?: BenchPolicyShape;
-  readonly simulateReport?: BenchSimulateReportMode;
-  readonly weightOverridesJson?: string;
-  /** Override the restore directory in tests. */
-  readonly dataDirRoot?: string;
-  readonly legacySnapshot?: boolean;
-  readonly dataDir?: string;
-  readonly pinnedMetaRoot?: string;
-  readonly legacyManifestSha256?: string;
-  readonly legacyDatasetSha256?: string;
-}
-export interface RecallEvalResult {
-  readonly slug: string;
-  readonly kpiPath: string;
-  readonly reportPath: string;
-  readonly findingsPath: string;
-  readonly payload: KpiPayload;
-  readonly snapshotManifest: LongMemEvalSnapshotManifest;
-  readonly perQuestionDelivered: ReadonlyMap<string, readonly string[]>;
-}
-export interface RecallEvalQuestionResult {
-  readonly questionId: string;
-  readonly hitAt1: boolean;
-  readonly hitAt5: boolean;
-  readonly hitAt10: boolean;
-  readonly firstTier: "hot" | "warm" | "cold";
-  readonly latencyMs: number;
-  readonly degradationReason: string | null;
-  readonly diagnostics: LongMemEvalQuestionDiagnostic;
-  readonly tokenMetrics: BenchTokenMetrics;
-  readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
-  readonly edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
-  readonly deliveredObjectIds: readonly string[];
-}
 interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
   readonly manifest: LongMemEvalSnapshotManifest;

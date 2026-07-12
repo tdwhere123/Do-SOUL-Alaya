@@ -1,7 +1,14 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
 import { buildPerPlaneRecallCoverage, ratio } from "../longmemeval/diagnostics-quality-helpers.js";
 import { createEmptyMissTaxonomyDistribution } from "../longmemeval/diagnostics-miss-taxonomy.js";
+import {
+  accumulateMeasurementAccounting,
+  buildMeasurementAccounting,
+  createMeasurementAccountingState,
+  type MeasurementAccountingState
+} from "./merge/measurement-accounting.js";
 import { accumulateCoreCounters } from "./merge/quality-core-counters.js";
+import { accumulateDistributions } from "./merge/quality-distributions.js";
 
 type BudgetDropEntry = QualityMetrics["budget_drop_distribution"][string];
 type GoldRankBuckets = NonNullable<QualityMetrics["gold_rank_buckets"]>;
@@ -16,6 +23,7 @@ export interface MergeQualityMetricsState {
   readonly budgetCounts: Map<string, BudgetDropEntry>;
   readonly missDistribution: Record<string, number>;
   readonly missTaxonomyDistribution: MissTaxonomyDistribution;
+  readonly measurementAccounting: MeasurementAccountingState;
   readonly planeGoldCounts: Map<string, number>;
   readonly planeHitAt5Counts: Map<string, number>;
   readonly goldRankBuckets: GoldRankBuckets;
@@ -71,6 +79,7 @@ export function createMergeQualityMetricsState(): MergeQualityMetricsState {
     budgetCounts: new Map(),
     missDistribution: {},
     missTaxonomyDistribution: createEmptyMissTaxonomyDistribution(),
+    measurementAccounting: createMeasurementAccountingState(),
     planeGoldCounts: new Map(),
     planeHitAt5Counts: new Map(),
     goldRankBuckets: emptyRankTally(),
@@ -94,6 +103,7 @@ export function accumulateMergedQualityMetric(
 ): void {
   accumulatePlaneCoverage(state, metric);
   accumulateCoreCounters(state, metric);
+  accumulateMeasurementAccounting(state.measurementAccounting, metric);
   accumulateDistributions(state, metric);
   accumulateOptionalAttribution(state, metric);
   accumulateOptionalBreakdowns(state, metric);
@@ -108,6 +118,7 @@ export function buildMergedQualityMetrics(
     ...buildStreamQualityMetrics(state),
     ...buildOptionalAttributionBlocks(state),
     ...buildOptionalBreakdownBlocks(state),
+    ...buildMeasurementAccounting(state.measurementAccounting),
     miss_taxonomy_distribution: state.missTaxonomyDistribution,
     miss_distribution: state.missDistribution
   };
@@ -172,24 +183,6 @@ function accumulatePlaneCoverage(
       (state.planeHitAt5Counts.get(plane) ?? 0) + entry.hit_at_5_count
     );
   }
-}
-
-function accumulateDistributions(
-  state: MergeQualityMetricsState,
-  metric: QualityMetrics
-): void {
-  for (const [key, entry] of Object.entries(metric.budget_drop_distribution)) {
-    const existing = state.budgetCounts.get(key) ?? { count: 0, denominator: 0, share: 0 };
-    state.budgetCounts.set(key, {
-      count: existing.count + entry.count,
-      share: 0,
-      denominator: existing.denominator + entry.denominator
-    });
-  }
-  for (const [key, count] of Object.entries(metric.miss_distribution)) {
-    state.missDistribution[key] = (state.missDistribution[key] ?? 0) + count;
-  }
-  accumulateRecord(state.missTaxonomyDistribution, metric.miss_taxonomy_distribution);
 }
 
 function accumulateOptionalAttribution(

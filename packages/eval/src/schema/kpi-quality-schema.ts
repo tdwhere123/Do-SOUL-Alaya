@@ -168,6 +168,44 @@ const UncalibratedAbstentionMetricsSchema = z.object({
   message: "uncalibrated abstention requires unscorable=total"
 });
 
+const MeasurementCohortCountsSchema = z.object({
+  evaluated: z.number().int().nonnegative(),
+  non_abstention: z.number().int().nonnegative(),
+  abstention: z.number().int().nonnegative(),
+  scorable_answerable: z.number().int().nonnegative(),
+  unscorable_answerable: z.number().int().nonnegative(),
+  hit_at_5: z.number().int().nonnegative(),
+  miss_at_5: z.number().int().nonnegative()
+}).strict().superRefine((value, context) => {
+  const checks = [
+    [value.evaluated, value.non_abstention + value.abstention, "evaluated"],
+    [
+      value.non_abstention,
+      value.scorable_answerable + value.unscorable_answerable,
+      "non_abstention"
+    ],
+    [value.scorable_answerable, value.hit_at_5 + value.miss_at_5, "scorable_answerable"]
+  ] as const;
+  for (const [actual, expected, field] of checks) {
+    if (actual === expected) continue;
+    context.addIssue({
+      code: "custom",
+      path: [field],
+      message: `measurement cohort conservation failed for ${field}`
+    });
+  }
+});
+
+type MeasurementCohortCounts = z.infer<typeof MeasurementCohortCountsSchema>;
+
+interface QualityMeasurementAccounting {
+  readonly measurement_cohort_counts?: MeasurementCohortCounts;
+  readonly unscorable_reason_distribution?: Readonly<Record<string, number>>;
+  readonly miss_taxonomy_distribution: Readonly<Record<string, number>>;
+  readonly evaluator_identity_unscorable_count?: number;
+  readonly abstention?: { readonly total: number };
+}
+
 export const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -231,6 +269,10 @@ export const QualityMetricsSchema = z
       answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     }),
+    unscorable_reason_distribution: z
+      .record(z.string(), z.number().int().nonnegative())
+      .optional(),
+    measurement_cohort_counts: MeasurementCohortCountsSchema.optional(),
     // v1 remains readable as historical evidence. New writers emit v2, which
     // is fail-closed until an independent calibration contract exists.
     abstention: z.discriminatedUnion("schema_version", [
@@ -239,5 +281,62 @@ export const QualityMetricsSchema = z
     ]).optional(),
     miss_distribution: z.record(z.string(), z.number().int().nonnegative())
   })
-  .strict();
+  .strict()
+  .superRefine(validateQualityMeasurementAccounting);
 export type QualityMetrics = z.infer<typeof QualityMetricsSchema>;
+
+function validateQualityMeasurementAccounting(
+  value: QualityMeasurementAccounting,
+  context: z.RefinementCtx
+): void {
+  const counts = value.measurement_cohort_counts;
+  const reasons = value.unscorable_reason_distribution;
+  if ((counts === undefined) !== (reasons === undefined)) {
+    addQualityMeasurementIssue(
+      context,
+      "measurement accounting fields must be paired"
+    );
+  }
+  if (counts === undefined || reasons === undefined) return;
+  addQualityMeasurementIssue(
+    context,
+    "unscorable reason conservation failed",
+    sumCounts(reasons) === counts.abstention + counts.unscorable_answerable
+  );
+  addQualityMeasurementIssue(
+    context,
+    "miss taxonomy conservation failed",
+    sumCounts(value.miss_taxonomy_distribution) === counts.miss_at_5
+  );
+  if (value.abstention !== undefined) {
+    addQualityMeasurementIssue(
+      context,
+      "measurement cohort abstention must match abstention total",
+      counts.abstention === value.abstention.total
+    );
+  }
+  if (value.evaluator_identity_unscorable_count !== undefined) {
+    addQualityMeasurementIssue(
+      context,
+      "measurement cohort unscorable answerable must match evaluator identity total",
+      counts.unscorable_answerable === value.evaluator_identity_unscorable_count
+    );
+  }
+}
+
+function addQualityMeasurementIssue(
+  context: z.RefinementCtx,
+  message: string,
+  valid = false
+): void {
+  if (valid) return;
+  context.addIssue({
+    code: "custom",
+    path: ["measurement_cohort_counts"],
+    message
+  });
+}
+
+function sumCounts(values: Readonly<Record<string, number>>): number {
+  return Object.values(values).reduce((sum, count) => sum + count, 0);
+}

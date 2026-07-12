@@ -223,34 +223,70 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
       "answer_set_coverage_drop"
     );
 
-    const summary = summarizeLongMemEvalRecallEvidence([
+    const abstention = buildQuestionDiagnostic({
+      questionId: "q-abstention_abs",
+      goldMemoryIds: [],
+      answerSessionIds: [],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidates: [] } }
+    });
+    expect(abstention.miss_taxonomy).toBeNull();
+
+    const hitWithStaleTaxonomy = {
+      ...candidateAbsent,
+      question_id: "q-hit-with-stale-taxonomy",
+      hit_at_5: true,
+      miss_taxonomy: "candidate_absent" as const
+    };
+
+    const questions = [
       materializationDrop,
       budgetDrop,
       deliveryOrderDrop,
       candidateAbsent,
       noGold,
       noGoldMaterializationDrop,
-      noGoldCandidateAbsent
-    ]);
+      noGoldCandidateAbsent,
+      abstention,
+      hitWithStaleTaxonomy
+    ];
+    const summary = summarizeLongMemEvalRecallEvidence(questions);
     expect(summary.miss_taxonomy_distribution).toEqual({
-      candidate_absent: 2,
-      materialization_drop: 2,
+      candidate_absent: 1,
+      materialization_drop: 1,
       budget_drop: 1,
       delivery_order_drop: 1,
       answer_set_coverage_drop: 0,
-      evaluation_or_gold_issue: 1
+      evaluation_or_gold_issue: 0
     });
-    expect(
-      buildLongMemEvalQualityMetrics([
-        materializationDrop,
-        budgetDrop,
-        deliveryOrderDrop,
-        candidateAbsent,
-        noGold,
-        noGoldMaterializationDrop,
-        noGoldCandidateAbsent
-      ]).miss_taxonomy_distribution
-    ).toEqual(summary.miss_taxonomy_distribution);
+    const metrics = buildLongMemEvalQualityMetrics(questions);
+    expect(metrics.miss_taxonomy_distribution).toEqual(summary.miss_taxonomy_distribution);
+    expect(metrics.unscorable_reason_distribution).toEqual({
+      abstention_uncalibrated: 1,
+      empty_gold_identity: 1,
+      extraction_materialization_drop: 2
+    });
+    const cohorts = metrics.measurement_cohort_counts!;
+    expect(cohorts).toEqual({
+      evaluated: 9,
+      non_abstention: 8,
+      abstention: 1,
+      scorable_answerable: 5,
+      unscorable_answerable: 3,
+      hit_at_5: 1,
+      miss_at_5: 4
+    });
+    expect(cohorts.evaluated).toBe(cohorts.non_abstention + cohorts.abstention);
+    expect(cohorts.non_abstention).toBe(
+      cohorts.scorable_answerable + cohorts.unscorable_answerable
+    );
+    expect(cohorts.scorable_answerable).toBe(cohorts.hit_at_5 + cohorts.miss_at_5);
   });
 
 });

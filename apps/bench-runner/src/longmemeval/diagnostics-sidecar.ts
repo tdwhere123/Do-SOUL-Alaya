@@ -13,6 +13,7 @@ import {
   readGraphExpansionPlaneCountPerEdgeType,
   readGraphExpansionPlaneCountPerHop
 } from "./diagnostics-private.js";
+import { classifyQuestionMeasurementStatus } from "./measurement/question-validity.js";
 import {
   createEmptyMissTaxonomyDistribution,
   readQuestionMissTaxonomy,
@@ -129,7 +130,10 @@ function accumulateRecallEvidenceRow(
   state.graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
   state.graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
   state.graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
-  const missTaxonomy = readQuestionMissTaxonomy(row);
+  const missTaxonomy = !row.hit_at_5 &&
+    classifyQuestionMeasurementStatus(row) === "scorable"
+    ? readQuestionMissTaxonomy(row)
+    : null;
   if (missTaxonomy !== null) {
     state.missTaxonomyDistribution[missTaxonomy] += 1;
   }

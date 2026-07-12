@@ -30,6 +30,26 @@ type ExpandGraphFrontierParams = Readonly<{
   readonly onCandidate: (candidate: Readonly<GraphExpansionCandidateDraft>) => void;
 }>;
 
+type ExpandGraphFrontiersBySeedParams = Readonly<
+  Omit<ExpandGraphFrontierParams, "onCandidate"> & {
+    readonly onCandidate: (
+      seedIndex: number,
+      candidate: Readonly<GraphExpansionCandidateDraft>
+    ) => void;
+  }
+>;
+
+type GraphFrontierState = {
+  readonly seedIndex: number;
+  readonly expandedIds: Set<string>;
+  frontier: readonly GraphExpansionFrontierNode[];
+};
+
+type PendingGraphFrontierState = Readonly<{
+  readonly state: GraphFrontierState;
+  readonly frontierIds: readonly string[];
+}>;
+
 export async function expandGraphFrontier(params: ExpandGraphFrontierParams): Promise<void> {
   if (params.seedEntries.length === 0) {
     return;
@@ -55,6 +75,91 @@ export async function expandGraphFrontier(params: ExpandGraphFrontierParams): Pr
       hop as 1 | 2
     );
   }
+}
+
+export async function expandGraphFrontiersBySeed(
+  params: ExpandGraphFrontiersBySeedParams
+): Promise<void> {
+  const states = createPerSeedGraphFrontierStates(params.seedEntries);
+  for (let hop = 1; hop <= params.maxGraphHops; hop += 1) {
+    const pendingStates = collectPendingGraphFrontierStates(states);
+    if (pendingStates.length === 0) {
+      break;
+    }
+    const frontierIds = collectUnionFrontierIds(pendingStates);
+    const eligiblePaths = await loadEligibleGraphExpansionPaths(
+      params,
+      frontierIds,
+      []
+    );
+    if (eligiblePaths === null) {
+      await expandPendingGraphFrontiersIndividually(params, pendingStates, hop as 1 | 2);
+      continue;
+    }
+    for (const pending of pendingStates) {
+      expandPendingGraphFrontier(params, pending, eligiblePaths, hop as 1 | 2);
+    }
+  }
+}
+
+async function expandPendingGraphFrontiersIndividually(
+  params: ExpandGraphFrontiersBySeedParams,
+  pendingStates: readonly PendingGraphFrontierState[],
+  hop: 1 | 2
+): Promise<void> {
+  for (const pending of pendingStates) {
+    const eligiblePaths = await loadEligibleGraphExpansionPaths(params, pending.frontierIds);
+    if (eligiblePaths === null) {
+      pending.state.frontier = [];
+      continue;
+    }
+    expandPendingGraphFrontier(params, pending, eligiblePaths, hop);
+  }
+}
+
+function expandPendingGraphFrontier(
+  params: ExpandGraphFrontiersBySeedParams,
+  pending: PendingGraphFrontierState,
+  eligiblePaths: readonly Readonly<PathRelation>[],
+  hop: 1 | 2
+): void {
+  pending.state.frontier = expandGraphFrontierHop(
+    {
+      ...params,
+      seedEntries: [params.seedEntries[pending.state.seedIndex]!],
+      onCandidate: (candidate) => params.onCandidate(pending.state.seedIndex, candidate)
+    },
+    pending.state.frontier,
+    eligiblePaths,
+    pending.state.expandedIds,
+    pending.frontierIds,
+    hop
+  );
+}
+
+function createPerSeedGraphFrontierStates(
+  seedEntries: readonly Readonly<MemoryEntry>[]
+): GraphFrontierState[] {
+  return seedEntries.map((seedEntry, seedIndex) => ({
+    seedIndex,
+    expandedIds: new Set<string>(),
+    frontier: createInitialGraphFrontier([seedEntry])
+  }));
+}
+
+function collectPendingGraphFrontierStates(
+  states: readonly GraphFrontierState[]
+): readonly PendingGraphFrontierState[] {
+  return states.flatMap((state) => {
+    const frontierIds = collectFrontierIdsToExpand(state.frontier, state.expandedIds);
+    return frontierIds.length === 0 ? [] : [{ state, frontierIds }];
+  });
+}
+
+function collectUnionFrontierIds(
+  states: readonly Readonly<{ readonly frontierIds: readonly string[] }>[]
+): readonly string[] {
+  return [...new Set(states.flatMap(({ frontierIds }) => frontierIds))];
 }
 
 function createInitialGraphFrontier(
@@ -83,7 +188,8 @@ async function loadEligibleGraphExpansionPaths(
     readonly warn: RecallServiceWarnPort;
     readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
   }>,
-  frontierIds: readonly string[]
+  frontierIds: readonly string[],
+  failureSeedCounts: readonly number[] = [frontierIds.length]
 ): Promise<readonly Readonly<PathRelation>[] | null> {
   const anchorRefs: PathAnchorRef[] = frontierIds.map((object_id) => ({
     kind: "object",
@@ -93,14 +199,16 @@ async function loadEligibleGraphExpansionPaths(
     const paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
     return paths.filter((path) => isPathRecallEligible(path));
   } catch (error) {
-    recordRecallDegradation(params, "graph_expansion_failed");
-    params.warn("graph expansion path lookup failed", {
-      workspace_id: params.workspaceId,
-      seed_count: frontierIds.length,
-      operation: "graph_expansion_path_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
+    for (const seedCount of failureSeedCounts) {
+      recordRecallDegradation(params, "graph_expansion_failed");
+      params.warn("graph expansion path lookup failed", {
+        workspace_id: params.workspaceId,
+        seed_count: seedCount,
+        operation: "graph_expansion_path_lookup",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+    }
     return null;
   }
 }

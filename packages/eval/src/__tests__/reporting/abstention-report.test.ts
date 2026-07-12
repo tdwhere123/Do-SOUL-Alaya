@@ -97,10 +97,71 @@ describe("abstention report contract", () => {
     };
     const lines: string[] = [];
 
+    expect(() => QualityMetricsSchema.parse(payload.kpi.quality_metrics)).not.toThrow();
     renderAbsoluteKpis(lines, payload);
 
     expect(lines.join("\n")).toContain(
       "evaluator_identity_issue=2 evaluator_identity_unscorable=3"
     );
+  });
+
+  it("renders conserved measurement cohorts separately from unscorable reasons", () => {
+    const payload = buildPayload("05d98df");
+    payload.kpi.quality_metrics = {
+      ...passingQualityMetrics(),
+      measurement_cohort_counts: {
+        evaluated: 8,
+        non_abstention: 7,
+        abstention: 1,
+        scorable_answerable: 4,
+        unscorable_answerable: 3,
+        hit_at_5: 3,
+        miss_at_5: 1
+      },
+      evaluator_identity_unscorable_count: 3,
+      abstention: {
+        schema_version: "bench-abstention.v2",
+        total: 1,
+        scored: 0,
+        unscorable: 1,
+        method: "fused_margin_diagnostic_only",
+        calibration_status: "uncalibrated",
+        gate_eligible: false
+      },
+      unscorable_reason_distribution: {
+        abstention_uncalibrated: 1,
+        empty_gold_identity: 3
+      },
+      miss_taxonomy_distribution: {
+        ...passingQualityMetrics().miss_taxonomy_distribution,
+        delivery_order_drop: 1
+      }
+    };
+    const lines: string[] = [];
+
+    expect(() => QualityMetricsSchema.parse(payload.kpi.quality_metrics)).not.toThrow();
+    renderAbsoluteKpis(lines, payload);
+
+    expect(lines).toContain(
+      "- Measurement cohorts: evaluated=8 non_abstention=7 abstention=1 scorable_answerable=4 unscorable_answerable=3 hit_at_5=3 miss_at_5=1"
+    );
+    expect(lines).toContain(
+      "- Unscorable reasons: abstention_uncalibrated=1 empty_gold_identity=3"
+    );
+  });
+
+  it("rejects measurement cohort counts that do not conserve", () => {
+    expect(() => QualityMetricsSchema.parse({
+      ...passingQualityMetrics(),
+      measurement_cohort_counts: {
+        evaluated: 8,
+        non_abstention: 7,
+        abstention: 1,
+        scorable_answerable: 5,
+        unscorable_answerable: 3,
+        hit_at_5: 3,
+        miss_at_5: 1
+      }
+    })).toThrow(/measurement cohort conservation/iu);
   });
 });
