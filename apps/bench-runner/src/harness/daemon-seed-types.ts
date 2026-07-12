@@ -41,6 +41,7 @@ export interface BenchSignalSeedInput {
   readonly evidenceRef: string;
   readonly turnSeedIndex: number;
   readonly extractionProvider: "official_api_compile" | "no_credentials_fallback";
+  readonly sourceObservedAt?: string;
   readonly sourceMemoryRefs?: readonly string[];
 }
 

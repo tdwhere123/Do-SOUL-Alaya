@@ -42,7 +42,6 @@ function admitPathExpansion(
     "path_expansion",
     undefined,
     undefined,
-    false,
     pathFlowScore
   );
 }

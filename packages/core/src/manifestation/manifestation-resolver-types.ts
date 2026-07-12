@@ -12,7 +12,10 @@ export interface ManifestationBudgetConfigProviderPort {
 }
 
 export interface ManifestationResolverEventLogWriterPort {
-  append(entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
+  /** Appends every entry in one transaction; a failure persists none of them. */
+  appendAtomically(
+    entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]
+  ): readonly EventLogEntry[] | Promise<readonly EventLogEntry[]>;
 }
 
 export interface ManifestationResolverDependencies {

@@ -386,12 +386,14 @@ function createResolverDependencies(input: {
     eventLogWriter: (() => {
       const nextEventId = stableIdGenerator("event");
       return {
-        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+        appendAtomically: vi.fn(async (
+          entries: readonly Omit<EventLogEntry, "event_id" | "created_at" | "revision">[]
+        ) => entries.map((entry) => ({
           event_id: nextEventId(),
           created_at: NOW,
           revision: 0,
           ...entry
-        }))
+        })))
       };
     })()
   };

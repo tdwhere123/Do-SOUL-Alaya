@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -27,6 +30,10 @@ import {
   makeSeed,
   signalsEnvelope
 } from "./compile-seed-fixture.js";
+import {
+  TEST_EXTRACTION_PROVIDER_URL,
+  writeExtractionCacheTestManifest
+} from "./extraction-cache-test-fixture.js";
 
 describe("extraction cache key — load-bearing inputs only", () => {
   let cacheRoot: string;
@@ -54,6 +61,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
   }
 
   it("hits the cache for the same turn under a different run_id", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
     };
@@ -75,7 +83,11 @@ describe("extraction cache key — load-bearing inputs only", () => {
     };
     const firstRun = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats: firstStats
     });
@@ -107,7 +119,11 @@ describe("extraction cache key — load-bearing inputs only", () => {
     };
     const secondRun = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats: secondStats
     });
@@ -123,15 +139,22 @@ describe("extraction cache key — load-bearing inputs only", () => {
   });
 
   it("still misses when the turn_content itself changes", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const firstRaw = signalsEnvelope([{ distilled: "Fact A.", matched: "A" }]);
+    const secondRaw = signalsEnvelope([{ distilled: "Fact B.", matched: "B" }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({ rawJson: '{"signals":[{"a":1}]}' })
-        .mockResolvedValueOnce({ rawJson: '{"signals":[{"b":2}]}' })
+        .mockResolvedValueOnce({ rawJson: firstRaw })
+        .mockResolvedValueOnce({ rawJson: secondRaw })
     };
     const extractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot
     });
     await extractor.extract({
@@ -151,6 +174,12 @@ describe("bench evidence capsule — production-faithful span", () => {
 
   beforeEach(async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-evidence-"));
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
   });
 
   afterEach(async () => {
@@ -173,6 +202,7 @@ describe("bench evidence capsule — production-faithful span", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: signalsEnvelope([
@@ -183,7 +213,7 @@ describe("bench evidence capsule — production-faithful span", () => {
     });
 
     const fullTurn =
-      "Yesterday I moved to Berlin and it has been a long week of unpacking.";
+      "Yesterday I moved to Berlin. It has been a long week of unpacking.";
     await runner.seedTurn({
       daemon,
       turnContent: fullTurn,
@@ -196,14 +226,11 @@ describe("bench evidence capsule — production-faithful span", () => {
     expect(seeded).toHaveLength(1);
     const raw = seeded[0]?.productionRawPayload;
     expect(raw).toBeDefined();
-    // The bench forwards compile()'s CONTENT-bearing raw_payload but strips
+    // The bench forwards compile()'s source-assertion raw_payload but strips
     // the schema-grounding block (it pins detected_object.object_kind to the
     // pre-canonicalization extracted kind — see stripSchemaGrounding). The
-    // load-bearing matched_text span survives: completeGardenTask's
-    // normalizeSchemaGroundedSignal re-grounds the signal from it, and
-    // production buildSignalSummary falls back to raw_payload.matched_text.
-    // It is the SAME span production materializes — NOT the full turn.
-    expect(raw?.matched_text).toBe("I moved to Berlin");
+    // The complete source assertion survives and is narrower than the turn.
+    expect(raw?.matched_text).toBe("Yesterday I moved to Berlin.");
     expect(raw?.matched_text).not.toBe(fullTurn);
     // The pre-strip schema-grounding keys are gone; the original
     // LLM-extracted object_kind is preserved for audit fidelity.

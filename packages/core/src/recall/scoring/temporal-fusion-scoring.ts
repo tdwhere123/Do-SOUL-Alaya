@@ -1,13 +1,14 @@
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
-import { parseRelativeTemporalTerm, resolveRelativeTemporalWindow } from "./temporal-window.js";
+import {
+  parseAbsoluteTemporalWindow,
+  parseRelativeTemporalTerm,
+  resolveRelativeTemporalWindow
+} from "./temporal-window.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
-import { classifyRecallIntent } from "../query/recall-query-plan.js";
+import { classifyRecallIntent, hasTemporalQuerySignal } from "../query/recall-query-plan.js";
 import type { RecallFusionStream } from "../runtime/recall-service-types.js";
-import {
-  recallProjectionScoringEnabled,
-  recallTemporalWindowEnabled
-} from "../../config/recall-env-access.js";
+import { recallProjectionScoringEnabled } from "../../config/recall-env-access.js";
 
 export function resolveDefaultFusionWeightForIntent(
   stream: RecallFusionStream,
@@ -46,7 +47,7 @@ export function resolveDefaultFusionWeightForIntentWithDiagnostics(
   if (stream !== "temporal_recency" || baseWeight > 0) {
     return { weight: baseWeight, baseWeight, adjustment: "none" };
   }
-  const weight = intent === "temporal" || intent === "knowledge_update" ? 4 : baseWeight;
+  const weight = hasTemporalQuerySignal(queryProbes, intent) ? 4 : baseWeight;
   return {
     weight,
     baseWeight,
@@ -55,10 +56,6 @@ export function resolveDefaultFusionWeightForIntentWithDiagnostics(
 }
 
 export { recallProjectionScoringEnabled } from "../../config/recall-env-access.js";
-
-export function temporalQueryWindowEnabled(): boolean {
-  return recallTemporalWindowEnabled();
-}
 
 export interface QueryTimeWindow {
   readonly startMs: number;
@@ -73,10 +70,11 @@ export function parseQueryTimeWindow(
   queryProbes: Readonly<RecallQueryProbes>,
   nowIso?: string
 ): QueryTimeWindow | null {
+  const offsetMinutes = nowIso === undefined ? 0 : parseFixedOffsetMinutes(nowIso) ?? 0;
   for (const term of queryProbes.date_terms) {
-    const window = parseAbsoluteDateWindow(term);
+    const window = parseAbsoluteTemporalWindow(term, offsetMinutes);
     if (window !== null) {
-      return window;
+      return { startMs: window.startMs, endMs: window.endMs };
     }
   }
   const anchorMs = nowIso === undefined ? null : parseOptionalTime(nowIso);
@@ -84,7 +82,7 @@ export function parseQueryTimeWindow(
     return null;
   }
   for (const term of queryProbes.date_terms) {
-    const window = parseRelativeDateWindow(term, anchorMs);
+    const window = parseRelativeDateWindow(term, anchorMs, offsetMinutes);
     if (window !== null) {
       return window;
     }
@@ -92,42 +90,17 @@ export function parseQueryTimeWindow(
   return null;
 }
 
-function parseAbsoluteDateWindow(term: string): QueryTimeWindow | null {
-  const isoDay = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(term);
-  if (isoDay) {
-    return dayWindow(Number(isoDay[1]), Number(isoDay[2]), Number(isoDay[3]));
-  }
-  const isoMonth = /^(\d{4})-(\d{2})$/u.exec(term);
-  if (isoMonth) {
-    return monthWindow(Number(isoMonth[1]), Number(isoMonth[2]));
-  }
-  const cjk = /^(\d{4})年(\d{1,2})月(?:(\d{1,2})日)?$/u.exec(term);
-  if (cjk) {
-    return cjk[3] === undefined
-      ? monthWindow(Number(cjk[1]), Number(cjk[2]))
-      : dayWindow(Number(cjk[1]), Number(cjk[2]), Number(cjk[3]));
-  }
-  return null;
-}
-
-function dayWindow(year: number, month: number, day: number): QueryTimeWindow | null {
-  const startMs = Date.UTC(year, month - 1, day);
-  return Number.isFinite(startMs) ? { startMs, endMs: startMs + 86_400_000 - 1 } : null;
-}
-
-function monthWindow(year: number, month: number): QueryTimeWindow | null {
-  const startMs = Date.UTC(year, month - 1, 1);
-  const endMs = Date.UTC(year, month, 1) - 1;
-  return Number.isFinite(startMs) && Number.isFinite(endMs) ? { startMs, endMs } : null;
-}
-
 // Relative date_terms (incl. seasons + "N units ago") resolve through the shared protocol window math.
-function parseRelativeDateWindow(term: string, anchorMs: number): QueryTimeWindow | null {
+function parseRelativeDateWindow(
+  term: string,
+  anchorMs: number,
+  offsetMinutes: number
+): QueryTimeWindow | null {
   const relativeTerm = parseRelativeTemporalTerm(term);
   if (relativeTerm === null) {
     return null;
   }
-  const window = resolveRelativeTemporalWindow(relativeTerm, anchorMs);
+  const window = resolveRelativeTemporalWindow(relativeTerm, anchorMs, offsetMinutes);
   return { startMs: window.startMs, endMs: window.endMs };
 }
 
@@ -196,6 +169,23 @@ function parseOptionalTime(value: string | null | undefined): number | null {
   }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseFixedOffsetMinutes(value: string): number | null {
+  if (/z$/iu.test(value)) {
+    return 0;
+  }
+  const match = /([+-])(\d{2}):(\d{2})$/u.exec(value);
+  if (match === null) {
+    return null;
+  }
+  const hours = Number(match[2]);
+  const minutes = Number(match[3]);
+  if (hours > 23 || minutes > 59) {
+    return null;
+  }
+  const total = hours * 60 + minutes;
+  return match[1] === "-" ? -total : total;
 }
 
 function normalizeEventTimeInterval(

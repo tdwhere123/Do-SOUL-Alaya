@@ -2,41 +2,38 @@ import {
   CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
-  SignalSource,
   readErrorMessage,
   type CandidateMemorySignal,
   type ConversationMessage
 } from "@do-soul/alaya-protocol";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   SignalExtractorError,
   createPiMonoExtractor,
   type SignalExtractor
 } from "./pi-mono-extractor.js";
-import { buildSchemaGroundedRawPayload } from "./schema-grounding.js";
 import {
   WallClockTimeoutError,
   withWallClockTimeout
 } from "./wall-clock-timeout.js";
 import {
-  buildTurnExcerpt,
   clampConfidence,
-  clampFullTurnContent,
   normalizeOptionalString,
   normalizePositiveTimeoutMs,
   parseOfficialApiSignals,
   type OfficialApiSignalDraft
 } from "./official-api-signal-parser.js";
 import {
-  extractHeadersFromCauseChain,
-  extractRecoveryKindFromInputs,
-  extractRetryClassificationFromInputs,
-  extractRetryCountFromInputs,
-  extractSignalErrorDiagnostic,
-  extractStatusFromCauseChain
-} from "./compute-provider-diagnostics.js";
+  normalizeSourceObservedAt,
+  selectObservedTemporalProjection
+} from "./temporal/observed-projection.js";
+import { buildOfficialCandidateSignal } from "./official-api/signal-payload.js";
+import { groundOfficialApiDraft } from "./official-api/source-grounding.js";
+import {
+  dumpOfficialApiRequestDiagnostic,
+  type OfficialApiExtractorMeta
+} from "./official-api/request-diagnostic.js";
 
 export { parseOfficialApiSignals, salvageRawSignalElements } from "./official-api-signal-parser.js";
 export type { OfficialApiSignalDraft } from "./official-api-signal-parser.js";
@@ -49,6 +46,7 @@ export interface GardenCompileContext {
   readonly run_id: string;
   readonly surface_id: string | null;
   readonly turn_messages: readonly ConversationMessage[];
+  readonly source_observed_at?: string;
 }
 
 export interface GardenComputeProvider {
@@ -83,8 +81,6 @@ interface OfficialApiGardenProviderDependencies {
 // Default cwd-rooted diagnostic directory used when no diagnosticDir override
 // is supplied. Generated path (data/* is gitignored); never treat as source.
 const DEFAULT_DIAGNOSTIC_DIR_REL = "data/diagnostics/seed-extraction-failures";
-const DIAGNOSTIC_BODY_PREFIX_MAX_CHARS = 4_096;
-const DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS = 512;
 
 export class GardenProviderError extends Error {
   public constructor(
@@ -119,37 +115,19 @@ export const OFFICIAL_API_SYSTEM_PROMPT = [
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
   'Each signal must include "signal_kind", "object_kind", "confidence", "matched_text", and "distilled_fact".',
   'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
-  '"matched_text" is the verbatim span of the turn that triggered the signal.',
+  '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
   '"distilled_fact" must be a self-contained declarative sentence carrying exactly one assertion.',
   'When a synthesis signal cites existing evidence or memories by ID, include "evidence_refs" and "source_memory_refs" arrays.',
   'When a signal has an event or valid-time fact, include optional "temporal_projection" with "projection_schema_version":1, ISO "event_time_start"/"event_time_end", ISO "valid_from"/"valid_to", "time_precision", and "time_source".',
+  "For relative dates, omit absolute temporal_projection dates; the runtime resolves them from source observation.",
   'When a signal is a durable preference, include optional "preference_profile" with "projection_schema_version":1, "subject", "predicate", "object", "category", and "polarity".',
   'Include "canonical_entities": an array of at most 3 lowercase canonical names for the entities or subjects the distilled_fact is about, resolving pronouns and aliases so the SAME real-world entity always yields the SAME string across turns.',
-  "Resolve every pronoun, relative date, and reference in distilled_fact to its absolute form using the turn text.",
+  "Resolve pronouns and non-temporal references in distilled_fact using only the turn text.",
+  "Preserve relative-date wording exactly; never infer an absolute date absent from the turn text.",
   "Preserve every concrete detail (names, numbers, dates, places) that appears in the turn.",
   "Do not invent facts and do not summarize away detail; split compound statements into separate signals.",
   'Return {"signals":[]} when the turn does not contain durable memory candidates.'
 ].join(" ");
-
-function buildOfficialApiRawPayload(
-  draft: OfficialApiSignalDraft,
-  providerKind: GardenProviderKind,
-  normalizedTurnContent: string
-): Record<string, unknown> {
-  return {
-    matched_text: draft.matched_text,
-    ...(draft.distilled_fact === undefined ? {} : { distilled_fact: draft.distilled_fact }),
-    ...(draft.temporal_projection === undefined ? {} : { temporal_projection: draft.temporal_projection }),
-    ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
-    ...(draft.canonical_entities === undefined || draft.canonical_entities.length === 0
-      ? {}
-      : { canonical_entities: draft.canonical_entities }),
-    provider_kind: providerKind,
-    extraction_reason: draft.reason ?? "official_api",
-    turn_content_excerpt: buildTurnExcerpt(normalizedTurnContent, draft.matched_text),
-    full_turn_content: clampFullTurnContent(normalizedTurnContent)
-  };
-}
 
 export class OfficialApiGardenProvider implements GardenComputeProvider {
   public readonly provider_kind = GardenProviderKind.OFFICIAL_API;
@@ -208,7 +186,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     }
 
     const drafts = await this.requestSignals(normalizedTurnContent, context);
-    const createdAt = this.now();
+    const createdAt = normalizeSourceObservedAt(context.source_observed_at) ?? this.now();
 
     const signals: CandidateMemorySignal[] = [];
     let distilledFactOmittedCount = 0;
@@ -239,30 +217,37 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     normalizedTurnContent: string,
     createdAt: string
   ): CandidateMemorySignal | null {
-    const confidence = clampConfidence(draft.confidence);
-    try {
-      return CandidateMemorySignalSchema.parse({
-        signal_id: this.generateSignalId(),
-        workspace_id: context.workspace_id,
-        run_id: context.run_id,
-        surface_id: context.surface_id,
-        source: SignalSource.GARDEN_COMPILE,
-        signal_kind: draft.signal_kind,
-        object_kind: draft.object_kind,
-        scope_hint: null,
-        domain_tags: [],
-        confidence,
-        evidence_refs: draft.evidence_refs,
-        ...(draft.canonical_entities === undefined ? {} : { canonical_entities: draft.canonical_entities }),
-        source_memory_refs: draft.source_memory_refs,
-        raw_payload: buildSchemaGroundedRawPayload({
-          signalKind: draft.signal_kind,
-          objectKind: draft.object_kind,
-          confidence,
-          rawPayload: buildOfficialApiRawPayload(draft, this.provider_kind, normalizedTurnContent)
-        }),
-        created_at: createdAt
+    const grounding = groundOfficialApiDraft(draft, normalizedTurnContent);
+    if (grounding.status === "rejected") {
+      console.warn("garden/compute-provider: rejected ungrounded official-API signal", {
+        runId: context.run_id,
+        reasons: grounding.audit.reasons
       });
+    }
+    const groundedDraft = grounding.draft;
+    const confidence = clampConfidence(groundedDraft.confidence);
+    const temporalProjection = grounding.status === "grounded"
+      ? selectObservedTemporalProjection(
+          groundedDraft.matched_text,
+          groundedDraft.temporal_projection,
+          context.source_observed_at
+        )
+      : undefined;
+    try {
+      return CandidateMemorySignalSchema.parse(buildOfficialCandidateSignal({
+        draft: groundedDraft,
+        workspaceId: context.workspace_id,
+        runId: context.run_id,
+        surfaceId: context.surface_id,
+        normalizedTurnContent,
+        confidence,
+        temporalProjection,
+        distilledFact: groundedDraft.distilled_fact,
+        providerKind: this.provider_kind,
+        signalId: this.generateSignalId(),
+        createdAt,
+        sourceGrounding: grounding.audit
+      }));
     } catch (error) {
       console.warn("garden/compute-provider: dropped one official-API signal", {
         runId: context.run_id,
@@ -291,18 +276,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       turn_messages: context.turn_messages
     });
     let rawJson: string | null = null;
-    let extractorMeta:
-      | {
-          readonly recoveryKind: string;
-          readonly retryCount: number;
-          readonly retryClassification?: string;
-        }
-      | null = null;
+    let extractorMeta: OfficialApiExtractorMeta | null = null;
     try {
-      // invariant: outer wall-clock guard. Inner timeoutMs drives the SDK's
-      // monotonic-clock abort; wall-clock fires after suspend-aware grace if
-      // the inner timer was frozen by host suspend.
-      // see also: packages/soul/src/garden/wall-clock-timeout.ts withWallClockTimeout
       const extractor = this.extractor;
       const requestTimeoutMs = this.requestTimeoutMs;
       const response = await withWallClockTimeout(
@@ -319,137 +294,40 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       extractorMeta = response.extractorMeta ?? null;
       return parseOfficialApiSignals(rawJson);
     } catch (error) {
-      // Only the invalid_response branch — JSON shape failure on the body the
-      // extractor returned, OR a SignalExtractorError of kind "invalid_json"
-      // (empty/oversized/non-JSON content). Both are what the bench preflight
-      // blocker rejects as `invalid_response`; the dump tells the diagnostic
-      // reader whether the model truncated, the provider returned chat noise,
-      // or the cache shard was torn. Network/timeout errors
-      // skip the dump — they are observable from the bench log already
-      // and the body is empty by definition.
-      // invariant: wall-clock timeout is a network-class failure, not an
-      // invalid_response. Body was never read; skip the diagnostic dump.
-      if (error instanceof WallClockTimeoutError) {
-        throw new GardenProviderError(error.message, "network", { cause: error });
-      }
-      const isInvalidResponse =
-        !(error instanceof SignalExtractorError) ||
-        error.kind === "invalid_json";
-      if (isInvalidResponse) {
-        // await so a preflight reading the dump immediately after sees the
-        // file — but a dump that itself throws (e.g. read-only fs)
-        // must not mask the real provider error.
-        await this.dumpInvalidResponseDiagnostic({
-          error,
-          rawJson,
-          userPrompt,
-          context,
-          extractorMeta
-        });
-      }
-      if (error instanceof SignalExtractorError) {
-        throw new GardenProviderError(
-          error.kind === "invalid_json"
-            ? "Official garden provider returned an invalid response."
-            : error.message,
-          error.kind === "invalid_json" ? "invalid_response" : "network",
-          { cause: error }
-        );
-      }
-      throw new GardenProviderError("Official garden provider returned an invalid response.", "invalid_response", {
-        cause: error
-      });
+      return this.handleRequestFailure(error, { rawJson, userPrompt, context, extractorMeta });
     }
   }
 
-  /**
-   * Best-effort diagnostic dump of one invalid_response failure. Writes
-   * status (if surfaced via the cause chain) / response body
-   * prefix / SignalExtractorError kind+message / user-prompt prefix / model /
-   * provider kind / timestamp to a per-failure JSON file. Atomic (tmp + rename
-   * on the same filesystem). Returns even if writing fails — observation must
-   * never destabilize the production failure path.
-   */
-  private async dumpInvalidResponseDiagnostic(input: {
-    readonly error: unknown;
+  private handleRequestFailure(error: unknown, input: {
     readonly rawJson: string | null;
     readonly userPrompt: string;
     readonly context: GardenCompileContext;
-    // invariant: surfaces tryRecoverJson branch + extractor retry attempt
-    // count + retry terminal classification when the body parsed but the
-    // post-extract envelope shape was wrong. Null when extract() threw
-    // before returning meta.
-    readonly extractorMeta:
-      | {
-          readonly recoveryKind: string;
-          readonly retryCount: number;
-          readonly retryClassification?: string;
-        }
-      | null;
-  }): Promise<void> {
-    if (this.diagnosticDir === null) {
-      return;
+    readonly extractorMeta: OfficialApiExtractorMeta | null;
+  }): never {
+    if (error instanceof WallClockTimeoutError) {
+      throw new GardenProviderError(error.message, "network", { cause: error });
     }
-    try {
-      const timestamp = this.now();
-      const envelope = {
-        captured_at: timestamp,
-        provider_kind: this.provider_kind,
-        model_id: this.model,
+    if (!(error instanceof SignalExtractorError) || error.kind === "invalid_json") {
+      dumpOfficialApiRequestDiagnostic({
+        diagnosticDir: this.diagnosticDir,
+        error,
+        ...input,
+        providerKind: this.provider_kind,
+        model: this.model,
         endpoint: this.endpoint,
-        workspace_id: input.context.workspace_id,
-        run_id: input.context.run_id,
-        surface_id: input.context.surface_id,
-        signal_extractor_error: extractSignalErrorDiagnostic(input.error),
-        // HTTP status / headers are not surfaced through SignalExtractorError;
-        // the pi-mono extractor swallows them. We capture whatever the cause
-        // chain exposes (status, statusText, headers if present) so a future
-        // transport wrapper that does pass them through gets recorded
-        // automatically — the dump shape is forward-compatible.
-        response_status: extractStatusFromCauseChain(input.error),
-        response_headers: extractHeadersFromCauseChain(input.error),
-        response_body_prefix:
-          input.rawJson === null
-            ? null
-            : input.rawJson.slice(0, DIAGNOSTIC_BODY_PREFIX_MAX_CHARS),
-        response_body_total_chars: input.rawJson === null ? null : input.rawJson.length,
-        user_prompt_prefix: input.userPrompt.slice(
-          0,
-          DIAGNOSTIC_PROMPT_PREFIX_MAX_CHARS
-        ),
-        // invariant: recovery branch + retry attempts + retry classification.
-        // recovery_kind is "none" when strict JSON parsed first try;
-        // "markdown_strip" / "trailing_strip" / "balanced_close" when the
-        // body was salvaged. extractor_retry_count is the count of
-        // additional attempts beyond the first (0 = no retry, N = retried N
-        // times). retry_classification labels the terminal outcome of the
-        // retry loop (success_first_try / success_after_retry /
-        // failure_max_retries / failure_non_retryable_4xx / failure_timeout
-        // / failure_aborted) so a dump consumer can distinguish a partial
-        // recovery from a chronic failure without re-deriving from
-        // retry_count + error kind. Pulled from extractorMeta when the
-        // extract() call succeeded; else from SignalExtractorError when the
-        // typed error surfaced.
-        recovery_kind: extractRecoveryKindFromInputs(input.extractorMeta, input.error),
-        extractor_retry_count: extractRetryCountFromInputs(input.extractorMeta, input.error),
-        retry_classification: extractRetryClassificationFromInputs(input.extractorMeta, input.error)
-      };
-      const fileName = `${timestamp.replace(/[:.]/gu, "-")}-${randomUUID()}.json`;
-      const filePath = join(this.diagnosticDir, fileName);
-      mkdirSync(dirname(filePath), { recursive: true });
-      // Atomic write: tmp + rename guards against an interrupted dump
-      // (WSL2 OOM is a known crash mode in this env) leaving a torn file
-      // a reader would mis-parse.
-      const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-      writeFileSync(tmpPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf8");
-      renameSync(tmpPath, filePath);
-    } catch (dumpError) {
-      // observation-only — never mask the real exception by throwing here.
-      // A single warn is enough; a chronically-failing dump path is the
-      // operator's problem, not the extraction caller's.
-      console.warn("garden/compute-provider: diagnostic dump failed", {
-        error: readErrorMessage(dumpError, "unknown error")
+        now: this.now
       });
     }
+    if (error instanceof SignalExtractorError) {
+      const invalid = error.kind === "invalid_json";
+      throw new GardenProviderError(
+        invalid ? "Official garden provider returned an invalid response." : error.message,
+        invalid ? "invalid_response" : "network",
+        { cause: error }
+      );
+    }
+    throw new GardenProviderError("Official garden provider returned an invalid response.", "invalid_response", {
+      cause: error
+    });
   }
 }

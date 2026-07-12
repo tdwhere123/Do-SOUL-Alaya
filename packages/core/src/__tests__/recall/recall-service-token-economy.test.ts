@@ -302,7 +302,7 @@ describe("RecallService", () => {
   });
 });
 
-describe("RecallService coverage-stage diagnostics", () => {
+describe("RecallService fusion-only delivery diagnostics", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -334,8 +334,7 @@ describe("RecallService coverage-stage diagnostics", () => {
     }
   });
 
-  it("marks the coverage selector applied and promotes a buried second-session rank when enabled", async () => {
-    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
+  it("keeps coverage diagnostics measure-only", async () => {
     const { dependencies } = createDependencies(buildTwoSessionMemories());
     const service = new RecallService(dependencies);
     const result = await service.recall({
@@ -346,13 +345,17 @@ describe("RecallService coverage-stage diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(["kept", "promoted", "displaced"]).toContain(candidate.coverage_selector_action);
-      expect(candidate.rank_after_coverage_selector).toBeDefined();
+      expect(candidate.coverage_selector_action).toBe("noop");
+      expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
+      expect(candidate.rank_after_lexical_priority).toBe(candidate.fused_rank);
+      expect(candidate.rank_after_coverage_selector).toBe(candidate.fused_rank);
+      expect(candidate.rank_after_session_coverage).toBe(candidate.fused_rank);
+      expect(candidate.rank_after_structural_reserve).toBe(candidate.fused_rank);
       expect(candidate.session_key).toBeDefined();
     }
     const secondSession = candidates.find((candidate) => candidate.object_id === "77777777-7777-4777-8777-777777777777");
-    expect(["kept", "promoted"]).toContain(secondSession?.coverage_selector_action);
+    expect(secondSession?.coverage_selector_action).toBe("noop");
     expect(secondSession?.session_key).toBe("sB");
-    expect(secondSession?.rank_after_coverage_selector).toBeLessThanOrEqual(secondSession?.rank_after_lexical_priority ?? Number.POSITIVE_INFINITY);
+    expect(secondSession?.rank_after_coverage_selector).toBe(secondSession?.fused_rank);
   });
 });

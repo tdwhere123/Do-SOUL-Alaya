@@ -1,4 +1,5 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
+import { isAbstentionQuestionId } from "./abstention.js";
 import type {
   LongMemEvalQuestionDiagnostic
 } from "./diagnostics-types.js";
@@ -16,5 +17,8 @@ export function buildLongMemEvalQualityMetrics(
   for (const question of diagnostics) {
     recordQualityQuestion(state, question);
   }
-  return buildQualityMetricsFromState(state, diagnostics.length);
+  const answerableCount = diagnostics.filter(
+    (question) => !isAbstentionQuestionId(question.question_id)
+  ).length;
+  return buildQualityMetricsFromState(state, answerableCount);
 }

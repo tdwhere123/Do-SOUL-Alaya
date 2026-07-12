@@ -296,6 +296,7 @@ export function resolveEffectiveActivationWeights(
 
 const RECALL_ADMISSION_ATTRIBUTION_ORDER: readonly RecallAdmissionPlane[] = [
   "lexical",
+  "facet_concept",
   "source_proximity",
   "path_expansion",
   "graph_expansion",

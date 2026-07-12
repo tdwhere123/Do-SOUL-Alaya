@@ -21,7 +21,7 @@ export function buildMemorySearchResult(
     evidence_pointers: [candidate.object_id],
     selection_reason: candidate.selection_reason ?? buildSelectionReason(candidate),
     source_channels: candidate.source_channels ?? buildSourceChannels(candidate),
-    score_factors: candidate.score_factors ?? buildScoreFactors(candidate),
+    score_factors: buildScoreFactors(candidate),
     budget_state: candidate.budget_state ?? buildBudgetState(candidate, policy, index, usedTokensBeforeCandidate),
     ...(candidate.pending_incomplete === undefined ? {} : { pending_incomplete: candidate.pending_incomplete }),
     ...(candidate.unfinishedness_bias === undefined ? {} : { unfinishedness_bias: candidate.unfinishedness_bias })
@@ -66,7 +66,9 @@ export function buildRecallStrategyMix(
 
 function buildSelectionReason(candidate: Readonly<RecallCandidate>): string {
   const origin = candidate.origin_plane === "global" ? "global recall" : "workspace recall";
-  return `Selected by ${origin} with relevance ${candidate.relevance_score.toFixed(3)} and activation ${candidate.activation_score.toFixed(3)}.`;
+  return `Selected by ${origin}. Final fusion evidence score ` +
+    `${candidate.relevance_score.toFixed(6)}; diagnostic supporting signal: ` +
+    `activation ${candidate.activation_score.toFixed(3)}.`;
 }
 
 function buildSourceChannels(candidate: Readonly<RecallCandidate>): readonly string[] {
@@ -79,6 +81,7 @@ function buildSourceChannels(candidate: Readonly<RecallCandidate>): readonly str
 
 function buildScoreFactors(candidate: Readonly<RecallCandidate>): RecallScoreFactors {
   return {
+    ...candidate.score_factors,
     activation: clampScore(candidate.activation_score),
     relevance: clampScore(candidate.relevance_score)
   };

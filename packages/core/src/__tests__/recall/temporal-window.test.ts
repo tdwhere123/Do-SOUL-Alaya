@@ -23,7 +23,7 @@ describe("parseRelativeTemporalTerm", () => {
   });
 
   it("returns null for unmapped or absolute terms", () => {
-    expect(parseRelativeTemporalTerm("tonight")).toBeNull();
+    expect(parseRelativeTemporalTerm("sometime")).toBeNull();
     expect(parseRelativeTemporalTerm("2023-05")).toBeNull();
   });
 });

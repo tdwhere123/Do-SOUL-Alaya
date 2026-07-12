@@ -1,6 +1,6 @@
 import type { MemoryEntry, RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
 import { countOrthogonalLexicalFields, lexicalDecorrEnabled } from "./lexical-decorrelation.js";
-import { classifyRecallIntent } from "../query/recall-query-plan.js";
+import { classifyRecallIntent, hasTemporalQuerySignal } from "../query/recall-query-plan.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import { recallEnvRaw } from "../../config/recall-env-access.js";
@@ -117,7 +117,7 @@ function resolveDefaultRrfK(
 ): number {
   const intent = classifyRecallIntent(queryProbes);
   if (stream === "subject_alignment" && intent === "preference") return 40;
-  if (stream === "temporal_recency" && (intent === "temporal" || intent === "knowledge_update")) return 40;
+  if (stream === "temporal_recency" && hasTemporalQuerySignal(queryProbes, intent)) return 40;
   if (stream === "embedding_similarity" || stream === "source_evidence_agreement") return 45;
   if (stream === "source_proximity" || stream === "entity_seed") return 55;
   if (stream === "lexical_fts") return 72;

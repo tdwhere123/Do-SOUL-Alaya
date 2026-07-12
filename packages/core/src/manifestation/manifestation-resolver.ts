@@ -1,10 +1,6 @@
 import {
-  ManifestationBudgetEvaluatedPayloadSchema,
     ManifestationBudgetConfigSchema,
     ManifestationDecisionSchema,
-    ManifestationEscalationDecidedPayloadSchema,
-    ManifestationLevel,
-    RuntimeGovernanceEventType,
     type ActivationCandidate,
     type ManifestationBudgetConfig,
     type ManifestationDecision,
@@ -12,13 +8,13 @@ import {
   } from "@do-soul/alaya-protocol";
 import { loadOrDefaultWithWorkspaceGuard } from "../shared/load-or-default-with-workspace-guard.js";
 import { validateActivationCandidates } from "../shared/validated-activation-candidates.js";
+import { appendManifestationGovernanceEvents } from "./manifestation-event-writer.js";
 import {
   SYSTEM_NOW,
   allocateBudget,
   anchorMemoryObjectId,
   buildDecisionReason,
   compareCandidatesForDeterministicEvaluation,
-  countAssigned,
   createDefaultManifestationBudgetConfig,
   determineDesiredLevel
 } from "./manifestation-resolver-helpers.js";
@@ -106,7 +102,30 @@ export class ManifestationResolver {
       dialogue_nudge: config.dialogue_nudge_cap,
       lens_entry: config.lens_entry_cap
     });
-    const { decisions } = orderedCandidates.reduce<{
+    const decisions = this.evaluateCandidates(
+      orderedCandidates,
+      config,
+      params.taskSurfaceRef,
+      initialBudget
+    );
+
+    await appendManifestationGovernanceEvents({
+      eventLogWriter: this.deps.eventLogWriter,
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      decisions,
+      decidedAt
+    });
+    return decisions;
+  }
+
+  private evaluateCandidates(
+    candidates: readonly Readonly<ActivationCandidate>[],
+    config: Readonly<ManifestationBudgetConfig>,
+    taskSurfaceRef: Readonly<TaskObjectSurface> | null,
+    initialBudget: BudgetState
+  ): readonly Readonly<ManifestationDecision>[] {
+    const { decisions } = candidates.reduce<{
       readonly budgets: BudgetState;
       readonly decisions: readonly Readonly<ManifestationDecision>[];
     }>(
@@ -114,7 +133,7 @@ export class ManifestationResolver {
         const evaluation = this.evaluateCandidate(
           candidate,
           config,
-          params.taskSurfaceRef,
+          taskSurfaceRef,
           state.budgets
         );
 
@@ -128,45 +147,6 @@ export class ManifestationResolver {
         decisions: Object.freeze([])
       }
     );
-
-    await this.deps.eventLogWriter.append({
-      event_type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
-      entity_type: "manifestation_budget",
-      entity_id: params.runId,
-      workspace_id: params.workspaceId,
-      run_id: params.runId,
-      caused_by: "deterministic_rule",
-      payload_json: ManifestationBudgetEvaluatedPayloadSchema.parse({
-        workspace_id: params.workspaceId,
-        run_id: params.runId,
-        total_candidates: orderedCandidates.length,
-        stance_bias_assigned: countAssigned(decisions, ManifestationLevel.STANCE_BIAS),
-        dialogue_nudge_assigned: countAssigned(decisions, ManifestationLevel.DIALOGUE_NUDGE),
-        lens_entry_assigned: countAssigned(decisions, ManifestationLevel.LENS_ENTRY),
-        discarded: decisions.filter((decision) => decision.assigned_level === null).length,
-        evaluated_at: decidedAt
-      })
-    });
-    // Keep the live path append order explicit: consumers should never observe
-    // a decision batch before the aggregate budget evaluation for the same run.
-    await this.deps.eventLogWriter.append({
-      event_type: RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
-      entity_type: "manifestation_decision_batch",
-      entity_id: params.runId,
-      workspace_id: params.workspaceId,
-      run_id: params.runId,
-      caused_by: "deterministic_rule",
-      payload_json: ManifestationEscalationDecidedPayloadSchema.parse({
-        workspace_id: params.workspaceId,
-        run_id: params.runId,
-        decisions: decisions.map((decision) => ({
-          candidate_id: decision.candidate_id,
-          assigned_level: decision.assigned_level,
-          reason: decision.reason
-        })),
-        decided_at: decidedAt
-      })
-    });
 
     return Object.freeze(decisions);
   }

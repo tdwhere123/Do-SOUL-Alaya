@@ -1,5 +1,6 @@
 import { resolvePremiseInvalid } from "../abstention.js";
 import { classifyQuestionMissTaxonomy } from "../diagnostics-miss-taxonomy.js";
+import { buildQuestionCohortLedger } from "../diagnostics-cohort.js";
 import type {
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
@@ -51,26 +52,50 @@ export function assembleQuestionDiagnostic(
   input: QuestionDiagnosticInput,
   parts: QuestionDiagnosticParts
 ): LongMemEvalQuestionDiagnostic {
+  const scoringInput = failClosedAbstentionHits(input);
+  const missFields = buildQuestionMissFields(scoringInput, parts);
+  const candidateKeyCollisions = buildCandidateKeyCollisions(parts.diagnostics);
+  const candidatePoolComplete = isCandidatePoolComplete(parts);
+  const premiseInvalid = input.premiseInvalid === true ? true : resolvePremiseInvalid();
   return {
     question_id: input.questionId,
     question_type: input.questionType ?? null,
     is_abstention: input.isAbstention === true,
-    premise_invalid: input.premiseInvalid === true ? true : resolvePremiseInvalid(),
+    premise_invalid: premiseInvalid,
     round_index: input.roundIndex ?? null,
     gold_memory_ids: input.goldMemoryIds,
     answer_session_ids: input.answerSessionIds,
     delivered_results: parts.deliveredResults,
     active_constraint_results: parts.activeConstraintResults,
-    hit_at_1: input.hitAt1,
-    hit_at_5: input.hitAt5,
-    hit_at_10: input.hitAt10,
-    ...buildQuestionMissFields(input, parts),
+    hit_at_1: scoringInput.hitAt1,
+    hit_at_5: scoringInput.hitAt5,
+    hit_at_10: scoringInput.hitAt10,
+    ...missFields,
     degradation_reason: input.degradationReason,
-    ...buildRecallTelemetryFields(input, parts),
+    ...buildRecallTelemetryFields(input, parts, candidatePoolComplete),
+    query_probes: parts.diagnostics?.queryProbes ?? null,
+    query_sought_facets: parts.diagnostics?.querySoughtFacets ?? null,
     candidates: parts.candidates,
-    candidate_key_collisions: buildCandidateKeyCollisions(parts.diagnostics),
+    candidate_key_collisions: candidateKeyCollisions,
+    cohort_ledger: buildQuestionCohortLedger({
+      isAbstention: input.isAbstention === true,
+      premiseInvalid,
+      hitAt5: scoringInput.hitAt5,
+      goldMemoryIds: input.goldMemoryIds,
+      gold: parts.gold,
+      diagnosticsAvailable: parts.diagnostics !== null,
+      candidatePoolComplete,
+      candidateKeyCollisionObjectIds: candidateKeyCollisions.map((row) => row.object_id),
+      missTaxonomy: missFields.miss_taxonomy,
+      seedDropReasons: input.seedDropReasons
+    }),
     gold: parts.gold
   };
+}
+
+function failClosedAbstentionHits(input: QuestionDiagnosticInput): QuestionDiagnosticInput {
+  if (input.isAbstention !== true) return input;
+  return { ...input, hitAt1: false, hitAt5: false, hitAt10: false };
 }
 
 function buildQuestionMissFields(
@@ -100,7 +125,8 @@ function buildQuestionMissFields(
 
 function buildRecallTelemetryFields(
   input: QuestionDiagnosticInput,
-  parts: QuestionDiagnosticParts
+  parts: QuestionDiagnosticParts,
+  candidatePoolComplete: boolean
 ) {
   const diagnostics = parts.diagnostics;
   return {
@@ -117,9 +143,13 @@ function buildRecallTelemetryFields(
     graph_expansion_plane_count_per_edge_type:
       diagnostics?.graphExpansionPlaneCountPerEdgeType ??
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
-    candidate_pool_complete: diagnostics?.candidatePoolComplete === true &&
-      parts.candidates.every(isReplayCandidateComplete)
+    candidate_pool_complete: candidatePoolComplete
   };
+}
+
+function isCandidatePoolComplete(parts: QuestionDiagnosticParts): boolean {
+  return parts.diagnostics?.candidatePoolComplete === true &&
+    parts.candidates.every(isReplayCandidateComplete);
 }
 
 function isReplayCandidateComplete(candidate: LongMemEvalReplayCandidate): boolean {
@@ -148,10 +178,10 @@ function classifyMiss(
   diagnosticsAvailable: boolean,
   isAbstention: boolean
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
-  if (isAbstention) return hitAt5 ? "abstained_correctly" : "abstain_false_confident";
+  if (isAbstention) return "abstention_uncalibrated";
+  if (gold.length === 0) return "no_gold";
   if (hitAt5) return "hit_at_5";
   if (!diagnosticsAvailable) return "diagnostics_unavailable";
-  if (gold.length === 0) return "no_gold";
   if (gold.some(isDeliveryBudgetLoss)) return "budget_dropped";
   if (gold.some((item) =>
     (item.final_rank !== null && item.final_rank > 5) ||

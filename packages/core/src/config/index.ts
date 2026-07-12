@@ -26,6 +26,5 @@ export {
   recallEnvRaw,
   recallIntentV2Enabled,
   recallProjectionScoringEnabled,
-  recallSessionRouteEnabled,
-  recallTemporalWindowEnabled
+  recallSessionRouteEnabled
 } from "./recall-env-access.js";

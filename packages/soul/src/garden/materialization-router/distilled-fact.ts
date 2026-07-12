@@ -1,5 +1,10 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { readSchemaGroundedContent } from "../schema-grounding.js";
+import {
+  requiresGardenSourceGrounding,
+  resolveGardenSignalGrounding
+} from "../grounding/signal-source-grounding.js";
+import { SOURCE_ASSERTION_MAX_CHARS } from "../grounding/source-assertion.js";
 
 export function buildTopicKey(signal: CandidateMemorySignal): string {
   const primaryTag = signal.domain_tags[0] ?? "signal";
@@ -39,10 +44,13 @@ export function buildSignalSummary(signal: CandidateMemorySignal): string {
 // invariant: kept <= AUDIT_DROPPED_CONTENT_MAX_CHARS (500) in
 // packages/core/src/governance/reconciliation-service.ts so a dropped fact stays
 // fully reconstructable from the reconciliation audit row.
-export const DISTILLED_FACT_MAX_CHARS = 500;
+export const DISTILLED_FACT_MAX_CHARS = SOURCE_ASSERTION_MAX_CHARS;
 const DISTILLED_FACT_MAX_SENTENCES = 2;
 
 export function buildDistilledFact(signal: CandidateMemorySignal): string {
+  if (signal.source === "garden_compile" && requiresGardenSourceGrounding(signal)) {
+    return buildGroundedGardenFact(signal);
+  }
   const providedDistilled = signal.raw_payload.distilled_fact;
   if (typeof providedDistilled === "string") {
     const trimmed = providedDistilled.trim();
@@ -58,6 +66,14 @@ export function buildDistilledFact(signal: CandidateMemorySignal): string {
     }
   }
   return ruleDistillFromRaw(buildSignalSummary(signal));
+}
+
+function buildGroundedGardenFact(signal: CandidateMemorySignal): string {
+  const grounding = resolveGardenSignalGrounding(signal);
+  if (grounding.status !== "grounded" || grounding.assertion.length > DISTILLED_FACT_MAX_CHARS) {
+    return "";
+  }
+  return grounding.assertion;
 }
 
 // see also: buildDistilledFact — fallback path when caller does not supply

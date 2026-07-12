@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -26,6 +29,7 @@ import {
   signalsEnvelope
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../harness/seed-errors.js";
+import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
 describe("createCompileSeedRunner — compile-based seed", () => {
   let cacheRoot: string;
@@ -36,6 +40,12 @@ describe("createCompileSeedRunner — compile-based seed", () => {
 
   beforeEach(async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-runner-"));
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
   });
 
   afterEach(async () => {
@@ -68,13 +78,14 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: signalsEnvelope([
-            { distilled: "Alice lives in Berlin.", matched: "moved to Berlin" },
+            { distilled: "Alice moved to Berlin.", matched: "Alice moved to Berlin." },
             {
               distilled: "Alice started her job on 2024-03-01.",
-              matched: "started my job in March 2024"
+              matched: "Alice started her job on 2024-03-01."
             }
           ])
         })
@@ -83,7 +94,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
 
     const result = await runner.seedTurn({
       daemon,
-      turnContent: "I moved to Berlin and I started my job in March 2024.",
+      turnContent: "Alice moved to Berlin. Alice started her job on 2024-03-01.",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       ...SEED_CONTEXT
@@ -95,10 +106,10 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       "memory-2"
     ]);
     expect(seeded).toHaveLength(2);
-    // Each seed carries the production-extracted resolved distilled_fact and
-    // the full turn as evidence.
+    // Each extracted fact remains self-contained while the full turn is the
+    // evidence boundary.
     expect(seeded.map((input) => input.distilledFact)).toEqual([
-      "Alice lives in Berlin.",
+      "Alice moved to Berlin.",
       "Alice started her job on 2024-03-01."
     ]);
     expect(seeded.every((input) => input.turnContent.includes("Berlin"))).toBe(
@@ -129,11 +140,11 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const corruptEnvelope =
       `{"signals":[` +
       `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
-      `"confidence":0.9,"matched_text":"moved to Berlin","distilled_fact":"Alice lives in Berlin."},` +
+      `"confidence":0.9,"matched_text":"I moved to Berlin","distilled_fact":"I moved to Berlin"},` +
       `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
       `"confidence":0.8,"matched_text":"I\\'ll bring my dog","distilled_fact":"bad"},` +
       `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
-      `"confidence":0.9,"matched_text":"started my job","distilled_fact":"Alice started her job."}` +
+      `"confidence":0.9,"matched_text":"I started my job","distilled_fact":"I started my job"}` +
       `]}`;
     expect(() => JSON.parse(corruptEnvelope)).toThrow();
 
@@ -147,6 +158,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({ rawJson: corruptEnvelope })
       })
@@ -154,7 +166,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
 
     const result = await runner.seedTurn({
       daemon,
-      turnContent: "I moved to Berlin and I started my job.",
+      turnContent: "I moved to Berlin. I started my job.",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       ...SEED_CONTEXT
@@ -166,8 +178,8 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       "memory-2"
     ]);
     expect(seeded.map((input) => input.distilledFact)).toEqual([
-      "Alice lives in Berlin.",
-      "Alice started her job."
+      "I moved to Berlin.",
+      "I started my job."
     ]);
     expect(
       seeded.every((input) => input.extractionProvider === "official_api_compile")
@@ -208,6 +220,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({ rawJson: degenerate })
       })
@@ -238,6 +251,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({ rawJson: '{"signals":[]}' })
       })
@@ -293,6 +307,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => {
           throw new Error("garden extraction HTTP 500");
@@ -323,7 +338,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     });
   });
 
-  it("classifies cached invalid raw JSON separately from live failures", async () => {
+  it("does not cache a semantically invalid live response", async () => {
     const turnContent = "A turn whose cached raw JSON is malformed.";
     const firstSeeded: BenchSignalSeedInput[] = [];
     const firstDaemon = buildCompileSeedDaemon((input) => {
@@ -333,6 +348,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const firstRunner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({ rawJson: '{"not_signals":[]}' })
       })
@@ -358,32 +374,31 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const secondRunner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({ extract: delegate })
     });
 
-    await expect(
-      secondRunner.seedTurn({
-        daemon: secondDaemon,
-        turnContent,
-        evidenceRefBase: "q1-s0-t0",
-        seedIndex: 0,
-        ...SEED_CONTEXT
-      })
-    ).rejects.toThrow("Official garden provider returned an invalid response.");
+    await secondRunner.seedTurn({
+      daemon: secondDaemon,
+      turnContent,
+      evidenceRefBase: "q1-s0-t0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
 
-    expect(seeded).toHaveLength(0);
-    expect(delegate).not.toHaveBeenCalled();
-    expect(secondRunner.stats.cacheHits).toBe(1);
-    expect(secondRunner.stats.llmCalls).toBe(0);
+    expect(seeded).toHaveLength(1);
+    expect(delegate).toHaveBeenCalledOnce();
+    expect(secondRunner.stats.cacheHits).toBe(0);
+    expect(secondRunner.stats.llmCalls).toBe(1);
     expect(secondRunner.stats.offlineFallbacks).toBe(0);
     expect(secondRunner.stats.liveExtractionFailures).toBe(0);
-    expect(secondRunner.stats.cachedExtractionFailures).toBe(1);
+    expect(secondRunner.stats.cachedExtractionFailures).toBe(0);
     expect(toSeedExtractionPathKpi(secondRunner.stats)).toMatchObject({
-      cache_hits: 1,
-      llm_calls: 0,
+      cache_hits: 0,
+      llm_calls: 1,
       offline_fallbacks: 0,
       live_extraction_failures: 0,
-      cached_extraction_failures: 1
+      cached_extraction_failures: 0
     });
   });
 
@@ -396,12 +411,13 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: signalsEnvelope([
-            { distilled: "Fact A.", matched: "a" },
-            { distilled: "Fact B.", matched: "b" },
-            { distilled: "Fact C.", matched: "c" }
+            { distilled: "Fact A.", matched: "Fact A." },
+            { distilled: "Fact B.", matched: "Fact B." },
+            { distilled: "Fact C.", matched: "Fact C." }
           ])
         })
       })
@@ -410,7 +426,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     const sidecar = new Map<string, { sessionId: string; hasAnswer: boolean }>();
     const result = await runner.seedTurn({
       daemon,
-      turnContent: "compound answer turn",
+      turnContent: "Fact A. Fact B. Fact C.",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       ...SEED_CONTEXT

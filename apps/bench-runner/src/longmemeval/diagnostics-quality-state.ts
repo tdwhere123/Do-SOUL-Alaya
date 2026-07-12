@@ -11,6 +11,7 @@ import type {
   LongMemEvalQuestionDiagnostic
 } from "./diagnostics-types.js";
 import { createEmptyMissTaxonomyDistribution } from "./diagnostics-miss-taxonomy.js";
+import { isEvaluatorIdentityUnscorable } from "./measurement/question-validity.js";
 import {
   classifyGoldRankBucket,
   classifyTopDistractor,
@@ -52,15 +53,15 @@ export interface QualityMetricsState {
   highLexicalDemotedDenominator: number;
   candidateAbsentCount: number;
   noGoldCount: number;
+  evaluatorIdentityIssueCount: number;
+  evaluatorIdentityUnscorableCount: number;
   budgetDropDenominator: number;
   evidenceStreamGoldDeliveryCount: number;
   evidenceStreamGoldDeliveryDenominator: number;
   pathStreamTop10Count: number;
   pathStreamTop10Denominator: number;
   abstentionTotal: number;
-  abstentionCorrectAt1: number;
-  abstentionCorrectAt5: number;
-  abstentionCorrectAt10: number;
+  abstentionUnscorable: number;
   cohortDeliveredPlaneCount: number;
   cohortGoldSourcePlaneCount: number;
   cohortGoldFirstAdmittedCount: number;
@@ -97,15 +98,15 @@ export function createQualityMetricsState(): QualityMetricsState {
     highLexicalDemotedDenominator: 0,
     candidateAbsentCount: 0,
     noGoldCount: 0,
+    evaluatorIdentityIssueCount: 0,
+    evaluatorIdentityUnscorableCount: 0,
     budgetDropDenominator: 0,
     evidenceStreamGoldDeliveryCount: 0,
     evidenceStreamGoldDeliveryDenominator: 0,
     pathStreamTop10Count: 0,
     pathStreamTop10Denominator: 0,
     abstentionTotal: 0,
-    abstentionCorrectAt1: 0,
-    abstentionCorrectAt5: 0,
-    abstentionCorrectAt10: 0,
+    abstentionUnscorable: 0,
     cohortDeliveredPlaneCount: 0,
     cohortGoldSourcePlaneCount: 0,
     cohortGoldFirstAdmittedCount: 0,
@@ -158,7 +159,16 @@ function recordQuestionBasics(
   }
   if (question.miss_classification === "candidate_absent") state.candidateAbsentCount++;
   if (question.miss_classification === "no_gold") state.noGoldCount++;
+  if (question.cohort_ledger?.evaluation_issue_reason === "identity_join_error" ||
+      question.cohort_ledger?.evaluation_issue_reason === "evaluator_data_identity_inconsistency" ||
+      question.cohort_ledger?.evaluation_issue_reason === "evaluator_data_identity_indeterminate") {
+    state.evaluatorIdentityIssueCount++;
+  }
+  if (isEvaluatorIdentityUnscorable(question)) {
+    state.evaluatorIdentityUnscorableCount++;
+  }
   recordAbstentionQuestion(state, question);
+  if (isAbstentionQuestionId(question.question_id)) return;
   if (question.delivered_results.length >= 2) {
     state.nonMonotonicDenominator++;
     if (isDeliveredOrderNonMonotonic(question.delivered_results)) {
@@ -173,9 +183,7 @@ function recordAbstentionQuestion(
 ): void {
   if (!isAbstentionQuestionId(question.question_id)) return;
   state.abstentionTotal++;
-  if (question.hit_at_1) state.abstentionCorrectAt1++;
-  if (question.hit_at_5) state.abstentionCorrectAt5++;
-  if (question.hit_at_10) state.abstentionCorrectAt10++;
+  state.abstentionUnscorable++;
 }
 
 function recordDeliveredResults(

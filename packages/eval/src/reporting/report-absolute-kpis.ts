@@ -17,14 +17,15 @@ function pushAbsoluteKpiHeader(lines: string[]): void {
 }
 
 function pushRecallHeadlineKpis(lines: string[], current: KpiPayload): void {
+  const denominator = current.answerable_evaluated_count ?? current.evaluated_count;
   lines.push(
-    `- R@1: ${formatRatio(current.kpi.r_at_1)}${ciAnnotation(current.kpi.r_at_1, current.evaluated_count)}`
+    `- R@1: ${formatRatio(current.kpi.r_at_1)}${ciAnnotation(current.kpi.r_at_1, denominator)}`
   );
   lines.push(
-    `- R@5: ${formatRatio(current.kpi.r_at_5)}${ciAnnotation(current.kpi.r_at_5, current.evaluated_count)}`
+    `- R@5: ${formatRatio(current.kpi.r_at_5)}${ciAnnotation(current.kpi.r_at_5, denominator)}`
   );
   lines.push(
-    `- R@10: ${formatRatio(current.kpi.r_at_10)}${ciAnnotation(current.kpi.r_at_10, current.evaluated_count)}`
+    `- R@10: ${formatRatio(current.kpi.r_at_10)}${ciAnnotation(current.kpi.r_at_10, denominator)}`
   );
   if (
     current.kpi.r_at_5_overall !== undefined ||
@@ -154,13 +155,19 @@ function pushSeedAndQualityKpis(lines: string[], current: KpiPayload): void {
     const metrics = current.kpi.quality_metrics;
     const taxonomy = metrics.miss_taxonomy_distribution;
     lines.push(
-      `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} miss_taxonomy=[candidate_absent=${taxonomy.candidate_absent} materialization_drop=${taxonomy.materialization_drop} budget_drop=${taxonomy.budget_drop} delivery_order_drop=${taxonomy.delivery_order_drop} answer_set_coverage_drop=${taxonomy.answer_set_coverage_drop} evaluation_or_gold_issue=${taxonomy.evaluation_or_gold_issue}] evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
+      `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} evaluator_identity_issue=${metrics.evaluator_identity_issue_count ?? "N/A"} evaluator_identity_unscorable=${metrics.evaluator_identity_unscorable_count ?? "N/A"} miss_taxonomy=[candidate_absent=${taxonomy.candidate_absent} materialization_drop=${taxonomy.materialization_drop} budget_drop=${taxonomy.budget_drop} delivery_order_drop=${taxonomy.delivery_order_drop} answer_set_coverage_drop=${taxonomy.answer_set_coverage_drop} evaluation_or_gold_issue=${taxonomy.evaluation_or_gold_issue}] evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
     );
     const abstention = metrics.abstention;
     if (abstention !== undefined && abstention.total > 0) {
-      lines.push(
-        `- Abstention (uncalibrated fused-margin heuristic, shared top-5 verdict, threshold=${abstention.false_confident_threshold}): ${abstention.total} questions, correct@1=${abstention.correct_at_1} correct@5=${abstention.correct_at_5} correct@10=${abstention.correct_at_10}; these compatibility counts carry the same question-level verdict and are credited to each recall@k numerator (denominator unchanged).`
-      );
+      if (abstention.schema_version === "bench-abstention.v1") {
+        lines.push(
+          `- Abstention (uncalibrated fused-margin heuristic, shared top-5 verdict, threshold=${abstention.false_confident_threshold}): ${abstention.total} questions, correct@1=${abstention.correct_at_1} correct@5=${abstention.correct_at_5} correct@10=${abstention.correct_at_10}; these compatibility counts carry the same question-level verdict and are credited to each recall@k numerator (denominator unchanged).`
+        );
+      } else {
+        lines.push(
+          `- Abstention (uncalibrated, diagnostic-only): ${abstention.total} questions, scored=${abstention.scored} unscorable=${abstention.unscorable} gate_eligible=${abstention.gate_eligible}`
+        );
+      }
     }
   }
 }

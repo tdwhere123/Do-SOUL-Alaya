@@ -168,7 +168,7 @@ function createPreferenceProjectionSignal(): CandidateMemorySignal {
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
-    source: "garden_compile",
+    source: "model_tool",
     signal_kind: "potential_preference",
     signal_state: "triaged",
     object_kind: "workflow_preference",

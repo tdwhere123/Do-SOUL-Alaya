@@ -65,15 +65,13 @@ describe("LongMemEval seed extraction release blocker", () => {
   });
 
   it("blocks with offline_fallbacks id when ONLY offline_fallbacks > 0 (live_extraction_failures=0)", () => {
-    // A turn extraction can fall back without a live-call failure when the
-    // cached extraction path returns a malformed envelope. That signal stays
-    // attributed to offline_fallbacks; live_extraction_failures stays zero
-    // so the more specific blocker id does not fire.
+    // Keep the more specific extraction-failure counters clear so this case
+    // isolates the fallback blocker.
     const payload = makePayload(
       makeSeedExtractionPath({
         offline_fallbacks: 2,
         live_extraction_failures: 0,
-        cached_extraction_failures: 2
+        cached_extraction_failures: 0
       })
     );
 

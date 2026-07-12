@@ -9,8 +9,13 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 
-import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../longmemeval/archive-evidence.js";
+import {
+  LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
+  readLongMemEvalDiagnosticsSidecar
+} from "../../longmemeval/archive-evidence.js";
+import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../longmemeval/evidence-manifest.js";
 
 import type { LongMemEvalQuestion } from "../../longmemeval/dataset.js";
 
@@ -38,6 +43,7 @@ import {
 import {
   buildLongMemEvalArchivePayload,
   buildMockQuestion,
+  withEligibleMeasurementContract,
   writeArchiveEntry
 } from "./longmemeval-runner-fixture.js";
 
@@ -51,6 +57,7 @@ beforeEach(async () => {
   // model is arbitrary and the tests are decoupled from the production
   // extraction-cache manifest's model.
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
 });
 
 afterEach(async () => {
@@ -147,14 +154,14 @@ describe("LongMemEval runner", () => {
         historyRoot,
         "public",
         "2026-05-14T120000Z-aaa1111-policy-chat-report-mixed",
-        buildLongMemEvalArchivePayload({
+        withEligibleMeasurementContract(buildLongMemEvalArchivePayload({
           run_at: priorPassingRunAt,
           alaya_commit: "aaa1111",
           split: "longmemeval-oracle",
           policy_shape: "chat",
           simulate_report: "mixed",
-          embedding_provider: "none"
-        })
+          embedding_provider: "none",
+        }))
       );
       await writeArchiveEntry(
         historyRoot,
@@ -203,15 +210,15 @@ describe("LongMemEval runner", () => {
 
       // harness_mode must reflect the real MCP chain, never direct_db_seed.
       expect(result.payload.harness_mode).toBe("mcp_propose_review");
-      expect(result.payload.recall_pipeline_version).toBe("fusion-rrf-synthesis-v2");
+      expect(result.payload.recall_pipeline_version).toBe(RECALL_PIPELINE_VERSION);
       expect(result.payload.embedding_provider).toBe("none");
       expect(result.payload.policy_shape).toBe("chat");
       expect(result.payload.simulate_report).toBe("mixed");
       expect(result.payload.seed_policy).toMatchObject({
-        mode: "label_independent_all_fact",
-        label_independent: true,
-        object_kind: "fact"
+        mode: "label_independent_open_vocabulary_extraction",
+        label_independent: true
       });
+      expect(result.payload.seed_policy).not.toHaveProperty("object_kind");
       expect(result.payload.seed_policy?.description).not.toMatch(/\bK\d\b/);
       expect(result.payload.recall_weight_overrides).toMatchObject({
         source: "cli",
@@ -233,9 +240,9 @@ describe("LongMemEval runner", () => {
       expect(parseResult.success).toBe(true);
       const report = await readFile(result.reportPath, "utf8");
       expect(report).toContain("Recall weights: source=cli");
-      expect(report).toContain("Recall pipeline: fusion-rrf-synthesis-v2");
+      expect(report).toContain(`Recall pipeline: ${RECALL_PIPELINE_VERSION}`);
       expect(report).toContain(
-        "Seed policy: label_independent_all_fact (label-independent)"
+        "Seed policy: label_independent_open_vocabulary_extraction (label-independent)"
       );
       expect(report).toContain("Release evidence blockers");
       expect(report).toContain("seed_extraction_path no_credentials_fallback");
@@ -301,6 +308,9 @@ describe("LongMemEval runner", () => {
           gold_memory_ids: string[];
           recall_diagnostics_present: boolean;
           recall_diagnostics_keys: string[];
+          candidates: unknown[];
+          query_probes?: unknown;
+          quality_axes?: unknown;
         }>;
       };
       expect(diagnostics.schema_version).toBe(1);
@@ -309,7 +319,7 @@ describe("LongMemEval runner", () => {
         unavailable: false,
         sha7: expect.stringMatching(/^[0-9a-f]{7}$/iu)
       });
-      expect(diagnostics.recall_pipeline_version).toBe("fusion-rrf-synthesis-v2");
+      expect(diagnostics.recall_pipeline_version).toBe(RECALL_PIPELINE_VERSION);
       expect(diagnostics.policy_shape).toBe("chat");
       expect(diagnostics.simulate_report).toBe("mixed");
       expect(diagnostics.seed_extraction_path).toMatchObject({
@@ -335,13 +345,21 @@ describe("LongMemEval runner", () => {
       expect(diagnostics.scored_recall_evidence.path_expansion_plane_count).toBeGreaterThanOrEqual(0);
       expect(diagnostics.compact_schema_version).toBe(1);
       expect(diagnostics.question_count).toBe(2);
-      expect(diagnostics.questions).toBeUndefined();
+      expect(diagnostics.questions).toHaveLength(2);
+      expect(diagnostics.questions?.every((question) =>
+        question.candidates.length === 0 &&
+        question.query_probes !== undefined &&
+        question.quality_axes !== undefined
+      )).toBe(true);
       expect(diagnostics.full_diagnostics_artifact_path).not.toContain(
         join("docs", "bench-history")
       );
-      const fullDiagnostics = JSON.parse(
-        await readFile(diagnostics.full_diagnostics_artifact_path, "utf8")
-      ) as {
+      expect(diagnostics.full_diagnostics_artifact_path).toMatch(/\.json\.gz$/u);
+      const fullDiagnostics = await readLongMemEvalDiagnosticsSidecar(
+        { historyRoot },
+        "public",
+        result.slug!
+      ) as unknown as {
         commit_resolution?: {
           source: string;
           unavailable: boolean;
@@ -362,6 +380,22 @@ describe("LongMemEval runner", () => {
           recall_diagnostics_keys: string[];
         }>;
       };
+      const evidenceManifest = JSON.parse(await readFile(
+        join(dirname(result.kpiPath), LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME),
+        "utf8"
+      )) as { artifacts: Array<{ role: string; path: string; sha256: string; bytes: number }> };
+      const fullArtifactBinding = evidenceManifest.artifacts.find(
+        (artifact) => artifact.role === "full_diagnostics"
+      );
+      const compressedBytes = await readFile(join(
+        dirname(result.kpiPath),
+        diagnostics.full_diagnostics_artifact_path
+      ));
+      expect(fullArtifactBinding).toMatchObject({
+        path: diagnostics.full_diagnostics_artifact_path,
+        bytes: compressedBytes.byteLength,
+        sha256: createHash("sha256").update(compressedBytes).digest("hex")
+      });
       expect(fullDiagnostics.commit_resolution).toMatchObject({
         source: "git",
         unavailable: false,

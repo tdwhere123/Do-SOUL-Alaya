@@ -9,10 +9,12 @@ import type {
 import {
   buildObjectIdentityKey,
   readCandidates,
+  readDiagnosticQueryProbes,
   readNumber,
   readNumberRecord,
   readRecord,
-  readString
+  readString,
+  readStringArray
 } from "./diagnostics-candidate-readers.js";
 
 export { buildObjectIdentityKey };
@@ -32,9 +34,15 @@ export function readRecallDiagnostics(
   const raw = (recallResult as { readonly diagnostics?: unknown }).diagnostics;
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
+  const queryProbes = readDiagnosticQueryProbes(record.query_probes);
+  const querySoughtFacets = readStringArray(record.query_sought_facets);
+  if (record.query_probes !== undefined && queryProbes === null) return null;
+  if (record.query_sought_facets !== undefined && querySoughtFacets === null) return null;
   const candidates = readCandidates(record);
   return {
     keys: Object.keys(record).sort(),
+    queryProbes,
+    querySoughtFacets,
     candidatePoolComplete: candidates.candidatePoolComplete,
     candidatesByObjectId: candidates.byObjectId,
     candidatesByObjectIdentity: candidates.byObjectIdentity,
@@ -204,6 +212,7 @@ export function hasStructuralPlane(planes: readonly string[]): boolean {
     [
       "object_probe",
       "evidence_anchor",
+      "facet_concept",
       "domain_tag_cluster",
       "session_surface_cohort",
       "source_proximity",
@@ -212,4 +221,3 @@ export function hasStructuralPlane(planes: readonly string[]): boolean {
     ].includes(plane)
   );
 }
-

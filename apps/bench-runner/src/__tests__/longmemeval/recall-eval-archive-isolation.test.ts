@@ -13,6 +13,7 @@ import {
   isRecallEvalArchive,
   selectFullRunBaseline
 } from "../../longmemeval/recall-eval-archive.js";
+import { withEligibleMeasurementContract } from "./longmemeval-runner-fixture.js";
 
 // @anchor recall-eval-archive-isolation — a fast-loop recall-eval archive
 // shares the public/ bench + (split, policy, simulate, provider) bucket with
@@ -36,6 +37,10 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
     candidate_absent_denominator: 100,
     no_gold_count: 0,
     no_gold_denominator: 100,
+    evaluator_identity_issue_count: 0,
+    evaluator_identity_issue_denominator: 100,
+    evaluator_identity_unscorable_count: 0,
+    evaluator_identity_unscorable_denominator: 100,
     evidence_stream_gold_delivery_rate: 0.2,
     evidence_stream_gold_delivery_count: 20,
     evidence_stream_gold_delivery_denominator: 100,
@@ -76,7 +81,7 @@ function buildPublicPayload(input: {
   readonly rAt5: number;
   readonly recallEval: boolean;
 }): KpiPayload {
-  return {
+  return withEligibleMeasurementContract({
     bench_name: "public",
     split: "longmemeval-oracle",
     run_at: "2026-05-20T10:00:00.000Z",
@@ -123,7 +128,7 @@ function buildPublicPayload(input: {
       },
       per_scenario: []
     }
-  };
+  });
 }
 
 let historyRoot: string;

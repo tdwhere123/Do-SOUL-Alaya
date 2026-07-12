@@ -16,6 +16,7 @@ export {
   FullGoldDeliveryContributionSchema,
   type KpiCore,
   type KpiPayload,
+  type BenchmarkMeasurementAttribution,
   type QualityMetrics,
   type RecallWeightOverridesSummary,
   type BenchPolicyShape,
@@ -53,6 +54,7 @@ export {
   evaluateSeedExtractionReleaseBlocker,
   formatSeedExtractionCounters,
   hasSeedExtractionReleaseBlocker,
+  isCacheOnlySeedExtractionPath,
   isLongMemEvalBenchName,
   type SeedExtractionReleaseBlocker
 } from "./gates/seed-extraction-blocker.js";
@@ -81,9 +83,13 @@ export {
   readEntryForDiff,
   readLatest,
   readPrevious,
+  reconcileHistoryEntryPointers,
   simulateReportSlug,
   writeEntry,
+  HistoryEntryCommittedError,
+  isHistoryEntryCommittedError,
   type HistoryEntry,
+  type HistoryFileSidecar,
   type HistoryLayout
 } from "./history/history.js";
 

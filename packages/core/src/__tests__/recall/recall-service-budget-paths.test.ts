@@ -386,6 +386,8 @@ it("actively suppresses a target via a reinforced (high-strength) negative path"
     // not remove), but it must rank strictly below the equivalent control.
     expect(suppressed).toBeDefined();
     expect(control).toBeDefined();
+    expect(suppressed?.path_suppression_score ?? 0).toBeGreaterThan(0);
+    expect(control?.path_suppression_score).toBe(0);
     expect(suppressed?.fused_score ?? 1).toBeLessThan(control?.fused_score ?? 0);
     expect(suppressed?.fused_rank ?? 0).toBeGreaterThan(control?.fused_rank ?? Number.MAX_SAFE_INTEGER);
   });

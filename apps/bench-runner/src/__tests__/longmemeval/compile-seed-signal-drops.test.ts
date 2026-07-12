@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -27,12 +30,22 @@ import {
   makeSeed,
   signalsEnvelope
 } from "./compile-seed-fixture.js";
+import {
+  TEST_EXTRACTION_PROVIDER_URL,
+  writeExtractionCacheTestManifest
+} from "./extraction-cache-test-fixture.js";
 
 describe("compile() signal-drop count is observable", () => {
   let cacheRoot: string;
 
   beforeEach(async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-drops-"));
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
   });
 
   afterEach(async () => {
@@ -59,10 +72,11 @@ describe("compile() signal-drop count is observable", () => {
     // the protocol 16 KB cap, so compile() drops that one signal and returns
     // the two survivors. The drop must be counted, not silent.
     const oversizedSpan = "lorem ipsum dolor ".repeat(260); // ~4680 chars
-    const turnContent = `Intro sentence. ${oversizedSpan} Closing sentence.`;
+    const turnContent = `Intro sentence. ${oversizedSpan}. Closing sentence.`;
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: JSON.stringify({
@@ -134,6 +148,7 @@ describe("compile() signal-drop count is observable", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           // The model envelope carries 3 raw signals. The middle one is
@@ -220,6 +235,7 @@ describe("compile() signal-drop count is observable", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: signalsEnvelope([
@@ -279,6 +295,7 @@ describe("compile() signal-drop count is observable", () => {
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
           rawJson: signalsEnvelope([{ distilled: "Created but unaccepted.", matched: "Intro span" }])
@@ -354,6 +371,7 @@ describe("extraction cache write is atomic", () => {
   });
 
   it("never leaves a partially-written shard on the final path", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     // A delegate whose response is large enough that a torn write would be
     // visibly partial. The write-tmp-then-rename discipline means the final
     // shard is always whole, parseable JSON with the complete raw_json.
@@ -371,13 +389,19 @@ describe("extraction cache write is atomic", () => {
     };
     const extractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot
     });
     await extractor.extract({ systemPrompt: "sys", userPrompt: "atomic-turn" });
 
     const cacheKey = createHash("sha256")
       .update("test-model", "utf8")
+      .update("\u0000", "utf8")
+      .update("provider-default-v1", "utf8")
       .update("\u0000", "utf8")
       .update("sys", "utf8")
       .update("\u0000", "utf8")
@@ -393,7 +417,11 @@ describe("extraction cache write is atomic", () => {
     // possible if the shard landed whole.
     const reread = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot
     });
     const second = await reread.extract({

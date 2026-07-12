@@ -94,6 +94,7 @@ export function collapseEvidenceRelevance(inputs: EvidenceCollapseInputs, rhoEvi
 export interface ConformantCandidate {
   readonly candidateKey: string;
   readonly candidate: FusionContributionCandidate;
+  readonly objectBase?: number;
 }
 
 export interface ConformantAxisContext {
@@ -131,17 +132,25 @@ const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
 // R_O := RRF_base = Σ active-stream RRF contributions — the proven additive object ranking. The flood
 // seeds from this same base (B1: one scale across the delivered base and the path inflow).
 function resolveObjectBase(
-  candidate: FusionContributionCandidate,
-  candidateKey: string,
+  input: ConformantCandidate,
   ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
   resolved: ResolvedRecallFusionWeights,
   supplementaryData: RecallSupplementaryData
 ): number {
+  if (input.objectBase !== undefined) {
+    return input.objectBase;
+  }
   let base = 0;
   for (const [stream, rankByKey] of ranksByStream) {
-    const rank = rankByKey.get(candidateKey);
+    const rank = rankByKey.get(input.candidateKey);
     if (rank !== undefined) {
-      base += resolveAdaptiveFusionContribution({ candidate, supplementaryData, resolved, stream, rank });
+      base += resolveAdaptiveFusionContribution({
+        candidate: input.candidate,
+        supplementaryData,
+        resolved,
+        stream,
+        rank
+      });
     }
   }
   return base;
@@ -202,14 +211,21 @@ function seedConformantCandidates(
   params: Parameters<typeof buildConformantAxisContext>[0],
   rhoEvidence: number
 ): readonly SeededConformantCandidate[] {
-  return params.candidates.map(({ candidateKey, candidate }) => ({
-    candidateKey,
-    objectId: candidate.entry.object_id,
-    entry: candidate.entry,
-    object: resolveObjectBase(candidate, candidateKey, params.ranksByStream, params.resolved, params.supplementaryData),
-    evidence: quantize(collapseEvidenceRelevance({ candidate, supplementaryData: params.supplementaryData }, rhoEvidence)),
-    temporal: quantize(scoreTemporalFusion(candidate.entry, params.supplementaryData.queryProbes, params.nowIso)),
-    control: quantize(scoreControlAxis(candidate))
+  return params.candidates.map((input) => ({
+    candidateKey: input.candidateKey,
+    objectId: input.candidate.entry.object_id,
+    entry: input.candidate.entry,
+    object: resolveObjectBase(input, params.ranksByStream, params.resolved, params.supplementaryData),
+    evidence: quantize(collapseEvidenceRelevance({
+      candidate: input.candidate,
+      supplementaryData: params.supplementaryData
+    }, rhoEvidence)),
+    temporal: quantize(scoreTemporalFusion(
+      input.candidate.entry,
+      params.supplementaryData.queryProbes,
+      params.nowIso
+    )),
+    control: quantize(scoreControlAxis(input.candidate))
   }));
 }
 

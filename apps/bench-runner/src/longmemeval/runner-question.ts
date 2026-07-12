@@ -40,6 +40,7 @@ import type { QaChatFn } from "./qa-chat.js";
 import { seedLongMemEvalQuestion } from "./runner-question-seeding.js";
 import { buildLongMemEvalQuestionResult } from "./runner-question-result.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from "./selection/question-runtime-identity.js";
+import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
 
 export interface LongMemEvalWorkerResult {
   readonly questionId: string;
@@ -133,15 +134,7 @@ async function runLongMemEvalQuestionInWorkspace(
     seedState.answerSessionSet
   );
   const recallCycle = await runQuestionPhase(phase, "recall", () =>
-    runLongMemEvalRecallCycle({
-      daemon: workspace,
-      query: input.question.question,
-      recallOptions: input.recallOptions,
-      simulateReport: input.simulateReport,
-      goldMemoryIds,
-      turnIndex: input.turnIndex,
-      questionText: input.question.question
-    })
+    runQuestionRecallCycle(input, workspace, goldMemoryIds)
   );
   return await buildTimedQuestionResult({
     input,
@@ -152,6 +145,23 @@ async function runLongMemEvalQuestionInWorkspace(
     recallCycle,
     embeddingWarmup,
     queryEmbeddingWarmup
+  });
+}
+
+function runQuestionRecallCycle(
+  input: LongMemEvalQuestionRunInput,
+  workspace: BenchWorkspaceHandle,
+  goldMemoryIds: readonly string[]
+): ReturnType<typeof runLongMemEvalRecallCycle> {
+  return runLongMemEvalRecallCycle({
+    daemon: workspace,
+    query: input.question.question,
+    recallOptions: input.recallOptions,
+    referenceTime: requireLongMemEvalTimestamp(input.question.question_date),
+    simulateReport: input.simulateReport,
+    goldMemoryIds,
+    turnIndex: input.turnIndex,
+    questionText: input.question.question
   });
 }
 

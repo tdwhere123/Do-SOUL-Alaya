@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
 
 import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../longmemeval/archive-evidence.js";
+import { LONGMEMEVAL_COHORT_LEDGER_FILENAME } from "../../longmemeval/cohort-ledger.js";
+import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from "../../longmemeval/evidence-manifest.js";
 
 import type { LongMemEvalQuestion } from "../../longmemeval/dataset.js";
 
@@ -38,6 +40,7 @@ import {
 import {
   buildLongMemEvalArchivePayload,
   buildMockQuestion,
+  withEligibleMeasurementContract,
   writeArchiveEntry
 } from "./longmemeval-runner-fixture.js";
 
@@ -51,6 +54,7 @@ beforeEach(async () => {
   // model is arbitrary and the tests are decoupled from the production
   // extraction-cache manifest's model.
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
 });
 
 afterEach(async () => {
@@ -214,6 +218,29 @@ describe("LongMemEval runner", () => {
         completed_count: 1,
         failed_question_ids: ["q002"]
       });
+      const kpi = KpiPayloadSchema.parse(JSON.parse(
+        await readFile(result.kpiPath, "utf8")
+      ));
+      expect(kpi).toMatchObject({
+        evaluated_count: 1,
+        answerable_evaluated_count: 1
+      });
+      expect(kpi.kpi.per_scenario).toHaveLength(1);
+      const archiveRoot = dirname(result.kpiPath);
+      const cohortLedger = JSON.parse(await readFile(
+        join(archiveRoot, LONGMEMEVAL_COHORT_LEDGER_FILENAME),
+        "utf8"
+      )) as { question_count: number; rows: unknown[] };
+      const evidenceManifest = JSON.parse(await readFile(
+        join(archiveRoot, LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME),
+        "utf8"
+      )) as { evidence_status: string; artifacts: Array<{ role: string }> };
+      expect(cohortLedger).toMatchObject({ question_count: 2 });
+      expect(cohortLedger.rows).toHaveLength(2);
+      expect(evidenceManifest.evidence_status).toBe("partial");
+      expect(evidenceManifest.artifacts.map((artifact) => artifact.role)).toEqual(
+        expect.arrayContaining(["kpi", "diagnostics", "full_diagnostics", "cohort_ledger", "run_provenance"])
+      );
     },
     180_000
   );
@@ -255,7 +282,7 @@ describe("LongMemEval runner", () => {
         historyRoot,
         "public-multiturn",
         "2026-05-15T120000Z-aaa1111",
-        buildLongMemEvalArchivePayload({
+        withEligibleMeasurementContract(buildLongMemEvalArchivePayload({
           bench_name: "public-multiturn",
           split: "longmemeval-s",
           run_at: priorPassingRunAt,
@@ -264,8 +291,8 @@ describe("LongMemEval runner", () => {
             name: "longmemeval_s:multiturn",
             size: 1,
             source: "fixture"
-          }
-        })
+          },
+        }))
       );
       await writeArchiveEntry(
         historyRoot,
@@ -355,7 +382,7 @@ describe("LongMemEval runner", () => {
         historyRoot,
         "public-crossquestion",
         "2026-05-16T120000Z-aaa1111",
-        buildLongMemEvalArchivePayload({
+        withEligibleMeasurementContract(buildLongMemEvalArchivePayload({
           bench_name: "public-crossquestion",
           split: "longmemeval-s",
           run_at: priorPassingRunAt,
@@ -364,8 +391,8 @@ describe("LongMemEval runner", () => {
             name: "longmemeval_s:crossquestion",
             size: 1,
             source: "fixture"
-          }
-        })
+          },
+        }))
       );
       await writeArchiveEntry(
         historyRoot,

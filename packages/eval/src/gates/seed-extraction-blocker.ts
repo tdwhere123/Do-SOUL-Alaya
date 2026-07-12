@@ -32,18 +32,26 @@ export function evaluateSeedExtractionReleaseBlocker(
   payload: KpiPayload
 ): SeedExtractionReleaseBlocker | null {
   const path = payload.kpi.seed_extraction_path;
-  if (path === undefined) {
-    if (isLongMemEvalBenchName(payload.bench_name)) {
-      return {
-        id: "seed_extraction_path missing_on_longmemeval",
-        detail:
-          "LongMemEval archive carries no seed_extraction_path provenance, " +
-          "so seeding integrity cannot be verified. Treated as degraded; " +
-          "this archive is blocked from release-grade surfaces."
-      };
-    }
-    return null;
-  }
+  if (path === undefined) return missingPathBlocker(payload.bench_name);
+  return seedExtractionPathBlocker(path);
+}
+
+function missingPathBlocker(
+  benchName: KpiPayload["bench_name"]
+): SeedExtractionReleaseBlocker | null {
+  if (!isLongMemEvalBenchName(benchName)) return null;
+  return {
+    id: "seed_extraction_path missing_on_longmemeval",
+    detail:
+      "LongMemEval archive carries no seed_extraction_path provenance, " +
+      "so seeding integrity cannot be verified. Treated as degraded; " +
+      "this archive is blocked from release-grade surfaces."
+  };
+}
+
+function seedExtractionPathBlocker(
+  path: SeedExtractionPath
+): SeedExtractionReleaseBlocker | null {
   if (path.path === "no_credentials_fallback") {
     return {
       id: "seed_extraction_path no_credentials_fallback",
@@ -53,16 +61,20 @@ export function evaluateSeedExtractionReleaseBlocker(
         "even if numeric KPI gates pass."
     };
   }
-  // invariant: live_extraction_failures is checked BEFORE offline_fallbacks
-  // because every live-extraction failure also bumps offline_fallbacks (via
-  // recordExtractionFailureSource in compile-seed.ts). Reporting the more
-  // specific blocker id makes the dump consumer see the live-call layer
-  // directly without re-deriving it from the dual counter. A future
-  // transport that recovers a live failure without falling back to offline
-  // (e.g. a more aggressive retry budget) would still set
-  // live_extraction_failures = 0, so this check stays correct.
-  // cross-file: apps/bench-runner/src/longmemeval/compile-seed.ts
-  //   recordExtractionFailureSource owns the increment site.
+  return cacheOnlyCounterBlocker(path);
+}
+
+function cacheOnlyCounterBlocker(
+  path: SeedExtractionPath
+): SeedExtractionReleaseBlocker | null {
+  if (path.llm_calls > 0) {
+    return {
+      id: "seed_extraction_path live_extraction_calls",
+      detail:
+        "LongMemEval release evidence must be cache-only, but official seed " +
+        `extraction made live LLM calls (${formatSeedExtractionCounters(path)}).`
+    };
+  }
   if (path.live_extraction_failures > 0) {
     return {
       id: "seed_extraction_path live_extraction_failures",
@@ -72,6 +84,15 @@ export function evaluateSeedExtractionReleaseBlocker(
         `fallback path (${formatSeedExtractionCounters(path)}); this archive ` +
         "is blocked because the run is no longer a faithful official_api_compile " +
         "evidence set."
+    };
+  }
+  if (path.cached_extraction_failures > 0) {
+    return {
+      id: "seed_extraction_path cached_extraction_failures",
+      detail:
+        "LongMemEval cached seed extraction contained invalid responses " +
+        `(${formatSeedExtractionCounters(path)}), so cache-only provenance ` +
+        "is incomplete and the archive is blocked."
     };
   }
   if (path.offline_fallbacks > 0) {
@@ -88,6 +109,12 @@ export function evaluateSeedExtractionReleaseBlocker(
 
 export function hasSeedExtractionReleaseBlocker(payload: KpiPayload): boolean {
   return evaluateSeedExtractionReleaseBlocker(payload) !== null;
+}
+
+export function isCacheOnlySeedExtractionPath(
+  path: SeedExtractionPath | undefined
+): boolean {
+  return path !== undefined && seedExtractionPathBlocker(path) === null;
 }
 
 export function isLongMemEvalBenchName(

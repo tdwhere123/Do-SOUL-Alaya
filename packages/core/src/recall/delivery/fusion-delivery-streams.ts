@@ -18,10 +18,6 @@ export const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, 
   facet_overlap: 4
 });
 
-export function facetOverlapEnabled(): boolean {
-  return recallEnvFlagEnabled("ALAYA_RECALL_FACET_OVERLAP");
-}
-
 export function facetSliceEnabled(): boolean {
   return recallEnvFlagEnabled("ALAYA_RECALL_FACET_SLICE");
 }

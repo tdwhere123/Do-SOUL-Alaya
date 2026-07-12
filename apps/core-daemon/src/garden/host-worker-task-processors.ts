@@ -28,6 +28,7 @@ const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 export interface PostTurnExtractTaskPayload {
   readonly run_id: string;
   readonly workspace_id: string;
+  readonly created_at?: string;
   readonly turn_index: number;
   readonly turn_digest: Readonly<{
     readonly last_messages: readonly Readonly<{
@@ -214,7 +215,11 @@ async function emitPostTurnExtractSignals(
     readonly signalReceiver: NonNullable<PostTurnExtractRuntimeInput["signalReceiver"]>;
   }
 ): Promise<readonly string[]> {
-  const candidateSignals = await compilePostTurnExtractTask(provider, payload);
+  const candidateSignals = await compilePostTurnExtractTask(
+    provider,
+    payload,
+    payload.created_at ?? row.created_at
+  );
   const emittedSignalIds: string[] = [];
   for (const [index, signal] of candidateSignals.entries()) {
     await refreshPostTurnExtractClaim(input.gardenTaskRepo, row.id);
@@ -324,13 +329,15 @@ function buildPostTurnExtractCompletionPayload(
 
 async function compilePostTurnExtractTask(
   provider: GardenComputeProvider,
-  payload: PostTurnExtractTaskPayload
+  payload: PostTurnExtractTaskPayload,
+  sourceObservedAt: string
 ): Promise<readonly CandidateMemorySignal[]> {
   const context: GardenCompileContext = {
     workspace_id: payload.workspace_id,
     run_id: payload.run_id,
     surface_id: null,
-    turn_messages: buildPostTurnConversationMessages(payload)
+    turn_messages: buildPostTurnConversationMessages(payload),
+    source_observed_at: sourceObservedAt
   };
   const signals = await provider.compile(buildPostTurnContent(payload), context);
   return Object.freeze(
@@ -350,11 +357,13 @@ function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskP
   }
   const runId = parseStringField(payload, "run_id");
   const workspaceId = parseStringField(payload, "workspace_id");
+  const createdAt = parseOptionalStringField(payload, "created_at");
   const turnIndex = parsePostTurnIndex(payload.turn_index);
   const lastMessages = parsePostTurnMessages(payload.turn_digest);
   return {
     run_id: runId,
     workspace_id: workspaceId,
+    ...(createdAt === undefined ? {} : { created_at: createdAt }),
     turn_index: turnIndex,
     turn_digest: { last_messages: lastMessages }
   };
@@ -413,6 +422,15 @@ function parseStringField(record: Readonly<Record<string, unknown>>, field: stri
     throw new Error("Invalid post-turn extract task payload.");
   }
   return value;
+}
+
+function parseOptionalStringField(
+  record: Readonly<Record<string, unknown>>,
+  field: string
+): string | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  return parseStringField(record, field);
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

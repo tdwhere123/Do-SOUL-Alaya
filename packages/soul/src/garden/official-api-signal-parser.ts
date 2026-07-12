@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { SignalKind, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
-import { normalizeTemporalIsoString } from "./temporal-date.js";
+import {
+  parseOfficialApiTemporalProjection,
+  type OfficialApiTemporalProjectionDraft
+} from "./temporal/observed-projection.js";
 
 const MAX_OFFICIAL_API_SIGNALS = 64;
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
@@ -68,58 +71,12 @@ const OptionalProjectionSchemaVersionSchema = z.preprocess(
   (value) => (value === 1 ? value : undefined),
   z.literal(1).optional()
 );
-const OptionalIsoStringSchema = z.preprocess((value) => {
-  const normalized = normalizeStringValue(value);
-  return normalized === null ? undefined : normalizeTemporalIsoString(normalized) ?? undefined;
-}, z.string().optional());
-const TimePrecisionValueSchema = z.union([
-  z.literal("day"),
-  z.literal("month"),
-  z.literal("year"),
-  z.literal("range"),
-  z.literal("relative"),
-  z.literal("unknown")
-]);
-const OptionalTimePrecisionSchema = z.preprocess((value) => {
-  const parsed = TimePrecisionValueSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
-}, TimePrecisionValueSchema.optional());
-const TimeSourceValueSchema = z.union([
-  z.literal("explicit"),
-  z.literal("session_timestamp"),
-  z.literal("relative_resolved")
-]);
-const OptionalTimeSourceSchema = z.preprocess((value) => {
-  const parsed = TimeSourceValueSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
-}, TimeSourceValueSchema.optional());
-const OfficialApiTemporalProjectionSchema = z
-  .preprocess(normalizeTemporalProjectionInput, z.object({
-    projection_schema_version: OptionalProjectionSchemaVersionSchema,
-    event_time_start: OptionalIsoStringSchema,
-    event_time_end: OptionalIsoStringSchema,
-    valid_from: OptionalIsoStringSchema,
-    valid_to: OptionalIsoStringSchema,
-    time_precision: OptionalTimePrecisionSchema,
-    time_source: OptionalTimeSourceSchema
-  }).nullable())
-  .transform((projection): OfficialApiTemporalProjectionDraft | null => {
-    if (projection === null) {
-      return null;
-    }
-    const draft: OfficialApiTemporalProjectionDraft = {
-      ...(projection.projection_schema_version === undefined
-        ? {}
-        : { projection_schema_version: projection.projection_schema_version }),
-      ...(projection.event_time_start === undefined ? {} : { event_time_start: projection.event_time_start }),
-      ...(projection.event_time_end === undefined ? {} : { event_time_end: projection.event_time_end }),
-      ...(projection.valid_from === undefined ? {} : { valid_from: projection.valid_from }),
-      ...(projection.valid_to === undefined ? {} : { valid_to: projection.valid_to }),
-      ...(projection.time_precision === undefined ? {} : { time_precision: projection.time_precision }),
-      ...(projection.time_source === undefined ? {} : { time_source: projection.time_source })
-    };
-    return Object.keys(draft).length === 0 ? null : Object.freeze(draft);
-  });
+const OfficialApiTemporalProjectionSchema = z.preprocess(
+  parseOfficialApiTemporalProjection,
+  z.custom<OfficialApiTemporalProjectionDraft | null>(
+    (value) => value === null || (typeof value === "object" && value !== null)
+  )
+);
 const PreferencePolarityValueSchema = z.union([
   z.literal("positive"),
   z.literal("negative"),
@@ -171,15 +128,7 @@ const OfficialApiSignalEntrySchema = z.object({
   preference_profile: OfficialApiPreferenceProfileSchema
 }).loose().readonly();
 
-export interface OfficialApiTemporalProjectionDraft {
-  readonly event_time_start?: string;
-  readonly event_time_end?: string;
-  readonly valid_from?: string;
-  readonly valid_to?: string;
-  readonly time_precision?: "day" | "month" | "year" | "range" | "relative" | "unknown";
-  readonly time_source?: "explicit" | "session_timestamp" | "relative_resolved";
-  readonly projection_schema_version?: 1;
-}
+export type { OfficialApiTemporalProjectionDraft } from "./temporal/observed-projection.js";
 
 export interface OfficialApiPreferenceProfileDraft {
   readonly preference_subject?: string;
@@ -244,6 +193,9 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
       drafts.push(draft);
     }
   }
+  if (envelope.data.signals.length > 0 && drafts.length === 0) {
+    throw new Error("signals array contained no valid entries");
+  }
   return Object.freeze(drafts);
 }
 
@@ -287,7 +239,7 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
 // `}` inside `matched_text` never miscounts. A truncated/incomplete FINAL
 // element (the array ends before its closing `}`) is dropped — only complete
 // balanced elements are returned. Returns [] when no `signals` array region
-// is found, so the caller degrades to zero signals (existing fallback).
+// is found; the production parsing path treats that as a hard failure.
 //
 // Exported so the LongMemEval bench seed path can count the RAW salvageable
 // element population (lastTurnRawSignalCount) when the strict envelope parse
@@ -392,23 +344,6 @@ function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
     ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile })
   });
-}
-
-function normalizeTemporalProjectionInput(value: unknown): unknown {
-  const parsed = UnknownRecordSchema.safeParse(value);
-  if (!parsed.success) {
-    return null;
-  }
-  const record = parsed.data;
-  return {
-    projection_schema_version: record.projection_schema_version ?? record.version,
-    event_time_start: record.event_time_start,
-    event_time_end: record.event_time_end,
-    valid_from: record.valid_from,
-    valid_to: record.valid_to,
-    time_precision: record.time_precision,
-    time_source: record.time_source
-  };
 }
 
 function normalizePreferenceProfileInput(value: unknown): unknown {

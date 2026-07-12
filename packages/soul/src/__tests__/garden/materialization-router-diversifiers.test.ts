@@ -24,7 +24,7 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
-    source: "garden_compile",
+    source: "model_tool",
     signal_kind: "potential_claim",
     signal_state: "triaged",
     object_kind: "preference",
@@ -205,7 +205,11 @@ describe("MaterializationRouter producer-side diversifiers", () => {
         object_kind: "outcome",
         signal_kind: "potential_claim",
         confidence: 0.7,
-        evidence_refs: []
+        evidence_refs: [],
+        raw_payload: {
+          matched_text: "The deployment completed successfully.",
+          full_turn_content: "The deployment completed successfully."
+        }
       })
     );
 

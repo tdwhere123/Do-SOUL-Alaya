@@ -8,7 +8,7 @@ import type {
 } from "../../recall/runtime/recall-service-types.js";
 
 const emptyQueryProbes = Object.freeze({
-  normalized_query: "",
+  normalized_query: "where did alice live",
   object_ids: [],
   subject_hints: [],
   evidence_refs: [],
@@ -78,11 +78,34 @@ describe("recall diagnostics", () => {
       dropped_reason: null,
       within_budget: true,
       relevance_score: 0.8,
+      additive_score: 0.8,
       lexical_rank: 1,
       structural_score: 0.1,
       score_factors: { activation: 0.5, relevance: 0.8 },
       source_channels: [],
       path_expansion_sources: [],
+      answer_features: {
+        content: "Alice lived in Paris.",
+        evidence_gist: null,
+        evidence_gist_truncated: false,
+        domain_tags: [],
+        evidence_refs: [],
+        facet_tags: [],
+        canonical_entities: [],
+        projection_schema_version: null,
+        event_time_start: null,
+        event_time_end: null,
+        valid_from: null,
+        valid_to: null,
+        time_precision: null,
+        time_source: null,
+        preference_subject: null,
+        preference_predicate: null,
+        preference_object: null,
+        preference_category: null,
+        preference_polarity: null
+      },
+      path_suppression_score: 0,
       per_axis_rank: { object: 1, path: 2, evidence: null, temporal: null, control: null },
       per_axis_contribution: { object: 0.2, path: 0.03, evidence: 0, temporal: 0, control: 0 },
       flood_potential: floodPotential,
@@ -91,6 +114,7 @@ describe("recall diagnostics", () => {
 
     const diagnostics = buildRecallDiagnostics({
       queryProbes: emptyQueryProbes,
+      querySoughtFacets: ["location_place"],
       totalScanned: 1,
       candidatePoolCount: 1,
       preBudgetCount: 1,
@@ -121,5 +145,7 @@ describe("recall diagnostics", () => {
       flood_potential: { Flood: 0.2, fuel_verified: true },
       flood_fuel_coverage: { fuel_verified_count: 1 }
     });
+    expect(diagnostics.query_probes.normalized_query).toBe("where did alice live");
+    expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
   });
 });

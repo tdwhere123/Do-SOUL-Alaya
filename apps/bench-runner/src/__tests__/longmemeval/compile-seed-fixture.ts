@@ -27,12 +27,14 @@ export function buildCompileSeedDaemon(
 export const CREDENTIALLED_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://example.test/v1",
   model: "test-model",
+  requestProfile: "provider-default-v1",
   apiKey: "test-key"
 };
 
 export const OFFLINE_CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://example.test/v1",
   model: "test-model",
+  requestProfile: "provider-default-v1",
   apiKey: null
 };
 

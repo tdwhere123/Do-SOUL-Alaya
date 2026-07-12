@@ -10,15 +10,7 @@ type ToolRuntimeWiringHoisted = Record<string, any>;
 function createStubCoreConfig(): CoreConfig {
   return {
     recall: {
-      compose: false,
       embedPoolRescore: false,
-      s4Coverage: undefined,
-      coverageSelector: undefined,
-      coveragePoolK: undefined,
-      coverageTargetK: undefined,
-      coverageMinScoreRatio: undefined,
-      sessionCoverageBand: undefined,
-      facetOverlap: undefined,
       facetSlice: undefined,
       confRhoPath: undefined,
       confRhoEvidence: undefined,
@@ -26,22 +18,15 @@ function createStubCoreConfig(): CoreConfig {
       confEvidenceBeta: undefined,
       confFloodCap: undefined,
       confFloodCapTotal: undefined,
+      confSliceCompatibility: false,
       pathEmbModulation: undefined,
-      structuralReserve: undefined,
-      fusionRankFloor: undefined,
       projectionsEnabled: true,
-      temporalWindowEnabled: false,
       lexicalDecorr: undefined,
-      deliverFusedOrder: undefined,
-      deliveryWindow: undefined,
       intentV2: false,
       queryHydeJson: undefined,
-      queryFacetsJson: undefined,
       extraSynonymClusters: undefined,
-      nowIso: undefined,
       sessionRoute: false,
-      coarseFilterSemanticFlags: {},
-      activationAssemblyFlags: {}
+      coarseFilterSemanticFlags: {}
     },
     embedding: {
       backfillConcurrency: undefined,

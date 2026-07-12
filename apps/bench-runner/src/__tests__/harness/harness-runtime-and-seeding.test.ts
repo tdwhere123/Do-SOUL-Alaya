@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteGardenTaskRepo,
@@ -21,6 +22,7 @@ import {
   createCompileSeedRunner,
   type CompileSeedExtractionConfig
 } from "../../longmemeval/compile-seed.js";
+import { writeExtractionCacheTestManifest } from "../longmemeval/extraction-cache-test-fixture.js";
 
 const handles: BenchDaemonHandle[] = [];
 const tmpRoots: string[] = [];
@@ -100,7 +102,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
       const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
       const memory = await new SqliteMemoryEntryRepo(db).findById(seed.memoryId);
-      expect(memory?.canonical_entities).toEqual(["alice", "postgresql"]);
+      expect(memory?.canonical_entities).toEqual(["postgresql"]);
     },
     60_000
   );
@@ -245,10 +247,17 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       const credentialledConfig: CompileSeedExtractionConfig = {
         providerUrl: "https://example.test/v1",
         model: "test-model",
+        requestProfile: "provider-default-v1",
         apiKey: "test-key"
       };
       const cacheRoot = await mkdtemp(join(tmpdir(), "harness-freeform-cache-"));
       tmpRoots.push(cacheRoot);
+      writeExtractionCacheTestManifest({
+        cacheRoot,
+        model: credentialledConfig.model,
+        providerUrl: credentialledConfig.providerUrl,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+      });
 
       // A compile()-shaped envelope: signal_kind potential_claim, a free-form
       // object_kind the router does NOT enumerate (the exact bug trigger),
@@ -256,6 +265,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       const runner = createCompileSeedRunner({
         config: credentialledConfig,
         cacheRoot,
+        allowLiveExtraction: true,
         extractorFactory: () => ({
           extract: async () => ({
             rawJson: JSON.stringify({
@@ -271,7 +281,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   signal_kind: "potential_preference",
                   object_kind: "health_advice",
                   confidence: 0.88,
-                  matched_text: "prefers low-impact morning workouts",
+                  matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts."
                 }
               ]
@@ -335,13 +345,21 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
       const cacheRoot = await mkdtemp(join(tmpdir(), "harness-tokenecon-cache-"));
       tmpRoots.push(cacheRoot);
+      writeExtractionCacheTestManifest({
+        cacheRoot,
+        model: "test-model",
+        providerUrl: "https://example.test/v1",
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+      });
       const runner = createCompileSeedRunner({
         config: {
           providerUrl: "https://example.test/v1",
           model: "test-model",
+          requestProfile: "provider-default-v1",
           apiKey: "test-key"
         },
         cacheRoot,
+        allowLiveExtraction: true,
         extractorFactory: () => ({
           extract: async () => ({
             rawJson: JSON.stringify({
@@ -357,7 +375,7 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
                   signal_kind: "potential_preference",
                   object_kind: "fact",
                   confidence: 0.88,
-                  matched_text: "prefers low-impact morning workouts",
+                  matched_text: "I prefer low-impact morning workouts",
                   distilled_fact: "The user prefers low-impact morning workouts."
                 }
               ]
@@ -387,12 +405,10 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       // raw_history is the FULL turn counted ONCE (4 chars/token heuristic),
       // not the per-fact sum and not a windowed excerpt.
       expect(metrics.raw_history_tokens).toBe(Math.ceil(fullTurn.length / 4));
-      // stored_memory sums both distilled facts.
+      // stored_memory sums the two verified source assertions.
       expect(metrics.stored_memory_tokens).toBe(
-        Math.ceil("The user plans three days in Kyoto.".length / 4) +
-          Math.ceil(
-            "The user prefers low-impact morning workouts.".length / 4
-          )
+        Math.ceil("I'd like to spend three days in Kyoto".length / 4) +
+          Math.ceil("I prefer low-impact morning workouts.".length / 4)
       );
       // The recall emitted exactly one SOUL_CONTEXT_LENS_ASSEMBLED event;
       // with a single recall the mean equals the total (the emit->query

@@ -1,20 +1,15 @@
 import {
-  existsSync
-} from "node:fs";
-import {
-  computeSystemPromptSha256,
   readExtractionCacheManifest,
   type ExtractionCacheManifest
 } from "./extraction-cache-manifest.js";
+import { assertExtractionCacheIdentity } from "./extraction/cache-identity.js";
 import {
-  cacheFilePath,
-  computeCacheKey
+  computeCacheKey,
+  inspectCachedExtraction
 } from "./compile-seed-cache.js";
 import type {
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
-
-const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 
 // Run-start coverage threshold. A populated cache below this coverage means a
 // run would live-extract a large gap; the operator must pass an explicit
@@ -28,10 +23,9 @@ const EXTRACTION_CACHE_COVERAGE_THRESHOLD = 0.95;
  * actionable throw.
  *
  * Behaviour by case:
- *   - NO manifest with requireManifest=false (first-ever build, before any
- *     fill pass): allow live, log loudly to stderr. Runner contexts default
- *     requireManifest=true; operators must set
- *     ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0/false for this path.
+ *   - NO manifest with requireManifest=false: allow inspection/offline
+ *     continuation and warn. Live shard writes still fail until
+ *     extraction-fill pins provider/model identity.
  *   - manifest present, `config.model !== manifest.extraction_model`: throw,
  *     naming both values — the cache would 0-hit and the run would be a full
  *     live extraction.
@@ -96,11 +90,17 @@ export function preflightExtractionCache(input: ExtractionCachePreflightInput): 
     handleMissingManifest(input.cacheRoot, input.requireManifest === true, warn);
     return;
   }
-  assertExtractionConfigDrift(input.config.model, input.systemPrompt, manifest);
+  assertExtractionCacheIdentity({
+    config: input.config,
+    systemPrompt: input.systemPrompt,
+    manifest,
+    validateProvider: input.allowLiveExtraction === true
+  });
   if (input.requiredTurnContents !== undefined) {
     assertWindowContainment({
       cacheRoot: input.cacheRoot,
       model: input.config.model,
+      requestProfile: input.config.requestProfile,
       systemPrompt: input.systemPrompt,
       requiredTurnContents: input.requiredTurnContents,
       allowLiveExtraction: input.allowLiveExtraction,
@@ -125,45 +125,17 @@ function handleMissingManifest(
     throw new Error(
       "[longmemeval preflight] extraction-cache manifest is missing at " +
         `${cacheRoot}. Restore or populate the cache before a cache-only ` +
-        "bench run, or set ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0 " +
-        "for an explicit first-fill/live extraction run."
+      "bench run, or set ALAYA_BENCH_REQUIRE_EXTRACTION_CACHE_MANIFEST=0 " +
+        "only for inspection/offline continuation. Run extraction-fill before " +
+        "any live cache write."
     );
   }
   warn(
     "[longmemeval preflight] no extraction-cache manifest at " +
-      `${cacheRoot}; treating as first-ever build. The cache cannot be validated ` +
-      "and a credentialled run will live-extract every turn. After this run, " +
-      "build/commit the cache manifest so later runs fail loud on drift."
+      `${cacheRoot}; this explicit first-ever build inspection may continue, but ` +
+      "live shard writes remain blocked until extraction-fill atomically pins " +
+      "the provider/model identity."
   );
-}
-
-function assertExtractionConfigDrift(
-  model: string,
-  systemPrompt: string,
-  manifest: ExtractionCacheManifest
-): void {
-  if (model !== manifest.extraction_model) {
-    throw new Error(
-      "[longmemeval preflight] extraction model mismatch: resolved model " +
-        `"${model}" != cache manifest extraction_model ` +
-        `"${manifest.extraction_model}". The cache would miss every key and ` +
-        "this run would be a full live extraction (~466h). Set " +
-        `${GARDEN_MODEL_ENV}=${manifest.extraction_model} in the bench ` +
-        "environment or rebuild the " +
-        "cache for the new model."
-    );
-  }
-  const systemPromptSha256 = computeSystemPromptSha256(systemPrompt);
-  if (systemPromptSha256 !== manifest.system_prompt_sha256) {
-    throw new Error(
-      "[longmemeval preflight] system prompt drift: sha256(systemPrompt) " +
-        `"${systemPromptSha256}" != cache manifest system_prompt_sha256 ` +
-        `"${manifest.system_prompt_sha256}". A prompt change invalidates ` +
-        "every cache key, so this run would re-extract the entire dataset " +
-        "live (~466h). Rebuild the cache for the new prompt or revert the " +
-        "prompt change."
-    );
-  }
 }
 
 // Window-containment gate. When the caller hands the actual run window's
@@ -178,27 +150,30 @@ function assertExtractionConfigDrift(
 function assertWindowContainment(input: {
   readonly cacheRoot: string;
   readonly model: string;
+  readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
   readonly requiredTurnContents: readonly string[];
   readonly allowLiveExtraction?: boolean;
   readonly liveExtractionPossible: boolean;
 }): void {
-  const missing = countMissingTurnFixtures(
+  const unavailable = inspectRequiredTurnFixtures(
     input.cacheRoot,
     input.model,
+    input.requestProfile,
     input.systemPrompt,
     input.requiredTurnContents
   );
   if (
-    missing > 0 &&
+    unavailable.total > 0 &&
     input.allowLiveExtraction !== true &&
     input.liveExtractionPossible
   ) {
     const total = input.requiredTurnContents.length;
     throw new Error(
       "[longmemeval preflight] extraction cache covers only part of this " +
-        `run's question window: ${missing} of ${total} distinct turns have ` +
-        "no fixture, so this run would live-extract the gap. The cache " +
+        `run's question window: ${unavailable.missing} missing and ` +
+        `${unavailable.invalid} invalid fixture(s) among ${total} distinct turns, ` +
+        "so this run would live-extract the gap. The cache " +
         "manifest's coverage scalar is relative to the window the last " +
         "extraction-fill recorded, not this run's window. Run extraction-fill " +
         "for the FULL --limit/--offset window of this run, or pass " +
@@ -247,25 +222,26 @@ function assertCoverageScalar(
   }
 }
 
-/**
- * Count, of `turnContents`, how many have NO fixture on disk under `cacheRoot`.
- * Each turn's cache key is the same sha256(model\0systemPrompt\0turnContent)
- * the caching extractor writes, so a present fixture proves a cache hit and a
- * missing one proves a live extraction would be needed. Pure file stats, no
- * LLM. cross-file: createCachingSignalExtractor (the writer of these fixtures).
- */
-function countMissingTurnFixtures(
+/** A path alone cannot prove a runtime cache hit; use the runtime validator. */
+function inspectRequiredTurnFixtures(
   cacheRoot: string,
   model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   turnContents: readonly string[]
-): number {
+): { readonly missing: number; readonly invalid: number; readonly total: number } {
   let missing = 0;
+  let invalid = 0;
   for (const turnContent of turnContents) {
-    const cacheKey = computeCacheKey(model, systemPrompt, turnContent);
-    if (!existsSync(cacheFilePath(cacheRoot, cacheKey))) {
-      missing += 1;
-    }
+    const cacheKey = computeCacheKey(model, requestProfile, systemPrompt, turnContent);
+    const status = inspectCachedExtraction(
+      cacheRoot,
+      cacheKey,
+      model,
+      requestProfile
+    ).status;
+    if (status === "missing") missing += 1;
+    if (status === "invalid") invalid += 1;
   }
-  return missing;
+  return { missing, invalid, total: missing + invalid };
 }

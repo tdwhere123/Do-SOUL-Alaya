@@ -2,12 +2,17 @@ import type {
   CandidateDiagnostic,
   DiagnosticAxisContributions,
   DiagnosticAxisRanks,
+  DiagnosticCandidateAnswerFeatures,
   DiagnosticFloodFuelCoverage,
   DiagnosticFloodPotential,
   DiagnosticScoreFactors,
   ReadCandidateDiagnosticsResult
 } from "./diagnostics-types.js";
-import { DiagnosticFloodPotentialSchema } from "./diagnostics-schema.js";
+import {
+  DiagnosticCandidateAnswerFeaturesSchema,
+  DiagnosticFloodPotentialSchema,
+  DiagnosticQueryProbesSchema
+} from "./diagnostics-schema.js";
 
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",
@@ -15,6 +20,7 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "object_probe",
   "lexical",
   "evidence_anchor",
+  "facet_concept",
   "domain_tag_cluster",
   "session_surface_cohort",
   "source_proximity",
@@ -70,9 +76,11 @@ export function readCandidates(
   const byObjectIdentity = new Map<string, CandidateDiagnostic>();
   const byCandidateKey = new Map<string, CandidateDiagnostic>();
   const mutableKeysByObjectId = new Map<string, string[]>();
+  let parsedCandidateCount = 0;
   for (const raw of source ?? []) {
     const candidate = readCandidateRow(raw, fusionBreakdown.byCandidateKey);
     if (candidate === null) continue;
+    parsedCandidateCount += 1;
     indexCandidateDiagnostic(
       candidate,
       byCandidateKey,
@@ -88,7 +96,7 @@ export function readCandidates(
     ] as const)
   );
   return {
-    candidatePoolComplete: source !== null,
+    candidatePoolComplete: source !== null && parsedCandidateCount === source.length,
     byObjectId: Object.freeze(byObjectId),
     byObjectIdentity: Object.freeze(byObjectIdentity),
     byCandidateKey: Object.freeze(byCandidateKey),
@@ -109,6 +117,10 @@ function readCandidateRow(
     identity.objectId,
     identity.objectKind
   );
+  const answerFeatures = readCandidateAnswerFeatures(record.answer_features);
+  if (record.answer_features != null && answerFeatures === null) return null;
+  const pathSuppressionScore = readNumber(record.path_suppression_score);
+  if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
   return {
     candidateKey: identity.candidateKey,
     objectId: identity.objectId,
@@ -117,6 +129,8 @@ function readCandidateRow(
     originPlane: identity.originPlane,
     ...readCandidateScoring(record, fusion),
     ...readCandidateProvenance(record),
+    answerFeatures,
+    pathSuppressionScore,
     ...readCandidateDelivery(record)
   };
 }
@@ -284,6 +298,12 @@ function readFloodPotential(value: unknown): DiagnosticFloodPotential | null {
   return parsed.success ? parsed.data : null;
 }
 
+function readCandidateAnswerFeatures(value: unknown): DiagnosticCandidateAnswerFeatures | null {
+  if (value == null) return null;
+  const parsed = DiagnosticCandidateAnswerFeaturesSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 function readFloodFuelCoverage(value: unknown): DiagnosticFloodFuelCoverage | null {
   const record = readRecord(value);
   if (record === null) return null;
@@ -400,6 +420,11 @@ export function readNumberRecord(value: unknown): Readonly<Record<string, number
   return Object.keys(result).length === 0 ? null : Object.freeze(result);
 }
 
+export function readDiagnosticQueryProbes(value: unknown) {
+  const parsed = DiagnosticQueryProbesSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 function readNullableNumberRecord(value: unknown): Readonly<Record<string, number | null>> | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Readonly<Record<string, unknown>>;
@@ -433,7 +458,7 @@ export function readNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function readStringArray(value: unknown): readonly string[] | null {
+export function readStringArray(value: unknown): readonly string[] | null {
   if (!Array.isArray(value)) return null;
   const strings = value.filter(
     (item): item is string => typeof item === "string" && item.length > 0

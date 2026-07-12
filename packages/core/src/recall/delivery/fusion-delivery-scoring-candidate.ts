@@ -19,6 +19,19 @@ export type FusedRecallCandidateInput = Readonly<RecallFusionCandidateInput & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
+export type KeyedRecallFusionCandidate = Readonly<{
+  readonly candidateKey: string;
+  readonly candidate: RecallFusionCandidateInput;
+}>;
+
+export type RecallFusionCandidateStreamSnapshot = Readonly<{
+  readonly candidateKey: string;
+  readonly candidate: RecallFusionCandidateInput;
+  readonly perStreamRank: RecallFusionStreamRanks;
+  readonly contributions: RecallFusionStreamContributions;
+  readonly objectBase: number;
+}>;
+
 export type PreliminaryFusionCandidate = Readonly<{
   readonly candidateKey: string;
   readonly objectId: string;
@@ -30,7 +43,7 @@ export type PreliminaryFusionCandidate = Readonly<{
   readonly contributions: RecallFusionStreamContributions;
   readonly fusedScore: number;
   readonly facetOverlapCount: number;
-  // invariant: conformant ordering uses axis rank and the collapsed R_a tie-break vector.
+  // invariant: conformant axis fields are diagnostics; fusedScore owns ordering.
   readonly axisRank?: Readonly<Record<RecallConformantAxis, number | null>>;
   readonly axisRa?: Readonly<Record<RecallConformantAxis, number>>;
   readonly floodPotential?: IntegratedFloodCandidateDiagnostics;

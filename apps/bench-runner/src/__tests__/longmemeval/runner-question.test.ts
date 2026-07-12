@@ -108,7 +108,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       }
     } as unknown as BenchDaemonHandle;
 
-    await runLongMemEvalQuestion({
+    const result = await runLongMemEvalQuestion({
       daemon,
       question,
       turnIndex: 0,
@@ -128,7 +128,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       simulateReport: "none",
       embeddingMode: "disabled",
       embeddingProviderKind: "openai",
-      captureSnapshot: false,
+      captureSnapshot: true,
       qaChat: answerChat,
       qaJudgeChat: judgeChat
     });
@@ -138,6 +138,11 @@ describe("runLongMemEvalQuestion QA delivery", () => {
     expect(countOccurrences(answerPrompt, "Duplicated gold turn.")).toBe(1);
     expect(countOccurrences(answerPrompt, "Unique gold turn.")).toBe(1);
     expect(answerPrompt).not.toContain("Distractor turn.");
+    expect(workspace.recall).toHaveBeenCalledWith(
+      question.question,
+      expect.objectContaining({ referenceTime: "2026-01-01T00:00:00.000Z" })
+    );
+    expect(result.snapshotQuestion?.questionDate).toBe("2026-01-01T00:00:00.000Z");
   });
 });
 

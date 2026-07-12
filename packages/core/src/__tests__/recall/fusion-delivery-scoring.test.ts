@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import { buildEmptyRecallFusionBreakdown, buildRecallFusionDetails, compareFusedRecallCandidates, scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -38,6 +38,64 @@ function emptySupplementaryData(query: string): RecallSupplementaryData {
 }
 
 describe("buildRecallFusionDetails temporal lane", () => {
+  it("lets one absolute date own final fused rank", () => {
+    const matching = createMemoryEntry({
+      object_id: "99999999-9999-4999-8999-999999999999",
+      event_time_start: "2023-05-12T00:00:00.000Z",
+      event_time_end: "2023-05-12T23:59:59.999Z"
+    });
+    const distractor = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      event_time_start: "2024-05-12T00:00:00.000Z",
+      event_time_end: "2024-05-12T23:59:59.999Z"
+    });
+    const supplementaryData = emptySupplementaryData("the 2023-05-12 incident");
+    const fusion = buildRecallFusionDetails({
+      candidates: [matching, distractor].map((entry) => ({
+        entry,
+        effectiveScore: 0,
+        effectiveFactors: { activation: 0, relevance: 0 }
+      })),
+      policy: {} as RecallPolicy,
+      supplementaryData,
+      nowIso: "2026-06-29T00:00:00.000Z"
+    });
+
+    expect(classifyRecallIntent(supplementaryData.queryProbes)).toBe("single_fact");
+    expect(fusion.get(`workspace_local:memory_entry:${matching.object_id}`)?.fused_rank).toBe(1);
+    expect(fusion.get(`workspace_local:memory_entry:${matching.object_id}`)
+      ?.fused_rank_contribution_per_stream.temporal_recency).toBeCloseTo(4 / 41, 6);
+  });
+
+  it.each([
+    ["May 2023 preference", "2023-05-15T00:00:00.000Z"],
+    ["2023 preference", "2023-08-15T00:00:00.000Z"]
+  ])("keeps an absolute %s window intent-neutral while using temporal k", (query, eventTime) => {
+    const entry = createMemoryEntry({
+      object_id: "77777777-7777-4777-8777-777777777777",
+      event_time_start: eventTime
+    });
+    const supplementaryData = emptySupplementaryData(query);
+    const fusion = buildRecallFusionDetails({
+      candidates: [{
+        entry,
+        effectiveScore: 0,
+        effectiveFactors: { activation: 0, relevance: 0 }
+      }],
+      policy: {} as RecallPolicy,
+      supplementaryData,
+      nowIso: "2026-06-29T00:00:00.000Z"
+    });
+
+    expect(classifyRecallIntent(supplementaryData.queryProbes)).toBe("preference");
+    expect(fusion.get(`workspace_local:memory_entry:${entry.object_id}`)
+      ?.fused_rank_contribution_per_stream.temporal_recency).toBeCloseTo(4 / 41, 6);
+  });
+
+  it("recognizes an open temporal question without an explicit date", () => {
+    expect(classifyRecallIntent(compileRecallQueryProbes("When did this happen?"))).toBe("temporal");
+  });
+
   it("uses event time instead of ingest created_at for temporal intent", () => {
     const policy = {} as RecallPolicy;
     const eventMemory = createMemoryEntry({
@@ -378,12 +436,7 @@ describe("buildRecallFusionDetails preference profile lane", () => {
   });
 });
 
-describe("scoreTemporalFusion window gate (ALAYA_RECALL_TEMPORAL_WINDOW)", () => {
-  afterEach(() => {
-    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
-  });
-
-  // Absolute-date query that classifies as single_fact, not temporal — the old intent gate would block window scoring.
+describe("scoreTemporalFusion query windows", () => {
   const query = "the 2023-05-12 incident";
   const nowIso = "2026-06-29T00:00:00.000Z";
   const entry = createMemoryEntry({
@@ -391,20 +444,18 @@ describe("scoreTemporalFusion window gate (ALAYA_RECALL_TEMPORAL_WINDOW)", () =>
     event_time_end: "2023-05-12T23:59:59.999Z"
   });
 
-  it("the absolute-date query is not temporal intent yet carries a parseable window", () => {
+  it("the absolute-date query carries an intent-neutral parseable window", () => {
     const probes = compileRecallQueryProbes(query);
-    expect(classifyRecallIntent(probes)).not.toBe("temporal");
+    expect(classifyRecallIntent(probes)).toBe("single_fact");
     expect(parseQueryTimeWindow(probes, nowIso)).not.toBeNull();
   });
 
-  it("falls back to distance-to-now recency when the flag is off", () => {
+  it("scores a parseable query window without an environment gate", () => {
     const probes = compileRecallQueryProbes(query);
-    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalEventTime(entry, nowIso));
-    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(0);
+    expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(1);
   });
 
-  it("scores by the query window for any windowed query when the flag is on", () => {
-    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
+  it("scores by the query window for any windowed query", () => {
     const probes = compileRecallQueryProbes(query);
     const window = parseQueryTimeWindow(probes, nowIso)!;
     expect(scoreTemporalFusion(entry, probes, nowIso)).toBe(scoreTemporalQueryWindow(entry, window, nowIso));
@@ -413,7 +464,7 @@ describe("scoreTemporalFusion window gate (ALAYA_RECALL_TEMPORAL_WINDOW)", () =>
 });
 
 describe("compareFusedRecallCandidates", () => {
-  it("orders by fused_rank before fused_score so delivery matches metadata", () => {
+  it("orders by fused_score even when stale rank metadata disagrees", () => {
     const betterRank = {
       entry: createMemoryEntry({ object_id: "11111111-1111-4111-8111-111111111111" }),
       effectiveScore: 0.5,
@@ -436,7 +487,9 @@ describe("compareFusedRecallCandidates", () => {
     };
 
     const ordered = [worseRank, betterRank].sort(compareFusedRecallCandidates);
-    expect(ordered[0]?.fusion.fused_rank).toBe(1);
-    expect(ordered[1]?.fusion.fused_rank).toBe(2);
+    expect(ordered.map((candidate) => candidate.entry.object_id)).toEqual([
+      "22222222-2222-4222-8222-222222222222",
+      "11111111-1111-4111-8111-111111111111"
+    ]);
   });
 });

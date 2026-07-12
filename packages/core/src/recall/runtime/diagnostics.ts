@@ -14,6 +14,7 @@ import { activeFusionStreams } from "../delivery/fusion-delivery.js";
 
 export function buildRecallDiagnostics(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
   readonly candidatePoolCount: number;
   readonly preBudgetCount: number;
@@ -30,6 +31,7 @@ export function buildRecallDiagnostics(params: Readonly<{
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: freezeRecallQueryProbes(params.queryProbes),
+    query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
     total_scanned: params.totalScanned,
     candidate_pool_count: params.candidatePoolCount,
     pre_budget_count: params.preBudgetCount,
@@ -67,6 +69,7 @@ function freezeRecallQueryProbes(
   queryProbes: Readonly<RecallQueryProbes>
 ): Readonly<RecallDiagnostics["query_probes"]> {
   return Object.freeze({
+    normalized_query: queryProbes.normalized_query,
     object_ids: Object.freeze([...queryProbes.object_ids]),
     subject_hints: Object.freeze([...queryProbes.subject_hints]),
     evidence_refs: Object.freeze([...queryProbes.evidence_refs]),

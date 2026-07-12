@@ -71,9 +71,23 @@ describe("LongMemEval edge trace integration", () => {
       taskSurface: taskSurface(),
       workspaceId: WORKSPACE_ID,
       runId: RUN_ID,
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
     const parsed = BenchRecallDiagnosticsSchema.parse(result.diagnostics);
+    expect(parsed.query_probes.normalized_query).toBe(taskSurface().display_name);
+    expect(parsed.query_sought_facets).toContain("location_place");
+    const targetCandidate = parsed.candidates.find((row) => row.object_id === TARGET_ID);
+    expect(targetCandidate).toMatchObject({
+      answer_features: {
+        content: "Paris deploy staging database target answer",
+        evidence_gist: null,
+        evidence_gist_truncated: false,
+        facet_tags: [{ facet: "location_place", value: "Paris" }],
+        projection_schema_version: 1
+      },
+      path_suppression_score: 0
+    });
     const target = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID);
     expect(target?.flood_potential?.edge_traces).toEqual([
       expect.objectContaining({
@@ -90,6 +104,14 @@ describe("LongMemEval edge trace integration", () => {
     ]);
 
     const strictQuestion = buildStrictQuestion(result);
+    expect(strictQuestion).toMatchObject({
+      query_probes: { normalized_query: taskSurface().display_name },
+      query_sought_facets: ["location_place"]
+    });
+    expect(strictQuestion.candidates.find((row) => row.object_id === TARGET_ID)).toMatchObject({
+      answer_features: targetCandidate?.answer_features,
+      path_suppression_score: 0
+    });
     expect(strictQuestion.gold[0]?.flood_potential?.edge_traces?.[0]).toEqual(
       expect.objectContaining({ path_id: PATH_ID, slice_compatibility: "slice_match" })
     );

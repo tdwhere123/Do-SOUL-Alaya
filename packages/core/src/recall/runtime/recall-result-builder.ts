@@ -27,6 +27,7 @@ export function buildRecallResult(
     working_projection: null,
     diagnostics: buildRecallDiagnostics({
       queryProbes: prepared.queryProbes,
+      querySoughtFacets: assessment.supplementaryData.querySoughtFacets,
       totalScanned: coarse.coarseFilter.total_scanned + coarse.globalCoarseFilter.total_scanned,
       candidatePoolCount: coarse.combinedCoarseCandidates.length,
       preBudgetCount: manifested.candidateDiagnostics.length,

@@ -4,6 +4,7 @@ import {
   computeFloodEdgeTransfer,
   RECALL_FLOOD_EDGE_TRACE_LIMIT
 } from "../../recall/flood/edge-transfer.js";
+import type { SliceCompatibilityV1 } from "../../recall/flood/slice-key-selector.js";
 import { noisyOrDecorrelate } from "../../recall/scoring/conformant-evidence-math.js";
 import type { PathInflowEdge } from "../../recall/runtime/recall-service-types.js";
 
@@ -366,7 +367,7 @@ describe("flood edge transfer trace", () => {
       rhoPath: 0.5,
       traceLimit: 2,
       enforceSliceCompatibility: true,
-      sliceCompatibilityByPathId: new Map([
+      sliceCompatibilityByPathId: new Map<string, SliceCompatibilityV1>([
         ["aa-low-transfer", { decision: "compatible", reason: "slice_match", matches: [] }],
         ["zy-high-transfer", { decision: "compatible", reason: "slice_match", matches: [] }],
         ["zz-material-rejection", { decision: "rejected", reason: "no_slice_match", matches: [] }]

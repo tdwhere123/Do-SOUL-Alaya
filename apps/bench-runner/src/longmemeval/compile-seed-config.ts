@@ -2,6 +2,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
 import {
+  EXTRACTION_REQUEST_PROFILES,
+  type ExtractionRequestProfile,
   type ExtractionCacheManifest
 } from "./extraction-cache-manifest.js";
 import type {
@@ -35,6 +37,8 @@ export const EXTRACTION_CACHE_ROOT = resolveExtractionCacheRoot();
 
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
 const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
+const EXTRACTION_MODEL_FAMILY_ENV = "ALAYA_BENCH_EXTRACTION_MODEL_FAMILY";
+const EXTRACTION_REQUEST_PROFILE_ENV = "ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE";
 const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
 const ALLOW_LIVE_EXTRACTION_ENV = "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION";
 const DEFAULT_GARDEN_PROVIDER_URL = "https://yunwu.ai/v1";
@@ -119,15 +123,40 @@ export function resolveCompileSeedExtractionConfig(
         "full live extraction."
     );
   }
+  const modelFamily =
+    readNonEmpty(env[EXTRACTION_MODEL_FAMILY_ENV]) ??
+    manifest?.model_family ??
+    model;
+  const requestProfile = resolveExtractionRequestProfile(env, manifest);
   const secretRef = readNonEmpty(env[GARDEN_SECRET_REF_ENV]);
   if (secretRef === undefined) {
-    return { providerUrl, model, apiKey: null };
+    return { providerUrl, model, modelFamily, requestProfile, apiKey: null };
   }
   const resolved = resolveSecretRef(secretRef);
   if ("value" in resolved) {
-    return { providerUrl, model, apiKey: resolved.value };
+    return { providerUrl, model, modelFamily, requestProfile, apiKey: resolved.value };
   }
-  return { providerUrl, model, apiKey: null };
+  return { providerUrl, model, modelFamily, requestProfile, apiKey: null };
+}
+
+function resolveExtractionRequestProfile(
+  env: NodeJS.ProcessEnv,
+  manifest: ExtractionCacheManifest | undefined
+): ExtractionRequestProfile {
+  const value = readNonEmpty(env[EXTRACTION_REQUEST_PROFILE_ENV]) ??
+    (manifest?.schema_version === 3 ? manifest.request_profile : undefined);
+  if (value === undefined) {
+    throw new Error(
+      `bench extraction request profile is unresolved: set ${EXTRACTION_REQUEST_PROFILE_ENV} ` +
+        "for a new cache root or use a schema_version 3 self-describing manifest."
+    );
+  }
+  if (EXTRACTION_REQUEST_PROFILES.includes(value as ExtractionRequestProfile)) {
+    return value as ExtractionRequestProfile;
+  }
+  throw new Error(
+    `${EXTRACTION_REQUEST_PROFILE_ENV} must be one of ${EXTRACTION_REQUEST_PROFILES.join(", ")}`
+  );
 }
 
 const EXTRACTION_CACHE_MIN_COVERAGE_ENV = "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE";
@@ -160,7 +189,7 @@ export function resolveBenchRequireExtractionCacheManifest(
   return !(normalized === "0" || normalized === "false");
 }
 
-function normalizeBaseUrl(url: string): string {
+export function normalizeBaseUrl(url: string): string {
   const trimmed = url.trim().replace(/\/+$/u, "");
   return trimmed.endsWith("/chat/completions")
     ? trimmed.slice(0, -"/chat/completions".length)

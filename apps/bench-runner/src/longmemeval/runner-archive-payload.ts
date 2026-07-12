@@ -34,11 +34,10 @@ import { toSeedFuelInventoryKpi } from "./seed-fuel-inventory-kpi.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 
 const LONGMEMEVAL_SEED_POLICY = Object.freeze({
-  mode: "label_independent_all_fact",
+  mode: "label_independent_open_vocabulary_extraction",
   label_independent: true,
-  object_kind: "fact",
   description:
-    "LongMemEval public recall evaluation seeds every haystack turn as a factual memory; has_answer labels are used only for scoring sidecars."
+    "LongMemEval seeds each haystack turn through production open-vocabulary extraction and governed materialization; has_answer labels are used only for scoring sidecars."
 });
 
 export interface LongMemEvalPayloadBuild {
@@ -89,10 +88,11 @@ function buildArchiveRates(aggregate: LongMemEvalRunArchiveAggregate): {
   readonly latencyP50: number;
   readonly latencyP95: number;
 } {
-  const n = aggregate.perScenario.length;
+  const n = aggregate.answerableCount;
+  const scorableRows = aggregate.perScenario.filter((row) => row.scorable === true);
   return {
     rAt1: n === 0 ? 0 : aggregate.totalHitAt1 / n,
-    rAt5: n === 0 ? 0 : aggregate.perScenario.filter((r) => r.hit_at_5).length / n,
+    rAt5: n === 0 ? 0 : scorableRows.filter((row) => row.hit_at_5).length / n,
     rAt10: n === 0 ? 0 : aggregate.totalHitAt10 / n,
     latencyP50: computePercentile(aggregate.latencies, 50),
     latencyP95: computePercentile(aggregate.latencies, 95)
@@ -132,7 +132,8 @@ function buildPayload(
     seed_policy: LONGMEMEVAL_SEED_POLICY,
     dataset: buildDataset(input),
     sample_size: input.opts.fetchResult?.questionCount ?? input.questionsLength,
-    evaluated_count: input.windowLength,
+    evaluated_count: input.aggregate.perScenario.length,
+    answerable_evaluated_count: input.aggregate.answerableCount,
     harness_mode: "mcp_propose_review",
     kpi: buildKpi(input, rates, providerSummary, embeddingVectorCache, queryEmbeddingCache, tokenEconomyInput, edgeProposalRate, edgeProposalAutoAccept)
   };

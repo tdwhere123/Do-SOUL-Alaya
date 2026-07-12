@@ -20,8 +20,7 @@ import { applyDeliverySelection } from "./delivery-selection.js";
 import { computeEffectiveScoreDetails } from "../scoring/scoring.js";
 import {
   selectFineAssessmentCandidates,
-  type FineAssessmentCandidate,
-  type FineAssessmentRankDiagnostics
+  type FineAssessmentCandidate
 } from "./fine-assessment-selection.js";
 
 export interface FineAssessParams {
@@ -32,6 +31,7 @@ export interface FineAssessParams {
   readonly tokenEstimator: TokenEstimator;
   readonly now: () => string;
   readonly warn: RecallServiceWarnPort;
+  readonly captureAnswerFeatures?: boolean;
 }
 
 export function fineAssess(params: FineAssessParams): Readonly<{
@@ -52,17 +52,14 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     params.supplementaryData,
     params.now()
   );
-  const delivery = applyDeliverySelection(
-    fusedCandidates,
-    params.supplementaryData,
-    config.budgets.max_entries
-  );
+  const delivery = applyDeliverySelection(fusedCandidates);
   return selectFineAssessmentCandidates({
-    deliveryOrderedCandidates: delivery.ordering.deliveryOrderedCandidates,
+    orderedCandidates: delivery.orderedCandidates,
     config,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
-    ranks: toFineAssessmentRankDiagnostics(delivery.ranks)
+    rankByCandidateKey: delivery.rankByCandidateKey,
+    captureAnswerFeatures: params.captureAnswerFeatures
   });
 }
 
@@ -99,24 +96,9 @@ function fuseFineAssessmentCandidates(
     buildRecallFusionDetails({ candidates: additiveScoredCandidates, policy, supplementaryData, nowIso }),
     supplementaryData.pathSuppressionScores
   );
-  return additiveScoredCandidates.map((candidate) => Object.freeze({
+  const fusedCandidates = additiveScoredCandidates.map((candidate) => Object.freeze({
     ...candidate,
     fusion: fusionByCandidateKey.get(buildRecallCandidateDedupeKey(candidate)) ?? buildEmptyRecallFusionBreakdown(candidate.entry.object_id)
   }));
-}
-
-function toFineAssessmentRankDiagnostics(
-  ranks: ReturnType<typeof applyDeliverySelection>["ranks"]
-): FineAssessmentRankDiagnostics {
-  return Object.freeze({
-    rankAfterFusion: ranks.rankAfterFusion,
-    rankAfterFeatureRerank: ranks.rankAfterFeatureRerank,
-    rankAfterLexicalPriority: ranks.rankAfterLexicalPriority,
-    rankAfterCoverageSelector: ranks.rankAfterCoverageSelector,
-    rankAfterSessionCoverage: ranks.rankAfterSessionCoverage,
-    rankAfterSynthesisReserve: ranks.rankAfterSynthesisReserve,
-    rankAfterStructuralReserve: ranks.rankAfterStructuralReserve,
-    coverageSelectorNoop: ranks.coverageSelectorNoop,
-    sessionCoverageNoop: ranks.sessionCoverageNoop
-  });
+  return fusedCandidates;
 }

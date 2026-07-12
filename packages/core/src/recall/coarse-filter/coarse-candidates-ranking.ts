@@ -32,6 +32,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
   }
   if (draft.admissionPlanes.some((plane) =>
     plane === "evidence_anchor" ||
+    plane === "facet_concept" ||
     plane === "domain_tag_cluster" ||
     plane === "session_surface_cohort" ||
     plane === "source_proximity" ||

@@ -1,12 +1,15 @@
 import {
   BenchEmbeddingProviderStateSchema,
   DiagnosticActiveConstraintResultSchema,
+  DiagnosticCandidateAnswerFeaturesSchema,
   DiagnosticFloodEdgeTraceV1Schema,
   DiagnosticFloodPotentialSchema,
   DiagnosticRecallResultSchema,
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalMissTaxonomySchema,
-  LongMemEvalQuestionDiagnosticSchema
+  LongMemEvalQuestionDiagnosticSchema,
+  LongMemEvalQuestionMeasurementAxesSchema,
+  DiagnosticQueryProbesSchema
 } from "./diagnostics-schema.js";
 import type { BenchCommitResolution } from "../shared/version.js";
 import type { z } from "zod";
@@ -28,6 +31,10 @@ export type DiagnosticStreamRanks = Readonly<Record<string, number | null>>;
 export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
 export type DiagnosticAxisRanks = Readonly<Record<string, number | null>>;
 export type DiagnosticAxisContributions = Readonly<Record<string, number>>;
+export type DiagnosticQueryProbes = z.infer<typeof DiagnosticQueryProbesSchema>;
+export type DiagnosticCandidateAnswerFeatures = z.infer<
+  typeof DiagnosticCandidateAnswerFeaturesSchema
+>;
 export type DiagnosticFloodEdgeTraceV1 = z.infer<typeof DiagnosticFloodEdgeTraceV1Schema>;
 export type DiagnosticFloodPotential = z.infer<typeof DiagnosticFloodPotentialSchema>;
 export type DiagnosticFloodFuelCoverage = Readonly<{
@@ -51,6 +58,22 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly fused_score: number | null;
   readonly per_stream_rank: DiagnosticStreamRanks | null;
   readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
+  readonly per_axis_rank: DiagnosticAxisRanks | null;
+  readonly per_axis_contribution: DiagnosticAxisContributions | null;
+  readonly flood_potential: DiagnosticFloodPotential | null;
+  readonly plane_first_admitted: string | null;
+  readonly plane_winning_admission: string | null;
+  readonly source_planes: readonly string[];
+  readonly source_channels: readonly string[];
+  readonly rank_after_fusion: number | null;
+  readonly rank_after_feature_rerank: number | null;
+  readonly rank_after_lexical_priority: number | null;
+  readonly rank_after_synthesis_reserve: number | null;
+  readonly rank_after_structural_reserve: number | null;
+  readonly rank_after_coverage_selector: number | null;
+  readonly rank_after_session_coverage: number | null;
+  readonly answer_features: DiagnosticCandidateAnswerFeatures | null;
+  readonly path_suppression_score: number | null;
   readonly score_factors: DiagnosticScoreFactors;
 }>;
 
@@ -77,6 +100,10 @@ export type LongMemEvalGoldDiagnostic = z.infer<
 
 export type LongMemEvalQuestionDiagnostic = z.infer<
   typeof LongMemEvalQuestionDiagnosticSchema
+>;
+
+export type LongMemEvalQuestionMeasurementAxes = z.infer<
+  typeof LongMemEvalQuestionMeasurementAxesSchema
 >;
 
 export type LongMemEvalMissTaxonomy = z.infer<
@@ -262,10 +289,13 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
   readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
   readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
   readonly miss_taxonomy_summary?: LongMemEvalMissTaxonomySummary;
+  readonly questions?: readonly LongMemEvalQuestionDiagnostic[];
 }
 
 export interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
+  readonly queryProbes: DiagnosticQueryProbes | null;
+  readonly querySoughtFacets: readonly string[] | null;
   readonly candidatePoolComplete: boolean;
   readonly candidatesByObjectId: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidatesByObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
@@ -312,6 +342,8 @@ export interface CandidateDiagnostic {
   readonly rankAfterStructuralReserve: number | null;
   readonly rankAfterCoverageSelector: number | null;
   readonly rankAfterSessionCoverage: number | null;
+  readonly answerFeatures: DiagnosticCandidateAnswerFeatures | null;
+  readonly pathSuppressionScore: number | null;
   readonly coverageSelectorAction: DeliveryStageAction | null;
   readonly sessionCoverageAction: DeliveryStageAction | null;
   readonly sessionKey: string | null;

@@ -28,8 +28,6 @@ export const EDGE_TYPE_HOP_DECAY: Readonly<Record<RecallGraphExpansionTrackedEdg
 // invariant: traversal maps a path's free-string relation_kind onto EDGE_TYPE_RECALL_MODEL when it names a transitive edge type; path-only kinds (co_recalled/shares_entity/signal_graph_ref) fold onto the weakest recalls tier so they propagate at most one extra hop. Negative/neutral kinds never reach here (traversal follows only recall-eligible paths).
 // see also: protocol/soul/memory-graph.ts EDGE_TYPE_RECALL_MODEL, path-graph/path-relation-proposal-service.ts seed catalog.
 const PATH_ASSOCIATIVE_RELATION_KIND_FALLBACK: RecallGraphExpansionTrackedEdgeType = "recalls";
-// invariant: earned multi-session fan-in carrier relation_kind (mirrors path-relation-proposal-service.ts CO_RECALLED_SEED_PROFILE.relationKind); minted only past the threshold-3 gate, so the structural reserve grants it a gold-blind exemption from the relevance gate. Other relation_kinds stay relevance-gated.
-export const EARNED_CO_RECALLED_FANIN_RELATION_KIND = "co_recalled";
 // Folds a path's free-string relation_kind onto the tracked edge-type set; unmapped kinds become recalls so the {derives_from, recalls, supports} diagnostic key set is preserved.
 export function pathRelationKindToTrackedEdgeType(
   relationKind: string

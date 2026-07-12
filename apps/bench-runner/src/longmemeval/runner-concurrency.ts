@@ -18,7 +18,11 @@ import type { LongMemEvalVariant } from "./dataset.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
 import { throwLifecycleErrors } from "./lifecycle/errors.js";
-import { preserveShardRunProvenance } from "./provenance/shard-aggregate.js";
+import { validateShardRunProvenancePlans } from "./provenance/shard-aggregate.js";
+import {
+  withLongMemEvalDiagnosticsSpool,
+  type LongMemEvalDiagnosticsSpool
+} from "./diagnostics/spool.js";
 
 export interface LongMemEvalWorkerShardPlan {
   readonly shardIndex: number;
@@ -251,22 +255,32 @@ async function runLongMemEvalConcurrentWorker(
 async function mergeLongMemEvalConcurrentRun(
   context: LongMemEvalConcurrentContext
 ): Promise<LongMemEvalRunResult> {
+  return withLongMemEvalDiagnosticsSpool((diagnosticsSpool) =>
+    mergeLongMemEvalConcurrentRunWithSpool(context, diagnosticsSpool)
+  );
+}
+
+async function mergeLongMemEvalConcurrentRunWithSpool(
+  context: LongMemEvalConcurrentContext,
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
+): Promise<LongMemEvalRunResult> {
   const shardRoots = context.plans.map((plan) => plan.historyRoot);
   process.stdout.write(
     `[longmemeval concurrency] merging ${shardRoots.length} shard(s) -> ${context.opts.historyRoot}\n`
   );
-  const loaded = await loadMergeShards(shardRoots);
+  const loaded = await loadMergeShards(shardRoots, diagnosticsSpool);
   const build = buildMergedLongMemEvalPayload(loaded);
+  await validateShardRunProvenancePlans({
+    shardArchiveRefs: loaded.archiveRefs,
+    plans: context.plans,
+    requestedConcurrency: context.concurrency
+  });
   const archive = await writeMergedLongMemEvalArchive({
     historyRoot: context.opts.historyRoot,
     build,
-    shardArchiveRefs: loaded.archiveRefs
-  });
-  await preserveShardRunProvenance({
     shardArchiveRefs: loaded.archiveRefs,
-    plans: context.plans,
-    mergedArchiveRoot: dirname(archive.kpiPath),
-    requestedConcurrency: context.concurrency
+    requestedConcurrency: context.concurrency,
+    diagnosticsSpool
   });
   return {
     slug: archive.slug,

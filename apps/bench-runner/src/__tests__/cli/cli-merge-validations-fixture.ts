@@ -30,7 +30,9 @@ export function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
     dataset: {
       name: "longmemeval_s",
       size: 500,
-      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+      checksum_sha256: "d".repeat(64),
+      checksum_source: "downloaded_bytes"
     },
     sample_size: 500,
     evaluated_count: 5,
@@ -65,6 +67,52 @@ export function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
   };
 }
 
+export function makeEligibleMeasurementAttribution(): NonNullable<
+  KpiPayload["measurement_attribution"]
+> {
+  return {
+    schema_version: "bench-measurement-attribution.v2",
+    status: "eligible",
+    gate_eligible: true,
+    evidence_status: "complete",
+    candidate_pool_complete: true,
+    provenance_complete: true,
+    abstention_calibration_status: "not_applicable",
+    evaluator_identity_status: "complete"
+  };
+}
+
+export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload {
+  const evaluated = payload.evaluated_count;
+  return {
+    ...payload,
+    answerable_evaluated_count: evaluated,
+    measurement_attribution: makeEligibleMeasurementAttribution(),
+    kpi: {
+      ...payload.kpi,
+      per_scenario: Array.from({ length: evaluated }, (_, index) => ({
+        id: `question-${index + 1}`,
+        version: 1,
+        hit_at_5: index < Math.round(payload.kpi.r_at_5 * evaluated),
+        scorable: true,
+        tier: "warm" as const
+      })),
+      quality_metrics: {
+        ...(payload.kpi.quality_metrics ?? makeQualityMetrics()),
+        abstention: {
+          schema_version: "bench-abstention.v2",
+          total: 0,
+          scored: 0,
+          unscorable: 0,
+          method: "fused_margin_diagnostic_only",
+          calibration_status: "uncalibrated",
+          gate_eligible: false
+        }
+      }
+    }
+  };
+}
+
 export function makeQualityMetrics(
   input: {
     readonly denominator?: number;
@@ -96,6 +144,10 @@ export function makeQualityMetrics(
     candidate_absent_denominator: denominator,
     no_gold_count: 0,
     no_gold_denominator: denominator,
+    evaluator_identity_issue_count: 0,
+    evaluator_identity_issue_denominator: denominator,
+    evaluator_identity_unscorable_count: 0,
+    evaluator_identity_unscorable_denominator: denominator,
     evidence_stream_gold_delivery_rate: 0.2,
     evidence_stream_gold_delivery_count: Math.ceil(denominator * 0.2),
     evidence_stream_gold_delivery_denominator: denominator,
@@ -124,7 +176,7 @@ export function makeSeedExtractionPath(
   return {
     path: "official_api_compile",
     cache_hits: 0,
-    llm_calls: 1,
+    llm_calls: 0,
     offline_fallbacks: 0,
     live_extraction_failures: 0,
     cached_extraction_failures: 0,
@@ -231,6 +283,7 @@ export async function writeShardRoot(
   diagnostics: unknown = makeShardDiagnostics(),
   pointerKinds: readonly ShardPointerKind[] = ["run"]
 ): Promise<void> {
+  const boundDiagnostics = bindEmptyDiagnosticsQuestions(diagnostics, kpi);
   const slug = "2026-05-14T100000Z-" + kpi.alaya_commit;
   const entryRoot = path.join(root, "public", slug);
   await mkdir(entryRoot, { recursive: true });
@@ -240,10 +293,10 @@ export async function writeShardRoot(
     "utf8"
   );
   await writeFile(path.join(entryRoot, "report.md"), "report\n", "utf8");
-  if (diagnostics !== null) {
+  if (boundDiagnostics !== null) {
     await writeFile(
       path.join(entryRoot, LONGMEMEVAL_DIAGNOSTICS_FILENAME),
-      JSON.stringify(diagnostics, null, 2) + "\n",
+      JSON.stringify(boundDiagnostics, null, 2) + "\n",
       "utf8"
     );
   }
@@ -261,6 +314,27 @@ export async function writeShardRoot(
       "utf8"
     );
   }
+}
+
+function bindEmptyDiagnosticsQuestions(diagnostics: unknown, kpi: KpiPayload): unknown {
+  if (diagnostics === null || typeof diagnostics !== "object") return diagnostics;
+  const record = diagnostics as Record<string, unknown>;
+  if (!Array.isArray(record.questions) || record.questions.length > 0) return diagnostics;
+  return {
+    ...record,
+    questions: kpi.kpi.per_scenario.map((row) => ({
+      question_id: row.id,
+      is_abstention: row.id.endsWith("_abs"),
+      gold_memory_ids: [],
+      delivered_memory_ids: [],
+      delivered_gold_ids: [],
+      hit_at_5: row.hit_at_5,
+      miss_reasons: [],
+      provider_state: "provider_not_requested",
+      candidate_pool_complete: false,
+      candidates: []
+    }))
+  };
 }
 
 export async function writeHistoryEntry(

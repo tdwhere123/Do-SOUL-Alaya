@@ -1,4 +1,5 @@
 import type {
+  MemoryEntry,
   RecallCandidate,
   RecallScoreFactors,
   RecallOriginPlane} from "@do-soul/alaya-protocol";
@@ -8,6 +9,7 @@ export type RecallAdmissionPlane =
   | "protected_winner"
   | "object_probe"
   | "evidence_anchor"
+  | "facet_concept"
   | "domain_tag_cluster"
   | "session_surface_cohort"
   | "source_proximity"
@@ -189,11 +191,14 @@ export interface RecallCandidateDiagnostic {
   readonly dropped_reason: RecallCandidateDropReason | null;
   readonly within_budget: boolean;
   readonly relevance_score: number;
+  readonly additive_score: number;
   readonly lexical_rank: number | null;
   readonly structural_score: number;
   readonly score_factors: Readonly<RecallScoreFactors>;
   readonly source_channels: readonly string[];
   readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
+  readonly answer_features?: Readonly<RecallCandidateAnswerFeatures>;
+  readonly path_suppression_score: number;
   // Per-stage delivery rank trajectory through fineAssess (1-based): shows where a candidate fell out of the top-k window; reserved_by names the stage that pulled it in. Provenance only, never feeds ranking.
   readonly rank_after_fusion?: number;
   readonly rank_after_feature_rerank?: number;
@@ -207,6 +212,28 @@ export interface RecallCandidateDiagnostic {
   readonly session_key?: string;
   readonly source_cohort_key?: string | null;
   readonly reserved_by?: "none" | "synthesis" | "structural";
+}
+
+export interface RecallCandidateAnswerFeatures {
+  readonly content: MemoryEntry["content"];
+  readonly evidence_gist: string | null;
+  readonly evidence_gist_truncated: boolean;
+  readonly domain_tags: MemoryEntry["domain_tags"];
+  readonly evidence_refs: MemoryEntry["evidence_refs"];
+  readonly facet_tags: NonNullable<MemoryEntry["facet_tags"]>;
+  readonly canonical_entities: NonNullable<MemoryEntry["canonical_entities"]>;
+  readonly projection_schema_version: Exclude<MemoryEntry["projection_schema_version"], undefined>;
+  readonly event_time_start: Exclude<MemoryEntry["event_time_start"], undefined>;
+  readonly event_time_end: Exclude<MemoryEntry["event_time_end"], undefined>;
+  readonly valid_from: Exclude<MemoryEntry["valid_from"], undefined>;
+  readonly valid_to: Exclude<MemoryEntry["valid_to"], undefined>;
+  readonly time_precision: Exclude<MemoryEntry["time_precision"], undefined>;
+  readonly time_source: Exclude<MemoryEntry["time_source"], undefined>;
+  readonly preference_subject: Exclude<MemoryEntry["preference_subject"], undefined>;
+  readonly preference_predicate: Exclude<MemoryEntry["preference_predicate"], undefined>;
+  readonly preference_object: Exclude<MemoryEntry["preference_object"], undefined>;
+  readonly preference_category: Exclude<MemoryEntry["preference_category"], undefined>;
+  readonly preference_polarity: Exclude<MemoryEntry["preference_polarity"], undefined>;
 }
 
 export interface RecallPathExpansionSourceDiagnostic {
@@ -264,6 +291,7 @@ export interface RecallGraphExpansionDiagnostics {
 
 export interface RecallDiagnostics {
   readonly query_probes: {
+    readonly normalized_query: string | null;
     readonly subject_hints: readonly string[];
     readonly object_ids: readonly string[];
     readonly evidence_refs: readonly string[];
@@ -282,6 +310,7 @@ export interface RecallDiagnostics {
     readonly char_ngrams: readonly string[];
     readonly date_terms: readonly string[];
   };
+  readonly query_sought_facets: readonly string[];
   readonly total_scanned: number;
   readonly candidate_pool_count: number;
   readonly pre_budget_count: number;

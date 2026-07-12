@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   FormationKind,
@@ -27,22 +27,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
 
-// anchor: PRODUCTION-PATH proof for the earned-co_recalled fan-in reserve
-// exemption. The sibling suite recall-durable-fanin-delivery.test.ts injects
-// `reachedViaEarnedCoRecalledFanin: true` DIRECTLY into helper candidates, so it
-// exercises the reserve HELPERS but NOT the production propagation that sets the
-// flag. recall-service.ts sets the flag only inside RecallService.recall()
-// during direct path_expansion admission when path.constitution.relation_kind
-// === "co_recalled" (the EARNED_CO_RECALLED_FANIN_RELATION_KIND const). This
-// suite drives REAL RecallService.recall() against real memory_entries + a real
-// co_recalled PathRelation and NEVER touches the internal flag — so it fails if
-// the production propagation (addPathExpansionCandidates) OR the reserve
-// exemption (isStructuralRescueCandidate) regresses. (Verified by mutation: with
-// the flag set point forced to false, the co_recalled sibling is no longer
-// delivered, matching the supports control.)
-// see also: packages/core/src/recall/graph-expansion.ts:EARNED_CO_RECALLED_FANIN_RELATION_KIND,
-//   packages/core/src/recall/recall-service.ts:addPathExpansionCandidates,
-//   packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
 
 const databases = new Set<StorageDatabase>();
 
@@ -58,21 +42,8 @@ const RUN = "run-1";
 const QUERY_TERM = "zylphqorbex";
 
 const SEED_ID = "00000000-0000-4000-8000-000000000001";
-// compareMemoryEntries (recall-service-helpers.ts) ranks by activation_score
-// FIRST; the id tie-break is only reached on an activation tie. The sibling is
-// buried by the WIDE activation margin (sibling activation 0.01 vs filler ~0.9),
-// not by its id ordering — that margin keeps it below the flat top-N cut, so its
-// only route into the window is the structural reserve.
 const SIBLING_ID = "00000000-0000-4000-8000-000000000009";
 
-// Eight lexical fillers fill the flat top window above the zero-relevance
-// structural sibling. The first DECOY_COUNT fillers are ALSO co_recalled path
-// targets of the seed, so the genuine sibling ranks LAST in the path_expansion
-// stream AND a decoy filler also competes for the final window slot — sinking
-// the sibling strictly BELOW the natural top-(max_entries) cut. Only the
-// structural reserve can then deliver it. (Validated by sweep: at DECOY_COUNT=5
-// the supports sibling is refused while the co_recalled sibling is rescued,
-// stable across path strengths.)
 const FILLER_COUNT = 8;
 const DECOY_COUNT = 5;
 const MAX_ENTRIES = 6;
@@ -81,28 +52,17 @@ function fillerId(index: number): string {
   return `00000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
 }
 
-// Drives a REAL RecallService.recall() in which a single zero-relevance sibling
-// is reached from the lexical seed via a path edge of the given relation_kind.
-// Returns whether the sibling was DELIVERED (present in the truncated top-N
-// result) and, when present, its admission source_channels.
-async function deliverSiblingViaPath(relationKind: string): Promise<{
+async function inspectSiblingViaPath(relationKind: string): Promise<{
   readonly delivered: boolean;
-  readonly sourceChannels: readonly string[] | undefined;
-  // Zero-based position of the sibling in the truncated top-N result, or -1 when
-  // it was refused. Used to assert the sibling rides the trailing reserve slot
-  // rather than a natural high-fused-score window slot.
-  readonly deliveredRank: number;
-  // Count of delivered candidates that carry the query term verbatim (the seed +
-  // lexical fillers, all out-activating the sibling). The sibling is lexically
-  // disjoint, so this is the size of the NATURAL window it would have to crack to
-  // be delivered without the reserve. With FILLER_COUNT (8) + seed = 9 lexical
-  // candidates available for MAX_ENTRIES (6) slots, the window stays fully
-  // saturated by lexical entries; the reserve displaces ONE of them for the
-  // sibling, so naturalWindowSize lands at MAX_ENTRIES - 1.
+  readonly admissionPlanes: readonly string[];
+  readonly sourceChannels: readonly string[];
+  readonly relationKinds: readonly string[];
+  readonly pathRank: number | null;
+  readonly pathContribution: number;
+  readonly fusedRank: number;
+  readonly finalRank: number | null;
+  readonly rankAfterStructuralStage: number | undefined;
   readonly naturalWindowSize: number;
-  // Size of the truncated top-N result. The reserve operates WITHIN max_entries
-  // (it carves a slot, not appends one), so this equals MAX_ENTRIES when the
-  // sibling is delivered.
   readonly totalDelivered: number;
 }> {
   const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();
@@ -143,10 +103,6 @@ async function deliverSiblingViaPath(relationKind: string): Promise<{
     relationKind,
     strength: 0.5
   }));
-  // Decoy co_recalled edges to high-activation lexical fillers. They crowd the
-  // path_expansion stream so the sibling ranks last there and sinks below the
-  // natural flat cut, isolating the structural reserve as the only delivery
-  // route for a surviving sibling.
   for (let index = 0; index < DECOY_COUNT; index += 1) {
     pathRelationRepo.create(buildPath({
       path_id: `3333333${index}-3333-4333-8333-aaaaaaaaaaaa`,
@@ -166,8 +122,11 @@ async function deliverSiblingViaPath(relationKind: string): Promise<{
     policyOverride: buildWideOpenPolicy(recallService)
   });
 
-  const deliveredRank = result.candidates.findIndex((row) => row.object_id === SIBLING_ID);
-  const candidate = deliveredRank === -1 ? undefined : result.candidates[deliveredRank];
+  const candidate = result.candidates.find((row) => row.object_id === SIBLING_ID);
+  const diagnostic = result.diagnostics?.candidates.find((row) => row.object_id === SIBLING_ID);
+  if (diagnostic === undefined) {
+    throw new Error("expected path-admitted sibling diagnostics");
+  }
   const naturalWindowSize = result.candidates.filter((row) =>
     row.content_preview.toLowerCase().includes(QUERY_TERM.toLowerCase())
   ).length;
@@ -175,73 +134,45 @@ async function deliverSiblingViaPath(relationKind: string): Promise<{
   databases.delete(database);
   return {
     delivered: candidate !== undefined,
-    sourceChannels: candidate?.source_channels,
-    deliveredRank,
+    admissionPlanes: diagnostic.admission_planes,
+    sourceChannels: diagnostic.source_channels,
+    relationKinds: diagnostic.path_expansion_sources.map((source) => source.relation_kind),
+    pathRank: diagnostic.per_stream_rank.path_expansion,
+    pathContribution: diagnostic.fused_rank_contribution_per_stream.path_expansion,
+    fusedRank: diagnostic.fused_rank,
+    finalRank: diagnostic.final_rank,
+    rankAfterStructuralStage: diagnostic.rank_after_structural_reserve,
     naturalWindowSize,
     totalDelivered: result.candidates.length
   };
 }
 
-describe("production-path earned co_recalled fan-in delivery (real RecallService.recall)", () => {
-  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
-  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
-  it("delivers a zero-relevance gold sibling reached via a real co_recalled PathRelation (earned fan-in reserve exemption, no injected flag)", async () => {
-    const { delivered, sourceChannels, deliveredRank, naturalWindowSize, totalDelivered } =
-      await deliverSiblingViaPath("co_recalled");
+describe("production path provenance under fusion-only delivery", () => {
+  it("records co_recalled path admission without forcing a budget slot", async () => {
+    const diagnostic = await inspectSiblingViaPath("co_recalled");
 
-    // The sibling has zero query relevance and is buried below the flat top-N
-    // cut; it is delivered ONLY because production admission set
-    // reachedViaEarnedCoRecalledFanin (path.relation_kind === "co_recalled") and
-    // the structural reserve exemption promoted it. If the production
-    // propagation or the reserve exemption regressed, this fails.
-    expect(
-      delivered,
-      "zero-relevance gold sibling must be DELIVERED via earned co_recalled fan-in"
-    ).toBe(true);
-    // Provenance: the sibling was admitted on the path_expansion plane (it has no
-    // lexical/activation route into the window).
-    expect(
-      sourceChannels?.some((channel) => channel.includes("path_expansion"))
-    ).toBe(true);
-    // ANTI-TAUTOLOGY: prove the sibling is GENUINELY BURIED, not trivially
-    // winning a window slot on merit. The seed + every filler carries the query
-    // term and out-activates the sibling (0.9..0.82 vs 0.01), and there are 9
-    // such lexical candidates (FILLER_COUNT + seed) contending for MAX_ENTRIES
-    // (6) slots. Without the reserve the whole window is lexical (see the
-    // negative control, which delivers 6 lexical entries and refuses the
-    // sibling). The reserve operates WITHIN max_entries, so admitting the sibling
-    // DISPLACES one higher-activation lexical filler: the delivered window stays
-    // MAX_ENTRIES wide, exactly MAX_ENTRIES - 1 of those slots are the surviving
-    // lexical entries, and the sibling rides the single trailing slot AFTER all
-    // of them. A future fusion-weight change that un-buries the sibling — lifting
-    // it ahead of any lexical entry or letting the window grow without
-    // displacement — breaks these invariants LOUDLY instead of passing trivially.
-    expect(
-      totalDelivered,
-      "the reserve must carve a slot WITHIN max_entries, not append one beyond it"
-    ).toBe(MAX_ENTRIES);
-    expect(
-      naturalWindowSize,
-      "the reserve must displace exactly one higher-activation lexical entry, so all but the sibling's slot stay lexical"
-    ).toBe(MAX_ENTRIES - 1);
-    expect(
-      deliveredRank,
-      "the buried sibling must ride the single trailing reserve slot, after every higher-activation lexical entry — never a natural high-fused-score slot"
-    ).toBe(MAX_ENTRIES - 1);
+    expect(diagnostic.admissionPlanes).toContain("path_expansion");
+    expect(diagnostic.sourceChannels.some((channel) => channel.includes("path_expansion"))).toBe(true);
+    expect(diagnostic.relationKinds).toContain("co_recalled");
+    expect(diagnostic.pathRank).not.toBeNull();
+    expect(diagnostic.pathContribution).toBeGreaterThan(0);
+    expect(diagnostic.fusedRank).toBeGreaterThan(MAX_ENTRIES);
+    expect(diagnostic.delivered).toBe(false);
+    expect(diagnostic.finalRank).toBeNull();
+    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.totalDelivered).toBe(MAX_ENTRIES);
+    expect(diagnostic.naturalWindowSize).toBe(MAX_ENTRIES);
   });
 
-  it("NEGATIVE CONTROL: an identical zero-relevance sibling reached via a NON-co_recalled relation_kind stays relevance-gated and is NOT delivered", async () => {
-    // Identical fixture, identical buried position; the ONLY delta is the
-    // relation_kind of the edge that reaches the sibling (`supports`, still
-    // recall-eligible so it STILL admits the sibling on path_expansion). Because
-    // it is not the earned co_recalled carrier, production must not set the
-    // fan-in flag and the reserve exemption must not fire — proving relation_kind,
-    // not topology, flips the exemption.
-    const { delivered } = await deliverSiblingViaPath("supports");
-    expect(
-      delivered,
-      "non-co_recalled sibling must stay relevance-gated and NOT be delivered"
-    ).toBe(false);
+  it("records supports provenance under the same fused budget contract", async () => {
+    const diagnostic = await inspectSiblingViaPath("supports");
+
+    expect(diagnostic.admissionPlanes).toContain("path_expansion");
+    expect(diagnostic.relationKinds).toContain("supports");
+    expect(diagnostic.pathContribution).toBeGreaterThan(0);
+    expect(diagnostic.delivered).toBe(false);
+    expect(diagnostic.finalRank).toBeNull();
+    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
   });
 });
 
@@ -336,10 +267,6 @@ function buildRecallService(params: {
   return new RecallService(deps);
 }
 
-// Open the deterministic match wide and set a tight delivery window so the test
-// isolates the fan-in reserve mechanism, not the build-strategy scope/dimension
-// contract. The base is the real build default policy, so every other knob
-// (fusion streams, weights, semantic supplement) stays production-faithful.
 function buildWideOpenPolicy(recallService: RecallService): RecallPolicy {
   const base = recallService.buildDefaultPolicy("build", "task-surface-ref");
   return {

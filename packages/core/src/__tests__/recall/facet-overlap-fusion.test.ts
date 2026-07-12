@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import { buildRecallFusionDetails, buildEmptyRecallFusionBreakdown, compareFusedRecallCandidates } from "../../recall/delivery/fusion-delivery-scoring.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -61,10 +61,6 @@ function buildFusion(supplementary: RecallSupplementaryData) {
   });
 }
 
-afterEach(() => {
-  delete process.env.ALAYA_RECALL_FACET_OVERLAP;
-});
-
 describe("facet_overlap fusion stream", () => {
   it("clamps facet overlap count before stream ranking", () => {
     const twoFacetRaw = createMemoryEntry({
@@ -95,7 +91,6 @@ describe("facet_overlap fusion stream", () => {
   });
 
   it("is active whenever query-sought facets are present", () => {
-    delete process.env.ALAYA_RECALL_FACET_OVERLAP;
     const withFacets = buildFusion(supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }));
     const baseline = buildFusion(supplementaryData());
 
@@ -106,7 +101,7 @@ describe("facet_overlap fusion stream", () => {
       .toBeGreaterThan(baseline.get(goldKey)?.fused_score ?? 0);
   });
 
-  it("uses real facet overlap count as the fused-rank primary key", () => {
+  it("derives rank from the scalar after facet evidence is incorporated", () => {
     const highOverlap = createMemoryEntry({
       object_id: GOLD_ID,
       content: "Later memory with two answer facets.",
@@ -130,11 +125,16 @@ describe("facet_overlap fusion stream", () => {
       nowIso: "2026-03-20T10:20:30.000Z"
     });
 
-    expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.fused_rank).toBe(1);
-    expect(fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`)?.fused_rank).toBe(2);
+    const gold = fusion.get(`workspace_local:memory_entry:${GOLD_ID}`);
+    const distractor = fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`);
+    expect(gold?.facet_overlap).toBe(2);
+    expect(distractor?.facet_overlap).toBe(1);
+    expect(distractor?.fused_score ?? 0).toBeGreaterThan(gold?.fused_score ?? 0);
+    expect(distractor?.fused_rank).toBe(1);
+    expect(gold?.fused_rank).toBe(2);
   });
 
-  it("keeps higher facet overlap above a stronger fused_score across tiers (flood distractor shield)", () => {
+  it("ranks the stronger fused score after facet evidence enters fusion", () => {
     const highOverlapWeak = createMemoryEntry({
       object_id: GOLD_ID,
       content: "Two facets but weak lexical lead.",
@@ -177,11 +177,11 @@ describe("facet_overlap fusion stream", () => {
     expect(fusion.get(strongKey)?.fused_score ?? 0).toBeGreaterThan(fusion.get(weakKey)?.fused_score ?? 0);
     expect(fusion.get(strongKey)?.facet_overlap).toBe(1);
     expect(fusion.get(weakKey)?.facet_overlap).toBe(2);
-    expect(fusion.get(weakKey)?.fused_rank).toBe(1);
-    expect(fusion.get(strongKey)?.fused_rank).toBe(2);
+    expect(fusion.get(strongKey)?.fused_rank).toBe(1);
+    expect(fusion.get(weakKey)?.fused_rank).toBe(2);
   });
 
-  it("uses fused_rank as the delivery tie-break when fused_score ties", () => {
+  it("uses deterministic candidate identity when fused_score ties", () => {
     const highOverlap = createMemoryEntry({
       object_id: GOLD_ID,
       content: "Later memory with two answer facets.",
@@ -195,34 +195,18 @@ describe("facet_overlap fusion stream", () => {
       facet_tags: [{ facet: "occupation_work" }]
     });
     const tiedScore = 0.42;
-    const goldFusion = { ...buildEmptyRecallFusionBreakdown(GOLD_ID), fused_score: tiedScore, fused_rank: 1 };
-    const distractorFusion = { ...buildEmptyRecallFusionBreakdown(DISTRACTOR_ID), fused_score: tiedScore, fused_rank: 2 };
-    expect(compareFusedRecallCandidates(
+    const goldFusion = { ...buildEmptyRecallFusionBreakdown(GOLD_ID), fused_score: tiedScore, fused_rank: 2 };
+    const distractorFusion = { ...buildEmptyRecallFusionBreakdown(DISTRACTOR_ID), fused_score: tiedScore, fused_rank: 1 };
+    const comparison = compareFusedRecallCandidates(
       { entry: highOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 }, fusion: goldFusion },
       { entry: lowOverlap, effectiveScore: 0, effectiveFactors: { activation: 0, relevance: 0 }, fusion: distractorFusion }
-    )).toBeLessThan(0);
-  });
-
-  it("facet flag is not part of the unified kernel contract", () => {
-    const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
-    const distractorKey = `workspace_local:memory_entry:${DISTRACTOR_ID}`;
-
-    delete process.env.ALAYA_RECALL_FACET_OVERLAP;
-    const off = buildFusion(supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }));
-
-    process.env.ALAYA_RECALL_FACET_OVERLAP = "on";
-    const on = buildFusion(supplementaryData({ querySoughtFacets: ["occupation_work", "location_place"] }));
-
-    const goldContribution = on.get(goldKey)?.fused_rank_contribution_per_stream.facet_overlap ?? 0;
-    expect(goldContribution).toBeGreaterThan(0);
-    expect(on.get(goldKey)?.fused_score ?? 0).toBeCloseTo(off.get(goldKey)?.fused_score ?? 0, 12);
-    expect((on.get(goldKey)?.fused_rank ?? Number.MAX_SAFE_INTEGER)).toBeLessThan(
-      on.get(distractorKey)?.fused_rank ?? Number.MAX_SAFE_INTEGER
     );
+    expect(Math.sign(comparison)).toBe(Math.sign(
+      goldFusion.candidate_key.localeCompare(distractorFusion.candidate_key)
+    ));
   });
 
-  it("contributes nothing when the flag is on but querySoughtFacets is empty", () => {
-    process.env.ALAYA_RECALL_FACET_OVERLAP = "on";
+  it("contributes nothing when querySoughtFacets is empty", () => {
     const goldKey = `workspace_local:memory_entry:${GOLD_ID}`;
     const fusion = buildFusion(supplementaryData({ querySoughtFacets: [] }));
     expect(fusion.get(goldKey)?.fused_rank_contribution_per_stream.facet_overlap ?? 0).toBe(0);

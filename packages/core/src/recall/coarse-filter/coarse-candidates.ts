@@ -44,13 +44,6 @@ export interface CoarseCandidateDraft {
   // confidence falls below ENTITY_GRAPH_EXPANSION_CONFIDENCE_FLOOR.
   // see also: packages/core/src/recall/recall-service.ts:RecallService.collectEntityDerivedSeeds.
   readonly entityConfidence?: number;
-  // invariant: sticky-true once this draft is admitted on the path_expansion
-  // plane via an EARNED `co_recalled` PathRelation (relation_kind === COG). This
-  // is the R1 sparse durable fan-in carrier; the structural delivery reserve
-  // reads it as the bounded exemption that admits a zero-relevance earned fan-in
-  // sibling without re-opening displacement to generic structural distractors.
-  // Gold-blind. see also: packages/core/src/recall/fusion-delivery.ts:isStructuralRescueCandidate.
-  readonly reachedViaEarnedCoRecalledFanin?: boolean;
 }
 
 export interface SourceProximitySeedDraft {

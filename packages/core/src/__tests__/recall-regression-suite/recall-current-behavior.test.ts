@@ -209,6 +209,8 @@ it("promotes answerable source-window neighbors without lifting source-only neig
 
     expect(result.candidates.map((item) => item.object_id)).toContain("answerable-neighbor");
     expect(result.candidates.map((item) => item.object_id)).not.toContain("source-only-neighbor");
+    expect(result.diagnostics?.query_probes.normalized_query).toBe("Where did I buy my new bookshelf?");
+    expect(result.diagnostics?.query_sought_facets).toContain("location_place");
     const answerDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "answerable-neighbor");
     const sourceOnlyDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "source-only-neighbor");
     expect(answerDiagnostic?.per_stream_rank.evidence_fts).not.toBeNull();
@@ -353,7 +355,8 @@ it("caps per-memory evidence_refs forwarded to findByIds for the gist collector 
     await new RecallService(dependencies).recall({
       taskSurface: task("needle answer payload"),
       workspaceId: WS,
-      strategy: "analyze"
+      strategy: "analyze",
+      diagnosticCapture: "answer_features"
     });
 
     expect(findByIds).toHaveBeenCalled();

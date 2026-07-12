@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
@@ -7,11 +7,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { applyDeliverySelection, type DeliverySelectionCandidate } from "../../recall/delivery/delivery-selection.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type {
   RecallFusionBreakdown,
-  RecallFusionStream,
-  RecallSupplementaryData
+  RecallFusionStream
 } from "../../recall/runtime/recall-service-types.js";
 
 function memory(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
@@ -80,33 +78,21 @@ function fusedCandidate(input: {
   });
 }
 
-function supplementary(): RecallSupplementaryData {
-  return {
-    queryProbes: compileRecallQueryProbes(null),
-    ftsRanks: {},
-    trigramFtsRanks: {},
-    synthesisFtsRanks: {},
-    evidenceFtsRanks: {},
-    evidenceGistsByMemoryId: {},
-    sourceProximityScores: {},
-    sourceCohortKeys: {},
-    structuralScores: {},
-    graphExpansionScores: {},
-    entitySeedScores: {},
-    pathExpansionScores: {},
-    pathSuppressionScores: {},
-    embeddingSimilarityScores: {},
-    graphSupportCounts: {}
-  } as unknown as RecallSupplementaryData;
-}
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
-
 describe("applyDeliverySelection", () => {
-  it("reorders within the delivery window without mutating core relevance scores", () => {
-    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
+  it("keeps fusion order as the only production order", () => {
+    const candidates = [
+      fusedCandidate({ objectId: "third", fusedScore: 0.7, surfaceId: "sA" }),
+      fusedCandidate({ objectId: "first", fusedScore: 1, surfaceId: "sA" }),
+      fusedCandidate({ objectId: "second", fusedScore: 0.8, surfaceId: "sB" })
+    ];
+
+    const result = applyDeliverySelection(candidates);
+
+    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
+      .toEqual(["first", "second", "third"]);
+  });
+
+  it("preserves core relevance scores", () => {
     const ordered = [
       fusedCandidate({ objectId: "a1", fusedScore: 1, effectiveScore: 0.91, surfaceId: "sA" }),
       ...Array.from({ length: 6 }, (_, index) =>
@@ -122,29 +108,49 @@ describe("applyDeliverySelection", () => {
     const beforeScores = new Map(
       ordered.map((candidate) => [candidate.entry.object_id, candidate.effectiveScore] as const)
     );
-    const result = applyDeliverySelection(ordered, supplementary(), 10);
-    for (const candidate of result.ordering.deliveryOrderedCandidates) {
+    const result = applyDeliverySelection(ordered);
+    for (const candidate of result.orderedCandidates) {
       expect(candidate.effectiveScore).toBe(beforeScores.get(candidate.entry.object_id));
     }
-    expect(result.ordering.deliveryOrderedCandidates.slice(0, 5).map((c) => c.entry.object_id)).toContain("b8");
-    expect(result.ranks.coverageSelectorNoop).toBe(false);
+    expect(result.orderedCandidates.slice(0, 2).map((c) => c.entry.object_id)).toEqual(["a1", "b8"]);
   });
 
+  it("orders only by the fused scalar when a stale alias disagrees", () => {
+    const fusedWinner = fusedCandidate({ objectId: "fused-winner", fusedScore: 0.9 });
+    const staleAliasWinner = {
+      ...fusedCandidate({ objectId: "alias-winner", fusedScore: 0.4 }),
+      finalRelevanceScore: 1
+    };
+
+    const result = applyDeliverySelection([staleAliasWinner, fusedWinner]);
+
+    expect(result.orderedCandidates[0]?.entry.object_id)
+      .toBe("fused-winner");
+  });
+
+  it.each([1, 3, 5, 10])(
+    "does not add rank, K, or sample-size epsilon at pool size %i",
+    (size) => {
+      const candidates = Array.from({ length: size }, (_, index) =>
+        fusedCandidate({ objectId: `m-${index}`, fusedScore: (size - index) / size })
+      );
+      const result = applyDeliverySelection(candidates);
+      expect(result.orderedCandidates.map((candidate) => candidate.fusion.fused_score))
+        .toEqual([...result.orderedCandidates].map((candidate) => candidate.fusion.fused_score).sort((a, b) => b - a));
+    }
+  );
+
   it("keeps fused rank-1 first while exposing stage rank diagnostics", () => {
-    vi.stubEnv("ALAYA_RECALL_COVERAGE_SELECTOR", "1");
     const ordered = [
       fusedCandidate({ objectId: "a1", fusedScore: 1, surfaceId: "sA" }),
       fusedCandidate({ objectId: "b2", fusedScore: 0.8, surfaceId: "sB" })
     ];
-    const result = applyDeliverySelection(ordered, supplementary(), 10);
-    expect(result.ordering.deliveryOrderedCandidates[0]?.entry.object_id).toBe("a1");
-    expect(result.ranks.rankAfterFusion.get("workspace_local:memory_entry:a1")).toBe(1);
-    // session_coverage remains an identity diagnostic slot (noop), not a reorder stage.
-    expect(result.ranks.sessionCoverageNoop).toBe(true);
-    expect(result.ordering.coverageOrderedCandidates).toBe(result.ordering.coverageSelectedCandidates);
+    const result = applyDeliverySelection(ordered);
+    expect(result.orderedCandidates[0]?.entry.object_id).toBe("a1");
+    expect(result.rankByCandidateKey.get("workspace_local:memory_entry:a1")).toBe(1);
   });
 
-  it("rescues a rank-6 candidate with two strong likelihood streams over a weak rank-5", () => {
+  it("does not let auxiliary stream ranks override fusion order", () => {
     const ordered = [
       fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
       fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
@@ -172,52 +178,9 @@ describe("applyDeliverySelection", () => {
       })
     ];
 
-    const result = applyDeliverySelection(ordered, supplementary(), 10);
+    const result = applyDeliverySelection(ordered);
 
-    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
-      "a1",
-      "a2",
-      "a3",
-      "a4",
-      "likelihood-rank-6",
-      "weak-rank-5"
-    ]);
-    expect(result.ranks.rankAfterStructuralReserve.get("workspace_local:memory_entry:likelihood-rank-6")).toBe(5);
-    expect(result.ranks.rankAfterStructuralReserve.get("workspace_local:memory_entry:weak-rank-5")).toBe(6);
-  });
-
-  it("I1 fusion-rank floor blocks likelihood rescue from displacing fused_rank≤5", () => {
-    vi.stubEnv("ALAYA_RECALL_FUSION_RANK_FLOOR", "1");
-    const ordered = [
-      fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
-      fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
-      fusedCandidate({ objectId: "a3", fusedRank: 3, fusedScore: 0.8 }),
-      fusedCandidate({ objectId: "a4", fusedRank: 4, fusedScore: 0.7 }),
-      fusedCandidate({
-        objectId: "weak-rank-5",
-        fusedRank: 5,
-        fusedScore: 0.6,
-        streamRanks: {
-          lexical_fts: 12,
-          embedding_similarity: 12,
-          evidence_fts: 12
-        }
-      }),
-      fusedCandidate({
-        objectId: "likelihood-rank-6",
-        fusedRank: 6,
-        fusedScore: 0.5,
-        streamRanks: {
-          lexical_fts: 3,
-          embedding_similarity: 1,
-          evidence_fts: 30
-        }
-      })
-    ];
-
-    const result = applyDeliverySelection(ordered, supplementary(), 10);
-
-    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
+    expect(result.orderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
       "a1",
       "a2",
       "a3",
@@ -225,45 +188,8 @@ describe("applyDeliverySelection", () => {
       "weak-rank-5",
       "likelihood-rank-6"
     ]);
+    expect(result.rankByCandidateKey.get("workspace_local:memory_entry:likelihood-rank-6")).toBe(6);
+    expect(result.rankByCandidateKey.get("workspace_local:memory_entry:weak-rank-5")).toBe(5);
   });
 
-  it("does not rescue a tail candidate with only one strong likelihood stream", () => {
-    const ordered = [
-      fusedCandidate({ objectId: "a1", fusedRank: 1, fusedScore: 1 }),
-      fusedCandidate({ objectId: "a2", fusedRank: 2, fusedScore: 0.9 }),
-      fusedCandidate({ objectId: "a3", fusedRank: 3, fusedScore: 0.8 }),
-      fusedCandidate({ objectId: "a4", fusedRank: 4, fusedScore: 0.7 }),
-      fusedCandidate({
-        objectId: "weak-rank-5",
-        fusedRank: 5,
-        fusedScore: 0.6,
-        streamRanks: {
-          lexical_fts: 12,
-          embedding_similarity: 12,
-          evidence_fts: 12
-        }
-      }),
-      fusedCandidate({
-        objectId: "single-stream-rank-6",
-        fusedRank: 6,
-        fusedScore: 0.5,
-        streamRanks: {
-          lexical_fts: 1,
-          embedding_similarity: 20,
-          evidence_fts: 20
-        }
-      })
-    ];
-
-    const result = applyDeliverySelection(ordered, supplementary(), 10);
-
-    expect(result.ordering.deliveryOrderedCandidates.slice(0, 6).map((c) => c.entry.object_id)).toEqual([
-      "a1",
-      "a2",
-      "a3",
-      "a4",
-      "weak-rank-5",
-      "single-stream-rank-6"
-    ]);
-  });
 });

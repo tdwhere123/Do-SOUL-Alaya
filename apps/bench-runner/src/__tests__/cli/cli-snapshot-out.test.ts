@@ -41,6 +41,7 @@ beforeEach(async () => {
   // first-ever-build preflight), this model is arbitrary: the test is decoupled
   // from the production extraction-cache manifest's model.
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
   vi.stubEnv("ALAYA_HOSTILE_DUMMY_KEY", "must-not-be-used");
   vi.stubEnv("ALAYA_BENCH_ALLOW_LIVE_EXTRACTION", "0");

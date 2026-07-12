@@ -33,6 +33,13 @@ import {
 } from "./lifecycle/owned-temp-root.js";
 import { buildLongMemEvalRunProvenance } from "./provenance/run.js";
 import { throwLifecycleErrors } from "./lifecycle/errors.js";
+import { runIsolatedQuestionSequence } from "./lifecycle/question-isolated-execution.js";
+import {
+  emptySeedFuelInventory,
+  mergeSeedFuelInventories,
+  type SeedFuelInventory
+} from "./seed-fuel-inventory.js";
+import type { LongMemEvalDiagnosticsSpool } from "./diagnostics/spool.js";
 
 type LongMemEvalQuestions = Awaited<ReturnType<typeof loadDataset>>;
 type LongMemEvalQuestion = LongMemEvalQuestions[number];
@@ -55,6 +62,7 @@ export interface LongMemEvalRunContext {
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly seedDataDirRoot?: string;
   readonly removeSeedDataDirRoot: boolean;
+  readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }
 
 export interface LongMemEvalExecutionResult {
@@ -68,7 +76,8 @@ export interface LongMemEvalExecutionResult {
 
 export async function prepareLongMemEvalRun(
   opts: LongMemEvalRunOptions,
-  recallWeightOverrides: BenchRecallWeightOverrides | undefined
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<LongMemEvalRunContext> {
   const questions = await loadDataset(opts.variant, {
     dataDir: opts.dataDir,
@@ -110,11 +119,20 @@ export async function prepareLongMemEvalRun(
     captureSnapshot: opts.snapshotOut !== undefined,
     extractionCacheRoot,
     recallWeightOverrides,
+    diagnosticsSpool,
     ...(await resolveSeedDataDirRoot(opts))
   };
 }
 
 export async function executeLongMemEvalRun(
+  context: LongMemEvalRunContext
+): Promise<LongMemEvalExecutionResult> {
+  return context.captureSnapshot
+    ? executeSnapshotCompatibleLongMemEvalRun(context)
+    : executeQuestionIsolatedLongMemEvalRun(context);
+}
+
+async function executeSnapshotCompatibleLongMemEvalRun(
   context: LongMemEvalRunContext
 ): Promise<LongMemEvalExecutionResult> {
   let daemon: BenchDaemonHandle | undefined;
@@ -159,6 +177,74 @@ export async function executeLongMemEvalRun(
   ]);
   if (result === undefined) throw new Error("LongMemEval run produced no result");
   return result;
+}
+
+async function executeQuestionIsolatedLongMemEvalRun(
+  context: LongMemEvalRunContext
+): Promise<LongMemEvalExecutionResult> {
+  const execution = createExecutionState();
+  let result: LongMemEvalExecutionResult | undefined;
+  let primaryError: unknown;
+  let succeeded = false;
+  try {
+    const isolated = await runIsolatedQuestionSequence<
+      LongMemEvalQuestion,
+      BenchDaemonHandle,
+      boolean,
+      SeedFuelInventory,
+      SeedFuelInventory
+    >({
+      questions: context.window,
+      rootParent: context.seedDataDirRoot,
+      rootPrefix: "question-",
+      initialAggregate: emptySeedFuelInventory(),
+      mergeAggregate: (aggregate, inventory) =>
+        mergeSeedFuelInventories([aggregate, inventory]),
+      start: async (root) => startLongMemEvalDaemon({
+        ...context,
+        seedDataDirRoot: root.path,
+        removeSeedDataDirRoot: false
+      }),
+      run: async (daemon, question, index) =>
+        runLongMemEvalQuestionSafely(context, daemon, execution, index, question),
+      collect: async (daemon) => collectBenchSeedFuelInventory(daemon.dataDir),
+      shutdown: async (daemon) => daemon.shutdown(),
+      isSuccessful: (questionSucceeded) => questionSucceeded,
+      failureLabel: (question) => question.question_id
+    });
+    result = buildExecutionResult(execution, isolated.aggregate);
+    succeeded = execution.questionFailures === 0;
+  } catch (error) {
+    primaryError = error;
+  }
+  const cleanupError = await captureSeedRootCleanupError(context, succeeded);
+  throwLifecycleErrors("LongMemEval run lifecycle failed", [primaryError, cleanupError]);
+  if (result === undefined) throw new Error("LongMemEval run produced no result");
+  return result;
+}
+
+function buildExecutionResult(
+  execution: ReturnType<typeof createExecutionState>,
+  seedFuelInventory: LongMemEvalExecutionResult["seedFuelInventory"]
+): LongMemEvalExecutionResult {
+  return {
+    collected: execution.collected,
+    questionFailures: execution.questionFailures,
+    failedQuestionIds: execution.failedQuestionIds,
+    seedFuelInventory
+  };
+}
+
+async function captureSeedRootCleanupError(
+  context: LongMemEvalRunContext,
+  succeeded: boolean
+): Promise<unknown> {
+  try {
+    await cleanupSeedDataDirRoot(context, succeeded);
+    return undefined;
+  } catch (error) {
+    return error;
+  }
 }
 
 function selectQuestionWindow(
@@ -255,7 +341,7 @@ async function runLongMemEvalQuestionSafely(
   execution: ReturnType<typeof createExecutionState>,
   questionIndex: number,
   question: LongMemEvalQuestion
-): Promise<void> {
+): Promise<boolean> {
   try {
     const result = await runLongMemEvalQuestion({
       daemon,
@@ -269,16 +355,19 @@ async function runLongMemEvalQuestionSafely(
       captureSnapshot: context.captureSnapshot,
       ...(context.opts.qa === undefined ? {} : buildQaOptions(context.opts.qa))
     });
-    execution.collected.push(result);
+    const diagnostics = await context.diagnosticsSpool.append(result.diagnostics);
+    execution.collected.push({ ...result, diagnostics });
     if (context.captureSnapshot && result.snapshotQuestion !== undefined) {
       execution.snapshotQuestions.push(result.snapshotQuestion);
     }
     writeLongMemEvalQuestionProgress(questionIndex, context.window.length, question.question_id, result);
+    return true;
   } catch (error) {
     if (!(error instanceof QaChatError)) throw error;
     execution.questionFailures += 1;
     execution.failedQuestionIds.push(question.question_id);
     writeLongMemEvalQuestionFailure(questionIndex, context.window.length, question.question_id, error);
+    return false;
   }
 }
 

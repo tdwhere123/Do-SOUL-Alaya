@@ -1,5 +1,4 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
-import { ABSTENTION_FALSE_CONFIDENT_THRESHOLD } from "./abstention.js";
 import {
   buildPerPlaneRecallCoverage,
   ratio
@@ -50,6 +49,10 @@ function buildOrderAndBudgetMetrics(
   | "candidate_absent_denominator"
   | "no_gold_count"
   | "no_gold_denominator"
+  | "evaluator_identity_issue_count"
+  | "evaluator_identity_issue_denominator"
+  | "evaluator_identity_unscorable_count"
+  | "evaluator_identity_unscorable_denominator"
 > {
   return {
     non_monotonic_rate: ratio(state.nonMonotonicCount, questionDenominator),
@@ -65,7 +68,11 @@ function buildOrderAndBudgetMetrics(
     candidate_absent_count: state.candidateAbsentCount,
     candidate_absent_denominator: questionDenominator,
     no_gold_count: state.noGoldCount,
-    no_gold_denominator: questionDenominator
+    no_gold_denominator: questionDenominator,
+    evaluator_identity_issue_count: state.evaluatorIdentityIssueCount,
+    evaluator_identity_issue_denominator: questionDenominator,
+    evaluator_identity_unscorable_count: state.evaluatorIdentityUnscorableCount,
+    evaluator_identity_unscorable_denominator: questionDenominator
   };
 }
 
@@ -160,14 +167,12 @@ function buildAbstentionMetrics(
   state: QualityMetricsState
 ): QualityMetrics["abstention"] {
   return {
-    schema_version: "bench-abstention.v1",
+    schema_version: "bench-abstention.v2",
     total: state.abstentionTotal,
-    false_confident_threshold: ABSTENTION_FALSE_CONFIDENT_THRESHOLD,
-    correct_at_1: state.abstentionCorrectAt1,
-    correct_at_5: state.abstentionCorrectAt5,
-    correct_at_10: state.abstentionCorrectAt10,
-    false_confident_at_1: state.abstentionTotal - state.abstentionCorrectAt1,
-    false_confident_at_5: state.abstentionTotal - state.abstentionCorrectAt5,
-    false_confident_at_10: state.abstentionTotal - state.abstentionCorrectAt10
+    scored: 0,
+    unscorable: state.abstentionUnscorable,
+    method: "fused_margin_diagnostic_only",
+    calibration_status: "uncalibrated",
+    gate_eligible: false
   };
 }

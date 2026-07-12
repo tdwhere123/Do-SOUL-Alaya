@@ -356,18 +356,19 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           objectKind: "preference",
           confidence: 0.9,
           distilledFact: "Alice lives in Berlin.",
-          turnContent: "I moved to Berlin last spring.",
+          turnContent: "I moved to Berlin last spring. I started my job in March 2024.",
           matchedText: "moved to Berlin",
           evidenceRef: "garden-source-q0-f0",
           turnSeedIndex: 0,
-          extractionProvider: "official_api_compile"
+          extractionProvider: "official_api_compile",
+          sourceObservedAt: "2026-02-03T04:05:06.000Z"
         },
         {
           signalKind: "potential_preference",
           objectKind: "fact",
           confidence: 0.85,
           distilledFact: "Alice started her job on 2024-03-01.",
-          turnContent: "I moved to Berlin last spring.",
+          turnContent: "I moved to Berlin last spring. I started my job in March 2024.",
           matchedText: "started my job",
           evidenceRef: "garden-source-q0-f1",
           turnSeedIndex: 0,
@@ -389,6 +390,9 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         const signal = await signalRepo.getById(seed.signalId);
         expect(signal).not.toBeNull();
         expect(signal?.source).toBe(SignalSource.GARDEN_COMPILE);
+        if (seed === seeds[0]) {
+          expect(signal?.created_at).toBe("2026-02-03T04:05:06.000Z");
+        }
       }
 
       // The full audit/accept chain still ran: every seed carries a

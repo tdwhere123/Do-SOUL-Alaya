@@ -48,6 +48,35 @@ function questionWithGoldPlanes(input: {
 }
 
 describe("per-plane recall coverage", () => {
+  it("preserves facet concept admission evidence as a structural plane", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-facet-concept",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [{
+            object_id: "memory-gold",
+            admission_planes: ["lexical", "facet_concept"],
+            source_channels: ["facet_concept", "plane:facet_concept"]
+          }]
+        }
+      }
+    });
+
+    expect(row.gold[0]).toMatchObject({
+      source_planes: ["lexical", "facet_concept"],
+      source_channels: ["facet_concept", "plane:facet_concept"]
+    });
+    expect(row.miss_classification).toBe("candidate_absent");
+  });
+
   it("aggregates gold and hit_at_5 counts per plane without a hardcoded plane list", () => {
     const rows = [
       questionWithGoldPlanes({
@@ -139,9 +168,7 @@ describe("diagnostics schema", () => {
 // isAbstention input ahead of the no_gold branch, so this asserts the
 // correct verdict and guards against a future regression.
 describe("abstention miss classification", () => {
-  it("classifies a correct abstention as abstained_correctly, not no_gold", () => {
-    // For an `_abs` question the hit booleans carry one uncalibrated top-5
-    // fused-margin verdict, not independent per-k or id-equality hits.
+  it("classifies recall-only abstention as uncalibrated, not no_gold", () => {
     const row = buildQuestionDiagnostic({
       questionId: "0862e8bf_abs",
       goldMemoryIds: [],
@@ -155,24 +182,8 @@ describe("abstention miss classification", () => {
       embeddingMode: "disabled",
       recallResult: { diagnostics: { provider_state: "provider_not_requested" } }
     });
-    expect(row.miss_classification).toBe("abstained_correctly");
-  });
-
-  it("classifies a false-confident abstention as abstain_false_confident", () => {
-    const row = buildQuestionDiagnostic({
-      questionId: "76d63226_abs",
-      goldMemoryIds: [],
-      answerSessionIds: ["session-a"],
-      deliveredResults: [{ object_id: "decoy", rank: 1, relevance_score: 0.9 }],
-      hitAt1: false,
-      hitAt5: false,
-      hitAt10: false,
-      isAbstention: true,
-      degradationReason: null,
-      embeddingMode: "disabled",
-      recallResult: { diagnostics: { provider_state: "provider_not_requested" } }
-    });
-    expect(row.miss_classification).toBe("abstain_false_confident");
+    expect(row.miss_classification).toBe("abstention_uncalibrated");
+    expect(row).toMatchObject({ hit_at_1: false, hit_at_5: false, hit_at_10: false });
   });
 
   it("keeps no_gold for a non-abstention question that genuinely has no gold", () => {

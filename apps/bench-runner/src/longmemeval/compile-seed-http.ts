@@ -4,6 +4,7 @@ import type {
   BenchSignalExtractor,
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
+import { buildGardenHttpRequestInit } from "./extraction/http-request.js";
 
 export const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
 
@@ -106,6 +107,7 @@ async function extractGardenHttpSignals(
   const apiKey = config.apiKey;
   let attempt = 0;
   let timeoutRetries = 0;
+  let rateLimitRetries = 0;
   let lastError: unknown = null;
   let lastClassification: BenchRetryClassification = "failure_max_retries";
   while (attempt <= BENCH_HTTP_MAX_RETRIES) {
@@ -117,20 +119,31 @@ async function extractGardenHttpSignals(
         input,
         attempt
       );
-      return buildGardenHttpSuccess(rawJson, attempt);
+      return buildGardenHttpSuccess(rawJson, attempt, rateLimitRetries);
     } catch (error) {
       lastError = error;
+      if (readStatusFromBenchError(error) === 429) rateLimitRetries += 1;
       const decision = decideGardenHttpRetry(input, error, attempt, timeoutRetries);
       lastClassification = decision.classification;
       if (!decision.retry) {
-        throw wrapBenchTransportError(error, decision.classification, attempt);
+        throw wrapBenchTransportError(
+          error,
+          decision.classification,
+          attempt,
+          rateLimitRetries
+        );
       }
       timeoutRetries = decision.timeoutRetries;
       await deps.sleep(computeBenchJitterMs(attempt, deps.random));
       attempt += 1;
     }
   }
-  throw wrapBenchTransportError(lastError, lastClassification, attempt);
+  throw wrapBenchTransportError(
+    lastError,
+    lastClassification,
+    attempt,
+    rateLimitRetries
+  );
 }
 
 async function runGardenHttpAttempt(
@@ -172,14 +185,16 @@ async function runGardenHttpAttempt(
 
 function buildGardenHttpSuccess(
   rawJson: string,
-  attempt: number
+  attempt: number,
+  rateLimitRetries: number
 ): GardenHttpExtractResult {
   return {
     rawJson,
     extractorMeta: {
       recoveryKind: "none",
       retryCount: attempt,
-      retryClassification: attempt === 0 ? "success_first_try" : "success_after_retry"
+      retryClassification: attempt === 0 ? "success_first_try" : "success_after_retry",
+      rateLimitRetries
     }
   };
 }
@@ -277,7 +292,12 @@ async function fetchGardenHttpResponse(
 ): Promise<Response> {
   const fetchPromise = input.deps.fetch(
     `${input.config.providerUrl}/chat/completions`,
-    buildGardenHttpRequestInit(input)
+    buildGardenHttpRequestInit(
+      input.config,
+      input.apiKey,
+      input.input,
+      input.controller.signal
+    )
   );
   observeLateGardenHttpRejection(input, fetchPromise, "fetch");
   const response = await Promise.race([fetchPromise, input.settlement.promise]);
@@ -289,27 +309,6 @@ async function fetchGardenHttpResponse(
     throw err;
   }
   return response;
-}
-
-function buildGardenHttpRequestInit(input: GardenHttpFetchInput): RequestInit {
-  return {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${input.apiKey}`
-    },
-    body: JSON.stringify({
-      model: input.config.model,
-      temperature: 0,
-      stream: true,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: input.input.systemPrompt },
-        { role: "user", content: input.input.userPrompt }
-      ]
-    }),
-    signal: input.controller.signal
-  };
 }
 
 async function readGardenHttpBodyText(
@@ -457,7 +456,8 @@ function extractContentFromSseChunk(chunkText: string): string {
 function wrapBenchTransportError(
   cause: unknown,
   classification: BenchRetryClassification,
-  retryCount: number
+  retryCount: number,
+  rateLimitRetries: number
 ): Error {
   const message =
     cause instanceof Error
@@ -467,7 +467,8 @@ function wrapBenchTransportError(
   (wrapped as { cause?: unknown }).cause = cause;
   (wrapped as { benchRetry?: unknown }).benchRetry = {
     retryCount,
-    retryClassification: classification
+    retryClassification: classification,
+    rateLimitRetries
   };
   return wrapped;
 }

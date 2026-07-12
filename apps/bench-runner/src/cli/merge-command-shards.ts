@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
@@ -9,32 +7,41 @@ import {
 } from "@do-soul/alaya-eval";
 import { aggregateBenchTokenMetrics } from "../harness/token-economy.js";
 import type { BenchTokenMetrics } from "../harness/daemon.js";
-import { readLongMemEvalDiagnosticsSidecar } from "../longmemeval/archive-evidence.js";
-import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
+import type {
+  LongMemEvalDiagnosticsSidecar,
+  LongMemEvalQuestionDiagnostic
+} from "../longmemeval/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../shared/version.js";
 import { buildMergedFullGoldCoverage } from "./merge-full-gold.js";
 import { pct } from "./result-format.js";
 import {
-  computePercentile,
   mergeSeedExtractionPath,
   ratio,
-  resolveShardPointerPath,
   stableJson
 } from "./merge-shared.js";
-import { mergeQualityMetrics } from "./merge-quality.js";
+import {
+  assertMergeMeasurementContracts,
+  mergeQualityMetrics
+} from "./merge-quality.js";
+import type { LongMemEvalDiagnosticsSpool } from "../longmemeval/diagnostics/spool.js";
+import {
+  isCurrentStreamedDiagnostics,
+  readShardPayload
+} from "./merge/shard-diagnostics-reader.js";
+import { buildMergedRates, type MergedRates } from "./merge/merged-rates.js";
 
 export interface ShardArchiveRef {
   readonly root: string;
   readonly slug: string;
+  readonly payload: KpiPayload;
+  readonly diagnostics: LongMemEvalDiagnosticsSidecar;
 }
-
 export interface LoadedMergeShards {
   readonly payloads: readonly KpiPayload[];
   readonly archiveRefs: readonly ShardArchiveRef[];
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly first: KpiPayload;
 }
-
 export interface MergedLongMemEvalBuild {
   readonly payload: KpiPayload;
   readonly runAt: Date;
@@ -48,7 +55,6 @@ export interface MergedLongMemEvalBuild {
   readonly latencyP95: number;
   readonly hasExactMergedLatency: boolean;
 }
-
 type ScalarIdentityField =
   | "split"
   | "sample_size"
@@ -61,7 +67,6 @@ type ScalarIdentityField =
   | "alaya_version"
   | "alaya_commit"
   | "recall_pipeline_version";
-
 const SCALAR_IDENTITY_FIELDS: ReadonlyArray<ScalarIdentityField> = [
   "split",
   "sample_size",
@@ -75,9 +80,9 @@ const SCALAR_IDENTITY_FIELDS: ReadonlyArray<ScalarIdentityField> = [
   "alaya_commit",
   "recall_pipeline_version"
 ];
-
 export async function loadMergeShards(
-  shards: readonly string[]
+  shards: readonly string[],
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<LoadedMergeShards> {
   const payloads: KpiPayload[] = [];
   const archiveRefs: ShardArchiveRef[] = [];
@@ -86,10 +91,11 @@ export async function loadMergeShards(
     const {
       payload,
       slug,
+      diagnostics,
       questionDiagnostics: shardQuestionDiagnostics
-    } = await readShardPayload(shardRoot);
+    } = await readShardPayload(shardRoot, diagnosticsSpool);
     payloads.push(payload);
-    archiveRefs.push({ root: shardRoot, slug });
+    archiveRefs.push({ root: shardRoot, slug, payload, diagnostics });
     questionDiagnostics.push(...shardQuestionDiagnostics);
     process.stdout.write(
       `  shard ${shardRoot}: ${payload.evaluated_count} questions, ` +
@@ -100,44 +106,27 @@ export async function loadMergeShards(
   if (first === undefined) {
     throw new Error("no shards loaded");
   }
+  assertCurrentDiagnosticsSpoolCount(payloads, archiveRefs, diagnosticsSpool);
   return { payloads, archiveRefs, questionDiagnostics, first };
 }
 
-async function readShardPayload(
-  shardRoot: string
-): Promise<{
-  readonly payload: KpiPayload;
-  readonly slug: string;
-  readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
-}> {
-  const pointerPath = await resolveShardPointerPath(shardRoot);
-  const pointer = JSON.parse(await readFile(pointerPath, "utf8")) as {
-    slug?: string;
-  };
-  if (typeof pointer.slug !== "string") {
+function assertCurrentDiagnosticsSpoolCount(
+  payloads: readonly KpiPayload[],
+  archiveRefs: readonly ShardArchiveRef[],
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
+): void {
+  if (!archiveRefs.every((shard) => isCurrentStreamedDiagnostics(shard.diagnostics))) {
+    return;
+  }
+  const evaluatedCount = payloads.reduce(
+    (total, payload) => total + payload.evaluated_count,
+    0
+  );
+  if (diagnosticsSpool.questionCount !== evaluatedCount) {
     throw new Error(
-      `shard ${shardRoot} ${path.basename(pointerPath)} missing slug`
+      `merged evaluated_count=${evaluatedCount} does not match diagnostics spool question count=${diagnosticsSpool.questionCount}`
     );
   }
-  const kpiPath = path.join(shardRoot, "public", pointer.slug, "kpi.json");
-  const payload = KpiPayloadSchema.parse(
-    JSON.parse(await readFile(kpiPath, "utf8"))
-  );
-  const diagnostics = await readLongMemEvalDiagnosticsSidecar(
-    { historyRoot: shardRoot },
-    "public",
-    pointer.slug
-  );
-  if (diagnostics === null) {
-    throw new Error(
-      `merge refused: missing diagnostics sidecar for shard root=${shardRoot} slug=${pointer.slug}`
-    );
-  }
-  return {
-    payload,
-    slug: pointer.slug,
-    questionDiagnostics: diagnostics.questions ?? []
-  };
 }
 
 export function buildMergedLongMemEvalPayload(
@@ -145,6 +134,7 @@ export function buildMergedLongMemEvalPayload(
 ): MergedLongMemEvalBuild {
   assertCompatibleShardIdentities(loaded.payloads, loaded.first);
   assertNoDuplicateQuestions(loaded.payloads);
+  assertMergeMeasurementContracts(loaded.payloads);
   const aggregate = aggregateMergeShards(loaded.payloads);
   if (aggregate.evaluatedTotal > loaded.first.sample_size) {
     throw new Error(
@@ -240,7 +230,9 @@ interface MergeShardAggregate {
   truncAnswerTotal: number;
   truncCharsTotal: number;
   totalHitAt1: number;
+  totalHitAt5: number;
   totalHitAt10: number;
+  answerableTotal: number;
   providerReturnedTotal: number;
   providerPendingTotal: number;
   providerFailedTotal: number;
@@ -268,7 +260,9 @@ function createMergeShardAggregate(): MergeShardAggregate {
     truncAnswerTotal: 0,
     truncCharsTotal: 0,
     totalHitAt1: 0,
+    totalHitAt5: 0,
     totalHitAt10: 0,
+    answerableTotal: 0,
     providerReturnedTotal: 0,
     providerPendingTotal: 0,
     providerFailedTotal: 0,
@@ -299,8 +293,13 @@ function addShardTotals(aggregate: MergeShardAggregate, shard: KpiPayload): void
     aggregate.shardTokenEconomies.push(shard.kpi.token_economy);
   }
   aggregate.perScenario.push(...shard.kpi.per_scenario);
-  aggregate.totalHitAt1 += Math.round(shard.kpi.r_at_1 * shard.evaluated_count);
-  aggregate.totalHitAt10 += Math.round(shard.kpi.r_at_10 * shard.evaluated_count);
+  const denominator = shard.answerable_evaluated_count ?? shard.evaluated_count;
+  aggregate.answerableTotal += denominator;
+  aggregate.totalHitAt1 += Math.round(shard.kpi.r_at_1 * denominator);
+  aggregate.totalHitAt5 += shard.kpi.per_scenario.filter(
+    (row) => row.scorable !== false && row.hit_at_5
+  ).length;
+  aggregate.totalHitAt10 += Math.round(shard.kpi.r_at_10 * denominator);
   aggregate.tierHot += shard.kpi.tier_distribution.hot;
   aggregate.tierWarm += shard.kpi.tier_distribution.warm;
   aggregate.tierCold += shard.kpi.tier_distribution.cold;
@@ -360,7 +359,7 @@ function buildMergedPayload(
   const policyShape = first.policy_shape ?? "stress";
   const simulateReport = first.simulate_report ?? "none";
   const rates = buildMergedRates(aggregate);
-  return {
+  const build = {
     ...rates,
     runAt,
     commitSha7,
@@ -384,44 +383,21 @@ function buildMergedPayload(
       dataset: first.dataset,
       sample_size: first.sample_size,
       evaluated_count: aggregate.evaluatedTotal,
+      ...(payloads.every((payload) => payload.answerable_evaluated_count !== undefined)
+        ? { answerable_evaluated_count: aggregate.answerableTotal }
+        : {}),
       harness_mode: first.harness_mode,
       kpi: buildMergedKpi(first, payloads, aggregate, rates, questionDiagnostics)
     }
   };
-}
-
-function buildMergedRates(aggregate: MergeShardAggregate): {
-  readonly rAt1: number;
-  readonly rAt5: number;
-  readonly rAt10: number;
-  readonly latencyP50: number;
-  readonly latencyP95: number;
-  readonly hasExactMergedLatency: boolean;
-} {
-  const n = aggregate.evaluatedTotal;
-  const mergedLatencies = aggregate.perScenario
-    .map((row) => row.latency_ms)
-    .filter((latency): latency is number => latency !== undefined);
-  const hasExactMergedLatency = n > 0 && mergedLatencies.length === n;
-  return {
-    rAt1: n === 0 ? 0 : aggregate.totalHitAt1 / n,
-    rAt5: n === 0 ? 0 : aggregate.perScenario.filter((r) => r.hit_at_5).length / n,
-    rAt10: n === 0 ? 0 : aggregate.totalHitAt10 / n,
-    latencyP50: hasExactMergedLatency
-      ? computePercentile(mergedLatencies, 50)
-      : aggregate.latencyP50Max,
-    latencyP95: hasExactMergedLatency
-      ? computePercentile(mergedLatencies, 95)
-      : aggregate.latencyP95Max,
-    hasExactMergedLatency
-  };
+  return { ...build, payload: KpiPayloadSchema.parse(build.payload) };
 }
 
 function buildMergedKpi(
   first: KpiPayload,
   payloads: readonly KpiPayload[],
   aggregate: MergeShardAggregate,
-  rates: ReturnType<typeof buildMergedRates>,
+  rates: MergedRates,
   questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
 ): KpiPayload["kpi"] {
   const token = buildMergedTokenEconomy(aggregate, payloads.length);

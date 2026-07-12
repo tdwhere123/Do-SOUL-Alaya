@@ -1,4 +1,5 @@
 import type { KpiPayload, QualityMetrics, Verdict } from "../schema/kpi-schema.js";
+import { measurementContractAllowsEligibility } from "../schema/kpi-measurement-contract.js";
 import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 import { rollupWorstVerdict } from "./thresholds.js";
 
@@ -50,6 +51,7 @@ export function releaseHardGateAllowsLatestPassing(current: KpiPayload): boolean
   if (evaluateSeedExtractionReleaseBlocker(current) !== null) {
     return false;
   }
+  if (!measurementAllowsLatestPassing(current)) return false;
   if (isTier1LatestPassingSurface(current) && !isReleaseGradeTier1Payload(current)) {
     return false;
   }
@@ -83,10 +85,40 @@ function collectPipelineIntegrityGates(
   const embeddingEnabled = current.embedding_provider !== "none";
   const metrics = current.kpi.quality_metrics;
   const gates: BenchmarkHardGate[] = [];
+  pushMeasurementAttributionGate(gates, current);
   pushEmbeddingProviderReturnedGate(gates, current, embeddingEnabled);
   pushLongMemEvalPipelineGates(gates, current, metrics);
   pushRecallLatencyGate(gates, current, embeddingEnabled);
   return gates;
+}
+
+function pushMeasurementAttributionGate(
+  gates: BenchmarkHardGate[],
+  current: KpiPayload
+): void {
+  const attribution = current.measurement_attribution;
+  if (!isLongMemEvalMeasurementSurface(current) && attribution === undefined) return;
+  gates.push(minGate(
+    "longmemeval_measurement_attribution",
+    "measurement evidence and calibration eligibility",
+    measurementAllowsLatestPassing(current) ? 1 : 0,
+    1,
+    "count"
+  ));
+}
+
+function measurementAllowsLatestPassing(current: KpiPayload): boolean {
+  const attribution = current.measurement_attribution;
+  if (attribution !== undefined) {
+    return measurementContractAllowsEligibility(current);
+  }
+  return !isLongMemEvalMeasurementSurface(current);
+}
+
+function isLongMemEvalMeasurementSurface(current: KpiPayload): boolean {
+  return current.split === "longmemeval-s" ||
+    current.split === "longmemeval-oracle" ||
+    current.split === "longmemeval-m";
 }
 
 function collectPublicLongMemEvalRecallGates(
@@ -206,7 +238,14 @@ function pushLongMemEvalPipelineGates(
       LONGMEMEVAL_BUDGET_DROPPED_RATE_TARGET,
       "ratio"
     ),
-    maxGate("longmemeval_s_candidate_absent", "candidate_absent", metrics?.candidate_absent_count ?? null, 6, "count"),
+    maxGate("longmemeval_s_no_gold", "no_gold", metrics?.no_gold_count ?? null, 0, "count"),
+    maxGate(
+      "longmemeval_s_evaluator_identity_issue",
+      "evaluator identity issue",
+      metrics?.evaluator_identity_issue_count ?? null,
+      0,
+      "count"
+    ),
     minGate("longmemeval_s_evidence_stream_gold_delivery", "evidence stream gold delivery", metrics?.evidence_stream_gold_delivery_rate ?? null, 0.15, "ratio")
   );
   if (current.simulate_report !== "none") {

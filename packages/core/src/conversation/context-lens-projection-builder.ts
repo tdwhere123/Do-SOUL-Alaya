@@ -17,7 +17,6 @@ import type { RecallCandidate, RecallResult } from "../recall/recall-service.js"
 import { makeTokenEstimator, type TokenEstimator } from "../recall/runtime/recall-service-types.js";
 
 import {
-  compareRecallCandidates,
   createExcerptContent,
   createLensEntry
 } from "./context-lens-assembler-ports.js";
@@ -51,26 +50,15 @@ export class ContextLensProjectionBuilder {
         sourceEnforcement: claim.enforcement_level
       })
     );
-    const projectCandidates = recallResult.candidates
-      .filter((candidate) => candidate.scope_class === ScopeClass.PROJECT && recalledMemories.has(candidate.object_id))
-      .sort(compareRecallCandidates);
-    const projectEntries = projectCandidates.map((candidate) =>
+    const recallCandidates = recallResult.candidates.filter((candidate) =>
+      isLensRecallCandidate(candidate, recalledMemories)
+    );
+    const recallEntries = recallCandidates.map((candidate) =>
       createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {
         scopeClass: candidate.scope_class
       })
     );
-    const globalCandidates = recallResult.candidates
-      .filter(
-        (candidate) =>
-          candidate.scope_class === ScopeClass.GLOBAL_DOMAIN || candidate.scope_class === ScopeClass.GLOBAL_CORE
-      )
-      .sort(compareRecallCandidates);
-    const globalEntries = globalCandidates.map((candidate) =>
-      createLensEntry(candidate.object_id, ObjectKind.MEMORY_ENTRY, candidate.relevance_score, candidate.manifestation, {
-        scopeClass: candidate.scope_class
-      })
-    );
-    const evidenceEntries = [...new Set([...projectCandidates, ...globalCandidates].flatMap((candidate) => {
+    const evidenceEntries = [...new Set(recallCandidates.flatMap((candidate) => {
       const memory = recalledMemories.get(candidate.object_id);
       return memory?.evidence_refs ?? [];
     }))].map((evidenceRef) => createLensEntry(evidenceRef, ObjectKind.EVIDENCE_CAPSULE, 0.25, "hint"));
@@ -79,8 +67,7 @@ export class ContextLensProjectionBuilder {
       ...overrideEntries,
       ...taskSurfaceEntries,
       ...strictWinnerEntries,
-      ...projectEntries,
-      ...globalEntries,
+      ...recallEntries,
       ...evidenceEntries
     ]);
   }
@@ -220,4 +207,14 @@ export class ContextLensProjectionBuilder {
 
     return `[${entry.object_kind}: ${entry.object_id}]`;
   }
+}
+
+function isLensRecallCandidate(
+  candidate: Readonly<RecallCandidate>,
+  recalledMemories: ReadonlyMap<string, Readonly<MemoryEntry>>
+): boolean {
+  if (candidate.scope_class === ScopeClass.PROJECT) {
+    return recalledMemories.has(candidate.object_id);
+  }
+  return candidate.scope_class === ScopeClass.GLOBAL_DOMAIN || candidate.scope_class === ScopeClass.GLOBAL_CORE;
 }

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
@@ -12,16 +13,40 @@ import {
   salvageRawSignalElements
 } from "@do-soul/alaya-soul";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
+import { assertExtractionCacheIdentity } from "./extraction/cache-identity.js";
+import { ExtractionCacheInvariantError } from "./extraction/cache-invariant-error.js";
+import {
+  acquireExtractionCacheWriteLease,
+  withExtractionCacheWriteLease,
+  type ExtractionCacheWriteLease
+} from "./extraction/fill-root-guard.js";
+import { readExtractionCacheManifestIdentity } from "./extraction-cache-manifest.js";
 import type {
+  BenchRetryClassification,
   BenchSignalExtractor,
-  CompileSeedExtractionStats
+  CompileSeedExtractionConfig,
+  CompileSeedExtractionStats,
+  BenchTerminalRetryClassification
 } from "./compile-seed-types.js";
 
 interface CachedExtraction {
   readonly model: string;
+  readonly request_profile: CompileSeedExtractionConfig["requestProfile"];
   readonly cache_key: string;
   readonly raw_json: string;
   readonly extracted_at: string;
+}
+
+interface CachingSignalExtractorOptions {
+  readonly delegate: BenchSignalExtractor;
+  readonly config: Pick<
+    CompileSeedExtractionConfig,
+    "model" | "modelFamily" | "providerUrl" | "requestProfile"
+  >;
+  readonly cacheRoot?: string;
+  readonly stats?: CompileSeedExtractionStats;
+  readonly allowLiveExtraction?: boolean;
+  readonly writeLease?: ExtractionCacheWriteLease;
 }
 
 /**
@@ -29,61 +54,228 @@ interface CachedExtraction {
  *
  * It wraps a delegate extractor (the live LLM transport) and caches the raw
  * LLM response keyed by a SHA-256 hash of the load-bearing extraction
- * inputs (model + systemPrompt + turn_content) — never the volatile routing
+ * inputs (model + requestProfile + systemPrompt + turn_content) — never the volatile routing
  * context (run_id / workspace_id / surface_id) the userPrompt also carries.
  * On a cache hit it returns the stored `rawJson` with zero LLM calls; on a
- * miss it calls the delegate and writes the fixture. This is what makes the
- * bench repeatable / zero-LLM on re-runs.
+ * miss it calls the delegate and writes the fixture only when live extraction
+ * is allowed. Cache-only callers fail closed before the delegate boundary.
  *
  * `OfficialApiGardenProvider` then parses that `rawJson` with the production
  * `parseOfficialApiSignals` — so caching never alters extraction semantics.
  */
-export function createCachingSignalExtractor(options: {
-  readonly delegate: BenchSignalExtractor;
-  readonly model: string;
-  readonly cacheRoot?: string;
-  readonly stats?: CompileSeedExtractionStats;
-}): BenchSignalExtractor {
+export function createCachingSignalExtractor(
+  options: CachingSignalExtractorOptions
+): BenchSignalExtractor {
   const cacheRoot = options.cacheRoot ?? EXTRACTION_CACHE_ROOT;
-  const stats = options.stats;
   return {
-    async extract(input) {
-      const cacheKey = computeCacheKey(
-        options.model,
-        input.systemPrompt,
-        extractTurnContent(input.userPrompt)
-      );
-      const cached = readCachedExtraction(cacheRoot, cacheKey, options.model);
-      if (cached !== undefined) {
-        if (stats !== undefined) {
-          stats.lastExtractionSource = "cache";
-          // Full cache key recorded here; the diagnostic writer slices to
-          // the 12-char prefix so logs stay scannable without leaking
-          // enough hash to fingerprint a private fixture path.
-          stats.lastCacheKey = cacheKey;
-          stats.cacheHits += 1;
-          recordExtractionDraftCounts(stats, cached);
-        }
-        return { rawJson: cached };
-      }
-      if (stats !== undefined) {
-        stats.lastExtractionSource = "live";
-        stats.lastCacheKey = cacheKey;
-      }
-      const result = await options.delegate.extract(input);
-      writeCachedExtraction(cacheRoot, cacheKey, {
-        model: options.model,
-        cache_key: cacheKey,
-        raw_json: result.rawJson,
-        extracted_at: new Date().toISOString()
-      });
-      if (stats !== undefined) {
-        stats.llmCalls += 1;
-        recordExtractionDraftCounts(stats, result.rawJson);
-      }
-      return result;
-    }
+    extract: (input) => extractWithCache(options, cacheRoot, input)
   };
+}
+
+async function extractWithCache(
+  options: CachingSignalExtractorOptions,
+  cacheRoot: string,
+  input: Parameters<BenchSignalExtractor["extract"]>[0]
+): ReturnType<BenchSignalExtractor["extract"]> {
+  const cacheKey = computeCacheKey(
+    options.config.model,
+    options.config.requestProfile,
+    input.systemPrompt,
+    extractTurnContent(input.userPrompt)
+  );
+  const cached = inspectCachedExtraction(
+    cacheRoot,
+    cacheKey,
+    options.config.model,
+    options.config.requestProfile
+  );
+  if (cached.status === "hit") {
+    recordCacheHit(options.stats, cacheKey, cached.rawJson);
+    return { rawJson: cached.rawJson };
+  }
+  if (options.allowLiveExtraction === false) {
+    throw new Error(
+      `[longmemeval cache-only] extraction fixture ${cached.status}: ` +
+      `${cacheKey}; live extraction disabled${cached.reason === undefined ? "" : ` (${cached.reason})`}`
+    );
+  }
+  return extractLive(options, cacheRoot, cacheKey, input);
+}
+
+function recordCacheHit(
+  stats: CompileSeedExtractionStats | undefined,
+  cacheKey: string,
+  rawJson: string
+): void {
+  if (stats === undefined) return;
+  stats.lastExtractionSource = "cache";
+  stats.lastCacheKey = cacheKey;
+  stats.cacheHits += 1;
+  recordExtractionDraftCounts(stats, rawJson);
+}
+
+async function extractLive(
+  options: CachingSignalExtractorOptions,
+  cacheRoot: string,
+  cacheKey: string,
+  input: Parameters<BenchSignalExtractor["extract"]>[0]
+): ReturnType<BenchSignalExtractor["extract"]> {
+  const ownedLease = options.writeLease;
+  if (ownedLease !== undefined && ownedLease.cacheRoot !== cacheRoot) {
+    throw new ExtractionCacheInvariantError(
+      "extraction cache writer lease belongs to a different cache root"
+    );
+  }
+  if (ownedLease !== undefined) {
+    return extractLiveWithLease(options, cacheRoot, cacheKey, input, ownedLease);
+  }
+  const lease = acquireExtractionCacheWriteLease(cacheRoot);
+  return withExtractionCacheWriteLease(
+    lease,
+    () => extractLiveWithLease(options, cacheRoot, cacheKey, input, lease)
+  );
+}
+
+async function extractLiveWithLease(
+  options: CachingSignalExtractorOptions,
+  cacheRoot: string,
+  cacheKey: string,
+  input: Parameters<BenchSignalExtractor["extract"]>[0],
+  lease: ExtractionCacheWriteLease
+): ReturnType<BenchSignalExtractor["extract"]> {
+  lease.assertOwned();
+  const recached = inspectCachedExtraction(
+    cacheRoot,
+    cacheKey,
+    options.config.model,
+    options.config.requestProfile
+  );
+  if (recached.status === "hit") {
+    recordCacheHit(options.stats, cacheKey, recached.rawJson);
+    return { rawJson: recached.rawJson };
+  }
+  const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
+  const stats = options.stats;
+  if (stats !== undefined) {
+    stats.lastExtractionSource = "live";
+    stats.lastCacheKey = cacheKey;
+  }
+  const result = await extractLiveDelegate(options.delegate, input, stats);
+  lease.assertOwned();
+  assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
+  parseOfficialApiSignals(result.rawJson);
+  try {
+    writeCachedExtraction(cacheRoot, cacheKey, {
+      model: options.config.model,
+      request_profile: options.config.requestProfile,
+      cache_key: cacheKey,
+      raw_json: result.rawJson,
+      extracted_at: new Date().toISOString()
+    });
+  } catch (cause) {
+    throw new ExtractionCacheInvariantError(
+      `failed to persist extraction cache shard ${cacheKey}`,
+      { cause }
+    );
+  }
+  if (stats !== undefined) {
+    stats.llmCalls += 1;
+    recordExtractionDraftCounts(stats, result.rawJson);
+  }
+  return result;
+}
+
+async function extractLiveDelegate(
+  delegate: BenchSignalExtractor,
+  input: Parameters<BenchSignalExtractor["extract"]>[0],
+  stats: CompileSeedExtractionStats | undefined
+): ReturnType<BenchSignalExtractor["extract"]> {
+  try {
+    const result = await delegate.extract(input);
+    recordRetrySuccess(stats, result.extractorMeta);
+    return result;
+  } catch (cause) {
+    recordRetryFailure(stats, cause);
+    throw cause;
+  }
+}
+
+function recordRetrySuccess(
+  stats: CompileSeedExtractionStats | undefined,
+  meta: Awaited<ReturnType<BenchSignalExtractor["extract"]>>["extractorMeta"]
+): void {
+  if (stats === undefined || meta === undefined) return;
+  stats.rateLimitRetries = (stats.rateLimitRetries ?? 0) + meta.rateLimitRetries;
+  if (meta.retryClassification === "success_after_retry") {
+    stats.retrySuccesses = (stats.retrySuccesses ?? 0) + 1;
+  }
+}
+
+function recordRetryFailure(
+  stats: CompileSeedExtractionStats | undefined,
+  cause: unknown
+): void {
+  if (stats === undefined || typeof cause !== "object" || cause === null) return;
+  const meta = (cause as { readonly benchRetry?: unknown }).benchRetry;
+  if (!isBenchRetryFailure(meta)) return;
+  stats.rateLimitRetries = (stats.rateLimitRetries ?? 0) + meta.rateLimitRetries;
+  const totals = stats.terminalRetryClassifications ?? {};
+  totals[meta.retryClassification] = (totals[meta.retryClassification] ?? 0) + 1;
+  stats.terminalRetryClassifications = totals;
+}
+
+function isBenchRetryFailure(value: unknown): value is {
+  readonly rateLimitRetries: number;
+  readonly retryClassification: BenchTerminalRetryClassification;
+} {
+  if (typeof value !== "object" || value === null) return false;
+  const input = value as { rateLimitRetries?: unknown; retryClassification?: unknown };
+  return typeof input.rateLimitRetries === "number" &&
+    isTerminalRetryClassification(input.retryClassification);
+}
+
+function isTerminalRetryClassification(
+  value: unknown
+): value is BenchTerminalRetryClassification {
+  const classification = value as BenchRetryClassification;
+  return classification === "failure_max_retries" ||
+    classification === "failure_non_retryable_4xx" ||
+    classification === "failure_timeout" || classification === "failure_aborted";
+}
+
+function assertWriteIdentity(
+  options: CachingSignalExtractorOptions,
+  cacheRoot: string,
+  systemPrompt: string,
+  expectedManifestSha?: string
+): string {
+  let identity: ReturnType<typeof readExtractionCacheManifestIdentity>;
+  try {
+    identity = readExtractionCacheManifestIdentity(cacheRoot);
+  } catch (cause) {
+    throw new ExtractionCacheInvariantError(
+      "extraction cache manifest became unreadable during live extraction",
+      { cause }
+    );
+  }
+  if (identity === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "live extraction cache writes require manifest.json; run extraction-fill " +
+        "to initialize provider/model identity before writing shards"
+    );
+  }
+  if (expectedManifestSha !== undefined && identity.manifestSha256 !== expectedManifestSha) {
+    throw new ExtractionCacheInvariantError(
+      "extraction cache manifest changed during live extraction"
+    );
+  }
+  assertExtractionCacheIdentity({
+    config: options.config,
+    systemPrompt,
+    manifest: identity.manifest,
+    validateProvider: true
+  });
+  return identity.manifestSha256;
 }
 
 /**
@@ -172,11 +364,14 @@ function countParsedDrafts(rawJson: string): number {
 
 export function computeCacheKey(
   model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   turnContent: string
 ): string {
   return createHash("sha256")
     .update(model, "utf8")
+    .update("\u0000", "utf8")
+    .update(requestProfile, "utf8")
     .update("\u0000", "utf8")
     .update(systemPrompt, "utf8")
     .update("\u0000", "utf8")
@@ -190,30 +385,43 @@ export function cacheFilePath(cacheRoot: string, cacheKey: string): string {
   return join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
 }
 
-function readCachedExtraction(
+export type CachedExtractionInspection =
+  | { readonly status: "hit"; readonly rawJson: string }
+  | { readonly status: "missing"; readonly reason?: undefined }
+  | { readonly status: "invalid"; readonly reason: string };
+
+export function inspectCachedExtraction(
   cacheRoot: string,
   cacheKey: string,
-  model: string
-): string | undefined {
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+): CachedExtractionInspection {
   const filePath = cacheFilePath(cacheRoot, cacheKey);
   if (!existsSync(filePath)) {
-    return undefined;
+    return { status: "missing" };
   }
   try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as CachedExtraction;
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedExtraction>;
     if (typeof parsed.raw_json !== "string") {
-      return undefined;
+      return { status: "invalid", reason: "raw_json must be a string" };
     }
-    // Defence in depth: the cache key already hashes the model, so a model
-    // mismatch should be impossible — but a hand-edited / cross-pollinated
-    // shard would silently feed a wrong-model extraction into the bench.
-    // Treat a mismatch as a miss rather than trusting the stale fixture.
-    if (typeof parsed.model === "string" && parsed.model !== model) {
-      return undefined;
+    if (parsed.model !== model) {
+      return { status: "invalid", reason: `model ${String(parsed.model)} != ${model}` };
     }
-    return parsed.raw_json;
-  } catch {
-    return undefined;
+    if (parsed.request_profile !== requestProfile) {
+      return {
+        status: "invalid",
+        reason: `request_profile ${String(parsed.request_profile)} != ${requestProfile}`
+      };
+    }
+    if (parsed.cache_key !== cacheKey) {
+      return { status: "invalid", reason: "cache_key does not match fixture path" };
+    }
+    parseOfficialApiSignals(parsed.raw_json);
+    return { status: "hit", rawJson: parsed.raw_json };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { status: "invalid", reason: `invalid cached extraction: ${reason}` };
   }
 }
 
@@ -231,6 +439,15 @@ function writeCachedExtraction(
   // the same filesystem, so a reader sees either the old file or the whole
   // new one, never a partial.
   const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-  writeFileSync(tmpPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-  renameSync(tmpPath, filePath);
+  try {
+    writeFileSync(tmpPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (cause) {
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      // Cleanup must not conceal the authoritative persistence failure.
+    }
+    throw cause;
+  }
 }

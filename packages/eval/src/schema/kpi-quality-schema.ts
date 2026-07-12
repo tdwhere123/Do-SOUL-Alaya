@@ -144,6 +144,30 @@ const PerGoldRankBucketsSchema = z
   })
   .strict();
 
+const LegacyAbstentionMetricsSchema = z.object({
+  schema_version: z.literal("bench-abstention.v1"),
+  total: z.number().int().nonnegative(),
+  false_confident_threshold: z.number(),
+  correct_at_1: z.number().int().nonnegative(),
+  correct_at_5: z.number().int().nonnegative(),
+  correct_at_10: z.number().int().nonnegative(),
+  false_confident_at_1: z.number().int().nonnegative(),
+  false_confident_at_5: z.number().int().nonnegative(),
+  false_confident_at_10: z.number().int().nonnegative()
+}).strict();
+
+const UncalibratedAbstentionMetricsSchema = z.object({
+  schema_version: z.literal("bench-abstention.v2"),
+  total: z.number().int().nonnegative(),
+  scored: z.literal(0),
+  unscorable: z.number().int().nonnegative(),
+  method: z.literal("fused_margin_diagnostic_only"),
+  calibration_status: z.literal("uncalibrated"),
+  gate_eligible: z.literal(false)
+}).strict().refine((value) => value.unscorable === value.total, {
+  message: "uncalibrated abstention requires unscorable=total"
+});
+
 export const QualityMetricsSchema = z
   .object({
     schema_version: z.literal("bench-quality-metrics.v1"),
@@ -162,6 +186,10 @@ export const QualityMetricsSchema = z
     candidate_absent_denominator: z.number().int().nonnegative(),
     no_gold_count: z.number().int().nonnegative(),
     no_gold_denominator: z.number().int().nonnegative(),
+    evaluator_identity_issue_count: z.number().int().nonnegative().optional(),
+    evaluator_identity_issue_denominator: z.number().int().nonnegative().optional(),
+    evaluator_identity_unscorable_count: z.number().int().nonnegative().optional(),
+    evaluator_identity_unscorable_denominator: z.number().int().nonnegative().optional(),
     evidence_stream_gold_delivery_rate: RatioSchema.default(0),
     evidence_stream_gold_delivery_count: z.number().int().nonnegative().default(0),
     evidence_stream_gold_delivery_denominator: z.number().int().nonnegative().default(0),
@@ -203,28 +231,12 @@ export const QualityMetricsSchema = z
       answer_set_coverage_drop: 0,
       evaluation_or_gold_issue: 0
     }),
-    // invariant: LongMemEval-S abstention metrics use an uncalibrated
-    // fused-margin heuristic for questions whose id ends in `_abs`.
-    // Optional so pre-abstention-scoring kpi.json records stay valid; new
-    // LongMemEval runs always populate it. One question-level verdict is
-    // derived from the delivered top-5 fused-score margin. The correct_at_k
-    // and false_confident_at_k fields are compatibility projections of that
-    // same verdict, not independently calibrated per-k measurements; they are
-    // credited to each recall@k numerator without changing the denominator.
-    abstention: z
-      .object({
-        schema_version: z.literal("bench-abstention.v1"),
-        total: z.number().int().nonnegative(),
-        false_confident_threshold: z.number(),
-        correct_at_1: z.number().int().nonnegative(),
-        correct_at_5: z.number().int().nonnegative(),
-        correct_at_10: z.number().int().nonnegative(),
-        false_confident_at_1: z.number().int().nonnegative(),
-        false_confident_at_5: z.number().int().nonnegative(),
-        false_confident_at_10: z.number().int().nonnegative()
-      })
-      .strict()
-      .optional(),
+    // v1 remains readable as historical evidence. New writers emit v2, which
+    // is fail-closed until an independent calibration contract exists.
+    abstention: z.discriminatedUnion("schema_version", [
+      LegacyAbstentionMetricsSchema,
+      UncalibratedAbstentionMetricsSchema
+    ]).optional(),
     miss_distribution: z.record(z.string(), z.number().int().nonnegative())
   })
   .strict();

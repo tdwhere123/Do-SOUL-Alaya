@@ -1,4 +1,5 @@
 export {
+  parseAbsoluteTemporalWindow,
   parseRelativeTemporalTerm,
   resolveRelativeTemporalWindow,
   type RelativeTemporalTerm,

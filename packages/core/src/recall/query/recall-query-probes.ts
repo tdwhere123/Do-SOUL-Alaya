@@ -1,7 +1,7 @@
 import { MemoryDimension, ScopeClass, type MemoryDimension as MemoryDimensionType, type ScopeClass as ScopeClassType } from "@do-soul/alaya-protocol";
+import { extractTemporalTerms } from "@do-soul/alaya-graph-algorithms";
 import { recallEnvRaw } from "../../config/recall-env-access.js";
 import { isCjkSegmentationCandidate, segmentCjkRun } from "../../shared/cjk-segmentation.js";
-import { temporalQueryWindowEnabled } from "../scoring/temporal-fusion-scoring.js";
 
 export type RecallQuerySubjectHint = "self_reference";
 
@@ -135,7 +135,7 @@ function buildRecallQueryProbes(normalized: string): Readonly<RecallQueryProbes>
     expanded_terms: expandLexicalTerms(lexicalTerms),
     phrases: extractPhrases(normalized, lexicalTerms),
     char_ngrams: extractCharNgrams(normalized),
-    date_terms: collectDateTermMatches(normalized)
+    date_terms: extractTemporalTerms(normalized)
   });
 }
 
@@ -161,17 +161,6 @@ function collectDimensionHints(normalized: string): readonly MemoryDimensionType
 
 function collectDomainHints(normalized: string): readonly string[] {
   return DOMAIN_HINTS.flatMap(([tag, pattern]) => pattern.test(normalized) ? [tag] : []);
-}
-
-const DATE_TERM_PATTERN =
-  /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year))\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu;
-
-// Superset adds seasons and "N units ago"; only enabled with the temporal-window flag, which is what turns them into windows.
-const WIDENED_DATE_TERM_PATTERN =
-  /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b(?:today|yesterday|tomorrow|tonight|last\s+(?:week|month|year)|next\s+(?:week|month|year)|this\s+(?:week|month|year)|(?:last|this|next)\s+(?:spring|summer|autumn|fall|winter)|\d{1,3}\s+(?:days?|weeks?|months?|years?)\s+ago)\b|(?:上次|昨天|今天|明天|今晚|上周|上个月|去年|下周|下个月|明年|今年|\d{1,3}(?:天|周|个月|年)前|\d{4}年\d{1,2}月(?:\d{1,2}日)?)/giu;
-
-function collectDateTermMatches(normalized: string): readonly string[] {
-  return collectFullMatches(normalized, temporalQueryWindowEnabled() ? WIDENED_DATE_TERM_PATTERN : DATE_TERM_PATTERN);
 }
 
 function normalizeQuery(queryText: string | null): string | null {
@@ -220,7 +209,7 @@ function extractLexicalTerms(value: string): readonly string[] {
   return unique(terms).slice(0, 48);
 }
 
-// Conservative bidirectional synonym/abbreviation clusters; kept narrow because an over-broad table dilutes the pool and depresses RRF R@5. Lowercased, deterministic lookup.
+// Conservative bidirectional synonym/abbreviation clusters keep product vocabulary aligned.
 const DOMAIN_SYNONYM_CLUSTERS: ReadonlyArray<readonly string[]> = [
   ["alaya", "do-soul"],
   ["recall", "retrieval", "retrieve"],
@@ -325,7 +314,7 @@ export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly st
   ).slice(0, 64);
 }
 
-// English suffix folding: inflected forms reachable under common plural/verb-tense rules; CJK and non-alphabetic terms are left unfolded.
+// Conservative noun-plural folding; verb stemming remains owned by the FTS tokenizer.
 function foldMorphology(term: string): readonly string[] {
   if (!/^[a-z][a-z'-]*$/u.test(term)) {
     return [];
@@ -338,38 +327,20 @@ function foldMorphology(term: string): readonly string[] {
   };
   if (term.endsWith("ies") && term.length > 4) {
     addStem(`${term.slice(0, -3)}y`);
-  }
-  if (term.endsWith("es") && term.length > 3) {
+  } else if (/(?:sses|shes|ches|xes|zes)$/u.test(term)) {
     addStem(term.slice(0, -2));
-  }
-  if (term.endsWith("s") && !term.endsWith("ss") && term.length > 3) {
+  } else if (term.endsWith("s") && !term.endsWith("ss") && term.length > 3) {
     addStem(term.slice(0, -1));
   }
-  if (term.endsWith("ing") && term.length > 5) {
-    const stem = term.slice(0, -3);
-    addStem(stem);
-    addStem(`${stem}e`);
-    addStem(undoubleFinalConsonant(stem));
-  }
-  if (term.endsWith("ed") && term.length > 4) {
-    const stem = term.slice(0, -2);
-    addStem(stem);
-    addStem(`${stem}e`);
-    addStem(undoubleFinalConsonant(stem));
-  }
-  // Forward plural so a singular query term still reaches a pluralized memory.
+  // Only noun plural forms are generated; verb stemming belongs to the FTS tokenizer.
   if (!term.endsWith("s")) {
-    variants.add(/(?:s|x|z|ch|sh)$/u.test(term) ? `${term}es` : `${term}s`);
+    if (/[^aeiou]y$/u.test(term)) {
+      variants.add(`${term.slice(0, -1)}ies`);
+    } else {
+      variants.add(/(?:s|x|z|ch|sh)$/u.test(term) ? `${term}es` : `${term}s`);
+    }
   }
   return [...variants];
-}
-
-// Collapse the orthographic consonant doubling before -ing/-ed ("runn" -> "run"); folds only a true double of the same non-vowel.
-function undoubleFinalConsonant(stem: string): string {
-  const last = stem.slice(-1);
-  return stem.length > 3 && stem.slice(-2, -1) === last && !/[aeiou]/u.test(last)
-    ? stem.slice(0, -1)
-    : stem;
 }
 
 function extractPhrases(value: string, lexicalTerms: readonly string[]): readonly string[] {

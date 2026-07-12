@@ -62,6 +62,10 @@ export function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_
     candidate_absent_denominator: 100,
     no_gold_count: 0,
     no_gold_denominator: 100,
+    evaluator_identity_issue_count: 0,
+    evaluator_identity_issue_denominator: 100,
+    evaluator_identity_unscorable_count: 0,
+    evaluator_identity_unscorable_denominator: 100,
     evidence_stream_gold_delivery_rate: 0.2,
     evidence_stream_gold_delivery_count: 20,
     evidence_stream_gold_delivery_denominator: 100,
@@ -130,11 +134,40 @@ export function buildFullLongMemEvalPayload(
     },
     sample_size: 500,
     evaluated_count: 500,
+    answerable_evaluated_count: 500,
+    measurement_attribution: {
+      schema_version: "bench-measurement-attribution.v2",
+      status: "eligible",
+      gate_eligible: true,
+      evidence_status: "complete",
+      candidate_pool_complete: true,
+      provenance_complete: true,
+      abstention_calibration_status: "not_applicable",
+      evaluator_identity_status: "complete"
+    },
     kpi: {
       ...buildPayload(commit).kpi,
       r_at_5: rAt5,
       latency_ms_p95: 120,
-      quality_metrics: passingQualityMetrics(),
+      per_scenario: Array.from({ length: 500 }, (_, index) => ({
+        id: `question-${index + 1}`,
+        version: 1,
+        hit_at_5: index < Math.round(rAt5 * 500),
+        scorable: true,
+        tier: "hot" as const
+      })),
+      quality_metrics: {
+        ...passingQualityMetrics(),
+        abstention: {
+          schema_version: "bench-abstention.v2",
+          total: 0,
+          scored: 0,
+          unscorable: 0,
+          method: "fused_margin_diagnostic_only",
+          calibration_status: "uncalibrated",
+          gate_eligible: false
+        }
+      },
       seed_extraction_path: cleanSeedExtractionPath()
     }
   };

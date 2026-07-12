@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
 import { z } from "zod";
 import {
@@ -9,8 +13,9 @@ import {
 } from "../selection/question-manifest.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import {
-  extractionCacheManifestPath,
-  readExtractionCacheManifest
+  EXTRACTION_CACHE_MANIFEST_VERSION,
+  EXTRACTION_REQUEST_PROFILES,
+  readExtractionCacheManifestIdentity
 } from "../extraction-cache-manifest.js";
 import { resolveLocalOnnxArtifactSha256 } from "./local-onnx.js";
 
@@ -18,9 +23,16 @@ export const LONGMEMEVAL_RUN_PROVENANCE_FILENAME =
   "longmemeval-run-provenance.json";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const ExecutedDistIdentitySchema = z.object({
+  algorithm: z.literal("sha256-reachable-path-file-sha256-v1"),
+  sha256: Sha256Schema,
+  file_count: z.number().int().positive()
+}).strict();
+const execFileAsync = promisify(execFile);
 const PAIRED_ENV_ALLOWLIST = new Set([
   "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION",
   "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE",
+  "ALAYA_BENCH_EXTRACTION_MODEL_FAMILY",
   "ALAYA_CONFLICT_DETECTION_ENABLED",
   "ALAYA_EXP_ANSWERS_WITH_BAR",
   "ALAYA_EXP_ANSWERS_WITH_CAP",
@@ -41,16 +53,45 @@ const PAIRED_ENV_ALLOWLIST = new Set([
   "ALAYA_RECALL_CONF_RHO_EVIDENCE",
   "ALAYA_RECALL_CONF_RHO_PATH",
   "ALAYA_RECALL_CONF_W_PATH",
-  "ALAYA_RECALL_COVERAGE_MIN_SCORE_RATIO",
-  "ALAYA_RECALL_COVERAGE_POOL_K",
-  "ALAYA_RECALL_COVERAGE_SELECTOR",
-  "ALAYA_RECALL_COVERAGE_TARGET_K",
-  "ALAYA_RECALL_DELIVERY_WINDOW",
-  "ALAYA_RECALL_FUSION_RANK_FLOOR",
   "ALAYA_RECALL_FACET_TAGS",
   "ALAYA_RECALL_SOURCE_REF_ROBUST",
-  "ALAYA_RECALL_STRUCTURAL_RESERVE",
   "OFFICIAL_API_GARDEN_MODEL"
+]);
+
+const ExtractionCacheIdentityBaseSchema = z.object({
+  manifest_sha256: Sha256Schema,
+  extraction_model: z.string().min(1),
+  provider_url: z.string().min(1),
+  system_prompt_sha256: Sha256Schema,
+  cache_key_algo: z.string().min(1),
+  dataset: z.string().min(1),
+  dataset_revision: z.string().min(1),
+  requested_turns: z.number().int().nonnegative().optional(),
+  cached_turns: z.number().int().nonnegative().optional(),
+  coverage: z.number().min(0).max(1).optional(),
+  storage: z.enum(["git-tracked", "archive"]),
+  archive_url: z.string().min(1).optional(),
+  archive_sha256: Sha256Schema.optional(),
+  built_at: z.string().min(1),
+  builder: z.string().min(1)
+}).strict();
+
+const ExtractionCacheIdentitySchema = z.discriminatedUnion("schema_version", [
+  ExtractionCacheIdentityBaseSchema.extend({
+    schema_version: z.literal(1),
+    model_family: z.never().optional(),
+    request_profile: z.never().optional()
+  }).strict(),
+  ExtractionCacheIdentityBaseSchema.extend({
+    schema_version: z.literal(2),
+    model_family: z.string().min(1),
+    request_profile: z.never().optional()
+  }).strict(),
+  ExtractionCacheIdentityBaseSchema.extend({
+    schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
+    model_family: z.string().min(1),
+    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES)
+  }).strict()
 ]);
 
 export const LongMemEvalRunProvenanceSchema = z.object({
@@ -58,26 +99,10 @@ export const LongMemEvalRunProvenanceSchema = z.object({
   code: z.object({
     commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u),
     gate_sha256: Sha256Schema.nullable(),
-    worktree_state_sha256: Sha256Schema.nullable()
+    worktree_state_sha256: Sha256Schema.nullable(),
+    executed_dist: ExecutedDistIdentitySchema.nullable().default(null)
   }).strict(),
-  extraction_cache: z.object({
-    manifest_sha256: Sha256Schema,
-    schema_version: z.number().int().positive(),
-    extraction_model: z.string().min(1),
-    provider_url: z.string().min(1),
-    system_prompt_sha256: Sha256Schema,
-    cache_key_algo: z.string().min(1),
-    dataset: z.string().min(1),
-    dataset_revision: z.string().min(1),
-    requested_turns: z.number().int().nonnegative().optional(),
-    cached_turns: z.number().int().nonnegative().optional(),
-    coverage: z.number().min(0).max(1).optional(),
-    storage: z.enum(["git-tracked", "archive"]),
-    archive_url: z.string().min(1).optional(),
-    archive_sha256: Sha256Schema.optional(),
-    built_at: z.string().min(1),
-    builder: z.string().min(1)
-  }).strict().nullable(),
+  extraction_cache: ExtractionCacheIdentitySchema.nullable(),
   runtime: z.object({
     node_version: z.string().min(1),
     platform: z.string().min(1),
@@ -128,8 +153,10 @@ export async function buildLongMemEvalRunProvenance(input: {
     readonly platform: string;
     readonly arch: string;
   };
+  readonly computeExecutedDistIdentity?: () => Promise<unknown>;
 }): Promise<LongMemEvalRunProvenance> {
   const recall = parseRecallRuntimeConfigFromEnv(input.env);
+  const executedDist = await resolveExecutedDistIdentity(input);
   return LongMemEvalRunProvenanceSchema.parse({
     schema_version: 1,
     code: {
@@ -141,7 +168,8 @@ export async function buildLongMemEvalRunProvenance(input: {
       worktree_state_sha256: readOptionalSha(
         input.env.ALAYA_BENCH_WORKTREE_STATE_SHA256,
         "ALAYA_BENCH_WORKTREE_STATE_SHA256"
-      )
+      ),
+      executed_dist: executedDist
     },
     extraction_cache: await readExtractionCacheIdentity(input.opts, input.env),
     runtime: await buildRuntimeIdentity(input),
@@ -162,6 +190,38 @@ export async function buildLongMemEvalRunProvenance(input: {
     },
     question_manifest: await readManifestIdentity(input.opts.questionManifest)
   });
+}
+
+async function resolveExecutedDistIdentity(
+  input: Parameters<typeof buildLongMemEvalRunProvenance>[0]
+): Promise<NonNullable<LongMemEvalRunProvenance["code"]["executed_dist"]>> {
+  const measured = ExecutedDistIdentitySchema.parse(
+    await (input.computeExecutedDistIdentity ?? computeExecutedDistIdentityFresh)()
+  );
+  assertExpectedExecutedDistIdentity(input.env, measured);
+  return measured;
+}
+
+function assertExpectedExecutedDistIdentity(
+  env: Readonly<Record<string, string | undefined>>,
+  measured: NonNullable<LongMemEvalRunProvenance["code"]["executed_dist"]>
+): void {
+  const sha = env.ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256;
+  const count = env.ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT;
+  if (sha === undefined && count === undefined) return;
+  if (sha === undefined || count === undefined) {
+    throw new Error("executed dist provenance requires both sha256 and file count");
+  }
+  if (sha !== measured.sha256 || Number(count) !== measured.file_count) {
+    throw new Error("executed dist environment identity does not match fresh closure");
+  }
+}
+
+async function computeExecutedDistIdentityFresh(): Promise<unknown> {
+  const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
+  const script = join(checkoutRoot, "apps/bench-runner/scripts/executed-dist-closure.mjs");
+  const { stdout } = await execFileAsync(process.execPath, [script, "--root", checkoutRoot]);
+  return JSON.parse(stdout);
 }
 
 async function buildRuntimeIdentity(
@@ -211,6 +271,20 @@ export function renderLongMemEvalRunProvenance(
   return `${JSON.stringify(provenance, null, 2)}\n`;
 }
 
+export function isLongMemEvalRunProvenanceGateEligible(
+  provenance: LongMemEvalRunProvenance
+): boolean {
+  const cache = provenance.extraction_cache;
+  return provenance.code.gate_sha256 !== null &&
+    provenance.code.worktree_state_sha256 !== null &&
+    provenance.code.executed_dist !== null && cache !== null &&
+    cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    cache.requested_turns !== undefined && cache.cached_turns !== undefined &&
+    cache.coverage === 1 && cache.cached_turns >= cache.requested_turns &&
+    (provenance.runtime.embedding_provider_kind !== "local_onnx" ||
+      provenance.runtime.onnx_model_artifact_sha256 !== undefined);
+}
+
 async function readManifestIdentity(
   manifestPath: string | undefined
 ): Promise<LongMemEvalRunProvenance["question_manifest"]> {
@@ -229,17 +303,17 @@ async function readExtractionCacheIdentity(
 ): Promise<LongMemEvalRunProvenance["extraction_cache"]> {
   const cacheRoot = opts.extractionCacheRoot ?? env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT;
   if (cacheRoot === undefined || cacheRoot.trim().length === 0) return null;
-  const manifest = readExtractionCacheManifest(cacheRoot);
-  if (manifest === undefined) return null;
-  const raw = await readFile(extractionCacheManifestPath(cacheRoot), "utf8");
-  return {
-    manifest_sha256: createHash("sha256").update(raw, "utf8").digest("hex"),
+  const identity = readExtractionCacheManifestIdentity(cacheRoot);
+  if (identity === undefined) return null;
+  const { manifest } = identity;
+  return ExtractionCacheIdentitySchema.parse({
+    manifest_sha256: identity.manifestSha256,
     ...manifest,
     provider_url: redactProvenanceUrl(manifest.provider_url),
     ...(manifest.archive_url === undefined
       ? {}
       : { archive_url: redactProvenanceUrl(manifest.archive_url) })
-  };
+  });
 }
 
 export function collectPairedEnvironment(

@@ -55,6 +55,7 @@ interface CollectSupplementaryDataParams {
   readonly coarseEntitySeedScores: Readonly<Record<string, number>>;
   readonly coarsePathExpansionScores: Readonly<Record<string, number>>;
   readonly coarsePathSuppressionScores: Readonly<Record<string, number>>;
+  readonly captureAnswerFeatures: boolean;
 }
 
 export async function collectSupplementaryData(
@@ -105,14 +106,16 @@ async function collectEvidenceAndGovernanceData(
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
   readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
 }>> {
-  const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
-    dependencies: params.dependencies,
-    warn: params.warn,
-    workspaceId: params.workspaceId,
-    candidates,
-    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
-  });
+  const evidenceGistsByMemoryId = params.captureAnswerFeatures
+    ? await collectEvidenceGistsByMemoryId({
+        dependencies: params.dependencies,
+        warn: params.warn,
+        workspaceId: params.workspaceId,
+        candidates,
+        coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
+        coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
+      })
+    : Object.freeze({});
   const governanceDerivations = await collectGovernancePathDerivations({
     dependencies: params.dependencies,
     warn: params.warn,
@@ -264,9 +267,9 @@ async function collectEvidenceGistsByMemoryId(params: {
       gistById
     );
   } catch (error) {
-    params.warn("evidence gist lookup for rerank failed", {
+    params.warn("evidence gist lookup for diagnostics failed", {
       workspace_id: params.workspaceId,
-      operation: "evidence_gist_lookup_for_rerank",
+      operation: "evidence_gist_lookup_for_diagnostics",
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });
@@ -302,7 +305,7 @@ function selectRelevantEvidenceRefs(
   entry: Readonly<MemoryEntry>,
   coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
 ): readonly string[] {
-  // invariant: per-memory evidence_refs capped before findByIds so a pathological memory cannot dominate the rerank loop's tokenizer/Set fan-out.
+  // Bound diagnostic enrichment independently of a memory's evidence cardinality.
   const hitRefs = entry.evidence_refs.filter(
     (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
   );

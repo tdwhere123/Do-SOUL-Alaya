@@ -29,36 +29,34 @@ export interface LongMemEvalRecallCycleResult {
   readonly reportUsageStats: LongMemEvalReportSimulationStats;
 }
 
-export async function runLongMemEvalRecallCycle(input: {
+interface LongMemEvalRecallCycleInput {
   readonly daemon: Pick<BenchDaemonHandle, "recall" | "reportContextUsage">;
   readonly query: string;
   readonly recallOptions: BenchRecallOptions;
+  readonly referenceTime: string;
   readonly simulateReport: BenchSimulateReportMode;
   readonly goldMemoryIds: readonly string[];
   readonly turnIndex: number;
   readonly questionText: string;
-}): Promise<LongMemEvalRecallCycleResult> {
-  if (input.simulateReport === "none") {
-    const recallStart = monotonicNowNs();
-    const scoredRecallResult = await input.daemon.recall(
-      input.query,
-      input.recallOptions
-    );
-    return {
-      scoredRecallResult,
-      scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
-      reportUsageStats: {
-        reportsAttempted: 0,
-        reportsUsed: 0,
-        reportsSkipped: 0,
-        usedObjectCount: 0
-      }
-    };
-  }
+}
 
+export async function runLongMemEvalRecallCycle(
+  input: LongMemEvalRecallCycleInput
+): Promise<LongMemEvalRecallCycleResult> {
+  const recallOptions = { ...input.recallOptions, referenceTime: input.referenceTime };
+  if (input.simulateReport === "none") {
+    return runUnreportedRecallCycle(input, recallOptions);
+  }
+  return runReportedRecallCycle(input, recallOptions);
+}
+
+async function runReportedRecallCycle(
+  input: LongMemEvalRecallCycleInput,
+  recallOptions: BenchRecallOptions
+): Promise<LongMemEvalRecallCycleResult> {
   const preReportRecallResult = await input.daemon.recall(
     input.query,
-    input.recallOptions
+    recallOptions
   );
   const reportUsage = buildLongMemEvalReportContextUsage({
     simulateReport: input.simulateReport,
@@ -75,12 +73,30 @@ export async function runLongMemEvalRecallCycle(input: {
   const recallStart = monotonicNowNs();
   const scoredRecallResult = await input.daemon.recall(
     input.query,
-    input.recallOptions
+    recallOptions
   );
   return {
     scoredRecallResult,
     scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
     reportUsageStats: reportUsage.stats
+  };
+}
+
+async function runUnreportedRecallCycle(
+  input: LongMemEvalRecallCycleInput,
+  recallOptions: BenchRecallOptions
+): Promise<LongMemEvalRecallCycleResult> {
+  const recallStart = monotonicNowNs();
+  const scoredRecallResult = await input.daemon.recall(input.query, recallOptions);
+  return {
+    scoredRecallResult,
+    scoredRecallLatencyMs: monotonicElapsedMs(recallStart),
+    reportUsageStats: {
+      reportsAttempted: 0,
+      reportsUsed: 0,
+      reportsSkipped: 0,
+      usedObjectCount: 0
+    }
   };
 }
 

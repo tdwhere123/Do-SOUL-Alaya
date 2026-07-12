@@ -8,15 +8,7 @@ import {
 } from "../../config/index.js";
 
 const RECALL_ENV_FIXTURE = Object.freeze({
-  ALAYA_RECALL_COMPOSE: "on",
   ALAYA_RECALL_EMBED_POOL_RESCORE: "off",
-  ALAYA_RECALL_S4_COVERAGE: "s4",
-  ALAYA_RECALL_COVERAGE_SELECTOR: "selector",
-  ALAYA_RECALL_COVERAGE_POOL_K: "17",
-  ALAYA_RECALL_COVERAGE_TARGET_K: "5",
-  ALAYA_RECALL_COVERAGE_MIN_SCORE_RATIO: "0.41",
-  ALAYA_RECALL_SESSION_COVERAGE_BAND: "band",
-  ALAYA_RECALL_FACET_OVERLAP: "overlap",
   ALAYA_RECALL_FACET_SLICE: "slice",
   ALAYA_RECALL_CONF_RHO_PATH: "0.11",
   ALAYA_RECALL_CONF_RHO_EVIDENCE: "0.22",
@@ -26,21 +18,13 @@ const RECALL_ENV_FIXTURE = Object.freeze({
   ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
   ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "true",
   ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
-  ALAYA_RECALL_STRUCTURAL_RESERVE: "structural",
-  ALAYA_RECALL_FUSION_RANK_FLOOR: "floor",
   ALAYA_RECALL_PROJECTIONS: "off",
-  ALAYA_RECALL_TEMPORAL_WINDOW: "yes",
   ALAYA_RECALL_LEXICAL_DECORR: "decorr",
-  ALAYA_RECALL_DELIVER_FUSED_ORDER: "fused",
-  ALAYA_RECALL_DELIVERY_WINDOW: "23",
   ALAYA_RECALL_INTENT_V2: "yes",
   ALAYA_RECALL_QUERY_HYDE_JSON: "{\"hyde\":true}",
-  ALAYA_RECALL_QUERY_FACETS_JSON: "{\"facet\":true}",
   ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms",
-  ALAYA_RECALL_NOW_ISO: "2026-07-10T00:00:00.000Z",
   ALAYA_RECALL_SESSION_ROUTE: "yes",
-  ALAYA_RECALL_SEMANTIC_CUSTOM: "semantic-custom",
-  ALAYA_RECALL_COMPOSE_CUSTOM: "compose-custom"
+  ALAYA_RECALL_SEMANTIC_CUSTOM: "semantic-custom"
 });
 
 const EXPECTED_RECALL_ENV = Object.freeze({
@@ -48,10 +32,27 @@ const EXPECTED_RECALL_ENV = Object.freeze({
   ALAYA_RECALL_EMBED_POOL_RESCORE: "off",
   ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
   ALAYA_RECALL_PROJECTIONS: "off",
-  ALAYA_RECALL_TEMPORAL_WINDOW: "on",
   ALAYA_RECALL_INTENT_V2: "on",
   ALAYA_RECALL_SESSION_ROUTE: "on"
 });
+
+const RETIRED_DELIVERY_ENV_NAMES = Object.freeze([
+  "ALAYA_RECALL_COMPOSE",
+  "ALAYA_RECALL_COMPOSE_CUSTOM",
+  "ALAYA_RECALL_S4_COVERAGE",
+  "ALAYA_RECALL_COVERAGE_SELECTOR",
+  "ALAYA_RECALL_COVERAGE_POOL_K",
+  "ALAYA_RECALL_COVERAGE_TARGET_K",
+  "ALAYA_RECALL_COVERAGE_MIN_SCORE_RATIO",
+  "ALAYA_RECALL_SESSION_COVERAGE_BAND",
+  "ALAYA_RECALL_STRUCTURAL_RESERVE",
+  "ALAYA_RECALL_FUSION_RANK_FLOOR",
+  "ALAYA_RECALL_DELIVER_FUSED_ORDER",
+  "ALAYA_RECALL_DELIVERY_WINDOW",
+  "ALAYA_RECALL_NOW_ISO",
+  "ALAYA_RECALL_TEMPORAL_WINDOW",
+  "ALAYA_RECALL_FACET_OVERLAP"
+]);
 
 describe("installCoreConfigFromProcessEnv", () => {
   afterEach(() => {
@@ -61,23 +62,6 @@ describe("installCoreConfigFromProcessEnv", () => {
   it("defaults embed pool rescore to enabled", () => {
     installCoreConfigFromProcessEnv({});
     expect(getCoreConfig().recall.embedPoolRescore).toBe(true);
-  });
-
-  it("parses compose flag from env", () => {
-    installCoreConfigFromProcessEnv({ ALAYA_RECALL_COMPOSE: "on" });
-    expect(getCoreConfig().recall.compose).toBe(true);
-  });
-
-  it("merges config file env when process env is unset", () => {
-    const configEnv = new Map<string, string>([["ALAYA_RECALL_COMPOSE", "1"]]);
-    installCoreConfigFromProcessEnv({}, configEnv);
-    expect(getCoreConfig().recall.compose).toBe(true);
-  });
-
-  it("process env wins over config file env", () => {
-    const configEnv = new Map<string, string>([["ALAYA_RECALL_COMPOSE", "1"]]);
-    installCoreConfigFromProcessEnv({ ALAYA_RECALL_COMPOSE: "off" }, configEnv);
-    expect(getCoreConfig().recall.compose).toBe(false);
   });
 
   it("round-trips every supported recall env lookup without name or value drift", () => {
@@ -99,6 +83,16 @@ describe("installCoreConfigFromProcessEnv", () => {
       expect(recallEnvRaw(name), name).toBe(expected);
     }
     expect(recallEnvRaw("ALAYA_RECALL_UNKNOWN")).toBeUndefined();
+  });
+
+  it("does not install retired post-fusion delivery controls", () => {
+    installCoreConfigFromProcessEnv(Object.fromEntries(
+      RETIRED_DELIVERY_ENV_NAMES.map((name) => [name, "on"])
+    ));
+
+    for (const name of RETIRED_DELIVERY_ENV_NAMES) {
+      expect(recallEnvRaw(name), name).toBeUndefined();
+    }
   });
 });
 

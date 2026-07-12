@@ -45,14 +45,14 @@ function createFailDowngrader(
   thresholds: ThresholdConfig
 ): (verdict: Verdict) => Verdict {
   // @anchor sample-too-small: see thresholds.min_sample_for_ratio_diff.
-  // Whenever either side of the diff has evaluated_count below the
+  // Whenever either side of the diff has a recall denominator below the
   // guard, ratio-based + latency + tier-share aggregates are variance
   // noise (e.g. smoke 1-shard vs full 2-shard latency, or current=smoke
   // vs previous=full giving spurious deltas). Downgrade FAIL to WARN
   // universally. Fixture flips remain FAIL; pass/fail per row is not
   // sample-size sensitive.
   const undersampled =
-    Math.min(previous.evaluated_count, current.evaluated_count) <
+    Math.min(recallDenominator(previous), recallDenominator(current)) <
     thresholds.min_sample_for_ratio_diff;
   return (verdict: Verdict): Verdict =>
     undersampled && verdict === "fail" ? "warn" : verdict;
@@ -101,17 +101,25 @@ function pushCiAwareRatioDelta(
   downgradeFail: (verdict: Verdict) => Verdict
 ): void {
   // invariant: ratio-KPI regression thresholds widen to the 95% Wilson CI
-  // half-width when evaluated_count < 100. A noise-level delta no longer
-  // trips a fail/warn alarm on small-N runs, while N >= 100 keeps the raw
+  // half-width for small recall denominators. A noise-level delta no longer
+  // trips a fail/warn alarm on small-N runs, while larger N keeps the raw
   // 2pp warn / 5pp fail floor.
   pushRatioDelta(
     deltas,
     key,
     currentValue,
     previousValue,
-    ciAwareBand(band, Math.round(currentValue * current.evaluated_count), current.evaluated_count),
+    ciAwareBand(
+      band,
+      Math.round(currentValue * recallDenominator(current)),
+      recallDenominator(current)
+    ),
     downgradeFail
   );
+}
+
+function recallDenominator(payload: KpiPayload): number {
+  return payload.answerable_evaluated_count ?? payload.evaluated_count;
 }
 
 function pushTokenEconomyDelta(

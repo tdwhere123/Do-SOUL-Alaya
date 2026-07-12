@@ -36,6 +36,7 @@ import {
   isRawPayloadBoundError,
   projectCompileRawPayload
 } from "./seeding/compile-raw-payload.js";
+import { attachCompileSourceGrounding } from "./seeding/source-grounding.js";
 
 export {
   accrueAnswersWithCoRelevance,
@@ -139,19 +140,14 @@ function buildSignalRawPayload(
     storedContent: safeDistilledFact,
     turnSeedIndex: signalInput.turnSeedIndex
   });
-  if (signalInput.productionRawPayload === undefined) {
-    return {
-      excerpt: safeExcerpt,
-      distilled_fact: safeDistilledFact,
-      extraction_provider: signalInput.extractionProvider,
-      ...tokenEconomy
-    };
-  }
-  return {
-    ...stripFirstClassMemoryRefsFromRawPayload(signalInput.productionRawPayload),
+  const proposedPayload = signalInput.productionRawPayload === undefined
+    ? { excerpt: safeExcerpt, distilled_fact: safeDistilledFact }
+    : stripFirstClassMemoryRefsFromRawPayload(signalInput.productionRawPayload);
+  return attachCompileSourceGrounding({
+    ...proposedPayload,
     extraction_provider: signalInput.extractionProvider,
     ...tokenEconomy
-  };
+  }, signalInput, safeExcerpt);
 }
 
 export async function proposeMemory(
@@ -272,7 +268,7 @@ function buildCompileSignal(
     evidence_refs: [signalInput.evidenceRef],
     ...buildSourceMemoryRefsField(signalInput.sourceMemoryRefs),
     raw_payload: rawPayload,
-    created_at: new Date().toISOString()
+    created_at: signalInput.sourceObservedAt ?? new Date().toISOString()
   };
   try {
     return normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse(candidate));

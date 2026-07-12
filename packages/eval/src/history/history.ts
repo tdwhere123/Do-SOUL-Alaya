@@ -1,13 +1,8 @@
 import {
   access,
-  mkdir,
-  mkdtemp,
   readFile,
   readdir,
-  rename,
-  rm,
-  stat,
-  writeFile
+  stat
 } from "node:fs/promises";
 import path from "node:path";
 import { ZodError } from "zod";
@@ -31,12 +26,27 @@ import {
   REPORT_FILENAME,
   latestPointerFilename,
   latestProviderPointerFilename,
-  validateSidecarFilename,
-  writeLegacyBaselinePointer,
-  writePointer,
   type HistoryPointerKind
 } from "./history-files.js";
 import { liveGatesSidecarAllowsLatestPassing } from "./history-live-gates.js";
+import {
+  HISTORY_STAGING_PREFIX,
+  HistoryEntryCommittedError,
+  isHistoryEntryCommittedError,
+  reconcileHistoryPointers,
+  writeHistoryEntry,
+  type HistoryFileSidecar,
+  type HistorySidecar,
+  type WriteEntryOptions
+} from "./history-entry-write.js";
+
+export {
+  HistoryEntryCommittedError,
+  isHistoryEntryCommittedError,
+  type HistoryFileSidecar,
+  type HistorySidecar,
+  type WriteEntryOptions
+};
 
 export type { HistoryPointerKind } from "./history-files.js";
 
@@ -50,15 +60,6 @@ export interface HistoryEntry {
   readonly reportPath: string;
   readonly findingsPath: string;
   readonly sidecarPaths: Readonly<Record<string, string>>;
-}
-
-export interface HistorySidecar {
-  readonly filename: string;
-  readonly contents: string;
-}
-
-export interface WriteEntryOptions {
-  readonly sidecars?: readonly HistorySidecar[];
 }
 
 export function entrySlug(
@@ -122,82 +123,28 @@ export async function writeEntry(
   findingsMarkdown: string | null,
   options: WriteEntryOptions = {}
 ): Promise<HistoryEntry> {
-  if (slug.includes("/") || slug.includes("\\") || slug.includes("..") || slug.length === 0) {
-    throw new Error(`invalid slug: '${slug}' contains a path separator or '..' token`);
-  }
-  if (!SLUG_PATTERN.test(slug)) {
-    throw new Error(
-      `invalid slug: '${slug}' must match <YYYY-MM-DDTHHMMSSZ>-<sha7+> (use entrySlug helper)`
-    );
-  }
-  const benchRoot = path.join(layout.historyRoot, benchName);
-  const sidecars = options.sidecars ?? [];
-  for (const sidecar of sidecars) {
-    validateSidecarFilename(sidecar.filename);
-  }
-  await mkdir(benchRoot, { recursive: true });
-  const entryRoot = path.join(benchRoot, slug);
-  try {
-    await access(entryRoot);
-    throw new Error(
-      `entry slug '${slug}' already exists at ${entryRoot}; refusing to overwrite (audit trail)`
-    );
-  } catch (err) {
-    if (
-      err !== null &&
-      typeof err === "object" &&
-      "code" in err &&
-      (err as { code: string }).code === "ENOENT"
-    ) {
-      // ENOENT means the slug is free; any other error is fatal.
-    } else {
-      throw err;
-    }
-  }
-  const stagingRoot = await mkdtemp(path.join(benchRoot, `${STAGING_PREFIX}${slug}-`));
-  try {
-    const stagingKpi = path.join(stagingRoot, KPI_FILENAME);
-    const stagingReport = path.join(stagingRoot, REPORT_FILENAME);
-    const stagingFindings = path.join(stagingRoot, FINDINGS_FILENAME);
-    await writeFile(stagingKpi, JSON.stringify(payload, null, 2) + "\n", "utf8");
-    await writeFile(stagingReport, reportMarkdown, "utf8");
-    if (findingsMarkdown !== null) {
-      await writeFile(stagingFindings, findingsMarkdown, "utf8");
-    }
-    for (const sidecar of sidecars) {
-      await writeFile(path.join(stagingRoot, sidecar.filename), sidecar.contents, "utf8");
-    }
-    await rename(stagingRoot, entryRoot);
-  } catch (err) {
-    await rm(stagingRoot, { recursive: true, force: true });
-    throw err;
-  }
+  return writeHistoryEntry({
+    layout, benchName, slug, payload, report: reportMarkdown,
+    findings: findingsMarkdown, options,
+    entryAllowsPassing: () => entryAllowsLatestPassing(layout, benchName, slug, payload)
+  });
+}
 
-  const kpiPath = path.join(entryRoot, KPI_FILENAME);
-  const reportPath = path.join(entryRoot, REPORT_FILENAME);
-  const findingsPath = path.join(entryRoot, FINDINGS_FILENAME);
-  const sidecarPaths = Object.fromEntries(
-    sidecars.map((sidecar) => [sidecar.filename, path.join(entryRoot, sidecar.filename)])
-  );
-
-  await writePointer(benchRoot, LATEST_RUN_FILENAME, slug, kpiPath);
-  await writePointer(benchRoot, latestProviderPointerFilename("run", payload.embedding_provider), slug, kpiPath);
-
-  if (
-    findingsMarkdown === null &&
-    (await entryAllowsLatestPassing(layout, benchName, slug, payload))
-  ) {
-    await writePointer(benchRoot, LATEST_PASSING_FILENAME, slug, kpiPath);
-    await writePointer(
-      benchRoot,
-      latestProviderPointerFilename("passing", payload.embedding_provider),
-      slug,
-      kpiPath
-    );
-    await writeLegacyBaselinePointer(benchRoot, payload.embedding_provider, slug, kpiPath);
-  }
-
-  return { slug, kpiPath, reportPath, findingsPath, sidecarPaths };
+export async function reconcileHistoryEntryPointers(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  entry: HistoryEntry,
+  payload: KpiPayload,
+  findings: string | null,
+  pointerWriter?: WriteEntryOptions["pointerWriter"]
+): Promise<void> {
+  return reconcileHistoryPointers({
+    layout, benchName, entry, payload, findings,
+    entryAllowsPassing: () => entryAllowsLatestPassing(
+      layout, benchName, entry.slug, payload
+    ),
+    options: { pointerWriter }
+  });
 }
 
 // @anchor write-entry-tmp-filter: staging directories created by
@@ -206,7 +153,7 @@ export async function writeEntry(
 // whose name does not match the canonical SLUG_PATTERN; that is a
 // silent skip by design (a future archive may carry sidecar dirs like
 // `evidence/` or `datasets/` at the bench root that are not slugs).
-const STAGING_PREFIX = ".tmp-";
+const STAGING_PREFIX = HISTORY_STAGING_PREFIX;
 
 export async function listEntries(
   layout: HistoryLayout,

@@ -31,7 +31,7 @@ it.each([
     );
   });
 
-it("keeps strong lexical delivery-window hits in the top five", async () => {
+it("keeps lexical evidence in fusion without overriding fused order", async () => {
     const sourceSeed = memory({
       object_id: "source-seed",
       content: "local adjacency seed",
@@ -77,14 +77,16 @@ it("keeps strong lexical delivery-window hits in the top five", async () => {
       policyOverride: policy
     });
 
-    const finalRank = result.diagnostics?.candidates.find(
+    const diagnostic = result.diagnostics?.candidates.find(
       (item) => item.object_id === "strong-lexical-gold"
-    )?.final_rank;
-    expect(finalRank).not.toBeNull();
-    expect(finalRank).toBeLessThanOrEqual(5);
+    );
+    expect(diagnostic?.per_stream_rank.lexical_fts).not.toBeNull();
+    expect(diagnostic?.fused_rank_contribution_per_stream.lexical_fts).toBeGreaterThan(0);
+    expect(diagnostic?.final_rank).toBe(diagnostic?.fused_rank);
+    expect(diagnostic?.rank_after_lexical_priority).toBe(diagnostic?.fused_rank);
   });
 
-it("does not demote strong lexical hits behind later non-source candidates", async () => {
+it("preserves fused order across legacy delivery stages", async () => {
     const sourceSeed = memory({
       object_id: "ordering-source-seed",
       content: "ordering source seed",
@@ -144,7 +146,12 @@ it("does not demote strong lexical hits behind later non-source candidates", asy
     expect(sourceOnly?.per_stream_rank.lexical_fts).toBeNull();
     expect(sourceOnly?.fused_rank).toBeLessThan(gold?.fused_rank ?? Number.MAX_SAFE_INTEGER);
     expect(gold?.fused_rank).toBeLessThan(peer?.fused_rank ?? Number.MAX_SAFE_INTEGER);
-    expect(gold?.final_rank).toBeLessThan(sourceOnly?.final_rank ?? Number.MAX_SAFE_INTEGER);
+    expect(sourceOnly?.final_rank).toBe(sourceOnly?.fused_rank);
+    expect(gold?.final_rank).toBe(gold?.fused_rank);
+    expect(peer?.final_rank).toBe(peer?.fused_rank);
+    expect(gold?.rank_after_feature_rerank).toBe(gold?.fused_rank);
+    expect(gold?.rank_after_lexical_priority).toBe(gold?.fused_rank);
+    expect(gold?.rank_after_structural_reserve).toBe(gold?.fused_rank);
     expect(gold?.final_rank).toBeLessThan(peer?.final_rank ?? Number.MAX_SAFE_INTEGER);
   });
 

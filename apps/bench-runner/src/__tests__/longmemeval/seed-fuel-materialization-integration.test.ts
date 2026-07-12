@@ -24,6 +24,10 @@ import {
 } from "../../longmemeval/compile-seed.js";
 import { BENCH_DAEMON_DB_FILENAME } from "../../longmemeval/snapshot.js";
 import { signalsEnvelope } from "./compile-seed-fixture.js";
+import {
+  TEST_EXTRACTION_PROVIDER_URL,
+  writeExtractionCacheTestManifest
+} from "./extraction-cache-test-fixture.js";
 import { removeTempDirectory } from "../support/temp-cleanup.js";
 
 const WS = "seed-fuel-ws";
@@ -201,6 +205,7 @@ describe("materialization fuel inventory integration", () => {
 
   it("protects materialization fuel inventory: cache replay serves extraction without new LLM calls before materialization", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "seed-fuel-cache-"));
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate = {
       extract: vi.fn(async () => ({
         rawJson: signalsEnvelope([
@@ -211,7 +216,11 @@ describe("materialization fuel inventory integration", () => {
     const warmStats = freshStats();
     const warmExtractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats: warmStats
     });
@@ -221,7 +230,11 @@ describe("materialization fuel inventory integration", () => {
     const replayStats = freshStats();
     const replayExtractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats: replayStats
     });

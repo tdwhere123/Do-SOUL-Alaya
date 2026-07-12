@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import { OFFICIAL_API_SYSTEM_PROMPT, OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -27,6 +27,10 @@ import {
   makeSeed,
   signalsEnvelope
 } from "./compile-seed-fixture.js";
+import {
+  TEST_EXTRACTION_PROVIDER_URL,
+  writeExtractionCacheTestManifest
+} from "./extraction-cache-test-fixture.js";
 
 describe("userPrompt shape contract — cache key turn_content dependency", () => {
   let cacheRoot: string;
@@ -83,6 +87,11 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
   });
 
   it("the cache hits for the same turn across a different run_id, end to end", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
     // Full-chain check: the real provider builds the userPrompt, the real
     // caching extractor derives the key. A second compile() of the SAME
     // turn under a DIFFERENT wall-clock run_id must be served from the
@@ -93,7 +102,11 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
     };
     const cachingExtractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot
     });
     const provider = new OfficialApiGardenProvider({
@@ -220,6 +233,12 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
   beforeEach(async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "compile-seed-diag-cache-"));
     diagnosticDir = await mkdtemp(join(tmpdir(), "compile-seed-diag-"));
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "gpt-test-mini",
+      providerUrl: "https://example.test/v1",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
   });
 
   afterEach(async () => {
@@ -231,6 +250,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
     const config: CompileSeedExtractionConfig = {
       providerUrl: "https://example.test/v1",
       model: "gpt-test-mini",
+      requestProfile: "provider-default-v1",
       apiKey: "test-key"
     };
     const daemon: CompileSeedDaemon = {
@@ -248,6 +268,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
     const runner = createCompileSeedRunner({
       config,
       cacheRoot,
+      allowLiveExtraction: true,
       diagnosticDir,
       extractorFactory: () => ({
         extract: async () => {
@@ -305,6 +326,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
     const config: CompileSeedExtractionConfig = {
       providerUrl: "https://example.test/v1",
       model: "gpt-test-mini",
+      requestProfile: "provider-default-v1",
       apiKey: "test-key"
     };
     const daemon: CompileSeedDaemon = {
@@ -322,6 +344,7 @@ describe("compile-seed diagnostic dump (Phase A.1 instrument)", () => {
     const runner = createCompileSeedRunner({
       config,
       cacheRoot,
+      allowLiveExtraction: true,
       diagnosticDir: null,
       extractorFactory: () => ({
         extract: async () => {

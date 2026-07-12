@@ -55,8 +55,45 @@ describe("seedLongMemEvalQuestion formation order", () => {
       formationMember("memory-a2", "session-a", 0, 1, 0),
       formationMember("memory-b0", "session-b", 1, 0, 0)
     ]);
+    expect(seedTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        evidenceRefBase: "q-formation-order-s0-r0",
+        sourceObservedAt: "2025-12-01T00:00:00.000Z"
+      })
+    );
   });
+
+  it.each([
+    [["2025-12-01"], /timeline arrays must have equal lengths/u],
+    [["not-a-date", "2025-12-02"], /invalid LongMemEval timestamp/u]
+  ])("fails before seeding an invalid historical timeline", async (haystackDates, error) => {
+    const question = buildQuestion({ haystack_dates: haystackDates });
+    const seedTurn = vi.fn();
+
+    await expect(seedLongMemEvalQuestion({
+      workspace: {} as BenchWorkspaceHandle,
+      question,
+      seedRunner: { seedTurn, stats: {} } as never
+    })).rejects.toThrow(error);
+    expect(seedTurn).not.toHaveBeenCalled();
+  });
+
 });
+
+function buildQuestion(overrides: Partial<LongMemEvalQuestion>): LongMemEvalQuestion {
+  return {
+    question_id: "q-invalid-timeline",
+    question_type: "single_session",
+    question: "What happened?",
+    answer: "An event.",
+    question_date: "2026-01-01",
+    haystack_session_ids: ["session-a", "session-b"],
+    haystack_dates: ["2025-12-01", "2025-12-02"],
+    haystack_sessions: [[{ role: "user", content: "First." }], [{ role: "user", content: "Second." }]],
+    answer_session_ids: ["session-a"],
+    ...overrides
+  };
+}
 
 function buildSeed(memoryId: string) {
   return {

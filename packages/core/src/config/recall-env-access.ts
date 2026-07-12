@@ -16,29 +16,13 @@ export function recallEnvRaw(name: string): string | undefined {
   if (lookup.matched) return lookup.value;
   lookup = readRecallDeliveryEnv(recall, name);
   if (lookup.matched) return lookup.value;
-  return recall.coarseFilterSemanticFlags[name] ?? recall.activationAssemblyFlags[name];
+  return recall.coarseFilterSemanticFlags[name];
 }
 
 function readRecallSelectionEnv(recall: RecallConfig, name: string): RecallEnvLookup {
   switch (name) {
-    case "ALAYA_RECALL_COMPOSE":
-      return matched(recall.compose ? "on" : undefined);
     case "ALAYA_RECALL_EMBED_POOL_RESCORE":
       return matched(recall.embedPoolRescore ? "on" : "off");
-    case "ALAYA_RECALL_S4_COVERAGE":
-      return matched(recall.s4Coverage);
-    case "ALAYA_RECALL_COVERAGE_SELECTOR":
-      return matched(recall.coverageSelector);
-    case "ALAYA_RECALL_COVERAGE_POOL_K":
-      return matched(stringify(recall.coveragePoolK));
-    case "ALAYA_RECALL_COVERAGE_TARGET_K":
-      return matched(stringify(recall.coverageTargetK));
-    case "ALAYA_RECALL_COVERAGE_MIN_SCORE_RATIO":
-      return matched(stringify(recall.coverageMinScoreRatio));
-    case "ALAYA_RECALL_SESSION_COVERAGE_BAND":
-      return matched(recall.sessionCoverageBand);
-    case "ALAYA_RECALL_FACET_OVERLAP":
-      return matched(recall.facetOverlap);
     case "ALAYA_RECALL_FACET_SLICE":
       return matched(recall.facetSlice);
     default:
@@ -64,10 +48,6 @@ function readRecallFloodEnv(recall: RecallConfig, name: string): RecallEnvLookup
       return matched(recall.confSliceCompatibility ? "on" : undefined);
     case "ALAYA_RECALL_PATH_EMB_MODULATION":
       return matched(recall.pathEmbModulation);
-    case "ALAYA_RECALL_STRUCTURAL_RESERVE":
-      return matched(recall.structuralReserve);
-    case "ALAYA_RECALL_FUSION_RANK_FLOOR":
-      return matched(recall.fusionRankFloor);
     default:
       return RECALL_ENV_NOT_MATCHED;
   }
@@ -77,24 +57,14 @@ function readRecallDeliveryEnv(recall: RecallConfig, name: string): RecallEnvLoo
   switch (name) {
     case "ALAYA_RECALL_PROJECTIONS":
       return matched(recall.projectionsEnabled ? "on" : "off");
-    case "ALAYA_RECALL_TEMPORAL_WINDOW":
-      return matched(recall.temporalWindowEnabled ? "on" : undefined);
     case "ALAYA_RECALL_LEXICAL_DECORR":
       return matched(recall.lexicalDecorr);
-    case "ALAYA_RECALL_DELIVER_FUSED_ORDER":
-      return matched(recall.deliverFusedOrder);
-    case "ALAYA_RECALL_DELIVERY_WINDOW":
-      return matched(stringify(recall.deliveryWindow));
     case "ALAYA_RECALL_INTENT_V2":
       return matched(recall.intentV2 ? "on" : undefined);
     case "ALAYA_RECALL_QUERY_HYDE_JSON":
       return matched(recall.queryHydeJson);
-    case "ALAYA_RECALL_QUERY_FACETS_JSON":
-      return matched(recall.queryFacetsJson);
     case "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS":
       return matched(recall.extraSynonymClusters);
-    case "ALAYA_RECALL_NOW_ISO":
-      return matched(recall.nowIso);
     case "ALAYA_RECALL_SESSION_ROUTE":
       return matched(recall.sessionRoute ? "on" : undefined);
     default:
@@ -117,10 +87,6 @@ export function recallEnvFlagEnabled(name: string): boolean {
 
 export function recallProjectionScoringEnabled(): boolean {
   return getCoreConfig().recall.projectionsEnabled;
-}
-
-export function recallTemporalWindowEnabled(): boolean {
-  return getCoreConfig().recall.temporalWindowEnabled;
 }
 
 export function recallIntentV2Enabled(): boolean {

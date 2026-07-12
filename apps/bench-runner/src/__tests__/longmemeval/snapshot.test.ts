@@ -1,5 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
+  RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   assertSnapshotVersionMatch,
   checkpointAndCopyBenchDb,
   readSchemaMigrationVersion,
@@ -19,6 +20,7 @@ import {
   writeSnapshotSidecar,
   type LongMemEvalSnapshotManifest
 } from "../../longmemeval/snapshot.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../longmemeval/extraction-cache-manifest.js";
 
 // @anchor recall-eval-snapshot-contract: checkpoint+copy, restore-to-working-
 // copy, version binding, and sidecar/manifest round-trip. Uses a freshly
@@ -41,7 +43,7 @@ function manifestFor(
   overrides: Partial<LongMemEvalSnapshotManifest> = {}
 ): LongMemEvalSnapshotManifest {
   return {
-    schema_version: 1,
+    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
     variant: "longmemeval_oracle",
     question_count: 1,
     recall_pipeline_version: RECALL_PIPELINE_VERSION,
@@ -125,12 +127,13 @@ describe("snapshot plumbing", () => {
     const manifest = manifestFor(snapshotDbPath);
     writeSnapshotManifest(snapshotDbPath, manifest);
     writeSnapshotSidecar(snapshotDbPath, {
-      schema_version: 1,
+      schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
       variant: "longmemeval_oracle",
       questions: [
         {
           questionId: "q001",
           question: "what?",
+          questionDate: "2026-01-02T00:00:00.000Z",
           answerSessionIds: ["s-001"],
           workspaceId: "ws-001",
           runId: "run-001",
@@ -168,6 +171,80 @@ describe("snapshot plumbing", () => {
     expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
       /attributed snapshot manifest.*incomplete/u
     );
+  });
+
+  it("rejects v2 snapshot extraction provenance without model_family", () => {
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+      extraction_provenance: {
+        manifest_sha256: "a".repeat(64),
+        schema_version: 2,
+        extraction_model: "fixture-model",
+        provider_url: `sha256:${"b".repeat(64)}`,
+        system_prompt_sha256: "c".repeat(64),
+        cache_key_algo: "fixture-v1",
+        dataset: "longmemeval-s",
+        dataset_revision: "d".repeat(64)
+      } as LongMemEvalSnapshotManifest["extraction_provenance"]
+    }));
+    expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
+      /extraction provenance.*model_family/u
+    );
+  });
+
+  it("requires a closed request_profile on v3 snapshot extraction provenance", () => {
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    const common = {
+      manifest_sha256: "a".repeat(64),
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      extraction_model: "fixture-model",
+      model_family: "fixture-family",
+      provider_url: `sha256:${"b".repeat(64)}`,
+      system_prompt_sha256: "c".repeat(64),
+      cache_key_algo: "fixture-v1",
+      dataset: "longmemeval-s",
+      dataset_revision: "d".repeat(64)
+    };
+    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+      extraction_provenance: common as LongMemEvalSnapshotManifest["extraction_provenance"]
+    }));
+    expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
+      /extraction provenance.*request_profile/u
+    );
+
+    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+      extraction_provenance: {
+        ...common,
+        request_profile: "deepseek-v4-nonthinking-v1"
+      } as LongMemEvalSnapshotManifest["extraction_provenance"]
+    }));
+    expect(readSnapshotManifest(snapshotDbPath).extraction_provenance).toMatchObject({
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      request_profile: "deepseek-v4-nonthinking-v1"
+    });
+  });
+
+  it.each([
+    [undefined, /missing questionDate/u],
+    ["2026-02-31", /invalid questionDate/u],
+    ["2026/01/02 (Fri) 00:00", /normalized ISO questionDate/u]
+  ])("rejects a snapshot sidecar with a non-canonical question date", (questionDate, error) => {
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    writeFileSync(snapshotSidecarPath(snapshotDbPath), JSON.stringify({
+      schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+      variant: "longmemeval_oracle",
+      questions: [{
+        questionId: "q001",
+        question: "what?",
+        ...(questionDate === undefined ? {} : { questionDate }),
+        answerSessionIds: [],
+        workspaceId: "ws-001",
+        runId: "run-001",
+        sidecar: []
+      }]
+    }));
+
+    expect(() => readSnapshotSidecar(snapshotDbPath)).toThrow(error);
   });
 
   it("passes the version-binding guard when pipeline + migration match", () => {

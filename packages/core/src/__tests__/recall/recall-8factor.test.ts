@@ -160,7 +160,7 @@ it("records valid per-domain activation weight overrides in score factors", asyn
     });
   });
 
-it("applies explicit additive scoring weight overrides from RecallPolicy", async () => {
+it("keeps additive weight overrides diagnostic while fusion owns public relevance", async () => {
     const { dependencies } = createDependencies([
       createMemoryEntry({
         object_id: "memory-1",
@@ -196,13 +196,10 @@ it("applies explicit additive scoring weight overrides from RecallPolicy", async
       policyOverride: override
     });
 
-    expect(overrideResult.candidates[0]?.relevance_score).toBeGreaterThan(
-      baseResult.candidates[0]?.relevance_score ?? 0
-    );
-    expect(
-      (overrideResult.candidates[0]?.relevance_score ?? 0) -
-        (baseResult.candidates[0]?.relevance_score ?? 0)
-    ).toBeGreaterThan(0.08);
+    expect(overrideResult.candidates[0]?.score_factors?.weighted_confidence ?? 0)
+      .toBeGreaterThan(baseResult.candidates[0]?.score_factors?.weighted_confidence ?? 0);
+    expect(overrideResult.candidates[0]?.relevance_score)
+      .toBe(baseResult.candidates[0]?.relevance_score);
   });
 
 it("dynamically transfers base prior weight to strong query evidence", async () => {
@@ -455,7 +452,7 @@ it("keeps weak conflicted contradiction losers below false-confident recall conf
     expect(loser?.relevance_score ?? 1).toBeLessThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
   });
 
-it("does not cap strong lexical evidence below useful recall confidence", async () => {
+it("keeps strong lexical evidence diagnostic while fusion owns public relevance", async () => {
     const { dependencies, searchByKeyword } = createDependencies([
       createMemoryEntry({
         object_id: "strong-evidence",
@@ -477,6 +474,8 @@ it("does not cap strong lexical evidence below useful recall confidence", async 
     const strong = result.candidates.find((candidate) => candidate.object_id === "strong-evidence");
 
     expect(strong?.score_factors?.content_relevance).toBeCloseTo(1);
-    expect(strong?.relevance_score ?? 0).toBeGreaterThan(FALSE_CONFIDENT_ACCEPTANCE_THRESHOLD);
+    expect(strong?.relevance_score ?? 0).toBeGreaterThan(0);
+    expect(strong?.score_factors?.relevance).toBe(strong?.relevance_score);
+    expect(strong?.selection_reason).toContain("Final fusion evidence score");
   });
 });

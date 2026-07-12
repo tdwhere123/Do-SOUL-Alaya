@@ -11,6 +11,7 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import { runCli } from "../../cli/index.js";
 
 import {
+  withEligibleMeasurementContract,
   makeQualityMetrics,
   makeSeedExtractionPath,
   makeShardDiagnostics,
@@ -69,14 +70,14 @@ describe("merge-longmemeval release gates", () => {
     await writeHistoryEntry(
       historyRoot,
       "2026-05-14T100001Z-abc1234-policy-chat",
-      makeShardKpi({
+      withEligibleMeasurementContract(makeShardKpi({
         alaya_commit: "abc1234",
         policy_shape: "chat",
         kpi: {
           ...makeShardKpi().kpi,
           r_at_5: 0.4
         }
-      })
+      }))
     );
     await writeFile(
       path.join(historyRoot, "public", "latest-baseline.json"),

@@ -1,28 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   parseQueryTimeWindow,
   scoreTemporalEventTime,
-  scoreTemporalQueryWindow,
-  temporalQueryWindowEnabled
+  scoreTemporalQueryWindow
 } from "../../recall/scoring/temporal-fusion-scoring.js";
+import { scoreTemporalFusion } from "../../recall/delivery/fusion-delivery-scoring-streams.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
-
-describe("temporalQueryWindowEnabled", () => {
-  afterEach(() => {
-    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
-  });
-
-  it("defaults off and reads truthy flag spellings", () => {
-    expect(temporalQueryWindowEnabled()).toBe(false);
-    for (const value of ["1", "true", "on", "yes", "ON"]) {
-      process.env.ALAYA_RECALL_TEMPORAL_WINDOW = value;
-      expect(temporalQueryWindowEnabled()).toBe(true);
-    }
-    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "off";
-    expect(temporalQueryWindowEnabled()).toBe(false);
-  });
-});
 
 describe("parseQueryTimeWindow", () => {
   it("parses an ISO month term into a calendar-month window", () => {
@@ -30,6 +14,21 @@ describe("parseQueryTimeWindow", () => {
     expect(window).toEqual({
       startMs: Date.UTC(2023, 4, 1),
       endMs: Date.UTC(2023, 5, 1) - 1
+    });
+  });
+
+  it("parses natural month and year expressions through the shared calendar contract", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what changed in March 2024?"))).toEqual({
+      startMs: Date.UTC(2024, 2, 1),
+      endMs: Date.UTC(2024, 3, 1) - 1
+    });
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what changed in 2024?"))).toEqual({
+      startMs: Date.UTC(2024, 0, 1),
+      endMs: Date.UTC(2025, 0, 1) - 1
+    });
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("2025年发生了什么?"))).toEqual({
+      startMs: Date.UTC(2025, 0, 1),
+      endMs: Date.UTC(2026, 0, 1) - 1
     });
   });
 
@@ -47,6 +46,29 @@ describe("parseQueryTimeWindow", () => {
       startMs: Date.UTC(2023, 4, 1),
       endMs: Date.UTC(2023, 5, 1) - 1
     });
+  });
+
+  it("parses only unambiguous slash dates", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what changed on 2023/05/12?"))).toEqual({
+      startMs: Date.UTC(2023, 4, 12),
+      endMs: Date.UTC(2023, 4, 12) + 86_400_000 - 1
+    });
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what changed on 2023/5/2?"))).toEqual({
+      startMs: Date.UTC(2023, 4, 2),
+      endMs: Date.UTC(2023, 4, 2) + 86_400_000 - 1
+    });
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what changed on 05/12/2023?"))).toBeNull();
+  });
+
+  it("rejects impossible calendar dates instead of normalizing them", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what changed on 2026-02-31?"))).toBeNull();
+  });
+
+  it("does not turn an unparseable date term into ordinary recency", () => {
+    const probes = compileRecallQueryProbes("what changed on 05/12/2023?");
+    const recent = createMemoryEntry({ event_time_start: "2026-07-11T00:00:00.000Z" });
+    expect(scoreTemporalEventTime(recent, "2026-07-12T00:00:00.000Z")).toBeGreaterThan(0);
+    expect(scoreTemporalFusion(recent, probes, "2026-07-12T00:00:00.000Z")).toBe(0);
   });
 
   it("returns null when date_terms carry only now-relative phrases", () => {
@@ -119,21 +141,13 @@ describe("parseQueryTimeWindow anchored relative resolution", () => {
   });
 });
 
-describe("parseQueryTimeWindow widened terms (temporal-window flag on)", () => {
+describe("parseQueryTimeWindow relative product terms", () => {
   // 2023-05-17 is a Wednesday; its Monday-anchored week starts 2023-05-15.
   const anchor = "2023-05-17T08:30:00.000Z";
 
-  beforeEach(() => {
-    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
-  });
-  afterEach(() => {
-    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
-  });
-
-  it("does not capture widened terms while the flag is off", () => {
-    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
-    expect(parseQueryTimeWindow(compileRecallQueryProbes("what shipped last summer"), anchor)).toBeNull();
-    expect(parseQueryTimeWindow(compileRecallQueryProbes("the outage 2 weeks ago"), anchor)).toBeNull();
+  it("captures relative terms without an environment gate", () => {
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what shipped last summer"), anchor)).not.toBeNull();
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("the outage 2 weeks ago"), anchor)).not.toBeNull();
   });
 
   it("resolves last summer to the prior year's June–August window", () => {

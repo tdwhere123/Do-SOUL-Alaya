@@ -14,6 +14,8 @@ import {
   timeConcernPattern,
   type TemporalProjection
 } from "./time-concern-projection.js";
+import { normalizeSourceObservedAt } from "./temporal/observed-projection.js";
+import { buildSourceVerificationText } from "./grounding/source-assertion.js";
 
 interface PatternDefinition {
   readonly pattern: RegExp;
@@ -171,6 +173,7 @@ interface CompileSignalState {
   readonly normalizedTurnContent: string;
   readonly context: GardenCompileContext;
   readonly createdAt: string;
+  readonly temporalAnchor: string;
   readonly seenMatches: Set<string>;
   readonly signals: CandidateMemorySignal[];
 }
@@ -187,10 +190,15 @@ function createCompileState(
   normalizedTurnContent: string,
   context: GardenCompileContext
 ): CompileSignalState {
+  const normalizedObservedAt = normalizeSourceObservedAt(context.source_observed_at);
+  const fallbackNow = new Date().toISOString();
   return {
     normalizedTurnContent,
     context,
-    createdAt: new Date().toISOString(),
+    createdAt: normalizedObservedAt ?? fallbackNow,
+    temporalAnchor: normalizedObservedAt === undefined
+      ? fallbackNow
+      : context.source_observed_at?.trim() ?? fallbackNow,
     seenMatches: new Set<string>(),
     signals: []
   };
@@ -212,7 +220,7 @@ function appendPatternSignals(state: CompileSignalState): void {
 }
 
 function appendTimeConcernSignals(state: CompileSignalState): void {
-  for (const timeConcern of extractTimeConcerns(state.normalizedTurnContent, state.createdAt)) {
+  for (const timeConcern of extractTimeConcerns(state.normalizedTurnContent, state.temporalAnchor)) {
     const dedupeKey =
       `potential_claim:time_concern:${timeConcern.window_digest}:` +
       `${timeConcern.excerpt.toLowerCase()}`;
@@ -247,7 +255,7 @@ function appendPatternSignal(
       pattern_category: definition.pattern_category,
       ...(preferenceProfile === null ? {} : { preference_profile: preferenceProfile }),
       turn_content_excerpt: buildTurnExcerpt(state.normalizedTurnContent, matchedText),
-      full_turn_content: clampFullTurnContent(state.normalizedTurnContent)
+      full_turn_content: buildSourceVerificationText(state.normalizedTurnContent, matchedText)
     }
   });
 }
@@ -286,7 +294,10 @@ function appendTimeConcernSignal(
         }
       ],
       turn_content_excerpt: buildTurnExcerpt(state.normalizedTurnContent, timeConcern.excerpt),
-      full_turn_content: clampFullTurnContent(state.normalizedTurnContent)
+      full_turn_content: buildSourceVerificationText(
+        state.normalizedTurnContent,
+        timeConcern.matched_text
+      )
     }
   });
 }
@@ -340,12 +351,6 @@ function buildTurnExcerpt(turnContent: string, matchedText: string): string {
   const start = Math.max(0, index - 40);
   const end = Math.min(turnContent.length, index + matchedText.length + 40);
   return turnContent.slice(start, end).trim();
-}
-
-const MAX_FULL_TURN_CONTENT_CHARS = 2_048;
-
-function clampFullTurnContent(turnContent: string): string {
-  return turnContent.slice(0, MAX_FULL_TURN_CONTENT_CHARS);
 }
 
 function extractTimeConcerns(turnContent: string, anchorIso: string): readonly TimeConcernMatch[] {

@@ -423,7 +423,12 @@ export async function runExtractionFillCommand(opts: ParsedFlags): Promise<numbe
     process.stdout.write(
       `Done. requested_turns=${result.requestedTurns} ` +
         `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
-        `failures=${result.failures} coverage=${pct(result.coverage)}\n`
+        `failures=${result.failures} retry_successes=${result.retrySuccesses} ` +
+        `rate_limit_retries=${result.rateLimitRetries} ` +
+        `terminal_max_retries=${result.terminalRetryClassifications.failure_max_retries} ` +
+        `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +
+        `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
+        `coverage=${pct(result.coverage)}\n`
     );
     return result.failures > 0 ? 1 : 0;
   } catch (err) {

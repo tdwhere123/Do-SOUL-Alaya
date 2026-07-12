@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { QualityMetricsSchema } from "./kpi-quality-schema.js";
+import { validateMeasurementDenominatorContract } from "./kpi-measurement-contract.js";
+import { BenchmarkMeasurementAttributionSchema } from "./kpi-measurement-schema.js";
+export {
+  BenchmarkMeasurementAttributionSchema,
+  type BenchmarkMeasurementAttribution
+} from "./kpi-measurement-schema.js";
 import {
   EdgeProposalAutoAcceptSchema,
   EdgeProposalRateSchema,
@@ -96,6 +102,9 @@ const PerScenarioRowSchema = z.object({
   id: z.string().min(1),
   version: z.number().int().positive(),
   hit_at_5: z.boolean(),
+  // Additive migration field. Missing means legacy denominator semantics;
+  // consumers must never infer scorable from hit_at_5.
+  scorable: z.boolean().optional(),
   tier: z.enum(["hot", "warm", "cold"]),
   latency_ms: z.number().nonnegative().optional()
 });
@@ -419,6 +428,7 @@ export const KpiPayloadSchema = z
     simulate_report: BenchSimulateReportModeSchema.default("none"),
     recall_weight_overrides: RecallWeightOverridesSummarySchema.optional(),
     recall_eval_attribution: RecallEvalAttributionSchema.optional(),
+    measurement_attribution: BenchmarkMeasurementAttributionSchema.optional(),
     seed_policy: SeedPolicySchema.optional(),
     dataset: z.object({
       name: z.string(),
@@ -435,6 +445,9 @@ export const KpiPayloadSchema = z
     // refinement: evaluated_count <= sample_size.
     sample_size: z.number().int().nonnegative(),
     evaluated_count: z.number().int().nonnegative(),
+    // New producers populate the answerable/scorable metric denominator.
+    // Optional preserves reads of historical artifacts.
+    answerable_evaluated_count: z.number().int().nonnegative().optional(),
     harness_mode: HarnessMode,
     kpi: KpiCoreSchema,
     diff_vs_previous: DiffVsPreviousSchema.nullable().optional()
@@ -442,5 +455,14 @@ export const KpiPayloadSchema = z
   .refine((payload) => payload.evaluated_count <= payload.sample_size, {
     message: "evaluated_count must be <= sample_size",
     path: ["evaluated_count"]
-  });
+  })
+  .refine(
+    (payload) => payload.answerable_evaluated_count === undefined ||
+      payload.answerable_evaluated_count <= payload.evaluated_count,
+    {
+      message: "answerable_evaluated_count must be <= evaluated_count",
+      path: ["answerable_evaluated_count"]
+    }
+  )
+  .superRefine(validateMeasurementDenominatorContract);
 export type KpiPayload = z.infer<typeof KpiPayloadSchema>;

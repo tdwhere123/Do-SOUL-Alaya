@@ -13,6 +13,7 @@ import { runCli } from "../../cli/index.js";
 import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
+  withEligibleMeasurementContract,
   makeShardDiagnostics,
   makeShardKpi,
   writeHistoryEntry,
@@ -112,7 +113,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
     await writeHistoryEntry(
       historyRoot,
       "2026-05-14T100001Z-abc1234-policy-chat-report-mixed",
-      makeShardKpi({
+      withEligibleMeasurementContract(makeShardKpi({
         alaya_commit: "abc1234",
         policy_shape: "chat",
         simulate_report: "mixed",
@@ -120,7 +121,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
           ...makeShardKpi().kpi,
           r_at_5: 0.4
         }
-      })
+      }))
     );
     await writeFile(
       path.join(historyRoot, "public", "latest-baseline.json"),
@@ -185,7 +186,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       provider_state_summary: { total: number; provider_not_requested: number };
       question_count: number;
       full_diagnostics_artifact_path: string;
-      questions?: unknown[];
+      questions?: Array<{ question_id: string }>;
     };
     expect(merged.simulate_report).toBe("mixed");
     expect(report).toContain("| r_at_5 | 0.4000 | 0.8000 | +0.4000 |");
@@ -198,10 +199,12 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       recalls: 0,
       supports: 1
     });
-    expect(diagnostics.provider_state_summary.total).toBe(0);
-    expect(diagnostics.provider_state_summary.provider_not_requested).toBe(0);
-    expect(diagnostics.question_count).toBe(0);
-    expect(diagnostics.questions).toBeUndefined();
+    expect(diagnostics.provider_state_summary.total).toBe(5);
+    expect(diagnostics.provider_state_summary.provider_not_requested).toBe(5);
+    expect(diagnostics.question_count).toBe(5);
+    expect(diagnostics.questions?.map((question) => question.question_id)).toEqual(
+      rows.map((row) => row.id)
+    );
     expect(diagnostics.full_diagnostics_artifact_path).not.toContain(
       "docs/bench-history"
     );

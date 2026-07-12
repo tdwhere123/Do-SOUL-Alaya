@@ -304,13 +304,9 @@ describe("LocalHeuristics", () => {
   });
 });
 
-describe("LocalHeuristics widened event-time extraction (ALAYA_RECALL_EVENT_TIME_EXTRACT)", () => {
+describe("LocalHeuristics event-time extraction", () => {
   // 2026-03-18 is a Wednesday; its Monday-anchored week starts 2026-03-16.
   const anchorIso = "2026-03-18T10:20:30.000Z";
-
-  afterEach(() => {
-    delete process.env.ALAYA_RECALL_EVENT_TIME_EXTRACT;
-  });
 
   async function timeConcernFor(text: string) {
     vi.useFakeTimers();
@@ -319,12 +315,25 @@ describe("LocalHeuristics widened event-time extraction (ALAYA_RECALL_EVENT_TIME
     return signals.find((signal) => signal.domain_tags.includes("time_concern"));
   }
 
-  it("does not write event time for widened terms while the flag is off", async () => {
+  it("writes event time for relative terms without environment configuration", async () => {
     const signal = await timeConcernFor("We planned the migration last week.");
-    expect(signal!.raw_payload).not.toHaveProperty("temporal_projection");
-    expect(signal!.raw_payload.time_concern).toEqual({
-      window_digest: "last_week",
-      matched_text: "last week"
+    expect(signal!.raw_payload.temporal_projection).toMatchObject({
+      event_time_start: "2026-03-09T00:00:00.000Z",
+      event_time_end: "2026-03-15T23:59:59.999Z",
+      time_source: "relative_resolved"
+    });
+  });
+
+  it("preserves the source observation offset for relative windows", async () => {
+    const signals = await new LocalHeuristics().compile("We planned the migration today.", {
+      ...createContext(),
+      source_observed_at: "2024-06-15T00:30:00+08:00"
+    });
+    const signal = signals.find((candidate) => candidate.domain_tags.includes("time_concern"));
+    expect(signal?.raw_payload.temporal_projection).toMatchObject({
+      event_time_start: "2024-06-14T16:00:00.000Z",
+      event_time_end: "2024-06-15T15:59:59.999Z",
+      time_source: "relative_resolved"
     });
   });
 
@@ -385,6 +394,13 @@ describe("LocalHeuristics widened event-time extraction (ALAYA_RECALL_EVENT_TIME
       time_source: "explicit",
       projection_schema_version: "1"
     }],
+    ["English month → explicit calendar-month range", "We shipped the feature in March 2024.", {
+      event_time_start: "2024-03-01T00:00:00.000Z",
+      event_time_end: "2024-03-31T23:59:59.999Z",
+      time_precision: "month",
+      time_source: "explicit",
+      projection_schema_version: "1"
+    }],
     ["CJK month → explicit calendar-month range", "我们在2026年5月发布。", {
       event_time_start: "2026-05-01T00:00:00.000Z",
       event_time_end: "2026-05-31T23:59:59.999Z",
@@ -392,8 +408,7 @@ describe("LocalHeuristics widened event-time extraction (ALAYA_RECALL_EVENT_TIME
       time_source: "explicit",
       projection_schema_version: "1"
     }]
-  ])("resolves %s when the flag is on", async (_label, text, expected) => {
-    process.env.ALAYA_RECALL_EVENT_TIME_EXTRACT = "on";
+  ])("resolves %s by default", async (_label, text, expected) => {
     const signal = await timeConcernFor(text);
     expect(signal!.raw_payload.temporal_projection).toEqual(expected);
   });

@@ -1,6 +1,8 @@
 import { basename, resolve } from "node:path";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../../shared/version.js";
-import { readExtractionCacheManifest } from "../extraction-cache-manifest.js";
+import {
+  readExtractionCacheManifestIdentity
+} from "../extraction-cache-manifest.js";
 import type { LongMemEvalVariant } from "../dataset.js";
 import { redactProvenanceUrl, type LongMemEvalRunProvenance } from "../provenance/run.js";
 import {
@@ -48,17 +50,32 @@ export async function writeRecallEvalSnapshotArtifacts(
 }
 
 function buildExtractionProvenance(root: string): SnapshotExtractionProvenance | null {
-  const manifest = readExtractionCacheManifest(root);
-  if (manifest === undefined) return null;
-  return {
+  const identity = readExtractionCacheManifestIdentity(root);
+  if (identity === undefined) return null;
+  const { manifest } = identity;
+  const common = {
+    manifest_sha256: identity.manifestSha256,
     extraction_model: manifest.extraction_model,
     provider_url: redactProvenanceUrl(manifest.provider_url),
     system_prompt_sha256: manifest.system_prompt_sha256,
+    cache_key_algo: manifest.cache_key_algo,
     dataset: manifest.dataset,
     dataset_revision: manifest.dataset_revision,
     ...(manifest.coverage === undefined ? {} : { coverage: manifest.coverage }),
     ...(manifest.cached_turns === undefined ? {} : { cached_turns: manifest.cached_turns }),
     ...(manifest.requested_turns === undefined ? {} : { requested_turns: manifest.requested_turns })
+  };
+  if (manifest.schema_version === 1) {
+    return { ...common, schema_version: 1 };
+  }
+  if (manifest.schema_version === 2) {
+    return { ...common, schema_version: 2, model_family: manifest.model_family };
+  }
+  return {
+    ...common,
+    schema_version: manifest.schema_version,
+    model_family: manifest.model_family,
+    request_profile: manifest.request_profile
   };
 }
 

@@ -10,9 +10,8 @@ import {
 } from "../../history/history.js";
 import type { KpiPayload } from "../../schema/kpi-schema.js";
 import {
-  buildPayload,
-  cleanSeedExtractionPath,
-  passingQualityMetrics
+  buildFullLongMemEvalPayload,
+  buildPayload
 } from "./history-fixture.js";
 
 describe("history archive filtered latest pointers", () => {
@@ -225,26 +224,9 @@ describe("history archive filtered latest pointers", () => {
     const failingSlug = "2026-05-14T110000Z-bbb2222-policy-chat";
     const nextPassingSlug = "2026-05-14T120000Z-ccc3333-policy-chat";
     const basePayload: KpiPayload = {
-      ...buildPayload("aaa1111"),
-      bench_name: "public",
-      split: "longmemeval-s",
-      embedding_provider: "none",
+      ...buildFullLongMemEvalPayload("public", "aaa1111", 0.91),
       policy_shape: "chat",
       simulate_report: "none",
-      sample_size: 500,
-      evaluated_count: 500,
-      dataset: {
-        name: "longmemeval_s",
-        size: 500,
-        source: "fixture"
-      },
-      kpi: {
-        ...buildPayload("aaa1111").kpi,
-        r_at_5: 0.91,
-        latency_ms_p95: 110,
-        quality_metrics: passingQualityMetrics(),
-        seed_extraction_path: cleanSeedExtractionPath()
-      }
     };
 
     await writeEntry(layout, "public", passingSlug, basePayload, "report", null);
@@ -301,5 +283,35 @@ describe("history archive filtered latest pointers", () => {
         pointerKind: "passing"
       }))?.alaya_commit
     ).toBe("ccc3333");
+  });
+
+  it.each([
+    ["missing denominator", (payload: KpiPayload): KpiPayload => ({
+      ...payload,
+      answerable_evaluated_count: undefined
+    })],
+    ["missing rows", (payload: KpiPayload): KpiPayload => ({
+      ...payload,
+      kpi: { ...payload.kpi, per_scenario: [] }
+    })]
+  ])("does not promote eligible attribution with %s", async (_label, forge) => {
+    const payload = forge({
+      ...buildFullLongMemEvalPayload("public", "abc1234", 0.91),
+      policy_shape: "chat"
+    });
+    await writeEntry(
+      layout,
+      "public",
+      "2026-05-14T100000Z-abc1234-policy-chat",
+      payload,
+      "report",
+      null
+    );
+
+    expect(await readLatest(layout, "public", {
+      split: "longmemeval-s",
+      policyShape: "chat",
+      pointerKind: "passing"
+    })).toBeNull();
   });
 });

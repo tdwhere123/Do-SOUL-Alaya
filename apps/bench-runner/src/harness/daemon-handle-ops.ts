@@ -144,6 +144,8 @@ function createBenchRecallOperation(
       runId: input.activeContext.runId,
       strategy: "chat",
       policyOverride: policy,
+      diagnosticCapture: "answer_features",
+      ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
       activeConstraintsCap: null
     });
     const results = collectBenchRecallResults(recallResult, policy, opts.maxResults);

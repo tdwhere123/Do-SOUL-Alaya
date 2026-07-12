@@ -183,6 +183,42 @@ describe("diffKpis", () => {
     expect(result.worst_verdict).toBe("fail");
   });
 
+  it("uses the answerable denominator for the undersampled downgrade", () => {
+    const previous = {
+      ...buildPayload({ latency_ms_p95: 100 }),
+      evaluated_count: 50,
+      answerable_evaluated_count: 49
+    };
+    const current = {
+      ...buildPayload({ latency_ms_p95: 180 }),
+      evaluated_count: 50,
+      answerable_evaluated_count: 49
+    };
+
+    const latency = diffKpis(current, previous).deltas.find(
+      (delta) => delta.key === "latency_ms_p95"
+    );
+    expect(latency?.verdict).toBe("warn");
+  });
+
+  it("uses the answerable denominator for recall confidence bands", () => {
+    const previous = {
+      ...buildPayload({ r_at_5: 0.95 }),
+      evaluated_count: 100,
+      answerable_evaluated_count: 94
+    };
+    const current = {
+      ...buildPayload({ r_at_5: 0.9 }),
+      evaluated_count: 100,
+      answerable_evaluated_count: 94
+    };
+
+    const rAt5 = diffKpis(current, previous).deltas.find(
+      (delta) => delta.key === "r_at_5"
+    );
+    expect(rAt5?.verdict).toBe("ok");
+  });
+
   it("does not fail public LongMemEval diffs on score-derived hot-share movement", () => {
     const previous: KpiPayload = {
       ...buildPayload({

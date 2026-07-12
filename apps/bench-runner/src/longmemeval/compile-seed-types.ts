@@ -6,6 +6,7 @@ import type {
   SeededMemoryResult,
   SeededSynthesisResult
 } from "../harness/daemon.js";
+import type { ExtractionRequestProfile } from "./extraction-cache-manifest.js";
 
 /**
  * The injectable `SignalExtractor` shape consumed by
@@ -42,6 +43,11 @@ export type BenchRetryClassification =
   | "failure_timeout"
   | "failure_aborted";
 
+export type BenchTerminalRetryClassification = Exclude<
+  BenchRetryClassification,
+  "success_first_try" | "success_after_retry"
+>;
+
 // invariant: BenchSignalExtractorMeta is structurally assignable to the
 // production SignalExtractorMeta in pi-mono-extractor.ts so the bench's
 // caching extractor can drop into OfficialApiGardenProvider.extractor without
@@ -54,13 +60,18 @@ export interface BenchSignalExtractorMeta {
   readonly recoveryKind: "none" | "markdown_strip" | "trailing_strip" | "balanced_close";
   readonly retryCount: number;
   readonly retryClassification: BenchRetryClassification;
+  readonly rateLimitRetries: number;
 }
 
 export interface CompileSeedExtractionConfig {
   /** OpenAI-compatible chat-completions base URL (…/v1). */
   readonly providerUrl: string;
-  /** Chat model id. */
+  /** Exact chat model id sent to the provider and used by the raw cache key. */
   readonly model: string;
+  /** Comparison-only model family; never participates in the raw cache key. */
+  readonly modelFamily?: string;
+  /** Explicit request semantics; participates in cache and shard identity. */
+  readonly requestProfile: ExtractionRequestProfile;
   /** Resolved API key, or null when no garden credentials are configured. */
   readonly apiKey: string | null;
 }
@@ -112,6 +123,14 @@ export interface CompileSeedExtractionStats {
   liveExtractionFailures: number;
   /** Official extraction fallbacks caused by a cached raw JSON failure. */
   cachedExtractionFailures: number;
+  /** Live extractions that succeeded only after at least one retry. */
+  retrySuccesses?: number;
+  /** Provider attempts that returned HTTP 429. */
+  rateLimitRetries?: number;
+  /** Terminal live transport outcomes, grouped without payload data. */
+  terminalRetryClassifications?: Partial<
+    Record<BenchTerminalRetryClassification, number>
+  >;
   /** Total candidate signals seeded across all turns. */
   factsProduced: number;
   /**
@@ -266,6 +285,7 @@ export interface CompileSeedTurnInput {
   readonly workspaceId: string;
   readonly runId: string;
   readonly surfaceId?: string | null;
+  readonly sourceObservedAt?: string;
   // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
   readonly sourceMemoryRefs?: readonly string[];
 }

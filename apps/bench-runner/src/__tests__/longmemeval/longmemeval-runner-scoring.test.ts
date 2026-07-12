@@ -280,6 +280,31 @@ describe("LongMemEval runner", () => {
     expect(metrics.miss_distribution).toMatchObject({ no_gold: 1 });
   });
 
+  it("rejects an answerable hit marker without evaluator gold identity", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-empty-gold-hit-marker",
+      goldMemoryIds: [],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "decoy", rank: 1, relevance_score: 0.9 }],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+
+    expect(row.miss_classification).toBe("no_gold");
+    expect(row.cohort_ledger).toMatchObject({
+      retrieval_status: "not_applicable",
+      evaluation_issue_reason: "empty_gold_identity",
+      final_verdict: "evaluation_unscorable"
+    });
+    const metrics = buildLongMemEvalQualityMetrics([row]);
+    expect(metrics.no_gold_count).toBe(1);
+    expect(metrics.candidate_absent_count).toBe(0);
+  });
+
   it("redacts arbitrary provider degradation text from diagnostics sidecars", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-secret-provider-text",

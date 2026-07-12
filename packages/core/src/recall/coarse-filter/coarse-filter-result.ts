@@ -118,7 +118,6 @@ function buildSupplementedCandidate(
     ])),
     structuralScore: draft.structuralScore,
     pathExpansionSources: Object.freeze([...draft.pathExpansionSources]),
-    ...(draft.reachedViaEarnedCoRecalledFanin ? { reachedViaEarnedCoRecalledFanin: true } : {}),
     ...(params.sourceChannel === undefined ? {} : { sourceChannel: params.sourceChannel }),
     ...(params.scoreMultiplier === undefined ? {} : { scoreMultiplier: params.scoreMultiplier })
   });

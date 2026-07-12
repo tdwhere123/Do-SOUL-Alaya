@@ -188,6 +188,7 @@ describe("LongMemEval runner", () => {
       daemon: { recall, reportContextUsage },
       query: "Which memory was used?",
       recallOptions: { maxResults: 10, conflictAwareness: true },
+      referenceTime: "2026-03-04T05:06:07.000Z",
       simulateReport: "mixed",
       goldMemoryIds: ["gold"],
       turnIndex: 7,
@@ -195,6 +196,11 @@ describe("LongMemEval runner", () => {
     });
 
     expect(recall).toHaveBeenCalledTimes(2);
+    expect(recall).toHaveBeenNthCalledWith(1, "Which memory was used?", {
+      maxResults: 10,
+      conflictAwareness: true,
+      referenceTime: "2026-03-04T05:06:07.000Z"
+    });
     expect(reportContextUsage).toHaveBeenCalledTimes(1);
     expect(reportContextUsage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -221,6 +227,7 @@ describe("LongMemEval runner", () => {
       daemon: { recall, reportContextUsage },
       query: "Which memory was used?",
       recallOptions: { maxResults: 10, conflictAwareness: true },
+      referenceTime: "2026-03-04T05:06:07.000Z",
       simulateReport: "none",
       goldMemoryIds: ["gold"],
       turnIndex: 8,
@@ -248,6 +255,7 @@ describe("LongMemEval runner", () => {
         daemon: { recall, reportContextUsage },
         query: "Which memory was used?",
         recallOptions: { maxResults: 10, conflictAwareness: true },
+        referenceTime: "2026-03-04T05:06:07.000Z",
         simulateReport,
         goldMemoryIds: ["gold"],
         turnIndex: 9,

@@ -148,9 +148,10 @@ function createOfficialApiProvider(input: {
       delegate:
         input.options?.extractorFactory?.(input.config) ??
         createGardenHttpExtractor(input.config),
-      model: input.config.model,
+      config: input.config,
       cacheRoot: input.cacheRoot,
-      stats: input.stats
+      stats: input.stats,
+      allowLiveExtraction: input.options?.allowLiveExtraction === true
     }),
     requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
     diagnosticDir: input.diagnosticDir

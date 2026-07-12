@@ -1,16 +1,10 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import {
-  buildRecallCandidateDedupeKey,
-  compareMemoryEntries
-} from "../runtime/recall-service-helpers.js";
-import {
-  resolveFusionContribution as resolveAdaptiveFusionContribution,
-  resolveRrfFusionWeights,
-  type ResolvedRecallFusionWeights
+  resolveRrfFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
 import {
   buildConformantAxisContext,
-  compareConformantAxisRa,
   type ConformantAxisContext
 } from "../scoring/conformant-fusion-scoring.js";
 import {
@@ -25,8 +19,14 @@ import {
 import type {
   RecallFusionCandidateInput,
   FusedRecallCandidateInput,
+  KeyedRecallFusionCandidate,
+  RecallFusionCandidateStreamSnapshot,
   PreliminaryFusionCandidate
 } from "./fusion-delivery-scoring-candidate.js";
+import {
+  buildFusionCandidateStreamSnapshots,
+  keyRecallFusionCandidates
+} from "./fusion-delivery-scoring-snapshot.js";
 import { scoreRecallFusionStream } from "./fusion-delivery-scoring-streams.js";
 import type {
   RecallFusionBreakdown,
@@ -39,7 +39,6 @@ import type {
 
 export {
   activeFusionStreams,
-  facetOverlapEnabled,
   RECALL_FUSION_STREAMS
 } from "./fusion-delivery-streams.js";
 
@@ -57,23 +56,27 @@ export function buildRecallFusionDetails(params: Readonly<{
     streams: activeFusionStreams(),
     baseWeights: RECALL_FUSION_DEFAULT_WEIGHTS
   });
-  const ranksByStream = buildFusionRanksByStream(params.candidates, params.supplementaryData, params.nowIso);
+  const keyedCandidates = keyRecallFusionCandidates(params.candidates);
+  const ranksByStream = buildFusionRanksByStream(keyedCandidates, params.supplementaryData, params.nowIso);
+  const streamSnapshots = buildFusionCandidateStreamSnapshots({
+    candidates: keyedCandidates,
+    ranksByStream,
+    resolved,
+    supplementaryData: params.supplementaryData
+  });
   const axisContext = buildConformantAxisContext({
-    candidates: params.candidates.map((candidate) => ({
-      candidateKey: buildRecallCandidateDedupeKey(candidate),
-      candidate
-    })),
+    candidates: streamSnapshots,
     ranksByStream,
     resolved,
     supplementaryData: params.supplementaryData,
     nowIso: params.nowIso
   });
-  const prelim = buildPreliminaryFusionCandidates(params, resolved, ranksByStream, axisContext);
+  const prelim = buildPreliminaryFusionCandidates(streamSnapshots, params.supplementaryData, axisContext);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
   return finalizeRecallFusionDetails(prelim, fusedRankByCandidateKey, params.supplementaryData);
 }
 
-// Path suppression only demotes fused_score and recomputes rank order.
+// invariant: path suppression changes the fused scalar before rank is derived.
 export function applyPathSuppressionToFusionScores(
   fusionByCandidateKey: ReadonlyMap<string, RecallFusionBreakdown>,
   suppressionScores: Readonly<Record<string, number>>
@@ -98,7 +101,7 @@ export function applyPathSuppressionToFusionScores(
     if (delta !== 0) {
       return delta;
     }
-    return left.breakdown.fused_rank - right.breakdown.fused_rank;
+    return left.breakdown.candidate_key.localeCompare(right.breakdown.candidate_key);
   });
   const suppressedRankByKey = new Map(
     ranked.map((entry, index) => [entry.breakdown.candidate_key, index + 1] as const)
@@ -119,7 +122,7 @@ export function applyPathSuppressionToFusionScores(
 
 
 function buildFusionRanksByStream(
-  candidates: readonly RecallFusionCandidateInput[],
+  candidates: readonly KeyedRecallFusionCandidate[],
   supplementaryData: RecallSupplementaryData,
   nowIso: string
 ): ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>> {
@@ -134,14 +137,14 @@ function buildFusionRanksByStream(
 }
 
 function buildFusionRanksForStream(
-  candidates: readonly RecallFusionCandidateInput[],
+  candidates: readonly KeyedRecallFusionCandidate[],
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
   nowIso: string
 ): ReadonlyMap<string, number> {
   const scored = candidates
-    .map((candidate) => Object.freeze({
-      candidateKey: buildRecallCandidateDedupeKey(candidate),
+    .map(({ candidateKey, candidate }) => Object.freeze({
+      candidateKey,
       entry: candidate.entry,
       score: scoreRecallFusionStream(candidate, stream, supplementaryData, nowIso)
     }))
@@ -155,37 +158,25 @@ function buildFusionRanksForStream(
 }
 
 function buildPreliminaryFusionCandidates(
-  params: Readonly<{
-    readonly candidates: readonly RecallFusionCandidateInput[];
-    readonly supplementaryData: RecallSupplementaryData;
-  }>,
-  resolved: ResolvedRecallFusionWeights,
-  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
+  candidates: readonly RecallFusionCandidateStreamSnapshot[],
+  supplementaryData: RecallSupplementaryData,
   axisContext: ConformantAxisContext
 ): readonly PreliminaryFusionCandidate[] {
-  return params.candidates.map((candidate) =>
-    buildPreliminaryFusionCandidate(candidate, params.supplementaryData, resolved, ranksByStream, axisContext)
+  return candidates.map((candidate) =>
+    buildPreliminaryFusionCandidate(candidate, supplementaryData, axisContext)
   );
 }
 
 function buildPreliminaryFusionCandidate(
-  candidate: RecallFusionCandidateInput,
+  snapshot: RecallFusionCandidateStreamSnapshot,
   supplementaryData: RecallSupplementaryData,
-  resolved: ResolvedRecallFusionWeights,
-  ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>,
   axisContext: ConformantAxisContext
 ): PreliminaryFusionCandidate {
-  const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  const perStreamRank = buildEmptyFusionStreamRanks();
-  const contributions = buildEmptyFusionStreamContributions();
+  const { candidateKey, candidate, perStreamRank, contributions } = snapshot;
   const fused = scoreIntegratedFusionCandidate({
     candidate,
     supplementaryData,
-    resolved,
-    ranksByStream,
     candidateKey,
-    perStreamRank,
-    contributions,
     axisContext
   });
   const axisRank = axisContext?.axisRankByKey.get(candidateKey);
@@ -197,8 +188,8 @@ function buildPreliminaryFusionCandidate(
     originPlane: candidate.originPlane ?? "workspace_local",
     entry: candidate.entry,
     effectiveScore: candidate.effectiveScore,
-    perStreamRank: Object.freeze(perStreamRank) as RecallFusionStreamRanks,
-    contributions: Object.freeze(contributions) as RecallFusionStreamContributions,
+    perStreamRank,
+    contributions,
     fusedScore: fused.score,
     facetOverlapCount: facetOverlapCountFor(candidate.entry, supplementaryData.querySoughtFacets),
     floodPotential: fused.diagnostics,
@@ -210,26 +201,9 @@ function buildPreliminaryFusionCandidate(
 function scoreIntegratedFusionCandidate(params: Readonly<{
   readonly candidate: RecallFusionCandidateInput;
   readonly supplementaryData: RecallSupplementaryData;
-  readonly resolved: ResolvedRecallFusionWeights;
-  readonly ranksByStream: ReadonlyMap<RecallFusionStream, ReadonlyMap<string, number>>;
   readonly candidateKey: string;
-  readonly perStreamRank: Record<RecallFusionStream, number | null>;
-  readonly contributions: Record<RecallFusionStream, number>;
   readonly axisContext: ConformantAxisContext;
 }>): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
-  for (const stream of activeFusionStreams()) {
-    const rank = params.ranksByStream.get(stream)?.get(params.candidateKey) ?? null;
-    params.perStreamRank[stream] = rank;
-    if (rank !== null) {
-      params.contributions[stream] = resolveAdaptiveFusionContribution({
-        candidate: params.candidate,
-        supplementaryData: params.supplementaryData,
-        resolved: params.resolved,
-        stream,
-        rank
-      });
-    }
-  }
   const ra = params.axisContext.raByKey.get(params.candidateKey);
   const scored = computeIntegratedFloodScore({
     entry: params.candidate.entry,
@@ -257,26 +231,12 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
 function buildFusedRankByCandidateKey(
   prelim: readonly PreliminaryFusionCandidate[]
 ): ReadonlyMap<string, number> {
-  // invariant: facet overlap is lexicographic-first; flood/RRF fused_score
-  // reorders only within the same facet-overlap tier.
   const ranked = [...prelim].sort((left, right) => {
-    const facetDelta = right.facetOverlapCount - left.facetOverlapCount;
-    if (facetDelta !== 0) {
-      return facetDelta;
-    }
     const fusionDelta = right.fusedScore - left.fusedScore;
     if (fusionDelta !== 0) {
       return fusionDelta;
     }
-    const axisDelta = compareConformantAxisRa(left.axisRa, right.axisRa);
-    if (axisDelta !== 0) {
-      return axisDelta;
-    }
-    const effectiveDelta = right.effectiveScore - left.effectiveScore;
-    if (effectiveDelta !== 0) {
-      return effectiveDelta;
-    }
-    return compareMemoryEntries(left.entry, right.entry);
+    return left.candidateKey.localeCompare(right.candidateKey);
   });
   return new Map(ranked.map((candidate, index) => [candidate.candidateKey, index + 1] as const));
 }
@@ -318,23 +278,11 @@ export function compareFusedRecallCandidates(
   left: FusedRecallCandidateInput,
   right: FusedRecallCandidateInput
 ): number {
-  const rankDelta = left.fusion.fused_rank - right.fusion.fused_rank;
-  if (rankDelta !== 0) {
-    return rankDelta;
-  }
   const fusionDelta = right.fusion.fused_score - left.fusion.fused_score;
   if (fusionDelta !== 0) {
     return fusionDelta;
   }
-  const axisDelta = compareConformantAxisRa(left.fusion.per_axis_contribution, right.fusion.per_axis_contribution);
-  if (axisDelta !== 0) {
-    return axisDelta;
-  }
-  const effectiveDelta = right.effectiveScore - left.effectiveScore;
-  if (effectiveDelta !== 0) {
-    return effectiveDelta;
-  }
-  return compareMemoryEntries(left.entry, right.entry);
+  return left.fusion.candidate_key.localeCompare(right.fusion.candidate_key);
 }
 
 export function buildEmptyRecallFusionBreakdown(objectId: string): Readonly<RecallFusionBreakdown> {

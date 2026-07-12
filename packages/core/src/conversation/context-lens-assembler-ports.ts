@@ -17,7 +17,7 @@ import {
   type WorkingProjection
 } from "@do-soul/alaya-protocol";
 
-import type { RecallCandidate, RecallResult } from "../recall/recall-service.js";
+import type { RecallResult } from "../recall/recall-service.js";
 import type { NodeStrategy } from "./task-surface-builder.js";
 
 export const MAX_LENS_STORE_SIZE = 200;
@@ -170,15 +170,6 @@ export function createLensEntry(
     scope_class: options?.scopeClass,
     source_enforcement: options?.sourceEnforcement
   };
-}
-
-export function compareRecallCandidates(left: Readonly<RecallCandidate>, right: Readonly<RecallCandidate>): number {
-  const activationDelta = right.activation_score - left.activation_score;
-  if (activationDelta !== 0) {
-    return activationDelta;
-  }
-
-  return left.object_id.localeCompare(right.object_id);
 }
 
 const EXCERPT_CONTENT_RATIO = 0.35;

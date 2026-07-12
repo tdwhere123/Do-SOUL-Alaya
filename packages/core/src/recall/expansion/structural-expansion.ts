@@ -31,8 +31,7 @@ type CoarseCandidateAdder = (
   structuralScore?: number,
   sourceChannel?: string,
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-  entityConfidence?: number,
-  reachedViaEarnedCoRecalledFanin?: boolean
+  entityConfidence?: number
 ) => boolean;
 
 export async function collectEntityDerivedSeeds(params: Readonly<{

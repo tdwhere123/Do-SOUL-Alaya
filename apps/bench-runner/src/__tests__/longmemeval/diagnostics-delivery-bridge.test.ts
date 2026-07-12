@@ -47,6 +47,8 @@ function sampleCandidate(
     rankAfterStructuralReserve: null,
     rankAfterCoverageSelector: null,
     rankAfterSessionCoverage: null,
+    answerFeatures: null,
+    pathSuppressionScore: null,
     coverageSelectorAction: null,
     sessionCoverageAction: null,
     sessionKey: null,

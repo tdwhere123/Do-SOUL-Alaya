@@ -43,6 +43,11 @@ function renderReportHeader(lines: string[], current: KpiPayload): void {
     `- Policy shape: ${current.policy_shape ?? "stress"}`,
     `- Dataset: ${current.dataset.name} (size=${current.dataset.size})`
   ];
+  if (current.answerable_evaluated_count !== undefined) {
+    headerLines.splice(2, 0,
+      `- Recall metric denominator: ${current.answerable_evaluated_count} answerable/scorable questions`
+    );
+  }
   if (current.seed_policy !== undefined) {
     headerLines.push(
       `- Seed policy: ${current.seed_policy.mode}` +
@@ -227,11 +232,13 @@ function renderPerScenarioRows(lines: string[], current: KpiPayload): void {
   if (current.kpi.per_scenario.length > 0) {
     lines.push("## Per-scenario rows");
     lines.push("");
-    lines.push("| id | version | hit_at_5 | tier |");
-    lines.push("|---|---|---|---|");
+    lines.push("| id | version | hit_at_5 | scorable | tier |");
+    lines.push("|---|---|---|---|---|");
     for (const row of current.kpi.per_scenario) {
+      const scorable = row.scorable === false ? "no" : "yes";
+      const hitAt5 = row.scorable === false ? "N/A" : row.hit_at_5 ? "✓" : "✗";
       lines.push(
-        `| ${row.id} | ${row.version} | ${row.hit_at_5 ? "✓" : "✗"} | ${row.tier} |`
+        `| ${row.id} | ${row.version} | ${hitAt5} | ${scorable} | ${row.tier} |`
       );
     }
     lines.push("");

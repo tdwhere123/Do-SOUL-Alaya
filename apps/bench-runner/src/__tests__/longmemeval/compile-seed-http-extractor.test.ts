@@ -27,6 +27,7 @@ describe("createGardenHttpExtractor retry policy", () => {
   const HTTP_CONFIG: CompileSeedExtractionConfig = {
     providerUrl: "https://example.test/v1",
     model: "test-model",
+    requestProfile: "provider-default-v1",
     apiKey: "sk-test"
   };
 
@@ -36,6 +37,37 @@ describe("createGardenHttpExtractor retry policy", () => {
       headers: { "content-type": "application/json" }
     });
   }
+
+  it("adds disabled thinking only for the explicit non-thinking profile", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const extractor = createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      model: "arbitrary-model",
+      requestProfile: "deepseek-v4-nonthinking-v1"
+    }, { fetch: fetchMock });
+
+    await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("leaves thinking absent for the provider-default profile", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const extractor = createGardenHttpExtractor({
+      ...HTTP_CONFIG,
+      model: "deepseek-v4-flash-free"
+    }, { fetch: fetchMock });
+
+    await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body).not.toHaveProperty("thinking");
+  });
 
   it("retries 3 times on HTTP 5xx then succeeds with retryClassification=success_after_retry", async () => {
     // Models the dominant yunwu.ai outage shape: a brief 503 storm followed
@@ -64,7 +96,8 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(result.extractorMeta).toEqual({
       recoveryKind: "none",
       retryCount: 3,
-      retryClassification: "success_after_retry"
+      retryClassification: "success_after_retry",
+      rateLimitRetries: 0
     });
     // 4 = first attempt + 3 retries.
     expect(fetchMock).toHaveBeenCalledTimes(4);
@@ -96,7 +129,8 @@ describe("createGardenHttpExtractor retry policy", () => {
       .benchRetry;
     expect(benchRetry).toEqual({
       retryCount: 0,
-      retryClassification: "failure_non_retryable_4xx"
+      retryClassification: "failure_non_retryable_4xx",
+      rateLimitRetries: 0
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(sleep).not.toHaveBeenCalled();
@@ -121,6 +155,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     });
     expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
     expect(result.extractorMeta?.retryCount).toBe(1);
+    expect(result.extractorMeta?.rateLimitRetries).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -144,9 +179,35 @@ describe("createGardenHttpExtractor retry policy", () => {
       .benchRetry;
     expect(benchRetry).toEqual({
       retryCount: 3,
-      retryClassification: "failure_max_retries"
+      retryClassification: "failure_max_retries",
+      rateLimitRetries: 0
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("reports every 429 attempt when rate-limit retries terminate", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("rate limited", { status: 429 })
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    let thrown: unknown;
+    try {
+      await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect((thrown as {
+      benchRetry?: { rateLimitRetries: number; retryClassification: string };
+    }).benchRetry).toMatchObject({
+      rateLimitRetries: 4,
+      retryClassification: "failure_max_retries"
+    });
   });
 
   // invariant: the wall-clock guard inside createGardenHttpExtractor must

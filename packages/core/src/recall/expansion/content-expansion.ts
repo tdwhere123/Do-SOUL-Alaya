@@ -9,6 +9,7 @@ import {
 } from "../coarse-filter/coarse-candidates.js";
 import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
 import type { RecallAdmissionPlane } from "../runtime/recall-service-types.js";
 import {
   scoreEvidenceAnchorMatch,
@@ -31,10 +32,33 @@ export function addContentDerivedExpansionCandidates(params: Readonly<{
   readonly dynamicRecallCohortRadius: number;
 }>): void {
   addQueryEvidenceCandidates(params);
+  addFacetConceptCandidates(params);
   const seedContext = collectExpansionSeedContext(params);
   addEvidenceAnchorCandidates(params, seedContext.structuralSeeds);
   addDomainTagClusterCandidates(params, seedContext.structuralSeeds);
   addSessionSurfaceCohortCandidates(params, seedContext);
+}
+
+function addFacetConceptCandidates(params: Readonly<{
+  readonly tierMemories: readonly Readonly<MemoryEntry>[];
+  readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly addCandidate: CoarseCandidateAdder;
+  readonly dynamicRecallPlaneCap: number;
+}>): void {
+  const sought = new Set(deriveQuerySoughtFacets(params.queryProbes));
+  if (sought.size === 0) return;
+  const matches = params.tierMemories
+    .map((entry) => ({ entry, overlap: countFacetOverlap(entry, sought) }))
+    .filter(({ overlap }) => overlap > 0)
+    .sort((left, right) => right.overlap - left.overlap || compareMemoryEntries(left.entry, right.entry))
+    .slice(0, params.dynamicRecallPlaneCap);
+  for (const { entry } of matches) {
+    params.addCandidate(entry, "facet_concept", undefined, "facet_concept");
+  }
+}
+
+function countFacetOverlap(entry: Readonly<MemoryEntry>, sought: ReadonlySet<string>): number {
+  return new Set((entry.facet_tags ?? []).map(({ facet }) => facet).filter((facet) => sought.has(facet))).size;
 }
 
 function addQueryEvidenceCandidates(params: Readonly<{
@@ -220,8 +244,9 @@ function collectSeedCohortContext(
 }> {
   const seedCohortByMemoryId = new Map<string, readonly Readonly<MemoryEntry>[]>();
   const seedCohortIds = new Set<string>();
+  const cohortIndex = buildSessionSurfaceCohortIndex(params.tierMemories);
   for (const seed of seeds.slice(0, DYNAMIC_RECALL_SEED_CAP)) {
-    const cohort = collectSessionSurfaceCohort(params.tierMemories, seed);
+    const cohort = collectSessionSurfaceCohort(cohortIndex, seed);
     seedCohortByMemoryId.set(seed.object_id, cohort);
     for (const entry of sliceSeedCohortNeighbors(params, seedCohortByMemoryId, seed)) {
       seedCohortIds.add(entry.object_id);
@@ -230,21 +255,75 @@ function collectSeedCohortContext(
   return Object.freeze({ seedCohortByMemoryId, seedCohortIds });
 }
 
+interface SessionSurfaceCohortIndex {
+  readonly bySurfaceId: ReadonlyMap<string, readonly Readonly<MemoryEntry>[]>;
+  readonly byRunId: ReadonlyMap<string, readonly Readonly<MemoryEntry>[]>;
+  readonly rankByEntry: ReadonlyMap<Readonly<MemoryEntry>, number>;
+  readonly bySeedKey: Map<string, readonly Readonly<MemoryEntry>[]>;
+}
+
+function buildSessionSurfaceCohortIndex(
+  tierMemories: readonly Readonly<MemoryEntry>[]
+): SessionSurfaceCohortIndex {
+  const ordered = [...tierMemories].sort(compareSessionSurfaceEntries);
+  const bySurfaceId = new Map<string, Readonly<MemoryEntry>[]>();
+  const byRunId = new Map<string, Readonly<MemoryEntry>[]>();
+  const rankByEntry = new Map<Readonly<MemoryEntry>, number>();
+  ordered.forEach((entry, rank) => {
+    rankByEntry.set(entry, rank);
+    appendCohortEntry(bySurfaceId, entry.surface_id, entry);
+    appendCohortEntry(byRunId, entry.run_id, entry);
+  });
+  return { bySurfaceId, byRunId, rankByEntry, bySeedKey: new Map() };
+}
+
+function appendCohortEntry(
+  index: Map<string, Readonly<MemoryEntry>[]>,
+  key: string | null,
+  entry: Readonly<MemoryEntry>
+): void {
+  if (key === null) {
+    return;
+  }
+  const cohort = index.get(key) ?? [];
+  cohort.push(entry);
+  index.set(key, cohort);
+}
+
 function collectSessionSurfaceCohort(
-  tierMemories: readonly Readonly<MemoryEntry>[],
+  index: SessionSurfaceCohortIndex,
   seed: Readonly<MemoryEntry>
 ): readonly Readonly<MemoryEntry>[] {
-  return tierMemories
-    .filter((entry) =>
-      (seed.surface_id !== null && entry.surface_id === seed.surface_id) ||
-      (seed.run_id !== null && entry.run_id === seed.run_id)
-    )
-    .sort((left, right) => {
-      const createdAtComparison = left.created_at.localeCompare(right.created_at);
-      return createdAtComparison === 0
-        ? left.object_id.localeCompare(right.object_id)
-        : createdAtComparison;
-    });
+  const { surface_id: surfaceId, run_id: runId } = seed;
+  const seedKey = JSON.stringify([surfaceId, runId]);
+  const cached = index.bySeedKey.get(seedKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const surfaceCohort = surfaceId === null ? [] : index.bySurfaceId.get(surfaceId) ?? [];
+  const runCohort = runId === null ? [] : index.byRunId.get(runId) ?? [];
+  const cohort = mergeSessionSurfaceCohorts(index.rankByEntry, surfaceCohort, runCohort);
+  index.bySeedKey.set(seedKey, cohort);
+  return cohort;
+}
+
+function mergeSessionSurfaceCohorts(
+  rankByEntry: ReadonlyMap<Readonly<MemoryEntry>, number>,
+  surfaceCohort: readonly Readonly<MemoryEntry>[],
+  runCohort: readonly Readonly<MemoryEntry>[]
+): readonly Readonly<MemoryEntry>[] {
+  return [...new Set([...surfaceCohort, ...runCohort])]
+    .sort((left, right) => (rankByEntry.get(left) ?? 0) - (rankByEntry.get(right) ?? 0));
+}
+
+function compareSessionSurfaceEntries(
+  left: Readonly<MemoryEntry>,
+  right: Readonly<MemoryEntry>
+): number {
+  const createdAtComparison = left.created_at.localeCompare(right.created_at);
+  return createdAtComparison === 0
+    ? left.object_id.localeCompare(right.object_id)
+    : createdAtComparison;
 }
 
 function sliceSeedCohortNeighbors(

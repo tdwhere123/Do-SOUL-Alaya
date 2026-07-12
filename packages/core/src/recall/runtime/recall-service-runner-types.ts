@@ -25,6 +25,8 @@ export interface RecallExecutionParams {
   readonly timeFilter?: RecallTimeFilter;
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
+  readonly referenceTime?: string;
+  readonly diagnosticCapture?: "answer_features";
 }
 
 export interface RecallExecutionContext {
@@ -44,6 +46,7 @@ export interface PreparedRecallRequest {
   readonly tokenEstimator: TokenEstimator;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly referenceTime: string;
   readonly activeConstraints: ActiveConstraintsResult;
   readonly winnerMemoryIds: ReadonlySet<string>;
 }

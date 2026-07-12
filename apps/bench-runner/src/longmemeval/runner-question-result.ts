@@ -20,6 +20,8 @@ import type { LongMemEvalQuestionSeedState } from "./runner-question-seeding.js"
 import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
 import { hasLongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
+import { attachQuestionMeasurementAxes } from "./diagnostics-measurement-axes.js";
+import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;
@@ -75,7 +77,7 @@ function buildDiagnostics(
   hits: ReturnType<typeof resolveLongMemEvalHitVerdict>
 ): LongMemEvalQuestionDiagnostic {
   const recallResult = input.recallCycle.scoredRecallResult;
-  return buildQuestionDiagnostic({
+  const diagnostic = buildQuestionDiagnostic({
     questionId: input.question.question_id,
     questionType: input.question.question_type,
     goldMemoryIds: input.goldMemoryIds,
@@ -91,6 +93,24 @@ function buildDiagnostics(
     embeddingMode: input.embeddingMode,
     seedDropReasons: input.seedState.answerSeedDropReasons
   });
+  return attachQuestionMeasurementAxes(diagnostic, {
+    answer: input.question.answer,
+    answerSessionIds: input.question.answer_session_ids,
+    sourceDatesBySession: buildSourceDatesBySession(input.question),
+    deliveredResults: diagnostic.delivered_results,
+    candidates: diagnostic.candidates,
+    sidecar: input.seedState.sidecar,
+    isAbstention
+  });
+}
+
+function buildSourceDatesBySession(
+  question: LongMemEvalQuestion
+): ReadonlyMap<string, string> {
+  return new Map(question.haystack_session_ids.flatMap((sessionId, index) => {
+    const sourceDate = question.haystack_dates[index];
+    return sourceDate === undefined ? [] : [[sessionId, sourceDate] as const];
+  }));
 }
 
 function deliveredResults(recallResult: LongMemEvalBenchRecallResult) {
@@ -170,6 +190,7 @@ function snapshotQuestionField(
     snapshotQuestion: {
       questionId: input.question.question_id,
       question: input.question.question,
+      questionDate: requireLongMemEvalTimestamp(input.question.question_date),
       answerSessionIds: [...input.question.answer_session_ids],
       workspaceId: input.workspace.workspaceId,
       runId: input.workspace.runId,

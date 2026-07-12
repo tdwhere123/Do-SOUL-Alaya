@@ -11,7 +11,6 @@ import type {
   RecallServiceWarnPort
 } from "./runtime/recall-service-types.js";
 import { buildDefaultPolicy } from "./runtime/orchestration.js";
-import { getCoreConfig } from "../config/install-core-config.js";
 import { executeRecall, type RecallExecutionParams } from "./runtime/recall-service-runner.js";
 import { wrapRecallFaultWarn } from "./runtime/recall-failure-health-inbox.js";
 
@@ -51,9 +50,7 @@ export class RecallService {
   public constructor(private readonly dependencies: RecallServiceDependencies) {
     assertActivationWeightsSumToOne(DYNAMICS_CONSTANTS.activation_weights_phase4b);
     this.generateRuntimeId = dependencies.generateRuntimeId ?? (() => randomUUID());
-    // bench-only asOf override: ALAYA_RECALL_NOW_ISO pins recall's "now" (e.g. question_date) so event-time scores against the query's time, not wall-clock.
-    const injectedNow = dependencies.now ?? (() => new Date().toISOString());
-    this.now = () => getCoreConfig().recall.nowIso || injectedNow();
+    this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);
   }
 

@@ -10,7 +10,6 @@ import {
   selectExpansionSeedDrafts,
   type CoarseCandidateDraft
 } from "../coarse-filter/coarse-candidates.js";
-import { EARNED_CO_RECALLED_FANIN_RELATION_KIND } from "./graph-expansion.js";
 import {
   PATH_SUPPRESSION_MAX_PER_TARGET,
   directionEligiblePathExpansionTargets,
@@ -41,7 +40,6 @@ type CoarseCandidateAdder = (
   sourceChannel?: string,
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   entityConfidence?: number,
-  reachedViaEarnedCoRecalledFanin?: boolean,
   pathFlowScore?: number
 ) => boolean;
 
@@ -211,8 +209,6 @@ function admitPathExpansionTargets(
     return initialAdded;
   }
   let added = initialAdded;
-  const reachedViaEarnedCoRecalledFanin =
-    path.constitution.relation_kind === EARNED_CO_RECALLED_FANIN_RELATION_KIND;
   const edgeStrength = scorePathRelationExpansion(path);
   for (const target of directionEligiblePathExpansionTargets(path, seedIds)) {
     const entry = params.byId.get(target.targetId);
@@ -227,7 +223,6 @@ function admitPathExpansionTargets(
       "path_expansion",
       buildMemoryPathExpansionSource(path, target.seedId, target.targetId),
       undefined,
-      reachedViaEarnedCoRecalledFanin,
       pathFlow
     );
     added += 1;

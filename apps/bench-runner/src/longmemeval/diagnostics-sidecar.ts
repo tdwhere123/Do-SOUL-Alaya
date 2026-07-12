@@ -198,17 +198,6 @@ function freezeRecallEvidenceSummary(
   };
 }
 
-/**
- * Default gate archives omit per-question replay `candidates[]`.
- * A 250Q shard with complete pools is ~500MB+ and can throw
- * `Invalid string length` on one-shot JSON.stringify.
- * Set ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL=1 for offline replay dumps.
- */
-export function includeReplayCandidatePoolInDiagnosticsWrite(): boolean {
-  const raw = process.env.ALAYA_BENCH_INCLUDE_REPLAY_CANDIDATE_POOL?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
-}
-
 export function stripReplayCandidatePoolsForGateWrite(
   sidecar: LongMemEvalDiagnosticsSidecar
 ): LongMemEvalDiagnosticsSidecar {
@@ -217,6 +206,17 @@ export function stripReplayCandidatePoolsForGateWrite(
     questions: sidecar.questions.map((question) => ({
       ...question,
       candidate_pool_complete: false,
+      query_probes: null,
+      query_sought_facets: null,
+      ...(question.cohort_ledger === undefined
+        ? {}
+        : {
+            cohort_ledger: {
+              ...question.cohort_ledger,
+              candidate_pool_complete: false,
+              evidence_status: question.recall_diagnostics_present ? "partial" as const : "missing" as const
+            }
+          }),
       candidates: []
     }))
   };
@@ -230,11 +230,24 @@ export function renderDiagnosticsSidecar(
 
 export function renderCompactDiagnosticsSidecar(
   sidecar: LongMemEvalDiagnosticsSidecar,
-  fullDiagnosticsArtifactPath: string
+  fullDiagnosticsArtifactPath: string,
+  options: { readonly includeQuestions?: boolean } = {}
 ): string {
-  const reportSideEffects = sidecar.report_side_effects;
   const normalizedSidecar = withMissTaxonomy(sidecar);
-  const compact: LongMemEvalCompactDiagnosticsSidecar = {
+  const compact = buildCompactDiagnosticsSidecar(
+    normalizedSidecar,
+    fullDiagnosticsArtifactPath,
+    options.includeQuestions === true
+  );
+  return JSON.stringify(compact, null, 2) + "\n";
+}
+
+function buildCompactDiagnosticsSidecar(
+  normalizedSidecar: LongMemEvalDiagnosticsSidecar,
+  fullDiagnosticsArtifactPath: string,
+  includeQuestions: boolean
+): LongMemEvalCompactDiagnosticsSidecar {
+  return {
     schema_version: 1,
     compact_schema_version: 1,
     bench_name: normalizedSidecar.bench_name,
@@ -261,20 +274,7 @@ export function renderCompactDiagnosticsSidecar(
     ...(normalizedSidecar.question_failures === undefined
       ? {}
       : { question_failures: normalizedSidecar.question_failures }),
-    ...(reportSideEffects === undefined
-      ? {}
-      : {
-          report_side_effects: {
-            mode: reportSideEffects.mode,
-            workspaces_observed: reportSideEffects.workspaces_observed,
-            memory_graph_edges_total: reportSideEffects.memory_graph_edges_total,
-            memory_graph_edges_by_type: reportSideEffects.memory_graph_edges_by_type,
-            recalls_edge_count: reportSideEffects.recalls_edge_count,
-            path_relations_total: reportSideEffects.path_relations_total,
-            latest_path_event_at: reportSideEffects.latest_path_event_at,
-            snapshot_count: reportSideEffects.snapshots.length
-          }
-        }),
+    ...compactReportSideEffects(normalizedSidecar.report_side_effects),
     ...(normalizedSidecar.scored_recall_evidence === undefined
       ? {}
       : { scored_recall_evidence: normalizedSidecar.scored_recall_evidence }),
@@ -284,9 +284,27 @@ export function renderCompactDiagnosticsSidecar(
     ...(normalizedSidecar.query_embedding_cache === undefined
       ? {}
       : { query_embedding_cache: normalizedSidecar.query_embedding_cache }),
-    miss_taxonomy_summary: normalizedSidecar.miss_taxonomy_summary
+    miss_taxonomy_summary: normalizedSidecar.miss_taxonomy_summary,
+    ...(includeQuestions ? { questions: normalizedSidecar.questions } : {})
   };
-  return JSON.stringify(compact, null, 2) + "\n";
+}
+
+function compactReportSideEffects(
+  reportSideEffects: LongMemEvalDiagnosticsSidecar["report_side_effects"]
+) {
+  if (reportSideEffects === undefined) return {};
+  return {
+    report_side_effects: {
+      mode: reportSideEffects.mode,
+      workspaces_observed: reportSideEffects.workspaces_observed,
+      memory_graph_edges_total: reportSideEffects.memory_graph_edges_total,
+      memory_graph_edges_by_type: reportSideEffects.memory_graph_edges_by_type,
+      recalls_edge_count: reportSideEffects.recalls_edge_count,
+      path_relations_total: reportSideEffects.path_relations_total,
+      latest_path_event_at: reportSideEffects.latest_path_event_at,
+      snapshot_count: reportSideEffects.snapshots.length
+    }
+  };
 }
 
 function withMissTaxonomy(

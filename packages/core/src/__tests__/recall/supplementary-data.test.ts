@@ -12,6 +12,35 @@ import {
 } from "./recall-service-test-fixtures.js";
 
 describe("collectSupplementaryData", () => {
+  it("does not load evidence gists without explicit diagnostic capture", async () => {
+    const findByIds = vi.fn(async () => []);
+    const candidate = createMemoryEntry({
+      object_id: "memory-evidence",
+      evidence_refs: ["evidence-1"]
+    });
+
+    await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      evidenceSearchPort: { searchByKeyword: vi.fn(async () => []), findByIds },
+      coarseEvidenceFtsRanks: { [candidate.object_id]: 1 },
+      coarseEvidenceFtsRanksPerRef: { "evidence-1": 1 }
+    });
+
+    expect(findByIds).not.toHaveBeenCalled();
+
+    await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      evidenceSearchPort: { searchByKeyword: vi.fn(async () => []), findByIds },
+      captureAnswerFeatures: true,
+      coarseEvidenceFtsRanks: { [candidate.object_id]: 1 },
+      coarseEvidenceFtsRanksPerRef: { "evidence-1": 1 }
+    });
+
+    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["evidence-1"]);
+  });
+
   it("bounds per-candidate graph support lookup concurrency", async () => {
     const candidates = Array.from({ length: SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY * 2 + 3 }, (_, index) =>
       createMemoryEntry({ object_id: `memory-${index}` })
@@ -102,13 +131,18 @@ async function collectWith(params: {
   readonly candidates: Parameters<typeof collectSupplementaryData>[0]["candidates"];
   readonly graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]>;
   readonly warn?: RecallServiceDependencies["warn"];
+  readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
+  readonly captureAnswerFeatures?: boolean;
+  readonly coarseEvidenceFtsRanks?: Readonly<Record<string, number>>;
+  readonly coarseEvidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
 }) {
   const { dependencies } = createDependencies([]);
   const service = new RecallService(dependencies);
   return await collectSupplementaryData({
     dependencies: {
       ...dependencies,
-      graphSupportPort: params.graphSupportPort
+      graphSupportPort: params.graphSupportPort,
+      evidenceSearchPort: params.evidenceSearchPort
     },
     warn: params.warn ?? (() => undefined),
     candidates: params.candidates,
@@ -120,16 +154,24 @@ async function collectWith(params: {
     coarseFtsRanks: {},
     coarseTrigramFtsRanks: {},
     coarseSynthesisFtsRanks: {},
-    coarseEvidenceFtsRanks: {},
-    coarseEvidenceFtsRanksPerRef: {},
+    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks ?? {},
+    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef ?? {},
     coarseSourceProximityScores: {},
     coarseSourceCohortKeys: {},
     coarseStructuralScores: {},
     coarseGraphExpansionScores: {},
     coarseEntitySeedScores: {},
     coarsePathExpansionScores: {},
-    coarsePathSuppressionScores: {}
+    coarsePathSuppressionScores: {},
+    captureAnswerFeatures: params.captureAnswerFeatures ?? false
   });
+}
+
+function emptyGraphSupportPort(): NonNullable<RecallServiceDependencies["graphSupportPort"]> {
+  return {
+    countInboundSupports: vi.fn(async () => 0),
+    countInboundEdgesWeighted: vi.fn(async () => 0)
+  };
 }
 
 function delay(ms: number): Promise<void> {

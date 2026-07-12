@@ -8,11 +8,8 @@ import {
   buildDistilledFact
 } from "../../garden/materialization-router.js";
 
-// Producer -> consumer join: a CandidateMemorySignal emitted by the
-// official-API garden provider must carry a resolved one-assertion fact
-// that materialization's buildDistilledFact uses verbatim, instead of
-// re-distilling the raw span. see also: garden/compute-provider.ts and
-// garden/materialization-router/inputs.ts buildDistilledFact.
+// Producer -> consumer join: model paraphrases remain auditable proposals,
+// while durable content is rebuilt from the source assertion.
 
 function createContext() {
   return {
@@ -46,7 +43,7 @@ async function compileSingleSignal(
 }
 
 describe("distilled_fact producer -> consumer join", () => {
-  it("uses a within-cap provider distilled_fact verbatim with no ellipsis", async () => {
+  it("uses the source assertion instead of a free model paraphrase", async () => {
     const fact = "The operator prefers to be called Ash in all sessions.";
     const signal = await compileSingleSignal(
       JSON.stringify({
@@ -64,11 +61,12 @@ describe("distilled_fact producer -> consumer join", () => {
     );
 
     const distilled = buildDistilledFact(signal);
-    expect(distilled).toBe(fact);
+    expect(distilled).toBe("From now on call me Ash.");
+    expect(signal.raw_payload.proposed_distilled_fact).toBe(fact);
     expect(distilled.endsWith("...")).toBe(false);
   });
 
-  it("falls through to ruleDistillFromRaw when the provider omits distilled_fact", async () => {
+  it("derives the matched source assertion when the provider omits distilled_fact", async () => {
     const turn =
       "We decided to ship the release on Friday. The rollout is gradual. " +
       "A third sentence exists to prove only the first claims survive.";
@@ -79,24 +77,22 @@ describe("distilled_fact producer -> consumer join", () => {
             signal_kind: "potential_claim",
             object_kind: "decision",
             confidence: 0.8,
-            matched_text: turn
+            matched_text: "We decided to ship the release on Friday."
           }
         ]
       }),
       turn
     );
 
-    // No distilled_fact key: buildDistilledFact must distill the raw span
-    // by sentence boundary, not echo the whole matched span verbatim.
-    expect("distilled_fact" in signal.raw_payload).toBe(false);
-    const distilled = buildDistilledFact(signal);
-    expect(distilled).toBe(
-      "We decided to ship the release on Friday. The rollout is gradual."
+    expect(signal.raw_payload.distilled_fact).toBe(
+      "We decided to ship the release on Friday."
     );
+    const distilled = buildDistilledFact(signal);
+    expect(distilled).toBe("We decided to ship the release on Friday.");
     expect(distilled).not.toContain("third sentence");
   });
 
-  it("hard-clamps an over-cap distilled_fact without appending an ellipsis", async () => {
+  it("clamps an over-cap proposal without allowing it into durable content", async () => {
     const oversized = "z".repeat(DISTILLED_FACT_MAX_CHARS + 500);
     const signal = await compileSingleSignal(
       JSON.stringify({
@@ -105,18 +101,19 @@ describe("distilled_fact producer -> consumer join", () => {
             signal_kind: "potential_claim",
             object_kind: "fact",
             confidence: 0.7,
-            matched_text: "fact text",
+            matched_text: "The fact is grounded.",
             distilled_fact: oversized
           }
         ]
       }),
-      "fact text"
+      "The fact is grounded."
     );
 
     const distilled = buildDistilledFact(signal);
-    // The provider already clamped to DISTILLED_FACT_MAX_CHARS; buildDistilledFact
-    // must not re-truncate with "..." on an already-distilled fact.
-    expect(distilled.length).toBe(DISTILLED_FACT_MAX_CHARS);
+    expect(distilled).toBe("The fact is grounded.");
+    expect((signal.raw_payload.source_grounding as {
+      proposed_distilled_fact: string;
+    }).proposed_distilled_fact).toHaveLength(DISTILLED_FACT_MAX_CHARS);
     expect(distilled.endsWith("...")).toBe(false);
   });
 });

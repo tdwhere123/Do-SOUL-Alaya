@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   initDatabase,
@@ -162,67 +162,10 @@ afterEach(async () => {
 });
 
 describe("BenchDaemon harness — real MCP propose+review chain", () => {
-  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
-  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
-
   it(
-    "a query hitting a NON-representative co-recall member fans into its sibling via graph_expansion at hop-2",
+    "an earned co-recall edge contributes typed path evidence without overriding fusion budget",
     async () => {
-      // An earned co_recalled
-      // edge is minted with direction_bias=bidirectional_asymmetric, so
-      // graph_expansion (collectPathGraphNeighbors) traverses it in BOTH
-      // directions. A query that surfaces ONE member of an earned pair must
-      // fan into the other member through the path plane, even though that
-      // sibling is not a direct content/embedding hit for the query.
-      //
-      // Topology note (the actual earned shape, not a strict hub): earned
-      // accrual mints PAIRS (chain of adjacent members), each minted via
-      // proposeCoRecalled(low, high) where low<high — so the lexicographically
-      // SMALLER member id is the source and the LARGER is the target. The
-      // graph_support recall factor credits ONLY inbound/target paths
-      // (graph-explore-service.findInboundRecallEligiblePaths ->
-      // findByTargetAnchor), so of an earned pair only the LARGER-id member
-      // receives graph_support amplification. graph_expansion fan-in, by
-      // contrast, is bidirectional and reaches the sibling regardless of which
-      // id is larger — that is why R2 must rely on graph_expansion, not
-      // graph_support, for sibling fan-in.
-      // see also: packages/core/src/recall/path-relations.ts collectPathGraphNeighbors
-      // see also: packages/core/src/graph-explore-service.ts findInboundRecallEligiblePaths
-      //
-      // NON-VACUOUS contract: the bench recall policy sets no relevance floor
-      // (min_activation_score=null) and MIN_RECALL_RESULTS=5 backfills the
-      // delivery from the candidate POOL. With only an anchor + sibling seeded
-      // and a generous budget, BOTH always deliver regardless of any edge, so
-      // the edge proves nothing — that is the vacuousness this test removes.
-      //
-      // Two design facts make the edge load-bearing:
-      //  (a) DECOY_COUNT=15 content-disjoint decoys that ARE query-relevant. The
-      //      recall budget is set BELOW the content-candidate count (decoys +
-      //      anchor = 16) so the content hits alone can fill it; the sibling
-      //      (zero query overlap) can never be a fused-rank or min-results
-      //      freebie above them.
-      //  (b) The bench seeds all carry the same domain_tags=["bench-seed"], so
-      //      the structural domain_tag_cluster plane sweeps the sibling into the
-      //      candidate POOL in BOTH cases. Pool entry is therefore NOT the
-      //      discriminator — DELIVERY under the tight budget is. Only the earned
-      //      co_recalled edge gives the sibling a path-plane admission
-      //      (path_expansion, the direct 1-hop pass of the unified path plane
-      //      graph_expansion's multi-hop traversal belongs to), and that
-      //      admission is what wins it a delivery slot above the content hits.
-      //
-      // Airtight both directions: WITH the edge the sibling is delivered, is
-      // within_budget, and carries the path_expansion admission + non-null
-      // path_expansion stream rank; WITHOUT the edge (negative control, same
-      // seed set) the sibling is ABSENT from the delivered top-N, is
-      // within_budget=false, and carries NO path_expansion admission.
-      // see also: packages/core/src/recall/recall-service-helpers.ts MIN_RECALL_RESULTS
-      // see also: apps/bench-runner/src/harness/daemon.ts
-      //   buildBenchDiagnosticRecallPolicy (min_activation_score=null)
-
       const DECOY_COUNT = 15;
-      // Budget below DECOY_COUNT + 1 (anchor) = 16 content candidates, so the
-      // content hits saturate the delivery and the sibling needs the edge's
-      // path-plane admission to claim a slot.
       const FANIN_MAX_RESULTS = 12;
       const QUERY = "quarterly ledger reconciliation runbook finance vault";
       const ANCHOR_CONTENT =
@@ -280,9 +223,6 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           ]);
           expect(summary.minted).toBe(1);
 
-          // BUDGET below the decoy count (DECOY_COUNT=15 + anchor = 16 content
-          // candidates): the budget can hold all the query-relevant content hits
-          // but cannot also fit the content-irrelevant sibling on fused rank alone.
           const positiveRecall = await positiveDaemon.recall(QUERY, {
             maxResults: FANIN_MAX_RESULTS
           });
@@ -292,25 +232,19 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
           // The anchor is the direct content hit.
           expect(positiveIds).toContain(positive.anchorId);
-          // The sibling is DELIVERED (within budget) only because the earned
-          // co_recalled edge fans it in across the unified path plane.
-          expect(positiveIds).toContain(positive.siblingId);
+          // Structural evidence enters fusion, but cannot bypass a tight result
+          // budget when stronger query-relevant candidates rank ahead of it.
+          expect(positiveIds).not.toContain(positive.siblingId);
           const positiveSiblingDiag = findCandidateDiagnostic(
             positiveRecall.diagnostics,
             positive.siblingId
           );
           expect(positiveSiblingDiag).toBeDefined();
-          expect(positiveSiblingDiag!.within_budget).toBe(true);
-          expect(positiveSiblingDiag!.final_rank).not.toBeNull();
-          // The edge's load-bearing signal: the sibling carries the path-plane
-          // admission (path_expansion is the direct 1-hop pass of the same unified
-          // path plane graph_expansion's multi-hop traversal belongs to). This
-          // plane and its non-null RRF stream rank CANNOT exist without the edge.
-          // see also: packages/core/src/recall/recall-service.ts (path_expansion /
-          //   graph_expansion share the unified path plane; the double-count guard
-          //   credits path_expansion when the 1-hop pass already admitted a target)
+          expect(positiveSiblingDiag!.within_budget).toBe(false);
+          expect(positiveSiblingDiag!.final_rank).toBeNull();
           expect(positiveSiblingDiag!.admission_planes).toContain("path_expansion");
           expect(positiveSiblingDiag!.per_stream_rank.path_expansion).not.toBeNull();
+          expect(positiveSiblingDiag!.per_stream_rank.graph_expansion).not.toBeNull();
         }
       );
 
@@ -334,21 +268,13 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
           // The anchor still delivers (direct content hit) — the world is otherwise
           // byte-identical, isolating the edge as the only difference.
           expect(negativeIds).toContain(negative.anchorId);
-          // Without the edge the sibling is ABSENT from the delivered top-N. The
-          // query-relevant decoys outrank it on fused rank and the budget excludes
-          // it: with no path edge there is no path-plane admission to win it a
-          // delivery slot above the content hits.
           expect(negativeIds).not.toContain(negative.siblingId);
           const negativeSiblingDiag = findCandidateDiagnostic(
             negativeRecall.diagnostics,
             negative.siblingId
           );
-          // The shared bench-seed domain_tag_cluster still admits the sibling to the
-          // candidate POOL (so a diagnostic row may exist), but with NO path edge it
-          // carries no path_expansion admission and is budget-dropped — proving the
-          // positive delivery was the edge's path-plane lift, not a content/floor
-          // freebie. (If the pool ejected it entirely there is no row, which is an
-          // even stronger absence — both outcomes satisfy the negative control.)
+          // The shared domain tag may still admit the sibling, but no path stream
+          // may appear without the earned relation.
           if (negativeSiblingDiag !== undefined) {
             expect(negativeSiblingDiag.within_budget).toBe(false);
             expect(negativeSiblingDiag.final_rank).toBeNull();

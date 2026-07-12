@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ManifestationLevel, PathGovernanceClass, RuntimeGovernanceEventType, serializePathAnchorRef, type ActivationCandidate } from "@do-soul/alaya-protocol";
+import { BoundedJsonObjectSchema, ManifestationLevel, PathGovernanceClass, RuntimeGovernanceEventType, serializePathAnchorRef, type ActivationCandidate } from "@do-soul/alaya-protocol";
 
 import { NOW, createBudgetConfig, createCandidate, createDependencies, createService, createTaskSurface } from "./manifestation-resolver.test-support.js";
 
@@ -76,9 +76,9 @@ describe("ManifestationResolver", () => {
       }
     });
 
-    expect(deps.eventLogWriter.append).toHaveBeenCalledTimes(2);
-    expect(deps.eventLogWriter.append).toHaveBeenNthCalledWith(
-      1,
+    expect(deps.eventLogWriter.appendAtomically).toHaveBeenCalledTimes(1);
+    const appended = deps.eventLogWriter.appendAtomically.mock.calls[0]?.[0] ?? [];
+    expect(appended[0]).toEqual(
       expect.objectContaining({
         event_type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED,
         workspace_id: "workspace-1",
@@ -96,8 +96,7 @@ describe("ManifestationResolver", () => {
         }
       })
     );
-    expect(deps.eventLogWriter.append).toHaveBeenNthCalledWith(
-      2,
+    expect(appended[1]).toEqual(
       expect.objectContaining({
         event_type: RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED,
         workspace_id: "workspace-1",
@@ -127,6 +126,47 @@ describe("ManifestationResolver", () => {
         }
       })
     );
+  });
+
+  it("writes large decision sets as bounded event batches", async () => {
+    const deps = createDependencies({ config: null });
+    deps.eventLogWriter.appendAtomically.mockImplementation(async (entries) =>
+      entries.map((entry) => {
+        BoundedJsonObjectSchema.parse(entry.payload_json);
+        return {
+          event_id: `event-${Math.random()}`,
+          created_at: NOW,
+          revision: 0,
+          ...entry
+        };
+      })
+    );
+    const service = await createService(deps);
+    const candidates = Array.from({ length: 300 }, (_, index) =>
+      createCandidate({ candidate_id: `candidate-${index}` })
+    );
+
+    const decisions = await service.resolve({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      candidates,
+      taskSurfaceRef: createTaskSurface([])
+    });
+
+    const decisionEvents = (deps.eventLogWriter.appendAtomically.mock.calls[0]?.[0] ?? [])
+      .filter(
+        (entry) =>
+          entry.event_type === RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED
+      );
+    expect(decisionEvents.length).toBeGreaterThan(1);
+    expect(
+      decisionEvents.flatMap((entry) =>
+        (entry.payload_json as { decisions: readonly { candidate_id: string }[] }).decisions.map(
+          (decision) => decision.candidate_id
+        )
+      )
+    ).toEqual(decisions.map((decision) => decision.candidate_id));
+    expect(deps.eventLogWriter.appendAtomically).toHaveBeenCalledTimes(1);
   });
 
   it("downgrades and discards once manifestation budgets are exhausted", async () => {
@@ -368,7 +408,7 @@ describe("ManifestationResolver", () => {
         taskSurfaceRef: null
       })
     ).rejects.toThrow();
-    expect(deps.eventLogWriter.append).not.toHaveBeenCalled();
+    expect(deps.eventLogWriter.appendAtomically).not.toHaveBeenCalled();
   });
 
 });

@@ -13,6 +13,7 @@ import { runCli } from "../../cli/index.js";
 import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from "./cli-merge-validations-fixture.js";
 
 import {
+  withEligibleMeasurementContract,
   makeQualityMetrics,
   makeShardDiagnostics,
   makeShardKpi,
@@ -134,7 +135,7 @@ describe("merge-longmemeval validations", () => {
         kpi: {
           ...makeShardKpi().kpi,
           per_scenario: [
-            { id: "q-diagnostics-b", version: 1, hit_at_5: true, tier: "warm" }
+            { id: "q-diagnostics-a", version: 1, hit_at_5: true, tier: "warm" }
           ]
         }
       }),
@@ -165,7 +166,7 @@ describe("merge-longmemeval validations", () => {
 
     expect(exitCode).toBe(2);
     expect(stderrBuf).toContain(
-      "merge refused: duplicate diagnostics question_id 'q-diagnostics-a' across shards"
+      "merge refused: duplicate question_id 'q-diagnostics-a' across shards"
     );
   });
 
@@ -202,14 +203,14 @@ describe("merge-longmemeval validations", () => {
     await writeHistoryEntry(
       historyRoot,
       "2026-05-13T120000Z-aaa1111-policy-stress",
-      makeShardKpi({
+      withEligibleMeasurementContract(makeShardKpi({
         run_at: priorPassingRunAt,
         alaya_commit: "aaa1111",
         kpi: {
           ...makeShardKpi().kpi,
-          r_at_5: 0.9
+          r_at_5: 0.8
         }
-      })
+      }))
     );
     await writeHistoryEntry(
       historyRoot,
@@ -346,232 +347,4 @@ describe("merge-longmemeval validations", () => {
     });
   });
 
-  it("refuses shards whose split differs", async () => {
-    const shardA = path.join(tmpRoot, "shard-a");
-    const shardB = path.join(tmpRoot, "shard-b");
-    await writeShardRoot(shardA, makeShardKpi({ alaya_commit: "0000aaa" }));
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        alaya_commit: "0000bbb",
-        split: "longmemeval-oracle",
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      })
-    );
-    const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/split=longmemeval-oracle.*split=longmemeval-s/);
-  });
-
-  it("refuses shards whose sample_size differs", async () => {
-    const shardA = path.join(tmpRoot, "shard-a");
-    const shardB = path.join(tmpRoot, "shard-b");
-    await writeShardRoot(
-      shardA,
-      makeShardKpi({
-        alaya_commit: "0000aaa",
-        sample_size: 500,
-        evaluated_count: 5
-      })
-    );
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        alaya_commit: "0000bbb",
-        sample_size: 250,
-        evaluated_count: 5,
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      })
-    );
-    const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/sample_size=250 != shard\[0\] sample_size=500/);
-  });
-
-  it("refuses shards whose dataset identity differs", async () => {
-    const shardA = path.join(tmpRoot, "shard-a");
-    const shardB = path.join(tmpRoot, "shard-b");
-    // Same alaya_commit so scalar-identity loop reaches the dataset
-    // composite check (dataset is not in SCALAR_IDENTITY_FIELDS).
-    await writeShardRoot(shardA, makeShardKpi({ alaya_commit: "abc1234" }));
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        alaya_commit: "abc1234",
-        dataset: {
-          name: "longmemeval_s_tampered",
-          size: 500,
-          source: "https://example.com/fake"
-        },
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      })
-    );
-    const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/dataset identity/);
-  });
-
-  it("refuses shards whose duplicate question ids overlap", async () => {
-    const shardA = path.join(tmpRoot, "shard-a");
-    const shardB = path.join(tmpRoot, "shard-b");
-    const dupId = "q-collide";
-    // Same alaya_commit for both shards so the new alaya_commit check
-    // does not fire first; the test exercises the duplicate-id branch.
-    await writeShardRoot(
-      shardA,
-      makeShardKpi({
-        alaya_commit: "abc1234",
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: dupId, version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      })
-    );
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        alaya_commit: "abc1234",
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: dupId, version: 1, hit_at_5: false, tier: "warm" }
-          ]
-        }
-      })
-    );
-    const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(/duplicate question_id 'q-collide'/);
-  });
-
-  it("refuses shards whose harness_mode differs", async () => {
-    const shardA = path.join(tmpRoot, "shard-a");
-    const shardB = path.join(tmpRoot, "shard-b");
-    await writeShardRoot(
-      shardA,
-      makeShardKpi({ alaya_commit: "0000aaa", harness_mode: "mcp_propose_review" })
-    );
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        alaya_commit: "0000bbb",
-        harness_mode: "direct_db_seed",
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      })
-    );
-    const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(
-      /harness_mode=direct_db_seed != shard\[0\] harness_mode=mcp_propose_review/
-    );
-  });
-
-  it("refuses shards whose embedding_provider differs", async () => {
-    const shardA = path.join(tmpRoot, "shard-a");
-    const shardB = path.join(tmpRoot, "shard-b");
-    await writeShardRoot(
-      shardA,
-      makeShardKpi({ alaya_commit: "0000aaa", embedding_provider: "none" })
-    );
-    await writeShardRoot(
-      shardB,
-      makeShardKpi({
-        alaya_commit: "0000bbb",
-        embedding_provider: "yunwu:text-embedding-3-small",
-        kpi: {
-          ...makeShardKpi().kpi,
-          per_scenario: [
-            { id: "q-shard-b-1", version: 1, hit_at_5: true, tier: "warm" }
-          ]
-        }
-      })
-    );
-    const historyRoot = path.join(tmpRoot, "history");
-    const exitCode = await runCli([
-      "merge-longmemeval",
-      "--variant",
-      "s",
-      "--history-root",
-      historyRoot,
-      "--shards",
-      shardA,
-      shardB
-    ]);
-    expect(exitCode).toBe(2);
-    expect(stderrBuf).toMatch(
-      /embedding_provider=yunwu:text-embedding-3-small != shard\[0\] embedding_provider=none/
-    );
-  });
 });

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { RecallCandidateAnswerFeaturesSchema } from "../harness/recall-diagnostics-schema.js";
+import { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
+export { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
 
 // Explicit zod schema for the bench-side diagnostic records produced by
 // buildQuestionDiagnostic. The raw recall-pipeline diagnostics input has its
@@ -101,6 +104,33 @@ const DiagnosticFloodFuelCoverageSchema = z
 
 const DiagnosticScoreFactorsSchema = z.record(z.string(), z.unknown()).readonly();
 
+export const DiagnosticQueryProbesSchema = z
+  .object({
+    normalized_query: z.string().nullable().optional(),
+    subject_hints: z.array(z.string()).readonly().optional(),
+    object_ids: z.array(z.string()).readonly().optional(),
+    evidence_refs: z.array(z.string()).readonly().optional(),
+    run_ids: z.array(z.string()).readonly().optional(),
+    surface_ids: z.array(z.string()).readonly().optional(),
+    file_paths: z.array(z.string()).readonly().optional(),
+    command_names: z.array(z.string()).readonly().optional(),
+    package_names: z.array(z.string()).readonly().optional(),
+    task_refs: z.array(z.string()).readonly().optional(),
+    dimensions: z.array(z.string()).readonly().optional(),
+    scope_classes: z.array(z.string()).readonly().optional(),
+    domain_tags: z.array(z.string()).readonly().optional(),
+    lexical_terms: z.array(z.string()).readonly().optional(),
+    expanded_terms: z.array(z.string()).readonly().optional(),
+    phrases: z.array(z.string()).readonly().optional(),
+    char_ngrams: z.array(z.string()).readonly().optional(),
+    date_terms: z.array(z.string()).readonly().optional()
+  })
+  .strict()
+  .readonly();
+
+export const DiagnosticCandidateAnswerFeaturesSchema =
+  RecallCandidateAnswerFeaturesSchema;
+
 const DeliveryStageActionSchema = z.enum([
   "noop",
   "kept",
@@ -182,8 +212,82 @@ const LongMemEvalReplayCandidateSchema = z
     per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
     fused_rank_contribution_per_stream:
       DiagnosticStreamContributionsSchema.nullable(),
+    per_axis_rank: DiagnosticAxisRanksSchema.nullable().default(null),
+    per_axis_contribution: DiagnosticAxisContributionsSchema.nullable().default(null),
+    flood_potential: DiagnosticFloodPotentialSchema.nullable().default(null),
+    plane_first_admitted: z.string().nullable().default(null),
+    plane_winning_admission: z.string().nullable().default(null),
+    source_planes: z.array(z.string()).readonly().default([]),
+    source_channels: z.array(z.string()).readonly().default([]),
+    rank_after_fusion: z.number().nullable().default(null),
+    rank_after_feature_rerank: z.number().nullable().default(null),
+    rank_after_lexical_priority: z.number().nullable().default(null),
+    rank_after_synthesis_reserve: z.number().nullable().default(null),
+    rank_after_structural_reserve: z.number().nullable().default(null),
+    rank_after_coverage_selector: z.number().nullable().default(null),
+    rank_after_session_coverage: z.number().nullable().default(null),
+    answer_features: DiagnosticCandidateAnswerFeaturesSchema.nullable().default(null),
+    path_suppression_score: z.number().nullable().default(null),
     score_factors: DiagnosticScoreFactorsSchema
   })
+  .readonly();
+
+const LongMemEvalQuestionCohortLedgerSchema = z
+  .object({
+    measurement_status: z.enum([
+      "scorable",
+      "abstention_unscorable",
+      "evaluator_identity_unscorable"
+    ]).optional(),
+    dataset_cohort: z.enum(["answerable", "abstention", "adjudicated_invalid"]),
+    extraction_materialization: z.object({
+      status: z.enum(["memory_emitted", "drop", "unknown"]),
+      emitted_memory_count: z.number().int().nonnegative(),
+      reason: z.enum(["candidate_absent", "materialization_drop"]).nullable()
+    }).strict().readonly(),
+    evaluator_gold_identity: z.object({
+      status: z.enum(["present", "absent", "ambiguous"]),
+      object_ids: z.array(z.string()).readonly()
+    }).strict().readonly(),
+    retrieval_status: z.enum(["hit_at_5", "miss_at_5", "not_applicable"]),
+    evidence_status: z.enum(["complete", "partial", "missing"]),
+    evaluation_issue_reason: z.enum([
+      "missing_diagnostics",
+      "empty_gold_identity",
+      "extraction_materialization_drop",
+      "gold_taxonomy_fallthrough",
+      "identity_join_error",
+      "evaluator_data_identity_inconsistency",
+      "evaluator_data_identity_indeterminate",
+      "adjudicated_dataset_issue"
+    ]).nullable(),
+    candidate_pool_complete: z.boolean(),
+    quality_axes: LongMemEvalQuestionMeasurementAxesSchema.optional(),
+    stage_ranks: z.array(z.object({
+      object_id: z.string(),
+      fused_rank: z.number().nullable(),
+      rank_after_feature_rerank: z.number().nullable(),
+      rank_after_lexical_priority: z.number().nullable(),
+      rank_after_synthesis_reserve: z.number().nullable(),
+      rank_after_structural_reserve: z.number().nullable(),
+      rank_after_coverage_selector: z.number().nullable(),
+      rank_after_session_coverage: z.number().nullable(),
+      selection_order: z.number().nullable(),
+      final_rank: z.number().nullable()
+    }).strict().readonly()).readonly(),
+    final_verdict: z.enum([
+      "hit_at_5",
+      "miss_at_5",
+      "abstained_correctly",
+      "abstain_false_confident",
+      "abstention_uncalibrated",
+      "evaluation_unscorable",
+      "evaluator_data_identity_inconsistency",
+      "evaluator_data_identity_indeterminate",
+      "adjudicated_invalid"
+    ])
+  })
+  .strict()
   .readonly();
 
 export const DiagnosticActiveConstraintResultSchema = z
@@ -255,8 +359,11 @@ export const LongMemEvalMissClassificationSchema = z.enum([
   "lexical_gap",
   "candidate_absent",
   "no_gold",
+  "evaluator_identity_inconsistent",
+  "evaluator_identity_indeterminate",
   "abstained_correctly",
   "abstain_false_confident",
+  "abstention_uncalibrated",
   "diagnostics_unavailable"
 ]);
 
@@ -290,6 +397,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     graph_expansion_plane_count_per_edge_type:
       GraphExpansionPlaneCountPerEdgeTypeSchema,
     candidate_pool_complete: z.boolean().default(false),
+    query_probes: DiagnosticQueryProbesSchema.nullable().optional(),
+    query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),
     candidate_key_collisions: z
       .array(
@@ -301,6 +410,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z
           .readonly()
       )
       .readonly(),
+    quality_axes: LongMemEvalQuestionMeasurementAxesSchema.optional(),
+    cohort_ledger: LongMemEvalQuestionCohortLedgerSchema.optional(),
     gold: z.array(LongMemEvalGoldDiagnosticSchema).readonly()
   })
   .readonly();

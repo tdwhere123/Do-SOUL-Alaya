@@ -22,6 +22,7 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION
 } from "../../longmemeval/extraction-cache-manifest.js";
 import { buildLongMemEvalFixtureQuestion } from "./longmemeval-fixture.js";
+import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
 // @anchor extraction-window-containment — I2: the cache coverage gate must
 // validate THIS run's question window, not the (possibly narrower) window the
@@ -34,6 +35,7 @@ import { buildLongMemEvalFixtureQuestion } from "./longmemeval-fixture.js";
 const CONFIG: CompileSeedExtractionConfig = {
   providerUrl: "https://yunwu.ai/v1",
   model: "gpt-5.4-mini",
+  requestProfile: "provider-default-v1",
   apiKey: "test-key"
 };
 
@@ -48,9 +50,16 @@ async function fillTurns(
   cacheRoot: string,
   turnContents: readonly string[]
 ): Promise<void> {
+  writeExtractionCacheTestManifest({
+    cacheRoot,
+    model: CONFIG.model,
+    modelFamily: CONFIG.model,
+    providerUrl: CONFIG.providerUrl,
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+  });
   const extractor = createCachingSignalExtractor({
     delegate: offlineExtractorFactory(),
-    model: CONFIG.model,
+    config: CONFIG,
     cacheRoot
   });
   for (const turn of turnContents) {
@@ -71,6 +80,8 @@ async function fillTurns(
   writeExtractionCacheManifest(cacheRoot, {
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
     extraction_model: CONFIG.model,
+    model_family: CONFIG.model,
+    request_profile: CONFIG.requestProfile,
     provider_url: CONFIG.providerUrl,
     system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
@@ -90,6 +101,7 @@ let cacheRoot: string;
 beforeEach(async () => {
   cacheRoot = await mkdtemp(join(tmpdir(), "window-containment-"));
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "gpt-5.4-mini");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
 });
 
 afterEach(async () => {
@@ -212,6 +224,7 @@ describe("extraction window-containment preflight", () => {
     const offlineConfig: CompileSeedExtractionConfig = {
       providerUrl: CONFIG.providerUrl,
       model: CONFIG.model,
+      requestProfile: CONFIG.requestProfile,
       apiKey: null
     };
 

@@ -14,6 +14,7 @@ import type { RecallEvalRuntimeAttribution } from "../lifecycle/recall-eval-runt
 import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
 import { computeRecallEvalAggregates, type RecallEvalAggregates } from "./recall-eval-aggregates.js";
 import { accumulateRecallEvalRows, type RecallEvalAccumulator } from "./recall-eval-accumulator.js";
+import { buildBenchmarkMeasurementAttribution } from "../measurement/attribution.js";
 
 const VARIANT_TO_SPLIT: Record<LongMemEvalVariant, BenchSplit> = {
   longmemeval_oracle: "longmemeval-oracle",
@@ -48,6 +49,11 @@ function buildPayload(
   accumulator: RecallEvalAccumulator,
   aggregates: RecallEvalAggregates
 ): KpiPayload {
+  const kpi = buildKpiCore(accumulator, aggregates);
+  const candidatePoolComplete = accumulator.questionDiagnostics.length ===
+    input.evaluatedCount && accumulator.questionDiagnostics.every(
+      (question) => question.candidate_pool_complete
+    );
   return {
     bench_name: "public", split: VARIANT_TO_SPLIT[input.variant],
     run_at: input.runAt.toISOString(), alaya_commit: input.commitSha7,
@@ -55,6 +61,16 @@ function buildPayload(
     embedding_provider: input.embeddingProviderLabel, chat_provider: "none",
     policy_shape: input.policyShape, simulate_report: input.simulateReport,
     recall_eval_attribution: input.runtimeAttribution,
+    measurement_attribution: buildBenchmarkMeasurementAttribution({
+      candidatePoolComplete,
+      provenanceComplete: input.runtimeAttribution.gate_eligible,
+      abstention: kpi.quality_metrics?.abstention,
+      noGoldCount: kpi.quality_metrics?.no_gold_count,
+      evaluatorIdentityIssueCount:
+        kpi.quality_metrics?.evaluator_identity_issue_count,
+      evaluatorIdentityUnscorableCount:
+        kpi.quality_metrics?.evaluator_identity_unscorable_count
+    }),
     ...(input.recallWeightOverrides === undefined ? {} : {
       recall_weight_overrides: input.recallWeightOverrides.summary
     }),
@@ -65,8 +81,9 @@ function buildPayload(
       checksum_source: `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
     },
     sample_size: input.sampleSize, evaluated_count: input.evaluatedCount,
+    answerable_evaluated_count: accumulator.answerableCount,
     harness_mode: "mcp_propose_review",
-    kpi: buildKpiCore(accumulator, aggregates)
+    kpi
   };
 }
 

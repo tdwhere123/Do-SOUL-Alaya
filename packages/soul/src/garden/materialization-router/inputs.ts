@@ -54,7 +54,6 @@ export function routeByObjectKind(objectKind: string): MaterializationTarget | n
         route_target: "signal_only",
         routing_reason: `object_kind=${objectKind} -> signal_only (no projection beyond signal row)`
       };
-    case "activity":
     case "review_scope":
       return {
         kind: "evidence_only",
@@ -86,6 +85,7 @@ export function routeByObjectKind(objectKind: string): MaterializationTarget | n
     case "reference":
     case "task_state":
     case "fact":
+    case "activity":
       return {
         kind: "evidence_only",
         route_target: "memory_entry_only",

@@ -18,7 +18,6 @@ export type AddCoarseCandidate = (
   sourceChannel?: string,
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   entityConfidence?: number,
-  reachedViaEarnedCoRecalledFanin?: boolean,
   pathFlowScore?: number
 ) => boolean;
 
@@ -41,7 +40,6 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
     sourceChannel,
     pathExpansionSource,
     entityConfidence,
-    reachedViaEarnedCoRecalledFanin,
     pathFlowScore
   ) {
     if (!shouldAdmitCoarseCandidate(params, entry, plane)) {
@@ -60,8 +58,7 @@ export function createCoarseCandidateAdder(params: CoarseCandidateAdderParams): 
         evidenceStructuralScore,
         sourceChannel,
         pathExpansionSource,
-        entityConfidence,
-        reachedViaEarnedCoRecalledFanin
+        entityConfidence
       )
     );
     updateCoarseCandidateScores(
@@ -107,16 +104,12 @@ function buildNextCoarseCandidateDraft(
   evidenceStructuralScore: number,
   sourceChannel: string | undefined,
   pathExpansionSource: RecallPathExpansionSourceDiagnostic | undefined,
-  entityConfidence: number | undefined,
-  reachedViaEarnedCoRecalledFanin: boolean | undefined
+  entityConfidence: number | undefined
 ): CoarseCandidateDraft {
   const nextEntityConfidence =
     plane === "entity_seed" && entityConfidence !== undefined
       ? Math.max(current?.entityConfidence ?? 0, entityConfidence)
       : current?.entityConfidence;
-  const nextReachedViaEarnedCoRecalledFanin =
-    (current?.reachedViaEarnedCoRecalledFanin ?? false) ||
-    reachedViaEarnedCoRecalledFanin === true;
   return {
     entry,
     admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
@@ -130,10 +123,7 @@ function buildNextCoarseCandidateDraft(
       ...(current?.pathExpansionSources ?? []),
       ...(pathExpansionSource === undefined ? [] : [pathExpansionSource])
     ]),
-    ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence }),
-    ...(nextReachedViaEarnedCoRecalledFanin
-      ? { reachedViaEarnedCoRecalledFanin: true }
-      : {})
+    ...(nextEntityConfidence === undefined ? {} : { entityConfidence: nextEntityConfidence })
   };
 }
 

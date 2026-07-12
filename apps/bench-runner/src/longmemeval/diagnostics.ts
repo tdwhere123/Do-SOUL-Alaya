@@ -33,7 +33,6 @@ export {
 } from "./diagnostics-quality.js";
 export { buildLongMemEvalFullGoldCoverage } from "./diagnostics-full-gold-coverage.js";
 export {
-  includeReplayCandidatePoolInDiagnosticsWrite,
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
   stripReplayCandidatePoolsForGateWrite,

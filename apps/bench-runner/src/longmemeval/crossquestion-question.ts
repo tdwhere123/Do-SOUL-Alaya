@@ -25,6 +25,7 @@ import type {
   QuestionResult,
   SidecarEntry
 } from "./crossquestion.js";
+import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
 
 interface CrossQuestionSeedStats {
   seedTurnsTruncated: number;
@@ -173,7 +174,10 @@ async function runCrossQuestionRecall(
   const answerSessionSet = new Set(input.question.answer_session_ids);
   const goldMemoryIds = collectCrossQuestionGoldMemoryIds(input.sidecar, input.question.question_id, answerSessionSet);
   const recallStart = monotonicNowNs();
-  const recallResult = await input.daemon.recall(input.question.question, { maxResults: 10 });
+  const recallResult = await input.daemon.recall(input.question.question, {
+    maxResults: 10,
+    referenceTime: requireLongMemEvalTimestamp(input.question.question_date)
+  });
   const recallOutcome = resolveCrossQuestionRecallOutcome(
     input,
     recallResult,

@@ -26,6 +26,10 @@ import {
   signalsEnvelope
 } from "./compile-seed-fixture.js";
 import { createUnscoredMaterializedSeedError } from "../../harness/seed-errors.js";
+import {
+  TEST_EXTRACTION_PROVIDER_URL,
+  writeExtractionCacheTestManifest
+} from "./extraction-cache-test-fixture.js";
 
 describe("createCachingSignalExtractor", () => {
   let cacheRoot: string;
@@ -39,6 +43,7 @@ describe("createCachingSignalExtractor", () => {
   });
 
   it("delegates to the real extractor on a cache miss", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
     const delegate: BenchSignalExtractor = {
       extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
     };
@@ -60,7 +65,12 @@ describe("createCachingSignalExtractor", () => {
     };
     const extractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats
     });
@@ -80,8 +90,10 @@ describe("createCachingSignalExtractor", () => {
   });
 
   it("serves a second extraction from the on-disk fixture with zero LLM calls", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const rawJson = signalsEnvelope([{ distilled: "Fact X.", matched: "X" }]);
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: '{"signals":[{"x":1}]}' }))
+      extract: vi.fn(async () => ({ rawJson }))
     };
     const firstStats: CompileSeedExtractionStats = {
       path: "official_api_compile",
@@ -101,7 +113,12 @@ describe("createCachingSignalExtractor", () => {
     };
     const firstRun = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats: firstStats
     });
@@ -127,7 +144,12 @@ describe("createCachingSignalExtractor", () => {
     };
     const secondRun = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot,
       stats: secondStats
     });
@@ -142,35 +164,75 @@ describe("createCachingSignalExtractor", () => {
     expect(secondStats.liveExtractionFailures).toBe(0);
     expect(secondStats.cachedExtractionFailures).toBe(0);
     expect(secondStats.lastExtractionSource).toBe("cache");
-    expect(cached.rawJson).toBe('{"signals":[{"x":1}]}');
+    expect(cached.rawJson).toBe(rawJson);
   });
 
   it("keys the cache on the prompt: a different user prompt is a fresh miss", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "s" });
+    const firstRaw = signalsEnvelope([{ distilled: "Fact A.", matched: "A" }]);
+    const secondRaw = signalsEnvelope([{ distilled: "Fact B.", matched: "B" }]);
     const delegate: BenchSignalExtractor = {
       extract: vi
         .fn<BenchSignalExtractor["extract"]>()
-        .mockResolvedValueOnce({ rawJson: '{"signals":[{"a":1}]}' })
-        .mockResolvedValueOnce({ rawJson: '{"signals":[{"b":2}]}' })
+        .mockResolvedValueOnce({ rawJson: firstRaw })
+        .mockResolvedValueOnce({ rawJson: secondRaw })
     };
     const extractor = createCachingSignalExtractor({
       delegate,
-      model: "test-model",
+      config: {
+        model: "test-model",
+        modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
       cacheRoot
     });
 
     const first = await extractor.extract({ systemPrompt: "s", userPrompt: "A" });
     const second = await extractor.extract({ systemPrompt: "s", userPrompt: "B" });
 
-    expect(first.rawJson).toBe('{"signals":[{"a":1}]}');
-    expect(second.rawJson).toBe('{"signals":[{"b":2}]}');
+    expect(first.rawJson).toBe(firstRaw);
+    expect(second.rawJson).toBe(secondRaw);
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("resolveCompileSeedExtractionConfig", () => {
+  it("requires an explicit request profile when no cache manifest exists", () => {
+    expect(() => resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini"
+    })).toThrow(/request profile.*unresolved|ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE/iu);
+  });
+
+  it("resolves the closed request profile independently of the model", () => {
+    const config = resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "arbitrary-model",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-v4-nonthinking-v1"
+    });
+    expect(config.requestProfile).toBe("deepseek-v4-nonthinking-v1");
+  });
+
+  it("rejects an unknown request profile", () => {
+    expect(() => resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "arbitrary-model",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "deepseek-auto"
+    })).toThrow(/must be one of.*provider-default-v1.*deepseek-v4-nonthinking-v1/iu);
+  });
+
+  it("keeps the request model exact while resolving a comparison model family", () => {
+    const config = resolveCompileSeedExtractionConfig({
+      OFFICIAL_API_GARDEN_MODEL: "deepseek-v4-flash-free",
+      ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "deepseek-v4-flash",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+    });
+    expect(config.model).toBe("deepseek-v4-flash-free");
+    expect(config.modelFamily).toBe("deepseek-v4-flash");
+  });
+
   it("resolves a null key when no garden secret ref is set", () => {
     const config = resolveCompileSeedExtractionConfig({
-      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini"
+      OFFICIAL_API_GARDEN_MODEL: "gpt-5.4-mini",
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
     });
     expect(config.apiKey).toBeNull();
     expect(config.model).toBe("gpt-5.4-mini");
@@ -185,7 +247,7 @@ describe("resolveCompileSeedExtractionConfig", () => {
 
   it("falls back to the manifest extraction_model when env is unset", () => {
     const config = resolveCompileSeedExtractionConfig(
-      {},
+      { ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1" },
       {
         schema_version: 1,
         extraction_model: "gpt-5.4-mini",

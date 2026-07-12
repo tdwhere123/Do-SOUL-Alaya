@@ -11,13 +11,24 @@ import {
   type CompileSeedExtractionStats
 } from "./compile-seed.js";
 import {
-  computeSystemPromptSha256,
-  readExtractionCacheManifest,
+  readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest,
-  EXTRACTION_CACHE_KEY_ALGO,
-  EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifest
 } from "./extraction-cache-manifest.js";
+import { preflightExtractionCache } from "./compile-seed-preflight.js";
+import {
+  acquireExtractionCacheWriteLease,
+  assertManifestlessCacheIsEmpty,
+  withExtractionCacheWriteLease,
+  type ExtractionCacheWriteLease
+} from "./extraction/fill-root-guard.js";
+import { ExtractionCacheInvariantError } from "./extraction/cache-invariant-error.js";
+import { buildFillManifest } from "./extraction/fill-manifest.js";
+import {
+  newFillStats,
+  readFillRetryTelemetry,
+  type FillRetryTelemetry
+} from "./extraction/fill-stats.js";
 import { loadDataset } from "./fetch.js";
 import {
   pairSessionIntoRounds,
@@ -28,10 +39,9 @@ import {
 /**
  * @anchor longmemeval-extraction-fill
  *
- * Layer 1 (slow, one-time). A standalone pass that, per turn, ONLY calls the
- * extractor and writes the extraction cache — NO daemon, NO DB, NO
- * materialization. The single LLM call point (OfficialApiGardenProvider.compile
- * -> the caching extractor delegate) is pure CPU + network, so this pass runs
+ * Layer 1 (slow, one-time). Calls the extractor and writes the extraction
+ * cache without starting a daemon or materializing memory. The delegate is
+ * pure CPU + network, so this pass runs
  * a bounded-concurrency pool with none of the daemon's process.env race or
  * 1500MB/shard memory ceiling. Its only ceiling is the provider's rate limit.
  *
@@ -73,7 +83,7 @@ export interface ExtractionFillOptions {
   readonly log?: (message: string) => void;
 }
 
-export interface ExtractionFillResult {
+export interface ExtractionFillResult extends FillRetryTelemetry {
   /** Distinct turn_content tasks after dedup (one cache key each). */
   readonly requestedTurns: number;
   /** Tasks served from an existing cache fixture (zero LLM). */
@@ -104,7 +114,7 @@ function buildFillUserPrompt(turnContent: string): string {
 
 /**
  * Flatten every question's sessions into rounds and dedup by turn_content. The
- * cache key hashes only model + systemPrompt + turn_content, so identical
+ * cache key hashes model + requestProfile + systemPrompt + turn_content, so identical
  * round content collapses to one task (and one cache key) regardless of which
  * question / session it came from.
  */
@@ -171,7 +181,11 @@ async function runBoundedPool<T>(
     }
   }
   const runners = Array.from({ length: Math.min(limit, tasks.length) }, () => pump());
-  await Promise.all(runners);
+  const settled = await Promise.allSettled(runners);
+  const rejected = settled.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (rejected !== undefined) throw rejected.reason;
 }
 
 /**
@@ -185,22 +199,121 @@ export async function runExtractionFill(
   options: ExtractionFillOptions
 ): Promise<ExtractionFillResult> {
   const cacheRoot = options.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const lease = acquireExtractionCacheWriteLease(cacheRoot);
+  return withExtractionCacheWriteLease(
+    lease,
+    () => runLockedExtractionFill(options, cacheRoot, lease)
+  );
+}
+
+async function runLockedExtractionFill(
+  options: ExtractionFillOptions,
+  cacheRoot: string,
+  writeLease: ExtractionCacheWriteLease
+): Promise<ExtractionFillResult> {
   const log =
     options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
   const concurrency = options.concurrency ?? EXTRACTION_FILL_DEFAULT_CONCURRENCY;
+  const prepared = await prepareExtractionFill(options, cacheRoot, concurrency, log);
+  const stats = newFillStats();
+  const failures = await executeExtractionFill(
+    options,
+    prepared,
+    cacheRoot,
+    concurrency,
+    stats,
+    log,
+    writeLease
+  );
+  return finishExtractionFill(
+    prepared, cacheRoot, failures, stats, log, writeLease
+  );
+}
 
-  const existingManifest = readExtractionCacheManifest(cacheRoot);
-  const config = resolveCompileSeedExtractionConfig(process.env, existingManifest);
-  // The model comes from the single source (env -> manifest); a missing source
-  // throws inside resolveCompileSeedExtractionConfig. Assert non-empty here so
-  // a fill pass can never write fixtures keyed under a silent default model.
-  if (config.model.trim().length === 0) {
-    throw new Error(
-      "extraction-fill: resolved extraction model is empty; refusing to fill " +
-        "the cache with an unkeyable model."
-    );
-  }
+interface PreparedExtractionFill {
+  readonly config: CompileSeedExtractionConfig;
+  readonly existingManifest: ExtractionCacheManifest | undefined;
+  readonly pinnedManifestSha256: string;
+  readonly distinctTurns: readonly string[];
+  readonly requestedTurns: number;
+  readonly variant: LongMemEvalVariant;
+}
 
+async function prepareExtractionFill(
+  options: ExtractionFillOptions,
+  cacheRoot: string,
+  concurrency: number,
+  log: (message: string) => void
+): Promise<PreparedExtractionFill> {
+  const startingIdentity = readExtractionCacheManifestIdentity(cacheRoot);
+  const existingManifest = startingIdentity?.manifest;
+  if (existingManifest === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
+  const config = resolveFillConfig(existingManifest);
+
+  const window = await prepareExtractionWindow(options);
+  const { distinctTurns, requestedTurns } = window;
+  const currentIdentity = readExtractionCacheManifestIdentity(cacheRoot);
+  assertPreparationIdentityUnchanged(startingIdentity, currentIdentity);
+  if (currentIdentity === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
+  const currentManifest = currentIdentity?.manifest;
+  preflightExtractionCache({
+    cacheRoot,
+    manifest: currentManifest,
+    config,
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    requiredTurnContents: distinctTurns,
+    allowLiveExtraction: true,
+    liveExtractionPossible: config.apiKey !== null,
+    warn: log
+  });
+  const pinned = pinExtractionCacheIdentity({
+    cacheRoot,
+    config,
+    variant: options.variant,
+    existingIdentity: currentIdentity,
+    requestedTurns
+  });
+  log(
+    `[extraction-fill] variant=${options.variant} questions=${window.questionCount} ` +
+      `distinct_turns=${requestedTurns} model=${config.model} ` +
+      `concurrency=${concurrency}`
+  );
+  return {
+    config,
+    existingManifest: pinned.manifest,
+    pinnedManifestSha256: pinned.manifestSha256,
+    distinctTurns,
+    requestedTurns,
+    variant: options.variant
+  };
+}
+
+function resolveFillConfig(
+  manifest: ExtractionCacheManifest | undefined
+): CompileSeedExtractionConfig {
+  const config = resolveCompileSeedExtractionConfig(process.env, manifest);
+  if (config.model.trim().length > 0) return config;
+  throw new Error(
+    "extraction-fill: resolved extraction model is empty; refusing to fill " +
+      "the cache with an unkeyable model."
+  );
+}
+
+function assertPreparationIdentityUnchanged(
+  starting: ReturnType<typeof readExtractionCacheManifestIdentity>,
+  current: ReturnType<typeof readExtractionCacheManifestIdentity>
+): void {
+  if (starting?.manifestSha256 === current?.manifestSha256) return;
+  throw new ExtractionCacheInvariantError(
+    "extraction cache manifest changed during dataset preparation"
+  );
+}
+
+async function prepareExtractionWindow(options: ExtractionFillOptions): Promise<{
+  readonly distinctTurns: readonly string[];
+  readonly requestedTurns: number;
+  readonly questionCount: number;
+}> {
   const questions = await loadDataset(options.variant, {
     dataDir: options.dataDir,
     pinnedMetaRoot: options.pinnedMetaRoot
@@ -209,65 +322,128 @@ export async function runExtractionFill(
   const sliceEnd =
     options.limit !== undefined ? offset + options.limit : questions.length;
   const window = questions.slice(offset, sliceEnd);
-
   const distinctTurns = collectDistinctTurnContents(window);
-  const requestedTurns = distinctTurns.length;
-  log(
-    `[extraction-fill] variant=${options.variant} questions=${window.length} ` +
-      `distinct_turns=${requestedTurns} model=${config.model} ` +
-      `concurrency=${concurrency}`
-  );
+  return {
+    distinctTurns,
+    requestedTurns: distinctTurns.length,
+    questionCount: window.length
+  };
+}
 
+function pinExtractionCacheIdentity(input: {
+  readonly cacheRoot: string;
+  readonly config: CompileSeedExtractionConfig;
+  readonly variant: LongMemEvalVariant;
+  readonly existingIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>;
+  readonly requestedTurns: number;
+}): { readonly manifest: ExtractionCacheManifest; readonly manifestSha256: string } {
+  if (input.existingIdentity === undefined) {
+    writeExtractionCacheManifest(input.cacheRoot, buildFillManifest({
+      config: input.config,
+      variant: input.variant,
+      existingManifest: undefined,
+      requestedTurns: input.requestedTurns,
+      cachedTurns: 0,
+      coverage: input.requestedTurns === 0 ? 1 : 0
+    }));
+  } else {
+    return input.existingIdentity;
+  }
+  const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  if (identity === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "extraction-fill failed to pin its cache manifest identity"
+    );
+  }
+  return identity;
+}
+
+async function executeExtractionFill(
+  options: ExtractionFillOptions,
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  concurrency: number,
+  stats: CompileSeedExtractionStats,
+  log: (message: string) => void,
+  writeLease: ExtractionCacheWriteLease
+): Promise<number> {
   const delegate =
-    options.extractorFactory?.(config) ?? createGardenHttpExtractor(config);
-  // One shared stats object across the pool. cacheHits / llmCalls increments
-  // are single-statement mutations in the JS event loop, so concurrent fill
-  // workers never tear a counter — only the final totals are read.
-  const stats = newFillStats();
+    options.extractorFactory?.(prepared.config) ??
+    createGardenHttpExtractor(prepared.config);
   const extractor = createCachingSignalExtractor({
     delegate,
-    model: config.model,
+    config: prepared.config,
     cacheRoot,
-    stats
+    stats,
+    writeLease
   });
-
-  const failures = await runExtractionPool({
+  return runExtractionPool({
     extractor,
-    distinctTurns,
+    distinctTurns: prepared.distinctTurns,
     concurrency,
-    requestedTurns,
+    requestedTurns: prepared.requestedTurns,
     stats,
     log
   });
+}
+
+function finishExtractionFill(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  failures: number,
+  stats: CompileSeedExtractionStats,
+  log: (message: string) => void,
+  writeLease: ExtractionCacheWriteLease
+): ExtractionFillResult {
+  assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
+  const { requestedTurns } = prepared;
   const cacheHits = stats.cacheHits;
   const newlyExtracted = stats.llmCalls;
-
   const coverage = requestedTurns === 0 ? 1 : (requestedTurns - failures) / requestedTurns;
   const cachedTurns = countCacheShards(cacheRoot);
+  const retryTelemetry = readFillRetryTelemetry(stats);
   const manifest = buildFillManifest({
-    config,
-    variant: options.variant,
-    existingManifest,
+    config: prepared.config,
+    variant: prepared.variant,
+    existingManifest: prepared.existingManifest,
     requestedTurns,
     cachedTurns,
     coverage
   });
   writeExtractionCacheManifest(cacheRoot, manifest);
-
   log(
     `[extraction-fill] done: cache_hits=${cacheHits} ` +
       `newly_extracted=${newlyExtracted} failures=${failures} ` +
+      `retry_successes=${retryTelemetry.retrySuccesses} ` +
+      `rate_limit_retries=${retryTelemetry.rateLimitRetries} ` +
+      `terminal_max_retries=${retryTelemetry.terminalRetryClassifications.failure_max_retries} ` +
+      `terminal_nonretryable_4xx=${retryTelemetry.terminalRetryClassifications.failure_non_retryable_4xx} ` +
+      `terminal_timeouts=${retryTelemetry.terminalRetryClassifications.failure_timeout} ` +
       `coverage=${(coverage * 100).toFixed(1)}% cached_turns=${cachedTurns}`
   );
-
   return {
     requestedTurns,
     cacheHits,
     newlyExtracted,
     failures,
     coverage,
+    ...retryTelemetry,
     manifest
   };
+}
+
+function assertPinnedFillIdentity(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  writeLease: ExtractionCacheWriteLease
+): void {
+  writeLease.assertOwned();
+  const identity = readExtractionCacheManifestIdentity(cacheRoot);
+  if (identity?.manifestSha256 !== prepared.pinnedManifestSha256) {
+    throw new ExtractionCacheInvariantError(
+      "extraction-fill cache manifest identity changed before finalization"
+    );
+  }
 }
 
 async function runExtractionPool(input: {
@@ -285,14 +461,12 @@ async function runExtractionPool(input: {
 
   await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
     try {
-      // The caching extractor returns a hit's stored rawJson with no delegate
-      // call (stats.cacheHits++); on a miss it calls the delegate (live HTTP),
-      // write-throughs the fixture (stats.llmCalls++).
       await extractor.extract({
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
         userPrompt: buildFillUserPrompt(turnContent)
       });
-    } catch {
+    } catch (cause) {
+      if (cause instanceof ExtractionCacheInvariantError) throw cause;
       failures++;
     } finally {
       processed++;
@@ -306,61 +480,4 @@ async function runExtractionPool(input: {
     }
   });
   return failures;
-}
-
-// coverage is this run's window denominator; cached_turns is recomputed from
-// every shard on disk so the manifest is honest about the whole cache.
-function buildFillManifest(input: {
-  readonly config: CompileSeedExtractionConfig;
-  readonly variant: LongMemEvalVariant;
-  readonly existingManifest: ExtractionCacheManifest | undefined;
-  readonly requestedTurns: number;
-  readonly cachedTurns: number;
-  readonly coverage: number;
-}): ExtractionCacheManifest {
-  return {
-    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-    extraction_model: input.config.model,
-    provider_url: input.config.providerUrl,
-    system_prompt_sha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-    dataset: datasetVariantLabel(input.variant),
-    dataset_revision: input.existingManifest?.dataset_revision ?? "unpinned",
-    requested_turns: input.requestedTurns,
-    cached_turns: input.cachedTurns,
-    coverage: input.coverage,
-    storage: input.existingManifest?.storage ?? "git-tracked",
-    built_at: new Date().toISOString(),
-    builder: "extraction-fill"
-  };
-}
-
-function datasetVariantLabel(variant: LongMemEvalVariant): string {
-  return variant.replace(/_/u, "-");
-}
-
-/**
- * A fresh extraction-stats accumulator the caching extractor mutates. Only
- * cacheHits / llmCalls are read by the fill pass; the rest exist to satisfy the
- * shared stats shape so the same caching extractor the bench run uses is reused
- * unchanged.
- */
-function newFillStats(): CompileSeedExtractionStats {
-  return {
-    path: "official_api_compile",
-    cacheHits: 0,
-    llmCalls: 0,
-    offlineFallbacks: 0,
-    liveExtractionFailures: 0,
-    cachedExtractionFailures: 0,
-    factsProduced: 0,
-    signalsDropped: 0,
-    signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
-    parseDropped: 0,
-    compileOverflowDropped: 0,
-    lastTurnRawSignalCount: 0,
-    lastTurnDraftCount: 0,
-    lastExtractionSource: null,
-    lastCacheKey: null
-  };
 }

@@ -1,12 +1,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  EXTRACTION_CACHE_KEY_ALGO,
+  EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   extractionCacheManifestPath,
   readExtractionCacheManifest,
+  readExtractionCacheManifestIdentity,
   writeExtractionCacheManifest,
   type ExtractionCacheManifest
 } from "../../longmemeval/extraction-cache-manifest.js";
@@ -42,6 +46,30 @@ describe("extraction-cache-manifest", () => {
     writeExtractionCacheManifest(cacheRoot, BASE_MANIFEST);
     const read = readExtractionCacheManifest(cacheRoot);
     expect(read).toEqual(BASE_MANIFEST);
+  });
+
+  it("round-trips an additive canonical model family without replacing the request model", () => {
+    const manifest: ExtractionCacheManifest = {
+      ...BASE_MANIFEST,
+      schema_version: 2,
+      extraction_model: "deepseek-v4-flash-free",
+      model_family: "deepseek-v4-flash"
+    };
+    writeExtractionCacheManifest(cacheRoot, manifest);
+    expect(readExtractionCacheManifest(cacheRoot)).toEqual(manifest);
+  });
+
+  it("round-trips a v3 manifest with an explicit closed request profile", () => {
+    const manifest: ExtractionCacheManifest = {
+      ...BASE_MANIFEST,
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      extraction_model: "deepseek-v4-flash-free",
+      model_family: "deepseek-v4-flash",
+      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+      request_profile: "deepseek-v4-nonthinking-v1"
+    };
+    writeExtractionCacheManifest(cacheRoot, manifest);
+    expect(readExtractionCacheManifest(cacheRoot)).toEqual(manifest);
   });
 
   it("round-trips a coverage-less (pre-fill) manifest", () => {
@@ -100,6 +128,170 @@ describe("extraction-cache-manifest", () => {
     );
     expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
       /invalid storage/u
+    );
+  });
+
+  it("rejects an unknown schema version instead of guessing compatibility", () => {
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(
+      extractionCacheManifestPath(cacheRoot),
+      JSON.stringify({ ...BASE_MANIFEST, schema_version: 99 }),
+      "utf8"
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+      /unsupported schema_version 99/u
+    );
+  });
+
+  it.each(["99", null, { version: 2 }])(
+    "rejects a present non-numeric schema version: %j",
+    (schemaVersion) => {
+      writeFileSync(
+        extractionCacheManifestPath(cacheRoot),
+        JSON.stringify({ ...BASE_MANIFEST, schema_version: schemaVersion }),
+        "utf8"
+      );
+      expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+        /invalid schema_version/u
+      );
+    }
+  );
+
+  it("rejects a v1 manifest carrying v2 model-family provenance", () => {
+    writeFileSync(
+      extractionCacheManifestPath(cacheRoot),
+      JSON.stringify({ ...BASE_MANIFEST, model_family: "fixture-family" }),
+      "utf8"
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+      /schema_version 1.*model_family/u
+    );
+  });
+
+  it("requires model_family for a v2 manifest", () => {
+    writeFileSync(
+      extractionCacheManifestPath(cacheRoot),
+      JSON.stringify({ ...BASE_MANIFEST, schema_version: 2 }),
+      "utf8"
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+      /schema_version 2.*model_family/u
+    );
+  });
+
+  it("requires request_profile for a v3 manifest", () => {
+    writeFileSync(
+      extractionCacheManifestPath(cacheRoot),
+      JSON.stringify({
+        ...BASE_MANIFEST,
+        schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+        model_family: "fixture-family"
+      }),
+      "utf8"
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+      /schema_version 3.*request_profile/u
+    );
+  });
+
+  it.each(["", "thinking-v1", null])(
+    "rejects an unsupported v3 request profile: %j",
+    (requestProfile) => {
+      writeFileSync(
+        extractionCacheManifestPath(cacheRoot),
+        JSON.stringify({
+          ...BASE_MANIFEST,
+          schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+          model_family: "fixture-family",
+          request_profile: requestProfile
+        }),
+        "utf8"
+      );
+      expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+        /request_profile/u
+      );
+    }
+  );
+
+  it.each([1, 2])("rejects request_profile on legacy schema v%d", (schemaVersion) => {
+    writeFileSync(
+      extractionCacheManifestPath(cacheRoot),
+      JSON.stringify({
+        ...BASE_MANIFEST,
+        schema_version: schemaVersion,
+        ...(schemaVersion === 2 ? { model_family: "fixture-family" } : {}),
+        request_profile: "provider-default-v1"
+      }),
+      "utf8"
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+      new RegExp(`schema_version ${schemaVersion}.*request_profile`, "u")
+    );
+  });
+
+  it("refuses to write an invalid version-family combination", () => {
+    const invalid = {
+      ...BASE_MANIFEST,
+      schema_version: 2
+    } as unknown as ExtractionCacheManifest;
+    expect(() => writeExtractionCacheManifest(cacheRoot, invalid)).toThrow(
+      /schema_version 2.*model_family/u
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).not.toThrow();
+    expect(readExtractionCacheManifest(cacheRoot)).toBeUndefined();
+  });
+
+  it("parses fields and hashes the same manifest bytes", () => {
+    writeExtractionCacheManifest(cacheRoot, BASE_MANIFEST);
+    const raw = readFileSync(extractionCacheManifestPath(cacheRoot), "utf8");
+    const identity = readExtractionCacheManifestIdentity(cacheRoot);
+    writeExtractionCacheManifest(cacheRoot, {
+      ...BASE_MANIFEST,
+      extraction_model: "replacement-model"
+    });
+    expect(identity?.manifest.extraction_model).toBe("gpt-5.4-mini");
+    expect(identity?.manifestSha256).toBe(
+      createHash("sha256").update(raw, "utf8").digest("hex")
+    );
+  });
+
+  it.each([
+    ["requested_turns", -1],
+    ["requested_turns", 1.5],
+    ["requested_turns", null],
+    ["requested_turns", Number.NaN],
+    ["requested_turns", Number.POSITIVE_INFINITY],
+    ["cached_turns", -1],
+    ["cached_turns", 1.5],
+    ["cached_turns", null],
+    ["cached_turns", Number.NaN],
+    ["cached_turns", Number.NEGATIVE_INFINITY]
+  ])("rejects invalid count field %s=%j", (field, value) => {
+    const invalid = { ...BASE_MANIFEST, [field]: value } as unknown as ExtractionCacheManifest;
+    expect(() => writeExtractionCacheManifest(cacheRoot, invalid)).toThrow(
+      /non-negative integer/u
+    );
+  });
+
+  it.each([-0.1, 1.1, null, Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY])(
+    "rejects out-of-range coverage %j",
+    (coverage) => {
+      const invalid = { ...BASE_MANIFEST, coverage } as unknown as ExtractionCacheManifest;
+      expect(() => writeExtractionCacheManifest(cacheRoot, invalid)).toThrow(
+        /coverage.*\[0, 1\]/u
+      );
+    }
+  );
+
+  it("rejects a blank model family instead of silently dropping provenance", () => {
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(
+      extractionCacheManifestPath(cacheRoot),
+      JSON.stringify({ ...BASE_MANIFEST, schema_version: 2, model_family: " " }),
+      "utf8"
+    );
+    expect(() => readExtractionCacheManifest(cacheRoot)).toThrow(
+      /field "model_family" must be a non-empty string/u
     );
   });
 

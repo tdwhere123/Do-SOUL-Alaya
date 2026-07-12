@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   GardenProviderError,
-  OfficialApiGardenProvider
+  OfficialApiGardenProvider,
+  parseOfficialApiSignals
 } from "../../garden/compute-provider.js";
 import {
   SignalExtractorError} from "../../garden/pi-mono-extractor.js";
@@ -90,13 +91,13 @@ describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when t
     );
     expect(signals).toHaveLength(2);
     expect(signals.map((s) => (s.raw_payload as { distilled_fact: string }).distilled_fact)).toEqual([
-      "The operator prefers dark mode in the editor.",
-      "The team deploys releases on Tuesdays."
+      "I prefer dark mode",
+      "we deploy on Tuesdays."
     ]);
   });
 
 
-  it("clamps an oversized distilled_fact to the field cap", async () => {
+  it("keeps oversized model paraphrases out of durable content", async () => {
     const oversized = "y".repeat(10_000);
     const extractor = createExtractor(JSON.stringify({
       signals: [
@@ -104,7 +105,7 @@ describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when t
           signal_kind: "potential_claim",
           object_kind: "fact",
           confidence: 0.6,
-          matched_text: "fact text",
+          matched_text: "The fact is grounded.",
           distilled_fact: oversized
         }
       ]
@@ -115,10 +116,11 @@ describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when t
       generateSignalId: () => "signal-clamp"
     });
 
-    const signals = await provider.compile("fact text", createContext());
-    expect((signals[0]!.raw_payload as { distilled_fact: string }).distilled_fact.length).toBe(
-      DISTILLED_FACT_MAX_CHARS
-    );
+    const signals = await provider.compile("The fact is grounded.", createContext());
+    expect(signals[0]!.raw_payload.distilled_fact).toBe("The fact is grounded.");
+    expect((signals[0]!.raw_payload.source_grounding as {
+      proposed_distilled_fact: string;
+    }).proposed_distilled_fact.length).toBe(DISTILLED_FACT_MAX_CHARS);
   });
 
 
@@ -207,32 +209,48 @@ describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when t
     } satisfies Partial<GardenProviderError>);
   });
 
-
-  it("caps the signal count and clamps oversized fields from an official API response", async () => {
-    const oversizedMatchedText = "x".repeat(10_000);
-    const oversizedObjectKind = "k".repeat(1_000);
+  it("rejects a non-empty signals array when every entry is invalid", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",
-      now: () => "2026-04-23T09:00:00.000Z",
-      generateSignalId: () => "signal-capped",
-      extractor: createExtractor(
-        JSON.stringify({
-          signals: Array.from({ length: 200 }, () => ({
-            signal_kind: "potential_preference",
-            object_kind: oversizedObjectKind,
-            confidence: 0.5,
-            matched_text: oversizedMatchedText,
-            reason: "r".repeat(1_000)
-          }))
-        })
-      )
+      extractor: createExtractor(JSON.stringify({ signals: [42] }))
     });
 
-    const signals = await provider.compile("Call me Ash.", createContext());
-    expect(signals).toHaveLength(64);
-    expect(signals[0]!.object_kind.length).toBe(200);
-    expect((signals[0]!.raw_payload as { matched_text: string }).matched_text.length).toBe(4_000);
-    expect((signals[0]!.raw_payload as { extraction_reason: string }).extraction_reason.length).toBe(400);
+    await expect(provider.compile("Call me Ash.", createContext())).rejects.toMatchObject({
+      name: "GardenProviderError",
+      kind: "invalid_response"
+    } satisfies Partial<GardenProviderError>);
+  });
+
+  it("keeps a valid signal beside an invalid sibling", () => {
+    const drafts = parseOfficialApiSignals(JSON.stringify({ signals: [42, {
+      signal_kind: "potential_preference",
+      object_kind: "user_preference",
+      confidence: 0.9,
+      matched_text: "Call me Ash",
+      distilled_fact: "The operator prefers to be called Ash."
+    }] }));
+
+    expect(drafts).toHaveLength(1);
+  });
+
+
+  it("caps the signal count and clamps oversized parsed fields", () => {
+    const oversizedMatchedText = "x".repeat(10_000);
+    const oversizedObjectKind = "k".repeat(1_000);
+    const drafts = parseOfficialApiSignals(JSON.stringify({
+      signals: Array.from({ length: 200 }, () => ({
+        signal_kind: "potential_preference",
+        object_kind: oversizedObjectKind,
+        confidence: 0.5,
+        matched_text: oversizedMatchedText,
+        reason: "r".repeat(1_000)
+      }))
+    }));
+
+    expect(drafts).toHaveLength(64);
+    expect(drafts[0]!.object_kind.length).toBe(200);
+    expect(drafts[0]!.matched_text.length).toBe(4_000);
+    expect(drafts[0]!.reason).toHaveLength(400);
   });
 
 });

@@ -295,7 +295,7 @@ describe("RecallService tier cascade", () => {
     );
   }, 30_000);
 
-  it("uses WARM once when HOT is empty and decays delivered relevance", async () => {
+  it("uses WARM once and keeps cascade decay in the fusion input diagnostic", async () => {
     const baseline = await recallWith({
       hot: [createMemoryEntry({ object_id: "candidate-0", activation_score: 0.8 })]
     });
@@ -338,12 +338,16 @@ describe("RecallService tier cascade", () => {
     expect(warm.result.candidates).toHaveLength(3);
     const candidate = warm.result.candidates.find((entry) => entry.object_id === "candidate-0");
     expect(candidate?.source_channels).toContain("warm_cascade");
-    expect(candidate?.relevance_score).toBeCloseTo(
-      (baseline.result.candidates[0]?.relevance_score ?? 0) * WARM_CASCADE_DECAY
+    const warmDiagnostic = warm.result.diagnostics?.candidates.find(
+      (entry) => entry.object_id === "candidate-0"
     );
+    expect(warmDiagnostic?.additive_score).toBeCloseTo(
+      (baseline.result.diagnostics?.candidates[0]?.additive_score ?? 0) * WARM_CASCADE_DECAY
+    );
+    expect(candidate?.relevance_score).toBe(baseline.result.candidates[0]?.relevance_score);
   });
 
-  it("uses COLD when HOT and WARM are empty and decays delivered relevance", async () => {
+  it("uses COLD and keeps cascade decay in the fusion input diagnostic", async () => {
     const baseline = await recallWith({
       hot: [createMemoryEntry({ object_id: "candidate", activation_score: 0.8 })]
     });
@@ -367,9 +371,11 @@ describe("RecallService tier cascade", () => {
     expect(cold.result.degradation_reason).toBe("cold_cascade_engaged");
     expect(cold.result.candidates).toHaveLength(1);
     expect(cold.result.candidates[0]?.source_channels).toContain("cold_cascade");
-    expect(cold.result.candidates[0]?.relevance_score).toBeCloseTo(
-      (baseline.result.candidates[0]?.relevance_score ?? 0) * COLD_CASCADE_DECAY
+    expect(cold.result.diagnostics?.candidates[0]?.additive_score).toBeCloseTo(
+      (baseline.result.diagnostics?.candidates[0]?.additive_score ?? 0) * COLD_CASCADE_DECAY
     );
+    expect(cold.result.candidates[0]?.relevance_score)
+      .toBe(baseline.result.candidates[0]?.relevance_score);
   });
 
   it("does not touch COLD when HOT plus WARM reaches the threshold", async () => {

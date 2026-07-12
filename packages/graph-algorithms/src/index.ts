@@ -8,9 +8,16 @@ interface TarjanState {
 }
 
 export {
+  parseAbsoluteTemporalWindow
+} from "./absolute-temporal-window.js";
+
+export { extractTemporalTerms } from "./temporal-terms.js";
+
+export {
   parseRelativeTemporalTerm,
   resolveRelativeTemporalWindow,
   type RelativeTemporalTerm,
+  type RelativeWeekday,
   type TemporalWindow
 } from "./temporal-window.js";
 

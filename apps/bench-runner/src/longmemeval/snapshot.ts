@@ -13,8 +13,13 @@ import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
 import type { LongMemEvalRunProvenance } from "./provenance/run.js";
+import {
+  EXTRACTION_CACHE_MANIFEST_VERSION,
+  type ExtractionRequestProfile
+} from "./extraction-cache-manifest.js";
 import type { SnapshotArtifactIntegrity } from "./snapshot/integrity.js";
 import { validateSnapshotManifest } from "./snapshot/manifest-validation.js";
+import { parseSnapshotSidecar } from "./snapshot/sidecar-validation.js";
 export { deriveSnapshotAttribution } from "./snapshot/attribution.js";
 
 /**
@@ -42,7 +47,7 @@ export { deriveSnapshotAttribution } from "./snapshot/attribution.js";
  * cross-file: apps/bench-runner/src/longmemeval/runner.ts (producer hook)
  */
 
-export const RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION = 1;
+export const RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION = 2;
 /** Filename of the daemon's seeded SQLite DB inside a dataDirRoot. */
 export const BENCH_DAEMON_DB_FILENAME = "alaya.db";
 
@@ -66,6 +71,7 @@ export interface LongMemEvalSnapshotSidecarEntry {
 export interface LongMemEvalSnapshotQuestion {
   readonly questionId: string;
   readonly question: string;
+  readonly questionDate: string;
   /** answer_session_ids from the dataset — the recall@k session filter. */
   readonly answerSessionIds: readonly string[];
   /** Sidecar entries seeded for this question (memory_entry + synthesis). */
@@ -135,16 +141,44 @@ export interface LongMemEvalSnapshotManifest {
  * (the recall fast loop never re-extracts, so it cannot produce these). Mirrors
  * the load-bearing fields of the extraction-cache manifest.
  */
-export interface SnapshotExtractionProvenance {
+interface SnapshotExtractionProvenanceBase {
+  readonly manifest_sha256: string;
   readonly extraction_model: string;
   readonly provider_url: string;
   readonly system_prompt_sha256: string;
+  readonly cache_key_algo: string;
   readonly dataset: string;
   readonly dataset_revision: string;
   readonly coverage?: number;
   readonly cached_turns?: number;
   readonly requested_turns?: number;
 }
+
+export interface SnapshotExtractionProvenanceV1
+  extends SnapshotExtractionProvenanceBase {
+  readonly schema_version: 1;
+  readonly model_family?: never;
+  readonly request_profile?: never;
+}
+
+export interface SnapshotExtractionProvenanceV2
+  extends SnapshotExtractionProvenanceBase {
+  readonly schema_version: 2;
+  readonly model_family: string;
+  readonly request_profile?: never;
+}
+
+export interface SnapshotExtractionProvenanceV3
+  extends SnapshotExtractionProvenanceBase {
+  readonly schema_version: typeof EXTRACTION_CACHE_MANIFEST_VERSION;
+  readonly model_family: string;
+  readonly request_profile: ExtractionRequestProfile;
+}
+
+export type SnapshotExtractionProvenance =
+  | SnapshotExtractionProvenanceV1
+  | SnapshotExtractionProvenanceV2
+  | SnapshotExtractionProvenanceV3;
 
 export function snapshotManifestPath(snapshotDbPath: string): string {
   return `${snapshotDbPath}.manifest.json`;
@@ -223,7 +257,12 @@ export function writeSnapshotSidecar(
   snapshotDbPath: string,
   sidecar: LongMemEvalSnapshotSidecarFile
 ): void {
-  atomicWriteJson(snapshotSidecarPath(snapshotDbPath), sidecar);
+  const filePath = snapshotSidecarPath(snapshotDbPath);
+  atomicWriteJson(filePath, parseSnapshotSidecar(
+    sidecar,
+    filePath,
+    RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION
+  ));
 }
 
 export function readSnapshotManifest(
@@ -249,18 +288,12 @@ export function readSnapshotSidecar(
     throw new Error(`recall-eval snapshot sidecar not found at ${filePath}`);
   }
   const parsed = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    (parsed as { schema_version?: unknown }).schema_version !== RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION ||
-    typeof (parsed as { variant?: unknown }).variant !== "string" ||
-    !Array.isArray((parsed as { questions?: unknown }).questions)
-  ) {
+  if ((parsed as { schema_version?: unknown })?.schema_version !== RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION) {
     throw new Error(
-      `recall-eval snapshot sidecar at ${filePath} is malformed (no questions array)`
+      `recall-eval snapshot sidecar at ${filePath} has unsupported schema_version`
     );
   }
-  return parsed as LongMemEvalSnapshotSidecarFile;
+  return parseSnapshotSidecar(parsed, filePath, RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION);
 }
 
 export function snapshotQuestionIdDigest(

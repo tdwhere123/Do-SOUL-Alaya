@@ -69,6 +69,7 @@ export type BenchEmbeddingProviderKind = "openai" | "local_onnx";
 export interface BenchRecallOptions {
   readonly maxResults?: number;
   readonly conflictAwareness?: boolean;
+  readonly referenceTime?: string;
 }
 
 export interface BenchEdgeFormationMember {

@@ -136,6 +136,34 @@ const RecallDiagnosticPathExpansionSourceSchema = z
   .strict()
   .readonly();
 
+export const RecallCandidateAnswerFeaturesSchema = z
+  .object({
+    content: z.string(),
+    evidence_gist: z.string().nullable(),
+    evidence_gist_truncated: z.boolean(),
+    domain_tags: z.array(z.string()).readonly(),
+    evidence_refs: z.array(z.string()).readonly(),
+    facet_tags: z.array(z.object({
+      facet: z.string(),
+      value: z.string().optional()
+    }).strict().readonly()).readonly(),
+    canonical_entities: z.array(z.string()).readonly(),
+    projection_schema_version: z.literal(1).nullable(),
+    event_time_start: z.string().nullable(),
+    event_time_end: z.string().nullable(),
+    valid_from: z.string().nullable(),
+    valid_to: z.string().nullable(),
+    time_precision: z.enum(["day", "month", "year", "range", "relative", "unknown"]).nullable(),
+    time_source: z.enum(["explicit", "session_timestamp", "relative_resolved"]).nullable(),
+    preference_subject: z.string().nullable(),
+    preference_predicate: z.string().nullable(),
+    preference_object: z.string().nullable(),
+    preference_category: z.string().nullable(),
+    preference_polarity: z.enum(["positive", "negative", "neutral"]).nullable()
+  })
+  .strict()
+  .readonly();
+
 const RecallCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
@@ -165,11 +193,14 @@ const RecallCandidateDiagnosticSchema = z
     dropped_reason: z.string().min(1).nullable(),
     within_budget: z.boolean(),
     relevance_score: z.number().min(0).max(1),
+    additive_score: z.number().min(0).max(1).optional(),
     lexical_rank: z.number().min(0).max(1).nullable(),
     structural_score: z.number().min(0).max(1),
     score_factors: z.record(z.string(), z.unknown()).readonly(),
     source_channels: z.array(z.string().min(1)).readonly(),
     path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly(),
+    answer_features: RecallCandidateAnswerFeaturesSchema.nullable().default(null),
+    path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
     rank_after_feature_rerank: z.number().int().positive().optional(),
     rank_after_lexical_priority: z.number().int().positive().optional(),
@@ -243,6 +274,7 @@ export const BenchRecallDiagnosticsSchema = z
   .object({
     query_probes: z
       .object({
+        normalized_query: z.string().nullable().default(null),
         object_ids: z.array(z.string()).readonly(),
         subject_hints: z.array(z.string()).readonly(),
         evidence_refs: z.array(z.string()).readonly(),
@@ -263,6 +295,7 @@ export const BenchRecallDiagnosticsSchema = z
       })
       .strict()
       .readonly(),
+    query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),
     candidate_pool_count: z.number().int().nonnegative(),
     pre_budget_count: z.number().int().nonnegative(),

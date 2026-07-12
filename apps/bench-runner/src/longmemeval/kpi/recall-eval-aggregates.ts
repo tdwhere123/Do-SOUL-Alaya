@@ -24,12 +24,13 @@ export interface RecallEvalAggregates {
 export function computeRecallEvalAggregates(
   accumulator: RecallEvalAccumulator
 ): RecallEvalAggregates {
-  const n = accumulator.perScenario.length;
+  const n = accumulator.answerableCount;
+  const scorableRows = accumulator.perScenario.filter((row) => row.scorable === true);
   const tokenInput = aggregateBenchTokenMetrics(accumulator.tokenMetricsPerQuestion);
   assertBenchTokenEconomyContract("public", tokenInput);
   return {
     rAt1: n === 0 ? 0 : accumulator.totalHitAt1 / n,
-    rAt5: n === 0 ? 0 : accumulator.perScenario.filter((row) => row.hit_at_5).length / n,
+    rAt5: n === 0 ? 0 : scorableRows.filter((row) => row.hit_at_5).length / n,
     rAt10: n === 0 ? 0 : accumulator.totalHitAt10 / n,
     latencyP50: percentile(accumulator.latencies, 50),
     latencyP95: percentile(accumulator.latencies, 95),

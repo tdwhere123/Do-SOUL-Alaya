@@ -91,6 +91,96 @@ export function buildLongMemEvalArchivePayload(
   };
 }
 
+export function makeEligibleMeasurementAttribution(): NonNullable<
+  KpiPayload["measurement_attribution"]
+> {
+  return {
+    schema_version: "bench-measurement-attribution.v2",
+    status: "eligible",
+    gate_eligible: true,
+    evidence_status: "complete",
+    candidate_pool_complete: true,
+    provenance_complete: true,
+    abstention_calibration_status: "not_applicable",
+    evaluator_identity_status: "complete"
+  };
+}
+
+export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload {
+  const evaluated = payload.evaluated_count;
+  return {
+    ...payload,
+    answerable_evaluated_count: evaluated,
+    measurement_attribution: makeEligibleMeasurementAttribution(),
+    kpi: {
+      ...payload.kpi,
+      seed_extraction_path: payload.kpi.seed_extraction_path === undefined
+        ? undefined
+        : { ...payload.kpi.seed_extraction_path, llm_calls: 0 },
+      per_scenario: payload.kpi.per_scenario.length === evaluated
+        ? payload.kpi.per_scenario.map((row) => ({ ...row, scorable: true }))
+        : Array.from({ length: evaluated }, (_, index) => ({
+            id: `question-${index + 1}`,
+            version: 1,
+            hit_at_5: index < Math.round(payload.kpi.r_at_5 * evaluated),
+            scorable: true,
+            tier: "warm" as const
+          })),
+      quality_metrics: currentQualityMetrics(evaluated)
+    }
+  };
+}
+
+function currentQualityMetrics(
+  denominator: number
+): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
+  return {
+    schema_version: "bench-quality-metrics.v1",
+    non_monotonic_rate: 0,
+    non_monotonic_count: 0,
+    non_monotonic_denominator: denominator,
+    budget_drop_distribution: {
+      max_entries: { count: 0, share: 0, denominator }
+    },
+    high_lexical_demoted_rate: 0,
+    high_lexical_demoted_count: 0,
+    high_lexical_demoted_denominator: 0,
+    candidate_absent_count: 0,
+    candidate_absent_denominator: denominator,
+    no_gold_count: 0,
+    no_gold_denominator: denominator,
+    evaluator_identity_issue_count: 0,
+    evaluator_identity_issue_denominator: denominator,
+    evaluator_identity_unscorable_count: 0,
+    evaluator_identity_unscorable_denominator: denominator,
+    evidence_stream_gold_delivery_rate: 0,
+    evidence_stream_gold_delivery_count: 0,
+    evidence_stream_gold_delivery_denominator: denominator,
+    path_stream_top10_rate: 0,
+    path_stream_top10_count: 0,
+    path_stream_top10_denominator: denominator,
+    per_plane_recall_coverage: {},
+    miss_taxonomy_distribution: {
+      candidate_absent: 0,
+      materialization_drop: 0,
+      budget_drop: 0,
+      delivery_order_drop: 0,
+      answer_set_coverage_drop: 0,
+      evaluation_or_gold_issue: 0
+    },
+    miss_distribution: {},
+    abstention: {
+      schema_version: "bench-abstention.v2",
+      total: 0,
+      scored: 0,
+      unscorable: 0,
+      method: "fused_margin_diagnostic_only",
+      calibration_status: "uncalibrated",
+      gate_eligible: false
+    }
+  };
+}
+
 export async function writeArchiveEntry(
   historyRoot: string,
   benchName: KpiPayload["bench_name"],

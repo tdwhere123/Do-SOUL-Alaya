@@ -24,6 +24,10 @@ import {
   prepareLongMemEvalRun,
   executeLongMemEvalRun
 } from "./runner-execution.js";
+import {
+  withLongMemEvalDiagnosticsSpool,
+  type LongMemEvalDiagnosticsSpool
+} from "./diagnostics/spool.js";
 export {
   buildLongMemEvalReportContextUsage,
   buildLongMemEvalSidecarKey,
@@ -148,6 +152,15 @@ export async function runLongMemEval(
   if (shouldFanOutLongMemEvalWorkers(opts)) {
     return runLongMemEvalConcurrent(opts);
   }
+  return withLongMemEvalDiagnosticsSpool((diagnosticsSpool) =>
+    runSingleLongMemEval(opts, diagnosticsSpool)
+  );
+}
+
+async function runSingleLongMemEval(
+  opts: LongMemEvalRunOptions,
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
+): Promise<LongMemEvalRunResult> {
   const recallWeightOverrides = resolveBenchRecallWeightOverrides({
     cliJson: opts.weightOverridesJson,
     envJson: process.env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV]
@@ -158,7 +171,11 @@ export async function runLongMemEval(
     );
   }
 
-  const context = await prepareLongMemEvalRun(opts, recallWeightOverrides);
+  const context = await prepareLongMemEvalRun(
+    opts,
+    recallWeightOverrides,
+    diagnosticsSpool
+  );
   const execution = await executeLongMemEvalRun(context);
   return finalizeLongMemEvalRun({
     opts,
@@ -176,7 +193,8 @@ export async function runLongMemEval(
     simulateReport: context.simulateReport,
     recallWeightOverrides,
     questionFailures: execution.questionFailures,
-    failedQuestionIds: execution.failedQuestionIds
+    failedQuestionIds: execution.failedQuestionIds,
+    diagnosticsSpool
   });
 }
 

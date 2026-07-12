@@ -48,9 +48,9 @@ export function resolveLongMemEvalHitVerdict(
   const abstention = scoreAbstentionQuestion({ results });
   const firstResult = results[0];
   return {
-    hitAt1: abstention.correctAt1,
-    hitAt5: abstention.correctAt5,
-    hitAt10: abstention.correctAt10,
+    hitAt1: abstention.hitAt1,
+    hitAt5: abstention.hitAt5,
+    hitAt10: abstention.hitAt10,
     firstTier:
       firstResult === undefined ? "cold" : inferTier(firstResult.relevance_score)
   };

@@ -32,6 +32,7 @@ import type {
   RoundResult,
   SidecarEntry
 } from "./multiturn.js";
+import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
 
 interface MultiturnQuestionState {
   readonly sidecar: Map<string, SidecarEntry>;
@@ -259,7 +260,10 @@ async function runMultiturnRecallRound(
   embeddingMode: NonNullable<LongMemEvalMultiturnRunOptions["embeddingMode"]>
 ): Promise<RoundResult> {
   const recallStart = monotonicNowNs();
-  const recallResult = await daemon.recall(question.question, { maxResults: 10 });
+  const recallResult = await daemon.recall(question.question, {
+    maxResults: 10,
+    referenceTime: requireLongMemEvalTimestamp(question.question_date)
+  });
   const recallOutcome = resolveMultiturnRecallOutcome(
     question,
     roundIndex,

@@ -73,6 +73,22 @@ function buildReplayCandidates(
       per_stream_rank: candidate.perStreamRank,
       fused_rank_contribution_per_stream:
         candidate.fusedRankContributionPerStream,
+      per_axis_rank: candidate.perAxisRank,
+      per_axis_contribution: candidate.perAxisContribution,
+      flood_potential: candidate.floodPotential,
+      plane_first_admitted: candidate.planeFirstAdmitted,
+      plane_winning_admission: candidate.planeWinningAdmission,
+      source_planes: candidate.sourcePlanes,
+      source_channels: candidate.sourceChannels,
+      rank_after_fusion: candidate.rankAfterFusion,
+      rank_after_feature_rerank: candidate.rankAfterFeatureRerank,
+      rank_after_lexical_priority: candidate.rankAfterLexicalPriority,
+      rank_after_synthesis_reserve: candidate.rankAfterSynthesisReserve,
+      rank_after_structural_reserve: candidate.rankAfterStructuralReserve,
+      rank_after_coverage_selector: candidate.rankAfterCoverageSelector,
+      rank_after_session_coverage: candidate.rankAfterSessionCoverage,
+      answer_features: candidate.answerFeatures,
+      path_suppression_score: candidate.pathSuppressionScore,
       score_factors: {
         ...(candidate.scoreFactors ?? {}),
         ...(candidate.facetOverlap === null

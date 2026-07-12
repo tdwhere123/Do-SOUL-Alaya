@@ -336,7 +336,7 @@ function createSignal(
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
-    source: "garden_compile",
+    source: "model_tool",
     signal_kind: objectKind === "preference" ? "potential_preference" : "potential_claim",
     signal_state: "emitted",
     object_kind: objectKind,

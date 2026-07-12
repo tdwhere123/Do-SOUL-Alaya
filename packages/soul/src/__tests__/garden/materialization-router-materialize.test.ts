@@ -77,6 +77,38 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     expect(memoryInput.content).toBe("Always use rtk for repo commands.");
   });
 
+  it("rebuilds official durable content from the complete source assertion", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+    const source = "I never moved to Berlin.";
+
+    const result = await router.materializeSignal(createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        provider_kind: "official_api",
+        matched_text: source,
+        proposed_matched_text: "moved to Berlin",
+        full_turn_content: source,
+        distilled_fact: "Alice lives in Berlin.",
+        source_assertion: source,
+        source_grounding: {
+          version: 1,
+          status: "grounded",
+          content_basis: "source_assertion",
+          source_assertion: source,
+          proposed_matched_text: "moved to Berlin",
+          reasons: ["matched_text_expanded_to_source_assertion"]
+        }
+      }
+    }));
+
+    expect(result.success).toBe(true);
+    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
+      readonly content: string;
+    };
+    expect(memoryInput.content).toBe(source);
+  });
+
 
   it("materializes synthesis by creating evidence objects and one synthesis capsule", async () => {
     const deps = createDeps();

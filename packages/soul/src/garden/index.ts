@@ -45,6 +45,12 @@ export {
   type OfficialApiSignalDraft
 } from "./compute-provider.js";
 export {
+  buildSourceVerificationText,
+  resolveSourceAssertion,
+  filterSourceAssertionEntities,
+  type SourceAssertionResolution
+} from "./grounding/source-assertion.js";
+export {
   SignalExtractorError,
   createPiMonoExtractor,
   type PiMonoExtractorDependencies,

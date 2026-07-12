@@ -22,6 +22,8 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly timeFilter?: BoundRecallTimeFilter;
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
+  readonly referenceTime?: string;
+  readonly diagnosticCapture?: "answer_features";
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
@@ -37,6 +39,8 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly timeFilter?: BoundRecallTimeFilter;
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
+  readonly referenceTime?: string;
+  readonly diagnosticCapture?: "answer_features";
 }>;
 
 // Recall scoring is identical across modes; sideEffectMode documents post-recall
@@ -53,6 +57,8 @@ export async function invokeBoundRecall<TRecallResult>(
     policyOverride: params.policyOverride,
     ...(params.timeFilter === undefined ? {} : { timeFilter: params.timeFilter }),
     ...(params.hostContext === undefined ? {} : { hostContext: params.hostContext }),
+    ...(params.referenceTime === undefined ? {} : { referenceTime: params.referenceTime }),
+    ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
     activeConstraintsCap: params.activeConstraintsCap ?? null
   });
 }

@@ -7,6 +7,7 @@ import {
   PathActivationCandidateProducer,
   ResolutionService,
   type GlobalMemoryRecallSubscription,
+  type ManifestationResolverEventLogWriterPort,
   type PathActivationCandidateProducerPathReaderPort
 } from "@do-soul/alaya-core";
 import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
@@ -280,9 +281,7 @@ function createManifestationRuntime(
     if (manifestationResolverInstance === null) {
       manifestationResolverInstance = new ManifestationResolver({
         budgetConfigProvider: input.manifestationBudgetConfigProvider,
-        eventLogWriter: {
-          append: async (entry) => input.eventLogRepo.append(entry)
-        }
+        eventLogWriter: createAtomicManifestationEventLogWriter(input.eventLogRepo)
       });
     }
     return manifestationResolverInstance;
@@ -312,6 +311,16 @@ function createManifestationRuntime(
         return result.biasSidecar;
       }
     }
+  };
+}
+
+export function createAtomicManifestationEventLogWriter(
+  eventLogRepo: Pick<CreateRecallMaterializationWiringInput["eventLogRepo"], "append" | "transactional">
+): ManifestationResolverEventLogWriterPort {
+  return {
+    appendAtomically: (entries) => eventLogRepo.transactional(() =>
+      entries.map((entry) => eventLogRepo.append(entry))
+    )
   };
 }
 

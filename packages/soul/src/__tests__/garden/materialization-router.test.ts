@@ -1,17 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  LocalHeuristics,
   MaterializationRouter,
   normalizeSchemaGroundedSignal
 } from "@do-soul/alaya-soul";
 import {
-  type EnqueueFn,
-  type MockCreatedObjectWithEnrich,
   createDeps,
   createRouter,
   createSignal
 } from "./materialization-router-fixture.js";
 
-describe("MaterializationRouter", () => {  it("routes potential_claim to memory_and_claim when confidence and evidence thresholds pass", () => {
+describe("MaterializationRouter routing and grounding", () => {
+  it("routes potential_claim to memory_and_claim when confidence and evidence thresholds pass", () => {
     const router = createRouter();
 
     const target = router.route(createSignal());
@@ -23,7 +23,6 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
         "object_kind=constraint -> memory_and_claim_draft (claim_status defaulted to draft by ClaimService)"
     });
   });
-
 
   it("routes potential_preference with empty evidence_refs to memory_and_claim when confidence >= 0.5", () => {
     const router = createRouter();
@@ -44,7 +43,6 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
     });
   });
 
-
   it("routes potential_claim with empty evidence_refs to memory_and_claim at confidence boundary 0.5", () => {
     const router = createRouter();
 
@@ -58,7 +56,6 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
 
     expect(target.kind).toBe("memory_and_claim");
   });
-
 
   it("defers invalid schema-grounded field candidates before memory_and_claim", async () => {
     const deps = createDeps();
@@ -126,6 +123,116 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
     });
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("defers rejected official source grounding before durable writes", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        provider_kind: "official_api",
+        matched_text: "Alice moved to Berlin.",
+        full_turn_content: "I never moved to Berlin.",
+        source_grounding: {
+          version: 1,
+          status: "rejected",
+          content_basis: "none",
+          proposed_matched_text: "Alice moved to Berlin.",
+          reasons: ["matched_text_absent"]
+        }
+      }
+    });
+
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      routing_reason: "garden source grounding failed: source_grounding_rejected"
+    });
+    await router.materializeSignal(signal);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a self-asserted fallback that is absent from the available full turn", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+    const signal = createSignal({
+      source: "garden_compile",
+      object_kind: "activity",
+      confidence: 0.9,
+      raw_payload: {
+        provider_kind: "official_api",
+        full_turn_content: "I stayed in Paris.",
+        proposed_matched_text: "moved to Berlin",
+        source_assertion: "I moved to Berlin.",
+        source_grounding: {
+          version: 1,
+          status: "grounded",
+          content_basis: "source_assertion",
+          source_assertion: "I moved to Berlin.",
+          proposed_matched_text: "moved to Berlin",
+          reasons: []
+        }
+      }
+    });
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      routing_reason: expect.stringContaining("source grounding failed")
+    });
+    await router.materializeSignal(signal);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for an ungrounded Garden signal even when provider metadata is absent", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+    const signal = createSignal({
+      source: "garden_compile",
+      object_kind: "activity",
+      confidence: 0.9,
+      raw_payload: { distilled_fact: "The operator practices piano daily." }
+    });
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      routing_reason: "garden source grounding failed: source_grounding_missing"
+    });
+    await router.materializeSignal(signal);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+  });
+
+  it("revalidates and defers a discourse-dependent cached Garden assertion", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+    const signal = createSignal({
+      source: "garden_compile",
+      object_kind: "activity",
+      confidence: 0.9,
+      raw_payload: {
+        proposed_matched_text: "The former is cheaper.",
+        matched_text: "The former is cheaper.",
+        distilled_fact: "The former is cheaper.",
+        full_turn_content: "Alice chose Berlin over Paris. The former is cheaper."
+      }
+    });
+
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      routing_reason: expect.stringContaining("source grounding failed")
+    });
+    await router.materializeSignal(signal);
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps source-verifiable local heuristic signals compatible with durable routing", async () => {
+    const [signal] = await new LocalHeuristics().compile(
+      "I always use TypeScript strict mode.",
+      { workspace_id: "workspace-1", run_id: "run-1", surface_id: null, turn_messages: [] }
+    );
+    expect(signal).toBeDefined();
+    expect(new MaterializationRouter(createDeps()).route(signal!)).toMatchObject({
+      route_target: "memory_and_claim_draft"
+    });
   });
 
 
@@ -239,232 +346,4 @@ describe("MaterializationRouter", () => {  it("routes potential_claim to memory_
       routing_reason: "unroutable signal -> evidence archive (questionable evidence only)"
     });
   });
-
-
-  it("materializes memory_and_claim by creating evidence, memory, and claim objects", async () => {
-    const deps = createDeps();
-    const router = new MaterializationRouter(deps);
-
-    const result = await router.materializeSignal(createSignal());
-
-    expect(result).toMatchObject({
-      signal_id: "signal-1",
-      target_kind: "memory_and_claim",
-      success: true
-    });
-    expect(result.created_objects).toEqual([
-      { object_kind: "evidence_capsule", object_id: "evidence-1" },
-      { object_kind: "memory_entry", object_id: "memory-1" },
-      { object_kind: "claim_form", object_id: "claim-1" }
-    ]);
-    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
-    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    expect(deps.claimService.create).toHaveBeenCalledTimes(1);
-
-    const evidenceInput = deps.evidenceService.create.mock.calls[0]![0] as {
-      readonly gist: string;
-      readonly semantic_anchor: { readonly summary: string };
-      readonly physical_anchor: { readonly artifact_ref: string } | null;
-    };
-    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
-      readonly content: string;
-    };
-    const claimInput = deps.claimService.create.mock.calls[0]![0] as {
-      readonly proposition_digest: string;
-    };
-
-    expect(evidenceInput.gist).toBe("Never print secrets.");
-    expect(evidenceInput.semantic_anchor.summary).toBe("Never print secrets.");
-    expect(evidenceInput.physical_anchor?.artifact_ref).toBe("msg-1");
-    expect(memoryInput.content).toBe("Never print secrets.");
-    expect(claimInput.proposition_digest).toBe("Never print secrets.");
-  });
-
-
-  it("deletes already-created evidence when memory creation fails after evidence creation", async () => {
-    const deps = createDeps();
-    deps.memoryService.create.mockRejectedValueOnce(new Error("memory create failed"));
-    const router = new MaterializationRouter(deps);
-
-    const result = await router.materializeSignal(createSignal());
-
-    expect(result).toMatchObject({
-      signal_id: "signal-1",
-      target_kind: "memory_and_claim",
-      success: false,
-      error: "memory create failed"
-    });
-    expect(result.created_objects).toEqual([]);
-    expect(deps.evidenceService.create).toHaveBeenCalledTimes(1);
-    expect(deps.evidenceService.deleteCreatedEvidence).toHaveBeenCalledWith("evidence-1");
-    expect(deps.memoryService.create).toHaveBeenCalledTimes(1);
-    expect(deps.claimService.create).not.toHaveBeenCalled();
-  });
-
-  it("keeps evidence visible in created_objects when compensation delete fails", async () => {
-    const deps = createDeps();
-    deps.memoryService.create.mockRejectedValueOnce(new Error("memory create failed"));
-    deps.evidenceService.deleteCreatedEvidence.mockRejectedValueOnce(new Error("delete failed"));
-    const router = new MaterializationRouter(deps);
-
-    const result = await router.materializeSignal(createSignal());
-
-    expect(result).toMatchObject({
-      signal_id: "signal-1",
-      target_kind: "memory_and_claim",
-      success: false,
-      error: "delete failed"
-    });
-    expect(result.created_objects).toEqual([
-      { object_kind: "evidence_capsule", object_id: "evidence-1" }
-    ]);
-    expect(deps.evidenceService.deleteCreatedEvidence).toHaveBeenCalledWith("evidence-1");
-    expect(deps.claimService.create).not.toHaveBeenCalled();
-  });
-
-
-  it("enqueues enrichment after memory_and_claim creates a memory entry (no inline enrichment)", async () => {
-    const deps = createDeps();
-    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
-    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
-
-    await router.materializeSignal(createSignal());
-
-    expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
-    expect(enrichPendingPort.enqueue).toHaveBeenCalledWith({
-      memoryId: "memory-1",
-      workspaceId: "workspace-1",
-      runId: "run-1",
-      sourceSignalId: "signal-1"
-    });
-  });
-
-
-  it("passes the enrichment intent on the create input so the marker commits atomically", async () => {
-    const deps = createDeps();
-    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
-    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
-
-    await router.materializeSignal(createSignal());
-
-    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
-      readonly enqueueEnrichment?: { readonly runId: string | null; readonly sourceSignalId: string | null };
-    };
-    expect(memoryInput.enqueueEnrichment).toEqual({ runId: "run-1", sourceSignalId: "signal-1" });
-  });
-
-  it("passes temporal projection metadata into memory create input", async () => {
-    const deps = createDeps();
-    const router = new MaterializationRouter(deps);
-
-    await router.materializeSignal(createSignal({
-      raw_payload: {
-        excerpt: "The deployment happened yesterday.",
-        temporal_projection: {
-          projection_schema_version: 1,
-          event_time_start: "2026-03-19T00:00:00.000Z",
-          event_time_end: "2026-03-20T00:00:00.000Z",
-          valid_from: "2026-03-19T00:00:00.000Z",
-          time_precision: "day",
-          time_source: "relative_resolved"
-        }
-      }
-    }));
-
-    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
-      readonly event_time_start?: string;
-      readonly event_time_end?: string;
-      readonly valid_from?: string;
-      readonly time_precision?: string;
-      readonly time_source?: string;
-      readonly projection_schema_version?: number;
-    };
-    expect(memoryInput).toMatchObject({
-      projection_schema_version: 1,
-      event_time_start: "2026-03-19T00:00:00.000Z",
-      event_time_end: "2026-03-20T00:00:00.000Z",
-      valid_from: "2026-03-19T00:00:00.000Z",
-      time_precision: "day",
-      time_source: "relative_resolved"
-    });
-  });
-
-  it("drops invalid temporal projection dates before memory create", async () => {
-    const deps = createDeps();
-    const router = new MaterializationRouter(deps);
-
-    await router.materializeSignal(createSignal({
-      raw_payload: {
-        excerpt: "The impossible date was 2026-02-31.",
-        temporal_projection: {
-          projection_schema_version: 1,
-          event_time_start: "2026-02-31",
-          event_time_end: "2026-03-01",
-          time_precision: "day",
-          time_source: "explicit"
-        }
-      }
-    }));
-
-    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as Record<string, unknown>;
-    expect(memoryInput.projection_schema_version).toBe(1);
-    expect(memoryInput.event_time_start).toBeUndefined();
-    expect(memoryInput.event_time_end).toBe("2026-03-01T00:00:00.000Z");
-  });
-
-  it("passes preference profile metadata into memory create input", async () => {
-    const deps = createDeps();
-    const router = new MaterializationRouter(deps);
-
-    await router.materializeSignal(createSignal({
-      signal_kind: "potential_preference",
-      object_kind: "preference",
-      raw_payload: {
-        excerpt: "I prefer dark mode.",
-        preference_profile: {
-          projection_schema_version: 1,
-          subject: "operator",
-          predicate: "prefer",
-          object: "dark mode",
-          category: "theme",
-          polarity: "positive"
-        }
-      }
-    }));
-
-    const memoryInput = deps.memoryService.create.mock.calls[0]![0] as {
-      readonly preference_subject?: string;
-      readonly preference_predicate?: string;
-      readonly preference_object?: string;
-      readonly preference_category?: string;
-      readonly preference_polarity?: string;
-      readonly projection_schema_version?: number;
-    };
-    expect(memoryInput).toMatchObject({
-      projection_schema_version: 1,
-      preference_subject: "operator",
-      preference_predicate: "prefer",
-      preference_object: "dark mode",
-      preference_category: "theme",
-      preference_polarity: "positive"
-    });
-  });
-
-
-  it("skips the loud fallback enqueue when the create reported it enqueued atomically", async () => {
-    const deps = createDeps();
-    // The atomic-capable create commits the row + marker in one transaction and
-    // reports enrichmentEnqueued: true, so the router must NOT enqueue again.
-    deps.memoryService.create = vi.fn<(input: Record<string, unknown>) => Promise<MockCreatedObjectWithEnrich>>(
-      async () => ({ object_kind: "memory_entry", object_id: "memory-1", enrichmentEnqueued: true })
-    );
-    const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
-    const router = new MaterializationRouter({ ...deps, enrichPendingPort });
-
-    const result = await router.materializeSignal(createSignal());
-
-    expect(result.success).toBe(true);
-    expect(enrichPendingPort.enqueue).not.toHaveBeenCalled();
-  });
-
 });

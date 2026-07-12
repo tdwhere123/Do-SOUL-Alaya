@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 const RETAINED_STRING_LIMITS = {
   matched_text: 1_024,
   distilled_fact: 2_048,
+  source_assertion: 2_048,
+  proposed_matched_text: 1_024,
+  proposed_distilled_fact: 2_048,
   full_turn_content: 2_048,
   turn_content_excerpt: 256,
   provider_kind: 200,
@@ -63,9 +66,11 @@ function addStructuredProjection(
   const canonicalEntities = projectCanonicalEntities(rawPayload.canonical_entities);
   const temporalProjection = projectRecord(rawPayload.temporal_projection, TEMPORAL_STRING_KEYS, 64);
   const preferenceProfile = projectRecord(rawPayload.preference_profile, PREFERENCE_STRING_KEYS, 512);
+  const sourceGrounding = projectSourceGrounding(rawPayload.source_grounding);
   if (canonicalEntities.length > 0) projection.canonical_entities = canonicalEntities;
   if (temporalProjection !== null) projection.temporal_projection = temporalProjection;
   if (preferenceProfile !== null) projection.preference_profile = preferenceProfile;
+  if (sourceGrounding !== null) projection.source_grounding = sourceGrounding;
   if (rawPayload.bench_seed === true) projection.bench_seed = true;
   for (const key of BENCH_INTEGER_KEYS) {
     const value = rawPayload[key];
@@ -77,6 +82,24 @@ function addStructuredProjection(
   if (typeof digest === "string" && /^sha256:[0-9a-f]{64}$/u.test(digest)) {
     projection.bench_full_turn_sha256 = digest;
   }
+}
+
+function projectSourceGrounding(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  if (source.version !== 1 || (source.status !== "grounded" && source.status !== "rejected")) return null;
+  const projection: Record<string, unknown> = { version: 1, status: source.status };
+  for (const key of ["content_basis", "source_assertion", "proposed_matched_text"] as const) {
+    const field = source[key];
+    if (typeof field === "string" && field.length > 0) projection[key] = field.slice(0, 2_048);
+  }
+  if (Array.isArray(source.reasons)) {
+    projection.reasons = source.reasons
+      .filter((reason): reason is string => typeof reason === "string")
+      .slice(0, 8)
+      .map((reason) => reason.slice(0, 128));
+  }
+  return projection;
 }
 
 function projectCanonicalEntities(value: unknown): readonly string[] {

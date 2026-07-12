@@ -1,4 +1,4 @@
-import { renderCompactDiagnosticsSidecar, summarizeLongMemEvalMissTaxonomy, summarizeProviderStates, type LongMemEvalDiagnosticsSidecar, type LongMemEvalEmbeddingVectorCacheSummary, type LongMemEvalMissTaxonomySummary, type LongMemEvalQueryEmbeddingCacheSummary, type LongMemEvalReportUsageSummary } from "../longmemeval/diagnostics.js";
+import { renderCompactDiagnosticsSidecar, summarizeLongMemEvalMissTaxonomy, summarizeProviderStates, type LongMemEvalDiagnosticsSidecar, type LongMemEvalEmbeddingVectorCacheSummary, type LongMemEvalMissTaxonomySummary, type LongMemEvalQueryEmbeddingCacheSummary, type LongMemEvalQuestionDiagnostic, type LongMemEvalReportUsageSummary } from "../longmemeval/diagnostics.js";
 import type { LongMemEvalArchiveEvidenceSummary } from "../longmemeval/archive-evidence.js";
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import {
@@ -12,54 +12,42 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
   shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
   evidence: LongMemEvalArchiveEvidenceSummary
 ): MergedLongMemEvalDiagnosticsPayload {
-  const questions = shardDiagnostics.flatMap((diagnostics) => {
+  const questions = normalizeMergedQuestions(shardDiagnostics.flatMap((diagnostics) => {
     if (diagnostics === null) {
       throw new Error(
         "merge refused: missing diagnostics sidecar for one or more shards"
       );
     }
     return diagnostics.questions ?? [];
-  });
+  }));
   assertMergedDiagnosticsQuestionsMatchKpi(payload, questions);
-  const questionCount = shardDiagnostics.reduce(
-    (sum, diagnostics) => sum + diagnosticQuestionCount(diagnostics),
-    0
-  );
-  const reportSideEffectSnapshotCount = aggregateReportSideEffectSnapshotCount(
-    shardDiagnostics
-  );
-  const embeddingMode =
-    shardDiagnostics.find(
-      (diagnostics): diagnostics is LongMemEvalDiagnosticsSidecar =>
-        diagnostics !== null
-    )?.embedding_mode ??
-    (payload.embedding_provider === "none" ? "disabled" : "env");
-  const reportUsage = aggregateReportUsage(
-    shardDiagnostics
-      .map((diagnostics) => diagnostics?.report_usage)
-      .filter(
-        (usage): usage is LongMemEvalReportUsageSummary => usage !== undefined
-      )
-  );
-  const embeddingVectorCache = aggregateEmbeddingVectorCache(
-    shardDiagnostics
-      .map((diagnostics) => diagnostics?.embedding_vector_cache)
-      .filter(
-        (summary): summary is LongMemEvalEmbeddingVectorCacheSummary =>
-          summary !== undefined
-      )
-  );
-  const queryEmbeddingCache = aggregateQueryEmbeddingCache(
-    shardDiagnostics
-      .map((diagnostics) => diagnostics?.query_embedding_cache)
-      .filter(
-        (summary): summary is LongMemEvalQueryEmbeddingCacheSummary =>
-          summary !== undefined
-      )
-  );
-  const missTaxonomySummary = aggregateMissTaxonomySummary(shardDiagnostics);
+  const summary = collectMergedDiagnosticsSummary(payload, shardDiagnostics, questions.length);
+  return {
+    sidecar: buildMergedDiagnosticsSidecar(payload, evidence, questions, summary),
+    question_count: summary.questionCount,
+    report_side_effects_snapshot_count: summary.reportSideEffectSnapshotCount,
+    failed_question_ids: summary.questionFailures?.failed_question_ids ?? []
+  };
+}
 
-  const sidecar: LongMemEvalDiagnosticsSidecar = {
+interface MergedDiagnosticsSummary {
+  readonly questionCount: number;
+  readonly reportSideEffectSnapshotCount: number | null;
+  readonly embeddingMode: LongMemEvalDiagnosticsSidecar["embedding_mode"];
+  readonly reportUsage: LongMemEvalReportUsageSummary | null;
+  readonly embeddingVectorCache: LongMemEvalEmbeddingVectorCacheSummary | null;
+  readonly queryEmbeddingCache: LongMemEvalQueryEmbeddingCacheSummary | null;
+  readonly missTaxonomySummary: LongMemEvalMissTaxonomySummary | null;
+  readonly questionFailures: LongMemEvalDiagnosticsSidecar["question_failures"] | null;
+}
+
+function buildMergedDiagnosticsSidecar(
+  payload: KpiPayload,
+  evidence: LongMemEvalArchiveEvidenceSummary,
+  questions: readonly LongMemEvalQuestionDiagnostic[],
+  summary: MergedDiagnosticsSummary
+): LongMemEvalDiagnosticsSidecar {
+  return {
     schema_version: 1,
     bench_name: "public",
     split: payload.split,
@@ -67,39 +55,120 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
     alaya_commit: payload.alaya_commit,
     recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
-    embedding_mode: embeddingMode,
+    embedding_mode: summary.embeddingMode,
     policy_shape: payload.policy_shape,
     simulate_report: payload.simulate_report,
-    ...(reportUsage === null ? {} : { report_usage: reportUsage }),
+    ...(summary.reportUsage === null ? {} : { report_usage: summary.reportUsage }),
     ...(evidence.report_side_effects === null
       ? {}
       : { report_side_effects: evidence.report_side_effects }),
     ...(evidence.scored_recall_evidence === null
       ? {}
       : { scored_recall_evidence: evidence.scored_recall_evidence }),
-    ...(embeddingVectorCache === null
+    ...(summary.embeddingVectorCache === null
       ? {}
-      : { embedding_vector_cache: embeddingVectorCache }),
-    ...(queryEmbeddingCache === null
+      : { embedding_vector_cache: summary.embeddingVectorCache }),
+    ...(summary.queryEmbeddingCache === null
       ? {}
-      : { query_embedding_cache: queryEmbeddingCache }),
-    ...(missTaxonomySummary === null
+      : { query_embedding_cache: summary.queryEmbeddingCache }),
+    ...(summary.questionFailures === null ? {} : { question_failures: summary.questionFailures }),
+    ...(summary.missTaxonomySummary === null
       ? {}
-      : { miss_taxonomy_summary: missTaxonomySummary }),
+      : { miss_taxonomy_summary: summary.missTaxonomySummary }),
     provider_state_summary: summarizeProviderStates(questions),
     questions
   };
+}
+
+function collectMergedDiagnosticsSummary(
+  payload: KpiPayload,
+  diagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
+  completedCount: number
+): MergedDiagnosticsSummary {
+  const present = diagnostics.filter(
+    (sidecar): sidecar is LongMemEvalDiagnosticsSidecar => sidecar !== null
+  );
   return {
-    sidecar,
-    question_count: questionCount,
-    report_side_effects_snapshot_count: reportSideEffectSnapshotCount
+    questionCount: diagnostics.reduce((sum, sidecar) => sum + diagnosticQuestionCount(sidecar), 0),
+    reportSideEffectSnapshotCount: aggregateReportSideEffectSnapshotCount(diagnostics),
+    embeddingMode: present[0]?.embedding_mode ??
+      (payload.embedding_provider === "none" ? "disabled" : "env"),
+    reportUsage: aggregateReportUsage(present.flatMap((sidecar) =>
+      sidecar.report_usage === undefined ? [] : [sidecar.report_usage]
+    )),
+    embeddingVectorCache: aggregateEmbeddingVectorCache(present.flatMap((sidecar) =>
+      sidecar.embedding_vector_cache === undefined ? [] : [sidecar.embedding_vector_cache]
+    )),
+    queryEmbeddingCache: aggregateQueryEmbeddingCache(present.flatMap((sidecar) =>
+      sidecar.query_embedding_cache === undefined ? [] : [sidecar.query_embedding_cache]
+    )),
+    missTaxonomySummary: aggregateMissTaxonomySummary(diagnostics),
+    questionFailures: aggregateQuestionFailures(diagnostics, completedCount)
   };
 }
 
-interface MergedLongMemEvalDiagnosticsPayload {
+function normalizeMergedQuestions(
+  questions: readonly LongMemEvalQuestionDiagnostic[]
+): LongMemEvalQuestionDiagnostic[] {
+  return questions.map((question) => question.cohort_ledger === undefined
+    ? withLegacyPartialCohort(question)
+    : question);
+}
+
+function withLegacyPartialCohort(
+  question: LongMemEvalQuestionDiagnostic
+): LongMemEvalQuestionDiagnostic {
+  const abstention = question.is_abstention || question.question_id.endsWith("_abs");
+  const hit = question.hit_at_5;
+  return {
+    ...question,
+    candidate_pool_complete: false,
+    candidates: question.candidates ?? [],
+    cohort_ledger: {
+      measurement_status: abstention
+        ? "abstention_unscorable"
+        : "evaluator_identity_unscorable",
+      dataset_cohort: abstention ? "abstention" : "answerable",
+      extraction_materialization: question.gold_memory_ids.length > 0
+        ? { status: "memory_emitted", emitted_memory_count: question.gold_memory_ids.length, reason: null }
+        : { status: "unknown", emitted_memory_count: 0, reason: null },
+      evaluator_gold_identity: {
+        status: question.gold_memory_ids.length > 0 ? "present" : "absent",
+        object_ids: question.gold_memory_ids
+      },
+      retrieval_status: abstention ? "not_applicable" : hit ? "hit_at_5" : "miss_at_5",
+      evidence_status: "partial",
+      evaluation_issue_reason: abstention ? null : "missing_diagnostics",
+      candidate_pool_complete: false,
+      stage_ranks: [],
+      final_verdict: abstention ? "abstain_false_confident" : hit ? "hit_at_5" : "miss_at_5"
+    }
+  };
+}
+
+export interface MergedLongMemEvalDiagnosticsPayload {
   readonly sidecar: LongMemEvalDiagnosticsSidecar;
   readonly question_count: number;
   readonly report_side_effects_snapshot_count: number | null;
+  readonly failed_question_ids: readonly string[];
+}
+
+function aggregateQuestionFailures(
+  diagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
+  completedCount: number
+): LongMemEvalDiagnosticsSidecar["question_failures"] | null {
+  const failedIds = diagnostics.flatMap((sidecar) =>
+    sidecar?.question_failures?.failed_question_ids ?? []
+  );
+  if (failedIds.length === 0) return null;
+  if (new Set(failedIds).size !== failedIds.length) {
+    throw new Error("merge refused: duplicate failed question ID across shards");
+  }
+  return {
+    failed_count: failedIds.length,
+    completed_count: completedCount,
+    failed_question_ids: failedIds
+  };
 }
 
 function assertMergedDiagnosticsQuestionsMatchKpi(
@@ -201,7 +270,11 @@ export function renderMergedLongMemEvalCompactDiagnosticsSidecar(
   fullDiagnosticsArtifactPath: string
 ): string {
   const compact = JSON.parse(
-    renderCompactDiagnosticsSidecar(payload.sidecar, fullDiagnosticsArtifactPath)
+    renderCompactDiagnosticsSidecar(
+      payload.sidecar,
+      fullDiagnosticsArtifactPath,
+      { includeQuestions: true }
+    )
   ) as {
     question_count?: unknown;
     report_side_effects?: { snapshot_count?: unknown };

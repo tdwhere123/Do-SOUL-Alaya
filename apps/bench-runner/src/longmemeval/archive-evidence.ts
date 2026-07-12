@@ -23,6 +23,7 @@ import {
   oppositeColdWarmMode,
   toComparisonEntry
 } from "./archive-evidence-helpers.js";
+import { readExternalDiagnosticsSidecarArtifact } from "./diagnostics-artifacts.js";
 export { aggregateLongMemEvalArchiveEvidence } from "./archive-evidence-helpers.js";
 
 export const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
@@ -141,6 +142,25 @@ export async function readLongMemEvalDiagnosticsSidecar(
   }
 }
 
+async function readLongMemEvalDiagnosticsSummarySidecar(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  slug: string
+): Promise<LongMemEvalDiagnosticsSidecar | null> {
+  const diagnosticsPath = path.join(
+    layout.historyRoot,
+    benchName,
+    slug,
+    LONGMEMEVAL_DIAGNOSTICS_FILENAME
+  );
+  try {
+    return JSON.parse(await readFile(diagnosticsPath, "utf8")) as LongMemEvalDiagnosticsSidecar;
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
 async function resolveExternalDiagnosticsArtifact(
   diagnosticsPath: string,
   diagnostics: LongMemEvalDiagnosticsSidecar
@@ -165,9 +185,7 @@ async function resolveExternalDiagnosticsArtifact(
     return diagnostics;
   }
   try {
-    return JSON.parse(
-      await readFile(artifactPath, "utf8")
-    ) as LongMemEvalDiagnosticsSidecar;
+    return await readExternalDiagnosticsSidecarArtifact(artifactPath);
   } catch (error) {
     if (isNotFound(error)) {
       return diagnostics;
@@ -199,7 +217,7 @@ export async function readLatestLongMemEvalOppositeArchive(input: {
       (payload.policy_shape ?? "stress") === policyShape &&
       (payload.simulate_report ?? "none") === oppositeMode
     ) {
-      const diagnostics = await readLongMemEvalDiagnosticsSidecar(
+      const diagnostics = await readLongMemEvalDiagnosticsSummarySidecar(
         input.layout,
         "public",
         slug

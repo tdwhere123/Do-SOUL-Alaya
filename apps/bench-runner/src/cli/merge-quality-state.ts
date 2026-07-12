@@ -1,6 +1,7 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
 import { buildPerPlaneRecallCoverage, ratio } from "../longmemeval/diagnostics-quality-helpers.js";
 import { createEmptyMissTaxonomyDistribution } from "../longmemeval/diagnostics-miss-taxonomy.js";
+import { accumulateCoreCounters } from "./merge/quality-core-counters.js";
 
 type BudgetDropEntry = QualityMetrics["budget_drop_distribution"][string];
 type GoldRankBuckets = NonNullable<QualityMetrics["gold_rank_buckets"]>;
@@ -33,6 +34,10 @@ export interface MergeQualityMetricsState {
   candidateAbsentDenominator: number;
   noGoldCount: number;
   noGoldDenominator: number;
+  evaluatorIdentityIssueCount: number;
+  evaluatorIdentityIssueDenominator: number;
+  evaluatorIdentityUnscorableCount: number;
+  evaluatorIdentityUnscorableDenominator: number;
   evidenceStreamGoldDeliveryCount: number;
   evidenceStreamGoldDeliveryDenominator: number;
   pathStreamTop10Count: number;
@@ -131,6 +136,10 @@ function emptyCoreCounters() {
     candidateAbsentDenominator: 0,
     noGoldCount: 0,
     noGoldDenominator: 0,
+    evaluatorIdentityIssueCount: 0,
+    evaluatorIdentityIssueDenominator: 0,
+    evaluatorIdentityUnscorableCount: 0,
+    evaluatorIdentityUnscorableDenominator: 0,
     evidenceStreamGoldDeliveryCount: 0,
     evidenceStreamGoldDeliveryDenominator: 0,
     pathStreamTop10Count: 0,
@@ -163,25 +172,6 @@ function accumulatePlaneCoverage(
       (state.planeHitAt5Counts.get(plane) ?? 0) + entry.hit_at_5_count
     );
   }
-}
-
-function accumulateCoreCounters(
-  state: MergeQualityMetricsState,
-  metric: QualityMetrics
-): void {
-  state.nonMonotonicCount += metric.non_monotonic_count;
-  state.nonMonotonicDenominator += metric.non_monotonic_denominator;
-  state.highLexicalDemotedCount += metric.high_lexical_demoted_count;
-  state.highLexicalDemotedDenominator += metric.high_lexical_demoted_denominator;
-  state.candidateAbsentCount += metric.candidate_absent_count;
-  state.candidateAbsentDenominator += metric.candidate_absent_denominator;
-  state.noGoldCount += metric.no_gold_count;
-  state.noGoldDenominator += metric.no_gold_denominator;
-  state.evidenceStreamGoldDeliveryCount += metric.evidence_stream_gold_delivery_count;
-  state.evidenceStreamGoldDeliveryDenominator +=
-    metric.evidence_stream_gold_delivery_denominator;
-  state.pathStreamTop10Count += metric.path_stream_top10_count;
-  state.pathStreamTop10Denominator += metric.path_stream_top10_denominator;
 }
 
 function accumulateDistributions(
@@ -303,6 +293,10 @@ function buildCoreQualityMetrics(
   | "candidate_absent_denominator"
   | "no_gold_count"
   | "no_gold_denominator"
+  | "evaluator_identity_issue_count"
+  | "evaluator_identity_issue_denominator"
+  | "evaluator_identity_unscorable_count"
+  | "evaluator_identity_unscorable_denominator"
 > {
   return {
     non_monotonic_rate: ratio(state.nonMonotonicCount, state.nonMonotonicDenominator),
@@ -318,7 +312,12 @@ function buildCoreQualityMetrics(
     candidate_absent_count: state.candidateAbsentCount,
     candidate_absent_denominator: state.candidateAbsentDenominator,
     no_gold_count: state.noGoldCount,
-    no_gold_denominator: state.noGoldDenominator
+    no_gold_denominator: state.noGoldDenominator,
+    evaluator_identity_issue_count: state.evaluatorIdentityIssueCount,
+    evaluator_identity_issue_denominator: state.evaluatorIdentityIssueDenominator,
+    evaluator_identity_unscorable_count: state.evaluatorIdentityUnscorableCount,
+    evaluator_identity_unscorable_denominator:
+      state.evaluatorIdentityUnscorableDenominator
   };
 }
 

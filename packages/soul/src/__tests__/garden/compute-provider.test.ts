@@ -16,7 +16,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
           object_kind: "user_preference",
           confidence: 0.92,
           matched_text: "Call me Ash",
-          distilled_fact: "The operator prefers to be called Ash.",
+          distilled_fact: "Call me Ash.",
           reason: "naming_preference"
         }
       ]
@@ -38,8 +38,8 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         object_kind: "user_preference",
         confidence: 0.92,
         raw_payload: expect.objectContaining({
-          matched_text: "Call me Ash",
-          distilled_fact: "The operator prefers to be called Ash.",
+          matched_text: "Call me Ash.",
+          distilled_fact: "Call me Ash.",
           provider_kind: GardenProviderKind.OFFICIAL_API,
           extraction_reason: "naming_preference"
         }),
@@ -57,6 +57,8 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("evidence_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("source_memory_refs");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("temporal_projection");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Preserve relative-date wording");
+    expect(OFFICIAL_API_SYSTEM_PROMPT).not.toContain("Resolve every pronoun, relative date");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("preference_profile");
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("projection_schema_version");
   });
@@ -96,7 +98,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
   });
 
 
-  it("leaves distilled_fact absent when a signal omits it", async () => {
+  it("derives a source assertion when a signal omits distilled_fact", async () => {
     const extractor = createExtractor(JSON.stringify({
       signals: [
         {
@@ -115,7 +117,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     const signals = await provider.compile("We decided to ship on Friday.", createContext());
     expect(signals).toHaveLength(1);
-    expect("distilled_fact" in signals[0]!.raw_payload).toBe(false);
+    expect(signals[0]!.raw_payload.distilled_fact).toBe("We decided to ship on Friday.");
   });
 
   it("preserves official temporal projection metadata on the raw payload", async () => {
@@ -125,15 +127,16 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
           signal_kind: "potential_claim",
           object_kind: "fact",
           confidence: 0.7,
-          matched_text: "The deployment happened yesterday.",
+          matched_text: "The deployment happened on 2026-03-19.",
           distilled_fact: "The deployment happened on 2026-03-19.",
           temporal_projection: {
             projection_schema_version: 1,
             event_time_start: "2026-03-19",
             event_time_end: "2026-03-20",
             valid_from: "2026-03-19",
+            valid_to: "2026-03-20",
             time_precision: "day",
-            time_source: "relative_resolved",
+            time_source: "explicit",
             ignored_field: "drop me"
           }
         }
@@ -145,16 +148,15 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       generateSignalId: () => "signal-temporal"
     });
 
-    const signals = await provider.compile("The deployment happened yesterday.", createContext());
+    const signals = await provider.compile("The deployment happened on 2026-03-19.", createContext());
 
     expect(signals[0]!.raw_payload).toMatchObject({
       temporal_projection: {
         projection_schema_version: 1,
         event_time_start: "2026-03-19T00:00:00.000Z",
-        event_time_end: "2026-03-20T00:00:00.000Z",
-        valid_from: "2026-03-19T00:00:00.000Z",
+        event_time_end: "2026-03-19T23:59:59.999Z",
         time_precision: "day",
-        time_source: "relative_resolved"
+        time_source: "explicit"
       }
     });
     expect(
@@ -163,7 +165,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     ).toBe(false);
   });
 
-  it("drops invalid official temporal date fields instead of normalizing rollover dates", async () => {
+  it("drops an invalid official temporal projection atomically", async () => {
     const extractor = createExtractor(JSON.stringify({
       signals: [
         {
@@ -190,19 +192,10 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     const signals = await provider.compile("The impossible date was 2026-02-31.", createContext());
 
-    expect(signals[0]!.raw_payload).toMatchObject({
-      temporal_projection: {
-        projection_schema_version: 1,
-        event_time_end: "2026-03-01T00:00:00.000Z"
-      }
-    });
-    expect(
-      "event_time_start" in
-        (signals[0]!.raw_payload.temporal_projection as Record<string, unknown>)
-    ).toBe(false);
+    expect(signals[0]!.raw_payload).not.toHaveProperty("temporal_projection");
   });
 
-  it("preserves official preference profile metadata on the raw payload", async () => {
+  it("keeps an unverified preference profile only in the grounding audit", async () => {
     const extractor = createExtractor(JSON.stringify({
       signals: [
         {
@@ -231,8 +224,9 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     const signals = await provider.compile("I prefer dark mode.", createContext());
 
-    expect(signals[0]!.raw_payload).toMatchObject({
-      preference_profile: {
+    expect(signals[0]!.raw_payload).not.toHaveProperty("preference_profile");
+    expect(signals[0]!.raw_payload.source_grounding).toMatchObject({
+      proposed_preference_profile: {
         projection_schema_version: 1,
         preference_subject: "operator",
         preference_predicate: "prefer",
@@ -243,12 +237,13 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     });
     expect(
       "ignored_field" in
-        (signals[0]!.raw_payload.preference_profile as Record<string, unknown>)
+        ((signals[0]!.raw_payload.source_grounding as Record<string, unknown>)
+          .proposed_preference_profile as Record<string, unknown>)
     ).toBe(false);
   });
 
 
-  it("leaves distilled_fact absent when the model sends a non-string or array value", async () => {
+  it("derives source assertions when distilled_fact is not a string", async () => {
     const extractor = createExtractor(JSON.stringify({
       signals: [
         {
@@ -276,14 +271,19 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       })()
     });
 
-    const signals = await provider.compile("We decided to ship on Friday.", createContext());
+    const signals = await provider.compile(
+      "We decided to ship on Friday. We picked Postgres.",
+      createContext()
+    );
     expect(signals).toHaveLength(2);
-    expect("distilled_fact" in signals[0]!.raw_payload).toBe(false);
-    expect("distilled_fact" in signals[1]!.raw_payload).toBe(false);
+    expect(signals.map((signal) => signal.raw_payload.distilled_fact)).toEqual([
+      "We decided to ship on Friday.",
+      "We picked Postgres."
+    ]);
   });
 
 
-  it("leaves distilled_fact absent when the model sends an empty string", async () => {
+  it("derives a source assertion when distilled_fact is empty", async () => {
     const extractor = createExtractor(JSON.stringify({
       signals: [
         {
@@ -303,7 +303,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     const signals = await provider.compile("We decided to ship on Friday.", createContext());
     expect(signals).toHaveLength(1);
-    expect("distilled_fact" in signals[0]!.raw_payload).toBe(false);
+    expect(signals[0]!.raw_payload.distilled_fact).toBe("We decided to ship on Friday.");
   });
 
 
@@ -337,7 +337,10 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         generateSignalId: () => (counter++ === 0 ? "" : "signal-good")
       });
 
-      const signals = await provider.compile("turn text", createContext());
+      const signals = await provider.compile(
+        "We decided to ship on Friday. Call me Ash.",
+        createContext()
+      );
       expect(signals).toHaveLength(1);
       expect(signals[0]!.signal_id).toBe("signal-good");
       expect(signals[0]!.signal_kind).toBe("potential_preference");
@@ -406,7 +409,11 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
         })()
       });
 
-      const signals = await provider.compile("turn text", createContext());
+      const signals = await provider.compile(
+        "Call me Ash. We decided to ship on Friday. We picked Postgres. " +
+          "The build runs nightly. I prefer dark mode.",
+        createContext()
+      );
       expect(signals).toHaveLength(4);
       expect(signals.map((s) => s.object_kind)).toEqual([
         "user_preference",
@@ -442,7 +449,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
       // excerpt of comparable length on the match-found path. The clamps do
       // not save it. The bad signal must be dropped and the rest survive.
       const oversizedMatched = "z".repeat(4_000);
-      const turnContent = `${oversizedMatched} and we deploy on Tuesdays`;
+      const turnContent = `${oversizedMatched}. We deploy on Tuesdays.`;
       const extractor = createExtractor(JSON.stringify({
         signals: [
           {
@@ -456,7 +463,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
             signal_kind: "potential_preference",
             object_kind: "user_preference",
             confidence: 0.8,
-            matched_text: "we deploy on Tuesdays",
+            matched_text: "We deploy on Tuesdays.",
             distilled_fact: "The team deploys releases on Tuesdays."
           }
         ]

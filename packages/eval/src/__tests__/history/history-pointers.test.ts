@@ -1,11 +1,13 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { diffKpis } from "../../history/diff.js";
 import {
+  HistoryEntryCommittedError,
   listEntries,
   readLatest,
+  reconcileHistoryEntryPointers,
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
@@ -64,6 +66,19 @@ describe("history archive", () => {
     ).toBe(passingSlug);
   });
 
+  it("does not advance latest-passing for legacy LongMemEval without measurement attribution", async () => {
+    const slug = "2026-05-16T080000Z-0cccccc";
+    const { measurement_attribution: _attribution, ...legacy } =
+      buildFullLongMemEvalPayload("public", "0cccccc", 0.95);
+
+    await writeEntry(layout, "public", slug, legacy as KpiPayload, "report", null);
+
+    expect(JSON.parse(await readFile(path.join(root, "public", "latest-run.json"), "utf8")).slug)
+      .toBe(slug);
+    await expect(readFile(path.join(root, "public", "latest-passing.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it.each([
     ["public-multiturn" as const, "longmemeval_multiturn_500_embedding_off_r_at_5"],
     ["public-crossquestion" as const, "longmemeval_crossquestion_500_embedding_off_r_at_5"]
@@ -112,9 +127,16 @@ describe("history archive", () => {
     const passing = KpiPayloadSchema.parse(
       buildFullLongMemEvalPayload("public-multiturn", "0aaaaaa", 0.91)
     );
+    const fullLimited = buildFullLongMemEvalPayload(
+      "public-multiturn",
+      "0bbbbbb",
+      1
+    );
     const limited = KpiPayloadSchema.parse({
-      ...buildFullLongMemEvalPayload("public-multiturn", "0bbbbbb", 1),
-      evaluated_count: 20
+      ...fullLimited,
+      evaluated_count: 20,
+      answerable_evaluated_count: 20,
+      kpi: { ...fullLimited.kpi, per_scenario: fullLimited.kpi.per_scenario.slice(0, 20) }
     });
 
     await writeEntry(layout, "public-multiturn", passingSlug, passing, "report", null);
@@ -242,6 +264,41 @@ describe("history archive", () => {
     await expect(
       readFile(path.join(root, "live", slug, "kpi.json"), "utf8")
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("reports committed state when pointer publication fails after entry rename", async () => {
+    const slug = "2026-05-15T133000Z-c0ffee0";
+    const stagedEvidence = path.join(root, "staged-evidence.gz");
+    await writeFile(stagedEvidence, "bound gzip evidence");
+    const failure = writeEntry(
+      layout, "live", slug, buildPayload("c0ffee0"), "report\n", null,
+      {
+        fileSidecars: [{
+          filename: "longmemeval-diagnostics.json.gz",
+          sourcePath: stagedEvidence
+        }],
+        pointerWriter: async () => { throw new Error("injected pointer failure"); }
+      }
+    );
+
+    const error = await failure.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(HistoryEntryCommittedError);
+    await expect(readFile(path.join(root, "live", slug, "kpi.json"), "utf8"))
+      .resolves.toContain('"alaya_commit": "c0ffee0"');
+    await expect(readFile(
+      path.join(root, "live", slug, "longmemeval-diagnostics.json.gz"), "utf8"
+    )).resolves.toBe("bound gzip evidence");
+    expect(await listEntries(layout, "live")).toEqual([slug]);
+    await reconcileHistoryEntryPointers(
+      layout,
+      "live",
+      (error as HistoryEntryCommittedError).entry,
+      buildPayload("c0ffee0"),
+      null
+    );
+    expect(JSON.parse(await readFile(
+      path.join(root, "live", "latest-run.json"), "utf8"
+    )).slug).toBe(slug);
   });
 
 

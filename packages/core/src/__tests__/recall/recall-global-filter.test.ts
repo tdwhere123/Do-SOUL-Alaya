@@ -328,29 +328,10 @@ describe("RecallService global project-mapping filter", () => {
     const advisory = result.candidates.find((candidate) => candidate.object_id === "global-suggested");
     const acceptedFactors = accepted?.score_factors;
     const advisoryFactors = advisory?.score_factors;
-    const expectedDynamicGap =
-      (acceptedFactors?.weighted_activation ?? 0) -
-      (advisoryFactors?.weighted_activation ?? 0) +
-      (acceptedFactors?.weighted_query_evidence_transfer ?? 0) -
-      (advisoryFactors?.weighted_query_evidence_transfer ?? 0);
-
     expect(accepted?.relevance_score).toBeGreaterThan(advisory?.relevance_score ?? 0);
     expect((acceptedFactors?.base_weight ?? 0) - (advisoryFactors?.base_weight ?? 0)).toBeCloseTo(0.18);
-    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(
-      expectedDynamicGap
-    );
-    // R3e single-count freshness: the accepted-vs-advisory gap is the sum of two
-    // sub-term deltas (everything else is identical between the two candidates):
-    //   Delta weighted_activation             = 0.085783808
-    //   Delta weighted_query_evidence_transfer = 0.021970000
-    //   total                                  = 0.107753808
-    // The shared freshness factor decays ONLY the freshness band of the activation
-    // (nonFreshnessFloor + freshnessWeight * factor), NOT the whole composite, and
-    // the query-evidence-transfer half of the gap is freshness-independent (it
-    // scales with base_weight, not activation). The prior model value (0.0866254)
-    // assumed the WHOLE un-decayed gap (0.1143348) scaled by a single freshness
-    // factor; that double-counting model is retired.
-    expect((accepted?.relevance_score ?? 0) - (advisory?.relevance_score ?? 0)).toBeCloseTo(0.107753808);
+    expect(accepted?.score_factors?.relevance).toBe(accepted?.relevance_score);
+    expect(advisory?.score_factors?.relevance).toBe(advisory?.relevance_score);
     expect(accepted?.is_advisory).toBe(false);
     expect(advisory?.is_advisory).toBe(true);
   });

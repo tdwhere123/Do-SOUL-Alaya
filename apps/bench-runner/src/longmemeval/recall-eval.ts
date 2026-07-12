@@ -1,4 +1,3 @@
-import { appendFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   buildDiffVsPrevious,
@@ -41,6 +40,7 @@ import {
   selectRecallEvalBaseline
 } from "./recall-eval-archive.js";
 import { assembleRecallEvalKpi } from "./recall-eval-kpi.js";
+import { attachQuestionMeasurementAxes } from "./diagnostics-measurement-axes.js";
 import {
   buildPerQuestionDelivered,
   buildRecallEvalArchiveSlug
@@ -67,6 +67,8 @@ import { throwLifecycleErrors } from "./lifecycle/errors.js";
 import { writeRecallEvalProgress } from "./lifecycle/recall-eval-progress.js";
 import { writeRecallEvalRankIdentity } from "./provenance/recall-eval-rank-identity.js";
 import { writeRecallEvalRunProvenance } from "./provenance/recall-eval-run.js";
+import { writeRecallEvalPoolDump } from "./provenance/recall-eval-pool-dump.js";
+import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
 import {
   prepareRecallEvalDataDir,
   buildRecallEvalRuntimeAttribution,
@@ -392,6 +394,7 @@ async function runRecallEvalQuestionCycle(
     daemon: workspace,
     query: input.question.question,
     recallOptions: input.recallOptions,
+    referenceTime: requireLongMemEvalTimestamp(input.question.questionDate),
     simulateReport: input.simulateReport,
     goldMemoryIds,
     turnIndex: input.turnIndex,
@@ -401,21 +404,6 @@ async function runRecallEvalQuestionCycle(
 
 // Probe-only (ALAYA_RECALL_EVAL_POOL_DUMP=path): append per-question fused pool ranks so an offline
 // doc2query probe can join content from the DB and re-rank. No content here (recall-eval sidecar lacks it).
-function writeRecallEvalPoolDump(
-  questionId: string,
-  goldMemoryIds: readonly string[],
-  results: readonly { readonly object_id: string }[]
-): void {
-  const dumpPath = process.env.ALAYA_RECALL_EVAL_POOL_DUMP;
-  if (dumpPath === undefined) return;
-  const goldSet = new Set(goldMemoryIds);
-  appendFileSync(dumpPath, JSON.stringify({
-    questionId,
-    goldIds: [...goldMemoryIds],
-    pool: results.map((p, i) => ({ rank: i + 1, objectId: p.object_id, isGold: goldSet.has(p.object_id) }))
-  }) + "\n");
-}
-
 async function buildRecallEvalQuestionResult(
   input: Parameters<typeof recallEvalOneQuestion>[0],
   workspace: BenchWorkspaceHandle,
@@ -443,7 +431,9 @@ async function buildRecallEvalQuestionResult(
     firstTier: scoredHits.firstTier,
     latencyMs: recallCycle.scoredRecallLatencyMs,
     degradationReason: recallResult.degradation_reason ?? null,
-    diagnostics: buildRecallEvalDiagnostics(input, recallResult, goldMemoryIds, scoredHits),
+    diagnostics: buildRecallEvalDiagnostics(
+      input, recallResult, sidecar, goldMemoryIds, scoredHits
+    ),
     tokenMetrics: await workspace.queryTokenMetrics(),
     recallTokenEconomy: extractRecallTokenEconomy(recallResult),
     edgeProposalKpiRows: await workspace.queryEdgeProposalKpiRows(),
@@ -454,13 +444,14 @@ async function buildRecallEvalQuestionResult(
 function buildRecallEvalDiagnostics(
   input: Parameters<typeof recallEvalOneQuestion>[0],
   recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"],
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
   goldMemoryIds: readonly string[],
   scoredHits: Pick<
     RecallEvalQuestionResult,
     "hitAt1" | "hitAt5" | "hitAt10"
   >
 ): LongMemEvalQuestionDiagnostic {
-  return buildQuestionDiagnostic({
+  const diagnostic = buildQuestionDiagnostic({
     questionId: input.question.questionId,
     goldMemoryIds,
     answerSessionIds: input.question.answerSessionIds,
@@ -474,6 +465,15 @@ function buildRecallEvalDiagnostics(
     recallResult,
     embeddingMode: recallEvalEmbeddingMode(),
     seedDropReasons: input.question.answerSeedDropReasons
+  });
+  return attachQuestionMeasurementAxes(diagnostic, {
+    answer: "",
+    answerSessionIds: input.question.answerSessionIds,
+    sourceDatesBySession: new Map(),
+    deliveredResults: diagnostic.delivered_results,
+    candidates: diagnostic.candidates,
+    sidecar,
+    isAbstention: diagnostic.is_abstention
   });
 }
 

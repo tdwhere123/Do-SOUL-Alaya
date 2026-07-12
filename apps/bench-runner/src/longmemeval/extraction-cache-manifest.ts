@@ -32,8 +32,16 @@ import { dirname, join } from "node:path";
  *   OFFICIAL_API_SYSTEM_PROMPT (the prompt whose sha256 is pinned here)
  */
 
-export const EXTRACTION_CACHE_MANIFEST_VERSION = 1;
+export const EXTRACTION_CACHE_MANIFEST_VERSION = 3;
 export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
+
+export const EXTRACTION_REQUEST_PROFILES = [
+  "provider-default-v1",
+  "deepseek-v4-nonthinking-v1"
+] as const;
+
+export type ExtractionRequestProfile =
+  (typeof EXTRACTION_REQUEST_PROFILES)[number];
 
 /**
  * Documented cache-key formula. Pinned in the manifest so a future change to
@@ -41,7 +49,7 @@ export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
  * detectable mismatch rather than a silent full miss.
  */
 export const EXTRACTION_CACHE_KEY_ALGO =
-  "sha256(model\\0systemPrompt\\0turnContent)";
+  "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)";
 
 export type ExtractionCacheStorage = "git-tracked" | "archive";
 
@@ -51,8 +59,7 @@ export type ExtractionCacheStorage = "git-tracked" | "archive";
  * provenance is still valid (the coverage fields are optional so a pre-fill
  * writer does not have to commit to a denominator it cannot yet compute).
  */
-export interface ExtractionCacheManifest {
-  readonly schema_version: number;
+interface ExtractionCacheManifestBase {
   /** == every cache shard's `.model`; run-start asserts config.model equals this. */
   readonly extraction_model: string;
   /** Reproduces the provider; aligns with DEFAULT_GARDEN_PROVIDER_URL. */
@@ -82,6 +89,36 @@ export interface ExtractionCacheManifest {
   readonly builder: string;
 }
 
+export interface ExtractionCacheManifestV1 extends ExtractionCacheManifestBase {
+  readonly schema_version: 1;
+  readonly model_family?: never;
+  readonly request_profile?: never;
+}
+
+export interface ExtractionCacheManifestV2 extends ExtractionCacheManifestBase {
+  readonly schema_version: 2;
+  /** Comparison-only canonical family. It never participates in the raw cache key. */
+  readonly model_family: string;
+  readonly request_profile?: never;
+}
+
+export interface ExtractionCacheManifestV3 extends ExtractionCacheManifestBase {
+  readonly schema_version: typeof EXTRACTION_CACHE_MANIFEST_VERSION;
+  /** Comparison-only canonical family. It never participates in the raw cache key. */
+  readonly model_family: string;
+  readonly request_profile: ExtractionRequestProfile;
+}
+
+export type ExtractionCacheManifest =
+  | ExtractionCacheManifestV1
+  | ExtractionCacheManifestV2
+  | ExtractionCacheManifestV3;
+
+export interface ExtractionCacheManifestIdentity {
+  readonly manifest: ExtractionCacheManifest;
+  readonly manifestSha256: string;
+}
+
 /**
  * Compute the prompt hash component the manifest pins. The same hash is
  * recomputed at run-start from the live OFFICIAL_API_SYSTEM_PROMPT and
@@ -107,27 +144,45 @@ export function extractionCacheManifestPath(cacheRoot: string): string {
 export function readExtractionCacheManifest(
   cacheRoot: string
 ): ExtractionCacheManifest | undefined {
+  return readExtractionCacheManifestIdentity(cacheRoot)?.manifest;
+}
+
+export function readExtractionCacheManifestIdentity(
+  cacheRoot: string
+): ExtractionCacheManifestIdentity | undefined {
   const filePath = extractionCacheManifestPath(cacheRoot);
   if (!existsSync(filePath)) {
     return undefined;
   }
-  let raw: string;
+  const raw = readManifestRaw(filePath);
+  const manifest = parseManifestRaw(raw, filePath);
+  return {
+    manifest,
+    manifestSha256: createHash("sha256").update(raw, "utf8").digest("hex")
+  };
+}
+
+function readManifestRaw(filePath: string): string {
   try {
-    raw = readFileSync(filePath, "utf8");
+    return readFileSync(filePath, "utf8");
   } catch (cause) {
     throw new Error(
       `extraction cache manifest unreadable at ${filePath}: ${describeCause(cause)}`
     );
   }
-  let parsed: unknown;
+}
+
+function parseManifestRaw(raw: string, filePath: string): ExtractionCacheManifest {
   try {
-    parsed = JSON.parse(raw);
+    return validateManifest(JSON.parse(raw), filePath);
   } catch (cause) {
-    throw new Error(
-      `extraction cache manifest is not valid JSON at ${filePath}: ${describeCause(cause)}`
-    );
+    if (cause instanceof SyntaxError) {
+      throw new Error(
+        `extraction cache manifest is not valid JSON at ${filePath}: ${cause.message}`
+      );
+    }
+    throw cause;
   }
-  return validateManifest(parsed, filePath);
 }
 
 /**
@@ -140,9 +195,10 @@ export function writeExtractionCacheManifest(
   manifest: ExtractionCacheManifest
 ): void {
   const filePath = extractionCacheManifestPath(cacheRoot);
+  const validated = validateManifest(manifest, filePath);
   mkdirSync(dirname(filePath), { recursive: true });
   const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-  writeFileSync(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileSync(tmpPath, `${JSON.stringify(validated, null, 2)}\n`, "utf8");
   renameSync(tmpPath, filePath);
 }
 
@@ -156,63 +212,135 @@ function validateManifest(
     );
   }
   const record = parsed as Record<string, unknown>;
-  const extractionModel = requireNonEmptyString(
-    record.extraction_model,
-    "extraction_model",
-    filePath
-  );
-  const providerUrl = requireNonEmptyString(
-    record.provider_url,
-    "provider_url",
-    filePath
-  );
-  const systemPromptSha256 = requireNonEmptyString(
-    record.system_prompt_sha256,
-    "system_prompt_sha256",
-    filePath
-  );
-  const cacheKeyAlgo = requireNonEmptyString(
-    record.cache_key_algo,
-    "cache_key_algo",
-    filePath
-  );
-  const dataset = requireNonEmptyString(record.dataset, "dataset", filePath);
-  const datasetRevision = requireNonEmptyString(
-    record.dataset_revision,
-    "dataset_revision",
-    filePath
-  );
-  const builtAt = requireNonEmptyString(record.built_at, "built_at", filePath);
-  const builder = requireNonEmptyString(record.builder, "builder", filePath);
-  const storage = record.storage;
-  if (storage !== "git-tracked" && storage !== "archive") {
-    throw new Error(
-      `extraction cache manifest at ${filePath} has invalid storage ` +
-        `"${String(storage)}"; expected "git-tracked" or "archive"`
-    );
-  }
-  const schemaVersion =
-    typeof record.schema_version === "number"
-      ? record.schema_version
-      : EXTRACTION_CACHE_MANIFEST_VERSION;
-  const manifest: ExtractionCacheManifest = {
-    schema_version: schemaVersion,
-    extraction_model: extractionModel,
-    provider_url: providerUrl,
-    system_prompt_sha256: systemPromptSha256,
-    cache_key_algo: cacheKeyAlgo,
-    dataset,
-    dataset_revision: datasetRevision,
-    storage,
-    built_at: builtAt,
-    builder,
-    ...optionalNumber(record.requested_turns, "requested_turns", filePath),
-    ...optionalNumber(record.cached_turns, "cached_turns", filePath),
-    ...optionalNumber(record.coverage, "coverage", filePath),
+  const schemaVersion = requireSchemaVersion(record, filePath);
+  const common: ExtractionCacheManifestBase = {
+    extraction_model: requireNonEmptyString(record.extraction_model, "extraction_model", filePath),
+    provider_url: requireNonEmptyString(record.provider_url, "provider_url", filePath),
+    system_prompt_sha256: requireNonEmptyString(
+      record.system_prompt_sha256,
+      "system_prompt_sha256",
+      filePath
+    ),
+    cache_key_algo: requireNonEmptyString(record.cache_key_algo, "cache_key_algo", filePath),
+    dataset: requireNonEmptyString(record.dataset, "dataset", filePath),
+    dataset_revision: requireNonEmptyString(record.dataset_revision, "dataset_revision", filePath),
+    storage: requireStorage(record.storage, filePath),
+    built_at: requireNonEmptyString(record.built_at, "built_at", filePath),
+    builder: requireNonEmptyString(record.builder, "builder", filePath),
+    ...optionalNonnegativeInteger(record.requested_turns, "requested_turns", filePath),
+    ...optionalNonnegativeInteger(record.cached_turns, "cached_turns", filePath),
+    ...optionalCoverage(record.coverage, filePath),
     ...optionalString(record.archive_url, "archive_url"),
     ...optionalString(record.archive_sha256, "archive_sha256")
   };
-  return manifest;
+  return readVersionedManifest(record, schemaVersion, common, filePath);
+}
+
+function requireSchemaVersion(
+  record: Readonly<Record<string, unknown>>,
+  filePath: string
+): 1 | 2 | typeof EXTRACTION_CACHE_MANIFEST_VERSION {
+  if (!Object.hasOwn(record, "schema_version")) return 1;
+  const version = record.schema_version;
+  if (version === 1 || version === 2 || version === EXTRACTION_CACHE_MANIFEST_VERSION) {
+    return version;
+  }
+  if (typeof version !== "number" || !Number.isInteger(version)) {
+    throw new Error(
+      `extraction cache manifest at ${filePath} has invalid schema_version ${String(version)}`
+    );
+  }
+  throw new Error(
+    `extraction cache manifest at ${filePath} has unsupported schema_version ${version}`
+  );
+}
+
+function readVersionedManifest(
+  record: Readonly<Record<string, unknown>>,
+  schemaVersion: 1 | 2 | typeof EXTRACTION_CACHE_MANIFEST_VERSION,
+  common: ExtractionCacheManifestBase,
+  filePath: string
+): ExtractionCacheManifest {
+  const hasFamily = Object.hasOwn(record, "model_family");
+  const hasProfile = Object.hasOwn(record, "request_profile");
+  if (schemaVersion === 1) {
+    if (hasFamily) {
+      throw new Error(
+        `extraction cache manifest at ${filePath} schema_version 1 must not define model_family`
+      );
+    }
+    assertLegacyProfileAbsent(hasProfile, schemaVersion, filePath);
+    return { ...common, schema_version: 1 };
+  }
+  if (!hasFamily) {
+    throw new Error(
+      `extraction cache manifest at ${filePath} schema_version ${schemaVersion} requires model_family`
+    );
+  }
+  const modelFamily = requireVersionedString(
+    record.model_family,
+    "model_family",
+    filePath
+  );
+  if (schemaVersion === 2) {
+    assertLegacyProfileAbsent(hasProfile, schemaVersion, filePath);
+    return { ...common, schema_version: 2, model_family: modelFamily };
+  }
+  return {
+    ...common,
+    schema_version: schemaVersion,
+    model_family: modelFamily,
+    request_profile: requireRequestProfile(record.request_profile, filePath)
+  };
+}
+
+function assertLegacyProfileAbsent(
+  present: boolean,
+  schemaVersion: 1 | 2,
+  filePath: string
+): void {
+  if (!present) return;
+  throw new Error(
+    `extraction cache manifest at ${filePath} schema_version ${schemaVersion} must not define request_profile`
+  );
+}
+
+function requireRequestProfile(
+  value: unknown,
+  filePath: string
+): ExtractionRequestProfile {
+  if (value === "provider-default-v1" || value === "deepseek-v4-nonthinking-v1") {
+    return value;
+  }
+  throw new Error(
+    `extraction cache manifest at ${filePath} schema_version 3 requires request_profile ` +
+      `to be one of ${EXTRACTION_REQUEST_PROFILES.join(", ")}`
+  );
+}
+
+function requireVersionedString(
+  value: unknown,
+  field: string,
+  filePath: string
+): string {
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  throw new Error(
+    `extraction cache manifest at ${filePath} field "${field}" must be a non-empty string`
+  );
+}
+
+function requireStorage(value: unknown, filePath: string): ExtractionCacheStorage {
+  if (value === "git-tracked" || value === "archive") return value;
+  throw new Error(
+    `extraction cache manifest at ${filePath} has invalid storage ` +
+      `"${String(value)}"; expected "git-tracked" or "archive"`
+  );
+}
+
+export function extractionModelFamily(
+  manifest: { readonly extraction_model: string; readonly model_family?: string }
+): string {
+  return manifest.model_family ?? manifest.extraction_model;
 }
 
 function requireNonEmptyString(
@@ -229,21 +357,31 @@ function requireNonEmptyString(
   return value;
 }
 
-function optionalNumber(
+function optionalNonnegativeInteger(
   value: unknown,
   field: string,
   filePath: string
 ): Record<string, number> {
-  if (value === undefined || value === null) {
+  if (value === undefined) {
     return {};
   }
-  if (typeof value !== "number" || Number.isNaN(value)) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(
       `extraction cache manifest at ${filePath} field "${field}" must be a ` +
-        `number when present`
+        `non-negative integer when present`
     );
   }
   return { [field]: value };
+}
+
+function optionalCoverage(value: unknown, filePath: string): Record<string, number> {
+  if (value === undefined) return {};
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(
+      `extraction cache manifest at ${filePath} field "coverage" must be in [0, 1]`
+    );
+  }
+  return { coverage: value };
 }
 
 function optionalString(

@@ -8,6 +8,7 @@ import {
 } from "../../longmemeval/lifecycle/recall-eval-runtime.js";
 import { resolveLocalOnnxArtifactSha256 } from "../../longmemeval/provenance/local-onnx.js";
 import type { LongMemEvalSnapshotManifest } from "../../longmemeval/snapshot.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../longmemeval/extraction-cache-manifest.js";
 
 function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
   return {
@@ -22,9 +23,14 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
     sidecar_filename: "snapshot.db.sidecar.json",
     built_at: "2026-07-10T00:00:00.000Z",
     extraction_provenance: {
+      manifest_sha256: "1".repeat(64),
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
       extraction_model: "fixture-model",
+      model_family: "fixture-family",
+      request_profile: "provider-default-v1",
       provider_url: `sha256:${"2".repeat(64)}`,
       system_prompt_sha256: "3".repeat(64),
+      cache_key_algo: "fixture-v1",
       dataset: "longmemeval-s",
       dataset_revision: "d".repeat(64),
       requested_turns: 10,
@@ -43,12 +49,19 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
       code: {
         commit_sha7: "05d98df",
         gate_sha256: "e".repeat(64),
-        worktree_state_sha256: "f".repeat(64)
+        worktree_state_sha256: "f".repeat(64),
+        executed_dist: {
+          algorithm: "sha256-reachable-path-file-sha256-v1",
+          sha256: "9".repeat(64),
+          file_count: 1
+        }
       },
       extraction_cache: {
         manifest_sha256: "1".repeat(64),
-        schema_version: 1,
+        schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
         extraction_model: "fixture-model",
+        model_family: "fixture-family",
+        request_profile: "provider-default-v1",
         provider_url: `sha256:${"2".repeat(64)}`,
         system_prompt_sha256: "3".repeat(64),
         cache_key_algo: "fixture-v1",

@@ -3,6 +3,7 @@ import type { BenchTokenMetrics } from "../../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../../harness/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "../diagnostics.js";
 import type { RecallEvalQuestionResult } from "../recall-eval.js";
+import { classifyQuestionMeasurementStatus } from "../measurement/question-validity.js";
 
 export interface RecallEvalAccumulator {
   readonly perScenario: PerScenarioRow[];
@@ -21,6 +22,7 @@ export interface RecallEvalAccumulator {
   degradePartial: number;
   totalHitAt1: number;
   totalHitAt10: number;
+  answerableCount: number;
 }
 
 export function accumulateRecallEvalRows(
@@ -38,15 +40,19 @@ function createAccumulator(): RecallEvalAccumulator {
     edgeProposalRowsAcross: [], edgeProposalRowsPerQuestion: [],
     tierHot: 0, tierWarm: 0, tierCold: 0,
     degradeNone: 0, degradeWarm: 0, degradeCold: 0, degradePartial: 0,
-    totalHitAt1: 0, totalHitAt10: 0
+    totalHitAt1: 0, totalHitAt10: 0, answerableCount: 0
   };
 }
 
 function accumulateRow(acc: RecallEvalAccumulator, result: RecallEvalQuestionResult): void {
   acc.questionDiagnostics.push(result.diagnostics);
   acc.latencies.push(result.latencyMs);
-  if (result.hitAt1) acc.totalHitAt1++;
-  if (result.hitAt10) acc.totalHitAt10++;
+  const scorable = classifyQuestionMeasurementStatus(result.diagnostics) === "scorable";
+  if (scorable) {
+    acc.answerableCount++;
+    if (result.hitAt1) acc.totalHitAt1++;
+    if (result.hitAt10) acc.totalHitAt10++;
+  }
   if (result.firstTier === "hot") acc.tierHot++;
   else if (result.firstTier === "warm") acc.tierWarm++;
   else acc.tierCold++;
@@ -59,7 +65,7 @@ function accumulateRow(acc: RecallEvalAccumulator, result: RecallEvalQuestionRes
   acc.edgeProposalRowsAcross.push(...result.edgeProposalKpiRows);
   acc.edgeProposalRowsPerQuestion.push([...result.edgeProposalKpiRows]);
   acc.perScenario.push({
-    id: result.questionId, version: 1, hit_at_5: result.hitAt5,
+    id: result.questionId, version: 1, hit_at_5: result.hitAt5, scorable,
     tier: result.firstTier, latency_ms: result.latencyMs
   });
 }

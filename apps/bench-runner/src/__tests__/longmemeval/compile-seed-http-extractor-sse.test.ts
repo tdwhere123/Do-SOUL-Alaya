@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
+import {
+  OFFICIAL_API_SYSTEM_PROMPT,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
 import {
   computeNextTurnSeedRefs,
   createCachingSignalExtractor,
@@ -22,6 +25,7 @@ import {
   buildCompileSeedDaemon,
   CREDENTIALLED_CONFIG
 } from "./compile-seed-fixture.js";
+import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
 // invariant: yunwu.ai + gpt-5.4-mini answers chat/completions content ONLY as
 // an SSE delta stream (`stream:true`); a non-stream request returns an empty
@@ -33,6 +37,7 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
   const HTTP_CONFIG: CompileSeedExtractionConfig = {
     providerUrl: "https://example.test/v1",
     model: "test-model",
+    requestProfile: "provider-default-v1",
     apiKey: "sk-test"
   };
 
@@ -193,6 +198,27 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     // 4 = first attempt + BENCH_HTTP_MAX_RETRIES (3); each settles on the
     // resolved poison bytes, never hangs.
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("retries when a non-empty signals array has no valid entries", async () => {
+    const response = (content: string) => makeJsonResponse({
+      choices: [{ message: { content } }]
+    });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response('{"signals":[42]}'))
+      .mockResolvedValueOnce(response('{"signals":[]}'));
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep: vi.fn(async () => undefined),
+      random: () => 0
+    });
+
+    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+
+    expect(result.rawJson).toBe('{"signals":[]}');
+    expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("extracts a full message.content carried in a single SSE frame", async () => {
@@ -387,9 +413,16 @@ describe("dumpSeedExtractionFailureDiagnostic surfaces retry_classification", ()
       }
     };
 
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
     const runner = createCompileSeedRunner({
       config: CREDENTIALLED_CONFIG,
       cacheRoot,
+      allowLiveExtraction: true,
       extractorFactory: () => failingDelegate,
       diagnosticDir
     });

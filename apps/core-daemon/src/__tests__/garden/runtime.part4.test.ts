@@ -27,10 +27,6 @@ import {
 } from "./runtime-fixture.js";
 
 const hoisted = vi.hoisted(() => {
-  const schedulers: Array<{
-    queue: GardenTaskDescriptor[];
-    completions: GardenTaskResult[];
-  }> = [];
   const tierOrder: Record<GardenTierValue, number> = {
     tier_0: 0,
     tier_1: 1,
@@ -118,6 +114,7 @@ const hoisted = vi.hoisted(() => {
     }
   }
 
+  const schedulers: FakeGardenScheduler[] = [];
   return { FakeGardenScheduler, schedulers };
 });
 

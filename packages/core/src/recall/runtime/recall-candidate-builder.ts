@@ -221,7 +221,8 @@ function buildSelectionReason(
     supports.push(`budget penalty ${factors.budget_penalty?.toFixed(3)}`);
   }
 
-  return `Selected by ${origin}; score ${factors.relevance.toFixed(3)} from ${supports.join(", ")}.`;
+  return `Selected by ${origin}. Final fusion evidence score ${factors.relevance.toFixed(6)}; ` +
+    `diagnostic supporting signals: ${supports.join(", ")}.`;
 }
 
 function buildSourceChannels(

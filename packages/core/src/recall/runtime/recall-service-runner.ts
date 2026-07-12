@@ -84,6 +84,7 @@ async function prepareRecallRequest(
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);
   const queryProbes = compileRecallQueryProbes(queryText);
+  const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
   const [slots, activeConstraints] = await Promise.all([
     context.dependencies.slotRepo.findByWorkspace(params.workspaceId),
     loadActiveConstraints({
@@ -97,9 +98,25 @@ async function prepareRecallRequest(
     tokenEstimator,
     queryText,
     queryProbes,
+    referenceTime,
     activeConstraints,
     winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots)
   });
+}
+
+function resolveRecallReferenceTime(
+  explicit: string | undefined,
+  now: () => string
+): string {
+  if (explicit === undefined) return now();
+  if (!/(?:z|[+-]\d{2}:\d{2})$/iu.test(explicit)) {
+    throw new Error("recall reference time must include a timezone offset");
+  }
+  const parsed = Date.parse(explicit);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("recall reference time must be a valid date-time");
+  }
+  return explicit;
 }
 
 async function resolveWinnerMemoryIds(
@@ -145,8 +162,9 @@ async function assessCandidateStage(
         winnerMemoryIds: prepared.winnerMemoryIds,
         supplementaryData,
         tokenEstimator: prepared.tokenEstimator,
-        now: context.now,
-        warn: context.warn
+        now: () => prepared.referenceTime,
+        warn: context.warn,
+        captureAnswerFeatures: params.diagnosticCapture === "answer_features"
       })
     : initialAssessment;
   const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
@@ -190,7 +208,7 @@ async function runInitialFineAssessment(
   return assessCoarseFilter({
     dependencies: context.dependencies,
     warn: context.warn,
-    now: context.now,
+    now: () => prepared.referenceTime,
     coarseFilter: Object.freeze({ ...coarse.coarseFilter, candidates: coarse.combinedCoarseCandidates }),
     workspaceId: params.workspaceId,
     runId: params.runId ?? null,
@@ -198,7 +216,8 @@ async function runInitialFineAssessment(
     policy: prepared.policy,
     queryProbes: prepared.queryProbes,
     winnerMemoryIds: prepared.winnerMemoryIds,
-    tokenEstimator: prepared.tokenEstimator
+    tokenEstimator: prepared.tokenEstimator,
+    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
   });
 }
 

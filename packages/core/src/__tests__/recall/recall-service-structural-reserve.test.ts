@@ -1,22 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension, ScopeClass, SynthesisStatus, type MemoryEntry, type PathAnchorRef, type SynthesisCapsule } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-types.js";
 import { createDependencies, createMemoryEntry, createPathRelation, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
-describe("structural delivery reserve", () => {
-  beforeEach(() => {
-    process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on";
-  });
-  afterEach(() => {
-    delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE;
-  });
-// Build the anchor + lexical multi-stream decoys + a structural gold that
-    // expands off the anchor via path_expansion. The anchor is the entity seed;
-    // each decoy holds a strong path so the gold ranks LOW on the path_expansion
-    // stream — a single-stream structural candidate with a poor stream rank is
-    // exactly the burial reserveStructuralDeliverySlots rescues.
+describe("fusion-only structural delivery", () => {
     const buildStructuralFixture = (params: {
       readonly decoyCount: number;
       readonly goldPathStrength: number;
@@ -89,14 +78,6 @@ const buildStructuralService = (params: {
         object_id: memory.object_id,
         normalized_rank: 1 - index * 0.02
       }));
-      // The active lexical lane is searchByKeywordWithinObjectIds (preferred over
-      // searchByKeyword when both are wired). The anchor + every decoy hold strong
-      // lexical ranks; memory-gold holds the WEAKEST hit (0.04) so it ranks last
-      // in the lexical_fts stream. Under the corrected I-1 contract a structural
-      // gold the reserve rescues must be relevance-bearing (not a pure
-      // membership-reached sibling), but the bottom-ranked 0.04 hit keeps the gold
-      // topology-DOMINATED and buried below the flat cut — the decoys out-fuse it
-      // on both the lexical and path lanes.
       const withinObjectIdRows = [
         { object_id: "memory-anchor", normalized_rank: 0.9 },
         ...params.decoys.map((decoy, index) => ({
@@ -145,10 +126,6 @@ const runStructuralRecall = (service: RecallService, maxEntries: number) => {
       const policy = overridePolicy(
         service.buildDefaultPolicy("chat", createTaskSurface().runtime_id),
         {
-          // Widen the lexical supplement so a structural gold's bottom-ranked weak
-          // lexical co-admission (its gold-blind relevance signal under the
-          // corrected I-1 contract) is not dropped by the default top-N cut. The
-          // gold still ranks last in the lexical_fts stream and stays buried.
           coarse_filter: {
             deterministic_match: { scope_filter: null, dimension_filter: null, domain_tag_filter: null },
             precomputed_rank: { max_candidates: 50, min_activation_score: 0.01 },
@@ -189,7 +166,7 @@ const buildCompositionSynthesis = (id: string): SynthesisCapsule => ({
       synthesis_status: SynthesisStatus.WORKING
     });
 
-it("tail-places a structural-plane gold ranked below the flat delivery cut", async () => {
+it("keeps buried path evidence without overriding the fused budget", async () => {
       const fixture = buildStructuralFixture({ decoyCount: 6, goldPathStrength: 0.05 });
       const service = buildStructuralService(fixture);
 
@@ -199,10 +176,6 @@ it("tail-places a structural-plane gold ranked below the flat delivery cut", asy
       const goldDiagnostic = result.diagnostics?.candidates.find(
         (candidate) => candidate.object_id === "memory-gold"
       );
-      // The gold is topology-DOMINATED (path_expansion) and carries a tiny lexical
-      // co-admission (0.04) that satisfies the gold-blind relevance guard without
-      // lifting it out of structural dominance. It still lands below the
-      // entry-count cut on fused rank.
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
       expect(goldDiagnostic?.admission_planes).toContain("lexical");
       const goldContributions = goldDiagnostic?.fused_rank_contribution_per_stream;
@@ -214,20 +187,21 @@ it("tail-places a structural-plane gold ranked below the flat delivery cut", asy
         );
       expect(goldDiagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
 
-      // The reserve tail-places the buried structural gold into delivery.
-      expect(delivered.map((candidate) => candidate.object_id)).toContain("memory-gold");
-      // Head slot is a pure multi-stream fusion winner, not a reserved tail row.
+      expect(delivered.map((candidate) => candidate.object_id)).not.toContain("memory-gold");
+      expect(goldDiagnostic?.final_rank).toBeNull();
+      expect(goldDiagnostic?.rank_after_feature_rerank).toBe(goldDiagnostic?.fused_rank);
+      expect(goldDiagnostic?.rank_after_lexical_priority).toBe(goldDiagnostic?.fused_rank);
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
+      expect(goldDiagnostic?.reserved_by).toBe("none");
+      expect(delivered.length).toBeLessThanOrEqual(5);
       const headDiagnostic = result.diagnostics?.candidates.find(
         (candidate) => candidate.object_id === delivered[0]?.object_id
       );
       expect(headDiagnostic?.admission_planes).toContain("lexical");
-      // A weakest in-budget non-structural row yielded its slot to the reserve.
-      expect(delivered.map((candidate) => candidate.object_id)).not.toContain("memory-anchor");
+      expect(headDiagnostic?.final_rank).toBe(headDiagnostic?.fused_rank);
     });
 
-it("is a no-op when the structural candidate already sits inside the delivery window", async () => {
-      // A lone structural candidate is rank-1 on its weight-3 stream, so it wins
-      // a natural in-window slot; the reserve must not perturb that ordering.
+it("delivers a structural candidate when fusion ranks it inside the budget", async () => {
       const fixture = buildStructuralFixture({ decoyCount: 2, goldPathStrength: 1 });
       const findByAnchorsSingle: RecallServicePathExpansionPort["findByAnchors"] = vi.fn(
         async (_workspaceId: string, anchorRefs: readonly PathAnchorRef[]) => {
@@ -255,13 +229,13 @@ it("is a no-op when the structural candidate already sits inside the delivery wi
       );
 
       expect(delivered).toContain("memory-gold");
-      // Already in-window: its delivery rank equals its natural fused rank, so
-      // no tail displacement occurred.
       expect(goldDiagnostic?.final_rank).toBe(goldDiagnostic?.pre_budget_rank);
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
+      expect(goldDiagnostic?.reserved_by).toBe("none");
       expect(goldDiagnostic?.pre_budget_rank ?? 99).toBeLessThanOrEqual(5);
     });
 
-it("keeps structural reserve within maxEntries when source-less synthesis rows match", async () => {
+it("keeps fusion delivery within maxEntries when source-less synthesis rows match", async () => {
       const fixture = buildStructuralFixture({ decoyCount: 6, goldPathStrength: 0.05 });
       const synthesisRows = ["synthesis-1", "synthesis-2", "synthesis-3"].map(buildCompositionSynthesis);
       const service = buildStructuralService({ ...fixture, synthesisRows });
@@ -289,13 +263,13 @@ it("keeps structural reserve within maxEntries when source-less synthesis rows m
       // delivery candidates.
       expect(synthesisDelivered.length).toBe(0);
       expect(structuralDelivered.length).toBeGreaterThan(0);
-      // The structural reserve leaves >= 1 pure-fusion head slot: the head row
-      // is a natural in-window lexical winner, not a tail-placed structural row.
       const head = delivered[0];
       expect(head?.object_kind).toBe("memory_entry");
       const headDiagnostic = head ? diagnosticsById.get(head.object_id) : undefined;
       expect(headDiagnostic?.admission_planes).toContain("lexical");
       expect(headDiagnostic?.pre_budget_rank).toBe(1);
+      expect(headDiagnostic?.rank_after_structural_reserve).toBe(1);
+      expect(headDiagnostic?.reserved_by).toBe("none");
       expect(kinds.every((kind) => kind === "memory_entry")).toBe(true);
     });
 

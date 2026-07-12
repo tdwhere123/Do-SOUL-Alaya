@@ -1,5 +1,9 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { validateSchemaGroundingForSignal } from "../schema-grounding.js";
+import {
+  requiresGardenSourceGrounding,
+  resolveGardenSignalGrounding
+} from "../grounding/signal-source-grounding.js";
 import type {
   MaterializationCreatedObject,
   MaterializationResult,
@@ -61,6 +65,26 @@ const SIGNAL_ROUTE_STRATEGIES: readonly SignalRouteStrategy[] = [
   }
 ];
 
+function guardSignalGrounding(signal: CandidateMemorySignal): MaterializationTarget | null {
+  if (requiresGardenSourceGrounding(signal)) {
+    const grounding = resolveGardenSignalGrounding(signal);
+    if (grounding.status === "rejected") {
+      return {
+        kind: "deferred",
+        route_target: "deferred",
+        routing_reason: `garden source grounding failed: ${grounding.reason}`
+      };
+    }
+  }
+  const schema = validateSchemaGroundingForSignal(signal);
+  if (!schema.declared || schema.status === "valid") return null;
+  return {
+    kind: "deferred",
+    route_target: "deferred",
+    routing_reason: `schema-grounded signal failed validation: ${schema.reasons.join("; ")}`
+  };
+}
+
 export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   public constructor(dependencies: MaterializationRouterDeps) {
     super(dependencies);
@@ -84,14 +108,8 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
-    const schemaGroundingValidation = validateSchemaGroundingForSignal(signal);
-    if (schemaGroundingValidation.declared && schemaGroundingValidation.status !== "valid") {
-      return {
-        kind: "deferred",
-        route_target: "deferred",
-        routing_reason: `schema-grounded signal failed validation: ${schemaGroundingValidation.reasons.join("; ")}`
-      };
-    }
+    const guard = guardSignalGrounding(signal);
+    if (guard !== null) return guard;
 
     for (const strategy of SIGNAL_ROUTE_STRATEGIES) {
       if (strategy.matches(signal)) {
@@ -99,37 +117,8 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
       }
     }
 
-    const materializationConfidenceFloor =
-      this.dependencies.materializationConfidenceFloor ?? 0.5;
-    if (
-      (signal.signal_kind === "potential_claim" || signal.signal_kind === "potential_preference") &&
-      signal.confidence >= materializationConfidenceFloor
-    ) {
-      const objectKindRoute = routeByObjectKind(signal.object_kind);
-      if (objectKindRoute !== null) {
-        return this.liftSignalOnlyForProjection(signal, objectKindRoute);
-      }
-      // invariant: unknown object_kind never enters governance review as
-      // a draft claim — that would re-introduce the producer-side claim
-      // collapse the routing table was meant to break. Known claim-
-      // capable dimensions are enumerated in routeByObjectKind; anything
-      // outside the table is archived as questionable evidence only.
-      // retainUnroutedHighConfidenceFacts keeps the fact recallable as a
-      // memory_entry_only (a memory with NO draft claim, so the claim/
-      // governance surface stays unpolluted) — the same route `fact` takes.
-      if (this.dependencies.retainUnroutedHighConfidenceFacts === true) {
-        return {
-          kind: "evidence_only",
-          route_target: "memory_entry_only",
-          routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> memory_entry_only (retain-unrouted-facts)`
-        };
-      }
-      return {
-        kind: "evidence_only",
-        route_target: "evidence_only",
-        routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> evidence_only`
-      };
-    }
+    const durable = this.routeDurableSignal(signal);
+    if (durable !== null) return durable;
 
     // Low-confidence unroutable signals are deferred rather than persisted as
     // questionable evidence — avoids accumulating low-confidence noise.
@@ -147,6 +136,27 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
       // invariant: unroutable signals are archived as questionable evidence only;
       // they do not produce verified long-term objects (invariant #16).
       routing_reason: "unroutable signal -> evidence archive (questionable evidence only)"
+    };
+  }
+
+  private routeDurableSignal(signal: CandidateMemorySignal): MaterializationTarget | null {
+    const floor = this.dependencies.materializationConfidenceFloor ?? 0.5;
+    const eligibleKind = signal.signal_kind === "potential_claim" ||
+      signal.signal_kind === "potential_preference";
+    if (!eligibleKind || signal.confidence < floor) return null;
+    const route = routeByObjectKind(signal.object_kind);
+    if (route !== null) return this.liftSignalOnlyForProjection(signal, route);
+    if (this.dependencies.retainUnroutedHighConfidenceFacts === true) {
+      return {
+        kind: "evidence_only",
+        route_target: "memory_entry_only",
+        routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> memory_entry_only (retain-unrouted-facts)`
+      };
+    }
+    return {
+      kind: "evidence_only",
+      route_target: "evidence_only",
+      routing_reason: `high-confidence ${signal.signal_kind} with unrouted object_kind=${signal.object_kind} -> evidence_only`
     };
   }
 

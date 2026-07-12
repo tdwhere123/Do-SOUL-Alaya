@@ -13,6 +13,7 @@ import type { CompileSeedExtractionStats } from "./compile-seed.js";
 import type { BenchCommitInfo } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
+import type { LongMemEvalDiagnosticsSpool } from "./diagnostics/spool.js";
 
 // End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
 export async function finalizeLongMemEvalRun(input: {
@@ -32,6 +33,7 @@ export async function finalizeLongMemEvalRun(input: {
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly questionFailures: number;
   readonly failedQuestionIds: readonly string[];
+  readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<LongMemEvalRunResult> {
   logLongMemEvalExtractionStats(input.extractionStats);
   const aggregate = aggregateLongMemEvalRunResults(input.collected);
@@ -48,6 +50,7 @@ export async function finalizeLongMemEvalRun(input: {
     runAt: input.runAt,
     questionFailures: input.questionFailures,
     failedQuestionIds: input.failedQuestionIds,
-    collectedLength: input.collected.length
+    collectedLength: input.collected.length,
+    diagnosticsSpool: input.diagnosticsSpool
   });
 }

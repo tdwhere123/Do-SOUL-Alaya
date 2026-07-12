@@ -69,9 +69,9 @@ describe("expandLexicalTerms", () => {
     const expanded = expandLexicalTerms(["recalls"]);
     // plural -> singular stem
     expect(expanded).toContain("recall");
-    // verb-suffix folding
-    expect(expandLexicalTerms(["running"])).toContain("run");
-    expect(expandLexicalTerms(["reviewed"])).toContain("review");
+    // verb stemming stays in the FTS tokenizer instead of fabricating query terms
+    expect(expandLexicalTerms(["running"])).not.toContain("run");
+    expect(expandLexicalTerms(["reviewed"])).not.toContain("review");
     // forward plural so a singular query term reaches a pluralized memory
     expect(expandLexicalTerms(["candidate"])).toContain("candidates");
     expect(expandLexicalTerms(["match"])).toContain("matches");
@@ -265,23 +265,12 @@ describe("synonym expansion table", () => {
   });
 });
 
-describe("collectDateTermMatches temporal-window flag gating", () => {
-  afterEach(() => {
-    delete process.env.ALAYA_RECALL_TEMPORAL_WINDOW;
-  });
-
+describe("collectDateTermMatches product defaults", () => {
   const query = "we shipped it last summer, 3 days ago, after last week";
 
-  it("captures only the base date terms when the flag is off", () => {
-    const probes = compileRecallQueryProbes(query);
-    expect(probes.date_terms).toContain("last week");
-    expect(probes.date_terms).not.toContain("last summer");
-    expect(probes.date_terms).not.toContain("3 days ago");
-  });
-
-  it("captures the widened season and N-ago terms when the flag is on", () => {
-    process.env.ALAYA_RECALL_TEMPORAL_WINDOW = "on";
+  it("captures relative windows without an environment gate", () => {
     const probes = compileRecallQueryProbes(query);
     expect(probes.date_terms).toEqual(expect.arrayContaining(["last week", "last summer", "3 days ago"]));
   });
+
 });

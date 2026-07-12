@@ -10,8 +10,7 @@ import { scorePreferenceProfileAlignment } from "../scoring/preference-fusion-sc
 import {
   parseQueryTimeWindow,
   scoreTemporalEventTime,
-  scoreTemporalQueryWindow,
-  temporalQueryWindowEnabled
+  scoreTemporalQueryWindow
 } from "../scoring/temporal-fusion-scoring.js";
 import type { RecallFusionStream, RecallSupplementaryData } from "../runtime/recall-service-types.js";
 import type { RecallFusionCandidateInput } from "./fusion-delivery-scoring-candidate.js";
@@ -38,17 +37,18 @@ function scoreSynthesisCapsuleFusionStream(
   return stream === "synthesis_fts" ? clamp01(supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? 0) : 0;
 }
 
-// invariant: parseable query windows score event time; otherwise temporal fusion scores recency against now.
+// A date-like query that cannot be resolved must not silently change meaning to recency.
 export function scoreTemporalFusion(
   entry: Readonly<MemoryEntry>,
   queryProbes: Readonly<RecallQueryProbes>,
   nowIso: string
 ): number {
-  if (temporalQueryWindowEnabled()) {
-    const window = parseQueryTimeWindow(queryProbes, nowIso);
-    if (window !== null) {
-      return scoreTemporalQueryWindow(entry, window, nowIso);
-    }
+  const window = parseQueryTimeWindow(queryProbes, nowIso);
+  if (window !== null) {
+    return scoreTemporalQueryWindow(entry, window, nowIso);
+  }
+  if (queryProbes.date_terms.length > 0) {
+    return 0;
   }
   return scoreTemporalEventTime(entry, nowIso);
 }

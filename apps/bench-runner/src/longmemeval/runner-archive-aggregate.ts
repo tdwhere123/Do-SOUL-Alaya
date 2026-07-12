@@ -12,6 +12,7 @@ import type {
 import type { QaQuestionVerdict } from "./qa-harness.js";
 import type { CompileSeedExtractionStats } from "./compile-seed.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
+import { classifyQuestionMeasurementStatus } from "./measurement/question-validity.js";
 
 export interface LongMemEvalRunArchiveAggregate {
   readonly perScenario: PerScenarioRow[];
@@ -40,6 +41,7 @@ export interface LongMemEvalRunArchiveAggregate {
   reportsUsed: number;
   reportsSkipped: number;
   reportUsedObjectCount: number;
+  answerableCount: number;
 }
 
 export function logLongMemEvalExtractionStats(
@@ -92,7 +94,8 @@ function createLongMemEvalRunArchiveAggregate(): LongMemEvalRunArchiveAggregate 
     reportsAttempted: 0,
     reportsUsed: 0,
     reportsSkipped: 0,
-    reportUsedObjectCount: 0
+    reportUsedObjectCount: 0,
+    answerableCount: 0
   };
 }
 
@@ -103,10 +106,12 @@ function addLongMemEvalWorkerResult(
   if (result === null || result === undefined) return;
   addQuestionArtifacts(aggregate, result);
   addQuestionCounters(aggregate, result);
+  const scorable = classifyQuestionMeasurementStatus(result.diagnostics) === "scorable";
   aggregate.perScenario.push({
     id: result.questionId,
     version: 1,
     hit_at_5: result.hitAt5,
+    scorable,
     tier: result.firstTier,
     latency_ms: result.latencyMs
   });
@@ -133,8 +138,11 @@ function addQuestionCounters(
   aggregate: LongMemEvalRunArchiveAggregate,
   result: LongMemEvalWorkerResult
 ): void {
-  if (result.hitAt1) aggregate.totalHitAt1++;
-  if (result.hitAt10) aggregate.totalHitAt10++;
+  if (classifyQuestionMeasurementStatus(result.diagnostics) === "scorable") {
+    aggregate.answerableCount++;
+    if (result.hitAt1) aggregate.totalHitAt1++;
+    if (result.hitAt10) aggregate.totalHitAt10++;
+  }
   if (result.firstTier === "hot") aggregate.tierHot++;
   else if (result.firstTier === "warm") aggregate.tierWarm++;
   else aggregate.tierCold++;

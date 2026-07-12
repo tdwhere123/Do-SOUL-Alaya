@@ -113,7 +113,7 @@ describe("history archive release-gate reporting", () => {
       "longmemeval_s_100_embedding_off_r_at_5 LongMemEval-S 100 embedding-off R@5"
     );
     expect(report).toContain("68.00% < target 70.00%");
-    expect(report).toContain("candidate_absent: 0 <= target 6");
+    expect(report).not.toContain("longmemeval_s_candidate_absent");
     expect(report).toContain("recall p95 embedding-off: 110ms <= target 200ms");
 
     const findings = renderFindings(parsedPayload, diff);

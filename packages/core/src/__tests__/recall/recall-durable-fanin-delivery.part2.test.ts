@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ControlPlaneObjectKind,
   FormationKind,
@@ -27,9 +27,6 @@ import {
 } from "@do-soul/alaya-storage";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
 
-// Structural delivery reserve: the gold-blind relevance guard and the sign-aware
-// suppression floor, driven through the public RecallService.recall() surface
-// against real memory_entries + PathRelations.
 
 const databases = new Set<StorageDatabase>();
 
@@ -53,15 +50,11 @@ function fillerId(index: number): string {
   return `00000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
 }
 
-// recall() where one sibling is reached from the lexical seed via a structural
-// path. siblingCarriesQueryTerm adds a lexical co-admit (relevance signal);
-// negativeSiblingPath adds a high-strength supersedes (suppression delta).
-// Returns whether the sibling survived into the truncated top-N.
-async function deliverSibling(params: {
+async function inspectSibling(params: {
   readonly relationKind: string;
   readonly siblingCarriesQueryTerm?: boolean;
   readonly negativeSiblingPath?: boolean;
-}): Promise<boolean> {
+}) {
   const { database, memoryEntryRepo, pathRelationRepo } = await createRealStorage();
 
   await memoryEntryRepo.create(
@@ -114,8 +107,6 @@ async function deliverSibling(params: {
     );
   }
   if (params.negativeSiblingPath === true) {
-    // Suppression floors the sibling's structural score, so the reserve must
-    // refuse it even though it is earned fan-in.
     pathRelationRepo.create(
       buildPath({
         path_id: "22222222-2222-4222-8222-bbbbbbbbbbbb",
@@ -138,50 +129,76 @@ async function deliverSibling(params: {
     policyOverride: buildWideOpenPolicy(recallService)
   });
   const delivered = result.candidates.some((row) => row.object_id === SIBLING_ID);
+  const diagnostic = result.diagnostics?.candidates.find((row) => row.object_id === SIBLING_ID);
+  if (diagnostic === undefined) {
+    throw new Error("expected path-admitted sibling diagnostics");
+  }
   database.close();
   databases.delete(database);
-  return delivered;
+  return {
+    delivered,
+    admissionPlanes: diagnostic.admission_planes,
+    relationKinds: diagnostic.path_expansion_sources.map((source) => source.relation_kind),
+    pathRank: diagnostic.per_stream_rank.path_expansion,
+    lexicalRank: diagnostic.per_stream_rank.lexical_fts,
+    pathContribution: diagnostic.fused_rank_contribution_per_stream.path_expansion,
+    lexicalContribution: diagnostic.fused_rank_contribution_per_stream.lexical_fts,
+    suppressionScore: diagnostic.path_suppression_score,
+    fusedRank: diagnostic.fused_rank,
+    finalRank: diagnostic.final_rank,
+    rankAfterStructuralStage: diagnostic.rank_after_structural_reserve
+  };
 }
 
-describe("query/evidence-relevance guard on generic structural fan-in rescue", () => {
-  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
-  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
-  it("refuses an irrelevant GENERIC structural sibling (supports edge, zero relevance, not earned co_recalled)", async () => {
-    // No relevance term and no earned-fan-in provenance, so the relevance guard
-    // refuses the reserve slot.
-    const delivered = await deliverSibling({ relationKind: "supports" });
-    expect(delivered).toBe(false);
+describe("query evidence in fusion-only path delivery", () => {
+  it("retains generic path admission when direct lexical evidence is absent", async () => {
+    const diagnostic = await inspectSibling({ relationKind: "supports" });
+    expect(diagnostic.admissionPlanes).toContain("path_expansion");
+    expect(diagnostic.relationKinds).toContain("supports");
+    expect(diagnostic.pathRank).not.toBeNull();
+    expect(diagnostic.pathContribution).toBeGreaterThan(0);
+    expect(diagnostic.lexicalRank).toBeNull();
+    expect(diagnostic.delivered).toBe(false);
+    expect(diagnostic.finalRank).toBeNull();
+    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
   });
 
-  it("admits the SAME GENERIC structural sibling once it carries a query-relevance term (guard is the discriminator)", async () => {
-    // Same topology plus a faint lexical term: the relevance guard now admits it
-    // and the reserve rescues it (gates on relevance, not a blanket refusal).
-    const delivered = await deliverSibling({
+  it("records direct lexical evidence without bypassing the fused budget", async () => {
+    const diagnostic = await inspectSibling({
       relationKind: "supports",
       siblingCarriesQueryTerm: true
     });
-    expect(delivered).toBe(true);
+    expect(diagnostic.admissionPlanes).toContain("path_expansion");
+    expect(diagnostic.admissionPlanes).toContain("lexical");
+    expect(diagnostic.pathContribution).toBeGreaterThan(0);
+    expect(diagnostic.lexicalContribution).toBeGreaterThan(0);
+    expect(diagnostic.delivered).toBe(false);
+    expect(diagnostic.finalRank).toBeNull();
+    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
   });
 });
 
-describe("structural reserve honors active sign-aware suppression", () => {
-  beforeEach(() => { process.env.ALAYA_RECALL_STRUCTURAL_RESERVE = "on"; });
-  afterEach(() => { delete process.env.ALAYA_RECALL_STRUCTURAL_RESERVE; });
-  it("does not rescue an EARNED co_recalled-reached sibling that a high-strength supersedes negative suppresses", async () => {
-    // Earned-fan-in sibling, but a supersedes negative floors it upstream of the
-    // reserve, so the contradicted sibling must NOT be resurfaced.
-    const delivered = await deliverSibling({
+describe("path diagnostics preserve sign-aware suppression", () => {
+  it("records a high-strength supersedes suppression signal", async () => {
+    const diagnostic = await inspectSibling({
       relationKind: "co_recalled",
       negativeSiblingPath: true
     });
-    expect(delivered).toBe(false);
+    expect(diagnostic.relationKinds).toContain("co_recalled");
+    expect(diagnostic.suppressionScore).toBeGreaterThan(0);
+    expect(diagnostic.delivered).toBe(false);
+    expect(diagnostic.finalRank).toBeNull();
+    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
   });
 
-  it("rescues the SAME earned co_recalled sibling when no suppression path is present (suppression is the discriminator)", async () => {
-    // Same sibling+pool without the negative path: the exemption admits it and the
-    // reserve rescues it (the refusal above is the suppression delta).
-    const delivered = await deliverSibling({ relationKind: "co_recalled" });
-    expect(delivered).toBe(true);
+  it("reports zero suppression when the negative path is absent", async () => {
+    const diagnostic = await inspectSibling({ relationKind: "co_recalled" });
+    expect(diagnostic.relationKinds).toContain("co_recalled");
+    expect(diagnostic.suppressionScore).toBe(0);
+    expect(diagnostic.pathContribution).toBeGreaterThan(0);
+    expect(diagnostic.delivered).toBe(false);
+    expect(diagnostic.finalRank).toBeNull();
+    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
   });
 });
 
@@ -255,8 +272,6 @@ function buildRecallService(params: {
           )
           .map((memory, rankIndex) => ({
             object_id: memory.object_id,
-            // Faint rank: clears the relevance guard (lexical > 0) yet stays
-            // structural-dominated and buried, so only the reserve can deliver it.
             normalized_rank: memory.object_id === SIBLING_ID ? 0.0001 : 1 / (rankIndex + 1)
           }));
       })

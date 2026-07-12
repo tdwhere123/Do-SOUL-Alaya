@@ -1,10 +1,46 @@
 import { LongMemEvalRunProvenanceSchema } from "../provenance/run.js";
 import {
+  EXTRACTION_CACHE_MANIFEST_VERSION,
+  EXTRACTION_REQUEST_PROFILES
+} from "../extraction-cache-manifest.js";
+import { z } from "zod";
+import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   type LongMemEvalSnapshotManifest
 } from "../snapshot.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
+
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const SnapshotExtractionBaseSchema = z.object({
+  manifest_sha256: Sha256Schema,
+  extraction_model: z.string().min(1),
+  provider_url: z.string().min(1),
+  system_prompt_sha256: Sha256Schema,
+  cache_key_algo: z.string().min(1),
+  dataset: z.string().min(1),
+  dataset_revision: z.string().min(1),
+  coverage: z.number().min(0).max(1).optional(),
+  cached_turns: z.number().int().nonnegative().optional(),
+  requested_turns: z.number().int().nonnegative().optional()
+}).strict();
+const SnapshotExtractionProvenanceSchema = z.discriminatedUnion("schema_version", [
+  SnapshotExtractionBaseSchema.extend({
+    schema_version: z.literal(1),
+    model_family: z.never().optional(),
+    request_profile: z.never().optional()
+  }).strict(),
+  SnapshotExtractionBaseSchema.extend({
+    schema_version: z.literal(2),
+    model_family: z.string().min(1),
+    request_profile: z.never().optional()
+  }).strict(),
+  SnapshotExtractionBaseSchema.extend({
+    schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
+    model_family: z.string().min(1),
+    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES)
+  }).strict()
+]);
 
 export function validateSnapshotManifest(
   parsed: unknown,
@@ -18,13 +54,20 @@ export function validateSnapshotManifest(
     : LongMemEvalRunProvenanceSchema.parse(record.run_provenance);
   const artifactIntegrity = parseArtifactIntegrity(record.artifact_integrity, filePath);
   const storedAttribution = parseSnapshotAttribution(record.attribution, filePath);
-  const manifest = parsed as LongMemEvalSnapshotManifest;
+  const extractionProvenance = parseExtractionProvenance(
+    record.extraction_provenance,
+    filePath
+  );
+  const manifest = {
+    ...(parsed as LongMemEvalSnapshotManifest),
+    extraction_provenance: extractionProvenance
+  };
   const derivedAttribution = deriveSnapshotAttribution({
     artifactIntegrity,
     runProvenance,
     questionIdDigest: optionalString(record.question_id_digest),
     datasetSha256: optionalString(record.dataset_sha256),
-    extractionProvenance: manifest.extraction_provenance
+    extractionProvenance
   });
   assertAttributionClaim(storedAttribution, derivedAttribution, filePath);
   return {
@@ -35,6 +78,22 @@ export function validateSnapshotManifest(
       ? derivedAttribution
       : { status: "legacy_unattributed", gate_eligible: false }
   };
+}
+
+function parseExtractionProvenance(
+  value: unknown,
+  filePath: string
+): LongMemEvalSnapshotManifest["extraction_provenance"] {
+  if (value === null || value === undefined) return null;
+  const parsed = SnapshotExtractionProvenanceSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const fields = parsed.error.issues
+    .map((issue) => issue.path.join("."))
+    .filter((field) => field.length > 0)
+    .join(", ");
+  throw new Error(
+    `recall-eval snapshot manifest at ${filePath} has invalid extraction provenance: ${fields}`
+  );
 }
 
 function requireManifestRecord(parsed: unknown, filePath: string): Record<string, unknown> {

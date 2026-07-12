@@ -19,6 +19,10 @@ import {
   createEmptyLongMemEvalSeedDropReasons,
   type LongMemEvalSeedDropReasons
 } from "./seed-drop-reasons.js";
+import {
+  assertLongMemEvalTimeline,
+  requireLongMemEvalTimestamp
+} from "./ingestion/source-time.js";
 
 export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
@@ -36,6 +40,7 @@ export async function seedLongMemEvalQuestion(input: {
   readonly seedRunner: CompileSeedRunner;
   readonly qaChat?: QaChatFn;
 }): Promise<LongMemEvalQuestionSeedState> {
+  assertLongMemEvalTimeline(input.question);
   const state = createSeedState(input.question);
   let seedIndex = 0;
   for (let si = 0; si < input.question.haystack_sessions.length; si++) {
@@ -116,6 +121,9 @@ async function seedQuestionRound(
   const beforeDropReasons = {
     ...input.seedRunner.stats.signalsDroppedByReason
   };
+  const sourceObservedAt = requireLongMemEvalTimestamp(
+    input.question.haystack_dates[context.sessionIndex]
+  );
   const seedResult = await input.seedRunner.seedTurn({
     daemon: input.workspace,
     turnContent: round.content,
@@ -123,6 +131,7 @@ async function seedQuestionRound(
     seedIndex: context.seedIndex,
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
+    sourceObservedAt,
     ...(benchSessionSurfacesEnabled() ? { surfaceId: context.sessionId } : {}),
     ...(context.previousTurnSeedMemoryIds.length === 0 ? {} : { sourceMemoryRefs: context.previousTurnSeedMemoryIds })
   });

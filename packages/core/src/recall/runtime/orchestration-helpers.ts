@@ -101,6 +101,7 @@ export type AssessCoarseFilterParams = Readonly<{
   readonly policy: Readonly<RecallPolicy>;
   readonly winnerMemoryIds: ReadonlySet<string>;
   readonly tokenEstimator: TokenEstimator;
+  readonly captureAnswerFeatures?: boolean;
 }>;
 
 export type AssessCoarseFilterResult = Readonly<{
@@ -249,7 +250,8 @@ export async function collectCoarseFilterSupplementaryData(
     coarseGraphExpansionScores: params.coarseFilter.graphExpansionScores,
     coarseEntitySeedScores: params.coarseFilter.entitySeedScores,
     coarsePathExpansionScores: params.coarseFilter.pathExpansionScores,
-    coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores
+    coarsePathSuppressionScores: params.coarseFilter.pathSuppressionScores,
+    captureAnswerFeatures: params.captureAnswerFeatures ?? false
   });
 }
 
@@ -264,7 +266,8 @@ export function runCoarseFineAssessment(
     supplementaryData,
     tokenEstimator: params.tokenEstimator,
     now: params.now,
-    warn: params.warn
+    warn: params.warn,
+    captureAnswerFeatures: params.captureAnswerFeatures
   });
 }
 
