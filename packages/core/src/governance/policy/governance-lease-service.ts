@@ -17,7 +17,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../../shared/errors.js";
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
-import { addDuration, readNow } from "../../shared/time.js";
+import { addDuration, isExpired, readNow } from "../../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../../shared/validators.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 
@@ -446,12 +446,4 @@ function normalizeExpiresAt(value: string | null): string | null {
   }
 
   return readNow(() => value, "expiresAt");
-}
-
-function isExpired(expiresAt: string | null, referenceTime: string): boolean {
-  if (expiresAt === null) {
-    return false;
-  }
-
-  return Date.parse(expiresAt) <= Date.parse(referenceTime);
 }

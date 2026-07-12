@@ -10,8 +10,8 @@ import {
   type CoreDaemonRateLimitConfig
 } from "../middleware/register-security-middleware.js";
 import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
-import { readBuildInfo } from "./build-info.js";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
+import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon-defaults.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/governance/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "../routes/governance/claims.js";
@@ -166,6 +166,8 @@ export function createApp(
 // Only the liveness path is exempt from the request-token gate, and the drain
 // middleware skips LIVENESS_PATH, so this stays cheap and never touches the DB
 // or any provider — liveness means "process is up".
+// Intentionally omits `version` (and other build metadata) to avoid leaking
+// release fingerprints to unauthenticated callers.
 const LIVENESS_PATH = "/health";
 
 type ResolvedRequestProtectionSettings = Readonly<{
@@ -222,7 +224,7 @@ function resolveRequestProtectionSettings(
     allowedOrigin:
       requestProtection?.allowedOrigin ??
       process.env.ALLOWED_ORIGIN ??
-      "http://localhost:5173",
+      DEFAULT_DAEMON_ALLOWED_ORIGIN,
     allowDesktopOriginlessRequests:
       requestProtection?.allowDesktopOriginlessRequests ?? true
   };
@@ -358,9 +360,8 @@ function registerRequestBodyLimitMiddleware(app: Hono): void {
 }
 
 function registerLivenessRoute(app: Hono): void {
-  const { version } = readBuildInfo();
   app.get(LIVENESS_PATH, (context) =>
-    context.json({ status: "ok", service: "alaya-core-daemon", version, uptime_s: process.uptime() }, 200)
+    context.json({ status: "ok", service: "alaya-core-daemon", uptime_s: process.uptime() }, 200)
   );
 }
 

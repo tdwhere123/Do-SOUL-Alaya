@@ -15,6 +15,12 @@ import {
   buildFacetTagsProjection,
   buildMemoryInput
 } from "./inputs.js";
+import {
+  MaterializationPartialFailureError,
+  materializationFailure,
+  materializationSuccess,
+  readPartialFailureCreatedObjects
+} from "./materialization-results.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
 
 type MemoryEntryMaterialization = {
@@ -27,17 +33,6 @@ interface ReconciledMaterializationState {
   readonly createdObjects: MaterializationCreatedObject[];
   evidenceId?: string;
   appendedMemory?: MemoryMaterializationCreatedObject;
-}
-
-class MaterializationPartialFailureError extends Error {
-  public constructor(
-    message: string,
-    public readonly createdObjects: readonly MaterializationCreatedObject[],
-    options?: { readonly cause?: unknown }
-  ) {
-    super(message, options);
-    this.name = "MaterializationPartialFailureError";
-  }
 }
 
 export class MaterializationRouterMemoryRoutes extends MaterializationRouterPathSideEffects {
@@ -63,25 +58,25 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       );
       createdObjects.push({ object_kind: claim.object_kind, object_id: claim.object_id });
 
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         target_kind: target.kind,
         route_target: target.route_target,
         routing_reason: target.routing_reason,
-        created_objects: createdObjects,
-        success: true
-      };
+        created_objects: createdObjects
+      });
     } catch (error) {
       createdObjects.push(...readPartialFailureCreatedObjects(error));
-      return {
-        signal_id: signal.signal_id,
-        target_kind: target.kind,
-        route_target: target.route_target,
-        routing_reason: target.routing_reason,
-        created_objects: createdObjects,
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      };
+      return materializationFailure(
+        {
+          signal_id: signal.signal_id,
+          target_kind: target.kind,
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: createdObjects
+        },
+        error
+      );
     }
   }
 
@@ -124,7 +119,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       const materializedMemory = await this.createEvidenceBackedMemoryEntry(signal);
       createdObjects.push(...materializedMemory.createdObjects);
 
-      return {
+      return materializationSuccess({
         signal_id: signal.signal_id,
         // wire-level kind stays evidence_only so the cross-package
         // SignalMaterializationTargetKind union does not need to widen;
@@ -133,20 +128,20 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         target_kind: "evidence_only",
         route_target: target.route_target,
         routing_reason: target.routing_reason,
-        created_objects: createdObjects,
-        success: true
-      };
+        created_objects: createdObjects
+      });
     } catch (error) {
       createdObjects.push(...readPartialFailureCreatedObjects(error));
-      return {
-        signal_id: signal.signal_id,
-        target_kind: "evidence_only",
-        route_target: target.route_target,
-        routing_reason: target.routing_reason,
-        created_objects: createdObjects,
-        success: false,
-        error: readErrorMessage(error, "Unknown materialization error")
-      };
+      return materializationFailure(
+        {
+          signal_id: signal.signal_id,
+          target_kind: "evidence_only",
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: createdObjects
+        },
+        error
+      );
     }
   }
 
@@ -341,7 +336,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
             { object_kind: "memory_entry", object_id: decision.survivingObjectId }
           ]
         : state.createdObjects;
-    return {
+    return materializationSuccess({
       signal_id: signal.signal_id,
       target_kind: "evidence_only",
       route_target: target.route_target,
@@ -349,9 +344,8 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         decision.kind === "add"
           ? target.routing_reason
           : `${target.routing_reason} — reconciled: ${decision.reason}`,
-      created_objects: createdObjects,
-      success: true
-    };
+      created_objects: createdObjects
+    });
   }
 
   protected async handleReconciledMaterializationFailure(
@@ -430,10 +424,6 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     return memory.enrichmentEnqueued === true || this.dependencies.enrichPendingPort !== undefined;
   }
 
-}
-
-function readPartialFailureCreatedObjects(error: unknown): readonly MaterializationCreatedObject[] {
-  return error instanceof MaterializationPartialFailureError ? error.createdObjects : [];
 }
 
 function readReconciliationProjectionFields(

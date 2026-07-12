@@ -37,15 +37,24 @@ export interface MaterializationTarget {
   readonly routing_reason: string;
 }
 
-export interface MaterializationResult {
+export interface MaterializationResultFields {
   readonly signal_id: string;
   readonly target_kind: MaterializationTarget["kind"];
   readonly route_target: RouteTarget;
   readonly routing_reason: string;
-  readonly created_objects: readonly { object_kind: string; object_id: string }[];
-  readonly success: boolean;
-  readonly error?: string;
+  readonly created_objects: readonly MaterializationCreatedObject[];
 }
+
+export interface MaterializationSuccessResult extends MaterializationResultFields {
+  readonly success: true;
+}
+
+export interface MaterializationFailureResult extends MaterializationResultFields {
+  readonly success: false;
+  readonly error: string;
+}
+
+export type MaterializationResult = MaterializationSuccessResult | MaterializationFailureResult;
 
 export interface MaterializationCreatedObject {
   readonly object_kind: string;

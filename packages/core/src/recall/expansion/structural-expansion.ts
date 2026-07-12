@@ -15,6 +15,7 @@ import {
   type GraphExpansionCandidateSourceDiagnostic,
   type GraphExpansionCandidatesResult
 } from "./graph-expansion.js";
+import { CoreError } from "../../shared/errors.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
@@ -283,14 +284,11 @@ function shouldSkipEntitySeedCollection(params: Readonly<{
   readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
   readonly queryText: string | null;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-  readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
 }>): boolean {
   return (
     params.entityExtractionPort === undefined ||
     params.queryText === null ||
-    params.byId.size === 0 ||
-    (params.memoryRepo.searchByKeyword === undefined &&
-      params.memoryRepo.searchByKeywordWithinObjectIds === undefined)
+    params.byId.size === 0
   );
 }
 
@@ -305,8 +303,10 @@ async function extractSeedEntities(params: Readonly<{
   readonly normalized: string;
   readonly confidence: number;
 }>[]> {
+  const entityExtractionPort = requireEntityExtractionPort(params.entityExtractionPort);
+  const queryText = requireQueryText(params.queryText);
   try {
-    return await params.entityExtractionPort!.extract(params.queryText!, {
+    return await entityExtractionPort.extract(queryText, {
       maxEntities: params.entityExtractionMaxEntities
     });
   } catch (error) {
@@ -344,15 +344,28 @@ async function searchEntitySeedHits(
   const perEntityLimit = confidence >= 0.85
     ? params.entitySeedPerEntityTopKStrong
     : params.entitySeedPerEntityTopKWeak;
+  if (params.memoryRepo.searchByKeywordWithinObjectIds !== undefined) {
+    try {
+      return await params.memoryRepo.searchByKeywordWithinObjectIds(
+        params.workspaceId,
+        surface,
+        perEntityLimit,
+        candidateIds
+      );
+    } catch (error) {
+      params.warn("entity seed lookup failed", {
+        workspace_id: params.workspaceId,
+        entity_surface: surface,
+        operation: "entity_seed_lookup",
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      });
+      return [];
+    }
+  }
+  const searchByKeyword = requireSearchByKeyword(params.memoryRepo);
   try {
-    return params.memoryRepo.searchByKeywordWithinObjectIds !== undefined
-      ? await params.memoryRepo.searchByKeywordWithinObjectIds(
-          params.workspaceId,
-          surface,
-          perEntityLimit,
-          candidateIds
-        )
-      : await params.memoryRepo.searchByKeyword!(params.workspaceId, surface, perEntityLimit);
+    return await searchByKeyword(params.workspaceId, surface, perEntityLimit);
   } catch (error) {
     params.warn("entity seed lookup failed", {
       workspace_id: params.workspaceId,
@@ -395,6 +408,31 @@ function admitEntitySeedHits(
     }
   }
   return nextAdmittedTotal;
+}
+
+function requireEntityExtractionPort(
+  port: RecallServiceDependencies["entityExtractionPort"]
+): NonNullable<RecallServiceDependencies["entityExtractionPort"]> {
+  if (port === undefined) {
+    throw new CoreError("CONFLICT", "Entity extraction port is required for entity seed collection");
+  }
+  return port;
+}
+
+function requireQueryText(queryText: string | null): string {
+  if (queryText === null) {
+    throw new CoreError("VALIDATION", "Query text is required for entity seed collection");
+  }
+  return queryText;
+}
+
+function requireSearchByKeyword(
+  memoryRepo: RecallServiceDependencies["memoryRepo"]
+): NonNullable<RecallServiceDependencies["memoryRepo"]["searchByKeyword"]> {
+  if (memoryRepo.searchByKeyword === undefined) {
+    throw new CoreError("CONFLICT", "Memory repo searchByKeyword is required for entity seed lookup");
+  }
+  return memoryRepo.searchByKeyword;
 }
 
 function buildEntitySeedResults(

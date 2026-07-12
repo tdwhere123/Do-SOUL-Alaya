@@ -430,7 +430,10 @@ function computeJitterMs(attempt: number, random: () => number): number {
 }
 
 function defaultSleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer?.unref?.();
+  });
 }
 
 function isTimeoutLike(error: unknown): boolean {

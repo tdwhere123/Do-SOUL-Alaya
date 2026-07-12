@@ -1,3 +1,5 @@
+import { AlayaError } from "@do-soul/alaya-protocol";
+
 export type SignalExtractorErrorKind = "timeout" | "transport_failure" | "invalid_json";
 
 // invariant: a closed enum so the bench / dump consumers (compute-provider
@@ -15,16 +17,18 @@ export type RetryClassification =
   | "failure_timeout"
   | "failure_aborted";
 
-export class SignalExtractorError extends Error {
+export class SignalExtractorError extends AlayaError {
   // invariant: retryCount on the thrown error reflects the attempt index at
   // the moment the failure escaped (0 = first attempt threw and was not
   // retried, e.g. a 4xx auth fail; N = first attempt failed, retried N
   // times, all attempts still failed). retryClassification labels which
   // branch of the retry policy terminated.
+  public readonly kind: SignalExtractorErrorKind;
   public readonly retryCount: number;
   public readonly retryClassification: RetryClassification;
+
   public constructor(
-    public readonly kind: SignalExtractorErrorKind,
+    kind: SignalExtractorErrorKind,
     message: string,
     options?: {
       readonly cause?: unknown;
@@ -32,8 +36,9 @@ export class SignalExtractorError extends Error {
       readonly retryClassification?: RetryClassification;
     }
   ) {
-    super(message, options);
+    super(kind, message, options);
     this.name = "SignalExtractorError";
+    this.kind = kind;
     this.retryCount = options?.retryCount ?? 0;
     this.retryClassification = options?.retryClassification ?? "failure_max_retries";
   }

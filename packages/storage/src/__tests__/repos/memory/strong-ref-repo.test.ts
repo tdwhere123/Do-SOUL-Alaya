@@ -114,6 +114,20 @@ describe("SqliteStrongRefRepo", () => {
     await expect(repo.isProtected(ref.workspace_id, ref.target_entity_type, ref.target_entity_id)).resolves.toBe(false);
     await expect(repo.findByTarget(ref.workspace_id, ref.target_entity_type, ref.target_entity_id)).resolves.toEqual([]);
   });
+
+  it("rejects corrupt strong ref rows on read", async () => {
+    const { database, repo } = createRepo();
+    const ref = createStrongRefFixture({ ref_id: "strong-ref-bad" });
+
+    await repo.create(ref);
+    database.connection
+      .prepare("UPDATE strong_refs SET created_at = '' WHERE ref_id = ?")
+      .run(ref.ref_id);
+
+    await expect(repo.findByTarget("workspace-1", "claim_form", "claim-1")).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+  });
 });
 
 function createRepo(): {

@@ -2,8 +2,47 @@ import {
   ToolProviderToolSpecSchema,
   type ToolProviderToolSpec
 } from "@do-soul/alaya-protocol";
+import { z } from "zod";
 import { isBuiltinConversationToolId, type BuiltinConversationToolId } from "./builtin-conversation-tool-specs.js";
 import type { DaemonMcpServerRuntimeConfig } from "./mcp-runtime-registry.js";
+
+const JsonObjectRecordSchema = z.record(z.string(), z.unknown());
+const NonEmptyStringSchema = z.string().trim().min(1);
+const McpToolCatalogServerToolsSchema = z.array(z.unknown());
+const McpToolEntryInputSchema = z
+  .object({
+    tool_id: z.unknown(),
+    name: z.unknown(),
+    description: z.unknown(),
+    daemon_binding: z.unknown().optional()
+  })
+  .loose()
+  .readonly();
+const DaemonMcpHttpConfigInputSchema = z
+  .object({
+    transport_type: z.literal("http"),
+    endpoint: NonEmptyStringSchema,
+    headers: z.unknown().optional()
+  })
+  .readonly();
+const DaemonMcpStdioConfigInputSchema = z
+  .object({
+    transport_type: z.literal("stdio")
+  })
+  .loose()
+  .readonly();
+const DaemonMcpBindingBuiltinSchema = z
+  .object({
+    binding_kind: z.literal("builtin_tool"),
+    builtin_tool_id: NonEmptyStringSchema
+  })
+  .readonly();
+const DaemonMcpBindingMcpToolSchema = z
+  .object({
+    binding_kind: z.literal("mcp_tool"),
+    tool_name: NonEmptyStringSchema.optional()
+  })
+  .readonly();
 
 export type DaemonMcpRuntimeBinding = Readonly<{
   readonly bindingKind: "builtin_tool";
@@ -35,12 +74,10 @@ export function parseDaemonMcpServerRuntimeConfigs(
 
   try {
     const parsed: unknown = JSON.parse(rawValue);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("expected a JSON object mapping server name -> runtime config");
-    }
+    const envelope = JsonObjectRecordSchema.parse(parsed);
 
     const runtimeConfigs: Record<string, DaemonMcpServerRuntimeConfig> = {};
-    for (const [serverName, rawConfig] of Object.entries(parsed as Record<string, unknown>)) {
+    for (const [serverName, rawConfig] of Object.entries(envelope)) {
       const config = parseDaemonMcpServerRuntimeConfig(serverName, rawConfig, warn);
       if (config !== null) {
         runtimeConfigs[serverName] = config;
@@ -88,58 +125,46 @@ function parseDaemonMcpServerRuntimeConfig(
   rawConfig: unknown,
   warn: WarnLogger
 ): DaemonMcpServerRuntimeConfig | null {
-  if (typeof rawConfig !== "object" || rawConfig === null || Array.isArray(rawConfig)) {
-    return null;
-  }
-
-  const candidate = rawConfig as Record<string, unknown>;
-  const transportType = readNonEmptyString(candidate["transport_type"]);
-  if (transportType === "stdio") {
+  if (DaemonMcpStdioConfigInputSchema.safeParse(rawConfig).success) {
     warn("dropping MCP stdio runtime config from environment", {
       serverName
     });
     return null;
   }
 
-  if (transportType === "http") {
-    const endpoint = readNonEmptyString(candidate["endpoint"]);
-    if (endpoint === null) {
-      warn("dropping MCP HTTP runtime config without endpoint", {
-        serverName,
-      });
-      return null;
-    }
+  const httpConfig = DaemonMcpHttpConfigInputSchema.safeParse(rawConfig);
+  if (!httpConfig.success) {
+    return null;
+  }
 
-    try {
-      const url = new URL(endpoint);
-      if (url.protocol !== "http:" && url.protocol !== "https:") {
-        throw new Error("unsupported protocol");
-      }
-      if (!isLoopbackMcpEndpoint(url)) {
-        warn("dropping MCP HTTP runtime config with non-local endpoint", {
-          serverName,
-          endpoint
-        });
-        return null;
-      }
-    } catch {
-      warn("dropping MCP HTTP runtime config with invalid endpoint", {
+  const endpoint = httpConfig.data.endpoint;
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+    if (!isLoopbackMcpEndpoint(url)) {
+      warn("dropping MCP HTTP runtime config with non-local endpoint", {
         serverName,
         endpoint
       });
       return null;
     }
-
-    return Object.freeze({
-      transportType,
-      endpoint,
-      ...(candidate["headers"] === undefined
-        ? {}
-        : { headers: readStringRecord(candidate["headers"]) })
+  } catch {
+    warn("dropping MCP HTTP runtime config with invalid endpoint", {
+      serverName,
+      endpoint
     });
+    return null;
   }
 
-  return null;
+  return Object.freeze({
+    transportType: "http",
+    endpoint,
+    ...(httpConfig.data.headers === undefined
+      ? {}
+      : { headers: readStringRecord(httpConfig.data.headers) })
+  });
 }
 
 function isLoopbackMcpEndpoint(url: URL): boolean {
@@ -171,17 +196,19 @@ function parseMcpToolCatalogByServer(
 
   try {
     const parsed: unknown = JSON.parse(rawValue);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error("expected a JSON object mapping server name -> tool array");
-    }
+    const envelope = JsonObjectRecordSchema.parse(parsed);
 
     const byServer = new Map<string, readonly DaemonMcpCatalogToolEntry[]>();
-    for (const [serverName, rawTools] of Object.entries(parsed as Record<string, unknown>)) {
-      if (serverName.trim().length === 0 || !Array.isArray(rawTools)) {
+    for (const [serverName, rawTools] of Object.entries(envelope)) {
+      if (serverName.trim().length === 0) {
+        continue;
+      }
+      const tools = McpToolCatalogServerToolsSchema.safeParse(rawTools);
+      if (!tools.success) {
         continue;
       }
 
-      const parsedTools = rawTools
+      const parsedTools = tools.data
         .map((rawTool) => parseMcpToolEntry(rawTool))
         .filter((tool): tool is DaemonMcpCatalogToolEntry => tool !== null);
       byServer.set(serverName, Object.freeze(parsedTools));
@@ -197,34 +224,29 @@ function parseMcpToolCatalogByServer(
 }
 
 function parseMcpToolEntry(rawTool: unknown): DaemonMcpCatalogToolEntry | null {
-  if (typeof rawTool !== "object" || rawTool === null || Array.isArray(rawTool)) {
+  const candidate = McpToolEntryInputSchema.safeParse(rawTool);
+  if (!candidate.success) {
     return null;
   }
 
-  const spec = parseMcpToolSpec(rawTool);
+  const spec = parseMcpToolSpec(candidate.data);
   if (spec === null) {
     return null;
   }
 
-  const candidate = rawTool as Record<string, unknown>;
   return Object.freeze({
     spec,
-    runtimeBinding: parseDaemonMcpToolRuntimeBinding(candidate["daemon_binding"])
+    runtimeBinding: parseDaemonMcpToolRuntimeBinding(candidate.data.daemon_binding)
   });
 }
 
-function parseMcpToolSpec(rawTool: unknown): Readonly<ToolProviderToolSpec> | null {
-  if (typeof rawTool !== "object" || rawTool === null || Array.isArray(rawTool)) {
-    return null;
-  }
-
-  const candidate = rawTool as Record<string, unknown>;
+function parseMcpToolSpec(rawTool: Pick<z.infer<typeof McpToolEntryInputSchema>, "tool_id" | "name" | "description">): Readonly<ToolProviderToolSpec> | null {
   try {
     return Object.freeze(
       ToolProviderToolSpecSchema.parse({
-        tool_id: candidate["tool_id"],
-        name: candidate["name"],
-        description: candidate["description"]
+        tool_id: rawTool.tool_id,
+        name: rawTool.name,
+        description: rawTool.description
       })
     );
   } catch (error) {
@@ -232,8 +254,8 @@ function parseMcpToolSpec(rawTool: unknown): Readonly<ToolProviderToolSpec> | nu
     process.emitWarning("[McpCatalog] dropping invalid MCP tool spec", {
       code: "ALAYA_MCP_TOOL_SPEC_INVALID",
       detail: JSON.stringify({
-        tool_id: typeof candidate["tool_id"] === "string" ? candidate["tool_id"] : null,
-        name: typeof candidate["name"] === "string" ? candidate["name"] : null,
+        tool_id: typeof rawTool.tool_id === "string" ? rawTool.tool_id : null,
+        name: typeof rawTool.name === "string" ? rawTool.name : null,
         error: error instanceof Error ? error.message : String(error)
       })
     });
@@ -242,47 +264,29 @@ function parseMcpToolSpec(rawTool: unknown): Readonly<ToolProviderToolSpec> | nu
 }
 
 function parseDaemonMcpToolRuntimeBinding(value: unknown): DaemonMcpRuntimeBinding | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  const bindingKind = readNonEmptyString(candidate["binding_kind"]);
-  if (bindingKind === "builtin_tool") {
-    const builtinToolId = readNonEmptyString(candidate["builtin_tool_id"]);
-    if (!isBuiltinConversationToolId(builtinToolId)) {
+  const builtinBinding = DaemonMcpBindingBuiltinSchema.safeParse(value);
+  if (builtinBinding.success) {
+    if (!isBuiltinConversationToolId(builtinBinding.data.builtin_tool_id)) {
       return null;
     }
 
     return Object.freeze({
-      bindingKind,
-      builtinToolId
+      bindingKind: "builtin_tool",
+      builtinToolId: builtinBinding.data.builtin_tool_id
     });
   }
 
-  if (bindingKind === "mcp_tool") {
-    const toolName = readNonEmptyString(candidate["tool_name"]);
+  const mcpToolBinding = DaemonMcpBindingMcpToolSchema.safeParse(value);
+  if (mcpToolBinding.success) {
     return Object.freeze({
-      bindingKind,
-      ...(toolName === null ? {} : { toolName })
+      bindingKind: "mcp_tool",
+      ...(mcpToolBinding.data.tool_name === undefined
+        ? {}
+        : { toolName: mcpToolBinding.data.tool_name })
     });
   }
 
   return null;
-}
-
-function readNonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
-function readStringArray(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) {
-    return Object.freeze([]);
-  }
-
-  return Object.freeze(
-    value.filter((item): item is string => typeof item === "string" && item.length > 0)
-  );
 }
 
 function readStringRecord(value: unknown): Readonly<Record<string, string>> {

@@ -58,6 +58,30 @@ describe("OpenAIEmbeddingClient", () => {
     expect(vi.mocked(fetchImpl).mock.calls[1]?.[0]).toBe("https://embedding.example.test/v1/embeddings");
   });
 
+  it("defaults the model when omitted but rejects an empty configured model", () => {
+    expect(
+      new OpenAIEmbeddingClient({
+        apiKey: "sk-test-secret"
+      }).modelId
+    ).toBe("text-embedding-3-small");
+
+    expect(
+      () =>
+        new OpenAIEmbeddingClient({
+          apiKey: "sk-test-secret",
+          model: ""
+        })
+    ).toThrow("OpenAI embedding model must not be empty.");
+
+    expect(
+      () =>
+        new OpenAIEmbeddingClient({
+          apiKey: "sk-test-secret",
+          model: "   "
+        })
+    ).toThrow("OpenAI embedding model must not be empty.");
+  });
+
   it("retries transient transport failures before returning embeddings", async () => {
     const transportError = new TypeError("fetch failed") as TypeError & {
       cause: { code: string };

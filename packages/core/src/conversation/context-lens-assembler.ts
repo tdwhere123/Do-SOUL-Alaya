@@ -22,6 +22,7 @@ import {
 import type { RecallCandidate } from "../recall/recall-service.js";
 
 import { ContextLensProjectionBuilder } from "./context-lens-projection-builder.js";
+import { isExpired } from "../shared/time.js";
 import {
   MAX_LENS_STORE_SIZE,
   type AssembleResult,
@@ -355,16 +356,12 @@ export class ContextLensAssembler {
   }
 
   private pruneLensStore(referenceTime: string): void {
-    const referenceMs = Date.parse(referenceTime);
-
-    if (!Number.isFinite(referenceMs)) {
+    if (!Number.isFinite(Date.parse(referenceTime))) {
       return;
     }
 
     for (const [runId, lens] of this.lensStore) {
-      const expiresAtMs = lens.expires_at === null ? Number.NaN : Date.parse(lens.expires_at);
-
-      if (!Number.isFinite(expiresAtMs) || expiresAtMs <= referenceMs) {
+      if (lens.expires_at === null || isExpired(lens.expires_at, referenceTime)) {
         this.lensStore.delete(runId);
       }
     }

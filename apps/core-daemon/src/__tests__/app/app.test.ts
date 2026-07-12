@@ -207,12 +207,10 @@ describe("createApp", () => {
       }
     });
 
-    // Request with invalid token is rejected with 403
-    const badHeaders1 = { "x-request-token": "wrong-token", "x-alaya-desktop": "1" };
-    expect((await app.request("/unknown", { headers: badHeaders1 })).status).toBe(403);
-    expect((await app.request("/unknown", { headers: badHeaders1 })).status).toBe(403);
+    const badHeaders = { "x-request-token": "wrong-token", "x-alaya-desktop": "1" };
+    expect((await app.request("/unknown", { headers: badHeaders })).status).toBe(403);
+    expect((await app.request("/unknown", { headers: badHeaders })).status).toBe(403);
 
-    // Request with valid token still succeeds/returns 404 (not 429) because bad token did not consume quota
     const goodHeaders = withTestAuthHeaders();
     expect((await app.request("/unknown", { headers: goodHeaders })).status).toBe(404);
   });
@@ -249,7 +247,7 @@ describe("createApp", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.status).toBe("ok");
     expect(body.service).toBe("alaya-core-daemon");
-    expect(typeof body.version).toBe("string");
+    expect(body.version).toBeUndefined();
     expect(typeof body.uptime_s).toBe("number");
   });
 

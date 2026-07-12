@@ -64,7 +64,6 @@ export function requireWorkerBaselineLock(
 export function isConflictError(error: unknown): error is Error & { readonly code: "CONFLICT" } {
   return (
     error instanceof Error &&
-    error.name === "StorageError" &&
     "code" in error &&
     (error as { readonly code?: unknown }).code === "CONFLICT"
   );

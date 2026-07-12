@@ -196,7 +196,11 @@ async function resolveImplicitWorkspaceForInspector(
     return active;
   }
   if (active.length === 1) {
-    return { status: "ok", workspaceId: active[0]!.workspace_id };
+    const [soleWorkspace] = active;
+    if (soleWorkspace === undefined) {
+      throw new Error("invariant violated: single active workspace missing");
+    }
+    return { status: "ok", workspaceId: soleWorkspace.workspace_id };
   }
   const currentDirectoryMatch = resolveWorkspaceFromCurrentDirectory(ctx.cwd, active);
   if (currentDirectoryMatch !== null) {

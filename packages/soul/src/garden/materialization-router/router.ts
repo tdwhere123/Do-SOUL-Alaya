@@ -15,6 +15,7 @@ import {
   routeByObjectKind,
   signalCarriesProjectionPayload
 } from "./inputs.js";
+import { materializationFailure } from "./materialization-results.js";
 import { MaterializationRouterRouteHandlers } from "./route-handlers.js";
 
 type SignalRouteStrategy = {
@@ -213,15 +214,17 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
         return this.materializeDeferred(signal, target);
       default: {
         const exhaustiveCheck: never = target.kind;
-        return {
-          signal_id: signal.signal_id,
-          target_kind: exhaustiveCheck,
-          route_target: target.route_target,
-          routing_reason: target.routing_reason,
-          created_objects: [],
-          success: false,
-          error: "Unsupported materialization target"
-        };
+        return materializationFailure(
+          {
+            signal_id: signal.signal_id,
+            target_kind: exhaustiveCheck,
+            route_target: target.route_target,
+            routing_reason: target.routing_reason,
+            created_objects: []
+          },
+          "Unsupported materialization target",
+          "Unsupported materialization target"
+        );
       }
     }
   }

@@ -171,6 +171,14 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
       );
     }
 
+    const workspaceId = parsedRecords[0]?.workspace_id;
+    if (workspaceId === undefined) {
+      throw new StorageError(
+        "VALIDATION_FAILED",
+        "Global memory recall cache batch must contain at least one record."
+      );
+    }
+
     try {
       this.db.connection.transaction((batch: readonly Readonly<GlobalMemoryRecallCacheRecord>[]) => {
         for (const record of batch) {
@@ -185,13 +193,13 @@ export class SqliteGlobalMemoryRecallCacheRepo implements GlobalMemoryRecallCach
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
-        `Failed to persist global memory recall cache batch for workspace ${parsedRecords[0]!.workspace_id}.`,
+        `Failed to persist global memory recall cache batch for workspace ${workspaceId}.`,
         error
       );
     }
 
     return this.listByWorkspaceAndObjectIds(
-      parsedRecords[0]!.workspace_id,
+      workspaceId,
       parsedRecords.map((record) => record.global_object_id)
     );
   }

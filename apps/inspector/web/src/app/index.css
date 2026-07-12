@@ -7,6 +7,7 @@
   --text-primary: #586E75;
   --text-secondary: #657B83;
   --accent-ink: #93A1A1;
+  --focus-ring: #7A5A0F;
 }
 
 html,
@@ -25,6 +26,11 @@ body {
   padding: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus-ring) !important;
+  outline-offset: 2px !important;
 }
 
 /* Custom scrollbar */

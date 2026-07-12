@@ -56,15 +56,20 @@ describe("keychain adapters", () => {
     });
   });
 
-  it("builds keychain write argv and passes Linux/Windows secrets on stdin", () => {
+  it("writes macOS secrets via security -i stdin and keeps the password out of argv", () => {
     const macRunner = stubRunner({ code: 0, stdout: "", stderr: "" });
-    expect(writeMacosKeychainSecret("svc", "acct", "secret", macRunner)).toEqual({ ok: true });
+    const secret = "secret-value";
+
+    expect(writeMacosKeychainSecret("svc", "acct", secret, macRunner)).toEqual({ ok: true });
     expect(macRunner).toHaveBeenCalledWith("security", ["-i"], {
-      input: "add-generic-password -s 'svc' -a 'acct' -w 'secret' -U\n",
+      input: expect.stringContaining(secret),
       timeoutMs: 10_000
     });
-    expect(macRunner.mock.calls[0]![1].join(" ")).not.toContain("secret");
+    expect(macRunner.mock.calls[0]![1]).toEqual(["-i"]);
+    expect(macRunner.mock.calls[0]![1]).not.toContain(secret);
+  });
 
+  it("passes Linux/Windows secrets on stdin", () => {
     const linuxRunner = stubRunner({ code: 0, stdout: "", stderr: "" });
     expect(writeLinuxKeychainSecret("svc", "acct", "secret", linuxRunner)).toEqual({ ok: true });
     expect(linuxRunner).toHaveBeenCalledWith(
@@ -82,56 +87,45 @@ describe("keychain adapters", () => {
   });
 
   it.each([
-    {
-      label: "single quote",
-      service: "svc'quote",
-      account: "acct",
-      secret: "sk'quote",
-      expectedInput: "add-generic-password -s 'svc'\\''quote' -a 'acct' -w 'sk'\\''quote' -U\n"
-    },
-    {
-      label: "backslash",
-      service: "svc\\path",
-      account: "acct\\path",
-      secret: "sk\\secret",
-      expectedInput: "add-generic-password -s 'svc\\path' -a 'acct\\path' -w 'sk\\secret' -U\n"
-    },
-    {
-      label: "leading dash",
-      service: "-svc",
-      account: "-acct",
-      secret: "-secret",
-      expectedInput: "add-generic-password -s '-svc' -a '-acct' -w '-secret' -U\n"
-    },
-    {
-      label: "substitution text",
-      service: "$(svc)",
-      account: "$(acct)",
-      secret: "$(secret)",
-      expectedInput: "add-generic-password -s '$(svc)' -a '$(acct)' -w '$(secret)' -U\n"
-    }
-  ])("quotes macOS security -i values for $label without argv secret exposure", ({ service, account, secret, expectedInput }) => {
+    { label: "single quote", secret: "sk'quote" },
+    { label: "backtick", secret: "sk`cmd" },
+    { label: "$PATH expansion text", secret: "$PATH:$HOME" },
+    { label: "backslash", secret: "sk\\secret" },
+    { label: "substitution text", secret: "$(secret)" }
+  ])("rejects macOS password shell-meta for $label", ({ secret }) => {
     const runner = stubRunner({ code: 0, stdout: "", stderr: "" });
 
-    expect(writeMacosKeychainSecret(service, account, secret, runner)).toEqual({ ok: true });
-    expect(runner).toHaveBeenCalledWith("security", ["-i"], {
-      input: expectedInput,
-      timeoutMs: 10_000
+    expect(writeMacosKeychainSecret("svc", "acct", secret, runner)).toMatchObject({
+      kind: "keychain_write_failed"
     });
-    expect(runner.mock.calls[0]![1].join(" ")).not.toContain(secret);
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it.each([
-    { label: "value", service: "svc", account: "acct", secret: "sk\nadd-generic-password -s evil -a evil -w pwn -U", field: "value" },
-    { label: "CR value", service: "svc", account: "acct", secret: "sk\radd-generic-password", field: "value" },
-    { label: "service", service: "svc\nevil", account: "acct", secret: "sk", field: "service" },
-    { label: "account", service: "svc", account: "acct\nevil", secret: "sk", field: "account" }
-  ])("rejects macOS security -i $label newlines without invoking the runner", ({ service, account, secret, field }) => {
+    { label: "service quote", service: "svc'quote", account: "acct", secret: "sk" },
+    { label: "service backtick", service: "svc`cmd", account: "acct", secret: "sk" },
+    { label: "service substitution", service: "$(svc)", account: "acct", secret: "sk" },
+    { label: "account quote", service: "svc", account: "acct'quote", secret: "sk" }
+  ])("rejects injection-shaped macOS service/account for $label", ({ service, account, secret }) => {
     const runner = stubRunner({ code: 0, stdout: "", stderr: "" });
 
-    expect(() => writeMacosKeychainSecret(service, account, secret, runner)).toThrow(
-      `macOS Keychain ${field} must not contain newline characters.`
-    );
+    expect(writeMacosKeychainSecret(service, account, secret, runner)).toMatchObject({
+      kind: "keychain_write_failed"
+    });
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "value", service: "svc", account: "acct", secret: "sk\nadd-generic-password -s evil -a evil -w pwn -U" },
+    { label: "CR value", service: "svc", account: "acct", secret: "sk\radd-generic-password" },
+    { label: "service", service: "svc\nevil", account: "acct", secret: "sk" },
+    { label: "account", service: "svc", account: "acct\nevil", secret: "sk" }
+  ])("rejects macOS security write $label newlines", ({ service, account, secret }) => {
+    const runner = stubRunner({ code: 0, stdout: "", stderr: "" });
+
+    expect(writeMacosKeychainSecret(service, account, secret, runner)).toMatchObject({
+      kind: "keychain_write_failed"
+    });
     expect(runner).not.toHaveBeenCalled();
   });
 

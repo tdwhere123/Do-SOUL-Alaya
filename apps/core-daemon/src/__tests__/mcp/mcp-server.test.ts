@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ALAYA_MCP_SERVER_INSTRUCTIONS,
   callAlayaMcpMemoryTool,
@@ -67,6 +67,36 @@ describe("mcp server", () => {
       ok: false,
       error: { code: "UNKNOWN_TOOL" }
     });
+  });
+
+  it("converts a rejected handler promise into a structured MCP error result", async () => {
+    const warn = vi.fn();
+    const handler: McpMemoryToolHandler = {
+      call: async () => {
+        throw new Error("private handler detail");
+      }
+    };
+
+    const result = await callAlayaMcpMemoryTool(
+      {
+        memoryToolHandler: handler,
+        contextProvider: () => ({ workspaceId: "ws1", runId: null, agentTarget: "codex", sessionId: "session-1" }),
+        warn
+      },
+      "soul.recall",
+      {}
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      ok: false,
+      error: { code: "INTERNAL", message: "Unexpected MCP tool failure" }
+    });
+    expect(warn).toHaveBeenCalledWith("MCP memory tool handler rejected", {
+      error: "private handler detail",
+      toolName: "soul.recall"
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain("private handler detail");
   });
 
   it("pins tools-only MCP server instructions for the full memory loop", () => {

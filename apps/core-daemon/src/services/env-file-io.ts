@@ -67,18 +67,98 @@ const runtimeEmbeddingConfigLocks = new Map<string, Promise<unknown>>();
 const RUNTIME_EMBEDDING_CONFIG_LOCK_SUFFIX = ".runtime-embedding.lock";
 const DEFAULT_RUNTIME_EMBEDDING_LOCK_TIMEOUT_MS = 10_000;
 const DEFAULT_RUNTIME_EMBEDDING_LOCK_RETRY_MS = 10;
+const DEFAULT_LOCK_CHAIN_WAIT_TIMEOUT_MS = 30_000;
 
-export async function withRuntimeEmbeddingConfigLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
-  const previous = runtimeEmbeddingConfigLocks.get(lockKey) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
-  runtimeEmbeddingConfigLocks.set(lockKey, current);
+function swallowLateLockChainReject(scope: string, error: unknown): void {
+  process.emitWarning(`[EnvFileIo] prior ${scope} rejected; continuing lock chain`, {
+    code: "ALAYA_ENV_FILE_IO_LATE_REJECT",
+    detail: JSON.stringify({
+      scope,
+      message: error instanceof Error ? error.message : String(error)
+    })
+  });
+}
+
+function swallowLateReject(promise: Promise<unknown>, scope: string): Promise<void> {
+  return promise.catch((error) => {
+    swallowLateLockChainReject(scope, error);
+  }).then(() => undefined);
+}
+
+async function waitForLockChain(previous: Promise<unknown>, scope: string, timeoutMs: number): Promise<void> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await current;
+    await Promise.race([
+      swallowLateReject(previous, scope),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new CoreError("CONFLICT", `${scope} lock wait timed out`));
+        }, timeoutMs);
+        timeoutHandle.unref?.();
+      })
+    ]);
   } finally {
-    if (runtimeEmbeddingConfigLocks.get(lockKey) === current) {
-      runtimeEmbeddingConfigLocks.delete(lockKey);
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
     }
   }
+}
+
+async function withLockChain<T>(
+  lockMap: Map<string, Promise<unknown>>,
+  lockKey: string,
+  scope: string,
+  timeoutMs: number,
+  operation: () => Promise<T>
+): Promise<T> {
+  const releasePrevious = lockMap.get(lockKey) ?? Promise.resolve();
+
+  let resolveNext!: () => void;
+  let rejectNext!: (reason: unknown) => void;
+  const releaseNext = new Promise<void>((resolve, reject) => {
+    resolveNext = resolve;
+    rejectNext = reject;
+  });
+  void releaseNext.catch(() => undefined);
+  lockMap.set(lockKey, releaseNext);
+
+  try {
+    await waitForLockChain(releasePrevious, scope, timeoutMs);
+  } catch (error) {
+    if (lockMap.get(lockKey) === releaseNext) {
+      lockMap.set(lockKey, releasePrevious);
+    }
+    // Timed-out waiters must not unblock successors early; forward this gate
+    // to the live holder so C still serializes behind A after B times out.
+    void releasePrevious.finally(() => resolveNext());
+    throw error;
+  }
+
+  let operationFailed = false;
+  try {
+    return await operation();
+  } catch (error) {
+    rejectNext(error);
+    operationFailed = true;
+    throw error;
+  } finally {
+    if (!operationFailed) {
+      resolveNext();
+      if (lockMap.get(lockKey) === releaseNext) {
+        lockMap.delete(lockKey);
+      }
+    }
+  }
+}
+
+export async function withRuntimeEmbeddingConfigLock<T>(lockKey: string, operation: () => Promise<T>): Promise<T> {
+  return withLockChain(
+    runtimeEmbeddingConfigLocks,
+    lockKey,
+    "runtime-embedding-config",
+    DEFAULT_LOCK_CHAIN_WAIT_TIMEOUT_MS,
+    operation
+  );
 }
 
 export async function withRuntimeEmbeddingFileLock<T>(
@@ -147,16 +227,13 @@ export async function writeTextAtomicLocked(
 }
 
 async function withPathWriteLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
-  const previous = pathWriteLocks.get(filePath) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(operation);
-  pathWriteLocks.set(filePath, current);
-  try {
-    return await current;
-  } finally {
-    if (pathWriteLocks.get(filePath) === current) {
-      pathWriteLocks.delete(filePath);
-    }
-  }
+  return withLockChain(
+    pathWriteLocks,
+    filePath,
+    "path-write",
+    DEFAULT_LOCK_CHAIN_WAIT_TIMEOUT_MS,
+    operation
+  );
 }
 
 export function trimTrailingLineBreaks(value: string): string {

@@ -39,14 +39,25 @@ export interface SignalMaterializedObject {
   readonly object_id: string;
 }
 
-export interface SignalMaterializationResult {
+export interface SignalMaterializationResultFields {
   readonly signal_id: string;
   readonly target_kind: SignalMaterializationTargetKind;
   readonly routing_reason: string;
   readonly created_objects: readonly SignalMaterializedObject[];
-  readonly success: boolean;
-  readonly error?: string;
 }
+
+export interface SignalMaterializationSuccessResult extends SignalMaterializationResultFields {
+  readonly success: true;
+}
+
+export interface SignalMaterializationFailureResult extends SignalMaterializationResultFields {
+  readonly success: false;
+  readonly error: string;
+}
+
+export type SignalMaterializationResult =
+  | SignalMaterializationSuccessResult
+  | SignalMaterializationFailureResult;
 
 export interface SignalServicePostTriageMaterializer {
   materialize(signal: CandidateMemorySignal): Promise<SignalMaterializationResult>;

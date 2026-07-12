@@ -351,6 +351,9 @@ describe("MaterializationRouter ingest reconciliation", () => {
     );
 
     expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected materialization failure");
+    }
     expect(result.error).toContain("PathRelationProposalPort unavailable before materializing");
     expect(result.created_objects).toEqual([]);
     expect(deps.evidenceService.create).not.toHaveBeenCalled();

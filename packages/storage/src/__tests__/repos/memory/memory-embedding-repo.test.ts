@@ -302,6 +302,27 @@ describe("Memory embedding storage repo", () => {
     await expect(repo.findByObjectId(objectId)).resolves.toBeNull();
   });
 
+  it("soft-misses guarded upserts when current memory content is empty", async () => {
+    const { database, repo, workspaceId } = await createRepoContext();
+    const objectId = "11111111-1111-4111-8111-111111111111";
+
+    database.connection
+      .prepare("UPDATE memory_entries SET content = ? WHERE object_id = ?")
+      .run("", objectId);
+
+    await expect(
+      repo.upsertIfContentHashMatchesCurrentMemory(
+        createEmbeddingRecord({
+          object_id: objectId,
+          workspace_id: workspaceId,
+          content_hash: "sha256:any-hash",
+          embedding: new Float32Array([0.4, 0.5, 0.6])
+        })
+      )
+    ).resolves.toBeNull();
+    await expect(repo.findByObjectId(objectId)).resolves.toBeNull();
+  });
+
   it("returns metadata for requested object ids without the embedding vector", async () => {
     const { workspaceId, repo } = await createRepoContext();
 
@@ -416,5 +437,36 @@ describe("Memory embedding storage repo", () => {
       writerDatabase.close();
       rmSync(dbDirectory, { recursive: true, force: true });
     }
+  });
+
+  it("rejects corrupt memory embedding rows on read", async () => {
+    const { database, workspaceId, repo } = await createRepoContext();
+    const objectId = "11111111-1111-4111-8111-111111111111";
+
+    database.connection
+      .prepare(
+        `
+        INSERT INTO memory_embeddings (
+          object_id, workspace_id, content_hash, provider_kind, model_id,
+          schema_version, dimensions, embedding_blob, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      )
+      .run(
+        objectId,
+        workspaceId,
+        "sha256:bad",
+        "openai",
+        "text-embedding-3-small",
+        0,
+        2,
+        Buffer.from(new Float32Array([0.1, 0.2]).buffer),
+        "2026-03-22T00:00:00.000Z",
+        "2026-03-22T00:00:00.000Z"
+      );
+
+    await expect(repo.findByObjectId(objectId)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
   });
 });

@@ -34,6 +34,31 @@ import { dirname, join } from "node:path";
 
 export const EXTRACTION_CACHE_MANIFEST_VERSION = 3;
 export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
+export const BENCH_EXTRACTION_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
+
+/**
+ * Resolve the bench extraction model from operator env or the cache manifest.
+ * Refuses the old silent fallback to the production constant `gpt-4.1-mini`,
+ * which produced 100% cache misses when the cache was built with another model.
+ */
+export function resolveBenchExtractionModel(
+  env: NodeJS.ProcessEnv = process.env,
+  manifest?: ExtractionCacheManifest | undefined
+): string {
+  const model =
+    readNonEmptyEnv(env[BENCH_EXTRACTION_MODEL_ENV]) ?? manifest?.extraction_model;
+  if (model === undefined || model.trim().length === 0) {
+    throw new Error(
+      "bench extraction model is unresolved: neither env " +
+        `${BENCH_EXTRACTION_MODEL_ENV} is set nor does the extraction cache manifest ` +
+        "declare extraction_model. Export the extraction model env var " +
+        "in the bench environment or build the cache manifest first. Refusing to " +
+        "fall back to a default model — a wrong default silently misses every " +
+        "cache key and degrades to a full live extraction."
+    );
+  }
+  return model;
+}
 
 export const EXTRACTION_REQUEST_PROFILES = [
   "provider-default-v1",
@@ -402,4 +427,12 @@ function describeCause(cause: unknown): string {
     return cause.message;
   }
   return String(cause);
+}
+
+function readNonEmptyEnv(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }

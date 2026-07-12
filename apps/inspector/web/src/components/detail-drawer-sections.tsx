@@ -2,7 +2,7 @@ import { Check, Copy, Edit3, Terminal, Trash2, TrendingDown, X } from "lucide-re
 import { clsx } from "clsx";
 import type { GraphNode } from "../types/graph";
 import { formatRelativeTime } from "../utils/graph";
-import { useI18n } from "../i18n/Locale";
+import { useI18n } from "../i18n/locale";
 import type { DictKey } from "../i18n/dict";
 import type { DetailDrawerState } from "./detail-drawer-state";
 
@@ -28,6 +28,7 @@ export function DetailDrawerShell(props: {
       )}
       role="complementary"
       aria-label={props.ariaLabel}
+      aria-hidden={!props.node}
     >
       {props.node ? (
         <div className="relative h-full flex flex-col p-6 pl-7 font-mono overflow-y-auto">
@@ -80,6 +81,7 @@ function DrawerHeader(props: {
     <div className="flex justify-between items-start mb-4">
       <NodeBadges node={props.node} kindColor={props.kindColor} />
       <button
+        type="button"
         onClick={props.onClose}
         className="p-1 hover:bg-beige-200 rounded transition-colors -mr-1"
         aria-label={t("drawer:close")}
@@ -152,6 +154,7 @@ function EvidenceSection(props: {
           >
             <span className="break-all">{ref}</span>
             <button
+              type="button"
               onClick={() => props.onCopyCli(ref)}
               className="text-ink-700/40 hover:text-ink-700"
               aria-label={t("drawer:copyEvidence", { ref })}
@@ -253,6 +256,7 @@ function ProposalButton(props: {
   }[props.tone];
   return (
     <button
+      type="button"
       onClick={() => void props.onClick()}
       disabled={props.disabled}
       className={`${props.fullWidth ? "w-full " : ""}flex items-center justify-center gap-2 rounded ${toneClass} px-3 py-2 text-xs font-bold uppercase tracking-widest text-beige-50 disabled:opacity-50`}
@@ -272,6 +276,7 @@ function SpotlightSection(props: {
     <section className="mb-6">
       <SectionTitle label={t("drawer:section.spotlight")} />
       <button
+        type="button"
         onClick={() => props.onFocusSubgraph(props.node.id)}
         className="text-xs font-mono text-ink-600 underline hover:text-ink-700"
       >
@@ -312,6 +317,7 @@ function MetadataIdRow(props: {
       <dt className="text-ink-700/60">{t("drawer:meta.id")}</dt>
       <dd className="text-ink-700 break-all select-all">{props.node.id}</dd>
       <button
+        type="button"
         onClick={() => props.onCopyCli(props.node.id)}
         className="text-ink-700/40 hover:text-ink-700"
         aria-label={t("drawer:copyNodeId")}
@@ -366,6 +372,7 @@ function OpenCliButton(props: {
   return (
     <div className="mt-auto pt-6 border-t border-beige-200">
       <button
+        type="button"
         onClick={() => props.onCopyCli(props.cliCommand)}
         className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-ink-600 text-beige-50 rounded hover:bg-ink-700 transition-colors text-xs font-bold uppercase tracking-widest"
       >

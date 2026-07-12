@@ -190,6 +190,20 @@ describe("SqliteSurfaceBindingRepo", () => {
     expect(untouched?.binding.binding_state).toBe(BindingState.ACTIVE);
     expect(countSurfaceBindingEvents(database)).toBe(0);
   });
+
+  it("rejects corrupt surface binding rows on read", async () => {
+    const { database, repo } = await createRepo();
+    const binding = createSurfaceBinding();
+
+    repo.create(binding, BINDING_ID_1);
+    database.connection
+      .prepare("UPDATE surface_bindings SET is_primary = 9 WHERE binding_id = ?")
+      .run(BINDING_ID_1);
+
+    await expect(repo.findByBindingId(BINDING_ID_1)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+  });
 });
 
 async function createRepo(): Promise<{

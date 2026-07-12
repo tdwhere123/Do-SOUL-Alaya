@@ -9,6 +9,8 @@ export {
   createGardenHttpExtractor,
   extractContentFromChatCompletionBody
 } from "./compile-seed-http.js";
+// Bench HTTP extractor surface; git workspace rate limits live in core-daemon
+// (createWorkspaceGitRateLimiter), not here.
 export { preflightExtractionCache } from "./compile-seed-preflight.js";
 export {
   resolveBenchExtractionCacheMinCoverage,

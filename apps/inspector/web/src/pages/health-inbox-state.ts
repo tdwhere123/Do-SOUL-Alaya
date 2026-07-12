@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { apiFetch } from "../api";
 import { useApiQuery } from "../hooks/useApiQuery";
-import { useToasts } from "../components/Toast";
+import { useToasts } from "../components/toast";
 import type {
   CauseFilter,
   HealthInboxEnvelope,
@@ -85,8 +85,11 @@ function useRefreshHealthInbox(
 ) {
   return useCallback(async () => {
     setRefreshing(true);
-    await refetch("background");
-    setRefreshing(false);
+    try {
+      await refetch("background");
+    } finally {
+      setRefreshing(false);
+    }
   }, [refetch, setRefreshing]);
 }
 

@@ -11,7 +11,7 @@ import {
   type ZeroDayPolicy
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "../shared/errors.js";
-import { readClockSnapshot } from "../shared/time.js";
+import { isExpired, readClockSnapshot } from "../shared/time.js";
 
 const {
   deny_category: ZERO_DAY_POLICY_KIND_DENY_CATEGORY,
@@ -210,7 +210,7 @@ function isActive(policy: ZeroDayPolicy, now: string): boolean {
     return true;
   }
 
-  return Date.parse(policy.expires_at) > nowMs;
+  return !isExpired(policy.expires_at, now);
 }
 
 function parsePolicies(policies: readonly ZeroDayPolicy[]): readonly ZeroDayPolicy[] {

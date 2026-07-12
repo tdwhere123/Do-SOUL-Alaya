@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  AlayaError,
   SignalState,
   type CandidateMemorySignal,
   type SignalState as SignalStateValue
@@ -225,11 +226,9 @@ function readNonEmptyString(value: unknown): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-class SignalReplayMismatchError extends Error {
-  public readonly code = "VALIDATION";
-
+class SignalReplayMismatchError extends AlayaError {
   public constructor(message: string) {
-    super(message);
+    super("VALIDATION", message);
     this.name = "SignalReplayMismatchError";
   }
 }

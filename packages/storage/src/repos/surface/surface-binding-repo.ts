@@ -7,6 +7,11 @@ import {
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
+import { parseOptionalRow, parseRow, parseRows } from "../shared/parse-row.js";
+import {
+  SurfaceBindingRowParser,
+  type SurfaceBindingRow
+} from "../shared/sqlite-row-schemas.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import { prepareSurfaceBindingStatements, type SqliteStatement } from "./surface-binding-statements.js";
 
@@ -36,21 +41,6 @@ export interface SurfaceBindingRepo {
     workspaceId: string,
     updatedAt: string
   ): readonly Readonly<SurfaceBindingRecord>[];
-}
-
-interface SurfaceBindingRow {
-  readonly binding_id: string;
-  readonly object_kind: string;
-  readonly schema_version: number;
-  readonly lifecycle_state: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly created_by: string;
-  readonly object_id: string;
-  readonly surface_id: string;
-  readonly is_primary: number;
-  readonly binding_state: string;
-  readonly workspace_id: string;
 }
 
 export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
@@ -116,10 +106,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedBindingId = parseNonEmptyString(bindingId, "binding id");
 
     try {
-      const row = this.findByBindingIdStatement.get(parsedBindingId) as SurfaceBindingRow | undefined;
-      return row === undefined ? null : parseSurfaceBindingRow(row);
+      const row = parseOptionalRow(
+        this.findByBindingIdStatement.get(parsedBindingId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
+      return row === null ? null : parseSurfaceBindingRow(row);
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to load surface binding ${parsedBindingId}.`, error);
+      rethrowQueryFailure(error, `Failed to load surface binding ${parsedBindingId}.`);
     }
   }
 
@@ -131,14 +125,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByObjectIdStatement.all(parsedObjectId, parsedWorkspaceId) as SurfaceBindingRow[];
+      const rows = parseRows(
+        this.findByObjectIdStatement.all(parsedObjectId, parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
       return rows.map((row) => parseSurfaceBindingRow(row));
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to load surface bindings for object ${parsedObjectId}.`,
-        error
-      );
+      rethrowQueryFailure(error, `Failed to load surface bindings for object ${parsedObjectId}.`);
     }
   }
 
@@ -150,17 +144,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const row = this.findPrimaryBindingStatement.get(
-        parsedObjectId,
-        parsedWorkspaceId
-      ) as SurfaceBindingRow | undefined;
-      return row === undefined ? null : parseSurfaceBindingRow(row);
-    } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to load primary binding for object ${parsedObjectId}.`,
-        error
+      const row = parseOptionalRow(
+        this.findPrimaryBindingStatement.get(parsedObjectId, parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
       );
+      return row === null ? null : parseSurfaceBindingRow(row);
+    } catch (error) {
+      rethrowQueryFailure(error, `Failed to load primary binding for object ${parsedObjectId}.`);
     }
   }
 
@@ -172,14 +163,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId) as SurfaceBindingRow[];
+      const rows = parseRows(
+        this.findBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
       return rows.map((row) => parseSurfaceBindingRow(row));
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to load surface bindings for surface ${parsedSurfaceId}.`,
-        error
-      );
+      rethrowQueryFailure(error, `Failed to load surface bindings for surface ${parsedSurfaceId}.`);
     }
   }
 
@@ -191,17 +182,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findDetachableBySurfaceIdStatement.all(
-        parsedSurfaceId,
-        parsedWorkspaceId
-      ) as SurfaceBindingRow[];
+      const rows = parseRows(
+        this.findDetachableBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
       return rows.map((row) => parseSurfaceBindingRow(row));
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to load detachable bindings for surface ${parsedSurfaceId}.`,
-        error
-      );
+      rethrowQueryFailure(error, `Failed to load detachable bindings for surface ${parsedSurfaceId}.`);
     }
   }
 
@@ -209,14 +197,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
 
     try {
-      const rows = this.findByWorkspaceStatement.all(parsedWorkspaceId) as SurfaceBindingRow[];
+      const rows = parseRows(
+        this.findByWorkspaceStatement.all(parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
       return rows.map((row) => parseSurfaceBindingRow(row));
     } catch (error) {
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to list surface bindings for workspace ${parsedWorkspaceId}.`,
-        error
-      );
+      rethrowQueryFailure(error, `Failed to list surface bindings for workspace ${parsedWorkspaceId}.`);
     }
   }
 
@@ -236,11 +224,11 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
         throw new StorageError("NOT_FOUND", `Surface binding ${parsedBindingId} was not found.`);
       }
 
-      const row = this.findByBindingIdStatement.get(parsedBindingId) as SurfaceBindingRow | undefined;
-
-      if (row === undefined) {
-        throw new StorageError("NOT_FOUND", `Surface binding ${parsedBindingId} was not found after update.`);
-      }
+      const row = parseRow(
+        this.findByBindingIdStatement.get(parsedBindingId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
 
       return parseSurfaceBindingRow(row);
     } catch (error) {
@@ -266,10 +254,11 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     const parsedUpdatedAt = parseTimestamp(updatedAt);
 
     try {
-      const rows = this.findDetachableBySurfaceIdStatement.all(
-        parsedSurfaceId,
-        parsedWorkspaceId
-      ) as SurfaceBindingRow[];
+      const rows = parseRows(
+        this.findDetachableBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
 
       if (rows.length === 0) {
         return [];
@@ -279,10 +268,11 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
 
       this.cascadeDetachStatement.run(parsedUpdatedAt, parsedSurfaceId, parsedWorkspaceId);
 
-      const updatedRows = this.findDetachedBySurfaceIdStatement.all(
-        parsedSurfaceId,
-        parsedWorkspaceId
-      ) as SurfaceBindingRow[];
+      const updatedRows = parseRows(
+        this.findDetachedBySurfaceIdStatement.all(parsedSurfaceId, parsedWorkspaceId),
+        SurfaceBindingRowParser,
+        "surface binding row"
+      );
       const rowById = new Map(updatedRows.map((row) => [row.binding_id, row]));
 
       return targetBindingIds
@@ -302,6 +292,14 @@ export class SqliteSurfaceBindingRepo implements SurfaceBindingRepo {
     }
   }
 
+}
+
+function rethrowQueryFailure(error: unknown, message: string): never {
+  if (error instanceof StorageError) {
+    throw error;
+  }
+
+  throw new StorageError("QUERY_FAILED", message, error);
 }
 
 function parseSurfaceBinding(value: Readonly<SurfaceBinding>): Readonly<SurfaceBinding> {

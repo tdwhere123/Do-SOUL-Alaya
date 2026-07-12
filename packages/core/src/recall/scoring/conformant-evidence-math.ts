@@ -11,7 +11,7 @@ export function noisyOrDecorrelate(
     return 0;
   }
   const weighted = (index: number): number =>
-    clamp01(confidences[index] ?? 1) * clamp01(values[index] ?? 0);
+    clamp01(confidences[index] ?? 0.5) * clamp01(values[index] ?? 0);
   if (clamp01(rho) >= 1) {
     let bestWeighted = -1;
     for (let index = 0; index < values.length; index++) {
@@ -26,7 +26,7 @@ export function noisyOrDecorrelate(
   const order = values.map((_, index) => index).sort((a, b) => weighted(b) - weighted(a));
   let complement = 1;
   order.forEach((index, position) => {
-    const term = clamp01(confidences[index] ?? 1) * clamp01(values[index] ?? 0);
+    const term = clamp01(confidences[index] ?? 0.5) * clamp01(values[index] ?? 0);
     complement *= 1 - (position === 0 ? term : lambda * term);
   });
   return clamp01(1 - complement);

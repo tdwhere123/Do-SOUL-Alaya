@@ -1,4 +1,5 @@
 import type { EmbeddingProviderPort } from "./types.js";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS,
   DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS,
@@ -102,6 +103,19 @@ function clampEmbeddingTransportBackstopMarginMs(value: number | undefined): num
   return Math.max(1, Math.floor(value));
 }
 
+const DEFAULT_OPENAI_EMBEDDING_MODEL = "text-embedding-3-small";
+
+function resolveOpenAIEmbeddingModelId(model: string | undefined): string {
+  if (model === undefined) {
+    return DEFAULT_OPENAI_EMBEDDING_MODEL;
+  }
+  const trimmed = model.trim();
+  if (trimmed.length === 0) {
+    throw new Error("OpenAI embedding model must not be empty.");
+  }
+  return trimmed;
+}
+
 export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   public readonly providerKind = "openai";
   public readonly modelId: string;
@@ -122,7 +136,7 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
 
   public constructor(options: OpenAIEmbeddingClientOptions) {
     this.apiKey = options.apiKey;
-    this.modelId = options.model?.trim() || "text-embedding-3-small";
+    this.modelId = resolveOpenAIEmbeddingModelId(options.model);
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? "https://api.openai.com/v1");
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.maxAttempts = clampEmbeddingRequestAttempts(options.maxAttempts);
@@ -314,9 +328,10 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   }
 }
 
-class EmbeddingTransportBackstopError extends Error {
+class EmbeddingTransportBackstopError extends AlayaError {
   public constructor(baseUrl: string, backstopMs: number) {
     super(
+      "EMBEDDING_TRANSPORT_BACKSTOP",
       `Embedding request transport stalled past ${backstopMs}ms backstop for host ${formatEmbeddingHost(baseUrl)}.`
     );
     this.name = "EmbeddingTransportBackstopError";

@@ -251,14 +251,25 @@ function parseGitLogLimit(value: string | undefined): number {
   }
 }
 
-function createWorkspaceGitRateLimiter(limit = 20, windowMs = 1_000): {
+const GIT_RATE_LIMITER_CLEANUP_INTERVAL = 128;
+
+// Per-workspace git diff/log cap; exported for tests and custom route wiring.
+// Daemon-wide HTTP rate limiting is separate (registerRateLimitMiddleware).
+export function createWorkspaceGitRateLimiter(limit = 20, windowMs = 1_000): {
   allow(workspaceId: string): boolean;
 } {
   const requestsByWorkspace = new Map<string, number[]>();
+  let requestsSinceCleanup = 0;
 
   return {
     allow(workspaceId: string): boolean {
       const now = Date.now();
+      requestsSinceCleanup += 1;
+      if (requestsSinceCleanup >= GIT_RATE_LIMITER_CLEANUP_INTERVAL) {
+        requestsSinceCleanup = 0;
+        evictInactiveWorkspaceGitRateEntries(requestsByWorkspace, now, windowMs);
+      }
+
       const recentRequests = (requestsByWorkspace.get(workspaceId) ?? []).filter(
         (timestamp) => now - timestamp < windowMs
       );
@@ -273,6 +284,24 @@ function createWorkspaceGitRateLimiter(limit = 20, windowMs = 1_000): {
       return true;
     }
   };
+}
+
+function evictInactiveWorkspaceGitRateEntries(
+  requestsByWorkspace: Map<string, number[]>,
+  now: number,
+  windowMs: number
+): void {
+  for (const [workspaceId, timestamps] of requestsByWorkspace) {
+    const activeTimestamps = timestamps.filter((timestamp) => now - timestamp < windowMs);
+    if (activeTimestamps.length === 0) {
+      requestsByWorkspace.delete(workspaceId);
+      continue;
+    }
+
+    if (activeTimestamps.length !== timestamps.length) {
+      requestsByWorkspace.set(workspaceId, activeTimestamps);
+    }
+  }
 }
 
 async function loadScopedToolExecutionRecords(

@@ -3,8 +3,9 @@ import { fileURLToPath } from "node:url";
 import { resolveSecretRef } from "@do-soul/alaya";
 import {
   EXTRACTION_REQUEST_PROFILES,
-  type ExtractionRequestProfile,
-  type ExtractionCacheManifest
+  resolveBenchExtractionModel,
+  type ExtractionCacheManifest,
+  type ExtractionRequestProfile
 } from "./extraction-cache-manifest.js";
 import type {
   CompileSeedExtractionConfig,
@@ -36,7 +37,6 @@ export function resolveExtractionCacheRoot(
 export const EXTRACTION_CACHE_ROOT = resolveExtractionCacheRoot();
 
 const GARDEN_SECRET_REF_ENV = "ALAYA_OFFICIAL_GARDEN_SECRET_REF";
-const GARDEN_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
 const EXTRACTION_MODEL_FAMILY_ENV = "ALAYA_BENCH_EXTRACTION_MODEL_FAMILY";
 const EXTRACTION_REQUEST_PROFILE_ENV = "ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE";
 const GARDEN_PROVIDER_URL_ENV = "OFFICIAL_API_GARDEN_PROVIDER_URL";
@@ -110,19 +110,7 @@ export function resolveCompileSeedExtractionConfig(
       manifest?.provider_url ??
       DEFAULT_GARDEN_PROVIDER_URL
   );
-  const model =
-    readNonEmpty(env[GARDEN_MODEL_ENV]) ?? manifest?.extraction_model;
-  if (model === undefined || model.trim().length === 0) {
-    throw new Error(
-      "bench extraction model is unresolved: neither env " +
-        `${GARDEN_MODEL_ENV} is set nor does the extraction cache manifest ` +
-        "declare extraction_model. Export the extraction model env var " +
-        "in the bench environment or build the " +
-        "cache manifest first. Refusing to fall back to a default model — a " +
-        "wrong default silently misses every cache key and degrades to a " +
-        "full live extraction."
-    );
-  }
+  const model = resolveBenchExtractionModel(env, manifest);
   const modelFamily =
     readNonEmpty(env[EXTRACTION_MODEL_FAMILY_ENV]) ??
     manifest?.model_family ??

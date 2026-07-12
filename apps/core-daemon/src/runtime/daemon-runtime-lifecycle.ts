@@ -57,6 +57,7 @@ type LifecycleState = {
   server: CloseableHttpServer | null;
   backgroundStarted: boolean;
   startupBackgroundPass: Promise<void> | null;
+  startupBackgroundPassFailure: unknown | null;
   shuttingDown: Promise<void> | null;
   signalHandlersInstalled: boolean;
   signalShutdownHandlers: SignalShutdownHandler[];
@@ -80,6 +81,7 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
     server: null,
     backgroundStarted: false,
     startupBackgroundPass: null,
+    startupBackgroundPassFailure: null,
     shuttingDown: null,
     signalHandlersInstalled: false,
     signalShutdownHandlers: [],
@@ -92,8 +94,17 @@ export function createDaemonLifecycleControls(input: CreateDaemonLifecycleContro
   return Object.freeze({
     startBackgroundServices,
     runGardenBackgroundPass: async () => {
-      await awaitStartupBackgroundPass(state);
-      await input.gardenRuntime.runBackgroundPass();
+      await awaitStartupBackgroundPassInFlight(state);
+      try {
+        await input.gardenRuntime.runBackgroundPass();
+        state.startupBackgroundPassFailure = null;
+      } catch (error) {
+        input.warnLogger.warn("garden background pass failed", {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        state.startupBackgroundPassFailure = error;
+        throw error;
+      }
     },
     // invariant: targeted BULK_ENRICH drain (bench edge-plane readiness), not
     // a full Garden maintenance pass. Waits for any in-flight startup pass so
@@ -133,6 +144,7 @@ function createBackgroundServiceStarter(
       input.warnLogger.warn("garden startup background pass failed", {
         error: error instanceof Error ? error.message : String(error)
       });
+      state.startupBackgroundPassFailure = error;
     });
     state.startupBackgroundPass = startupPass;
     void startupPass.finally(() => {
@@ -143,9 +155,16 @@ function createBackgroundServiceStarter(
   };
 }
 
-async function awaitStartupBackgroundPass(state: LifecycleState): Promise<void> {
+async function awaitStartupBackgroundPassInFlight(state: LifecycleState): Promise<void> {
   if (state.startupBackgroundPass !== null) {
     await state.startupBackgroundPass;
+  }
+}
+
+async function awaitStartupBackgroundPass(state: LifecycleState): Promise<void> {
+  await awaitStartupBackgroundPassInFlight(state);
+  if (state.startupBackgroundPassFailure !== null) {
+    throw state.startupBackgroundPassFailure;
   }
 }
 
@@ -308,7 +327,15 @@ async function stopBackgroundServices(
       error: error instanceof Error ? error.message : String(error)
     });
   }
-  await awaitStartupBackgroundPass(state);
+  await awaitStartupBackgroundPassInFlight(state);
+  if (state.startupBackgroundPassFailure !== null) {
+    input.warnLogger.warn("garden startup background pass failed during shutdown", {
+      error:
+        state.startupBackgroundPassFailure instanceof Error
+          ? state.startupBackgroundPassFailure.message
+          : String(state.startupBackgroundPassFailure)
+    });
+  }
   input.gardenRuntime.setBacklogTelemetryObserver(null);
   try {
     const telemetryStopResult = await input.gardenBacklogTelemetryService.stop();

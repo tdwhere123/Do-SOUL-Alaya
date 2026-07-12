@@ -12,21 +12,25 @@ import { STRATEGY_RECALL_DEFAULTS, type NodeStrategy } from "../../conversation/
 import { parseRecallPolicy } from "../../shared/recall-policy.js";
 import {
   applyManifestationBiasEntries,
-  collectCoarseFilterSupplementaryData,
   collectManifestationAnchorMemoryObjectIds,
   collectManifestationBiasEntriesByMemoryId,
+  loadManifestationBiasSidecar
+} from "./orchestration/bias.js";
+import {
   collectUniqueCoarseCandidates,
-  loadManifestationBiasSidecar,
   loadTierCascadeProjectMappings,
   mergeCascadeGraphExpansion,
   mergeReadonlyRecords,
   mergeTierCascadeStage,
+  type ExpandTierCascadeParams
+} from "./orchestration/cascade.js";
+import {
+  collectCoarseFilterSupplementaryData,
   runCoarseFineAssessment,
   type AssessCoarseFilterParams,
   type AssessCoarseFilterResult,
-  type CoarseFilterResult,
-  type ExpandTierCascadeParams
-} from "./orchestration-helpers.js";
+  type CoarseFilterResult
+} from "./orchestration/coarse.js";
 import {
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,

@@ -9,8 +9,9 @@ import {
   type SetStateAction
 } from "react";
 import { apiFetch, type ApiError } from "../api";
-import type { ToastInput } from "../components/Toast";
+import type { ToastInput } from "../components/toast";
 import { useApiQuery } from "../hooks/useApiQuery";
+import { useI18n } from "../i18n/locale";
 import { fetchMemoryPage, type MemoryFilterState } from "./memory-browser-api";
 import {
   retainLoadedMemoryRowWindow,
@@ -25,6 +26,7 @@ import {
 } from "./memory-browser-support";
 
 type ShowToast = (input: ToastInput) => void;
+type Translate = ReturnType<typeof useI18n>["t"];
 
 interface ControllerOptions {
   readonly workspaceId: string | null;
@@ -41,7 +43,7 @@ export interface MemoryBrowserController {
   readonly paginationStatus: string;
   readonly pointer: EvidenceCapsuleShape | null;
   readonly pointerLoading: boolean;
-  readonly promoteBusyId: string | null;
+  readonly promoteBusyIds: ReadonlySet<string>;
   readonly refreshing: boolean;
   readonly rows: readonly MemoryEntryRow[];
   readonly scopeFilter: ScopeFilter;
@@ -61,12 +63,13 @@ export function useMemoryBrowserController({
   workspaceId,
   showToast
 }: ControllerOptions): MemoryBrowserController {
+  const { t } = useI18n();
   const isMountedRef = useMountedRef();
   const filters = useMemoryFilterState();
-  const pointer = useEvidencePointer({ workspaceId, showToast, isMountedRef });
-  const rows = useMemoryRows({ workspaceId, showToast, filters, isMountedRef });
+  const pointer = useEvidencePointer({ workspaceId, showToast, isMountedRef, t });
+  const rows = useMemoryRows({ workspaceId, showToast, filters, isMountedRef, t });
   const selection = useMemorySelection(rows.rows, pointer.invalidatePointerState);
-  const promotion = useStrictGovernancePromotion({ workspaceId, showToast, isMountedRef });
+  const promotion = useStrictGovernancePromotion({ workspaceId, showToast, isMountedRef, t });
   const handleRefresh = useCallback(async () => {
     pointer.invalidatePointerState();
     await rows.handleRefresh();
@@ -80,7 +83,7 @@ export function useMemoryBrowserController({
     pointer: pointer.pointer,
     pointerLoading: pointer.pointerLoading,
     openEvidence: pointer.openEvidence,
-    promoteBusyId: promotion.promoteBusyId,
+    promoteBusyIds: promotion.promoteBusyIds,
     promoteToStrictlyGoverned: promotion.promoteToStrictlyGoverned
   };
 }
@@ -122,12 +125,14 @@ function useMemoryRows(props: {
   readonly showToast: ShowToast;
   readonly filters: MemoryFilterState;
   readonly isMountedRef: MutableRefObject<boolean>;
+  readonly t: Translate;
 }) {
   const [rowState, setRowState] = useState(() => emptyRowState());
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const queryVersionRef = useRef(0);
-  const firstPage = useFirstMemoryPage(props.workspaceId, props.filters, props.showToast);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
+  const firstPage = useFirstMemoryPage(props.workspaceId, props.filters, props.showToast, props.t);
   useMemoryRowLifecycle({
     firstPage: firstPage.data,
     filters: props.filters,
@@ -138,6 +143,8 @@ function useMemoryRows(props: {
   });
 
   const handleRefresh = useCallback(async () => {
+    loadMoreAbortRef.current?.abort();
+    loadMoreAbortRef.current = null;
     queryVersionRef.current += 1;
     setLoadingMore(false);
     setRefreshing(true);
@@ -147,13 +154,16 @@ function useMemoryRows(props: {
     }
   }, [firstPage, props.isMountedRef]);
 
+  useEffect(() => () => loadMoreAbortRef.current?.abort(), []);
+
   const loadMore = useLoadMoreRows({
     ...props,
     nextOffset: rowState.nextOffset,
     queryVersionRef,
     refreshing,
     setLoadingMore,
-    setRowState
+    setRowState,
+    loadMoreAbortRef
   });
 
   return {
@@ -161,7 +171,7 @@ function useMemoryRows(props: {
     error: firstPage.error,
     loading: firstPage.loading,
     loadingMore,
-    paginationStatus: formatPaginationStatus(rowState),
+    paginationStatus: formatPaginationStatus(rowState, props.t),
     refreshing,
     handleRefresh,
     loadMore
@@ -192,7 +202,8 @@ function useMemoryRowLifecycle(props: {
 function useFirstMemoryPage(
   workspaceId: string | null,
   filters: MemoryFilterState,
-  showToast: ShowToast
+  showToast: ShowToast,
+  t: Translate
 ) {
   const fetchRows = useCallback(
     (signal: AbortSignal) =>
@@ -202,7 +213,7 @@ function useFirstMemoryPage(
   return useApiQuery(fetchRows, [workspaceId, filters], {
     enabled: workspaceId !== null,
     onError: (message) => {
-      showToast({ message: `Memory list fetch failed: ${message}`, type: "error" });
+      showToast({ message: t("memoryBrowser:toast.memoryListFetchFailed", { message }), type: "error" });
     }
   });
 }
@@ -217,21 +228,39 @@ function useLoadMoreRows(props: {
   readonly refreshing: boolean;
   readonly setLoadingMore: (loading: boolean) => void;
   readonly setRowState: Dispatch<SetStateAction<MemoryPageData>>;
+  readonly loadMoreAbortRef: MutableRefObject<AbortController | null>;
+  readonly t: Translate;
 }) {
   return useCallback(async () => {
     if (props.workspaceId === null || props.refreshing) return;
     const version = props.queryVersionRef.current;
+    const controller = new AbortController();
+    props.loadMoreAbortRef.current?.abort();
+    props.loadMoreAbortRef.current = controller;
     props.setLoadingMore(true);
     try {
-      const page = await fetchMemoryPage(props.workspaceId, props.filters, props.nextOffset);
+      const page = await fetchMemoryPage(props.workspaceId, props.filters, props.nextOffset, controller.signal);
       if (!props.isMountedRef.current || version !== props.queryVersionRef.current) return;
       props.setRowState((previous) => appendRowPage(previous, page));
     } catch (err) {
+      if (
+        controller.signal.aborted ||
+        !props.isMountedRef.current ||
+        version !== props.queryVersionRef.current
+      ) {
+        return;
+      }
       if ((err as ApiError).status !== 401) {
-        const message = err instanceof Error ? err.message : "unknown error";
-        props.showToast({ message: `Memory list fetch failed: ${message}`, type: "error" });
+        const message = err instanceof Error ? err.message : props.t("memoryBrowser:error.unknown");
+        props.showToast({
+          message: props.t("memoryBrowser:toast.memoryListFetchFailed", { message }),
+          type: "error"
+        });
       }
     } finally {
+      if (props.loadMoreAbortRef.current === controller) {
+        props.loadMoreAbortRef.current = null;
+      }
       if (props.isMountedRef.current && version === props.queryVersionRef.current) {
         props.setLoadingMore(false);
       }
@@ -271,6 +300,7 @@ function useEvidencePointer(props: {
   readonly workspaceId: string | null;
   readonly showToast: ShowToast;
   readonly isMountedRef: MutableRefObject<boolean>;
+  readonly t: Translate;
 }) {
   const pointerVersionRef = useRef(0);
   const [pointer, setPointer] = useState<EvidenceCapsuleShape | null>(null);
@@ -291,6 +321,7 @@ function useOpenEvidence(props: {
   readonly pointerVersionRef: MutableRefObject<number>;
   readonly setPointer: (pointer: EvidenceCapsuleShape | null) => void;
   readonly setPointerLoading: (loading: boolean) => void;
+  readonly t: Translate;
 }) {
   return useCallback(async (evidenceId: string) => {
     if (props.workspaceId === null) return;
@@ -305,8 +336,11 @@ function useOpenEvidence(props: {
       props.setPointer(envelope.data);
     } catch (err) {
       if (props.isMountedRef.current && pointerVersion === props.pointerVersionRef.current) {
-        const message = err instanceof Error ? err.message : "unknown error";
-        props.showToast({ message: `Evidence open failed: ${message}`, type: "error" });
+        const message = err instanceof Error ? err.message : props.t("memoryBrowser:error.unknown");
+        props.showToast({
+          message: props.t("memoryBrowser:toast.evidenceOpenFailed", { message }),
+          type: "error"
+        });
       }
     } finally {
       if (props.isMountedRef.current && pointerVersion === props.pointerVersionRef.current) {
@@ -320,11 +354,12 @@ function useStrictGovernancePromotion(props: {
   readonly workspaceId: string | null;
   readonly showToast: ShowToast;
   readonly isMountedRef: MutableRefObject<boolean>;
+  readonly t: Translate;
 }) {
-  const [promoteBusyId, setPromoteBusyId] = useState<string | null>(null);
+  const [promoteBusyIds, setPromoteBusyIds] = useState<ReadonlySet<string>>(() => new Set());
   const promoteToStrictlyGoverned = useCallback(async (memoryId: string) => {
     if (props.workspaceId === null) return;
-    setPromoteBusyId(memoryId);
+    setPromoteBusyIds((previous) => new Set(previous).add(memoryId));
     try {
       const envelope = await apiFetch<PromoteEnvelope>(
         `/workspaces/${props.workspaceId}/soul/memory/${encodeURIComponent(memoryId)}/proposals/promote-strictly-governed`,
@@ -332,20 +367,27 @@ function useStrictGovernancePromotion(props: {
       );
       props.showToast({
         type: "success",
-        message: `Proposal created: ${envelope.data.proposal_id} (path_relation → strictly_governed)`
+        message: props.t("memoryBrowser:toast.proposalCreated", { id: envelope.data.proposal_id })
       });
     } catch (err) {
       if ((err as ApiError).status !== 401) {
-        const message = err instanceof Error ? err.message : "unknown error";
-        props.showToast({ message: `Promote failed: ${message}`, type: "error" });
+        const message = err instanceof Error ? err.message : props.t("memoryBrowser:error.unknown");
+        props.showToast({
+          message: props.t("memoryBrowser:toast.promoteFailed", { message }),
+          type: "error"
+        });
       }
     } finally {
       if (props.isMountedRef.current) {
-        setPromoteBusyId(null);
+        setPromoteBusyIds((previous) => {
+          const next = new Set(previous);
+          next.delete(memoryId);
+          return next;
+        });
       }
     }
   }, [props]);
-  return { promoteBusyId, promoteToStrictlyGoverned };
+  return { promoteBusyIds, promoteToStrictlyGoverned };
 }
 
 function emptyRowState(): MemoryPageData {
@@ -365,12 +407,24 @@ function appendRowPage(previous: MemoryPageData, page: MemoryPageData): MemoryPa
   };
 }
 
-function formatPaginationStatus(rowState: MemoryPageData): string {
+function formatPaginationStatus(rowState: MemoryPageData, t: Translate): string {
   const droppedLoadedRows = Math.max(0, rowState.nextOffset - rowState.rows.length);
   if (droppedLoadedRows === 0) {
-    return `Showing ${rowState.rows.length}${rowState.totalRows === null ? "" : ` of ${rowState.totalRows}`} loaded`;
+    return rowState.totalRows === null
+      ? t("memoryBrowser:pagination.showing", { count: rowState.rows.length })
+      : t("memoryBrowser:pagination.showingTotal", {
+          count: rowState.rows.length,
+          total: rowState.totalRows
+        });
   }
-  return `Showing ${rowState.rows.length} retained window of ${rowState.nextOffset}${
-    rowState.totalRows === null ? "" : ` of ${rowState.totalRows}`
-  } loaded`;
+  return rowState.totalRows === null
+    ? t("memoryBrowser:pagination.retained", {
+        count: rowState.rows.length,
+        offset: rowState.nextOffset
+      })
+    : t("memoryBrowser:pagination.retainedTotal", {
+        count: rowState.rows.length,
+        offset: rowState.nextOffset,
+        total: rowState.totalRows
+      });
 }

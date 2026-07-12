@@ -25,6 +25,9 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     const result = await router.materializeSignal(createSignal());
 
     expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected materialization failure");
+    }
     expect(result.error).toContain("SQLITE_BUSY");
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
   });
@@ -44,6 +47,9 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     );
 
     expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected materialization failure");
+    }
     expect(result.error).toContain("disk full");
   });
 

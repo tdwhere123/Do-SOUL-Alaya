@@ -1,3 +1,5 @@
+import { AlayaError, type AlayaErrorOptions } from "@do-soul/alaya-protocol";
+
 export type CoreErrorCode =
   | "VALIDATION"
   | "NOT_FOUND"
@@ -11,18 +13,17 @@ export type CoreErrorCode =
 // wired (degrade); CONCURRENT_MODIFICATION = lost a race (safe to retry).
 export type CoreErrorSubCode = "PORT_UNAVAILABLE" | "CONCURRENT_MODIFICATION";
 
-export interface CoreErrorOptions extends ErrorOptions {
+export interface CoreErrorOptions extends AlayaErrorOptions {
   readonly subCode?: CoreErrorSubCode;
 }
 
-export class CoreError extends Error {
-  public readonly code: CoreErrorCode;
+export class CoreError extends AlayaError {
+  declare public readonly code: CoreErrorCode;
   public readonly subCode?: CoreErrorSubCode;
 
   public constructor(code: CoreErrorCode, message: string, options?: CoreErrorOptions) {
-    super(message, options);
+    super(code, message, options);
     this.name = "CoreError";
-    this.code = code;
     this.subCode = options?.subCode;
   }
 }

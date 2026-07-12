@@ -1,22 +1,10 @@
 import { createHash } from "node:crypto";
 import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
+import type { MemoryEmbeddingMetadataRow, MemoryEmbeddingRow } from "../shared/sqlite-row-schemas.js";
 import type { MemoryEmbeddingMetadata, MemoryEmbeddingRecord } from "./memory-embedding-repo.js";
 
-export interface MemoryEmbeddingRow {
-  readonly object_id: string;
-  readonly workspace_id: string;
-  readonly content_hash: string;
-  readonly provider_kind: string;
-  readonly model_id: string;
-  readonly schema_version: number;
-  readonly dimensions: number;
-  readonly embedding_blob: Buffer;
-  readonly created_at: string;
-  readonly updated_at: string;
-}
-
-export type MemoryEmbeddingMetadataRow = Omit<MemoryEmbeddingRow, "embedding_blob">;
+export type { MemoryEmbeddingMetadataRow, MemoryEmbeddingRow } from "../shared/sqlite-row-schemas.js";
 
 export const MEMORY_EMBEDDING_SELECT_COLUMNS = `
       object_id,

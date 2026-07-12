@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createInMemorySqliteWriteQueuePort,
   type SqliteWriteQueuePort
@@ -112,5 +112,41 @@ describe("SqliteWriteQueuePort contract", () => {
     };
 
     expect(() => structuredClone(job)).toThrow();
+  });
+
+  it("rejects a failing job to its awaiter while still running subsequent jobs", async () => {
+    const queue = createInMemorySqliteWriteQueuePort();
+    const filename = "/tmp/alaya/fail-serialize.db";
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(() => process);
+
+    const executionOrder: string[] = [];
+    const failing = queue.enqueue({
+      jobId: "job-fail",
+      kind: "ontology_write",
+      filename,
+      execute: async () => {
+        throw new Error("write job failed");
+      }
+    });
+
+    const succeeding = queue.enqueue({
+      jobId: "job-ok",
+      kind: "ontology_write",
+      filename,
+      execute: async () => {
+        executionOrder.push("job-ok");
+      }
+    });
+
+    await expect(failing).rejects.toThrow("write job failed");
+    await succeeding;
+
+    expect(executionOrder).toEqual(["job-ok"]);
+    expect(emitWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/SQLite write queue job failed \(jobId=job-fail, kind=ontology_write\)/),
+      expect.objectContaining({ code: "ALAYA_SQLITE_WRITE_QUEUE_JOB_FAILED" })
+    );
+
+    emitWarning.mockRestore();
   });
 });

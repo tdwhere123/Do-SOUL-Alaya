@@ -1,9 +1,9 @@
+import { z } from "zod";
 import { LongMemEvalRunProvenanceSchema } from "../provenance/run.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES
 } from "../extraction-cache-manifest.js";
-import { z } from "zod";
 import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   type LongMemEvalSnapshotManifest
@@ -41,6 +41,19 @@ const SnapshotExtractionProvenanceSchema = z.discriminatedUnion("schema_version"
     request_profile: z.enum(EXTRACTION_REQUEST_PROFILES)
   }).strict()
 ]);
+const SnapshotManifestRecordSchema = z.record(z.string(), z.unknown());
+const SnapshotArtifactIntegritySchema = z
+  .object({
+    db_sha256: Sha256Schema,
+    sidecar_sha256: Sha256Schema
+  })
+  .readonly();
+const SnapshotAttributionSchema = z
+  .object({
+    status: z.enum(["attributed", "legacy_unattributed"]),
+    gate_eligible: z.boolean()
+  })
+  .readonly();
 
 export function validateSnapshotManifest(
   parsed: unknown,
@@ -97,10 +110,11 @@ function parseExtractionProvenance(
 }
 
 function requireManifestRecord(parsed: unknown, filePath: string): Record<string, unknown> {
-  if (typeof parsed !== "object" || parsed === null) {
+  const result = SnapshotManifestRecordSchema.safeParse(parsed);
+  if (!result.success) {
     throw new Error(`recall-eval snapshot manifest at ${filePath} is not an object`);
   }
-  return parsed as Record<string, unknown>;
+  return result.data;
 }
 
 function validateManifestBase(record: Record<string, unknown>, filePath: string): void {
@@ -129,16 +143,11 @@ function parseArtifactIntegrity(
   filePath: string
 ): SnapshotArtifactIntegrity | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null) {
+  try {
+    return SnapshotArtifactIntegritySchema.parse(value);
+  } catch {
     throw new Error(`recall-eval snapshot manifest at ${filePath} has invalid artifact_integrity`);
   }
-  const record = value as Record<string, unknown>;
-  for (const field of ["db_sha256", "sidecar_sha256"] as const) {
-    if (typeof record[field] !== "string" || !/^[a-f0-9]{64}$/u.test(record[field])) {
-      throw new Error(`recall-eval snapshot manifest at ${filePath} has invalid ${field}`);
-    }
-  }
-  return record as unknown as SnapshotArtifactIntegrity;
 }
 
 function parseSnapshotAttribution(
@@ -146,15 +155,11 @@ function parseSnapshotAttribution(
   filePath: string
 ): LongMemEvalSnapshotManifest["attribution"] {
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null) {
+  try {
+    return SnapshotAttributionSchema.parse(value);
+  } catch {
     throw new Error(`recall-eval snapshot manifest at ${filePath} has invalid attribution`);
   }
-  const record = value as Record<string, unknown>;
-  if ((record.status !== "attributed" && record.status !== "legacy_unattributed") ||
-      typeof record.gate_eligible !== "boolean") {
-    throw new Error(`recall-eval snapshot manifest at ${filePath} has invalid attribution`);
-  }
-  return record as NonNullable<LongMemEvalSnapshotManifest["attribution"]>;
 }
 
 function assertAttributionClaim(

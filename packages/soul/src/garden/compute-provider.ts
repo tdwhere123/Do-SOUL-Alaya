@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   CandidateMemorySignalSchema,
   GardenProviderKind as GardenProviderKinds,
   type GardenProviderKind as GardenProviderKindValue,
@@ -82,14 +83,17 @@ interface OfficialApiGardenProviderDependencies {
 // is supplied. Generated path (data/* is gitignored); never treat as source.
 const DEFAULT_DIAGNOSTIC_DIR_REL = "data/diagnostics/seed-extraction-failures";
 
-export class GardenProviderError extends Error {
+export class GardenProviderError extends AlayaError {
+  public readonly kind: GardenProviderErrorKind;
+
   public constructor(
     message: string,
-    public readonly kind: GardenProviderErrorKind,
+    kind: GardenProviderErrorKind,
     options?: { readonly cause?: unknown }
   ) {
-    super(message, options);
+    super(kind, message, options);
     this.name = "GardenProviderError";
+    this.kind = kind;
   }
 }
 const DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS = 10_000;

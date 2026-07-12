@@ -27,6 +27,11 @@ import {
 } from "./runtime-fixture.js";
 
 const hoisted = vi.hoisted(() => {
+  const schedulers: Array<{
+    queue: GardenTaskDescriptor[];
+    completions: GardenTaskResult[];
+    reportCompletion(result: GardenTaskResult): Promise<void>;
+  }> = [];
   const tierOrder: Record<GardenTierValue, number> = {
     tier_0: 0,
     tier_1: 1,
@@ -114,7 +119,6 @@ const hoisted = vi.hoisted(() => {
     }
   }
 
-  const schedulers: FakeGardenScheduler[] = [];
   return { FakeGardenScheduler, schedulers };
 });
 
@@ -171,7 +175,6 @@ function plasticityTasks(scheduler: CapturedScheduler): readonly GardenTaskDescr
 }
 
 describe("garden runtime targeted embedding backfill pass", () => {
-
   beforeEach(() => {
     hoisted.schedulers.splice(0, hoisted.schedulers.length);
   });

@@ -1,6 +1,6 @@
+export { DEFAULT_DAEMON_HOST, DEFAULT_DAEMON_PORT } from "../runtime/daemon-defaults.js";
+
 export const DEFAULT_INSPECTOR_PORT = 5174;
-export const DEFAULT_DAEMON_HOST = "127.0.0.1";
-export const DEFAULT_DAEMON_PORT = 5173;
 export const READY_LINE = "inspector_ready";
 export const SHUTDOWN_TIMEOUT_MS = 2000;
 export const INSPECTOR_STDERR_CAPTURE_LIMIT = 4096;

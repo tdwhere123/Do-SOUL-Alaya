@@ -81,7 +81,10 @@ export interface ApiFetchResult<T> {
 const RETRYABLE_METHODS = new Set(["GET", "HEAD"]);
 
 async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer?.unref?.();
+  });
 }
 
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
