@@ -27,7 +27,7 @@ export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
 interface FineAssessmentAccumulator {
   readonly selected: RecallCandidate[];
   readonly diagnostics: RecallCandidateDiagnostic[];
-  readonly seen: Set<string>;
+  readonly seenObjects: Set<string>;
   readonly perDimensionCounts: Map<MemoryDimensionType, number>;
   totalTokens: number;
 }
@@ -77,7 +77,7 @@ function createFineAssessmentAccumulator(): FineAssessmentAccumulator {
   return {
     selected: [],
     diagnostics: [],
-    seen: new Set<string>(),
+    seenObjects: new Set<string>(),
     perDimensionCounts: new Map<MemoryDimensionType, number>(),
     totalTokens: 0
   };
@@ -90,7 +90,8 @@ function appendFineAssessmentCandidate(
   context: FineAssessmentSelectionContext
 ): FineAssessmentAccumulator {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  const admission = resolveAdmission(accumulator, candidate, candidateKey, context);
+  const objectKey = `${candidate.objectKind ?? candidate.entry.object_kind}:${candidate.entry.object_id}`;
+  const admission = resolveAdmission(accumulator, candidate, objectKey, context);
   if (admission.droppedReason !== null) {
     accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, null, admission.droppedReason, context));
     return accumulator;
@@ -111,7 +112,7 @@ function appendFineAssessmentCandidate(
   });
   accumulator.selected.push(nextCandidate);
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context));
-  accumulator.seen.add(candidateKey);
+  accumulator.seenObjects.add(objectKey);
   accumulator.perDimensionCounts.set(candidate.entry.dimension, (accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0) + 1);
   accumulator.totalTokens += tokenEstimate;
   return accumulator;
@@ -120,10 +121,10 @@ function appendFineAssessmentCandidate(
 function resolveAdmission(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
-  candidateKey: string,
+  objectKey: string,
   context: FineAssessmentSelectionContext
 ): FineAssessmentAdmission {
-  if (accumulator.seen.has(candidateKey)) {
+  if (accumulator.seenObjects.has(objectKey)) {
     return { droppedReason: "duplicate", tokenEstimate: null };
   }
   const dimensionCount = accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0;
@@ -189,7 +190,7 @@ function createFineAssessmentDiagnostic(
     } : {}),
     path_suppression_score:
       context.supplementaryData.pathSuppressionScores[candidate.entry.object_id] ?? 0,
-    ...buildLegacyStageDiagnosticFields(fusionRank),
+    ...buildCompatibilityStageDiagnosticAliases(fusionRank),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>",
     source_cohort_key: context.supplementaryData.sourceCohortKeys[candidate.entry.object_id] ?? null
   });
@@ -223,7 +224,7 @@ function buildFusionDiagnosticFields(candidate: FineAssessmentCandidate) {
   };
 }
 
-function buildLegacyStageDiagnosticFields(fusionRank: number | undefined) {
+function buildCompatibilityStageDiagnosticAliases(fusionRank: number | undefined) {
   return {
     rank_after_fusion: fusionRank,
     rank_after_feature_rerank: fusionRank,

@@ -100,6 +100,73 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(rows).toEqual([]);
   });
 
+  it("queries source anchors by ids while safely ignoring invalid JSON shapes", async () => {
+    const { database, repo } = await createRepo();
+    await repo.create(createEvidenceCapsule({
+      object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4",
+      physical_anchor: { file_path: null, line_range: null, symbol_name: null, artifact_ref: "Doc-S1-T10" }
+    }));
+    const malformedId = "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab";
+    const nullId = "357d80f9-26f1-4a27-97ea-ae8f7729caa1";
+    const nonTextId = "9fa00d38-516b-47b5-a120-713ae5eb085d";
+    const blankId = "4820c456-17cd-4abc-9c70-51fc0469431b";
+    for (const objectId of [malformedId, nullId, nonTextId, blankId]) {
+      await repo.create(createEvidenceCapsule({ object_id: objectId }));
+    }
+    await repo.create(createEvidenceCapsule({
+      object_id: "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      run_id: "run-3",
+      workspace_id: "workspace-2",
+      physical_anchor: { file_path: null, line_range: null, symbol_name: null, artifact_ref: "doc-s1-t11" }
+    }));
+
+    const updateAnchor = database.connection.prepare(
+      "UPDATE evidence_capsules SET physical_anchor = ? WHERE object_id = ?"
+    );
+    updateAnchor.run("not-json", malformedId);
+    updateAnchor.run("null", nullId);
+    updateAnchor.run(JSON.stringify({ artifact_ref: 42 }), nonTextId);
+    updateAnchor.run(JSON.stringify({ artifact_ref: "   " }), blankId);
+
+    await expect(repo.findSourceAnchorsByIds("workspace-1", [
+      "f6c1b587-be07-4410-b2ca-8bfbc4d82db4",
+      "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      malformedId,
+      nullId,
+      nonTextId,
+      blankId
+    ])).resolves.toEqual([
+      { evidence_object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4", artifact_ref: "Doc-S1-T10" }
+    ]);
+  });
+
+  it("chunks source-anchor id batches above SQLite's variable limit", async () => {
+    const { repo } = await createRepo();
+    const ids = Array.from({ length: 1_005 }, (_, index) =>
+      `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`
+    );
+    for (const [index, objectId] of ids.entries()) {
+      await repo.create(createEvidenceCapsule({
+        object_id: objectId,
+        physical_anchor: {
+          file_path: null,
+          line_range: null,
+          symbol_name: null,
+          artifact_ref: `bulk-s1-t${index}`
+        }
+      }));
+    }
+
+    const rows = await repo.findSourceAnchorsByIds("workspace-1", ids);
+
+    expect(rows).toHaveLength(ids.length);
+    expect(rows[0]).toEqual({ evidence_object_id: ids[0], artifact_ref: "bulk-s1-t0" });
+    expect(rows.at(-1)).toEqual({
+      evidence_object_id: ids.at(-1),
+      artifact_ref: "bulk-s1-t1004"
+    });
+  });
+
   it("lists by run id", async () => {
     const { repo } = await createRepo();
 
@@ -352,6 +419,7 @@ describe("SqliteEvidenceCapsuleRepo", () => {
 });
 
 async function createRepo(): Promise<{
+  readonly database: ReturnType<typeof initDatabase>;
   readonly repo: SqliteEvidenceCapsuleRepo;
 }> {
   const database = initDatabase({ filename: ":memory:" });
@@ -412,6 +480,7 @@ async function createRepo(): Promise<{
   });
 
   return {
+    database,
     repo: new SqliteEvidenceCapsuleRepo(database)
   };
 }

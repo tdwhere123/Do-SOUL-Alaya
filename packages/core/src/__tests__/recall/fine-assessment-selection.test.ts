@@ -152,6 +152,47 @@ describe("selectFineAssessmentCandidates", () => {
 
     expect(result.diagnostics[0]).not.toHaveProperty("answer_features");
   });
+
+  it("deduplicates object representations while retaining provenance diagnostics", () => {
+    const local = createCandidate("shared");
+    const globalBase = createCandidate("shared");
+    const global = {
+      ...globalBase,
+      originPlane: "global" as const,
+      fusion: {
+        ...globalBase.fusion,
+        candidate_key: "global:memory_entry:shared",
+        fused_rank: 2,
+        fused_score: 0.6
+      }
+    };
+    const next = createCandidate("next");
+
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [local, global, next],
+      config: {
+        ...createConfig(),
+        budgets: { ...createConfig().budgets, max_entries: 2 }
+      },
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: new Map([
+        [local.fusion.candidate_key, 1],
+        [global.fusion.candidate_key, 2],
+        [next.fusion.candidate_key, 3]
+      ])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["shared", "next"]);
+    expect(result.diagnostics.map((candidate) => ({
+      candidateKey: candidate.candidate_key,
+      droppedReason: candidate.dropped_reason
+    }))).toEqual([
+      { candidateKey: local.fusion.candidate_key, droppedReason: null },
+      { candidateKey: global.fusion.candidate_key, droppedReason: "duplicate" },
+      { candidateKey: next.fusion.candidate_key, droppedReason: null }
+    ]);
+  });
 });
 
 function createCandidate(

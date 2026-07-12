@@ -5,6 +5,7 @@ import {
   hasAbstentionIdentityConflict
 } from "../diagnostics-cohort.js";
 import type {
+  CandidateDiagnostic,
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
   DiagnosticRecallResultInput,
@@ -57,7 +58,7 @@ export function assembleQuestionDiagnostic(
 ): LongMemEvalQuestionDiagnostic {
   const scoringInput = failClosedAbstentionHits(input);
   const missFields = buildQuestionMissFields(scoringInput, parts);
-  const candidateKeyCollisions = buildCandidateKeyCollisions(parts.diagnostics);
+  const candidateCollisions = classifyCandidateCollisions(parts.diagnostics);
   const candidatePoolComplete = isCandidatePoolComplete(parts);
   const premiseInvalid = input.premiseInvalid === true ? true : resolvePremiseInvalid();
   return {
@@ -79,7 +80,7 @@ export function assembleQuestionDiagnostic(
     query_probes: parts.diagnostics?.queryProbes ?? null,
     query_sought_facets: parts.diagnostics?.querySoughtFacets ?? null,
     candidates: parts.candidates,
-    candidate_key_collisions: candidateKeyCollisions,
+    candidate_key_collisions: candidateCollisions.rows,
     cohort_ledger: buildQuestionCohortLedger({
       isAbstention: input.isAbstention === true,
       premiseInvalid,
@@ -88,7 +89,7 @@ export function assembleQuestionDiagnostic(
       gold: parts.gold,
       diagnosticsAvailable: parts.diagnostics !== null,
       candidatePoolComplete,
-      candidateKeyCollisionObjectIds: candidateKeyCollisions.map((row) => row.object_id),
+      identityConflictObjectIds: candidateCollisions.identityConflictObjectIds,
       missTaxonomy: missFields.miss_taxonomy,
       seedDropReasons: input.seedDropReasons
     }),
@@ -164,16 +165,42 @@ function isReplayCandidateComplete(candidate: LongMemEvalReplayCandidate): boole
     candidate.score_factors.created_at !== undefined;
 }
 
-function buildCandidateKeyCollisions(
+function classifyCandidateCollisions(
   diagnostics: NarrowRecallDiagnostics | null
-): LongMemEvalQuestionDiagnostic["candidate_key_collisions"] {
-  if (diagnostics === null) return [];
-  return [...diagnostics.candidateKeysByObjectId.entries()]
+): Readonly<{
+  rows: LongMemEvalQuestionDiagnostic["candidate_key_collisions"];
+  identityConflictObjectIds: readonly string[];
+}> {
+  if (diagnostics === null) return { rows: [], identityConflictObjectIds: [] };
+  const rows = [...diagnostics.candidateKeysByObjectId.entries()]
     .filter(([, candidateKeys]) => candidateKeys.length > 1)
     .map(([objectId, candidateKeys]) => ({
       object_id: objectId,
       candidate_keys: candidateKeys
     }));
+  return {
+    rows,
+    identityConflictObjectIds: rows
+      .filter((row) => hasIdentityConflict(diagnostics, row.candidate_keys))
+      .map((row) => row.object_id)
+  };
+}
+
+function hasIdentityConflict(
+  diagnostics: NarrowRecallDiagnostics,
+  candidateKeys: readonly string[]
+): boolean {
+  const candidates = candidateKeys
+    .map((key) => diagnostics.candidatesByCandidateKey.get(key))
+    .filter((candidate): candidate is CandidateDiagnostic => candidate !== undefined);
+  const first = candidates[0];
+  return first !== undefined && candidates.slice(1).some((candidate) =>
+    candidate.objectKind !== first.objectKind ||
+    candidate.createdAt !== first.createdAt ||
+    candidate.dimension !== first.dimension ||
+    candidate.sessionKey !== first.sessionKey ||
+    JSON.stringify(candidate.answerFeatures) !== JSON.stringify(first.answerFeatures)
+  );
 }
 
 function classifyMiss(

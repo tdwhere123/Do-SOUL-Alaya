@@ -125,6 +125,72 @@ describe("collectSupplementaryData", () => {
       })
     );
   });
+
+  it("uses one bulk graph read for both supplementary metrics", async () => {
+    const candidates = [
+      createMemoryEntry({ object_id: "memory-a" }),
+      createMemoryEntry({ object_id: "memory-b" })
+    ];
+    const countInboundEdgesWeighted = vi.fn(async () => 99);
+    const countInboundRecalls = vi.fn(async () => 99);
+    const bulkReceivers: unknown[] = [];
+    const countInboundRecallMetricsByMemoryId = vi.fn(async function (this: unknown) {
+      bulkReceivers.push(this);
+      return new Map([
+        ["memory-a", { weightedEdgeCount: 1.5, recallCount: 2 }],
+        ["memory-b", { weightedEdgeCount: 0.3, recallCount: 1 }]
+      ]);
+    });
+    const graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]> = {
+      countInboundSupports: vi.fn(async () => 0),
+      countInboundEdgesWeighted,
+      countInboundRecalls,
+      countInboundRecallMetricsByMemoryId
+    };
+
+    const result = await collectWith({ candidates, graphSupportPort });
+
+    expect(countInboundRecallMetricsByMemoryId).toHaveBeenCalledTimes(1);
+    expect(countInboundRecallMetricsByMemoryId).toHaveBeenCalledWith(
+      ["memory-a", "memory-b"],
+      "workspace-1"
+    );
+    expect(bulkReceivers).toEqual([graphSupportPort]);
+    expect(countInboundEdgesWeighted).not.toHaveBeenCalled();
+    expect(countInboundRecalls).not.toHaveBeenCalled();
+    expect(result.graphSupportCounts).toEqual({
+      "memory-a": 1.5,
+      "memory-b": 0.3
+    });
+    expect(result.recallsEdgeCount).toBe(3);
+  });
+
+  it("preserves legacy graph results when the bulk read fails", async () => {
+    const warn = vi.fn();
+    const candidate = createMemoryEntry({ object_id: "memory-a" });
+    const graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]> = {
+      countInboundSupports: vi.fn(async () => 0),
+      countInboundEdgesWeighted: vi.fn(async () => 1.5),
+      countInboundRecalls: vi.fn(async () => 2),
+      countInboundRecallMetricsByMemoryId: vi.fn(async () => {
+        throw new Error("bulk unavailable");
+      })
+    };
+
+    const result = await collectWith({ candidates: [candidate], graphSupportPort, warn });
+
+    expect(result.graphSupportCounts).toEqual({ "memory-a": 1.5 });
+    expect(result.recallsEdgeCount).toBe(2);
+    expect(warn).toHaveBeenCalledWith(
+      "bulk graph metrics lookup failed; using legacy lookups",
+      expect.objectContaining({
+        workspace_id: "workspace-1",
+        candidate_count: 1,
+        operation: "bulk_graph_metrics_lookup",
+        error: "bulk unavailable"
+      })
+    );
+  });
 });
 
 async function collectWith(params: {

@@ -329,6 +329,7 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       expect(candidate.coverage_selector_action).toBe("noop");
+      expect(candidate.session_coverage_action).toBe("noop");
       expect(candidate.rank_after_coverage_selector).toBe(candidate.rank_after_lexical_priority);
       expect(candidate.session_key).toBeDefined();
     }
@@ -346,6 +347,7 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       expect(candidate.coverage_selector_action).toBe("noop");
+      expect(candidate.session_coverage_action).toBe("noop");
       expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
       expect(candidate.rank_after_lexical_priority).toBe(candidate.fused_rank);
       expect(candidate.rank_after_coverage_selector).toBe(candidate.fused_rank);
@@ -355,6 +357,7 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     }
     const secondSession = candidates.find((candidate) => candidate.object_id === "77777777-7777-4777-8777-777777777777");
     expect(secondSession?.coverage_selector_action).toBe("noop");
+    expect(secondSession?.session_coverage_action).toBe("noop");
     expect(secondSession?.session_key).toBe("sB");
     expect(secondSession?.rank_after_coverage_selector).toBe(secondSession?.fused_rank);
   });

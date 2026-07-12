@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SynthesisStatus } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
+  SqliteEvidenceCapsuleRepo,
   SqliteMemoryEntryRepo,
   SqliteSynthesisCapsuleRepo
 } from "@do-soul/alaya-storage";
@@ -82,11 +83,14 @@ describe("RecallReadWorkerClient", () => {
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
     const memoryRepo = new SqliteMemoryEntryRepo(database);
+    const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
     const synthesisRepo = new SqliteSynthesisCapsuleRepo(database);
     const workspaceMemoryId = randomUUID();
     const otherWorkspaceMemoryId = randomUUID();
     const workspaceSynthesisId = randomUUID();
     const otherWorkspaceSynthesisId = randomUUID();
+    const workspaceEvidenceId = randomUUID();
+    const otherWorkspaceEvidenceId = randomUUID();
 
     try {
       await memoryRepo.create(createMemoryEntry({
@@ -105,6 +109,18 @@ describe("RecallReadWorkerClient", () => {
         object_id: workspaceSynthesisId,
         workspace_id: "workspace-1",
         run_id: "run-1"
+      }));
+      await evidenceRepo.create(createEvidenceCapsule({
+        object_id: workspaceEvidenceId,
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        artifact_ref: "doc-s1-t10"
+      }));
+      await evidenceRepo.create(createEvidenceCapsule({
+        object_id: otherWorkspaceEvidenceId,
+        workspace_id: "workspace-2",
+        run_id: "run-2",
+        artifact_ref: "doc-s1-t11"
       }));
       await synthesisRepo.create(createSynthesisCapsule({
         object_id: otherWorkspaceSynthesisId,
@@ -135,6 +151,15 @@ describe("RecallReadWorkerClient", () => {
             otherWorkspaceSynthesisId
           ])
         ).resolves.toMatchObject([{ object_id: workspaceSynthesisId }]);
+        await expect(
+          client.evidenceSearchPort.findSourceAnchorsByIds!("workspace-1", [
+            workspaceEvidenceId,
+            otherWorkspaceEvidenceId
+          ])
+        ).resolves.toEqual([{
+          evidence_object_id: workspaceEvidenceId,
+          artifact_ref: "doc-s1-t10"
+        }]);
       } finally {
         await client.close();
       }
@@ -300,5 +325,38 @@ function createSynthesisCapsule(overrides: {
     workspace_id: overrides.workspace_id,
     run_id: overrides.run_id,
     synthesis_status: SynthesisStatus.WORKING
+  };
+}
+
+function createEvidenceCapsule(overrides: {
+  readonly object_id: string;
+  readonly workspace_id: string;
+  readonly run_id: string;
+  readonly artifact_ref: string;
+}) {
+  return {
+    object_id: overrides.object_id,
+    object_kind: "evidence_capsule" as const,
+    schema_version: 1,
+    lifecycle_state: "active" as const,
+    created_at: "2026-06-17T00:00:00.000Z",
+    updated_at: "2026-06-17T00:00:00.000Z",
+    created_by: "test",
+    evidence_kind: "tool_output" as const,
+    semantic_anchor: { topic: "worker", keywords: [], summary: "worker anchor" },
+    event_anchor: null,
+    physical_anchor: {
+      file_path: null,
+      line_range: null,
+      symbol_name: null,
+      artifact_ref: overrides.artifact_ref
+    },
+    evidence_health_state: "verified" as const,
+    gist: "worker evidence",
+    excerpt: "worker evidence excerpt",
+    source_hash: null,
+    run_id: overrides.run_id,
+    workspace_id: overrides.workspace_id,
+    surface_id: null
   };
 }

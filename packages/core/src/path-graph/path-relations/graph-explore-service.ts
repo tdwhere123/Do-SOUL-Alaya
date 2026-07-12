@@ -43,6 +43,10 @@ export interface GraphExploreServicePathRepoPort {
     workspaceId: string,
     objectId: string
   ): Promise<readonly Readonly<PathRelation>[]>;
+  findByBackingObjectIds?(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<PathRelation>[]>;
 }
 
 export interface GraphExploreServiceEventLogRepoPort {
@@ -59,6 +63,11 @@ export interface GraphExploreOptions {
   readonly edgeTypes?: readonly MemoryGraphEdgeTypeValue[];
   readonly direction?: GraphExploreDir;
   readonly runId?: string | null;
+}
+
+export interface InboundRecallMetrics {
+  readonly weightedEdgeCount: number;
+  readonly recallCount: number;
 }
 
 export class GraphExploreService {
@@ -168,6 +177,35 @@ export class GraphExploreService {
     );
   }
 
+  public async countInboundRecallMetricsByMemoryId(
+    memoryIds: readonly string[],
+    workspaceId: string
+  ): Promise<ReadonlyMap<string, Readonly<InboundRecallMetrics>>> {
+    const parsedWorkspaceId = parseObjectId(workspaceId);
+    const parsedMemoryIds = [...new Set(memoryIds.map((memoryId) => parseObjectId(memoryId)))];
+    if (parsedMemoryIds.length === 0) {
+      return new Map();
+    }
+    const paths = await this.findRecallContributionPathsBulk(parsedMemoryIds, parsedWorkspaceId);
+    return buildInboundRecallMetrics(parsedMemoryIds, paths);
+  }
+
+  private async findRecallContributionPathsBulk(
+    memoryIds: readonly string[],
+    workspaceId: string
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    const bulkReader = this.dependencies.pathRepo.findByBackingObjectIds;
+    if (bulkReader !== undefined) {
+      return await bulkReader.call(this.dependencies.pathRepo, workspaceId, memoryIds);
+    }
+    const pathGroups = await Promise.all(
+      memoryIds.map((memoryId) =>
+        this.dependencies.pathRepo.findByBackingObjectId(workspaceId, memoryId)
+      )
+    );
+    return [...new Map(pathGroups.flat().map((path) => [path.path_id, path] as const)).values()];
+  }
+
   // Directional relations contribute at their target; unordered semantic
   // relations contribute equally at both endpoints.
   private async findRecallContributionPaths(
@@ -184,6 +222,40 @@ export class GraphExploreService {
       .filter((path) => pathContributesToObject(path, parsedMemoryId))
       .map((path) => [path.path_id, path] as const)).values()];
   }
+}
+
+function buildInboundRecallMetrics(
+  memoryIds: readonly string[],
+  paths: readonly Readonly<PathRelation>[]
+): ReadonlyMap<string, Readonly<InboundRecallMetrics>> {
+  const metrics = new Map<string, { weightedEdgeCount: number; recallCount: number }>(
+    memoryIds.map((memoryId) => [memoryId, { weightedEdgeCount: 0, recallCount: 0 }])
+  );
+  for (const path of new Map(paths.map((entry) => [entry.path_id, entry] as const)).values()) {
+    if (!isPathRecallEligible(path)) continue;
+    const edgeType = mapRelationKindToGraphEdgeType(path.constitution.relation_kind);
+    const weight = EDGE_TYPE_RECALL_MODEL[edgeType].contribution_weight;
+    addPathMetrics(metrics, getPathAnchorBackingObjectId(path.anchors.target_anchor), weight, edgeType);
+    if (isUnorderedPathRelationKind(path.constitution.relation_kind)) {
+      const sourceId = getPathAnchorBackingObjectId(path.anchors.source_anchor);
+      const targetId = getPathAnchorBackingObjectId(path.anchors.target_anchor);
+      if (sourceId !== targetId) addPathMetrics(metrics, sourceId, weight, edgeType);
+    }
+  }
+  return new Map([...metrics].map(([memoryId, value]) => [memoryId, Object.freeze(value)]));
+}
+
+function addPathMetrics(
+  metrics: Map<string, { weightedEdgeCount: number; recallCount: number }>,
+  memoryId: string | null,
+  weight: number,
+  edgeType: MemoryGraphEdgeTypeValue
+): void {
+  if (memoryId === null) return;
+  const current = metrics.get(memoryId);
+  if (current === undefined) return;
+  current.weightedEdgeCount += weight;
+  if (edgeType === "recalls") current.recallCount += 1;
 }
 
 function pathContributesToObject(path: Readonly<PathRelation>, objectId: string): boolean {

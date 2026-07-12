@@ -84,6 +84,22 @@ export function findByBackingObjectIdSql(): string {
     `;
 }
 
+export function findByBackingObjectIdsSql(objectIdCount: number): string {
+  const placeholders = Array.from({ length: objectIdCount }, () => "?").join(", ");
+  return `
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL} IN (${placeholders})
+      UNION ALL
+      SELECT${PATH_RELATION_SELECT_COLUMNS}
+      FROM path_relations
+      WHERE workspace_id = ?
+        AND ${PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL} IN (${placeholders})
+      ORDER BY created_at ASC, path_id ASC
+    `;
+}
+
 export const WAVE_1_ACTIVE_LIFECYCLE_SQL = `CASE
       WHEN json_valid(lifecycle_json) = 0 THEN 0
       WHEN json_type(lifecycle_json, '$.retirement_rule') IS NULL

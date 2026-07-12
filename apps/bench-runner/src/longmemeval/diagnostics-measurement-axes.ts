@@ -251,21 +251,23 @@ function buildEvaluatorIdentityIntegrity(
     candidate.objectKind === "memory_entry" && goldIds.has(candidate.objectId)
   );
   const sessionSupport = exactGold.filter((candidate) =>
-    input.answerSessionIds.includes(candidate.sidecar?.sessionId ?? "")
+    candidate.sidecar?.hasAnswer === true &&
+    input.answerSessionIds.includes(candidate.sidecar.sessionId)
   ).length;
   const answer = normalizeLiteral(input.answer);
   const literalSupport = exactGold.filter((candidate) =>
     answer.length > 0 && literalWitness(candidate, answer).length > 0
   ).length;
   const topSessionSupport = topFive.filter((candidate) =>
-    input.answerSessionIds.includes(candidate.sidecar?.sessionId ?? "")
+    candidate.sidecar?.hasAnswer === true &&
+    input.answerSessionIds.includes(candidate.sidecar.sessionId)
   ).length;
   const topLiteralSupport = topFive.filter((candidate) =>
     answer.length > 0 && literalWitness(candidate, answer).length > 0
   ).length;
   const status = resolveIdentityStatus(
     input, exactGold, sessionSupport, literalSupport,
-    topSessionSupport, topLiteralSupport
+    topSessionSupport
   );
   return identityIntegrityResult(
     true, status, exactGold.length, sessionSupport, literalSupport,
@@ -278,12 +280,11 @@ function resolveIdentityStatus(
   exactGold: readonly TopFiveCandidate[],
   sessionSupport: number,
   literalSupport: number,
-  topSessionSupport: number,
-  topLiteralSupport: number
+  topSessionSupport: number
 ): "consistent" | "inconsistent" | "indeterminate" {
   const exactSupport = sessionSupport + literalSupport;
   if (input.evaluatorHitAt5 !== true) {
-    return topSessionSupport + topLiteralSupport > 0 && exactSupport === 0
+    return topSessionSupport > 0 && exactSupport === 0
       ? "inconsistent"
       : "consistent";
   }

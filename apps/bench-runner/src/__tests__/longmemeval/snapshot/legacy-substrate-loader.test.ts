@@ -20,6 +20,7 @@ import { loadRecallEvalSnapshot } from "../../../longmemeval/snapshot/recall-eva
 import { prepareRecallEvalRestoredDb } from "../../../longmemeval/snapshot/recall-eval-db.js";
 import { restoreLegacySnapshotToDataDir } from "../../../longmemeval/snapshot/legacy-substrate.js";
 import { writeLongMemEvalFixtureDataset } from "../longmemeval-fixture.js";
+import { createDatabaseThroughMigration } from "./legacy-database-fixture.js";
 
 const VARIANT = "longmemeval_s";
 const CACHE_MANIFEST_SHA =
@@ -271,9 +272,7 @@ async function createFixture(requestedRoot?: string, questionCount = 2): Promise
     variant: VARIANT, dataDir, pinnedMetaRoot, questions
   });
   const snapshotDbPath = join(root, "legacy.db");
-  const database = initDatabase({ filename: snapshotDbPath });
-  database.connection.prepare("DELETE FROM schema_version WHERE version = 104").run();
-  database.close();
+  createDatabaseThroughMigration(snapshotDbPath, 103);
   const sidecar = buildSidecar(questions);
   await writeFile(snapshotSidecarPath(snapshotDbPath), JSON.stringify(sidecar));
   const manifest = buildManifest({

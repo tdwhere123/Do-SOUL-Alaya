@@ -3,7 +3,7 @@ import type { StorageDatabase } from "../../sqlite/db.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";
-import { findByAnchorsSql } from "./path-relation-sql.js";
+import { findByAnchorsSql, findByBackingObjectIdsSql } from "./path-relation-sql.js";
 import type { PathRelationStatements } from "./path-relation-statements.js";
 import type { PathRelationPageOptions } from "./path-relation-types.js";
 import {
@@ -195,6 +195,46 @@ export async function findPathRelationsByBackingObjectId(
     throw new StorageError(
       "QUERY_FAILED",
       `Failed to list path relations by backing object id for workspace ${parsedWorkspaceId}.`,
+      error
+    );
+  }
+}
+
+const BACKING_OBJECT_ID_BATCH_SIZE = 400;
+
+export async function findPathRelationsByBackingObjectIds(
+  ctx: PathRelationQueryContext,
+  workspaceId: string,
+  objectIds: readonly string[]
+): Promise<readonly Readonly<PathRelation>[]> {
+  const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace id");
+  const parsedObjectIds = [...new Set(
+    objectIds.map((objectId) => parseNonEmptyString(objectId, "object id"))
+  )];
+  if (parsedObjectIds.length === 0) {
+    return deepFreeze([]);
+  }
+
+  try {
+    const rows: PathRelationRow[] = [];
+    for (let offset = 0; offset < parsedObjectIds.length; offset += BACKING_OBJECT_ID_BATCH_SIZE) {
+      const batch = parsedObjectIds.slice(offset, offset + BACKING_OBJECT_ID_BATCH_SIZE);
+      const statement = ctx.db.connection.prepare(findByBackingObjectIdsSql(batch.length));
+      rows.push(...statement.all(
+        parsedWorkspaceId,
+        ...batch,
+        parsedWorkspaceId,
+        ...batch
+      ) as PathRelationRow[]);
+    }
+    return ctx.parseRows(rows, { dedupe: true });
+  } catch (error) {
+    if (error instanceof StorageError) {
+      throw error;
+    }
+    throw new StorageError(
+      "QUERY_FAILED",
+      `Failed to list path relations by backing object ids for workspace ${parsedWorkspaceId}.`,
       error
     );
   }

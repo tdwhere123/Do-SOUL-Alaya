@@ -17,13 +17,13 @@ export function applyDeliverySelection(
   readonly orderedCandidates: readonly DeliverySelectionCandidate[];
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
 }> {
-  const orderedCandidates = Object.freeze(
+  const rankedCandidates = Object.freeze(
     [...scoredCandidates].sort(compareFusedRecallCandidates)
   );
   return Object.freeze({
-    orderedCandidates,
+    orderedCandidates: rankedCandidates,
     rankByCandidateKey: new Map(
-      orderedCandidates.map((candidate, index) => [candidate.fusion.candidate_key, index + 1])
+      rankedCandidates.map((candidate, index) => [candidate.fusion.candidate_key, index + 1])
     )
   });
 }

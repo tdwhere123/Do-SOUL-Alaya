@@ -88,7 +88,9 @@ function createRecallEvidenceSearchPort(
         : await input.evidenceCapsuleRepo.searchByKeyword(workspaceId, queryText, limit),
     findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) => {
       return await input.evidenceCapsuleRepo.findByIds(workspaceId, evidenceObjectIds);
-    }
+    },
+    findSourceAnchorsByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
+      await input.evidenceCapsuleRepo.findSourceAnchorsByIds(workspaceId, evidenceObjectIds)
   };
 }
 

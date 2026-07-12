@@ -32,7 +32,8 @@ export {
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleListPageOptions,
-  type EvidenceCapsuleKeywordHit
+  type EvidenceCapsuleKeywordHit,
+  type EvidenceSourceAnchor
 } from "./repos/capsules/index.js";
 export {
   SqliteMemoryEntryRepo,

@@ -134,7 +134,7 @@ it("merges adopted global-source candidates through optional recall ports and ex
     ]);
   });
 
-it("keeps local and global recall candidates with matching ids in separate origin planes", async () => {
+it("delivers one object for matching local and global ids while preserving provenance diagnostics", async () => {
     const sharedObjectId = "shared-object-id";
     const memories = [
       createMemoryEntry({
@@ -235,8 +235,15 @@ it("keeps local and global recall candidates with matching ids in separate origi
       (candidate) => candidate.object_id === sharedObjectId
     );
     expect(querySupplementIfReady).toHaveBeenCalled();
-    expect(collidingCandidates).toHaveLength(2);
-    expect(collidingCandidates.map((candidate) => candidate.origin_plane).sort()).toEqual([
+    expect(collidingCandidates).toHaveLength(1);
+    const collidingDiagnostics = result.diagnostics?.candidates.filter(
+      (candidate) => candidate.object_id === sharedObjectId
+    );
+    expect(collidingDiagnostics).toHaveLength(2);
+    expect(collidingDiagnostics?.filter(
+      (candidate) => candidate.dropped_reason === "duplicate"
+    )).toHaveLength(1);
+    expect(collidingDiagnostics?.map((candidate) => candidate.origin_plane).sort()).toEqual([
       "global",
       "workspace_local"
     ]);

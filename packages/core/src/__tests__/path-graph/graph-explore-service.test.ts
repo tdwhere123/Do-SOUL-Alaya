@@ -66,6 +66,7 @@ function createPathRepo(paths: readonly PathRelation[] = []) {
   return {
     findByAnchors: vi.fn(async () => paths),
     findByBackingObjectId: vi.fn(async () => paths),
+    findByBackingObjectIds: vi.fn(async () => paths),
     findByTargetAnchor: vi.fn(async (_workspaceId: string, anchorRef: { kind: string; object_id?: string }) =>
       paths.filter((path) => {
         const target = path.anchors.target_anchor;
@@ -317,5 +318,109 @@ describe("GraphExploreService countInbound* on the path plane", () => {
     const sourceContribution = await service.countInboundEdgesWeighted(TARGET, "workspace-1");
     const targetContribution = await service.countInboundEdgesWeighted(peer, "workspace-1");
     expect(sourceContribution).toBe(targetContribution);
+  });
+
+  it("computes weighted and recalls metrics from one bulk path read", async () => {
+    const peer = "memory-peer";
+    const pathRepo = createPathRepo([
+      createPath({ pathId: "p-supports", sourceMemoryId: "source", targetMemoryId: TARGET, relationKind: "supports" }),
+      createPath({ pathId: "p-recalls", sourceMemoryId: TARGET, targetMemoryId: peer, relationKind: "co_recalled" }),
+      createPath({ pathId: "p-outbound", sourceMemoryId: TARGET, targetMemoryId: "other", relationKind: "supports" })
+    ]);
+    const service = new GraphExploreService({
+      pathRepo,
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
+    });
+
+    const metrics = await service.countInboundRecallMetricsByMemoryId(
+      [TARGET, peer, TARGET],
+      "workspace-1"
+    );
+
+    expect(metrics).toEqual(new Map([
+      [TARGET, { weightedEdgeCount: 1.3, recallCount: 1 }],
+      [peer, { weightedEdgeCount: 0.3, recallCount: 1 }]
+    ]));
+    expect(pathRepo.findByBackingObjectIds).toHaveBeenCalledTimes(1);
+    expect(pathRepo.findByBackingObjectIds).toHaveBeenCalledWith(
+      "workspace-1",
+      [TARGET, peer]
+    );
+    expect(pathRepo.findByBackingObjectId).not.toHaveBeenCalled();
+  });
+
+  it("returns empty bulk metrics without reading paths", async () => {
+    const pathRepo = createPathRepo();
+    const service = new GraphExploreService({
+      pathRepo,
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
+    });
+
+    await expect(
+      service.countInboundRecallMetricsByMemoryId([], "workspace-1")
+    ).resolves.toEqual(new Map());
+    expect(pathRepo.findByBackingObjectIds).not.toHaveBeenCalled();
+  });
+
+  it("matches legacy metrics across eligibility and direction rules", async () => {
+    const peer = "memory-peer";
+    const paths = [
+      createPath({ pathId: "p-supports", sourceMemoryId: "source", targetMemoryId: TARGET, relationKind: "supports" }),
+      createPath({ pathId: "p-unordered", sourceMemoryId: TARGET, targetMemoryId: peer, relationKind: "co_recalled" }),
+      createPath({ pathId: "p-negative", sourceMemoryId: "source", targetMemoryId: TARGET, relationKind: "contradicts", recallBias: -0.5 }),
+      createPath({ pathId: "p-retired", sourceMemoryId: "source", targetMemoryId: peer, relationKind: "recalls", status: "retired" }),
+      createPath({ pathId: "p-directional", sourceMemoryId: TARGET, targetMemoryId: "other", relationKind: "supports" })
+    ];
+    const legacy = createServiceWithInboundPaths(paths);
+    const bulk = createServiceWithInboundPaths(paths);
+    const expected = new Map([
+      [TARGET, {
+        weightedEdgeCount: await legacy.countInboundEdgesWeighted(TARGET, "workspace-1"),
+        recallCount: await legacy.countInboundRecalls(TARGET, "workspace-1")
+      }],
+      [peer, {
+        weightedEdgeCount: await legacy.countInboundEdgesWeighted(peer, "workspace-1"),
+        recallCount: await legacy.countInboundRecalls(peer, "workspace-1")
+      }]
+    ]);
+
+    await expect(
+      bulk.countInboundRecallMetricsByMemoryId([TARGET, peer], "workspace-1")
+    ).resolves.toEqual(expected);
+  });
+
+  it("matches per-object legacy metrics when the path repo has no bulk reader", async () => {
+    const peer = "memory-peer";
+    const paths = [
+      createPath({ pathId: "p-inbound", sourceMemoryId: "source", targetMemoryId: TARGET, relationKind: "supports" }),
+      createPath({ pathId: "p-unordered", sourceMemoryId: TARGET, targetMemoryId: peer, relationKind: "co_recalled" }),
+      createPath({ pathId: "p-outbound", sourceMemoryId: TARGET, targetMemoryId: "other", relationKind: "supports" }),
+      createPath({ pathId: "p-negative", sourceMemoryId: "source", targetMemoryId: TARGET, relationKind: "contradicts", recallBias: -0.5 }),
+      createPath({ pathId: "p-dormant", sourceMemoryId: "source", targetMemoryId: peer, relationKind: "recalls", status: "dormant" })
+    ];
+    const legacy = createServiceWithInboundPaths(paths);
+    const repo = createPathRepo(paths);
+    const fallback = new GraphExploreService({
+      pathRepo: {
+        findByAnchors: repo.findByAnchors,
+        findByBackingObjectId: repo.findByBackingObjectId,
+        findByTargetAnchor: repo.findByTargetAnchor
+      },
+      eventLogRepo: { append: vi.fn(async (event) => createEventLogEntry(event)) }
+    });
+    const memoryIds = [TARGET, peer];
+    const expected = new Map(await Promise.all(memoryIds.map(async (memoryId) => [
+      memoryId,
+      {
+        weightedEdgeCount: await legacy.countInboundEdgesWeighted(memoryId, "workspace-1"),
+        recallCount: await legacy.countInboundRecalls(memoryId, "workspace-1")
+      }
+    ] as const)));
+
+    await expect(
+      fallback.countInboundRecallMetricsByMemoryId(memoryIds, "workspace-1")
+    ).resolves.toEqual(expected);
+    expect(repo.findByBackingObjectId).toHaveBeenCalledTimes(memoryIds.length);
+    expect(repo.findByBackingObjectIds).not.toHaveBeenCalled();
   });
 });

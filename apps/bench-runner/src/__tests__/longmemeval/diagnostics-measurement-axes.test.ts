@@ -95,6 +95,10 @@ function sidecar(objectId: string, sessionId: string) {
   };
 }
 
+function answerSidecar(objectId: string, sessionId: string) {
+  return { ...sidecar(objectId, sessionId), hasAnswer: true };
+}
+
 describe("LongMemEval measurement-only quality axes", () => {
   it("measures top-five answer-session coverage without changing gold identity", () => {
     const axes = buildQuestionMeasurementAxes(input());
@@ -250,7 +254,7 @@ describe("LongMemEval measurement-only quality axes", () => {
       deliveredResults: [{ object_id: "answer-witness", rank: 1 }],
       candidates: [candidate("answer-witness", "Blue Jay", null)],
       sidecar: new Map([
-        ["memory_entry:answer-witness", sidecar("answer-witness", "answer-a")]
+        ["memory_entry:answer-witness", answerSidecar("answer-witness", "answer-a")]
       ])
     }));
 
@@ -265,6 +269,45 @@ describe("LongMemEval measurement-only quality axes", () => {
       miss_classification: "evaluator_identity_inconsistent",
       miss_taxonomy: "evaluation_or_gold_issue",
       hit_at_5: false
+    });
+  });
+
+  it("keeps a literal-bearing non-gold witness diagnostic-only on a miss", () => {
+    const diagnostic = {
+      question_id: "synthetic-session-neighbor",
+      is_abstention: false,
+      hit_at_5: false,
+      gold_memory_ids: ["gold-memory"],
+      miss_classification: "under_ranked",
+      miss_taxonomy: "delivery_order_drop",
+      delivered_results: [],
+      gold: [],
+      cohort_ledger: {
+        dataset_cohort: "answerable",
+        measurement_status: "scorable",
+        retrieval_status: "miss_at_5",
+        evaluation_issue_reason: null,
+        final_verdict: "miss_at_5"
+      }
+    } as unknown as LongMemEvalQuestionDiagnostic;
+    const attached = attachQuestionMeasurementAxes(diagnostic, input({
+      answerSessionIds: ["answer-a"],
+      deliveredResults: [{ object_id: "session-neighbor", rank: 1 }],
+      candidates: [candidate("session-neighbor", "A Blue Jay appeared nearby", null)],
+      sidecar: new Map([
+        ["memory_entry:session-neighbor", sidecar("session-neighbor", "answer-a")]
+      ])
+    }));
+
+    expect(attached.quality_axes?.evaluator_identity_integrity_at_5.status)
+      .toBe("consistent");
+    expect(attached.quality_axes?.answer_literal_witness_lower_bound_at_5)
+      .toMatchObject({ witnessed: true, matched_candidate_count: 1 });
+    expect(attached.cohort_ledger).toMatchObject({
+      measurement_status: "scorable",
+      retrieval_status: "miss_at_5",
+      evaluation_issue_reason: null,
+      final_verdict: "miss_at_5"
     });
   });
 

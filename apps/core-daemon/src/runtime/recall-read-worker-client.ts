@@ -30,6 +30,7 @@ export type RecallReadWorkerOperation =
   | "memory.findByIds"
   | "evidence.searchByKeyword"
   | "evidence.findByIds"
+  | "evidence.findSourceAnchorsByIds"
   | "synthesis.searchByKeyword"
   | "synthesis.findByIds"
   | "path.findByAnchors"
@@ -158,7 +159,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
       await this.request("evidence.searchByKeyword", { workspaceId, queryText, limit }),
     findByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
-      await this.request("evidence.findByIds", { workspaceId, evidenceObjectIds })
+      await this.request("evidence.findByIds", { workspaceId, evidenceObjectIds }),
+    findSourceAnchorsByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
+      await this.request("evidence.findSourceAnchorsByIds", { workspaceId, evidenceObjectIds })
   };
 
   public readonly synthesisSearchPort: RecallServiceSynthesisSearchPort = {

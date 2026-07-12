@@ -12,6 +12,10 @@ import {
   assertLegacySnapshotSourceCompatibility,
   prepareLegacySnapshotConsumer
 } from "../../../longmemeval/snapshot/legacy-compatibility.js";
+import {
+  createDatabaseThroughMigration,
+  executeSqlite
+} from "./legacy-database-fixture.js";
 
 const roots: string[] = [];
 
@@ -31,13 +35,15 @@ function manifest(): LongMemEvalSnapshotManifest {
   };
 }
 
-async function sourceWithLedgerMutation(sql = "DELETE FROM schema_version WHERE version = 104"): Promise<string> {
+async function sourceAtMigration(
+  maxVersion = 103,
+  sql?: string
+): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "legacy-compatibility-"));
   roots.push(root);
   const path = join(root, "source.db");
-  const db = initDatabase({ filename: path });
-  db.connection.exec(sql);
-  db.close();
+  createDatabaseThroughMigration(path, maxVersion);
+  if (sql !== undefined) executeSqlite(path, sql);
   return path;
 }
 
@@ -47,7 +53,7 @@ afterEach(async () => {
 
 describe("legacy snapshot migration compatibility", () => {
   it("checks the frozen producer before migrating only the working copy", async () => {
-    const source = await sourceWithLedgerMutation();
+    const source = await sourceAtMigration();
     expect(() => assertLegacySnapshotSourceCompatibility(manifest(), source)).not.toThrow();
     const working = join(source, "..", "working.db");
     copyFileSync(source, working);
@@ -57,17 +63,27 @@ describe("legacy snapshot migration compatibility", () => {
     initDatabase({ filename: working }).close();
   });
 
-  it("rejects lower, higher, incomplete, or pipeline-drifted producer tuples", async () => {
-    const lower = await sourceWithLedgerMutation(
-      "DELETE FROM schema_version WHERE version IN (103, 104)"
-    );
+  it("rejects a lower producer ledger", async () => {
+    const lower = await sourceAtMigration(102);
     expect(() => assertLegacySnapshotSourceCompatibility(manifest(), lower)).toThrow(/ledger mismatch/u);
-    const higher = await sourceWithLedgerMutation("");
+  });
+
+  it("rejects a higher producer ledger", async () => {
+    const higher = await sourceAtMigration();
+    initDatabase({ filename: higher }).close();
     expect(() => assertLegacySnapshotSourceCompatibility(manifest(), higher)).toThrow(/ledger mismatch/u);
-    const incomplete = await sourceWithLedgerMutation(
-      "DELETE FROM schema_version WHERE version IN (50, 104)"
+  });
+
+  it("rejects an incomplete producer ledger", async () => {
+    const incomplete = await sourceAtMigration(
+      103,
+      "DELETE FROM schema_version WHERE version = 50"
     );
     expect(() => assertLegacySnapshotSourceCompatibility(manifest(), incomplete)).toThrow(/ledger mismatch/u);
+  });
+
+  it("rejects a pipeline-drifted producer tuple", async () => {
+    const lower = await sourceAtMigration(102);
     expect(() => assertLegacySnapshotSourceCompatibility({
       ...manifest(), recall_pipeline_version: "future-pipeline"
     }, lower)).toThrow(/compatibility mismatch/u);

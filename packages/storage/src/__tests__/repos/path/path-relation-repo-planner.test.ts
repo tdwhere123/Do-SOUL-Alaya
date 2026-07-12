@@ -5,6 +5,7 @@ import {
   PATH_RELATION_SOURCE_BACKING_OBJECT_ID_SQL,
   PATH_RELATION_TARGET_BACKING_OBJECT_ID_SQL
 } from "../../../repos/path/path-relation-repo.js";
+import { findByBackingObjectIdsSql } from "../../../repos/path/path-relation-sql.js";
 import {
   anchorKindsFromSchema,
   createPathRelationFixture,
@@ -373,6 +374,29 @@ describe("SqlitePathRelationRepo SQL planner and cache behavior", () => {
       plan.some((step) => step.detail.startsWith("SCAN")),
       `expected no SCAN step, got: ${details}`
     ).toBe(false);
+  });
+
+  it("findByBackingObjectIds keeps both bulk lookup arms on backing-object indexes", () => {
+    const { database } = createRepo();
+    const plan = database.connection
+      .prepare(`EXPLAIN QUERY PLAN ${findByBackingObjectIdsSql(2)}`)
+      .all(
+        "workspace-1",
+        "object-1",
+        "object-2",
+        "workspace-1",
+        "object-1",
+        "object-2"
+      ) as ReadonlyArray<{ readonly detail: string }>;
+    const details = plan.map((step) => step.detail).join(" | ");
+    const indexSearches = plan.filter(
+      (step) =>
+        step.detail.includes("USING INDEX idx_path_relations_source_backing_object_id") ||
+        step.detail.includes("USING INDEX idx_path_relations_target_backing_object_id")
+    );
+
+    expect(indexSearches, details).toHaveLength(2);
+    expect(plan.some((step) => step.detail.startsWith("SCAN")), details).toBe(false);
   });
 
   // invariant: anchorBackingObjectIdSql has no ELSE, so an anchor kind absent

@@ -34,6 +34,10 @@ export interface PathRelationRepo {
     workspaceId: string,
     objectId: string
   ): Promise<readonly Readonly<PathRelation>[]>;
+  findByBackingObjectIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<PathRelation>[]>;
   findActivePage?(
     workspaceId: string,
     page: PathRelationPageOptions

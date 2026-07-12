@@ -335,6 +335,76 @@ describe("SqlitePathRelationRepo", () => {
     ]);
   });
 
+  it("findByBackingObjectIds preserves backing-anchor semantics", async () => {
+    const { repo } = createRepo();
+    const facetRelation = createPathRelationFixture({
+      path_id: "path-facet-backing",
+      anchors: {
+        source_anchor: {
+          kind: "object_facet",
+          object_id: "object-source",
+          facet_key: "status"
+        },
+        target_anchor: { kind: "object", object_id: "object-target" }
+      }
+    });
+    const dualEndpointRelation = createPathRelationFixture({
+      path_id: "path-dual-backing",
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-dual" },
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: "object-dual",
+          window_digest: "window"
+        }
+      },
+      created_at: "2026-04-17T00:01:00.000Z",
+      updated_at: "2026-04-17T00:01:00.000Z"
+    });
+    repo.create(facetRelation);
+    repo.create(dualEndpointRelation);
+
+    await expect(
+      repo.findByBackingObjectIds("workspace-1", [
+        "object-source",
+        "object-dual",
+        "object-source"
+      ])
+    ).resolves.toEqual([
+      withActiveLifecycle(facetRelation),
+      withActiveLifecycle(dualEndpointRelation)
+    ]);
+  });
+
+  it("findByBackingObjectIds avoids storage reads for an empty input", async () => {
+    const { repo } = createRepo();
+
+    await expect(repo.findByBackingObjectIds("workspace-1", [])).resolves.toEqual([]);
+  });
+
+  it("findByBackingObjectIds batches beyond the conservative SQLite variable limit", async () => {
+    const { repo } = createRepo();
+    const objectIds = Array.from({ length: 501 }, (_, index) => `object-bulk-${index}`);
+    for (const [index, objectId] of objectIds.entries()) {
+      repo.create(createPathRelationFixture({
+        path_id: `path-bulk-${index}`,
+        anchors: {
+          source_anchor: { kind: "object", object_id: objectId },
+          target_anchor: { kind: "object", object_id: `target-bulk-${index}` }
+        },
+        created_at: new Date(Date.UTC(2026, 3, 17, 0, 0, index)).toISOString(),
+        updated_at: new Date(Date.UTC(2026, 3, 17, 0, 0, index)).toISOString()
+      }));
+    }
+
+    const results = await repo.findByBackingObjectIds("workspace-1", objectIds);
+
+    expect(results).toHaveLength(objectIds.length);
+    expect(results.map((relation) => relation.path_id)).toEqual(
+      objectIds.map((_, index) => `path-bulk-${index}`)
+    );
+  });
+
   it("findByTargetAnchor returns only target-anchored rows, excluding source-anchored-only rows", async () => {
     const { repo } = createRepo();
     const inboundRelation = createPathRelationFixture({

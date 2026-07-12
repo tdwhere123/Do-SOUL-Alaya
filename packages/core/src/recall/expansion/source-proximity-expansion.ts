@@ -15,10 +15,7 @@ import {
   errorNameOf,
   toErrorMessage
 } from "../runtime/recall-service-helpers.js";
-import type {
-  RecallServiceDependencies,
-  RecallServiceWarnPort
-} from "../runtime/recall-service-types.js";
+import type { RecallServiceDependencies, RecallServiceWarnPort } from "../runtime/recall-service-types.js";
 import type { CoarseCandidateAdder } from "./content-expansion.js";
 
 type SourceChunkIndex = ReturnType<typeof buildEvidenceSourceChunkIndex>;
@@ -46,12 +43,14 @@ export async function addSourceProximityCandidates(params: Readonly<{
   }
   const robust = params.robustSourceRefParsing ?? false;
   const sourceRefsByMemoryId = await loadEvidenceSourceRefsByMemoryId({
-    workspaceId: params.workspaceId,
-    entries: params.tierMemories,
-    evidenceSearchPort: params.evidenceSearchPort,
-    warn: params.warn
+    workspaceId: params.workspaceId, entries: params.tierMemories,
+    evidenceSearchPort: params.evidenceSearchPort, warn: params.warn
   });
-  const sourceCohortKeys = buildEvidenceSourceCohortKeys(params.tierMemories, sourceRefsByMemoryId, robust);
+  const sourceCohortKeys = buildEvidenceSourceCohortKeys(
+    params.tierMemories,
+    sourceRefsByMemoryId,
+    robust
+  );
   const bySource = buildEvidenceSourceChunkIndex(params.tierMemories, sourceRefsByMemoryId, robust);
   if (bySource.size === 0) {
     return sourceCohortKeys;
@@ -71,7 +70,7 @@ export async function addSourceProximityCandidates(params: Readonly<{
         newlyAdmitted
       )
     ) {
-      return sourceCohortKeys;
+      break;
     }
   }
   return sourceCohortKeys;
@@ -168,11 +167,29 @@ async function loadEvidenceSourceRefsByMemoryId(params: Readonly<{
 }>): Promise<ReadonlyMap<string, readonly string[]>> {
   const sourceRefsByMemoryId = createInitialSourceRefsByMemoryId(params.entries);
   const evidenceSearchPort = params.evidenceSearchPort;
-  if (evidenceSearchPort?.findByIds === undefined) {
-    return sourceRefsByMemoryId;
-  }
   const evidenceObjectIds = uniqueStrings(params.entries.flatMap((entry) => entry.evidence_refs));
   if (evidenceObjectIds.length === 0) {
+    return sourceRefsByMemoryId;
+  }
+  if (evidenceSearchPort?.findSourceAnchorsByIds !== undefined) {
+    try {
+      const anchors = await evidenceSearchPort.findSourceAnchorsByIds(
+        params.workspaceId,
+        evidenceObjectIds
+      );
+      mergeArtifactRefsIntoSourceRefs(
+        params.entries,
+        sourceRefsByMemoryId,
+        new Map(anchors.map((anchor) => [anchor.evidence_object_id, anchor.artifact_ref]))
+      );
+      return sourceRefsByMemoryId;
+    } catch (error) {
+      warnSourceAnchorFallback(params, "failed", error);
+    }
+  } else {
+    warnSourceAnchorFallback(params, "unavailable");
+  }
+  if (evidenceSearchPort?.findByIds === undefined) {
     return sourceRefsByMemoryId;
   }
   try {
@@ -189,6 +206,30 @@ async function loadEvidenceSourceRefsByMemoryId(params: Readonly<{
   }
 
   return sourceRefsByMemoryId;
+}
+
+function warnSourceAnchorFallback(
+  params: Readonly<{
+    readonly workspaceId: string;
+    readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
+    readonly warn: RecallServiceWarnPort;
+  }>,
+  state: "failed" | "unavailable",
+  error?: unknown
+): void {
+  const fullHydration = params.evidenceSearchPort?.findByIds !== undefined;
+  params.warn(
+    `evidence source-anchor id lookup ${state}; using ${fullHydration ? "full capsule hydration" : "embedded evidence refs"}`,
+    {
+      workspace_id: params.workspaceId,
+      operation: "evidence_source_anchor_id_lookup",
+      reason: state === "failed" ? "scalar_anchor_lookup_failed" : "scalar_anchor_port_unavailable",
+      ...(error === undefined ? {} : {
+        errorName: errorNameOf(error),
+        error: toErrorMessage(error)
+      })
+    }
+  );
 }
 
 function createInitialSourceRefsByMemoryId(

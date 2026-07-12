@@ -68,7 +68,7 @@ export function buildQuestionCohortLedger(input: {
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
   readonly diagnosticsAvailable: boolean;
   readonly candidatePoolComplete: boolean;
-  readonly candidateKeyCollisionObjectIds: readonly string[];
+  readonly identityConflictObjectIds?: readonly string[];
   readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
   readonly seedDropReasons?: LongMemEvalSeedDropReasons;
 }): LongMemEvalQuestionCohortLedger {
@@ -76,17 +76,19 @@ export function buildQuestionCohortLedger(input: {
     ? "adjudicated_invalid"
     : input.isAbstention ? "abstention" : "answerable";
   const ambiguousIdentity = input.goldMemoryIds.some((id) =>
-    input.candidateKeyCollisionObjectIds.includes(id)
+    input.identityConflictObjectIds?.includes(id) === true
   );
   const identityPresent = input.goldMemoryIds.length > 0 && !ambiguousIdentity;
   return {
-    measurement_status: measurementStatus(input, datasetCohort, identityPresent),
+    measurement_status: measurementStatus(
+      input, datasetCohort, identityPresent, ambiguousIdentity
+    ),
     dataset_cohort: datasetCohort,
     extraction_materialization: extractionStatus(input),
     evaluator_gold_identity: {
       status: ambiguousIdentity
         ? "ambiguous"
-        : input.goldMemoryIds.length > 0 ? "present" : "absent",
+        : identityPresent ? "present" : "absent",
       object_ids: input.goldMemoryIds
     },
     retrieval_status: datasetCohort === "answerable" && identityPresent
@@ -105,14 +107,11 @@ export function buildQuestionCohortLedger(input: {
 function measurementStatus(
   input: Parameters<typeof buildQuestionCohortLedger>[0],
   cohort: LongMemEvalQuestionCohortLedger["dataset_cohort"],
-  identityPresent: boolean
+  identityPresent: boolean,
+  ambiguousIdentity: boolean
 ): LongMemEvalQuestionCohortLedger["measurement_status"] {
   if (cohort === "abstention") return "abstention_unscorable";
-  const issue = evaluationIssueReason(
-    input,
-    cohort,
-    input.goldMemoryIds.some((id) => input.candidateKeyCollisionObjectIds.includes(id))
-  );
+  const issue = evaluationIssueReason(input, cohort, ambiguousIdentity);
   return cohort === "answerable" && identityPresent && issue === null
     ? "scorable"
     : "evaluator_identity_unscorable";

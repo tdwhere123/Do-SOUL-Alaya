@@ -79,9 +79,30 @@ function fusedCandidate(input: {
 }
 
 describe("applyDeliverySelection", () => {
-  it("keeps fusion order as the only production order", () => {
+  it("keeps fused relevance order across repeated sessions", () => {
+    const sameSession = Array.from({ length: 5 }, (_, index) =>
+      fusedCandidate({
+        objectId: `same-${index + 1}`,
+        fusedScore: 1 - index * 0.01,
+        surfaceId: "repeated-session"
+      })
+    );
+    const independent = fusedCandidate({
+      objectId: "independent",
+      fusedScore: 0.95,
+      surfaceId: "independent-session"
+    });
+
+    const result = applyDeliverySelection([...sameSession, independent]);
+
+    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
+      .toEqual([...sameSession, independent].map((candidate) => candidate.entry.object_id));
+    expect(result.rankByCandidateKey.get("workspace_local:memory_entry:independent")).toBe(6);
+  });
+
+  it("retains fusion order when the top-K sessions are distinct", () => {
     const candidates = [
-      fusedCandidate({ objectId: "third", fusedScore: 0.7, surfaceId: "sA" }),
+      fusedCandidate({ objectId: "third", fusedScore: 0.7, surfaceId: "sC" }),
       fusedCandidate({ objectId: "first", fusedScore: 1, surfaceId: "sA" }),
       fusedCandidate({ objectId: "second", fusedScore: 0.8, surfaceId: "sB" })
     ];
@@ -106,11 +127,15 @@ describe("applyDeliverySelection", () => {
       fusedCandidate({ objectId: "b8", fusedScore: 0.7, effectiveScore: 0.7, surfaceId: "sB" })
     ];
     const beforeScores = new Map(
-      ordered.map((candidate) => [candidate.entry.object_id, candidate.effectiveScore] as const)
+      ordered.map((candidate) => [candidate.entry.object_id, {
+        effective: candidate.effectiveScore,
+        fused: candidate.fusion.fused_score
+      }] as const)
     );
     const result = applyDeliverySelection(ordered);
     for (const candidate of result.orderedCandidates) {
-      expect(candidate.effectiveScore).toBe(beforeScores.get(candidate.entry.object_id));
+      expect(candidate.effectiveScore).toBe(beforeScores.get(candidate.entry.object_id)?.effective);
+      expect(candidate.fusion.fused_score).toBe(beforeScores.get(candidate.entry.object_id)?.fused);
     }
     expect(result.orderedCandidates.slice(0, 2).map((c) => c.entry.object_id)).toEqual(["a1", "b8"]);
   });
@@ -128,17 +153,36 @@ describe("applyDeliverySelection", () => {
       .toBe("fused-winner");
   });
 
-  it.each([1, 3, 5, 10])(
-    "does not add rank, K, or sample-size epsilon at pool size %i",
-    (size) => {
-      const candidates = Array.from({ length: size }, (_, index) =>
-        fusedCandidate({ objectId: `m-${index}`, fusedScore: (size - index) / size })
-      );
-      const result = applyDeliverySelection(candidates);
-      expect(result.orderedCandidates.map((candidate) => candidate.fusion.fused_score))
-        .toEqual([...result.orderedCandidates].map((candidate) => candidate.fusion.fused_score).sort((a, b) => b - a));
-    }
-  );
+  it("is permutation-stable", () => {
+    const candidates = [
+      fusedCandidate({ objectId: "a", fusedScore: 1, surfaceId: "same" }),
+      fusedCandidate({ objectId: "b", fusedScore: 0.99, surfaceId: "same" }),
+      fusedCandidate({ objectId: "c", fusedScore: 0.98, surfaceId: "same" }),
+      fusedCandidate({ objectId: "d", fusedScore: 0.97, surfaceId: "other" })
+    ];
+    const expected = applyDeliverySelection(candidates).orderedCandidates
+      .map((candidate) => candidate.entry.object_id);
+
+    const actual = applyDeliverySelection([candidates[2]!, candidates[0]!, candidates[3]!, candidates[1]!])
+      .orderedCandidates.map((candidate) => candidate.entry.object_id);
+
+    expect(actual).toEqual(expected);
+  });
+
+  it("uses candidate identity as the deterministic tie break", () => {
+    const candidates = [
+      fusedCandidate({ objectId: "b", fusedScore: 0.9, surfaceId: "same" }),
+      fusedCandidate({ objectId: "c", fusedScore: 0.9, surfaceId: "other" }),
+      fusedCandidate({ objectId: "a", fusedScore: 0.9, surfaceId: "same" })
+    ];
+    const first = applyDeliverySelection(candidates).orderedCandidates
+      .map((candidate) => candidate.entry.object_id);
+    const second = applyDeliverySelection([candidates[2]!, candidates[0]!, candidates[1]!])
+      .orderedCandidates.map((candidate) => candidate.entry.object_id);
+
+    expect(first).toEqual(["a", "b", "c"]);
+    expect(second).toEqual(first);
+  });
 
   it("keeps fused rank-1 first while exposing stage rank diagnostics", () => {
     const ordered = [
@@ -190,6 +234,27 @@ describe("applyDeliverySelection", () => {
     ]);
     expect(result.rankByCandidateKey.get("workspace_local:memory_entry:likelihood-rank-6")).toBe(6);
     expect(result.rankByCandidateKey.get("workspace_local:memory_entry:weak-rank-5")).toBe(5);
+  });
+
+  it("preserves provenance representations and their fusion ranks for admission", () => {
+    const preferred = fusedCandidate({ objectId: "shared", fusedScore: 0.9 });
+    const alternateBase = fusedCandidate({ objectId: "shared", fusedScore: 0.8 });
+    const alternate = Object.freeze({
+      ...alternateBase,
+      originPlane: "evidence" as const,
+      fusion: Object.freeze({
+        ...alternateBase.fusion,
+        candidate_key: "evidence:memory_entry:shared"
+      })
+    });
+    const nextUnique = fusedCandidate({ objectId: "next", fusedScore: 0.7 });
+
+    const result = applyDeliverySelection([nextUnique, alternate, preferred]);
+
+    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
+      .toEqual(["shared", "shared", "next"]);
+    expect(result.rankByCandidateKey.get("workspace_local:memory_entry:shared")).toBe(1);
+    expect(result.rankByCandidateKey.get("evidence:memory_entry:shared")).toBe(2);
   });
 
 });

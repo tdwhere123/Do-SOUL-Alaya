@@ -27,11 +27,25 @@ export interface EvidenceCapsuleKeywordHit {
   readonly normalized_rank: number;
 }
 
+export interface EvidenceSourceAnchor {
+  readonly evidence_object_id: string;
+  readonly artifact_ref: string;
+}
+
+interface EvidenceSourceAnchorRow {
+  readonly evidence_object_id: string;
+  readonly artifact_ref: string | null;
+}
+
 export interface EvidenceCapsuleRepo {
   create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findSourceAnchorsByIds(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly EvidenceSourceAnchor[]>;
   findByRunIdPage?(
     runId: string,
     page: EvidenceCapsuleListPageOptions
@@ -221,6 +235,36 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
+  public async findSourceAnchorsByIds(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly EvidenceSourceAnchor[]> {
+    const ids = uniqueNonEmpty(evidenceObjectIds);
+    if (ids.length === 0) return [];
+    try {
+      const rows: EvidenceSourceAnchorRow[] = [];
+      for (let offset = 0; offset < ids.length; offset += 500) {
+        const chunk = ids.slice(offset, offset + 500);
+        const placeholders = chunk.map(() => "?").join(", ");
+        rows.push(...this.db.connection.prepare(
+          `SELECT object_id AS evidence_object_id,
+                  CASE WHEN json_valid(physical_anchor) THEN
+                    CASE WHEN json_type(physical_anchor, '$.artifact_ref') = 'text' THEN
+                      NULLIF(trim(json_extract(physical_anchor, '$.artifact_ref')), '')
+                    ELSE NULL END
+                  ELSE NULL END AS artifact_ref
+           FROM evidence_capsules
+           WHERE workspace_id = ? AND object_id IN (${placeholders})`
+        ).all(workspaceId, ...chunk) as EvidenceSourceAnchorRow[]);
+      }
+      return sortSourceAnchors(rows.filter(
+        (row): row is EvidenceSourceAnchor => row.artifact_ref !== null
+      ));
+    } catch (error) {
+      throw new StorageError("QUERY_FAILED", "Failed to load evidence source anchors by ids.", error);
+    }
+  }
+
   public async findByRunId(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
     return await this.findByRunIdPage(runId, DEFAULT_EVIDENCE_PAGE);
   }
@@ -359,4 +403,14 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       throw new StorageError("QUERY_FAILED", `Failed to update evidence health for ${objectId}.`, error);
     }
   }
+}
+
+function uniqueNonEmpty(values: readonly string[]): readonly string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
+}
+
+function sortSourceAnchors(rows: readonly EvidenceSourceAnchor[]): readonly EvidenceSourceAnchor[] {
+  return [...rows].sort((left, right) =>
+    left.evidence_object_id.localeCompare(right.evidence_object_id)
+  );
 }

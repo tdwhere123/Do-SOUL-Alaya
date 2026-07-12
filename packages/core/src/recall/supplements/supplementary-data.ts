@@ -62,8 +62,9 @@ export async function collectSupplementaryData(
   params: CollectSupplementaryDataParams
 ): Promise<RecallSupplementaryData> {
   const candidates = params.candidates;
-  const graphSupportCounts = await collectGraphSupportCounts(params);
-  const recallEdgeCounts = await collectRecallEdgeCounts(params);
+  const graphMetrics = await collectGraphMetrics(params);
+  const graphSupportCounts = graphMetrics.graphSupportCounts;
+  const recallEdgeCounts = graphMetrics.recallEdgeCounts;
   const budgetPenaltyFactor = await collectBudgetPenaltyFactor(params);
   const plasticityFactors = await collectPlasticityFactors(params);
   const coldMetrics = computeColdGraphPathMetrics(params, graphSupportCounts, recallEdgeCounts, plasticityFactors);
@@ -96,6 +97,55 @@ export async function collectSupplementaryData(
     pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
     querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
   });
+}
+
+async function collectGraphMetrics(
+  params: CollectSupplementaryDataParams
+): Promise<Readonly<{
+  readonly graphSupportCounts: Record<string, number>;
+  readonly recallEdgeCounts: Record<string, number>;
+}>> {
+  const bulkReader = params.dependencies.graphSupportPort?.countInboundRecallMetricsByMemoryId;
+  if (bulkReader === undefined) {
+    return collectLegacyGraphMetrics(params);
+  }
+  try {
+    const metrics = await bulkReader.call(
+      params.dependencies.graphSupportPort,
+      params.candidates.map((candidate) => candidate.object_id),
+      params.workspaceId
+    );
+    return Object.freeze({
+      graphSupportCounts: Object.fromEntries(params.candidates.map((candidate) => [
+        candidate.object_id,
+        metrics.get(candidate.object_id)?.weightedEdgeCount ?? 0
+      ])),
+      recallEdgeCounts: Object.fromEntries(params.candidates.map((candidate) => [
+        candidate.object_id,
+        metrics.get(candidate.object_id)?.recallCount ?? 0
+      ]))
+    });
+  } catch (error) {
+    params.warn("bulk graph metrics lookup failed; using legacy lookups", {
+      workspace_id: params.workspaceId,
+      candidate_count: params.candidates.length,
+      operation: "bulk_graph_metrics_lookup",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    });
+    return collectLegacyGraphMetrics(params);
+  }
+}
+
+async function collectLegacyGraphMetrics(
+  params: CollectSupplementaryDataParams
+): Promise<Readonly<{
+  readonly graphSupportCounts: Record<string, number>;
+  readonly recallEdgeCounts: Record<string, number>;
+}>> {
+  const graphSupportCounts = await collectGraphSupportCounts(params);
+  const recallEdgeCounts = await collectRecallEdgeCounts(params);
+  return Object.freeze({ graphSupportCounts, recallEdgeCounts });
 }
 
 async function collectEvidenceAndGovernanceData(

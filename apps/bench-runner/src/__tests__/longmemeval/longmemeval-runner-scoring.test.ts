@@ -38,6 +38,30 @@ import {
 
 let tmpDir: string;
 
+function answerFeatures(content: string) {
+  return {
+    content,
+    evidence_gist: null,
+    evidence_gist_truncated: false,
+    domain_tags: [],
+    evidence_refs: [],
+    facet_tags: [],
+    canonical_entities: [],
+    projection_schema_version: null,
+    event_time_start: null,
+    event_time_end: null,
+    valid_from: null,
+    valid_to: null,
+    time_precision: null,
+    time_source: null,
+    preference_subject: null,
+    preference_predicate: null,
+    preference_object: null,
+    preference_category: null,
+    preference_polarity: null
+  };
+}
+
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "lme-test-"));
   // These runs take the no-credentials offline seed path; the model value is
@@ -308,6 +332,142 @@ describe("LongMemEval runner", () => {
     const metrics = buildLongMemEvalQualityMetrics([row]);
     expect(metrics.no_gold_count).toBe(1);
     expect(metrics.candidate_absent_count).toBe(0);
+  });
+
+  it("keeps one gold memory scorable when multiple recall planes admit it", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-multiplane-gold",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "memory-gold", rank: 1, relevance_score: 0.9 }],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            {
+              candidate_key: "lexical:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "lexical"
+            },
+            {
+              candidate_key: "evidence_anchor:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "evidence_anchor"
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.candidate_key_collisions).toHaveLength(1);
+    expect(row.cohort_ledger).toMatchObject({
+      measurement_status: "scorable",
+      evaluator_gold_identity: { status: "present" },
+      evaluation_issue_reason: null,
+      retrieval_status: "hit_at_5"
+    });
+  });
+
+  it.each([
+    [
+      "object kind",
+      {
+        candidate_key: "evidence_anchor:synthesis_capsule:memory-gold",
+        object_id: "memory-gold",
+        object_kind: "synthesis_capsule",
+        origin_plane: "evidence_anchor"
+      }
+    ],
+    [
+      "identity field",
+      {
+        candidate_key: "evidence_anchor:memory_entry:memory-gold",
+        object_id: "memory-gold",
+        object_kind: "memory_entry",
+        origin_plane: "evidence_anchor",
+        created_at: "2026-07-12T01:00:00.000Z"
+      }
+    ]
+  ])("fails closed when duplicate gold candidates conflict on %s", (_label, conflicting) => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-conflicting-gold-identity",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "memory-gold", rank: 1, relevance_score: 0.9 }],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            {
+              candidate_key: "lexical:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "lexical",
+              created_at: "2026-07-12T00:00:00.000Z"
+            },
+            conflicting
+          ]
+        }
+      }
+    });
+
+    expect(row.candidate_key_collisions).toHaveLength(1);
+    expect(row.cohort_ledger).toMatchObject({
+      measurement_status: "evaluator_identity_unscorable",
+      evaluator_gold_identity: { status: "ambiguous" },
+      evaluation_issue_reason: "identity_join_error",
+      retrieval_status: "not_applicable"
+    });
+  });
+
+  it("fails closed when duplicate gold candidates contradict answer features", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-conflicting-answer-features",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "memory-gold", rank: 1, relevance_score: 0.9 }],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            {
+              candidate_key: "lexical:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "lexical",
+              answer_features: answerFeatures("first canonical content")
+            },
+            {
+              candidate_key: "evidence_anchor:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "evidence_anchor",
+              answer_features: answerFeatures("contradictory canonical content")
+            }
+          ]
+        }
+      }
+    });
+
+    expect(row.cohort_ledger).toMatchObject({
+      measurement_status: "evaluator_identity_unscorable",
+      evaluator_gold_identity: { status: "ambiguous" },
+      evaluation_issue_reason: "identity_join_error"
+    });
   });
 
   it("invalidates an abstention row that carries evaluator gold identity", () => {

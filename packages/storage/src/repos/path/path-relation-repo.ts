@@ -15,6 +15,7 @@ import {
   findPathRelationsByAnchor,
   findPathRelationsByAnchors,
   findPathRelationsByBackingObjectId,
+  findPathRelationsByBackingObjectIds,
   findPathRelationsByTargetAnchor,
   findPathRelationsByWorkspace,
   findPathRelationsByWorkspacePage,
@@ -212,6 +213,13 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
     objectId: string
   ): Promise<readonly Readonly<PathRelation>[]> {
     return await findPathRelationsByBackingObjectId(this.queryContext(), workspaceId, objectId);
+  }
+
+  public async findByBackingObjectIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<readonly Readonly<PathRelation>[]> {
+    return await findPathRelationsByBackingObjectIds(this.queryContext(), workspaceId, objectIds);
   }
 
   /**

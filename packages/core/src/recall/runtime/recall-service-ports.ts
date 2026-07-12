@@ -42,6 +42,11 @@ export interface RecallMemoryListPageOptions {
   readonly offset: number;
 }
 
+export interface RecallEvidenceSourceAnchor {
+  readonly evidence_object_id: string;
+  readonly artifact_ref: string;
+}
+
 export interface RecallServiceMemoryRepoPort {
   findByWorkspaceId(
     workspaceId: string,
@@ -87,6 +92,10 @@ export interface RecallServiceEvidenceSearchPort {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findSourceAnchorsByIds?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly RecallEvidenceSourceAnchor[]>;
 }
 
 // Synthesis FTS port (impl SqliteSynthesisCapsuleRepo, migration 079); synthesis rows route as capsules and expand source_memory_refs into candidates, but are not themselves delivered. see also: storage/repos/capsules/synthesis-capsule-repo.ts.
@@ -119,6 +128,13 @@ export interface RecallServiceGraphSupportPort {
   countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
   // Inbound RECALLS edges only; cold-mode transfer uses this as explicit evidence of recall graph activity.
   countInboundRecalls?(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundRecallMetricsByMemoryId?(
+    memoryIds: readonly string[],
+    workspaceId: string
+  ): Promise<ReadonlyMap<string, Readonly<{
+    readonly weightedEdgeCount: number;
+    readonly recallCount: number;
+  }>>>;
 }
 
 export interface RecallServiceBudgetPenaltyPort {
