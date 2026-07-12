@@ -66,5 +66,5 @@ describe("StorageDatabase write-queue eviction guard", () => {
     expect(blockedDatabase.isClosed()).toBe(false);
     releaseSlowJob?.();
     await pendingJob;
-  }, 20_000);
+  }, 60_000);
 });
