@@ -7,13 +7,8 @@ import {
   wrapAppendError
 } from "./event-log-append.js";
 import {
-  queryBoundedAll as executeBoundedEventLogQuery,
-  wrapBoundedQueryError
-} from "./event-log-bounded-query.js";
-import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   DEFAULT_EVENT_LOG_PAGE,
-  EVENT_LOG_ALL_QUERY_HARD_MAX,
   parseEventLogEntryRow,
   parseEventLogPage,
   type CountRow,
@@ -34,6 +29,7 @@ import {
   executeQueryNarrativeDigestPayloadsByRun,
   wrapGovernanceQueryError
 } from "./event-log-governance-queries.js";
+import { queryEventLogScopeAll } from "./event-log-scope-queries.js";
 import type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
 
 export type { EventLogAppendInput, EventLogPageOptions, EventLogRepo } from "./event-log-types.js";
@@ -94,17 +90,11 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByEntityAll(entityType: string, entityId: string): Promise<readonly EventLogEntry[]> {
-    return await this.queryBoundedAll(
-      () =>
-        this.activeStatements().queryByEntityPagedStatement.all(
-          entityType,
-          entityId,
-          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
-          0
-        ) as EventLogRow[],
-      "entity",
-      `${entityType}:${entityId}`
-    );
+    return await queryEventLogScopeAll(() => this.activeStatements(), {
+      kind: "entity",
+      entityType,
+      entityId
+    });
   }
 
   public async queryByEntityPage(
@@ -132,16 +122,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByRunAll(runId: string): Promise<readonly EventLogEntry[]> {
-    return await this.queryBoundedAll(
-      () =>
-        this.activeStatements().queryByRunPagedStatement.all(
-          runId,
-          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
-          0
-        ) as EventLogRow[],
-      "run",
-      runId
-    );
+    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "run", runId });
   }
 
   public async queryNarrativeDigestPayloadsByRun(
@@ -265,16 +246,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
   }
 
   public async queryByWorkspaceAll(workspaceId: string): Promise<readonly EventLogEntry[]> {
-    return await this.queryBoundedAll(
-      () =>
-        this.activeStatements().queryByWorkspacePagedStatement.all(
-          workspaceId,
-          EVENT_LOG_ALL_QUERY_HARD_MAX + 1,
-          0
-        ) as EventLogRow[],
-      "workspace",
-      workspaceId
-    );
+    return await queryEventLogScopeAll(() => this.activeStatements(), { kind: "workspace", workspaceId });
   }
 
   public async queryByWorkspacePage(
@@ -479,18 +451,6 @@ export class SqliteEventLogRepo implements EventLogRepo {
       return row?.event_id ?? null;
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to get latest workspace event ID.", error);
-    }
-  }
-
-  private async queryBoundedAll(
-    loadRows: () => EventLogRow[],
-    scopeKind: "entity" | "run" | "workspace",
-    scopeId: string
-  ): Promise<readonly EventLogEntry[]> {
-    try {
-      return executeBoundedEventLogQuery(loadRows, scopeKind, scopeId);
-    } catch (error) {
-      wrapBoundedQueryError(scopeKind, error);
     }
   }
 

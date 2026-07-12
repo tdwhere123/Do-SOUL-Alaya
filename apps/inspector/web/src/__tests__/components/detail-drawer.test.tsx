@@ -56,6 +56,26 @@ describe("DetailDrawer", () => {
     expect(screen.getByText("Metadata")).toBeTruthy();
   });
 
+  it("hides the closed drawer from complementary landmarks", () => {
+    const onClose = vi.fn();
+    const view = renderDrawer({ onClose });
+
+    expect(screen.getByRole("complementary").getAttribute("aria-hidden")).toBe("false");
+
+    view.rerender(
+      <DetailDrawer
+        node={null}
+        onClose={onClose}
+        onFocusSubgraph={vi.fn()}
+        onCopyCli={vi.fn()}
+        onCreateProposal={vi.fn(async () => undefined)}
+      />
+    );
+
+    expect(document.querySelector('[role="complementary"]')?.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.queryByRole("complementary")).toBeNull();
+  });
+
   it("creates a rewrite proposal through the parent callback", async () => {
     const onCreateProposal = vi.fn(async () => undefined);
     renderDrawer({ onCreateProposal });

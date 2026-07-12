@@ -204,6 +204,44 @@ describe("EmbeddingSupplementForm", () => {
     expect(patchCalls).toHaveLength(1);
   });
 
+  it("preserves edits made while the commit request is in flight", async () => {
+    let resolvePatch: (response: Response) => void = () => undefined;
+    const pendingPatch = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") return pendingPatch;
+      if (String(url).includes("/embedding-status/")) return jsonResponse(degradedNullEmbeddingStatus());
+      return jsonResponse({
+        provider_url: null,
+        model_id: null,
+        secret_ref: null,
+        embedding_enabled: false
+      });
+    });
+
+    renderForm();
+    const providerInput = await screen.findByPlaceholderText("https://api.openai.com/v1");
+    await userEvent.type(providerInput, "https://old.example");
+    await userEvent.click(screen.getByRole("button", { name: /commit embedding/i }));
+    await userEvent.clear(providerInput);
+    await userEvent.type(providerInput, "https://new.example");
+
+    resolvePatch(
+      jsonResponse({
+        success: true,
+        data: {
+          provider_url: "https://old.example",
+          model_id: null,
+          secret_ref: null,
+          embedding_enabled: false
+        }
+      })
+    );
+
+    await waitFor(() => expect(screen.getByDisplayValue("https://new.example")).toBeTruthy());
+  });
+
   it("submits paste mode and switches to returned file ref without displaying plaintext", async () => {
     const plaintext = "sk-test-plaintext-secret";
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {

@@ -1,4 +1,5 @@
 import type { EmbeddingProviderPort } from "./types.js";
+import { AlayaError } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_EMBEDDING_REQUEST_MAX_ATTEMPTS,
   DEFAULT_EMBEDDING_REQUEST_RETRY_DELAY_MS,
@@ -327,9 +328,10 @@ export class OpenAIEmbeddingClient implements EmbeddingProviderPort {
   }
 }
 
-class EmbeddingTransportBackstopError extends Error {
+class EmbeddingTransportBackstopError extends AlayaError {
   public constructor(baseUrl: string, backstopMs: number) {
     super(
+      "EMBEDDING_TRANSPORT_BACKSTOP",
       `Embedding request transport stalled past ${backstopMs}ms backstop for host ${formatEmbeddingHost(baseUrl)}.`
     );
     this.name = "EmbeddingTransportBackstopError";

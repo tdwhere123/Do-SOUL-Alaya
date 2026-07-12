@@ -1,5 +1,9 @@
 import type { CanonicalAliasMap, BootstrappingPathTemplate } from "@do-soul/alaya-protocol";
 
+export const DEFAULT_DAEMON_HOST = "127.0.0.1";
+export const DEFAULT_DAEMON_PORT = 5173;
+export const DEFAULT_DAEMON_ALLOWED_ORIGIN = `http://localhost:${DEFAULT_DAEMON_PORT}`;
+
 export const defaultCanonicalAliasMap: CanonicalAliasMap = {
   "governance_subject.domain": [
     {

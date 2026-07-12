@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import {
   EmbeddingStatusSchema,
   type EmbeddingStatus,
@@ -62,17 +62,23 @@ export function useEmbeddingSupplementState(props: {
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus | null>(null);
+  const fieldsRevisionRef = useRef(0);
+  const updateFields = useCallback((next: SetStateAction<EmbeddingFormFields>) => {
+    fieldsRevisionRef.current += 1;
+    setFields(next);
+  }, []);
   const refreshEmbeddingStatus = useEmbeddingStatusRefresh(workspaceId, setEmbeddingStatus);
 
   useEffect(() => {
-    return loadEmbeddingConfig({ workspaceId, showToast, refreshEmbeddingStatus, setFields, setInitial, setLoading });
-  }, [refreshEmbeddingStatus, showToast, workspaceId]);
+    return loadEmbeddingConfig({ workspaceId, showToast, refreshEmbeddingStatus, setFields: updateFields, setInitial, setLoading });
+  }, [refreshEmbeddingStatus, showToast, updateFields, workspaceId]);
 
   const dirty = useMemo(() => isEmbeddingDirty(initial, fields), [fields, initial]);
   const handleSave = useCallback(
     () =>
       saveEmbeddingConfig({
         fields,
+        fieldsRevisionRef,
         onRequiresRestart,
         showToast,
         setFields,
@@ -91,7 +97,7 @@ export function useEmbeddingSupplementState(props: {
     loading,
     revealFile,
     saving,
-    setFields,
+    setFields: updateFields,
     setRevealFile,
     setValidationError,
     validationError
@@ -102,13 +108,13 @@ function useEmbeddingStatusRefresh(
   workspaceId: string,
   setEmbeddingStatus: (status: EmbeddingStatus | null) => void
 ) {
-  return useCallback(async () => {
+  return useCallback(async (isCancelled: () => boolean = () => false) => {
     try {
       const envelope = await apiFetch<{ data?: unknown }>(`/embedding-status/${workspaceId}`);
       const parsed = EmbeddingStatusSchema.safeParse(envelope.data);
-      if (parsed.success) setEmbeddingStatus(parsed.data);
+      if (!isCancelled() && parsed.success) setEmbeddingStatus(parsed.data);
     } catch {
-      setEmbeddingStatus(null);
+      if (!isCancelled()) setEmbeddingStatus(null);
     }
   }, [setEmbeddingStatus, workspaceId]);
 }
@@ -116,7 +122,7 @@ function useEmbeddingStatusRefresh(
 function loadEmbeddingConfig(props: {
   readonly workspaceId: string;
   readonly showToast: ShowToast;
-  readonly refreshEmbeddingStatus: () => Promise<void>;
+  readonly refreshEmbeddingStatus: (isCancelled?: () => boolean) => Promise<void>;
   readonly setFields: Dispatch<SetStateAction<EmbeddingFormFields>>;
   readonly setInitial: (config: RuntimeEmbeddingConfig | null) => void;
   readonly setLoading: (loading: boolean) => void;
@@ -129,14 +135,14 @@ function loadEmbeddingConfig(props: {
       props.setInitial(data);
       props.setFields(fieldsFromEmbeddingConfig(data));
     } catch (err) {
-      if ((err as ApiError).status !== 401) {
+      if (!cancelled && (err as ApiError).status !== 401) {
         props.showToast({ message: `Failed to load embedding config: ${(err as Error).message}`, type: "error" });
       }
       return;
     } finally {
       if (!cancelled) props.setLoading(false);
     }
-    if (!cancelled) await props.refreshEmbeddingStatus();
+    if (!cancelled) await props.refreshEmbeddingStatus(() => cancelled);
   })();
   return () => {
     cancelled = true;
@@ -145,6 +151,7 @@ function loadEmbeddingConfig(props: {
 
 async function saveEmbeddingConfig(props: {
   readonly fields: EmbeddingFormFields;
+  readonly fieldsRevisionRef: MutableRefObject<number>;
   readonly onRequiresRestart: () => void;
   readonly showToast: ShowToast;
   readonly setFields: Dispatch<SetStateAction<EmbeddingFormFields>>;
@@ -161,8 +168,9 @@ async function saveEmbeddingConfig(props: {
   }
   props.setValidationError(null);
   props.setSaving(true);
+  const fieldsRevision = props.fieldsRevisionRef.current;
   try {
-    await patchRuntimeEmbeddingConfig(props);
+    await patchRuntimeEmbeddingConfig({ ...props, fieldsRevision });
   } catch (err) {
     if ((err as ApiError).status !== 401) {
       props.showToast({ message: `Failed to patch embedding: ${(err as Error).message}`, type: "error" });
@@ -174,6 +182,8 @@ async function saveEmbeddingConfig(props: {
 
 async function patchRuntimeEmbeddingConfig(props: {
   readonly fields: EmbeddingFormFields;
+  readonly fieldsRevision: number;
+  readonly fieldsRevisionRef: MutableRefObject<number>;
   readonly onRequiresRestart: () => void;
   readonly showToast: ShowToast;
   readonly setFields: Dispatch<SetStateAction<EmbeddingFormFields>>;
@@ -194,7 +204,9 @@ async function patchRuntimeEmbeddingConfig(props: {
   if (result.requires_daemon_restart) props.onRequiresRestart();
   const nextInitial = nextEmbeddingInitial(props.fields, secretPatch.secret_ref ?? null, sanitized);
   props.setInitial(nextInitial);
-  props.setFields(fieldsFromEmbeddingConfig(nextInitial));
+  if (props.fieldsRevisionRef.current === props.fieldsRevision) {
+    props.setFields(fieldsFromEmbeddingConfig(nextInitial));
+  }
 }
 
 async function fetchRuntimeEmbeddingConfig(workspaceId: string): Promise<RuntimeEmbeddingConfig> {

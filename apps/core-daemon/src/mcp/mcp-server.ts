@@ -28,6 +28,7 @@ import type {
 export interface AlayaMcpServerOptions {
   readonly memoryToolHandler: McpMemoryToolHandler;
   readonly contextProvider: () => McpMemoryToolCallContext;
+  readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   readonly tools?: readonly AlayaMemoryToolDefinition[];
   readonly version?: string;
 }
@@ -89,15 +90,35 @@ export function createAlayaMcpToolsResult(tools: readonly AlayaMemoryToolDefinit
 }
 
 export async function callAlayaMcpMemoryTool(
-  options: Pick<AlayaMcpServerOptions, "memoryToolHandler" | "contextProvider">,
+  options: Pick<AlayaMcpServerOptions, "memoryToolHandler" | "contextProvider" | "warn">,
   toolName: string,
   rawArguments: unknown
 ): Promise<CallToolResult> {
-  const result = await options.memoryToolHandler.call({
-    toolName,
-    arguments: rawArguments,
-    context: options.contextProvider()
-  });
+  let result: Awaited<ReturnType<McpMemoryToolHandler["call"]>>;
+  try {
+    result = await options.memoryToolHandler.call({
+      toolName,
+      arguments: rawArguments,
+      context: options.contextProvider()
+    });
+  } catch (error) {
+    options.warn?.("MCP memory tool handler rejected", {
+      error: error instanceof Error ? error.message : String(error),
+      toolName
+    });
+    const payload = {
+      ok: false as const,
+      error: {
+        code: "INTERNAL" as const,
+        message: "Unexpected MCP tool failure"
+      }
+    };
+    return {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload
+    };
+  }
 
   if (!result.ok) {
     const payload = {

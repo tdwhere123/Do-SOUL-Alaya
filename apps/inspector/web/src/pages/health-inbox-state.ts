@@ -85,8 +85,11 @@ function useRefreshHealthInbox(
 ) {
   return useCallback(async () => {
     setRefreshing(true);
-    await refetch("background");
-    setRefreshing(false);
+    try {
+      await refetch("background");
+    } finally {
+      setRefreshing(false);
+    }
   }, [refetch, setRefreshing]);
 }
 

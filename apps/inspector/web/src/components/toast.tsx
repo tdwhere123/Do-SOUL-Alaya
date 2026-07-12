@@ -11,6 +11,7 @@ import {
 import { AlertCircle, AlertTriangle, CheckCircle, Info, X } from "lucide-react";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { useI18n } from "../i18n/locale";
 
 function cn(...inputs: unknown[]): string {
   return twMerge(clsx(inputs));
@@ -99,6 +100,7 @@ export function useToasts(): ToastContextValue {
 }
 
 function ToastItem({ toast, onClose }: { toast: ToastEntry; onClose: () => void }) {
+  const { t } = useI18n();
   const [visible, setVisible] = useState(false);
   const duration = toast.duration ?? 5000;
 
@@ -126,6 +128,7 @@ function ToastItem({ toast, onClose }: { toast: ToastEntry; onClose: () => void 
       <div className="flex-1 text-sm font-mono text-ink-700">{toast.message}</div>
       {toast.action ? (
         <button
+          type="button"
           onClick={toast.action.onClick}
           className="px-2 py-1 text-xs font-bold uppercase tracking-wider text-ink-600 hover:bg-beige-200 rounded transition-colors"
         >
@@ -133,12 +136,13 @@ function ToastItem({ toast, onClose }: { toast: ToastEntry; onClose: () => void 
         </button>
       ) : null}
       <button
+        type="button"
         onClick={() => {
           setVisible(false);
           setTimeout(onClose, 250);
         }}
         className="text-ink-700/40 hover:text-ink-700 transition-colors"
-        aria-label="Dismiss notification"
+        aria-label={t("toast:dismiss")}
       >
         <X className="w-4 h-4" />
       </button>

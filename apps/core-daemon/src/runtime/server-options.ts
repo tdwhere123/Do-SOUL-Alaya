@@ -1,4 +1,4 @@
-const DEFAULT_DAEMON_HOST = "127.0.0.1";
+import { DEFAULT_DAEMON_HOST } from "./daemon-defaults.js";
 
 type DaemonHostEnvLike = {
   DAEMON_HOST?: string;

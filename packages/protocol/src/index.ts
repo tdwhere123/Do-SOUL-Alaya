@@ -140,6 +140,7 @@ export * from "./runtime/node-template.js";
 export * from "./workers/auditor-ports.js";
 export * from "./shared/read-error-message.js";
 export { AlayaError, type AlayaErrorOptions } from "./shared/alaya-error.js";
+export { deepFreeze } from "./shared/deep-freeze.js";
 export {
   BoundedJsonObjectSchema,
   IsoDatetimeStringSchema,

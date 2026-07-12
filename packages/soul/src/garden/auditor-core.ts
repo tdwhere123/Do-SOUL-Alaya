@@ -3,6 +3,7 @@ import {
   GardenRole,
   GardenTier,
   HealthIssueResolutionState,
+  AlayaError,
   type EventLogEntry,
   type GardenRoleValue,
   type GardenTaskDescriptor,
@@ -24,12 +25,15 @@ export function addMillisecondsIso(isoTimestamp: string, deltaMs: number): strin
   return new Date(new Date(isoTimestamp).getTime() + deltaMs).toISOString();
 }
 
-export class GreenRevokeNoopError extends Error {
+export class GreenRevokeNoopError extends AlayaError {
   public readonly memoryEntryId: string;
   public readonly workspaceId: string;
 
   public constructor(memoryEntryId: string, workspaceId: string) {
-    super(`revokeGreen affected zero rows for memory ${memoryEntryId} in workspace ${workspaceId}`);
+    super(
+      "GREEN_REVOKE_NOOP",
+      `revokeGreen affected zero rows for memory ${memoryEntryId} in workspace ${workspaceId}`
+    );
     this.name = "GreenRevokeNoopError";
     this.memoryEntryId = memoryEntryId;
     this.workspaceId = workspaceId;

@@ -41,6 +41,7 @@ describe("StatusPage", () => {
     );
     renderStatus();
     await waitFor(() => screen.getByText(/OPERATIONAL/i));
+    expect(screen.getByRole("button", { name: "Refresh now" }).getAttribute("type")).toBe("button");
   });
 
   it("shows OFFLINE when daemon.ready=false (no longer misreads as OPERATIONAL)", async () => {

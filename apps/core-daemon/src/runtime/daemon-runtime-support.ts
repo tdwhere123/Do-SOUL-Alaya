@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon-defaults.js";
 import { readFile } from "node:fs/promises";
 import {
   AcceptedBy,
@@ -82,7 +83,7 @@ export function createRequestProtection(
     allowedOrigin:
       allowedOrigin !== undefined && allowedOrigin.length > 0
         ? allowedOrigin
-        : "http://localhost:5173",
+        : DEFAULT_DAEMON_ALLOWED_ORIGIN,
     requestToken:
       configuredRequestToken !== undefined && configuredRequestToken.length > 0
         ? configuredRequestToken

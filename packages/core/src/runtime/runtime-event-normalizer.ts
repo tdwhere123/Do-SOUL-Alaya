@@ -1,5 +1,6 @@
 import type { EventLogEntry, RuntimeEvent } from "@do-soul/alaya-protocol";
 import {
+  AlayaError,
   WorkerRuntimeEventType,
   WorkerMessageDeltaPayloadSchema,
   WorkerPatchEmittedPayloadSchema,
@@ -39,11 +40,11 @@ interface PendingNormalizedNotification {
   readonly retry?: Promise<Readonly<EventLogEntry>>;
 }
 
-export class RuntimeEventNormalizerPropagationError extends Error {
+export class RuntimeEventNormalizerPropagationError extends AlayaError {
   public readonly entry: EventLogEntry;
 
   public constructor(entry: EventLogEntry, cause: unknown) {
-    super(`Runtime event ${entry.event_type} was appended but notification failed.`, {
+    super("RUNTIME_EVENT_NORMALIZER_PROPAGATION_FAILED", `Runtime event ${entry.event_type} was appended but notification failed.`, {
       cause: cause instanceof Error ? cause : undefined
     });
     this.name = "RuntimeEventNormalizerPropagationError";

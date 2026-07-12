@@ -1,6 +1,7 @@
 import { AlertTriangle, Save } from "lucide-react";
 import type { EmbeddingStatus } from "@do-soul/alaya-protocol";
 import { useToasts } from "./toast";
+import { useI18n } from "../i18n/locale";
 import {
   FieldRow,
   SecretRefField,
@@ -19,9 +20,10 @@ interface Props {
 
 export default function EmbeddingSupplementForm({ onRequiresRestart, workspaceId }: Props) {
   const { showToast } = useToasts();
+  const { t } = useI18n();
   const state = useEmbeddingSupplementState({ onRequiresRestart, showToast, workspaceId });
   if (state.loading) {
-    return <LoadingConfig label="Loading Embedding Supplement..." />;
+    return <LoadingConfig label={t("config:loading.embeddingSupplement")} />;
   }
   return <EmbeddingSupplementEditor state={state} />;
 }
@@ -30,6 +32,7 @@ function EmbeddingSupplementEditor(props: {
   readonly state: ReturnType<typeof useEmbeddingSupplementState>;
 }) {
   const { state } = props;
+  const { t } = useI18n();
   const setField = <K extends keyof EmbeddingFormFields>(key: K, value: EmbeddingFormFields[K]) =>
     state.setFields((current) => ({ ...current, [key]: value }));
 
@@ -42,7 +45,7 @@ function EmbeddingSupplementEditor(props: {
         dirty={state.dirty}
         saving={state.saving}
         validationError={state.validationError}
-        label="Commit Embedding"
+        label={t("config:action.commitEmbedding")}
         onSave={state.handleSave}
       />
     </div>
@@ -53,26 +56,27 @@ function EmbeddingPrimaryFields(props: {
   readonly fields: EmbeddingFormFields;
   readonly setField: <K extends keyof EmbeddingFormFields>(key: K, value: EmbeddingFormFields[K]) => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <FieldRow label="provider url">
+      <FieldRow label={t("config:field.providerUrl")}>
         <ConfigTextInput
           value={props.fields.providerUrl}
           onChange={(value) => props.setField("providerUrl", value)}
           placeholder="https://api.openai.com/v1"
         />
       </FieldRow>
-      <FieldRow label="model id">
+      <FieldRow label={t("config:field.modelId")}>
         <ConfigTextInput
           value={props.fields.modelId}
           onChange={(value) => props.setField("modelId", value)}
           placeholder="text-embedding-3-small"
         />
       </FieldRow>
-      <FieldRow label="embedding enabled">
+      <FieldRow label={t("config:field.embeddingEnabled")}>
         <ToggleSwitch
           enabled={props.fields.embeddingEnabled}
-          label="Toggle embedding"
+          label={t("config:field.toggle", { field: t("config:field.embeddingEnabled") })}
           onToggle={() => props.setField("embeddingEnabled", !props.fields.embeddingEnabled)}
         />
       </FieldRow>
@@ -84,8 +88,9 @@ function EmbeddingSecretField(props: {
   readonly state: ReturnType<typeof useEmbeddingSupplementState>;
   readonly setField: <K extends keyof EmbeddingFormFields>(key: K, value: EmbeddingFormFields[K]) => void;
 }) {
+  const { t } = useI18n();
   return (
-    <FieldRow label="secret ref">
+    <FieldRow label={t("config:field.secretRef")}>
       <SecretRefField
         mode={props.state.fields.secretMode}
         value={props.state.fields.secretValue}
@@ -131,23 +136,25 @@ export function CommitConfigRow(props: {
   readonly label: string;
   readonly onSave: () => Promise<void>;
 }) {
+  const { t } = useI18n();
   return (
     <div className="pt-4 flex items-center justify-between">
       <span className="text-[10px] text-ink-700/40 uppercase tracking-widest">
-        {props.dirty ? "unsaved changes" : "in sync with daemon"}
+        {props.dirty ? t("config:dirty.unsaved") : t("config:dirty.synced")}
       </span>
       <button
         onClick={() => void props.onSave()}
         disabled={props.saving || !props.dirty || props.validationError !== null}
         className="flex items-center gap-2 px-4 py-2 bg-ink-600 text-beige-50 rounded text-xs font-bold uppercase tracking-widest hover:bg-ink-700 disabled:opacity-40 transition-colors"
       >
-        {props.saving ? "Saving..." : <><Save className="w-4 h-4" />{props.label}</>}
+        {props.saving ? t("config:action.saving") : <><Save className="w-4 h-4" />{props.label}</>}
       </button>
     </div>
   );
 }
 
 function EmbeddingStatusAlert({ status }: { readonly status: EmbeddingStatus | null }) {
+  const { t } = useI18n();
   if (status === null || status.effective_mode !== "degraded") return null;
   return (
     <div
@@ -156,32 +163,34 @@ function EmbeddingStatusAlert({ status }: { readonly status: EmbeddingStatus | n
     >
       <AlertTriangle className="w-4 h-4 mt-0.5 text-morandi-pink shrink-0" />
       <div className="flex-1 space-y-1 min-w-0">
-        <p className="font-bold uppercase tracking-widest">Embedding Degraded</p>
+        <p className="font-bold uppercase tracking-widest">{t("config:embedding.degraded.heading")}</p>
         <p className="text-ink-700/80 break-words">
-          {humanizeDegradedReason(status.degraded_reason)}
+          {humanizeDegradedReason(status.degraded_reason, t)}
         </p>
-        <p className="text-[10px] text-ink-700/50 font-mono">checked {status.checked_at}</p>
+        <p className="text-[10px] text-ink-700/50 font-mono">
+          {t("config:embedding.degraded.checked", { timestamp: status.checked_at })}
+        </p>
       </div>
     </div>
   );
 }
 
-function humanizeDegradedReason(reason: string | null): string {
+function humanizeDegradedReason(reason: string | null, t: ReturnType<typeof useI18n>["t"]): string {
   if (reason === null || reason === "") {
-    return "Embedding marked degraded but no reason was reported. Check daemon logs.";
+    return t("config:embedding.degraded.reason.none");
   }
   switch (reason) {
     case "provider_unconfigured":
-      return "Provider is not configured. Set the secret_ref and re-save, then restart the daemon.";
+      return t("config:embedding.degraded.reason.providerUnconfigured");
     case "storage_unavailable":
-      return "Embedding storage table is missing. Run `alaya doctor` to verify schema migration.";
+      return t("config:embedding.degraded.reason.storageUnavailable");
     case "provider_unavailable":
-      return "Provider rejected our request (auth or network). Verify the secret_ref points to a valid key and the provider URL is reachable.";
+      return t("config:embedding.degraded.reason.providerUnavailable");
     case "query_embedding_failed":
-      return "Provider returned an error when embedding a query. Verify the model id is supported by your endpoint.";
+      return t("config:embedding.degraded.reason.queryEmbeddingFailed");
     case "local_vector_lookup_failed":
-      return "Local embedding vector lookup failed. Restart the daemon; if it persists, run `alaya doctor`.";
+      return t("config:embedding.degraded.reason.localVectorLookupFailed");
     default:
-      return `Provider reports: ${reason}. See daemon logs for the full error.`;
+      return t("config:embedding.degraded.reason.unknown", { reason });
   }
 }

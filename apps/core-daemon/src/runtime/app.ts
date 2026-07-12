@@ -11,6 +11,7 @@ import {
 } from "../middleware/register-security-middleware.js";
 import { applyLazyRequestBodyLimit } from "../middleware/lazy-request-body-limit.js";
 import { createWarnLogger } from "./daemon-runtime-helpers.js";
+import { DEFAULT_DAEMON_ALLOWED_ORIGIN } from "./daemon-defaults.js";
 import { registerErrorHandler, type ErrorLoggerPort } from "../middleware/error-handler.js";
 import { registerBudgetRoutes, type BudgetRouteServices } from "../routes/governance/budget.js";
 import { registerClaimRoutes, type ClaimRouteServices } from "../routes/governance/claims.js";
@@ -223,7 +224,7 @@ function resolveRequestProtectionSettings(
     allowedOrigin:
       requestProtection?.allowedOrigin ??
       process.env.ALLOWED_ORIGIN ??
-      "http://localhost:5173",
+      DEFAULT_DAEMON_ALLOWED_ORIGIN,
     allowDesktopOriginlessRequests:
       requestProtection?.allowDesktopOriginlessRequests ?? true
   };

@@ -89,7 +89,7 @@ function useRecallController() {
   );
   const query = useApiQuery(fetchStats, [workspaceId, windowChoice], {
     enabled: workspaceId !== null,
-    onError: (message) => showToast({ message: `Recall fetch failed: ${message}`, type: "error" })
+    onError: (message) => showToast({ message: t("recall:toast.fetchFailed", { message }), type: "error" })
   });
   const handleRefresh = useCallback(
     () => refreshRecall(query.refetch, refreshState, setRefreshing),
@@ -225,7 +225,7 @@ function WindowToggle(props: {
   readonly t: ReturnType<typeof useI18n>["t"];
 }) {
   return (
-    <div role="group" aria-label="Recall window" data-testid="recall-window-toggle" className="flex items-center gap-1 rounded-full border border-beige-300 bg-beige-50 p-0.5 shadow-sm">
+    <div role="group" aria-label={props.t("recall:window.aria")} data-testid="recall-window-toggle" className="flex items-center gap-1 rounded-full border border-beige-300 bg-beige-50 p-0.5 shadow-sm">
       {(["24h", "7d", "30d"] as const).map((value) => (
         <button key={value} type="button" onClick={() => props.onChoose(value)} aria-pressed={props.choice === value} className={"rounded-full px-2 py-0.5 text-[10px] font-mono uppercase transition-colors " + (props.choice === value ? "bg-ink-600 text-beige-50" : "text-ink-700/60 hover:text-ink-700")}>
           {props.t(WINDOW_LABEL_KEY[value])}

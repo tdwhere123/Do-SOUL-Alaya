@@ -251,7 +251,7 @@ function readFieldCandidates(value: unknown): readonly SchemaGroundedFieldCandid
           field_name: fieldName,
           value: rawValue.slice(0, MAX_FIELD_VALUE_CHARS),
           evidence: evidence.slice(0, MAX_FIELD_EVIDENCE_CHARS),
-          confidence: clampConfidence(readNumber(record.confidence) ?? 0.5)
+          confidence: clampConfidence(readNumber(record.confidence) ?? 0)
         })
       ];
     })

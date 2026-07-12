@@ -382,6 +382,9 @@ async function startMcpStdioSession(
       agentTarget: resolvedAgentTarget,
       sessionId: mcpSessionId
     }),
+    warn: (message, meta) => {
+      ctx.stderr.write(`${message}: ${JSON.stringify(meta)}\n`);
+    },
     stdin: ctx.stdin as unknown as Readable,
     stdout: ctx.stdout as unknown as Writable
   });

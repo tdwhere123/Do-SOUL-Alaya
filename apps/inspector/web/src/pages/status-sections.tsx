@@ -3,16 +3,19 @@ import type { ReactNode } from "react";
 import type { AlayaStatus } from "@do-soul/alaya-protocol";
 import type { useDaemonHealth } from "../hooks/useDaemonHealth";
 import type { DictKey } from "../i18n/dict";
+import { useI18n } from "../i18n/locale";
 
 type Translate = (key: DictKey, params?: Record<string, string | number>) => string;
 
-export function StatusLoadingView() {
+export function StatusLoadingView(props: { readonly t?: Translate } = {}) {
+  const context = useI18n();
+  const t = props.t ?? context.t;
   return (
     <div className="flex-1 flex items-center justify-center bg-beige-100">
       <div className="flex flex-col items-center gap-4">
         <div className="w-10 h-10 border-2 border-ink-600/20 border-t-ink-600 rounded-full animate-spin" />
         <p className="text-ink-600 font-mono text-xs uppercase tracking-widest">
-          Querying Engine Status...
+          {t("status:loading")}
         </p>
       </div>
     </div>
@@ -31,18 +34,18 @@ export function StatusPageShell(props: {
   return (
     <div className="h-full w-full overflow-y-auto">
       <div className="max-w-4xl mx-auto w-full p-8 font-mono">
-        {props.degraded ? <StatusDegradedAlert message={props.degraded} /> : null}
+        {props.degraded ? <StatusDegradedAlert message={props.degraded} t={props.t} /> : null}
         <StatusHeader {...props} />
-        <StatusBody schemaMismatch={props.schemaMismatch} status={props.status} />
+        <StatusBody schemaMismatch={props.schemaMismatch} status={props.status} t={props.t} />
       </div>
     </div>
   );
 }
 
-function StatusDegradedAlert(props: { readonly message: string }) {
+function StatusDegradedAlert(props: { readonly message: string; readonly t: Translate }) {
   return (
     <div role="alert" className="mb-6 px-4 py-2 bg-beige-200/50 border border-beige-300 rounded text-xs text-ink-700/80 font-mono flex items-center justify-between">
-      <span>STATUS_FEED_DEGRADED · backing off to 30s · last: {props.message}</span>
+      <span>{props.t("status:degraded", { message: props.message })}</span>
     </div>
   );
 }
@@ -76,13 +79,13 @@ function StatusRefreshPanel(props: {
     <div className="text-right flex flex-col items-end gap-2">
       <div className={`flex items-center gap-2 justify-end ${props.indicator.colorClass}`} data-testid="health-indicator">
         <div className="w-2 h-2 rounded-full bg-current animate-pulse" />
-        <span className="text-xs font-bold uppercase tracking-wider">{props.indicator.label}</span>
+        <span className="text-xs font-bold uppercase tracking-wider">{statusIndicatorLabel(props.t, props.indicator.label)}</span>
       </div>
-      <button onClick={props.onRefresh} disabled={props.refreshing} className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-700/60 hover:text-ink-700 disabled:opacity-50 transition-colors" aria-label={props.t("common:refresh.aria")}>
+      <button type="button" onClick={props.onRefresh} disabled={props.refreshing} className="flex items-center gap-2 px-3 py-1 text-[10px] uppercase tracking-widest text-ink-700/60 hover:text-ink-700 disabled:opacity-50 transition-colors" aria-label={props.t("common:refresh.aria")}>
         <RotateCcw className={`w-3 h-3 ${props.refreshing ? "animate-spin" : ""}`} />
         {props.t("common:refresh")}
       </button>
-      <p className="text-[10px] text-ink-700/40">LAST_CHECK: {lastCheckedLabel(props.status)}</p>
+      <p className="text-[10px] text-ink-700/40">{props.t("status:lastCheck", { value: lastCheckedLabel(props.t, props.status) })}</p>
     </div>
   );
 }
@@ -90,58 +93,58 @@ function StatusRefreshPanel(props: {
 function StatusBody(props: {
   readonly schemaMismatch: boolean;
   readonly status: AlayaStatus | null;
+  readonly t: Translate;
 }) {
-  if (props.schemaMismatch) return <SchemaMismatchBlock />;
+  if (props.schemaMismatch) return <SchemaMismatchBlock t={props.t} />;
   if (props.status === null) return null;
   return (
     <>
-      <StatusStatsGrid status={props.status} />
+      <StatusStatsGrid status={props.status} t={props.t} />
       <div className="space-y-12">
-        <StartupLog steps={props.status.daemon.startup_steps} />
-        <ActiveServers servers={props.status.mcp.allowed_servers} />
+        <StartupLog steps={props.status.daemon.startup_steps} t={props.t} />
+        <ActiveServers servers={props.status.mcp.allowed_servers} t={props.t} />
       </div>
     </>
   );
 }
 
-function SchemaMismatchBlock() {
+function SchemaMismatchBlock(props: { readonly t: Translate }) {
   return (
     <div className="p-6 bg-beige-50 border border-beige-200 rounded-lg text-sm text-ink-700/80">
-      Status payload schema mismatch (v0.1 contract). Inspector cannot render the
-      telemetry block until the daemon and protocol package agree on <code>AlayaStatusSchema</code>.
+      {props.t("status:schemaMismatch")}
     </div>
   );
 }
 
-function StatusStatsGrid(props: { readonly status: AlayaStatus }) {
+function StatusStatsGrid(props: { readonly status: AlayaStatus; readonly t: Translate }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-      <StatCard icon={<Zap className="w-4 h-4" />} label="Daemon Ready" value={props.status.daemon.ready ? "ACTIVE" : "INITIALIZING"} />
-      <StatCard icon={<Activity className="w-4 h-4" />} label="MCP Tools" value={String(props.status.mcp.enrolled_tools)} />
-      <StatCard icon={<Shield className="w-4 h-4" />} label="Coding Engine" value={props.status.daemon.principal_coding_engine_available ? "AVAIL" : "UNAVAIL"} />
+      <StatCard icon={<Zap className="w-4 h-4" />} label={props.t("status:stat.daemonReady")} value={props.t(props.status.daemon.ready ? "status:value.active" : "status:value.initializing")} />
+      <StatCard icon={<Activity className="w-4 h-4" />} label={props.t("status:stat.mcpTools")} value={String(props.status.mcp.enrolled_tools)} />
+      <StatCard icon={<Shield className="w-4 h-4" />} label={props.t("status:stat.codingEngine")} value={props.t(props.status.daemon.principal_coding_engine_available ? "status:value.available" : "status:value.unavailable")} />
     </div>
   );
 }
 
-function StartupLog(props: { readonly steps: readonly string[] }) {
+function StartupLog(props: { readonly steps: readonly string[]; readonly t: Translate }) {
   return (
     <section>
-      <SectionTitle icon={<Server className="w-5 h-5 text-ink-600" />} title="Startup Log" />
+      <SectionTitle icon={<Server className="w-5 h-5 text-ink-600" />} title={props.t("status:section.startup")} />
       <div className="bg-beige-50/50 rounded-lg border border-beige-200 px-6">
-        {props.steps.map((step, i) => <StepItem key={`${i}-${step}`} step={step} index={i} />)}
-        {props.steps.length === 0 ? <p className="py-3 text-ink-700/40 text-xs italic">No startup steps recorded yet.</p> : null}
+        {props.steps.map((step, i) => <StepItem key={`${i}-${step}`} step={step} index={i} t={props.t} />)}
+        {props.steps.length === 0 ? <p className="py-3 text-ink-700/40 text-xs italic">{props.t("status:empty.startup")}</p> : null}
       </div>
     </section>
   );
 }
 
-function ActiveServers(props: { readonly servers: readonly string[] }) {
+function ActiveServers(props: { readonly servers: readonly string[]; readonly t: Translate }) {
   return (
     <section>
-      <SectionTitle icon={<Activity className="w-5 h-5 text-ink-600" />} title="Active MCP Servers" />
+      <SectionTitle icon={<Activity className="w-5 h-5 text-ink-600" />} title={props.t("status:section.activeServers")} />
       <div className="flex flex-wrap gap-2">
         {props.servers.map((server) => <ServerPill key={server} server={server} />)}
-        {props.servers.length === 0 ? <p className="text-ink-700/40 text-xs italic">No external MCP servers registered.</p> : null}
+        {props.servers.length === 0 ? <p className="text-ink-700/40 text-xs italic">{props.t("status:empty.servers")}</p> : null}
       </div>
     </section>
   );
@@ -168,7 +171,7 @@ function StatCard(props: { readonly icon: ReactNode; readonly label: string; rea
   );
 }
 
-function StepItem(props: { readonly step: string; readonly index: number }) {
+function StepItem(props: { readonly step: string; readonly index: number; readonly t: Translate }) {
   return (
     <div className="flex items-start gap-4 py-3 border-b border-beige-200 last:border-0 group">
       <span className="text-[10px] font-mono text-ink-700/30 mt-1">{String(props.index + 1).padStart(2, "0")}</span>
@@ -176,7 +179,7 @@ function StepItem(props: { readonly step: string; readonly index: number }) {
         <p className="text-sm font-mono text-ink-700">{props.step}</p>
         <div className="flex items-center gap-2 mt-1">
           <div className="w-1.5 h-1.5 rounded-full bg-morandi-green" />
-          <span className="text-[9px] uppercase tracking-widest text-ink-700/40">Verified</span>
+          <span className="text-[9px] uppercase tracking-widest text-ink-700/40">{props.t("status:verified")}</span>
         </div>
       </div>
     </div>
@@ -191,6 +194,12 @@ function ServerPill(props: { readonly server: string }) {
   );
 }
 
-function lastCheckedLabel(status: AlayaStatus | null): string {
-  return status?.checked_at ? new Date(status.checked_at).toLocaleTimeString() : "N/A";
+function statusIndicatorLabel(t: Translate, label: ReturnType<typeof useDaemonHealth>["indicator"]["label"]): string {
+  if (label === "OPERATIONAL") return t("status:indicator.operational");
+  if (label === "WARMING") return t("status:indicator.warming");
+  return t("status:indicator.offline");
+}
+
+function lastCheckedLabel(t: Translate, status: AlayaStatus | null): string {
+  return status?.checked_at ? new Date(status.checked_at).toLocaleTimeString() : t("status:na");
 }

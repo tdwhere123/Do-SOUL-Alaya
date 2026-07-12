@@ -513,7 +513,7 @@ export class ExtensionRegistryService {
         if (this.providerCacheSnapshot === null) {
           this.publishProviderCache(snapshot);
         }
-      });
+      }).catch(() => undefined);
       return;
     }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { ManifestationBudgetConfig } from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
 import { useToasts } from "./toast";
@@ -34,19 +34,33 @@ export function useManifestationBudgetState(workspaceId: string): ManifestationB
   const [current, setCurrent] = useState<ManifestationBudgetConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const currentRevisionRef = useRef(0);
 
   useLoadManifestationBudget(workspaceId, showToast, setInitial, setCurrent, setLoading);
   const dirty = useMemo(() => isDirty(initial, current), [initial, current]);
   const patchConfig = useCallback(
-    (patch: Partial<ManifestationBudgetConfig>) => setCurrent((prev) => patchRoot(prev, patch)),
+    (patch: Partial<ManifestationBudgetConfig>) => {
+      currentRevisionRef.current += 1;
+      setCurrent((prev) => patchRoot(prev, patch));
+    },
     []
   );
   const patchPolicy = useCallback(
-    (patch: Partial<ManifestationBudgetConfig["escalation_policy"]>) =>
-      setCurrent((prev) => patchEscalationPolicy(prev, patch)),
+    (patch: Partial<ManifestationBudgetConfig["escalation_policy"]>) => {
+      currentRevisionRef.current += 1;
+      setCurrent((prev) => patchEscalationPolicy(prev, patch));
+    },
     []
   );
-  const save = useSaveManifestationBudget(workspaceId, current, showToast, setInitial, setCurrent, setSaving);
+  const save = useSaveManifestationBudget(
+    workspaceId,
+    current,
+    currentRevisionRef,
+    showToast,
+    setInitial,
+    setCurrent,
+    setSaving
+  );
 
   return { current, dirty, loading, patchConfig, patchPolicy, save, saving };
 }
@@ -60,7 +74,7 @@ function useLoadManifestationBudget(
 ) {
   useEffect(() => {
     let cancelled = false;
-    void loadManifestationBudget(workspaceId, showToast, (config) => {
+    void loadManifestationBudget(workspaceId, showToast, () => cancelled, (config) => {
       if (cancelled) return;
       setInitial(config);
       setCurrent(config);
@@ -76,6 +90,7 @@ function useLoadManifestationBudget(
 function useSaveManifestationBudget(
   workspaceId: string,
   current: ManifestationBudgetConfig | null,
+  currentRevisionRef: MutableRefObject<number>,
   showToast: ShowToast,
   setInitial: (config: ManifestationBudgetConfig) => void,
   setCurrent: (config: ManifestationBudgetConfig) => void,
@@ -83,11 +98,14 @@ function useSaveManifestationBudget(
 ) {
   return useCallback(async () => {
     if (current === null) return;
+    const currentRevision = currentRevisionRef.current;
     setSaving(true);
     try {
       const saved = await patchManifestationBudget(workspaceId, current);
       setInitial(saved);
-      setCurrent(saved);
+      if (currentRevisionRef.current === currentRevision) {
+        setCurrent(saved);
+      }
       showToast({ message: "Manifestation budget patched", type: "success" });
     } catch (err) {
       if ((err as ApiError).status !== 401) {
@@ -99,12 +117,13 @@ function useSaveManifestationBudget(
     } finally {
       setSaving(false);
     }
-  }, [current, setCurrent, setInitial, setSaving, showToast, workspaceId]);
+  }, [current, currentRevisionRef, setCurrent, setInitial, setSaving, showToast, workspaceId]);
 }
 
 async function loadManifestationBudget(
   workspaceId: string,
   showToast: ShowToast,
+  isCancelled: () => boolean,
   onLoaded: (config: ManifestationBudgetConfig) => void
 ) {
   try {
@@ -113,7 +132,7 @@ async function loadManifestationBudget(
     );
     onLoaded(unwrapManifestationBudgetConfig(envelope));
   } catch (err) {
-    if ((err as ApiError).status !== 401) {
+    if (!isCancelled() && (err as ApiError).status !== 401) {
       showToast({
         message: `Failed to load manifestation budget: ${(err as Error).message}`,
         type: "error"

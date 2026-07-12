@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
+import { StorageError } from "@do-soul/alaya-storage";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
 
 describe("registerErrorHandler", () => {
@@ -100,5 +101,28 @@ describe("registerErrorHandler", () => {
     );
     const loggedMeta = logger.error.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(JSON.stringify(loggedMeta)).not.toContain("workspace_path");
+  });
+
+  it("maps structured storage conflicts without exposing storage details", async () => {
+    const app = new Hono();
+    const logger = { error: vi.fn() };
+
+    registerErrorHandler(app, logger as never);
+    app.get("/storage-conflict", () => {
+      throw new StorageError("DUPLICATE_KEY", "sqlite detail must stay private");
+    });
+
+    const response = await app.request("/storage-conflict");
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      error: "Request conflict"
+    });
+    expect(logger.error).toHaveBeenCalledWith(
+      "[daemon] sanitized storage error",
+      expect.objectContaining({ code: "DUPLICATE_KEY", messageRedacted: true })
+    );
+    expect(JSON.stringify(logger.error.mock.calls[0]?.[1])).not.toContain("sqlite detail");
   });
 });
