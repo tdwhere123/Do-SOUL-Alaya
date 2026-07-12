@@ -357,6 +357,7 @@ export function assertSnapshotVersionMatch(
   manifest: LongMemEvalSnapshotManifest,
   restoredDbPath: string
 ): void {
+  const restoredSchemaVersion = readSchemaMigrationVersion(restoredDbPath);
   if (manifest.recall_pipeline_version !== RECALL_PIPELINE_VERSION) {
     throw new Error(
       "[recall-eval] snapshot recall_pipeline_version " +
@@ -366,7 +367,6 @@ export function assertSnapshotVersionMatch(
         "(seed with --snapshot-out) before recall-eval."
     );
   }
-  const restoredSchemaVersion = readSchemaMigrationVersion(restoredDbPath);
   if (restoredSchemaVersion !== manifest.schema_migration_version) {
     throw new Error(
       "[recall-eval] snapshot schema_migration_version " +

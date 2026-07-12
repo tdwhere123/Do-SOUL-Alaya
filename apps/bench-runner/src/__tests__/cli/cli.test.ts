@@ -51,6 +51,8 @@ describe("bench-runner CLI", () => {
     expect(exitCode).toBe(0);
     expect(stdoutBuf).toContain("extraction-fill");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
+    expect(stdoutBuf).toContain("--legacy-manifest-sha256 <sha>");
+    expect(stdoutBuf).toContain("--legacy-dataset-sha256 <sha>");
     expect(stdoutBuf).toContain("--concurrency N");
     expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
   });
@@ -60,6 +62,25 @@ describe("bench-runner CLI", () => {
 
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(/--snapshot <db> required/);
+  });
+
+  it("requires both external trust anchors for a legacy snapshot", async () => {
+    const exitCode = await runCli([
+      "recall-eval", "--snapshot", "/tmp/legacy.db", "--legacy-snapshot"
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/requires --data-dir, --legacy-manifest-sha256, and --legacy-dataset-sha256/u);
+  });
+
+  it("rejects orphan legacy trust anchors on the current snapshot path", async () => {
+    const exitCode = await runCli([
+      "recall-eval", "--snapshot", "/tmp/current.db",
+      "--legacy-manifest-sha256", "a".repeat(64)
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/legacy SHA-256 flags require --legacy-snapshot/u);
   });
 
   it("rejects invalid embedding modes instead of silently disabling embeddings", async () => {

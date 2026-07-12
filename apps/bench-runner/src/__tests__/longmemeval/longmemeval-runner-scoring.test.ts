@@ -31,7 +31,10 @@ import {
   scoreLongMemEvalRecallHits
 } from "../../longmemeval/runner.js";
 
-import { buildRecallResult } from "./longmemeval-runner-fixture.js";
+import {
+  buildLongMemEvalArchivePayload,
+  buildRecallResult
+} from "./longmemeval-runner-fixture.js";
 
 let tmpDir: string;
 
@@ -99,6 +102,8 @@ describe("LongMemEval runner", () => {
     expect(metrics.evidence_stream_gold_delivery_rate).toBe(1);
     expect(metrics.path_stream_top10_count).toBe(1);
     expect(metrics.path_stream_top10_rate).toBe(1);
+    expect(metrics.evaluator_identity_issue_denominator).toBe(1);
+    expect(metrics.evaluator_identity_unscorable_denominator).toBe(1);
   });
 
   it("scores LongMemEval R@K from ranked results only, not active constraints", () => {
@@ -303,6 +308,70 @@ describe("LongMemEval runner", () => {
     const metrics = buildLongMemEvalQualityMetrics([row]);
     expect(metrics.no_gold_count).toBe(1);
     expect(metrics.candidate_absent_count).toBe(0);
+  });
+
+  it("invalidates an abstention row that carries evaluator gold identity", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-conflicted_abs",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "memory-gold", rank: 1, relevance_score: 0.9 }],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+
+    expect(row.cohort_ledger).toMatchObject({
+      dataset_cohort: "adjudicated_invalid",
+      measurement_status: "evaluator_identity_unscorable",
+      evaluation_issue_reason: "evaluator_data_identity_inconsistency",
+      retrieval_status: "not_applicable",
+      final_verdict: "evaluator_data_identity_inconsistency"
+    });
+    expect(row.miss_classification).toBe("evaluator_identity_inconsistent");
+
+    const metrics = buildLongMemEvalQualityMetrics([row]);
+    expect(metrics.abstention).toMatchObject({ total: 0, unscorable: 0 });
+    expect(metrics.evaluator_identity_issue_count).toBe(1);
+    expect(metrics.evaluator_identity_issue_denominator).toBe(1);
+    expect(metrics.evaluator_identity_unscorable_count).toBe(1);
+    expect(metrics.evaluator_identity_unscorable_denominator).toBe(1);
+    expect(metrics.miss_distribution).toMatchObject({
+      evaluator_identity_inconsistent: 1
+    });
+
+    const base = buildLongMemEvalArchivePayload();
+    const payload: KpiPayload = {
+      ...base,
+      sample_size: 1,
+      evaluated_count: 1,
+      answerable_evaluated_count: 0,
+      measurement_attribution: {
+        schema_version: "bench-measurement-attribution.v2",
+        status: "ineligible",
+        gate_eligible: false,
+        evidence_status: "partial",
+        candidate_pool_complete: false,
+        provenance_complete: false,
+        abstention_calibration_status: "not_applicable",
+        evaluator_identity_status: "invalid"
+      },
+      kpi: {
+        ...base.kpi,
+        r_at_1: 0,
+        r_at_5: 0,
+        r_at_10: 0,
+        per_scenario: [
+          { id: row.question_id, version: 1, hit_at_5: false, scorable: false, tier: "hot" }
+        ],
+        quality_metrics: metrics
+      }
+    };
+    expect(() => KpiPayloadSchema.parse(payload)).not.toThrow();
   });
 
   it("redacts arbitrary provider degradation text from diagnostics sidecars", () => {

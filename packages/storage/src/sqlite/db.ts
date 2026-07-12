@@ -115,6 +115,62 @@ export function closeCachedDatabase(filename: string): void {
   cached.close();
 }
 
+export function readSchemaMigrationLedger(
+  filename: string
+): readonly number[] {
+  const database = new BetterSqlite3(filename, {
+    readonly: true,
+    fileMustExist: true
+  });
+  try {
+    assertCanonicalSchemaVersionTable(database);
+    const rows = database.prepare(
+      "SELECT version FROM schema_version ORDER BY version ASC"
+    ).all() as ReadonlyArray<Readonly<{ version: unknown }>>;
+    if (rows.length === 0) throw new Error("schema_version ledger is empty");
+    const versions = rows.map((row) => row.version);
+    assertOrderedSafeMigrationVersions(versions);
+    return Object.freeze(versions as number[]);
+  } finally {
+    database.close();
+  }
+}
+
+function assertCanonicalSchemaVersionTable(database: SqliteConnection): void {
+  const columns = database.prepare("PRAGMA table_info(schema_version)").all() as
+    ReadonlyArray<Readonly<{
+      cid: number;
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: unknown;
+      pk: number;
+    }>>;
+  const actual = columns.map(({ cid, name, type, notnull, dflt_value, pk }) => ({
+    cid, name, type: type.toUpperCase(), notnull, dflt_value, pk
+  }));
+  const expected = [
+    { cid: 0, name: "version", type: "INTEGER", notnull: 0, dflt_value: null, pk: 1 },
+    { cid: 1, name: "applied_at", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 }
+  ];
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error("schema_version table is not canonical");
+  }
+}
+
+function assertOrderedSafeMigrationVersions(versions: readonly unknown[]): asserts versions is number[] {
+  let previous = 0;
+  for (const version of versions) {
+    if (!Number.isSafeInteger(version) || (version as number) <= 0) {
+      throw new Error("schema_version ledger contains an unsafe migration version");
+    }
+    if ((version as number) <= previous) {
+      throw new Error("schema_version ledger is not strictly ordered and unique");
+    }
+    previous = version as number;
+  }
+}
+
 export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase {
   const filename = options.filename ?? ":memory:";
 

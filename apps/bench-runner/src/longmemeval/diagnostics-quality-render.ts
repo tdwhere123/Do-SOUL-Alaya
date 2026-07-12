@@ -7,14 +7,19 @@ import type { QualityMetricsState } from "./diagnostics-quality-state.js";
 
 export function buildQualityMetricsFromState(
   state: QualityMetricsState,
-  questionDenominator: number
+  questionDenominator: number,
+  evaluatorIdentityDenominator: number
 ): QualityMetrics {
   if (!state.budgetDropCounts.has("max_entries")) {
     state.budgetDropCounts.set("max_entries", 0);
   }
   return {
     schema_version: "bench-quality-metrics.v1",
-    ...buildOrderAndBudgetMetrics(state, questionDenominator),
+    ...buildOrderAndBudgetMetrics(
+      state,
+      questionDenominator,
+      evaluatorIdentityDenominator
+    ),
     ...buildStreamAndCoverageMetrics(state),
     cohort_attribution: buildCohortAttribution(state),
     path_vs_graph_fanin: buildPathVsGraphFanin(state),
@@ -35,7 +40,8 @@ export function buildQualityMetricsFromState(
 
 function buildOrderAndBudgetMetrics(
   state: QualityMetricsState,
-  questionDenominator: number
+  questionDenominator: number,
+  evaluatorIdentityDenominator: number
 ): Pick<
   QualityMetrics,
   | "non_monotonic_rate"
@@ -70,9 +76,9 @@ function buildOrderAndBudgetMetrics(
     no_gold_count: state.noGoldCount,
     no_gold_denominator: questionDenominator,
     evaluator_identity_issue_count: state.evaluatorIdentityIssueCount,
-    evaluator_identity_issue_denominator: questionDenominator,
+    evaluator_identity_issue_denominator: evaluatorIdentityDenominator,
     evaluator_identity_unscorable_count: state.evaluatorIdentityUnscorableCount,
-    evaluator_identity_unscorable_denominator: questionDenominator
+    evaluator_identity_unscorable_denominator: evaluatorIdentityDenominator
   };
 }
 

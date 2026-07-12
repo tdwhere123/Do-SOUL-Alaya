@@ -1,6 +1,9 @@
 import { resolvePremiseInvalid } from "../abstention.js";
 import { classifyQuestionMissTaxonomy } from "../diagnostics-miss-taxonomy.js";
-import { buildQuestionCohortLedger } from "../diagnostics-cohort.js";
+import {
+  buildQuestionCohortLedger,
+  hasAbstentionIdentityConflict
+} from "../diagnostics-cohort.js";
 import type {
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
@@ -107,7 +110,8 @@ function buildQuestionMissFields(
       input.hitAt5,
       parts.gold,
       parts.diagnostics !== null,
-      input.isAbstention === true
+      input.isAbstention === true,
+      input.goldMemoryIds
     ),
     miss_taxonomy: classifyQuestionMissTaxonomy({
       hitAt5: input.hitAt5,
@@ -176,8 +180,12 @@ function classifyMiss(
   hitAt5: boolean,
   gold: readonly LongMemEvalGoldDiagnostic[],
   diagnosticsAvailable: boolean,
-  isAbstention: boolean
+  isAbstention: boolean,
+  goldMemoryIds: readonly string[]
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
+  if (hasAbstentionIdentityConflict({ isAbstention, goldMemoryIds })) {
+    return "evaluator_identity_inconsistent";
+  }
   if (isAbstention) return "abstention_uncalibrated";
   if (gold.length === 0) return "no_gold";
   if (hitAt5) return "hit_at_5";

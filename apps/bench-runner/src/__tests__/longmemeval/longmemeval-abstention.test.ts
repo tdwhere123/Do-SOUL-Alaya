@@ -246,6 +246,30 @@ describe("abstention miss classification and KPI breakdown", () => {
     expect(metrics.candidate_absent_denominator).toBe(0);
     expect(metrics.non_monotonic_denominator).toBe(0);
     expect(metrics.no_gold_count).toBe(0);
+    expect(metrics.evaluator_identity_issue_denominator).toBe(2);
+    expect(metrics.evaluator_identity_unscorable_denominator).toBe(2);
+  });
+
+  it("keeps cohort-less legacy abstention rows in the abstention total", () => {
+    const current = buildQuestionDiagnostic({
+      questionId: "legacy_abs",
+      goldMemoryIds: [],
+      answerSessionIds: [],
+      deliveredResults: [],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+    const { cohort_ledger: _cohortLedger, ...legacy } = current;
+
+    const metrics = buildLongMemEvalQualityMetrics([legacy]);
+    expect(metrics.abstention).toMatchObject({ total: 1, unscorable: 1 });
+    expect(metrics.evaluator_identity_issue_denominator).toBe(1);
+    expect(metrics.evaluator_identity_unscorable_denominator).toBe(1);
   });
 
   it("persists fused-margin abstention_confidence_score on delivered_results", () => {

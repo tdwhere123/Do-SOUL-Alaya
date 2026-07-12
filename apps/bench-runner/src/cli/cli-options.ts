@@ -31,6 +31,9 @@ export interface ParsedFlags {
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
   readonly concurrency?: number;
+  readonly legacySnapshot: boolean;
+  readonly legacyManifestSha256?: string;
+  readonly legacyDatasetSha256?: string;
   // --qa: gate the end-to-end QA harness (answer-LLM + LLM-judge). Default off
   // => zero LLM calls, zero cost, recall path + kpi bytes unchanged.
   readonly qa: boolean;
@@ -60,6 +63,9 @@ interface ParsedFlagsState {
   questionManifest?: string;
   extractionCacheRoot?: string;
   concurrency?: number;
+  legacySnapshot: boolean;
+  legacyManifestSha256?: string;
+  legacyDatasetSha256?: string;
   qa: boolean;
   edgePlane: boolean;
   shards: string[];
@@ -85,6 +91,7 @@ function createParsedFlagsState(): ParsedFlagsState {
     force: false,
     qa: false,
     edgePlane: false,
+    legacySnapshot: false,
     shards: [],
     collectingShards: false
   };
@@ -218,6 +225,8 @@ function consumeOtherPathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
+  const legacyIdentityIndex = consumeLegacyIdentityFlags(args, index, token, state);
+  if (legacyIdentityIndex !== undefined) return legacyIdentityIndex;
   if (token === "--data-dir") {
     state.dataDir = args[index + 1];
     return index + 1;
@@ -235,12 +244,7 @@ function consumeOtherPathFlags(
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--extraction-cache-root")) {
-    state.extractionCacheRoot = readFlagValue(
-      args,
-      index,
-      token,
-      "--extraction-cache-root"
-    );
+    state.extractionCacheRoot = readFlagValue(args, index, token, "--extraction-cache-root");
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--snapshot")) {
@@ -249,8 +253,30 @@ function consumeOtherPathFlags(
   }
   if (matchFlagToken(token, "--concurrency")) {
     state.concurrency = parsePositiveInt(
-      readFlagValue(args, index, token, "--concurrency"),
-      "--concurrency"
+      readFlagValue(args, index, token, "--concurrency"), "--concurrency"
+    );
+    return nextIndex(index, token);
+  }
+  return undefined;
+}
+
+function consumeLegacyIdentityFlags(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
+  if (matchFlagToken(token, "--legacy-manifest-sha256")) {
+    state.legacyManifestSha256 = readRequiredFlagValue(
+      args, index, token, "--legacy-manifest-sha256",
+      "--legacy-manifest-sha256 requires a SHA-256 value"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--legacy-dataset-sha256")) {
+    state.legacyDatasetSha256 = readRequiredFlagValue(
+      args, index, token, "--legacy-dataset-sha256",
+      "--legacy-dataset-sha256 requires a SHA-256 value"
     );
     return nextIndex(index, token);
   }
@@ -273,6 +299,10 @@ function consumeBooleanFlags(
   }
   if (token === "--edge-plane") {
     state.edgePlane = true;
+    return index;
+  }
+  if (token === "--legacy-snapshot") {
+    state.legacySnapshot = true;
     return index;
   }
   if (token === "--source") {
@@ -421,6 +451,9 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
     concurrency: state.concurrency,
+    legacySnapshot: state.legacySnapshot,
+    legacyManifestSha256: state.legacyManifestSha256,
+    legacyDatasetSha256: state.legacyDatasetSha256,
     qa: state.qa,
     edgePlane: state.edgePlane
   };

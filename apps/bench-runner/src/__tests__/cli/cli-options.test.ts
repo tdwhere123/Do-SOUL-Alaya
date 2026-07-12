@@ -34,6 +34,9 @@ describe("parseFlags", () => {
       "--pinned-meta-root=/tmp/pinned",
       "--question-manifest=/tmp/questions.json",
       "--extraction-cache-root=/tmp/cache",
+      "--legacy-snapshot",
+      `--legacy-manifest-sha256=${"a".repeat(64)}`,
+      `--legacy-dataset-sha256=${"b".repeat(64)}`,
       "--concurrency=4"
     ]);
 
@@ -48,6 +51,9 @@ describe("parseFlags", () => {
     expect(parsed.pinnedMetaRoot).toBe("/tmp/pinned");
     expect(parsed.questionManifest).toBe("/tmp/questions.json");
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
+    expect(parsed.legacySnapshot).toBe(true);
+    expect(parsed.legacyManifestSha256).toBe("a".repeat(64));
+    expect(parsed.legacyDatasetSha256).toBe("b".repeat(64));
     expect(parsed.concurrency).toBe(4);
   });
 

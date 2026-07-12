@@ -17,7 +17,10 @@ import {
 } from "../snapshot/integrity.js";
 import { resolveBenchEmbeddingProviderLabel } from "../runner-helpers.js";
 import { resolveLocalOnnxArtifactSha256 } from "../provenance/local-onnx.js";
-import { resolveBenchCommitSha7 } from "../../shared/version.js";
+import {
+  RECALL_PIPELINE_VERSION,
+  resolveBenchCommitSha7
+} from "../../shared/version.js";
 import {
   deriveSnapshotAttribution,
   type LongMemEvalSnapshotManifest
@@ -56,6 +59,10 @@ export interface RecallEvalRuntimeAttribution {
   readonly embedding_provider_label: string;
   readonly onnx_threads: number | null;
   readonly onnx_model_artifact_sha256: string | null;
+  readonly hydration_binding?: Readonly<{
+    dataset_sha256: string;
+    source: "external_expected_sha256";
+  }>;
   readonly snapshot_binding: Readonly<{
     commit_sha7: string | null;
     gate_sha256: string | null;
@@ -66,13 +73,21 @@ export interface RecallEvalRuntimeAttribution {
     extraction_cache_coverage: number | null;
     dataset_sha256: string | null;
     question_id_digest: string | null;
+    snapshot_manifest_sha256: string | null;
+    producer_recall_pipeline_version: string;
+    consumer_recall_pipeline_version: string;
+    producer_schema_migration_version: number;
   }>;
 }
 
 export async function buildRecallEvalRuntimeAttribution(
   manifest: LongMemEvalSnapshotManifest,
   env: Readonly<Record<string, string | undefined>> = process.env,
-  currentCommitSha7 = resolveBenchCommitSha7(env)
+  currentCommitSha7 = resolveBenchCommitSha7(env),
+  evaluatorBinding: Readonly<{
+    snapshotManifestSha256?: string | null;
+    datasetSha256?: string | null;
+  }> = {}
 ): Promise<RecallEvalRuntimeAttribution> {
   const label = recallEvalEmbeddingProviderLabel(env);
   const onnxSha = await resolveLocalOnnxArtifactSha256(label, env);
@@ -112,12 +127,22 @@ export async function buildRecallEvalRuntimeAttribution(
     embedding_provider_label: label,
     onnx_threads: onnxThreads,
     onnx_model_artifact_sha256: onnxSha ?? null,
-    snapshot_binding: buildRecallEvalSnapshotBinding(manifest)
+    ...(evaluatorBinding.datasetSha256 === undefined || evaluatorBinding.datasetSha256 === null
+      ? {}
+      : { hydration_binding: {
+          dataset_sha256: evaluatorBinding.datasetSha256,
+          source: "external_expected_sha256" as const
+        } }),
+    snapshot_binding: buildRecallEvalSnapshotBinding(
+      manifest,
+      evaluatorBinding.snapshotManifestSha256 ?? null
+    )
   };
 }
 
 function buildRecallEvalSnapshotBinding(
-  manifest: LongMemEvalSnapshotManifest
+  manifest: LongMemEvalSnapshotManifest,
+  snapshotManifestSha256: string | null
 ): RecallEvalRuntimeAttribution["snapshot_binding"] {
   const provenance = manifest.run_provenance;
   const cache = provenance?.extraction_cache;
@@ -130,7 +155,11 @@ function buildRecallEvalSnapshotBinding(
     extraction_cache_cached_turns: cache?.cached_turns ?? null,
     extraction_cache_coverage: cache?.coverage ?? null,
     dataset_sha256: manifest.dataset_sha256 ?? null,
-    question_id_digest: manifest.question_id_digest ?? null
+    question_id_digest: manifest.question_id_digest ?? null,
+    snapshot_manifest_sha256: snapshotManifestSha256,
+    producer_recall_pipeline_version: manifest.recall_pipeline_version,
+    consumer_recall_pipeline_version: RECALL_PIPELINE_VERSION,
+    producer_schema_migration_version: manifest.schema_migration_version
   };
 }
 
@@ -166,6 +195,7 @@ export async function prepareRecallEvalDataDir(input: {
   readonly requestedRoot?: string;
   readonly artifactIntegrity?: SnapshotArtifactIntegrity;
   readonly validateRestoredDb?: (dbPath: string) => void;
+  readonly restoreSnapshot?: (dataDirRoot: string) => void;
 }): Promise<OwnedTempRoot> {
   const root = input.requestedRoot === undefined
     ? await createOwnedTempRoot("alaya-recall-eval-")
@@ -174,10 +204,14 @@ export async function prepareRecallEvalDataDir(input: {
     if (input.artifactIntegrity !== undefined) {
       await verifySnapshotArtifactIntegrity(input.snapshotDbPath, input.artifactIntegrity);
     }
-    restoreSnapshotToDataDir({
-      snapshotDbPath: input.snapshotDbPath,
-      dataDirRoot: root.path
-    });
+    if (input.restoreSnapshot === undefined) {
+      restoreSnapshotToDataDir({
+        snapshotDbPath: input.snapshotDbPath,
+        dataDirRoot: root.path
+      });
+    } else {
+      input.restoreSnapshot(root.path);
+    }
     input.validateRestoredDb?.(`${root.path}/alaya.db`);
     return root;
   } catch (error) {

@@ -36,6 +36,7 @@ export interface RecallEvalKpiInput {
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly embeddingProviderLabel: string;
   readonly runtimeAttribution: RecallEvalRuntimeAttribution;
+  readonly datasetSha256: string | null;
 }
 
 export function assembleRecallEvalKpi(input: RecallEvalKpiInput): KpiPayload {
@@ -77,8 +78,12 @@ function buildPayload(
     dataset: {
       name: input.variant, size: input.sampleSize,
       source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
-      checksum_sha256: input.manifest.extraction_provenance?.dataset_revision ?? "snapshot-inherited",
-      checksum_source: `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
+      ...(input.datasetSha256 === null
+        ? {}
+        : { checksum_sha256: input.datasetSha256 }),
+      checksum_source: input.runtimeAttribution.hydration_binding === undefined
+        ? `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
+        : `${RECALL_EVAL_ARCHIVE_MARKER} external evaluator dataset binding`
     },
     sample_size: input.sampleSize, evaluated_count: input.evaluatedCount,
     answerable_evaluated_count: accumulator.answerableCount,

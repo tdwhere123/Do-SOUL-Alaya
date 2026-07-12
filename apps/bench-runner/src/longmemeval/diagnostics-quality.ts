@@ -20,5 +20,5 @@ export function buildLongMemEvalQualityMetrics(
   const answerableCount = diagnostics.filter(
     (question) => !isAbstentionQuestionId(question.question_id)
   ).length;
-  return buildQualityMetricsFromState(state, answerableCount);
+  return buildQualityMetricsFromState(state, answerableCount, diagnostics.length);
 }

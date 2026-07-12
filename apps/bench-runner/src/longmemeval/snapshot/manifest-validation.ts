@@ -57,20 +57,20 @@ const SnapshotAttributionSchema = z
 
 export function validateSnapshotManifest(
   parsed: unknown,
-  filePath: string
+  filePath: string,
+  options: { readonly allowLegacyV1?: boolean } = {}
 ): LongMemEvalSnapshotManifest {
   const record = requireManifestRecord(parsed, filePath);
-  validateManifestBase(record, filePath);
+  const legacyV1 = validateManifestBase(record, filePath, options.allowLegacyV1 === true);
   validateOptionalShaFields(record, filePath);
   const runProvenance = record.run_provenance === undefined
     ? undefined
     : LongMemEvalRunProvenanceSchema.parse(record.run_provenance);
   const artifactIntegrity = parseArtifactIntegrity(record.artifact_integrity, filePath);
   const storedAttribution = parseSnapshotAttribution(record.attribution, filePath);
-  const extractionProvenance = parseExtractionProvenance(
-    record.extraction_provenance,
-    filePath
-  );
+  const extractionProvenance = legacyV1
+    ? null
+    : parseExtractionProvenance(record.extraction_provenance, filePath);
   const manifest = {
     ...(parsed as LongMemEvalSnapshotManifest),
     extraction_provenance: extractionProvenance
@@ -117,16 +117,23 @@ function requireManifestRecord(parsed: unknown, filePath: string): Record<string
   return result.data;
 }
 
-function validateManifestBase(record: Record<string, unknown>, filePath: string): void {
+function validateManifestBase(
+  record: Record<string, unknown>,
+  filePath: string,
+  allowLegacyV1: boolean
+): boolean {
   if (typeof record.recall_pipeline_version !== "string" || record.recall_pipeline_version.length === 0) {
     throw new Error(`recall-eval snapshot manifest at ${filePath} missing recall_pipeline_version`);
   }
-  if (typeof record.schema_migration_version !== "number" || Number.isNaN(record.schema_migration_version)) {
+  if (!Number.isSafeInteger(record.schema_migration_version) ||
+      (record.schema_migration_version as number) < 0) {
     throw new Error(`recall-eval snapshot manifest at ${filePath} missing schema_migration_version`);
   }
-  if (record.schema_version !== RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION) {
+  const legacyV1 = allowLegacyV1 && record.schema_version === 1;
+  if (!legacyV1 && record.schema_version !== RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION) {
     throw new Error(`recall-eval snapshot manifest at ${filePath} has unsupported schema_version`);
   }
+  return legacyV1;
 }
 
 function validateOptionalShaFields(record: Record<string, unknown>, filePath: string): void {

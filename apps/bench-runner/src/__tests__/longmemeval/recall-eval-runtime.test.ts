@@ -209,7 +209,14 @@ describe("prepareRecallEvalDataDir", () => {
       status: "attributed",
       gate_eligible: true,
       embedding_provider_label: "local_onnx:Xenova/test",
-      onnx_model_artifact_sha256: sha
+      onnx_model_artifact_sha256: sha,
+      snapshot_binding: {
+        producer_recall_pipeline_version: "test",
+        consumer_recall_pipeline_version: "fusion-evidence-first-v3",
+        producer_schema_migration_version: 1,
+        snapshot_manifest_sha256: null,
+        dataset_sha256: "d".repeat(64)
+      }
     });
 
     for (const drift of [

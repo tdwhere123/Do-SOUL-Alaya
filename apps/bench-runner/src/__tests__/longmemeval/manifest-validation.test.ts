@@ -56,4 +56,14 @@ describe("validateSnapshotManifest invalid payload rejection", () => {
       )
     ).toThrow(/invalid attribution/u);
   });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects invalid schema migration version %s",
+    (schemaMigrationVersion) => {
+      expect(() => validateSnapshotManifest({
+        ...baseManifest(),
+        schema_migration_version: schemaMigrationVersion
+      }, FILE_PATH)).toThrow(/schema_migration_version/u);
+    }
+  );
 });

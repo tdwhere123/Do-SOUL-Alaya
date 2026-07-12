@@ -19,7 +19,6 @@ import {
   resolveQaJudgeChatConfig
 } from "../longmemeval/qa-chat.js";
 import { runExtractionFill } from "../longmemeval/extraction-fill.js";
-import { runRecallEval } from "../longmemeval/recall-eval.js";
 import {
   seedExtractionReleaseBlockerExitCode
 } from "../longmemeval/seed-extraction-release-blocker.js";
@@ -439,57 +438,4 @@ export async function runExtractionFillCommand(opts: ParsedFlags): Promise<numbe
   }
 }
 
-/**
- * @anchor recall-eval-command — Layers 2+3 (fast, every iteration). Recall-only
- * against a seeded-DB snapshot; no LLM, no materialization.
- * see also: apps/bench-runner/src/longmemeval/recall-eval.ts
- */
-export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
-  if (opts.snapshot === undefined) {
-    process.stderr.write(
-      "alaya-bench-runner recall-eval: --snapshot <db> required\n"
-    );
-    return 2;
-  }
-  try {
-    process.stdout.write(
-      `Running recall-eval against snapshot ${opts.snapshot}` +
-        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
-        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
-        ` policy_shape=${opts.policyShape}` +
-        (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
-        "...\n"
-    );
-    const result = await runRecallEval({
-      snapshotDbPath: opts.snapshot,
-      variant: opts.variant,
-      ...(opts.limit === undefined ? {} : { limit: opts.limit }),
-      ...(opts.offset === undefined ? {} : { offset: opts.offset }),
-      historyRoot: opts.historyRoot,
-      policyShape: opts.policyShape,
-      simulateReport: opts.simulateReport,
-      ...(opts.weightOverridesJson === undefined
-        ? {}
-        : { weightOverridesJson: opts.weightOverridesJson })
-    });
-    const kpi = result.payload.kpi;
-    process.stdout.write(
-      `Done. Slug: ${result.slug}\n` +
-        `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
-        (kpi.full_gold_coverage === undefined
-          ? ""
-          : `  full-gold@5=${pct(kpi.full_gold_coverage.full_gold_at_5)} ` +
-            `cov@5=${pct(kpi.full_gold_coverage.gold_coverage_at_5)} ` +
-            `pool@50=${pct(kpi.full_gold_coverage.pool_recall_at_50)} ` +
-            `pool@100=${pct(kpi.full_gold_coverage.pool_recall_at_100)}\n`) +
-        `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
-        `  KPI: ${result.kpiPath}\n`
-    );
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
-  } catch (err) {
-    process.stderr.write(
-      `alaya-bench-runner recall-eval: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
-  }
-}
+export { runRecallEvalCommand } from "./recall-eval/command.js";

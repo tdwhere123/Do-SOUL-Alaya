@@ -13,6 +13,7 @@ import {
   isRecallEvalArchive,
   selectFullRunBaseline
 } from "../../longmemeval/recall-eval-archive.js";
+import { assembleRecallEvalKpi } from "../../longmemeval/recall-eval-kpi.js";
 import { withEligibleMeasurementContract } from "./longmemeval-runner-fixture.js";
 
 // @anchor recall-eval-archive-isolation — a fast-loop recall-eval archive
@@ -144,6 +145,71 @@ afterEach(async () => {
 });
 
 describe("recall-eval archive discriminator + baseline isolation", () => {
+  it("preserves archive identity for an assembled legacy payload", () => {
+    const payload = assembleRecallEvalKpi({
+      collected: [],
+      manifest: {
+        schema_version: 1,
+        variant: "longmemeval_s",
+        question_count: 1,
+        recall_pipeline_version: "fusion-rrf-synthesis-v2",
+        schema_migration_version: 103,
+        bench_runner_version: "0.3.11",
+        alaya_commit: "d7266aa",
+        db_filename: "snapshot.db",
+        sidecar_filename: "snapshot.db.sidecar.json",
+        built_at: "2026-07-12T00:00:00.000Z"
+      },
+      variant: "longmemeval_s",
+      runAt: new Date("2026-07-12T00:00:00.000Z"),
+      commitSha7: "aba63cb",
+      alayaVersion: "0.3.11",
+      policyShape: "stress",
+      simulateReport: "none",
+      sampleSize: 1,
+      evaluatedCount: 0,
+      recallWeightOverrides: undefined,
+      embeddingProviderLabel: "none",
+      datasetSha256: "b".repeat(64),
+      runtimeAttribution: {
+        status: "legacy_unattributed",
+        gate_eligible: false,
+        node_version: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        embedding_mode: "disabled",
+        embedding_provider_kind: "openai",
+        embedding_provider_label: "none",
+        onnx_threads: null,
+        onnx_model_artifact_sha256: null,
+        hydration_binding: {
+          dataset_sha256: "b".repeat(64),
+          source: "external_expected_sha256"
+        },
+        snapshot_binding: {
+          commit_sha7: "d7266aa",
+          gate_sha256: null,
+          worktree_state_sha256: null,
+          extraction_cache_manifest_sha256: null,
+          extraction_cache_requested_turns: null,
+          extraction_cache_cached_turns: null,
+          extraction_cache_coverage: null,
+          dataset_sha256: null,
+          question_id_digest: null,
+          snapshot_manifest_sha256: "d".repeat(64),
+          producer_recall_pipeline_version: "fusion-rrf-synthesis-v2",
+          consumer_recall_pipeline_version: "fusion-evidence-first-v3",
+          producer_schema_migration_version: 103
+        }
+      }
+    });
+
+    expect(isRecallEvalArchive(payload)).toBe(true);
+    expect(payload.dataset.checksum_source).toBe(
+      `${RECALL_EVAL_ARCHIVE_MARKER} external evaluator dataset binding`
+    );
+  });
+
   it("marks a recall-eval archive and leaves a full run unmarked", () => {
     const fullRun = buildPublicPayload({ commit: "f".repeat(7), rAt5: 0.8, recallEval: false });
     const recallEval = buildPublicPayload({ commit: "e".repeat(7), rAt5: 0.5, recallEval: true });

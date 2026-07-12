@@ -3,7 +3,6 @@ import {
   buildDiffVsPrevious,
   diffKpis,
   renderFindings,
-  renderReport,
   writeEntry,
   type BenchPolicyShape,
   type BenchSimulateReportMode,
@@ -53,14 +52,7 @@ import {
   resolveLongMemEvalHitVerdict,
   type LongMemEvalSidecarEntry
 } from "./runner.js";
-import {
-  assertSnapshotVersionMatch,
-  assertSnapshotConsumerBinding,
-  readSnapshotManifest,
-  readSnapshotSidecar,
-  type LongMemEvalSnapshotManifest,
-  type LongMemEvalSnapshotQuestion
-} from "./snapshot.js";
+import type { LongMemEvalSnapshotManifest, LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
 import { throwLifecycleErrors } from "./lifecycle/errors.js";
@@ -76,6 +68,10 @@ import {
   recallEvalEmbeddingProviderLabel,
   recallEvalEmbeddingProviderKind
 } from "./lifecycle/recall-eval-runtime.js";
+import { loadRecallEvalSnapshot } from "./snapshot/recall-eval-loader.js";
+import { renderRecallEvalReport } from "./kpi/recall-eval-report.js";
+import { prepareRecallEvalRestoredDb } from "./snapshot/recall-eval-db.js";
+import { restoreLegacySnapshotToDataDir } from "./snapshot/legacy-substrate.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -88,6 +84,11 @@ export interface RecallEvalOptions {
   readonly weightOverridesJson?: string;
   /** Override the restore directory in tests. */
   readonly dataDirRoot?: string;
+  readonly legacySnapshot?: boolean;
+  readonly dataDir?: string;
+  readonly pinnedMetaRoot?: string;
+  readonly legacyManifestSha256?: string;
+  readonly legacyDatasetSha256?: string;
 }
 export interface RecallEvalResult {
   readonly slug: string;
@@ -127,6 +128,7 @@ interface RecallEvalRunContext {
   readonly runAt: Date;
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly runtimeAttribution: Awaited<ReturnType<typeof buildRecallEvalRuntimeAttribution>>;
+  readonly datasetSha256: string | null;
 }
 /** Run recall-only scoring against an integrity-checked working snapshot copy. */
 export async function runRecallEval(
@@ -171,27 +173,35 @@ async function prepareRecallEvalRun(
   options: RecallEvalOptions,
   recallWeightOverrides: BenchRecallWeightOverrides | undefined
 ): Promise<RecallEvalRunContext> {
-  const manifest = readSnapshotManifest(options.snapshotDbPath);
-  const sidecarFile = readSnapshotSidecar(options.snapshotDbPath);
-  assertSnapshotConsumerBinding({
-    snapshotDbPath: options.snapshotDbPath,
-    manifest,
-    sidecar: sidecarFile,
-    variant: options.variant
-  });
+  const bundle = await loadRecallEvalSnapshot(options);
+  const { manifest, sidecar: sidecarFile } = bundle;
   const commitSha7 = resolveBenchCommitSha7();
   const runtimeAttribution = await buildRecallEvalRuntimeAttribution(
     manifest,
     process.env,
-    commitSha7
+    commitSha7,
+    {
+      snapshotManifestSha256: bundle.snapshotManifestSha256,
+      datasetSha256: bundle.datasetSha256
+    }
   );
   const window = selectRecallEvalWindow(sidecarFile.questions, options);
   const alayaVersion = resolveBenchRunnerVersion();
   const dataDir = await prepareRecallEvalDataDir({
     snapshotDbPath: options.snapshotDbPath,
     requestedRoot: options.dataDirRoot,
-    artifactIntegrity: manifest.artifact_integrity,
-    validateRestoredDb: (dbPath) => assertSnapshotVersionMatch(manifest, dbPath)
+    ...(options.legacySnapshot === true
+      ? { restoreSnapshot: (dataDirRoot: string) => restoreLegacySnapshotToDataDir({
+          snapshotDbPath: options.snapshotDbPath,
+          dataDirRoot,
+          manifest
+        }) }
+      : { artifactIntegrity: manifest.artifact_integrity }),
+    validateRestoredDb: (dbPath) => prepareRecallEvalRestoredDb({
+      manifest,
+      restoredDbPath: dbPath,
+      legacySnapshot: options.legacySnapshot === true
+    })
   });
   return {
     options,
@@ -210,7 +220,8 @@ async function prepareRecallEvalRun(
     commitSha7,
     runAt: new Date(),
     recallWeightOverrides,
-    runtimeAttribution
+    runtimeAttribution,
+    datasetSha256: resolveRecallEvalDatasetSha(bundle)
   };
 }
 
@@ -278,7 +289,8 @@ async function writeRecallEvalArtifacts(
     evaluatedCount: context.window.length,
     recallWeightOverrides: context.recallWeightOverrides,
     embeddingProviderLabel: recallEvalEmbeddingProviderLabel(),
-    runtimeAttribution: context.runtimeAttribution
+    runtimeAttribution: context.runtimeAttribution,
+    datasetSha256: context.datasetSha256
   });
   const layout: HistoryLayout = { historyRoot: context.options.historyRoot };
   const previous = await selectRecallEvalBaseline(layout, "public", {
@@ -296,6 +308,15 @@ async function writeRecallEvalArtifacts(
   return persistRecallEvalArtifacts(context, collected, layout, payload, previous, diff);
 }
 
+function resolveRecallEvalDatasetSha(
+  bundle: Awaited<ReturnType<typeof loadRecallEvalSnapshot>>
+): string | null {
+  if (bundle.datasetSha256 !== null) return bundle.datasetSha256;
+  if (bundle.manifest.dataset_sha256 !== undefined) return bundle.manifest.dataset_sha256;
+  const revision = bundle.manifest.extraction_provenance?.dataset_revision;
+  return revision !== undefined && /^[a-f0-9]{64}$/u.test(revision) ? revision : null;
+}
+
 async function persistRecallEvalArtifacts(
   context: RecallEvalRunContext,
   collected: readonly RecallEvalQuestionResult[],
@@ -310,7 +331,7 @@ async function persistRecallEvalArtifacts(
     "public",
     slug,
     payload,
-    renderReport(payload, previous, diff),
+    renderRecallEvalReport(payload, previous, diff),
     renderFindings(payload, diff)
   );
   await writeRecallEvalRankIdentity(dirname(entry.kpiPath), collected, {

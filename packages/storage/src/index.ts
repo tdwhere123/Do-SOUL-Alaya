@@ -8,6 +8,9 @@ export {
   type InitDatabaseOptions
 } from "./sqlite/index.js";
 export {
+  readSchemaMigrationLedger
+} from "./sqlite/db.js";
+export {
   SqliteWorkspaceRepo,
   type WorkspaceCreateInput,
   type WorkspaceRepo

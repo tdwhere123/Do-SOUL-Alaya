@@ -181,7 +181,9 @@ function recordAbstentionQuestion(
   state: QualityMetricsState,
   question: LongMemEvalQuestionDiagnostic
 ): void {
-  if (!isAbstentionQuestionId(question.question_id)) return;
+  const cohort = question.cohort_ledger?.dataset_cohort;
+  if (cohort === undefined && !isAbstentionQuestionId(question.question_id)) return;
+  if (cohort !== undefined && cohort !== "abstention") return;
   state.abstentionTotal++;
   state.abstentionUnscorable++;
 }

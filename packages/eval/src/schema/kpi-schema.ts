@@ -399,6 +399,10 @@ export const RecallEvalAttributionSchema = z
     embedding_provider_label: z.string().min(1),
     onnx_threads: z.number().int().positive().nullable(),
     onnx_model_artifact_sha256: Sha256Schema.nullable(),
+    hydration_binding: z.object({
+      dataset_sha256: Sha256Schema,
+      source: z.literal("external_expected_sha256")
+    }).strict().optional(),
     snapshot_binding: z.object({
       commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u).nullable(),
       gate_sha256: Sha256Schema.nullable(),
@@ -408,7 +412,11 @@ export const RecallEvalAttributionSchema = z
       extraction_cache_cached_turns: z.number().int().nonnegative().nullable(),
       extraction_cache_coverage: RatioSchema.nullable(),
       dataset_sha256: Sha256Schema.nullable(),
-      question_id_digest: Sha256Schema.nullable()
+      question_id_digest: Sha256Schema.nullable(),
+      snapshot_manifest_sha256: Sha256Schema.nullable().optional(),
+      producer_recall_pipeline_version: z.string().min(1).optional(),
+      consumer_recall_pipeline_version: z.string().min(1).optional(),
+      producer_schema_migration_version: z.number().int().nonnegative().optional()
     }).strict()
   })
   .strict();
