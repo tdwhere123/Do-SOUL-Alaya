@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { z } from "zod";
 import { CoreError } from "@do-soul/alaya-core";
 import { EngineError, EngineErrorKind } from "@do-soul/alaya-protocol";
+import { StorageError } from "@do-soul/alaya-storage";
 import {
   isRequestBodyTooLargeError,
   REQUEST_BODY_TOO_LARGE_MESSAGE
@@ -131,6 +132,32 @@ function publicMessageForEngineError(error: EngineError): string {
   }
 }
 
+function statusForStorageError(error: StorageError): 404 | 409 | 500 {
+  switch (error.code) {
+    case "NOT_FOUND":
+    case "MIGRATION_NOT_FOUND":
+      return 404;
+    case "CONFLICT":
+    case "DUPLICATE_KEY":
+      return 409;
+    default:
+      return 500;
+  }
+}
+
+function publicMessageForStorageError(error: StorageError): string {
+  switch (error.code) {
+    case "NOT_FOUND":
+    case "MIGRATION_NOT_FOUND":
+      return "Resource not found";
+    case "CONFLICT":
+    case "DUPLICATE_KEY":
+      return "Request conflict";
+    default:
+      return "Storage operation failed";
+  }
+}
+
 interface ErrorHandlerContext {
   get(name: string): unknown;
   header(name: string, value: string): void;
@@ -151,6 +178,10 @@ function handleDaemonError(
   if (coreErrorResponse !== null) {
     return coreErrorResponse;
   }
+  const storageErrorResponse = handleStorageDaemonError(error, context, logger, requestId);
+  if (storageErrorResponse !== null) {
+    return storageErrorResponse;
+  }
   const engineErrorResponse = handleEngineDaemonError(error, context, logger, requestId);
   if (engineErrorResponse !== null) {
     return engineErrorResponse;
@@ -161,6 +192,27 @@ function handleDaemonError(
   }
   logger.error("[daemon] unhandled error", summarizeUnhandledError(error, requestId));
   return context.json({ success: false, error: "Internal server error" }, 500);
+}
+
+function handleStorageDaemonError(
+  error: unknown,
+  context: ErrorHandlerContext,
+  logger: ErrorLoggerPort,
+  requestId?: string
+): Response | null {
+  if (!(error instanceof StorageError)) {
+    return null;
+  }
+  const publicMessage = publicMessageForStorageError(error);
+  logger.error(
+    "[daemon] sanitized storage error",
+    summarizeHandledError(error, {
+      code: error.code,
+      publicMessage,
+      request_id: requestId
+    })
+  );
+  return context.json({ success: false, error: publicMessage }, statusForStorageError(error));
 }
 
 function applyRequestIdHeaders(context: ErrorHandlerContext): string | undefined {
@@ -246,7 +298,7 @@ function handleZodDaemonError(
   }
   logger.error(
     "[daemon] sanitized zod validation error",
-    summarizeHandledError(error, {
+    summarizeHandledError(error instanceof Error ? error : new Error("zod validation failure"), {
       publicMessage: "Invalid request",
       request_id: requestId
     })

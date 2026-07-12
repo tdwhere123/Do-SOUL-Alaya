@@ -41,6 +41,7 @@ interface HealthRefs {
   readonly lastStatusRef: MutableRefObject<AlayaStatus | null>;
   readonly isMountedRef: MutableRefObject<boolean>;
   readonly cooldownTimerRef: MutableRefObject<ReturnType<typeof setTimeout> | null>;
+  readonly inFlightTickRef: MutableRefObject<Promise<void> | null>;
 }
 
 const POLL_OK_MS = 5_000;
@@ -71,22 +72,24 @@ function useHealthRefs(): HealthRefs {
   const lastStatusRef = useRef<AlayaStatus | null>(null);
   const isMountedRef = useRef(true);
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightTickRef = useRef<Promise<void> | null>(null);
   return useMemo(
     () => ({
       consecutiveFailuresRef,
       refreshLockRef,
       lastStatusRef,
       isMountedRef,
-      cooldownTimerRef
+      cooldownTimerRef,
+      inFlightTickRef
     }),
     []
   );
 }
 
 function useStatusFetcher() {
-  return useCallback(async (): Promise<FetchOutcome> => {
+  return useCallback(async (signal?: AbortSignal): Promise<FetchOutcome> => {
     try {
-      const envelope = await apiFetch<StatusEnvelope>("/status");
+      const envelope = await apiFetch<StatusEnvelope>("/status", { signal });
       const parsed = AlayaStatusSchema.safeParse(envelope.data);
       if (!parsed.success) {
         return { kind: "schema_error", raw: envelope.data };
@@ -105,15 +108,32 @@ function useStatusFetcher() {
 }
 
 function useHealthTick(
-  fetchStatus: () => Promise<FetchOutcome>,
+  fetchStatus: (signal?: AbortSignal) => Promise<FetchOutcome>,
   setState: (state: DaemonHealthState) => void,
   refs: HealthRefs,
   showToast: ReturnType<typeof useToasts>["showToast"]
 ) {
   return useCallback(async () => {
-    const outcome = await fetchStatus();
-    if (!refs.isMountedRef.current) return;
-    applyHealthOutcome(outcome, setState, refs, showToast);
+    if (refs.inFlightTickRef.current !== null) {
+      return await refs.inFlightTickRef.current;
+    }
+    const run = async (): Promise<void> => {
+      try {
+        const outcome = await fetchStatus();
+        if (!refs.isMountedRef.current) return;
+        applyHealthOutcome(outcome, setState, refs, showToast);
+      } catch {
+        // The global 401 handler owns session expiry; polling must still release
+        // its lifecycle so a transient auth/network failure cannot wedge refresh.
+      }
+    };
+    const promise = run().finally(() => {
+      if (refs.inFlightTickRef.current === promise) {
+        refs.inFlightTickRef.current = null;
+      }
+    });
+    refs.inFlightTickRef.current = promise;
+    await promise;
   }, [fetchStatus, refs, setState, showToast]);
 }
 
@@ -149,10 +169,13 @@ function useHealthRefresh(
     if (refs.refreshLockRef.current) return;
     refs.refreshLockRef.current = true;
     setRefreshing(true);
-    await tick();
-    if (!refs.isMountedRef.current) {
-      refs.refreshLockRef.current = false;
-      return;
+    try {
+      await tick();
+    } finally {
+      if (!refs.isMountedRef.current) {
+        refs.refreshLockRef.current = false;
+        return;
+      }
     }
     refs.cooldownTimerRef.current = setTimeout(() => {
       refs.cooldownTimerRef.current = null;

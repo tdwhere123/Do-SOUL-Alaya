@@ -3,6 +3,7 @@ import { render, screen, waitFor, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import ConfigPage from "../../pages/config";
+import { ConfigSection, type SectionMeta } from "../../pages/config-section";
 import { ToastProvider } from "../../components/toast";
 import { LocaleProvider } from "../../i18n/locale";
 import { setInspectorToken, setWorkspaceId } from "../../api";
@@ -16,6 +17,19 @@ function renderConfig() {
         </ToastProvider>
       </LocaleProvider>
     </MemoryRouter>
+  );
+}
+
+function renderConfigSection(meta: SectionMeta) {
+  return render(
+    <ToastProvider>
+      <ConfigSection
+        meta={meta}
+        workspaceId="ws-1"
+        onDirtyChange={vi.fn()}
+        onRequiresRestart={vi.fn()}
+      />
+    </ToastProvider>
   );
 }
 
@@ -141,7 +155,7 @@ describe("ConfigPage", () => {
   it("shows restart banner after PATCH that returns requires_daemon_restart", async () => {
     renderConfig();
     const dot = await screen.findByTestId("dirty-dot-soul");
-    await waitFor(() => screen.getByText(/auto checkpoint/i));
+    await waitFor(() => screen.getByText(/auto_checkpoint/i));
     const soulHeading = screen.getByRole("heading", { name: /Soul Runtime/i });
     const soulSection = soulHeading.closest("div.mb-12") as HTMLElement;
     const toggles = within(soulSection).getAllByRole("button", { pressed: true });
@@ -156,6 +170,50 @@ describe("ConfigPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toMatch(/Restart Daemon Pending/i)
     );
+  });
+
+  it("does not let an older save response dirty a newly loaded section", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const patchResponse = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") return patchResponse;
+      if (url.endsWith("/config/ws-1/soul")) {
+        return jsonResponse({ memory_consolidation_enabled: true });
+      }
+      if (url.endsWith("/config/ws-1/strategy")) {
+        return jsonResponse({ auto_approve_readonly: false });
+      }
+      return jsonResponse({});
+    });
+
+    const view = renderConfigSection({ key: "soul", title: "Soul Runtime", icon: null });
+    const soulToggle = await screen.findByRole("button", { pressed: true });
+    await userEvent.click(soulToggle);
+    await userEvent.click(screen.getByRole("button", { name: /commit changes/i }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true)
+    );
+
+    view.rerender(
+      <ToastProvider>
+        <ConfigSection
+          meta={{ key: "strategy", title: "Strategy & Guardrails", icon: null }}
+          workspaceId="ws-1"
+          onDirtyChange={vi.fn()}
+          onRequiresRestart={vi.fn()}
+        />
+      </ToastProvider>
+    );
+    const strategyDot = await screen.findByTestId("dirty-dot-strategy");
+    await waitFor(() => expect(strategyDot.className).toContain("morandi-green"));
+
+    await act(async () => {
+      resolvePatch(jsonResponse({ success: true }));
+      await patchResponse;
+    });
+    await waitFor(() => expect(strategyDot.className).toContain("morandi-green"));
   });
 });
 

@@ -128,7 +128,7 @@ function useQueryMountLifecycle<T>(controller: QueryController<T>) {
     controller.mountedRef.current = true;
     return () => {
       controller.mountedRef.current = false;
-      abortActiveController(controller);
+      invalidateActiveRequest(controller);
     };
   }, []);
 }
@@ -141,7 +141,7 @@ function useQueryAutoRun<T>(
 ) {
   useEffect(() => {
     if (!enabled) {
-      abortActiveController(controller);
+      invalidateActiveRequest(controller);
       controller.setLoading(false);
       controller.setError(null);
       return;
@@ -149,7 +149,7 @@ function useQueryAutoRun<T>(
 
     void run("replace");
     return () => {
-      controller.controllerRef.current?.abort();
+      invalidateActiveRequest(controller);
     };
   }, [enabled, run, ...deps]);
 }
@@ -164,10 +164,10 @@ function beginQueryRequest<T>(controller: QueryController<T>) {
 function finishQueryRequest<T>(
   controller: QueryController<T>,
   request: { readonly controller: AbortController; readonly id: number },
-  mode: QueryMode
+  _mode: QueryMode
 ) {
   if (controller.controllerRef.current === request.controller) controller.controllerRef.current = null;
-  if (mode === "replace" && isCurrentRequest(controller, request.id)) controller.setLoading(false);
+  if (isCurrentRequest(controller, request.id)) controller.setLoading(false);
 }
 
 function handleQueryError<T>(
@@ -199,4 +199,9 @@ function isSilentQueryError(err: unknown, controller: AbortController): boolean 
 function abortActiveController<T>(controller: QueryController<T>) {
   controller.controllerRef.current?.abort();
   controller.controllerRef.current = null;
+}
+
+function invalidateActiveRequest<T>(controller: QueryController<T>) {
+  controller.requestIdRef.current += 1;
+  abortActiveController(controller);
 }

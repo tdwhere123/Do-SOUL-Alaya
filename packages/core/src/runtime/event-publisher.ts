@@ -1,4 +1,9 @@
-import { WorkspaceRunEventSchema, type EventLogEntry, type WorkspaceRunEvent } from "@do-soul/alaya-protocol";
+import {
+  AlayaError,
+  WorkspaceRunEventSchema,
+  type EventLogEntry,
+  type WorkspaceRunEvent
+} from "@do-soul/alaya-protocol";
 import { reportAsyncSideEffectFailure, scheduleAuditedAsyncSideEffect } from "./async-side-effect-auditor.js";
 
 export type EventPublisherInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
@@ -31,12 +36,12 @@ export interface EventPublisherDependencies {
   readonly runtimeNotifier: RuntimeNotifier;
 }
 
-export class EventPublisherPropagationError extends Error {
+export class EventPublisherPropagationError extends AlayaError {
   public readonly entry: EventLogEntry;
   public readonly entries: readonly EventLogEntry[];
 
   public constructor(entry: EventLogEntry, cause: unknown, entries: readonly EventLogEntry[] = [entry]) {
-    super(`Event ${entry.event_type} was appended but propagation failed.`, {
+    super("EVENT_PUBLISHER_PROPAGATION_FAILED", `Event ${entry.event_type} was appended but propagation failed.`, {
       cause: cause instanceof Error ? cause : undefined
     });
     this.name = "EventPublisherPropagationError";

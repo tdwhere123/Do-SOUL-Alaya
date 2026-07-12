@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
+import { AlayaError, StorageTier, type MemoryEntry } from "@do-soul/alaya-protocol";
 import type { HqProvider } from "./embed-text-resolver.js";
 import type { EmbeddingProviderPort, EmbeddingVectorRecord } from "./embedding-recall-service.js";
 
@@ -44,21 +44,23 @@ export interface EmbeddingBackfillPartialFailureInput {
   readonly cause: unknown;
 }
 
-export class EmbeddingBackfillPartialFailureError extends Error {
+export class EmbeddingBackfillPartialFailureError extends AlayaError {
   public override readonly name = "EmbeddingBackfillPartialFailureError";
-  public override readonly cause: unknown;
   public readonly workspaceId: string;
   public readonly failedObjectId: string;
   public readonly objectsAffected: readonly string[];
   public readonly auditEntries: readonly string[];
 
   public constructor(input: EmbeddingBackfillPartialFailureInput) {
-    super(`embedding_backfill_failed:persistence:${input.failedObjectId}:${input.message}`);
+    super(
+      "EMBEDDING_BACKFILL_PARTIAL_FAILURE",
+      `embedding_backfill_failed:persistence:${input.failedObjectId}:${input.message}`,
+      { cause: input.cause }
+    );
     this.workspaceId = input.workspaceId;
     this.failedObjectId = input.failedObjectId;
     this.objectsAffected = Object.freeze([...input.objectsAffected]);
     this.auditEntries = Object.freeze([...input.auditEntries]);
-    this.cause = input.cause;
     Object.setPrototypeOf(this, EmbeddingBackfillPartialFailureError.prototype);
   }
 }

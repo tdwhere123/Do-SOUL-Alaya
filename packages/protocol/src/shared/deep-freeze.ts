@@ -1,5 +1,3 @@
-// Intentionally duplicated across package-local helpers in protocol, core, storage, and soul:
-// merging them would require a shared util that violates the current dependency direction.
 export function deepFreeze<T>(value: T): Readonly<T> {
   freezeRecursive(value, new WeakSet<object>());
   return value as Readonly<T>;

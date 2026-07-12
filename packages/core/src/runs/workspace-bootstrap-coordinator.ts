@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   BootstrappingPathsPlantedPayloadSchema,
   RuntimeGovernanceEventType,
   WorkspaceState,
@@ -48,10 +49,10 @@ export interface WorkspaceBootstrapCoordinatorDependencies {
   readonly bootstrappingRecordRepo?: WorkspaceBootstrappingRecordRepoPort;
 }
 
-class BootstrapReconcileRaceError extends Error {
+class BootstrapReconcileRaceError extends AlayaError {
   public readonly racedRecord: Readonly<BootstrappingRecord>;
   public constructor(racedRecord: Readonly<BootstrappingRecord>) {
-    super("bootstrap_reconcile_race");
+    super("BOOTSTRAP_RECONCILE_RACE", "bootstrap_reconcile_race");
     this.racedRecord = racedRecord;
   }
 }

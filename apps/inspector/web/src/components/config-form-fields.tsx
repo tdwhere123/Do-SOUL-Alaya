@@ -1,5 +1,8 @@
 import { Eye, EyeOff } from "lucide-react";
 import { clsx } from "clsx";
+import { useI18n } from "../i18n/locale";
+
+type Translate = ReturnType<typeof useI18n>["t"];
 
 export type SecretRefMode = "env" | "file" | "paste";
 
@@ -60,18 +63,19 @@ export function SecretRefField(props: {
   readonly onValidationErrorChange: (value: string | null) => void;
   readonly onValueChange: (value: string) => void;
 }) {
+  const { t } = useI18n();
   const visibleValue =
     props.mode === "file" && !props.revealFile && props.value ? maskFilePath(props.value) : props.value;
   return (
     <div className="flex flex-col items-end gap-2">
       <SecretModeChips mode={props.mode} onModeChange={props.onModeChange} />
       <div className="flex items-center gap-2">
-        <SecretRevealButton {...props} />
+        <SecretRevealButton {...props} t={t} />
         <input
           type={props.mode === "paste" ? "password" : "text"}
           value={visibleValue}
           onChange={(event) => props.onValueChange(event.target.value)}
-          placeholder={secretPlaceholder(props.mode)}
+          placeholder={secretPlaceholder(props.mode, t)}
           className={clsx(
             "bg-transparent border-b outline-none text-sm font-mono text-right py-1 min-w-[260px]",
             props.validationError
@@ -83,11 +87,13 @@ export function SecretRefField(props: {
         />
       </div>
       {props.validationError ? (
-        <span className="text-[10px] text-morandi-pink">{props.validationError}</span>
+        <span className="text-[10px] text-morandi-pink">
+          {translateSecretValidationError(props.validationError, t)}
+        </span>
       ) : null}
       {props.mode === "paste" ? (
         <span className="max-w-[260px] text-right text-[10px] text-ink-700/40">
-          Paste is stored as a local file secret and returned as file:.
+          {t("config:secret.pasteHelper")}
         </span>
       ) : null}
     </div>
@@ -124,6 +130,7 @@ function SecretRevealButton(props: {
   readonly value: string;
   readonly revealFile: boolean;
   readonly onRevealFileChange: (value: boolean | ((current: boolean) => boolean)) => void;
+  readonly t: Translate;
 }) {
   if (props.mode !== "file" || !props.value) return null;
   return (
@@ -131,7 +138,7 @@ function SecretRevealButton(props: {
       type="button"
       onClick={() => props.onRevealFileChange((current) => !current)}
       className="text-ink-700/40 hover:text-ink-700"
-      aria-label={props.revealFile ? "Hide full path" : "Show full path"}
+      aria-label={props.revealFile ? props.t("config:secret.path.hide") : props.t("config:secret.path.show")}
     >
       {props.revealFile ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
     </button>
@@ -184,8 +191,21 @@ function maskFilePath(path: string): string {
   return `…/${segs[segs.length - 1]}`;
 }
 
-function secretPlaceholder(mode: SecretRefMode): string {
-  if (mode === "env") return "OPENAI_API_KEY";
-  if (mode === "file") return "/etc/alaya/secrets/openai";
-  return "paste API key";
+function secretPlaceholder(mode: SecretRefMode, t: Translate): string {
+  if (mode === "env") return t("config:secret.placeholder.env");
+  if (mode === "file") return t("config:secret.placeholder.file");
+  return t("config:secret.placeholder.paste");
+}
+
+function translateSecretValidationError(error: string, t: Translate): string {
+  switch (error) {
+    case "env name must be UPPER_SNAKE_CASE":
+      return t("config:secret.validation.envName");
+    case "file path must be absolute (start with /)":
+      return t("config:secret.validation.filePath");
+    case "pasted key is required":
+      return t("config:secret.validation.pastedKey");
+    default:
+      return error;
+  }
 }

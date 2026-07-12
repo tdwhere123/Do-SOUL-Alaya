@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 import type { RuntimeGardenComputeConfig } from "@do-soul/alaya-protocol";
 import { apiFetch, type ApiError } from "../api";
 import type { ToastInput } from "./toast";
@@ -58,16 +58,22 @@ export function useGardenComputeState(props: {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const fieldsRevisionRef = useRef(0);
+  const updateFields = useCallback((next: SetStateAction<GardenComputeFields>) => {
+    fieldsRevisionRef.current += 1;
+    setFields(next);
+  }, []);
 
   useEffect(() => {
-    return loadGardenCompute({ workspaceId, showToast, setFields, setInitial, setLoading });
-  }, [showToast, workspaceId]);
+    return loadGardenCompute({ workspaceId, showToast, setFields: updateFields, setInitial, setLoading });
+  }, [showToast, updateFields, workspaceId]);
 
   const dirty = useMemo(() => isGardenDirty(initial, fields), [fields, initial]);
   const handleSave = useCallback(
     () =>
       saveGardenCompute({
         fields,
+        fieldsRevisionRef,
         onRequiresRestart,
         showToast,
         setFields,
@@ -78,7 +84,7 @@ export function useGardenComputeState(props: {
     [fields, onRequiresRestart, showToast]
   );
 
-  return { dirty, fields, handleSave, loading, revealFile, saving, setFields, setRevealFile, setValidationError, validationError };
+  return { dirty, fields, handleSave, loading, revealFile, saving, setFields: updateFields, setRevealFile, setValidationError, validationError };
 }
 
 function loadGardenCompute(props: {
@@ -96,7 +102,7 @@ function loadGardenCompute(props: {
       props.setInitial(data);
       props.setFields(fieldsFromGardenConfig(data));
     } catch (err) {
-      if ((err as ApiError).status !== 401) {
+      if (!cancelled && (err as ApiError).status !== 401) {
         props.showToast({ message: `Failed to load garden compute config: ${(err as Error).message}`, type: "error" });
       }
     } finally {
@@ -110,6 +116,7 @@ function loadGardenCompute(props: {
 
 async function saveGardenCompute(props: {
   readonly fields: GardenComputeFields;
+  readonly fieldsRevisionRef: MutableRefObject<number>;
   readonly onRequiresRestart: () => void;
   readonly showToast: ShowToast;
   readonly setFields: Dispatch<SetStateAction<GardenComputeFields>>;
@@ -126,8 +133,9 @@ async function saveGardenCompute(props: {
   }
   props.setValidationError(null);
   props.setSaving(true);
+  const fieldsRevision = props.fieldsRevisionRef.current;
   try {
-    await patchGardenCompute(props);
+    await patchGardenCompute({ ...props, fieldsRevision });
   } catch (err) {
     if ((err as ApiError).status !== 401) {
       props.showToast({ message: `Failed to patch garden compute: ${(err as Error).message}`, type: "error" });
@@ -139,6 +147,8 @@ async function saveGardenCompute(props: {
 
 async function patchGardenCompute(props: {
   readonly fields: GardenComputeFields;
+  readonly fieldsRevision: number;
+  readonly fieldsRevisionRef: MutableRefObject<number>;
   readonly onRequiresRestart: () => void;
   readonly showToast: ShowToast;
   readonly setFields: Dispatch<SetStateAction<GardenComputeFields>>;
@@ -160,7 +170,9 @@ async function patchGardenCompute(props: {
   if (result.requires_daemon_restart) props.onRequiresRestart();
   const nextInitial = nextGardenInitial(props.fields, secretPatch.secret_ref ?? null, sanitized);
   props.setInitial(nextInitial);
-  props.setFields(fieldsFromGardenConfig(nextInitial));
+  if (props.fieldsRevisionRef.current === props.fieldsRevision) {
+    props.setFields(fieldsFromGardenConfig(nextInitial));
+  }
 }
 
 async function fetchGardenConfig(workspaceId: string): Promise<RuntimeGardenComputeConfig> {

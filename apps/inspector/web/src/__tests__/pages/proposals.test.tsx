@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
@@ -117,6 +117,43 @@ describe("ProposalsPage", () => {
     await screen.findByText("No pending proposals.");
     expect(screen.queryByText(/Error:/)).toBeNull();
   });
+
+  it("keeps concurrent proposal review buttons independently busy", async () => {
+    let resolveFirst!: (response: Response) => void;
+    let resolveSecond!: (response: Response) => void;
+    const firstReview = new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    const secondReview = new Promise<Response>((resolve) => { resolveSecond = resolve; });
+    const proposals = [pendingProposal(), { ...pendingProposal(), proposal_id: "proposal-2", target_object_id: "memory-2" }];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return url.includes("/proposal-1/") ? firstReview : secondReview;
+      }
+      return pendingResponse(proposals);
+    });
+
+    renderProposals();
+    await screen.findByText("proposal-2");
+    await userEvent.type(await screen.findByLabelText(/reviewer identity/i), "user:reviewer");
+
+    const firstRow = screen.getByText("proposal-1").closest("li") as HTMLElement;
+    const secondRow = screen.getByText("proposal-2").closest("li") as HTMLElement;
+    const firstAccept = within(firstRow).getByRole("button", { name: "Accept" });
+    const secondAccept = within(secondRow).getByRole("button", { name: "Accept" });
+    await userEvent.click(firstAccept);
+    await userEvent.click(secondAccept);
+
+    await waitFor(() => {
+      expect(firstAccept).toHaveProperty("disabled", true);
+      expect(secondAccept).toHaveProperty("disabled", true);
+    });
+
+    resolveFirst(reviewResponse("proposal-1"));
+    await waitFor(() => expect(firstAccept).toHaveProperty("disabled", false));
+    expect(secondAccept).toHaveProperty("disabled", true);
+
+    resolveSecond(reviewResponse("proposal-2"));
+    await waitFor(() => expect(secondAccept).toHaveProperty("disabled", false));
+  });
 });
 
 function renderProposals(path = "/proposals") {
@@ -148,6 +185,16 @@ function pendingResponse(proposals: readonly PendingProposalFixture[]) {
         proposals,
         total_count: proposals.length
       }
+    }),
+    { status: 200 }
+  );
+}
+
+function reviewResponse(proposalId: string) {
+  return new Response(
+    JSON.stringify({
+      success: true,
+      data: { proposal_id: proposalId, resolution_state: "accepted" }
     }),
     { status: 200 }
   );

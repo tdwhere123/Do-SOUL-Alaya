@@ -2,7 +2,7 @@ import { BrowserRouter } from "react-router-dom";
 import CommandPalette from "../components/command-palette";
 import SessionExpired from "../components/session-expired";
 import { ToastProvider } from "../components/toast";
-import { LocaleProvider } from "../i18n/locale";
+import { LocaleProvider, useI18n } from "../i18n/locale";
 import { InspectorRoutes } from "./app-routes";
 import { useInspectorLaunchState } from "./inspector-launch-state";
 import type { InspectorLaunchState } from "./inspector-launch-state";
@@ -37,10 +37,12 @@ function InspectorAppContent() {
 }
 
 function AuthenticationRequired(props: { readonly message: string }) {
+  const { t } = useI18n();
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-beige-100 p-8 text-center">
       <h1 className="text-2xl font-bold text-ink-600 mb-4 font-mono uppercase tracking-widest">
-        Authentication Required
+        {t("shell:authRequired")}
       </h1>
       <p className="text-ink-700 max-w-md font-mono text-sm leading-relaxed">
         {props.message}
@@ -53,12 +55,14 @@ function AuthenticationRequired(props: { readonly message: string }) {
 }
 
 function InspectorLoading() {
+  const { t } = useI18n();
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-beige-100">
       <div className="flex flex-col items-center gap-4">
         <div className="w-12 h-12 border-2 border-ink-600/20 border-t-ink-600 rounded-full animate-spin" />
         <p className="text-ink-600 font-mono text-xs uppercase tracking-widest">
-          Loading Inspector Surface...
+          {t("shell:loading")}
         </p>
       </div>
     </div>

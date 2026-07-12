@@ -54,7 +54,7 @@ function useProposalsController() {
   const workspaceId = getWorkspaceId();
   const [reviewer, setReviewer] = useState("");
   const [reasonByProposal, setReasonByProposal] = useState<Record<string, string>>({});
-  const [busyProposalId, setBusyProposalId] = useState<string | null>(null);
+  const [busyProposalIds, setBusyProposalIds] = useState<ReadonlySet<string>>(() => new Set());
   const [searchParams] = useSearchParams();
   const highlightedRowRef = useRef<HTMLLIElement | null>(null);
   const highlightedProposalId = searchParams.get("highlight");
@@ -74,12 +74,12 @@ function useProposalsController() {
     (proposalId: string, verdict: "accept" | "reject") =>
       submitProposalReview({
         proposalId, verdict, reviewer, reasonByProposal, refetch: query.refetch,
-        setBusyProposalId, showToast, t, workspaceId
+        setBusyProposalIds, showToast, t, workspaceId
       }),
     [query.refetch, reasonByProposal, reviewer, showToast, t, workspaceId]
   );
   return {
-    busyProposalId, highlightedProposalId, highlightedRowRef, loadError: workspaceId === null ? t("proposals:loadFailedNoWorkspace") : query.error,
+    busyProposalIds, highlightedProposalId, highlightedRowRef, loadError: workspaceId === null ? t("proposals:loadFailedNoWorkspace") : query.error,
     loading: query.loading, proposals, reasonByProposal, reviewer, setReasonByProposal, setReviewer, submitReview, t
   };
 }
@@ -143,7 +143,7 @@ function ProposalRow(props: {
       <ReviewReasonInput controller={controller} proposal={proposal} reasonInputId={reasonInputId} />
       <ProposalActions
         canAccept={proposedChangesDisplay !== null}
-        busy={controller.busyProposalId === proposal.proposal_id}
+        busy={controller.busyProposalIds.has(proposal.proposal_id)}
         proposalId={proposal.proposal_id}
         submitReview={controller.submitReview}
         t={controller.t}
@@ -244,7 +244,7 @@ async function submitProposalReview(props: {
   readonly reviewer: string;
   readonly reasonByProposal: Record<string, string>;
   readonly refetch: (mode?: "replace" | "background") => Promise<readonly PendingSummary[] | null>;
-  readonly setBusyProposalId: (proposalId: string | null) => void;
+  readonly setBusyProposalIds: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>;
   readonly showToast: (input: Parameters<ReturnType<typeof useToasts>["showToast"]>[0]) => void;
   readonly t: ReturnType<typeof useI18n>["t"];
   readonly workspaceId: string | null;
@@ -255,7 +255,7 @@ async function submitProposalReview(props: {
     return;
   }
   if (props.workspaceId === null) return;
-  props.setBusyProposalId(props.proposalId);
+  props.setBusyProposalIds((current) => new Set(current).add(props.proposalId));
   try {
     const envelope = await postReview(props, trimmedReviewer);
     props.showToast({ type: "success", message: reviewToastMessage(envelope, props.proposalId, props.verdict, props.t) });
@@ -265,7 +265,11 @@ async function submitProposalReview(props: {
       props.showToast({ type: "error", message: err instanceof Error ? err.message : props.t("proposals:toast.reviewFailed") });
     }
   } finally {
-    props.setBusyProposalId(null);
+    props.setBusyProposalIds((current) => {
+      const next = new Set(current);
+      next.delete(props.proposalId);
+      return next;
+    });
   }
 }
 

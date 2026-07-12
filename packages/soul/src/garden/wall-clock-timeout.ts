@@ -57,9 +57,9 @@ export class WallClockTimeoutError extends AlayaError {
 // wins the race, so its original abort error is surfaced instead. Either way
 // the surfaced error is never a WallClockTimeoutError for an operator abort.
 // see also: withWallClockTimeout operatorAbortListener
-class OperatorAbortError extends Error {
+class OperatorAbortError extends AlayaError {
   public constructor() {
-    super("Operator aborted the wall-clock-bounded call.");
+    super("OPERATOR_ABORT", "Operator aborted the wall-clock-bounded call.");
     this.name = "OperatorAbortError";
   }
 }

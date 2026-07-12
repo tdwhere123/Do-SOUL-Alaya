@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SAMPLE_ROWS,
@@ -9,6 +10,9 @@ import {
   type FetchInput
 } from "./memory-browser.test-support";
 import { setInspectorToken, setWorkspaceId } from "../../api";
+import { ToastProvider } from "../../components/toast";
+import { LocaleProvider } from "../../i18n/locale";
+import MemoryBrowserPage from "../../pages/memory-browser";
 
 describe("MemoryBrowserPage promote-to-strictly_governed", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -21,6 +25,7 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     setWorkspaceId(null);
+    window.localStorage.removeItem("alaya-inspector-locale");
   });
 
   it("POSTs a typed path_relation Proposal when the promote button is clicked", async () => {
@@ -68,6 +73,101 @@ describe("MemoryBrowserPage promote-to-strictly_governed", () => {
       });
       expect(matched).toBe(true);
     });
+  });
+
+  it("keeps each promotion busy until its own request settles", async () => {
+    const firstPromotion = deferred<Response>();
+    const secondPromotion = deferred<Response>();
+    const rows = [
+      SAMPLE_ROWS[0]!,
+      { ...SAMPLE_ROWS[0]!, object_id: "mem-second", content: "second memory" }
+    ];
+    let promotionCalls = 0;
+    fetchMock.mockImplementation(async (input: FetchInput, init?: RequestInit) => {
+      const url = urlOf(input);
+      if (url.includes("/memory-entries/ws1")) {
+        return jsonResponse({ success: true, data: rows }, 200, {
+          "x-total-count": "2",
+          "x-limit": "200",
+          "x-offset": "0"
+        });
+      }
+      if (url.includes("/proposals/promote-strictly-governed") && init?.method === "POST") {
+        promotionCalls += 1;
+        return promotionCalls === 1 ? firstPromotion.promise : secondPromotion.promise;
+      }
+      return jsonResponse({}, 404);
+    });
+
+    renderMemoryBrowser();
+    fireEvent.click(await screen.findByText("remember preference"));
+    fireEvent.click(screen.getByTestId("promote-strictly-governed"));
+    fireEvent.click(await screen.findByText("second memory"));
+    fireEvent.click(screen.getByTestId("promote-strictly-governed"));
+
+    await waitFor(() => expect(promotionCalls).toBe(2));
+    firstPromotion.resolve(jsonResponse({ success: true, data: { proposal_id: "promo-1" } }));
+    await waitFor(() => expect((screen.getByTestId("promote-strictly-governed") as HTMLButtonElement).disabled).toBe(true));
+
+    secondPromotion.resolve(jsonResponse({ success: true, data: { proposal_id: "promo-2" } }));
+    await waitFor(() => expect((screen.getByTestId("promote-strictly-governed") as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it.each(["Enter", " "])("selects a memory row with %s", async (key) => {
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/memory-entries/ws1")) {
+        return jsonResponse({ success: true, data: SAMPLE_ROWS }, 200, {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    renderMemoryBrowser();
+
+    const row = await screen.findByRole("row", {
+      name: "Select memory mem-abc-1234567890"
+    });
+    fireEvent.keyDown(row, { key });
+
+    expect(await screen.findByText("Evidence")).not.toBeNull();
+    const panel = screen.getByTestId("memory-evidence-panel");
+    expect(panel.className).toContain("w-full");
+    expect(panel.className).toContain("md:w-96");
+  });
+
+  it("renders localized operator state and evidence labels in zh", async () => {
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/memory-entries/ws1")) {
+        return jsonResponse({ success: true, data: SAMPLE_ROWS }, 200, {
+          "x-total-count": "1",
+          "x-limit": "200",
+          "x-offset": "0"
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    window.localStorage.setItem("alaya-inspector-locale", "zh");
+
+    render(
+      <LocaleProvider>
+        <MemoryRouter>
+          <ToastProvider>
+            <MemoryBrowserPage />
+          </ToastProvider>
+        </MemoryRouter>
+      </LocaleProvider>
+    );
+
+    expect(await screen.findByRole("button", { name: "刷新" })).not.toBeNull();
+    expect(screen.getByText("维度:")).not.toBeNull();
+    fireEvent.click(await screen.findByText("remember preference"));
+    expect(await screen.findByText("证据")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "关闭证据面板" })).not.toBeNull();
   });
 
 

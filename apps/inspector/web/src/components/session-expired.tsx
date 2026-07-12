@@ -1,16 +1,17 @@
+import { useI18n } from "../i18n/locale";
+
 interface SessionExpiredProps {
   readonly reason?: string;
 }
 
 export default function SessionExpired({ reason }: SessionExpiredProps) {
-  const message =
-    reason ??
-    "Inspector token rejected. Please re-run `alaya inspect` to obtain a fresh URL.";
+  const { t } = useI18n();
+  const message = reason ?? t("session:expired.body");
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-beige-100 p-8 text-center">
       <h1 className="text-2xl font-bold text-ink-600 mb-4 font-mono uppercase tracking-widest">
-        Session Expired
+        {t("session:expired.title")}
       </h1>
       <p className="text-ink-700 max-w-md font-mono text-sm leading-relaxed mb-8">
         {message}

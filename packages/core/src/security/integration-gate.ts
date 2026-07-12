@@ -1,4 +1,5 @@
 import {
+  AlayaError,
   WorkerRuntimeEventType,
   RuntimeCapabilitiesSchema,
   WorkerIntegrationStatusPayloadSchema,
@@ -38,7 +39,7 @@ export interface IntegrationGateDependencies {
   readonly now?: () => string;
 }
 
-export class IntegrationGatePublicationError extends Error {
+export class IntegrationGatePublicationError extends AlayaError {
   public readonly decision: IntegrationGateDecision;
   public readonly durableDecisionCommitted: boolean;
 
@@ -47,7 +48,7 @@ export class IntegrationGatePublicationError extends Error {
     cause: unknown,
     durableDecisionCommitted: boolean
   ) {
-    super("Integration gate failed to publish worker.integration_status.", {
+    super("INTEGRATION_GATE_PUBLICATION_FAILED", "Integration gate failed to publish worker.integration_status.", {
       cause: cause instanceof Error ? cause : undefined
     });
     this.name = "IntegrationGatePublicationError";
