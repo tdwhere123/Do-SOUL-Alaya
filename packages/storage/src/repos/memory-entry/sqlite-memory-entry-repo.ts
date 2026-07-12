@@ -1,9 +1,4 @@
-import {
-  StorageTier,
-  type MemoryDimension,
-  type MemoryEntry,
-  type ScopeClass
-} from "@do-soul/alaya-protocol";
+import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import {
@@ -47,7 +42,6 @@ import {
 } from "./update-workflows.js";
 import {
   type AutonomousTombstoneInput,
-  type MemoryEntryListPageOptions,
   type MemoryEntryKeywordSearchResult,
   type MemoryEntryRepo,
   type MemoryEntryRepoDiagnosticSink,
