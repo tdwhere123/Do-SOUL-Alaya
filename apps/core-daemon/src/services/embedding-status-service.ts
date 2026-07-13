@@ -22,10 +22,14 @@ export interface EmbeddingStatusDegradationSource {
   ): Promise<readonly Pick<HealthJournalEntry, "created_at" | "detail_json">[]>;
 }
 
+export type EmbeddingProviderWarmupStatus = "not_requested" | "pending" | "ready" | "failed";
+
 export interface EmbeddingStatusServiceOptions {
   readonly embeddingEnabled: boolean;
   readonly recallPolicyEmbeddingEnabled?: boolean;
   readonly providerConfigured: boolean;
+  readonly providerAvailable?: () => boolean;
+  readonly providerWarmupStatus?: () => EmbeddingProviderWarmupStatus;
   readonly modelId: string | null;
   readonly storageAvailable: boolean;
   readonly degradationSource?: EmbeddingStatusDegradationSource;
@@ -42,6 +46,9 @@ export function createEmbeddingStatusService(
     getStatus: async (workspaceId: string): Promise<EmbeddingStatus> => {
       const checkedAt = now();
       const effectiveEmbeddingEnabled = isEffectiveEmbeddingEnabled(options);
+      const providerAvailable = options.providerAvailable?.() ?? options.providerConfigured;
+      const providerWarmupStatus = options.providerWarmupStatus?.() ??
+        (options.providerConfigured ? "ready" : "not_requested");
       const recentDegradedReason = await findRecentDegradedReason(
         workspaceId,
         options,
@@ -55,7 +62,13 @@ export function createEmbeddingStatusService(
         provider_configured: options.providerConfigured,
         model_id: normalizeModelId(options.modelId),
         storage_available: options.storageAvailable,
-        ...resolveEffectivePosture(options, effectiveEmbeddingEnabled, recentDegradedReason),
+        ...resolveEffectivePosture(
+          options,
+          effectiveEmbeddingEnabled,
+          providerAvailable,
+          providerWarmupStatus,
+          recentDegradedReason
+        ),
         checked_at: checkedAt
       });
     }
@@ -69,6 +82,8 @@ function isEffectiveEmbeddingEnabled(options: EmbeddingStatusServiceOptions): bo
 function resolveEffectivePosture(
   options: EmbeddingStatusServiceOptions,
   effectiveEmbeddingEnabled: boolean,
+  providerAvailable: boolean,
+  providerWarmupStatus: EmbeddingProviderWarmupStatus,
   recentDegradedReason: string | null
 ): Pick<EmbeddingStatus, "effective_mode" | "degraded_reason"> {
   if (!effectiveEmbeddingEnabled) {
@@ -77,32 +92,33 @@ function resolveEffectivePosture(
       degraded_reason: null
     };
   }
-
-  if (!options.providerConfigured) {
+  const degradedReason = resolveDegradedReason(
+    options, providerAvailable, providerWarmupStatus, recentDegradedReason
+  );
+  if (degradedReason !== null) {
     return {
       effective_mode: "degraded",
-      degraded_reason: "provider_unconfigured"
+      degraded_reason: degradedReason
     };
   }
-
-  if (!options.storageAvailable) {
-    return {
-      effective_mode: "degraded",
-      degraded_reason: "storage_unavailable"
-    };
-  }
-
-  if (recentDegradedReason !== null) {
-    return {
-      effective_mode: "degraded",
-      degraded_reason: recentDegradedReason
-    };
-  }
-
   return {
     effective_mode: "embedding_supplement",
     degraded_reason: null
   };
+}
+
+function resolveDegradedReason(
+  options: EmbeddingStatusServiceOptions,
+  providerAvailable: boolean,
+  providerWarmupStatus: EmbeddingProviderWarmupStatus,
+  recentDegradedReason: string | null
+): string | null {
+  if (!options.providerConfigured) return "provider_unconfigured";
+  if (!options.storageAvailable) return "storage_unavailable";
+  if (providerWarmupStatus === "pending") return "provider_warmup_pending";
+  if (providerWarmupStatus === "failed") return "provider_warmup_failed";
+  if (!providerAvailable) return "provider_unavailable";
+  return recentDegradedReason;
 }
 
 async function findRecentDegradedReason(

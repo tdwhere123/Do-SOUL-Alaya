@@ -41,6 +41,7 @@ import { seedLongMemEvalQuestion } from "./runner-question-seeding.js";
 import { buildLongMemEvalQuestionResult } from "./runner-question-result.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from "./selection/question-runtime-identity.js";
 import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
+import { warmLongMemEvalEmbeddingCaches } from "./embedding-cache-warmup.js";
 
 export interface LongMemEvalWorkerResult {
   readonly questionId: string;
@@ -122,7 +123,12 @@ async function runLongMemEvalQuestionInWorkspace(
   const { embeddingWarmup, queryEmbeddingWarmup } = await runQuestionPhase(
     phase,
     "embedding_warmup",
-    () => warmQuestionEmbeddingCaches(input, workspace, seedState.sidecar)
+    () => warmLongMemEvalEmbeddingCaches({
+      embeddingMode: input.embeddingMode,
+      workspace,
+      objectIds: deriveLongMemEvalMemoryObjectIds(seedState.sidecar),
+      queryText: input.question.question
+    })
   );
   await runQuestionPhase(phase, "edge_plane", () =>
     input.daemon.runEdgePlanePassIfConfigured()
@@ -195,27 +201,6 @@ async function buildTimedQuestionResult(input: {
       embeddingMode: input.input.embeddingMode
     })
   );
-}
-
-async function warmQuestionEmbeddingCaches(
-  input: LongMemEvalQuestionRunInput,
-  workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
-  sidecar: Parameters<typeof deriveLongMemEvalMemoryObjectIds>[0]
-): Promise<{
-  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
-  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
-}> {
-  if (input.embeddingMode !== "env") {
-    return { embeddingWarmup: null, queryEmbeddingWarmup: null };
-  }
-  return {
-    embeddingWarmup: await workspace.warmEmbeddingCache(
-      deriveLongMemEvalMemoryObjectIds(sidecar)
-    ),
-    queryEmbeddingWarmup: await workspace.warmQueryEmbeddingCache([
-      input.question.question
-    ])
-  };
 }
 
 async function runCoherenceEdgesIfEnabled(

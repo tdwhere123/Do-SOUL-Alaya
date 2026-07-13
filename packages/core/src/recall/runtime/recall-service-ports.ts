@@ -37,6 +37,11 @@ export interface KeywordSearchResult {
   readonly trigram_rank?: number;
 }
 
+export interface KeywordSearchBatchQuery {
+  readonly queryText: string;
+  readonly limit: number;
+}
+
 export interface RecallMemoryListPageOptions {
   readonly limit: number;
   readonly offset: number;
@@ -62,6 +67,11 @@ export interface RecallServiceMemoryRepoPort {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly KeywordSearchResult[]>;
+  searchManyByKeywordWithinObjectIds?(
+    workspaceId: string,
+    queries: readonly Readonly<KeywordSearchBatchQuery>[],
+    objectIds: readonly string[]
+  ): Promise<readonly (readonly KeywordSearchResult[])[]>;
   searchByAnchorWithinObjectIds?(
     workspaceId: string,
     anchorTokens: readonly string[],
@@ -294,6 +304,13 @@ export interface RecallServiceEmbeddingRecallPort {
   }): Promise<ReadonlyMap<string, number>>;
 }
 
+export interface RecallServiceAnswerRerankPort {
+  score(
+    query: string,
+    passages: readonly string[]
+  ): Promise<readonly number[]>;
+}
+
 export interface RecallServiceDependencies {
   readonly memoryRepo: RecallServiceMemoryRepoPort;
   readonly slotRepo: RecallServiceSlotRepoPort;
@@ -305,6 +322,7 @@ export interface RecallServiceDependencies {
   readonly globalRecallCachePort?: GlobalMemoryRecallCachePort;
   readonly claimResolverPort?: RecallServiceClaimResolverPort;
   readonly embeddingRecallService?: RecallServiceEmbeddingRecallPort;
+  readonly answerRerankService?: RecallServiceAnswerRerankPort;
   readonly pathPlasticityPort?: RecallServicePathPlasticityPort;
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;

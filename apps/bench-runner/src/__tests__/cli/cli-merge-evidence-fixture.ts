@@ -143,6 +143,8 @@ export function provenance(offset: number, count: number) {
       embedding_provider_kind: "openai",
       embedding_provider_label: "none",
       onnx_threads: null,
+      embedding_supplement: { enabled: false },
+      answer_rerank: { enabled: false },
       paired_env: {}
     },
     execution: {
@@ -152,7 +154,13 @@ export function provenance(offset: number, count: number) {
       limit: count,
       evaluated_count: count
     },
-    recall_config: { conf_slice_compatibility: false },
+    recall_config: {
+      conf_slice_compatibility: false,
+      schema_version: 2,
+      max_results: 10,
+      conflict_awareness: true,
+      effective_config_sha256: "d".repeat(64)
+    },
     seed_capabilities: { facet_tags_enabled: false },
     question_manifest: null
   };

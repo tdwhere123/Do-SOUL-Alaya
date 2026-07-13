@@ -2,6 +2,7 @@ import type {
   MemorySearchResult,
   SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
+import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import type {
   BenchContextUsageObject,
   BenchEmbeddingProviderKind,
@@ -10,10 +11,11 @@ import type {
   BenchReportContextUsageInput
 } from "./daemon-types.js";
 import { formatEmbeddingWarmupNotReadyError } from "./embedding-warmup.js";
+import {
+  resolveTreatmentEmbeddingInputIdentity
+} from "./strict-treatment-config.js";
 
 const BENCH_EDGE_PLANE_ENV = "ALAYA_BENCH_RUN_EDGE_PLANE";
-const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL =
-  "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 
 export function buildReportContextUsageArgs(
@@ -64,26 +66,35 @@ export function notRequestedEmbeddingWarmupSummary(
     pass_count: 0,
     missing_object_ids: [...objectIds],
     provider_kind: null,
-    model_id: null
+    model_id: null,
+    schema_version: null,
+    d2q_input: null
   };
 }
 
 export function resolveBenchEmbeddingModelId(
   providerKind: BenchEmbeddingProviderKind,
   env: Partial<Record<string, string | undefined>>
-): { readonly providerKind: string; readonly modelId: string } {
+): { readonly providerKind: BenchEmbeddingProviderKind; readonly modelId: string } {
   if (providerKind === "local_onnx") {
     return {
       providerKind,
       modelId:
         env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() ||
-        DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL
+        DEFAULT_LOCAL_ONNX_MODEL_ID
     };
   }
   return {
     providerKind,
     modelId: env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_BENCH_EMBEDDING_MODEL
   };
+}
+
+export function resolveBenchEmbeddingSchemaVersion(
+  providerKind: BenchEmbeddingProviderKind,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): 1 | 2 {
+  return resolveTreatmentEmbeddingInputIdentity(providerKind, env).schema_version as 1 | 2;
 }
 
 export function assertWarmEmbeddingReady(
@@ -107,7 +118,9 @@ export function notRequestedQueryEmbeddingWarmupSummary(
     provider_requested_count: 0,
     missing_count: queryCount,
     provider_kind: null,
-    model_id: null
+    model_id: null,
+    schema_version: null,
+    d2q_input: null
   };
 }
 

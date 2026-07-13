@@ -86,7 +86,8 @@ describe("recall-candidate-builder", () => {
     const candidate = buildRecallCandidate({
       candidate: createCoarseCandidate({ sourceChannel: "warm_cascade" }),
       relevanceScore: 0.6,
-      scoreFactors: createScoreFactors({ path_plasticity: 0.5 }),
+      scoreFactors: createScoreFactors({ path_plasticity: 0.5, content_relevance: 0.6 }),
+      finalRelevanceSource: "fusion",
       tokenEstimator,
       budgets: {
         max_entries: 5,
@@ -98,6 +99,7 @@ describe("recall-candidate-builder", () => {
     });
 
     expect(candidate.object_id).toBe("memory-1");
+    expect(candidate.selection_reason).toContain("Final fusion evidence score 0.600000");
     expect(candidate.source_channels).toEqual([
       "ranked_recall",
       "workspace_local",
@@ -166,6 +168,7 @@ describe("recall-candidate-builder governance ceiling clamp (TRUTH BOUNDARY)", (
       }),
       relevanceScore: 0.6,
       scoreFactors: createScoreFactors(),
+      finalRelevanceSource: "fusion",
       tokenEstimator,
       budgets: { max_entries: 5, max_total_tokens: 200, per_dimension_limits: {} },
       index: 0,

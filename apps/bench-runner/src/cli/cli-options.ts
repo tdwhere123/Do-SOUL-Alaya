@@ -4,7 +4,11 @@ import type {
   BenchPolicyShape,
   BenchSimulateReportMode
 } from "@do-soul/alaya-eval";
-import type { BenchEmbeddingMode, BenchEmbeddingProviderKind } from "../harness/daemon.js";
+import {
+  DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
+  type BenchEmbeddingMode,
+  type BenchEmbeddingProviderKind
+} from "../harness/daemon-types.js";
 import type { LongMemEvalVariant } from "../longmemeval/dataset.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
@@ -85,7 +89,7 @@ function createParsedFlagsState(): ParsedFlagsState {
     variantRaw: "oracle",
     historyRoot: DEFAULT_HISTORY_ROOT,
     embeddingMode: "disabled",
-    embeddingProviderKind: "openai",
+    embeddingProviderKind: DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
     policyShape: "stress",
     simulateReport: "none",
     force: false,
@@ -148,8 +152,10 @@ function consumeExtendedFlagToken(
 ): number {
   if (matchFlagToken(token, "--embedding-provider")) {
     state.embeddingProviderKind = parseEmbeddingProviderKind(
-      readFlagValue(args, index, token, "--embedding-provider", "openai") ??
-        "openai"
+      readFlagValue(
+        args, index, token, "--embedding-provider",
+        DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND
+      ) ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND
     );
     return nextIndex(index, token);
   }

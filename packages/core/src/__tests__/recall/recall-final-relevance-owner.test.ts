@@ -45,6 +45,42 @@ describe("final recall relevance ownership", () => {
     );
   });
 
+  it("lets a query-conditioned reranker replace both final order and scalar", () => {
+    const answerScores = new Map([
+      [`workspace_local:memory_entry:${FUSION_WINNER_ID}`, 0.1],
+      [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.9]
+    ]);
+    const baseline = buildRelevanceFixture();
+    const fixture = buildRelevanceFixture(answerScores);
+    const baselineFactors = new Map(
+      baseline.assessed.candidates.map((candidate) => [candidate.object_id, candidate.score_factors] as const)
+    );
+
+    expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
+    expect(fixture.assessed.candidates.map((candidate) => candidate.relevance_score))
+      .toEqual([0.9, 0.1]);
+    for (const candidate of fixture.assessed.candidates) {
+      const { relevance: _baselineRelevance, ...baselineSupportingFactors } =
+        baselineFactors.get(candidate.object_id) ?? { relevance: -1 };
+      const { relevance: _finalRelevance, ...finalSupportingFactors } =
+        candidate.score_factors ?? { relevance: -1 };
+      expect(finalSupportingFactors).toEqual(baselineSupportingFactors);
+      expect(candidate.score_factors?.relevance).toBe(candidate.relevance_score);
+    }
+    expect(fixture.assessed.candidates[0]?.selection_reason).toContain(
+      "Final query-conditioned answer relevance score 0.900000"
+    );
+    const answerWinner = fixture.assessed.diagnostics.find(
+      (candidate) => candidate.object_id === ACTIVATION_WINNER_ID
+    );
+    expect(answerWinner?.answer_relevance_rank).toBe(1);
+    expect(answerWinner?.answer_relevance_score).toBe(0.9);
+    expect(answerWinner?.score_factors.content_relevance).toBe(
+      baselineFactors.get(ACTIVATION_WINNER_ID)?.content_relevance
+    );
+  });
+
   it("uses only the injected clock when a retired benchmark env is present", () => {
     installCoreConfigFromProcessEnv({
       ALAYA_RECALL_NOW_ISO: "2030-01-01T00:00:00.000Z"
@@ -61,7 +97,9 @@ describe("final recall relevance ownership", () => {
   });
 });
 
-function buildRelevanceFixture() {
+function buildRelevanceFixture(
+  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>
+) {
   const fusionWinner = createMemory(FUSION_WINNER_ID, 0.1, [
     { facet: "occupation_work" }, { facet: "location_place" }
   ]);
@@ -71,7 +109,7 @@ function buildRelevanceFixture() {
   const assessed = fineAssess({
     candidates: [createCoarseCandidate(activationWinner), createCoarseCandidate(fusionWinner)],
     policy: buildPolicy(), winnerMemoryIds: new Set(),
-    supplementaryData: createSupplementaryData(), tokenEstimator: { estimate: () => 4 },
+    supplementaryData: createSupplementaryData(answerRelevanceScoresByCandidateKey), tokenEstimator: { estimate: () => 4 },
     now: () => NOW, warn: vi.fn()
   });
   return { fusionWinner, activationWinner, assessed };
@@ -162,7 +200,9 @@ function createMemory(
   };
 }
 
-function createSupplementaryData(): RecallSupplementaryData {
+function createSupplementaryData(
+  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>
+): RecallSupplementaryData {
   return {
     queryProbes: compileRecallQueryProbes("where does the operator work?"),
     ftsRanks: {},
@@ -185,7 +225,10 @@ function createSupplementaryData(): RecallSupplementaryData {
     weightTransferAmount: 0,
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
-    querySoughtFacets: ["occupation_work", "location_place"]
+    querySoughtFacets: ["occupation_work", "location_place"],
+    ...(answerRelevanceScoresByCandidateKey === undefined
+      ? {}
+      : { answerRelevanceScoresByCandidateKey })
   };
 }
 

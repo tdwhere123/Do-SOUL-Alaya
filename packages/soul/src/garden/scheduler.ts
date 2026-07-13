@@ -1,4 +1,5 @@
 import {
+  GARDEN_ROLE_PERMISSIONS,
   GARDEN_ROLE_TIER_MAP,
   GardenTier,
   type GardenBacklogQueueDepthByTier,
@@ -18,11 +19,17 @@ import {
 import { InMemoryGardenTaskRepo } from "./in-memory-garden-task-repo.js";
 import { buildGardenCompletionEventPayload } from "./events/completion-payload.js";
 import {
+  quarantineInvalidTask,
+  readDispatchTask
+} from "./dispatch/invalid-task-quarantine.js";
+import { buildTaskFailureCompletionEvent } from "./dispatch/task-failure-completion-event.js";
+import {
   buildCoolingKey,
   countByStatus,
+  gardenTaskRoutingError,
   parseIsoTimestampMs,
-  parseTaskDescriptorFromRow,
   roleForTier,
+  taskKindAllowedAtTier,
   tierForRole,
   TIER_ORDER
 } from "./scheduler-helpers.js";
@@ -32,7 +39,9 @@ import type {
   GardenSchedulerEventLogPort,
   GardenTaskBacklogCount,
   GardenTaskEventInput,
-  GardenTaskRepoPort} from "./scheduler-types.js";
+  GardenTaskRepoPort,
+  GardenTaskRow
+} from "./scheduler-types.js";
 
 export { InMemoryGardenTaskRepo } from "./in-memory-garden-task-repo.js";
 export type {
@@ -48,6 +57,18 @@ export type {
 } from "./scheduler-types.js";
 
 const IN_PROCESS_GARDEN_CLAIMANT = "in-process";
+const IN_PROCESS_GARDEN_TASK_KINDS: ReadonlySet<GardenTaskDescriptor["task_kind"]> =
+  new Set<GardenTaskDescriptor["task_kind"]>(
+    Object.values(GARDEN_ROLE_PERMISSIONS).flatMap(
+      (permission) => permission.allowed_task_kinds
+    )
+  );
+
+interface DispatchOptions {
+  readonly matchesTaskKind: (taskKind: GardenTaskDescriptor["task_kind"]) => boolean;
+  readonly rejectTierViolations: boolean;
+  readonly workspaceId?: string;
+}
 
 function defaultGardenSchedulerWarn(message: string, meta: Record<string, unknown>): void {
   process.emitWarning(message, {
@@ -67,7 +88,7 @@ export class GardenScheduler {
   private nextBacklogWarningTransitionId = 1;
 
   public constructor(
-    private readonly eventLog: GardenSchedulerEventLogPort,
+    eventLog: GardenSchedulerEventLogPort,
     config: GardenSchedulerConfig = {},
     private readonly healthJournal: HealthJournalRecordPort | null = null,
     private readonly taskRepo: GardenTaskRepoPort = new InMemoryGardenTaskRepo(eventLog)
@@ -79,6 +100,11 @@ export class GardenScheduler {
   }
 
   public enqueue(descriptor: GardenTaskDescriptor): void {
+    if (!taskKindAllowedAtTier(descriptor.task_kind, descriptor.required_tier)) {
+      throw new Error(
+        `Garden task kind ${descriptor.task_kind} is not allowed at ${descriptor.required_tier}.`
+      );
+    }
     this.taskRepo.enqueue({
       id: descriptor.task_id,
       workspace_id: descriptor.workspace_id,
@@ -115,7 +141,7 @@ export class GardenScheduler {
   ): Promise<GardenTaskDescriptor | null> {
     const allowedTaskKinds = new Set<GardenTaskDescriptor["task_kind"]>(taskKinds);
     return await this.dispatchNextInternal(role, {
-      matchesTaskKind: (task) => allowedTaskKinds.has(task.task_kind),
+      matchesTaskKind: (taskKind) => allowedTaskKinds.has(taskKind),
       rejectTierViolations: false,
       workspaceId
     });
@@ -123,11 +149,7 @@ export class GardenScheduler {
 
   private async dispatchNextInternal(
     role: GardenRoleValue,
-    options: {
-      readonly matchesTaskKind: (task: GardenTaskDescriptor) => boolean;
-      readonly rejectTierViolations: boolean;
-      readonly workspaceId?: string;
-    }
+    options: DispatchOptions
   ): Promise<GardenTaskDescriptor | null> {
     const roleTier = GARDEN_ROLE_TIER_MAP[role];
     const nowIso = this.now();
@@ -136,87 +158,129 @@ export class GardenScheduler {
     const candidates = this.taskRepo.peekPending(role, options.workspaceId, Math.max(1, this.queueDepth));
 
     for (const candidate of candidates) {
-      const task = parseTaskDescriptorFromRow(candidate);
-      if (!options.matchesTaskKind(task)) {
+      if (!IN_PROCESS_GARDEN_TASK_KINDS.has(candidate.kind)) continue;
+      if (!options.matchesTaskKind(candidate.kind)) continue;
+      const task = await this.readDispatchCandidate(candidate, nowIso);
+      if (task === null) continue;
+
+      const routingError = gardenTaskRoutingError(candidate, task, role);
+      if (routingError !== null && !options.rejectTierViolations) {
+        await this.quarantineInvalidTask(candidate, routingError, nowIso);
         continue;
       }
-
-      // Tier violations are intentionally fail-fast for the current dispatch pass:
-      // reject and remove the highest-priority invalid task, then let the caller retry.
       if (TIER_ORDER[task.required_tier] > TIER_ORDER[roleTier]) {
         if (!options.rejectTierViolations) {
           continue;
         }
-
-        const claimResult = this.taskRepo.claimAtomic(
-          task.task_id,
-          IN_PROCESS_GARDEN_CLAIMANT,
-          nowIso
-        );
-        if (claimResult !== "claimed") {
-          continue;
+        if (await this.rejectTierViolation(candidate, task, role, roleTier, nowIso)) {
+          return null;
         }
-
-        try {
-          await this.appendTierViolationEvent(task, roleTier, nowIso);
-        } catch (error) {
-          this.taskRepo.releaseClaim(task.task_id, IN_PROCESS_GARDEN_CLAIMANT);
-          throw error;
-        }
-
-        await this.taskRepo.completeWithEvents(
-          task.task_id,
-          {
-            status: "failed",
-            completed_at: nowIso,
-            last_error_text: `Tier violation: ${role} cannot dispatch ${task.required_tier}`
-          },
-          [],
-          IN_PROCESS_GARDEN_CLAIMANT
-        );
-        this.updateBacklogTelemetry(nowIso);
-        await this.recordTierViolationHealthJournal(task, roleTier);
-        return null;
+        continue;
+      }
+      if (routingError !== null) {
+        await this.quarantineInvalidTask(candidate, routingError, nowIso);
+        continue;
       }
 
       // invariant: only Tier 1 work cools between repeated object-level passes.
       if (task.required_tier === GardenTier.TIER_1 && this.isCooling(task, nowIso)) {
         continue;
       }
-
-      // invariant: claim state and dispatch audit commit or roll back together.
-      const dispatchedEvent: GardenTaskEventInput = {
-        event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
-        entity_type: "garden_task",
-        entity_id: task.task_id,
-        workspace_id: task.workspace_id,
-        run_id: task.run_id,
-        caused_by: IN_PROCESS_GARDEN_CLAIMANT,
-        payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED, {
-          task_id: task.task_id,
-          task_kind: task.task_kind,
-          role,
-          tier: roleTier,
-          workspace_id: task.workspace_id,
-          run_id: task.run_id,
-          occurred_at: nowIso
-        })
-      };
-      const claimResult = await this.taskRepo.claimAtomicWithEvents(
-        task.task_id,
-        IN_PROCESS_GARDEN_CLAIMANT,
-        nowIso,
-        [dispatchedEvent]
-      );
-      if (claimResult !== "claimed") {
+      if (!(await this.claimForDispatch(task, role, roleTier, nowIso))) {
         continue;
       }
-
-      this.updateBacklogTelemetry(nowIso);
       return task;
     }
 
     return null;
+  }
+
+  private async readDispatchCandidate(
+    candidate: GardenTaskRow,
+    nowIso: string
+  ): Promise<GardenTaskDescriptor | null> {
+    return await readDispatchTask(candidate, nowIso, {
+      taskRepo: this.taskRepo,
+      onQuarantined: () => this.updateBacklogTelemetry(nowIso),
+      warn: this.warn
+    });
+  }
+
+  private async quarantineInvalidTask(
+    candidate: GardenTaskRow,
+    reason: string,
+    nowIso: string
+  ): Promise<void> {
+    await quarantineInvalidTask(candidate, reason, nowIso, {
+      taskRepo: this.taskRepo,
+      onQuarantined: () => this.updateBacklogTelemetry(nowIso),
+      warn: this.warn
+    });
+  }
+
+  private async rejectTierViolation(
+    candidate: GardenTaskRow,
+    task: GardenTaskDescriptor,
+    role: GardenRoleValue,
+    roleTier: GardenTierValue,
+    nowIso: string
+  ): Promise<boolean> {
+    const failureReason = `Tier violation: ${role} cannot dispatch ${task.required_tier}`;
+    const rejected = await this.taskRepo.failPendingWithCompletionEvent(
+      candidate.id,
+      nowIso,
+      failureReason,
+      buildTaskFailureCompletionEvent(candidate, nowIso),
+      [this.buildTierViolationEvent(task, roleTier, nowIso)]
+    );
+    if (!rejected) return false;
+    this.updateBacklogTelemetry(nowIso);
+    await this.recordTierViolationHealthJournal(task, roleTier);
+    return true;
+  }
+
+  private async claimForDispatch(
+    task: GardenTaskDescriptor,
+    role: GardenRoleValue,
+    roleTier: GardenTierValue,
+    nowIso: string
+  ): Promise<boolean> {
+    const claimResult = await this.taskRepo.claimAtomicWithEvents(
+      task.task_id,
+      IN_PROCESS_GARDEN_CLAIMANT,
+      nowIso,
+      [this.buildDispatchedEvent(task, role, roleTier, nowIso)]
+    );
+    if (claimResult !== "claimed") {
+      return false;
+    }
+    this.updateBacklogTelemetry(nowIso);
+    return true;
+  }
+
+  private buildDispatchedEvent(
+    task: GardenTaskDescriptor,
+    role: GardenRoleValue,
+    roleTier: GardenTierValue,
+    nowIso: string
+  ): GardenTaskEventInput {
+    return {
+      event_type: GardenEventType.SOUL_GARDEN_TASK_DISPATCHED,
+      entity_type: "garden_task",
+      entity_id: task.task_id,
+      workspace_id: task.workspace_id,
+      run_id: task.run_id,
+      caused_by: IN_PROCESS_GARDEN_CLAIMANT,
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TASK_DISPATCHED, {
+        task_id: task.task_id,
+        task_kind: task.task_kind,
+        role,
+        tier: roleTier,
+        workspace_id: task.workspace_id,
+        run_id: task.run_id,
+        occurred_at: nowIso
+      })
+    };
   }
 
   public async reportCompletion(result: GardenTaskResult): Promise<void> {
@@ -366,18 +430,19 @@ export class GardenScheduler {
     return counts;
   }
 
-  private async appendTierViolationEvent(
+  private buildTierViolationEvent(
     task: GardenTaskDescriptor,
     roleTier: GardenTierValue,
     occurredAt: string
-  ): Promise<void> {
-    await this.eventLog.append({
+  ): GardenTaskEventInput {
+    return {
       event_type: GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED,
       entity_type: "garden_task",
       entity_id: task.task_id,
       workspace_id: task.workspace_id,
       run_id: task.run_id,
-      payload: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED, {
+      caused_by: "garden-scheduler",
+      payload_json: parseGardenEventPayload(GardenEventType.SOUL_GARDEN_TIER_VIOLATION_REJECTED, {
         task_id: task.task_id,
         task_kind: task.task_kind,
         required_tier: task.required_tier,
@@ -385,7 +450,7 @@ export class GardenScheduler {
         workspace_id: task.workspace_id,
         occurred_at: occurredAt
       })
-    });
+    };
   }
 
   private async recordTierViolationHealthJournal(

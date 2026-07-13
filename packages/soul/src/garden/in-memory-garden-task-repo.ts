@@ -1,4 +1,5 @@
 import {
+  GardenEventType,
   GardenTaskDescriptorSchema,
   type GardenRoleValue,
   type GardenTaskDescriptor,
@@ -11,6 +12,7 @@ import {
 import { KeyedMutex } from "./keyed-mutex.js";
 import type {
   GardenSchedulerEventLogPort,
+  GardenSchedulerEventInput,
   GardenTaskBacklogCount,
   GardenTaskClaimResult,
   GardenTaskEventInput,
@@ -26,6 +28,7 @@ interface InMemoryGardenTaskRow extends GardenTaskRow {
 /** Default in-process queue used when callers do not provide a GardenTaskRepoPort. */
 export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
   private readonly rows: InMemoryGardenTaskRow[] = [];
+  private readonly reservedTaskIds = new Set<string>();
   // Serializes per-task read-decide-(await)-write so the appendTaskEvent yield cannot interleave.
   private readonly mutex = new KeyedMutex();
 
@@ -42,6 +45,9 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     const descriptor = GardenTaskDescriptorSchema.parse(input.payload);
     const taskId = input.id ?? `garden-task-${this.rows.length + 1}`;
     const createdAt = input.created_at ?? new Date().toISOString();
+    if (this.reservedTaskIds.has(taskId) || this.rows.some((row) => row.id === taskId)) {
+      throw new Error(`Garden task ${taskId} already exists.`);
+    }
     this.rows.push({
       id: taskId,
       workspace_id: input.workspace_id,
@@ -78,23 +84,14 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     return row === undefined ? null : { ...row };
   }
 
-  public claimAtomic(
+  public async claimAtomic(
     taskId: string,
     claimedBy: string,
     claimedAt: string
-  ): GardenTaskClaimResult {
-    const row = this.rows.find((candidate) => candidate.id === taskId);
-    if (row === undefined || row.status !== "pending") {
-      return "already-claimed";
-    }
-    assertReplaced(replaceRow(this.rows, row, {
-      ...row,
-      status: "claimed",
-      claimed_by: claimedBy,
-      claimed_at: claimedAt,
-      attempt_count: row.attempt_count + 1
-    }), taskId);
-    return "claimed";
+  ): Promise<GardenTaskClaimResult> {
+    return await this.mutex.runExclusive(taskId, async () =>
+      this.claimPending(taskId, claimedBy, claimedAt)
+    );
   }
 
   public async claimAtomicWithEvents(
@@ -103,29 +100,33 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     claimedAt: string,
     dispatchedEvents: readonly GardenTaskEventInput[]
   ): Promise<GardenTaskClaimResult> {
-    return this.mutex.runExclusive(taskId, async () => {
-      const snapshot = this.rows.find((candidate) => candidate.id === taskId);
-      if (snapshot === undefined) {
-        return "already-claimed";
-      }
-      const preClaimState = { ...snapshot };
-      const result = this.claimAtomic(taskId, claimedBy, claimedAt);
-      if (result !== "claimed") {
-        return result;
-      }
-      try {
-        for (const event of dispatchedEvents) {
-          await this.appendTaskEvent(event);
-        }
-      } catch (error) {
-        const current = this.rows.find((candidate) => candidate.id === taskId);
-        if (current !== undefined) {
-          assertReplaced(replaceRow(this.rows, current, preClaimState), taskId);
-          this.rows.sort((left, right) => compareTasks(left.descriptor, right.descriptor));
-        }
-        throw error;
-      }
-      return "claimed";
+    return await this.mutex.runExclusive(taskId, async () => {
+      const row = this.rows.find((candidate) => candidate.id === taskId);
+      if (row === undefined || row.status !== "pending") return "already-claimed";
+      await this.appendTaskEvents(dispatchedEvents);
+      return this.claimPending(taskId, claimedBy, claimedAt);
+    });
+  }
+
+  public async failPendingWithCompletionEvent(
+    taskId: string,
+    completedAt: string,
+    lastErrorText: string,
+    completionEvent: GardenTaskEventInput,
+    precedingEvents: readonly GardenTaskEventInput[] = []
+  ): Promise<boolean> {
+    assertFailureCompletionEvent(taskId, completionEvent);
+    return await this.mutex.runExclusive(taskId, async () => {
+      const row = this.rows.find((candidate) => candidate.id === taskId);
+      if (row === undefined || row.status !== "pending") return false;
+      await this.appendTaskEvents([...precedingEvents, completionEvent]);
+      assertReplaced(replaceRow(this.rows, row, {
+        ...row,
+        status: "failed",
+        completed_at: completedAt,
+        last_error_text: lastErrorText
+      }), taskId);
+      return true;
     });
   }
 
@@ -140,17 +141,18 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     claimedBy: string
   ): Promise<void> {
     await this.mutex.runExclusive(taskId, async () => {
-      for (const event of events) {
-        await this.appendTaskEvent(event);
-      }
-
       const row = this.rows.find((candidate) => candidate.id === taskId);
-      if (row === undefined || (row.status !== "pending" && row.status !== "claimed")) {
+      if (row === undefined) {
+        await this.appendCompletionWithoutRow(taskId, events);
+        return;
+      }
+      if (row.status !== "pending" && row.status !== "claimed") {
         return;
       }
       if (row.claimed_by !== claimedBy) {
         throw new Error(`Garden task ${taskId} is not claimed by the expected worker.`);
       }
+      await this.appendTaskEvents(events);
       assertReplaced(replaceRow(this.rows, row, {
         ...row,
         status: result.status,
@@ -218,7 +220,30 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
     return [...counts.values()];
   }
 
-  public releaseClaim(taskId: string, claimedBy: string): boolean {
+  public async releaseClaim(taskId: string, claimedBy: string): Promise<boolean> {
+    return await this.mutex.runExclusive(taskId, async () =>
+      this.releaseClaimForWorker(taskId, claimedBy)
+    );
+  }
+
+  private claimPending(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string
+  ): GardenTaskClaimResult {
+    const row = this.rows.find((candidate) => candidate.id === taskId);
+    if (row === undefined || row.status !== "pending") return "already-claimed";
+    assertReplaced(replaceRow(this.rows, row, {
+      ...row,
+      status: "claimed",
+      claimed_by: claimedBy,
+      claimed_at: claimedAt,
+      attempt_count: row.attempt_count + 1
+    }), taskId);
+    return "claimed";
+  }
+
+  private releaseClaimForWorker(taskId: string, claimedBy: string): boolean {
     const row = this.rows.find((candidate) => candidate.id === taskId);
     if (row === undefined || row.status !== "claimed" || row.claimed_by !== claimedBy) {
       return false;
@@ -251,14 +276,54 @@ export class InMemoryGardenTaskRepo implements GardenTaskRepoPort {
   }
 
   private async appendTaskEvent(event: GardenTaskEventInput): Promise<void> {
-    await this.eventLog.append({
-      event_type: event.event_type,
-      entity_type: event.entity_type,
-      entity_id: event.entity_id,
-      workspace_id: event.workspace_id,
-      run_id: event.run_id,
-      payload: event.payload_json
-    });
+    await this.eventLog.append(toSchedulerEvent(event));
+  }
+
+  private async appendTaskEvents(events: readonly GardenTaskEventInput[]): Promise<void> {
+    if (events.length === 0) return;
+    if (events.length === 1) return await this.appendTaskEvent(events[0]!);
+    if (this.eventLog.appendManyAtomic === undefined) {
+      throw new Error("Garden task multi-event transition requires atomic batch append support.");
+    }
+    await this.eventLog.appendManyAtomic(events.map(toSchedulerEvent));
+  }
+
+  private async appendCompletionWithoutRow(
+    taskId: string,
+    events: readonly GardenTaskEventInput[]
+  ): Promise<void> {
+    if (events.length === 0) return;
+    this.reservedTaskIds.add(taskId);
+    try {
+      await this.appendTaskEvents(events);
+    } finally {
+      this.reservedTaskIds.delete(taskId);
+    }
+  }
+}
+
+function toSchedulerEvent(event: GardenTaskEventInput): GardenSchedulerEventInput {
+  return {
+    event_type: event.event_type,
+    entity_type: event.entity_type,
+    entity_id: event.entity_id,
+    workspace_id: event.workspace_id,
+    run_id: event.run_id,
+    payload: event.payload_json
+  };
+}
+
+function assertFailureCompletionEvent(taskId: string, event: GardenTaskEventInput): void {
+  if (
+    event.event_type !== GardenEventType.SOUL_GARDEN_TASK_COMPLETED ||
+    event.entity_type !== "garden_task" ||
+    event.entity_id !== taskId ||
+    event.payload_json.task_id !== taskId ||
+    event.payload_json.success !== false
+  ) {
+    throw new Error(
+      `Garden task ${taskId} pending failure requires its own unsuccessful completion event.`
+    );
   }
 }
 

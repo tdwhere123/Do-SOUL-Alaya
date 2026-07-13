@@ -37,14 +37,15 @@ export interface FineAssessParams {
 export function fineAssess(params: FineAssessParams): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly preparedCandidates: readonly FineAssessmentCandidate[];
 }> {
   if (params.candidates.length === 0) {
     return Object.freeze({
       candidates: Object.freeze([]),
-      diagnostics: Object.freeze([])
+      diagnostics: Object.freeze([]),
+      preparedCandidates: Object.freeze([])
     });
   }
-  const config = params.policy.fine_assessment;
   const scoredCandidates = scoreFineAssessmentCandidates(params);
   const fusedCandidates = fuseFineAssessmentCandidates(
     scoredCandidates,
@@ -52,15 +53,28 @@ export function fineAssess(params: FineAssessParams): Readonly<{
     params.supplementaryData,
     params.now()
   );
-  const delivery = applyDeliverySelection(fusedCandidates);
-  return selectFineAssessmentCandidates({
+  return deliverFineAssessment(params, fusedCandidates);
+}
+
+export function deliverFineAssessment(
+  params: FineAssessParams,
+  preparedCandidates: readonly FineAssessmentCandidate[]
+): ReturnType<typeof fineAssess> {
+  const delivery = applyDeliverySelection(
+    preparedCandidates,
+    params.supplementaryData.answerRelevanceScoresByCandidateKey
+  );
+  const selected = selectFineAssessmentCandidates({
     orderedCandidates: delivery.orderedCandidates,
-    config,
+    config: params.policy.fine_assessment,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: delivery.rankByCandidateKey,
+    finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
+    answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures
   });
+  return Object.freeze({ ...selected, preparedCandidates });
 }
 
 type AdditiveScoredCandidate = Readonly<CoarseRecallCandidate & {

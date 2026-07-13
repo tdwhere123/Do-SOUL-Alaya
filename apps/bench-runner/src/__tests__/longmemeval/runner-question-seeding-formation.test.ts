@@ -78,6 +78,39 @@ describe("seedLongMemEvalQuestion formation order", () => {
     expect(seedTurn).not.toHaveBeenCalled();
   });
 
+  it("fails loud instead of overwriting a duplicate object-kind identity", async () => {
+    const question = buildQuestion({
+      haystack_session_ids: ["session-a"],
+      haystack_dates: ["2025-12-01"],
+      haystack_sessions: [[
+        { role: "user", content: "First." },
+        { role: "assistant", content: "Reply." },
+        { role: "user", content: "Second." }
+      ]]
+    });
+    const workspace = {
+      workspaceId: "workspace-duplicate",
+      runId: "run-duplicate",
+      accrueSessionCoRecall: vi.fn(async () => ({
+        pairsObserved: 0, minted: 0, belowThreshold: 0
+      })),
+      proposeSynthesis: vi.fn(async () => ({ synthesisId: null }))
+    } as unknown as BenchWorkspaceHandle;
+
+    await expect(seedLongMemEvalQuestion({
+      workspace,
+      question,
+      seedRunner: {
+        seedTurn: vi.fn(async () => ({
+          seeds: [buildSeed("memory-duplicate")],
+          turnTruncated: false,
+          charsClipped: 0
+        })),
+        stats: {}
+      } as never
+    })).rejects.toThrow(/duplicate LongMemEval sidecar object identity/iu);
+  });
+
 });
 
 function buildQuestion(overrides: Partial<LongMemEvalQuestion>): LongMemEvalQuestion {

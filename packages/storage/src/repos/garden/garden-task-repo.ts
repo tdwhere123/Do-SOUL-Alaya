@@ -10,7 +10,9 @@ import { prepareGardenTaskStatements } from "./garden-task-statements.js";
 import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString, parseNullableString, parseTimestamp } from "../shared/validators.js";
 import { parseClaimRequest } from "./garden-task-claim-request.js";
-import { GardenTaskClaimCasMiss, isUniqueConstraintError } from "./garden-task-errors.js";
+import { isUniqueConstraintError } from "./garden-task-errors.js";
+import { claimGardenTaskWithEvents } from "./garden-task-claim-with-events.js";
+import { failPendingGardenTaskWithCompletionEvent } from "./garden-task-pending-failure.js";
 import {
   computeStaleClaimCutoff,
   parseBacklogCountRow,
@@ -32,6 +34,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
   private readonly peekPendingStatement;
   private readonly peekPendingByWorkspaceStatement;
   private readonly claimStatement;
+  private readonly failPendingStatement;
   private readonly beginCompletionAttemptStatement;
   private readonly refreshClaimStatement;
   private readonly releaseClaimStatement;
@@ -54,6 +57,7 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     this.peekPendingStatement = statements.peekPendingStatement;
     this.peekPendingByWorkspaceStatement = statements.peekPendingByWorkspaceStatement;
     this.claimStatement = statements.claimStatement;
+    this.failPendingStatement = statements.failPendingStatement;
     this.releaseClaimStatement = statements.releaseClaimStatement;
     this.beginCompletionAttemptStatement = statements.beginCompletionAttemptStatement;
     this.refreshClaimStatement = statements.refreshClaimStatement;
@@ -137,12 +141,12 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     }
   }
 
-  public claimAtomic(
+  public async claimAtomic(
     taskId: string,
     claimedBy: string,
     claimedAt: string,
     workspace_id?: string
-  ): GardenTaskClaimResult {
+  ): Promise<GardenTaskClaimResult> {
     const request = parseClaimRequest(taskId, claimedBy, claimedAt, workspace_id);
 
     try {
@@ -166,46 +170,36 @@ export class SqliteGardenTaskRepo implements GardenTaskRepoPort {
     dispatchedEvents: readonly GardenTaskEventInput[],
     workspace_id?: string
   ): Promise<GardenTaskClaimResult> {
-    const request = parseClaimRequest(taskId, claimedBy, claimedAt, workspace_id);
-
-    if (dispatchedEvents.length === 0) {
-      return this.claimAtomic(request.taskId, request.claimedBy, request.claimedAt, workspace_id);
-    }
-
-    let claimResult: GardenTaskClaimResult = "already-claimed";
-    try {
-      await this.eventPublisher.appendManyWithMutation(dispatchedEvents, () => {
-        const result = this.claimStatement.run(
-          request.claimedBy,
-          request.claimedAt,
-          request.taskId,
-          request.workspaceId,
-          request.workspaceId
-        );
-        claimResult = result.changes === 1 ? "claimed" : "already-claimed";
-        if (claimResult !== "claimed") {
-          // CAS lost. Roll the audit append back with the same throw-to-rollback
-          // contract completeWithEvents already uses for tier-promotion CAS misses.
-          throw new GardenTaskClaimCasMiss();
-        }
-      });
-      return claimResult;
-    } catch (error) {
-      if (error instanceof GardenTaskClaimCasMiss) {
-        return "already-claimed";
-      }
-      if (error instanceof StorageError) {
-        throw error;
-      }
-      throw new StorageError(
-        "QUERY_FAILED",
-        `Failed to atomically claim Garden task ${request.taskId}.`,
-        error
-      );
-    }
+    return await claimGardenTaskWithEvents(
+      this.eventPublisher,
+      this.claimStatement,
+      taskId,
+      claimedBy,
+      claimedAt,
+      dispatchedEvents,
+      workspace_id
+    );
   }
 
-  public releaseClaim(taskId: string, claimedBy: string): boolean {
+  public async failPendingWithCompletionEvent(
+    taskId: string,
+    completedAt: string,
+    lastErrorText: string,
+    completionEvent: GardenTaskEventInput,
+    precedingEvents?: readonly GardenTaskEventInput[]
+  ): Promise<boolean> {
+    return await failPendingGardenTaskWithCompletionEvent(
+      this.eventPublisher,
+      this.failPendingStatement,
+      taskId,
+      completedAt,
+      lastErrorText,
+      completionEvent,
+      precedingEvents
+    );
+  }
+
+  public async releaseClaim(taskId: string, claimedBy: string): Promise<boolean> {
     const parsedTaskId = parseNonEmptyString(taskId, "garden_task.id");
     const parsedClaimedBy = parseNonEmptyString(claimedBy, "garden_task.claimed_by");
 

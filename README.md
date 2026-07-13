@@ -574,6 +574,32 @@ already reflects them.
 
 ## Quickstart
 
+### Local embedding model
+
+Alaya uses the local ONNX bi-encoder as a recall supplement by default. It
+never decides durable truth and never downloads weights from the recall path.
+Fetch the model once before starting the daemon:
+
+```bash
+node scripts/fetch-local-embedding-model.mjs
+```
+
+The script writes to `$ALAYA_LOCAL_EMBEDDING_CACHE_DIR` or, when unset,
+`$XDG_CACHE_HOME/do-soul-alaya/models` (`~/.cache/do-soul-alaya/models` on a
+standard Linux host). Set `ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=false` (or `0`)
+for a deliberate keyword-only deployment. `true`/`1` re-enables it; values are
+case-insensitive and surrounding whitespace is ignored. Invalid values stop
+startup instead of silently selecting a different recall posture.
+
+An API embedding provider is never selected implicitly. Set
+`ALAYA_EMBEDDING_PROVIDER=openai`,
+`ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=true`, and a configured secret reference;
+legacy model or secret settings alone never authorize an API call. `alaya
+install` persists the selected provider explicitly. If startup warmup fails,
+status reports a degraded provider and recall stays on its keyword fallback.
+A later successful provider use or backfill restores the supplement without a
+daemon restart.
+
 ### Option A — install from GitHub Releases (recommended)
 
 > **Status:** Do-SOUL Alaya is **not published to npm**. v0.1.2 onward
@@ -609,8 +635,9 @@ alaya attach claude-code
 free-text TTY wizard). Bare `alaya install` prints this usage with a
 runnable example. The optional `--keychain` flag adds a single guided
 secret prompt for OS-keychain key storage. Answer fields (`db_path`,
-`embedding_enabled`, `model_id`, `provider_base_url`, `api_key_source`
-= `env`/`file`/`paste`, `key_file_path`, `default_workspace`,
+`embedding_enabled`, `embedding_provider` = `local_onnx`/`openai`,
+`model_id`, `provider_base_url`, `api_key_source` = `env`/`file`/`paste`,
+`key_file_path`, `default_workspace`,
 `garden_provider_kind`, …) are all optional and merge over any existing
 config.
 

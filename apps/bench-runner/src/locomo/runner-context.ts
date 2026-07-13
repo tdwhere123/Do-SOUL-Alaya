@@ -44,7 +44,7 @@ export async function prepareLocomoRun(
     embeddingProvider: resolveBenchEmbeddingProviderLabel(
       embeddingMode,
       process.env,
-      opts.embeddingProviderKind ?? "openai"
+      opts.embeddingProviderKind
     ),
     seedRunner: createLocomoSeedRunner(window)
   };

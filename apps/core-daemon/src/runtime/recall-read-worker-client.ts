@@ -8,6 +8,7 @@ import type {
   StorageTier
 } from "@do-soul/alaya-protocol";
 import type {
+  KeywordSearchBatchQuery,
   RecallMemoryListPageOptions,
   RecallServiceEvidenceSearchPort,
   RecallServiceMemoryRepoPort,
@@ -25,6 +26,7 @@ export type RecallReadWorkerOperation =
   | "memory.findByScopeClass"
   | "memory.searchByKeyword"
   | "memory.searchByKeywordWithinObjectIds"
+  | "memory.searchManyByKeywordWithinObjectIds"
   | "memory.searchByAnchorWithinObjectIds"
   | "memory.findByEvidenceRefs"
   | "memory.findByIds"
@@ -133,6 +135,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         workspaceId,
         queryText,
         limit,
+        objectIds
+      }),
+    searchManyByKeywordWithinObjectIds: async (
+      workspaceId: string,
+      queries: readonly Readonly<KeywordSearchBatchQuery>[],
+      objectIds: readonly string[]
+    ) =>
+      await this.request("memory.searchManyByKeywordWithinObjectIds", {
+        workspaceId,
+        queries,
         objectIds
       }),
     searchByAnchorWithinObjectIds: async (

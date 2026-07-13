@@ -1,13 +1,18 @@
 export { readEmbeddingWarmupSummary } from "./daemon-embedding-readiness.js";
 export {
   applyBenchDaemonEnvironment,
+  createBenchDaemonLaunchConfig,
   closeBenchDaemonResources,
   requireBenchOpenAiSecretRef,
   resolveBenchOpenAiSecretRef,
   resolveBenchReviewerCredentials,
   restoreEnv
 } from "./daemon-environment.js";
-export type { BenchReviewerCredentials } from "./daemon-environment.js";
+export type {
+  BenchDaemonEnvironment,
+  BenchDaemonLaunchConfig,
+  BenchReviewerCredentials
+} from "./daemon-environment.js";
 export {
   benchSessionSurfacesEnabled,
   callMcpTool,

@@ -114,7 +114,7 @@ async function claimPostTurnExtractTask(
     return null;
   }
   const claimedAt = new Date().toISOString();
-  const claimResult = input.gardenTaskRepo.claimAtomic(
+  const claimResult = await input.gardenTaskRepo.claimAtomic(
     row.id,
     IN_PROCESS_POST_TURN_CLAIMANT,
     claimedAt,
@@ -142,7 +142,7 @@ async function processClaimedPostTurnExtractTask(
   try {
     payload = parsePostTurnExtractTaskPayload(task.row.payload);
   } catch (error) {
-    input.gardenTaskRepo.releaseClaim(task.row.id, IN_PROCESS_POST_TURN_CLAIMANT);
+    await input.gardenTaskRepo.releaseClaim(task.row.id, IN_PROCESS_POST_TURN_CLAIMANT);
     throw error;
   }
   try {

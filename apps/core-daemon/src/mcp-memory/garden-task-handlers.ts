@@ -40,7 +40,7 @@ export interface GardenTaskHandlerDependencies {
       claimedBy: string,
       claimedAt: string,
       workspace_id?: string
-    ): "claimed" | "already-claimed";
+    ): Promise<"claimed" | "already-claimed">;
     completeWithEvents(
       taskId: string,
       result: GardenTaskCompletionResult,
@@ -54,7 +54,7 @@ export interface GardenTaskHandlerDependencies {
       claimedAt: string,
       completionEnvelopeJson?: string | null
     ): boolean;
-    releaseClaim(taskId: string, claimedBy: string): boolean;
+    releaseClaim(taskId: string, claimedBy: string): Promise<boolean>;
     countByKind?(
       kind: string,
       staleBeforeIso: string,
@@ -119,7 +119,7 @@ function createClaimGardenTaskHandler(params: Readonly<{
     if (repo === undefined) {
       throw new GardenTaskUnavailableError("Garden task queue is not available.");
     }
-    const claimResult = repo.claimAtomic(
+    const claimResult = await repo.claimAtomic(
       request.task_id,
       context.agentTarget,
       params.now(),

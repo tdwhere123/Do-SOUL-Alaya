@@ -146,6 +146,19 @@ describe("RecallReadWorkerClient", () => {
           ])
         ).resolves.toMatchObject([{ object_id: workspaceMemoryId }]);
         await expect(
+          client.memoryRepo.searchManyByKeywordWithinObjectIds!(
+            "workspace-1",
+            [
+              { queryText: "workspace one", limit: 5 },
+              { queryText: "Worker recall", limit: 5 }
+            ],
+            [workspaceMemoryId, otherWorkspaceMemoryId]
+          )
+        ).resolves.toEqual([
+          [expect.objectContaining({ object_id: workspaceMemoryId })],
+          [expect.objectContaining({ object_id: workspaceMemoryId })]
+        ]);
+        await expect(
           client.synthesisSearchPort.findByIds("workspace-1", [
             workspaceSynthesisId,
             otherWorkspaceSynthesisId

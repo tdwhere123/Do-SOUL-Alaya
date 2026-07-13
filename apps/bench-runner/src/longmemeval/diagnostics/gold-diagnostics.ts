@@ -71,6 +71,8 @@ function buildGoldRankingFields(
     selection_order: candidate?.selectionOrder ?? null,
     fused_rank: candidate?.fusedRank ?? null,
     fused_score: candidate?.fusedScore ?? null,
+    answer_relevance_score: candidate?.answerRelevanceScore ?? null,
+    answer_relevance_rank: candidate?.answerRelevanceRank ?? null,
     per_stream_rank: candidate?.perStreamRank ?? null,
     fused_rank_contribution_per_stream: candidate?.fusedRankContributionPerStream ?? null,
     per_axis_rank: candidate?.perAxisRank ?? null,

@@ -5,6 +5,7 @@ import {
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import { fineAssess } from "../../delivery/fine-assessment.js";
+import type { FineAssessmentCandidate } from "../../delivery/fine-assessment-selection.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import type { RecallTimeFilter } from "../recall-service-helpers.js";
 import { collectSupplementaryData } from "../../supplements/supplementary-data.js";
@@ -83,6 +84,7 @@ export type AssessCoarseFilterResult = Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly preparedCandidates: readonly FineAssessmentCandidate[];
 }>;
 
 export async function collectCoarseFilterSupplementaryData(

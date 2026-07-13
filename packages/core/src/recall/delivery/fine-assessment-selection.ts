@@ -37,6 +37,8 @@ interface FineAssessmentSelectionContext {
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
+  readonly finalRelevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures: boolean;
 }
 
@@ -51,6 +53,8 @@ export function selectFineAssessmentCandidates(params: {
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
+  readonly finalRelevanceByCandidateKey?: ReadonlyMap<string, number>;
+  readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
 }): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
@@ -61,6 +65,8 @@ export function selectFineAssessmentCandidates(params: {
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: params.rankByCandidateKey,
+    finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
+    answerRelevanceRankByCandidateKey: params.answerRelevanceRankByCandidateKey ?? new Map(),
     captureAnswerFeatures: params.captureAnswerFeatures ?? false
   });
   const finalAccumulator = params.orderedCandidates.reduce(
@@ -97,12 +103,16 @@ function appendFineAssessmentCandidate(
     return accumulator;
   }
   const tokenEstimate = admission.tokenEstimate ?? context.tokenEstimator.estimate(candidate.entry.content);
-  const finalRelevance = candidate.fusion.fused_score;
+  const finalRelevance = context.finalRelevanceByCandidateKey.get(candidateKey) ?? candidate.fusion.fused_score;
+  const finalRelevanceSource = context.answerRelevanceRankByCandidateKey.has(candidateKey)
+    ? "answer_rerank" as const
+    : "fusion" as const;
   const finalScoreFactors = buildFinalScoreFactors(candidate, finalRelevance);
   const nextCandidate = buildRecallCandidate({
     candidate,
     relevanceScore: finalRelevance,
     scoreFactors: finalScoreFactors,
+    finalRelevanceSource,
     tokenEstimator: context.tokenEstimator,
     tokenEstimate,
     budgets: context.config.budgets,
@@ -151,8 +161,7 @@ function createFineAssessmentDiagnostic(
   context: FineAssessmentSelectionContext
 ): Readonly<RecallCandidateDiagnostic> {
   const admissionPlanes = Object.freeze([...(candidate.admissionPlanes ?? ["activation"])]);
-  const fusionRank = context.rankByCandidateKey.get(candidateKey);
-  const finalRelevance = candidate.fusion.fused_score;
+  const ranks = resolveCandidateRankContext(candidate, candidateKey, context);
   return Object.freeze({
     candidate_key: candidateKey,
     object_id: candidate.entry.object_id,
@@ -164,33 +173,30 @@ function createFineAssessmentDiagnostic(
     admission_planes: admissionPlanes,
     plane_first_admitted: candidate.firstAdmissionPlane ?? admissionPlanes[0] ?? "activation",
     plane_winning_admission: selectRecallAdmissionAttributionPlane(admissionPlanes, candidate.firstAdmissionPlane),
-    pre_budget_rank: candidate.fusion.fused_rank,
+    pre_budget_rank: selectionOrder,
     selection_order: selectionOrder,
     ...buildFusionDiagnosticFields(candidate),
     final_rank: finalRank,
-    // invariant: MemTrace aliases mirror the delivery outcome until the public fields retire.
     post_rank: finalRank,
     in_final_packet: droppedReason === null,
     eviction_reason: droppedReason,
     dropped_reason: droppedReason,
     within_budget: droppedReason === null,
-    relevance_score: finalRelevance,
+    relevance_score: ranks.finalRelevance,
+    ...(ranks.answerRelevanceRank === undefined ? {} : {
+      answer_relevance_score: ranks.finalRelevance,
+      answer_relevance_rank: ranks.answerRelevanceRank
+    }),
     additive_score: candidate.effectiveScore,
     lexical_rank: lexicalRank(candidate, context.supplementaryData),
     structural_score: clamp01(candidate.structuralScore ?? context.supplementaryData.structuralScores[candidate.entry.object_id] ?? 0),
-    score_factors: buildFinalScoreFactors(candidate, finalRelevance),
+    score_factors: buildFinalScoreFactors(candidate, ranks.finalRelevance),
     source_channels: buildSourceChannels(candidate, admissionPlanes),
     path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])]),
-    ...(context.captureAnswerFeatures ? {
-      answer_features: buildRecallCandidateAnswerFeatures(
-        candidate.entry,
-        candidate.objectKind ?? "memory_entry",
-        context.supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id]
-      )
-    } : {}),
+    ...buildAnswerFeatureDiagnostics(candidate, context),
     path_suppression_score:
       context.supplementaryData.pathSuppressionScores[candidate.entry.object_id] ?? 0,
-    ...buildCompatibilityStageDiagnosticAliases(fusionRank),
+    ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>",
     source_cohort_key: context.supplementaryData.sourceCohortKeys[candidate.entry.object_id] ?? null
   });
@@ -200,10 +206,37 @@ function buildFinalScoreFactors(
   candidate: FineAssessmentCandidate,
   finalRelevance: number
 ): RecallScoreFactors {
-  return Object.freeze({
-    ...candidate.effectiveFactors,
-    relevance: finalRelevance
-  });
+  return Object.freeze({ ...candidate.effectiveFactors, relevance: finalRelevance });
+}
+
+function buildAnswerFeatureDiagnostics(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+) {
+  if (!context.captureAnswerFeatures) return {};
+  return {
+    answer_features: buildRecallCandidateAnswerFeatures(
+      candidate.entry,
+      candidate.objectKind ?? "memory_entry",
+      context.supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id]
+    )
+  };
+}
+
+function resolveCandidateRankContext(
+  candidate: FineAssessmentCandidate,
+  candidateKey: string,
+  context: FineAssessmentSelectionContext
+): Readonly<{
+  readonly deliveryRank: number | undefined;
+  readonly finalRelevance: number;
+  readonly answerRelevanceRank: number | undefined;
+}> {
+  return {
+    deliveryRank: context.rankByCandidateKey.get(candidateKey),
+    finalRelevance: context.finalRelevanceByCandidateKey.get(candidateKey) ?? candidate.fusion.fused_score,
+    answerRelevanceRank: context.answerRelevanceRankByCandidateKey.get(candidateKey)
+  };
 }
 
 function buildFusionDiagnosticFields(candidate: FineAssessmentCandidate) {
@@ -224,15 +257,18 @@ function buildFusionDiagnosticFields(candidate: FineAssessmentCandidate) {
   };
 }
 
-function buildCompatibilityStageDiagnosticAliases(fusionRank: number | undefined) {
+function buildCompatibilityStageDiagnosticAliases(
+  fusionRank: number | undefined,
+  deliveryRank: number | undefined
+) {
   return {
     rank_after_fusion: fusionRank,
-    rank_after_feature_rerank: fusionRank,
-    rank_after_lexical_priority: fusionRank,
-    rank_after_coverage_selector: fusionRank,
-    rank_after_session_coverage: fusionRank,
-    rank_after_synthesis_reserve: fusionRank,
-    rank_after_structural_reserve: fusionRank,
+    rank_after_feature_rerank: deliveryRank,
+    rank_after_lexical_priority: deliveryRank,
+    rank_after_coverage_selector: deliveryRank,
+    rank_after_session_coverage: deliveryRank,
+    rank_after_synthesis_reserve: deliveryRank,
+    rank_after_structural_reserve: deliveryRank,
     coverage_selector_action: "noop" as const,
     session_coverage_action: "noop" as const,
     reserved_by: "none" as const

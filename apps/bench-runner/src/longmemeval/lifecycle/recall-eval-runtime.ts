@@ -2,7 +2,10 @@ import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
 } from "../../harness/daemon.js";
-import { arch, platform } from "node:os";
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { arch, platform, tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   createOwnedTempRoot,
   externalTempRoot,
@@ -16,26 +19,45 @@ import {
   type SnapshotArtifactIntegrity
 } from "../snapshot/integrity.js";
 import { resolveBenchEmbeddingProviderLabel } from "../runner-helpers.js";
-import { resolveLocalOnnxArtifactSha256 } from "../provenance/local-onnx.js";
 import {
-  RECALL_PIPELINE_VERSION,
-  resolveBenchCommitSha7
+  resolveEmbeddingSupplementRuntimeProvenance,
+  resolveLocalCrossEncoderRuntimeProvenance,
+  type EmbeddingSupplementRuntimeProvenance,
+  type LocalCrossEncoderRuntimeProvenance
+} from "../provenance/local-onnx.js";
+import {
+  RECALL_PIPELINE_VERSION
 } from "../../shared/version.js";
 import {
   deriveSnapshotAttribution,
   type LongMemEvalSnapshotManifest
 } from "../snapshot.js";
+import { prepareRecallEvalRestoredDb } from "../snapshot/recall-eval-db.js";
+import type { RecallEvalSnapshotBundle } from "../snapshot/recall-eval-loader.js";
+import { restoreLegacySnapshotToDataDir } from "../snapshot/legacy-substrate.js";
+import type { RecallEvalOptions } from "./recall-eval-contract.js";
+import { readOptionalOnnxThreadCount } from "../../harness/strict-treatment-config.js";
+import {
+  buildEffectiveRecallConfigIdentity,
+  readRecallEvalMaxResults,
+  type EffectiveRecallConfigIdentity,
+  type EffectiveRecallOptions
+} from "../provenance/effective-recall-config.js";
+import type { BenchRecallWeightOverrides } from "../../harness/recall-weight-overrides.js";
 
 export function recallEvalEmbeddingMode(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): BenchEmbeddingMode {
-  return env.ALAYA_RECALL_EVAL_EMBEDDING === "env" ? "env" : "disabled";
+  const value = env.ALAYA_RECALL_EVAL_EMBEDDING?.trim().toLowerCase();
+  if (value === undefined || value.length === 0 || value === "disabled") return "disabled";
+  if (value === "env") return "env";
+  throw new Error("ALAYA_RECALL_EVAL_EMBEDDING must be env or disabled");
 }
 
 export function recallEvalEmbeddingProviderKind(
-  env: Readonly<Record<string, string | undefined>> = process.env
+  _env: Readonly<Record<string, string | undefined>> = process.env
 ): BenchEmbeddingProviderKind {
-  return recallEvalEmbeddingMode(env) === "env" ? "local_onnx" : "openai";
+  return "local_onnx";
 }
 
 export function recallEvalEmbeddingProviderLabel(
@@ -59,6 +81,15 @@ export interface RecallEvalRuntimeAttribution {
   readonly embedding_provider_label: string;
   readonly onnx_threads: number | null;
   readonly onnx_model_artifact_sha256: string | null;
+  readonly embedding_supplement: EmbeddingSupplementRuntimeProvenance;
+  readonly answer_rerank: LocalCrossEncoderRuntimeProvenance;
+  readonly recall_config: EffectiveRecallConfigIdentity;
+  readonly evaluation_slice?: Readonly<{
+    offset: number;
+    limit: number | null;
+    evaluated_count: number;
+    question_id_digest: string;
+  }>;
   readonly hydration_binding?: Readonly<{
     dataset_sha256: string;
     source: "external_expected_sha256";
@@ -80,21 +111,31 @@ export interface RecallEvalRuntimeAttribution {
   }>;
 }
 
+type RecallEvalRuntimeIdentity = Pick<
+  RecallEvalRuntimeAttribution,
+  | "embedding_mode" | "embedding_provider_kind" | "embedding_provider_label"
+  | "onnx_threads" | "onnx_model_artifact_sha256" | "embedding_supplement"
+  | "answer_rerank" | "recall_config"
+>;
+
 export async function buildRecallEvalRuntimeAttribution(
   manifest: LongMemEvalSnapshotManifest,
   env: Readonly<Record<string, string | undefined>> = process.env,
-  currentCommitSha7 = resolveBenchCommitSha7(env),
   evaluatorBinding: Readonly<{
     snapshotManifestSha256?: string | null;
     datasetSha256?: string | null;
+    recallOptions?: EffectiveRecallOptions;
+    recallWeightOverrides?: BenchRecallWeightOverrides;
   }> = {}
 ): Promise<RecallEvalRuntimeAttribution> {
-  const label = recallEvalEmbeddingProviderLabel(env);
-  const onnxSha = await resolveLocalOnnxArtifactSha256(label, env);
-  const embeddingMode = recallEvalEmbeddingMode(env);
-  const providerKind = recallEvalEmbeddingProviderKind(env);
-  const onnxThreads = readOnnxThreads(env.ALAYA_LOCAL_ONNX_THREADS);
-  const archivedRuntime = manifest.run_provenance?.runtime;
+  const identity = await resolveRecallEvalRuntimeIdentity(
+    env,
+    evaluatorBinding.recallOptions ?? {
+      maxResults: readRecallEvalMaxResults(env.ALAYA_RECALL_EVAL_MAX_RESULTS),
+      conflictAwareness: true
+    },
+    evaluatorBinding.recallWeightOverrides
+  );
   const snapshotAttribution = deriveSnapshotAttribution({
     artifactIntegrity: manifest.artifact_integrity,
     runProvenance: manifest.run_provenance,
@@ -102,31 +143,15 @@ export async function buildRecallEvalRuntimeAttribution(
     datasetSha256: manifest.dataset_sha256,
     extractionProvenance: manifest.extraction_provenance
   });
-  const gateEligible = Boolean(
-    snapshotAttribution.gate_eligible &&
-    archivedRuntime !== undefined &&
-    hasCurrentSnapshotCodeBinding(manifest, env, currentCommitSha7) &&
-    archivedRuntime.node_version === process.version &&
-    archivedRuntime.platform === platform() &&
-    archivedRuntime.arch === arch() &&
-    archivedRuntime.embedding_mode === embeddingMode &&
-    archivedRuntime.embedding_provider_kind === providerKind &&
-    archivedRuntime.embedding_provider_label === label &&
-    archivedRuntime.onnx_threads === onnxThreads &&
-    archivedRuntime.onnx_model_artifact_sha256 !== undefined &&
-    archivedRuntime.onnx_model_artifact_sha256 === onnxSha
-  );
   return {
     status: manifest.attribution?.status ?? "legacy_unattributed",
-    gate_eligible: gateEligible,
+    gate_eligible: isRecallEvalRuntimeGateEligible(
+      manifest, snapshotAttribution.gate_eligible
+    ),
     node_version: process.version,
     platform: platform(),
     arch: arch(),
-    embedding_mode: embeddingMode,
-    embedding_provider_kind: providerKind,
-    embedding_provider_label: label,
-    onnx_threads: onnxThreads,
-    onnx_model_artifact_sha256: onnxSha ?? null,
+    ...identity,
     ...(evaluatorBinding.datasetSha256 === undefined || evaluatorBinding.datasetSha256 === null
       ? {}
       : { hydration_binding: {
@@ -138,6 +163,45 @@ export async function buildRecallEvalRuntimeAttribution(
       evaluatorBinding.snapshotManifestSha256 ?? null
     )
   };
+}
+
+async function resolveRecallEvalRuntimeIdentity(
+  env: Readonly<Record<string, string | undefined>>,
+  recallOptions: EffectiveRecallOptions,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined
+): Promise<RecallEvalRuntimeIdentity> {
+  const embeddingMode = recallEvalEmbeddingMode(env);
+  const providerKind = recallEvalEmbeddingProviderKind(env);
+  const label = recallEvalEmbeddingProviderLabel(env);
+  const [embeddingSupplement, answerRerank] = await Promise.all([
+    resolveEmbeddingSupplementRuntimeProvenance(embeddingMode, providerKind, env, label),
+    resolveLocalCrossEncoderRuntimeProvenance(env)
+  ]);
+  const onnxSha = embeddingSupplement.enabled &&
+    embeddingSupplement.provider_kind === "local_onnx"
+    ? embeddingSupplement.model_artifact_sha256
+    : null;
+  return {
+    embedding_mode: embeddingMode,
+    embedding_provider_kind: providerKind,
+    embedding_provider_label: label,
+    onnx_threads: readOptionalOnnxThreadCount(env.ALAYA_LOCAL_ONNX_THREADS),
+    onnx_model_artifact_sha256: onnxSha,
+    embedding_supplement: embeddingSupplement,
+    answer_rerank: answerRerank,
+    recall_config: buildEffectiveRecallConfigIdentity(
+      env,
+      recallOptions,
+      recallWeightOverrides
+    )
+  };
+}
+
+function isRecallEvalRuntimeGateEligible(
+  manifest: LongMemEvalSnapshotManifest,
+  snapshotGateEligible: boolean
+): boolean {
+  return manifest.attribution?.status === "attributed" && snapshotGateEligible;
 }
 
 function buildRecallEvalSnapshotBinding(
@@ -163,44 +227,19 @@ function buildRecallEvalSnapshotBinding(
   };
 }
 
-function hasCurrentSnapshotCodeBinding(
-  manifest: LongMemEvalSnapshotManifest,
-  env: Readonly<Record<string, string | undefined>>,
-  currentCommitSha7: string
-): boolean {
-  const code = manifest.run_provenance?.code;
-  return Boolean(
-    code !== undefined &&
-    code.commit_sha7 === currentCommitSha7 &&
-    code.gate_sha256 !== null &&
-    code.gate_sha256 === readSha(env.ALAYA_BENCH_GATE_SHA256) &&
-    code.worktree_state_sha256 !== null &&
-    code.worktree_state_sha256 === readSha(env.ALAYA_BENCH_WORKTREE_STATE_SHA256)
-  );
-}
-
-function readSha(raw: string | undefined): string | null {
-  const value = raw?.trim().toLowerCase();
-  return value !== undefined && /^[a-f0-9]{64}$/u.test(value) ? value : null;
-}
-
-function readOnnxThreads(raw: string | undefined): number | null {
-  if (raw === undefined || !/^\d+$/u.test(raw)) return null;
-  const value = Number(raw);
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
-}
-
 export async function prepareRecallEvalDataDir(input: {
   readonly snapshotDbPath: string;
   readonly requestedRoot?: string;
   readonly artifactIntegrity?: SnapshotArtifactIntegrity;
   readonly validateRestoredDb?: (dbPath: string) => void;
   readonly restoreSnapshot?: (dataDirRoot: string) => void;
+  readonly plannedRoot?: OwnedTempRoot;
 }): Promise<OwnedTempRoot> {
-  const root = input.requestedRoot === undefined
+  const root = input.plannedRoot ?? (input.requestedRoot === undefined
     ? await createOwnedTempRoot("alaya-recall-eval-")
-    : externalTempRoot(input.requestedRoot);
+    : externalTempRoot(input.requestedRoot));
   try {
+    if (root.owned) await mkdir(root.path, { recursive: true });
     if (input.artifactIntegrity !== undefined) {
       await verifySnapshotArtifactIntegrity(input.snapshotDbPath, input.artifactIntegrity);
     }
@@ -224,4 +263,37 @@ export async function prepareRecallEvalDataDir(input: {
     throwLifecycleErrors("recall-eval preparation failed", [error, cleanupError]);
     throw error;
   }
+}
+
+export async function prepareRecallEvalDataRoot(
+  options: RecallEvalOptions,
+  bundle: RecallEvalSnapshotBundle,
+  plannedRoot?: OwnedTempRoot
+): Promise<OwnedTempRoot> {
+  const { manifest } = bundle;
+  return await prepareRecallEvalDataDir({
+    snapshotDbPath: options.snapshotDbPath,
+    requestedRoot: options.dataDirRoot,
+    plannedRoot,
+    ...(options.legacySnapshot === true
+      ? { restoreSnapshot: (dataDirRoot: string) => restoreLegacySnapshotToDataDir({
+          snapshotDbPath: options.snapshotDbPath,
+          dataDirRoot,
+          manifest
+        }) }
+      : { artifactIntegrity: manifest.artifact_integrity }),
+    validateRestoredDb: (dbPath) => prepareRecallEvalRestoredDb({
+      manifest,
+      restoredDbPath: dbPath,
+      legacySnapshot: options.legacySnapshot === true
+    })
+  });
+}
+
+export function planRecallEvalDataRoot(options: RecallEvalOptions): OwnedTempRoot {
+  if (options.dataDirRoot !== undefined) return externalTempRoot(options.dataDirRoot);
+  return Object.freeze({
+    path: join(tmpdir(), `alaya-recall-eval-${randomUUID()}`),
+    owned: true
+  });
 }

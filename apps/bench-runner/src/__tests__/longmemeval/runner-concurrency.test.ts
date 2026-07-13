@@ -45,6 +45,18 @@ describe("buildLongMemEvalWorkerEnvOverrides", () => {
     expect(env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBeUndefined();
     expect(env.ALAYA_LOCAL_ONNX_LOCK_PATH).toBeUndefined();
   });
+
+  it("adds shared ONNX single-flight env for a cross-only parallel arm", () => {
+    const env = buildLongMemEvalWorkerEnvOverrides({
+      concurrency: 2,
+      embeddingMode: "disabled",
+      crossEncoderEnabled: true,
+      shardRoot: "/tmp/lme-shards",
+      historyRoot: "/tmp/lme-shards/shard-0"
+    });
+    expect(env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT).toBe("1");
+    expect(env.ALAYA_LOCAL_ONNX_LOCK_PATH).toContain("local-onnx-inference.lock");
+  });
 });
 
 describe("buildLongMemEvalWorkerShardPlans", () => {

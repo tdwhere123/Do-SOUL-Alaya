@@ -53,10 +53,8 @@ export interface BenchDaemonOptions {
   readonly runId?: string;
   readonly embeddingMode?: BenchEmbeddingMode;
   // Selects which provider the bench daemon points the embedding subsystem at
-  // when embeddingMode === "env". Default "openai" preserves the historical
-  // bench wiring; "local_onnx" drives the on-device ONNX provider so the same
-  // harness can exercise both cosine spaces. Ignored when embeddingMode is
-  // "disabled". see also: apps/core-daemon/src/daemon-embedding-runtime.ts
+  // when embeddingMode === "env". OpenAI is explicit opt-in; the local ONNX
+  // provider is the product default. Ignored when embeddingMode is "disabled".
   readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly reviewerIdentity?: string;
@@ -65,6 +63,7 @@ export interface BenchDaemonOptions {
 
 export type BenchEmbeddingMode = "disabled" | "env";
 export type BenchEmbeddingProviderKind = "openai" | "local_onnx";
+export const DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND = "local_onnx" as const;
 
 export interface BenchRecallOptions {
   readonly maxResults?: number;

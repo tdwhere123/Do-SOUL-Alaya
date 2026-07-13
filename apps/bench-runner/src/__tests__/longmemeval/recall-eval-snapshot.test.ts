@@ -109,6 +109,7 @@ describe("recall-eval against a seeded-DB snapshot", () => {
       const manifest = readSnapshotManifest(snapshotDbPath);
       expect(manifest.question_count).toBe(2);
       expect(manifest.variant).toBe(VARIANT);
+      expect(manifest.dataset_sha256).toMatch(/^[a-f0-9]{64}$/u);
 
       const evalHistoryRoot = join(tmpDir, "eval-history");
       const recallResult = await runRecallEval({
@@ -128,9 +129,15 @@ describe("recall-eval against a seeded-DB snapshot", () => {
       expect((recallResult.payload as typeof recallResult.payload & {
         recall_eval_attribution: { status: string; gate_eligible: boolean };
       }).recall_eval_attribution).toMatchObject({
-        status: "legacy_unattributed",
-        gate_eligible: false
+        status: "attributed",
+        gate_eligible: false,
+        evaluation_slice: {
+          offset: 0,
+          limit: null,
+          evaluated_count: 2
+        }
       });
+      expect(recallResult.payload.measurement_attribution?.provenance_complete).toBe(false);
       const archivedKpi = JSON.parse(await readFile(recallResult.kpiPath, "utf8")) as {
         recall_eval_attribution?: { status: string; gate_eligible: boolean };
       };
@@ -144,10 +151,18 @@ describe("recall-eval against a seeded-DB snapshot", () => {
         )
       ));
       expect(provenance).toMatchObject({
-        code: { commit_sha7: recallResult.payload.alaya_commit },
+        code: {
+          commit_sha7: recallResult.payload.alaya_commit,
+          executed_dist: expect.objectContaining({
+            algorithm: "sha256-reachable-path-file-sha256-v1"
+          })
+        },
         execution: { protocol: "sequential", concurrency: 1, evaluated_count: 2 },
         recall_config: { conf_slice_compatibility: false }
       });
+      expect(provenance.recall_config.effective_config_sha256).toBe(
+        recallResult.payload.recall_eval_attribution?.recall_config?.effective_config_sha256
+      );
       expect(OfficialApiGardenProvider.prototype.compile).not.toHaveBeenCalled();
     },
     120_000
@@ -175,6 +190,9 @@ describe("recall-eval against a seeded-DB snapshot", () => {
       vi.stubEnv("ALAYA_RECALL_EVAL_EMBEDDING", "env");
       vi.stubEnv("ALAYA_LOCAL_EMBEDDING_MODEL", "linked");
       vi.stubEnv("ALAYA_LOCAL_EMBEDDING_CACHE_DIR", modelCacheRoot);
+      const ownedTempParent = join(tmpDir, "owned-temp");
+      await mkdir(ownedTempParent);
+      vi.stubEnv("TMPDIR", ownedTempParent);
       const before = await listOwnedRecallRoots();
       const stderr: string[] = [];
       vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {

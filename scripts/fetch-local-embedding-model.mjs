@@ -19,6 +19,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
+import { pathToFileURL } from "node:url";
 import { defaultCacheDir } from "./local-embedding-cache-dir.mjs";
 
 export { defaultCacheDir } from "./local-embedding-cache-dir.mjs";

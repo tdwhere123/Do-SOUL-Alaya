@@ -196,7 +196,8 @@ export async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise
       rounds: opts.rounds,
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode
+      embeddingMode: opts.embeddingMode,
+      embeddingProviderKind: opts.embeddingProviderKind
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
@@ -231,7 +232,8 @@ export async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Pro
       offset: opts.offset,
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
-      embeddingMode: opts.embeddingMode
+      embeddingMode: opts.embeddingMode,
+      embeddingProviderKind: opts.embeddingProviderKind
     });
     const kpi = result.payload.kpi;
     process.stdout.write(

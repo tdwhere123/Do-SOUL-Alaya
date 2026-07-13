@@ -20,7 +20,10 @@ import { loadRecallEvalSnapshot } from "../../../longmemeval/snapshot/recall-eva
 import { prepareRecallEvalRestoredDb } from "../../../longmemeval/snapshot/recall-eval-db.js";
 import { restoreLegacySnapshotToDataDir } from "../../../longmemeval/snapshot/legacy-substrate.js";
 import { writeLongMemEvalFixtureDataset } from "../longmemeval-fixture.js";
-import { createDatabaseThroughMigration } from "./legacy-database-fixture.js";
+import {
+  createDatabaseThroughMigration,
+  executeSqlite
+} from "./legacy-database-fixture.js";
 
 const VARIANT = "longmemeval_s";
 const CACHE_MANIFEST_SHA =
@@ -104,7 +107,7 @@ describe("strict legacy snapshot loader", () => {
       await rm(sized.root, { recursive: true, force: true });
       fixture = original;
     }
-  });
+  }, 20_000);
 
   it("rejects v1 through the default current-snapshot path", async () => {
     await expect(loadRecallEvalSnapshot({
@@ -274,6 +277,7 @@ async function createFixture(requestedRoot?: string, questionCount = 2): Promise
   const snapshotDbPath = join(root, "legacy.db");
   createDatabaseThroughMigration(snapshotDbPath, 103);
   const sidecar = buildSidecar(questions);
+  seedLegacyIdentityRows(snapshotDbPath, sidecar);
   await writeFile(snapshotSidecarPath(snapshotDbPath), JSON.stringify(sidecar));
   const manifest = buildManifest({
     snapshotDbPath,
@@ -327,6 +331,43 @@ function buildSidecar(questions: readonly LongMemEvalQuestion[]) {
       }]
     }))
   };
+}
+
+function seedLegacyIdentityRows(path: string, sidecar: LegacySidecar): void {
+  const createdAt = "2026-07-12T00:00:00.000Z";
+  const statements: string[] = [];
+  for (const [index, question] of sidecar.questions.entries()) {
+    const entry = question.sidecar[0]!;
+    const evidenceId = `evidence-${index + 1}`;
+    statements.push(`
+      INSERT INTO evidence_capsules (
+        object_id, object_kind, schema_version, lifecycle_state, created_at, updated_at,
+        created_by, evidence_kind, semantic_anchor, physical_anchor, evidence_health_state,
+        gist, run_id, workspace_id, surface_id
+      ) VALUES (
+        ${sql(evidenceId)}, 'evidence_capsule', 1, 'active', ${sql(createdAt)}, ${sql(createdAt)},
+        'garden_compile', 'external_reference', '{}',
+        ${sql(JSON.stringify({ artifact_ref: `${question.questionId}-s0-r0` }))},
+        'verified', 'fixture', ${sql(question.runId)}, ${sql(question.workspaceId)},
+        ${sql(entry.sessionId)}
+      );
+      INSERT INTO memory_entries (
+        object_id, object_kind, schema_version, lifecycle_state, created_at, updated_at,
+        created_by, dimension, source_kind, formation_kind, scope_class, content,
+        domain_tags, evidence_refs, workspace_id, run_id, surface_id, storage_tier
+      ) VALUES (
+        ${sql(entry.objectId)}, 'memory_entry', 1, 'active', ${sql(createdAt)}, ${sql(createdAt)},
+        'garden_compile', 'semantic', 'inferred', 'observed', 'session', 'fixture',
+        '[]', ${sql(JSON.stringify([evidenceId]))}, ${sql(question.workspaceId)},
+        ${sql(question.runId)}, ${sql(entry.sessionId)}, 'hot'
+      );
+    `);
+  }
+  executeSqlite(path, statements.join("\n"));
+}
+
+function sql(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 function buildManifest(input: {

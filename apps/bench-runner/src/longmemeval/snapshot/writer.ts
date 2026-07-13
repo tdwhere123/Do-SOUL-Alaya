@@ -26,6 +26,7 @@ export interface WriteRecallEvalSnapshotInput {
   readonly commitSha7: string;
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
+  readonly datasetSha256: string;
   readonly runProvenance: LongMemEvalRunProvenance;
 }
 
@@ -42,7 +43,7 @@ export async function writeRecallEvalSnapshotArtifacts(
     questions: input.snapshotQuestions
   });
   const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
-  const datasetSha = resolveSnapshotDatasetSha(input.runProvenance, extraction);
+  const datasetSha = resolveSnapshotDatasetSha(input, extraction);
   const questionDigest = snapshotQuestionIdDigest(input.snapshotQuestions);
   writeSnapshotManifest(input.snapshotOut, buildManifest({
     input, schemaMigrationVersion, extraction, integrity, datasetSha, questionDigest
@@ -84,7 +85,7 @@ function buildManifest(context: {
   readonly schemaMigrationVersion: number;
   readonly extraction: SnapshotExtractionProvenance | null;
   readonly integrity: Awaited<ReturnType<typeof buildSnapshotArtifactIntegrity>>;
-  readonly datasetSha: string | undefined;
+  readonly datasetSha: string;
   readonly questionDigest: string;
 }) {
   const { input } = context;
@@ -115,11 +116,17 @@ function buildManifest(context: {
 }
 
 function resolveSnapshotDatasetSha(
-  provenance: LongMemEvalRunProvenance,
+  input: WriteRecallEvalSnapshotInput,
   extraction: SnapshotExtractionProvenance | null
-): string | undefined {
-  const candidate = provenance.question_manifest?.dataset_sha256 ?? extraction?.dataset_revision;
-  return candidate !== undefined && /^[a-f0-9]{64}$/u.test(candidate)
-    ? candidate
-    : undefined;
+): string {
+  if (!/^[a-f0-9]{64}$/u.test(input.datasetSha256)) {
+    throw new Error("recall-eval snapshot requires a valid dataset SHA-256");
+  }
+  const provenanceSha = input.runProvenance.question_manifest?.dataset_sha256 ??
+    extraction?.dataset_revision;
+  if (provenanceSha !== undefined && /^[a-f0-9]{64}$/u.test(provenanceSha) &&
+      provenanceSha !== input.datasetSha256) {
+    throw new Error("recall-eval snapshot dataset provenance mismatch");
+  }
+  return input.datasetSha256;
 }

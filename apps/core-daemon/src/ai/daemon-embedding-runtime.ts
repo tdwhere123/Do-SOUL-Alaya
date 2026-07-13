@@ -2,6 +2,7 @@ import {
   D2Q_SCHEMA_VERSION,
   EmbeddingBackfillHandler,
   EmbeddingRecallService,
+  LocalOnnxCrossEncoderClient,
   LocalOnnxEmbeddingClient,
   OpenAIEmbeddingClient,
   defaultLocalOnnxCacheDir,
@@ -19,11 +20,18 @@ import {
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
   createOptionalMemoryEmbeddingRepo,
-  createOptionalMemoryHqRepo,
-  readConfigEnvValue,
-  readNonEmptyEnv
+  createOptionalMemoryHqRepo
 } from "../runtime/index.js";
-import { resolveSecretRef, type ResolveSecretError } from "../secrets/index.js";
+import {
+  isD2qActive,
+  readEmbeddingRuntimeConfig,
+  type EmbeddingRuntimeConfig
+} from "./daemon-embedding-runtime-config.js";
+import {
+  createEmbeddingProviderReadiness,
+  observeEmbeddingProviderReadiness,
+  type EmbeddingProviderReadiness
+} from "./daemon-embedding-provider-readiness.js";
 
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
@@ -43,87 +51,30 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingApiKey: runtimeConfig.embeddingApiKey,
     embeddingStatusService: services.embeddingStatusService,
     embeddingRecallService: services.embeddingRecallService,
+    answerRerankService: createAnswerRerankService(runtimeConfig),
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup
   };
 }
 
-interface EmbeddingRuntimeConfig {
-  readonly rawEmbeddingSecretRef: string | undefined;
-  readonly embeddingApiKey: string | null;
-  readonly configuredEmbeddingModel: string | null;
-  readonly configuredEmbeddingProviderUrl: string | null;
-  readonly explicitEmbeddingProvider: "openai" | "local_onnx" | null;
-  readonly embeddingProviderKind: "openai" | "local_onnx";
-  readonly localEmbeddingCacheDir: string | null;
-  readonly localEmbeddingModel: string | null;
-  readonly embeddingSupplementOptInEnabled: boolean;
-  readonly recallPolicyEmbeddingEnabled: boolean;
-  readonly d2qEnabled: boolean;
-}
-
 interface EmbeddingProviderState {
   readonly memoryEmbeddingRepo: ReturnType<typeof createOptionalMemoryEmbeddingRepo>;
   readonly embeddingProvider: EmbeddingProviderPort | null;
   readonly embeddingModelId: string | null;
+  readonly readiness: EmbeddingProviderReadiness;
 }
 
-function readEmbeddingRuntimeConfig(
-  configEnv: ReadonlyMap<string, string>,
-  warn: (message: string, meta: Record<string, unknown>) => void
-): EmbeddingRuntimeConfig {
-  const rawEmbeddingSecretRef = readConfigEnvValue(configEnv, "ALAYA_OPENAI_SECRET_REF");
-  const configuredEmbeddingModel = readNonEmptyEnv(readConfigEnvValue(configEnv, "OPENAI_EMBEDDING_MODEL"));
-  const explicitEmbeddingProvider = readExplicitEmbeddingProvider(configEnv);
-  const embeddingOptInRaw = readConfigEnvValue(configEnv, "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT");
-  return {
-    rawEmbeddingSecretRef,
-    embeddingApiKey: resolveOptionalEmbeddingApiKey(rawEmbeddingSecretRef, warn),
-    configuredEmbeddingModel,
-    configuredEmbeddingProviderUrl: readNonEmptyEnv(readConfigEnvValue(configEnv, "OPENAI_EMBEDDING_PROVIDER_URL")),
-    explicitEmbeddingProvider,
-    embeddingProviderKind: resolveEmbeddingProviderKind(rawEmbeddingSecretRef, configuredEmbeddingModel, explicitEmbeddingProvider),
-    localEmbeddingCacheDir: readNonEmptyEnv(readConfigEnvValue(configEnv, "ALAYA_LOCAL_EMBEDDING_CACHE_DIR")),
-    localEmbeddingModel: readNonEmptyEnv(readConfigEnvValue(configEnv, "ALAYA_LOCAL_EMBEDDING_MODEL")),
-    embeddingSupplementOptInEnabled:
-      embeddingOptInRaw === "true" ||
-      (explicitEmbeddingProvider === "local_onnx" && embeddingOptInRaw !== "false"),
-    recallPolicyEmbeddingEnabled:
-      embeddingOptInRaw === "true" ||
-      (explicitEmbeddingProvider === "local_onnx" && embeddingOptInRaw !== "false"),
-    d2qEnabled: readD2qEnabled(configEnv)
-  };
-}
-
-function readD2qEnabled(configEnv: ReadonlyMap<string, string>): boolean {
-  const raw = readNonEmptyEnv(readConfigEnvValue(configEnv, "ALAYA_RECALL_D2Q"))?.toLowerCase();
-  return raw === "1" || raw === "true";
-}
-
-function readExplicitEmbeddingProvider(
-  configEnv: ReadonlyMap<string, string>
-): "openai" | "local_onnx" | null {
-  const explicitProvider = readNonEmptyEnv(readConfigEnvValue(configEnv, "ALAYA_EMBEDDING_PROVIDER"));
-  return explicitProvider === "openai" || explicitProvider === "local_onnx"
-    ? explicitProvider
-    : null;
-}
-
-function resolveEmbeddingProviderKind(
-  rawEmbeddingSecretRef: string | undefined,
-  configuredEmbeddingModel: string | null,
-  explicitEmbeddingProvider: "openai" | "local_onnx" | null
-): "openai" | "local_onnx" {
-  const hasExistingOpenAiConfig =
-    (rawEmbeddingSecretRef?.trim().length ?? 0) > 0 || configuredEmbeddingModel !== null;
-  if (explicitEmbeddingProvider === "local_onnx") {
-    return "local_onnx";
-  }
-  if (explicitEmbeddingProvider === "openai" || hasExistingOpenAiConfig) {
-    return "openai";
-  }
-  return "local_onnx";
+function createAnswerRerankService(
+  config: EmbeddingRuntimeConfig
+): LocalOnnxCrossEncoderClient | undefined {
+  if (!config.localAnswerRerankEnabled) return undefined;
+  return new LocalOnnxCrossEncoderClient({
+    cacheDir: config.localAnswerRerankCacheDir ?? defaultLocalOnnxCacheDir(),
+    ...(config.localAnswerRerankModel === null
+      ? {}
+      : { modelId: config.localAnswerRerankModel })
+  });
 }
 
 function createEmbeddingProviderState(
@@ -131,10 +82,10 @@ function createEmbeddingProviderState(
   config: EmbeddingRuntimeConfig
 ): EmbeddingProviderState {
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(input.database);
-  const embeddingProvider = resolveEmbeddingProvider({
+  const resolvedProvider = resolveEmbeddingProvider({
     providerKind: config.embeddingProviderKind,
     storageAvailable: memoryEmbeddingRepo !== null,
-    optInEnabled: config.embeddingSupplementOptInEnabled,
+    optInEnabled: config.embeddingSupplementEnabled,
     apiKey: config.embeddingApiKey,
     openAiModel: config.configuredEmbeddingModel,
     openAiBaseUrl: config.configuredEmbeddingProviderUrl,
@@ -143,6 +94,8 @@ function createEmbeddingProviderState(
     localSchemaVersion: isD2qActive(config) ? D2Q_SCHEMA_VERSION : null,
     providerOverride: input.embeddingProviderOverride
   });
+  const readiness = createEmbeddingProviderReadiness(resolvedProvider);
+  const embeddingProvider = observeEmbeddingProviderReadiness(resolvedProvider, readiness);
   return {
     memoryEmbeddingRepo,
     embeddingProvider,
@@ -151,7 +104,8 @@ function createEmbeddingProviderState(
       (config.embeddingProviderKind === "local_onnx"
         ? config.localEmbeddingModel
         : config.configuredEmbeddingModel ??
-          (config.embeddingApiKey === null ? null : DEFAULT_OPENAI_EMBEDDING_MODEL))
+          (config.embeddingApiKey === null ? null : DEFAULT_OPENAI_EMBEDDING_MODEL)),
+    readiness
   };
 }
 
@@ -160,11 +114,17 @@ function createEmbeddingRuntimeServices(
   config: EmbeddingRuntimeConfig,
   providerState: EmbeddingProviderState
 ) {
+  const providerWarmup = createProviderWarmup(
+    providerState.embeddingProvider,
+    input.warn,
+    providerState.readiness
+  );
   const embeddingStatusService = createEmbeddingStatusService({
-    embeddingEnabled: config.embeddingSupplementOptInEnabled,
+    embeddingEnabled: config.embeddingSupplementEnabled,
     recallPolicyEmbeddingEnabled: config.recallPolicyEmbeddingEnabled,
-    providerConfigured:
-      providerState.embeddingProvider !== null && providerState.embeddingProvider.isAvailable,
+    providerConfigured: providerState.embeddingProvider !== null,
+    providerAvailable: () => providerState.embeddingProvider?.isAvailable === true,
+    providerWarmupStatus: () => providerState.readiness.status,
     modelId: providerState.embeddingModelId,
     storageAvailable: providerState.memoryEmbeddingRepo !== null,
     degradationSource: input.healthJournalService
@@ -175,12 +135,12 @@ function createEmbeddingRuntimeServices(
     embeddingRecallService,
     embeddingBackfillHandler: createEmbeddingBackfillHandler(input, config, providerState),
     defaultPolicyDecorator: createDefaultPolicyDecorator(
-      input.configEnv,
       config.recallPolicyEmbeddingEnabled,
       embeddingRecallService,
-      providerState.embeddingProvider
+      providerState.embeddingProvider,
+      providerState.readiness
     ),
-    providerWarmup: createProviderWarmup(providerState.embeddingProvider, input.warn)
+    providerWarmup
   };
 }
 
@@ -218,12 +178,6 @@ function createEmbeddingBackfillHandler(
   });
 }
 
-// d2q is the proven MiniLM doc2query path; gate the HQ source + schema bump on
-// the local provider so an OpenAI deployment never invalidates its vectors.
-function isD2qActive(config: EmbeddingRuntimeConfig): boolean {
-  return config.d2qEnabled && config.embeddingProviderKind === "local_onnx";
-}
-
 function resolveBackfillHqProvider(
   input: Parameters<typeof createDaemonEmbeddingRuntime>[0],
   config: EmbeddingRuntimeConfig
@@ -235,10 +189,10 @@ function resolveBackfillHqProvider(
 }
 
 function createDefaultPolicyDecorator(
-  configEnv: ReadonlyMap<string, string>,
   recallPolicyEmbeddingEnabled: boolean,
   embeddingRecallService: EmbeddingRecallService | undefined,
-  embeddingProvider: EmbeddingProviderPort | null
+  embeddingProvider: EmbeddingProviderPort | null,
+  readiness: EmbeddingProviderReadiness
 ): ((policy: Readonly<RecallPolicy>) => Readonly<RecallPolicy>) | undefined {
   const embeddingPolicyConfigured =
     embeddingRecallService !== undefined &&
@@ -247,24 +201,18 @@ function createDefaultPolicyDecorator(
   if (!embeddingPolicyConfigured) {
     return undefined;
   }
-  const embeddingFusionWeight = readEmbeddingFusionWeightOverride(configEnv);
-  const policyDecoratorDisabled = readPolicyDecoratorDisabled(configEnv);
   return (policy: Readonly<RecallPolicy>): Readonly<RecallPolicy> =>
     applyEmbeddingPolicyDecorator(
       policy,
-      embeddingProvider,
-      embeddingFusionWeight,
-      policyDecoratorDisabled
+      readiness.status === "ready" ? embeddingProvider : null
     );
 }
 
 function applyEmbeddingPolicyDecorator(
   policy: Readonly<RecallPolicy>,
-  embeddingProvider: EmbeddingProviderPort | null,
-  embeddingFusionWeight: number,
-  policyDecoratorDisabled: boolean
+  embeddingProvider: EmbeddingProviderPort | null
 ): Readonly<RecallPolicy> {
-  if (policyDecoratorDisabled || embeddingProvider === null || !embeddingProvider.isAvailable) {
+  if (embeddingProvider === null || !embeddingProvider.isAvailable) {
     return policy;
   }
   const existingFusionWeights = policy.scoring_weight_overrides?.fusion_weights ?? {};
@@ -285,7 +233,7 @@ function applyEmbeddingPolicyDecorator(
     scoring_weight_overrides: {
       ...(policy.scoring_weight_overrides ?? {}),
       fusion_weights: {
-        embedding_similarity: embeddingFusionWeight,
+        embedding_similarity: DEFAULT_EMBEDDING_FUSION_WEIGHT,
         ...existingFusionWeights
       }
     }
@@ -294,12 +242,12 @@ function applyEmbeddingPolicyDecorator(
 
 function createProviderWarmup(
   embeddingProvider: EmbeddingProviderPort | null,
-  warn: (message: string, meta: Record<string, unknown>) => void
+  warn: (message: string, meta: Record<string, unknown>) => void,
+  readiness: EmbeddingProviderReadiness
 ): Promise<"not_requested" | "ready" | "failed"> {
   if (embeddingProvider === null) {
     return Promise.resolve("not_requested");
   }
-
   return Promise.resolve()
     .then(async () => {
       await embeddingProvider.embedTexts(["alaya-init-probe"], { timeoutMs: 60_000 });
@@ -311,35 +259,15 @@ function createProviderWarmup(
         model_id: embeddingProvider.modelId,
         error: error instanceof Error ? error.message : String(error)
       });
+      readiness.markFailed();
       return "failed" as const;
     });
 }
 
-const DEFAULT_EMBEDDING_FUSION_WEIGHT_ON = 12;
+const DEFAULT_EMBEDDING_FUSION_WEIGHT = 12;
 // mirror: packages/core/src/recall/supplements.ts EMBEDDING_MAX_INJECTED_DELIVERY / EMBEDDING_INJECTION_SIMILARITY_FLOOR
 const DEFAULT_EMBEDDING_INJECTION_CAP = 10;
 const DEFAULT_EMBEDDING_INJECTION_FLOOR = 0.5;
-
-function readPolicyDecoratorDisabled(configEnv: ReadonlyMap<string, string>): boolean {
-  const raw = readNonEmptyEnv(
-    readConfigEnvValue(configEnv, "ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR")
-  )?.toLowerCase();
-  return raw === "1" || raw === "true";
-}
-
-function readEmbeddingFusionWeightOverride(
-  configEnv: ReadonlyMap<string, string>
-): number {
-  const raw = readNonEmptyEnv(readConfigEnvValue(configEnv, "ALAYA_EMBEDDING_FUSION_WEIGHT_ON"));
-  if (raw === null) {
-    return DEFAULT_EMBEDDING_FUSION_WEIGHT_ON;
-  }
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return DEFAULT_EMBEDDING_FUSION_WEIGHT_ON;
-  }
-  return parsed;
-}
 
 function resolveEmbeddingProvider(input: {
   readonly providerKind: "openai" | "local_onnx";
@@ -376,60 +304,4 @@ function resolveEmbeddingProvider(input: {
     model: input.openAiModel ?? undefined,
     baseUrl: input.openAiBaseUrl ?? undefined
   });
-}
-
-
-function resolveOptionalEmbeddingApiKey(
-  rawSecretRef: string | undefined,
-  warn: (message: string, meta: Record<string, unknown>) => void
-): string | null {
-  if (rawSecretRef === undefined || rawSecretRef.trim().length === 0) {
-    return null;
-  }
-
-  const resolved = resolveSecretRef(rawSecretRef);
-  if (!("kind" in resolved)) {
-    return resolved.value;
-  }
-
-  if (resolved.kind === "malformed" || resolved.kind === "empty") {
-    throw new Error(formatEmbeddingSecretResolutionError(resolved));
-  }
-
-  warn("embedding provider unavailable; falling back to keyword recall", {
-    reason: resolved.kind,
-    secret_ref_source: describeSecretRefSource(resolved)
-  });
-  return null;
-}
-
-function describeSecretRefSource(error: ResolveSecretError): string {
-  switch (error.kind) {
-    case "env_missing":
-      return `env:${error.var_name}`;
-    case "file_missing":
-    case "file_unreadable":
-      return "file";
-    case "keychain_tooling_unavailable":
-    case "keychain_entry_not_found":
-      return `keychain:${error.service}:${error.account}`;
-    case "malformed":
-    case "empty":
-      return "invalid";
-  }
-}
-
-function formatEmbeddingSecretResolutionError(error: ResolveSecretError): string {
-  switch (error.kind) {
-    case "malformed":
-      return `ALAYA_OPENAI_SECRET_REF: ${error.ref} -> ${error.reason}`;
-    case "empty":
-      return `ALAYA_OPENAI_SECRET_REF: ${error.ref} -> ${error.origin} secret is empty`;
-    case "env_missing":
-    case "file_missing":
-    case "file_unreadable":
-    case "keychain_tooling_unavailable":
-    case "keychain_entry_not_found":
-      return "ALAYA_OPENAI_SECRET_REF is unavailable";
-  }
 }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BenchPolicyShape } from "@do-soul/alaya-eval";
+import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import {
   resolveBenchCommitInfo
 } from "../shared/version.js";
@@ -11,6 +12,7 @@ import type {
   BenchEmbeddingWarmupSummary,
   BenchQueryEmbeddingWarmupSummary
 } from "../harness/daemon.js";
+import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { LongMemEvalRunProvenance } from "./provenance/run.js";
 import { writeRecallEvalSnapshotArtifacts } from "./snapshot/writer.js";
@@ -43,8 +45,6 @@ export {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
-const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL =
-  "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 const PINNED_META_ROOT = resolve(
   __dirname,
   "../../../../docs/bench-history/datasets"
@@ -54,7 +54,7 @@ const PINNED_META_ROOT = resolve(
 export function resolveBenchEmbeddingProviderLabel(
   embeddingMode: BenchEmbeddingMode,
   env: Readonly<Record<string, string | undefined>> = process.env,
-  providerKind: BenchEmbeddingProviderKind = "openai"
+  providerKind: BenchEmbeddingProviderKind = DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND
 ): string {
   if (embeddingMode === "disabled") {
     return "none";
@@ -63,7 +63,7 @@ export function resolveBenchEmbeddingProviderLabel(
   if (providerKind === "local_onnx") {
     const localModel =
       env.ALAYA_LOCAL_EMBEDDING_MODEL?.trim() ||
-      DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL;
+      DEFAULT_LOCAL_ONNX_MODEL_ID;
     return `local_onnx:${localModel}`;
   }
 
@@ -120,6 +120,7 @@ export function writeRecallEvalSnapshot(input: {
   readonly commitSha7: string;
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
+  readonly datasetSha256: string;
   readonly runProvenance: LongMemEvalRunProvenance;
 }): Promise<void> {
   return writeRecallEvalSnapshotArtifacts(input);

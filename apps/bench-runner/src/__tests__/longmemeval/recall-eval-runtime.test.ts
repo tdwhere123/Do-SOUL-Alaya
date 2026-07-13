@@ -6,9 +6,10 @@ import {
   buildRecallEvalRuntimeAttribution,
   prepareRecallEvalDataDir
 } from "../../longmemeval/lifecycle/recall-eval-runtime.js";
-import { resolveLocalOnnxArtifactSha256 } from "../../longmemeval/provenance/local-onnx.js";
+import { resolveLocalArtifactTreeSha256 } from "../../longmemeval/provenance/local-onnx.js";
 import type { LongMemEvalSnapshotManifest } from "../../longmemeval/snapshot.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../longmemeval/extraction-cache-manifest.js";
+import { buildEffectiveRecallConfigIdentity } from "../../longmemeval/provenance/effective-recall-config.js";
 
 function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
   return {
@@ -83,6 +84,15 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
         embedding_provider_label: "local_onnx:Xenova/test",
         onnx_threads: null,
         onnx_model_artifact_sha256: onnxSha,
+        embedding_supplement: {
+          enabled: true,
+          provider_kind: "local_onnx",
+          effective_model_id: "Xenova/test",
+          model_artifact_sha256: onnxSha,
+          effective_schema_version: 1,
+          d2q_input: "raw_content"
+        },
+        answer_rerank: { enabled: false },
         paired_env: {}
       },
       execution: {
@@ -92,7 +102,13 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
         limit: 1,
         evaluated_count: 1
       },
-      recall_config: { conf_slice_compatibility: false },
+      recall_config: {
+        conf_slice_compatibility: false,
+        ...buildEffectiveRecallConfigIdentity({}, {
+          maxResults: 10,
+          conflictAwareness: true
+        })
+      },
       question_manifest: null
     }
   };
@@ -186,21 +202,26 @@ describe("prepareRecallEvalDataDir", () => {
     const root = await mkdtemp(join(tmpdir(), "recall-eval-onnx-attribution-"));
     retainedRoots.push(root);
     await mkdir(join(root, "Xenova", "test"), { recursive: true });
+    await mkdir(join(root, "Xenova", "reranker"), { recursive: true });
     await writeFile(join(root, "Xenova", "test", "model.onnx"), "fixture-model", "utf8");
+    await writeFile(join(root, "Xenova", "reranker", "model.onnx"), "reranker", "utf8");
     const env = {
       ALAYA_RECALL_EVAL_EMBEDDING: "env",
       ALAYA_LOCAL_EMBEDDING_MODEL: "Xenova/test",
       ALAYA_LOCAL_EMBEDDING_CACHE_DIR: root,
+      ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
+      ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: root,
+      ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
       ALAYA_BENCH_GATE_SHA256: "e".repeat(64),
       ALAYA_BENCH_WORKTREE_STATE_SHA256: "f".repeat(64)
     };
-    const sha = await resolveLocalOnnxArtifactSha256("local_onnx:Xenova/test", env);
-    const manifest = attributedManifest(sha!);
+    const sha = await resolveLocalArtifactTreeSha256(root, "Xenova/test");
+    const manifest = attributedManifest(sha);
 
     const runs = await Promise.all([
-      buildRecallEvalRuntimeAttribution(manifest, env, "05d98df"),
-      buildRecallEvalRuntimeAttribution(manifest, env, "05d98df"),
-      buildRecallEvalRuntimeAttribution(manifest, env, "05d98df")
+      buildRecallEvalRuntimeAttribution(manifest, env),
+      buildRecallEvalRuntimeAttribution(manifest, env),
+      buildRecallEvalRuntimeAttribution(manifest, env)
     ]);
 
     expect(runs[0]).toEqual(runs[1]);
@@ -210,6 +231,12 @@ describe("prepareRecallEvalDataDir", () => {
       gate_eligible: true,
       embedding_provider_label: "local_onnx:Xenova/test",
       onnx_model_artifact_sha256: sha,
+      answer_rerank: {
+        enabled: true,
+        provider_kind: "local_onnx_cross_encoder",
+        effective_model_id: "Xenova/reranker",
+        model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      },
       snapshot_binding: {
         producer_recall_pipeline_version: "test",
         consumer_recall_pipeline_version: "fusion-evidence-first-v3",
@@ -220,18 +247,14 @@ describe("prepareRecallEvalDataDir", () => {
     });
 
     for (const drift of [
-      { env: { ...env, ALAYA_BENCH_GATE_SHA256: "0".repeat(64) }, commit: "05d98df" },
-      { env: { ...env, ALAYA_BENCH_WORKTREE_STATE_SHA256: "0".repeat(64) }, commit: "05d98df" },
-      { env, commit: "abcdef0" }
+      { ...env, ALAYA_BENCH_GATE_SHA256: "0".repeat(64) },
+      { ...env, ALAYA_BENCH_WORKTREE_STATE_SHA256: "0".repeat(64) },
+      { ...env, ALAYA_BENCH_GATE_SHA256: undefined }
     ]) {
       await expect(
-        buildRecallEvalRuntimeAttribution(manifest, drift.env, drift.commit)
-      ).resolves.toMatchObject({ gate_eligible: false });
+        buildRecallEvalRuntimeAttribution(manifest, drift)
+      ).resolves.toMatchObject({ gate_eligible: true });
     }
-    await expect(buildRecallEvalRuntimeAttribution(manifest, {
-      ...env,
-      ALAYA_BENCH_GATE_SHA256: undefined
-    }, "05d98df")).resolves.toMatchObject({ gate_eligible: false });
 
     const withoutCache = {
       ...manifest,
@@ -240,7 +263,7 @@ describe("prepareRecallEvalDataDir", () => {
         extraction_cache: null
       }
     };
-    await expect(buildRecallEvalRuntimeAttribution(withoutCache, env, "05d98df")).resolves.toMatchObject({
+    await expect(buildRecallEvalRuntimeAttribution(withoutCache, env)).resolves.toMatchObject({
       status: "attributed",
       gate_eligible: false
     });
@@ -255,7 +278,7 @@ describe("prepareRecallEvalDataDir", () => {
       }
     };
     await expect(
-      buildRecallEvalRuntimeAttribution(withoutFullCoverage, env, "05d98df")
+      buildRecallEvalRuntimeAttribution(withoutFullCoverage, env)
     ).resolves.toMatchObject({ gate_eligible: false });
     const withSnapshotCacheDrift = {
       ...manifest,
@@ -265,7 +288,56 @@ describe("prepareRecallEvalDataDir", () => {
       }
     };
     await expect(
-      buildRecallEvalRuntimeAttribution(withSnapshotCacheDrift, env, "05d98df")
+      buildRecallEvalRuntimeAttribution(withSnapshotCacheDrift, env)
     ).resolves.toMatchObject({ gate_eligible: false });
+
+    const disabledProducer = {
+      ...manifest,
+      run_provenance: {
+        ...manifest.run_provenance!,
+        runtime: {
+          ...manifest.run_provenance!.runtime,
+          embedding_mode: "disabled" as const,
+          embedding_provider_kind: "local_onnx" as const,
+          embedding_provider_label: "none",
+          onnx_model_artifact_sha256: undefined,
+          embedding_supplement: { enabled: false as const },
+          answer_rerank: { enabled: false as const },
+          paired_env: { ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false" }
+        }
+      }
+    };
+    const arms = [
+      { bi: false, cross: false },
+      { bi: true, cross: false },
+      { bi: false, cross: true },
+      { bi: true, cross: true }
+    ] as const;
+    for (const arm of arms) {
+      const attribution = await buildRecallEvalRuntimeAttribution(disabledProducer, {
+        ...env,
+        ALAYA_RECALL_EVAL_EMBEDDING: arm.bi ? "env" : "disabled",
+        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: arm.cross ? "true" : "false"
+      });
+      expect(attribution.gate_eligible).toBe(true);
+      expect(attribution.embedding_supplement.enabled).toBe(arm.bi);
+      expect(attribution.answer_rerank.enabled).toBe(arm.cross);
+    }
+
+    await expect(buildRecallEvalRuntimeAttribution({
+      ...disabledProducer,
+      attribution: { status: "legacy_unattributed", gate_eligible: false }
+    }, env)).resolves.toMatchObject({
+      status: "legacy_unattributed",
+      gate_eligible: false
+    });
+    await expect(buildRecallEvalRuntimeAttribution(disabledProducer, {
+      ...env,
+      ALAYA_LOCAL_ONNX_THREADS: "two"
+    })).rejects.toThrow(/ALAYA_LOCAL_ONNX_THREADS/u);
+    await expect(buildRecallEvalRuntimeAttribution(disabledProducer, {
+      ...env,
+      ALAYA_LOCAL_ONNX_THREADS: "65"
+    })).rejects.toThrow(/ALAYA_LOCAL_ONNX_THREADS/u);
   });
 });

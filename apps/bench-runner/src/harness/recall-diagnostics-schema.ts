@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { assertBiEncoderRunActivation } from "./embedding-treatment-activation.js";
+import { readOptionalTreatmentBoolean } from "./strict-treatment-config.js";
 
 const RecallFusionStreamRankSchema = z
   .object({
@@ -180,6 +182,8 @@ const RecallCandidateDiagnosticSchema = z
     selection_order: z.number().int().positive(),
     fused_rank: z.number().int().positive(),
     fused_score: z.number().min(0),
+    answer_relevance_score: z.number().min(0).max(1).optional(),
+    answer_relevance_rank: z.number().int().positive().optional(),
     per_stream_rank: RecallFusionStreamRankSchema,
     fused_rank_contribution_per_stream: RecallFusionStreamContributionSchema,
     per_axis_rank: RecallConformantAxisRankSchema.optional(),
@@ -258,6 +262,19 @@ const RecallDegradationReasonSchema = z.enum([
   "path_expansion_failed"
 ]);
 
+export const BenchAnswerRerankStatusSchema = z.enum([
+  "not_requested",
+  "not_applicable",
+  "returned",
+  "failed"
+]);
+
+export const BenchAnswerRerankFailureClassSchema = z.enum([
+  "invalid_score_count",
+  "invalid_score_value",
+  "service_error"
+]);
+
 // see also: packages/core/src/recall/recall-service-types.ts
 //   RecallMultiSeedGraphFanInDiagnostics
 const RecallMultiSeedGraphFanInDiagnosticsSchema = z
@@ -307,6 +324,10 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_not_requested"
     ]),
     provider_degradation_reason: z.string().nullable(),
+    answer_rerank_status: BenchAnswerRerankStatusSchema,
+    answer_rerank_expected_count: z.number().int().nonnegative(),
+    answer_rerank_scored_count: z.number().int().nonnegative(),
+    answer_rerank_failure_class: BenchAnswerRerankFailureClassSchema.nullable(),
     degradation_reasons: z.array(RecallDegradationReasonSchema).readonly().optional(),
     embedding_workspace_scan_cap: z.number().int().nonnegative().optional(),
     embedding_workspace_scanned_count: z.number().int().nonnegative().optional(),
@@ -371,3 +392,73 @@ export const BenchRecallDiagnosticsSchema = z
 
 export type BenchRecallDiagnostics = z.infer<typeof BenchRecallDiagnosticsSchema>;
 export type BenchRecallTokenEconomy = z.infer<typeof RecallTokenEconomySchema>;
+
+export function parseBenchRecallDiagnosticsForRun(
+  value: unknown,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): BenchRecallDiagnostics {
+  const diagnostics = BenchRecallDiagnosticsSchema.parse(value);
+  assertBiEncoderRunActivation(diagnostics, env);
+  const crossEncoderEnabled = readOptionalTreatmentBoolean(
+    env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
+    "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
+  );
+  if (crossEncoderEnabled === true) {
+    assertCrossEncoderTreatmentActivation(diagnostics);
+  } else if (crossEncoderEnabled === false) {
+    assertCrossEncoderControlInactive(diagnostics);
+  }
+  return diagnostics;
+}
+
+function assertCrossEncoderControlInactive(
+  diagnostics: BenchRecallDiagnostics
+): void {
+  if (
+    diagnostics.answer_rerank_status !== "not_requested" ||
+    diagnostics.answer_rerank_expected_count !== 0 ||
+    diagnostics.answer_rerank_scored_count !== 0 ||
+    diagnostics.answer_rerank_failure_class !== null
+  ) {
+    throw new Error("cross-encoder control activation failed: reranking was observed");
+  }
+}
+
+function assertCrossEncoderTreatmentActivation(
+  diagnostics: BenchRecallDiagnostics
+): void {
+  if (diagnostics.answer_rerank_status === "not_applicable") {
+    assertRerankNotApplicable(diagnostics);
+    return;
+  }
+  if (diagnostics.answer_rerank_status !== "returned") {
+    throw new Error(
+      `cross-encoder treatment activation failed: status ${diagnostics.answer_rerank_status}`
+    );
+  }
+  if (
+    diagnostics.answer_rerank_expected_count <= 0 ||
+    diagnostics.answer_rerank_scored_count !== diagnostics.answer_rerank_expected_count ||
+    diagnostics.answer_rerank_failure_class !== null
+  ) {
+    throw new Error(
+      `cross-encoder treatment activation failed: expected ${diagnostics.answer_rerank_expected_count} scores but received ${diagnostics.answer_rerank_scored_count}`
+    );
+  }
+}
+
+function assertRerankNotApplicable(diagnostics: BenchRecallDiagnostics): void {
+  const normalizedQuery = diagnostics.query_probes.normalized_query;
+  const emptyQuery = normalizedQuery === null || normalizedQuery.trim().length === 0;
+  const emptyPool = diagnostics.candidate_pool_count === 0;
+  if (
+    (!emptyQuery && !emptyPool) ||
+    diagnostics.answer_rerank_expected_count !== 0 ||
+    diagnostics.answer_rerank_scored_count !== 0 ||
+    diagnostics.answer_rerank_failure_class !== null
+  ) {
+    throw new Error(
+      "cross-encoder treatment activation failed: not_applicable for a non-empty query and candidate pool"
+    );
+  }
+}

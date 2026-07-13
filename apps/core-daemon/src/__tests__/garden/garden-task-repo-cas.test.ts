@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EventPublisher, type RuntimeNotifier } from "@do-soul/alaya-core";
 
 import {
+  EdgeClassifyTaskPayloadSchema,
   GardenEventType,
   GardenRole,
   GardenTaskKind,
@@ -307,9 +308,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
       payload: { task_kind: GardenTaskKind.EDGE_CLASSIFY },
       created_at: "2026-05-01T00:00:00.000Z"
     });
-    expect(
+    await expect(
       repo.claimAtomic("edge-claimed", "agent-target-a", "2026-05-02T00:00:00.000Z")
-    ).toBe("claimed");
+    ).resolves.toBe("claimed");
 
     // peek selects only status='pending' rows, so a claimed task is never listed.
     const expired = repo.peekExpiredUnclaimedTasks(
@@ -321,14 +322,67 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
     expect(getGardenTask(database, "edge-claimed").status).toBe("claimed");
   });
 
-  it("lets the production scheduler dispatch persisted EMBEDDING_BACKFILL by workspace without draining other kinds", async () => {
-    const { eventPublisher, repo } = createHarness();
+  it("routes in-process work around persisted host-worker tasks", async () => {
+    const { database, eventPublisher, repo } = createHarness();
+    const warn = vi.fn();
     const scheduler = new GardenScheduler(
       createSchedulerEventLogPort(eventPublisher),
-      {},
+      { warn },
       null,
       repo
     );
+    const edgeTask = EdgeClassifyTaskPayloadSchema.parse({
+      task_id: "task-edge-host-worker",
+      task_kind: GardenTaskKind.EDGE_CLASSIFY,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-A",
+      run_id: "run-A",
+      priority: 100,
+      created_at: "2026-05-07T00:00:00.000Z",
+      dimension: "fact",
+      scope_class: "project",
+      source_memory: { object_id: "source-A", content: "source", domain_tags: [] },
+      neighbor_memory: { object_id: "neighbor-A", content: "neighbor", domain_tags: [] },
+      source_signal_id: "signal-A"
+    });
+    repo.enqueue({
+      id: edgeTask.task_id,
+      workspace_id: edgeTask.workspace_id,
+      role: GardenRole.LIBRARIAN,
+      kind: edgeTask.task_kind,
+      payload: edgeTask,
+      created_at: edgeTask.created_at
+    });
+    const mismatchedTask = createTask({
+      task_id: "task-mismatched-kind",
+      task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-A",
+      target_object_refs: ["workspace-A"],
+      priority: 90
+    });
+    repo.enqueue({
+      id: mismatchedTask.task_id,
+      workspace_id: mismatchedTask.workspace_id,
+      role: GardenRole.LIBRARIAN,
+      kind: GardenTaskKind.BULK_ENRICH,
+      payload: mismatchedTask,
+      created_at: mismatchedTask.created_at
+    });
+    const invalidTierTask = createTask({
+      task_id: "task-invalid-kind-tier",
+      task_kind: GardenTaskKind.MERGE_PROPOSAL,
+      required_tier: GardenTier.TIER_0,
+      priority: 80
+    });
+    repo.enqueue({
+      id: invalidTierTask.task_id,
+      workspace_id: invalidTierTask.workspace_id,
+      role: GardenRole.JANITOR,
+      kind: invalidTierTask.task_kind,
+      payload: invalidTierTask,
+      created_at: invalidTierTask.created_at
+    });
     scheduler.enqueue(
       createTask({
         task_id: "task-backfill-a",
@@ -379,7 +433,32 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
         GardenTaskKind.EMBEDDING_BACKFILL
       ])
     ).resolves.toMatchObject({ task_id: "task-backfill-b", workspace_id: "workspace-B" });
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(GardenRole.LIBRARIAN, [
+        GardenTaskKind.EDGE_CLASSIFY
+      ])
+    ).resolves.toBeNull();
 
-    expect(repo.peekPending(GardenRole.LIBRARIAN).map((task) => task.id)).toEqual(["task-bulk-a"]);
+    expect(repo.peekPending(GardenRole.LIBRARIAN).map((task) => task.id)).toEqual([
+      "task-edge-host-worker",
+      "task-mismatched-kind",
+      "task-invalid-kind-tier",
+      "task-bulk-a"
+    ]);
+    await expect(scheduler.dispatchNext(GardenRole.LIBRARIAN)).resolves.toMatchObject({
+      task_id: "task-bulk-a"
+    });
+    expect(repo.peekPending(GardenRole.LIBRARIAN).map((task) => task.id)).toEqual([
+      "task-edge-host-worker"
+    ]);
+    expect(getGardenTask(database, mismatchedTask.task_id)).toMatchObject({
+      status: "failed",
+      last_error_text: expect.stringContaining("kind")
+    });
+    expect(getGardenTask(database, invalidTierTask.task_id)).toMatchObject({
+      status: "failed",
+      last_error_text: expect.stringContaining("not allowed")
+    });
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });

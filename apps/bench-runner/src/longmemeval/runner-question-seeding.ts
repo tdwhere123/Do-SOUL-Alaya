@@ -117,7 +117,11 @@ async function seedQuestionRound(
   }
 ): Promise<{ readonly nextTurnSeedMemoryIds: readonly string[] }> {
   const round = pairSessionIntoRounds(input.question.haystack_sessions[context.sessionIndex]!)[context.roundIndex]!;
-  const evidenceRef = `${input.question.question_id}-s${context.sessionIndex}-r${context.roundIndex}`;
+  const evidenceRef = buildLongMemEvalRoundEvidenceRef(
+    input.question.question_id,
+    context.sessionIndex,
+    context.roundIndex
+  );
   const beforeDropReasons = {
     ...input.seedRunner.stats.signalsDroppedByReason
   };
@@ -184,7 +188,7 @@ function addSeedSidecarEntries(
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
   for (const [seedOrdinal, seed] of seedResult.seeds.entries()) {
-    state.sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
+    addSidecarEntry(state, {
       objectId: seed.memoryId,
       objectKind: "memory_entry",
       sessionId: context.sessionId,
@@ -250,14 +254,78 @@ async function seedSessionSynthesis(
   if (synthesisInput === null) return;
   const synthesisResult = await workspace.proposeSynthesis(synthesisInput);
   if (synthesisResult.synthesisId === null) return;
-  state.sidecar.set(
-    buildLongMemEvalSidecarKey("synthesis_capsule", synthesisResult.synthesisId),
-    {
-      objectId: synthesisResult.synthesisId,
-      objectKind: "synthesis_capsule",
-      sessionId: input.sessionId,
-      hasAnswer: input.sessionHasAnswer,
-      content: synthesisInput.summary
-    }
-  );
+  addSidecarEntry(state, {
+    objectId: synthesisResult.synthesisId,
+    objectKind: "synthesis_capsule",
+    sessionId: input.sessionId,
+    hasAnswer: input.sessionHasAnswer,
+    content: synthesisInput.summary
+  });
+}
+
+function addSidecarEntry(
+  state: LongMemEvalQuestionSeedState,
+  entry: LongMemEvalSidecarEntry
+): void {
+  const key = buildLongMemEvalSidecarKey(entry.objectKind, entry.objectId);
+  if (state.sidecar.has(key)) {
+    throw new Error(`duplicate LongMemEval sidecar object identity ${key}`);
+  }
+  state.sidecar.set(key, entry);
+}
+
+export interface LongMemEvalSeedRoundIdentity {
+  readonly sessionIndex: number;
+  readonly roundIndex: number;
+  readonly sessionId: string;
+  readonly hasAnswer: boolean;
+}
+
+export function buildLongMemEvalRoundEvidenceRef(
+  questionId: string,
+  sessionIndex: number,
+  roundIndex: number
+): string {
+  return `${questionId}-s${sessionIndex}-r${roundIndex}`;
+}
+
+export function resolveLongMemEvalSeedRoundIdentity(
+  value: unknown,
+  question: LongMemEvalQuestion
+): LongMemEvalSeedRoundIdentity {
+  const prefix = `${question.question_id}-s`;
+  if (typeof value !== "string" || !value.startsWith(prefix)) {
+    throw new Error("legacy sidecar evidence round identity mismatch");
+  }
+  const match = /^(\d+)-r(\d+)(?:-f\d+)?$/u.exec(value.slice(prefix.length));
+  const sessionIndex = Number(match?.[1]);
+  const roundIndex = Number(match?.[2]);
+  if (match === null || match[1] !== String(sessionIndex) ||
+      match[2] !== String(roundIndex)) {
+    throw new Error("legacy sidecar evidence round identity mismatch");
+  }
+  const sessionId = question.haystack_session_ids[sessionIndex];
+  const session = question.haystack_sessions[sessionIndex];
+  const round = session === undefined ? undefined : pairSessionIntoRounds(session)[roundIndex];
+  if (sessionId === undefined || round === undefined) {
+    throw new Error("legacy sidecar evidence round identity mismatch");
+  }
+  return { sessionIndex, roundIndex, sessionId, hasAnswer: round.hasAnswer };
+}
+
+export function resolveLongMemEvalSeedSessionIndex(
+  value: unknown,
+  question: LongMemEvalQuestion
+): number {
+  const prefix = `${question.question_id}-s`;
+  const ordinal = typeof value === "string" && value.startsWith(prefix)
+    ? value.slice(prefix.length)
+    : "";
+  const sessionIndex = Number(ordinal);
+  if (!/^\d+$/u.test(ordinal) || ordinal !== String(sessionIndex) ||
+      question.haystack_sessions[sessionIndex] === undefined ||
+      question.haystack_session_ids[sessionIndex] === undefined) {
+    throw new Error("legacy sidecar synthesis session identity mismatch");
+  }
+  return sessionIndex;
 }

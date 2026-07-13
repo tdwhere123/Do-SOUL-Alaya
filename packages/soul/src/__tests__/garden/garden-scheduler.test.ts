@@ -43,8 +43,12 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
 
 
   it("rejects tier violations, records health journal diagnostics, and removes the task", async () => {
+    const append = vi.fn(async (_event: unknown) => undefined);
     const eventLog = {
-      append: vi.fn(async () => undefined)
+      append,
+      appendManyAtomic: vi.fn(async (events: readonly unknown[]) => {
+        for (const event of events) await append(event);
+      })
     };
     const healthJournal = {
       record: vi.fn(async () => undefined)
@@ -65,6 +69,13 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
         entity_id: "task-tier-1"
       })
     );
+    expect(eventLog.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+        entity_id: "task-tier-1",
+        payload: expect.objectContaining({ success: false })
+      })
+    );
     expect(healthJournal.record).toHaveBeenCalledWith(
       expect.objectContaining({
         event_kind: "garden_backlog",
@@ -78,8 +89,12 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
   it("uses the injected warn port when tier violation health journal diagnostics fail", async () => {
     const warn = vi.fn();
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const append = vi.fn(async (_event: unknown) => undefined);
     const eventLog = {
-      append: vi.fn(async () => undefined)
+      append,
+      appendManyAtomic: vi.fn(async (events: readonly unknown[]) => {
+        for (const event of events) await append(event);
+      })
     };
     const healthJournal = {
       record: vi.fn(async () => {
@@ -116,8 +131,12 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
 
 
   it("rejects a higher-priority tier violation before dispatching a later valid task", async () => {
+    const append = vi.fn(async (_event: unknown) => undefined);
     const eventLog = {
-      append: vi.fn(async () => undefined)
+      append,
+      appendManyAtomic: vi.fn(async (events: readonly unknown[]) => {
+        for (const event of events) await append(event);
+      })
     };
     const repo = new InMemoryGardenTaskRepo(eventLog);
     const scheduler = new GardenScheduler(eventLog, {}, null, repo);
@@ -173,6 +192,19 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
     await expect(scheduler.dispatchNext(GardenRole.LIBRARIAN)).resolves.toMatchObject({
       task_id: "task-tier-2"
     });
+  });
+
+  it("rejects a task kind that is not allowed at its declared tier", () => {
+    const { scheduler } = createScheduler();
+
+    expect(() =>
+      scheduler.enqueue(
+        createTask({
+          task_kind: GardenTaskKind.MERGE_PROPOSAL,
+          required_tier: GardenTier.TIER_0
+        })
+      )
+    ).toThrow("merge_proposal is not allowed at tier_0");
   });
 
 
@@ -264,6 +296,54 @@ describe("GardenScheduler", () => {  it("dispatches a tier-0 task for janitor an
         GardenTaskKind.PATH_PLASTICITY_UPDATE
       ])
     ).resolves.toMatchObject({ task_id: "task-plasticity" });
+  });
+
+  it("quarantines a mismatched row role before the matching-dispatch tier shortcut", async () => {
+    const eventLog = { append: vi.fn(async () => undefined) };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(eventLog, { warn: vi.fn() }, null, repo);
+    const invalid = createTask({
+      task_id: "task-invalid-routing",
+      task_kind: GardenTaskKind.TTL_CLEANUP,
+      required_tier: GardenTier.TIER_1,
+      priority: 50
+    });
+    repo.enqueue({
+      id: invalid.task_id,
+      workspace_id: invalid.workspace_id,
+      role: GardenRole.JANITOR,
+      kind: invalid.task_kind,
+      payload: invalid,
+      created_at: invalid.created_at
+    });
+    scheduler.enqueue(
+      createTask({
+        task_id: "task-valid-routing",
+        task_kind: GardenTaskKind.TTL_CLEANUP,
+        required_tier: GardenTier.TIER_0,
+        priority: 40
+      })
+    );
+
+    await expect(
+      scheduler.dispatchNextMatchingTaskKind(GardenRole.JANITOR, [GardenTaskKind.TTL_CLEANUP])
+    ).resolves.toMatchObject({ task_id: "task-valid-routing" });
+    expect(repo.findById(invalid.task_id)).toMatchObject({
+      status: "failed",
+      last_error_text: expect.stringContaining("does not match required tier")
+    });
+    expect(eventLog.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: GardenEventType.SOUL_GARDEN_TASK_COMPLETED,
+        entity_id: invalid.task_id,
+        payload: expect.objectContaining({
+          task_kind: GardenTaskKind.TTL_CLEANUP,
+          role: GardenRole.JANITOR,
+          tier: GardenTier.TIER_0,
+          success: false
+        })
+      })
+    );
   });
 
 

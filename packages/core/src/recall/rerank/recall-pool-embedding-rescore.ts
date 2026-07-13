@@ -1,5 +1,3 @@
-import { resolveHydeQueryText } from "../query/query-hyde.js";
-import { recallEmbedPoolRescoreEnabled } from "../../config/recall-env-access.js";
 import type { CoarseStageResult } from "../runtime/recall-service-runner-coarse.js";
 import type { PreparedRecallRequest, RecallExecutionContext, RecallExecutionParams } from "../runtime/recall-service-runner-types.js";
 
@@ -11,7 +9,6 @@ export async function collectPoolEmbeddingRescore(
 ): Promise<Readonly<Record<string, number>>> {
   const service = context.dependencies.embeddingRecallService;
   if (
-    !recallEmbedPoolRescoreEnabled() ||
     prepared.queryText === null ||
     service === undefined ||
     typeof service.scorePoolCandidates !== "function" ||
@@ -26,7 +23,7 @@ export async function collectPoolEmbeddingRescore(
   const scores = await service.scorePoolCandidates({
     workspaceId: params.workspaceId,
     runId: params.runId ?? null,
-    queryText: resolveHydeQueryText(prepared.queryText)!,
+    queryText: prepared.queryText,
     objectIds
   });
   return Object.fromEntries(scores);

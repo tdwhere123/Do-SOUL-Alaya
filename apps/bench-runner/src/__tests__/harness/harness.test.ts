@@ -164,7 +164,7 @@ afterEach(async () => {
 
 describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
-  it("requires an operator embedding secret when env embedding mode is requested", async () => {
+  it("requires an operator embedding secret for explicit OpenAI embedding", async () => {
     const savedOpenAiKey = process.env.OPENAI_API_KEY;
     const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
     delete process.env.OPENAI_API_KEY;
@@ -175,7 +175,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         startBenchDaemon({
           workspaceId: "harness-embedding-missing-ws",
           runId: "harness-embedding-missing-run",
-          embeddingMode: "env"
+          embeddingMode: "env",
+          embeddingProviderKind: "openai"
         })
       ).rejects.toThrow(/--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF/);
     } finally {
@@ -197,7 +198,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         startBenchDaemon({
           workspaceId: "harness-embedding-blank-ws",
           runId: "harness-embedding-blank-run",
-          embeddingMode: "env"
+          embeddingMode: "env",
+          embeddingProviderKind: "openai"
         })
       ).rejects.toThrow(/--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF/);
     } finally {
@@ -219,7 +221,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         startBenchDaemon({
           workspaceId: "harness-embedding-ref-missing-key-ws",
           runId: "harness-embedding-ref-missing-key-run",
-          embeddingMode: "env"
+          embeddingMode: "env",
+          embeddingProviderKind: "openai"
         })
       ).rejects.toThrow(/--embedding env requires a resolvable ALAYA_OPENAI_SECRET_REF/);
     } finally {
@@ -241,7 +244,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         startBenchDaemon({
           workspaceId: "harness-embedding-custom-missing-ws",
           runId: "harness-embedding-custom-missing-run",
-          embeddingMode: "env"
+          embeddingMode: "env",
+          embeddingProviderKind: "openai"
         })
       ).rejects.toThrow(/missing environment variable ALAYA_MISSING_OPENAI_KEY/);
 
@@ -250,7 +254,8 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         startBenchDaemon({
           workspaceId: "harness-embedding-custom-blank-ws",
           runId: "harness-embedding-custom-blank-run",
-          embeddingMode: "env"
+          embeddingMode: "env",
+          embeddingProviderKind: "openai"
         })
       ).rejects.toThrow(/secret is empty/);
     } finally {
@@ -270,12 +275,37 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
         startBenchDaemon({
           workspaceId: "harness-embedding-file-missing-ws",
           runId: "harness-embedding-file-missing-run",
-          embeddingMode: "env"
+          embeddingMode: "env",
+          embeddingProviderKind: "openai"
         })
       ).rejects.toThrow(/referenced file is missing/);
     } finally {
       if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
       else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+    }
+  });
+
+  it("starts the default local provider without resolving an OpenAI secret", async () => {
+    const savedSecretRef = process.env.ALAYA_OPENAI_SECRET_REF;
+    const savedOpenAiKey = process.env.OPENAI_API_KEY;
+    let handle: BenchDaemonHandle | undefined;
+    process.env.ALAYA_OPENAI_SECRET_REF = "file:/tmp/alaya-bench-missing-openai-secret";
+    delete process.env.OPENAI_API_KEY;
+    try {
+      handle = await startBenchDaemon({
+        workspaceId: "harness-local-default-ws",
+        runId: "harness-local-default-run",
+        embeddingMode: "env"
+      });
+      expect(process.env.ALAYA_EMBEDDING_PROVIDER).toBe("local_onnx");
+      expect(process.env.ALAYA_OPENAI_SECRET_REF).toBeUndefined();
+      expect(process.env.OPENAI_API_KEY).toBeUndefined();
+    } finally {
+      await handle?.shutdown();
+      if (savedSecretRef === undefined) delete process.env.ALAYA_OPENAI_SECRET_REF;
+      else process.env.ALAYA_OPENAI_SECRET_REF = savedSecretRef;
+      if (savedOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = savedOpenAiKey;
     }
   });
 
@@ -349,6 +379,52 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
     );
     emitWarning.mockRestore();
   });
+
+  it(
+    "preserves cross-encoder configuration and restores managed env on shutdown",
+    async () => {
+      const keys = [
+        "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
+        "ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR",
+        "ALAYA_LOCAL_CROSS_ENCODER_MODEL"
+      ] as const;
+      const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+      process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK = "true";
+      process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR = "/tmp/cross-encoder-cache";
+      process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "Xenova/ms-marco-MiniLM-L-6-v2";
+      const configured = snapshotManagedEnv();
+
+      try {
+        await withBenchDaemon(
+          {
+            workspaceId: "harness-cross-encoder-env-ws",
+            runId: "harness-cross-encoder-env-run"
+          },
+          async () => {
+            expect(process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK).toBe("true");
+            expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR).toBe(
+              "/tmp/cross-encoder-cache"
+            );
+            expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL).toBe(
+              "Xenova/ms-marco-MiniLM-L-6-v2"
+            );
+            process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL = "mutated-by-runtime";
+          }
+        );
+        expect(process.env.ALAYA_LOCAL_CROSS_ENCODER_MODEL).toBe(
+          "Xenova/ms-marco-MiniLM-L-6-v2"
+        );
+        expect(snapshotManagedEnv()).toEqual(configured);
+      } finally {
+        for (const key of keys) {
+          const value = original[key];
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    },
+    60_000
+  );
 
   it(
     "uses configured reviewer credentials and restores managed env on shutdown",

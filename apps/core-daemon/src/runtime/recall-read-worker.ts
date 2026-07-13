@@ -66,6 +66,7 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "memory.findByScopeClass":
     case "memory.searchByKeyword":
     case "memory.searchByKeywordWithinObjectIds":
+    case "memory.searchManyByKeywordWithinObjectIds":
     case "memory.searchByAnchorWithinObjectIds":
     case "memory.findByEvidenceRefs":
     case "memory.findByIds":
@@ -93,6 +94,11 @@ async function runMemoryOperation(
   payload: Record<string, unknown>
 ) {
   switch (operation) {
+    case "memory.searchByKeyword":
+    case "memory.searchByKeywordWithinObjectIds":
+    case "memory.searchManyByKeywordWithinObjectIds":
+    case "memory.searchByAnchorWithinObjectIds":
+      return await runMemorySearchOperation(operation, payload);
     case "memory.findByWorkspaceId":
       return await findMemoryEntriesByWorkspaceId(
         readString(payload.workspaceId, "workspaceId"),
@@ -109,27 +115,6 @@ async function runMemoryOperation(
         readString(payload.workspaceId, "workspaceId"),
         ScopeClassSchema.parse(payload.scopeClass)
       );
-    case "memory.searchByKeyword":
-      return await memoryEntryRepo.searchByKeyword(
-        readString(payload.workspaceId, "workspaceId"),
-        readString(payload.queryText, "queryText"),
-        readNumber(payload.limit, "limit")
-      );
-    case "memory.searchByKeywordWithinObjectIds":
-      return await memoryEntryRepo.searchByKeywordWithinObjectIds(
-        readString(payload.workspaceId, "workspaceId"),
-        readString(payload.queryText, "queryText"),
-        readNumber(payload.limit, "limit"),
-        readStringArray(payload.objectIds, "objectIds")
-      );
-    case "memory.searchByAnchorWithinObjectIds":
-      return await memoryEntryRepo.searchByAnchorWithinObjectIds(
-        readString(payload.workspaceId, "workspaceId"),
-        readStringArray(payload.anchorTokens, "anchorTokens"),
-        readStringArray(payload.optionalTokens, "optionalTokens"),
-        readNumber(payload.limit, "limit"),
-        readStringArray(payload.objectIds, "objectIds")
-      );
     case "memory.findByEvidenceRefs":
       return await memoryEntryRepo.findByEvidenceRefs(
         readString(payload.workspaceId, "workspaceId"),
@@ -141,6 +126,58 @@ async function runMemoryOperation(
         readStringArray(payload.objectIds, "objectIds")
       );
   }
+}
+
+async function runMemorySearchOperation(
+  operation: Extract<RecallReadWorkerRequest["operation"], `memory.search${string}`>,
+  payload: Record<string, unknown>
+) {
+  if (operation === "memory.searchManyByKeywordWithinObjectIds") {
+    return await searchManyMemoryKeywordsWithinObjectIds(payload);
+  }
+  const workspaceId = readString(payload.workspaceId, "workspaceId");
+  const limit = readNumber(payload.limit, "limit");
+  if (operation === "memory.searchByKeyword") {
+    return await memoryEntryRepo.searchByKeyword(
+      workspaceId,
+      readString(payload.queryText, "queryText"),
+      limit
+    );
+  }
+  const objectIds = readStringArray(payload.objectIds, "objectIds");
+  if (operation === "memory.searchByKeywordWithinObjectIds") {
+    return await memoryEntryRepo.searchByKeywordWithinObjectIds(
+      workspaceId,
+      readString(payload.queryText, "queryText"),
+      limit,
+      objectIds
+    );
+  }
+  return await memoryEntryRepo.searchByAnchorWithinObjectIds(
+    workspaceId,
+    readStringArray(payload.anchorTokens, "anchorTokens"),
+    readStringArray(payload.optionalTokens, "optionalTokens"),
+    limit,
+    objectIds
+  );
+}
+
+async function searchManyMemoryKeywordsWithinObjectIds(
+  payload: Record<string, unknown>
+) {
+  const workspaceId = readString(payload.workspaceId, "workspaceId");
+  const objectIds = readStringArray(payload.objectIds, "objectIds");
+  const queries = readKeywordSearchBatchQueries(payload.queries);
+  const batches = [];
+  for (const query of queries) {
+    batches.push(await memoryEntryRepo.searchByKeywordWithinObjectIds(
+      workspaceId,
+      query.queryText,
+      query.limit,
+      objectIds
+    ));
+  }
+  return batches;
 }
 
 async function runEvidenceOperation(
@@ -369,6 +406,21 @@ function readStringArray(value: unknown, name: string): readonly string[] {
     throw new Error(`worker payload ${name} must be a string array`);
   }
   return value;
+}
+
+function readKeywordSearchBatchQueries(
+  value: unknown
+): readonly Readonly<{ readonly queryText: string; readonly limit: number }>[] {
+  if (!Array.isArray(value)) {
+    throw new Error("worker payload queries must be an array");
+  }
+  return value.map((item, index) => {
+    const query = asPayload(item);
+    return {
+      queryText: readString(query.queryText, `queries[${index}].queryText`),
+      limit: readNumber(query.limit, `queries[${index}].limit`)
+    };
+  });
 }
 
 function readPage(value: unknown): { readonly limit: number; readonly offset: number } {

@@ -1,4 +1,7 @@
-import type { LongMemEvalRunProvenance } from "../provenance/run.js";
+import {
+  isLongMemEvalRunProvenanceGateEligible,
+  type LongMemEvalRunProvenance
+} from "../provenance/run.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../extraction-cache-manifest.js";
 import type {
   LongMemEvalSnapshotManifest,
@@ -20,15 +23,12 @@ export function deriveSnapshotAttribution(input: {
   return {
     status: "attributed",
     gate_eligible:
-      provenance.code.gate_sha256 !== null &&
-      provenance.code.worktree_state_sha256 !== null &&
+      isLongMemEvalRunProvenanceGateEligible(provenance) &&
       hasGateEligibleExtractionCache(
         provenance,
         input.datasetSha256,
         input.extractionProvenance
-      ) &&
-      (provenance.runtime.embedding_provider_kind !== "local_onnx" ||
-        provenance.runtime.onnx_model_artifact_sha256 !== undefined)
+      )
   };
 }
 

@@ -257,4 +257,34 @@ describe("applyDeliverySelection", () => {
     expect(result.rankByCandidateKey.get("evidence:memory_entry:shared")).toBe(2);
   });
 
+  it("lets a complete query-conditioned score own order and final relevance", () => {
+    const fusedFirst = fusedCandidate({ objectId: "fused-first", fusedScore: 0.9 });
+    const answerFirst = fusedCandidate({ objectId: "answer-first", fusedScore: 0.4 });
+    const answerScores = new Map([
+      [fusedFirst.fusion.candidate_key, 0.2],
+      [answerFirst.fusion.candidate_key, 0.8]
+    ]);
+
+    const result = applyDeliverySelection([fusedFirst, answerFirst], answerScores);
+
+    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
+      .toEqual(["answer-first", "fused-first"]);
+    expect(result.finalRelevanceByCandidateKey.get(answerFirst.fusion.candidate_key)).toBe(0.8);
+    expect(result.answerRelevanceRankByCandidateKey.get(answerFirst.fusion.candidate_key)).toBe(1);
+  });
+
+  it("falls back byte-for-byte to fusion order when answer scores are absent", () => {
+    const candidates = [
+      fusedCandidate({ objectId: "second", fusedScore: 0.4 }),
+      fusedCandidate({ objectId: "first", fusedScore: 0.9 })
+    ];
+
+    const result = applyDeliverySelection(candidates, new Map());
+
+    expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
+      .toEqual(["first", "second"]);
+    expect(result.finalRelevanceByCandidateKey.get(candidates[1]!.fusion.candidate_key)).toBe(0.9);
+    expect(result.answerRelevanceRankByCandidateKey).toEqual(new Map());
+  });
+
 });

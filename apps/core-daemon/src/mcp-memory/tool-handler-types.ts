@@ -280,7 +280,7 @@ export interface McpMemoryToolHandlerDependencies {
       claimedBy: string,
       claimedAt: string,
       workspace_id?: string
-    ): "claimed" | "already-claimed";
+    ): Promise<"claimed" | "already-claimed">;
     completeWithEvents(
       taskId: string,
       result: GardenTaskCompletionResult,
@@ -295,7 +295,7 @@ export interface McpMemoryToolHandlerDependencies {
       completionEnvelopeJson?: string | null
     ): boolean;
     refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
-    releaseClaim(taskId: string, claimedBy: string): boolean;
+    releaseClaim(taskId: string, claimedBy: string): Promise<boolean>;
     // invariant: per-kind eventual-consistency diagnostic source. pending =
     // unclaimed; stale = claimed past the cutoff. Optional so a fake repo in a
     // test need not implement it; the EDGE_CLASSIFY completion only emits the

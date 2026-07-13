@@ -1,10 +1,15 @@
 export {
   parseCoreConfigFromEnv,
   resolveEmbeddingRecallTiersFromConfig,
+  resolvePathRelContentStrengthEnabledFromConfig,
   type CoreConfig,
   type EmbeddingRuntimeConfig,
   type PathGraphRuntimeConfig
 } from "./core-config.js";
+export {
+  isCoreConfigEnvironmentKey,
+  resolveCoreConfigEnvironmentKeys
+} from "./core-config-environment.js";
 export {
   getCoreConfig,
   installCoreConfig,
@@ -21,7 +26,6 @@ export {
   readRecallRatio,
   readRecallUnitFloat,
   recallAnswersWithEnabled,
-  recallEmbedPoolRescoreEnabled,
   recallEnvFlagEnabled,
   recallEnvRaw,
   recallIntentV2Enabled,

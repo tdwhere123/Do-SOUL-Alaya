@@ -27,16 +27,24 @@ import type { GardenTaskHandlerDependencies, GardenTaskToolCallContext } from ".
 
 const EDGE_CLASSIFY_STALE_AFTER_MS = 5 * 60 * 1000;
 
-export function createGardenTaskCompletionHandler(params: Readonly<{
+interface GardenTaskCompletionParams {
   readonly deps: GardenTaskHandlerDependencies;
   readonly now: () => string;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
   readonly generateId: () => string;
-}>): Readonly<{
+}
+
+type GardenTaskCompletionResult = Readonly<{
+  readonly task_id: string;
+  readonly status: string;
+  readonly events_appended: 1;
+}>;
+
+export function createGardenTaskCompletionHandler(params: GardenTaskCompletionParams): Readonly<{
   completeGardenTask(
     request: GardenCompleteTaskRequest,
     context: GardenTaskToolCallContext
-  ): Promise<{ readonly task_id: string; readonly status: string; readonly events_appended: 1 }>;
+  ): Promise<GardenTaskCompletionResult>;
 }> {
   return {
     completeGardenTask: async (request, context) => {
@@ -140,31 +148,19 @@ function validateTaskResultEnvelope(
 }
 
 async function completeCandidateSignalTask(
-  params: Readonly<{
-    readonly deps: GardenTaskHandlerDependencies;
-    readonly now: () => string;
-    readonly warn: (message: string, meta: Record<string, unknown>) => void;
-    readonly generateId: () => string;
-  }>,
+  params: GardenTaskCompletionParams,
   request: GardenCompleteTaskRequest,
   context: GardenTaskToolCallContext,
   row: GardenTaskRow,
   resolvedRunId: string | null
-): Promise<{ readonly task_id: string; readonly status: string; readonly events_appended: 1 }> {
+): Promise<GardenTaskCompletionResult> {
   const repo = params.deps.gardenTaskRepo!;
   const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
   const completionEnvelopeJson =
     contentOnlySignals.length === 0
       ? null
       : buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals);
-  if (
-    row.completion_envelope_json !== null &&
-    row.completion_envelope_json !== completionEnvelopeJson
-  ) {
-    throw new GardenTaskValidationError(
-      `Garden task ${row.id} candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope.`
-    );
-  }
+  assertCandidateSignalRetryCompatible(row, completionEnvelopeJson);
 
   const completionClaimedBy =
     contentOnlySignals.length === 0
@@ -193,11 +189,24 @@ async function completeCandidateSignalTask(
       completionClaimedBy
     );
   } catch (error) {
-    releaseCompletionClaim(repo, row.id, completionClaimedBy, error, params.warn);
+    await releaseCompletionClaim(repo, row.id, completionClaimedBy, error, params.warn);
     throw error;
   }
 
   return { task_id: row.id, status: request.status, events_appended: 1 };
+}
+
+function assertCandidateSignalRetryCompatible(
+  row: GardenTaskRow,
+  completionEnvelopeJson: string | null
+): void {
+  if (row.completion_envelope_json === null ||
+      row.completion_envelope_json === completionEnvelopeJson) {
+    return;
+  }
+  throw new GardenTaskValidationError(
+    `Garden task ${row.id} candidate_signals changed after a previous partial completion attempt; retry with the original candidate signal envelope.`
+  );
 }
 
 function beginCompletionAttemptIfNeeded(
@@ -225,11 +234,7 @@ function beginCompletionAttemptIfNeeded(
 }
 
 async function emitCandidateSignals(
-  params: Readonly<{
-    readonly deps: GardenTaskHandlerDependencies;
-    readonly now: () => string;
-    readonly warn: (message: string, meta: Record<string, unknown>) => void;
-  }>,
+  params: GardenTaskCompletionParams,
   contentOnlySignals: NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"],
   taskId: string,
   workspaceId: string,
@@ -252,14 +257,14 @@ async function emitCandidateSignals(
   return emittedSignalIds;
 }
 
-function releaseCompletionClaim(
+async function releaseCompletionClaim(
   repo: NonNullable<GardenTaskHandlerDependencies["gardenTaskRepo"]>,
   taskId: string,
   completionClaimedBy: string,
   error: unknown,
   warn: (message: string, meta: Record<string, unknown>) => void
-): void {
-  const released = repo.releaseClaim(taskId, completionClaimedBy);
+): Promise<void> {
+  const released = await repo.releaseClaim(taskId, completionClaimedBy);
   if (!released) {
     warn("Garden task completion claim could not be released after partial failure.", {
       task_id: taskId,
@@ -270,17 +275,13 @@ function releaseCompletionClaim(
 }
 
 async function completeEdgeClassifyTask(
-  params: Readonly<{
-    readonly deps: GardenTaskHandlerDependencies;
-    readonly now: () => string;
-    readonly warn: (message: string, meta: Record<string, unknown>) => void;
-  }>,
+  params: GardenTaskCompletionParams,
   request: GardenCompleteTaskRequest,
   context: GardenTaskToolCallContext,
   row: GardenTaskRow,
   resolvedRunId: string | null,
   verdict: EdgeClassifyVerdict | undefined
-): Promise<{ readonly task_id: string; readonly status: string; readonly events_appended: 1 }> {
+): Promise<GardenTaskCompletionResult> {
   const objectsAffected = await applyEdgeClassifyVerdict(
     params.deps,
     request,

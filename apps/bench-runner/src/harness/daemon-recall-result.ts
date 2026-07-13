@@ -15,31 +15,6 @@ export function buildBenchDiagnosticRecallPolicy(
   conflictAwareness = true
 ): RecallPolicy {
   const maxResults = Math.max(maxResultsInput, 1);
-  // Diagnostic-only delivery token budget. Default 2000 = production口径; a wide
-  // override lets a probe deliver the full ranked pool so gold-rank can tell
-  // in-pool-ranked-low from absent-from-pool. No fusion-weight change.
-  const maxTotalTokens = Math.max(
-    2000,
-    Math.floor(Number(process.env.ALAYA_BENCH_RECALL_MAX_TOKENS ?? "2000")) || 2000
-  );
-  // Embedding semantic-injection sweep knobs (embedding-on only). Unset => recall
-  // service defaults.
-  const rawInjectionCap = Number(
-    process.env.ALAYA_BENCH_EMBEDDING_INJECTION_CAP ?? ""
-  );
-  const embeddingInjectionCap =
-    Number.isInteger(rawInjectionCap) && rawInjectionCap >= 0
-      ? rawInjectionCap
-      : null;
-  const rawInjectionFloor = Number(
-    process.env.ALAYA_BENCH_EMBEDDING_INJECTION_FLOOR ?? ""
-  );
-  const embeddingInjectionFloor =
-    Number.isFinite(rawInjectionFloor) &&
-    rawInjectionFloor >= 0 &&
-    rawInjectionFloor <= 1
-      ? rawInjectionFloor
-      : null;
   return buildRecallPolicyCore({
     runtimeId: randomUUID(),
     taskSurfaceId,
@@ -50,10 +25,8 @@ export function buildBenchDiagnosticRecallPolicy(
       domainTagFilter: null
     },
     conflictAwareness,
-    maxTotalTokens,
-    coarseFloor: Number(process.env.ALAYA_RECALL_COARSE_FLOOR) || 0,
-    embeddingInjectionCap,
-    embeddingInjectionSimilarityFloor: embeddingInjectionFloor
+    maxTotalTokens: 2_000,
+    coarseFloor: 0
   });
 }
 

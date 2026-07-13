@@ -13,6 +13,7 @@ import {
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
+import { snapshotQuestionIdDigest } from "./snapshot.js";
 
 /**
  * @anchor recall-eval-archive-marker — the parse-surviving discriminator that
@@ -103,27 +104,101 @@ export async function selectFullRunBaseline(
 export async function selectRecallEvalBaseline(
   layout: HistoryLayout,
   benchName: BenchName,
-  opts: {
-    readonly split: BenchSplit;
-    readonly policyShape: BenchPolicyShape;
-    readonly simulateReport: BenchSimulateReportMode;
-    readonly embeddingProvider: string;
-  }
+  current: KpiPayload
 ): Promise<KpiPayload | null> {
   const slugs = await listEntries(layout, benchName);
-  for (let i = slugs.length - 1; i >= 0; i--) {
-    const slug = slugs[i];
-    if (slug === undefined) continue;
+  const matches: Array<{ readonly slug: string; readonly payload: KpiPayload }> = [];
+  for (const slug of slugs) {
     const entry = await readEntryForDiff(layout, benchName, slug);
     if (entry === null) continue;
     if (!isRecallEvalArchive(entry)) continue;
-    if (entry.split !== opts.split) continue;
-    if ((entry.policy_shape ?? "stress") !== opts.policyShape) continue;
-    if ((entry.simulate_report ?? "none") !== opts.simulateReport) continue;
-    if (entry.embedding_provider !== opts.embeddingProvider) continue;
-    return entry;
+    if (!sameRecallEvalBaselineIdentity(entry, current)) continue;
+    matches.push({ slug, payload: entry });
   }
-  return null;
+  return matches.reduce<typeof matches[number] | null>(latestArchive, null)?.payload ?? null;
+}
+
+function sameRecallEvalBaselineIdentity(left: KpiPayload, right: KpiPayload): boolean {
+  const leftAttribution = left.recall_eval_attribution;
+  const rightAttribution = right.recall_eval_attribution;
+  const leftDigest = evaluatedQuestionDigest(left);
+  const rightDigest = evaluatedQuestionDigest(right);
+  return leftAttribution !== undefined && rightAttribution !== undefined &&
+    leftAttribution.recall_config !== undefined &&
+    rightAttribution.recall_config !== undefined &&
+    leftDigest !== null && leftDigest === rightDigest &&
+    sliceIdentityMatches(left, leftAttribution, leftDigest) &&
+    sliceIdentityMatches(right, rightAttribution, rightDigest) &&
+    JSON.stringify(leftAttribution.evaluation_slice) ===
+      JSON.stringify(rightAttribution.evaluation_slice) &&
+    left.split === right.split &&
+    (left.policy_shape ?? "stress") === (right.policy_shape ?? "stress") &&
+    (left.simulate_report ?? "none") === (right.simulate_report ?? "none") &&
+    left.embedding_provider === right.embedding_provider &&
+    left.dataset.checksum_sha256 === right.dataset.checksum_sha256 &&
+    left.dataset.name === right.dataset.name && left.dataset.size === right.dataset.size &&
+    left.sample_size === right.sample_size && left.evaluated_count === right.evaluated_count &&
+    treatmentIdentityKey(leftAttribution) === treatmentIdentityKey(rightAttribution) &&
+    snapshotBindingKey(leftAttribution.snapshot_binding) ===
+      snapshotBindingKey(rightAttribution.snapshot_binding) &&
+    JSON.stringify(leftAttribution.hydration_binding) ===
+      JSON.stringify(rightAttribution.hydration_binding) &&
+    JSON.stringify(left.recall_weight_overrides) === JSON.stringify(right.recall_weight_overrides);
+}
+
+function sliceIdentityMatches(
+  payload: KpiPayload,
+  attribution: NonNullable<KpiPayload["recall_eval_attribution"]>,
+  digest: string
+): boolean {
+  const slice = attribution.evaluation_slice;
+  return slice !== undefined && slice.evaluated_count === payload.evaluated_count &&
+    slice.question_id_digest === digest;
+}
+
+function evaluatedQuestionDigest(payload: KpiPayload): string | null {
+  const rows = payload.kpi.per_scenario;
+  if (rows.length !== payload.evaluated_count) return null;
+  return snapshotQuestionIdDigest(rows.map((row) => ({ questionId: row.id })));
+}
+
+function treatmentIdentityKey(
+  attribution: NonNullable<KpiPayload["recall_eval_attribution"]>
+): string {
+  return JSON.stringify([
+    attribution.embedding_mode,
+    attribution.embedding_provider_kind,
+    attribution.embedding_provider_label,
+    attribution.onnx_threads,
+    attribution.onnx_model_artifact_sha256,
+    attribution.embedding_supplement ?? null,
+    attribution.answer_rerank ?? null,
+    attribution.recall_config ?? null
+  ]);
+}
+
+function snapshotBindingKey(
+  binding: NonNullable<KpiPayload["recall_eval_attribution"]>["snapshot_binding"]
+): string {
+  return JSON.stringify([
+    binding.commit_sha7, binding.gate_sha256, binding.worktree_state_sha256,
+    binding.extraction_cache_manifest_sha256,
+    binding.extraction_cache_requested_turns, binding.extraction_cache_cached_turns,
+    binding.extraction_cache_coverage, binding.dataset_sha256,
+    binding.question_id_digest, binding.snapshot_manifest_sha256 ?? null,
+    binding.producer_recall_pipeline_version ?? null,
+    binding.producer_schema_migration_version ?? null
+  ]);
+}
+
+function latestArchive<T extends { readonly slug: string; readonly payload: KpiPayload }>(
+  latest: T | null,
+  candidate: T
+): T {
+  if (latest === null) return candidate;
+  const byRunAt = candidate.payload.run_at.localeCompare(latest.payload.run_at);
+  if (byRunAt !== 0) return byRunAt > 0 ? candidate : latest;
+  return candidate.slug.localeCompare(latest.slug) > 0 ? candidate : latest;
 }
 
 async function entryIsPassingFullRun(

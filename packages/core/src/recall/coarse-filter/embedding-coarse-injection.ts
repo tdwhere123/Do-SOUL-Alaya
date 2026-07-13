@@ -2,7 +2,6 @@ import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { EmbeddingWorkspaceNeighborResult } from "../../embedding-recall/embedding-recall-service.js";
 import { hashMemoryContent } from "../../embedding-recall/helpers.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
-import { resolveHydeQueryText } from "../query/query-hyde.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import type {
   CoarseRecallCandidate,
@@ -55,6 +54,7 @@ export async function collectEmbeddingCoarseInjection(
 }
 
 function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams): Readonly<{
+  readonly queryText: string;
   readonly maxSupplement: number;
   readonly injectionCap: number;
   readonly poolObjectIds: readonly string[];
@@ -75,6 +75,7 @@ function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams
     return null;
   }
   return Object.freeze({
+    queryText: params.queryText,
     maxSupplement,
     injectionCap,
     poolObjectIds: params.poolCandidates.map((candidate) => candidate.entry.object_id)
@@ -83,11 +84,16 @@ function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams
 
 async function collectEmbeddingNeighbors(
   params: EmbeddingCoarseInjectionParams,
-  request: Readonly<{ readonly maxSupplement: number; readonly injectionCap: number; readonly poolObjectIds: readonly string[] }>
+  request: Readonly<{
+    readonly queryText: string;
+    readonly maxSupplement: number;
+    readonly injectionCap: number;
+    readonly poolObjectIds: readonly string[];
+  }>
 ): Promise<Readonly<EmbeddingWorkspaceNeighborResult>> {
   const embeddingRecallService = params.dependencies.embeddingRecallService!;
   const maxNeighbors = Math.max(request.maxSupplement, request.injectionCap);
-  const embedQueryText = resolveHydeQueryText(params.queryText)!;
+  const embedQueryText = request.queryText;
   if (typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata === "function") {
     return embeddingRecallService.collectWorkspaceNeighborsWithMetadata({
       workspaceId: params.workspaceId,

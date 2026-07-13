@@ -1,5 +1,6 @@
 import { StorageTier } from "@do-soul/alaya-protocol";
 import { parseRecallRuntimeConfigFromEnv, type RecallRuntimeConfig } from "./recall-runtime-config.js";
+import { CORE_CONFIG_ENV_KEYS } from "./core-config-environment.js";
 
 export interface EmbeddingRuntimeConfig {
   readonly backfillConcurrency: number | undefined;
@@ -36,17 +37,25 @@ function readOptionalPositiveInt(raw: string | undefined): number | undefined {
 export function parseCoreConfigFromEnv(
   env: Readonly<Record<string, string | undefined>>
 ): CoreConfig {
+  const embeddingKeys = CORE_CONFIG_ENV_KEYS.embedding;
   return Object.freeze({
     recall: parseRecallRuntimeConfigFromEnv(env),
     embedding: Object.freeze({
-      backfillConcurrency: readOptionalPositiveInt(env.ALAYA_EMBEDDING_BACKFILL_CONCURRENCY),
-      recallTiersRaw: env.ALAYA_EMBEDDING_RECALL_TIERS,
-      workspaceScanCap: readOptionalPositiveInt(env.ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP)
+      backfillConcurrency: readOptionalPositiveInt(env[embeddingKeys.backfillConcurrency]),
+      recallTiersRaw: env[embeddingKeys.recallTiers],
+      workspaceScanCap: readOptionalPositiveInt(env[embeddingKeys.workspaceScanCap])
     }),
     pathGraph: Object.freeze({
-      pathrelContentStrength: env.ALAYA_PATHREL_CONTENT_STRENGTH
+      pathrelContentStrength: env[CORE_CONFIG_ENV_KEYS.pathGraph.contentStrength]
     })
   });
+}
+
+export function resolvePathRelContentStrengthEnabledFromConfig(
+  config: PathGraphRuntimeConfig
+): boolean {
+  const raw = config.pathrelContentStrength;
+  return raw === "on" || raw === "1" || raw === "true";
 }
 
 export function resolveEmbeddingRecallTiersFromConfig(

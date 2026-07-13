@@ -33,20 +33,24 @@ describe("Garden MCP tools", () => {
           10 * 60 * 1000
         );
         expect(abandoned).toEqual([]);
-        expect(
+        await expect(
           context.gardenTaskRepo.claimAtomic(
             "task-lease-race",
             "claude-code",
             "2026-05-07T00:20:01.000Z"
           )
-        ).toBe("already-claimed");
+        ).resolves.toBe("already-claimed");
         return await context.signalService.receiveSignal(signal);
       }
     });
     harness.enqueueTask("task-lease-race");
-    expect(
-      harness.gardenTaskRepo.claimAtomic("task-lease-race", "garden-worker", "2026-05-07T00:00:00.000Z")
-    ).toBe("claimed");
+    await expect(
+      harness.gardenTaskRepo.claimAtomic(
+        "task-lease-race",
+        "garden-worker",
+        "2026-05-07T00:00:00.000Z"
+      )
+    ).resolves.toBe("claimed");
 
     await expect(
       harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {

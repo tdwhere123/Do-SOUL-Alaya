@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import {
   RuntimeGardenProviderKindSchema,
   formatFileSecretRef,
@@ -90,9 +91,6 @@ async function ensureSchemaReady(dbPath: string): Promise<void> {
   initDatabase({ filename: dbPath });
 }
 
-// Default on-device model id, mirrored from packages/core LocalOnnxEmbeddingClient.
-const DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
-
 type EmbeddingProviderKind = "openai" | "local_onnx";
 
 interface ExistingInstallConfig {
@@ -138,7 +136,10 @@ async function readExistingInstallConfig(paths: AlayaConfigPaths): Promise<Exist
 
 function readEmbeddingProviderEnv(env: string): EmbeddingProviderKind | null {
   const raw = readEnvValue(env, "ALAYA_EMBEDDING_PROVIDER");
-  return raw === "local_onnx" || raw === "openai" ? raw : null;
+  if (raw === null) return null;
+  const normalized = raw.toLowerCase();
+  if (normalized === "local_onnx" || normalized === "openai") return normalized;
+  throw new Error("ALAYA_EMBEDDING_PROVIDER must be openai or local_onnx when set.");
 }
 
 function resolveInstallAnswers(
@@ -146,18 +147,11 @@ function resolveInstallAnswers(
   existing: ExistingInstallConfig,
   paths: AlayaConfigPaths
 ): ResolvedInstallConfig {
-  // Provider resolution + migration guard: an explicit answer wins; otherwise
-  // any OpenAI signal (api key source, persisted secret, or persisted openai
-  // provider) keeps openai, and a fresh install with no such signal defaults to
-  // the no-key on-device local_onnx path.
   const embeddingProvider: EmbeddingProviderKind =
     answers.embedding_provider ??
-    (answers.api_key_source !== undefined ||
-    existing.secret_ref !== null ||
-    existing.embedding_provider === "openai"
-      ? "openai"
-      : "local_onnx");
+    (answers.api_key_source !== undefined ? "openai" : existing.embedding_provider ?? "local_onnx");
   const usesOpenAi = embeddingProvider === "openai";
+  const providerUnchanged = existing.embedding_provider === embeddingProvider;
   const embeddingEnabled =
     answers.embedding_enabled ?? existing.embedding_enabled ?? embeddingProvider === "local_onnx";
   const keySource = answers.api_key_source ?? (existing.secret_ref === null ? "env" : undefined);
@@ -173,14 +167,18 @@ function resolveInstallAnswers(
       ? resolveInstallSecretRef(answers, existing, pastedSecret)
       : existing.secret_ref
     : null;
-  const defaultModelId = usesOpenAi ? "text-embedding-3-small" : DEFAULT_LOCAL_ONNX_EMBEDDING_MODEL;
+  const defaultModelId = usesOpenAi ? "text-embedding-3-small" : DEFAULT_LOCAL_ONNX_MODEL_ID;
+  const carriedModelId = providerUnchanged ? existing.model_id : null;
+  const carriedBaseUrl = providerUnchanged ? existing.provider_base_url : null;
 
   return {
     db_path: path.resolve(answers.db_path ?? existing.db_path ?? path.join(paths.configDir, "alaya.db")),
     embedding_enabled: embeddingEnabled,
     embedding_provider: embeddingProvider,
-    provider_base_url: usesOpenAi ? normalizeNullableString(answers.provider_base_url, existing.provider_base_url) : null,
-    model_id: requireNonEmpty(answers.model_id ?? existing.model_id ?? defaultModelId, "model_id"),
+    provider_base_url: usesOpenAi
+      ? normalizeNullableString(answers.provider_base_url, carriedBaseUrl)
+      : null,
+    model_id: requireNonEmpty(answers.model_id ?? carriedModelId ?? defaultModelId, "model_id"),
     default_workspace: requireNonEmpty(
       answers.default_workspace ?? existing.default_workspace ?? "default",
       "default_workspace"
@@ -244,9 +242,11 @@ function renderAlayaToml(config: ResolvedInstallConfig): string {
 }
 
 function renderEnvFile(config: ResolvedInstallConfig): string {
-  const lines = [`ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=${config.embedding_enabled ? "true" : "false"}`];
+  const lines = [
+    `ALAYA_ENABLE_EMBEDDING_SUPPLEMENT=${config.embedding_enabled ? "true" : "false"}`,
+    `ALAYA_EMBEDDING_PROVIDER=${config.embedding_provider}`
+  ];
   if (config.embedding_provider === "local_onnx") {
-    lines.push("ALAYA_EMBEDDING_PROVIDER=local_onnx");
     lines.push(`ALAYA_LOCAL_EMBEDDING_MODEL=${config.model_id}`);
   } else {
     if (config.secret_ref !== null) {

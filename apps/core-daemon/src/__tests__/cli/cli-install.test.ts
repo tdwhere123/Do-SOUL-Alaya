@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, symlink } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -145,6 +145,7 @@ describe("cli install", () => {
     expect(toml).toContain('default_workspace = "work"');
     expect(toml).toContain('provider_base_url = "https://embedding.example.test/v1"');
     expect(toml).toContain('model_id = "text-embedding-3-large"');
+    expect(env).toContain("ALAYA_EMBEDDING_PROVIDER=openai");
     expect(env).toContain("ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY");
     expect(env).toContain("OPENAI_EMBEDDING_PROVIDER_URL=https://embedding.example.test/v1");
     expect(env).toContain("OPENAI_EMBEDDING_MODEL=text-embedding-3-large");
@@ -160,6 +161,110 @@ describe("cli install", () => {
         path.join(configDir, ".env")
       ])
     );
+  });
+
+  it("migrates legacy OpenAI-shaped config to explicit local defaults", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-legacy-"));
+    const dbPath = path.join(configDir, "legacy.db");
+    await writeFile(path.join(configDir, "alaya.toml"), [
+      "[storage]",
+      `db_path = ${JSON.stringify(dbPath)}`,
+      "",
+      "[runtime]",
+      'default_workspace = "default"',
+      "worktree_enabled = false",
+      "",
+      "[embedding]",
+      "enabled = true",
+      'model_id = "text-embedding-3-small"',
+      'provider_base_url = "https://legacy-embedding.example.test/v1"',
+      ""
+    ].join("\n"), "utf8");
+    await writeFile(
+      path.join(configDir, ".env"),
+      "ALAYA_OPENAI_SECRET_REF=env:OPENAI_API_KEY\nOPENAI_EMBEDDING_MODEL=text-embedding-3-small\n",
+      "utf8"
+    );
+    const command = createInstallCommand({
+      configDirResolver: () => configDir,
+      clock: createClock()
+    });
+
+    const result = await command.handler(createContext(), {
+      nonInteractive: true,
+      answers: {},
+      force: false,
+      keychain: false
+    });
+
+    expect(result.exitCode).toBe(0);
+    const env = await readFile(path.join(configDir, ".env"), "utf8");
+    const toml = await readFile(path.join(configDir, "alaya.toml"), "utf8");
+    expect(env).toContain("ALAYA_EMBEDDING_PROVIDER=local_onnx");
+    expect(env).toContain(
+      "ALAYA_LOCAL_EMBEDDING_MODEL=Xenova/paraphrase-multilingual-MiniLM-L12-v2"
+    );
+    expect(env).not.toContain("ALAYA_OPENAI_SECRET_REF");
+    expect(env).not.toContain("OPENAI_EMBEDDING_PROVIDER_URL");
+    expect(toml).toContain(
+      'model_id = "Xenova/paraphrase-multilingual-MiniLM-L12-v2"'
+    );
+    expect(toml).not.toContain("provider_base_url");
+  });
+
+  it("normalizes a valid persisted embedding provider", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-provider-normalize-"));
+    const dbPath = path.join(configDir, "alaya.db");
+    await writeFile(
+      path.join(configDir, "alaya.toml"),
+      `[storage]\ndb_path = ${JSON.stringify(dbPath)}\n\n[embedding]\nenabled = false\nmodel_id = "text-embedding-3-large"\n`,
+      "utf8"
+    );
+    await writeFile(path.join(configDir, ".env"), "ALAYA_EMBEDDING_PROVIDER= OpenAI \n", "utf8");
+    const command = createInstallCommand({
+      configDirResolver: () => configDir,
+      clock: createClock()
+    });
+
+    const result = await command.handler(createContext(), {
+      nonInteractive: true,
+      answers: {},
+      force: false,
+      keychain: false
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(path.join(configDir, ".env"), "utf8")).toContain(
+      "ALAYA_EMBEDDING_PROVIDER=openai"
+    );
+  });
+
+  it("rejects an invalid persisted embedding provider", async () => {
+    const configDir = await mkdtemp(path.join(tmpdir(), "alaya-install-provider-invalid-"));
+    const envBefore = "ALAYA_EMBEDDING_PROVIDER=open_ai\n";
+    await writeFile(path.join(configDir, ".env"), envBefore, "utf8");
+    const command = createInstallCommand({
+      configDirResolver: () => configDir,
+      clock: createClock()
+    });
+
+    const result = await command.handler(createContext(), {
+      nonInteractive: true,
+      answers: {},
+      force: false,
+      keychain: false
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(await readFile(path.join(configDir, ".env"), "utf8")).toBe(envBefore);
+    const auditFiles = await readdir(path.join(configDir, "audit"));
+    const audit = JSON.parse(
+      await readFile(path.join(configDir, "audit", auditFiles[0]!), "utf8")
+    ) as { readonly status: string; readonly error: string };
+    expect(audit).toMatchObject({
+      status: "failed",
+      error: expect.stringMatching(/ALAYA_EMBEDDING_PROVIDER/)
+    });
   });
 
   it("re-run with accepted defaults leaves config files unchanged and writes only a fresh audit row", async () => {

@@ -130,18 +130,13 @@ describe("legacy recall substrate", () => {
     })).toThrow(/prompt/iu);
   });
 
-  it("rejects unknown sessions, impossible answer markers, and question order drift", () => {
+  it("rejects unknown sessions and question order drift", () => {
     expect(() => hydrateLegacySnapshotSidecar({
       ...sidecar,
       questions: [{ ...sidecar.questions[0]!, sidecar: [{
         ...sidecar.questions[0]!.sidecar[0]!, sessionId: "unknown"
       }] }]
     }, [question])).toThrow(/absent from dataset/iu);
-    const withoutMarker = {
-      ...question,
-      haystack_sessions: [[{ role: "user", content: "I chose tea." }]]
-    } satisfies LongMemEvalQuestion;
-    expect(() => hydrateLegacySnapshotSidecar(sidecar, [withoutMarker])).toThrow(/answer marker/iu);
     expect(() => hydrateLegacySnapshotSidecar(sidecar, [{
       ...question, question_id: "question-2"
     }], legacyManifest())).toThrow(/question order/iu);

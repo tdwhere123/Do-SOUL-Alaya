@@ -2,6 +2,7 @@ import {
   startBenchDaemon,
   type BenchTokenMetrics
 } from "../harness/daemon.js";
+import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.js";
 import { aggregateBenchTokenMetrics } from "../harness/token-economy.js";
 import { resolveBenchRunnerVersion } from "../shared/version.js";
 import type { LongMemEvalQuestion } from "./dataset.js";
@@ -58,7 +59,9 @@ export async function prepareCrossQuestionRun(
     commitInfo,
     commitSha7: commitInfo.sha7,
     runAt: new Date(),
-    embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(embeddingMode),
+    embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
+      embeddingMode, process.env, opts.embeddingProviderKind
+    ),
     seedRunner: createCrossQuestionSeedRunner(opts)
   };
 }
@@ -69,7 +72,9 @@ export async function executeCrossQuestionRun(
   const daemon = await startBenchDaemon({
     workspaceId: `lme-cq-shared-${context.commitSha7}`,
     runId: `run-cq-${context.commitSha7}-${context.runAt.getTime()}`,
-    embeddingMode: context.opts.embeddingMode ?? "disabled"
+    embeddingMode: context.opts.embeddingMode ?? "disabled",
+    embeddingProviderKind: context.opts.embeddingProviderKind ??
+      DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND
   });
   const sidecar = new Map<string, SidecarEntry>();
   const collected: QuestionResult[] = [];

@@ -23,6 +23,7 @@ export interface BuildRecallCandidateInput {
   readonly candidate: Readonly<CoarseRecallCandidate>;
   readonly relevanceScore: number;
   readonly scoreFactors: Readonly<RecallScoreFactors>;
+  readonly finalRelevanceSource: RecallFinalRelevanceSource;
   readonly tokenEstimator: TokenEstimator;
   readonly tokenEstimate?: number;
   readonly budgets: Readonly<FineAssessmentConfig["budgets"]>;
@@ -32,6 +33,8 @@ export interface BuildRecallCandidateInput {
   // invariant: governance ceiling on manifestation from inbound recall-eligible PathRelations; clamp only lowers the tier, never elevates; absent = full_eligible. see also: path-manifestation-policy.ts memoryGovernanceCeiling.
   readonly governanceCeiling?: ManifestationState;
 }
+
+export type RecallFinalRelevanceSource = "fusion" | "answer_rerank";
 
 export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly<RecallCandidate> {
   const entry = input.candidate.entry;
@@ -54,7 +57,12 @@ export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly
     manifestation,
     dimension: entry.dimension,
     scope_class: entry.scope_class,
-    selection_reason: buildSelectionReason(input.scoreFactors, input.candidate.originPlane),
+    selection_reason: buildSelectionReason(
+      input.scoreFactors,
+      input.candidate.originPlane,
+      input.relevanceScore,
+      input.finalRelevanceSource
+    ),
     source_channels: buildSourceChannels(input.candidate, input.scoreFactors, input.extraSourceChannel),
     score_factors: input.scoreFactors,
     budget_state: buildRecallBudgetState({
@@ -204,7 +212,9 @@ export function buildRecallBudgetState(params: Readonly<{
 
 function buildSelectionReason(
   factors: Readonly<RecallScoreFactors>,
-  originPlane: CoarseRecallCandidate["originPlane"]
+  originPlane: CoarseRecallCandidate["originPlane"],
+  finalRelevance: number,
+  source: RecallFinalRelevanceSource
 ): string {
   const origin = originPlane === "global" ? "global recall" : "workspace recall";
   const supports: string[] = [`activation ${factors.activation.toFixed(3)}`];
@@ -221,7 +231,10 @@ function buildSelectionReason(
     supports.push(`budget penalty ${factors.budget_penalty?.toFixed(3)}`);
   }
 
-  return `Selected by ${origin}. Final fusion evidence score ${factors.relevance.toFixed(6)}; ` +
+  const relevanceOwner = source === "answer_rerank"
+    ? "query-conditioned answer relevance"
+    : "fusion evidence";
+  return `Selected by ${origin}. Final ${relevanceOwner} score ${finalRelevance.toFixed(6)}; ` +
     `diagnostic supporting signals: ${supports.join(", ")}.`;
 }
 

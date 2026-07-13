@@ -1,6 +1,5 @@
 import type { EmbeddingProviderPort } from "./embedding-recall-service.js";
 import { withLocalOnnxHostSingleFlight } from "./local-onnx-host-single-flight.js";
-import { withTimeout } from "./local-onnx-embedding-timeout.js";
 import os from "node:os";
 import path from "node:path";
 
@@ -49,11 +48,13 @@ export interface LocalOnnxEmbeddingClientOptions {
    */
   readonly cacheDir?: string | null;
   /**
-   * Test seam: replaces the dynamic `@huggingface/transformers` import. The
+   * Test seam: replaces the lazy `@huggingface/transformers` import. The
    * default loader pins `allowRemoteModels = false` so production runs are
    * offline once the model weights are pre-fetched.
    */
   readonly pipelineLoader?: LocalOnnxPipelineLoader;
+  /** Test seam for the default offline adapter. */
+  readonly transformersImporter?: LocalOnnxEmbeddingTransformersImporter;
   /**
    * Override for the dynamic clock (test seam). Real wall-clock by default.
    */
@@ -62,7 +63,7 @@ export interface LocalOnnxEmbeddingClientOptions {
   readonly schemaVersion?: number;
 }
 
-const DEFAULT_LOCAL_ONNX_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+export const DEFAULT_LOCAL_ONNX_MODEL_ID = "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
 export const LOCAL_ONNX_EMBEDDING_DIMENSIONS = 384;
 // Consecutive load failures before the provider declares itself unavailable.
 // A small window so a single transient cold-cache fault does not flip the
@@ -119,7 +120,9 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     this.cacheDir = options.cacheDir === undefined
       ? defaultLocalOnnxCacheDir()
       : options.cacheDir;
-    this.pipelineLoader = options.pipelineLoader ?? defaultLocalOnnxPipelineLoader;
+    const importer = options.transformersImporter ?? importTransformers;
+    this.pipelineLoader = options.pipelineLoader ?? ((modelId, cacheDir, loaderOptions) =>
+      defaultLocalOnnxPipelineLoader(modelId, cacheDir, loaderOptions, importer));
     this.now = options.now ?? (() => Date.now());
   }
 
@@ -143,38 +146,58 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
     if (texts.length === 0) {
       return Object.freeze([]);
     }
+    const deadline = createEmbeddingDeadline(options.timeoutMs, options.signal);
+    const occupancy = withLocalOnnxHostSingleFlight(
+      () => this.embedUnderLease(texts, deadline.signal),
+      {
+        signal: deadline.signal,
+        timeoutMs: options.timeoutMs > 0 ? options.timeoutMs : undefined
+      }
+    );
+    try {
+      return await waitForEmbeddingCaller(occupancy, deadline.signal);
+    } finally {
+      deadline.close();
+    }
+  }
 
-    // Host single-flight (env-gated) serializes ONNX inference across shard
-    // processes so parallel LongMemEval gates do not oversubscribe CPUs.
-    return withLocalOnnxHostSingleFlight(async () => {
-      const extractor = await this.loadExtractor();
-      const run = extractor([...texts], { pooling: "mean", normalize: true });
-      const output = await withTimeout(run, options.timeoutMs, options.signal);
-      const rows = output.tolist();
-      if (rows.length !== texts.length) {
+  private async embedUnderLease(
+    texts: readonly string[],
+    signal: AbortSignal
+  ): Promise<readonly Float32Array[]> {
+    const extractor = await this.loadExtractor();
+    throwIfEmbeddingCancelled(signal);
+    const output = await Promise.resolve().then(() =>
+      extractor([...texts], { pooling: "mean", normalize: true })
+    );
+    return this.readVectors(output, texts.length);
+  }
+
+  private readVectors(
+    output: Awaited<ReturnType<LocalOnnxFeatureExtractor>>,
+    expectedCount: number
+  ): readonly Float32Array[] {
+    const rows = output.tolist();
+    if (rows.length !== expectedCount) {
+      throw new Error(
+        `Local ONNX embedding returned ${rows.length} vectors for ${expectedCount} inputs.`
+      );
+    }
+    const vectors = rows.map((row, index) => {
+      if (!Array.isArray(row) || row.length === 0) {
+        throw new Error(`Local ONNX embedding row ${index} was empty.`);
+      }
+      if (row.length !== LOCAL_ONNX_EMBEDDING_DIMENSIONS) {
         throw new Error(
-          `Local ONNX embedding returned ${rows.length} vectors for ${texts.length} inputs.`
+          `Local ONNX embedding row ${index} had ${row.length} dimensions; ` +
+            `expected ${LOCAL_ONNX_EMBEDDING_DIMENSIONS}.`
         );
       }
-
-      const vectors = rows.map((row, index) => {
-        if (!Array.isArray(row) || row.length === 0) {
-          throw new Error(`Local ONNX embedding row ${index} was empty.`);
-        }
-        if (row.length !== LOCAL_ONNX_EMBEDDING_DIMENSIONS) {
-          throw new Error(
-            `Local ONNX embedding row ${index} had ${row.length} dimensions; ` +
-              `expected ${LOCAL_ONNX_EMBEDDING_DIMENSIONS}.`
-          );
-        }
-        return new Float32Array(row);
-      });
-      // A successful pipeline run resets the dynamic health state — even if
-      // the provider was in the backoff window after a prior failure run.
-      this.currentlyAvailable = true;
-      this.consecutiveLoadFailures = 0;
-      return Object.freeze(vectors);
+      return new Float32Array(row);
     });
+    this.currentlyAvailable = true;
+    this.consecutiveLoadFailures = 0;
+    return Object.freeze(vectors);
   }
 
   private loadExtractor(): Promise<LocalOnnxFeatureExtractor> {
@@ -216,6 +239,65 @@ export class LocalOnnxEmbeddingClient implements EmbeddingProviderPort {
   }
 }
 
+interface EmbeddingDeadline {
+  readonly signal: AbortSignal;
+  readonly close: () => void;
+}
+
+function createEmbeddingDeadline(timeoutMs: number, parent?: AbortSignal): EmbeddingDeadline {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(parent?.reason);
+  if (parent?.aborted === true) onAbort();
+  else parent?.addEventListener("abort", onAbort, { once: true });
+  const timer = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? setTimeout(
+        () => controller.abort(new Error(`Local ONNX embedding timed out after ${timeoutMs} ms.`)),
+        timeoutMs
+      )
+    : null;
+  timer?.unref?.();
+  return {
+    signal: controller.signal,
+    close: () => {
+      if (timer !== null) clearTimeout(timer);
+      parent?.removeEventListener("abort", onAbort);
+    }
+  };
+}
+
+function throwIfEmbeddingCancelled(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  throw embeddingCancellationError(signal);
+}
+
+function waitForEmbeddingCaller<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(embeddingCancellationError(signal));
+    if (signal.aborted) {
+      onAbort();
+      work.catch(() => undefined);
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+function embeddingCancellationError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Local ONNX embedding was cancelled.");
+}
+
 export function defaultLocalOnnxCacheDir(): string {
   const xdgCacheHome = process.env.XDG_CACHE_HOME?.trim();
   const cacheHome = xdgCacheHome && xdgCacheHome.length > 0
@@ -224,7 +306,7 @@ export function defaultLocalOnnxCacheDir(): string {
   return path.join(cacheHome, "do-soul-alaya/models");
 }
 
-type TransformersModule = {
+export type LocalOnnxEmbeddingTransformersModule = {
   readonly env: {
     allowRemoteModels: boolean;
     cacheDir?: string;
@@ -235,20 +317,62 @@ type TransformersModule = {
     model: string,
     options: {
       readonly dtype: string;
+      readonly cache_dir?: string;
+      readonly local_files_only: true;
       readonly session_options?: LocalOnnxSessionOptions;
     }
   ) => Promise<LocalOnnxFeatureExtractor>;
 };
 
-async function importTransformers(): Promise<TransformersModule> {
+export type LocalOnnxEmbeddingTransformersImporter =
+  () => Promise<LocalOnnxEmbeddingTransformersModule>;
+
+// Transformers.js 4.2 pipeline preflight reads env.localModelPath before it
+// forwards per-load cache options. Serialize that narrow initialization seam
+// so bi-encoder and cross-encoder loads cannot borrow each other's cache root.
+let localTransformersLoadQueue: Promise<void> = Promise.resolve();
+
+export function withLocalTransformersOfflineLoad<T>(
+  env: LocalOnnxEmbeddingTransformersModule["env"],
+  cacheDir: string | null,
+  load: () => Promise<T>
+): Promise<T> {
+  const run = localTransformersLoadQueue.then(async () => {
+    const previousCacheDir = env.cacheDir;
+    const previousLocalModelPath = env.localModelPath;
+    env.allowRemoteModels = false;
+    if (cacheDir !== null) {
+      env.cacheDir = cacheDir;
+      env.localModelPath = cacheDir;
+    }
+    try {
+      return await load();
+    } finally {
+      restoreOptionalEnvPath(env, "cacheDir", previousCacheDir);
+      restoreOptionalEnvPath(env, "localModelPath", previousLocalModelPath);
+    }
+  });
+  localTransformersLoadQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function restoreOptionalEnvPath(
+  env: LocalOnnxEmbeddingTransformersModule["env"],
+  key: "cacheDir" | "localModelPath",
+  value: string | undefined
+): void {
+  if (value === undefined) delete env[key];
+  else env[key] = value;
+}
+
+async function importTransformers(): Promise<LocalOnnxEmbeddingTransformersModule> {
   try {
-    return (await import("@huggingface/transformers")) as TransformersModule;
+    return (await import("@huggingface/transformers")) as LocalOnnxEmbeddingTransformersModule;
   } catch (error) {
-    // transformers is an optional peer; surface the actionable cause instead of
-    // a generic load failure when an opt-in deployer simply hasn't installed it.
+    // Surface a packaging failure distinctly from an unreadable model artifact.
     if ((error as { code?: string }).code === "ERR_MODULE_NOT_FOUND") {
       throw new Error(
-        "@huggingface/transformers is an optional peer dependency for the local ONNX embedding provider; install it to enable on-device embeddings.",
+        "@huggingface/transformers is required for the local ONNX embedding provider.",
         { cause: error }
       );
     }
@@ -259,22 +383,22 @@ async function importTransformers(): Promise<TransformersModule> {
 async function defaultLocalOnnxPipelineLoader(
   modelId: string,
   cacheDir: string | null,
-  options: LocalOnnxPipelineOptions
+  options: LocalOnnxPipelineOptions,
+  importer: LocalOnnxEmbeddingTransformersImporter
 ): Promise<LocalOnnxFeatureExtractor> {
-  const transformers = await importTransformers();
+  const transformers = await importer();
   // invariant: embedding is a recall supplement; the on-device provider must
   // not reach the network during recall. Weights are pre-fetched out of band.
-  transformers.env.allowRemoteModels = false;
-  if (cacheDir !== null) {
-    transformers.env.cacheDir = cacheDir;
-    transformers.env.localModelPath = cacheDir;
-  }
-  return transformers.pipeline("feature-extraction", modelId, {
-    dtype: "q8",
-    ...(options.sessionOptions === undefined
-      ? {}
-      : { session_options: options.sessionOptions })
-  });
+  return withLocalTransformersOfflineLoad(transformers.env, cacheDir, async () =>
+    transformers.pipeline("feature-extraction", modelId, {
+      dtype: "q8",
+      ...(cacheDir === null ? {} : { cache_dir: cacheDir }),
+      local_files_only: true,
+      ...(options.sessionOptions === undefined
+        ? {}
+        : { session_options: options.sessionOptions })
+    })
+  );
 }
 
 export function resolveLocalOnnxSessionOptionsFromEnv(

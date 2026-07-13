@@ -24,7 +24,7 @@ type SourceProximityNeighborCandidate = Readonly<{
   readonly score: number;
 }>;
 
-export async function addSourceProximityCandidates(params: Readonly<{
+type SourceProximityParams = Readonly<{
   readonly workspaceId: string;
   readonly tierMemories: readonly Readonly<MemoryEntry>[];
   readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
@@ -33,7 +33,11 @@ export async function addSourceProximityCandidates(params: Readonly<{
   readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
   readonly robustSourceRefParsing?: boolean;
   readonly warn: RecallServiceWarnPort;
-}>): Promise<Readonly<Record<string, string>>> {
+}>;
+
+export async function addSourceProximityCandidates(
+  params: SourceProximityParams
+): Promise<Readonly<Record<string, string>>> {
   if (params.drafts.size === 0 || params.admissionLimit <= 0) {
     return Object.freeze({});
   }

@@ -19,6 +19,7 @@ function diagnosticPayload(): KpiPayload {
       embedding_provider_label: "none",
       onnx_threads: null,
       onnx_model_artifact_sha256: null,
+      answer_rerank: { enabled: false },
       hydration_binding: {
         dataset_sha256: "b".repeat(64),
         source: "external_expected_sha256"
@@ -42,6 +43,23 @@ function diagnosticPayload(): KpiPayload {
   };
 }
 
+function withRecallIdentity(payload: KpiPayload, schemaVersion: 1 | 2): KpiPayload {
+  return {
+    ...payload,
+    recall_eval_attribution: {
+      ...payload.recall_eval_attribution!,
+      status: "attributed",
+      gate_eligible: true,
+      recall_config: {
+        schema_version: schemaVersion,
+        max_results: 10,
+        conflict_awareness: true,
+        effective_config_sha256: "e".repeat(64)
+      }
+    }
+  };
+}
+
 describe("legacy recall-eval report", () => {
   it("cannot present a measurement-ineligible short diagnostic as OK", () => {
     const payload = diagnosticPayload();
@@ -51,5 +69,19 @@ describe("legacy recall-eval report", () => {
     expect(report).toContain("Recall consumer: fusion-evidence-first-v3");
     expect(report).toContain("Worst verdict: **INELIGIBLE**");
     expect(report).not.toContain("Worst verdict: **OK**");
+  });
+
+  it("keeps a parsed v1 recall identity diagnostic-only", () => {
+    const payload = withRecallIdentity(diagnosticPayload(), 1);
+    const report = renderRecallEvalReport(payload, null, diffKpis(payload, null));
+    expect(report).toContain("Diagnostic only: measurement-ineligible");
+    expect(report).toContain("Worst verdict: **INELIGIBLE**");
+  });
+
+  it("allows an explicitly eligible v2 recall identity to render normally", () => {
+    const payload = withRecallIdentity(diagnosticPayload(), 2);
+    const report = renderRecallEvalReport(payload, null, diffKpis(payload, null));
+    expect(report).not.toContain("Diagnostic only: measurement-ineligible");
+    expect(report).not.toContain("Worst verdict: **INELIGIBLE**");
   });
 });

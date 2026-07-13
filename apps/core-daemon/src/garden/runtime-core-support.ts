@@ -11,16 +11,28 @@ export function createGardenSchedulerEventLogPort(
 ): GardenSchedulerEventLogPort {
   return {
     append: async (entry) => {
-      await eventPublisher.publish({
-        event_type: entry.event_type as EventType,
-        entity_type: entry.entity_type,
-        entity_id: entry.entity_id,
-        workspace_id: entry.workspace_id,
-        run_id: entry.run_id,
-        caused_by: "garden-scheduler",
-        payload_json: entry.payload
-      });
+      await eventPublisher.publish(toPublisherEvent(entry));
+    },
+    appendManyAtomic: async (entries) => {
+      await eventPublisher.appendManyWithMutation(
+        entries.map(toPublisherEvent),
+        () => undefined
+      );
     }
+  };
+}
+
+function toPublisherEvent(
+  entry: Parameters<GardenSchedulerEventLogPort["append"]>[0]
+) {
+  return {
+    event_type: entry.event_type as EventType,
+    entity_type: entry.entity_type,
+    entity_id: entry.entity_id,
+    workspace_id: entry.workspace_id,
+    run_id: entry.run_id,
+    caused_by: "garden-scheduler",
+    payload_json: entry.payload
   };
 }
 

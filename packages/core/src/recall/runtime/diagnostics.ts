@@ -3,6 +3,7 @@ import type { PreparedEmbeddingQueryHandle } from "../../embedding-recall/embedd
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type {
   RecallCandidateDiagnostic,
+  RecallAnswerRerankDiagnostics,
   RecallDegradationReason,
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
@@ -21,6 +22,7 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly deliveredCount: number;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
+  readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly degradationReasons?: readonly RecallDegradationReason[];
   readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
@@ -38,6 +40,7 @@ export function buildRecallDiagnostics(params: Readonly<{
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
+    ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
     ...(params.degradationReasons === undefined || params.degradationReasons.length === 0
       ? {}
       : { degradation_reasons: Object.freeze([...new Set(params.degradationReasons)]) }),
@@ -56,6 +59,23 @@ export function buildRecallDiagnostics(params: Readonly<{
       ? {}
       : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
   });
+}
+
+function buildAnswerRerankDiagnostics(
+  diagnostics: Readonly<RecallAnswerRerankDiagnostics>
+): Pick<
+  RecallDiagnostics,
+  | "answer_rerank_status"
+  | "answer_rerank_expected_count"
+  | "answer_rerank_scored_count"
+  | "answer_rerank_failure_class"
+> {
+  return {
+    answer_rerank_status: diagnostics.status,
+    answer_rerank_expected_count: diagnostics.expected_count,
+    answer_rerank_scored_count: diagnostics.scored_count,
+    answer_rerank_failure_class: diagnostics.failure_class
+  };
 }
 
 export function recordRecallDegradation(

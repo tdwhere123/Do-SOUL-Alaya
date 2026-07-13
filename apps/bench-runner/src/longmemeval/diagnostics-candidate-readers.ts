@@ -172,6 +172,8 @@ function readCandidateScoring(
     finalRank: readNumber(record.final_rank) ?? readNumber(record.rank),
     fusedRank: readNumber(record.fused_rank),
     fusedScore: readNumber(record.fused_score),
+    answerRelevanceScore: readNumber(record.answer_relevance_score),
+    answerRelevanceRank: readNumber(record.answer_relevance_rank),
     perStreamRank: readNullableNumberRecord(record.per_stream_rank),
     fusedRankContributionPerStream:
       readNumberRecord(record.fused_rank_contribution_per_stream),

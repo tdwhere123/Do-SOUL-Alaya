@@ -26,7 +26,7 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   }
 }
 
-function buildRecallEvalOptions(opts: ParsedFlags, snapshot: string): RecallEvalOptions {
+export function buildRecallEvalOptions(opts: ParsedFlags, snapshot: string): RecallEvalOptions {
   return {
     snapshotDbPath: snapshot, variant: opts.variant,
     historyRoot: opts.historyRoot, policyShape: opts.policyShape,
@@ -35,6 +35,7 @@ function buildRecallEvalOptions(opts: ParsedFlags, snapshot: string): RecallEval
     ...(opts.offset === undefined ? {} : { offset: opts.offset }),
     ...(opts.weightOverridesJson === undefined ? {} : { weightOverridesJson: opts.weightOverridesJson }),
     ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
+    ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.legacyManifestSha256 === undefined ? {} : { legacyManifestSha256: opts.legacyManifestSha256 }),
     ...(opts.legacyDatasetSha256 === undefined ? {} : { legacyDatasetSha256: opts.legacyDatasetSha256 })

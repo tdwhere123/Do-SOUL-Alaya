@@ -44,6 +44,7 @@ import type {
   BenchReportContextUsageInput
 } from "./daemon-types.js";
 import { drainEmbeddingWarmupPasses } from "./embedding-warmup.js";
+import { resolveTreatmentEmbeddingInputIdentity } from "./strict-treatment-config.js";
 import {
   applyBenchRecallWeightOverrides,
   type BenchRecallWeightOverrides
@@ -55,12 +56,16 @@ import {
   notRequestedEmbeddingWarmupSummary,
   notRequestedQueryEmbeddingWarmupSummary,
   resolveBenchEmbeddingModelId,
+  resolveBenchEmbeddingSchemaVersion,
   resolveBenchRecallDegradationReason,
   shouldRunBenchEdgePlane
 } from "./daemon-handle-ops-support.js";
 import { invokeBoundRecall } from "@do-soul/alaya/recall/bound-execution";
+import {
+  parseBenchRecallDiagnosticsForRun
+} from "./recall-diagnostics-schema.js";
+import { assertEmbeddingTreatmentDiagnosticsPresent } from "./embedding-treatment-activation.js";
 
-const BENCH_EMBEDDING_SCHEMA_VERSION = 1;
 const DEFAULT_EMBEDDING_WARMUP_PASSES = 12;
 const EMBEDDING_WARMUP_MAX_STALL_PASSES = 6;
 
@@ -78,9 +83,11 @@ interface BenchDaemonOpsInput {
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
+  readonly effectiveEnv: Readonly<Record<string, string | undefined>>;
   readonly savedEnv: Partial<Record<string, string | undefined>>;
   readonly managedEnvKeys: readonly string[];
   readonly reviewerCredentials: BenchReviewerCredentials;
+  readonly cleanupConfigDirectory: () => Promise<void>;
   readonly releaseActive: () => void;
   readonly cleanupManagedWorkspaceRoots: () => Promise<void>;
 }
@@ -136,7 +143,7 @@ function createBenchRecallOperation(
       opts,
       input.recallWeightOverrides
     );
-    const recallResult = await invokeBoundRecall({
+    const rawRecallResult = await invokeBoundRecall({
       sideEffectMode: "benchmark",
       recallService: input.activeRuntime.services.recallService,
       taskSurface,
@@ -148,6 +155,7 @@ function createBenchRecallOperation(
       ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
       activeConstraintsCap: null
     });
+    const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);
     const results = collectBenchRecallResults(recallResult, policy, opts.maxResults);
     const delivery = await recordBenchRecallDelivery(input, results, recallResult);
     emitBenchContextLensAssembledEvent(input.dataDir, {
@@ -162,6 +170,16 @@ function createBenchRecallOperation(
     });
     return buildBenchRecallResponse(delivery.deliveryId, results, recallResult, policy);
   };
+}
+
+function validateBenchRecallDiagnostics(
+  recallResult: BenchRecallServiceResult,
+  effectiveEnv: Readonly<Record<string, string | undefined>>
+): BenchRecallServiceResult {
+  assertEmbeddingTreatmentDiagnosticsPresent(recallResult.diagnostics, effectiveEnv);
+  if (recallResult.diagnostics === undefined) return recallResult;
+  parseBenchRecallDiagnosticsForRun(recallResult.diagnostics, effectiveEnv);
+  return recallResult;
 }
 
 function createBenchReportContextUsageOperation(
@@ -188,7 +206,7 @@ function createWarmEmbeddingCacheOperation(
     }
     const embedding = resolveBenchEmbeddingModelId(
       input.embeddingProviderKind,
-      input.savedEnv
+      input.effectiveEnv
     );
     const warmed = await drainEmbeddingWarmupPasses({
       maxPasses: opts.maxPasses ?? DEFAULT_EMBEDDING_WARMUP_PASSES,
@@ -204,7 +222,9 @@ function createWarmEmbeddingCacheOperation(
           objectIds,
           providerKind: embedding.providerKind,
           modelId: embedding.modelId,
-          schemaVersion: BENCH_EMBEDDING_SCHEMA_VERSION,
+          schemaVersion: resolveBenchEmbeddingSchemaVersion(
+            input.embeddingProviderKind, input.effectiveEnv
+          ),
           passCount
         })
     });
@@ -226,11 +246,15 @@ function createWarmQueryEmbeddingCacheOperation(
     if (service === undefined) {
       throw new Error("query embedding warmup requested but embeddingRecallService is unavailable");
     }
-    return await service.warmQueryEmbeddings({
+    const summary = await service.warmQueryEmbeddings({
       workspaceId: input.activeContext.workspaceId,
       runId: input.activeContext.runId,
       queryTexts
     });
+    return {
+      ...summary,
+      ...resolveTreatmentEmbeddingInputIdentity(input.embeddingProviderKind, input.effectiveEnv)
+    };
   };
 }
 
@@ -262,8 +286,12 @@ function createBenchShutdownOperation(
       });
       await input.cleanupManagedWorkspaceRoots();
     } finally {
-      restoreEnv(input.managedEnvKeys, input.savedEnv);
-      input.releaseActive();
+      try {
+        await input.cleanupConfigDirectory();
+      } finally {
+        restoreEnv(input.managedEnvKeys, input.savedEnv);
+        input.releaseActive();
+      }
     }
   };
 }

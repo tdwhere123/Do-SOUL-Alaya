@@ -1,18 +1,13 @@
-import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { RecallEvalRuntimeAttribution } from "../lifecycle/recall-eval-runtime.js";
 import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
 import {
-  collectPairedEnvironment,
-  LONGMEMEVAL_RUN_PROVENANCE_FILENAME,
+  buildLongMemEvalRunProvenance,
+  isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
-  readOptionalSha,
-  renderLongMemEvalRunProvenance,
   type LongMemEvalRunProvenance
 } from "./run.js";
 
-export function buildRecallEvalRunProvenance(input: {
+export async function buildRecallEvalRunProvenance(input: {
   readonly manifest: LongMemEvalSnapshotManifest;
   readonly runtimeAttribution: RecallEvalRuntimeAttribution;
   readonly evaluatedCount: number;
@@ -20,33 +15,41 @@ export function buildRecallEvalRunProvenance(input: {
   readonly limit: number | null;
   readonly commitSha7: string;
   readonly env: Readonly<Record<string, string | undefined>>;
-}): LongMemEvalRunProvenance {
-  const recall = parseRecallRuntimeConfigFromEnv(input.env);
+  readonly computeExecutedDistIdentity?: () => Promise<unknown>;
+}): Promise<LongMemEvalRunProvenance> {
+  const current = await buildLongMemEvalRunProvenance({
+    opts: {
+      variant: input.manifest.variant as "longmemeval_oracle" | "longmemeval_s" | "longmemeval_m",
+      historyRoot: "",
+      embeddingMode: input.runtimeAttribution.embedding_mode,
+      embeddingProviderKind: input.runtimeAttribution.embedding_provider_kind,
+      offset: input.offset,
+      ...(input.limit === null ? {} : { limit: input.limit })
+    },
+    evaluatedCount: input.evaluatedCount,
+    commitSha7: input.commitSha7,
+    embeddingProviderLabel: input.runtimeAttribution.embedding_provider_label,
+    env: withoutExtractionCacheRoot(input.env),
+    recallOptions: {
+      maxResults: input.runtimeAttribution.recall_config.max_results,
+      conflictAwareness: input.runtimeAttribution.recall_config.conflict_awareness
+    },
+    runtime: {
+      nodeVersion: input.runtimeAttribution.node_version,
+      platform: input.runtimeAttribution.platform,
+      arch: input.runtimeAttribution.arch
+    },
+    ...(input.computeExecutedDistIdentity === undefined
+      ? {}
+      : { computeExecutedDistIdentity: input.computeExecutedDistIdentity })
+  });
   return LongMemEvalRunProvenanceSchema.parse({
-    schema_version: 1,
-    code: {
-      commit_sha7: input.commitSha7,
-      gate_sha256: readOptionalSha(
-        input.env.ALAYA_BENCH_GATE_SHA256,
-        "ALAYA_BENCH_GATE_SHA256"
-      ),
-      worktree_state_sha256: readOptionalSha(
-        input.env.ALAYA_BENCH_WORKTREE_STATE_SHA256,
-        "ALAYA_BENCH_WORKTREE_STATE_SHA256"
-      )
+    ...current,
+    recall_config: {
+      ...current.recall_config,
+      ...input.runtimeAttribution.recall_config
     },
     extraction_cache: input.manifest.run_provenance?.extraction_cache ?? null,
-    runtime: buildCurrentRuntime(input.runtimeAttribution, input.env),
-    execution: {
-      protocol: "sequential",
-      concurrency: 1,
-      offset: input.offset,
-      limit: input.limit,
-      evaluated_count: input.evaluatedCount
-    },
-    recall_config: {
-      conf_slice_compatibility: recall.confSliceCompatibility
-    },
     ...(input.manifest.run_provenance?.seed_capabilities === undefined
       ? {}
       : { seed_capabilities: input.manifest.run_provenance.seed_capabilities }),
@@ -54,32 +57,53 @@ export function buildRecallEvalRunProvenance(input: {
   });
 }
 
-export async function writeRecallEvalRunProvenance(
-  archiveRoot: string,
-  input: Parameters<typeof buildRecallEvalRunProvenance>[0]
-): Promise<void> {
-  await writeFile(
-    join(archiveRoot, LONGMEMEVAL_RUN_PROVENANCE_FILENAME),
-    renderLongMemEvalRunProvenance(buildRecallEvalRunProvenance(input)),
-    "utf8"
-  );
+export function isRecallEvalRunEvidenceEligible(input: {
+  readonly runtimeAttribution: RecallEvalRuntimeAttribution;
+  readonly provenance: LongMemEvalRunProvenance;
+  readonly expectedQuestionIdDigest: string;
+  readonly actualQuestionIdDigest: string;
+  readonly evaluatedCount: number;
+  readonly offset: number;
+  readonly limit: number | null;
+}): boolean {
+  return input.runtimeAttribution.gate_eligible &&
+    isLongMemEvalRunProvenanceGateEligible(input.provenance) &&
+    input.expectedQuestionIdDigest === input.actualQuestionIdDigest &&
+    input.provenance.execution.evaluated_count === input.evaluatedCount &&
+    input.provenance.execution.offset === input.offset &&
+    input.provenance.execution.limit === input.limit &&
+    sameCurrentTreatment(
+      input.runtimeAttribution,
+      input.provenance.runtime,
+      input.provenance.recall_config
+    );
 }
 
-function buildCurrentRuntime(
+function sameCurrentTreatment(
   attribution: RecallEvalRuntimeAttribution,
+  runtime: LongMemEvalRunProvenance["runtime"],
+  recallConfig: LongMemEvalRunProvenance["recall_config"]
+): boolean {
+  return runtime.node_version === attribution.node_version &&
+    runtime.platform === attribution.platform && runtime.arch === attribution.arch &&
+    runtime.embedding_mode === attribution.embedding_mode &&
+    runtime.embedding_provider_kind === attribution.embedding_provider_kind &&
+    runtime.embedding_provider_label === attribution.embedding_provider_label &&
+    runtime.onnx_threads === attribution.onnx_threads &&
+    (runtime.onnx_model_artifact_sha256 ?? null) ===
+      attribution.onnx_model_artifact_sha256 &&
+    JSON.stringify(runtime.embedding_supplement) ===
+      JSON.stringify(attribution.embedding_supplement) &&
+    JSON.stringify(runtime.answer_rerank) === JSON.stringify(attribution.answer_rerank) &&
+    recallConfig.schema_version === attribution.recall_config.schema_version &&
+    recallConfig.max_results === attribution.recall_config.max_results &&
+    recallConfig.conflict_awareness === attribution.recall_config.conflict_awareness &&
+    recallConfig.effective_config_sha256 ===
+      attribution.recall_config.effective_config_sha256;
+}
+
+function withoutExtractionCacheRoot(
   env: Readonly<Record<string, string | undefined>>
-): LongMemEvalRunProvenance["runtime"] {
-  return {
-    node_version: attribution.node_version,
-    platform: attribution.platform,
-    arch: attribution.arch,
-    embedding_mode: attribution.embedding_mode,
-    embedding_provider_kind: attribution.embedding_provider_kind,
-    embedding_provider_label: attribution.embedding_provider_label,
-    onnx_threads: attribution.onnx_threads,
-    ...(attribution.onnx_model_artifact_sha256 === null
-      ? {}
-      : { onnx_model_artifact_sha256: attribution.onnx_model_artifact_sha256 }),
-    paired_env: collectPairedEnvironment(env)
-  };
+): Readonly<Record<string, string | undefined>> {
+  return { ...env, ALAYA_BENCH_EXTRACTION_CACHE_ROOT: undefined };
 }

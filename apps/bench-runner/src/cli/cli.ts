@@ -31,7 +31,7 @@ Usage:
   alaya-bench-runner controlled-replay [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
   alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>]
-  alaya-bench-runner recall-eval --snapshot <db> [--legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--pinned-meta-root <path>] [--history-root <path>]
+  alaya-bench-runner recall-eval --snapshot <db> [--legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
   alaya-bench-runner --help
 
 Variants:

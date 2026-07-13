@@ -4,7 +4,11 @@ import type {
   EdgeProposalKpiEventRow,
   KpiPayload
 } from "@do-soul/alaya-eval";
-import type { BenchTokenMetrics } from "../../harness/daemon.js";
+import type {
+  BenchEmbeddingWarmupSummary,
+  BenchQueryEmbeddingWarmupSummary,
+  BenchTokenMetrics
+} from "../../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../../harness/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "../diagnostics.js";
 import type { LongMemEvalVariant } from "../dataset.js";
@@ -50,5 +54,7 @@ export interface RecallEvalQuestionResult {
   readonly tokenMetrics: BenchTokenMetrics;
   readonly recallTokenEconomy: BenchRecallTokenEconomy | null;
   readonly edgeProposalKpiRows: readonly EdgeProposalKpiEventRow[];
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
   readonly deliveredObjectIds: readonly string[];
 }

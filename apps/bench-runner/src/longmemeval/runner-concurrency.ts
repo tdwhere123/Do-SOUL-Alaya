@@ -23,6 +23,7 @@ import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
 } from "./diagnostics/spool.js";
+import { readOptionalTreatmentBoolean } from "../harness/strict-treatment-config.js";
 
 export interface LongMemEvalWorkerShardPlan {
   readonly shardIndex: number;
@@ -68,13 +69,17 @@ export function freezeProcessEnvForWorkers(
 export function buildLongMemEvalWorkerEnvOverrides(input: {
   readonly concurrency: number;
   readonly embeddingMode: LongMemEvalRunOptions["embeddingMode"];
+  readonly crossEncoderEnabled?: boolean;
   readonly shardRoot: string;
   readonly historyRoot: string;
 }): NodeJS.ProcessEnv {
   const overrides: NodeJS.ProcessEnv = {
     ALAYA_BENCH_ARTIFACT_ROOT: join(input.historyRoot, ".bench-artifacts")
   };
-  if (input.concurrency > 1 && input.embeddingMode === "env") {
+  if (
+    input.concurrency > 1 &&
+    (input.embeddingMode === "env" || input.crossEncoderEnabled === true)
+  ) {
     overrides.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
     overrides.ALAYA_LOCAL_ONNX_LOCK_PATH = join(
       input.shardRoot,
@@ -237,6 +242,10 @@ async function runLongMemEvalConcurrentWorker(
       buildLongMemEvalWorkerEnvOverrides({
         concurrency: context.concurrency,
         embeddingMode: context.opts.embeddingMode,
+        crossEncoderEnabled: readOptionalTreatmentBoolean(
+          process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
+          "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
+        ) === true,
         shardRoot: context.shardRoot,
         historyRoot: plan.historyRoot
       })

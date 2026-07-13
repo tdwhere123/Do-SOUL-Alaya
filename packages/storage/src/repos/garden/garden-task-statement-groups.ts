@@ -18,6 +18,7 @@ export interface GardenTaskQueueStatements {
 
 export interface GardenTaskClaimStatements {
   readonly claimStatement: GardenTaskSqliteStatement;
+  readonly failPendingStatement: GardenTaskSqliteStatement;
   readonly releaseClaimStatement: GardenTaskSqliteStatement;
   readonly beginCompletionAttemptStatement: GardenTaskSqliteStatement;
   readonly refreshClaimStatement: GardenTaskSqliteStatement;
@@ -116,6 +117,15 @@ const GARDEN_TASK_CLAIM_SQL: SqlDefinitionMap<GardenTaskClaimStatements> = {
           claimed_at = ?,
           attempt_count = attempt_count + 1
       WHERE id = ? AND status = 'pending' AND (? IS NULL OR workspace_id = ?)
+    `,
+  failPendingStatement: `
+      UPDATE garden_tasks
+      SET status = 'failed',
+          claimed_by = NULL,
+          claimed_at = NULL,
+          completed_at = ?,
+          last_error_text = ?
+      WHERE id = ? AND status = 'pending'
     `,
   releaseClaimStatement: `
       UPDATE garden_tasks

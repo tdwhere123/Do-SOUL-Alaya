@@ -70,6 +70,8 @@ function buildReplayCandidates(
       selection_order: candidate.selectionOrder,
       fused_rank: candidate.fusedRank,
       fused_score: candidate.fusedScore,
+      answer_relevance_score: candidate.answerRelevanceScore,
+      answer_relevance_rank: candidate.answerRelevanceRank,
       per_stream_rank: candidate.perStreamRank,
       fused_rank_contribution_per_stream:
         candidate.fusedRankContributionPerStream,

@@ -143,6 +143,25 @@ function buildRecallTelemetryFields(
     provider_state: diagnostics?.providerState ??
       (input.embeddingMode === "disabled" ? "provider_not_requested" : "unknown"),
     provider_degradation_reason: diagnostics?.providerDegradationReason ?? null,
+    ...(diagnostics?.embeddingWorkspaceScannedCount === null || diagnostics === null
+      ? {}
+      : { embedding_workspace_scanned_count: diagnostics.embeddingWorkspaceScannedCount }),
+    ...(diagnostics?.embeddingWorkspaceTruncated === null || diagnostics === null
+      ? {}
+      : { embedding_workspace_truncated: diagnostics.embeddingWorkspaceTruncated }),
+    ...(diagnostics?.embeddingWorkspaceProviderKind === null || diagnostics === null
+      ? {}
+      : { embedding_workspace_provider_kind: diagnostics.embeddingWorkspaceProviderKind }),
+    ...(diagnostics?.embeddingWorkspaceModelId === null || diagnostics === null
+      ? {}
+      : { embedding_workspace_model_id: diagnostics.embeddingWorkspaceModelId }),
+    ...(diagnostics?.embeddingWorkspaceSchemaVersion === null || diagnostics === null
+      ? {}
+      : { embedding_workspace_schema_version: diagnostics.embeddingWorkspaceSchemaVersion }),
+    answer_rerank_status: diagnostics?.answerRerankStatus ?? null,
+    answer_rerank_expected_count: diagnostics?.answerRerankExpectedCount ?? null,
+    answer_rerank_scored_count: diagnostics?.answerRerankScoredCount ?? null,
+    answer_rerank_failure_class: diagnostics?.answerRerankFailureClass ?? null,
     graph_expansion_plane_count_per_hop: diagnostics?.graphExpansionPlaneCountPerHop ??
       createEmptyGraphExpansionPlaneCountPerHop(),
     graph_expansion_plane_count_per_edge_type:

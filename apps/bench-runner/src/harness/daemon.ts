@@ -2,6 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
   type BenchDaemonHandle,
   type BenchDaemonOptions,
   type BenchEmbeddingProviderKind
@@ -33,50 +34,38 @@ export {
   type SeededMemoryResult,
   type SeededSynthesisResult
 } from "./daemon-types.js";
+export { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "./daemon-types.js";
 export {
   applyBenchFastPragmaIfRequested,
   readEmbeddingWarmupSummary
 } from "./daemon-support.js";
 export type { BenchFastPragmaResult } from "./daemon-support.js";
+export { BENCH_DAEMON_MANAGED_ENV_KEYS } from "./daemon-environment.js";
 import { createBenchDaemonOps } from "./daemon-handle-ops.js";
 import { initializeBenchDaemon } from "./daemon-startup.js";
 import {
-  type BenchReviewerCredentials,
+  createBenchDaemonConfigDirectoryLease,
+  type BenchDaemonConfigDirectoryLease
+} from "./daemon-config-directory.js";
+import {
+  createBenchDaemonLaunchConfig,
   queryEdgeProposalKpiRows,
   queryTokenMetrics,
-  requireBenchOpenAiSecretRef,
-  resolveBenchOpenAiSecretRef,
-  resolveBenchReviewerCredentials,
   restoreEnv
 } from "./daemon-support.js";
+import {
+  resolveBenchDaemonManagedEnvKeys,
+  type BenchDaemonLaunchConfig
+} from "./daemon-environment.js";
 import { createBenchWorkspaceManager } from "./daemon-workspace-manager.js";
 
-export const BENCH_DAEMON_MANAGED_ENV_KEYS = [
-  "DATA_DIR",
-  "OPENAI_API_KEY",
-  "OPENAI_EMBEDDING_MODEL",
-  "OPENAI_EMBEDDING_PROVIDER_URL",
-  "ALAYA_OPENAI_SECRET_REF",
-  "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
-  "ALAYA_EMBEDDING_PROVIDER",
-  "ALAYA_LOCAL_EMBEDDING_CACHE_DIR",
-  "ALAYA_LOCAL_EMBEDDING_MODEL",
-  "ALAYA_RECALL_SOURCE_REF_ROBUST",
-  "ALAYA_CONFIG_DIR",
-  "CODEX_HOME",
-  "HOME",
-  "ALAYA_REVIEWER_IDENTITY",
-  "ALAYA_REVIEWER_TOKEN"
-] as const;
-
-type ManagedEnvKey = (typeof BENCH_DAEMON_MANAGED_ENV_KEYS)[number];
-const DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND: BenchEmbeddingProviderKind = "openai";
 let activeBenchDaemonCount = 0;
 
 export async function startBenchDaemon(
-  opts: BenchDaemonOptions = {}
+  opts: BenchDaemonOptions = {},
+  preparedLaunch?: BenchDaemonLaunchConfig
 ): Promise<BenchDaemonHandle> {
-  const state = await createBenchDaemonState(opts);
+  const state = await createBenchDaemonState(opts, preparedLaunch);
   try {
     return await bootBenchDaemon(state);
   } catch (err) {
@@ -93,32 +82,38 @@ interface BenchDaemonState {
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
   readonly recallWeightOverrides: BenchDaemonOptions["recallWeightOverrides"];
   readonly dataDir: string;
-  readonly savedEnv: Partial<Record<ManagedEnvKey, string | undefined>>;
-  readonly effectiveOpenAiSecretRef: string;
-  readonly reviewerCredentials: BenchReviewerCredentials;
+  readonly savedEnv: Partial<Record<string, string | undefined>>;
+  readonly managedEnvKeys: readonly string[];
+  readonly launch: BenchDaemonLaunchConfig;
+  readonly configDirectory: BenchDaemonConfigDirectoryLease;
   readonly releaseActive: () => void;
   readonly workspaceManager: ReturnType<typeof createBenchWorkspaceManager>;
 }
 
 async function createBenchDaemonState(
-  opts: BenchDaemonOptions
+  opts: BenchDaemonOptions,
+  preparedLaunch: BenchDaemonLaunchConfig | undefined
 ): Promise<BenchDaemonState> {
   const defaultWorkspaceId = opts.workspaceId ?? "bench-workspace-1";
   const defaultRunId = opts.runId ?? "bench-run-1";
   const activeContext = { workspaceId: defaultWorkspaceId, runId: defaultRunId };
-  const embeddingMode = opts.embeddingMode ?? "disabled";
-  const embeddingProviderKind =
-    opts.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
   const recallWeightOverrides = opts.recallWeightOverrides;
-  const dataDir = opts.dataDirRoot ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
-  const savedEnv = snapshotManagedEnv();
-  const effectiveOpenAiSecretRef =
-    embeddingMode === "env" && embeddingProviderKind === "openai"
-      ? resolveBenchOpenAiSecretRef(savedEnv)
-      : "env:OPENAI_API_KEY";
-  if (embeddingMode === "env" && embeddingProviderKind === "openai") {
-    requireBenchOpenAiSecretRef(effectiveOpenAiSecretRef);
-  }
+  const dataDir = opts.dataDirRoot ??
+    preparedLaunch?.dataDir ?? (await mkdtemp(join(tmpdir(), "alaya-bench-")));
+  const embeddingMode = opts.embeddingMode ?? preparedLaunch?.embeddingMode ?? "disabled";
+  const embeddingProviderKind = opts.embeddingProviderKind ??
+    preparedLaunch?.embeddingProviderKind ?? DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND;
+  const launch = preparedLaunch ?? createBenchDaemonLaunchConfig({
+    dataDir,
+    embeddingMode,
+    embeddingProviderKind,
+    reviewerIdentity: opts.reviewerIdentity,
+    reviewerToken: opts.reviewerToken
+  });
+  assertPreparedLaunchMatches(launch, { dataDir, embeddingMode, embeddingProviderKind });
+  const configDirectory = createBenchDaemonConfigDirectoryLease(launch.configDir);
+  const managedEnvKeys = resolveBenchDaemonManagedEnvKeys(launch.environment, process.env);
+  const savedEnv = snapshotManagedEnv(managedEnvKeys);
   return {
     defaultWorkspaceId,
     defaultRunId,
@@ -128,8 +123,9 @@ async function createBenchDaemonState(
     recallWeightOverrides,
     dataDir,
     savedEnv,
-    effectiveOpenAiSecretRef,
-    reviewerCredentials: resolveBenchReviewerCredentials({ options: opts, savedEnv }),
+    managedEnvKeys,
+    launch,
+    configDirectory,
     releaseActive: reserveBenchDaemonSlot(),
     workspaceManager: createBenchWorkspaceManager({
       dataDir,
@@ -137,6 +133,16 @@ async function createBenchDaemonState(
       knownWorkspaceIds: [defaultWorkspaceId]
     })
   };
+}
+
+function assertPreparedLaunchMatches(
+  launch: BenchDaemonLaunchConfig,
+  expected: Pick<BenchDaemonLaunchConfig, "dataDir" | "embeddingMode" | "embeddingProviderKind">
+): void {
+  if (launch.dataDir !== expected.dataDir || launch.embeddingMode !== expected.embeddingMode ||
+      launch.embeddingProviderKind !== expected.embeddingProviderKind) {
+    throw new Error("prepared bench daemon launch does not match requested options");
+  }
 }
 
 async function bootBenchDaemon(
@@ -147,11 +153,9 @@ async function bootBenchDaemon(
     defaultWorkspaceId: state.defaultWorkspaceId,
     defaultRunId: state.defaultRunId,
     activeContext: state.activeContext,
-    embeddingMode: state.embeddingMode,
-    embeddingProviderKind: state.embeddingProviderKind,
-    effectiveOpenAiSecretRef: state.effectiveOpenAiSecretRef,
-    savedEnv: state.savedEnv,
-    reviewerCredentials: state.reviewerCredentials,
+    launch: state.launch,
+    configDirectory: state.configDirectory,
+    managedEnvKeys: state.managedEnvKeys,
     createManagedWorkspaceRoot: state.workspaceManager.createManagedWorkspaceRoot
   });
   const daemonOps = createBenchDaemonOps({
@@ -163,9 +167,11 @@ async function bootBenchDaemon(
     recallWeightOverrides: state.recallWeightOverrides,
     embeddingMode: state.embeddingMode,
     embeddingProviderKind: state.embeddingProviderKind,
+    effectiveEnv: state.launch.environment,
     savedEnv: state.savedEnv,
-    managedEnvKeys: BENCH_DAEMON_MANAGED_ENV_KEYS,
-    reviewerCredentials: state.reviewerCredentials,
+    managedEnvKeys: state.managedEnvKeys,
+    reviewerCredentials: state.launch.reviewerCredentials,
+    cleanupConfigDirectory: state.configDirectory.cleanup,
     releaseActive: state.releaseActive,
     cleanupManagedWorkspaceRoots: state.workspaceManager.cleanupManagedWorkspaceRoots
   });
@@ -211,14 +217,20 @@ async function cleanupFailedBenchDaemonStart(
   try {
     await state.workspaceManager.cleanupManagedWorkspaceRoots();
   } finally {
-    restoreEnv(BENCH_DAEMON_MANAGED_ENV_KEYS, state.savedEnv);
-    state.releaseActive();
+    try {
+      await state.configDirectory.cleanup();
+    } finally {
+      restoreEnv(state.managedEnvKeys, state.savedEnv);
+      state.releaseActive();
+    }
   }
 }
 
-function snapshotManagedEnv(): Partial<Record<ManagedEnvKey, string | undefined>> {
-  const savedEnv: Partial<Record<ManagedEnvKey, string | undefined>> = {};
-  for (const key of BENCH_DAEMON_MANAGED_ENV_KEYS) {
+function snapshotManagedEnv(
+  managedEnvKeys: readonly string[]
+): Partial<Record<string, string | undefined>> {
+  const savedEnv: Partial<Record<string, string | undefined>> = {};
+  for (const key of managedEnvKeys) {
     savedEnv[key] = process.env[key];
   }
   return savedEnv;

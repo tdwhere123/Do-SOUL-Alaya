@@ -6,10 +6,12 @@ export {
   BenchmarkMeasurementAttributionSchema,
   type BenchmarkMeasurementAttribution
 } from "./kpi-measurement-schema.js";
+export { RecallEvalAttributionSchema } from "./kpi-auxiliary-schema.js";
 import {
   EdgeProposalAutoAcceptSchema,
   EdgeProposalRateSchema,
   QaMetricsSchema,
+  RecallEvalAttributionSchema,
   RecallTokenEconomySchema,
   TokenEconomySchema
 } from "./kpi-auxiliary-schema.js";
@@ -281,7 +283,14 @@ export type FullGoldCoverage = z.infer<typeof FullGoldCoverageSchema>;
 
 export type { QualityMetrics } from "./kpi-quality-schema.js";
 
-export type { EdgeProposalAutoAccept, EdgeProposalRate, QaMetrics, RecallTokenEconomy, TokenEconomy } from "./kpi-auxiliary-schema.js";
+export type {
+  EdgeProposalAutoAccept,
+  EdgeProposalRate,
+  QaMetrics,
+  RecallEvalAttribution,
+  RecallTokenEconomy,
+  TokenEconomy
+} from "./kpi-auxiliary-schema.js";
 
 
 
@@ -385,42 +394,6 @@ export const HarnessMode = z.enum([
   "live_strict_real"
 ]);
 export type HarnessMode = z.infer<typeof HarnessMode>;
-
-const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
-export const RecallEvalAttributionSchema = z
-  .object({
-    status: z.enum(["attributed", "legacy_unattributed"]),
-    gate_eligible: z.boolean(),
-    node_version: z.string().min(1),
-    platform: z.string().min(1),
-    arch: z.string().min(1),
-    embedding_mode: z.enum(["disabled", "env"]),
-    embedding_provider_kind: z.enum(["openai", "local_onnx"]),
-    embedding_provider_label: z.string().min(1),
-    onnx_threads: z.number().int().positive().nullable(),
-    onnx_model_artifact_sha256: Sha256Schema.nullable(),
-    hydration_binding: z.object({
-      dataset_sha256: Sha256Schema,
-      source: z.literal("external_expected_sha256")
-    }).strict().optional(),
-    snapshot_binding: z.object({
-      commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u).nullable(),
-      gate_sha256: Sha256Schema.nullable(),
-      worktree_state_sha256: Sha256Schema.nullable(),
-      extraction_cache_manifest_sha256: Sha256Schema.nullable(),
-      extraction_cache_requested_turns: z.number().int().nonnegative().nullable(),
-      extraction_cache_cached_turns: z.number().int().nonnegative().nullable(),
-      extraction_cache_coverage: RatioSchema.nullable(),
-      dataset_sha256: Sha256Schema.nullable(),
-      question_id_digest: Sha256Schema.nullable(),
-      snapshot_manifest_sha256: Sha256Schema.nullable().optional(),
-      producer_recall_pipeline_version: z.string().min(1).optional(),
-      consumer_recall_pipeline_version: z.string().min(1).optional(),
-      producer_schema_migration_version: z.number().int().nonnegative().optional()
-    }).strict()
-  })
-  .strict();
-export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
 
 export const KpiPayloadSchema = z
   .object({

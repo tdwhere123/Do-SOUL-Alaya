@@ -1,14 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  getCoreConfig,
   installCoreConfigFromProcessEnv,
   parseRecallRuntimeConfigFromEnv,
   recallEnvRaw,
+  resolveCoreConfigEnvironmentKeys,
   resetCoreConfigForTests
 } from "../../config/index.js";
 
 const RECALL_ENV_FIXTURE = Object.freeze({
-  ALAYA_RECALL_EMBED_POOL_RESCORE: "off",
   ALAYA_RECALL_FACET_SLICE: "slice",
   ALAYA_RECALL_CONF_RHO_PATH: "0.11",
   ALAYA_RECALL_CONF_RHO_EVIDENCE: "0.22",
@@ -21,7 +20,6 @@ const RECALL_ENV_FIXTURE = Object.freeze({
   ALAYA_RECALL_PROJECTIONS: "off",
   ALAYA_RECALL_LEXICAL_DECORR: "decorr",
   ALAYA_RECALL_INTENT_V2: "yes",
-  ALAYA_RECALL_QUERY_HYDE_JSON: "{\"hyde\":true}",
   ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS: "synonyms",
   ALAYA_RECALL_SESSION_ROUTE: "yes",
   ALAYA_RECALL_SEMANTIC_CUSTOM: "semantic-custom"
@@ -29,14 +27,15 @@ const RECALL_ENV_FIXTURE = Object.freeze({
 
 const EXPECTED_RECALL_ENV = Object.freeze({
   ...RECALL_ENV_FIXTURE,
-  ALAYA_RECALL_EMBED_POOL_RESCORE: "off",
   ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
   ALAYA_RECALL_PROJECTIONS: "off",
   ALAYA_RECALL_INTENT_V2: "on",
   ALAYA_RECALL_SESSION_ROUTE: "on"
 });
 
-const RETIRED_DELIVERY_ENV_NAMES = Object.freeze([
+const RETIRED_RECALL_ENV_NAMES = Object.freeze([
+  "ALAYA_RECALL_EMBED_POOL_RESCORE",
+  "ALAYA_RECALL_QUERY_HYDE_JSON",
   "ALAYA_RECALL_COMPOSE",
   "ALAYA_RECALL_COMPOSE_CUSTOM",
   "ALAYA_RECALL_S4_COVERAGE",
@@ -59,11 +58,6 @@ describe("installCoreConfigFromProcessEnv", () => {
     resetCoreConfigForTests();
   });
 
-  it("defaults embed pool rescore to enabled", () => {
-    installCoreConfigFromProcessEnv({});
-    expect(getCoreConfig().recall.embedPoolRescore).toBe(true);
-  });
-
   it("round-trips every supported recall env lookup without name or value drift", () => {
     installCoreConfigFromProcessEnv(RECALL_ENV_FIXTURE);
 
@@ -77,29 +71,52 @@ describe("installCoreConfigFromProcessEnv", () => {
 
     for (const name of Object.keys(RECALL_ENV_FIXTURE)) {
       const expected =
-        name === "ALAYA_RECALL_EMBED_POOL_RESCORE" || name === "ALAYA_RECALL_PROJECTIONS"
-          ? "on"
-          : undefined;
+        name === "ALAYA_RECALL_PROJECTIONS" ? "on" : undefined;
       expect(recallEnvRaw(name), name).toBe(expected);
     }
     expect(recallEnvRaw("ALAYA_RECALL_UNKNOWN")).toBeUndefined();
   });
 
-  it("does not install retired post-fusion delivery controls", () => {
+  it("does not install retired recall controls", () => {
     installCoreConfigFromProcessEnv(Object.fromEntries(
-      RETIRED_DELIVERY_ENV_NAMES.map((name) => [name, "on"])
+      RETIRED_RECALL_ENV_NAMES.map((name) => [name, "on"])
     ));
 
-    for (const name of RETIRED_DELIVERY_ENV_NAMES) {
+    for (const name of RETIRED_RECALL_ENV_NAMES) {
       expect(recallEnvRaw(name), name).toBeUndefined();
     }
   });
 });
 
+describe("core config environment contract", () => {
+  it("enumerates exact keys and discovers supported dynamic prefixes", () => {
+    const keys = resolveCoreConfigEnvironmentKeys({
+      ...RECALL_ENV_FIXTURE,
+      ALAYA_RECALL_SEMANTIC_LATE_BOUND: "0.5",
+      ALAYA_UNRELATED_RUNTIME_SETTING: "untouched"
+    });
+
+    for (const name of [
+      ...Object.keys(RECALL_ENV_FIXTURE),
+      "ALAYA_EMBEDDING_BACKFILL_CONCURRENCY",
+      "ALAYA_EMBEDDING_RECALL_TIERS",
+      "ALAYA_EMBEDDING_WORKSPACE_SCAN_CAP",
+      "ALAYA_PATHREL_CONTENT_STRENGTH"
+    ]) {
+      expect(keys, name).toContain(name);
+    }
+    expect(keys).not.toContain("ALAYA_UNRELATED_RUNTIME_SETTING");
+  });
+});
+
 describe("parseRecallRuntimeConfigFromEnv", () => {
-  it("opt-outs embed pool rescore", () => {
-    const config = parseRecallRuntimeConfigFromEnv({ ALAYA_RECALL_EMBED_POOL_RESCORE: "off" });
-    expect(config.embedPoolRescore).toBe(false);
+  it("does not expose retired per-query embedding controls", () => {
+    const config = parseRecallRuntimeConfigFromEnv({
+      ALAYA_RECALL_EMBED_POOL_RESCORE: "off",
+      ALAYA_RECALL_QUERY_HYDE_JSON: "{\"query\":\"hypothesis\"}"
+    });
+    expect(config).not.toHaveProperty("embedPoolRescore");
+    expect(config).not.toHaveProperty("queryHydeJson");
   });
 
   it("captures slice compatibility as default off", () => {

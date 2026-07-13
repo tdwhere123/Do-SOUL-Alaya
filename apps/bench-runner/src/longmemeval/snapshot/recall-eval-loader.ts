@@ -2,8 +2,10 @@ import type { LongMemEvalVariant } from "../dataset.js";
 import {
   assertSnapshotConsumerBinding,
   readSnapshotManifest,
-  readSnapshotSidecar
+  readSnapshotSidecar,
+  snapshotManifestPath
 } from "../snapshot.js";
+import { sha256File } from "./integrity.js";
 import {
   readLegacySnapshotBundle
 } from "./legacy-substrate.js";
@@ -26,12 +28,7 @@ export async function loadRecallEvalSnapshot(input: {
 }): Promise<RecallEvalSnapshotBundle> {
   const bundle = input.legacySnapshot === true
     ? await readLegacySnapshotBundle(input)
-    : {
-        manifest: readSnapshotManifest(input.snapshotDbPath),
-        sidecar: readSnapshotSidecar(input.snapshotDbPath),
-        snapshotManifestSha256: null,
-        datasetSha256: null
-      };
+    : await readAttributedSnapshotBundle(input.snapshotDbPath);
   assertSnapshotConsumerBinding({
     snapshotDbPath: input.snapshotDbPath,
     manifest: bundle.manifest,
@@ -39,4 +36,13 @@ export async function loadRecallEvalSnapshot(input: {
     variant: input.variant
   });
   return bundle;
+}
+
+async function readAttributedSnapshotBundle(snapshotDbPath: string) {
+  return {
+    manifest: readSnapshotManifest(snapshotDbPath),
+    sidecar: readSnapshotSidecar(snapshotDbPath),
+    snapshotManifestSha256: await sha256File(snapshotManifestPath(snapshotDbPath)),
+    datasetSha256: null
+  };
 }

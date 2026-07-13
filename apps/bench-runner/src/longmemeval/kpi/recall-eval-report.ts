@@ -10,8 +10,12 @@ export function renderRecallEvalReport(
   diff: KpiDiffResult
 ): string {
   const report = renderReport(current, previous, diff);
-  if (current.recall_eval_attribution?.gate_eligible !== false) return report;
-  const binding = current.recall_eval_attribution.snapshot_binding;
+  const attribution = current.recall_eval_attribution;
+  if (attribution === undefined ||
+      (attribution.gate_eligible && attribution.recall_config?.schema_version === 2)) {
+    return report;
+  }
+  const binding = attribution.snapshot_binding;
   const banner = [
     "> [!WARNING]",
     "> Diagnostic only: measurement-ineligible and not release evidence.",

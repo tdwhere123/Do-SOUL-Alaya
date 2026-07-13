@@ -294,9 +294,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
       }),
       created_at: "2026-05-07T00:00:00.000Z"
     });
-    expect(repo.claimAtomic("task-failed", "agent-target-failed", "2026-05-07T00:00:01.000Z")).toBe(
-      "claimed"
-    );
+    await expect(
+      repo.claimAtomic("task-failed", "agent-target-failed", "2026-05-07T00:00:01.000Z")
+    ).resolves.toBe("claimed");
 
     await repo.completeWithEvents(
       "task-failed",

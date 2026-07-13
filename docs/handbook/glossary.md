@@ -205,8 +205,15 @@ before the trigger is called consumable.
 **Lexical Recall** — BM25 / FTS-based search.
 **Path-Aware Recall** — Recall that incorporates `PathRelation`
 proximity.
-**Embedding Supplement** — Optional, opt-in vector ranking. Never
-decides durable truth.
+**Embedding Supplement** — Vector ranking that supplements lexical and path
+recall. The bundled local ONNX provider is enabled by default after verified
+startup warmup; operators can explicitly disable it. It never decides durable
+truth.
+
+**API Embedding Provider** — A network-backed embedding supplement. API use is
+always explicit opt-in through `ALAYA_EMBEDDING_PROVIDER=openai` and requires
+both provider credentials and an enabled supplement; local default-on behavior
+never authorizes a network call.
 
 ## Provider
 

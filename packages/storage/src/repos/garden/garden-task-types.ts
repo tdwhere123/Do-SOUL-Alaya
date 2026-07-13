@@ -84,7 +84,7 @@ export interface GardenTaskRepoPort {
     claimedBy: string,
     claimedAt: string,
     workspace_id?: string
-  ): GardenTaskClaimResult;
+  ): Promise<GardenTaskClaimResult>;
   claimAtomicWithEvents(
     taskId: string,
     claimedBy: string,
@@ -92,6 +92,13 @@ export interface GardenTaskRepoPort {
     dispatchedEvents: readonly GardenTaskEventInput[],
     workspace_id?: string
   ): Promise<GardenTaskClaimResult>;
+  failPendingWithCompletionEvent(
+    taskId: string,
+    completedAt: string,
+    lastErrorText: string,
+    completionEvent: GardenTaskEventInput,
+    precedingEvents?: readonly GardenTaskEventInput[]
+  ): Promise<boolean>;
   beginCompletionAttempt(
     taskId: string,
     claimedBy: string,
@@ -100,7 +107,7 @@ export interface GardenTaskRepoPort {
     completionEnvelopeJson?: string | null
   ): boolean;
   refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
-  releaseClaim(taskId: string, claimedBy: string): boolean;
+  releaseClaim(taskId: string, claimedBy: string): Promise<boolean>;
   completeWithEvents(
     taskId: string,
     result: GardenTaskCompletionResult,

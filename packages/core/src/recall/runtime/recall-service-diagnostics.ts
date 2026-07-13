@@ -191,6 +191,8 @@ export interface RecallCandidateDiagnostic {
   readonly dropped_reason: RecallCandidateDropReason | null;
   readonly within_budget: boolean;
   readonly relevance_score: number;
+  readonly answer_relevance_score?: number;
+  readonly answer_relevance_rank?: number;
   readonly additive_score: number;
   readonly lexical_rank: number | null;
   readonly structural_score: number;
@@ -289,6 +291,24 @@ export interface RecallGraphExpansionDiagnostics {
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
 }
 
+export type RecallAnswerRerankStatus =
+  | "not_requested"
+  | "not_applicable"
+  | "returned"
+  | "failed";
+
+export type RecallAnswerRerankFailureClass =
+  | "invalid_score_count"
+  | "invalid_score_value"
+  | "service_error";
+
+export interface RecallAnswerRerankDiagnostics {
+  readonly status: RecallAnswerRerankStatus;
+  readonly expected_count: number;
+  readonly scored_count: number;
+  readonly failure_class: RecallAnswerRerankFailureClass | null;
+}
+
 export interface RecallDiagnostics {
   readonly query_probes: {
     readonly normalized_query: string | null;
@@ -317,6 +337,10 @@ export interface RecallDiagnostics {
   readonly delivered_count: number;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly provider_degradation_reason: string | null;
+  readonly answer_rerank_status: RecallAnswerRerankStatus;
+  readonly answer_rerank_expected_count: number;
+  readonly answer_rerank_scored_count: number;
+  readonly answer_rerank_failure_class: RecallAnswerRerankFailureClass | null;
   readonly degradation_reasons?: readonly RecallDegradationReason[];
   readonly embedding_workspace_scan_cap?: number;
   readonly embedding_workspace_scanned_count?: number;

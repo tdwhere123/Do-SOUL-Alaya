@@ -11,6 +11,8 @@ export interface BenchEmbeddingWarmupSummary {
   readonly missing_object_ids: readonly string[];
   readonly provider_kind: string | null;
   readonly model_id: string | null;
+  readonly schema_version: number | null;
+  readonly d2q_input: "raw_content" | "content_plus_hq" | null;
 }
 
 export interface DrainEmbeddingWarmupPassesInput {
@@ -76,5 +78,7 @@ export interface BenchQueryEmbeddingWarmupSummary {
   readonly missing_count: number;
   readonly provider_kind: string | null;
   readonly model_id: string | null;
+  readonly schema_version: number | null;
+  readonly d2q_input: "raw_content" | "content_plus_hq" | null;
   readonly last_error?: string;
 }

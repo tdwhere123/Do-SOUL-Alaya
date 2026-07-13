@@ -7,6 +7,7 @@ import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coa
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
   RecallCandidateDiagnostic,
+  RecallAnswerRerankDiagnostics,
   RecallDegradationReason,
   RecallEmbeddingProviderStatus,
   RecallResult,
@@ -60,6 +61,7 @@ export interface RecallAssessmentStageResult {
   readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
+  readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly recallAfterFusion: number;
 }
 

@@ -11,6 +11,7 @@ import {
   writeEntry,
   type HistoryLayout
 } from "../../history/history.js";
+import { RecallEvalAttributionSchema } from "../../schema/kpi-schema.js";
 import { buildPayload, plantSchemaInvalidArchive } from "./history-fixture.js";
 
 describe("history archive schema-invalid baselines", () => {
@@ -45,6 +46,12 @@ describe("history archive schema-invalid baselines", () => {
       embedding_provider_label: "local_onnx:Xenova/test",
       onnx_threads: 1,
       onnx_model_artifact_sha256: "a".repeat(64),
+      answer_rerank: {
+        enabled: true as const,
+        provider_kind: "local_onnx_cross_encoder" as const,
+        effective_model_id: "Xenova/reranker",
+        model_artifact_sha256: "1".repeat(64)
+      },
       snapshot_binding: {
         commit_sha7: "0ff0ff1",
         gate_sha256: "b".repeat(64),
@@ -69,6 +76,24 @@ describe("history archive schema-invalid baselines", () => {
     await expect(readEntry(layout, "self", slug)).resolves.toMatchObject({
       recall_eval_attribution: attribution
     });
+
+    const { answer_rerank: _answerRerank, ...legacyAttribution } = attribution;
+    expect(RecallEvalAttributionSchema.safeParse(legacyAttribution).success).toBe(true);
+    const recallConfig = {
+      max_results: 10,
+      conflict_awareness: true,
+      effective_config_sha256: "2".repeat(64)
+    };
+    for (const schemaVersion of [1, 2] as const) {
+      expect(RecallEvalAttributionSchema.safeParse({
+        ...attribution,
+        recall_config: { ...recallConfig, schema_version: schemaVersion }
+      }).success).toBe(true);
+    }
+    expect(RecallEvalAttributionSchema.safeParse({
+      ...attribution,
+      recall_config: { ...recallConfig, schema_version: 3 }
+    }).success).toBe(false);
   });
 
   it("readEntryForDiff degrades a schema-invalid archive to no-baseline with a warning", async () => {

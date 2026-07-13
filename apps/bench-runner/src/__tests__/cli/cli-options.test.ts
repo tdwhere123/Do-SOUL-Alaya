@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { parseFlags } from "../../cli/cli-options.js";
 
 describe("parseFlags", () => {
+  it("defaults the benchmark embedding provider to local ONNX", () => {
+    expect(parseFlags([]).embeddingProviderKind).toBe("local_onnx");
+  });
+
   it("collects shard paths until the next flag and resolves variant aliases", () => {
     const parsed = parseFlags([
       "--variant",

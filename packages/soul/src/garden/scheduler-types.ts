@@ -7,15 +7,19 @@ import type {
 } from "@do-soul/alaya-protocol";
 import type { BacklogPressureThresholds } from "./backlog-telemetry.js";
 
+export interface GardenSchedulerEventInput {
+  readonly event_type: string;
+  readonly entity_type: string;
+  readonly entity_id: string;
+  readonly workspace_id: string;
+  readonly run_id: string | null;
+  readonly payload: Record<string, unknown>;
+}
+
 export interface GardenSchedulerEventLogPort {
-  append(entry: {
-    readonly event_type: string;
-    readonly entity_type: string;
-    readonly entity_id: string;
-    readonly workspace_id: string;
-    readonly run_id: string | null;
-    readonly payload: Record<string, unknown>;
-  }): Promise<void>;
+  append(entry: GardenSchedulerEventInput): Promise<void>;
+  // Multi-event transitions fail closed unless the port can commit the whole batch.
+  appendManyAtomic?(entries: readonly GardenSchedulerEventInput[]): Promise<void>;
 }
 
 export type GardenTaskStatus = "pending" | "claimed" | "completed" | "failed";
@@ -67,13 +71,24 @@ export interface GardenTaskRepoPort {
     limit?: number
   ): readonly GardenTaskRow[];
   findById(taskId: string): GardenTaskRow | null;
-  claimAtomic(taskId: string, claimedBy: string, claimedAt: string): GardenTaskClaimResult;
+  claimAtomic(
+    taskId: string,
+    claimedBy: string,
+    claimedAt: string
+  ): Promise<GardenTaskClaimResult>;
   claimAtomicWithEvents(
     taskId: string,
     claimedBy: string,
     claimedAt: string,
     dispatchedEvents: readonly GardenTaskEventInput[]
   ): Promise<GardenTaskClaimResult>;
+  failPendingWithCompletionEvent(
+    taskId: string,
+    completedAt: string,
+    lastErrorText: string,
+    completionEvent: GardenTaskEventInput,
+    precedingEvents?: readonly GardenTaskEventInput[]
+  ): Promise<boolean>;
   completeWithEvents(
     taskId: string,
     result: {
@@ -94,7 +109,7 @@ export interface GardenTaskRepoPort {
     }[]
   ): Promise<number>;
   countBacklog(workspace_id?: string): readonly GardenTaskBacklogCount[];
-  releaseClaim(taskId: string, claimedBy: string): boolean;
+  releaseClaim(taskId: string, claimedBy: string): Promise<boolean>;
 }
 
 export interface GardenSchedulerConfig {

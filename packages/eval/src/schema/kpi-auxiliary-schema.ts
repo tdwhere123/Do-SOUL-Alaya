@@ -1,6 +1,86 @@
 import { z } from "zod";
 
 const RatioSchema = z.number().min(0).max(1);
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+
+export const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
+  z.object({ enabled: z.literal(false) }).strict(),
+  z.object({
+    enabled: z.literal(true),
+    provider_kind: z.literal("local_onnx"),
+    effective_model_id: z.string().min(1),
+    model_artifact_sha256: Sha256Schema,
+    effective_schema_version: z.number().int().positive(),
+    d2q_input: z.enum(["raw_content", "content_plus_hq"])
+  }).strict(),
+  z.object({
+    enabled: z.literal(true),
+    provider_kind: z.literal("openai"),
+    effective_model_id: z.string().min(1),
+    effective_schema_version: z.literal(1),
+    d2q_input: z.literal("raw_content")
+  }).strict()
+]);
+export type EmbeddingSupplementRuntimeProvenance = z.infer<
+  typeof EmbeddingSupplementRuntimeProvenanceSchema
+>;
+
+const RecallEvalAnswerRerankSchema = z.discriminatedUnion("enabled", [
+  z.object({ enabled: z.literal(false) }).strict(),
+  z.object({
+    enabled: z.literal(true),
+    provider_kind: z.literal("local_onnx_cross_encoder"),
+    effective_model_id: z.string().min(1),
+    model_artifact_sha256: Sha256Schema
+  }).strict()
+]);
+
+export const RecallEvalAttributionSchema = z.object({
+  status: z.enum(["attributed", "legacy_unattributed"]),
+  gate_eligible: z.boolean(),
+  node_version: z.string().min(1),
+  platform: z.string().min(1),
+  arch: z.string().min(1),
+  embedding_mode: z.enum(["disabled", "env"]),
+  embedding_provider_kind: z.enum(["openai", "local_onnx"]),
+  embedding_provider_label: z.string().min(1),
+  onnx_threads: z.number().int().min(1).max(64).nullable(),
+  onnx_model_artifact_sha256: Sha256Schema.nullable(),
+  embedding_supplement: EmbeddingSupplementRuntimeProvenanceSchema.optional(),
+  answer_rerank: RecallEvalAnswerRerankSchema.optional(),
+  recall_config: z.object({
+    schema_version: z.union([z.literal(1), z.literal(2)]),
+    max_results: z.number().int().min(1).max(1_000),
+    conflict_awareness: z.boolean(),
+    effective_config_sha256: Sha256Schema
+  }).strict().optional(),
+  evaluation_slice: z.object({
+    offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive().nullable(),
+    evaluated_count: z.number().int().nonnegative(),
+    question_id_digest: Sha256Schema
+  }).strict().optional(),
+  hydration_binding: z.object({
+    dataset_sha256: Sha256Schema,
+    source: z.literal("external_expected_sha256")
+  }).strict().optional(),
+  snapshot_binding: z.object({
+    commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u).nullable(),
+    gate_sha256: Sha256Schema.nullable(),
+    worktree_state_sha256: Sha256Schema.nullable(),
+    extraction_cache_manifest_sha256: Sha256Schema.nullable(),
+    extraction_cache_requested_turns: z.number().int().nonnegative().nullable(),
+    extraction_cache_cached_turns: z.number().int().nonnegative().nullable(),
+    extraction_cache_coverage: RatioSchema.nullable(),
+    dataset_sha256: Sha256Schema.nullable(),
+    question_id_digest: Sha256Schema.nullable(),
+    snapshot_manifest_sha256: Sha256Schema.nullable().optional(),
+    producer_recall_pipeline_version: z.string().min(1).optional(),
+    consumer_recall_pipeline_version: z.string().min(1).optional(),
+    producer_schema_migration_version: z.number().int().nonnegative().optional()
+  }).strict()
+}).strict();
+export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
 
 // @anchor token-economy: event-sourced token-economy figures, all
 // derived from the bench run's EventLog (SOUL_SIGNAL_EMITTED for the

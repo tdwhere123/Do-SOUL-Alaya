@@ -11,8 +11,12 @@ import {
   enqueueVisibleTierViolation} from "./garden-scheduler-fixtures.js";
 
 describe("GardenScheduler", () => {  it("does not remove a tier-violation task when the reject append fails", async () => {
+    const append = vi.fn(async (_event: unknown) => undefined);
     const eventLog = {
-      append: vi.fn(async () => undefined)
+      append,
+      appendManyAtomic: vi.fn(async (events: readonly unknown[]) => {
+        for (const event of events) await append(event);
+      })
     };
     const repo = new InMemoryGardenTaskRepo(eventLog);
     const scheduler = new GardenScheduler(
@@ -46,7 +50,7 @@ describe("GardenScheduler", () => {  it("does not remove a tier-violation task w
     expect(armSignal).toEqual(expect.objectContaining({ transition: "arm" }));
     expect(scheduler.acknowledgeBacklogWarningTransition(armSignal!.transition_id)).toBe(true);
 
-    eventLog.append.mockRejectedValueOnce(new Error("tier violation append failed"));
+    eventLog.appendManyAtomic.mockRejectedValueOnce(new Error("tier violation append failed"));
 
     await expect(scheduler.dispatchNext(GardenRole.JANITOR)).rejects.toThrow(
       "tier violation append failed"
@@ -64,6 +68,41 @@ describe("GardenScheduler", () => {  it("does not remove a tier-violation task w
     await expect(scheduler.dispatchNext(GardenRole.JANITOR)).resolves.toMatchObject({
       task_id: "task-valid"
     });
+  });
+
+  it("does not retain a partial tier-violation audit when the completion append fails", async () => {
+    const committed: Array<{ readonly event_type: string }> = [];
+    const eventLog = {
+      append: vi.fn(async (event: { readonly event_type: string }) => {
+        if (event.event_type === "soul.garden.task_completed") {
+          throw new Error("completion append failed");
+        }
+        committed.push(event);
+      }),
+      appendManyAtomic: vi.fn(async (events: readonly { readonly event_type: string }[]) => {
+        const staged: Array<{ readonly event_type: string }> = [];
+        for (const event of events) {
+          if (event.event_type === "soul.garden.task_completed") {
+            throw new Error("completion append failed");
+          }
+          staged.push(event);
+        }
+        committed.push(...staged);
+      })
+    };
+    const repo = new InMemoryGardenTaskRepo(eventLog);
+    const scheduler = new GardenScheduler(eventLog, {}, null, repo);
+    enqueueVisibleTierViolation(repo, {
+      task_id: "task-invalid-batch",
+      task_kind: GardenTaskKind.GREEN_MAINTENANCE,
+      required_tier: GardenTier.TIER_1
+    });
+
+    await expect(scheduler.dispatchNext(GardenRole.JANITOR)).rejects.toThrow(
+      "completion append failed"
+    );
+    expect(committed).toEqual([]);
+    expect(repo.findById("task-invalid-batch")).toMatchObject({ status: "pending" });
   });
 
 

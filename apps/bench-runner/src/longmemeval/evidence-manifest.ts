@@ -14,6 +14,7 @@ export type LongMemEvalEvidenceArtifactRole =
   | "run_provenance"
   | "shard_run_provenance"
   | "rank_identity"
+  | "recall_eval_diagnostics"
   | "stage_ledger"
   | "oracle_derivation";
 
@@ -33,6 +34,7 @@ export type LongMemEvalEvidenceArtifactInput = LongMemEvalEvidenceArtifactBase &
 export interface LongMemEvalEvidenceManifest {
   readonly schema_version: 1;
   readonly kind: "longmemeval_evidence_bundle";
+  readonly profile?: "full_run" | "recall_eval";
   readonly run: {
     readonly slug: string;
     readonly bench_name: string;
@@ -56,6 +58,7 @@ export interface LongMemEvalEvidenceManifest {
 }
 
 export function buildLongMemEvalEvidenceManifest(input: {
+  readonly profile?: "full_run" | "recall_eval";
   readonly run: LongMemEvalEvidenceManifest["run"];
   readonly artifacts: readonly LongMemEvalEvidenceArtifactInput[];
 }): LongMemEvalEvidenceManifest {
@@ -65,8 +68,9 @@ export function buildLongMemEvalEvidenceManifest(input: {
   const unsigned = {
     schema_version: 1 as const,
     kind: "longmemeval_evidence_bundle" as const,
+    ...(input.profile === undefined ? {} : { profile: input.profile }),
     run: input.run,
-    evidence_status: evidenceIsComplete(input.run, input.artifacts)
+    evidence_status: evidenceIsComplete(input.run, input.artifacts, input.profile)
       ? "complete" as const
       : "partial" as const,
     artifacts
@@ -84,13 +88,25 @@ const REQUIRED_EVIDENCE_ROLES = [
   "run_provenance"
 ] as const;
 
+const REQUIRED_RECALL_EVAL_EVIDENCE_ROLES = [
+  "kpi",
+  "report",
+  "rank_identity",
+  "run_provenance",
+  "recall_eval_diagnostics"
+] as const;
+
 function evidenceIsComplete(
   run: LongMemEvalEvidenceManifest["run"],
-  artifacts: readonly LongMemEvalEvidenceArtifactInput[]
+  artifacts: readonly LongMemEvalEvidenceArtifactInput[],
+  profile: "full_run" | "recall_eval" | undefined
 ): boolean {
   if (!run.candidate_pool_complete || run.provenance_complete !== true) return false;
   const roles = new Set(artifacts.map((artifact) => artifact.role));
-  return REQUIRED_EVIDENCE_ROLES.every((role) => roles.has(role));
+  const required = profile === "recall_eval"
+    ? REQUIRED_RECALL_EVAL_EVIDENCE_ROLES
+    : REQUIRED_EVIDENCE_ROLES;
+  return required.every((role) => roles.has(role));
 }
 
 function assertRunBindings(run: LongMemEvalEvidenceManifest["run"]): void {

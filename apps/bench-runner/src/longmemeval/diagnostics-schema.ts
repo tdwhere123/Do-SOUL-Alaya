@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { RecallCandidateAnswerFeaturesSchema } from "../harness/recall-diagnostics-schema.js";
+import {
+  BenchAnswerRerankFailureClassSchema,
+  BenchAnswerRerankStatusSchema,
+  RecallCandidateAnswerFeaturesSchema
+} from "../harness/recall-diagnostics-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
 export { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
 
@@ -209,6 +213,8 @@ const LongMemEvalReplayCandidateSchema = z
     selection_order: z.number().nullable(),
     fused_rank: z.number().nullable(),
     fused_score: z.number().nullable(),
+    answer_relevance_score: z.number().min(0).max(1).nullable().default(null),
+    answer_relevance_rank: z.number().int().positive().nullable().default(null),
     per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
     fused_rank_contribution_per_stream:
       DiagnosticStreamContributionsSchema.nullable(),
@@ -317,6 +323,8 @@ export const LongMemEvalGoldDiagnosticSchema = z
     selection_order: z.number().nullable(),
     fused_rank: z.number().nullable(),
     fused_score: z.number().nullable(),
+    answer_relevance_score: z.number().min(0).max(1).nullable().default(null),
+    answer_relevance_rank: z.number().int().positive().nullable().default(null),
     per_stream_rank: DiagnosticStreamRanksSchema.nullable(),
     fused_rank_contribution_per_stream:
       DiagnosticStreamContributionsSchema.nullable(),
@@ -392,6 +400,16 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     phase_latency_ms: PhaseLatencyMsSchema.optional(),
     provider_state: BenchEmbeddingProviderStateSchema,
     provider_degradation_reason: z.string().nullable(),
+    embedding_workspace_scanned_count: z.number().int().nonnegative().optional(),
+    embedding_workspace_truncated: z.boolean().optional(),
+    embedding_workspace_provider_kind: z.string().min(1).optional(),
+    embedding_workspace_model_id: z.string().min(1).optional(),
+    embedding_workspace_schema_version: z.number().int().positive().optional(),
+    answer_rerank_status: BenchAnswerRerankStatusSchema.nullable().default(null),
+    answer_rerank_expected_count: z.number().int().nonnegative().nullable().default(null),
+    answer_rerank_scored_count: z.number().int().nonnegative().nullable().default(null),
+    answer_rerank_failure_class:
+      BenchAnswerRerankFailureClassSchema.nullable().default(null),
     graph_expansion_plane_count_per_hop:
       GraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:

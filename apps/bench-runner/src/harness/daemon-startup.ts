@@ -9,12 +9,9 @@ import {
   closeBenchDaemonResources,
   makeDispatchCli,
   seedBenchWorkspaceAndRun,
-  type BenchReviewerCredentials
+  type BenchDaemonLaunchConfig
 } from "./daemon-support.js";
-import type {
-  BenchEmbeddingMode,
-  BenchEmbeddingProviderKind
-} from "./daemon-types.js";
+import type { BenchDaemonConfigDirectoryLease } from "./daemon-config-directory.js";
 
 type ActiveBenchContext = { workspaceId: string; runId: string };
 
@@ -23,11 +20,9 @@ export interface BenchDaemonStartupInput {
   readonly defaultWorkspaceId: string;
   readonly defaultRunId: string;
   readonly activeContext: ActiveBenchContext;
-  readonly embeddingMode: BenchEmbeddingMode;
-  readonly embeddingProviderKind: BenchEmbeddingProviderKind;
-  readonly effectiveOpenAiSecretRef: string;
-  readonly savedEnv: Partial<Record<string, string | undefined>>;
-  readonly reviewerCredentials: BenchReviewerCredentials;
+  readonly launch: BenchDaemonLaunchConfig;
+  readonly configDirectory: BenchDaemonConfigDirectoryLease;
+  readonly managedEnvKeys: readonly string[];
   readonly createManagedWorkspaceRoot: (workspaceId: string) => Promise<string>;
 }
 
@@ -43,21 +38,15 @@ export interface BenchDaemonStartupResources {
 export async function initializeBenchDaemon(
   input: BenchDaemonStartupInput
 ): Promise<BenchDaemonStartupResources> {
-  applyBenchDaemonEnvironment({
-    dataDir: input.dataDir,
-    embeddingMode: input.embeddingMode,
-    embeddingProviderKind: input.embeddingProviderKind,
-    effectiveOpenAiSecretRef: input.effectiveOpenAiSecretRef,
-    savedEnv: input.savedEnv,
-    reviewerCredentials: input.reviewerCredentials
-  });
+  applyBenchDaemonEnvironment(input.launch.environment, input.managedEnvKeys);
+  await input.configDirectory.prepare();
   const resources = await createBenchRuntimeResources(input.activeContext);
   try {
     await installBenchProfile(
       resources.dispatchCli,
       input.dataDir,
       input.defaultWorkspaceId,
-      input.embeddingMode === "env"
+      input.launch.embeddingMode === "env"
     );
     await seedBenchDefaultWorkspace(input);
     logBenchPragmaApplication(input.dataDir);

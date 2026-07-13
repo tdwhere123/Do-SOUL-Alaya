@@ -1,5 +1,6 @@
 import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import { startBenchDaemon } from "../harness/daemon.js";
+import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.js";
 import { extractRecallTokenEconomy } from "./recall-token-economy.js";
 import { buildQuestionDiagnostic } from "./diagnostics.js";
 import { isAbstentionQuestionId } from "./abstention.js";
@@ -53,7 +54,9 @@ export async function runLongMemEvalMultiturnQuestion(input: {
   const daemon = await startBenchDaemon({
     workspaceId: `lme-mt-${input.question.question_id.slice(0, 8)}`,
     runId: `run-mt-${input.question.question_id.slice(0, 8)}`,
-    embeddingMode: input.opts.embeddingMode ?? "disabled"
+    embeddingMode: input.opts.embeddingMode ?? "disabled",
+    embeddingProviderKind: input.opts.embeddingProviderKind ??
+      DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND
   });
   try {
     const state = createMultiturnQuestionState(input.question);

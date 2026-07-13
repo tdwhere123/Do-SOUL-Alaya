@@ -115,6 +115,20 @@ describe("bench maintenance scripts", () => {
     expect(pathIsStrictlyOutside(checkoutRoot, cacheDir)).toBe(true);
   });
 
+  it("loads the local embedding fetch script before validating arguments", async () => {
+    const scriptPath = path.resolve(repoRoot, "scripts/fetch-local-embedding-model.mjs");
+
+    const result = await execFileRejects(
+      process.execPath,
+      [scriptPath, "--unknown"],
+      cliScriptEnv()
+    );
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("unknown argument: --unknown");
+    expect(result.stderr).not.toContain("ReferenceError");
+  });
+
   it("does not append degradation backlog after daily runner infrastructure failures", async () => {
     const markerPath = path.join(tmpDir, "append-called");
     const scriptPath = path.resolve(
@@ -208,11 +222,15 @@ async function execFileRejects(
   file: string,
   args: readonly string[],
   env: NodeJS.ProcessEnv
-): Promise<{ readonly code: number | string | null }> {
+): Promise<{ readonly code: number | string | null; readonly stderr: string }> {
   try {
     await execFileAsync(file, args, { env });
   } catch (error) {
-    return { code: (error as { code?: number | string }).code ?? null };
+    const failed = error as { code?: number | string; stderr?: string | Buffer };
+    return {
+      code: failed.code ?? null,
+      stderr: typeof failed.stderr === "string" ? failed.stderr : failed.stderr?.toString() ?? ""
+    };
   }
   throw new Error("expected command to fail");
 }

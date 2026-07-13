@@ -115,6 +115,16 @@ function accumulateRecallEvidenceRow(
   state: RecallEvidenceAccumulator,
   row: LongMemEvalQuestionDiagnostic
 ): void {
+  accumulateGraphExpansionCounts(state, row);
+  accumulateMissTaxonomy(state, row);
+  accumulateDeliveredEvidence(state, row);
+  accumulateGoldEvidence(state, row);
+}
+
+function accumulateGraphExpansionCounts(
+  state: RecallEvidenceAccumulator,
+  row: LongMemEvalQuestionDiagnostic
+): void {
   const graphExpansionHopCounts =
     readGraphExpansionPlaneCountPerHop(
       (row as { readonly graph_expansion_plane_count_per_hop?: unknown })
@@ -130,6 +140,12 @@ function accumulateRecallEvidenceRow(
   state.graphExpansionEdgeTypes.derives_from += graphExpansionEdgeTypeCounts.derives_from;
   state.graphExpansionEdgeTypes.recalls += graphExpansionEdgeTypeCounts.recalls;
   state.graphExpansionEdgeTypes.supports += graphExpansionEdgeTypeCounts.supports;
+}
+
+function accumulateMissTaxonomy(
+  state: RecallEvidenceAccumulator,
+  row: LongMemEvalQuestionDiagnostic
+): void {
   const missTaxonomy = !row.hit_at_5 &&
     classifyQuestionMeasurementStatus(row) === "scorable"
     ? readQuestionMissTaxonomy(row)
@@ -137,6 +153,12 @@ function accumulateRecallEvidenceRow(
   if (missTaxonomy !== null) {
     state.missTaxonomyDistribution[missTaxonomy] += 1;
   }
+}
+
+function accumulateDeliveredEvidence(
+  state: RecallEvidenceAccumulator,
+  row: LongMemEvalQuestionDiagnostic
+): void {
   for (const delivered of row.delivered_results) {
     state.deliveredResultCount += 1;
     incrementCount(state.deliveredFirst, delivered.plane_first_admitted ?? "unknown");
@@ -154,6 +176,12 @@ function accumulateRecallEvidenceRow(
       state.pathExpansionPlaneCount += 1;
     }
   }
+}
+
+function accumulateGoldEvidence(
+  state: RecallEvidenceAccumulator,
+  row: LongMemEvalQuestionDiagnostic
+): void {
   for (const gold of row.gold) {
     if (gold.source_channels.includes("graph_support")) {
       state.graphSupportGoldCount += 1;

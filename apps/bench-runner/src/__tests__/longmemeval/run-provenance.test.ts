@@ -6,10 +6,11 @@ import { createStratifiedQuestionManifest } from "../../longmemeval/selection/qu
 import {
   buildLongMemEvalRunProvenance,
   buildLongMemEvalRunProvenanceSidecar,
+  isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
   LONGMEMEVAL_RUN_PROVENANCE_FILENAME
 } from "../../longmemeval/provenance/run.js";
-import { resolveLocalOnnxArtifactSha256 } from "../../longmemeval/provenance/local-onnx.js";
+import { resolveLocalArtifactTreeSha256 } from "../../longmemeval/provenance/local-onnx.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_CACHE_KEY_ALGO,
@@ -29,11 +30,18 @@ describe("LongMemEval run provenance", () => {
     const manifestPath = join(root, "manifest.json");
     const extractionCacheRoot = join(root, "extraction-cache");
     const modelCacheRoot = join(root, "models");
+    const crossEncoderCacheRoot = join(root, "cross-models");
     await mkdir(join(modelCacheRoot, "Xenova", "test"), { recursive: true });
+    await mkdir(join(crossEncoderCacheRoot, "Xenova", "reranker"), { recursive: true });
     await writeFile(join(modelCacheRoot, "Xenova", "test", "config.json"), "model-config", {
       encoding: "utf8",
       flag: "w"
     });
+    await writeFile(
+      join(crossEncoderCacheRoot, "Xenova", "reranker", "model.onnx"),
+      "cross-encoder-model",
+      "utf8"
+    );
     const manifest = createStratifiedQuestionManifest({
       variant: "longmemeval_s",
       datasetSha256: "a".repeat(64),
@@ -95,6 +103,9 @@ describe("LongMemEval run provenance", () => {
         OFFICIAL_API_GARDEN_MODEL: "cached-model",
         ALAYA_LOCAL_ONNX_THREADS: "2",
         ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelCacheRoot,
+        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
+        ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: crossEncoderCacheRoot,
+        ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
         ALAYA_EXP_ANSWERS_WITH_CAP: "3",
         ALAYA_RECALL_ANSWERS_WITH: "1",
         ALAYA_RECALL_FACET_TAGS: "1",
@@ -117,6 +128,7 @@ describe("LongMemEval run provenance", () => {
       evaluated_count: 1
     });
     expect(provenance.recall_config.conf_slice_compatibility).toBe(true);
+    expect(provenance.recall_config.schema_version).toBe(2);
     expect(provenance.seed_capabilities).toEqual({ facet_tags_enabled: true });
     expect(provenance.code).toEqual({
       commit_sha7: "05d98df",
@@ -148,11 +160,27 @@ describe("LongMemEval run provenance", () => {
       embedding_provider_label: "local_onnx:Xenova/test",
       onnx_threads: 2,
       onnx_model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      embedding_supplement: {
+        enabled: true,
+        provider_kind: "local_onnx",
+        effective_model_id: "Xenova/test",
+        model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        effective_schema_version: 1,
+        d2q_input: "raw_content"
+      },
+      answer_rerank: {
+        enabled: true,
+        provider_kind: "local_onnx_cross_encoder",
+        effective_model_id: "Xenova/reranker",
+        model_artifact_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      },
       paired_env: {
         ALAYA_EXP_ANSWERS_WITH_CAP: "3",
         ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
         ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",
         ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "cached-family",
+        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
+        ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
         ALAYA_LOCAL_ONNX_THREADS: "2",
         OFFICIAL_API_GARDEN_MODEL: "cached-model",
         ALAYA_RECALL_ANSWERS_WITH: "1",
@@ -164,6 +192,7 @@ describe("LongMemEval run provenance", () => {
     });
     expect(provenance.runtime.paired_env).not.toHaveProperty("ALAYA_RECALL_AUTH_HEADER");
     expect(provenance.runtime.paired_env).not.toHaveProperty("ALAYA_EXP_SIGNED_URL");
+    expect(JSON.stringify(provenance.runtime.paired_env)).not.toContain(crossEncoderCacheRoot);
     expect(provenance.question_manifest).toMatchObject({
       schema_version: 1,
       variant: "longmemeval_s",
@@ -196,6 +225,9 @@ describe("LongMemEval run provenance", () => {
         OFFICIAL_API_GARDEN_MODEL: "cached-model",
         ALAYA_LOCAL_ONNX_THREADS: "2",
         ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelCacheRoot,
+        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
+        ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: crossEncoderCacheRoot,
+        ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
         ALAYA_EXP_ANSWERS_WITH_CAP: "3",
         ALAYA_RECALL_ANSWERS_WITH: "1",
         ALAYA_RECALL_FACET_TAGS: "1",
@@ -216,6 +248,24 @@ describe("LongMemEval run provenance", () => {
       ...provenance,
       extraction_cache: { ...v1Cache, schema_version: 1 }
     }).success).toBe(true);
+    const legacyRuntime = { ...provenance.runtime };
+    delete (legacyRuntime as { answer_rerank?: unknown }).answer_rerank;
+    delete (legacyRuntime as { embedding_supplement?: unknown }).embedding_supplement;
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...provenance,
+      runtime: legacyRuntime
+    }).success).toBe(true);
+    expect(LongMemEvalRunProvenanceSchema.safeParse({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        answer_rerank: {
+          enabled: true,
+          provider_kind: "local_onnx_cross_encoder",
+          effective_model_id: "Xenova/reranker"
+        }
+      }
+    }).success).toBe(false);
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
       extraction_cache: { ...v1Cache, schema_version: 99 }
@@ -241,6 +291,75 @@ describe("LongMemEval run provenance", () => {
         request_profile: "provider-default-v1"
       }
     }).success).toBe(false);
+
+    expect(isLongMemEvalRunProvenanceGateEligible(provenance)).toBe(true);
+    const legacyRecallIdentity = LongMemEvalRunProvenanceSchema.parse({
+      ...provenance,
+      recall_config: { ...provenance.recall_config, schema_version: 1 }
+    });
+    expect(isLongMemEvalRunProvenanceGateEligible(legacyRecallIdentity)).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        paired_env: {
+          ...provenance.runtime.paired_env,
+          ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
+        }
+      }
+    })).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        answer_rerank: { enabled: false }
+      }
+    })).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: legacyRuntime
+    })).toBe(false);
+    expect(() => isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        paired_env: {
+          ...provenance.runtime.paired_env,
+          ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "sometimes"
+        }
+      }
+    })).toThrow(/ALAYA_ENABLE_EMBEDDING_SUPPLEMENT/u);
+    expect(() => isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        paired_env: {
+          ...provenance.runtime.paired_env,
+          ALAYA_RECALL_D2Q: "sometimes"
+        }
+      }
+    })).toThrow(/ALAYA_RECALL_D2Q/u);
+    expect(() => isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        paired_env: {
+          ...provenance.runtime.paired_env,
+          ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "sometimes"
+        }
+      }
+    })).toThrow(/ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK/u);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...provenance,
+      runtime: {
+        ...provenance.runtime,
+        embedding_mode: "disabled",
+        embedding_provider_kind: "openai",
+        embedding_provider_label: "none",
+        embedding_supplement: { enabled: false },
+        onnx_model_artifact_sha256: "3".repeat(64)
+      }
+    })).toBe(false);
   });
 
   it("rejects symbolic links in the local ONNX artifact tree", async () => {
@@ -251,9 +370,9 @@ describe("LongMemEval run provenance", () => {
     await writeFile(join(root, "outside"), "secret", "utf8");
     await symlink(join(root, "outside"), join(modelRoot, "model.onnx"));
 
-    await expect(resolveLocalOnnxArtifactSha256("local_onnx:Xenova/test", {
-      ALAYA_LOCAL_EMBEDDING_CACHE_DIR: join(root, "models")
-    })).rejects.toThrow(/artifact tree/u);
+    await expect(resolveLocalArtifactTreeSha256(
+      join(root, "models"), "Xenova/test"
+    )).rejects.toThrow(/artifact tree/u);
   });
 
   it("rejects an environment identity that does not match the fresh closure", async () => {
@@ -274,6 +393,21 @@ describe("LongMemEval run provenance", () => {
     })).rejects.toThrow(/does not match fresh closure/u);
   });
 
+  it("rejects an ONNX thread count above the runtime maximum", async () => {
+    await expect(buildLongMemEvalRunProvenance({
+      opts: {
+        variant: "longmemeval_s",
+        historyRoot: "/tmp",
+        embeddingMode: "disabled"
+      },
+      evaluatedCount: 0,
+      commitSha7: "05d98df",
+      embeddingProviderLabel: "disabled",
+      env: { ALAYA_LOCAL_ONNX_THREADS: "128" },
+      computeExecutedDistIdentity: fakeExecutedDistIdentity
+    })).rejects.toThrow(/ALAYA_LOCAL_ONNX_THREADS/u);
+  });
+
   it("rejects model traversal and a symlinked model root", async () => {
     const root = await mkdtemp(join(tmpdir(), "lme-onnx-root-symlink-"));
     roots.push(root);
@@ -284,12 +418,10 @@ describe("LongMemEval run provenance", () => {
     await writeFile(join(outside, "model.onnx"), "model", "utf8");
     await symlink(outside, join(cacheRoot, "linked"), "dir");
 
-    await expect(resolveLocalOnnxArtifactSha256("local_onnx:../outside", {
-      ALAYA_LOCAL_EMBEDDING_CACHE_DIR: cacheRoot
-    })).rejects.toThrow(/cache root/u);
-    await expect(resolveLocalOnnxArtifactSha256("local_onnx:linked", {
-      ALAYA_LOCAL_EMBEDDING_CACHE_DIR: cacheRoot
-    })).rejects.toThrow(/artifact tree/u);
+    await expect(resolveLocalArtifactTreeSha256(cacheRoot, "../outside"))
+      .rejects.toThrow(/cache root/u);
+    await expect(resolveLocalArtifactTreeSha256(cacheRoot, "linked"))
+      .rejects.toThrow(/artifact tree/u);
   });
 });
 

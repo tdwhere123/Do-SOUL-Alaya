@@ -1,5 +1,9 @@
 import type { KpiPayload } from "@do-soul/alaya-eval";
-import type { BenchEmbeddingMode, BenchTokenMetrics } from "../harness/daemon.js";
+import type {
+  BenchEmbeddingMode,
+  BenchEmbeddingProviderKind,
+  BenchTokenMetrics
+} from "../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "./diagnostics.js";
 import type { LongMemEvalVariant } from "./dataset.js";
@@ -21,6 +25,7 @@ export interface LongMemEvalMultiturnRunOptions {
   readonly dataDir?: string;
   readonly fetchResult?: FetchResult;
   readonly embeddingMode?: BenchEmbeddingMode;
+  readonly embeddingProviderKind?: BenchEmbeddingProviderKind;
   readonly pinnedMetaRoot?: string;
   readonly offset?: number;
   readonly rounds?: number;

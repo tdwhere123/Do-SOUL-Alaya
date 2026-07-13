@@ -13,6 +13,7 @@ import {
 } from "./diagnostics-schema.js";
 import type { BenchCommitResolution } from "../shared/version.js";
 import type { z } from "zod";
+import type { BenchRecallDiagnostics } from "../harness/recall-diagnostics-schema.js";
 
 // @anchor diagnostics-schema: the persisted shape of these records is owned
 // by diagnostics-schema.ts; these aliases keep one source of truth.
@@ -56,6 +57,8 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly selection_order: number | null;
   readonly fused_rank: number | null;
   readonly fused_score: number | null;
+  readonly answer_relevance_score: number | null;
+  readonly answer_relevance_rank: number | null;
   readonly per_stream_rank: DiagnosticStreamRanks | null;
   readonly fused_rank_contribution_per_stream: DiagnosticStreamContributions | null;
   readonly per_axis_rank: DiagnosticAxisRanks | null;
@@ -303,6 +306,16 @@ export interface NarrowRecallDiagnostics {
   readonly candidateKeysByObjectId: ReadonlyMap<string, readonly string[]>;
   readonly providerState: BenchEmbeddingProviderState;
   readonly providerDegradationReason: string | null;
+  readonly embeddingWorkspaceScannedCount: number | null;
+  readonly embeddingWorkspaceTruncated: boolean | null;
+  readonly embeddingWorkspaceProviderKind: string | null;
+  readonly embeddingWorkspaceModelId: string | null;
+  readonly embeddingWorkspaceSchemaVersion: number | null;
+  readonly answerRerankStatus: BenchRecallDiagnostics["answer_rerank_status"] | null;
+  readonly answerRerankExpectedCount: number | null;
+  readonly answerRerankScoredCount: number | null;
+  readonly answerRerankFailureClass:
+    BenchRecallDiagnostics["answer_rerank_failure_class"] | null;
   readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
   readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
   readonly phaseLatencyMs: LongMemEvalPhaseLatencyMs | null;
@@ -321,6 +334,8 @@ export interface CandidateDiagnostic {
   readonly finalRank: number | null;
   readonly fusedRank: number | null;
   readonly fusedScore: number | null;
+  readonly answerRelevanceScore: number | null;
+  readonly answerRelevanceRank: number | null;
   readonly perStreamRank: DiagnosticStreamRanks | null;
   readonly fusedRankContributionPerStream: DiagnosticStreamContributions | null;
   readonly perAxisRank: DiagnosticAxisRanks | null;

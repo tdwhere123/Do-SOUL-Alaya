@@ -71,6 +71,9 @@ export interface RecallSupplementaryData {
   // applyPathSuppressionToFusionScores.
   readonly pathSuppressionScores: Readonly<Record<string, number>>;
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
+  // Optional final query-to-candidate relevance owned by a local reranker.
+  // Candidate-key identity preserves distinct provenance projections.
+  readonly answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>;
   readonly graphSupportCounts: Readonly<Record<string, number>>;
   readonly evidenceSupportVectorsByMemoryId?: Readonly<Record<string, readonly EvidenceSupportVector[]>>;
   readonly budgetPenaltyFactor: number;

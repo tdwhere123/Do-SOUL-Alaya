@@ -15,7 +15,6 @@ import {
   type GraphExpansionCandidateSourceDiagnostic,
   type GraphExpansionCandidatesResult
 } from "./graph-expansion.js";
-import { CoreError } from "../../shared/errors.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
@@ -27,6 +26,7 @@ import {
   expandGraphFrontier,
   expandGraphFrontiersBySeed
 } from "./structural-expansion-graph-frontier.js";
+import { loadEntitySeedHitBatches } from "./entity-seed-bulk-read.js";
 
 
 type CoarseCandidateAdder = (
@@ -37,6 +37,17 @@ type CoarseCandidateAdder = (
   pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
   entityConfidence?: number
 ) => boolean;
+
+type EntitySeedDescriptor = Readonly<{
+  readonly surface: string;
+  readonly confidence: number;
+}>;
+
+type EntitySeedLookup = Readonly<{
+  readonly entity: EntitySeedDescriptor;
+  readonly surface: string;
+  readonly limit: number;
+}>;
 
 export async function collectEntityDerivedSeeds(params: Readonly<{
   readonly workspaceId: string;
@@ -62,15 +73,20 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
   }
   const seedConfidenceById = new Map<string, number>();
   const candidateIds = [...params.byId.keys()];
+  const lookups = buildEntitySeedLookups(params, entities);
+  const hitBatches = await loadEntitySeedBatchesForCollection(params, lookups, candidateIds);
   let admittedTotal = 0;
-  for (const entity of entities) {
+  for (let index = 0; index < lookups.length; index += 1) {
     if (admittedTotal >= params.entitySeedTotalAdmitCap) {
       break;
     }
-    admittedTotal = await admitEntitySeedsForEntity(
+    const lookup = lookups[index];
+    const hits = hitBatches[index] ?? [];
+    if (lookup === undefined) break;
+    admittedTotal = admitEntitySeedHits(
       params,
-      entity,
-      candidateIds,
+      lookup.entity.confidence,
+      hits,
       seedConfidenceById,
       admittedTotal
     );
@@ -301,8 +317,9 @@ async function extractSeedEntities(params: Readonly<{
   readonly normalized: string;
   readonly confidence: number;
 }>[]> {
-  const entityExtractionPort = requireEntityExtractionPort(params.entityExtractionPort);
-  const queryText = requireQueryText(params.queryText);
+  const entityExtractionPort = params.entityExtractionPort;
+  const queryText = params.queryText;
+  if (entityExtractionPort === undefined || queryText === null) return [];
   try {
     return await entityExtractionPort.extract(queryText, {
       maxEntities: params.entityExtractionMaxEntities
@@ -318,62 +335,39 @@ async function extractSeedEntities(params: Readonly<{
   }
 }
 
-async function admitEntitySeedsForEntity(
+function buildEntitySeedLookups(
   params: Parameters<typeof collectEntityDerivedSeeds>[0],
-  entity: Readonly<{ readonly surface: string; readonly confidence: number }>,
-  candidateIds: readonly string[],
-  seedConfidenceById: Map<string, number>,
-  admittedTotal: number
-): Promise<number> {
-  const surface = entity.surface.trim();
-  if (surface.length < params.entitySeedMinSurfaceLength) {
-    return admittedTotal;
-  }
-  const hits = await searchEntitySeedHits(params, surface, entity.confidence, candidateIds);
-  return admitEntitySeedHits(params, entity.confidence, hits, seedConfidenceById, admittedTotal);
+  entities: readonly EntitySeedDescriptor[]
+): readonly EntitySeedLookup[] {
+  return entities.flatMap((entity) => {
+    const surface = entity.surface.trim();
+    return surface.length < params.entitySeedMinSurfaceLength
+      ? []
+      : [{ entity, surface, limit: resolveEntitySeedLimit(params, entity.confidence) }];
+  });
 }
 
-async function searchEntitySeedHits(
+async function loadEntitySeedBatchesForCollection(
   params: Parameters<typeof collectEntityDerivedSeeds>[0],
-  surface: string,
-  confidence: number,
+  lookups: readonly EntitySeedLookup[],
   candidateIds: readonly string[]
-): Promise<readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[]> {
-  const perEntityLimit = confidence >= 0.85
+): Promise<readonly (readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[])[]> {
+  return loadEntitySeedHitBatches({
+    workspaceId: params.workspaceId,
+    lookups,
+    candidateIds,
+    memoryRepo: params.memoryRepo,
+    warn: params.warn
+  });
+}
+
+function resolveEntitySeedLimit(
+  params: Parameters<typeof collectEntityDerivedSeeds>[0],
+  confidence: number
+): number {
+  return confidence >= 0.85
     ? params.entitySeedPerEntityTopKStrong
     : params.entitySeedPerEntityTopKWeak;
-  if (params.memoryRepo.searchByKeywordWithinObjectIds !== undefined) {
-    try {
-      return await params.memoryRepo.searchByKeywordWithinObjectIds(
-        params.workspaceId,
-        surface,
-        perEntityLimit,
-        candidateIds
-      );
-    } catch (error) {
-      params.warn("entity seed lookup failed", {
-        workspace_id: params.workspaceId,
-        entity_surface: surface,
-        operation: "entity_seed_lookup",
-        errorName: errorNameOf(error),
-        error: toErrorMessage(error)
-      });
-      return [];
-    }
-  }
-  const searchByKeyword = requireSearchByKeyword(params.memoryRepo);
-  try {
-    return await searchByKeyword(params.workspaceId, surface, perEntityLimit);
-  } catch (error) {
-    params.warn("entity seed lookup failed", {
-      workspace_id: params.workspaceId,
-      entity_surface: surface,
-      operation: "entity_seed_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return [];
-  }
 }
 
 function admitEntitySeedHits(
@@ -406,31 +400,6 @@ function admitEntitySeedHits(
     }
   }
   return nextAdmittedTotal;
-}
-
-function requireEntityExtractionPort(
-  port: RecallServiceDependencies["entityExtractionPort"]
-): NonNullable<RecallServiceDependencies["entityExtractionPort"]> {
-  if (port === undefined) {
-    throw new CoreError("CONFLICT", "Entity extraction port is required for entity seed collection");
-  }
-  return port;
-}
-
-function requireQueryText(queryText: string | null): string {
-  if (queryText === null) {
-    throw new CoreError("VALIDATION", "Query text is required for entity seed collection");
-  }
-  return queryText;
-}
-
-function requireSearchByKeyword(
-  memoryRepo: RecallServiceDependencies["memoryRepo"]
-): NonNullable<RecallServiceDependencies["memoryRepo"]["searchByKeyword"]> {
-  if (memoryRepo.searchByKeyword === undefined) {
-    throw new CoreError("CONFLICT", "Memory repo searchByKeyword is required for entity seed lookup");
-  }
-  return memoryRepo.searchByKeyword;
 }
 
 function buildEntitySeedResults(

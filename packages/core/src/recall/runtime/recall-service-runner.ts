@@ -5,7 +5,11 @@ import {
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import { withEmbeddingSimilarityScores } from "../coarse-filter/coarse-candidates.js";
-import { fineAssess } from "../delivery/fine-assessment.js";
+import {
+  deliverFineAssessment,
+  fineAssess,
+  type FineAssessParams
+} from "../delivery/fine-assessment.js";
 import {
   applyManifestationBiasSidecar,
   appendWeightTransferTelemetry,
@@ -38,6 +42,7 @@ import {
   type EmbeddingCoarseInjectionResult
 } from "./recall-service-runner-coarse.js";
 import { collectPoolEmbeddingRescore } from "../rerank/recall-pool-embedding-rescore.js";
+import { collectAnswerRelevanceScores } from "../rerank/recall-answer-rerank.js";
 import { buildRecallResult } from "./recall-result-builder.js";
 import type {
   FineAssessmentResult,
@@ -154,29 +159,78 @@ async function assessCandidateStage(
     coarse.embeddingCoarseInjection.similarityScores,
     poolRescoreScores
   );
-  const finalAssessment = needsEmbeddingReassessment(embeddingSupplement, coarse.embeddingCoarseInjection) ||
+  const embeddingAssessment = needsEmbeddingReassessment(embeddingSupplement, coarse.embeddingCoarseInjection) ||
     Object.keys(poolRescoreScores).length > 0
-    ? fineAssess({
-        candidates: coarse.combinedCoarseCandidates,
-        policy: prepared.policy,
-        winnerMemoryIds: prepared.winnerMemoryIds,
-        supplementaryData,
-        tokenEstimator: prepared.tokenEstimator,
-        now: () => prepared.referenceTime,
-        warn: context.warn,
-        captureAnswerFeatures: params.diagnosticCapture === "answer_features"
-      })
+    ? fineAssess(buildFineAssessParams(context, params, prepared, coarse, supplementaryData))
     : initialAssessment;
+  const reranked = await applyAnswerRerank(
+    context, params, prepared, coarse, embeddingAssessment, supplementaryData
+  );
   const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
   return Object.freeze({
-    finalAssessment,
-    supplementaryData,
+    finalAssessment: reranked.assessment,
+    supplementaryData: reranked.supplementaryData,
     preparedEmbeddingQuery,
     embeddingCoarseInjection: coarse.embeddingCoarseInjection,
     embeddingProviderStatus: provider.status,
     providerDegradationReason: provider.degradationReason,
+    answerRerankDiagnostics: reranked.diagnostics,
     recallAfterFusion: performance.now()
   });
+}
+
+async function applyAnswerRerank(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult,
+  assessment: FineAssessmentResult,
+  supplementaryData: FineAssessParams["supplementaryData"]
+): Promise<Readonly<{
+  readonly assessment: FineAssessmentResult;
+  readonly supplementaryData: FineAssessParams["supplementaryData"];
+  readonly diagnostics: AssessmentStageResult["answerRerankDiagnostics"];
+}>> {
+  const rerank = await collectAnswerRelevanceScores({
+    service: context.dependencies.answerRerankService,
+    queryText: prepared.queryText,
+    candidates: assessment.preparedCandidates,
+    warn: context.warn
+  });
+  if (rerank.scores.size === 0) {
+    return Object.freeze({ assessment, supplementaryData, diagnostics: rerank.diagnostics });
+  }
+  const rerankedData = Object.freeze({
+    ...supplementaryData,
+    answerRelevanceScoresByCandidateKey: rerank.scores
+  });
+  return Object.freeze({
+    assessment: deliverFineAssessment(
+      buildFineAssessParams(context, params, prepared, coarse, rerankedData),
+      assessment.preparedCandidates
+    ),
+    supplementaryData: rerankedData,
+    diagnostics: rerank.diagnostics
+  });
+}
+
+function buildFineAssessParams(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult,
+  supplementaryData: FineAssessParams["supplementaryData"]
+): FineAssessParams {
+  return {
+    candidates: coarse.combinedCoarseCandidates,
+    policy: prepared.policy,
+    winnerMemoryIds: prepared.winnerMemoryIds,
+    supplementaryData,
+    tokenEstimator: prepared.tokenEstimator,
+    now: () => prepared.referenceTime,
+    warn: context.warn,
+    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
+  };
 }
 
 function startEmbeddingSupplementPreparation(

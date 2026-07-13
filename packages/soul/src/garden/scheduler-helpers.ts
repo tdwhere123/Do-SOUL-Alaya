@@ -1,12 +1,15 @@
 import {
+  GARDEN_ROLE_PERMISSIONS,
   GARDEN_ROLE_TIER_MAP,
   GardenRole,
   GardenTaskDescriptorSchema,
   GardenTier,
   type GardenRoleValue,
   type GardenTaskDescriptor,
+  type GardenTaskKindValue,
   type GardenTierValue
 } from "@do-soul/alaya-protocol";
+import type { GardenTaskRow } from "./scheduler-types.js";
 
 export const TIER_ORDER: Record<GardenTierValue, number> = {
   tier_0: 0,
@@ -36,14 +39,48 @@ export function buildCoolingKey(
   return `${taskKind}:${targetRef}`;
 }
 
-export function parseTaskDescriptorFromRow(row: {
-  readonly payload: unknown;
-  readonly descriptor?: GardenTaskDescriptor;
-}): GardenTaskDescriptor {
-  if (row.descriptor !== undefined) {
-    return row.descriptor;
+export function parseTaskDescriptorFromRow(
+  row: GardenTaskRow & { readonly descriptor?: GardenTaskDescriptor }
+): GardenTaskDescriptor {
+  const task = row.descriptor ?? GardenTaskDescriptorSchema.parse(row.payload);
+  assertEnvelopeIdentity("task id", row.id, task.task_id);
+  assertEnvelopeIdentity("workspace", row.workspace_id, task.workspace_id);
+  assertEnvelopeIdentity("kind", row.kind, task.task_kind);
+  return task;
+}
+
+export function taskKindAllowedAtTier(
+  taskKind: GardenTaskKindValue,
+  tier: GardenTierValue
+): boolean {
+  const allowed = GARDEN_ROLE_PERMISSIONS[roleForTier(tier)]
+    .allowed_task_kinds as readonly GardenTaskKindValue[];
+  return allowed.includes(taskKind);
+}
+
+export function gardenTaskRoutingError(
+  row: GardenTaskRow,
+  task: GardenTaskDescriptor,
+  dispatchRole: GardenRoleValue
+): string | null {
+  const canonicalRole = roleForTier(task.required_tier);
+  if (row.role !== canonicalRole) {
+    return `role ${row.role} does not match required tier ${task.required_tier}`;
   }
-  return GardenTaskDescriptorSchema.parse(row.payload);
+  if (!taskKindAllowedAtTier(task.task_kind, task.required_tier)) {
+    return `${task.task_kind} is not allowed at ${task.required_tier}`;
+  }
+  const allowed = GARDEN_ROLE_PERMISSIONS[dispatchRole]
+    .allowed_task_kinds as readonly GardenTaskKindValue[];
+  return allowed.includes(task.task_kind)
+    ? null
+    : `${task.task_kind} is not allowed for ${dispatchRole}`;
+}
+
+function assertEnvelopeIdentity(label: string, rowValue: string, taskValue: string): void {
+  if (rowValue !== taskValue) {
+    throw new Error(`Garden task ${label} mismatch: row=${rowValue}, payload=${taskValue}.`);
+  }
 }
 
 export function parseIsoTimestampMs(timestamp: string): number | null {

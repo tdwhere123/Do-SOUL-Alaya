@@ -50,6 +50,8 @@ export function makeShardProvenance(
       embedding_provider_kind: "openai",
       embedding_provider_label: "none",
       onnx_threads: null,
+      embedding_supplement: { enabled: false },
+      answer_rerank: { enabled: false },
       paired_env: {}
     },
     execution: {
@@ -59,7 +61,13 @@ export function makeShardProvenance(
       limit,
       evaluated_count: limit
     },
-    recall_config: { conf_slice_compatibility: false },
+    recall_config: {
+      conf_slice_compatibility: false,
+      schema_version: 2,
+      max_results: 10,
+      conflict_awareness: true,
+      effective_config_sha256: "8".repeat(64)
+    },
     question_manifest: null
   };
 }

@@ -121,6 +121,12 @@ describe("recall diagnostics", () => {
       deliveredCount: 1,
       embeddingProviderStatus: "provider_not_requested",
       providerDegradationReason: null,
+      answerRerankDiagnostics: {
+        status: "not_requested",
+        expected_count: 0,
+        scored_count: 0,
+        failure_class: null
+      },
       graphExpansionDiagnostics: {
         graph_expansion_plane_count_per_hop: [0, 0],
         graph_expansion_plane_count_per_edge_type: {

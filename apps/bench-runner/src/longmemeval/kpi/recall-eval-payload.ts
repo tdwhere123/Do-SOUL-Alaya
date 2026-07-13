@@ -6,7 +6,12 @@ import type {
 } from "@do-soul/alaya-eval";
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 import type { BenchRecallWeightOverrides } from "../../harness/recall-weight-overrides.js";
-import { buildLongMemEvalFullGoldCoverage, buildLongMemEvalQualityMetrics } from "../diagnostics.js";
+import {
+  buildLongMemEvalFullGoldCoverage,
+  buildLongMemEvalQualityMetrics,
+  rAt5WithProviderReturned,
+  summarizeProviderStates
+} from "../diagnostics.js";
 import type { LongMemEvalVariant } from "../dataset.js";
 import { RECALL_EVAL_ARCHIVE_MARKER } from "../recall-eval-archive.js";
 import type { RecallEvalQuestionResult } from "../recall-eval.js";
@@ -15,6 +20,10 @@ import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
 import { computeRecallEvalAggregates, type RecallEvalAggregates } from "./recall-eval-aggregates.js";
 import { accumulateRecallEvalRows, type RecallEvalAccumulator } from "./recall-eval-accumulator.js";
 import { buildBenchmarkMeasurementAttribution } from "../measurement/attribution.js";
+import {
+  summarizeEmbeddingVectorCache,
+  summarizeQueryEmbeddingCache
+} from "../runner-helpers.js";
 
 const VARIANT_TO_SPLIT: Record<LongMemEvalVariant, BenchSplit> = {
   longmemeval_oracle: "longmemeval-oracle",
@@ -37,6 +46,7 @@ export interface RecallEvalKpiInput {
   readonly embeddingProviderLabel: string;
   readonly runtimeAttribution: RecallEvalRuntimeAttribution;
   readonly datasetSha256: string | null;
+  readonly provenanceComplete: boolean;
 }
 
 export function assembleRecallEvalKpi(input: RecallEvalKpiInput): KpiPayload {
@@ -50,7 +60,7 @@ function buildPayload(
   accumulator: RecallEvalAccumulator,
   aggregates: RecallEvalAggregates
 ): KpiPayload {
-  const kpi = buildKpiCore(accumulator, aggregates);
+  const kpi = buildKpiCore(accumulator, aggregates, input.collected);
   const candidatePoolComplete = accumulator.questionDiagnostics.length ===
     input.evaluatedCount && accumulator.questionDiagnostics.every(
       (question) => question.candidate_pool_complete
@@ -64,7 +74,7 @@ function buildPayload(
     recall_eval_attribution: input.runtimeAttribution,
     measurement_attribution: buildBenchmarkMeasurementAttribution({
       candidatePoolComplete,
-      provenanceComplete: input.runtimeAttribution.gate_eligible,
+      provenanceComplete: input.provenanceComplete,
       abstention: kpi.quality_metrics?.abstention,
       noGoldCount: kpi.quality_metrics?.no_gold_count,
       evaluatorIdentityIssueCount:
@@ -94,7 +104,8 @@ function buildPayload(
 
 function buildKpiCore(
   accumulator: RecallEvalAccumulator,
-  aggregates: RecallEvalAggregates
+  aggregates: RecallEvalAggregates,
+  collected: readonly RecallEvalQuestionResult[]
 ): KpiPayload["kpi"] {
   return {
     r_at_1: aggregates.rAt1, r_at_5: aggregates.rAt5, r_at_10: aggregates.rAt10,
@@ -124,6 +135,30 @@ function buildKpiCore(
     ...(aggregates.edgeProposalAutoAccept === undefined ? {} : {
       edge_proposal_auto_accept: aggregates.edgeProposalAutoAccept
     }),
+    ...buildEmbeddingKpis(collected, accumulator.questionDiagnostics),
     per_scenario: accumulator.perScenario
+  };
+}
+
+function buildEmbeddingKpis(
+  collected: readonly RecallEvalQuestionResult[],
+  diagnostics: RecallEvalAccumulator["questionDiagnostics"]
+): Partial<KpiPayload["kpi"]> {
+  const vectors = summarizeEmbeddingVectorCache(
+    collected.flatMap((result) => result.embeddingWarmup ?? [])
+  );
+  const queries = summarizeQueryEmbeddingCache(
+    collected.flatMap((result) => result.queryEmbeddingWarmup ?? [])
+  );
+  const provider = summarizeProviderStates(diagnostics);
+  const returnedRAt5 = rAt5WithProviderReturned(diagnostics);
+  return {
+    provider_returned_rate: provider.provider_returned_rate,
+    provider_pending_rate: provider.provider_pending_rate,
+    provider_failed_rate: provider.provider_failed_rate,
+    provider_not_requested_rate: provider.provider_not_requested_rate,
+    ...(returnedRAt5 === undefined ? {} : { r_at_5_with_embedding_returned: returnedRAt5 }),
+    ...(vectors === null ? {} : { embedding_vector_cache_ready_rate: vectors.ready_rate }),
+    ...(queries === null ? {} : { query_embedding_cache_ready_rate: queries.ready_rate })
   };
 }

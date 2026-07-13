@@ -3,6 +3,7 @@ import {
   startBenchDaemon,
   type BenchDaemonHandle
 } from "../harness/daemon.js";
+import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.js";
 import type { BenchRecallWeightOverrides } from "../harness/recall-weight-overrides.js";
 import { collectBenchSeedFuelInventory } from "./seed-fuel-collector.js";
 import { collectDistinctTurnContents } from "./extraction-fill.js";
@@ -16,6 +17,7 @@ import { QaChatError } from "./qa-chat.js";
 import { loadQuestionManifestSelection } from "./selection/question-manifest.js";
 import {
   recallOptionsForPolicyShape,
+  readLongMemEvalPinnedMeta,
   resolveBenchEmbeddingProviderLabel,
   resolveCommitInfo,
   writeRecallEvalSnapshot
@@ -107,7 +109,7 @@ export async function prepareLongMemEvalRun(
     embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
       opts.embeddingMode ?? "disabled",
       process.env,
-      opts.embeddingProviderKind ?? "openai"
+      opts.embeddingProviderKind
     ),
     policyShape: opts.policyShape ?? "stress",
     simulateReport: opts.simulateReport ?? "none",
@@ -351,7 +353,8 @@ async function runLongMemEvalQuestionSafely(
       recallOptions: context.recallOptions,
       simulateReport: context.simulateReport,
       embeddingMode: context.opts.embeddingMode ?? "disabled",
-      embeddingProviderKind: context.opts.embeddingProviderKind ?? "openai",
+      embeddingProviderKind: context.opts.embeddingProviderKind ??
+        DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
       captureSnapshot: context.captureSnapshot,
       ...(context.opts.qa === undefined ? {} : buildQaOptions(context.opts.qa))
     });
@@ -419,7 +422,8 @@ async function writeLongMemEvalSnapshotIfRequested(
     evaluatedCount: snapshotQuestions.length,
     commitSha7: context.commitSha7,
     embeddingProviderLabel: context.embeddingProviderLabel,
-    env: process.env
+    env: process.env,
+    recallOptions: context.recallOptions
   });
   await writeRecallEvalSnapshot({
     snapshotOut: context.opts.snapshotOut,
@@ -428,6 +432,10 @@ async function writeLongMemEvalSnapshotIfRequested(
     commitSha7: context.commitSha7,
     snapshotQuestions,
     extractionCacheRoot: context.extractionCacheRoot,
+    datasetSha256: readLongMemEvalPinnedMeta(
+      context.opts.variant,
+      context.opts.pinnedMetaRoot
+    ).sha256,
     runProvenance
   });
   process.stdout.write(

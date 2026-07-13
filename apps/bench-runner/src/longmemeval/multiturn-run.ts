@@ -52,7 +52,7 @@ export async function prepareMultiturnRun(
     commitSha7: commitInfo.sha7,
     runAt: new Date(),
     embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
-      opts.embeddingMode ?? "disabled"
+      opts.embeddingMode ?? "disabled", process.env, opts.embeddingProviderKind
     ),
     seedRunner: createMultiturnSeedRunner(opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT)
   };

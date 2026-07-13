@@ -95,8 +95,8 @@ function contributionTotal(contributions: Readonly<Record<RecallFusionStream, nu
   return Object.values(contributions).reduce((sum, contribution) => sum + contribution, 0);
 }
 
-describe("fusion duplicate content projection accounting", () => {
-  it("does not increase the object base when a lexical match is duplicated as a trigram view", () => {
+describe("fusion complementary content projection accounting", () => {
+  it("retains lexical and trigram evidence as complementary retrieval views", () => {
     const lexicalOnly = snapshots([candidate()], {
       lexical_fts: { [CANDIDATE_KEY]: 1 }
     })[0]!;
@@ -108,8 +108,8 @@ describe("fusion duplicate content projection accounting", () => {
     expect(duplicated.perStreamRank.lexical_fts).toBe(1);
     expect(duplicated.perStreamRank.trigram_fts).toBe(1);
     expect(duplicated.contributions.lexical_fts).toBeCloseTo(0.5, 12);
-    expect(duplicated.contributions.trigram_fts).toBe(0);
-    expect(duplicated.objectBase).toBeCloseTo(lexicalOnly.objectBase, 12);
+    expect(duplicated.contributions.trigram_fts).toBeCloseTo(0.5, 12);
+    expect(duplicated.objectBase).toBeCloseTo(lexicalOnly.objectBase * 2, 12);
     expect(contributionTotal(duplicated.contributions)).toBeCloseTo(duplicated.objectBase, 12);
   });
 
@@ -139,7 +139,7 @@ describe("fusion duplicate content projection accounting", () => {
     expect(contributionTotal(value.contributions)).toBeCloseTo(value.objectBase, 12);
   });
 
-  it("keeps the stronger trigram projection when it exceeds lexical contribution", () => {
+  it("retains weak lexical corroboration when trigram contribution is stronger", () => {
     const resolved = equalizedWeights();
     const weights = { ...resolved.weights, trigram_fts: 2 / 0.85 };
     const value = snapshots([candidate()], {
@@ -147,18 +147,18 @@ describe("fusion duplicate content projection accounting", () => {
       trigram_fts: { [CANDIDATE_KEY]: 1 }
     }, { ...resolved, weights })[0]!;
 
-    expect(value.contributions.lexical_fts).toBe(0);
+    expect(value.contributions.lexical_fts).toBeCloseTo(0.5, 12);
     expect(value.contributions.trigram_fts).toBeCloseTo(1, 12);
   });
 
-  it("uses lexical as the stable winner when duplicate projections tie", () => {
+  it("retains both projections when their contributions tie", () => {
     const value = snapshots([candidate()], {
       lexical_fts: { [CANDIDATE_KEY]: 1 },
       trigram_fts: { [CANDIDATE_KEY]: 1 }
     })[0]!;
 
     expect(value.contributions.lexical_fts).toBeCloseTo(0.5, 12);
-    expect(value.contributions.trigram_fts).toBe(0);
+    expect(value.contributions.trigram_fts).toBeCloseTo(0.5, 12);
   });
 
   it("is invariant to candidate permutation", () => {
@@ -187,7 +187,7 @@ describe("fusion duplicate content projection accounting", () => {
     expect(streamView(withUnrelated)).toEqual(streamView(baseline));
   });
 
-  it("honors default and explicit fusion weight semantics within the duplicate family", () => {
+  it("honors default and explicit fusion weight semantics for both views", () => {
     const queryProbes = supplementaryData([CANDIDATE_ID]).queryProbes;
     const defaults = resolveRrfFusionWeights({
       policy: {} as RecallPolicy,
@@ -213,7 +213,7 @@ describe("fusion duplicate content projection accounting", () => {
     const overrideValue = snapshots([candidate()], ranks, overridden)[0]!;
 
     expect(defaultValue.contributions.lexical_fts).toBeGreaterThan(0);
-    expect(defaultValue.contributions.trigram_fts).toBe(0);
+    expect(defaultValue.contributions.trigram_fts).toBeGreaterThan(0);
     expect(overrideValue.contributions.lexical_fts).toBe(0);
     expect(overrideValue.contributions.trigram_fts).toBeGreaterThan(0);
   });

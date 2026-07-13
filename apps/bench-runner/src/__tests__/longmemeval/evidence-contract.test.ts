@@ -388,7 +388,12 @@ describe("LongMemEval evidence contract", () => {
         score_factors: {}
       }]
     }).candidates[0];
-    expect(candidate).toMatchObject({ answer_features: null, path_suppression_score: null });
+    expect(candidate).toMatchObject({
+      answer_features: null,
+      path_suppression_score: null,
+      answer_relevance_score: null,
+      answer_relevance_rank: null
+    });
   });
 
   it("marks malformed nested answer features as incomplete instead of silently accepting them", () => {

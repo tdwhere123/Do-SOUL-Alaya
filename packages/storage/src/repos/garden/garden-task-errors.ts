@@ -5,6 +5,13 @@ export class GardenTaskClaimCasMiss extends Error {
   }
 }
 
+export class GardenTaskPendingFailureCasMiss extends Error {
+  constructor() {
+    super("Garden task is no longer pending.");
+    this.name = "GardenTaskPendingFailureCasMiss";
+  }
+}
+
 export function isUniqueConstraintError(error: unknown, qualifiedColumn: string): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current !== null && current !== undefined; depth += 1) {

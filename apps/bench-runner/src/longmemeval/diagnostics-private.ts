@@ -50,6 +50,19 @@ export function readRecallDiagnostics(
     candidateKeysByObjectId: candidates.keysByObjectId,
     providerState: readProviderState(record, embeddingMode),
     providerDegradationReason: readProviderDegradationReason(record),
+    embeddingWorkspaceScannedCount:
+      readNonnegativeInteger(record.embedding_workspace_scanned_count),
+    embeddingWorkspaceTruncated: readBoolean(record.embedding_workspace_truncated),
+    embeddingWorkspaceProviderKind: readString(record.embedding_workspace_provider_kind),
+    embeddingWorkspaceModelId: readString(record.embedding_workspace_model_id),
+    embeddingWorkspaceSchemaVersion:
+      readPositiveInteger(record.embedding_workspace_schema_version),
+    answerRerankStatus: readAnswerRerankStatus(record.answer_rerank_status),
+    answerRerankExpectedCount: readNonnegativeInteger(record.answer_rerank_expected_count),
+    answerRerankScoredCount: readNonnegativeInteger(record.answer_rerank_scored_count),
+    answerRerankFailureClass: readAnswerRerankFailureClass(
+      record.answer_rerank_failure_class
+    ),
     graphExpansionPlaneCountPerHop:
       readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
       createEmptyGraphExpansionPlaneCountPerHop(),
@@ -58,6 +71,43 @@ export function readRecallDiagnostics(
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
     phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
   };
+}
+
+function readAnswerRerankStatus(
+  value: unknown
+): NarrowRecallDiagnostics["answerRerankStatus"] {
+  const status = readString(value);
+  if (
+    status === "not_requested" || status === "not_applicable" ||
+    status === "returned" || status === "failed"
+  ) return status;
+  return null;
+}
+
+function readAnswerRerankFailureClass(
+  value: unknown
+): NarrowRecallDiagnostics["answerRerankFailureClass"] {
+  if (value === null) return null;
+  const failure = readString(value);
+  if (
+    failure === "invalid_score_count" || failure === "invalid_score_value" ||
+    failure === "service_error"
+  ) return failure;
+  return null;
+}
+
+function readNonnegativeInteger(value: unknown): number | null {
+  const parsed = readNumber(value);
+  return parsed !== null && Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  const parsed = readNonnegativeInteger(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
 }
 
 export function isLongMemEvalGoldEligibleDiagnosticResult(

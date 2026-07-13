@@ -21,8 +21,6 @@ export function recallEnvRaw(name: string): string | undefined {
 
 function readRecallSelectionEnv(recall: RecallConfig, name: string): RecallEnvLookup {
   switch (name) {
-    case "ALAYA_RECALL_EMBED_POOL_RESCORE":
-      return matched(recall.embedPoolRescore ? "on" : "off");
     case "ALAYA_RECALL_FACET_SLICE":
       return matched(recall.facetSlice);
     default:
@@ -61,8 +59,6 @@ function readRecallDeliveryEnv(recall: RecallConfig, name: string): RecallEnvLoo
       return matched(recall.lexicalDecorr);
     case "ALAYA_RECALL_INTENT_V2":
       return matched(recall.intentV2 ? "on" : undefined);
-    case "ALAYA_RECALL_QUERY_HYDE_JSON":
-      return matched(recall.queryHydeJson);
     case "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS":
       return matched(recall.extraSynonymClusters);
     case "ALAYA_RECALL_SESSION_ROUTE":
@@ -95,10 +91,6 @@ export function recallIntentV2Enabled(): boolean {
 
 export function recallSessionRouteEnabled(): boolean {
   return getCoreConfig().recall.sessionRoute;
-}
-
-export function recallEmbedPoolRescoreEnabled(): boolean {
-  return getCoreConfig().recall.embedPoolRescore;
 }
 
 /** answers_with / flood path fuel is always on; no closable off-switch. */

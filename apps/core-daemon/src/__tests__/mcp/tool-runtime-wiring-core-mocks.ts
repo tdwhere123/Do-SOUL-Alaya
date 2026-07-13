@@ -10,7 +10,6 @@ type ToolRuntimeWiringHoisted = Record<string, any>;
 function createStubCoreConfig(): CoreConfig {
   return {
     recall: {
-      embedPoolRescore: false,
       facetSlice: undefined,
       confRhoPath: undefined,
       confRhoEvidence: undefined,
@@ -23,7 +22,6 @@ function createStubCoreConfig(): CoreConfig {
       projectionsEnabled: true,
       lexicalDecorr: undefined,
       intentV2: false,
-      queryHydeJson: undefined,
       extraSynonymClusters: undefined,
       sessionRoute: false,
       coarseFilterSemanticFlags: {}

@@ -18,7 +18,11 @@ function provenance(input: {
       commit_sha7: "05d98df",
       gate_sha256: "b".repeat(64),
       worktree_state_sha256: "c".repeat(64),
-      executed_dist: null
+      executed_dist: {
+        algorithm: "sha256-reachable-path-file-sha256-v1",
+        sha256: "6".repeat(64),
+        file_count: 1
+      }
     },
     extraction_cache: cacheIdentity(
       input.datasetRevision,
@@ -33,6 +37,8 @@ function provenance(input: {
       embedding_provider_kind: "openai",
       embedding_provider_label: "none",
       onnx_threads: null,
+      embedding_supplement: { enabled: false },
+      answer_rerank: { enabled: false },
       paired_env: {}
     },
     execution: {
@@ -42,7 +48,13 @@ function provenance(input: {
       limit: 1,
       evaluated_count: 1
     },
-    recall_config: { conf_slice_compatibility: false },
+    recall_config: {
+      conf_slice_compatibility: false,
+      schema_version: 2,
+      max_results: 10,
+      conflict_awareness: true,
+      effective_config_sha256: "7".repeat(64)
+    },
     question_manifest: questionManifestIdentity(input.questionManifestDatasetSha)
   };
 }

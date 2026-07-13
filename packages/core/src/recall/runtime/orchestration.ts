@@ -215,7 +215,8 @@ export async function assessCoarseFilter(
   return Object.freeze({
     supplementaryData,
     candidates: assessment.candidates,
-    diagnostics: assessment.diagnostics
+    diagnostics: assessment.diagnostics,
+    preparedCandidates: assessment.preparedCandidates
   });
 }
 

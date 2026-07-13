@@ -34,6 +34,7 @@ export function buildRecallResult(
       deliveredCount: manifested.candidates.length,
       embeddingProviderStatus: assessment.embeddingProviderStatus,
       providerDegradationReason: assessment.providerDegradationReason,
+      answerRerankDiagnostics: assessment.answerRerankDiagnostics,
       degradationReasons: [...degradationReasons],
       graphExpansionDiagnostics: coarse.coarseFilter.graphExpansionDiagnostics,
       candidates: manifested.candidateDiagnostics,

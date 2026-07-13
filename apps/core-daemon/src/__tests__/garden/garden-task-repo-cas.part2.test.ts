@@ -233,7 +233,7 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
       Array.from({ length: 8 }, (_, claimerIndex) =>
         Promise.resolve().then(async () => {
           for (const taskId of taskIds) {
-            const result = repo.claimAtomic(
+            const result = await repo.claimAtomic(
               taskId,
               `agent-target-${claimerIndex + 1}`,
               `2026-05-07T00:00:0${claimerIndex}.000Z`
@@ -306,9 +306,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
       }),
       created_at: "2026-05-07T00:00:00.000Z"
     });
-    expect(
+    await expect(
       repo.claimAtomic("task-stale-claim", "agent-target-a", "2026-05-07T00:00:00.000Z")
-    ).toBe("claimed");
+    ).resolves.toBe("claimed");
 
     const abandoned = repo.peekAbandonedClaims("2026-05-07T00:10:00.000Z", 5 * 60 * 1000);
     const reclaimed = await repo.gcAbandonedClaims(
@@ -359,9 +359,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
       }),
       created_at: "2026-05-07T00:00:00.000Z"
     });
-    expect(
+    await expect(
       repo.claimAtomic("task-claimant-cas", "agent-target-a", "2026-05-07T00:00:00.000Z")
-    ).toBe("claimed");
+    ).resolves.toBe("claimed");
     const abandoned = repo.peekAbandonedClaims("2026-05-07T00:10:00.000Z", 5 * 60 * 1000);
     await repo.gcAbandonedClaims(
       abandoned.map((row) => ({
@@ -380,9 +380,9 @@ describe("SqliteGardenTaskRepo — CAS-backed Garden queue", () => {
         })
       }))
     );
-    expect(
+    await expect(
       repo.claimAtomic("task-claimant-cas", "agent-target-b", "2026-05-07T00:11:00.000Z")
-    ).toBe("claimed");
+    ).resolves.toBe("claimed");
 
     await expect(
       repo.completeWithEvents(

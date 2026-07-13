@@ -27,9 +27,17 @@ describe("Garden MCP tools", () => {
     const harness = await createGardenMcpHarness();
     harness.enqueueTask("task-pending");
     harness.enqueueTask("task-claimed");
-    harness.gardenTaskRepo.claimAtomic("task-claimed", "worker-a", "2026-05-07T00:00:01.000Z");
+    await harness.gardenTaskRepo.claimAtomic(
+      "task-claimed",
+      "worker-a",
+      "2026-05-07T00:00:01.000Z"
+    );
     harness.enqueueTask("task-completed");
-    harness.gardenTaskRepo.claimAtomic("task-completed", "worker-a", "2026-05-07T00:00:02.000Z");
+    await harness.gardenTaskRepo.claimAtomic(
+      "task-completed",
+      "worker-a",
+      "2026-05-07T00:00:02.000Z"
+    );
     await harness.gardenTaskRepo.completeWithEvents(
       "task-completed",
       { status: "completed", completed_at: "2026-05-07T00:00:03.000Z" },
@@ -357,9 +365,13 @@ describe("Garden MCP tools", () => {
   it("rejects complete_task from a stale claimant after GC reclaim and new claim", async () => {
     const harness = await createGardenMcpHarness();
     harness.enqueueTask("task-reclaimed");
-    expect(
-      harness.gardenTaskRepo.claimAtomic("task-reclaimed", "garden-worker", "2026-05-07T00:00:00.000Z")
-    ).toBe("claimed");
+    await expect(
+      harness.gardenTaskRepo.claimAtomic(
+        "task-reclaimed",
+        "garden-worker",
+        "2026-05-07T00:00:00.000Z"
+      )
+    ).resolves.toBe("claimed");
     const abandoned = harness.gardenTaskRepo.peekAbandonedClaims(
       "2026-05-07T00:20:00.000Z",
       5 * 60 * 1000

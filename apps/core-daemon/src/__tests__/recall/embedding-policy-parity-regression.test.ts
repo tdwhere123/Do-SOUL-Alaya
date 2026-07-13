@@ -63,8 +63,7 @@ describe("embedding policy parity regression net", () => {
     const saved: Record<string, string | undefined> = {};
     for (const key of [
       "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
-      "ALAYA_EMBEDDING_PROVIDER",
-      "ALAYA_DISABLE_POLICY_EMBEDDING_DECORATOR"
+      "ALAYA_EMBEDDING_PROVIDER"
     ]) {
       saved[key] = process.env[key];
       delete process.env[key];
@@ -74,7 +73,14 @@ describe("embedding policy parity regression net", () => {
 
     const fixture = buildFixture();
     try {
-      const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
+      const provider = {
+        providerKind: "local_onnx" as const,
+        modelId: "local/parity-model",
+        schemaVersion: 1,
+        isAvailable: true,
+        embedTexts: vi.fn(async () => [new Float32Array([1])])
+      };
+      const { defaultPolicyDecorator, providerWarmup } = createDaemonEmbeddingRuntime({
         database: fixture.database,
         configEnv: new Map([
           ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
@@ -86,9 +92,11 @@ describe("embedding policy parity regression net", () => {
           record: vi.fn(async () => undefined)
         },
         memoryEntryRepo: fixture.memoryEntryRepo,
-        warn: vi.fn()
+        warn: vi.fn(),
+        embeddingProviderOverride: provider
       });
       expect(defaultPolicyDecorator).toBeDefined();
+      await expect(providerWarmup).resolves.toBe("ready");
       const decorated = defaultPolicyDecorator!(makeBasePolicy());
       expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(
         EXPECTED_EMBEDDING_FUSION_WEIGHT

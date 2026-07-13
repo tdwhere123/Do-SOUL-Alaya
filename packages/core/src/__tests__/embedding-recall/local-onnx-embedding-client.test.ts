@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +11,7 @@ import {
   resolveLocalOnnxSessionOptionsFromEnv,
   type LocalOnnxFeatureExtractor
 } from "../../embedding-recall/local-onnx-embedding-client.js";
+import { withLocalOnnxHostSingleFlight } from "../../embedding-recall/local-onnx-host-single-flight.js";
 
 function stubExtractor(
   rowsByCall: readonly (readonly (readonly number[])[])[]
@@ -228,6 +230,108 @@ describe("LocalOnnxEmbeddingClient", () => {
     }
   });
 
+  it("retains the host inference lock until a timed-out extractor actually settles", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-timeout-"));
+    const previousEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
+    const previousLockPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
+    process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
+    process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = path.join(root, "inference.lock");
+    const releases: Array<(value: Awaited<ReturnType<LocalOnnxFeatureExtractor>>) => void> = [];
+    const extractor = vi.fn<LocalOnnxFeatureExtractor>(() =>
+      new Promise((resolve) => releases.push(resolve))
+    );
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor });
+    const output = { dims: [1, LOCAL_ONNX_EMBEDDING_DIMENSIONS], tolist: () => [dimRow(9)] };
+    let second: Promise<readonly Float32Array[]> | null = null;
+
+    try {
+      await expect(client.embedTexts(["first"], { timeoutMs: 10 })).rejects.toThrow(/timed out/);
+      second = client.embedTexts(["second"], { timeoutMs: 1_000 });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(extractor).toHaveBeenCalledTimes(1);
+
+      releases.shift()?.(output);
+      await vi.waitFor(() => expect(extractor).toHaveBeenCalledTimes(2));
+      releases.shift()?.(output);
+      await expect(second).resolves.toHaveLength(1);
+    } finally {
+      for (const release of releases.splice(0)) release(output);
+      if (second !== null) {
+        await vi.waitFor(() => expect(extractor.mock.calls.length).toBeGreaterThanOrEqual(2))
+          .catch(() => undefined);
+        for (const release of releases.splice(0)) release(output);
+        await second.catch(() => undefined);
+      }
+      restoreEnv("ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT", previousEnabled);
+      restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the entry deadline while waiting for the host lock and never starts orphan work", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-wait-"));
+    const lockPath = path.join(root, "inference.lock");
+    let releaseHolder: () => void = () => undefined;
+    let markAcquired: () => void = () => undefined;
+    const acquired = new Promise<void>((resolve) => { markAcquired = resolve; });
+    const holder = withLocalOnnxHostSingleFlight(async () => {
+      markAcquired();
+      await new Promise<void>((resolve) => { releaseHolder = resolve; });
+    }, { enabled: true, lockPath });
+    await acquired;
+    const extractor = vi.fn(stubExtractor([[dimRow(1)]]).extractor);
+    const client = new LocalOnnxEmbeddingClient({ pipelineLoader: async () => extractor });
+    const previousEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
+    const previousLockPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
+    process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
+    process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = lockPath;
+    const releaseTimer = setTimeout(releaseHolder, 60);
+    try {
+      await expect(client.embedTexts(["waiting"], { timeoutMs: 15 })).rejects.toThrow(/timed out/);
+      await holder;
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(extractor).not.toHaveBeenCalled();
+    } finally {
+      clearTimeout(releaseTimer);
+      releaseHolder();
+      await holder;
+      restoreEnv("ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT", previousEnabled);
+      restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", previousLockPath);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the entry deadline for model load and skips inference after cancellation", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "alaya-embedding-load-"));
+    const priorEnabled = process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT;
+    const priorPath = process.env.ALAYA_LOCAL_ONNX_LOCK_PATH;
+    process.env.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
+    process.env.ALAYA_LOCAL_ONNX_LOCK_PATH = path.join(root, "inference.lock");
+    let finishLoad: (extractor: LocalOnnxFeatureExtractor) => void = () => undefined;
+    const extractor = vi.fn(stubExtractor([[dimRow(2)]]).extractor);
+    const client = new LocalOnnxEmbeddingClient({
+      pipelineLoader: () => new Promise((resolve) => { finishLoad = resolve; })
+    });
+    const secondLoader = vi.fn(async () => stubExtractor([[dimRow(3)]]).extractor);
+    const second = new LocalOnnxEmbeddingClient({ pipelineLoader: secondLoader });
+    let waiting: Promise<readonly Float32Array[]> | null = null;
+    try {
+      await expect(client.embedTexts(["loading"], { timeoutMs: 15 })).rejects.toThrow(/timed out/);
+      waiting = second.embedTexts(["next"], { timeoutMs: 1_000 });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(secondLoader).not.toHaveBeenCalled();
+      finishLoad(extractor);
+      await expect(waiting).resolves.toHaveLength(1);
+      expect(extractor).not.toHaveBeenCalled();
+    } finally {
+      finishLoad(extractor);
+      await waiting?.catch(() => undefined);
+      restoreEnv("ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT", priorEnabled);
+      restoreEnv("ALAYA_LOCAL_ONNX_LOCK_PATH", priorPath);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("aborts via an external signal and suppresses the abandoned run's late rejection", async () => {
     let rejectLate: (reason: unknown) => void = () => {};
     const extractor: LocalOnnxFeatureExtractor = () =>
@@ -268,6 +372,14 @@ describe("LocalOnnxEmbeddingClient", () => {
     expect(loader).toHaveBeenCalledTimes(2);
   });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
+}
 
 // Real-model smoke check. Runs only when the model weights have been
 // pre-fetched into the worktree cache; otherwise skipped so CI without the

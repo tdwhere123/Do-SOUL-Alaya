@@ -282,7 +282,7 @@ describe("post-turn extract Garden task", () => {
     // reclaim it back to pending so another agent (or the same agent after
     // reconnect) can pick it up.
     const staleClaimedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    harness.gardenTaskRepo.claimAtomic(
+    await harness.gardenTaskRepo.claimAtomic(
       "post-turn-task-1",
       "abandoned-agent",
       staleClaimedAt,

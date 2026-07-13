@@ -108,6 +108,12 @@ export function createQualityMetricsState(): QualityMetricsState {
       gold_ordinal_1plus: emptyGoldRankBucketTally()
     },
     perGoldDisplacedBy: zeroTopDistractorBuckets(),
+    ...zeroQualityMetricCounters()
+  };
+}
+
+function zeroQualityMetricCounters() {
+  return {
     nonMonotonicCount: 0,
     nonMonotonicDenominator: 0,
     highLexicalDemotedCount: 0,

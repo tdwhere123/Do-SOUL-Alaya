@@ -154,6 +154,7 @@ describe("longmemeval --snapshot-out CLI", () => {
         question_count: number;
         variant: string;
         artifact_integrity?: { db_sha256: string; sidecar_sha256: string };
+        dataset_sha256?: string;
         run_provenance?: { runtime: { embedding_provider_label: string } };
         attribution?: { status: string; gate_eligible: boolean };
       };
@@ -161,11 +162,12 @@ describe("longmemeval --snapshot-out CLI", () => {
       expect(manifest.variant).toBe(VARIANT);
       expect(manifest.artifact_integrity?.db_sha256).toMatch(/^[a-f0-9]{64}$/u);
       expect(manifest.artifact_integrity?.sidecar_sha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(manifest.dataset_sha256).toMatch(/^[a-f0-9]{64}$/u);
       expect(manifest.run_provenance?.runtime.embedding_provider_label).toBe(
         "none"
       );
       expect(manifest.attribution).toEqual({
-        status: "legacy_unattributed",
+        status: "attributed",
         gate_eligible: false
       });
       expect(OfficialApiGardenProvider.prototype.compile).not.toHaveBeenCalled();

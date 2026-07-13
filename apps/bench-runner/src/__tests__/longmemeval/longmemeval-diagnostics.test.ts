@@ -41,8 +41,6 @@ const emptyQueryProbes = {
 
 describe("LongMemEval recall diagnostics", () => {
 
-
-
   it("accepts graph expansion per-hop and per-edge-type counts in the strict bench schema", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse({
       query_probes: emptyQueryProbes,
@@ -52,6 +50,10 @@ describe("LongMemEval recall diagnostics", () => {
       delivered_count: 0,
       embedding_provider_status: "provider_not_requested",
       provider_degradation_reason: null,
+      answer_rerank_status: "not_requested",
+      answer_rerank_expected_count: 0,
+      answer_rerank_scored_count: 0,
+      answer_rerank_failure_class: null,
       degradation_reasons: ["evidence_fts_failed", "path_expansion_failed"],
       embedding_workspace_scan_cap: 10000,
       embedding_workspace_scanned_count: 10001,
@@ -177,6 +179,8 @@ describe("LongMemEval recall diagnostics", () => {
               selection_order: 1,
               fused_rank: 1,
               fused_score: 0.4,
+              answer_relevance_score: 0.93,
+              answer_relevance_rank: 2,
               final_rank: 1,
               per_stream_rank: {
                 lexical_fts: 1,
@@ -200,15 +204,30 @@ describe("LongMemEval recall diagnostics", () => {
     expect(row.candidates[0]).toMatchObject({
       object_id: "gold-a",
       candidate_key: "workspace_local:memory_entry:gold-a",
+      answer_relevance_score: 0.93,
+      answer_relevance_rank: 2,
       score_factors: {
         activation: 0.7,
         facet_overlap: 2,
         created_at: "2026-07-07T00:00:00.000Z"
       }
     });
-    expect(LongMemEvalQuestionDiagnosticSchema.parse(row).candidates[0]?.score_factors).toMatchObject({
-      facet_overlap: 2,
-      created_at: "2026-07-07T00:00:00.000Z"
+    const parsed = LongMemEvalQuestionDiagnosticSchema.parse(row);
+    expect(parsed.candidates[0]).toMatchObject({
+      answer_relevance_score: 0.93,
+      answer_relevance_rank: 2,
+      score_factors: {
+        facet_overlap: 2,
+        created_at: "2026-07-07T00:00:00.000Z"
+      }
+    });
+    expect(parsed.gold[0]).toMatchObject({
+      answer_relevance_score: 0.93,
+      answer_relevance_rank: 2
+    });
+    expect(row.gold[0]).toMatchObject({
+      answer_relevance_score: 0.93,
+      answer_relevance_rank: 2
     });
   });
 
@@ -306,6 +325,10 @@ describe("LongMemEval recall diagnostics", () => {
       delivered_count: 1,
       embedding_provider_status: "provider_not_requested",
       provider_degradation_reason: null,
+      answer_rerank_status: "not_requested",
+      answer_rerank_expected_count: 0,
+      answer_rerank_scored_count: 0,
+      answer_rerank_failure_class: null,
       graph_expansion_plane_count_per_hop: [0, 0],
       graph_expansion_plane_count_per_edge_type: {
         derives_from: 0,

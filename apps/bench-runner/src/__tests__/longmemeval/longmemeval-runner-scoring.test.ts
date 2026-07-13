@@ -591,16 +591,19 @@ describe("LongMemEval runner", () => {
       resolveBenchEmbeddingProviderLabel("env", {
         OPENAI_EMBEDDING_PROVIDER_URL: "https://api.yunwu.example/v1",
         OPENAI_EMBEDDING_MODEL: "text-embedding-3-large"
-      })
+      }, "openai")
     ).toBe("yunwu:text-embedding-3-large");
     expect(
       resolveBenchEmbeddingProviderLabel("env", {
         OPENAI_EMBEDDING_PROVIDER_URL: "https://embedding-proxy.example/v1",
         OPENAI_EMBEDDING_MODEL: "custom-embed"
-      })
+      }, "openai")
     ).toBe("openai-compatible:custom-embed");
-    expect(resolveBenchEmbeddingProviderLabel("env", {})).toBe(
+    expect(resolveBenchEmbeddingProviderLabel("env", {}, "openai")).toBe(
       "openai:text-embedding-3-small"
+    );
+    expect(resolveBenchEmbeddingProviderLabel("env", {})).toBe(
+      "local_onnx:Xenova/paraphrase-multilingual-MiniLM-L12-v2"
     );
     expect(resolveBenchEmbeddingProviderLabel("disabled", {})).toBe("none");
     // local_onnx is an on-device provider: labeled by the resolved local model,
