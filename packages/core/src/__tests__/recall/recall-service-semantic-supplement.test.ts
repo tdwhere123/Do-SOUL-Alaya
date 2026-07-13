@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
+import { prepareEmbeddingSupplementQuery } from "../../recall/supplements/supplements.js";
 import { createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
@@ -58,6 +59,34 @@ it("does not invoke embedding supplement work under the default policy", async (
     expect(hasStoredVectors).not.toHaveBeenCalled();
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
+  });
+
+it("preserves the legacy query-embedding receiver", async () => {
+    const basePolicy = new RecallService(createDependencies([]).dependencies)
+      .buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const preparedQuery = createPreparedQueryHandle("prepared-query-receiver");
+    const embeddingRecallService = {
+      preparedQuery,
+      prepareQueryEmbedding() { return this.preparedQuery; },
+      querySupplement: vi.fn(async () => ({
+        supplementaryEntries: Object.freeze([]), similarityHintsByObjectId: Object.freeze({})
+      }))
+    };
+    const result = await prepareEmbeddingSupplementQuery({
+      dependencies: { embeddingRecallService },
+      config: overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: true, max_supplement: 1, embedding_enabled: true }
+        }
+      }),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      localEligibleCandidates: [{ entry: createMemoryEntry() }],
+      lexicalFallbackCount: 1
+    });
+    expect(result.handle).toBe(preparedQuery);
   });
 
 it("keeps the lexical baseline when the semantic supplement exhausts no remaining budget", async () => {

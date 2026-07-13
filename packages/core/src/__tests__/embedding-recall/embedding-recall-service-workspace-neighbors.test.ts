@@ -180,6 +180,43 @@ describe("EmbeddingRecallService.collectWorkspaceNeighbors", () => {
     expect(neighbors).toHaveLength(0);
   });
 
+  it("preserves the repository receiver while scanning a workspace", async () => {
+    const embeddingRepo = {
+      workspaceVectors: [
+        createEmbeddingRecord({ object_id: "near", embedding: new Float32Array([0.05, 0.99]) })
+      ],
+      listByObjectIds: vi.fn(async () => []),
+      async listByWorkspace(): Promise<readonly EmbeddingVectorRecord[]> {
+        return this.workspaceVectors;
+      }
+    };
+    const service = new EmbeddingRecallService({
+      embeddingRepo,
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([0, 1])])
+      }),
+      eventLogRepo: {
+        append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+          event_id: "event-1",
+          created_at: "2026-04-23T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const neighbors = await service.collectWorkspaceNeighbors({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      excludeObjectIds: [],
+      maxNeighbors: 5
+    });
+
+    expect(neighbors.map((hit) => hit.object_id)).toEqual(["near"]);
+  });
+
   it("returns an empty result when the repo cannot scan the whole workspace", async () => {
     const service = new EmbeddingRecallService({
       embeddingRepo: {

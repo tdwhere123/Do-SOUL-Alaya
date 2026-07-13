@@ -390,7 +390,7 @@ async function prepareLegacyEmbeddingSupplementQuery(
     return precheck;
   }
   return Object.freeze({
-    handle: prepareQueryEmbedding({
+    handle: prepareQueryEmbedding.call(embeddingRecallService, {
       workspaceId: params.workspaceId,
       runId: params.runId,
       queryText: params.queryText!

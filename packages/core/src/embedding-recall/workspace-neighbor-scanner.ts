@@ -95,12 +95,12 @@ export class WorkspaceNeighborScanner {
 
   private async loadWorkspaceVectorScan(params: WorkspaceNeighborParams): Promise<WorkspaceVectorScan | null> {
     const workspaceScanCap = resolveEmbeddingWorkspaceScanCap();
-    const listByWorkspace = this.deps.embeddingRepo.listByWorkspace;
-    if (typeof listByWorkspace !== "function") {
+    const embeddingRepo = this.deps.embeddingRepo;
+    if (typeof embeddingRepo.listByWorkspace !== "function") {
       return null;
     }
     try {
-      const scanned = await listByWorkspace(params.workspaceId, {
+      const scanned = await embeddingRepo.listByWorkspace(params.workspaceId, {
         tierFilter: resolveEmbeddingRecallTiers(),
         limit: workspaceScanCap + 1,
         providerKind: this.deps.provider.providerKind,
