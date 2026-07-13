@@ -172,6 +172,27 @@ describe("LongMemEval measurement-only quality axes", () => {
     expect(axes.answer_session_coverage_at_5.applicable).toBe(false);
     expect(axes.answer_literal_witness_lower_bound_at_5.applicable).toBe(false);
     expect(axes.abstention).toEqual({ applicable: true, status: "uncalibrated" });
+    expect(LongMemEvalQuestionMeasurementAxesSchema.parse(axes)).toEqual(axes);
+  });
+
+  it("rejects coverage applicability that contradicts abstention and target state", () => {
+    const answerable = buildQuestionMeasurementAxes(input());
+    expect(() => LongMemEvalQuestionMeasurementAxesSchema.parse({
+      ...answerable,
+      answer_session_coverage_at_5: {
+        ...answerable.answer_session_coverage_at_5,
+        applicable: false, covered_count: 0, ratio: null, full_coverage: false
+      }
+    })).toThrow(/applicability/u);
+
+    const abstention = buildQuestionMeasurementAxes(input({ isAbstention: true }));
+    expect(() => LongMemEvalQuestionMeasurementAxesSchema.parse({
+      ...abstention,
+      answer_session_coverage_at_5: {
+        ...abstention.answer_session_coverage_at_5,
+        applicable: true, ratio: 0
+      }
+    })).toThrow(/applicability/u);
   });
 
   it("attaches one identical additive contract to diagnostics and its cohort row", () => {

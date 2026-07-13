@@ -94,9 +94,20 @@ function validateCoverage(
   context: z.RefinementCtx
 ): void {
   const value = axes.answer_session_coverage_at_5;
+  const expectedApplicable = !axes.abstention.applicable && value.total_count > 0;
+  if (value.applicable !== expectedApplicable) {
+    addIssue(context, ["answer_session_coverage_at_5"], "answer-session coverage applicability is inconsistent");
+    return;
+  }
+  if (!value.applicable) {
+    if (value.covered_count !== 0 || value.ratio !== null || value.full_coverage) {
+      addIssue(context, ["answer_session_coverage_at_5"], "answer-session coverage is inconsistent");
+    }
+    return;
+  }
   const ratio = value.total_count === 0 ? null : value.covered_count / value.total_count;
   const full = value.total_count > 0 && value.covered_count === value.total_count;
-  if (value.covered_count > value.total_count || value.ratio !== ratio ||
+  if (value.total_count === 0 || value.covered_count > value.total_count || value.ratio !== ratio ||
       value.full_coverage !== full) {
     addIssue(context, ["answer_session_coverage_at_5"], "answer-session coverage is inconsistent");
   }
