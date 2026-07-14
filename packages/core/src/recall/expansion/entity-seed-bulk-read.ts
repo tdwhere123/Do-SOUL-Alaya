@@ -1,5 +1,9 @@
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type { RecallServiceDependencies, RecallServiceWarnPort } from "../runtime/recall-service-types.js";
+import {
+  loadIndexAlignedSearchBatches,
+  type IndexAlignedBatchFailure
+} from "../runtime/orchestration/index-aligned-search-batches.js";
 
 export type EntitySeedHit = Readonly<{
   readonly object_id: string;
@@ -14,71 +18,27 @@ type LoadEntitySeedHitBatchesParams = Readonly<{
   readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
   readonly warn: RecallServiceWarnPort;
 }>;
-type BulkFailure = Readonly<{
-  readonly failureClass: "result_count_mismatch" | "service_error";
-  readonly actualCount: number;
-}>;
-type BulkSearchOutcome = Readonly<
-  | { readonly kind: "unavailable" }
-  | { readonly kind: "success"; readonly batches: readonly (readonly EntitySeedHit[])[] }
-  | { readonly kind: "failure"; readonly failure: BulkFailure }
->;
-
 export async function loadEntitySeedHitBatches(
   params: LoadEntitySeedHitBatchesParams
 ): Promise<readonly (readonly EntitySeedHit[])[]> {
-  if (params.lookups.length === 0) return [];
-  const bulk = await tryBulkSearch(params);
-  if (bulk.kind === "success") return bulk.batches;
-  const hasScalar = hasScalarSearch(params.memoryRepo);
-  if (bulk.kind === "failure") {
-    warnBulkFailure(params, bulk.failure, hasScalar);
-    if (!hasScalar) return emptyHitBatches(params.lookups);
-  }
-  if (!hasScalar) {
-    warnNoSearchPort(params);
-    return emptyHitBatches(params.lookups);
-  }
-  return loadScalarHitBatches(params);
-}
-
-async function tryBulkSearch(
-  params: LoadEntitySeedHitBatchesParams
-): Promise<BulkSearchOutcome> {
   const bulkSearch = params.memoryRepo.searchManyByKeywordWithinObjectIds;
-  if (bulkSearch === undefined) return Object.freeze({ kind: "unavailable" });
-  try {
-    const batches = await bulkSearch.call(
-      params.memoryRepo,
-      params.workspaceId,
-      params.lookups.map(({ surface, limit }) => ({ queryText: surface, limit })),
-      params.candidateIds
-    );
-    return batches.length === params.lookups.length
-      ? Object.freeze({ kind: "success", batches })
-      : Object.freeze({
-          kind: "failure",
-          failure: Object.freeze({
-            failureClass: "result_count_mismatch" as const,
-            actualCount: batches.length
-          })
-        });
-  } catch {
-    return Object.freeze({
-      kind: "failure",
-      failure: Object.freeze({ failureClass: "service_error" as const, actualCount: 0 })
-    });
-  }
-}
-
-async function loadScalarHitBatches(
-  params: LoadEntitySeedHitBatchesParams
-): Promise<readonly (readonly EntitySeedHit[])[]> {
-  const batches: (readonly EntitySeedHit[])[] = [];
-  for (const lookup of params.lookups) {
-    batches.push(await loadScalarHits(params, lookup));
-  }
-  return batches;
+  const hasScalar = hasScalarSearch(params.memoryRepo);
+  return loadIndexAlignedSearchBatches({
+    lookups: params.lookups,
+    ...(bulkSearch === undefined ? {} : {
+      searchMany: (lookups: readonly EntitySeedLookup[]) => bulkSearch.call(
+        params.memoryRepo,
+        params.workspaceId,
+        lookups.map(({ surface, limit }) => ({ queryText: surface, limit })),
+        params.candidateIds
+      )
+    }),
+    ...(hasScalar ? { searchOne: (lookup: EntitySeedLookup) => loadScalarHits(params, lookup) } : {}),
+    isHit: isEntitySeedHit,
+    maxHitsForLookup: (lookup) => lookup.limit,
+    onBatchFailure: (failure, canFallback) => warnBulkFailure(params, failure, canFallback),
+    onUnavailable: () => warnNoSearchPort(params)
+  });
 }
 
 async function loadScalarHits(
@@ -88,7 +48,7 @@ async function loadScalarHits(
   try {
     const scoped = params.memoryRepo.searchByKeywordWithinObjectIds;
     if (scoped !== undefined) {
-      return scoped.call(
+      return await scoped.call(
         params.memoryRepo, params.workspaceId, lookup.surface, lookup.limit, params.candidateIds
       );
     }
@@ -114,9 +74,16 @@ function hasScalarSearch(memoryRepo: RecallServiceDependencies["memoryRepo"]): b
     memoryRepo.searchByKeyword !== undefined;
 }
 
+function isEntitySeedHit(value: unknown): value is EntitySeedHit {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const hit = value as Record<string, unknown>;
+  return typeof hit.object_id === "string" && hit.object_id.trim().length > 0 &&
+    typeof hit.normalized_rank === "number" && Number.isFinite(hit.normalized_rank);
+}
+
 function warnBulkFailure(
   params: LoadEntitySeedHitBatchesParams,
-  failure: BulkFailure,
+  failure: IndexAlignedBatchFailure,
   hasScalar: boolean
 ): void {
   params.warn(
@@ -127,7 +94,9 @@ function warnBulkFailure(
       operation: "entity_seed_bulk_lookup",
       failure_class: failure.failureClass,
       expected_count: params.lookups.length,
-      actual_count: failure.actualCount
+      returned_count: failure.returnedCount,
+      valid_batch_count: failure.validBatchCount,
+      invalid_index: failure.invalidIndex
     }
   );
 }
@@ -139,10 +108,4 @@ function warnNoSearchPort(params: LoadEntitySeedHitBatchesParams): void {
     expected_count: params.lookups.length,
     actual_count: 0
   });
-}
-
-function emptyHitBatches(
-  lookups: readonly EntitySeedLookup[]
-): readonly (readonly EntitySeedHit[])[] {
-  return lookups.map(() => Object.freeze([]));
 }

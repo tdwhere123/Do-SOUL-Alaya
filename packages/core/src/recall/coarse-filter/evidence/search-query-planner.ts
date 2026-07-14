@@ -26,15 +26,3 @@ export function buildInformativeEvidenceSearchQueries(
     ...queryProbes.date_terms.slice(0, 6)
   ].map((value) => value.trim()).filter((value) => value.length > 0));
 }
-
-export function selectEvidenceSearchQueries(
-  queryText: string,
-  queryProbes: Readonly<RecallQueryProbes>
-): readonly string[] {
-  const informativeQueries = buildInformativeEvidenceSearchQueries(queryProbes);
-  if (informativeQueries.length > 0) {
-    return informativeQueries;
-  }
-  const fallback = queryText.trim();
-  return fallback.length === 0 ? [] : [fallback];
-}

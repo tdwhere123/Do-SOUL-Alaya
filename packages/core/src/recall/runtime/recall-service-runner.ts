@@ -1,19 +1,12 @@
-import { performance } from "node:perf_hooks";
 import {
   RecallContextEventType,
   SoulRecallCompletedPayloadSchema,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import { withEmbeddingSimilarityScores } from "../coarse-filter/coarse-candidates.js";
-import {
-  deliverFineAssessment,
-  fineAssess,
-  type FineAssessParams
-} from "../delivery/fine-assessment.js";
+import type { FineAssessParams } from "../delivery/fine-assessment.js";
 import {
   applyManifestationBiasSidecar,
   appendWeightTransferTelemetry,
-  assessCoarseFilter,
   loadActiveConstraints,
   recordGlobalRecallClassificationsSafely,
   resolvePolicy
@@ -38,14 +31,28 @@ import {
   type EmbeddingCoarseInjectionResult
 } from "./recall-service-runner-coarse.js";
 import {
-  collectEmbeddingAssessmentData,
+  collectLegacyEmbeddingAssessmentData,
+  collectSnapshotEmbeddingAssessmentData,
   startEmbeddingAssessmentPreparation,
   type EmbeddingAssessmentData
 } from "./orchestration/recall-embedding-assessment.js";
 import { collectAnswerRelevanceScores } from "../rerank/recall-answer-rerank.js";
 import { buildRecallResult } from "./recall-result-builder.js";
+import {
+  collectInitialLegacyAssessment,
+  collectTimedSupplementaryData,
+  deliverOrReuseAssessment,
+  prepareLegacyReassessment,
+  prepareSnapshotAssessment
+} from "./orchestration/recall-fine-assessment.js";
+import {
+  measureAsync,
+  measureSync,
+  sumLatencyExcluding
+} from "./orchestration/recall-phase-latency.js";
 import type {
   FineAssessmentResult,
+  FineAssessmentPreparation,
   PreparedEmbeddingQuery,
   PreparedRecallRequest,
   RecallAssessmentStageResult,
@@ -58,6 +65,11 @@ export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallReque
 
 type AssessmentStageResult = RecallAssessmentStageResult;
 type ManifestedRecallResult = RecallManifestedResult;
+type AssessmentPhaseSeed = Readonly<{
+  readonly embedding: number;
+  readonly assessment: number;
+  readonly delivery: number;
+}>;
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 
@@ -143,119 +155,149 @@ async function assessCandidateStage(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
-  const preparedEmbeddingQueryPromise = startEmbeddingAssessmentPreparation(context, params, prepared, coarse);
-  const initialAssessment = await runInitialFineAssessment(context, params, prepared, coarse);
-  const embeddingData = await collectEmbeddingAssessmentData(
-    context, params, prepared, coarse, initialAssessment, preparedEmbeddingQueryPromise
-  );
-  const { preparedEmbeddingQuery, supplement: embeddingSupplement, poolRescoreScores } = embeddingData;
-  const supplementaryData = withEmbeddingSimilarityScores(
-    initialAssessment.supplementaryData,
-    embeddingSupplement.similarityHintsByObjectId,
-    coarse.embeddingCoarseInjection.similarityScores,
-    poolRescoreScores
-  );
-  const embeddingAssessment = needsEmbeddingReassessment(embeddingSupplement, coarse.embeddingCoarseInjection) ||
-    Object.keys(poolRescoreScores).length > 0
-    ? fineAssess(buildFineAssessParams(context, params, prepared, coarse, supplementaryData))
-    : initialAssessment;
-  const reranked = await applyAnswerRerank(
-    context, params, prepared, coarse, embeddingAssessment, supplementaryData
-  );
-  const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
-  return Object.freeze({
-    finalAssessment: reranked.assessment,
-    supplementaryData: reranked.supplementaryData,
-    preparedEmbeddingQuery,
-    embeddingCoarseInjection: coarse.embeddingCoarseInjection,
-    embeddingProviderStatus: provider.status,
-    providerDegradationReason: provider.degradationReason,
-    answerRerankDiagnostics: reranked.diagnostics,
-    recallAfterFusion: performance.now()
-  });
+  if (coarse.embeddingCoarseInjection.requestScoreSnapshot !== undefined) {
+    return assessSnapshotCandidateStage(context, params, prepared, coarse);
+  }
+  return assessLegacyCandidateStage(context, params, prepared, coarse);
 }
 
-async function applyAnswerRerank(
+async function assessLegacyCandidateStage(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult
+): Promise<AssessmentStageResult> {
+  const embeddingPreparation = measureAsync(() => {
+    const pending = startEmbeddingAssessmentPreparation(context, params, prepared, coarse);
+    if (pending === null) {
+      throw new Error("legacy embedding preparation is unavailable");
+    }
+    return pending;
+  });
+  const initial = await collectInitialLegacyAssessment(context, params, prepared, coarse);
+  const preparedEmbeddingQuery = await embeddingPreparation;
+  const embedding = await measureAsync(() => collectLegacyEmbeddingAssessmentData(
+    context, params, prepared, coarse, initial.assessment, preparedEmbeddingQuery.value
+  ));
+  const reassessment = measureSync(() => prepareLegacyReassessment(
+    context, params, prepared, coarse, initial, embedding.value
+  ));
+  const initialAssessmentLatencyMs = sumLatencyExcluding(
+    initial.assessmentSpans, preparedEmbeddingQuery
+  );
+  const initialDeliveryLatencyMs = sumLatencyExcluding(
+    initial.deliverySpans, preparedEmbeddingQuery
+  );
+  return completeCandidateAssessment(
+    context,
+    params,
+    prepared,
+    coarse,
+    reassessment.value.preparedCandidates,
+    reassessment.value.supplementaryData,
+    embedding.value,
+    Object.freeze({
+      embedding: preparedEmbeddingQuery.latencyMs + embedding.latencyMs,
+      assessment: initialAssessmentLatencyMs + reassessment.latencyMs,
+      delivery: initialDeliveryLatencyMs
+    }),
+    reassessment.value.reassessmentRequired ? undefined : initial.assessment
+  );
+}
+
+async function assessSnapshotCandidateStage(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult
+): Promise<AssessmentStageResult> {
+  const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
+  const embedding = await measureAsync(() => collectSnapshotEmbeddingAssessmentData(
+    context, prepared, coarse
+  ));
+  const assessment = measureSync(() => prepareSnapshotAssessment(
+    context, params, prepared, coarse, base.value, embedding.value
+  ));
+  return completeCandidateAssessment(
+    context,
+    params,
+    prepared,
+    coarse,
+    assessment.value.preparedCandidates,
+    assessment.value.supplementaryData,
+    embedding.value,
+    Object.freeze({
+      embedding: embedding.latencyMs,
+      assessment: base.latencyMs + assessment.latencyMs,
+      delivery: 0
+    })
+  );
+}
+
+async function completeCandidateAssessment(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  assessment: FineAssessmentResult,
+  preparedCandidates: FineAssessmentPreparation,
+  supplementaryData: FineAssessParams["supplementaryData"],
+  embeddingData: EmbeddingAssessmentData,
+  phaseLatency: AssessmentPhaseSeed,
+  reusableAssessment?: FineAssessmentResult
+): Promise<AssessmentStageResult> {
+  const { preparedEmbeddingQuery } = embeddingData;
+  const rerank = await measureAsync(() => collectAnswerRerankStage(
+    context, prepared, preparedCandidates, supplementaryData
+  ));
+  const delivery = deliverOrReuseAssessment(
+    context, params, prepared, coarse, preparedCandidates, rerank.value, reusableAssessment
+  );
+  const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
+  return Object.freeze({
+    finalAssessment: delivery.value,
+    supplementaryData: rerank.value.supplementaryData,
+    preparedEmbeddingQuery,
+    embeddingCoarseInjection: coarse.embeddingCoarseInjection,
+    embeddingProviderStatus: provider.status,
+    providerDegradationReason: provider.degradationReason,
+    answerRerankDiagnostics: rerank.value.diagnostics,
+    phaseLatencyMs: Object.freeze({
+      embedding: phaseLatency.embedding,
+      assessment: phaseLatency.assessment,
+      cross_rerank: rerank.latencyMs,
+      delivery: phaseLatency.delivery + delivery.latencyMs
+    })
+  });
+}
+
+async function collectAnswerRerankStage(
+  context: RecallExecutionContext,
+  prepared: PreparedRecallRequest,
+  preparedCandidates: FineAssessmentPreparation,
   supplementaryData: FineAssessParams["supplementaryData"]
 ): Promise<Readonly<{
-  readonly assessment: FineAssessmentResult;
   readonly supplementaryData: FineAssessParams["supplementaryData"];
   readonly diagnostics: AssessmentStageResult["answerRerankDiagnostics"];
+  readonly applied: boolean;
 }>> {
   const rerank = await collectAnswerRelevanceScores({
     service: context.dependencies.answerRerankService,
     queryText: prepared.queryText,
-    candidates: assessment.preparedCandidates,
+    candidates: preparedCandidates,
     warn: context.warn
   });
   if (rerank.scores.size === 0) {
-    return Object.freeze({ assessment, supplementaryData, diagnostics: rerank.diagnostics });
+    return Object.freeze({ supplementaryData, diagnostics: rerank.diagnostics, applied: false });
   }
   const rerankedData = Object.freeze({
     ...supplementaryData,
     answerRelevanceScoresByCandidateKey: rerank.scores
   });
   return Object.freeze({
-    assessment: deliverFineAssessment(
-      buildFineAssessParams(context, params, prepared, coarse, rerankedData),
-      assessment.preparedCandidates
-    ),
     supplementaryData: rerankedData,
-    diagnostics: rerank.diagnostics
+    diagnostics: rerank.diagnostics,
+    applied: true
   });
-}
-
-function buildFineAssessParams(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  supplementaryData: FineAssessParams["supplementaryData"]
-): FineAssessParams {
-  return {
-    candidates: coarse.combinedCoarseCandidates,
-    policy: prepared.policy,
-    winnerMemoryIds: prepared.winnerMemoryIds,
-    supplementaryData,
-    tokenEstimator: prepared.tokenEstimator,
-    now: () => prepared.referenceTime,
-    warn: context.warn,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
-  };
-}
-
-async function runInitialFineAssessment(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Promise<Awaited<ReturnType<typeof assessCoarseFilter>>> {
-  return assessCoarseFilter({
-    dependencies: context.dependencies,
-    warn: context.warn,
-    now: () => prepared.referenceTime,
-    coarseFilter: Object.freeze({ ...coarse.coarseFilter, candidates: coarse.combinedCoarseCandidates }),
-    workspaceId: params.workspaceId,
-    runId: params.runId ?? null,
-    queryText: prepared.queryText,
-    policy: prepared.policy,
-    queryProbes: prepared.queryProbes,
-    winnerMemoryIds: prepared.winnerMemoryIds,
-    tokenEstimator: prepared.tokenEstimator,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
-  });
-}
-
-function needsEmbeddingReassessment(
-  supplement: EmbeddingAssessmentData["supplement"],
-  injection: EmbeddingCoarseInjectionResult
-): boolean {
-  return Object.keys(supplement.similarityHintsByObjectId).length > 0 || injection.candidates.length > 0;
 }
 
 function resolveEmbeddingProvider(
@@ -280,18 +322,25 @@ async function manifestCandidateStage(
   params: RecallExecutionParams,
   finalAssessment: FineAssessmentResult
 ): Promise<ManifestedRecallResult> {
-  const candidates = await applyManifestationBiasSidecar({
-    manifestationSidecarPort: context.dependencies.manifestationSidecarPort,
-    warn: context.warn,
-    workspaceId: params.workspaceId,
-    runId: params.runId ?? null,
-    taskSurfaceRef: params.taskSurface,
-    candidates: finalAssessment.candidates
+  const manifested = await measureAsync(async () => {
+    const candidates = await applyManifestationBiasSidecar({
+      manifestationSidecarPort: context.dependencies.manifestationSidecarPort,
+      warn: context.warn,
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      taskSurfaceRef: params.taskSurface,
+      candidates: finalAssessment.candidates
+    });
+    return Object.freeze({
+      candidates,
+      candidateDiagnostics: finalizeRecallCandidateDiagnostics(
+        finalAssessment.diagnostics, candidates
+      )
+    });
   });
   return Object.freeze({
-    candidates,
-    candidateDiagnostics: finalizeRecallCandidateDiagnostics(finalAssessment.diagnostics, candidates),
-    recallAfterManifestation: performance.now()
+    ...manifested.value,
+    manifestationLatencyMs: manifested.latencyMs
   });
 }
 

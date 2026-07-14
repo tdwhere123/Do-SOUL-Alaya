@@ -171,6 +171,7 @@ async function runExpansion(
     drafts,
     addCandidate: (entry, _plane, score) => {
       if (drafts.has(entry.object_id)) return false;
+      if (score === undefined) throw new Error("source proximity score is required");
       drafts.set(entry.object_id, draft(entry));
       admitted.push({ id: entry.object_id, score });
       return true;

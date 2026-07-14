@@ -241,10 +241,11 @@ describe("applyDeliverySelection", () => {
     const alternateBase = fusedCandidate({ objectId: "shared", fusedScore: 0.8 });
     const alternate = Object.freeze({
       ...alternateBase,
-      originPlane: "evidence" as const,
+      originPlane: "global" as const,
       fusion: Object.freeze({
         ...alternateBase.fusion,
-        candidate_key: "evidence:memory_entry:shared"
+        candidate_key: "global:memory_entry:shared",
+        origin_plane: "global" as const
       })
     });
     const nextUnique = fusedCandidate({ objectId: "next", fusedScore: 0.7 });
@@ -254,7 +255,7 @@ describe("applyDeliverySelection", () => {
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
       .toEqual(["shared", "shared", "next"]);
     expect(result.rankByCandidateKey.get("workspace_local:memory_entry:shared")).toBe(1);
-    expect(result.rankByCandidateKey.get("evidence:memory_entry:shared")).toBe(2);
+    expect(result.rankByCandidateKey.get("global:memory_entry:shared")).toBe(2);
   });
 
   it("lets a complete query-conditioned score own order and final relevance", () => {

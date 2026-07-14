@@ -89,14 +89,22 @@ export function parseMemoryEmbeddingRecord(
 ): Readonly<MemoryEmbeddingRecord> {
   const embedding = parseEmbedding(value.embedding, "embedding");
   const dimensions = parseDimensions(value.dimensions);
+  assertEmbeddingDimensions(embedding, dimensions);
+  return buildMemoryEmbeddingRecord(value, dimensions, embedding);
+}
 
-  if (embedding.length !== dimensions) {
-    throw new StorageError(
-      "VALIDATION_FAILED",
-      `Embedding length ${embedding.length} did not match declared dimensions ${dimensions}.`
-    );
-  }
+export function parseMemoryEmbeddingRow(row: MemoryEmbeddingRow): Readonly<MemoryEmbeddingRecord> {
+  const dimensions = parseDimensions(row.dimensions);
+  const embedding = deserializeEmbedding(row.embedding_blob, dimensions);
+  assertEmbeddingDimensions(embedding, dimensions);
+  return buildMemoryEmbeddingRecord(row, dimensions, embedding);
+}
 
+function buildMemoryEmbeddingRecord(
+  value: MemoryEmbeddingRecord | MemoryEmbeddingRow,
+  dimensions: number,
+  embedding: Float32Array
+): Readonly<MemoryEmbeddingRecord> {
   return Object.freeze({
     object_id: parseObjectId(value.object_id),
     workspace_id: parseWorkspaceId(value.workspace_id),
@@ -108,23 +116,6 @@ export function parseMemoryEmbeddingRecord(
     embedding,
     created_at: parseTimestamp(value.created_at),
     updated_at: parseTimestamp(value.updated_at)
-  });
-}
-
-export function parseMemoryEmbeddingRow(row: MemoryEmbeddingRow): Readonly<MemoryEmbeddingRecord> {
-  const embedding = deserializeEmbedding(row.embedding_blob, row.dimensions);
-
-  return parseMemoryEmbeddingRecord({
-    object_id: row.object_id,
-    workspace_id: row.workspace_id,
-    content_hash: row.content_hash,
-    provider_kind: row.provider_kind,
-    model_id: row.model_id,
-    schema_version: row.schema_version,
-    dimensions: row.dimensions,
-    embedding,
-    created_at: row.created_at,
-    updated_at: row.updated_at
   });
 }
 
@@ -145,8 +136,11 @@ export function parseMemoryEmbeddingMetadataRow(
 }
 
 function serializeEmbedding(embedding: Float32Array): Buffer {
-  const copy = new Float32Array(embedding);
-  return Buffer.from(copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength));
+  return Buffer.from(copyBytes(new Uint8Array(
+    embedding.buffer,
+    embedding.byteOffset,
+    embedding.byteLength
+  )));
 }
 
 function deserializeEmbedding(blob: Buffer, dimensions: number): Float32Array {
@@ -158,11 +152,17 @@ function deserializeEmbedding(blob: Buffer, dimensions: number): Float32Array {
     );
   }
 
-  const copiedBytes = Uint8Array.from(blob);
-  return new Float32Array(copiedBytes.buffer);
+  const embedding = new Float32Array(copyBytes(blob));
+  assertValidEmbedding(embedding, "embedding");
+  return embedding;
 }
 
 function parseEmbedding(value: Float32Array, fieldName: string): Float32Array {
+  assertValidEmbedding(value, fieldName);
+  return new Float32Array(value);
+}
+
+function assertValidEmbedding(value: Float32Array, fieldName: string): void {
   if (!(value instanceof Float32Array)) {
     throw new StorageError("VALIDATION_FAILED", `${fieldName} must be a Float32Array.`);
   }
@@ -176,8 +176,20 @@ function parseEmbedding(value: Float32Array, fieldName: string): Float32Array {
       throw new StorageError("VALIDATION_FAILED", `${fieldName} must contain only finite numbers.`);
     }
   }
+}
 
-  return new Float32Array(value);
+function assertEmbeddingDimensions(embedding: Float32Array, dimensions: number): void {
+  if (embedding.length !== dimensions) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      `Embedding length ${embedding.length} did not match declared dimensions ${dimensions}.`
+    );
+  }
+}
+
+// invariant: mapper outputs never retain caller- or SQLite-owned mutable bytes.
+function copyBytes(bytes: Uint8Array): ArrayBuffer {
+  return Uint8Array.from(bytes).buffer;
 }
 
 function parseDimensions(value: number): number {

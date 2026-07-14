@@ -13,7 +13,8 @@ import {
 } from "./coarse-candidates.js";
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
-import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
+import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
+import { buildEvidenceSearchQueries } from "./evidence/search-query-planner.js";
 
 export interface SemanticSupplementParams {
   readonly context: RunCoarseFilterContext;
@@ -213,13 +214,16 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
     return;
   }
   try {
+    const evidenceQueries = buildEvidenceSearchQueries(params.queryText, params.queryProbes);
+    const limit = params.config.semantic_supplement.max_supplement;
+    const evidenceHitBatches = await loadEvidenceSearchHitBatches({
+      workspaceId: params.workspaceId,
+      queries: evidenceQueries.map((queryText) => ({ queryText, limit })),
+      searchPort: params.context.dependencies.evidenceSearchPort,
+      warn: params.context.warn
+    });
     const evidenceMatchById = new Map<string, number>();
-    for (const evidenceQuery of selectEvidenceSearchQueries(params.queryText, params.queryProbes)) {
-      const evidenceMatches = await params.context.dependencies.evidenceSearchPort.searchByKeyword(
-        params.workspaceId,
-        evidenceQuery,
-        params.config.semantic_supplement.max_supplement
-      );
+    for (const evidenceMatches of evidenceHitBatches) {
       for (const match of evidenceMatches) {
         evidenceMatchById.set(
           match.object_id,

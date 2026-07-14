@@ -3,6 +3,12 @@ import { RecallService } from "../../recall/recall-service.js";
 import { selectCandidatesWithinBudgets } from "../../recall/runtime/recall-candidate-builder.js";
 import { compareRecallCandidates } from "../../recall/runtime/recall-service-helpers.js";
 import { WS, candidate, deps, evidenceCapsule, fineConfig, memory, pathRelation, task, withBudgets } from "./recall-current-behavior-test-fixtures.js";
+import {
+  RECALL_PHASES,
+  createAnswerableSourceWindowScenario,
+  createEvidenceFanoutScenario,
+  createSourceDeliveryBudgetScenario
+} from "./recall-current-behavior-scenarios.js";
 
 describe("recall regression suite", () => {
 it.each([
@@ -74,9 +80,7 @@ it("emits per-phase latency telemetry on the full recall path", async () => {
     });
     const latency = result.diagnostics?.phase_latency_ms;
     expect(latency).toBeDefined();
-    expect(Object.keys(latency ?? {})).toEqual(
-      expect.arrayContaining(["coarse", "synthesis", "fusion", "manifestation"])
-    );
+    expect(Object.keys(latency ?? {})).toEqual(RECALL_PHASES);
     for (const value of Object.values(latency ?? {})) {
       expect(value).toBeGreaterThanOrEqual(0);
       expect(Number.isFinite(value)).toBe(true);
@@ -153,47 +157,8 @@ it("uses source proximity as an independent fusion stream for neighboring eviden
   });
 
 it("promotes answerable source-window neighbors without lifting source-only neighbors", async () => {
-    const seed = memory({
-      object_id: "seed",
-      content: "bookshelf purchase context",
-      evidence_refs: ["source-a-s1-t3"],
-      activation_score: 0.9
-    });
-    const answerableNeighbor = memory({
-      object_id: "answerable-neighbor",
-      content: "I bought my new bookshelf from IKEA after comparing Target shelves.",
-      evidence_refs: ["evidence-answer", "source-a-s1-t4"],
-      activation_score: 0.05
-    });
-    const sourceOnlyNeighbor = memory({
-      object_id: "source-only-neighbor",
-      content: "The same conversation also mentioned room lighting.",
-      evidence_refs: ["source-a-s1-t5"],
-      activation_score: 0.04
-    });
-    const decoys = Array.from({ length: 4 }, (_, index) =>
-      memory({
-        object_id: `evidence-decoy-${index}`,
-        content: `Bookshelf store comparison decoy ${index}`,
-        evidence_refs: [`evidence-decoy-${index}`, `source-decoy-${index}-s1-t1`],
-        activation_score: 0.8 - index * 0.01
-      })
-    );
-    const evidenceRanks = new Map([
-      ...decoys.map((entry, index) => [entry.evidence_refs[0] ?? "", 1 - index * 0.01] as const),
-      ["evidence-answer", 0.95] as const
-    ]);
-    const { dependencies } = deps([seed, ...decoys, answerableNeighbor, sourceOnlyNeighbor], {
-      searchByKeyword: async () => [{ object_id: "seed", normalized_rank: 1 }],
-      evidenceSearchPort: {
-        searchByKeyword: vi.fn(async () =>
-          [...evidenceRanks.entries()].map(([object_id, normalized_rank]) => ({
-            object_id,
-            normalized_rank
-          }))
-        )
-      }
-    });
+    const { dependencies, answerableNeighbor, sourceOnlyNeighbor } =
+      createAnswerableSourceWindowScenario();
     const service = new RecallService(dependencies);
     const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
       max_entries: 5,
@@ -207,12 +172,16 @@ it("promotes answerable source-window neighbors without lifting source-only neig
       policyOverride: policy
     });
 
-    expect(result.candidates.map((item) => item.object_id)).toContain("answerable-neighbor");
-    expect(result.candidates.map((item) => item.object_id)).not.toContain("source-only-neighbor");
+    expect(result.candidates.map((item) => item.object_id)).toContain(answerableNeighbor.object_id);
+    expect(result.candidates.map((item) => item.object_id)).not.toContain(sourceOnlyNeighbor.object_id);
     expect(result.diagnostics?.query_probes.normalized_query).toBe("Where did I buy my new bookshelf?");
     expect(result.diagnostics?.query_sought_facets).toContain("location_place");
-    const answerDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "answerable-neighbor");
-    const sourceOnlyDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "source-only-neighbor");
+    const answerDiagnostic = result.diagnostics?.candidates.find(
+      (item) => item.object_id === answerableNeighbor.object_id
+    );
+    const sourceOnlyDiagnostic = result.diagnostics?.candidates.find(
+      (item) => item.object_id === sourceOnlyNeighbor.object_id
+    );
     expect(answerDiagnostic?.per_stream_rank.evidence_fts).not.toBeNull();
     expect(answerDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
     expect(answerDiagnostic?.per_stream_rank.source_evidence_agreement).not.toBeNull();
@@ -318,44 +287,7 @@ it("uses evidence capsule artifact refs for source proximity when memory refs ar
   });
 
 it("caps per-memory evidence_refs forwarded to findByIds for the gist collector at 8", async () => {
-    // Bound the per-memory tokenizer / new Set fan-out inside the gist
-    // collector when a single memory aggregates many evidence_refs. The
-    // top-rank ref (which the gist picker selects) must always survive the
-    // cap; refs beyond it are sorted by per-ref evidence-FTS rank and the
-    // bottom is dropped. 8 is a generous bound over the in-corpus
-    // distribution (1-3 refs/memory) and small enough to flatten the worst
-    // case.
-    const refIds = Array.from({ length: 20 }, (_, index) => `evidence-fanout-${index}`);
-    const seed = memory({
-      object_id: "fanout-seed",
-      content: "needle answer payload",
-      // Pin the top-ranked ref to a known id (highest normalized_rank
-      // below) so the cap test can assert it survives.
-      evidence_refs: refIds
-    });
-    const evidenceById = new Map(
-      refIds.map((id) => [id, evidenceCapsule(id, `source-${id}`)] as const)
-    );
-    const findByIds = vi.fn(async (_workspaceId: string, ids: readonly string[]) =>
-      ids.flatMap((id) => {
-        const evidence = evidenceById.get(id);
-        return evidence === undefined ? [] : [evidence];
-      })
-    );
-    // Rank descending by index — `evidence-fanout-0` is the top ref.
-    const evidenceSearchByKeyword = vi.fn(async () =>
-      refIds.map((id, index) => ({
-        object_id: id,
-        normalized_rank: 1 - index * 0.01
-      }))
-    );
-    const { dependencies } = deps([seed], {
-      searchByKeyword: async () => [{ object_id: "fanout-seed", normalized_rank: 1 }],
-      evidenceSearchPort: {
-        searchByKeyword: evidenceSearchByKeyword,
-        findByIds
-      }
-    });
+    const { dependencies, findByIds, topRankedRef } = createEvidenceFanoutScenario();
 
     await new RecallService(dependencies).recall({
       taskSurface: task("needle answer payload"),
@@ -365,58 +297,17 @@ it("caps per-memory evidence_refs forwarded to findByIds for the gist collector 
     });
 
     expect(findByIds).toHaveBeenCalled();
-    // Find the findByIds call that came from the gist collector. The
-    // source-proximity path also calls findByIds; both flow through the
-    // same vi.fn mock. The gist collector's payload is bounded by
-    // MAX_REFS_PER_MEMORY (= 8); any source-proximity call is the full
-    // ref set. Assert at least one call satisfies the cap and that it
-    // contains the top-ranked ref.
     const callsUnderCap = findByIds.mock.calls
       .map((call) => call[1] as readonly string[])
       .filter((ids) => ids.length <= 8);
     expect(callsUnderCap.length).toBeGreaterThan(0);
     const cappedCall = callsUnderCap[0]!;
     expect(cappedCall.length).toBeLessThanOrEqual(8);
-    // Top-ranked ref must always survive the cap.
-    expect(cappedCall).toContain("evidence-fanout-0");
+    expect(cappedCall).toContain(topRankedRef);
   });
 
 it("keeps final delivery budget monotonic by fused rank after source proximity admission", async () => {
-    const anchor = memory({
-      object_id: "anchor",
-      content: "needle answer primary",
-      evidence_refs: ["source-a-s1-t3"],
-      activation_score: 0.95
-    });
-    const sibling = memory({
-      object_id: "filler-12-sibling",
-      content: "same-source sibling detail",
-      evidence_refs: ["source-a-s1-t4"],
-      activation_score: 0.01
-    });
-    const outsideRadius = memory({
-      object_id: "outside-radius",
-      content: "same-source distant detail",
-      evidence_refs: ["source-a-s1-t30"],
-      activation_score: 0.01
-    });
-    const fillers = Array.from({ length: 30 }, (_, index) =>
-      memory({
-        object_id: `filler-${index}`,
-        content: `needle distractor ${index}`,
-        evidence_refs: [`source-z-s${index}-t1`],
-        activation_score: 0.9 - index * 0.01
-      })
-    );
-    const { dependencies } = deps([anchor, ...fillers, sibling, outsideRadius], {
-      searchByKeyword: async () => [
-        { object_id: "anchor", normalized_rank: 1 },
-        ...fillers.map((entry, index) => ({
-          object_id: entry.object_id,
-          normalized_rank: 0.99 - index * 0.01
-        }))
-      ]
-    });
+    const { dependencies, siblingId, outsideRadiusId } = createSourceDeliveryBudgetScenario();
     const service = new RecallService(dependencies);
     const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
       max_entries: 10,
@@ -431,7 +322,9 @@ it("keeps final delivery budget monotonic by fused rank after source proximity a
     });
 
     expect(result.candidates).toHaveLength(10);
-    const siblingDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "filler-12-sibling");
+    const siblingDiagnostic = result.diagnostics?.candidates.find(
+      (item) => item.object_id === siblingId
+    );
     expect(siblingDiagnostic?.admission_planes).toEqual(["source_proximity"]);
     expect(siblingDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
     const diagnostics = result.diagnostics?.candidates ?? [];
@@ -442,7 +335,9 @@ it("keeps final delivery budget monotonic by fused rank after source proximity a
         .filter((item) => item.fused_rank <= 10)
         .every((item) => item.dropped_reason === null && item.final_rank !== null)
     ).toBe(true);
-    const outsideDiagnostic = result.diagnostics?.candidates.find((item) => item.object_id === "outside-radius");
+    const outsideDiagnostic = result.diagnostics?.candidates.find(
+      (item) => item.object_id === outsideRadiusId
+    );
     expect(outsideDiagnostic).toBeUndefined();
   });
 

@@ -39,21 +39,22 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly preparedCandidates: readonly FineAssessmentCandidate[];
 }> {
+  return deliverFineAssessment(params, prepareFineAssessment(params));
+}
+
+export function prepareFineAssessment(
+  params: FineAssessParams
+): readonly FineAssessmentCandidate[] {
   if (params.candidates.length === 0) {
-    return Object.freeze({
-      candidates: Object.freeze([]),
-      diagnostics: Object.freeze([]),
-      preparedCandidates: Object.freeze([])
-    });
+    return Object.freeze([]);
   }
   const scoredCandidates = scoreFineAssessmentCandidates(params);
-  const fusedCandidates = fuseFineAssessmentCandidates(
+  return fuseFineAssessmentCandidates(
     scoredCandidates,
     params.policy,
     params.supplementaryData,
     params.now()
   );
-  return deliverFineAssessment(params, fusedCandidates);
 }
 
 export function deliverFineAssessment(

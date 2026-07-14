@@ -33,7 +33,7 @@ describe("readSchemaMigrationLedger", () => {
     [102, "lower"],
     [103, "equal"],
     [104, "higher"]
-  ] as const)("exposes max version %i for a consumer's %s comparison", (version) => {
+  ] as const)("exposes max version %i for a consumer's %s comparison", (version, _comparison) => {
     const filename = createDatabase();
     writeCanonicalLedger(filename, [version]);
 

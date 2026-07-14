@@ -1,6 +1,9 @@
 import type { RecallPolicy, SoulRecallHostContext, TaskObjectSurface } from "@do-soul/alaya-protocol";
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
-import type { fineAssess } from "../delivery/fine-assessment.js";
+import type {
+  fineAssess,
+  prepareFineAssessment
+} from "../delivery/fine-assessment.js";
 import type { loadActiveConstraints } from "./orchestration.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coarse.js";
@@ -41,6 +44,7 @@ export interface RecallExecutionContext {
 export type ActiveConstraintsResult = Awaited<ReturnType<typeof loadActiveConstraints>>;
 export type PreparedEmbeddingQuery = Awaited<ReturnType<typeof prepareEmbeddingSupplementQuery>>;
 export type FineAssessmentResult = ReturnType<typeof fineAssess>;
+export type FineAssessmentPreparation = ReturnType<typeof prepareFineAssessment>;
 
 export interface PreparedRecallRequest {
   readonly policy: Readonly<RecallPolicy>;
@@ -62,11 +66,16 @@ export interface RecallAssessmentStageResult {
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
-  readonly recallAfterFusion: number;
+  readonly phaseLatencyMs: Readonly<{
+    readonly embedding: number;
+    readonly assessment: number;
+    readonly cross_rerank: number;
+    readonly delivery: number;
+  }>;
 }
 
 export interface RecallManifestedResult {
   readonly candidates: RecallResult["candidates"];
   readonly candidateDiagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-  readonly recallAfterManifestation: number;
+  readonly manifestationLatencyMs: number;
 }

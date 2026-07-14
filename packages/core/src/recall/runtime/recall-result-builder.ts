@@ -53,8 +53,13 @@ function buildPhaseLatencyMs(
   return Object.freeze({
     coarse: coarse.recallAfterCoarse - coarse.recallPhaseStart,
     synthesis: coarse.recallAfterSynthesis - coarse.recallAfterCoarse,
-    fusion: assessment.recallAfterFusion - coarse.recallAfterSynthesis,
-    manifestation: manifested.recallAfterManifestation - assessment.recallAfterFusion
+    embedding:
+      coarse.recallAfterEmbedding - coarse.recallAfterSynthesis +
+      assessment.phaseLatencyMs.embedding,
+    assessment: assessment.phaseLatencyMs.assessment,
+    cross_rerank: assessment.phaseLatencyMs.cross_rerank,
+    delivery: assessment.phaseLatencyMs.delivery,
+    manifestation: manifested.manifestationLatencyMs
   });
 }
 

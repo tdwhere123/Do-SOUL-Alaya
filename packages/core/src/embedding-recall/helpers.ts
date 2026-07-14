@@ -94,24 +94,53 @@ export function cosineSimilarity(left: Float32Array, right: Float32Array): numbe
   if (left.length !== right.length || left.length === 0) {
     return 0;
   }
+  const leftMagnitude = nonzeroFiniteMagnitude(left);
+  return leftMagnitude === null ? 0 : cosineWithLeftMagnitude(left, leftMagnitude, right);
+}
 
+// invariant: all documents scored by one batch share the left-vector norm.
+export function createCosineBatchScorer(
+  left: Float32Array
+): (right: Float32Array) => number {
+  const leftMagnitude = nonzeroFiniteMagnitude(left);
+  if (leftMagnitude === null) {
+    return () => 0;
+  }
+  return (right) => cosineWithLeftMagnitude(left, leftMagnitude, right);
+}
+
+function cosineWithLeftMagnitude(
+  left: Float32Array,
+  leftMagnitude: number,
+  right: Float32Array
+): number {
+  if (left.length !== right.length || right.length === 0) {
+    return 0;
+  }
   let dot = 0;
-  let leftMagnitude = 0;
-  let rightMagnitude = 0;
-
+  let rightMagnitudeSquared = 0;
   for (let index = 0; index < left.length; index += 1) {
     const leftValue = left[index] ?? 0;
     const rightValue = right[index] ?? 0;
     dot += leftValue * rightValue;
-    leftMagnitude += leftValue * leftValue;
-    rightMagnitude += rightValue * rightValue;
+    rightMagnitudeSquared += rightValue * rightValue;
   }
-
-  if (leftMagnitude === 0 || rightMagnitude === 0) {
+  if (rightMagnitudeSquared === 0) {
     return 0;
   }
+  return dot / (leftMagnitude * Math.sqrt(rightMagnitudeSquared));
+}
 
-  return dot / (Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude));
+function nonzeroFiniteMagnitude(vector: Float32Array): number | null {
+  if (vector.length === 0) {
+    return null;
+  }
+  let squared = 0;
+  for (const value of vector) {
+    squared += value * value;
+  }
+  const magnitude = Math.sqrt(squared);
+  return magnitude === 0 || !Number.isFinite(magnitude) ? null : magnitude;
 }
 
 // cosine space is comparable only within one (provider_kind, model_id, schema_version).

@@ -356,6 +356,6 @@ export interface RecallDiagnostics {
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
   // Per-recall token instrument; emitted on both normal and degraded paths to keep bench coverage at 100% without synthetic zero samples.
   readonly token_economy?: Readonly<RecallTokenEconomy>;
-  // Per-phase wall-clock (ms) for latency localization; only on the instrumented full recall path.
+  // Exclusive critical-path contributions: an earlier phase owns concurrent overlap, and a later phase reports residual wait.
   readonly phase_latency_ms?: Readonly<Record<string, number>>;
 }

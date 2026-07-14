@@ -35,6 +35,11 @@ const MEMORY_ENTRY_PAGE_LIMIT = 500;
 const MAX_WORKER_PAGE_LIMIT = 5000;
 let closed = false;
 
+type WorkerKeywordSearchQuery = Readonly<{
+  readonly queryText: string;
+  readonly limit: number;
+}>;
+
 parentPort.on("message", (message: unknown) => {
   void handleRequest(message);
 });
@@ -72,6 +77,7 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "memory.findByIds":
       return await runMemoryOperation(request.operation, payload);
     case "evidence.searchByKeyword":
+    case "evidence.searchManyByKeyword":
     case "evidence.findByIds":
     case "evidence.findSourceAnchorsByIds":
       return await runEvidenceOperation(request.operation, payload);
@@ -168,22 +174,19 @@ async function searchManyMemoryKeywordsWithinObjectIds(
   const workspaceId = readString(payload.workspaceId, "workspaceId");
   const objectIds = readStringArray(payload.objectIds, "objectIds");
   const queries = readKeywordSearchBatchQueries(payload.queries);
-  const batches = [];
-  for (const query of queries) {
-    batches.push(await memoryEntryRepo.searchByKeywordWithinObjectIds(
-      workspaceId,
-      query.queryText,
-      query.limit,
-      objectIds
+  return runOrderedKeywordSearchBatch(queries, (query) =>
+    memoryEntryRepo.searchByKeywordWithinObjectIds(
+      workspaceId, query.queryText, query.limit, objectIds
     ));
-  }
-  return batches;
 }
 
 async function runEvidenceOperation(
   operation: Extract<RecallReadWorkerRequest["operation"], `evidence.${string}`>,
   payload: Record<string, unknown>
 ) {
+  if (operation === "evidence.searchManyByKeyword") {
+    return searchManyEvidenceKeywords(payload);
+  }
   if (operation === "evidence.searchByKeyword") {
     return await evidenceCapsuleRepo.searchByKeyword(
       readString(payload.workspaceId, "workspaceId"),
@@ -203,6 +206,24 @@ async function runEvidenceOperation(
     workspaceId,
     readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
   );
+}
+
+async function searchManyEvidenceKeywords(
+  payload: Record<string, unknown>
+) {
+  const workspaceId = readString(payload.workspaceId, "workspaceId");
+  const queries = readKeywordSearchBatchQueries(payload.queries);
+  return runOrderedKeywordSearchBatch(queries, (query) =>
+    evidenceCapsuleRepo.searchByKeyword(workspaceId, query.queryText, query.limit));
+}
+
+async function runOrderedKeywordSearchBatch<Result>(
+  queries: readonly WorkerKeywordSearchQuery[],
+  searchOne: (query: WorkerKeywordSearchQuery) => Promise<readonly Result[]>
+): Promise<readonly (readonly Result[])[]> {
+  const batches: (readonly Result[])[] = [];
+  for (const query of queries) batches.push(await searchOne(query));
+  return batches;
 }
 
 async function runSynthesisOperation(
@@ -410,7 +431,7 @@ function readStringArray(value: unknown, name: string): readonly string[] {
 
 function readKeywordSearchBatchQueries(
   value: unknown
-): readonly Readonly<{ readonly queryText: string; readonly limit: number }>[] {
+): readonly WorkerKeywordSearchQuery[] {
   if (!Array.isArray(value)) {
     throw new Error("worker payload queries must be an array");
   }

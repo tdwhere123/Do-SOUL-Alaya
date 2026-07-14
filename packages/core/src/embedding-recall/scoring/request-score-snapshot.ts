@@ -1,7 +1,7 @@
 import { resolveEmbeddingWorkspaceScanCap } from "../constants.js";
 import {
   clamp01,
-  cosineSimilarity,
+  createCosineBatchScorer,
   hashMemoryContent,
   isProviderMatchedEmbedding,
   toErrorMessage
@@ -194,6 +194,7 @@ export class RequestScoreSnapshotBuilder {
     const poolMemories = new Map(params.poolMemories.map((memory) => [memory.object_id, memory] as const));
     const poolScores: Record<string, number> = {};
     const neighbors: EmbeddingNeighborHit[] = [];
+    const scoreCosine = createCosineBatchScorer(queryEmbedding);
     for (const record of ledger.values()) {
       if (record.dimensions !== record.embedding.length || record.dimensions !== queryEmbedding.length) {
         continue;
@@ -205,7 +206,7 @@ export class RequestScoreSnapshotBuilder {
       if (poolMemory !== undefined && record.content_hash !== hashMemoryContent(poolMemory.content)) {
         continue;
       }
-      const similarity = clamp01(cosineSimilarity(queryEmbedding, record.embedding));
+      const similarity = clamp01(scoreCosine(record.embedding));
       if (similarity <= 0) {
         continue;
       }

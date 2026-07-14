@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MemoryEntry, PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
+import type { MemoryEntry, PathRelation } from "@do-soul/alaya-protocol";
 import {
   expandGraphFrontier,
   expandGraphFrontiersBySeed
 } from "../../recall/expansion/structural-expansion-graph-frontier.js";
 import type { GraphExpansionCandidateDraft } from "../../recall/expansion/graph-expansion.js";
+import type { RecallServicePathExpansionPort } from "../../recall/runtime/recall-service-ports.js";
 import {
   createMemoryEntry,
   createPathRelation
@@ -16,6 +17,9 @@ type CandidateView = Readonly<{
   readonly hop: number;
   readonly edgeType: string;
 }>;
+
+type PathReader = RecallServicePathExpansionPort["findByAnchors"];
+type PathReaderMock = ReturnType<typeof vi.fn<PathReader>>;
 
 describe("batched entity-seed graph frontier", () => {
   it("matches independent traversals across mixed randomized path semantics", async () => {
@@ -79,7 +83,7 @@ describe("batched entity-seed graph frontier", () => {
       .map((object_id) => createMemoryEntry({ object_id }));
     const serialWarn = vi.fn();
     const serialDegradationReasons = new Set<"graph_expansion_failed">();
-    const serialFindByAnchors = vi.fn(async () => {
+    const serialFindByAnchors = vi.fn<PathReader>(async () => {
       throw new Error("path read failed");
     });
     for (const seed of entries) {
@@ -94,7 +98,7 @@ describe("batched entity-seed graph frontier", () => {
 
     const batchedWarn = vi.fn();
     const batchedDegradationReasons = new Set<"graph_expansion_failed">();
-    const batchedFindByAnchors = vi.fn(async () => {
+    const batchedFindByAnchors = vi.fn<PathReader>(async () => {
       throw new Error("path read failed");
     });
 
@@ -122,7 +126,7 @@ describe("batched entity-seed graph frontier", () => {
     const paths = [path("seed-a-neighbor", "seed-a", "neighbor-a", "supports")];
     const warn = vi.fn();
     const degradationReasons = new Set<"graph_expansion_failed">();
-    const findByAnchors = vi.fn(async (_workspaceId: string, anchors: readonly PathAnchorRef[]) => {
+    const findByAnchors = vi.fn<PathReader>(async (_workspaceId, anchors) => {
       const ids = new Set(anchors.flatMap((anchor) =>
         anchor.kind === "object" ? [anchor.object_id] : []
       ));
@@ -158,7 +162,7 @@ async function runSerial(
   entries: readonly MemoryEntry[],
   seeds: readonly MemoryEntry[],
   paths: readonly PathRelation[]
-): Promise<Readonly<{ candidates: readonly CandidateView[][]; findByAnchors: ReturnType<typeof vi.fn> }>> {
+): Promise<Readonly<{ candidates: readonly CandidateView[][]; findByAnchors: PathReaderMock }>> {
   const findByAnchors = createPathReader(paths);
   const candidates: CandidateView[][] = [];
   for (const seed of seeds) {
@@ -177,7 +181,7 @@ async function runBatched(
   entries: readonly MemoryEntry[],
   seeds: readonly MemoryEntry[],
   paths: readonly PathRelation[]
-): Promise<Readonly<{ candidates: readonly CandidateView[][]; findByAnchors: ReturnType<typeof vi.fn> }>> {
+): Promise<Readonly<{ candidates: readonly CandidateView[][]; findByAnchors: PathReaderMock }>> {
   const findByAnchors = createPathReader(paths);
   const candidates = seeds.map((): CandidateView[] => []);
   await expandGraphFrontiersBySeed({
@@ -188,7 +192,7 @@ async function runBatched(
   return { candidates, findByAnchors };
 }
 
-function traversalParams(entries: readonly MemoryEntry[], findByAnchors: ReturnType<typeof vi.fn>) {
+function traversalParams(entries: readonly MemoryEntry[], findByAnchors: PathReader) {
   return {
     workspaceId: "workspace-1",
     byId: new Map(entries.map((entry) => [entry.object_id, entry])),
@@ -200,7 +204,7 @@ function traversalParams(entries: readonly MemoryEntry[], findByAnchors: ReturnT
 }
 
 function createPathReader(paths: readonly PathRelation[]) {
-  return vi.fn(async (_workspaceId: string, anchors: readonly PathAnchorRef[]) => {
+  return vi.fn<PathReader>(async (_workspaceId, anchors) => {
     const ids = new Set(anchors.flatMap((anchor) =>
       anchor.kind === "object" ? [anchor.object_id] : []
     ));

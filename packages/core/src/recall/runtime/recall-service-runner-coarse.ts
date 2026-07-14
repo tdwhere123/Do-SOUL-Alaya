@@ -51,6 +51,7 @@ export interface CoarseStageResult {
   readonly recallPhaseStart: number;
   readonly recallAfterCoarse: number;
   readonly recallAfterSynthesis: number;
+  readonly recallAfterEmbedding: number;
   readonly coarseFilter: CoarseFilterResult;
   readonly globalCoarseFilter: Awaited<ReturnType<typeof loadGlobalRecallCandidates>>;
   readonly globalRecallClassifications: Parameters<typeof recordGlobalRecallClassificationsSafely>[0]["classifications"];
@@ -77,10 +78,12 @@ export async function collectCoarseStage(
   const recallAfterSynthesis = performance.now();
   const lexicalCoarseCandidates = mergeLexicalCoarseCandidates(coarseFilter, global.filteredCandidates, synthesisCoarseFilter);
   const embeddingCoarseInjection = await collectEmbeddingInjection(context, params, prepared, lexicalCoarseCandidates);
+  const recallAfterEmbedding = performance.now();
   return Object.freeze({
     recallPhaseStart,
     recallAfterCoarse,
     recallAfterSynthesis,
+    recallAfterEmbedding,
     coarseFilter: Object.freeze({ ...coarseFilter, synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks }),
     globalCoarseFilter: global.raw,
     globalRecallClassifications: global.classifications,

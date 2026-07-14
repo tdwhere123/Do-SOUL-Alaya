@@ -40,7 +40,9 @@ describe("entity seed bulk fallback", () => {
         operation: "entity_seed_bulk_lookup",
         failure_class: "service_error",
         expected_count: 3,
-        actual_count: 0
+        returned_count: null,
+        valid_batch_count: null,
+        invalid_index: null
       }
     );
   });
@@ -58,8 +60,72 @@ describe("entity seed bulk fallback", () => {
         operation: "entity_seed_bulk_lookup",
         failure_class: "result_count_mismatch",
         expected_count: 3,
-        actual_count: 2
+        returned_count: 2,
+        valid_batch_count: null,
+        invalid_index: null
       }
+    );
+  });
+});
+
+describe("entity seed bulk validation", () => {
+  it("falls back when a bulk hit violates the shared result contract", async () => {
+    const serial = await runEntitySeedCollection();
+    const malformed = await runEntitySeedCollection({
+      withBulk: true,
+      bulkMalformedHit: { object_id: "beta", normalized_rank: Number.NaN }
+    });
+
+    expect(malformed.results).toEqual(serial.results);
+    expect(malformed.singleSearch).toHaveBeenCalledTimes(3);
+    expect(malformed.warn).toHaveBeenCalledWith(
+      "entity seed bulk lookup failed; using scalar lookups",
+      expect.objectContaining({
+        failure_class: "result_shape_mismatch",
+        returned_count: 3,
+        valid_batch_count: 2,
+        invalid_index: 1
+      })
+    );
+  });
+
+  it("falls back when one entity batch exceeds its per-seed limit", async () => {
+    const serial = await runEntitySeedCollection();
+    const overLimit = await runEntitySeedCollection({ withBulk: true, bulkOverLimit: true });
+
+    expect(overLimit.results).toEqual(serial.results);
+    expect(overLimit.singleSearch).toHaveBeenCalledTimes(3);
+    expect(overLimit.warn).toHaveBeenCalledWith(
+      "entity seed bulk lookup failed; using scalar lookups",
+      expect.objectContaining({
+        failure_class: "result_limit_exceeded",
+        returned_count: 3,
+        valid_batch_count: 2,
+        invalid_index: 1
+      })
+    );
+  });
+});
+
+describe("entity seed scalar fallback isolation", () => {
+  it("keeps successful seeds when one scalar retry fails", async () => {
+    const result = await runEntitySeedCollection({
+      withBulk: true,
+      bulkFails: true,
+      scalarFailureSurface: "BetaPlanner"
+    });
+
+    expect(result.results.map(({ memoryId }) => memoryId)).toEqual(["alpha", "gamma"]);
+    expect(result.admitted).toEqual(["alpha", "gamma"]);
+    expect(result.singleSearch).toHaveBeenCalledTimes(3);
+    expect(result.warn).toHaveBeenCalledWith(
+      "entity seed lookup failed",
+      expect.objectContaining({
+        entity_surface: "BetaPlanner",
+        operation: "entity_seed_lookup",
+        errorName: "Error",
+        error: "scalar read failed"
+      })
     );
   });
 });
@@ -117,6 +183,9 @@ type EntitySeedFixtureOptions = Readonly<{
   readonly withScalar?: boolean;
   readonly bulkFails?: boolean;
   readonly bulkCountMismatch?: boolean;
+  readonly bulkMalformedHit?: unknown;
+  readonly bulkOverLimit?: boolean;
+  readonly scalarFailureSurface?: string;
   readonly surfaces?: readonly string[];
 }>;
 
@@ -167,9 +236,10 @@ function buildSearchPorts(
   options: EntitySeedFixtureOptions,
   byQuery: ReadonlyMap<string, readonly Readonly<{ object_id: string; normalized_rank: number }>[]>
 ) {
-  const singleSearch = vi.fn(async (_workspaceId: string, queryText: string) =>
-    byQuery.get(queryText) ?? []
-  );
+  const singleSearch = vi.fn(async (_workspaceId: string, queryText: string) => {
+    if (queryText === options.scalarFailureSurface) throw new Error("scalar read failed");
+    return byQuery.get(queryText) ?? [];
+  });
   const bulkSearch = vi.fn(async (
     _workspaceId: string,
     queries: readonly Readonly<{ readonly queryText: string; readonly limit: number }>[],
@@ -177,9 +247,28 @@ function buildSearchPorts(
   ) => {
     if (options.bulkFails === true) throw new Error("bulk read failed");
     const results = queries.map((query) => byQuery.get(query.queryText) ?? []);
-    return options.bulkCountMismatch === true ? results.slice(0, -1) : results;
+    if (options.bulkCountMismatch === true) return results.slice(0, -1);
+    if (options.bulkOverLimit === true) {
+      return results.map((batch, index) =>
+        index === 1 ? repeatFirstHit(batch, queries[index]!.limit + 1) : batch
+      );
+    }
+    if (options.bulkMalformedHit !== undefined) {
+      return results.map((batch, index) =>
+        index === 1 ? [options.bulkMalformedHit] : batch
+      ) as unknown as typeof results;
+    }
+    return results;
   });
   return { singleSearch, bulkSearch };
+}
+
+function repeatFirstHit(
+  batch: readonly Readonly<{ readonly object_id: string; readonly normalized_rank: number }>[],
+  count: number
+) {
+  const hit = batch[0] ?? { object_id: "bulk-over-limit", normalized_rank: 0.8 };
+  return Array.from({ length: count }, () => hit);
 }
 
 function buildEntities(surfaces: readonly string[] | undefined) {

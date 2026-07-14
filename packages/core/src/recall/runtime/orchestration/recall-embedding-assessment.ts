@@ -48,27 +48,36 @@ export function startEmbeddingAssessmentPreparation(
   }));
 }
 
-export async function collectEmbeddingAssessmentData(
+export async function collectLegacyEmbeddingAssessmentData(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   initialAssessment: FineAssessmentResult,
-  preparedQueryPromise: PreparedQueryPromise
+  preparedQueryResult: Awaited<NonNullable<PreparedQueryPromise>>
 ): Promise<EmbeddingAssessmentData> {
-  const snapshot = coarse.embeddingCoarseInjection.requestScoreSnapshot;
-  return snapshot === undefined
-    ? collectLegacyAssessmentData(context, params, prepared, coarse, initialAssessment, preparedQueryPromise)
-    : collectSnapshotAssessmentData(context, prepared, coarse, initialAssessment, snapshot);
+  const preparedEmbeddingQuery = unwrapSettled(preparedQueryResult);
+  const [supplementResult, poolResult] = await Promise.all([
+    settle(collectLegacySupplement(context, params, prepared, coarse, initialAssessment, preparedEmbeddingQuery)),
+    settle(collectPoolEmbeddingRescore(context, params, prepared, coarse))
+  ]);
+  throwFirstRejected([supplementResult, poolResult]);
+  return Object.freeze({
+    preparedEmbeddingQuery,
+    supplement: unwrapSettled(supplementResult),
+    poolRescoreScores: unwrapSettled(poolResult)
+  });
 }
 
-async function collectSnapshotAssessmentData(
+export async function collectSnapshotEmbeddingAssessmentData(
   context: RecallExecutionContext,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  initialAssessment: FineAssessmentResult,
-  snapshot: NonNullable<CoarseStageResult["embeddingCoarseInjection"]["requestScoreSnapshot"]>
+  coarse: CoarseStageResult
 ): Promise<EmbeddingAssessmentData> {
+  const snapshot = coarse.embeddingCoarseInjection.requestScoreSnapshot;
+  if (snapshot === undefined) {
+    throw new Error("embedding request score snapshot is unavailable");
+  }
   const service = context.dependencies.embeddingRecallService;
   if (service?.materializeEmbeddingSupplementFromSnapshot === undefined) {
     throw new Error("embedding request score snapshot materializer is unavailable");
@@ -76,7 +85,8 @@ async function collectSnapshotAssessmentData(
   const supplement = await service.materializeEmbeddingSupplementFromSnapshot({
     snapshot,
     eligibleMemories: coarse.coarseFilter.candidates.map((candidate) => candidate.entry),
-    baseCandidateIds: initialAssessment.candidates.map((candidate) => candidate.object_id),
+    // invariant: injected neighbors have their own admission path and do not redefine the pre-embedding supplement base.
+    baseCandidateIds: coarse.coarseFilter.candidates.map((candidate) => candidate.entry.object_id),
     maxSupplement: prepared.policy.coarse_filter.semantic_supplement.max_supplement
   });
   return Object.freeze({
@@ -87,30 +97,6 @@ async function collectSnapshotAssessmentData(
     }),
     supplement,
     poolRescoreScores: snapshot.poolScoresByObjectId
-  });
-}
-
-async function collectLegacyAssessmentData(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  initialAssessment: FineAssessmentResult,
-  preparedQueryPromise: PreparedQueryPromise
-): Promise<EmbeddingAssessmentData> {
-  if (preparedQueryPromise === null) {
-    throw new Error("legacy embedding preparation is unavailable");
-  }
-  const preparedEmbeddingQuery = unwrapSettled(await preparedQueryPromise);
-  const [supplementResult, poolResult] = await Promise.all([
-    settle(collectLegacySupplement(context, params, prepared, coarse, initialAssessment, preparedEmbeddingQuery)),
-    settle(collectPoolEmbeddingRescore(context, params, prepared, coarse))
-  ]);
-  throwFirstRejected([supplementResult, poolResult]);
-  return Object.freeze({
-    preparedEmbeddingQuery,
-    supplement: unwrapSettled(supplementResult),
-    poolRescoreScores: unwrapSettled(poolResult)
   });
 }
 

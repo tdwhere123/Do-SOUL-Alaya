@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { performance } from "node:perf_hooks";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
 import type { RecallServiceEmbeddingRecallPort } from "../../recall/runtime/recall-service-types.js";
@@ -16,93 +17,67 @@ import {
   overridePolicy
 } from "./recall-service-test-fixtures.js";
 
+const completeAssessmentCalls = vi.hoisted(() => vi.fn());
+const deliveryCalls = vi.hoisted(() => vi.fn());
+const fineAssessCalls = vi.hoisted(() => vi.fn());
+
+vi.mock("../../recall/delivery/fine-assessment.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../recall/delivery/fine-assessment.js")
+  >();
+  return {
+    ...actual,
+    fineAssess: (...args: Parameters<typeof actual.fineAssess>) => {
+      fineAssessCalls();
+      return actual.fineAssess(...args);
+    },
+    prepareFineAssessment: (...args: Parameters<typeof actual.prepareFineAssessment>) => {
+      completeAssessmentCalls();
+      return actual.prepareFineAssessment(...args);
+    },
+    deliverFineAssessment: (...args: Parameters<typeof actual.deliverFineAssessment>) => {
+      deliveryCalls();
+      return actual.deliverFineAssessment(...args);
+    }
+  };
+});
+
 describe("RecallService embedding request score snapshot", () => {
-  it("uses the request snapshot without invoking legacy supplement or pool scoring", async () => {
+  beforeEach(() => {
+    completeAssessmentCalls.mockClear();
+    deliveryCalls.mockClear();
+    fineAssessCalls.mockClear();
+  });
+
+  it.each([
+    { label: "cross-off", crossEnabled: false, expectedRerankStatus: "not_requested" },
+    { label: "cross-on", crossEnabled: true, expectedRerankStatus: "returned" }
+  ] as const)("uses exclusive snapshot phases with $label", async ({
+    crossEnabled,
+    expectedRerankStatus
+  }) => {
     const memory = createMemoryEntry({
       object_id: "snapshot-pool-memory",
       content: "Snapshot query procedure"
     });
     const { dependencies } = createDependencies([memory]);
-    const prepareRecallEmbeddingSnapshot = vi.fn(async () => Object.freeze({
-      workspaceId: "workspace-1",
-      runId: null,
-      queryId: "snapshot-query",
-      poolScoresByObjectId: Object.freeze({ [memory.object_id]: 0.91 }),
-      scoringLatencyMs: 0,
-      workspaceNeighbors: Object.freeze({
-        hits: Object.freeze([]),
-        embedding_inference_calls: 1,
-        query_embedding_cache_hit: false,
-        query_embedding_status: "provider_returned" as const,
-        query_embedding_degradation_reason: null
-      }),
-      degradedReason: null
-    }));
-    const materializeEmbeddingSupplementFromSnapshot = vi.fn(async () => ({
-      supplementaryEntries: Object.freeze([]),
-      similarityHintsByObjectId: Object.freeze({
-        [memory.object_id]: Object.freeze({
-          object_id: memory.object_id,
-          normalized_similarity: 0.91
-        })
-      })
-    }));
-    const legacyPreparedQuery = createPreparedQueryHandle("legacy-query");
-    const prepareQuerySupplement = vi.fn(async () => ({
-      preparedQuery: legacyPreparedQuery,
-      storedVectors: Object.freeze([]),
-      degradedReason: null
-    }));
-    const querySupplementIfReady = vi.fn(async () => ({
-      supplementaryEntries: Object.freeze([]),
-      similarityHintsByObjectId: Object.freeze({})
-    }));
-    const scorePoolCandidates = vi.fn(async () => new Map([[memory.object_id, 0.5]]));
-    const embeddingRecallService = {
-      prepareRecallEmbeddingSnapshot,
-      materializeEmbeddingSupplementFromSnapshot,
-      prepareQuerySupplement,
-      querySupplementIfReady,
-      scorePoolCandidates,
-      querySupplement: vi.fn(async () => ({
-        supplementaryEntries: Object.freeze([]),
-        similarityHintsByObjectId: Object.freeze({})
-      }))
-    } satisfies RecallServiceEmbeddingRecallPort;
-    const service = new RecallService({ ...dependencies, embeddingRecallService });
-    const taskSurface = { ...createTaskSurface(), display_name: "Snapshot query" };
-    const basePolicy = service.buildDefaultPolicy("analyze", taskSurface.runtime_id);
-    const policyOverride = overridePolicy(basePolicy, {
-      coarse_filter: {
-        ...basePolicy.coarse_filter,
-        semantic_supplement: {
-          ...basePolicy.coarse_filter.semantic_supplement,
-          embedding_enabled: true,
-          max_supplement: 5,
-          injection_cap: 0
-        }
-      }
+    const fixture = createExclusiveSnapshotPort(memory.object_id);
+    const answerRerankScore = vi.fn(async (_query: string, passages: readonly string[]) =>
+      passages.map(() => 0.75)
+    );
+    const service = new RecallService({
+      ...dependencies,
+      embeddingRecallService: fixture.port,
+      ...(crossEnabled ? { answerRerankService: { score: answerRerankScore } } : {})
+    });
+    const run = await runSnapshotRecall(service, "Snapshot query", {
+      maxSupplement: 5,
+      injectionCap: 0
     });
 
-    const result = await service.recall({
-      taskSurface,
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride
-    });
-
-    expect(prepareRecallEmbeddingSnapshot).toHaveBeenCalledOnce();
-    expect(prepareRecallEmbeddingSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      maxNeighbors: 0
-    }));
-    expect(materializeEmbeddingSupplementFromSnapshot).toHaveBeenCalledOnce();
-    expect(prepareQuerySupplement).not.toHaveBeenCalled();
-    expect(querySupplementIfReady).not.toHaveBeenCalled();
-    expect(scorePoolCandidates).not.toHaveBeenCalled();
-    expect(result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
-    expect(result.diagnostics?.embedding_provider_status).toBe("provider_returned");
-    expect(result.candidates.find((candidate) => candidate.object_id === memory.object_id)
-      ?.score_factors?.embedding_similarity).toBeCloseTo(0.91, 5);
+    expectExclusiveSnapshotContract(
+      fixture, run, memory.object_id, answerRerankScore, crossEnabled, expectedRerankStatus
+    );
   });
 
   it("keeps built-in pool scoring when supplement and injection caps are zero", async () => {
@@ -163,51 +138,14 @@ describe("RecallService embedding request score snapshot", () => {
     async (snapshotProviderStatus, expectedProviderStatus, degradationReason) => {
       const memory = createMemoryEntry({ content: "Snapshot status query" });
       const { dependencies } = createDependencies([memory]);
-      const embeddingRecallService = {
-        prepareRecallEmbeddingSnapshot: vi.fn(async () => ({
-          workspaceId: "workspace-1",
-          runId: null,
-          queryId: `snapshot-${snapshotProviderStatus}`,
-          poolScoresByObjectId: Object.freeze({}),
-          scoringLatencyMs: 0,
-          workspaceNeighbors: Object.freeze({
-            hits: Object.freeze([]),
-            embedding_inference_calls: 0,
-            query_embedding_cache_hit: false,
-            query_embedding_status: snapshotProviderStatus,
-            query_embedding_degradation_reason: degradationReason
-          }),
-          degradedReason: degradationReason
-        })),
-        materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        })),
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        }))
-      } satisfies RecallServiceEmbeddingRecallPort;
+      const embeddingRecallService = createStatusSnapshotPort(
+        snapshotProviderStatus,
+        degradationReason
+      );
       const service = new RecallService({ ...dependencies, embeddingRecallService });
-      const taskSurface = { ...createTaskSurface(), display_name: "Snapshot status query" };
-      const basePolicy = service.buildDefaultPolicy("analyze", taskSurface.runtime_id);
-      const policyOverride = overridePolicy(basePolicy, {
-        coarse_filter: {
-          ...basePolicy.coarse_filter,
-          semantic_supplement: {
-            ...basePolicy.coarse_filter.semantic_supplement,
-            embedding_enabled: true,
-            max_supplement: 5,
-            injection_cap: 0
-          }
-        }
-      });
-
-      const result = await service.recall({
-        taskSurface,
-        workspaceId: "workspace-1",
-        strategy: "analyze",
-        policyOverride
+      const { result } = await runSnapshotRecall(service, "Snapshot status query", {
+        maxSupplement: 5,
+        injectionCap: 0
       });
 
       expect(result.diagnostics?.embedding_provider_status).toBe(expectedProviderStatus);
@@ -227,74 +165,210 @@ describe("RecallService embedding request score snapshot", () => {
       activation_score: 0.01
     });
     const { dependencies } = createDependencies([pooled]);
-    const findByIds = vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
-      objectIds.includes(neighbor.object_id) ? [neighbor] : []
-    );
-    const prepareRecallEmbeddingSnapshot = vi.fn(async () => Object.freeze({
-      workspaceId: "workspace-1",
-      runId: null,
-      queryId: "snapshot-native-query",
-      poolScoresByObjectId: Object.freeze({ [pooled.object_id]: 0.8 }),
-      scoringLatencyMs: 0,
-      workspaceNeighbors: Object.freeze({
-        hits: Object.freeze([{
-          object_id: neighbor.object_id,
-          normalized_similarity: 0.96,
-          content_hash: hashMemoryContent(neighbor.content)
-        }]),
-        embedding_inference_calls: 1,
-        query_embedding_cache_hit: false,
-        query_embedding_status: "provider_returned" as const,
-        query_embedding_degradation_reason: null
-      }),
-      degradedReason: null
-    }));
-    const embeddingRecallService = {
-      prepareRecallEmbeddingSnapshot,
-      materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => ({
-        supplementaryEntries: Object.freeze([]),
-        similarityHintsByObjectId: Object.freeze({})
-      })),
-      querySupplement: vi.fn(async () => ({
-        supplementaryEntries: Object.freeze([]),
-        similarityHintsByObjectId: Object.freeze({})
-      }))
-    } satisfies RecallServiceEmbeddingRecallPort;
+    const fixture = createNeighborSnapshotPort(pooled.object_id, neighbor);
     const service = new RecallService({
       ...dependencies,
-      memoryRepo: { ...dependencies.memoryRepo, findByIds },
-      embeddingRecallService
+      memoryRepo: { ...dependencies.memoryRepo, findByIds: fixture.findByIds },
+      embeddingRecallService: fixture.port
     });
-    const taskSurface = { ...createTaskSurface(), display_name: "Snapshot native query" };
-    const basePolicy = service.buildDefaultPolicy("analyze", taskSurface.runtime_id);
-    const policyOverride = overridePolicy(basePolicy, {
-      coarse_filter: {
-        ...basePolicy.coarse_filter,
-        precomputed_rank: {
-          ...basePolicy.coarse_filter.precomputed_rank,
-          min_activation_score: 0.5
-        },
-        semantic_supplement: {
-          ...basePolicy.coarse_filter.semantic_supplement,
-          embedding_enabled: true,
-          max_supplement: 5,
-          injection_cap: 1
-        }
-      }
+    const { result } = await runSnapshotRecall(service, "Snapshot native query", {
+      maxSupplement: 5,
+      injectionCap: 1,
+      minActivationScore: 0.5
     });
 
-    const result = await service.recall({
-      taskSurface,
-      workspaceId: "workspace-1",
-      strategy: "analyze",
-      policyOverride
-    });
-
-    expect(prepareRecallEmbeddingSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+    expect(fixture.prepareRecallEmbeddingSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       maxNeighbors: 5
     }));
-    expect(findByIds).toHaveBeenCalledWith("workspace-1", [neighbor.object_id]);
+    expect(fixture.materializeEmbeddingSupplementFromSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseCandidateIds: [pooled.object_id]
+      })
+    );
+    expect(fixture.findByIds).toHaveBeenCalledWith("workspace-1", [neighbor.object_id]);
     expect(result.candidates.find((candidate) => candidate.object_id === neighbor.object_id)
       ?.source_channels).toContain("semantic_supplement");
   });
 });
+
+type SnapshotRun = Awaited<ReturnType<typeof runSnapshotRecall>>;
+
+function createExclusiveSnapshotPort(memoryId: string) {
+  const prepareRecallEmbeddingSnapshot = vi.fn(async () => Object.freeze({
+    workspaceId: "workspace-1", runId: null, queryId: "snapshot-query",
+    poolScoresByObjectId: Object.freeze({ [memoryId]: 0.91 }), scoringLatencyMs: 0,
+    workspaceNeighbors: Object.freeze({
+      hits: Object.freeze([]), embedding_inference_calls: 1,
+      query_embedding_cache_hit: false, query_embedding_status: "provider_returned" as const,
+      query_embedding_degradation_reason: null
+    }),
+    degradedReason: null
+  }));
+  const materializeEmbeddingSupplementFromSnapshot = vi.fn(async () => ({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({
+      [memoryId]: Object.freeze({ object_id: memoryId, normalized_similarity: 0.91 })
+    })
+  }));
+  const prepareQuerySupplement = vi.fn(async () => ({
+    preparedQuery: createPreparedQueryHandle("legacy-query"),
+    storedVectors: Object.freeze([]), degradedReason: null
+  }));
+  const querySupplementIfReady = vi.fn(async () => ({
+    supplementaryEntries: Object.freeze([]), similarityHintsByObjectId: Object.freeze({})
+  }));
+  const scorePoolCandidates = vi.fn(async () => new Map([[memoryId, 0.5]]));
+  const port = {
+    prepareRecallEmbeddingSnapshot, materializeEmbeddingSupplementFromSnapshot,
+    prepareQuerySupplement, querySupplementIfReady, scorePoolCandidates,
+    querySupplement: emptyEmbeddingSupplement
+  } satisfies RecallServiceEmbeddingRecallPort;
+  return {
+    port, prepareRecallEmbeddingSnapshot, materializeEmbeddingSupplementFromSnapshot,
+    prepareQuerySupplement, querySupplementIfReady, scorePoolCandidates
+  };
+}
+
+function createStatusSnapshotPort(
+  providerStatus: "provider_pending" | "provider_failed" | "provider_not_requested" | "provider_returned",
+  degradationReason: string
+): RecallServiceEmbeddingRecallPort {
+  return {
+    prepareRecallEmbeddingSnapshot: vi.fn(async () => ({
+      workspaceId: "workspace-1", runId: null, queryId: `snapshot-${providerStatus}`,
+      poolScoresByObjectId: Object.freeze({}), scoringLatencyMs: 0,
+      workspaceNeighbors: Object.freeze({
+        hits: Object.freeze([]), embedding_inference_calls: 0,
+        query_embedding_cache_hit: false, query_embedding_status: providerStatus,
+        query_embedding_degradation_reason: degradationReason
+      }),
+      degradedReason: degradationReason
+    })),
+    materializeEmbeddingSupplementFromSnapshot: emptyEmbeddingSupplement,
+    querySupplement: emptyEmbeddingSupplement
+  };
+}
+
+function createNeighborSnapshotPort(
+  pooledId: string,
+  neighbor: ReturnType<typeof createMemoryEntry>
+) {
+  const findByIds = vi.fn(async (_workspaceId: string, objectIds: readonly string[]) =>
+    objectIds.includes(neighbor.object_id) ? [neighbor] : []
+  );
+  const prepareRecallEmbeddingSnapshot = vi.fn(async () => Object.freeze({
+    workspaceId: "workspace-1", runId: null, queryId: "snapshot-native-query",
+    poolScoresByObjectId: Object.freeze({ [pooledId]: 0.8 }), scoringLatencyMs: 0,
+    workspaceNeighbors: Object.freeze({
+      hits: Object.freeze([{
+        object_id: neighbor.object_id, normalized_similarity: 0.96,
+        content_hash: hashMemoryContent(neighbor.content)
+      }]),
+      embedding_inference_calls: 1, query_embedding_cache_hit: false,
+      query_embedding_status: "provider_returned" as const,
+      query_embedding_degradation_reason: null
+    }),
+    degradedReason: null
+  }));
+  const materializeEmbeddingSupplementFromSnapshot = vi.fn(emptyEmbeddingSupplement);
+  const port = {
+    prepareRecallEmbeddingSnapshot,
+    materializeEmbeddingSupplementFromSnapshot,
+    querySupplement: emptyEmbeddingSupplement
+  } satisfies RecallServiceEmbeddingRecallPort;
+  return { port, findByIds, prepareRecallEmbeddingSnapshot, materializeEmbeddingSupplementFromSnapshot };
+}
+
+function emptyEmbeddingSupplement() {
+  return Promise.resolve({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({})
+  });
+}
+
+async function runSnapshotRecall(
+  service: RecallService,
+  displayName: string,
+  options: Readonly<{
+    readonly maxSupplement: number;
+    readonly injectionCap: number;
+    readonly minActivationScore?: number;
+  }>
+) {
+  const taskSurface = { ...createTaskSurface(), display_name: displayName };
+  const basePolicy = service.buildDefaultPolicy("analyze", taskSurface.runtime_id);
+  const policyOverride = overridePolicy(basePolicy, {
+    coarse_filter: {
+      ...basePolicy.coarse_filter,
+      ...(options.minActivationScore === undefined ? {} : {
+        precomputed_rank: {
+          ...basePolicy.coarse_filter.precomputed_rank,
+          min_activation_score: options.minActivationScore
+        }
+      }),
+      semantic_supplement: {
+        ...basePolicy.coarse_filter.semantic_supplement,
+        embedding_enabled: true,
+        max_supplement: options.maxSupplement,
+        injection_cap: options.injectionCap
+      }
+    }
+  });
+  const startedAt = performance.now();
+  const result = await service.recall({
+    taskSurface, workspaceId: "workspace-1", strategy: "analyze", policyOverride
+  });
+  return { result, elapsedMs: performance.now() - startedAt };
+}
+
+function expectExclusiveSnapshotContract(
+  fixture: ReturnType<typeof createExclusiveSnapshotPort>,
+  run: SnapshotRun,
+  memoryId: string,
+  answerRerankScore: ReturnType<typeof vi.fn>,
+  crossEnabled: boolean,
+  expectedRerankStatus: "not_requested" | "returned"
+): void {
+  expect(fineAssessCalls).not.toHaveBeenCalled();
+  expect(completeAssessmentCalls).toHaveBeenCalledOnce();
+  expect(deliveryCalls).toHaveBeenCalledOnce();
+  expect(fixture.prepareRecallEmbeddingSnapshot).toHaveBeenCalledOnce();
+  expect(fixture.prepareRecallEmbeddingSnapshot).toHaveBeenCalledWith(
+    expect.objectContaining({ maxNeighbors: 0 })
+  );
+  expect(fixture.materializeEmbeddingSupplementFromSnapshot).toHaveBeenCalledOnce();
+  expect(fixture.prepareQuerySupplement).not.toHaveBeenCalled();
+  expect(fixture.querySupplementIfReady).not.toHaveBeenCalled();
+  expect(fixture.scorePoolCandidates).not.toHaveBeenCalled();
+  expect(run.result.diagnostics?.token_economy?.embedding_inference_calls).toBe(1);
+  expect(run.result.diagnostics?.embedding_provider_status).toBe("provider_returned");
+  expect(run.result.diagnostics?.answer_rerank_status).toBe(expectedRerankStatus);
+  expect(answerRerankScore).toHaveBeenCalledTimes(crossEnabled ? 1 : 0);
+  expectExclusivePhaseLatency(run.result.diagnostics?.phase_latency_ms, run.elapsedMs);
+  expect(run.result.candidates.find((candidate) => candidate.object_id === memoryId)
+    ?.score_factors?.embedding_similarity).toBeCloseTo(0.91, 5);
+}
+
+const EXCLUSIVE_PHASES = [
+  "coarse",
+  "synthesis",
+  "embedding",
+  "assessment",
+  "cross_rerank",
+  "delivery",
+  "manifestation"
+] as const;
+
+function expectExclusivePhaseLatency(
+  phaseLatencyMs: Readonly<Record<string, number>> | undefined,
+  elapsedMs: number
+): void {
+  expect(phaseLatencyMs).toBeDefined();
+  expect(Object.keys(phaseLatencyMs ?? {})).toEqual(EXCLUSIVE_PHASES);
+  const values = Object.values(phaseLatencyMs ?? {});
+  for (const value of values) {
+    expect(Number.isFinite(value)).toBe(true);
+    expect(value).toBeGreaterThanOrEqual(0);
+  }
+  expect(values.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(elapsedMs);
+}

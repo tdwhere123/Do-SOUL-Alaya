@@ -101,6 +101,11 @@ export interface RecallServiceEvidenceSearchPort {
     queryText: string,
     limit: number
   ): Promise<readonly KeywordSearchResult[]>;
+  /** Result batch at index i corresponds to the query at index i. */
+  searchManyByKeyword?(
+    workspaceId: string,
+    queries: readonly Readonly<KeywordSearchBatchQuery>[]
+  ): Promise<readonly (readonly KeywordSearchResult[])[]>;
   findByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
