@@ -46,6 +46,18 @@ parentPort.on("message", (message: unknown) => {
 
 async function handleRequest(message: unknown): Promise<void> {
   if (!isRecallReadWorkerRequest(message)) {
+    const id = readNumericMessageId(message);
+    if (id !== null) {
+      // Bound rejection to this id so the client does not wait for timeout cascade.
+      postResponse({
+        id,
+        ok: false,
+        error: {
+          name: "Error",
+          message: "invalid recall read worker request"
+        }
+      });
+    }
     return;
   }
   try {
@@ -394,6 +406,14 @@ function isRecallReadWorkerRequest(value: unknown): value is RecallReadWorkerReq
     readonly operation?: unknown;
   };
   return typeof record.id === "number" && typeof record.operation === "string";
+}
+
+function readNumericMessageId(value: unknown): number | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const id = (value as { readonly id?: unknown }).id;
+  return typeof id === "number" && Number.isFinite(id) ? id : null;
 }
 
 function readDatabaseFilename(value: unknown): string {

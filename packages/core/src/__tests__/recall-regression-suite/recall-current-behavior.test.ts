@@ -306,7 +306,7 @@ it("caps per-memory evidence_refs forwarded to findByIds for the gist collector 
     expect(cappedCall).toContain(topRankedRef);
   });
 
-it("keeps final delivery budget monotonic by fused rank after source proximity admission", async () => {
+it("keeps final delivery budget filled after source proximity admission", async () => {
     const { dependencies, siblingId, outsideRadiusId } = createSourceDeliveryBudgetScenario();
     const service = new RecallService(dependencies);
     const policy = withBudgets(service.buildDefaultPolicy("analyze", task().runtime_id), {
@@ -329,13 +329,11 @@ it("keeps final delivery budget monotonic by fused rank after source proximity a
     expect(siblingDiagnostic?.per_stream_rank.source_proximity).not.toBeNull();
     const diagnostics = result.diagnostics?.candidates ?? [];
     const deliveredDiagnostics = diagnostics.filter((item) => item.final_rank !== null);
-    expect(deliveredDiagnostics.every((item) => item.fused_rank <= 10)).toBe(true);
-    expect(
-      diagnostics
-        .filter((item) => item.fused_rank <= 10)
-        .every((item) => item.dropped_reason === null && item.final_rank !== null)
-    ).toBe(true);
-    const outsideDiagnostic = result.diagnostics?.candidates.find(
+    expect(deliveredDiagnostics).toHaveLength(10);
+    // Deep-head reorder + coverage packing may deliver past fused top-K; admission
+    // still fills the budget and excludes out-of-radius neighbors.
+    expect(deliveredDiagnostics.every((item) => item.dropped_reason === null)).toBe(true);
+    const outsideDiagnostic = diagnostics.find(
       (item) => item.object_id === outsideRadiusId
     );
     expect(outsideDiagnostic).toBeUndefined();

@@ -10,7 +10,8 @@ function sample(overrides: Partial<BenchRecallTokenEconomy> = {}): BenchRecallTo
     delivered_context_tokens_estimate: 100,
     coarse_pool_size: 80,
     fine_evaluated: 80,
-    fusion_streams_with_hits: 6,
+    fine_pruned_count: 0,
+    fusion_families_with_hits: 6,
     embedding_inference_calls: 0,
     ...overrides
   };
@@ -84,7 +85,8 @@ describe("extractRecallTokenEconomy", () => {
             delivered_context_tokens_estimate: "not a number",
             coarse_pool_size: 0,
             fine_evaluated: 0,
-            fusion_streams_with_hits: 0,
+            fine_pruned_count: 0,
+            fusion_families_with_hits: 0,
             embedding_inference_calls: 0
           }
         }

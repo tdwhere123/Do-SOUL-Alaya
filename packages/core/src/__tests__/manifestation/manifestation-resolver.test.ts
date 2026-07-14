@@ -122,7 +122,9 @@ describe("ManifestationResolver", () => {
               reason: decisions[2]?.reason
             }
           ],
-          decided_at: NOW
+          decided_at: NOW,
+          batch_index: 0,
+          batch_count: 1
         }
       })
     );
@@ -159,13 +161,27 @@ describe("ManifestationResolver", () => {
           entry.event_type === RuntimeGovernanceEventType.MANIFESTATION_ESCALATION_DECIDED
       );
     expect(decisionEvents.length).toBeGreaterThan(1);
-    expect(
-      decisionEvents.flatMap((entry) =>
-        (entry.payload_json as { decisions: readonly { candidate_id: string }[] }).decisions.map(
-          (decision) => decision.candidate_id
-        )
+    const foldedCandidateIds = decisionEvents.flatMap((entry) =>
+      (entry.payload_json as { decisions: readonly { candidate_id: string }[] }).decisions.map(
+        (decision) => decision.candidate_id
       )
-    ).toEqual(decisions.map((decision) => decision.candidate_id));
+    );
+    expect(foldedCandidateIds).toEqual(decisions.map((decision) => decision.candidate_id));
+    expect(new Set(foldedCandidateIds).size).toBe(foldedCandidateIds.length);
+    expect(
+      decisionEvents.map((entry) => {
+        const payload = entry.payload_json as {
+          batch_index: number;
+          batch_count: number;
+        };
+        return { batch_index: payload.batch_index, batch_count: payload.batch_count };
+      })
+    ).toEqual(
+      decisionEvents.map((_, index) => ({
+        batch_index: index,
+        batch_count: decisionEvents.length
+      }))
+    );
     expect(deps.eventLogWriter.appendAtomically).toHaveBeenCalledTimes(1);
   });
 

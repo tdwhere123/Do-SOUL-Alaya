@@ -23,6 +23,11 @@ type DecisionEventItem = Readonly<{
   reason: string;
 }>;
 
+// Wide placeholders so a later real batch_index/batch_count stamp cannot
+// push a previously-accepted batch over the bounded JSON limit.
+const BATCH_FIT_PROBE_INDEX = 999_999;
+const BATCH_FIT_PROBE_COUNT = 999_999;
+
 export async function appendManifestationGovernanceEvents(
   input: AppendManifestationEventsInput
 ): Promise<void> {
@@ -60,33 +65,52 @@ function createBudgetPayload(input: AppendManifestationEventsInput) {
 }
 
 function createBoundedDecisionPayloads(input: AppendManifestationEventsInput) {
-  const payloads = [];
+  const batches: DecisionEventItem[][] = [];
   let batch: DecisionEventItem[] = [];
   for (const decision of input.decisions) {
     const nextBatch = [...batch, toDecisionEventItem(decision)];
-    const payload = createDecisionPayload(input, nextBatch);
-    if (BoundedJsonObjectSchema.safeParse(payload).success) {
+    if (fitsDecisionBatch(input, nextBatch)) {
       batch = nextBatch;
       continue;
     }
-    payloads.push(BoundedJsonObjectSchema.parse(createDecisionPayload(input, batch)));
+    batches.push(batch);
     batch = [toDecisionEventItem(decision)];
   }
   if (batch.length > 0 || input.decisions.length === 0) {
-    payloads.push(BoundedJsonObjectSchema.parse(createDecisionPayload(input, batch)));
+    batches.push(batch);
   }
-  return Object.freeze(payloads);
+  const batchCount = batches.length;
+  return Object.freeze(
+    batches.map((items, batchIndex) =>
+      BoundedJsonObjectSchema.parse(
+        createDecisionPayload(input, items, batchIndex, batchCount)
+      )
+    )
+  );
+}
+
+function fitsDecisionBatch(
+  input: AppendManifestationEventsInput,
+  decisions: readonly DecisionEventItem[]
+): boolean {
+  return BoundedJsonObjectSchema.safeParse(
+    createDecisionPayload(input, decisions, BATCH_FIT_PROBE_INDEX, BATCH_FIT_PROBE_COUNT)
+  ).success;
 }
 
 function createDecisionPayload(
   input: AppendManifestationEventsInput,
-  decisions: readonly DecisionEventItem[]
+  decisions: readonly DecisionEventItem[],
+  batchIndex: number,
+  batchCount: number
 ) {
   return ManifestationEscalationDecidedPayloadSchema.parse({
     workspace_id: input.workspaceId,
     run_id: input.runId,
     decisions,
-    decided_at: input.decidedAt
+    decided_at: input.decidedAt,
+    batch_index: batchIndex,
+    batch_count: batchCount
   });
 }
 

@@ -29,6 +29,8 @@ export interface PostTurnExtractTaskPayload {
   readonly run_id: string;
   readonly workspace_id: string;
   readonly created_at?: string;
+  // Host wall-clock for the turn when supplied; otherwise the enqueue clock.
+  readonly source_observed_at?: string;
   readonly turn_index: number;
   readonly turn_digest: Readonly<{
     readonly last_messages: readonly Readonly<{
@@ -218,7 +220,7 @@ async function emitPostTurnExtractSignals(
   const candidateSignals = await compilePostTurnExtractTask(
     provider,
     payload,
-    payload.created_at ?? row.created_at
+    resolvePostTurnSourceObservedAt(payload, row)
   );
   const emittedSignalIds: string[] = [];
   for (const [index, signal] of candidateSignals.entries()) {
@@ -351,6 +353,17 @@ async function compilePostTurnExtractTask(
   );
 }
 
+function resolvePostTurnSourceObservedAt(
+  payload: PostTurnExtractTaskPayload,
+  row: GardenTaskRow
+): string {
+  const hostObservedAt = payload.source_observed_at?.trim();
+  if (hostObservedAt !== undefined && hostObservedAt.length > 0) {
+    return hostObservedAt;
+  }
+  return row.created_at;
+}
+
 function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskPayload {
   if (!isRecord(payload)) {
     throw new Error("Invalid post-turn extract task payload.");
@@ -358,12 +371,14 @@ function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskP
   const runId = parseStringField(payload, "run_id");
   const workspaceId = parseStringField(payload, "workspace_id");
   const createdAt = parseOptionalStringField(payload, "created_at");
+  const sourceObservedAt = parseOptionalStringField(payload, "source_observed_at");
   const turnIndex = parsePostTurnIndex(payload.turn_index);
   const lastMessages = parsePostTurnMessages(payload.turn_digest);
   return {
     run_id: runId,
     workspace_id: workspaceId,
     ...(createdAt === undefined ? {} : { created_at: createdAt }),
+    ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt }),
     turn_index: turnIndex,
     turn_digest: { last_messages: lastMessages }
   };

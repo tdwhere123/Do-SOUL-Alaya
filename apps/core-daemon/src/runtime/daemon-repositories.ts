@@ -20,6 +20,7 @@ import {
   SqliteOrphanRadarRepo,
   SqliteCoUsageCounterRepo,
   SqliteEnrichPendingRepo,
+  SqliteSourceGroundingDeferQueueRepo,
   SqlitePathGraphSnapshotRepo,
   SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
@@ -103,6 +104,7 @@ function createDaemonMemoryRepos(input: {
     input.warn(message, meta)
   );
   const enrichPendingRepo = new SqliteEnrichPendingRepo(input.database);
+  const sourceGroundingDeferQueueRepo = new SqliteSourceGroundingDeferQueueRepo(input.database);
 
   return {
     memoryEntryRepo,
@@ -117,6 +119,7 @@ function createDaemonMemoryRepos(input: {
     coUsageCounterRepo: new SqliteCoUsageCounterRepo(input.database),
     enrichPendingRepo,
     enqueueEnrichPending: createEnrichPendingEnqueue(enrichPendingRepo),
+    sourceGroundingDeferQueueRepo,
     pathPlasticityWatermarkRepo: new SqlitePathPlasticityWatermarkRepo(input.database),
     pathGraphSnapshotRepo: new SqlitePathGraphSnapshotRepo(input.database)
   };

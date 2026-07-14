@@ -151,4 +151,26 @@ describe("SoulMemorySearchRequestSchema time-filter fields", () => {
     };
     expect(recallSchema.properties?.["recent_turn"]).toBeDefined();
   });
+
+  it("accepts an optional source_observed_at for host turn wall-clock", () => {
+    expect(SoulMemorySearchRequestSchema.parse({ ...baseRequest }).source_observed_at).toBeUndefined();
+
+    const parsed = SoulMemorySearchRequestSchema.parse({
+      ...baseRequest,
+      source_observed_at: "2026-08-01T11:59:00.000Z"
+    });
+    expect(parsed.source_observed_at).toBe("2026-08-01T11:59:00.000Z");
+
+    expect(
+      SoulMemorySearchRequestSchema.safeParse({
+        ...baseRequest,
+        source_observed_at: "not-a-timestamp"
+      }).success
+    ).toBe(false);
+
+    const recallSchema = soulToolJsonSchemas["soul.recall"] as {
+      readonly properties?: Record<string, unknown>;
+    };
+    expect(recallSchema.properties?.["source_observed_at"]).toBeDefined();
+  });
 });

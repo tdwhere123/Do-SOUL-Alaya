@@ -71,7 +71,7 @@ soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_cou
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#4da2b41
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#842166a
 soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#dd992a3|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
-soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,time_field,until)#226f973
+soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,source_observed_at,time_field,until)#c5070a3
 soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,degradation_reason,delivery_id,protocol_version,results,strategy_mix,total_count)#df6fc29
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#e9b7fcd
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a7a3c8a
@@ -84,7 +84,7 @@ soul:mcp-types.ts#SoulProposeMemoryUpdateResponseSchema(proposal_id,status)#9fc8
 soul:mcp-types.ts#SoulRecallHostContextSchema(tokenizer_hint)#378010f
 soul:mcp-types.ts#SoulRecallStrategyMixSchema(deterministic_match,global_recall,graph_support,path_plasticity,precomputed_rank,semantic_supplement)#f24ace8
 soul:mcp-types.ts#SoulRecallTokenizerHintSchema()#affc1f5|enum=approx_chars_per_token|cl100k|o200k
-soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery_id,per_anchor_usage,reason,turn_digest,turn_index,usage_state,used_object_ids)#de5d0a4
+soul:mcp-types.ts#SoulReportContextUsageRequestSchema(delivered_objects,delivery_id,per_anchor_usage,reason,source_observed_at,turn_digest,turn_index,usage_state,used_object_ids)#dfa0cd7
 soul:mcp-types.ts#SoulReportContextUsageResponseSchema(delivery_id,status)#802bcfe
 soul:mcp-types.ts#SoulReviewMemoryProposalRequestSchema(proposal_id,reason,reviewer_identity,reviewer_token,verdict)#4c52522
 soul:mcp-types.ts#SoulReviewMemoryProposalResponseSchema(proposal_id,resolution_state)#45fd743
@@ -199,7 +199,7 @@ evt:runtime-governance.ts#ExtensionDescriptorRegistrationRevertedPayloadSchema(d
 evt:runtime-governance.ts#ExtensionGovernanceCheckedPayloadSchema(checked_at,execution_recorded,permission_checked,provider_id,tool_id)#ecb7bf1
 evt:runtime-governance.ts#ExtensionToolDiscoveredPayloadSchema(discovered_at,provider_id,source,tool_id,tool_name)#a18f548
 evt:runtime-governance.ts#ManifestationBudgetEvaluatedPayloadSchema(dialogue_nudge_assigned,discarded,evaluated_at,lens_entry_assigned,run_id,stance_bias_assigned,total_candidates,workspace_id)#2a36129
-evt:runtime-governance.ts#ManifestationEscalationDecidedPayloadSchema(decided_at,decisions,run_id,workspace_id)#41ef725
+evt:runtime-governance.ts#ManifestationEscalationDecidedPayloadSchema(batch_count,batch_index,decided_at,decisions,run_id,workspace_id)#d701944
 evt:runtime-governance.ts#OutputCommandCompressedPayloadSchema(compressed_at,compression_ratio,run_id,total_after_shaping,total_original,workspace_id)#3cb36de
 evt:runtime-governance.ts#OutputShapingAppliedPayloadSchema(command_class,compressed_to,compression_mode,original_count,original_event_ids,shaped_at,shaping_id)#e1f9777
 evt:runtime-governance.ts#PathConsolidationCompletedPayloadSchema(completed_at,duration_ms,paths_reinforced,paths_retired,paths_weakened,stability_promotions,workspace_id)#9d71aff
@@ -228,7 +228,7 @@ evt:runtime-governance.ts#SurfaceDriftLeaseReleaseFailedPayloadSchema(failed_at,
 evt:signal.ts#SoulSignalEmittedPayloadSchema(contradicts_refs,exception_to_refs,incompatible_with_refs,raw_payload,run_id,signal_id,signal_kind,source,source_delivery_ids,source_memory_refs,supersedes_refs,workspace_id)#bb458c7
 evt:signal.ts#SoulSignalMaterializedPayloadSchema(created_objects,error,run_id,signal_id,success,workspace_id)#f8c61ca
 evt:signal.ts#SoulSignalNormalizedPayloadSchema(normalized_fields,run_id,signal_id,workspace_id)#a87d9e1
-evt:signal.ts#SoulSignalTriagedPayloadSchema(best_similarity,dropped_content,run_id,signal_id,surviving_object_id,triage_result,workspace_id)#7e9396f
+evt:signal.ts#SoulSignalTriagedPayloadSchema(best_similarity,defer_class,defer_reason,dropped_content,run_id,signal_id,surviving_object_id,triage_result,workspace_id)#6d32ac0
 evt:slot.ts#SoulConflictMatrixEdgeCreatedPayloadSchema(edge_type,object_id,object_kind,run_id,source_claim_id,target_claim_id,workspace_id)#f8ad4c1
 evt:slot.ts#SoulSlotCreatedPayloadSchema(claim_kind,governance_subject,object_id,object_kind,run_id,scope_class,winner_claim_id,workspace_id)#df34027
 evt:slot.ts#SoulSlotWinnerChangedPayloadSchema(caused_by,evidence_refs,from_claim_id,object_id,object_kind,occurred_at,reason_code,run_id,to_claim_id,workspace_id)#9d00af9

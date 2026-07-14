@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import {
+  applyEmbeddingPathModulation,
+  buildConflictGateContext,
   resolveFusionContribution,
-  resolveRrfFusionWeights
+  resolveRrfFusionWeights,
+  selectWouldOutrankSuppressedKeys,
+  shouldSuppressConflictStreamContribution
 } from "../../recall/delivery/fusion-delivery-adaptive-scoring.js";
 import { activeFusionStreams, RECALL_FUSION_DEFAULT_WEIGHTS } from "../../recall/delivery/fusion-delivery-streams.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
+import type { RecallFusionStream, RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 function emptySupplementaryData(query: string): RecallSupplementaryData {
@@ -93,5 +97,104 @@ describe("resolveFusionContribution", () => {
     });
 
     expect(contribution).toBeCloseTo(6 / 11, 6);
+  });
+});
+
+describe("conflict would-outrank suppression", () => {
+  it("suppresses conflict lanes for emb-unsupported candidates that clear the emb-head floor", () => {
+    const decisiveKey = "workspace_local:memory_entry:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const pileKey = "workspace_local:memory_entry:dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const gate = buildConflictGateContext({
+      candidateKeys: [decisiveKey, pileKey],
+      embeddingRanks: new Map([[decisiveKey, 1]]),
+      embeddingScores: {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": 0.9
+      }
+    });
+    expect(gate.poolEmbeddingDecisive).toBe(true);
+
+    const embWeight = RECALL_FUSION_DEFAULT_WEIGHTS.embedding_similarity;
+    const pathWeight = RECALL_FUSION_DEFAULT_WEIGHTS.path_expansion;
+    const contributionsByKey = new Map<string, Partial<Record<RecallFusionStream, number>>>([
+      [decisiveKey, { embedding_similarity: embWeight / 61 }],
+      [pileKey, { path_expansion: pathWeight / 61, structural: pathWeight / 61, graph_expansion: pathWeight / 61 }]
+    ]);
+    const suppressed = selectWouldOutrankSuppressedKeys({ gate, contributionsByKey });
+    expect(suppressed.has(pileKey)).toBe(true);
+    expect(suppressed.has(decisiveKey)).toBe(false);
+    expect(shouldSuppressConflictStreamContribution({
+      stream: "path_expansion",
+      candidateKey: pileKey,
+      suppressedCandidateKeys: suppressed
+    })).toBe(true);
+    expect(shouldSuppressConflictStreamContribution({
+      stream: "lexical_fts",
+      candidateKey: pileKey,
+      suppressedCandidateKeys: suppressed
+    })).toBe(false);
+  });
+
+  it("keeps conflict lanes for emb-scored mid-rank candidates even when pool is decisive", () => {
+    const decisiveKey = "workspace_local:memory_entry:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const midKey = "workspace_local:memory_entry:99999999-9999-4999-8999-999999999999";
+    const gate = buildConflictGateContext({
+      candidateKeys: [decisiveKey, midKey],
+      embeddingRanks: new Map([
+        [decisiveKey, 1],
+        [midKey, 9]
+      ]),
+      embeddingScores: {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": 0.9,
+        "99999999-9999-4999-8999-999999999999": 0.7
+      }
+    });
+    const embWeight = RECALL_FUSION_DEFAULT_WEIGHTS.embedding_similarity;
+    const pathWeight = RECALL_FUSION_DEFAULT_WEIGHTS.path_expansion;
+    const contributionsByKey = new Map<string, Partial<Record<RecallFusionStream, number>>>([
+      [decisiveKey, { embedding_similarity: embWeight / 61 }],
+      [midKey, {
+        embedding_similarity: embWeight / 69,
+        path_expansion: pathWeight / 61,
+        structural: pathWeight / 61
+      }]
+    ]);
+    const suppressed = selectWouldOutrankSuppressedKeys({ gate, contributionsByKey });
+    expect(suppressed.has(midKey)).toBe(false);
+  });
+});
+
+describe("applyEmbeddingPathModulation", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("skips path×cosine boost when the embedding pool is decisive", () => {
+    const memory = createMemoryEntry({
+      object_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    });
+    const supplementaryData = {
+      ...emptySupplementaryData("path modulation"),
+      embeddingSimilarityScores: { [memory.object_id]: 0.95 }
+    };
+    const gate = buildConflictGateContext({
+      candidateKeys: [`workspace_local:memory_entry:${memory.object_id}`],
+      embeddingRanks: new Map([[`workspace_local:memory_entry:${memory.object_id}`, 1]]),
+      embeddingScores: { [memory.object_id]: 0.95 }
+    });
+    const boosted = applyEmbeddingPathModulation(
+      1,
+      { entry: memory, effectiveFactors: { activation: 0, relevance: 0 } },
+      supplementaryData,
+      "path_expansion"
+    );
+    const gated = applyEmbeddingPathModulation(
+      1,
+      { entry: memory, effectiveFactors: { activation: 0, relevance: 0 } },
+      supplementaryData,
+      "path_expansion",
+      gate
+    );
+    expect(boosted).toBeGreaterThan(1);
+    expect(gated).toBe(1);
   });
 });

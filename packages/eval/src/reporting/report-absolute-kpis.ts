@@ -52,8 +52,14 @@ function pushLatencyAndPrimaryEconomy(lines: string[], current: KpiPayload): voi
     current.kpi.latency_source === "worst_shard_bound"
       ? " (≤ worst-shard upper bound)"
       : "";
+  // Scored latency includes per-query encode when bi-encoder is on; it is not a
+  // warm-query-cache SLI. Gate claims require mean embedding_inference_calls ≥ 1.
   lines.push(`- Latency p50: ${current.kpi.latency_ms_p50} ms${latencyTag}`);
   lines.push(`- Latency p95: ${current.kpi.latency_ms_p95} ms${latencyTag}`);
+  const honesty = describeEmbeddingLatencyHonesty(current);
+  if (honesty !== null) {
+    lines.push(`- ${honesty}`);
+  }
   lines.push(
     `- Token saved vs full-prompt baseline: ${formatRatio(current.kpi.token_saved_ratio_vs_full_prompt)}`
   );
@@ -89,7 +95,8 @@ function pushPerRecallEconomy(lines: string[], current: KpiPayload): void {
     pushDistributionLine(lines, "delivered_context_tokens", rte.delivered_context_tokens_estimate);
     pushDistributionLine(lines, "coarse_pool_size", rte.coarse_pool_size);
     pushDistributionLine(lines, "fine_evaluated", rte.fine_evaluated);
-    pushDistributionLine(lines, "fusion_streams_with_hits", rte.fusion_streams_with_hits);
+    pushDistributionLine(lines, "fine_pruned_count", rte.fine_pruned_count);
+    pushDistributionLine(lines, "fusion_families_with_hits", rte.fusion_families_with_hits);
     pushDistributionLine(lines, "embedding_inference_calls", rte.embedding_inference_calls, 3);
   }
 }
@@ -279,6 +286,27 @@ export interface SeedDropAttribution {
   readonly materializationDrop: number;
   readonly batchResidual: number;
   readonly trulyLost: number;
+}
+
+/** Surface warm-cache-only latency so the 1100 ms gate is not claimable on it. */
+export function describeEmbeddingLatencyHonesty(current: KpiPayload): string | null {
+  if (current.embedding_provider === "none" || current.embedding_provider === undefined) {
+    return null;
+  }
+  const inferenceMean = current.kpi.recall_token_economy?.embedding_inference_calls.mean;
+  if (inferenceMean === undefined) {
+    return "Latency measurement: query encode expected inside timed recall when bi-encoder is on";
+  }
+  if (inferenceMean < 1) {
+    return (
+      "⚠ Latency is warm-query-cache-only (embedding_inference_calls.mean " +
+      `${inferenceMean.toFixed(3)} < 1); gate p95 is not claimable on this run`
+    );
+  }
+  return (
+    "Latency includes in-timer query encode " +
+    `(embedding_inference_calls.mean=${inferenceMean.toFixed(3)})`
+  );
 }
 
 // candidate_absent is governance declining a signal as durable truth, not a loss;

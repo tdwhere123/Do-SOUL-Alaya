@@ -214,6 +214,13 @@ function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializa
     embeddingRuntime.providerWarmup.then((status) => {
       if (status === "ready") {
         input.warn("embedding provider warmup ready", { status });
+        return;
+      }
+      if (status === "failed") {
+        input.warn("embedding provider warmup FAILED — bi-default-on is lexical-only", {
+          status,
+          degraded_reason: "provider_warmup_failed"
+        });
       }
     }),
     input.warn,

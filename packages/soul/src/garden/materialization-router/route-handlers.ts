@@ -114,7 +114,9 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
       target_kind: "deferred",
       route_target: target.route_target,
       routing_reason: target.routing_reason,
-      created_objects: []
+      created_objects: [],
+      ...(target.defer_reason === undefined ? {} : { defer_reason: target.defer_reason }),
+      ...(target.defer_class === undefined ? {} : { defer_class: target.defer_class })
     });
   }
 

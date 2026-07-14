@@ -37,13 +37,15 @@ export function extractRecallTokenEconomy(
   );
   const coarse = readNonNegativeInt(record, "coarse_pool_size");
   const fine = readNonNegativeInt(record, "fine_evaluated");
-  const streams = readNonNegativeInt(record, "fusion_streams_with_hits");
+  const pruned = readNonNegativeInt(record, "fine_pruned_count");
+  const families = readNonNegativeInt(record, "fusion_families_with_hits");
   const inferences = readNonNegativeInt(record, "embedding_inference_calls");
   if (
     delivered === null ||
     coarse === null ||
     fine === null ||
-    streams === null ||
+    pruned === null ||
+    families === null ||
     inferences === null
   ) {
     return null;
@@ -52,7 +54,8 @@ export function extractRecallTokenEconomy(
     delivered_context_tokens_estimate: delivered,
     coarse_pool_size: coarse,
     fine_evaluated: fine,
-    fusion_streams_with_hits: streams,
+    fine_pruned_count: pruned,
+    fusion_families_with_hits: families,
     embedding_inference_calls: inferences
   });
 }
@@ -150,9 +153,10 @@ export function aggregateRecallTokenEconomy(
     ),
     coarse_pool_size: summarizeField(samples, (s) => s.coarse_pool_size),
     fine_evaluated: summarizeField(samples, (s) => s.fine_evaluated),
-    fusion_streams_with_hits: summarizeField(
+    fine_pruned_count: summarizeField(samples, (s) => s.fine_pruned_count),
+    fusion_families_with_hits: summarizeField(
       samples,
-      (s) => s.fusion_streams_with_hits
+      (s) => s.fusion_families_with_hits
     ),
     embedding_inference_calls: summarizeField(
       samples,

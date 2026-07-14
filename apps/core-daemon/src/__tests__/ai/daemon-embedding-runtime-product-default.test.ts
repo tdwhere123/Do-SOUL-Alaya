@@ -268,6 +268,7 @@ describe("daemon local embedding product default", () => {
     );
     try {
       expect(isPolicyEnabled(runtime)).toBe(false);
+      expect(runtime.getWarmupHoldReason()).toBe("provider_warmup_pending");
       await expect(runtime.embeddingStatusService.getStatus("workspace-1")).resolves.toMatchObject({
         effective_mode: "degraded",
         degraded_reason: "provider_warmup_pending"
@@ -276,6 +277,7 @@ describe("daemon local embedding product default", () => {
       resolveWarmup([new Float32Array([1])]);
       await expect(runtime.providerWarmup).resolves.toBe("ready");
       expect(isPolicyEnabled(runtime)).toBe(true);
+      expect(runtime.getWarmupHoldReason()).toBeNull();
     } finally {
       database.close();
     }

@@ -81,7 +81,7 @@ export interface RecallSupplementaryData {
   readonly graphAndPathColdScore: number;
   readonly recallsEdgeCount: number;
   readonly weightTransferAmount: number;
-  // Evidence capsule gist keyed by memory id for explicitly requested deep diagnostics.
+  // Evidence capsule gist keyed by memory id — coverage delivery identity + diagnostics.
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
   // invariant: governance ceiling on recall manifestation, keyed by
   // memory_entry.object_id. Derived from each candidate's inbound

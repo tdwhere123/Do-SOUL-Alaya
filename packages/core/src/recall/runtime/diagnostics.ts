@@ -11,7 +11,7 @@ import type {
   RecallGraphExpansionDiagnostics,
   RecallTokenEconomy
 } from "./recall-service-types.js";
-import { activeFusionStreams } from "../delivery/fusion-delivery.js";
+import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 
 export function buildRecallDiagnostics(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -174,6 +174,7 @@ export function computeRecallTokenEconomy(params: Readonly<{
   readonly deliveredCandidates: readonly Readonly<RecallCandidate>[];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
+  readonly finePrunedCount?: number;
   readonly preBudgetCandidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly embeddingInferenceCalls: number;
 }>): Readonly<RecallTokenEconomy> {
@@ -181,21 +182,16 @@ export function computeRecallTokenEconomy(params: Readonly<{
   for (const candidate of params.deliveredCandidates) {
     deliveredContextTokensEstimate += candidate.token_estimate;
   }
-  // Distinct fusion streams with a non-null rank across pre-budget candidates; tracks the active stream set so flag-gated streams are not miscounted.
-  let fusionStreamsWithHits = 0;
-  for (const stream of activeFusionStreams()) {
-    const hit = params.preBudgetCandidates.some(
-      (candidate) => candidate.per_stream_rank[stream] !== null
-    );
-    if (hit) {
-      fusionStreamsWithHits += 1;
-    }
-  }
+  // Distinct fusion families with any member-stream hit — decorrelated vote surface (~5), not raw lanes.
+  const fusionFamiliesWithHits = countFamiliesWithHits(params.preBudgetCandidates);
+  const finePrunedCount = params.finePrunedCount ??
+    Math.max(0, params.coarsePoolSize - params.fineEvaluated);
   return Object.freeze({
     delivered_context_tokens_estimate: deliveredContextTokensEstimate,
     coarse_pool_size: params.coarsePoolSize,
     fine_evaluated: params.fineEvaluated,
-    fusion_streams_with_hits: fusionStreamsWithHits,
+    fine_pruned_count: finePrunedCount,
+    fusion_families_with_hits: fusionFamiliesWithHits,
     embedding_inference_calls: Math.max(0, Math.trunc(params.embeddingInferenceCalls))
   });
 }

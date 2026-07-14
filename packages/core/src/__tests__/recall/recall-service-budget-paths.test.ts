@@ -109,7 +109,9 @@ it("uses the unified path plane for direct (path_expansion) and multi-hop (graph
     );
     expect(graphTargetDiag?.admission_planes).toContain("graph_expansion");
     expect(graphTargetDiag?.admission_planes).not.toContain("path_expansion");
-    expect(graphTargetDiag?.fused_rank_contribution_per_stream.graph_expansion).toBeGreaterThan(0.04);
+    // Per-lane weights are identity; RRF@rank1 with k=60 is 1/61.
+    expect(graphTargetDiag?.fused_rank_contribution_per_stream.graph_expansion)
+      .toBeCloseTo(1 / 61, 12);
   });
 
 it("excludes negative-bias paths from path_expansion positive candidates", async () => {

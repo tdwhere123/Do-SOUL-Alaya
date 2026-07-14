@@ -85,7 +85,10 @@ export interface AlayaDaemonRuntimeServices {
   // the SAME in-process receiveSignal seam the production garden host-worker
   // completion uses (garden-runtime.ts processPostTurnExtractTask), so a
   // bench-seeded signal materializes a memory_entry exactly as production.
-  readonly signalService: Pick<SignalService, "receiveSignal">;
+  readonly signalService: Pick<
+    SignalService,
+    "receiveSignal" | "getSourceGroundingDeferStats" | "redriveSourceGroundingDefer" | "listSourceGroundingDefers"
+  >;
   // invariant: the bench harness seeds session-level synthesis_capsule rows
   // by calling SynthesisService.create directly, bypassing the
   // potential_synthesis signal route (materializeSynthesis) so no duplicate

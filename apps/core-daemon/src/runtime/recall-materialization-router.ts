@@ -52,6 +52,7 @@ export function createSignalMaterializationRuntime(input: {
     eventLogRepo: wiring.eventLogRepo,
     signalRepo: wiring.signalRepo,
     runtimeNotifier: wiring.runtimeNotifier,
+    sourceGroundingDeferQueue: wiring.sourceGroundingDeferQueueRepo,
     postTriageMaterializer: {
       materialize: async (signal: CandidateMemorySignal) =>
         await materializationRouter.materializeSignal(signal)

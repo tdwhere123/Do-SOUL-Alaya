@@ -17,6 +17,7 @@ import {
   type FusionContributionCandidate,
   type ResolvedRecallFusionWeights
 } from "../delivery/fusion-delivery-adaptive-scoring.js";
+import { aggregateFamilyContributions } from "../delivery/fusion-delivery-families.js";
 import { scoreTemporalFusion } from "../delivery/fusion-delivery-scoring-streams.js";
 import type {
   PathInflowEdge,
@@ -129,7 +130,7 @@ const EMPTY_SLICE_KEYS: readonly SelectedSliceKeyV1[] = Object.freeze([]);
 const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
   Object.freeze({ object: null, path: null, evidence: null, temporal: null, control: null });
 
-// R_O := RRF_base = Σ active-stream RRF contributions — the proven additive object ranking. The flood
+// R_O := family-decorrelated RRF_base (Σ max lane contribution per family). The flood
 // seeds from this same base (B1: one scale across the delivered base and the path inflow).
 function resolveObjectBase(
   input: ConformantCandidate,
@@ -140,11 +141,11 @@ function resolveObjectBase(
   if (input.objectBase !== undefined) {
     return input.objectBase;
   }
-  let base = 0;
+  const contributions = {} as Record<RecallFusionStream, number>;
   for (const [stream, rankByKey] of ranksByStream) {
     const rank = rankByKey.get(input.candidateKey);
     if (rank !== undefined) {
-      base += resolveAdaptiveFusionContribution({
+      contributions[stream] = resolveAdaptiveFusionContribution({
         candidate: input.candidate,
         supplementaryData,
         resolved,
@@ -153,7 +154,7 @@ function resolveObjectBase(
       });
     }
   }
-  return base;
+  return aggregateFamilyContributions(contributions);
 }
 
 // invariant: parallel eligible edges remain distinct inputs to the NOR fold.

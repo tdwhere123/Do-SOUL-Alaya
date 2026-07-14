@@ -3,6 +3,12 @@ import type {
   EventLogEntry,
   SignalState as SignalStateValue
 } from "@do-soul/alaya-protocol";
+import type {
+  SourceGroundingDeferQueuePort,
+  SourceGroundingDeferStats
+} from "./source-grounding-defer-queue.js";
+
+export type { SourceGroundingDeferStats };
 
 export interface SignalServiceEventLogRepoPort {
   append(event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">): EventLogEntry | Promise<EventLogEntry>;
@@ -44,6 +50,8 @@ export interface SignalMaterializationResultFields {
   readonly target_kind: SignalMaterializationTargetKind;
   readonly routing_reason: string;
   readonly created_objects: readonly SignalMaterializedObject[];
+  readonly defer_reason?: string;
+  readonly defer_class?: "source_grounding";
 }
 
 export interface SignalMaterializationSuccessResult extends SignalMaterializationResultFields {
@@ -79,4 +87,6 @@ export interface SignalServiceDependencies {
   readonly runtimeNotifier: SignalRuntimeNotifier;
   readonly postTriageMaterializer?: SignalServicePostTriageMaterializer;
   readonly warn?: SignalServiceWarnPort;
+  /** Optional bounded re-drive queue for source-grounding deferrals. */
+  readonly sourceGroundingDeferQueue?: SourceGroundingDeferQueuePort;
 }

@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { RecallService } from "../../recall/recall-service.js";
 import {
   buildEvidenceSearchQueries,
-  buildInformativeEvidenceSearchQueries
+  buildInformativeEvidenceSearchQueries,
+  selectEvidenceSearchQueries
 } from "../../recall/coarse-filter/evidence/search-query-planner.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
@@ -58,28 +59,28 @@ describe("evidence search query construction", () => {
 
 describe("evidence search query coverage", () => {
   it("retains direct keyword and CJK surface coverage", () => {
-    expect(buildEvidenceSearchQueries(
+    expect(selectEvidenceSearchQueries(
       "zylphqorbex",
       compileRecallQueryProbes("zylphqorbex")
     )).toContain("zylphqorbex");
 
-    const cjkQueries = buildEvidenceSearchQueries(
+    const cjkQueries = selectEvidenceSearchQueries(
       "我喜欢咖啡",
       compileRecallQueryProbes("我喜欢咖啡")
     );
     expect(cjkQueries.some((query) => query.split(/\s+/u).includes("我喜欢咖啡"))).toBe(true);
   });
 
-  it("keeps the raw reference query when informative probes exist", () => {
+  it("omits the raw natural-language query when informative probes exist", () => {
     const rawQuery = "What was the deployment configuration for the database that we used and why?";
-    const queries = buildEvidenceSearchQueries(rawQuery, compileRecallQueryProbes(rawQuery));
+    const queries = selectEvidenceSearchQueries(rawQuery, compileRecallQueryProbes(rawQuery));
 
-    expect(queries[0]).toBe(rawQuery);
-    expect(queries.length).toBeGreaterThan(1);
+    expect(queries).not.toContain(rawQuery);
+    expect(queries.length).toBeGreaterThan(0);
   });
 
   it("uses the raw query when no informative probe exists", () => {
-    expect(buildEvidenceSearchQueries(
+    expect(selectEvidenceSearchQueries(
       "why and where",
       compileRecallQueryProbes("why and where")
     )).toEqual(["why and where"]);
@@ -87,7 +88,7 @@ describe("evidence search query coverage", () => {
 });
 
 describe("evidence scalar reference", () => {
-  it("uses the complete reference query set and preserves max-rank merging", async () => {
+  it("uses informative evidence queries and preserves max-rank merging", async () => {
     const { evidenceSearch, rawQuery, service } = createReferenceQuerySetFixture();
 
     const result = await service.recall({
@@ -97,7 +98,8 @@ describe("evidence scalar reference", () => {
     });
 
     expect(evidenceSearch).toHaveBeenCalled();
-    const expectedQueries = buildEvidenceSearchQueries(rawQuery, compileRecallQueryProbes(rawQuery));
+    expect(evidenceSearch.mock.calls.map((call) => call[1])).not.toContain(rawQuery);
+    const expectedQueries = selectEvidenceSearchQueries(rawQuery, compileRecallQueryProbes(rawQuery));
     const calledQueries = evidenceSearch.mock.calls.map((call) => call[1]);
     expect(calledQueries.length % expectedQueries.length).toBe(0);
     for (let offset = 0; offset < calledQueries.length; offset += expectedQueries.length) {
@@ -283,7 +285,7 @@ function createEvidenceBatchState() {
   const first = createMemoryEntry({ object_id: "memory-first", evidence_refs: ["evidence-first"] });
   const second = createMemoryEntry({ object_id: "memory-second", evidence_refs: ["evidence-second"] });
   const rawQuery = "What was the deployment configuration for the database that we used and why?";
-  const queries = buildEvidenceSearchQueries(rawQuery, compileRecallQueryProbes(rawQuery));
+  const queries = selectEvidenceSearchQueries(rawQuery, compileRecallQueryProbes(rawQuery));
   const hitsByQuery = new Map(queries.map((query, index) => [
     query,
     index === 0
@@ -362,12 +364,30 @@ function buildOverLimitBatch(
 
 function expectedBatchFailureDetails(failureMode: BatchFailureMode, expectedCount: number) {
   if (failureMode === "throw") {
-    return { returned_count: null, valid_batch_count: null, invalid_index: null };
+    return {
+      returned_count: null,
+      valid_batch_count: null,
+      invalid_index: null,
+      errorName: "Error",
+      errorMessage: "batch failed"
+    };
   }
   if (failureMode === "count") {
-    return { returned_count: expectedCount - 1, valid_batch_count: null, invalid_index: null };
+    return {
+      returned_count: expectedCount - 1,
+      valid_batch_count: null,
+      invalid_index: null,
+      errorName: null,
+      errorMessage: null
+    };
   }
-  return { returned_count: expectedCount, valid_batch_count: expectedCount - 1, invalid_index: 1 };
+  return {
+    returned_count: expectedCount,
+    valid_batch_count: expectedCount - 1,
+    invalid_index: 1,
+    errorName: null,
+    errorMessage: null
+  };
 }
 
 function readEvidenceCandidateRanks(

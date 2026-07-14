@@ -14,18 +14,8 @@ import { runLocomo } from "../../locomo/runner.js";
 
 describe("LoCoMo runner", () => {
 
-  it("archives partial query warm-cache readiness without aborting scoring", async () => {
-    const warmQueryEmbeddingCache = vi.fn(async (queryTexts: readonly string[]) => ({
-      status: "ready" as const,
-      requested_count: queryTexts.length,
-      ready_count: 0,
-      cache_hit_count: 0,
-      provider_requested_count: queryTexts.length,
-      missing_count: queryTexts.length,
-      provider_kind: "openai",
-      model_id: "text-embedding-3-small",
-      last_error: "provider temporarily unreachable"
-    }));
+  it("leaves query encode to timed recall instead of pre-warming the query cache", async () => {
+    const warmQueryEmbeddingCache = vi.fn();
     const recall = vi.fn(async () => buildRecallResult());
     const accrueSessionCoRecall = vi.fn(async () => ({
       pairsObserved: 1,
@@ -41,7 +31,6 @@ describe("LoCoMo runner", () => {
       historyRoot: tmpDir,
       embeddingMode: "env"
     });
-    // The LoCoMo seed loop drives the EARNED co-recall accrual once per session.
     expect(accrueSessionCoRecall).toHaveBeenCalled();
     const kpi = JSON.parse(await readFile(result.kpiPath, "utf8")) as {
       readonly kpi: {
@@ -49,24 +38,13 @@ describe("LoCoMo runner", () => {
       };
     };
     const diagnostics = JSON.parse(await readFile(result.diagnosticsPath, "utf8")) as {
-      readonly query_embedding_cache?: {
-        readonly requested_count: number;
-        readonly ready_count: number;
-        readonly ready_rate: number;
-        readonly last_error?: string;
-      };
+      readonly query_embedding_cache?: unknown;
     };
 
     expect(recall).toHaveBeenCalledTimes(1);
-    expect(kpi.kpi.query_embedding_cache_ready_rate).toBe(0);
-    expect(diagnostics.query_embedding_cache).toEqual(
-      expect.objectContaining({
-        requested_count: 1,
-        ready_count: 0,
-        ready_rate: 0,
-        last_error: "provider temporarily unreachable"
-      })
-    );
+    expect(warmQueryEmbeddingCache).not.toHaveBeenCalled();
+    expect(kpi.kpi.query_embedding_cache_ready_rate).toBeUndefined();
+    expect(diagnostics.query_embedding_cache).toBeUndefined();
   });
 
   it("keeps answerless adversarial rows in the retrieval denominator while still using the abstention QA judge", async () => {

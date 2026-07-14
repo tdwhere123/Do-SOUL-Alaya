@@ -232,7 +232,8 @@ const RecallTokenEconomySchema = z
     delivered_context_tokens_estimate: z.number().int().nonnegative(),
     coarse_pool_size: z.number().int().nonnegative(),
     fine_evaluated: z.number().int().nonnegative(),
-    fusion_streams_with_hits: z.number().int().nonnegative(),
+    fine_pruned_count: z.number().int().nonnegative(),
+    fusion_families_with_hits: z.number().int().nonnegative(),
     embedding_inference_calls: z.number().int().nonnegative()
   })
   .strict()

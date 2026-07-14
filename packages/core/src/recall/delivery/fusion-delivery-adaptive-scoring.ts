@@ -1,14 +1,24 @@
 import type { MemoryEntry, RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
-import { countOrthogonalLexicalFields, lexicalDecorrEnabled } from "./lexical-decorrelation.js";
 import { classifyRecallIntent, hasTemporalQuerySignal } from "../query/recall-query-plan.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import { recallEnvRaw } from "../../config/recall-env-access.js";
 import type { RecallFusionStream, RecallSupplementaryData } from "../runtime/recall-service-types.js";
 import { resolveDefaultFusionWeightForIntent } from "../scoring/temporal-fusion-scoring.js";
+import type { ConflictGateContext } from "./fusion-delivery-conflict-gate.js";
 
 const EMBEDDING_PATH_MODULATION_GAIN = 0.25;
 const RECALL_RRF_DEFAULT_K = 60;
+
+export type { ConflictGateContext } from "./fusion-delivery-conflict-gate.js";
+export {
+  buildConflictGateContext,
+  CONFLICT_FUSION_STREAMS,
+  isConflictFusionStream,
+  selectWouldOutrankSuppressedKeys,
+  shouldSuppressConflictStreamContribution,
+  zeroConflictStreamContributions
+} from "./fusion-delivery-conflict-gate.js";
 
 export type ResolvedRecallFusionWeights = Readonly<{
   readonly kByStream: Readonly<Record<RecallFusionStream, number>>;
@@ -27,12 +37,8 @@ type FusionContributionParams = Readonly<{
   readonly resolved: ResolvedRecallFusionWeights;
   readonly stream: RecallFusionStream;
   readonly rank: number;
-}>;
-
-type LaneReliabilityParams = Readonly<{
-  readonly candidate: FusionContributionCandidate;
-  readonly supplementaryData: RecallSupplementaryData;
-  readonly stream: RecallFusionStream;
+  readonly candidateKey?: string;
+  readonly conflictGate?: ConflictGateContext;
 }>;
 
 export function resolveRrfFusionWeights(params: Readonly<{
@@ -62,10 +68,17 @@ export function resolveRrfFusionWeights(params: Readonly<{
 }
 
 export function resolveFusionContribution(params: FusionContributionParams): number {
-  const reliability = scoreLaneReliability(params);
+  // Conflict would-outrank suppression is applied after all raw lane contributions are known
+  // (fusion-delivery-scoring-snapshot), so this path only builds the unsuppressed RRF term.
   const k = params.resolved.kByStream[params.stream];
-  const base = params.resolved.weights[params.stream] * reliability / (k + params.rank);
-  return applyEmbeddingPathModulation(base, params.candidate, params.supplementaryData, params.stream);
+  const base = params.resolved.weights[params.stream] / (k + params.rank);
+  return applyEmbeddingPathModulation(
+    base,
+    params.candidate,
+    params.supplementaryData,
+    params.stream,
+    params.conflictGate
+  );
 }
 
 // Same embedding cosine modulation the RRF path applies; shared so flood mode does not duplicate it.
@@ -80,9 +93,14 @@ export function applyEmbeddingPathModulation(
   contribution: number,
   candidate: FusionContributionCandidate,
   supplementaryData: RecallSupplementaryData,
-  stream: RecallFusionStream
+  stream: RecallFusionStream,
+  conflictGate?: ConflictGateContext
 ): number {
   if ((stream !== "path_expansion" && stream !== "graph_expansion") || !pathEmbModulationEnabled()) {
+    return contribution;
+  }
+  // When emb is decisive, path×cosine boost would amplify the same conflict lanes that bury emb-top.
+  if (conflictGate?.poolEmbeddingDecisive === true) {
     return contribution;
   }
   const cos = clamp01(supplementaryData.embeddingSimilarityScores?.[candidate.entry.object_id] ?? 0.5);
@@ -127,97 +145,6 @@ function resolveDefaultRrfK(
   if (stream === "graph_expansion" || stream === "path_expansion") return fallbackK;
   if (stream === "synthesis_fts") return 80;
   return fallbackK;
-}
-
-export function scoreLaneReliability(params: LaneReliabilityParams): number {
-  if (!isLexicalFamilyStream(params.stream)) {
-    return 1;
-  }
-  const context = buildLexicalFamilyContext(params.candidate, params.supplementaryData);
-  if (params.stream === "trigram_fts") {
-    return scoreTrigramReliability(params.supplementaryData.queryProbes, context);
-  }
-  if (params.stream === "evidence_structural_agreement") {
-    return context.hasIndependentSupport ? 0.9 : 0.75;
-  }
-  if (params.stream === "evidence_fts") {
-    return context.hasIndependentSupport ? 1 : scoreBroadLexicalReliability(params.supplementaryData.queryProbes, context, 0.85);
-  }
-  return scoreBroadLexicalReliability(params.supplementaryData.queryProbes, context, 0.9);
-}
-
-type LexicalFamilyContext = Readonly<{
-  readonly lexicalFamilyHitCount: number;
-  readonly orthogonalFieldCount: number;
-  readonly hasIndependentSupport: boolean;
-}>;
-
-// Redundant when >=3 lexical lanes pile onto fewer orthogonal fields; flag off collapses to the raw lane-count gate.
-function isRedundantLexicalFamily(context: LexicalFamilyContext): boolean {
-  if (context.lexicalFamilyHitCount < 3 || context.hasIndependentSupport) {
-    return false;
-  }
-  return !lexicalDecorrEnabled() || context.lexicalFamilyHitCount > context.orthogonalFieldCount;
-}
-
-function scoreBroadLexicalReliability(
-  queryProbes: Readonly<RecallQueryProbes>,
-  context: LexicalFamilyContext,
-  floor: number
-): number {
-  if (!isRedundantLexicalFamily(context)) {
-    return 1;
-  }
-  const intent = classifyRecallIntent(queryProbes);
-  return intent === "single_fact" ? floor : Math.max(0.75, floor - 0.1);
-}
-
-function scoreTrigramReliability(
-  queryProbes: Readonly<RecallQueryProbes>,
-  context: LexicalFamilyContext
-): number {
-  const scriptSpecific = queryProbes.char_ngrams.length > 0 || queryProbes.lexical_terms.some((term) => term.length >= 12);
-  const base = scriptSpecific ? 0.85 : 0.7;
-  if (isRedundantLexicalFamily(context)) {
-    return Math.max(0.55, base - 0.15);
-  }
-  return base;
-}
-
-function buildLexicalFamilyContext(
-  candidate: FusionContributionCandidate,
-  supplementaryData: RecallSupplementaryData
-): LexicalFamilyContext {
-  const objectId = candidate.entry.object_id;
-  const evidenceHit = (supplementaryData.evidenceFtsRanks[objectId] ?? 0) > 0;
-  const structuralHit = (candidate.structuralScore ?? supplementaryData.structuralScores[objectId] ?? 0) > 0;
-  const lexicalFamilyHitCount = [
-    supplementaryData.ftsRanks[objectId],
-    supplementaryData.trigramFtsRanks[objectId],
-    supplementaryData.evidenceFtsRanks[objectId],
-    evidenceHit && structuralHit ? 1 : 0
-  ].filter((score) => (score ?? 0) > 0).length;
-  return Object.freeze({
-    lexicalFamilyHitCount,
-    orthogonalFieldCount: countOrthogonalLexicalFields(candidate, supplementaryData),
-    hasIndependentSupport:
-      (candidate.effectiveFactors.embedding_similarity ?? 0) > 0 ||
-      (supplementaryData.sourceProximityScores[objectId] ?? 0) > 0 ||
-      (supplementaryData.sourceCohortKeys[objectId]?.length ?? 0) > 0 ||
-      (supplementaryData.graphExpansionScores[objectId] ?? 0) > 0 ||
-      (supplementaryData.entitySeedScores[objectId] ?? 0) > 0 ||
-      (supplementaryData.pathExpansionScores[objectId] ?? 0) > 0 ||
-      (supplementaryData.graphSupportCounts[objectId] ?? 0) > 0
-  });
-}
-
-function isLexicalFamilyStream(stream: RecallFusionStream): boolean {
-  return (
-    stream === "lexical_fts" ||
-    stream === "trigram_fts" ||
-    stream === "evidence_fts" ||
-    stream === "evidence_structural_agreement"
-  );
 }
 
 function readPositiveInteger(value: unknown, fallback: number): number {

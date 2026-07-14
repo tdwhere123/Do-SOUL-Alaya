@@ -139,6 +139,14 @@ export {
   type EnrichPendingRepo
 } from "./repos/garden/index.js";
 export {
+  SqliteSourceGroundingDeferQueueRepo,
+  SOURCE_GROUNDING_DEFER_QUEUE_CAP,
+  type SourceGroundingDeferEntry,
+  type SourceGroundingDeferEnqueueResult,
+  type SourceGroundingDeferQueueRepo,
+  type SourceGroundingDeferStats
+} from "./repos/garden/index.js";
+export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo

@@ -135,15 +135,15 @@ export const RecallTokenEconomySchema = z
     // the candidates actually returned. Mirrors the chars/token heuristic
     // used by makeTokenEstimator in core.
     delivered_context_tokens_estimate: PerCallStatSchema,
-    // Coarse-pool size — the candidate count flowing into fineAssess.
+    // Coarse-pool size — the candidate count before the coarse→fine waist.
     coarse_pool_size: PerCallStatSchema,
-    // Fine-assess evaluated count — equals coarse pool size while fineAssess
-    // has no early-out paths, so distributions match; the field is separate
-    // for forward compatibility if fineAssess gains early-out paths.
+    // Fine-assess evaluated count after coarse→fine prune (may be < coarse_pool_size).
     fine_evaluated: PerCallStatSchema,
-    // Distinct fusion streams that contributed at least one non-null
-    // per-stream rank across the pre-budget candidate set, per recall.
-    fusion_streams_with_hits: PerCallStatSchema,
+    // Coarse candidates dropped by the coarse→fine waist before scoring.
+    fine_pruned_count: PerCallStatSchema,
+    // Distinct fusion families with any member-stream hit (~5), not raw lane
+    // count, across the pre-budget candidate set per recall.
+    fusion_families_with_hits: PerCallStatSchema,
     // Embedding provider inference calls attributable to one recall: 1
     // when the recall issued a fresh provider invocation, 0 otherwise.
     // The mean across all recalls in the run is the call-weighted rate

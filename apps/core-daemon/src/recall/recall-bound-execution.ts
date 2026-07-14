@@ -45,6 +45,7 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
 
 // Recall scoring is identical across modes; sideEffectMode documents post-recall
 // divergence (MCP delivery/plasticity/garden vs bench diagnostics-only).
+// Embedding warmup hold annotation is applied by the daemon recall-service proxy.
 export async function invokeBoundRecall<TRecallResult>(
   params: InvokeBoundRecallParams<TRecallResult>
 ): Promise<TRecallResult> {

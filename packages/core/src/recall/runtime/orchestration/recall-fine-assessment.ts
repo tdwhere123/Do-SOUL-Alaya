@@ -66,6 +66,17 @@ export async function collectInitialLegacyAssessment(
   });
 }
 
+function preparationFromAssessment(
+  assessment: FineAssessmentResult
+): FineAssessmentPreparation {
+  return Object.freeze({
+    candidates: assessment.preparedCandidates,
+    coarsePoolSize: assessment.coarsePoolSize,
+    fineEvaluated: assessment.fineEvaluated,
+    finePrunedCount: assessment.finePrunedCount
+  });
+}
+
 export function prepareLegacyReassessment(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
@@ -90,7 +101,7 @@ export function prepareLegacyReassessment(
     reassessmentRequired,
     preparedCandidates: reassessmentRequired
       ? prepareFineAssessment(buildFineAssessParams(context, params, prepared, coarse, supplementaryData))
-      : initial.assessment.preparedCandidates
+      : preparationFromAssessment(initial.assessment)
   });
 }
 

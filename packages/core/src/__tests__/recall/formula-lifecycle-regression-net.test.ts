@@ -272,8 +272,8 @@ function createDecayHarness(getNow: () => string): {
 }
 
 describe("formula and lifecycle regression net", () => {
-  it("protects embedding policy parity: core default and resolved decorator fusion weight is 12", () => {
-    expect(RECALL_FUSION_DEFAULT_WEIGHTS.embedding_similarity).toBe(12);
+  it("protects embedding policy parity: core default family weight is 1; decorator override still applies", () => {
+    expect(RECALL_FUSION_DEFAULT_WEIGHTS.embedding_similarity).toBe(1);
     const resolved = resolvePolicy({
       strategy: "chat",
       taskSurfaceRef: "00000000-0000-4000-8000-000000000099",

@@ -68,7 +68,9 @@ describe("Recall candidate protocol schema", () => {
         manifestation: "excerpt",
         dimension: MemoryDimension.PROCEDURE,
         scope_class: ScopeClass.PROJECT,
-        selection_reason: "Selected by lexical and activation ranking.",
+        selection_reason:
+          "Selected by workspace recall. Final fusion evidence score 0.910000; " +
+          "diagnostic supporting signals: activation 0.800.",
         source_channels: ["workspace_local", "keyword"],
         score_factors: {
           activation: 0.7,
@@ -87,7 +89,9 @@ describe("Recall candidate protocol schema", () => {
         }
       })
     ).toMatchObject({
-      selection_reason: "Selected by lexical and activation ranking.",
+      selection_reason:
+        "Selected by workspace recall. Final fusion evidence score 0.910000; " +
+        "diagnostic supporting signals: activation 0.800.",
       source_channels: ["workspace_local", "keyword"],
       score_factors: {
         activation: 0.7,

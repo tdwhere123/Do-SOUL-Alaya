@@ -77,7 +77,8 @@ describe("LongMemEval recall diagnostics", () => {
         delivered_context_tokens_estimate: 0,
         coarse_pool_size: 0,
         fine_evaluated: 0,
-        fusion_streams_with_hits: 0,
+        fine_pruned_count: 0,
+        fusion_families_with_hits: 0,
         embedding_inference_calls: 0
       }
     });
@@ -428,7 +429,8 @@ describe("LongMemEval recall diagnostics", () => {
         delivered_context_tokens_estimate: 0,
         coarse_pool_size: 1,
         fine_evaluated: 1,
-        fusion_streams_with_hits: 1,
+        fine_pruned_count: 0,
+        fusion_families_with_hits: 1,
         embedding_inference_calls: 0
       }
     });

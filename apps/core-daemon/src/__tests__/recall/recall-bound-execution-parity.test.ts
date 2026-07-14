@@ -137,7 +137,7 @@ function buildSeededRecallResult(query: string) {
     fine_assessment_count: candidates.length,
     diagnostics: Object.freeze({
       scoring_weight_overrides: Object.freeze({
-        fusion_weights: Object.freeze({ embedding_similarity: 12 })
+        fusion_weights: Object.freeze({ embedding_similarity: 1 })
       })
     })
   });

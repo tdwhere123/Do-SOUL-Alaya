@@ -82,8 +82,12 @@ it("keeps lexical evidence in fusion without overriding fused order", async () =
     );
     expect(diagnostic?.per_stream_rank.lexical_fts).not.toBeNull();
     expect(diagnostic?.fused_rank_contribution_per_stream.lexical_fts).toBeGreaterThan(0);
-    expect(diagnostic?.final_rank).toBe(diagnostic?.fused_rank);
+    // Legacy lexical-priority stage stays retired (still tracks fused rank).
     expect(diagnostic?.rank_after_lexical_priority).toBe(diagnostic?.fused_rank);
+    // Delivery order may diverge from fused_rank (deep-head reorder and coverage
+    // packing); lexical must still land in the delivered set, not a separate stage.
+    expect(diagnostic?.final_rank).not.toBeNull();
+    expect(result.candidates.map((item) => item.object_id)).toContain("strong-lexical-gold");
   });
 
 it("preserves fused order across legacy delivery stages", async () => {

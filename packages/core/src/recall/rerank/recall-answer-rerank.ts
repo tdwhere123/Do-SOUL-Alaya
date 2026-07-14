@@ -4,8 +4,7 @@ import type {
   RecallServiceAnswerRerankPort,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
-
-const ANSWER_RERANK_CANDIDATE_LIMIT = 50;
+import { DEEP_HEAD_CANDIDATE_LIMIT } from "./deep-head.js";
 
 export async function collectAnswerRelevanceScores(params: Readonly<{
   readonly service: RecallServiceAnswerRerankPort | undefined;
@@ -20,7 +19,7 @@ export async function collectAnswerRelevanceScores(params: Readonly<{
   if (params.queryText === null) return answerRerankResult("not_applicable", 0, 0, null);
   const candidates = [...params.candidates]
     .sort((left, right) => left.fusion.fused_rank - right.fusion.fused_rank)
-    .slice(0, ANSWER_RERANK_CANDIDATE_LIMIT);
+    .slice(0, DEEP_HEAD_CANDIDATE_LIMIT);
   if (candidates.length === 0) return answerRerankResult("not_applicable", 0, 0, null);
   try {
     const scores = await params.service.score(

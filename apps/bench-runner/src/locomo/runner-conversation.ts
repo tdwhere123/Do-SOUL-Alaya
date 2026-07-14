@@ -19,6 +19,7 @@ import {
   seedLocomoConversation,
   type LocomoSeededConversation
 } from "./runner-conversation-seed.js";
+import { warmLocomoEmbeddingCaches } from "./embedding-cache-warmup.js";
 import { shouldRunLocomoRecall } from "./runner-utils.js";
 
 export interface ConversationResult {
@@ -82,16 +83,14 @@ async function warmLocomoConversation(
   opts: LocomoRunOptions
 ): Promise<Pick<ConversationResult, "embeddingWarmup" | "queryEmbeddingWarmup">> {
   const recallQuestions = conversation.qa.filter((qa) => shouldRunLocomoRecall(qa, opts));
-  const embeddingWarmup =
-    opts.embeddingMode === "env"
-      ? await workspace.warmEmbeddingCache(seeded.allSeededMemoryIds)
-      : null;
-  const queryEmbeddingWarmup =
-    opts.embeddingMode === "env"
-      ? await workspace.warmQueryEmbeddingCache(recallQuestions.map((qa) => qa.question))
-      : null;
+  const warmup = await warmLocomoEmbeddingCaches({
+    embeddingMode: opts.embeddingMode ?? "disabled",
+    workspace,
+    objectIds: seeded.allSeededMemoryIds,
+    queryTexts: recallQuestions.map((qa) => qa.question)
+  });
   await daemon.runEdgePlanePassIfConfigured();
-  return { embeddingWarmup, queryEmbeddingWarmup };
+  return warmup;
 }
 
 function buildConversationResult(

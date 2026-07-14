@@ -32,6 +32,11 @@ import {
   collectEmbeddingCoarseInjection,
   collectSynthesisCoarseCandidates
 } from "../supplements/supplements.js";
+import {
+  settle,
+  throwFirstRejected,
+  unwrapSettled
+} from "./settle-parallel.js";
 
 export type CoarseFilterResult = Awaited<ReturnType<typeof runCoarseFilter>>;
 export type EmbeddingCoarseInjectionResult = Awaited<ReturnType<typeof collectEmbeddingCoarseInjection>>;
@@ -92,31 +97,6 @@ export async function collectCoarseStage(
   });
 }
 
-type Settled<T> =
-  | { readonly status: "fulfilled"; readonly value: T }
-  | { readonly status: "rejected"; readonly reason: unknown };
-
-function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
-  return promise.then(
-    (value) => ({ status: "fulfilled" as const, value }),
-    (reason: unknown) => ({ status: "rejected" as const, reason })
-  );
-}
-
-function throwFirstRejected(results: readonly Settled<unknown>[]): void {
-  for (const result of results) {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-  }
-}
-
-function unwrapSettled<T>(result: Settled<T>): T {
-  if (result.status === "rejected") {
-    throw result.reason;
-  }
-  return result.value;
-}
 
 async function collectHotCoarseFilter(
   context: RecallExecutionContext,

@@ -255,12 +255,14 @@ export interface RecallPathExpansionSourceDiagnostic {
 export interface RecallTokenEconomy {
   // Sum of token_estimate over delivered candidates, same heuristic as RecallCandidate.token_estimate.
   readonly delivered_context_tokens_estimate: number;
-  // Coarse-stage pool size flowing into fineAssess (matches candidate_pool_count).
+  // Coarse-stage pool size before the coarse→fine waist (matches candidate_pool_count).
   readonly coarse_pool_size: number;
-  // Fine-assess evaluated count; equals the input pool length even when the budget drops rows.
+  // Candidates that entered fine scoring after coarse→fine prune (may be < coarse_pool_size).
   readonly fine_evaluated: number;
-  // Distinct fusion streams with a non-null per_stream_rank across pre-budget candidates.
-  readonly fusion_streams_with_hits: number;
+  // Coarse candidates dropped by the coarse→fine waist before scoring.
+  readonly fine_pruned_count: number;
+  // Distinct fusion families with any member-stream hit (~5), not raw lane count.
+  readonly fusion_families_with_hits: number;
   // Embedding provider inference calls for this recall: 0 when not requested / cache hit / failed, 1 on a fresh invocation.
   readonly embedding_inference_calls: number;
 }

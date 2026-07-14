@@ -14,7 +14,7 @@ import {
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
 import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
-import { buildEvidenceSearchQueries } from "./evidence/search-query-planner.js";
+import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
 
 export interface SemanticSupplementParams {
   readonly context: RunCoarseFilterContext;
@@ -214,7 +214,7 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
     return;
   }
   try {
-    const evidenceQueries = buildEvidenceSearchQueries(params.queryText, params.queryProbes);
+    const evidenceQueries = selectEvidenceSearchQueries(params.queryText, params.queryProbes);
     const limit = params.config.semantic_supplement.max_supplement;
     const evidenceHitBatches = await loadEvidenceSearchHitBatches({
       workspaceId: params.workspaceId,

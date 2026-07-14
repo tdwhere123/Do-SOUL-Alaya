@@ -19,6 +19,7 @@ vi.mock("../../recall/delivery/fusion-delivery-adaptive-scoring.js", async (impo
 });
 
 import { buildRecallFusionDetails } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { aggregateFamilyContributions } from "../../recall/delivery/fusion-delivery-families.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type {
   RecallFusionBreakdown,
@@ -91,10 +92,9 @@ describe("fusion delivery stream snapshots", () => {
     const ranked = [...details.values()].sort((left, right) => left.fused_rank - right.fused_rank);
     expect(ranked.map((row) => row.object_id)).toEqual(entries.map((entry) => entry.object_id));
     for (const row of ranked) {
-      const contributionTotal = Object.values(row.fused_rank_contribution_per_stream)
-        .reduce((sum, contribution) => sum + contribution, 0);
-      expect(row.per_axis_contribution?.object).toBeCloseTo(contributionTotal, 8);
-      expect(row.flood_potential?.R_obj).toBeCloseTo(contributionTotal, 8);
+      const familyBase = aggregateFamilyContributions(row.fused_rank_contribution_per_stream);
+      expect(row.per_axis_contribution?.object).toBeCloseTo(familyBase, 8);
+      expect(row.flood_potential?.R_obj).toBeCloseTo(familyBase, 8);
       expect(row.flood_potential?.final_score).toBe(row.fused_score);
     }
   });

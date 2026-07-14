@@ -15,8 +15,8 @@ export function resolveGardenSignalGrounding(
   }
   const proposedMatch = readString(signal.raw_payload.proposed_matched_text) ??
     readString(signal.raw_payload.matched_text);
-  const fullTurn = readString(signal.raw_payload.full_turn_content) ??
-    readString(signal.raw_payload.bench_full_turn_content);
+  // Product trusts only full_turn_content; bench must project into that key at seed.
+  const fullTurn = readString(signal.raw_payload.full_turn_content);
   if (fullTurn !== null && proposedMatch !== null) {
     return resolveSourceAssertion(fullTurn, proposedMatch);
   }

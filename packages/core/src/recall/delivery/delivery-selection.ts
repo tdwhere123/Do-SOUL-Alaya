@@ -11,9 +11,19 @@ export type DeliverySelectionCandidate = Readonly<CoarseRecallCandidate & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
+export type DeliverySelectionOptions = Readonly<{
+  /**
+   * When true (cross-encoder path), scores own the public relevance scalar.
+   * Lightweight deep-head reorder must leave fused_score as the public scalar so
+   * 8-factor / plasticity / conflict governance stay visible on RecallCandidate.
+   */
+  readonly replacePublicRelevance?: boolean;
+}>;
+
 export function applyDeliverySelection(
   scoredCandidates: readonly DeliverySelectionCandidate[],
-  answerRelevanceScores: ReadonlyMap<string, number> = new Map()
+  answerRelevanceScores: ReadonlyMap<string, number> = new Map(),
+  options: DeliverySelectionOptions = {}
 ): Readonly<{
   readonly orderedCandidates: readonly DeliverySelectionCandidate[];
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
@@ -24,6 +34,8 @@ export function applyDeliverySelection(
     [...scoredCandidates].sort(compareFusedRecallCandidates)
   );
   const rankedCandidates = rankByAnswerRelevance(fusionOrdered, answerRelevanceScores);
+  // Default true preserves CE/test callers that pass scores without options.
+  const replacePublicRelevance = options.replacePublicRelevance ?? true;
   return Object.freeze({
     orderedCandidates: rankedCandidates,
     rankByCandidateKey: new Map(
@@ -31,9 +43,13 @@ export function applyDeliverySelection(
     ),
     finalRelevanceByCandidateKey: new Map(rankedCandidates.map((candidate) => [
       candidate.fusion.candidate_key,
-      answerRelevanceScores.get(candidate.fusion.candidate_key) ?? candidate.fusion.fused_score
+      replacePublicRelevance
+        ? (answerRelevanceScores.get(candidate.fusion.candidate_key) ?? candidate.fusion.fused_score)
+        : candidate.fusion.fused_score
     ])),
-    answerRelevanceRankByCandidateKey: buildAnswerRelevanceRanks(rankedCandidates, answerRelevanceScores)
+    answerRelevanceRankByCandidateKey: replacePublicRelevance
+      ? buildAnswerRelevanceRanks(rankedCandidates, answerRelevanceScores)
+      : new Map()
   });
 }
 

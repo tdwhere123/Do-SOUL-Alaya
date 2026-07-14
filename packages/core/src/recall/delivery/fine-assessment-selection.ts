@@ -17,6 +17,11 @@ import type {
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { selectRecallAdmissionAttributionPlane } from "../scoring/scoring.js";
 import { buildRecallCandidateAnswerFeatures } from "./fine-assessment-answer-features.js";
+import {
+  COVERAGE_MAX_PER_GIST_SAFETY,
+  orderByCoverageMarginalGain,
+  resolveCoverageIdentity
+} from "./coverage-selection.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -28,6 +33,7 @@ interface FineAssessmentAccumulator {
   readonly selected: RecallCandidate[];
   readonly diagnostics: RecallCandidateDiagnostic[];
   readonly seenObjects: Set<string>;
+  readonly gistCounts: Map<string, number>;
   readonly perDimensionCounts: Map<MemoryDimensionType, number>;
   totalTokens: number;
 }
@@ -54,22 +60,30 @@ export function selectFineAssessmentCandidates(params: {
   readonly tokenEstimator: TokenEstimator;
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
   readonly finalRelevanceByCandidateKey?: ReadonlyMap<string, number>;
+  /** Packing relevance; defaults to finalRelevance. Deep-head scores when public scalar stays fused. */
+  readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
 }): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
 }> {
+  const finalRelevanceByCandidateKey = params.finalRelevanceByCandidateKey ?? new Map();
   const context = Object.freeze({
     config: params.config,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: params.rankByCandidateKey,
-    finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
+    finalRelevanceByCandidateKey,
     answerRelevanceRankByCandidateKey: params.answerRelevanceRankByCandidateKey ?? new Map(),
     captureAnswerFeatures: params.captureAnswerFeatures ?? false
   });
-  const finalAccumulator = params.orderedCandidates.reduce(
+  const coverageOrdered = orderByCoverageMarginalGain({
+    candidates: params.orderedCandidates,
+    relevanceByCandidateKey: params.coverageRelevanceByCandidateKey ?? finalRelevanceByCandidateKey,
+    supplementaryData: params.supplementaryData
+  });
+  const finalAccumulator = coverageOrdered.reduce(
     (accumulator, candidate, index) => appendFineAssessmentCandidate(accumulator, candidate, index + 1, context),
     createFineAssessmentAccumulator()
   );
@@ -84,6 +98,7 @@ function createFineAssessmentAccumulator(): FineAssessmentAccumulator {
     selected: [],
     diagnostics: [],
     seenObjects: new Set<string>(),
+    gistCounts: new Map<string, number>(),
     perDimensionCounts: new Map<MemoryDimensionType, number>(),
     totalTokens: 0
   };
@@ -120,9 +135,11 @@ function appendFineAssessmentCandidate(
     usedTokensBeforeCandidate: accumulator.totalTokens,
     governanceCeiling: context.supplementaryData.governanceCeilingByMemoryId[candidate.entry.object_id]
   });
+  const gistKey = resolveCoverageIdentity(candidate, context.supplementaryData).gistKey;
   accumulator.selected.push(nextCandidate);
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context));
   accumulator.seenObjects.add(objectKey);
+  accumulator.gistCounts.set(gistKey, (accumulator.gistCounts.get(gistKey) ?? 0) + 1);
   accumulator.perDimensionCounts.set(candidate.entry.dimension, (accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0) + 1);
   accumulator.totalTokens += tokenEstimate;
   return accumulator;
@@ -135,6 +152,10 @@ function resolveAdmission(
   context: FineAssessmentSelectionContext
 ): FineAssessmentAdmission {
   if (accumulator.seenObjects.has(objectKey)) {
+    return { droppedReason: "duplicate", tokenEstimate: null };
+  }
+  const gistKey = resolveCoverageIdentity(candidate, context.supplementaryData).gistKey;
+  if ((accumulator.gistCounts.get(gistKey) ?? 0) >= COVERAGE_MAX_PER_GIST_SAFETY) {
     return { droppedReason: "duplicate", tokenEstimate: null };
   }
   const dimensionCount = accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0;

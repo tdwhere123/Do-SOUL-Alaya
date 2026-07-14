@@ -64,7 +64,11 @@ export const SoulSignalTriagedPayloadSchema = z.object({
   triage_result: z.enum(triageResultValues),
   dropped_content: BoundedString(500).optional(),
   surviving_object_id: BoundedIdSchema.optional(),
-  best_similarity: z.number().min(0).max(1).optional()
+  best_similarity: z.number().min(0).max(1).optional(),
+  // Governance/audit only (invariant §14): which fail-closed rule deferred
+  // materialization. Never implies durable memory creation.
+  defer_reason: BoundedLabelSchema.optional(),
+  defer_class: z.literal("source_grounding").optional()
 }).strict().readonly();
 
 export const SoulSignalMaterializedPayloadSchema = z

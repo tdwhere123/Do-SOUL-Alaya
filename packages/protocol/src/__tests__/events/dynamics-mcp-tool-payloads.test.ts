@@ -128,7 +128,9 @@ describe("MCP tool request/response schemas", () => {
               relevance_score: 0.91,
               content_preview: "Use pnpm for monorepo commands.",
               evidence_pointers: ["evidence-1"],
-              selection_reason: "Selected by lexical and activation ranking.",
+              selection_reason:
+                "Selected by workspace recall. Final fusion evidence score 0.910000; " +
+                "diagnostic supporting signals: activation 0.800.",
               source_channels: ["workspace_local", "keyword"],
               score_factors: {
                 activation: 0.8,

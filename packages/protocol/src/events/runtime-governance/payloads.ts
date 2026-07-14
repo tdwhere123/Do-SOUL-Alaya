@@ -347,7 +347,13 @@ export const ManifestationEscalationDecidedPayloadSchema = z
           .readonly()
       )
       .readonly(),
-    decided_at: IsoDatetimeStringSchema
+    decided_at: IsoDatetimeStringSchema,
+    // invariant: one resolve may emit 0..N DECIDED events when the decision
+    // list exceeds the bounded JSON size. Consumers fold by matching
+    // (run_id, decided_at) and concatenate `decisions` in batch_index order
+    // when present. Omitting batch_* remains valid for single-batch emits.
+    batch_index: NonNegativeIntSchema.optional(),
+    batch_count: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadIndexAlignedSearchBatches } from "../../../recall/runtime/orchestration/index-aligned-search-batches.js";
+import { loadIndexAlignedSearchBatches } from "../../../recall/search/index-aligned-search-batches.js";
 
 type Lookup = Readonly<{ readonly key: string; readonly limit: number }>;
 type Hit = Readonly<{ readonly object_id: string }>;
@@ -22,7 +22,9 @@ describe("index-aligned search batch validation", () => {
       failureClass: "result_shape_mismatch",
       returnedCount: 2,
       validBatchCount: 1,
-      invalidIndex: 1
+      invalidIndex: 1,
+      errorName: null,
+      errorMessage: null
     }, true);
   });
 
@@ -35,7 +37,9 @@ describe("index-aligned search batch validation", () => {
       failureClass: "result_limit_exceeded",
       returnedCount: 2,
       validBatchCount: 1,
-      invalidIndex: 1
+      invalidIndex: 1,
+      errorName: null,
+      errorMessage: null
     }, true);
   });
 });
@@ -59,6 +63,33 @@ describe("index-aligned batches without a scalar fallback", () => {
       expect.objectContaining({ failureClass, invalidIndex: 1 }),
       false
     );
+  });
+});
+
+describe("index-aligned searchMany service errors", () => {
+  it("threads the thrown cause into onBatchFailure then scalar-falls back", async () => {
+    const searchOne = vi.fn(async (lookup: Lookup) => [hit(`scalar-${lookup.key}`)]);
+    const onBatchFailure = vi.fn();
+    const batches = await loadIndexAlignedSearchBatches({
+      lookups: LOOKUPS,
+      searchMany: async () => {
+        throw new Error("searchMany exploded");
+      },
+      searchOne,
+      isHit,
+      maxHitsForLookup: (lookup) => lookup.limit,
+      onBatchFailure
+    });
+
+    expect(batches).toEqual([[hit("scalar-alpha")], [hit("scalar-beta")]]);
+    expect(onBatchFailure).toHaveBeenCalledWith({
+      failureClass: "service_error",
+      returnedCount: null,
+      validBatchCount: null,
+      invalidIndex: null,
+      errorName: "Error",
+      errorMessage: "searchMany exploded"
+    }, true);
   });
 });
 

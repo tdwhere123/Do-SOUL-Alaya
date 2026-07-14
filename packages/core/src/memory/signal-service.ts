@@ -16,6 +16,15 @@ import {
   mapExistingSignalStateToTriage,
   mapTriageResultToSignalState
 } from "./signal-service-helpers.js";
+import {
+  applySourceGroundingDeferAudit,
+  emptySourceGroundingDeferStats,
+  resolveRedriveSignal
+} from "./signal-service-grounding-defer.js";
+import {
+  SOURCE_GROUNDING_DEFER_QUEUE_CAP,
+  type SourceGroundingDeferStats
+} from "./source-grounding-defer-queue.js";
 import type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
@@ -41,8 +50,16 @@ export type {
   SignalServiceReceiveResult,
   SignalServiceSignalRepoPort,
   SignalServiceWarnPort,
-  SignalTriageResult
+  SignalTriageResult,
+  SourceGroundingDeferStats
 } from "./signal-service-types.js";
+export {
+  SOURCE_GROUNDING_DEFER_QUEUE_CAP,
+  createInMemorySourceGroundingDeferQueue,
+  readSourceGroundingDeferMeta,
+  type SourceGroundingDeferEntry,
+  type SourceGroundingDeferQueuePort
+} from "./source-grounding-defer-queue.js";
 
 interface MaterializationAttempt {
   readonly materializingSignal: CandidateMemorySignal;
@@ -111,6 +128,37 @@ export class SignalService {
       return await countByRun.call(this.dependencies.signalRepo, runId);
     }
     return (await this.dependencies.signalRepo.listByRun(runId)).length;
+  }
+
+  public getSourceGroundingDeferStats(): SourceGroundingDeferStats {
+    const queue = this.dependencies.sourceGroundingDeferQueue;
+    if (queue === undefined) {
+      return emptySourceGroundingDeferStats(SOURCE_GROUNDING_DEFER_QUEUE_CAP);
+    }
+    return queue.stats();
+  }
+
+  public listSourceGroundingDefers(limit?: number) {
+    return this.dependencies.sourceGroundingDeferQueue?.list(limit) ?? [];
+  }
+
+  /**
+   * Explicit re-drive: re-runs the materializer (including source grounding).
+   * Never auto-materializes without passing the same fail-closed rules.
+   */
+  public async redriveSourceGroundingDefer(
+    signalId: string,
+    patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }
+  ): Promise<SignalServiceReceiveResult> {
+    const existing = await this.dependencies.signalRepo.getById(signalId);
+    if (existing === null) {
+      throw new Error(`Signal ${signalId} was not found for grounding re-drive.`);
+    }
+    const signal = resolveRedriveSignal(existing, patch);
+    if (this.dependencies.postTriageMaterializer === undefined) {
+      throw new Error("postTriageMaterializer is required for grounding re-drive.");
+    }
+    return await this.materializeAcceptedSignal(signal, "accepted");
   }
 
   private async resumeExistingSignal(existingSignal: CandidateMemorySignal): Promise<SignalServiceReceiveResult> {
@@ -202,6 +250,7 @@ export class SignalService {
       return await this.completeDeferredMaterialization(triagedSignal, attempt.materialization, matEvent);
     }
 
+    this.dependencies.sourceGroundingDeferQueue?.remove(triagedSignal.signal_id);
     return await this.completeSuccessfulMaterialization(triageResult, attempt, matEvent);
   }
 
@@ -217,7 +266,11 @@ export class SignalService {
     try {
       return {
         materializingSignal,
-        materialization: await materializer.materialize(materializingSignal),
+        // Prefer the caller's signal payload (redrive patches) over repo state.
+        materialization: await materializer.materialize({
+          ...materializingSignal,
+          raw_payload: triagedSignal.raw_payload
+        }),
         caughtMaterializationError: false
       };
     } catch (error) {
@@ -308,21 +361,14 @@ export class SignalService {
     );
     await this.notifyRunBoundEvent(matEvent);
 
-    const deferredEvent = await this.dependencies.eventLogRepo.append({
-      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
-      entity_type: "candidate_memory_signal",
-      entity_id: triagedSignal.signal_id,
-      workspace_id: triagedSignal.workspace_id,
-      run_id: triagedSignal.run_id,
-      caused_by: "materialization_router",
-      payload_json: SoulSignalTriagedPayloadSchema.parse({
-        signal_id: triagedSignal.signal_id,
-        workspace_id: triagedSignal.workspace_id,
-        run_id: triagedSignal.run_id,
-        triage_result: "deferred"
-      })
+    await applySourceGroundingDeferAudit({
+      signal: triagedSignal,
+      materialization,
+      eventLogRepo: this.dependencies.eventLogRepo,
+      queue: this.dependencies.sourceGroundingDeferQueue,
+      warn: this.warn,
+      notifyRunBoundEvent: (event) => this.notifyRunBoundEvent(event)
     });
-    await this.notifyRunBoundEvent(deferredEvent);
 
     return {
       signal: deferredSignal,

@@ -94,10 +94,18 @@ describe("manifestation budget contracts", () => {
       ],
       decided_at: NOW
     } as const;
+    const batchedDecisionPayload = {
+      ...decisionPayload,
+      batch_index: 0,
+      batch_count: 2
+    } as const;
 
     expect(ManifestationBudgetEvaluatedPayloadSchema.parse(budgetPayload)).toEqual(budgetPayload);
     expect(ManifestationEscalationDecidedPayloadSchema.parse(decisionPayload)).toEqual(
       decisionPayload
+    );
+    expect(ManifestationEscalationDecidedPayloadSchema.parse(batchedDecisionPayload)).toEqual(
+      batchedDecisionPayload
     );
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED, budgetPayload)

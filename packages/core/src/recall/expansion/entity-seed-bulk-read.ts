@@ -3,7 +3,7 @@ import type { RecallServiceDependencies, RecallServiceWarnPort } from "../runtim
 import {
   loadIndexAlignedSearchBatches,
   type IndexAlignedBatchFailure
-} from "../runtime/orchestration/index-aligned-search-batches.js";
+} from "../search/index-aligned-search-batches.js";
 
 export type EntitySeedHit = Readonly<{
   readonly object_id: string;
@@ -96,7 +96,9 @@ function warnBulkFailure(
       expected_count: params.lookups.length,
       returned_count: failure.returnedCount,
       valid_batch_count: failure.validBatchCount,
-      invalid_index: failure.invalidIndex
+      invalid_index: failure.invalidIndex,
+      errorName: failure.errorName,
+      errorMessage: failure.errorMessage
     }
   );
 }

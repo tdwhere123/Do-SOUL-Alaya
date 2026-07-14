@@ -132,7 +132,8 @@ describe("history archive release-gate reporting", () => {
           delivered_context_tokens_estimate: perCallStat(42),
           coarse_pool_size: perCallStat(12),
           fine_evaluated: perCallStat(12),
-          fusion_streams_with_hits: perCallStat(4),
+          fine_pruned_count: perCallStat(0),
+          fusion_families_with_hits: perCallStat(4),
           embedding_inference_calls: perCallStat(0.333)
         }
       }

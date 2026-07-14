@@ -1,7 +1,7 @@
 import {
   loadIndexAlignedSearchBatches,
   type IndexAlignedBatchFailure
-} from "../../runtime/orchestration/index-aligned-search-batches.js";
+} from "../../search/index-aligned-search-batches.js";
 import type {
   KeywordSearchBatchQuery,
   KeywordSearchResult,
@@ -56,6 +56,8 @@ function warnBatchFailure(
     expected_count: params.queries.length,
     returned_count: failure.returnedCount,
     valid_batch_count: failure.validBatchCount,
-    invalid_index: failure.invalidIndex
+    invalid_index: failure.invalidIndex,
+    errorName: failure.errorName,
+    errorMessage: failure.errorMessage
   });
 }

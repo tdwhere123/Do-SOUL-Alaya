@@ -7,6 +7,8 @@ export type IndexAlignedBatchFailure = Readonly<{
   readonly returnedCount: number | null;
   readonly validBatchCount: number | null;
   readonly invalidIndex: number | null;
+  readonly errorName: string | null;
+  readonly errorMessage: string | null;
 }>;
 
 type BatchOutcome<Hit> = Readonly<
@@ -52,8 +54,12 @@ async function tryBatchSearch<Lookup, Hit>(
       params.isHit,
       params.maxHitsForLookup
     );
-  } catch {
-    return batchFailure("service_error");
+  } catch (error) {
+    // Preserve throw cause for warn metadata; otherwise service_error is opaque.
+    return batchFailure("service_error", {
+      errorName: error instanceof Error ? error.name : typeof error,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
   }
 }
 
@@ -118,7 +124,9 @@ function batchFailure<Hit>(
       failureClass,
       returnedCount: details.returnedCount ?? null,
       validBatchCount: details.validBatchCount ?? null,
-      invalidIndex: details.invalidIndex ?? null
+      invalidIndex: details.invalidIndex ?? null,
+      errorName: details.errorName ?? null,
+      errorMessage: details.errorMessage ?? null
     })
   });
 }

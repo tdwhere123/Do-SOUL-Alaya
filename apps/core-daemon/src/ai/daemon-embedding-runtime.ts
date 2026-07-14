@@ -32,6 +32,7 @@ import {
   observeEmbeddingProviderReadiness,
   type EmbeddingProviderReadiness
 } from "./daemon-embedding-provider-readiness.js";
+import { resolveEmbeddingWarmupHoldReason } from "./embedding-warmup-hold.js";
 
 export function createDaemonEmbeddingRuntime(input: {
   readonly database: StorageDatabase;
@@ -54,7 +55,8 @@ export function createDaemonEmbeddingRuntime(input: {
     answerRerankService: createAnswerRerankService(runtimeConfig),
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
-    providerWarmup: services.providerWarmup
+    providerWarmup: services.providerWarmup,
+    getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status)
   };
 }
 
@@ -201,11 +203,13 @@ function createDefaultPolicyDecorator(
   if (!embeddingPolicyConfigured) {
     return undefined;
   }
-  return (policy: Readonly<RecallPolicy>): Readonly<RecallPolicy> =>
-    applyEmbeddingPolicyDecorator(
-      policy,
-      readiness.status === "ready" ? embeddingProvider : null
-    );
+  return (policy: Readonly<RecallPolicy>): Readonly<RecallPolicy> => {
+    // Hold embedding-on until warmup verifies the provider; pending/failed stay lexical-only.
+    if (readiness.status !== "ready") {
+      return policy;
+    }
+    return applyEmbeddingPolicyDecorator(policy, embeddingProvider);
+  };
 }
 
 function applyEmbeddingPolicyDecorator(
@@ -254,17 +258,20 @@ function createProviderWarmup(
       return "ready" as const;
     })
     .catch((error: unknown) => {
-      warn("embedding provider warmup failed", {
+      readiness.markFailed();
+      // Loud operator signal: bi-default-on is lexical-only until recovery.
+      warn("embedding provider warmup FAILED — recall stays lexical-only until recovery", {
         provider_kind: embeddingProvider.providerKind,
         model_id: embeddingProvider.modelId,
+        degraded_reason: "provider_warmup_failed",
         error: error instanceof Error ? error.message : String(error)
       });
-      readiness.markFailed();
       return "failed" as const;
     });
 }
 
-const DEFAULT_EMBEDDING_FUSION_WEIGHT = 12;
+// Equal family ballot with RECALL_FUSION_DEFAULT_WEIGHTS — not a fitted emb boost.
+const DEFAULT_EMBEDDING_FUSION_WEIGHT = 1;
 // mirror: packages/core/src/recall/supplements.ts EMBEDDING_MAX_INJECTED_DELIVERY / EMBEDDING_INJECTION_SIMILARITY_FLOOR
 const DEFAULT_EMBEDDING_INJECTION_CAP = 10;
 const DEFAULT_EMBEDDING_INJECTION_FLOOR = 0.5;

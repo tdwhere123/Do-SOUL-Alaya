@@ -108,6 +108,7 @@ export interface PostTurnPayload {
   readonly target_object_refs?: readonly string[];
   readonly priority?: number;
   readonly created_at?: string;
+  readonly source_observed_at?: string;
   readonly turn_index: number;
   readonly workspace_id: string;
   readonly turn_digest: {

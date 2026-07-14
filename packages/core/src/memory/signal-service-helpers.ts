@@ -160,7 +160,9 @@ function buildBenchTokenPayloadSummary(
 
   const excerptSibling = readNonEmptyString(rawPayload.excerpt);
   const fullTurnContent =
-    readNonEmptyString(rawPayload[BENCH_FULL_TURN_CONTENT_KEY]) ?? excerptSibling;
+    readNonEmptyString(rawPayload.full_turn_content) ??
+    readNonEmptyString(rawPayload[BENCH_FULL_TURN_CONTENT_KEY]) ??
+    excerptSibling;
   const storedContent =
     readNonEmptyString(rawPayload[BENCH_STORED_CONTENT_KEY]) ??
     readNonEmptyString(rawPayload.distilled_fact) ??

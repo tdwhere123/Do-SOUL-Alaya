@@ -272,7 +272,7 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
     ).toBe(2);
   });
 
-  it("de-correlates repeated lexical-family hits without global hard damp", () => {
+  it("family-decorrelates repeated lexical hits without damping individual lane contributions", () => {
     const policy = {} as RecallPolicy;
     const memory = createMemoryEntry({
       object_id: "77777777-7777-4777-8777-777777777777",
@@ -301,14 +301,16 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
       nowIso: "2026-03-20T10:20:30.000Z"
     });
 
-    const contributions =
-      fusion.get("workspace_local:memory_entry:77777777-7777-4777-8777-777777777777")
-        ?.fused_rank_contribution_per_stream;
-
-    expect(contributions?.lexical_fts ?? 0).toBeLessThan(3 / 61);
-    expect(contributions?.lexical_fts ?? 0).toBeGreaterThan((3 / 61) * 0.5);
-    expect(contributions?.evidence_structural_agreement ?? 0).toBeLessThan(6 / 61);
-    expect(contributions?.evidence_structural_agreement ?? 0).toBeGreaterThan((6 / 61) * 0.5);
+    const breakdown = fusion.get("workspace_local:memory_entry:77777777-7777-4777-8777-777777777777")!;
+    const contributions = breakdown.fused_rank_contribution_per_stream;
+    // Lane contributions remain full identity-weight RRF (no partial reliability discount).
+    expect(contributions.lexical_fts).toBeCloseTo(1 / 73, 6);
+    expect(contributions.trigram_fts).toBeCloseTo(1 / 91, 6);
+    expect(contributions.evidence_fts).toBeCloseTo(1 / 69, 6);
+    const laneSum = Object.values(contributions).reduce((sum, value) => sum + value, 0);
+    // Object axis uses family max, so it is strictly below the raw lane sum.
+    expect(breakdown.per_axis_contribution?.object ?? 0).toBeLessThan(laneSum);
+    expect(breakdown.per_axis_contribution?.object ?? 0).toBeGreaterThan(0);
   });
 
   it("honors per-lane RRF k overrides", () => {
@@ -344,7 +346,7 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
     expect(
       fusion.get("workspace_local:memory_entry:88888888-8888-4888-8888-888888888888")
         ?.fused_rank_contribution_per_stream.lexical_fts ?? 0
-    ).toBeCloseTo(3 / 11, 6);
+    ).toBeCloseTo(1 / 11, 6);
   });
 });
 

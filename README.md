@@ -340,9 +340,10 @@ order:
    override.
 
 The agent receives a `delivery_id` plus result entries, pointers, and
-stable explanation metadata: `selection_reason`, `source_channels`,
-`score_factors`, `budget_state`, response-level `strategy_mix`, and an
-optional `degradation_reason`. Internal plumbing (the full
+stable explanation metadata: numeric `score_factors` (API),
+`source_channels`, `budget_state`, response-level `strategy_mix`, and an
+optional `degradation_reason`. `selection_reason` is diagnostic prose
+only — agents must not branch on its wording. Internal plumbing (the full
 `ContextPack` projection) stays inside Alaya.
 
 **Failure mode this prevents.** The most seductive failure of any
@@ -713,7 +714,8 @@ pnpm alaya tools call soul.recall \
   '{"query":"hello","scope_class":null,"dimension":null,"domain_tags":null,"max_results":5}' \
   --json
 #   Expect: { "delivery_id": "...", "results": [...], "total_count": <int> }
-#   Each result includes selection_reason/source_channels/score_factors/budget_state;
+#   Each result includes numeric score_factors (API), source_channels,
+#   budget_state, and diagnostic-only selection_reason prose;
 #   the response includes strategy_mix and optional degradation_reason.
 #   v0.3.9 also adds an optional staged_warnings[] on each result that
 #   the agent can resolve with soul.resolve.

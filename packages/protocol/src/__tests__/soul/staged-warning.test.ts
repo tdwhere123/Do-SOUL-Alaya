@@ -28,7 +28,9 @@ const baseSearchResult = {
   relevance_score: 0.64,
   content_preview: "Prefer pnpm.",
   evidence_pointers: ["memory-1"],
-  selection_reason: "lexical and activation.",
+  selection_reason:
+    "Selected by workspace recall. Final fusion evidence score 0.640000; " +
+    "diagnostic supporting signals: activation 0.700.",
   source_channels: ["workspace_local", "keyword"],
   score_factors: { activation: 0.7, relevance: 0.64 },
   budget_state: {

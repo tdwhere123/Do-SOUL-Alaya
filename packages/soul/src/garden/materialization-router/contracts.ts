@@ -35,6 +35,9 @@ export interface MaterializationTarget {
   readonly kind: "memory_and_claim" | "synthesis" | "handoff_gap" | "evidence_only" | "deferred";
   readonly route_target: RouteTarget;
   readonly routing_reason: string;
+  /** Structured fail-closed reason when kind is deferred for source grounding. */
+  readonly defer_reason?: string;
+  readonly defer_class?: "source_grounding";
 }
 
 export interface MaterializationResultFields {
@@ -43,6 +46,8 @@ export interface MaterializationResultFields {
   readonly route_target: RouteTarget;
   readonly routing_reason: string;
   readonly created_objects: readonly MaterializationCreatedObject[];
+  readonly defer_reason?: string;
+  readonly defer_class?: "source_grounding";
 }
 
 export interface MaterializationSuccessResult extends MaterializationResultFields {

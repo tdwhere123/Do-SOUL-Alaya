@@ -118,8 +118,11 @@ export const MemorySearchResultSchema = z
     relevance_score: z.number().min(0).max(1),
     content_preview: NonEmptyStringSchema,
     evidence_pointers: z.array(NonEmptyStringSchema).readonly(),
+    // Diagnostic-only prose. Agents must not branch on its wording; use
+    // numeric score_factors and relevance_score for ranking/explainability.
     selection_reason: BoundedReasonSchema,
     source_channels: z.array(BoundedLabelSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly(),
+    // Public numeric explainability API for soul.recall consumers.
     score_factors: RecallScoreFactorsSchema,
     budget_state: RecallBudgetStateSchema,
     pending_incomplete: z.boolean().optional(),
@@ -190,6 +193,9 @@ export const SoulMemorySearchRequestSchema = z
     // already recalling for, without depending on the host echoing a
     // turn_digest on report_context_usage. Falls back to `query` when absent.
     recent_turn: BoundedQuerySchema.optional(),
+    // Host wall-clock for the turn being recalled. When present, Garden
+    // auto-extract uses it as source_observed_at; otherwise enqueue clock.
+    source_observed_at: IsoDatetimeStringSchema.optional(),
     active_constraints_cap: NonNegativeIntSchema.max(50).optional()
   })
   .strict()

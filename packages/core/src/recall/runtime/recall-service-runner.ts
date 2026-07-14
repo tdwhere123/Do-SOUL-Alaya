@@ -283,7 +283,7 @@ async function collectAnswerRerankStage(
   const rerank = await collectAnswerRelevanceScores({
     service: context.dependencies.answerRerankService,
     queryText: prepared.queryText,
-    candidates: preparedCandidates,
+    candidates: preparedCandidates.candidates,
     warn: context.warn
   });
   if (rerank.scores.size === 0) {

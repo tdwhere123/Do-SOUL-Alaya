@@ -42,7 +42,9 @@ describe("entity seed bulk fallback", () => {
         expected_count: 3,
         returned_count: null,
         valid_batch_count: null,
-        invalid_index: null
+        invalid_index: null,
+        errorName: "Error",
+        errorMessage: "bulk read failed"
       }
     );
   });
@@ -62,7 +64,9 @@ describe("entity seed bulk fallback", () => {
         expected_count: 3,
         returned_count: 2,
         valid_batch_count: null,
-        invalid_index: null
+        invalid_index: null,
+        errorName: null,
+        errorMessage: null
       }
     );
   });

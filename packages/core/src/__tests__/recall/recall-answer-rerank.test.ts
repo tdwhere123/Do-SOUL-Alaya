@@ -5,9 +5,9 @@ import { collectAnswerRelevanceScores } from "../../recall/rerank/recall-answer-
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 describe("collectAnswerRelevanceScores", () => {
-  it("scores the fused top-50 in stable rank order", async () => {
-    const candidates = Array.from({ length: 52 }, (_, index) =>
-      candidate(`candidate-${index + 1}`, 52 - index)
+  it("scores the fused top-30 in stable rank order", async () => {
+    const candidates = Array.from({ length: 35 }, (_, index) =>
+      candidate(`candidate-${index + 1}`, 35 - index)
     ).reverse();
     const score = vi.fn(async (_query: string, passages: readonly string[]) =>
       passages.map((_, index) => index / passages.length)
@@ -18,13 +18,13 @@ describe("collectAnswerRelevanceScores", () => {
     });
 
     expect(score).toHaveBeenCalledTimes(1);
-    expect(score.mock.calls[0]?.[1]).toHaveLength(50);
-    expect(score.mock.calls[0]?.[1][0]).toBe("content candidate-52");
-    expect(result.scores).toHaveLength(50);
+    expect(score.mock.calls[0]?.[1]).toHaveLength(30);
+    expect(score.mock.calls[0]?.[1][0]).toBe("content candidate-35");
+    expect(result.scores).toHaveLength(30);
     expect(result.diagnostics).toEqual({
       status: "returned",
-      expected_count: 50,
-      scored_count: 50,
+      expected_count: 30,
+      scored_count: 30,
       failure_class: null
     });
   });

@@ -12,10 +12,12 @@ import type {
   RecallExecutionContext,
   RecallExecutionParams
 } from "../recall-service-runner-types.js";
-
-type Settled<T> =
-  | { readonly status: "fulfilled"; readonly value: T }
-  | { readonly status: "rejected"; readonly reason: unknown };
+import {
+  settle,
+  throwFirstRejected,
+  unwrapSettled,
+  type Settled
+} from "../settle-parallel.js";
 
 type PreparedQueryPromise = Promise<Settled<PreparedEmbeddingQuery>> | null;
 
@@ -119,26 +121,4 @@ async function collectLegacySupplement(
     preparedEmbeddingQuery: preparedEmbeddingQuery.handle,
     preparedStoredVectors: preparedEmbeddingQuery.storedVectors
   });
-}
-
-function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
-  return promise.then(
-    (value) => ({ status: "fulfilled" as const, value }),
-    (reason: unknown) => ({ status: "rejected" as const, reason })
-  );
-}
-
-function throwFirstRejected(results: readonly Settled<unknown>[]): void {
-  for (const result of results) {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-  }
-}
-
-function unwrapSettled<T>(result: Settled<T>): T {
-  if (result.status === "rejected") {
-    throw result.reason;
-  }
-  return result.value;
 }

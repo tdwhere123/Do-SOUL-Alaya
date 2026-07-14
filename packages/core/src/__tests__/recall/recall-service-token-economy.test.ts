@@ -100,20 +100,20 @@ describe("RecallService", () => {
       expectedDelivered
     );
     // coarse_pool_size equals candidate_pool_count (== combined coarse
-    // candidates fed into fineAssess).
+    // candidates before the coarse→fine waist).
     expect(tokenEconomy?.coarse_pool_size).toBe(
       result.diagnostics?.candidate_pool_count ?? -1
     );
-    // fine_evaluated mirrors coarse_pool_size because fineAssess scores
-    // every coarse candidate before delivery truncation.
+    // Small fixture pools sit under the waist cap, so fine_evaluated matches
+    // coarse_pool_size and fine_pruned_count is zero.
     expect(tokenEconomy?.fine_evaluated).toBe(tokenEconomy?.coarse_pool_size);
+    expect(tokenEconomy?.fine_pruned_count).toBe(0);
     // No embedding provider was wired into the deps factory, so the
     // pipeline reports zero fresh provider inferences for this recall.
     expect(tokenEconomy?.embedding_inference_calls).toBe(0);
-    // fusion_streams_with_hits is non-negative and never exceeds the
-    // total fusion stream surface.
-    expect(tokenEconomy?.fusion_streams_with_hits).toBeGreaterThanOrEqual(0);
-    expect(tokenEconomy?.fusion_streams_with_hits).toBeLessThanOrEqual(16);
+    // fusion_families_with_hits counts decorrelated families (≤5), not raw lanes.
+    expect(tokenEconomy?.fusion_families_with_hits).toBeGreaterThanOrEqual(0);
+    expect(tokenEconomy?.fusion_families_with_hits).toBeLessThanOrEqual(5);
   });
 
   // anti-patterns-lint-allow: see the populates-RecallTokenEconomy test —
@@ -293,6 +293,7 @@ describe("RecallService", () => {
       expect.objectContaining({
         coarse_pool_size: result.diagnostics?.candidate_pool_count,
         fine_evaluated: result.diagnostics?.candidate_pool_count,
+        fine_pruned_count: 0,
         embedding_inference_calls: 0
       })
     );

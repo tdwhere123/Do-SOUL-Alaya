@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
+import { Worker } from "node:worker_threads";
 import { beforeAll, describe, expect, it } from "vitest";
 import { SynthesisStatus } from "@do-soul/alaya-protocol";
 import {
@@ -17,8 +18,8 @@ import { createRecallReadWorkerClient } from "../../runtime/recall-read-worker-c
 const builtWorkerUrl = new URL("../../../dist/runtime/recall-read-worker.js", import.meta.url);
 
 describe("RecallReadWorkerClient", () => {
-  // Loud failure (not skip): the wave gate builds before testing, so a missing
-  // dist is a real regression, never an excuse to silently pass.
+  // Loud failure (not skip): CI builds before testing, so a missing dist is a
+  // real regression, never an excuse to silently pass.
   beforeAll(() => {
     if (!existsSync(fileURLToPath(builtWorkerUrl))) {
       throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
@@ -273,6 +274,66 @@ describe("RecallReadWorkerClient", () => {
       );
     } finally {
       await client?.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a numeric-id message that fails request validation promptly", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-invalid-msg-"));
+    const databasePath = join(directory, "alaya.db");
+    const database = initDatabase({ filename: databasePath });
+    database.close();
+
+    const worker = new Worker(fileURLToPath(builtWorkerUrl), {
+      execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
+      workerData: { databaseFilename: databasePath }
+    });
+
+    try {
+      const invalidResponse = await new Promise<unknown>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("invalid request did not receive a prompt error response")),
+          1_000
+        );
+        worker.once("message", (message: unknown) => {
+          clearTimeout(timeout);
+          resolve(message);
+        });
+        worker.postMessage({ id: 42, operation: 123 });
+      });
+
+      expect(invalidResponse).toEqual({
+        id: 42,
+        ok: false,
+        error: expect.objectContaining({
+          name: "Error",
+          message: "invalid recall read worker request"
+        })
+      });
+
+      const validResponse = await new Promise<unknown>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error("worker did not survive after invalid request")),
+          2_000
+        );
+        worker.once("message", (message: unknown) => {
+          clearTimeout(timeout);
+          resolve(message);
+        });
+        worker.postMessage({
+          id: 43,
+          operation: "memory.findByIds",
+          payload: { workspaceId: "workspace-1", objectIds: [] }
+        });
+      });
+
+      expect(validResponse).toEqual({
+        id: 43,
+        ok: true,
+        result: []
+      });
+    } finally {
+      await worker.terminate();
       rmSync(directory, { recursive: true, force: true });
     }
   });

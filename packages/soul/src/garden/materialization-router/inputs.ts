@@ -185,7 +185,6 @@ export function buildEvidenceInput(
   const excerpt =
     opts?.fullTurnExcerpt === true
       ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
-         readStringPayload(signal.raw_payload, "bench_full_turn_content") ??
          buildSignalSummary(signal))
       : buildSignalSummary(signal);
 

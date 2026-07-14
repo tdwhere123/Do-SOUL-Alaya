@@ -10,6 +10,10 @@ import {
 import { findActiveConstraints } from "@do-soul/alaya-storage";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../ai/daemon-embedding-runtime.js";
+import {
+  annotateRecallEmbeddingWarmupHold,
+  type EmbeddingWarmupHoldReason
+} from "../ai/embedding-warmup-hold.js";
 import { createManifestationContextLensAssembler } from "../manifestation/context-lens-assembler.js";
 import {
   buildSingleUsedAnchorPayload,
@@ -184,7 +188,7 @@ function createRecallService(input: {
   readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
 }) {
-  return new RecallService({
+  const service = new RecallService({
     memoryRepo: input.recallSearchRuntime.recallMemoryRepo,
     slotRepo: input.input.slotRepo,
     eventLogRepo: input.input.eventLogRepo,
@@ -211,6 +215,24 @@ function createRecallService(input: {
     entityExtractionPort: new RuleBasedEntityExtractor(),
     recallFailureHealthInbox: input.input.recallFailureHealthInboxPort,
     warn: input.input.warn
+  });
+  return withEmbeddingWarmupHoldAnnotation(service, input.embeddingRuntime.getWarmupHoldReason);
+}
+
+function withEmbeddingWarmupHoldAnnotation(
+  service: RecallService,
+  getWarmupHoldReason: () => EmbeddingWarmupHoldReason | null
+): RecallService {
+  return new Proxy(service, {
+    get(target, prop, receiver) {
+      if (prop === "recall") {
+        return async (params: Parameters<RecallService["recall"]>[0]) => {
+          const result = await target.recall(params);
+          return annotateRecallEmbeddingWarmupHold(result, getWarmupHoldReason());
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    }
   });
 }
 

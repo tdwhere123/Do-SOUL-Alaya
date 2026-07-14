@@ -10,6 +10,14 @@ export {
   type EnrichPendingRepo
 } from "./enrich-pending-repo.js";
 export {
+  SqliteSourceGroundingDeferQueueRepo,
+  SOURCE_GROUNDING_DEFER_QUEUE_CAP,
+  type SourceGroundingDeferEntry,
+  type SourceGroundingDeferEnqueueResult,
+  type SourceGroundingDeferQueueRepo,
+  type SourceGroundingDeferStats
+} from "./source-grounding-defer-queue-repo.js";
+export {
   SqliteGardenTaskRepo,
   type GardenTaskBacklogCount,
   type GardenTaskKindBacklogCount,

@@ -84,8 +84,9 @@ describe("LoCoMo runner", () => {
       provider_kind: "openai",
       model_id: "text-embedding-3-small"
     }));
+    const warmQueryEmbeddingCache = vi.fn();
     startBenchDaemonMock.mockResolvedValue(
-      buildMockDaemon({ warmEmbeddingCache })
+      buildMockDaemon({ warmEmbeddingCache, warmQueryEmbeddingCache })
     );
 
     const result = await runLocomo({
@@ -106,16 +107,13 @@ describe("LoCoMo runner", () => {
         readonly ready_count: number;
         readonly ready_rate: number;
       };
-      readonly query_embedding_cache?: {
-        readonly requested_count: number;
-        readonly ready_count: number;
-        readonly ready_rate: number;
-      };
+      readonly query_embedding_cache?: unknown;
     };
 
     expect(kpi.kpi.provider_returned_rate).toBe(1);
     expect(kpi.kpi.embedding_vector_cache_ready_rate).toBe(1);
-    expect(kpi.kpi.query_embedding_cache_ready_rate).toBe(1);
+    expect(kpi.kpi.query_embedding_cache_ready_rate).toBeUndefined();
+    expect(warmQueryEmbeddingCache).not.toHaveBeenCalled();
     expect(diagnostics.embedding_vector_cache).toEqual(
       expect.objectContaining({
         expected_count: 2,
@@ -123,12 +121,6 @@ describe("LoCoMo runner", () => {
         ready_rate: 1
       })
     );
-    expect(diagnostics.query_embedding_cache).toEqual(
-      expect.objectContaining({
-        requested_count: 1,
-        ready_count: 1,
-        ready_rate: 1
-      })
-    );
+    expect(diagnostics.query_embedding_cache).toBeUndefined();
   });
 });

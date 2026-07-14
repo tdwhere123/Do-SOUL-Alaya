@@ -76,7 +76,9 @@ function buildTokenEconomy(
   return computeRecallTokenEconomy({
     deliveredCandidates: manifested.candidates,
     coarsePoolSize,
-    fineEvaluated: coarsePoolSize,
+    // Waist survivors actually scored in fine assessment — not the pre-prune coarse pool.
+    fineEvaluated: assessment.finalAssessment.fineEvaluated,
+    finePrunedCount: assessment.finalAssessment.finePrunedCount,
     preBudgetCandidates: manifested.candidateDiagnostics,
     embeddingInferenceCalls:
       assessment.embeddingCoarseInjection.embeddingInferenceCalls + preparedEmbeddingInferenceCalls

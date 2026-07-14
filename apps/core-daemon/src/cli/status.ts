@@ -9,6 +9,15 @@ export interface StatusCommandDependencies {
   readonly trustStateSummaryProvider: (agentTarget: string) => Promise<TrustSummary>;
   readonly resolveAgentTargets?: () => Promise<readonly string[]> | readonly string[];
   readonly getGardenStatus?: () => Promise<Readonly<{ last_pass_at: string | null }>>;
+  readonly getSourceGroundingDeferStats?: () => Promise<Readonly<{
+    queue_depth: number;
+    queue_cap: number;
+    deferred_by_reason: Readonly<Record<string, number>>;
+  }>> | Readonly<{
+    queue_depth: number;
+    queue_cap: number;
+    deferred_by_reason: Readonly<Record<string, number>>;
+  }>;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly startupStepsProvider?: (
     context: Pick<AlayaCliContext, "daemon">
@@ -34,6 +43,11 @@ interface StatusReport {
   readonly trust: readonly TrustSummary[];
   readonly garden: Readonly<{
     last_pass_at: string | null;
+    source_grounding_defers?: Readonly<{
+      queue_depth: number;
+      queue_cap: number;
+      deferred_by_reason: Readonly<Record<string, number>>;
+    }>;
   }>;
   readonly recall_stats?: RecallUtilizationStats;
 }
@@ -89,6 +103,15 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: StatusReport):
     "trust counters above track delivery/usage evidence and are distinct from pending proposal queue state.\n"
   );
   stream.write(`garden last pass: ${report.garden.last_pass_at ?? "n/a"}\n`);
+  if (report.garden.source_grounding_defers !== undefined) {
+    const defers = report.garden.source_grounding_defers;
+    const reasons = Object.entries(defers.deferred_by_reason)
+      .map(([reason, count]) => `${reason}=${count}`)
+      .join(" ") || "(none)";
+    stream.write(
+      `garden source-grounding defers: queue=${defers.queue_depth}/${defers.queue_cap} by_reason: ${reasons}\n`
+    );
+  }
   stream.write("memory inspector: run `alaya inspect --open` to launch the loopback UI (http://127.0.0.1:5174).\n");
   if (report.recall_stats !== undefined) {
     writeRecallStatsSummary(stream, report.recall_stats);
@@ -154,11 +177,20 @@ async function buildStatusReport(
   if (!recallStatsResult.ok) {
     return recallStatsResult;
   }
+  const gardenBase = deps.getGardenStatus ? await deps.getGardenStatus() : { last_pass_at: null };
+  const sourceGroundingDefers = deps.getSourceGroundingDeferStats
+    ? await deps.getSourceGroundingDeferStats()
+    : undefined;
   const report: StatusReport = {
     checked_at: now(),
     daemon: daemonStatus.summary,
     trust: trustSummaries,
-    garden: deps.getGardenStatus ? await deps.getGardenStatus() : { last_pass_at: null },
+    garden: {
+      ...gardenBase,
+      ...(sourceGroundingDefers === undefined
+        ? {}
+        : { source_grounding_defers: sourceGroundingDefers })
+    },
     ...(recallStatsResult.recallStats === undefined ? {} : { recall_stats: recallStatsResult.recallStats })
   };
   return { ok: true, daemonUp: daemonStatus.summary.up, report };

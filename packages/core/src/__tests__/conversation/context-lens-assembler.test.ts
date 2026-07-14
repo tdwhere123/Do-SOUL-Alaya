@@ -102,6 +102,55 @@ it("assembles task-surface entries, strict winners, recalled memories, evidence 
     );
   });
 
+it("keeps recall delivery order when activation ranking diverges", async () => {
+    const highActivationLowRelevance = Object.freeze({
+      ...createGlobalCandidate(),
+      activation_score: 0.99,
+      relevance_score: 0.2
+    });
+    const lowActivationHighRelevance = Object.freeze({
+      ...createProjectCandidate(),
+      activation_score: 0.1,
+      relevance_score: 0.95
+    });
+    expect(highActivationLowRelevance.activation_score).toBeGreaterThan(
+      lowActivationHighRelevance.activation_score
+    );
+    expect(highActivationLowRelevance.relevance_score).toBeLessThan(
+      lowActivationHighRelevance.relevance_score
+    );
+
+    const dependencies = createDependencies({
+      recallService: {
+        recall: vi.fn(async () =>
+          // Delivery order deliberately opposite activation-desc order.
+          createRecallResult([lowActivationHighRelevance, highActivationLowRelevance])
+        ),
+        buildDefaultPolicy: vi.fn((strategy: "chat" | "analyze" | "build" | "govern", taskSurfaceRef: string) =>
+          createRecallPolicy(taskSurfaceRef, strategy)
+        )
+      }
+    });
+    const assembler = new ContextLensAssembler(dependencies);
+
+    const result = await assembler.assemble({
+      run: {
+        run_id: "run-1",
+        workspace_id: "workspace-1",
+        run_mode: "chat",
+        title: "Main Run"
+      },
+      surfaceId: "surface://chat/main",
+      displayName: "Implement ContextLens"
+    });
+
+    const memoryEntryIds = result.contextLens.lens_entries
+      .filter((entry) => entry.object_kind === ObjectKind.MEMORY_ENTRY)
+      .map((entry) => entry.object_id);
+    expect(memoryEntryIds).toEqual([PROJECT_MEMORY_ID, GLOBAL_MEMORY_ID]);
+    expect(memoryEntryIds).not.toEqual([GLOBAL_MEMORY_ID, PROJECT_MEMORY_ID]);
+  });
+
 it("prepends session overrides and exposes correction content in the working projection", async () => {
     const override = {
       runtime_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

@@ -233,6 +233,7 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
   bridge.registerSubcommand(createStatusCommand({
     trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget),
     getGardenStatus: async () => runtime.services.gardenStatus.getStatus(),
+    getSourceGroundingDeferStats: () => runtime.services.signalService.getSourceGroundingDeferStats(),
     recallUtilizationService: runtime.services.recallUtilizationService
   }));
   bridge.registerSubcommand(createInstallCommand());

@@ -113,6 +113,24 @@ describe("SignalEventSchema", () => {
     expect(SignalEventSchema.parse(event)).toEqual(event);
   });
 
+  it("accepts a source-grounding deferred triage payload with audit fields", () => {
+    const event = {
+      ...signalEventBase,
+      event_id: "event-7b",
+      event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
+      payload: {
+        signal_id: "signal-1",
+        workspace_id: "workspace-1",
+        run_id: "run-1",
+        triage_result: "deferred",
+        defer_reason: "source_assertion_not_self_contained",
+        defer_class: "source_grounding"
+      }
+    };
+
+    expect(SignalEventSchema.parse(event)).toEqual(event);
+  });
+
   it("rejects a mismatched payload", () => {
     const result = SignalEventSchema.safeParse({
       ...signalEventBase,

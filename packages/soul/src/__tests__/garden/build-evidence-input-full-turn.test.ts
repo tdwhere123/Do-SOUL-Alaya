@@ -25,11 +25,11 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
     expect(ev.gist).toBe(FULL_TURN);
   });
 
-  it("fullTurnExcerpt: falls back to bench_full_turn_content then summary", () => {
-    const benchSignal = createSignal({
+  it("fullTurnExcerpt: ignores bench_full_turn_content and falls back to summary", () => {
+    const benchOnly = createSignal({
       raw_payload: { excerpt: "narrow", bench_full_turn_content: FULL_TURN }
     });
-    expect(buildEvidenceInput(benchSignal, undefined, { fullTurnExcerpt: true }).excerpt).toBe(FULL_TURN);
+    expect(buildEvidenceInput(benchOnly, undefined, { fullTurnExcerpt: true }).excerpt).toBe("narrow");
 
     const noTurn = createSignal({ raw_payload: { excerpt: "narrow only" } });
     expect(buildEvidenceInput(noTurn, undefined, { fullTurnExcerpt: true }).excerpt).toBe("narrow only");

@@ -14,6 +14,7 @@ import {
   WorkspaceState
 } from "@do-soul/alaya-protocol";
 import { buildRecallFusionDetails } from "../../recall/delivery/fusion-delivery-scoring.js";
+import { lexicalDecorrEnabled } from "../../recall/delivery/lexical-decorrelation.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "./recall-service-test-fixtures.js";
@@ -65,7 +66,6 @@ function createRealStorage(): { readonly database: StorageDatabase; readonly mem
   return { database, memoryEntryRepo };
 }
 
-// Equal 4-lane counts but different field spread: redundant collapses onto one ref, distinct lands on two refs.
 async function seedCandidates(memoryEntryRepo: SqliteMemoryEntryRepo): Promise<void> {
   await memoryEntryRepo.create(createMemoryEntry({
     object_id: REDUNDANT_ID,
@@ -90,7 +90,6 @@ function buildSupplementaryData(): RecallSupplementaryData {
     trigramFtsRanks: { [REDUNDANT_ID]: 1, [DISTINCT_ID]: 1 },
     synthesisFtsRanks: {},
     evidenceFtsRanks: { [REDUNDANT_ID]: 1, [DISTINCT_ID]: 1 },
-    // Redundant: all weight on one ref. Distinct: two refs → two independent fields.
     evidenceFtsRanksPerRef: {
       [REDUNDANT_REF]: 1,
       [DISTINCT_REF_A]: 1,
@@ -135,30 +134,22 @@ async function fusedScoresFromRealStorage(): Promise<{ readonly redundant: numbe
   };
 }
 
-describe("selective lexical de-correlation (real SQLite)", () => {
-  it("flag ON lifts the distinct-ref candidate's relative rank by restoring its full corroboration credit", async () => {
+describe("lexical decorr superseded by family decorrelation", () => {
+  it("keeps ALAYA_RECALL_LEXICAL_DECORR as a no-op shim", () => {
+    delete process.env.ALAYA_RECALL_LEXICAL_DECORR;
+    expect(lexicalDecorrEnabled()).toBe(false);
+    process.env.ALAYA_RECALL_LEXICAL_DECORR = "1";
+    expect(lexicalDecorrEnabled()).toBe(false);
+  });
+
+  it("does not change fused scores when the legacy lexical decorr flag is set", async () => {
     delete process.env.ALAYA_RECALL_LEXICAL_DECORR;
     const off = await fusedScoresFromRealStorage();
 
     process.env.ALAYA_RECALL_LEXICAL_DECORR = "1";
     const on = await fusedScoresFromRealStorage();
 
-    // Distinct's 4 lanes map to 4 fields so ON lifts its discount; redundant's collapse to 3 fields so it stays damped.
-    expect(on.distinct).toBeGreaterThan(off.distinct);
     expect(on.redundant).toBeCloseTo(off.redundant, 9);
-    // Distinct clears redundant by a wider margin than OFF.
-    expect(on.distinct - on.redundant).toBeGreaterThan(off.distinct - off.redundant);
-  });
-
-  it("flag OFF is byte-identical to HEAD lane-count scoring", async () => {
-    delete process.env.ALAYA_RECALL_LEXICAL_DECORR;
-    const first = await fusedScoresFromRealStorage();
-    const second = await fusedScoresFromRealStorage();
-    expect(first).toEqual(second);
-
-    // ON must reproduce the redundant candidate's OFF value exactly, proving OFF is the unchanged default.
-    process.env.ALAYA_RECALL_LEXICAL_DECORR = "1";
-    const on = await fusedScoresFromRealStorage();
-    expect(on.redundant).toBeCloseTo(first.redundant, 9);
+    expect(on.distinct).toBeCloseTo(off.distinct, 9);
   });
 });

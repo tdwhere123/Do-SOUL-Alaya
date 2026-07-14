@@ -67,6 +67,7 @@ export function enqueueRecallExtractTask(
         runId,
         deliveredObjectIds: dedupedDeliveredIds,
         createdAt,
+        sourceObservedAt: request.source_observed_at,
         turnIndex: 0,
         lastMessages: [
           {
@@ -132,6 +133,7 @@ export function enqueuePostTurnExtractTask(
         runId,
         deliveredObjectIds,
         createdAt,
+        sourceObservedAt: request.source_observed_at,
         turnIndex,
         lastMessages
       }),
@@ -215,9 +217,11 @@ function buildPostTurnExtractPayload(input: {
   readonly runId: string;
   readonly deliveredObjectIds: readonly string[];
   readonly createdAt: string;
+  readonly sourceObservedAt?: string;
   readonly turnIndex: number;
   readonly lastMessages: readonly { readonly role: string; readonly content_excerpt: string }[];
 }) {
+  const hostObservedAt = input.sourceObservedAt?.trim();
   return Object.freeze({
     task_id: input.taskId,
     task_kind: GardenTaskKind.POST_TURN_EXTRACT,
@@ -226,6 +230,9 @@ function buildPostTurnExtractPayload(input: {
     target_object_refs: input.deliveredObjectIds,
     priority: 20 as const,
     created_at: input.createdAt,
+    ...(hostObservedAt === undefined || hostObservedAt.length === 0
+      ? {}
+      : { source_observed_at: hostObservedAt }),
     turn_index: input.turnIndex,
     workspace_id: input.workspaceId,
     turn_digest: Object.freeze({

@@ -31,6 +31,7 @@ import type {
   SqliteReconciliationLeaseRepo,
   SqliteSignalRepo,
   SqliteSlotRepo,
+  SqliteSourceGroundingDeferQueueRepo,
   SqliteSynthesisCapsuleRepo,
   StorageDatabase
 } from "@do-soul/alaya-storage";
@@ -89,6 +90,7 @@ export type CreateRecallMaterializationWiringInput = {
   }) => void;
   readonly sqliteHandoffGapRepo: SqliteHandoffGapRepo;
   readonly signalRepo: SqliteSignalRepo;
+  readonly sourceGroundingDeferQueueRepo: SqliteSourceGroundingDeferQueueRepo;
   readonly pathFailureHealthInboxPort: PathFailureHealthInboxPort;
   readonly recallFailureHealthInboxPort: RecallFailureHealthInboxPort;
   readonly evidenceService: EvidenceService;

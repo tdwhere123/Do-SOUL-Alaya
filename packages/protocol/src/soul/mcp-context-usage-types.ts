@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { BOUNDED_DEFAULT_ARRAY_MAX, BoundedIdSchema, BoundedLabelSchema, BoundedReasonSchema, NonEmptyStringSchema, NonNegativeIntSchema } from "../shared/schema-primitives.js";
+import {
+  BOUNDED_DEFAULT_ARRAY_MAX,
+  BoundedIdSchema,
+  BoundedLabelSchema,
+  BoundedReasonSchema,
+  IsoDatetimeStringSchema,
+  NonEmptyStringSchema,
+  NonNegativeIntSchema
+} from "../shared/schema-primitives.js";
 
 export const SoulContextUsageStateSchema = z.enum(["used", "skipped", "not_applicable"]);
 export const SoulContextUsageTrustModeSchema = z.enum(["manual", "automatic"]);
@@ -63,6 +71,9 @@ export const SoulReportContextUsageRequestSchema = z
       .optional(),
     turn_index: NonNegativeIntSchema.optional(),
     turn_digest: SoulContextUsageTurnDigestSchema.optional(),
+    // Host wall-clock for the reported turn. When present, Garden post-turn
+    // extract uses it as source_observed_at; otherwise the enqueue clock wins.
+    source_observed_at: IsoDatetimeStringSchema.optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).max(BOUNDED_DEFAULT_ARRAY_MAX).readonly().optional(),
     // invariant (agents propose, Alaya decides): trust_mode is NOT a
     // request field. Usage trust weight is server-derived — an MCP usage

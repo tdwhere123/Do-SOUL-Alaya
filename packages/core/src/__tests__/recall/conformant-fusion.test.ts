@@ -365,9 +365,12 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(foldedPath).not.toBeCloseTo(supportA + supportB, 9);
     expect(foldedPath).not.toBeCloseTo(stronger, 9);
 
-    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "0.05";
+    // Family-max objectBase seeds a smaller flood than raw-lane-sum; pick a cap
+    // below the NOR fold so clamp_tot still proves under the tighter seed.
+    process.env.ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL = "0.01";
     const clamped = await runFusion(GENERIC_QUERY, [seedA, seedB, target], { inflow });
-    expect(clamped.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(0.05, 9);
+    expect(clamped.get(keyOf(target.id))!.per_axis_contribution!.path).toBeCloseTo(0.01, 9);
+    expect(foldedPath).toBeGreaterThan(0.01);
   });
 
   // B2 regression lock: single_fact gold (lexical answer + its own embedding) must out-rank a purely

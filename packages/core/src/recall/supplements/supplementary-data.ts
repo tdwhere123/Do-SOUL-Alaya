@@ -156,16 +156,16 @@ async function collectEvidenceAndGovernanceData(
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
   readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
 }>> {
-  const evidenceGistsByMemoryId = params.captureAnswerFeatures
-    ? await collectEvidenceGistsByMemoryId({
-        dependencies: params.dependencies,
-        warn: params.warn,
-        workspaceId: params.workspaceId,
-        candidates,
-        coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
-        coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
-      })
-    : Object.freeze({});
+  // Coverage-aware delivery selects on gist identity; collect whenever the
+  // evidence port can answer, not only for deep diagnostic capture.
+  const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
+    dependencies: params.dependencies,
+    warn: params.warn,
+    workspaceId: params.workspaceId,
+    candidates,
+    coarseEvidenceFtsRanks: params.coarseEvidenceFtsRanks,
+    coarseEvidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef
+  });
   const governanceDerivations = await collectGovernancePathDerivations({
     dependencies: params.dependencies,
     warn: params.warn,
@@ -317,9 +317,9 @@ async function collectEvidenceGistsByMemoryId(params: {
       gistById
     );
   } catch (error) {
-    params.warn("evidence gist lookup for diagnostics failed", {
+    params.warn("evidence gist lookup for coverage selection failed", {
       workspace_id: params.workspaceId,
-      operation: "evidence_gist_lookup_for_diagnostics",
+      operation: "evidence_gist_lookup_for_coverage",
       errorName: errorNameOf(error),
       error: toErrorMessage(error)
     });

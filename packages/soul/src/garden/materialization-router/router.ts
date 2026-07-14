@@ -73,7 +73,9 @@ function guardSignalGrounding(signal: CandidateMemorySignal): MaterializationTar
       return {
         kind: "deferred",
         route_target: "deferred",
-        routing_reason: `garden source grounding failed: ${grounding.reason}`
+        routing_reason: `garden source grounding failed: ${grounding.reason}`,
+        defer_reason: grounding.reason,
+        defer_class: "source_grounding"
       };
     }
   }

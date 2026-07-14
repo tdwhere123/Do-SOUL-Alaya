@@ -50,6 +50,7 @@ export class ContextLensProjectionBuilder {
         sourceEnforcement: claim.enforcement_level
       })
     );
+    // Preserve recall delivery order; do not re-rank by activation_score.
     const recallCandidates = recallResult.candidates.filter((candidate) =>
       isLensRecallCandidate(candidate, recalledMemories)
     );

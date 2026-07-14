@@ -12,7 +12,8 @@ import {
 } from "./recall-service-test-fixtures.js";
 
 describe("collectSupplementaryData", () => {
-  it("does not load evidence gists without explicit diagnostic capture", async () => {
+  // Coverage packing needs gist identity; diagnostics no longer gate the load.
+  it("loads evidence gists for coverage selection even without diagnostic capture", async () => {
     const findByIds = vi.fn(async () => []);
     const candidate = createMemoryEntry({
       object_id: "memory-evidence",
@@ -27,7 +28,8 @@ describe("collectSupplementaryData", () => {
       coarseEvidenceFtsRanksPerRef: { "evidence-1": 1 }
     });
 
-    expect(findByIds).not.toHaveBeenCalled();
+    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["evidence-1"]);
+    expect(findByIds).toHaveBeenCalledTimes(1);
 
     await collectWith({
       candidates: [candidate],
@@ -38,7 +40,9 @@ describe("collectSupplementaryData", () => {
       coarseEvidenceFtsRanksPerRef: { "evidence-1": 1 }
     });
 
-    expect(findByIds).toHaveBeenCalledWith("workspace-1", ["evidence-1"]);
+    // Still bounded to the evidence-FTS hit set (not every memory's full refs).
+    expect(findByIds).toHaveBeenLastCalledWith("workspace-1", ["evidence-1"]);
+    expect(findByIds).toHaveBeenCalledTimes(2);
   });
 
   it("bounds per-candidate graph support lookup concurrency", async () => {

@@ -89,7 +89,7 @@ it("preserves the legacy query-embedding receiver", async () => {
     expect(result.handle).toBe(preparedQuery);
   });
 
-it("keeps the lexical baseline when the semantic supplement exhausts no remaining budget", async () => {
+it("keeps the lexical baseline when a non-decisive semantic supplement joins the pool", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-lexical",
@@ -111,11 +111,12 @@ it("keeps the lexical baseline when the semantic supplement exhausts no remainin
       similarityHintsByObjectId: Object.freeze({
         "memory-lexical": Object.freeze({
           object_id: "memory-lexical",
-          normalized_similarity: 0.1
+          normalized_similarity: 0.2
         }),
         "memory-semantic": Object.freeze({
           object_id: "memory-semantic",
-          normalized_similarity: 0.95
+          // Not decisive vs lexical — injection alone must not steal a tight budget slot.
+          normalized_similarity: 0.2
         })
       })
     }));
@@ -172,8 +173,8 @@ it("keeps the lexical baseline when the semantic supplement exhausts no remainin
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(["memory-lexical"]);
   });
 
-// Embedding default weight is 12 (pool re-rank era): a decisive embedding match (sim 1)
-// now out-ranks a strong-lexical/high-activation candidate with zero embedding similarity.
+// Decisive embedding match out-ranks strong lexical with near-zero embedding similarity
+// via the lightweight deep head (family vote is weight-1; emb is not a fitted ×12 ballot).
 it("rebuilds budget state after a decisive embedding boost re-ranks above a strong lexical candidate", async () => {
     const memories = [
       createMemoryEntry({

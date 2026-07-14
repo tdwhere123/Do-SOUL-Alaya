@@ -17,6 +17,10 @@ export const ContextLensEntrySchema = z
   .strict()
   .readonly();
 
+// invariant: lens_entries order follows recall delivery order for memory
+// entries (plus fixed prefix/suffix bands for overrides, task surface,
+// claims, and evidence). Delivery order may diverge from activation-desc
+// ranking; consumers must not re-sort by activation_score.
 export const ContextLensSchema = ControlPlaneEnvelopeSchema.unwrap()
   .extend({
     object_kind: z.literal(ControlPlaneObjectKind.CONTEXT_LENS),

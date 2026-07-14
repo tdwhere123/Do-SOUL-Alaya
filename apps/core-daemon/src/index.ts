@@ -191,6 +191,7 @@ async function createRecallAndCoreWiring(
     enqueueEnrichPending: repositories.enqueueEnrichPending,
     sqliteHandoffGapRepo: repositories.sqliteHandoffGapRepo,
     signalRepo: repositories.signalRepo,
+    sourceGroundingDeferQueueRepo: repositories.sourceGroundingDeferQueueRepo,
     pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
     recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
     evidenceService: foundation.evidenceService

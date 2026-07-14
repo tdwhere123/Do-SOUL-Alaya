@@ -142,27 +142,33 @@ describe("RecallService global project-mapping filter", () => {
     const memories = [
       createMemoryEntry({
         object_id: "project-memory",
-        scope_class: ScopeClass.PROJECT
+        scope_class: ScopeClass.PROJECT,
+        evidence_refs: ["evidence-project"]
       }),
       createMemoryEntry({
         object_id: "global-accepted",
-        scope_class: ScopeClass.GLOBAL_DOMAIN
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        evidence_refs: ["evidence-accepted"]
       }),
       createMemoryEntry({
         object_id: "global-adapted",
-        scope_class: ScopeClass.GLOBAL_DOMAIN
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        evidence_refs: ["evidence-adapted"]
       }),
       createMemoryEntry({
         object_id: "global-suggested",
-        scope_class: ScopeClass.GLOBAL_DOMAIN
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        evidence_refs: ["evidence-suggested"]
       }),
       createMemoryEntry({
         object_id: "global-probationary",
-        scope_class: ScopeClass.GLOBAL_DOMAIN
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        evidence_refs: ["evidence-probationary"]
       }),
       createMemoryEntry({
         object_id: "global-rejected",
-        scope_class: ScopeClass.GLOBAL_DOMAIN
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        evidence_refs: ["evidence-rejected"]
       })
     ];
     const findByWorkspace = vi.fn(async () => [

@@ -8,7 +8,7 @@ import {
 } from "@do-soul/alaya-storage";
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 
-const EXPECTED_EMBEDDING_FUSION_WEIGHT = 12;
+const EXPECTED_EMBEDDING_FUSION_WEIGHT = 1;
 
 function makeBasePolicy(): RecallPolicy {
   return {
@@ -59,7 +59,7 @@ function buildFixture(): {
 }
 
 describe("embedding policy parity regression net", () => {
-  it("protects embedding policy parity: daemon decorator resolves embedding_similarity to 12", async () => {
+  it("protects embedding policy parity: daemon decorator resolves embedding_similarity to 1", async () => {
     const saved: Record<string, string | undefined> = {};
     for (const key of [
       "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
