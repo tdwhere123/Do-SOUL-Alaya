@@ -17,6 +17,7 @@ import {
   scoreEmbeddingPoolCandidates
 } from "./pool-scoring.js";
 import { QueryEmbeddingEngine } from "./query-embedding-engine.js";
+import { RequestScoreSnapshotBuilder } from "./scoring/request-score-snapshot.js";
 import { EmbeddingSupplementBuilder } from "./supplement-builder.js";
 import type {
   EmbeddingNeighborHit,
@@ -25,38 +26,31 @@ import type {
   EmbeddingRecallSupplementResult,
   EmbeddingVectorRecord,
   EmbeddingWorkspaceNeighborResult,
+  MaterializeEmbeddingSupplementFromSnapshotParams,
+  PrepareRecallEmbeddingSnapshotParams,
   PreparedEmbeddingQueryHandle,
-  PreparedEmbeddingSupplement
+  PreparedEmbeddingSupplement,
+  EmbeddingRecallRequestScoreSnapshot
 } from "./types.js";
 import { WorkspaceNeighborScanner } from "./workspace-neighbor-scanner.js";
 
-interface EmbeddingRecallPrecheckError extends Error {
-  readonly reason: "local_vector_lookup_failed";
-}
-
 export class EmbeddingRecallService {
   public readonly generateQueryId: () => string;
-
   public readonly now: () => string;
-
   public readonly warn: (message: string, meta: Record<string, unknown>) => void;
-
   public readonly queryTimeoutMs: number;
-
   public readonly queryEmbeddingCacheSize: number;
-
   private readonly queryEngine: QueryEmbeddingEngine;
-
   private readonly telemetry: EmbeddingRecallTelemetry;
-
   private readonly supplementBuilder: EmbeddingSupplementBuilder;
-
   private readonly workspaceScanner: WorkspaceNeighborScanner;
+  private readonly requestSnapshotBuilder: RequestScoreSnapshotBuilder;
 
   public constructor(public readonly dependencies: EmbeddingRecallServiceDependencies) {
     this.generateQueryId = dependencies.generateQueryId ?? (() => `recall-embedding-${randomUUID()}`);
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.warn = dependencies.warn ?? (() => undefined);
+    const nowEpochMs = dependencies.nowEpochMs ?? Date.now;
     this.queryTimeoutMs = clampQueryTimeout(dependencies.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS);
     this.queryEmbeddingCacheSize = clampQueryEmbeddingCacheSize(
       dependencies.queryEmbeddingCacheSize ?? DEFAULT_QUERY_EMBEDDING_CACHE_SIZE
@@ -77,6 +71,7 @@ export class EmbeddingRecallService {
     this.supplementBuilder = new EmbeddingSupplementBuilder({
       provider: dependencies.provider,
       now: this.now,
+      nowEpochMs,
       telemetry: this.telemetry
     });
     this.workspaceScanner = new WorkspaceNeighborScanner({
@@ -86,6 +81,27 @@ export class EmbeddingRecallService {
       queryTimeoutMs: this.queryTimeoutMs,
       warn: this.warn
     });
+    this.requestSnapshotBuilder = new RequestScoreSnapshotBuilder({
+      provider: dependencies.provider,
+      embeddingRepo: dependencies.embeddingRepo,
+      queryEngine: this.queryEngine,
+      queryTimeoutMs: this.queryTimeoutMs,
+      generateQueryId: this.generateQueryId,
+      nowEpochMs,
+      warn: this.warn
+    });
+  }
+
+  public prepareRecallEmbeddingSnapshot(
+    params: PrepareRecallEmbeddingSnapshotParams
+  ): Promise<Readonly<EmbeddingRecallRequestScoreSnapshot>> {
+    return this.requestSnapshotBuilder.prepare(params);
+  }
+
+  public materializeEmbeddingSupplementFromSnapshot(
+    params: MaterializeEmbeddingSupplementFromSnapshotParams
+  ): Promise<EmbeddingRecallSupplementResult> {
+    return this.supplementBuilder.buildSupplementFromScoreSnapshot(params);
   }
 
   public prepareQueryEmbedding(params: {
@@ -126,7 +142,7 @@ export class EmbeddingRecallService {
       });
       throw Object.assign(new Error("embedding supplement precheck failed"), {
         reason: "local_vector_lookup_failed"
-      } satisfies Pick<EmbeddingRecallPrecheckError, "reason">);
+      } satisfies { readonly reason: "local_vector_lookup_failed" });
     }
   }
 

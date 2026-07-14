@@ -16,8 +16,11 @@ import type {
 import type { ScopeClass } from "@do-soul/alaya-protocol";
 import type {
   EmbeddingNeighborHit,
+  EmbeddingRecallRequestScoreSnapshot,
   EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
+  MaterializeEmbeddingSupplementFromSnapshotParams,
+  PrepareRecallEmbeddingSnapshotParams,
   PreparedEmbeddingSupplement,
   PreparedEmbeddingQueryHandle
 } from "../../embedding-recall/embedding-recall-service.js";
@@ -236,6 +239,12 @@ function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
 }
 
 export interface RecallServiceEmbeddingRecallPort {
+  prepareRecallEmbeddingSnapshot?(
+    params: PrepareRecallEmbeddingSnapshotParams
+  ): Promise<Readonly<EmbeddingRecallRequestScoreSnapshot>>;
+  materializeEmbeddingSupplementFromSnapshot?(
+    params: MaterializeEmbeddingSupplementFromSnapshotParams
+  ): Promise<EmbeddingRecallSupplementResult>;
   prepareQuerySupplement?(params: {
     readonly workspaceId: string;
     readonly runId: string | null;

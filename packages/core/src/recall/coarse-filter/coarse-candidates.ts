@@ -11,6 +11,8 @@ import type {
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
 
+export { buildEvidenceSearchQueries } from "./evidence/search-query-planner.js";
+
 export const DYNAMIC_RECALL_SEED_CAP = 50;
 // anchor: entity-derived graph_expansion seeding floor. Only entities whose
 // extractor confidence meets this threshold are allowed to fan their FTS
@@ -95,25 +97,6 @@ export function withEmbeddingSimilarityScores(
     ...supplementaryData,
     embeddingSimilarityScores: Object.freeze(Object.fromEntries(merged))
   });
-}
-
-export function buildEvidenceSearchQueries(
-  queryText: string,
-  queryProbes: Readonly<RecallQueryProbes>
-): readonly string[] {
-  const phraseQueries = queryProbes.phrases
-    .filter((phrase) => phrase.length >= 3)
-    .slice(0, 8);
-  const multiKeyQuery = queryProbes.lexical_terms.slice(0, 8).join(" ");
-  const expandedKeyQuery = queryProbes.expanded_terms.slice(0, 8).join(" ");
-  const dateQueries = queryProbes.date_terms.slice(0, 6);
-  return uniqueStrings([
-    queryText,
-    ...phraseQueries,
-    ...(multiKeyQuery.length === 0 ? [] : [multiKeyQuery]),
-    ...(expandedKeyQuery.length === 0 ? [] : [expandedKeyQuery]),
-    ...dateQueries
-  ].map((value) => value.trim()).filter((value) => value.length > 0));
 }
 
 // Deterministic OR-query of expanded lexical terms (morphology + synonym

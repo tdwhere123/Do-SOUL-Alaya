@@ -11,6 +11,7 @@ export type {
   EmbeddingProviderPort,
   EmbeddingQueryWarmupSummary,
   EmbeddingRecallEventLogPort,
+  EmbeddingRecallRequestScoreSnapshot,
   EmbeddingRecallRepoPort,
   EmbeddingRecallServiceDependencies,
   EmbeddingRecallSupplementResult,
@@ -18,6 +19,8 @@ export type {
   EmbeddingVectorRecord,
   EmbeddingWorkspaceNeighborResult,
   EmbeddingWorkspaceScanOptions,
+  MaterializeEmbeddingSupplementFromSnapshotParams,
+  PrepareRecallEmbeddingSnapshotParams,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingQuerySnapshot,
   PreparedEmbeddingSupplement

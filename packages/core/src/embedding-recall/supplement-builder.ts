@@ -6,17 +6,24 @@ import {
 } from "@do-soul/alaya-protocol";
 
 import type { EmbeddingRecallTelemetry } from "./embedding-recall-telemetry.js";
-import { clamp01, cosineSimilarity, hashMemoryContent } from "./helpers.js";
+import {
+  clamp01,
+  cosineSimilarity,
+  EMPTY_SUPPLEMENT_RESULT,
+  hashMemoryContent
+} from "./helpers.js";
 import type {
   EmbeddingProviderPort,
   EmbeddingRecallSupplementResult,
   EmbeddingSimilarityHint,
-  EmbeddingVectorRecord
+  EmbeddingVectorRecord,
+  MaterializeEmbeddingSupplementFromSnapshotParams
 } from "./types.js";
 
 export interface SupplementBuilderDependencies {
   readonly provider: EmbeddingProviderPort;
   readonly now: () => string;
+  readonly nowEpochMs: () => number;
   readonly telemetry: EmbeddingRecallTelemetry;
 }
 
@@ -31,6 +38,15 @@ export interface BuildSupplementFromQueryEmbeddingParams {
   readonly maxSupplement: number;
 }
 
+interface SupplementMaterializationParams {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryId: string;
+  readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+  readonly baseCandidateIds: readonly string[];
+  readonly maxSupplement: number;
+}
+
 // Selects an additive supplement set: it never displaces base candidates.
 export class EmbeddingSupplementBuilder {
   public constructor(private readonly deps: SupplementBuilderDependencies) {}
@@ -38,12 +54,51 @@ export class EmbeddingSupplementBuilder {
   public async buildSupplementFromQueryEmbedding(
     params: BuildSupplementFromQueryEmbeddingParams
   ): Promise<EmbeddingRecallSupplementResult> {
-    const startedAtEpochMs = Date.now();
+    const startedAtEpochMs = this.deps.nowEpochMs();
     const eligibleMemoryMap = new Map(
       params.eligibleMemories.map((memory) => [memory.object_id, memory] as const)
     );
     const hints = this.collectEmbeddingSimilarityHints(params, eligibleMemoryMap);
-    const latencyMs = Math.max(0, Date.now() - startedAtEpochMs);
+    return this.materializeSupplement(params, hints, eligibleMemoryMap, startedAtEpochMs, 0);
+  }
+
+  public async buildSupplementFromScoreSnapshot(
+    params: MaterializeEmbeddingSupplementFromSnapshotParams
+  ): Promise<EmbeddingRecallSupplementResult> {
+    const degradationReason = snapshotDegradationReason(params.snapshot);
+    if (degradationReason !== null) {
+      await this.recordSnapshotDegradation(params, degradationReason);
+    }
+    if (
+      params.maxSupplement <= 0 ||
+      params.eligibleMemories.length === 0 ||
+      params.snapshot.workspaceNeighbors.query_embedding_status !== "provider_returned"
+    ) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+    const startedAtEpochMs = this.deps.nowEpochMs();
+    const eligibleMemoryMap = new Map(
+      params.eligibleMemories.map((memory) => [memory.object_id, memory] as const)
+    );
+    const hints = collectSnapshotHints(params, eligibleMemoryMap);
+    return this.materializeSupplement(
+      snapshotMaterializationParams(params),
+      hints,
+      eligibleMemoryMap,
+      startedAtEpochMs,
+      params.snapshot.scoringLatencyMs
+    );
+  }
+
+  private async materializeSupplement(
+    params: SupplementMaterializationParams,
+    hints: readonly Readonly<EmbeddingSimilarityHint>[],
+    eligibleMemoryMap: ReadonlyMap<string, Readonly<MemoryEntry>>,
+    startedAtEpochMs: number,
+    priorLatencyMs: number
+  ): Promise<EmbeddingRecallSupplementResult> {
+    const latencyMs = Math.max(0, Math.trunc(priorLatencyMs)) +
+      Math.max(0, Math.trunc(this.deps.nowEpochMs() - startedAtEpochMs));
     await this.appendSupplementQueriedTelemetry(params, hints.length, latencyMs);
 
     const supplementaryEntries = selectSupplementaryEntries(params, hints, eligibleMemoryMap);
@@ -54,6 +109,20 @@ export class EmbeddingSupplementBuilder {
       similarityHintsByObjectId: Object.freeze(
         Object.fromEntries(hints.map((hint) => [hint.object_id, hint] as const))
       )
+    });
+  }
+
+  private async recordSnapshotDegradation(
+    params: MaterializeEmbeddingSupplementFromSnapshotParams,
+    reason: string
+  ): Promise<void> {
+    await this.deps.telemetry.recordDegraded({
+      workspaceId: params.snapshot.workspaceId,
+      runId: params.snapshot.runId,
+      queryId: params.snapshot.queryId,
+      reason,
+      baseCandidateCount: params.baseCandidateIds.length,
+      fallbackCandidateCount: params.baseCandidateIds.length
     });
   }
 
@@ -104,7 +173,7 @@ export class EmbeddingSupplementBuilder {
   }
 
   private async appendSupplementQueriedTelemetry(
-    params: BuildSupplementFromQueryEmbeddingParams,
+    params: SupplementMaterializationParams,
     returnedCandidateCount: number,
     latencyMs: number
   ): Promise<void> {
@@ -134,7 +203,7 @@ export class EmbeddingSupplementBuilder {
   }
 
   private async appendSupplementMergedTelemetry(
-    params: BuildSupplementFromQueryEmbeddingParams,
+    params: SupplementMaterializationParams,
     supplementCandidateCount: number
   ): Promise<void> {
     await this.deps.telemetry.appendTelemetrySafely({
@@ -163,8 +232,21 @@ export class EmbeddingSupplementBuilder {
   }
 }
 
+function snapshotDegradationReason(
+  snapshot: MaterializeEmbeddingSupplementFromSnapshotParams["snapshot"]
+): string | null {
+  if (snapshot.degradedReason !== null) {
+    return snapshot.degradedReason;
+  }
+  const status = snapshot.workspaceNeighbors.query_embedding_status;
+  if (status !== "provider_pending" && status !== "provider_failed") {
+    return null;
+  }
+  return snapshot.workspaceNeighbors.query_embedding_degradation_reason ?? "query_embedding_failed";
+}
+
 function selectSupplementaryEntries(
-  params: BuildSupplementFromQueryEmbeddingParams,
+  params: SupplementMaterializationParams,
   hints: readonly Readonly<EmbeddingSimilarityHint>[],
   eligibleMemoryMap: ReadonlyMap<string, Readonly<MemoryEntry>>
 ): readonly Readonly<MemoryEntry>[] {
@@ -176,4 +258,33 @@ function selectSupplementaryEntries(
       const memory = eligibleMemoryMap.get(hint.object_id);
       return memory === undefined ? [] : [memory];
     });
+}
+
+function collectSnapshotHints(
+  params: MaterializeEmbeddingSupplementFromSnapshotParams,
+  eligibleMemoryMap: ReadonlyMap<string, Readonly<MemoryEntry>>
+): readonly Readonly<EmbeddingSimilarityHint>[] {
+  return Object.entries(params.snapshot.poolScoresByObjectId)
+    .flatMap(([objectId, normalizedSimilarity]) =>
+      eligibleMemoryMap.has(objectId) && normalizedSimilarity > 0
+        ? [Object.freeze({ object_id: objectId, normalized_similarity: normalizedSimilarity })]
+        : []
+    )
+    .sort((left, right) =>
+      right.normalized_similarity - left.normalized_similarity ||
+      left.object_id.localeCompare(right.object_id)
+    );
+}
+
+function snapshotMaterializationParams(
+  params: MaterializeEmbeddingSupplementFromSnapshotParams
+): SupplementMaterializationParams {
+  return Object.freeze({
+    workspaceId: params.snapshot.workspaceId,
+    runId: params.snapshot.runId,
+    queryId: params.snapshot.queryId,
+    eligibleMemories: params.eligibleMemories,
+    baseCandidateIds: params.baseCandidateIds,
+    maxSupplement: params.maxSupplement
+  });
 }

@@ -116,6 +116,7 @@ export interface EmbeddingRecallServiceDependencies {
   readonly healthJournalRecorder?: HealthJournalRecordPort;
   readonly generateQueryId?: () => string;
   readonly now?: () => string;
+  readonly nowEpochMs?: () => number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   /**
    * Per-query embedding provider timeout for the recall prefetch / supplement
@@ -162,6 +163,31 @@ export interface PreparedEmbeddingSupplement {
   readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
   readonly storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
   readonly degradedReason: string | null;
+}
+
+export interface EmbeddingRecallRequestScoreSnapshot {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryId: string;
+  readonly poolScoresByObjectId: Readonly<Record<string, number>>;
+  readonly scoringLatencyMs: number;
+  readonly workspaceNeighbors: Readonly<EmbeddingWorkspaceNeighborResult>;
+  readonly degradedReason: string | null;
+}
+
+export interface PrepareRecallEmbeddingSnapshotParams {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryText: string;
+  readonly poolMemories: readonly Readonly<MemoryEntry>[];
+  readonly maxNeighbors: number;
+}
+
+export interface MaterializeEmbeddingSupplementFromSnapshotParams {
+  readonly snapshot: Readonly<EmbeddingRecallRequestScoreSnapshot>;
+  readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
+  readonly baseCandidateIds: readonly string[];
+  readonly maxSupplement: number;
 }
 
 export interface EmbeddingQueryWarmupSummary {

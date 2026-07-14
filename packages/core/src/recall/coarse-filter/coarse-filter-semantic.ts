@@ -9,11 +9,11 @@ import {
 } from "../query/recall-query-plan.js";
 import {
   EXPANDED_QUERY_RANK_DISCOUNT,
-  buildEvidenceSearchQueries,
   buildExpandedKeywordQuery
 } from "./coarse-candidates.js";
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
+import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
 
 export interface SemanticSupplementParams {
   readonly context: RunCoarseFilterContext;
@@ -214,7 +214,7 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
   }
   try {
     const evidenceMatchById = new Map<string, number>();
-    for (const evidenceQuery of buildEvidenceSearchQueries(params.queryText, params.queryProbes)) {
+    for (const evidenceQuery of selectEvidenceSearchQueries(params.queryText, params.queryProbes)) {
       const evidenceMatches = await params.context.dependencies.evidenceSearchPort.searchByKeyword(
         params.workspaceId,
         evidenceQuery,

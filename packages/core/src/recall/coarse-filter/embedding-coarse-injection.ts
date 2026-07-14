@@ -1,5 +1,8 @@
 import type { MemoryEntry, RecallPolicy } from "@do-soul/alaya-protocol";
-import type { EmbeddingWorkspaceNeighborResult } from "../../embedding-recall/embedding-recall-service.js";
+import type {
+  EmbeddingRecallRequestScoreSnapshot,
+  EmbeddingWorkspaceNeighborResult
+} from "../../embedding-recall/embedding-recall-service.js";
 import { hashMemoryContent } from "../../embedding-recall/helpers.js";
 import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
@@ -21,6 +24,7 @@ type EmbeddingCoarseInjectionResult = Readonly<{
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus | null;
   readonly providerDegradationReason: string | null;
   readonly workspaceScan: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
+  readonly requestScoreSnapshot?: Readonly<EmbeddingRecallRequestScoreSnapshot>;
 }>;
 
 type EmbeddingCoarseInjectionParams = {
@@ -38,6 +42,10 @@ export async function collectEmbeddingCoarseInjection(
   params: EmbeddingCoarseInjectionParams
 ): Promise<EmbeddingCoarseInjectionResult> {
   const request = resolveEmbeddingInjectionRequest(params);
+  const requestScoreSnapshot = await prepareRequestScoreSnapshot(params, request);
+  if (requestScoreSnapshot !== null) {
+    return collectSnapshotEmbeddingInjection(params, request, requestScoreSnapshot);
+  }
   if (request === null) {
     return emptyEmbeddingCoarseInjection();
   }
@@ -51,6 +59,71 @@ export async function collectEmbeddingCoarseInjection(
     return emptyWithProvider;
   }
   return buildEmbeddingInjectionResult(params, request, neighborResult, neighborEntries, emptyWithProvider);
+}
+
+async function prepareRequestScoreSnapshot(
+  params: EmbeddingCoarseInjectionParams,
+  request: ReturnType<typeof resolveEmbeddingInjectionRequest>
+): Promise<Readonly<EmbeddingRecallRequestScoreSnapshot> | null> {
+  const service = params.dependencies.embeddingRecallService;
+  if (
+    params.policy.coarse_filter.semantic_supplement.embedding_enabled !== true ||
+    params.queryText === null ||
+    service?.prepareRecallEmbeddingSnapshot === undefined ||
+    service.materializeEmbeddingSupplementFromSnapshot === undefined
+  ) {
+    return null;
+  }
+  return service.prepareRecallEmbeddingSnapshot({
+    workspaceId: params.workspaceId,
+    runId: params.runId,
+    queryText: params.queryText,
+    poolMemories: params.poolCandidates.map((candidate) => candidate.entry),
+    maxNeighbors: request === null ? 0 : Math.max(request.maxSupplement, request.injectionCap)
+  });
+}
+
+async function collectSnapshotEmbeddingInjection(
+  params: EmbeddingCoarseInjectionParams,
+  request: ReturnType<typeof resolveEmbeddingInjectionRequest>,
+  snapshot: Readonly<EmbeddingRecallRequestScoreSnapshot>
+): Promise<EmbeddingCoarseInjectionResult> {
+  const fallback = attachRequestScoreSnapshot(
+    emptyEmbeddingCoarseInjectionWithProvider(snapshot.workspaceNeighbors),
+    snapshot
+  );
+  if (request === null || snapshot.workspaceNeighbors.hits.length === 0) {
+    return fallback;
+  }
+  const entries = await loadEmbeddingNeighborEntries(params, snapshot.workspaceNeighbors, fallback);
+  if (entries === null) {
+    return fallback;
+  }
+  return attachRequestScoreSnapshot(
+    buildEmbeddingInjectionResult(
+      params,
+      request,
+      snapshot.workspaceNeighbors,
+      entries,
+      fallback
+    ),
+    snapshot
+  );
+}
+
+function attachRequestScoreSnapshot(
+  result: EmbeddingCoarseInjectionResult,
+  snapshot: Readonly<EmbeddingRecallRequestScoreSnapshot>
+): EmbeddingCoarseInjectionResult {
+  return Object.freeze({
+    ...result,
+    embeddingProviderStatus:
+      result.embeddingProviderStatus === "provider_not_requested" && snapshot.degradedReason !== null
+        ? "provider_failed"
+        : result.embeddingProviderStatus,
+    providerDegradationReason: snapshot.degradedReason ?? result.providerDegradationReason,
+    requestScoreSnapshot: snapshot
+  });
 }
 
 function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams): Readonly<{
@@ -68,8 +141,7 @@ function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams
     injectionCap <= 0 ||
     params.queryText === null ||
     embeddingRecallService === undefined ||
-    (typeof embeddingRecallService.collectWorkspaceNeighbors !== "function" &&
-      typeof embeddingRecallService.collectWorkspaceNeighborsWithMetadata !== "function") ||
+    !supportsEmbeddingNeighborCollection(embeddingRecallService) ||
     typeof params.dependencies.memoryRepo.findByIds !== "function"
   ) {
     return null;
@@ -80,6 +152,16 @@ function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams
     injectionCap,
     poolObjectIds: params.poolCandidates.map((candidate) => candidate.entry.object_id)
   });
+}
+
+function supportsEmbeddingNeighborCollection(
+  service: NonNullable<RecallServiceDependencies["embeddingRecallService"]>
+): boolean {
+  const supportsSnapshot = typeof service.prepareRecallEmbeddingSnapshot === "function" &&
+    typeof service.materializeEmbeddingSupplementFromSnapshot === "function";
+  const supportsLegacy = typeof service.collectWorkspaceNeighbors === "function" ||
+    typeof service.collectWorkspaceNeighborsWithMetadata === "function";
+  return supportsSnapshot || supportsLegacy;
 }
 
 async function collectEmbeddingNeighbors(

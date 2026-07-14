@@ -33,15 +33,15 @@ import type {
 } from "./recall-service-types.js";
 import { makeTokenEstimator } from "./recall-service-types.js";
 import {
-  collectEmbeddingSupplement,
-  prepareEmbeddingSupplementQuery
-} from "../supplements/supplements.js";
-import {
   collectCoarseStage,
   type CoarseStageResult,
   type EmbeddingCoarseInjectionResult
 } from "./recall-service-runner-coarse.js";
-import { collectPoolEmbeddingRescore } from "../rerank/recall-pool-embedding-rescore.js";
+import {
+  collectEmbeddingAssessmentData,
+  startEmbeddingAssessmentPreparation,
+  type EmbeddingAssessmentData
+} from "./orchestration/recall-embedding-assessment.js";
 import { collectAnswerRelevanceScores } from "../rerank/recall-answer-rerank.js";
 import { buildRecallResult } from "./recall-result-builder.js";
 import type {
@@ -143,16 +143,12 @@ async function assessCandidateStage(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
-  const preparedEmbeddingQueryPromise = startEmbeddingSupplementPreparation(context, params, prepared, coarse);
+  const preparedEmbeddingQueryPromise = startEmbeddingAssessmentPreparation(context, params, prepared, coarse);
   const initialAssessment = await runInitialFineAssessment(context, params, prepared, coarse);
-  const preparedEmbeddingQuery = await unwrapPreparedEmbeddingQuery(preparedEmbeddingQueryPromise);
-  const [embeddingSupplementResult, poolRescoreResult] = await Promise.all([
-    settle(collectEmbeddingSupplementStage(context, params, prepared, coarse, initialAssessment, preparedEmbeddingQuery)),
-    settle(collectPoolEmbeddingRescore(context, params, prepared, coarse))
-  ]);
-  throwFirstRejected([embeddingSupplementResult, poolRescoreResult]);
-  const embeddingSupplement = unwrapSettled(embeddingSupplementResult);
-  const poolRescoreScores = unwrapSettled(poolRescoreResult);
+  const embeddingData = await collectEmbeddingAssessmentData(
+    context, params, prepared, coarse, initialAssessment, preparedEmbeddingQueryPromise
+  );
+  const { preparedEmbeddingQuery, supplement: embeddingSupplement, poolRescoreScores } = embeddingData;
   const supplementaryData = withEmbeddingSimilarityScores(
     initialAssessment.supplementaryData,
     embeddingSupplement.similarityHintsByObjectId,
@@ -233,26 +229,6 @@ function buildFineAssessParams(
   };
 }
 
-function startEmbeddingSupplementPreparation(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Promise<{ readonly status: "fulfilled"; readonly value: PreparedEmbeddingQuery } | { readonly status: "rejected"; readonly reason: unknown }> {
-  return prepareEmbeddingSupplementQuery({
-    dependencies: context.dependencies,
-    config: prepared.policy,
-    workspaceId: params.workspaceId,
-    runId: params.runId ?? null,
-    queryText: prepared.queryText,
-    localEligibleCandidates: coarse.coarseFilter.candidates,
-    lexicalFallbackCount: Math.min(coarse.combinedCoarseCandidates.length, prepared.policy.fine_assessment.budgets.max_entries)
-  }).then(
-    (value) => ({ status: "fulfilled" as const, value }),
-    (reason: unknown) => ({ status: "rejected" as const, reason })
-  );
-}
-
 async function runInitialFineAssessment(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
@@ -275,39 +251,8 @@ async function runInitialFineAssessment(
   });
 }
 
-async function unwrapPreparedEmbeddingQuery(
-  promise: Promise<{ readonly status: "fulfilled"; readonly value: PreparedEmbeddingQuery } | { readonly status: "rejected"; readonly reason: unknown }>
-): Promise<PreparedEmbeddingQuery> {
-  const result = await promise;
-  if (result.status === "rejected") {
-    throw result.reason;
-  }
-  return result.value;
-}
-
-async function collectEmbeddingSupplementStage(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  initialAssessment: Awaited<ReturnType<typeof assessCoarseFilter>>,
-  preparedEmbeddingQuery: PreparedEmbeddingQuery
-): Promise<Awaited<ReturnType<typeof collectEmbeddingSupplement>>> {
-  return collectEmbeddingSupplement({
-    dependencies: context.dependencies,
-    baseCandidateIds: initialAssessment.candidates.map((candidate) => candidate.object_id),
-    localEligibleCandidates: coarse.coarseFilter.candidates,
-    config: prepared.policy,
-    workspaceId: params.workspaceId,
-    runId: params.runId ?? null,
-    queryText: prepared.queryText,
-    preparedEmbeddingQuery: preparedEmbeddingQuery.handle,
-    preparedStoredVectors: preparedEmbeddingQuery.storedVectors
-  });
-}
-
 function needsEmbeddingReassessment(
-  supplement: Awaited<ReturnType<typeof collectEmbeddingSupplement>>,
+  supplement: EmbeddingAssessmentData["supplement"],
   injection: EmbeddingCoarseInjectionResult
 ): boolean {
   return Object.keys(supplement.similarityHintsByObjectId).length > 0 || injection.candidates.length > 0;
@@ -377,32 +322,6 @@ async function recordRecallSideEffects(
       classifications: coarse.globalRecallClassifications
     })
   ]);
-}
-
-type Settled<T> =
-  | { readonly status: "fulfilled"; readonly value: T }
-  | { readonly status: "rejected"; readonly reason: unknown };
-
-function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
-  return promise.then(
-    (value) => ({ status: "fulfilled" as const, value }),
-    (reason: unknown) => ({ status: "rejected" as const, reason })
-  );
-}
-
-function throwFirstRejected(results: readonly Settled<unknown>[]): void {
-  for (const result of results) {
-    if (result.status === "rejected") {
-      throw result.reason;
-    }
-  }
-}
-
-function unwrapSettled<T>(result: Settled<T>): T {
-  if (result.status === "rejected") {
-    throw result.reason;
-  }
-  return result.value;
 }
 
 async function appendRecallCompletedEvent(
