@@ -3,12 +3,18 @@ import { aggregateFamilyContributions } from "./fusion-delivery-families.js";
 
 // Delivery any@5 budget: emb ranks inside this window are the protected ordinal head.
 const DECISIVE_EMBEDDING_RANK_MAX = 5;
+// Emb "support" for conflict refinement = decisive head plus one extra delivery page
+// (same ordinal budget as any@5). Not a cohort cutoff: 2×DECISIVE is the near-miss
+// neighborhood where emb still co-signals fusion; beyond it, emb presence alone is
+// not support. (Deep-head 30 / fine-prune 200 are too wide — they would re-inert the gate.)
+const FUSED_RESCUE_EMB_RANK_MAX = DECISIVE_EMBEDDING_RANK_MAX * 2;
 // Tie-break only — requires a strict cosine gap past the first rank outside the budget.
 const DECISIVE_EMBEDDING_COSINE_EPS = 1e-9;
 
 // Conflict lanes ⊆ structural + graph families, plus evidence_fts (lexical member that piles
-// with ESA). Would-outrank suppression zeros these only for non-emb-supported candidates that
-// would otherwise clear the emb-head floor; emb-scored mid-ranks keep them for fused rescues.
+// with ESA). Would-outrank suppression zeros these for candidates outside the emb-head/rescue
+// band that would otherwise clear the emb-head floor. Under bi-ON almost every pruned
+// candidate has some emb rank — treating any emb hit as support left the gate inert.
 export const CONFLICT_FUSION_STREAMS: ReadonlySet<RecallFusionStream> = Object.freeze(new Set<RecallFusionStream>([
   "path_expansion",
   "graph_expansion",
@@ -61,10 +67,10 @@ export function zeroConflictStreamContributions<T extends Partial<Record<RecallF
   return next;
 }
 
-// When the emb head is decisive: conflict mass may refine inside that head freely. Outside it,
-// emb-scored candidates keep conflict lanes (mid-rank fused rescues). Non-emb-supported
-// candidates keep conflict mass only while their family-aggregated score stays ≤ the lowest
-// decisive emb-head score — conflict may not push an emb-unsupported candidate past emb-top.
+// When the emb head is decisive: conflict mass may refine inside the head and the fused-rescue
+// band freely. Outside that band, candidates keep conflict mass only while their
+// family-aggregated score stays ≤ the lowest decisive emb-head score — weak-emb + conflict
+// piles may not clear the emb-top floor.
 export function selectWouldOutrankSuppressedKeys(params: Readonly<{
   readonly gate: ConflictGateContext;
   readonly contributionsByKey: ReadonlyMap<string, Readonly<Partial<Record<RecallFusionStream, number>>>>;
@@ -78,8 +84,9 @@ export function selectWouldOutrankSuppressedKeys(params: Readonly<{
     if (params.gate.decisiveCandidateKeys.has(candidateKey)) {
       continue;
     }
-    // Emb rank present ⇒ scored on the embedding stream; conflict may accumulate freely.
-    if (params.gate.embeddingRankByKey.has(candidateKey)) {
+    const embeddingRank = params.gate.embeddingRankByKey.get(candidateKey);
+    // Decisive head + fused-rescue band keep conflict for mid-rank emb rescues.
+    if (embeddingRank !== undefined && embeddingRank <= FUSED_RESCUE_EMB_RANK_MAX) {
       continue;
     }
     if (aggregateFamilyContributions(contributions) > floor) {

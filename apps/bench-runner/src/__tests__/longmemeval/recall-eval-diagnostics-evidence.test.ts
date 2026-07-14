@@ -184,6 +184,24 @@ describe("recall-eval diagnostics evidence", () => {
     })).not.toThrow();
   });
 
+  it("accepts null query warmup when document warmup proves bi identity (encode-in-timer)", () => {
+    const source = question("q-encode-in-timer", "not_applicable");
+    expect(() => buildRecallEvalDiagnosticsEvidence({
+      questions: [{
+        ...source,
+        queryEmbeddingWarmup: null,
+        diagnostics: {
+          ...source.diagnostics,
+          answer_rerank_status: "not_requested",
+          answer_rerank_expected_count: 0,
+          answer_rerank_scored_count: 0
+        }
+      }],
+      embeddingSupplement: biIdentity,
+      answerRerank: { enabled: false }
+    })).not.toThrow();
+  });
+
   it("rejects D2Q identity that disagrees with the persisted workspace schema", () => {
     expect(() => buildRecallEvalDiagnosticsEvidence({
       questions: [question("q-d2q-drift", "returned")],

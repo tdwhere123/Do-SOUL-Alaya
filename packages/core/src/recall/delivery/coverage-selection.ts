@@ -3,17 +3,17 @@ import type { RecallSupplementaryData } from "../runtime/recall-service-types.js
 
 /**
  * Hard backstop only. Primary redundancy control is marginal-gain selection
- * over gist + source cohort — blind dedup alone lowers full-gold coverage.
+ * over gist identity — blind dedup alone lowers full-gold coverage.
  */
 export const COVERAGE_MAX_PER_GIST_SAFETY = 2;
 
 /**
- * Facility-location novelty over two identity axes: same gist is full
- * redundancy (1); same source cohort is partial sibling overlap (1/2); else
- * novel (0). Ternary from the axes — not a fitted continuum.
+ * Facility-location novelty: same gist is full redundancy (1); else novel (0).
+ * Cohort soft-overlap (formerly 1/2) displaced deep-head / CE top ranks on any@5
+ * by promoting weaker novel-cohort items ahead of stronger same-cohort golds.
+ * Cohort stays on the identity record for diagnostics; it does not cut gain.
  */
 const SAME_GIST_SIMILARITY = 1;
-const SAME_COHORT_SIMILARITY = 0.5;
 
 export type CoverageIdentity = Readonly<{
   readonly gistKey: string;
@@ -34,8 +34,8 @@ type CoverageSupplementary = Readonly<Pick<
 >>;
 
 /**
- * Greedy facility-location packing over gist + cohort identity so later
- * novel-gist items can outrank earlier duplicate-gist ones before admission.
+ * Greedy facility-location packing over gist identity so later novel-gist
+ * items can outrank earlier duplicate-gist ones before admission.
  */
 export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate>(
   params: Readonly<{
@@ -97,17 +97,7 @@ function coverageSimilarity(
   left: CoverageIdentity,
   right: CoverageIdentity
 ): number {
-  if (left.gistKey === right.gistKey) {
-    return SAME_GIST_SIMILARITY;
-  }
-  if (
-    left.cohortKey !== null
-    && right.cohortKey !== null
-    && left.cohortKey === right.cohortKey
-  ) {
-    return SAME_COHORT_SIMILARITY;
-  }
-  return 0;
+  return left.gistKey === right.gistKey ? SAME_GIST_SIMILARITY : 0;
 }
 
 function marginalCoverageGain(params: Readonly<{
@@ -128,6 +118,11 @@ function resolveRelevance(
   candidate: CoverageSelectableCandidate,
   relevanceByCandidateKey: ReadonlyMap<string, number>
 ): number {
-  return relevanceByCandidateKey.get(candidate.fusion.candidate_key)
-    ?? candidate.fusion.fused_score;
+  // When a deep-head / CE map is present, missing keys must not fall back to
+  // fused_score: CE logits are ~1e-3 while fused RRF is ~5e-2, so the unscored
+  // tail would monopolize packing and drop CE winners past max_entries.
+  if (relevanceByCandidateKey.size > 0) {
+    return relevanceByCandidateKey.get(candidate.fusion.candidate_key) ?? 0;
+  }
+  return candidate.fusion.fused_score;
 }

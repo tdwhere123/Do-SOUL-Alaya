@@ -102,6 +102,53 @@ describe("coverage-aware delivery", () => {
     expect(result.diagnostics.filter((row) => row.dropped_reason === "duplicate")).toHaveLength(2);
   });
 
+  it("does not let fused_score fallback outrank a tiny CE deep-head map", () => {
+    const ceWinner = createCandidate("ce-winner", 0.04);
+    const fusedTail = createCandidate("fused-tail", 0.08);
+    const ordered = orderByCoverageMarginalGain({
+      candidates: [fusedTail, ceWinner],
+      relevanceByCandidateKey: new Map([
+        [ceWinner.fusion.candidate_key, 0.002]
+      ]),
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          "ce-winner": "gist-a",
+          "fused-tail": "gist-b"
+        }
+      })
+    });
+    expect(ordered.map((candidate) => candidate.entry.object_id)).toEqual([
+      "ce-winner",
+      "fused-tail"
+    ]);
+  });
+
+  it("does not demote a stronger same-cohort gold behind a weaker novel cohort sibling", () => {
+    const strong = createCandidate("strong-gold", 0.9);
+    const weakNovel = createCandidate("weak-novel", 0.4);
+    const ordered = orderByCoverageMarginalGain({
+      candidates: [strong, weakNovel],
+      relevanceByCandidateKey: new Map([
+        [strong.fusion.candidate_key, 0.9],
+        [weakNovel.fusion.candidate_key, 0.4]
+      ]),
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          "strong-gold": "gist-a",
+          "weak-novel": "gist-b"
+        },
+        sourceCohortKeys: {
+          "strong-gold": "cohort-1",
+          "weak-novel": "cohort-1"
+        }
+      })
+    });
+    expect(ordered.map((candidate) => candidate.entry.object_id)).toEqual([
+      "strong-gold",
+      "weak-novel"
+    ]);
+  });
+
   it("packs by coverageRelevance even when public finalRelevance stays fused", () => {
     const highFusedDupA = createCandidate("dup-a", 0.99);
     const highFusedDupB = createCandidate("dup-b", 0.98);

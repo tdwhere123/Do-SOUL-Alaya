@@ -134,14 +134,14 @@ describe("conflict would-outrank suppression", () => {
     })).toBe(false);
   });
 
-  it("keeps conflict lanes for emb-scored mid-rank candidates even when pool is decisive", () => {
+  it("keeps conflict lanes for emb-scored rescue-band candidates (emb rank ≤ 2×decisive)", () => {
     const decisiveKey = "workspace_local:memory_entry:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    const midKey = "workspace_local:memory_entry:99999999-9999-4999-8999-999999999999";
+    const rescueKey = "workspace_local:memory_entry:99999999-9999-4999-8999-999999999999";
     const gate = buildConflictGateContext({
-      candidateKeys: [decisiveKey, midKey],
+      candidateKeys: [decisiveKey, rescueKey],
       embeddingRanks: new Map([
         [decisiveKey, 1],
-        [midKey, 9]
+        [rescueKey, 10]
       ]),
       embeddingScores: {
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": 0.9,
@@ -152,14 +152,44 @@ describe("conflict would-outrank suppression", () => {
     const pathWeight = RECALL_FUSION_DEFAULT_WEIGHTS.path_expansion;
     const contributionsByKey = new Map<string, Partial<Record<RecallFusionStream, number>>>([
       [decisiveKey, { embedding_similarity: embWeight / 61 }],
-      [midKey, {
-        embedding_similarity: embWeight / 69,
+      [rescueKey, {
+        embedding_similarity: embWeight / 70,
         path_expansion: pathWeight / 61,
         structural: pathWeight / 61
       }]
     ]);
     const suppressed = selectWouldOutrankSuppressedKeys({ gate, contributionsByKey });
-    expect(suppressed.has(midKey)).toBe(false);
+    expect(suppressed.has(rescueKey)).toBe(false);
+  });
+
+  it("suppresses weak-emb conflict piles outside the fused-rescue band", () => {
+    const decisiveKey = "workspace_local:memory_entry:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const weakEmbPileKey = "workspace_local:memory_entry:cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const gate = buildConflictGateContext({
+      candidateKeys: [decisiveKey, weakEmbPileKey],
+      embeddingRanks: new Map([
+        [decisiveKey, 1],
+        // First rank past 2×decisive (10): emb presence alone is not support.
+        [weakEmbPileKey, 11]
+      ]),
+      embeddingScores: {
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": 0.9,
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc": 0.4
+      }
+    });
+    const embWeight = RECALL_FUSION_DEFAULT_WEIGHTS.embedding_similarity;
+    const pathWeight = RECALL_FUSION_DEFAULT_WEIGHTS.path_expansion;
+    const contributionsByKey = new Map<string, Partial<Record<RecallFusionStream, number>>>([
+      [decisiveKey, { embedding_similarity: embWeight / 61 }],
+      [weakEmbPileKey, {
+        embedding_similarity: embWeight / 71,
+        path_expansion: pathWeight / 61,
+        structural: pathWeight / 61,
+        graph_expansion: pathWeight / 61
+      }]
+    ]);
+    const suppressed = selectWouldOutrankSuppressedKeys({ gate, contributionsByKey });
+    expect(suppressed.has(weakEmbPileKey)).toBe(true);
   });
 });
 

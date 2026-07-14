@@ -166,7 +166,14 @@ function assertEmbeddingIdentity(
       assertDisabledEmbeddingEvidence(question, summaries);
       continue;
     }
-    assertEnabledEmbeddingEvidence(question, identity, summaries);
+    // Query warmup may be null: encode belongs inside timed recall (G6).
+    // Document warmup must still prove bi-encoder identity.
+    assertEnabledEmbeddingEvidence(question, identity, [
+      question.document_embedding_warmup,
+      ...(question.query_embedding_warmup === null
+        ? []
+        : [question.query_embedding_warmup])
+    ]);
   }
 }
 
