@@ -12,9 +12,12 @@ export {
 export {
   SqliteSourceGroundingDeferQueueRepo,
   SOURCE_GROUNDING_DEFER_QUEUE_CAP,
+  SOURCE_GROUNDING_DEFER_QUEUE_OVERFLOW_ALLOWANCE,
   type SourceGroundingDeferEntry,
+  type SourceGroundingDeferEnqueueInput,
   type SourceGroundingDeferEnqueueResult,
   type SourceGroundingDeferQueueRepo,
+  type SourceGroundingDeferReason,
   type SourceGroundingDeferStats
 } from "./source-grounding-defer-queue-repo.js";
 export {

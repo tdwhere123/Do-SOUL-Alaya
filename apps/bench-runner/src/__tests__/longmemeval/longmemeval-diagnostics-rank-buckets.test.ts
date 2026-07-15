@@ -101,7 +101,8 @@ describe("per-gold rank buckets and displaced-by attribution", () => {
         supports: 0
       },
       candidate_key_collisions: [],
-      gold
+      gold,
+      cohort_ledger: currentAnswerableLedger(gold.map((item) => item.object_id))
     }) as unknown as LongMemEvalQuestionDiagnostic;
 
   it("splits gold ranks {3,8,60} by ordinal and attributes displaced slots", () => {
@@ -152,3 +153,24 @@ describe("per-gold rank buckets and displaced-by attribution", () => {
     expect(metrics.per_gold_displaced_by?.lexical_topic_neighbor).toBe(0);
   });
 });
+
+function currentAnswerableLedger(
+  goldMemoryIds: readonly string[]
+): NonNullable<LongMemEvalQuestionDiagnostic["cohort_ledger"]> {
+  return {
+    measurement_status: "scorable",
+    dataset_cohort: "answerable",
+    extraction_materialization: {
+      status: "memory_emitted",
+      emitted_memory_count: goldMemoryIds.length,
+      reason: null
+    },
+    evaluator_gold_identity: { status: "present", object_ids: goldMemoryIds },
+    retrieval_status: "hit_at_5",
+    evidence_status: "complete",
+    evaluation_issue_reason: null,
+    candidate_pool_complete: true,
+    stage_ranks: [],
+    final_verdict: "hit_at_5"
+  };
+}

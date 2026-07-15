@@ -1,18 +1,30 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { releaseHardGateVerdict, type KpiPayload } from "@do-soul/alaya-eval";
+import {
+  releaseMetricGateVerdict,
+  verifiedLongMemEvalEvidenceMatches,
+  type KpiPayload,
+  type VerifiedLongMemEvalEvidenceContext
+} from "@do-soul/alaya-eval";
 import { seedExtractionReleaseBlockerExitCode } from "../longmemeval/seed-extraction-release-blocker.js";
 import { exitCodeForVerdicts } from "./result-format.js";
 
-export function exitCodeForBenchmarkResult(payload: KpiPayload): number {
+export function exitCodeForBenchmarkResult(
+  payload: KpiPayload,
+  evidence?: VerifiedLongMemEvalEvidenceContext
+): number {
   const seedExtractionExitCode = seedExtractionReleaseBlockerExitCode(payload);
   if (seedExtractionExitCode !== 0) return seedExtractionExitCode;
-  if (releaseHardGateVerdict(payload) === "fail") return 1;
+  if (releaseMetricGateVerdict(payload) === "fail") return 1;
+  if (!verifiedLongMemEvalEvidenceMatches(payload, evidence)) return 1;
   return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
 }
 
-export function exitCodeForMergedLongMemEvalResult(payload: KpiPayload): number {
-  return exitCodeForBenchmarkResult(payload);
+export function exitCodeForMergedLongMemEvalResult(
+  payload: KpiPayload,
+  evidence?: VerifiedLongMemEvalEvidenceContext
+): number {
+  return exitCodeForBenchmarkResult(payload, evidence);
 }
 
 export function ratio(count: number, total: number): number {
@@ -134,4 +146,3 @@ export function isNotFound(error: unknown): boolean {
     (error as { readonly code?: unknown }).code === "ENOENT"
   );
 }
-

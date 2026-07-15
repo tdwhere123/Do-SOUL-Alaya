@@ -1,4 +1,7 @@
-import type { KpiPayload } from "@do-soul/alaya-eval";
+import type {
+  KpiPayload,
+  VerifiedLongMemEvalEvidenceContext
+} from "@do-soul/alaya-eval";
 import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind,
@@ -43,6 +46,7 @@ export interface LongMemEvalMultiturnRunResult {
   readonly findingsPath: string;
   readonly diagnosticsPath: string | null;
   readonly payload: KpiPayload;
+  readonly evidenceContext: VerifiedLongMemEvalEvidenceContext | null;
 }
 
 export type SidecarEntry = LongMemEvalSidecarEntry;

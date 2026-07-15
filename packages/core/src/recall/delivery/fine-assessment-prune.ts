@@ -1,22 +1,18 @@
+import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { RECALL_TOTAL_CANDIDATE_CAP } from "../../shared/recall-policy.js";
 import type {
   CoarseRecallCandidate,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
-
-/**
- * Coarse→fine waist. Measured scaling: coarse ≈ 105 + 1.04·pool_size ms
- * (mean pool ~584 → ~713 ms). Cap 200 targets coarse ≈ 105 + 208 ≈ 313 ms so
- * fusion (≈102 + 0.26·fine) and a later deep head still fit p95 ≤ 1100 with the
- * documented ~650–750 ms funnel projection. Chosen from that latency budget
- * arithmetic — not from R@5 deltas.
- */
-export const FINE_ASSESSMENT_COARSE_PRUNE_CAP = 200;
 
 export type FineAssessmentPruneResult = Readonly<{
   readonly survivors: readonly Readonly<CoarseRecallCandidate>[];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
+  readonly hardBudget: number;
+  readonly priorityCandidateCount: number;
+  readonly priorityOverflowCount: number;
 }>;
 
 type PruneSupplementary = Readonly<Pick<
@@ -32,30 +28,64 @@ export function pruneCoarseCandidatesForFineAssessment(params: Readonly<{
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly supplementaryData: PruneSupplementary;
   readonly winnerMemoryIds: ReadonlySet<string>;
-  readonly cap?: number;
+  readonly cap: number;
 }>): FineAssessmentPruneResult {
   const coarsePoolSize = params.candidates.length;
-  const cap = params.cap ?? FINE_ASSESSMENT_COARSE_PRUNE_CAP;
+  const cap = normalizeFineAssessmentCandidateBudget(params.cap);
   if (coarsePoolSize === 0) {
-    return emptyPruneResult();
+    return emptyPruneResult(cap);
   }
   if (coarsePoolSize <= cap) {
     return Object.freeze({
       survivors: Object.freeze([...params.candidates]),
       coarsePoolSize,
       fineEvaluated: coarsePoolSize,
-      finePrunedCount: 0
+      finePrunedCount: 0,
+      hardBudget: cap,
+      priorityCandidateCount: countPriorityCandidates(params.candidates, params.winnerMemoryIds),
+      priorityOverflowCount: 0
     });
   }
 
   const partitioned = partitionPruneCandidates(params.candidates, params.winnerMemoryIds);
   const survivors = selectPruneSurvivors(partitioned, cap, params.supplementaryData);
+  const priorityCandidateCount = partitioned.winners.length + partitioned.injected.length;
   return Object.freeze({
     survivors,
     coarsePoolSize,
     fineEvaluated: survivors.length,
-    finePrunedCount: Math.max(0, coarsePoolSize - survivors.length)
+    finePrunedCount: Math.max(0, coarsePoolSize - survivors.length),
+    hardBudget: cap,
+    priorityCandidateCount,
+    priorityOverflowCount: Math.max(0, priorityCandidateCount - cap)
   });
+}
+
+export function resolveFineAssessmentCandidateBudget(
+  policy: Readonly<RecallPolicy>
+): number {
+  const explicit = policy.fine_assessment.max_candidates;
+  if (explicit !== undefined) {
+    return normalizeFineAssessmentCandidateBudget(explicit);
+  }
+  const semantic = policy.coarse_filter.semantic_supplement;
+  const semanticBudget = semantic.enabled ? semantic.max_supplement : 0;
+  const injectionBudget = semantic.enabled && semantic.embedding_enabled === true
+    ? semantic.injection_cap ?? 0
+    : 0;
+  return normalizeFineAssessmentCandidateBudget(Math.max(
+    policy.fine_assessment.budgets.max_entries,
+    policy.coarse_filter.precomputed_rank.max_candidates + semanticBudget + injectionBudget
+  ));
+}
+
+function normalizeFineAssessmentCandidateBudget(value: number): number {
+  if (Number.isNaN(value) || value === Number.NEGATIVE_INFINITY) return 0;
+  if (value === Number.POSITIVE_INFINITY) return RECALL_TOTAL_CANDIDATE_CAP;
+  return Math.min(
+    RECALL_TOTAL_CANDIDATE_CAP,
+    Math.max(0, Math.trunc(value))
+  );
 }
 
 type PrunePartition = Readonly<{
@@ -88,31 +118,36 @@ function selectPruneSurvivors(
   cap: number,
   supplementaryData: PruneSupplementary
 ): readonly Readonly<CoarseRecallCandidate>[] {
-  // Winners always survive (may exceed cap). Injected fill remaining under cap
-  // first so a misconfigured injection_cap cannot explode the waist unbounded;
-  // competitive fill takes whatever slots remain under cap.
-  const retainedInjected = partitioned.injected.slice(
-    0,
-    Math.max(0, cap - partitioned.winners.length)
-  );
-  const retainedIds = new Set(
-    [...partitioned.winners, ...retainedInjected].map((candidate) => candidate.entry.object_id)
-  );
-  const remainingSlots = Math.max(0, cap - partitioned.winners.length - retainedInjected.length);
-  const rankedFill = [...partitioned.competitive]
-    .sort((left, right) => compareByCheapPruneSignals(left, right, supplementaryData))
-    .filter((candidate) => !retainedIds.has(candidate.entry.object_id))
-    .slice(0, remainingSlots);
-  return Object.freeze([...partitioned.winners, ...retainedInjected, ...rankedFill]);
+  const rank = (candidates: readonly Readonly<CoarseRecallCandidate>[]) =>
+    [...candidates].sort((left, right) =>
+      compareByCheapPruneSignals(left, right, supplementaryData)
+    );
+  return Object.freeze([
+    ...rank(partitioned.winners),
+    ...rank(partitioned.injected),
+    ...rank(partitioned.competitive)
+  ].slice(0, cap));
 }
 
-function emptyPruneResult(): FineAssessmentPruneResult {
+function emptyPruneResult(hardBudget: number): FineAssessmentPruneResult {
   return Object.freeze({
     survivors: Object.freeze([]),
     coarsePoolSize: 0,
     fineEvaluated: 0,
-    finePrunedCount: 0
+    finePrunedCount: 0,
+    hardBudget,
+    priorityCandidateCount: 0,
+    priorityOverflowCount: 0
   });
+}
+
+function countPriorityCandidates(
+  candidates: readonly Readonly<CoarseRecallCandidate>[],
+  winnerMemoryIds: ReadonlySet<string>
+): number {
+  return candidates.filter((candidate) =>
+    isProtectedWinner(candidate, winnerMemoryIds) || isSemanticInjected(candidate)
+  ).length;
 }
 
 function isProtectedWinner(

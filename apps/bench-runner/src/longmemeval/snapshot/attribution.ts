@@ -24,6 +24,7 @@ export function deriveSnapshotAttribution(input: {
     status: "attributed",
     gate_eligible:
       isLongMemEvalRunProvenanceGateEligible(provenance) &&
+      input.questionIdDigest === provenance.selection?.selected_id_digest &&
       hasGateEligibleExtractionCache(
         provenance,
         input.datasetSha256,
@@ -74,7 +75,8 @@ function hasGateEligibleExtractionCache(
 function resolveProvenanceDatasetSha(
   provenance: LongMemEvalRunProvenance
 ): string | undefined {
-  const manifestSha = provenance.question_manifest?.dataset_sha256;
+  const manifestSha = provenance.dataset_sha256 ??
+    provenance.question_manifest?.dataset_sha256;
   if (manifestSha !== undefined) return manifestSha;
   const revision = provenance.extraction_cache?.dataset_revision;
   return revision !== undefined && /^[a-f0-9]{64}$/u.test(revision)

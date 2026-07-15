@@ -51,6 +51,7 @@ describe("buildRecallPolicy", () => {
       per_dimension_limits: null
     });
     expect(policy.fine_assessment.conflict_awareness).toBe(true);
+    expect(policy.fine_assessment.max_candidates).toBe(240);
   });
 
   it("supports open filters and diagnostic overrides for bench-style policies", () => {
@@ -82,6 +83,7 @@ describe("buildRecallPolicy", () => {
       max_entries: 3
     });
     expect(policy.fine_assessment.conflict_awareness).toBe(false);
+    expect(policy.fine_assessment.max_candidates).toBe(67);
     expect(policy.coarse_filter.semantic_supplement.injection_cap).toBe(7);
     expect(policy.coarse_filter.semantic_supplement.injection_similarity_floor).toBe(0.33);
   });

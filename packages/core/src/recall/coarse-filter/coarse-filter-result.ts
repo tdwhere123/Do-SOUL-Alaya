@@ -12,8 +12,7 @@ import {
   type CoarseCandidateDraft
 } from "./coarse-candidates.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
-
-const DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP = 1000;
+import { RECALL_TOTAL_CANDIDATE_CAP } from "../../shared/recall-policy.js";
 
 export interface CoarseFilterRunResult {
   readonly total_scanned: number;
@@ -86,7 +85,7 @@ function buildSupplementedCandidates(
 ): readonly Readonly<CoarseRecallCandidate>[] {
   const anchorMap = new Map(params.projectMappings.map((mapping) => [mapping.global_object_id, mapping]));
   const selectedDrafts = rankCoarseCandidateDrafts([...params.drafts.values()])
-    .slice(0, DYNAMIC_RECALL_TOTAL_CANDIDATE_CAP);
+    .slice(0, RECALL_TOTAL_CANDIDATE_CAP);
   return Object.freeze(
     selectedDrafts.flatMap((draft) => {
       const classification = classifyProjectMappingCandidate(

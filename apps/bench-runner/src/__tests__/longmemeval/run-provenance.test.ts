@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createStratifiedQuestionManifest } from "../../longmemeval/selection/question-manifest.js";
 import {
+  createLongMemEvalSelectionContract,
+  selectionContractIdentity
+} from "../../longmemeval/selection/contract.js";
+import {
   buildLongMemEvalRunProvenance,
   buildLongMemEvalRunProvenanceSidecar,
   isLongMemEvalRunProvenanceGateEligible,
@@ -42,22 +46,27 @@ describe("LongMemEval run provenance", () => {
       "cross-encoder-model",
       "utf8"
     );
+    const selectedQuestions = [{
+      question_id: "q-1",
+      question_type: "multi-session",
+      question: "q",
+      answer: "a",
+      question_date: "2026-01-01",
+      haystack_session_ids: [],
+      haystack_dates: [],
+      haystack_sessions: [],
+      answer_session_ids: []
+    }];
     const manifest = createStratifiedQuestionManifest({
       variant: "longmemeval_s",
       datasetSha256: "a".repeat(64),
-      questions: [{
-        question_id: "q-1",
-        question_type: "multi-session",
-        question: "q",
-        answer: "a",
-        question_date: "2026-01-01",
-        haystack_session_ids: [],
-        haystack_dates: [],
-        haystack_sessions: [],
-        answer_session_ids: []
-      }],
+      questions: selectedQuestions,
       targetCount: 1
     });
+    const selection = selectionContractIdentity(createLongMemEvalSelectionContract({
+      datasetSha256: manifest.dataset_sha256,
+      questions: selectedQuestions
+    }));
     await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
     writeExtractionCacheManifest(extractionCacheRoot, {
       schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -92,8 +101,6 @@ describe("LongMemEval run provenance", () => {
       commitSha7: "05d98df",
       embeddingProviderLabel: "local_onnx:Xenova/test",
       env: {
-        ALAYA_BENCH_GATE_SHA256: "d".repeat(64),
-        ALAYA_BENCH_WORKTREE_STATE_SHA256: "1".repeat(64),
         ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "2".repeat(64),
         ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT: "17",
         ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
@@ -116,7 +123,9 @@ describe("LongMemEval run provenance", () => {
         ALAYA_EXP_SIGNED_URL: "https://example.invalid/model?signature=secret"
       },
       runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
-      computeExecutedDistIdentity: fakeExecutedDistIdentity
+      computeExecutedDistIdentity: fakeExecutedDistIdentity,
+      datasetSha256: manifest.dataset_sha256,
+      selection
     });
 
     expect(LONGMEMEVAL_RUN_PROVENANCE_FILENAME).toBe("longmemeval-run-provenance.json");
@@ -132,8 +141,8 @@ describe("LongMemEval run provenance", () => {
     expect(provenance.seed_capabilities).toEqual({ facet_tags_enabled: true });
     expect(provenance.code).toEqual({
       commit_sha7: "05d98df",
-      gate_sha256: "d".repeat(64),
-      worktree_state_sha256: "1".repeat(64),
+      gate_sha256: null,
+      worktree_state_sha256: null,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
         sha256: "2".repeat(64),
@@ -214,8 +223,6 @@ describe("LongMemEval run provenance", () => {
       commitSha7: "05d98df",
       embeddingProviderLabel: "local_onnx:Xenova/test",
       env: {
-        ALAYA_BENCH_GATE_SHA256: "d".repeat(64),
-        ALAYA_BENCH_WORKTREE_STATE_SHA256: "1".repeat(64),
         ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "2".repeat(64),
         ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT: "17",
         ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
@@ -236,7 +243,9 @@ describe("LongMemEval run provenance", () => {
         ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics"
       },
       runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
-      computeExecutedDistIdentity: fakeExecutedDistIdentity
+      computeExecutedDistIdentity: fakeExecutedDistIdentity,
+      datasetSha256: manifest.dataset_sha256,
+      selection
     });
     expect(sidecar.filename).toBe(LONGMEMEVAL_RUN_PROVENANCE_FILENAME);
     expect(JSON.parse(sidecar.contents)).toEqual(provenance);
@@ -292,67 +301,93 @@ describe("LongMemEval run provenance", () => {
       }
     }).success).toBe(false);
 
-    expect(isLongMemEvalRunProvenanceGateEligible(provenance)).toBe(true);
-    const legacyRecallIdentity = LongMemEvalRunProvenanceSchema.parse({
+    expect(isLongMemEvalRunProvenanceGateEligible(provenance)).toBe(false);
+    const currentProvenance = LongMemEvalRunProvenanceSchema.parse({
       ...provenance,
-      recall_config: { ...provenance.recall_config, schema_version: 1 }
+      code: {
+        ...provenance.code,
+        commit_sha: "05d98df" + "0".repeat(33),
+        gate_contract_path: "/tmp/frozen-contract.json",
+        gate_sha256: "d".repeat(64),
+        worktree_state_sha256: "1".repeat(64),
+        worktree_clean: true
+      }
+    });
+    expect(isLongMemEvalRunProvenanceGateEligible(currentProvenance)).toBe(true);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...currentProvenance,
+      extraction_cache: {
+        ...currentProvenance.extraction_cache!,
+        dataset_revision: "unpinned"
+      }
+    })).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...currentProvenance,
+      extraction_cache: {
+        ...currentProvenance.extraction_cache!,
+        dataset_revision: "9".repeat(64)
+      }
+    })).toBe(false);
+    const legacyRecallIdentity = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      recall_config: { ...currentProvenance.recall_config, schema_version: 1 }
     });
     expect(isLongMemEvalRunProvenanceGateEligible(legacyRecallIdentity)).toBe(false);
     expect(isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: {
-        ...provenance.runtime,
+          ...currentProvenance.runtime,
         paired_env: {
-          ...provenance.runtime.paired_env,
+            ...currentProvenance.runtime.paired_env,
           ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
         }
       }
     })).toBe(false);
     expect(isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: {
-        ...provenance.runtime,
+          ...currentProvenance.runtime,
         answer_rerank: { enabled: false }
       }
     })).toBe(false);
     expect(isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: legacyRuntime
     })).toBe(false);
     expect(() => isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: {
-        ...provenance.runtime,
+          ...currentProvenance.runtime,
         paired_env: {
-          ...provenance.runtime.paired_env,
+            ...currentProvenance.runtime.paired_env,
           ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "sometimes"
         }
       }
     })).toThrow(/ALAYA_ENABLE_EMBEDDING_SUPPLEMENT/u);
     expect(() => isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: {
-        ...provenance.runtime,
+          ...currentProvenance.runtime,
         paired_env: {
-          ...provenance.runtime.paired_env,
+            ...currentProvenance.runtime.paired_env,
           ALAYA_RECALL_D2Q: "sometimes"
         }
       }
     })).toThrow(/ALAYA_RECALL_D2Q/u);
     expect(() => isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: {
-        ...provenance.runtime,
+          ...currentProvenance.runtime,
         paired_env: {
-          ...provenance.runtime.paired_env,
+            ...currentProvenance.runtime.paired_env,
           ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "sometimes"
         }
       }
     })).toThrow(/ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK/u);
     expect(isLongMemEvalRunProvenanceGateEligible({
-      ...provenance,
+      ...currentProvenance,
       runtime: {
-        ...provenance.runtime,
+          ...currentProvenance.runtime,
         embedding_mode: "disabled",
         embedding_provider_kind: "openai",
         embedding_provider_label: "none",

@@ -7,8 +7,9 @@ import {
   rmSync,
   writeFileSync
 } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
@@ -19,6 +20,8 @@ import {
 } from "./extraction-cache-manifest.js";
 import type { SnapshotArtifactIntegrity } from "./snapshot/integrity.js";
 import { validateSnapshotManifest } from "./snapshot/manifest-validation.js";
+import { computeLegacySnapshotQuestionIdDigestV1 } from
+  "./snapshot/legacy-question-id-digest.js";
 import { parseSnapshotSidecar } from "./snapshot/sidecar-validation.js";
 export { deriveSnapshotAttribution } from "./snapshot/attribution.js";
 
@@ -299,14 +302,9 @@ export function readSnapshotSidecar(
 export function snapshotQuestionIdDigest(
   questions: readonly Pick<LongMemEvalSnapshotQuestion, "questionId">[]
 ): string {
-  const hash = createHash("sha256");
-  for (const question of questions) {
-    const bytes = Buffer.from(question.questionId, "utf8");
-    const size = Buffer.alloc(8);
-    size.writeBigUInt64BE(BigInt(bytes.byteLength));
-    hash.update(size).update(bytes);
-  }
-  return hash.digest("hex");
+  return computeLongMemEvalQuestionIdDigest(
+    questions.map((question) => question.questionId)
+  );
 }
 
 export function assertSnapshotConsumerBinding(input: {
@@ -329,7 +327,7 @@ export function assertSnapshotConsumerBinding(input: {
   if (new Set(input.sidecar.questions.map((question) => question.questionId)).size !== input.sidecar.questions.length) {
     throw new Error("recall-eval snapshot contains duplicate question ids");
   }
-  const digest = snapshotQuestionIdDigest(input.sidecar.questions);
+  const digest = snapshotConsumerQuestionIdDigest(input.manifest, input.sidecar.questions);
   if (input.manifest.question_id_digest !== undefined && input.manifest.question_id_digest !== digest) {
     throw new Error("recall-eval snapshot question digest binding mismatch");
   }
@@ -345,6 +343,20 @@ export function assertSnapshotConsumerBinding(input: {
     /^[a-f0-9]{64}$/u.test(provenanceDataset) &&
     input.manifest.dataset_sha256 !== provenanceDataset
   ) throw new Error("recall-eval snapshot dataset binding mismatch");
+}
+
+function snapshotConsumerQuestionIdDigest(
+  manifest: LongMemEvalSnapshotManifest,
+  questions: readonly LongMemEvalSnapshotQuestion[]
+): string {
+  if (manifest.schema_version !== 1) return snapshotQuestionIdDigest(questions);
+  if (manifest.attribution?.status !== "legacy_unattributed" ||
+      manifest.attribution.gate_eligible !== false) {
+    throw new Error("recall-eval legacy snapshot digest requires permanent ineligibility");
+  }
+  return computeLegacySnapshotQuestionIdDigestV1(
+    questions.map((question) => question.questionId)
+  );
 }
 
 /**

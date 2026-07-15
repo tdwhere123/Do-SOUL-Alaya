@@ -15,6 +15,7 @@ import {
   resolveAlayaCliDistPaths,
   type LoadedAlayaCliModules
 } from "../../cli/module-loader.js";
+import { AlayaOperationError } from "../../cli/operations-types.js";
 import { pathEndsWithPosixSegments, toPosixPath } from "../support/test-paths.js";
 
 function createTextSink(): { readonly stream: PassThrough; readonly readText: () => string } {
@@ -206,7 +207,7 @@ describe("cli bridge", () => {
     expect(stderr.readText()).toContain("daemon not ready");
   });
 
-  it("handler exception caught and sanitized", async () => {
+  it("handler exception exposes only a safe error id and category", async () => {
     const { bridge, stderr } = createBridgeHarness({
       env: {}
     });
@@ -223,11 +224,13 @@ describe("cli bridge", () => {
     const result = await bridge.dispatch(["doctor"]);
     expect(result).toEqual({ exitCode: ALAYA_SYSEXITS.SOFTWARE });
     const message = stderr.readText();
-    expect(message).toContain("boom");
-    expect(message).not.toContain("\n    at ");
+    expect(message).toMatch(
+      /^CLI failure \[category=subcommand error_id=[0-9a-f-]{36}\]\n$/u
+    );
+    expect(message).not.toContain("boom");
   });
 
-  it("handler exception includes stack when ALAYA_DEBUG is enabled", async () => {
+  it("does not expose an unknown handler stack when ALAYA_DEBUG is enabled", async () => {
     const { bridge, stderr } = createBridgeHarness({
       env: { ALAYA_DEBUG: "1" }
     });
@@ -244,8 +247,49 @@ describe("cli bridge", () => {
     const result = await bridge.dispatch(["doctor"]);
     expect(result).toEqual({ exitCode: ALAYA_SYSEXITS.SOFTWARE });
     const message = stderr.readText();
-    expect(message).toContain("Error: debug boom");
-    expect(message).toContain("at ");
+    expect(message).toMatch(
+      /^CLI failure \[category=subcommand error_id=[0-9a-f-]{36}\]\n$/u
+    );
+    expect(message).not.toContain("debug boom");
+    expect(message).not.toContain("at ");
+  });
+
+  it("preserves only explicitly public-safe typed error messages", async () => {
+    const { bridge, stderr } = createBridgeHarness();
+    bridge.registerSubcommand({
+      name: "doctor",
+      description: "doctor command",
+      argsSchema: stringArraySchema(),
+      requiresDaemonReady: false,
+      handler: async (): Promise<AlayaCliResult> => {
+        throw new AlayaOperationError("DATAERR", "Public-safe operation input is invalid.");
+      }
+    });
+
+    const result = await bridge.dispatch(["doctor"]);
+    expect(result).toEqual({ exitCode: ALAYA_SYSEXITS.SOFTWARE });
+    expect(stderr.readText()).toBe("Public-safe operation input is invalid.\n");
+  });
+
+  it("binary startup errors stay opaque even when ALAYA_DEBUG is enabled", async () => {
+    const stderr = createTextSink();
+    const exitCode = await runAlayaCli([], {
+      env: { ALAYA_DEBUG: "1" },
+      stdin: new PassThrough(),
+      stdout: createTextSink().stream,
+      stderr: stderr.stream,
+      isTTY: false,
+      loadModules: vi.fn(async () => {
+        throw new Error("bootstrap capability secret");
+      })
+    });
+
+    expect(exitCode).toBe(ALAYA_SYSEXITS.SOFTWARE);
+    expect(stderr.readText()).toMatch(
+      /^CLI failure \[category=bootstrap error_id=[0-9a-f-]{36}\]\n$/u
+    );
+    expect(stderr.readText()).not.toContain("bootstrap capability secret");
+    expect(stderr.readText()).not.toContain("at ");
   });
 
   it("binary delegates to bridge cleanly", async () => {

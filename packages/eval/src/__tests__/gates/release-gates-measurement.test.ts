@@ -3,22 +3,20 @@ import type { KpiPayload } from "../../schema/kpi-schema.js";
 import {
   collectReleaseHardGates,
   releaseHardGateAllowsLatestPassing,
-  releaseHardGateVerdict
+  releaseMetricGateVerdict
 } from "../../gates/release-gates.js";
-import {
-  evaluateSeedExtractionReleaseBlocker,
-  isCacheOnlySeedExtractionPath
-} from "../../gates/seed-extraction-blocker.js";
 import {
   buildLimitedTier1Payload,
   buildLocomoPayload,
   buildPayload,
+  buildReleaseGradePublic,
   eligibleMeasurementAttribution,
   legacyAbstention,
   makeSeedExtractionPath,
   passingQualityMetrics,
   withEligibleMeasurementContract
 } from "./release-gates-fixture.js";
+import { verifiedEvidenceForPayload } from "./verified-evidence-fixture.js";
 
 type LongMemBench = "public" | "public-multiturn" | "public-crossquestion";
 
@@ -49,6 +47,128 @@ function buildCurrentLongMemPayload(input: {
   });
 }
 
+function perCallStat(value: number) {
+  return { mean: value, p50: value, p95: value, max: value };
+}
+
+function withEmbeddingActivation(
+  payload: KpiPayload,
+  inferenceCallsMean?: number,
+  sampleCount = payload.evaluated_count
+): KpiPayload {
+  return {
+    ...payload,
+    embedding_provider: "local_onnx:Xenova/all-MiniLM-L6-v2",
+    kpi: {
+      ...payload.kpi,
+      provider_returned_rate: 1,
+      ...(inferenceCallsMean === undefined
+        ? {}
+        : {
+            recall_token_economy: {
+              schema_version: "bench-recall-token-economy.v1",
+              sample_count: sampleCount,
+              delivered_context_tokens_estimate: perCallStat(42),
+              coarse_pool_size: perCallStat(12),
+              fine_evaluated: perCallStat(8),
+              fine_pruned_count: perCallStat(4),
+              fusion_families_with_hits: perCallStat(3),
+              embedding_inference_calls: perCallStat(inferenceCallsMean)
+            }
+          })
+    }
+  };
+}
+
+it.each([
+  [100, 0.899, false],
+  [100, 0.9, true],
+  [500, 0.899, false],
+  [500, 0.9, true]
+] as const)(
+  "holds LongMemEval-S %i embedding-on R@5 at the 0.90 boundary",
+  (sampleSize, rAt5, passed) => {
+    const measured = buildCurrentLongMemPayload({
+      benchName: "public",
+      datasetName: "longmemeval_s",
+      evaluated: sampleSize,
+      rAt5: 0.9
+    });
+    // A 100-row hit ratio cannot encode 0.899, so isolate the numeric gate
+    // after constructing a schema-valid measurement payload.
+    const payload = withEmbeddingActivation({
+      ...measured,
+      kpi: { ...measured.kpi, r_at_5: rAt5 }
+    }, 1);
+    const gate = collectReleaseHardGates(payload).find(
+      (candidate) => candidate.id ===
+        `longmemeval_s_${sampleSize}_embedding_on_r_at_5`
+    );
+
+    expect(gate).toMatchObject({ current: rAt5, target: 0.9, passed });
+  }
+);
+
+it.each([
+  [undefined, null, false],
+  [0, 0, false],
+  [0.999, 0.999, false],
+  [1, 1, true]
+] as const)(
+  "requires LongMemEval-S embedding inference mean %s to reach one",
+  async (mean, current, passed) => {
+    const payload = withEmbeddingActivation(buildCurrentLongMemPayload({
+      benchName: "public",
+      datasetName: "longmemeval_s",
+      evaluated: 500,
+      rAt5: 0.95,
+      seedExtractionPath: makeSeedExtractionPath()
+    }), mean);
+    const gate = collectReleaseHardGates(payload).find(
+      (candidate) => candidate.id ===
+        "longmemeval_s_embedding_inference_calls_mean"
+    );
+
+    expect(gate).toMatchObject({ current, target: 1, passed, missing: mean === undefined });
+    expect(releaseHardGateAllowsLatestPassing(
+      payload,
+      passed ? await verifiedEvidenceForPayload(payload) : undefined
+    )).toBe(passed);
+  }
+);
+
+it("fails closed when embedding inference telemetry omits a recall", () => {
+  const payload = withEmbeddingActivation(buildCurrentLongMemPayload({
+    benchName: "public",
+    datasetName: "longmemeval_s",
+    evaluated: 500,
+    rAt5: 0.95,
+    seedExtractionPath: makeSeedExtractionPath()
+  }), 1, 499);
+  const gate = collectReleaseHardGates(payload).find(
+    (candidate) => candidate.id ===
+      "longmemeval_s_embedding_inference_calls_mean"
+  );
+
+  expect(gate).toMatchObject({ current: null, passed: false, missing: true });
+  expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
+});
+
+it("does not apply the embedding inference activation gate outside embedding-on LongMemEval-S", () => {
+  const embeddingOff = buildCurrentLongMemPayload({
+    benchName: "public",
+    datasetName: "longmemeval_s",
+    evaluated: 100,
+    rAt5: 0.95
+  });
+  const locomo = withEmbeddingActivation(buildLocomoPayload(1982, 1982, 0.95), 0);
+
+  for (const payload of [embeddingOff, locomo]) {
+    expect(collectReleaseHardGates(payload).map((gate) => gate.id))
+      .not.toContain("longmemeval_s_embedding_inference_calls_mean");
+  }
+});
+
   it("keeps staged public coverage out of latest-passing after report gates pass", () => {
     const payload = buildCurrentLongMemPayload({
       benchName: "public",
@@ -60,7 +180,7 @@ function buildCurrentLongMemPayload(input: {
 
     expect(collectReleaseHardGates(payload).length).toBeGreaterThan(0);
     expect(collectReleaseHardGates(payload).every((gate) => gate.passed)).toBe(true);
-    expect(releaseHardGateVerdict(payload)).toBe("ok");
+    expect(releaseMetricGateVerdict(payload)).toBe("ok");
     expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
   });
 
@@ -76,7 +196,7 @@ function buildCurrentLongMemPayload(input: {
       rAt5: 0.95
     });
 
-    expect(releaseHardGateVerdict(payload)).toBe("ok");
+    expect(releaseMetricGateVerdict(payload)).toBe("ok");
     expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
   });
 
@@ -118,11 +238,24 @@ function buildCurrentLongMemPayload(input: {
     );
   });
 
+  it("does not let a self-consistent plain KPI payload mint release evidence", () => {
+    const forged = buildReleaseGradePublic(makeSeedExtractionPath());
+    expect(forged.selection_contract?.expected_cohort_counts).toEqual({
+      answerable: 500,
+      abstention: 0
+    });
+
+    expect(releaseHardGateAllowsLatestPassing(forged)).toBe(false);
+  });
+
   it.each([
     ["public" as const, "longmemeval_s"],
     ["public-multiturn" as const, "longmemeval_s:multiturn"],
     ["public-crossquestion" as const, "longmemeval_s:crossquestion"]
-  ])("allows release-grade %s coverage to be latest-passing", (benchName, datasetName) => {
+  ])("rejects self-consistent %s coverage when external selection is missing", (
+    benchName,
+    datasetName
+  ) => {
     const payload = buildCurrentLongMemPayload({
       benchName,
       datasetName,
@@ -130,8 +263,52 @@ function buildCurrentLongMemPayload(input: {
       rAt5: 0.95,
       seedExtractionPath: makeSeedExtractionPath()
     });
+    const withoutExternalSelection = { ...payload, selection_contract: undefined };
 
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
+    expect(releaseHardGateAllowsLatestPassing(withoutExternalSelection)).toBe(false);
+  });
+
+  it.each([
+    ["dataset SHA", (payload: KpiPayload) => ({
+      ...payload,
+      selection_contract: { ...payload.selection_contract!, dataset_sha256: "e".repeat(64) }
+    })],
+    ["selected count", (payload: KpiPayload) => ({
+      ...payload,
+      selection_contract: { ...payload.selection_contract!, selected_count: 499 }
+    })],
+    ["ordered ID digest", (payload: KpiPayload) => ({
+      ...payload,
+      selection_contract: { ...payload.selection_contract!, selected_id_digest: "e".repeat(64) }
+    })],
+    ["expected cohorts", (payload: KpiPayload) => ({
+      ...payload,
+      selection_contract: {
+        ...payload.selection_contract!,
+        expected_cohort_counts: { answerable: 499, abstention: 1 }
+      }
+    })],
+    ["ordered assignment digest", (payload: KpiPayload) => ({
+      ...payload,
+      selection_contract: {
+        ...payload.selection_contract!,
+        cohort_assignment_digest: "e".repeat(64)
+      }
+    })],
+    ["observed row ordering", (payload: KpiPayload) => ({
+      ...payload,
+      kpi: { ...payload.kpi, per_scenario: [...payload.kpi.per_scenario].reverse() }
+    })]
+  ])("rejects external selection %s drift at the raw gate", (_label, forge) => {
+    const payload = buildCurrentLongMemPayload({
+      benchName: "public",
+      datasetName: "longmemeval_s",
+      evaluated: 500,
+      rAt5: 0.95,
+      seedExtractionPath: makeSeedExtractionPath()
+    });
+
+    expect(releaseHardGateAllowsLatestPassing(forge(payload))).toBe(false);
   });
 
   it("fails closed for legacy v1 abstention without measurement attribution", () => {
@@ -177,7 +354,7 @@ function buildCurrentLongMemPayload(input: {
       kpi: {
         ...current.kpi,
         quality_metrics: {
-          ...current.kpi.quality_metrics,
+          ...current.kpi.quality_metrics!,
           abstention: legacyAbstention()
         }
       }
@@ -235,93 +412,6 @@ function buildCurrentLongMemPayload(input: {
     const payload = buildIneligiblePayload(attribution);
     expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
   });
-  it("blocks degraded seed extraction after numeric and measurement gates pass", () => {
-    const payload = buildReleaseGradePublic(makeSeedExtractionPath({
-      path: "no_credentials_fallback",
-      cache_hits: 0,
-      offline_fallbacks: 8
-    }));
-
-    expect(collectReleaseHardGates(payload).every((gate) => gate.passed)).toBe(true);
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
-  });
-
-  it("allows clean seed extraction after numeric and measurement gates pass", () => {
-    const payload = buildReleaseGradePublic(makeSeedExtractionPath());
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
-  });
-
-  it("blocks live extraction calls from cache-only release evidence", () => {
-    const payload = buildReleaseGradePublic(makeSeedExtractionPath({ llm_calls: 1 }));
-
-    expect(collectReleaseHardGates(payload).every((gate) => gate.passed)).toBe(true);
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
-  });
-
-  it.each([
-    ["llm_calls", { llm_calls: 1 }],
-    ["offline_fallbacks", { offline_fallbacks: 1 }],
-    ["live_extraction_failures", { live_extraction_failures: 1 }],
-    ["cached_extraction_failures", { cached_extraction_failures: 1 }]
-  ] as const)("rejects non-cache-only %s provenance consistently", (_field, override) => {
-    const path = makeSeedExtractionPath(override);
-    const payload = buildReleaseGradePublic(path);
-
-    expect(isCacheOnlySeedExtractionPath(path)).toBe(false);
-    expect(evaluateSeedExtractionReleaseBlocker(payload)).not.toBeNull();
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
-  });
-
-  it.each([
-    ["longmemeval_s_no_gold", { no_gold_count: 1 }],
-    ["longmemeval_s_evaluator_identity_issue", { evaluator_identity_issue_count: 1 }]
-  ])("fails the %s hard gate independently of candidate absence", (gateId, override) => {
-    const current = buildReleaseGradePublic(makeSeedExtractionPath());
-    const payload = {
-      ...current,
-      kpi: {
-        ...current.kpi,
-        quality_metrics: {
-          ...current.kpi.quality_metrics,
-          candidate_absent_count: 0,
-          ...override
-        }
-      }
-    } as KpiPayload;
-
-    expect(collectReleaseHardGates(payload)).toContainEqual(
-      expect.objectContaining({ id: gateId, passed: false, target: 0 })
-    );
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
-  });
-
-  it("blocks missing seed extraction after numeric and measurement gates pass", () => {
-    const payload = buildReleaseGradePublic();
-    expect(collectReleaseHardGates(payload).every((gate) => gate.passed)).toBe(true);
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
-  });
-
-  it("keeps missing seed extraction backward-compatible for LoCoMo", () => {
-    expect(releaseHardGateAllowsLatestPassing(buildLocomoPayload(1982, 1982, 0.56)))
-      .toBe(true);
-  });
-
-  it("blocks an explicitly degraded seed path on a future non-LongMem bench", () => {
-    const base = buildLocomoPayload(1982, 1982, 0.95);
-    const payload: KpiPayload = {
-      ...base,
-      kpi: {
-        ...base.kpi,
-        seed_extraction_path: makeSeedExtractionPath({
-          offline_fallbacks: 3,
-          live_extraction_failures: 3
-        })
-      }
-    };
-
-    expect(collectReleaseHardGates(payload).every((gate) => gate.passed)).toBe(true);
-    expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
-  });
 function zeroAbstention() {
   return {
     schema_version: "bench-abstention.v2" as const,
@@ -346,7 +436,7 @@ function buildIneligiblePayload(
       status: "ineligible",
       gate_eligible: false,
       ...attribution
-    },
+    } as NonNullable<KpiPayload["measurement_attribution"]>,
     kpi: {
       ...buildPayload("abc1234").kpi,
       seed_extraction_path: makeSeedExtractionPath(),
@@ -363,16 +453,4 @@ function buildIneligiblePayload(
       }
     }
   };
-}
-
-function buildReleaseGradePublic(
-  seedExtractionPath?: KpiPayload["kpi"]["seed_extraction_path"]
-): KpiPayload {
-  return buildCurrentLongMemPayload({
-    benchName: "public",
-    datasetName: "longmemeval_s",
-    evaluated: 500,
-    rAt5: 0.95,
-    seedExtractionPath
-  });
 }

@@ -5,6 +5,8 @@ import {
   RecallCandidateAnswerFeaturesSchema
 } from "../harness/recall-diagnostics-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
+import { validateQuestionMeasurementStatus } from
+  "./measurement/question-measurement-status.js";
 export { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
 
 // Explicit zod schema for the bench-side diagnostic records produced by
@@ -240,6 +242,7 @@ const LongMemEvalReplayCandidateSchema = z
 
 const LongMemEvalQuestionCohortLedgerSchema = z
   .object({
+    measurement_evidence_mode: z.literal("legacy_synthesized").optional(),
     measurement_status: z.enum([
       "scorable",
       "abstention_unscorable",
@@ -431,5 +434,22 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     quality_axes: LongMemEvalQuestionMeasurementAxesSchema.optional(),
     cohort_ledger: LongMemEvalQuestionCohortLedgerSchema.optional(),
     gold: z.array(LongMemEvalGoldDiagnosticSchema).readonly()
+  })
+  .superRefine((diagnostic, context) => {
+    if (diagnostic.cohort_ledger === undefined) return;
+    try {
+      validateQuestionMeasurementStatus({
+        isAbstention: diagnostic.is_abstention,
+        legacyDiagnostic:
+          diagnostic.cohort_ledger.measurement_evidence_mode === "legacy_synthesized",
+        cohortLedger: diagnostic.cohort_ledger
+      });
+    } catch {
+      context.addIssue({
+        code: "custom",
+        message: "persisted measurement status contradicts primitive axes",
+        path: ["cohort_ledger", "measurement_status"]
+      });
+    }
   })
   .readonly();

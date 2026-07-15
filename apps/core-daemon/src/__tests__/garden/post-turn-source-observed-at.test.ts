@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 import {
   cleanupPostTurnExtractHarnesses,
   createPostTurnPayload,
@@ -56,7 +57,7 @@ describe("post-turn Garden source observation", () => {
   });
 
   it("does not shift source_observed_at to worker process time after delay", async () => {
-    const compile = vi.fn(async () => []);
+    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => []);
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
       localCompile: compile

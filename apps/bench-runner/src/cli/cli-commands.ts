@@ -1,8 +1,10 @@
 import process from "node:process";
 import { z } from "zod";
 import {
-  releaseHardGateVerdict,
-  type KpiPayload
+  releaseMetricGateVerdict,
+  verifiedLongMemEvalEvidenceMatches,
+  type KpiPayload,
+  type VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
 import { fetchLongMemEval } from "../longmemeval/fetch.js";
 import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
@@ -64,7 +66,10 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
     process.stdout.write(renderLongMemEvalStart(opts, qaOption));
     const result = await runLongMemEval(buildLongMemEvalRunOptions(opts, qaOption));
     process.stdout.write(renderLongMemEvalResult(result));
-    return exitCodeForBenchmarkResult(result.payload);
+    return exitCodeForBenchmarkResult(
+      result.payload,
+      result.evidenceContext ?? undefined
+    );
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval: ${err instanceof Error ? err.message : String(err)}\n`
@@ -197,7 +202,13 @@ export async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind
+      embeddingProviderKind: opts.embeddingProviderKind,
+      ...(opts.pinnedMetaRoot === undefined ? {} : {
+        pinnedMetaRoot: opts.pinnedMetaRoot
+      }),
+      ...(opts.extractionCacheRoot === undefined ? {} : {
+        extractionCacheRoot: opts.extractionCacheRoot
+      })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
@@ -207,7 +218,10 @@ export async function runLongMemEvalMultiturnCommand(opts: ParsedFlags): Promise
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    return exitCodeForBenchmarkResult(result.payload);
+    return exitCodeForBenchmarkResult(
+      result.payload,
+      result.evidenceContext ?? undefined
+    );
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval-multiturn: ${err instanceof Error ? err.message : String(err)}\n`
@@ -233,7 +247,13 @@ export async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Pro
       historyRoot: opts.historyRoot,
       dataDir: opts.dataDir,
       embeddingMode: opts.embeddingMode,
-      embeddingProviderKind: opts.embeddingProviderKind
+      embeddingProviderKind: opts.embeddingProviderKind,
+      ...(opts.pinnedMetaRoot === undefined ? {} : {
+        pinnedMetaRoot: opts.pinnedMetaRoot
+      }),
+      ...(opts.extractionCacheRoot === undefined ? {} : {
+        extractionCacheRoot: opts.extractionCacheRoot
+      })
     });
     const kpi = result.payload.kpi;
     process.stdout.write(
@@ -243,7 +263,10 @@ export async function runLongMemEvalCrossQuestionCommand(opts: ParsedFlags): Pro
         `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
         `  KPI: ${result.kpiPath}\n`
     );
-    return exitCodeForBenchmarkResult(result.payload);
+    return exitCodeForBenchmarkResult(
+      result.payload,
+      result.evidenceContext ?? undefined
+    );
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner longmemeval-crossquestion: ${err instanceof Error ? err.message : String(err)}\n`
@@ -393,11 +416,21 @@ export async function runControlledReplayCommand(opts: ParsedFlags): Promise<num
   }
 }
 
-function exitCodeForBenchmarkResult(payload: KpiPayload): number {
+function exitCodeForBenchmarkResult(
+  payload: KpiPayload,
+  evidence?: VerifiedLongMemEvalEvidenceContext
+): number {
   const seedExtractionExitCode = seedExtractionReleaseBlockerExitCode(payload);
   if (seedExtractionExitCode !== 0) return seedExtractionExitCode;
-  if (releaseHardGateVerdict(payload) === "fail") return 1;
+  if (releaseMetricGateVerdict(payload) === "fail") return 1;
+  if (isLongMemEvalSplit(payload.split) &&
+      !verifiedLongMemEvalEvidenceMatches(payload, evidence)) return 1;
   return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
+}
+
+function isLongMemEvalSplit(split: KpiPayload["split"]): boolean {
+  return split === "longmemeval-s" || split === "longmemeval-oracle" ||
+    split === "longmemeval-m";
 }
 
 /**

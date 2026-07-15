@@ -12,16 +12,19 @@ export function buildMergedLongMemEvalDiagnosticsSidecar(
   shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
   evidence: LongMemEvalArchiveEvidenceSummary
 ): MergedLongMemEvalDiagnosticsPayload {
-  const questions = normalizeMergedQuestions(shardDiagnostics.flatMap((diagnostics) => {
-    if (diagnostics === null) {
-      throw new Error(
-        "merge refused: missing diagnostics sidecar for one or more shards"
-      );
-    }
-    return diagnostics.questions ?? [];
-  }));
+  const questions = normalizeMergedQuestions(
+    shardDiagnostics.flatMap((diagnostics) => {
+      if (diagnostics === null) {
+        throw new Error(
+          "merge refused: missing diagnostics sidecar for one or more shards"
+        );
+      }
+      return diagnostics.questions ?? [];
+    }),
+    payload.answerable_evaluated_count === undefined
+  );
   assertMergedDiagnosticsQuestionsMatchKpi(payload, questions);
-  const summary = collectMergedDiagnosticsSummary(payload, shardDiagnostics, questions.length);
+  const summary = collectMergedDiagnosticsSummary(payload, shardDiagnostics, questions);
   return {
     sidecar: buildMergedDiagnosticsSidecar(payload, evidence, questions, summary),
     question_count: summary.questionCount,
@@ -58,6 +61,7 @@ function buildMergedDiagnosticsSidecar(
     embedding_mode: summary.embeddingMode,
     policy_shape: payload.policy_shape,
     simulate_report: payload.simulate_report,
+    seed_extraction_path: payload.kpi.seed_extraction_path,
     ...(summary.reportUsage === null ? {} : { report_usage: summary.reportUsage }),
     ...(evidence.report_side_effects === null
       ? {}
@@ -83,7 +87,7 @@ function buildMergedDiagnosticsSidecar(
 function collectMergedDiagnosticsSummary(
   payload: KpiPayload,
   diagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
-  completedCount: number
+  questions: readonly LongMemEvalQuestionDiagnostic[]
 ): MergedDiagnosticsSummary {
   const present = diagnostics.filter(
     (sidecar): sidecar is LongMemEvalDiagnosticsSidecar => sidecar !== null
@@ -102,17 +106,32 @@ function collectMergedDiagnosticsSummary(
     queryEmbeddingCache: aggregateQueryEmbeddingCache(present.flatMap((sidecar) =>
       sidecar.query_embedding_cache === undefined ? [] : [sidecar.query_embedding_cache]
     )),
-    missTaxonomySummary: aggregateMissTaxonomySummary(diagnostics),
-    questionFailures: aggregateQuestionFailures(diagnostics, completedCount)
+    missTaxonomySummary: aggregateMissTaxonomySummary(diagnostics, questions),
+    questionFailures: aggregateQuestionFailures(diagnostics, questions.length)
   };
 }
 
 function normalizeMergedQuestions(
-  questions: readonly LongMemEvalQuestionDiagnostic[]
+  questions: readonly LongMemEvalQuestionDiagnostic[],
+  legacyMeasurementContract: boolean
 ): LongMemEvalQuestionDiagnostic[] {
-  return questions.map((question) => question.cohort_ledger === undefined
-    ? withLegacyPartialCohort(question)
-    : question);
+  if (!legacyMeasurementContract) return [...questions];
+  return questions.map(withLegacyMeasurementEvidence);
+}
+
+function withLegacyMeasurementEvidence(
+  question: LongMemEvalQuestionDiagnostic
+): LongMemEvalQuestionDiagnostic {
+  if (question.cohort_ledger === undefined) {
+    return withLegacyPartialCohort(question);
+  }
+  return {
+    ...question,
+    cohort_ledger: {
+      ...question.cohort_ledger,
+      measurement_evidence_mode: "legacy_synthesized"
+    }
+  };
 }
 
 function withLegacyPartialCohort(
@@ -125,6 +144,7 @@ function withLegacyPartialCohort(
     candidate_pool_complete: false,
     candidates: question.candidates ?? [],
     cohort_ledger: {
+      measurement_evidence_mode: "legacy_synthesized",
       measurement_status: abstention
         ? "abstention_unscorable"
         : "evaluator_identity_unscorable",
@@ -251,14 +271,19 @@ function requiredCompactNonNegativeInteger(
 }
 
 function aggregateMissTaxonomySummary(
-  shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[]
+  shardDiagnostics: readonly (LongMemEvalDiagnosticsSidecar | null)[],
+  questions: readonly LongMemEvalQuestionDiagnostic[]
 ): LongMemEvalMissTaxonomySummary | null {
   const summaries: LongMemEvalMissTaxonomySummary[] = [];
+  if (shardDiagnostics.some((diagnostics) => Array.isArray(diagnostics?.questions))) {
+    const currentQuestions = questions.filter((question) =>
+      question.cohort_ledger?.measurement_evidence_mode !== "legacy_synthesized"
+    );
+    summaries.push(summarizeLongMemEvalMissTaxonomy(currentQuestions));
+  }
   for (const diagnostics of shardDiagnostics) {
-    if (diagnostics === null) continue;
-    const summary = Array.isArray(diagnostics.questions)
-      ? summarizeLongMemEvalMissTaxonomy(diagnostics.questions)
-      : readCompactMissTaxonomySummary(diagnostics.miss_taxonomy_summary);
+    if (diagnostics === null || Array.isArray(diagnostics.questions)) continue;
+    const summary = readCompactMissTaxonomySummary(diagnostics.miss_taxonomy_summary);
     if (summary === null) continue;
     summaries.push(summary);
   }

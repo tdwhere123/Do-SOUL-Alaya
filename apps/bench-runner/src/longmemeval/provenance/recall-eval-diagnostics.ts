@@ -166,7 +166,7 @@ function assertEmbeddingIdentity(
       assertDisabledEmbeddingEvidence(question, summaries);
       continue;
     }
-    // Query warmup may be null: encode belongs inside timed recall (G6).
+    // Query warmup may be null because encoding belongs inside timed recall.
     // Document warmup must still prove bi-encoder identity.
     assertEnabledEmbeddingEvidence(question, identity, [
       question.document_embedding_warmup,

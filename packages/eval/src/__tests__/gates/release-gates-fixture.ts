@@ -2,6 +2,11 @@ import {
   KpiPayloadSchema,
   type KpiPayload
 } from "../../schema/kpi-schema.js";
+import { createLongMemEvalSelectionContractIdentity } from
+  "../../schema/longmemeval-selection-contract.js";
+import { VERIFIED_TEST_DATASET_SHA256 } from "./verified-dataset-fixture.js";
+
+const FIXTURE_DATASET_SHA = VERIFIED_TEST_DATASET_SHA256;
 
 export function makeSeedExtractionPath(
   input: Partial<NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>> = {}
@@ -100,13 +105,17 @@ export function eligibleMeasurementAttribution(): NonNullable<
   KpiPayload["measurement_attribution"]
 > {
   return {
-    schema_version: "bench-measurement-attribution.v2",
+    schema_version: "bench-measurement-attribution.v3",
     status: "eligible",
     gate_eligible: true,
     evidence_status: "complete",
     candidate_pool_complete: true,
     provenance_complete: true,
-    abstention_calibration_status: "not_applicable",
+    measurement_scope: "answerable_recall",
+    abstention_evaluation_status: "excluded_not_evaluated",
+    abstention_calibration_status: "uncalibrated",
+    abstention_gate_eligible: false,
+    abstention_evidence_status: "current_uncalibrated",
     evaluator_identity_status: "complete"
   };
 }
@@ -173,21 +182,52 @@ export function passingQualityMetrics(
 
 export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload {
   const evaluated = payload.evaluated_count;
+  const hitCount = Math.round(payload.kpi.r_at_5 * evaluated);
+  const missCount = evaluated - hitCount;
+  const rows = Array.from({ length: evaluated }, (_, index) => ({
+    id: `question-${index + 1}`,
+    version: 1,
+    hit_at_5: index < hitCount,
+    scorable: true,
+    measurement_cohort: "answerable" as const,
+    tier: "hot" as const
+  }));
+  const datasetSha256 = payload.dataset.checksum_sha256 ?? FIXTURE_DATASET_SHA;
   return KpiPayloadSchema.parse({
     ...payload,
+    dataset: { ...payload.dataset, checksum_sha256: datasetSha256 },
     answerable_evaluated_count: evaluated,
     measurement_attribution: eligibleMeasurementAttribution(),
+    selection_contract: createLongMemEvalSelectionContractIdentity({
+      datasetSha256,
+      assignments: rows.map((row) => ({
+        question_id: row.id,
+        dataset_cohort: "answerable"
+      }))
+    }),
     kpi: {
       ...payload.kpi,
-      per_scenario: Array.from({ length: evaluated }, (_, index) => ({
-        id: `question-${index + 1}`,
-        version: 1,
-        hit_at_5: index < Math.round(payload.kpi.r_at_5 * evaluated),
-        scorable: true,
-        tier: "hot" as const
-      })),
+      per_scenario: rows,
       quality_metrics: {
         ...passingQualityMetrics(evaluated),
+        measurement_cohort_counts: {
+          evaluated,
+          non_abstention: evaluated,
+          abstention: 0,
+          scorable_answerable: evaluated,
+          unscorable_answerable: 0,
+          hit_at_5: hitCount,
+          miss_at_5: missCount
+        },
+        unscorable_reason_distribution: {},
+        miss_taxonomy_distribution: {
+          candidate_absent: 0,
+          materialization_drop: 0,
+          budget_drop: 0,
+          delivery_order_drop: missCount,
+          answer_set_coverage_drop: 0,
+          evaluation_or_gold_issue: 0
+        },
         abstention: {
           schema_version: "bench-abstention.v2",
           total: 0,
@@ -198,6 +238,28 @@ export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload
           gate_eligible: false
         }
       }
+    }
+  });
+}
+
+export function buildReleaseGradePublic(
+  seedExtractionPath?: KpiPayload["kpi"]["seed_extraction_path"]
+): KpiPayload {
+  const base = buildPayload("abc1234");
+  return withEligibleMeasurementContract({
+    ...base,
+    bench_name: "public",
+    split: "longmemeval-s",
+    dataset: { name: "longmemeval_s", size: 500, source: "fixture" },
+    sample_size: 500,
+    evaluated_count: 500,
+    kpi: {
+      ...base.kpi,
+      r_at_5: 0.95,
+      latency_ms_p95: 110,
+      ...(seedExtractionPath === undefined
+        ? {}
+        : { seed_extraction_path: seedExtractionPath })
     }
   });
 }

@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { createGunzip } from "node:zlib";
 import type { LongMemEvalDiagnosticsSidecar } from "../diagnostics-types.js";
 import { DiagnosticsJsonStreamReader } from "./artifact-json-reader.js";
@@ -13,6 +14,29 @@ export async function readDiagnosticsGzipStream(
   options: { readonly maxQuestionChars?: number } = {}
 ): Promise<LongMemEvalDiagnosticsSidecar> {
   const source = createArtifactReadStream(artifactPath);
+  return readDiagnosticsGzipSource(
+    source,
+    artifactSourceLabel(artifactPath),
+    options
+  );
+}
+
+export async function readDiagnosticsGzipBytes(
+  contents: Uint8Array,
+  options: { readonly maxQuestionChars?: number } = {}
+): Promise<LongMemEvalDiagnosticsSidecar> {
+  return readDiagnosticsGzipSource(
+    Readable.from([contents]),
+    "verified full_diagnostics bytes",
+    options
+  );
+}
+
+async function readDiagnosticsGzipSource(
+  source: Readable,
+  sourceLabel: string,
+  options: { readonly maxQuestionChars?: number }
+): Promise<LongMemEvalDiagnosticsSidecar> {
   const gunzip = createGunzip();
   const reader = new DiagnosticsJsonStreamReader(options.maxQuestionChars);
   source.once("error", (error) => gunzip.destroy(error));
@@ -26,18 +50,27 @@ export async function readDiagnosticsGzipStream(
     if (hasCode(error, "ENOENT")) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `failed to read gzip diagnostics ${artifactSourceLabel(artifactPath)}: ${message}`
+      `failed to read gzip diagnostics ${sourceLabel}: ${message}`
     );
   }
 }
 
 export async function* streamDiagnosticsGzipQuestions(
   artifactPath: ArtifactReadSource,
-  options: { readonly maxQuestionChars?: number } = {}
+  options: {
+    readonly maxQuestionChars?: number;
+    readonly observeArtifactChunk?: (chunk: Uint8Array) => void;
+  } = {}
 ): AsyncGenerator<LongMemEvalDiagnosticsSidecar["questions"][number]> {
   const source = createArtifactReadStream(artifactPath);
   const gunzip = createGunzip();
   const reader = new DiagnosticsJsonStreamReader(options.maxQuestionChars, true);
+  if (options.observeArtifactChunk !== undefined) {
+    const observe = options.observeArtifactChunk;
+    source.on("data", (chunk: string | Buffer) => {
+      observe(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    });
+  }
   source.once("error", (error) => gunzip.destroy(error));
   source.pipe(gunzip);
   try {

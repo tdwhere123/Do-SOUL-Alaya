@@ -10,12 +10,14 @@ export function createArtifactReadStream(source: ArtifactReadSource): ReadStream
 }
 
 export async function* decodeArtifactUtf8(
-  chunks: AsyncIterable<unknown>
+  chunks: AsyncIterable<unknown>,
+  observeArtifactChunk?: (chunk: Uint8Array) => void
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   try {
     for await (const chunk of chunks) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      observeArtifactChunk?.(bytes);
       const text = decoder.decode(bytes, { stream: true });
       if (text.length > 0) yield text;
     }

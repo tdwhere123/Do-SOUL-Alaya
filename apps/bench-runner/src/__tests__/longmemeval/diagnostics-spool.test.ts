@@ -46,6 +46,9 @@ describe("LongMemEval diagnostics spool", () => {
     const parsed = await readExternalDiagnosticsSidecarArtifact(artifactPath);
     expect(parsed.questions).toHaveLength(200);
     expect(parsed.questions[0]?.candidates).toHaveLength(50);
+    await expect(spool.append(question("after-seal", 1))).rejects.toThrow(
+      /diagnostics spool is sealed/u
+    );
     await spool.dispose();
   });
 

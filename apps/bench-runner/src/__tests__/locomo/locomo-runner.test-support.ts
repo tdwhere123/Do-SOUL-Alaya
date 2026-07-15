@@ -249,6 +249,15 @@ export function buildRecallResult(objectId = "memory-d1") {
     degradation_reason: null,
     diagnostics: {
       embedding_provider_status: "provider_returned",
+      token_economy: {
+        delivered_context_tokens_estimate: 1,
+        coarse_pool_size: 4,
+        fine_evaluated: 2,
+        fine_pruned_count: 2,
+        fine_priority_overflow_count: 1,
+        fusion_families_with_hits: 2,
+        embedding_inference_calls: 0
+      },
       candidates: [
         {
           object_id: objectId,

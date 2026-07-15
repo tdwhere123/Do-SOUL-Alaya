@@ -49,7 +49,7 @@ describe("merge-longmemeval compact diagnostics", () => {
     expect(await runCli([
       "merge-longmemeval", "--variant", "s", "--history-root", historyRoot,
       "--shards", shardA, shardB
-    ])).toBe(0);
+    ])).toBe(1);
 
     const diagnostics = await readMergedDiagnostics(historyRoot);
     expect(diagnostics.question_count).toBe(10);

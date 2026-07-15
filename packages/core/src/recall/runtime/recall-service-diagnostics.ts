@@ -27,6 +27,7 @@ export type RecallAdmissionPlane =
 export type RecallCandidateDropReason =
   | "duplicate"
   | "dimension_limit"
+  | "embedding_head_dominance"
   | "max_entries"
   | "max_total_tokens";
 
@@ -261,6 +262,8 @@ export interface RecallTokenEconomy {
   readonly fine_evaluated: number;
   // Coarse candidates dropped by the coarse→fine waist before scoring.
   readonly fine_pruned_count: number;
+  // Priority candidates excluded because all classes share the same hard fine-assessment budget.
+  readonly fine_priority_overflow_count: number;
   // Distinct fusion families with any member-stream hit (~5), not raw lane count.
   readonly fusion_families_with_hits: number;
   // Embedding provider inference calls for this recall: 0 when not requested / cache hit / failed, 1 on a fresh invocation.

@@ -12,13 +12,18 @@ import {
   type HistoryLayout
 } from "../../history/history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
+import { createLongMemEvalSelectionContractIdentity } from
+  "../../schema/longmemeval-selection-contract.js";
 import { renderFindings } from "../../reporting/report.js";
 import { collectReleaseHardGates, releaseHardGateAllowsLatestPassing } from "../../gates/release-gates.js";
+import { verifiedEvidenceForPayload } from "../gates/verified-evidence-fixture.js";
 import {
   buildFullLongMemEvalPayload,
   buildLivePayload,
   buildLocomoPayload,
-  buildPayload} from "./history-fixture.js";
+  buildPayload,
+  FIXTURE_LONGMEMEVAL_DATASET_SHA
+} from "./history-fixture.js";
 
 describe("history archive", () => {
   let layout: HistoryLayout;
@@ -26,7 +31,13 @@ describe("history archive", () => {
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "bench-history-"));
-    layout = { historyRoot: root };
+    layout = {
+      historyRoot: root,
+      verifyLongMemEvalEvidence: async ({ payload }) =>
+        payload.selection_contract === undefined
+          ? null
+          : verifiedEvidenceForPayload(payload)
+    };
   });
 
   afterEach(async () => {
@@ -75,6 +86,18 @@ describe("history archive", () => {
 
     expect(JSON.parse(await readFile(path.join(root, "public", "latest-run.json"), "utf8")).slug)
       .toBe(slug);
+    await expect(readFile(path.join(root, "public", "latest-passing.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not advance latest-passing for an otherwise eligible LongMemEval without evidence", async () => {
+    layout = { historyRoot: root };
+    const slug = "2026-05-16T090000Z-0dddddd";
+    const payload = buildFullLongMemEvalPayload("public", "0dddddd", 0.95);
+
+    await writeEntry(layout, "public", slug, payload, "report", null);
+
+    expect((await readLatest(layout, "public"))?.alaya_commit).toBe("0dddddd");
     await expect(readFile(path.join(root, "public", "latest-passing.json"), "utf8"))
       .rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -132,11 +155,30 @@ describe("history archive", () => {
       "0bbbbbb",
       1
     );
+    const limitedRows = fullLimited.kpi.per_scenario.slice(0, 20);
     const limited = KpiPayloadSchema.parse({
       ...fullLimited,
       evaluated_count: 20,
       answerable_evaluated_count: 20,
-      kpi: { ...fullLimited.kpi, per_scenario: fullLimited.kpi.per_scenario.slice(0, 20) }
+      selection_contract: createLongMemEvalSelectionContractIdentity({
+        datasetSha256: FIXTURE_LONGMEMEVAL_DATASET_SHA,
+        assignments: limitedRows.map((row) => ({
+          question_id: row.id,
+          dataset_cohort: "answerable"
+        }))
+      }),
+      kpi: {
+        ...fullLimited.kpi,
+        per_scenario: limitedRows,
+        quality_metrics: {
+          ...fullLimited.kpi.quality_metrics!,
+          measurement_cohort_counts: {
+            evaluated: 20, non_abstention: 20, abstention: 0,
+            scorable_answerable: 20, unscorable_answerable: 0,
+            hit_at_5: 20, miss_at_5: 0
+          }
+        }
+      }
     });
 
     await writeEntry(layout, "public-multiturn", passingSlug, passing, "report", null);

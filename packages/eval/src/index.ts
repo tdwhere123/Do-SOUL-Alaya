@@ -29,6 +29,22 @@ export {
 } from "./schema/kpi-schema.js";
 
 export {
+  LongMemEvalSelectionCohortSchema,
+  LongMemEvalSelectionContractIdentitySchema,
+  computeLongMemEvalCohortAssignmentDigest,
+  computeLongMemEvalQuestionIdDigest,
+  createLongMemEvalSelectionContractIdentity,
+  findLongMemEvalSelectionBindingError,
+  findLongMemEvalQuestionIdValidationError,
+  longMemEvalSelectionContractAllowsEligibility,
+  type LongMemEvalSelectionAssignment,
+  type LongMemEvalSelectionCohort,
+  type LongMemEvalSelectionContract,
+  type LongMemEvalSelectionContractIdentity,
+  type LongMemEvalQuestionIdValidationError
+} from "./schema/longmemeval-selection-contract.js";
+
+export {
   aggregateEdgeProposalAutoAccept,
   aggregateEdgeProposalRate,
   aggregateEdgeProposalRatePerQuestion,
@@ -46,9 +62,17 @@ export {
   collectReleaseHardGates,
   combineVerdicts,
   releaseHardGateAllowsLatestPassing,
-  releaseHardGateVerdict,
+  releaseMetricGateVerdict,
   type BenchmarkHardGate
 } from "./gates/release-gates.js";
+
+export {
+  LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
+  verifyLongMemEvalEvidenceArtifactIntegrity,
+  verifiedLongMemEvalEvidenceMatches,
+  type LongMemEvalEvidenceArtifact,
+  type VerifiedLongMemEvalEvidenceContext
+} from "./gates/longmemeval-verified-evidence.js";
 
 export {
   evaluateSeedExtractionReleaseBlocker,

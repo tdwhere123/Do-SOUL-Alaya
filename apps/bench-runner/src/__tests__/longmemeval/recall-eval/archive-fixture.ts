@@ -2,6 +2,8 @@ import type { KpiPayload } from "@do-soul/alaya-eval";
 import { RECALL_EVAL_ARCHIVE_MARKER } from "../../../longmemeval/recall-eval-archive.js";
 import { snapshotQuestionIdDigest } from "../../../longmemeval/snapshot.js";
 import { withEligibleMeasurementContract } from "../longmemeval-runner-fixture.js";
+import { VERIFIED_TEST_DATASET_SHA256 } from
+  "../../../../../../packages/eval/src/__tests__/gates/verified-dataset-fixture.js";
 
 function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics"]> {
   return {
@@ -77,7 +79,7 @@ export function buildPublicPayload(input: {
       name: "longmemeval_oracle",
       size: 500,
       source: "fixture",
-      checksum_sha256: input.recallEval ? "a".repeat(64) : "abc123",
+      checksum_sha256: VERIFIED_TEST_DATASET_SHA256,
       checksum_source: input.recallEval
         ? `${RECALL_EVAL_ARCHIVE_MARKER} snapshot.db`
         : "pinned longmemeval_oracle.meta.json"

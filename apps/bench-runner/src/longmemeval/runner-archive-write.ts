@@ -7,7 +7,6 @@ import {
   renderReport,
   writeEntry,
   isHistoryEntryCommittedError,
-  isCacheOnlySeedExtractionPath,
   KpiPayloadSchema,
   type HistoryLayout,
   type KpiPayload
@@ -37,30 +36,39 @@ import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 import type { LongMemEvalPayloadBuild } from "./runner-archive-payload.js";
 import {
-  buildLongMemEvalRunProvenanceSidecar,
-  isLongMemEvalRunProvenanceGateEligible,
-  LongMemEvalRunProvenanceSchema
+  buildLongMemEvalRunProvenanceSidecar
 } from "./provenance/run.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
 } from "./cohort-ledger.js";
-import {
-  buildLongMemEvalEvidenceManifest,
-  LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
-  renderLongMemEvalEvidenceManifest,
-  type LongMemEvalEvidenceArtifactInput
-} from "./evidence-manifest.js";
 import type { LongMemEvalDiagnosticsSpool } from "./diagnostics/spool.js";
-import { buildBenchmarkMeasurementAttribution } from "./measurement/attribution.js";
+import { withCurrentMeasurementAttribution } from "./measurement/archive-attribution.js";
 import {
   prepareDiagnosticsArtifactStagingPath,
   withPublishedDiagnosticsArtifact,
   type StagedDiagnosticsArtifact
 } from "./measurement/artifact-transaction.js";
+import {
+  selectionContractIdentity,
+  type LongMemEvalSelectionContract
+} from "./selection/contract.js";
+import { buildArchiveEvidenceManifestSidecar } from
+  "./provenance/archive-evidence-sidecar.js";
+import {
+  createLongMemEvalHistoryLayout,
+  resolveLongMemEvalEvidenceContext
+} from "./history/evidence-context.js";
+import type { LongMemEvalReleaseEvidenceAuthority } from
+  "@do-soul/alaya-eval/internal";
 
 export async function writeLongMemEvalRunArchive(input: {
   readonly opts: LongMemEvalRunOptions;
+  readonly datasetSha256: string;
+  readonly datasetSourcePath: string;
+  readonly datasetChecksumSource: string;
+  readonly releaseEvidenceAuthority: LongMemEvalReleaseEvidenceAuthority | null;
+  readonly selectionContract: LongMemEvalSelectionContract;
   readonly aggregate: LongMemEvalRunArchiveAggregate;
   readonly build: LongMemEvalPayloadBuild;
   readonly commitInfo: BenchCommitInfo;
@@ -71,7 +79,10 @@ export async function writeLongMemEvalRunArchive(input: {
   readonly collectedLength: number;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<LongMemEvalRunResult> {
-  const layout: HistoryLayout = { historyRoot: input.opts.historyRoot };
+  const layout = createLongMemEvalHistoryLayout({
+    historyRoot: input.opts.historyRoot,
+    authority: input.releaseEvidenceAuthority
+  });
   const payload = await withLongMemEvalDiff(layout, input.build.payload);
   const slug = entrySlug(
     input.runAt,
@@ -79,7 +90,29 @@ export async function writeLongMemEvalRunArchive(input: {
     benchArchiveDiscriminator(payload.policy_shape, payload.simulate_report)
   );
   const sidecars = await buildLongMemEvalArchiveSidecars({ ...input, payload, layout, slug });
-  const entry = await withPublishedDiagnosticsArtifact(
+  const entry = await publishLongMemEvalArchiveEntry(layout, slug, sidecars);
+  const evidenceContext = await resolveLongMemEvalEvidenceContext(
+    layout,
+    path.dirname(entry.kpiPath),
+    sidecars.payload
+  );
+  return {
+    slug,
+    kpiPath: entry.kpiPath,
+    reportPath: entry.reportPath,
+    findingsPath: entry.findingsPath,
+    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
+    payload: sidecars.payload,
+    evidenceContext
+  };
+}
+
+async function publishLongMemEvalArchiveEntry(
+  layout: HistoryLayout,
+  slug: string,
+  sidecars: ArchiveSidecarBuildResult
+) {
+  return withPublishedDiagnosticsArtifact(
     sidecars.diagnosticsArtifact,
     () => writeEntry(
       layout,
@@ -98,14 +131,6 @@ export async function writeLongMemEvalRunArchive(input: {
     ),
     isHistoryEntryCommittedError
   );
-  return {
-    slug,
-    kpiPath: entry.kpiPath,
-    reportPath: entry.reportPath,
-    findingsPath: entry.findingsPath,
-    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
-    payload: sidecars.payload
-  };
 }
 
 async function withLongMemEvalDiff(
@@ -127,6 +152,8 @@ async function withLongMemEvalDiff(
 
 type ArchiveSidecarBuildInput = Readonly<{
   readonly opts: LongMemEvalRunOptions;
+  readonly datasetSha256: string;
+  readonly selectionContract: LongMemEvalSelectionContract;
   readonly aggregate: LongMemEvalRunArchiveAggregate;
   readonly build: LongMemEvalPayloadBuild;
   readonly commitInfo: BenchCommitInfo;
@@ -194,24 +221,26 @@ async function prepareArchiveSidecars(
   });
   const diff = diffKpis(input.payload, previous);
   const comparison = await buildComparisonSidecar(input, diagnostics.currentEvidence);
-  const runProvenanceSidecar = await buildLongMemEvalRunProvenanceSidecar({
-    opts: input.opts,
-    evaluatedCount: input.payload.evaluated_count,
-    commitSha7: input.payload.alaya_commit,
-    embeddingProviderLabel: input.payload.embedding_provider,
-    env: process.env
-  });
+  const runProvenanceSidecar = await buildArchiveRunProvenance(input);
   const payload = KpiPayloadSchema.parse(
-    withMeasurementAttribution(input, diagnostics, runProvenanceSidecar)
+    withCurrentMeasurementAttribution({
+      payload: input.payload,
+      failedQuestionIds: input.failedQuestionIds,
+      diagnostics: diagnostics.persistedPayload.questions,
+      provenanceContents: runProvenanceSidecar.contents
+    })
   );
   const attributedInput = { ...input, payload };
   const { report, findings } = buildRenderedArchiveDocuments(payload, previous, diff);
   const cohortLedger = renderLongMemEvalCohortLedger(
     diagnostics.persistedPayload.questions,
-    input.failedQuestionIds
+    input.failedQuestionIds,
+    input.selectionContract
   );
   const evidenceManifest = buildArchiveEvidenceManifestSidecar({
-    input: attributedInput,
+    slug: attributedInput.slug,
+    payload: attributedInput.payload,
+    failedQuestionIds: attributedInput.failedQuestionIds,
     diagnostics,
     comparison,
     runProvenanceSidecar,
@@ -230,32 +259,16 @@ async function prepareArchiveSidecars(
   };
 }
 
-function withMeasurementAttribution(
-  input: ArchiveSidecarBuildInput,
-  diagnostics: Awaited<ReturnType<typeof buildDiagnosticsSidecar>>,
-  provenanceSidecar: { readonly contents: string }
-): KpiPayload {
-  const provenance = LongMemEvalRunProvenanceSchema.parse(
-    JSON.parse(provenanceSidecar.contents)
-  );
-  const candidatePoolComplete = input.failedQuestionIds.length === 0 &&
-    diagnostics.persistedPayload.questions.every(
-      (question) => question.candidate_pool_complete
-    );
-  const provenanceComplete = isLongMemEvalRunProvenanceGateEligible(provenance) &&
-    isCacheOnlySeedExtractionPath(input.payload.kpi.seed_extraction_path);
-  const abstention = input.payload.kpi.quality_metrics?.abstention;
-  const attribution = buildBenchmarkMeasurementAttribution({
-    candidatePoolComplete,
-    provenanceComplete,
-    abstention,
-    noGoldCount: input.payload.kpi.quality_metrics?.no_gold_count,
-    evaluatorIdentityIssueCount:
-      input.payload.kpi.quality_metrics?.evaluator_identity_issue_count,
-    evaluatorIdentityUnscorableCount:
-      input.payload.kpi.quality_metrics?.evaluator_identity_unscorable_count
+function buildArchiveRunProvenance(input: ArchiveSidecarBuildInput) {
+  return buildLongMemEvalRunProvenanceSidecar({
+    opts: input.opts,
+    evaluatedCount: input.payload.evaluated_count,
+    commitSha7: input.payload.alaya_commit,
+    embeddingProviderLabel: input.payload.embedding_provider,
+    env: process.env,
+    datasetSha256: input.datasetSha256,
+    selection: selectionContractIdentity(input.selectionContract)
   });
-  return { ...input.payload, measurement_attribution: attribution };
 }
 
 function buildRenderedArchiveDocuments(
@@ -345,72 +358,6 @@ async function writeFullDiagnosticsArtifact(input: {
     stagedPath: written.artifactPath,
     identity: { bytes: written.bytes, sha256: written.sha256 }
   };
-}
-
-interface EvidenceManifestSidecarInput {
-  readonly input: Parameters<typeof buildLongMemEvalArchiveSidecars>[0];
-  readonly diagnostics: Awaited<ReturnType<typeof buildDiagnosticsSidecar>>;
-  readonly comparison: string;
-  readonly runProvenanceSidecar: { readonly filename: string; readonly contents: string };
-  readonly report: string;
-  readonly findings: string | null;
-  readonly cohortLedger: string;
-}
-
-function buildArchiveEvidenceManifestSidecar(input: EvidenceManifestSidecarInput) {
-  const provenance = LongMemEvalRunProvenanceSchema.parse(
-    JSON.parse(input.runProvenanceSidecar.contents)
-  );
-  const questions = input.diagnostics.persistedPayload.questions;
-  const cohortIdentity = JSON.parse(input.cohortLedger) as {
-    readonly question_id_digest: string;
-  };
-  const datasetSha = input.input.payload.dataset.checksum_sha256;
-  if (datasetSha === undefined) {
-    throw new Error("LongMemEval evidence manifest requires dataset.checksum_sha256");
-  }
-  const manifest = buildLongMemEvalEvidenceManifest({
-    run: {
-      slug: input.input.slug,
-      bench_name: "public",
-      split: input.input.payload.split,
-      run_at: input.input.payload.run_at,
-      alaya_commit: input.input.payload.alaya_commit,
-      dataset_sha256: datasetSha,
-      selection_manifest_sha256: provenance.question_manifest?.file_sha256 ?? null,
-      question_id_digest: cohortIdentity.question_id_digest,
-      candidate_pool_complete: input.input.failedQuestionIds.length === 0 &&
-        questions.every((row) => row.candidate_pool_complete),
-      provenance_complete:
-        input.input.payload.measurement_attribution?.provenance_complete === true
-    },
-    artifacts: buildEvidenceArtifacts(input)
-  });
-  return {
-    filename: LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
-    contents: renderLongMemEvalEvidenceManifest(manifest)
-  };
-}
-
-function buildEvidenceArtifacts(
-  input: EvidenceManifestSidecarInput
-): LongMemEvalEvidenceArtifactInput[] {
-  return [
-    { role: "kpi", path: "kpi.json", contents: `${JSON.stringify(input.input.payload, null, 2)}\n` },
-    { role: "report", path: "report.md", contents: input.report },
-    ...(input.findings === null
-      ? []
-      : [{ role: "findings" as const, path: "findings.md", contents: input.findings }]),
-    { role: "diagnostics", path: LONGMEMEVAL_DIAGNOSTICS_FILENAME, contents: input.diagnostics.compact },
-    {
-      role: "full_diagnostics",
-      path: `${LONGMEMEVAL_DIAGNOSTICS_FILENAME}.gz`,
-      identity: input.diagnostics.fullArtifactIdentity
-    },
-    { role: "cohort_ledger", path: LONGMEMEVAL_COHORT_LEDGER_FILENAME, contents: input.cohortLedger },
-    { role: "comparison", path: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: input.comparison },
-    { role: "run_provenance", path: input.runProvenanceSidecar.filename, contents: input.runProvenanceSidecar.contents }
-  ];
 }
 
 function buildCurrentEvidence(input: {

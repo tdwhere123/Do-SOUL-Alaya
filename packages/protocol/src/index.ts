@@ -69,6 +69,7 @@ export * from "./soul/path-graph-snapshot.js";
 export * from "./soul/soul-topology.js";
 export * from "./soul/activation-candidate.js";
 export * from "./soul/manifestation-budget.js";
+export * from "./soul/source-grounding-defer.js";
 export * from "./soul/execution-stance.js";
 export * from "./soul/extension-descriptors.js";
 export * from "./soul/extension-descriptor-parsers.js";

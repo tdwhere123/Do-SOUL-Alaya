@@ -9,6 +9,7 @@ import {
   type HistoryLayout
 } from "../../history/history.js";
 import type { KpiPayload } from "../../schema/kpi-schema.js";
+import { verifiedEvidenceForPayload } from "../gates/verified-evidence-fixture.js";
 import {
   buildFullLongMemEvalPayload,
   buildPayload
@@ -220,6 +221,7 @@ describe("history archive filtered latest pointers", () => {
   });
 
   it("keeps filtered latest-passing separate from a failed latest-run and advances on the next pass", async () => {
+    const verifiedLayout = withVerifiedLongMemEvalEvidence(layout);
     const passingSlug = "2026-05-14T100000Z-aaa1111-policy-chat";
     const failingSlug = "2026-05-14T110000Z-bbb2222-policy-chat";
     const nextPassingSlug = "2026-05-14T120000Z-ccc3333-policy-chat";
@@ -229,9 +231,9 @@ describe("history archive filtered latest pointers", () => {
       simulate_report: "none",
     };
 
-    await writeEntry(layout, "public", passingSlug, basePayload, "report", null);
+    await writeEntry(verifiedLayout, "public", passingSlug, basePayload, "report", null);
     await writeEntry(
-      layout,
+      verifiedLayout,
       "public",
       failingSlug,
       {
@@ -244,7 +246,7 @@ describe("history archive filtered latest pointers", () => {
     );
 
     expect(
-      (await readLatest(layout, "public", {
+      (await readLatest(verifiedLayout, "public", {
         split: "longmemeval-s",
         policyShape: "chat",
         simulateReport: "none",
@@ -252,7 +254,7 @@ describe("history archive filtered latest pointers", () => {
       }))?.alaya_commit
     ).toBe("bbb2222");
     expect(
-      (await readLatest(layout, "public", {
+      (await readLatest(verifiedLayout, "public", {
         split: "longmemeval-s",
         policyShape: "chat",
         simulateReport: "none",
@@ -262,7 +264,7 @@ describe("history archive filtered latest pointers", () => {
     ).toBe("aaa1111");
 
     await writeEntry(
-      layout,
+      verifiedLayout,
       "public",
       nextPassingSlug,
       {
@@ -275,7 +277,7 @@ describe("history archive filtered latest pointers", () => {
     );
 
     expect(
-      (await readLatest(layout, "public", {
+      (await readLatest(verifiedLayout, "public", {
         split: "longmemeval-s",
         policyShape: "chat",
         simulateReport: "none",
@@ -315,3 +317,13 @@ describe("history archive filtered latest pointers", () => {
     })).toBeNull();
   });
 });
+
+function withVerifiedLongMemEvalEvidence(layout: HistoryLayout): HistoryLayout {
+  return {
+    ...layout,
+    verifyLongMemEvalEvidence: async ({ payload }) =>
+      payload.selection_contract === undefined
+        ? null
+        : verifiedEvidenceForPayload(payload)
+  };
+}

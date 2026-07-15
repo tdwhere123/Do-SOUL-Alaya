@@ -82,7 +82,7 @@ export function runBoundaryObjectiveLane(questions, assignments, foldCount, adap
     }),
     guards,
     fold_models: Object.freeze(foldModels),
-    decision: summarizeGuardDecision(guards, currentHits, questions.length)
+    decision: summarizeGuardDecision(guards)
   });
 }
 
@@ -163,7 +163,7 @@ export function applyMonotonicGuard(scoredRows, guard) {
   return renderGuardRanking(finalRows, accepted);
 }
 
-export function summarizeGuardDecision(guards, currentHits, denominator) {
+export function summarizeGuardDecision(guards) {
   const candidates = guards.filter((guard) => guard.net_gain_count > 0);
   const ordered = [...candidates].sort((left, right) =>
     right.end_to_end_any_at_5_count - left.end_to_end_any_at_5_count ||
@@ -175,8 +175,6 @@ export function summarizeGuardDecision(guards, currentHits, denominator) {
     zero_loss_candidate_guard_names: Object.freeze(candidates.filter((guard) => guard.loss_count === 0)
       .map((guard) => guard.name)),
     best_candidate_guard: ordered[0]?.name ?? null,
-    theoretical_gate: Object.freeze({ target_hits: 85, target_denominator: 94,
-      reached: denominator === 94 && (ordered[0]?.end_to_end_any_at_5_count ?? 0) >= 85 }),
     production_authorization: "offline_evidence_only"
   });
 }

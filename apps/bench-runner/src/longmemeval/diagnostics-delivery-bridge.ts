@@ -80,6 +80,7 @@ function parseDropReason(
   if (
     value === "duplicate" ||
     value === "dimension_limit" ||
+    value === "embedding_head_dominance" ||
     value === "max_entries" ||
     value === "max_total_tokens"
   ) {

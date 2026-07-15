@@ -128,6 +128,15 @@ describe("diagnostics-delivery-bridge", () => {
     ).toBeNull();
   });
 
+  it("preserves embedding-head dominance through the diagnostic bridge", () => {
+    const roundTripped = JSON.parse(JSON.stringify(sampleCandidate({
+      budgetDropReason: "embedding_head_dominance"
+    }))) as CandidateDiagnostic;
+    expect(
+      toDeliveryMissCandidateInput(roundTripped).droppedReason
+    ).toBe("embedding_head_dominance");
+  });
+
   it("uses fusion-stage ranks only for core delivery rank", () => {
     expect(resolveCoreDeliveryRank(sampleGold())).toBeNull();
     expect(

@@ -175,13 +175,17 @@ function shard(prefix: string, answerable: number, abstention: number): KpiPaylo
     evaluated_count: evaluated,
     answerable_evaluated_count: answerable,
     measurement_attribution: {
-      schema_version: "bench-measurement-attribution.v2",
+      schema_version: "bench-measurement-attribution.v3",
       status: "ineligible",
       gate_eligible: false,
       evidence_status: "complete",
       candidate_pool_complete: true,
       provenance_complete: true,
+      measurement_scope: "answerable_recall",
+      abstention_evaluation_status: "excluded_not_evaluated",
       abstention_calibration_status: "uncalibrated",
+      abstention_gate_eligible: false,
+      abstention_evidence_status: "current_uncalibrated",
       evaluator_identity_status: "complete"
     },
     kpi: {
@@ -208,6 +212,9 @@ function shard(prefix: string, answerable: number, abstention: number): KpiPaylo
         version: 1,
         hit_at_5: index < answerable,
         scorable: index < answerable,
+        measurement_cohort: index < answerable
+          ? "answerable" as const
+          : "dataset_declared_abstention" as const,
         tier: "warm" as const,
         latency_ms: 1
       }))

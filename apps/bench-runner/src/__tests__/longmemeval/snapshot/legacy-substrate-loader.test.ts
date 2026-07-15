@@ -12,13 +12,15 @@ import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
 import { LongMemEvalRunProvenanceSchema } from "../../../longmemeval/provenance/run.js";
 import {
   snapshotManifestPath,
-  snapshotQuestionIdDigest,
-  snapshotSidecarPath
+  snapshotSidecarPath,
+  type LongMemEvalSnapshotManifest
 } from "../../../longmemeval/snapshot.js";
 import { sha256File } from "../../../longmemeval/snapshot/integrity.js";
 import { loadRecallEvalSnapshot } from "../../../longmemeval/snapshot/recall-eval-loader.js";
 import { prepareRecallEvalRestoredDb } from "../../../longmemeval/snapshot/recall-eval-db.js";
 import { restoreLegacySnapshotToDataDir } from "../../../longmemeval/snapshot/legacy-substrate.js";
+import { computeLegacySnapshotQuestionIdDigestV1 } from
+  "../../../longmemeval/snapshot/legacy-question-id-digest.js";
 import { writeLongMemEvalFixtureDataset } from "../longmemeval-fixture.js";
 import {
   createDatabaseThroughMigration,
@@ -146,7 +148,7 @@ describe("strict legacy snapshot loader", () => {
     expect(() => restoreLegacySnapshotToDataDir({
       snapshotDbPath: fixture.snapshotDbPath,
       dataDirRoot: join(fixture.root, "restore-tampered"),
-      manifest: fixture.manifest
+      manifest: currentManifestShape(fixture.manifest)
     })).toThrow(/DB SHA-256 mismatch/iu);
   });
 
@@ -170,10 +172,10 @@ describe("strict legacy snapshot loader", () => {
     restoreLegacySnapshotToDataDir({
       snapshotDbPath: fixture.snapshotDbPath,
       dataDirRoot: restoredRoot,
-      manifest: fixture.manifest
+      manifest: currentManifestShape(fixture.manifest)
     });
     expect(() => prepareRecallEvalRestoredDb({
-      manifest: fixture.manifest,
+      manifest: currentManifestShape(fixture.manifest),
       restoredDbPath: join(restoredRoot, "alaya.db"),
       legacySnapshot: true
     })).toThrow(/producer migration ledger mismatch/iu);
@@ -200,7 +202,9 @@ describe("strict legacy snapshot loader", () => {
     fixture.manifest = {
       ...fixture.manifest,
       question_count: 1,
-      question_id_digest: snapshotQuestionIdDigest(secondOnly.questions),
+      question_id_digest: computeLegacySnapshotQuestionIdDigestV1(
+        secondOnly.questions.map((question) => question.questionId)
+      ),
       artifact_integrity: {
         ...fixture.manifest.artifact_integrity,
         sidecar_sha256: await sha256File(snapshotSidecarPath(fixture.snapshotDbPath))
@@ -380,7 +384,9 @@ function buildManifest(input: {
     schema_version: 1,
     variant: VARIANT,
     question_count: input.sidecar.questions.length,
-    question_id_digest: snapshotQuestionIdDigest(input.sidecar.questions),
+    question_id_digest: computeLegacySnapshotQuestionIdDigestV1(
+      input.sidecar.questions.map((question) => question.questionId)
+    ),
     recall_pipeline_version: "fusion-rrf-synthesis-v2",
     schema_migration_version: 103,
     bench_runner_version: "0.3.11",
@@ -405,6 +411,10 @@ function buildManifest(input: {
     attribution: { status: "legacy_unattributed", gate_eligible: false },
     run_provenance: buildRunProvenance(input.sidecar.questions.length)
   };
+}
+
+function currentManifestShape(manifest: LegacyManifest): LongMemEvalSnapshotManifest {
+  return manifest as unknown as LongMemEvalSnapshotManifest;
 }
 
 function buildRunProvenance(questionCount: number) {

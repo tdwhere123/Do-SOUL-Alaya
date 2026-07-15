@@ -91,7 +91,8 @@ function buildQuestionRow(question, cohort) {
   const poolComplete = question.candidate_pool_complete === true &&
     cohort.candidate_pool_complete === true;
   if (poolComplete) assertCompleteReplayQuestion(question, cohort);
-  const scorable = poolComplete && isScorableMeasurementCohort(cohort);
+  const primitiveScorable = isScorableMeasurementCohort(cohort);
+  const scorable = poolComplete && primitiveScorable;
   const bestRanks = Object.fromEntries(STAGE_ORDER.map((stage) => [
     stage,
     scorable ? bestGoldRank(question.candidates, goldIds, STAGE_FIELDS[stage]) : null
@@ -107,10 +108,9 @@ function buildQuestionRow(question, cohort) {
   const failure = scorable && !finalHit ? classifyFailures(anyGoldAtK) : null;
   const unscorableReason = scorable
     ? null
-    : cohort.evaluation_issue_reason ??
-      (poolComplete
-        ? measurementUnscorableReason(cohort)
-        : "incomplete_candidate_pool");
+    : primitiveScorable
+      ? "incomplete_candidate_pool"
+      : measurementUnscorableReason(cohort);
   const qualityAxes = readQualityAxes(question, cohort);
   return {
     question_id: question.question_id,

@@ -3,7 +3,10 @@ import type { BenchTokenMetrics } from "../../harness/daemon.js";
 import type { BenchRecallTokenEconomy } from "../../harness/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "../diagnostics.js";
 import type { RecallEvalQuestionResult } from "../recall-eval.js";
-import { classifyQuestionMeasurementStatus } from "../measurement/question-validity.js";
+import {
+  classifyQuestionMeasurementCohort,
+  classifyQuestionMeasurementStatus
+} from "../measurement/question-validity.js";
 
 export interface RecallEvalAccumulator {
   readonly perScenario: PerScenarioRow[];
@@ -66,6 +69,7 @@ function accumulateRow(acc: RecallEvalAccumulator, result: RecallEvalQuestionRes
   acc.edgeProposalRowsPerQuestion.push([...result.edgeProposalKpiRows]);
   acc.perScenario.push({
     id: result.questionId, version: 1, hit_at_5: result.hitAt5, scorable,
+    measurement_cohort: classifyQuestionMeasurementCohort(result.diagnostics),
     tier: result.firstTier, latency_ms: result.latencyMs
   });
 }

@@ -66,66 +66,25 @@ async function main() {
   const questions = readQuestions(sidecar);
   const examples = buildExamples(questions);
   const isotonic = summarizeIsotonic(examples);
-  const report = {
+  const report = buildReport({ args, sidecar, questions, examples, isotonic });
+  console.log(JSON.stringify(report, null, 2));
+}
+
+function buildReport({ args, sidecar, questions, examples, isotonic }) {
+  return {
     schema_version: "abstention-calibration-eval.v1",
     diagnostics_path: args.diagnostics,
-    run_metadata: {
-      bench_name: sidecar.bench_name ?? null,
-      split: sidecar.split ?? null,
-      run_at: sidecar.run_at ?? null,
-      alaya_commit: sidecar.alaya_commit ?? null,
-      embedding_mode: sidecar.embedding_mode ?? null,
-      embedding_provider: sidecar.embedding_provider ?? null
-    },
-    counts: {
-      questions_total: questions.length,
-      answerable_training: examples.answerable.length,
-      synthetic_negatives: examples.syntheticNegatives.length,
-      synthetic_skipped_no_delivered_gold: examples.syntheticSkippedNoDeliveredGold,
-      true_abstention_holdout: examples.holdoutAbstentions.length
-    },
-    calibration_boundary: {
-      threshold_search_uses_true_abs_holdout: false,
-      roc_auc_uses_true_abs_holdout_for_evaluation_only: true,
-      roc_auc_excludes_synthetic_negatives: true,
-      synthetic_negative_strategy: "leave_gold_out_delivered_results_only",
-      premise_invalid_available: false,
-      premise_invalid_default: false,
-      isotonic_fit_uses_true_abs_holdout: false,
-      limitation:
-        "This sidecar does not expose premise-validity labels; premise_invalid is reported false and excluded from threshold search."
-    },
-    runtime_handoff: {
-      scorer_field: "abstention_confidence_score",
-      scorer_threshold: 0.91,
-      fused_margin_scale: 1 / 60,
-      producer:
-        "apps/bench-runner/src/longmemeval/abstention-confidence.ts — fused_score ranking dominance (top1−top2 and top1−mean(top2..top5)) with scale=1/60 (RRF k), never relevance_score",
-      missing_confidence_behavior:
-        "scoreAbstentionQuestion treats missing/null confidence as correct abstention (auto-pass)",
-      threshold_reflection:
-        "Runtime uses scale=1/60 with threshold 0.91; a live LongMemEval reflection run may still retune the threshold. This script reports ROC/AUC for raw fused margins, runtime confidence, and isotonic-calibrated variants without claiming a production AUC."
-    },
+    run_metadata: runMetadata(sidecar),
+    counts: exampleCounts(questions, examples),
+    calibration_boundary: calibrationBoundary(),
+    runtime_handoff: runtimeHandoff(),
     signal_comparison: {
       ...summarizeSignalComparison(),
       isotonic: ISOTONIC_SOURCE_SIGNALS.map(calibratedSignalName)
     },
     feature_availability: summarizeFeatureAvailability(examples),
-    signals: [
-      ...SIGNALS.map((signal) =>
-        summarizeSignal(examples.training, examples.holdoutAbstentions, signal, {
-          includeSweep: args.includeSweep
-        })
-      ),
-      ...isotonic.signals
-    ],
-    roc_auc: [
-      ...SIGNALS.map((signal) => ({
-        ...signalDefinition(signal),
-        ...summarizeRocAuc(examples.answerable, examples.holdoutAbstentions, signal)
-      })),
-      ...isotonic.roc
-    ],
+    signals: signalSummaries(args, examples, isotonic),
+    roc_auc: rocAucSummaries(examples, isotonic),
     isotonic_calibration: {
       algorithm: "pava",
       fit_split: "answerable_plus_synthetic_leave_gold_out",
@@ -133,7 +92,87 @@ async function main() {
       fits: isotonic.fits
     }
   };
-  console.log(JSON.stringify(report, null, 2));
+}
+
+function runMetadata(sidecar) {
+  return {
+    bench_name: sidecar.bench_name ?? null,
+    split: sidecar.split ?? null,
+    run_at: sidecar.run_at ?? null,
+    alaya_commit: sidecar.alaya_commit ?? null,
+    embedding_mode: sidecar.embedding_mode ?? null,
+    embedding_provider: sidecar.embedding_provider ?? null
+  };
+}
+
+function exampleCounts(questions, examples) {
+  return {
+    questions_total: questions.length,
+    answerable_training: examples.answerable.length,
+    synthetic_negatives: examples.syntheticNegatives.length,
+    synthetic_skipped_no_delivered_gold: examples.syntheticSkippedNoDeliveredGold,
+    true_abstention_holdout: examples.holdoutAbstentions.length
+  };
+}
+
+function calibrationBoundary() {
+  return {
+    threshold_search_uses_true_abs_holdout: false,
+    roc_auc_uses_true_abs_holdout_for_evaluation_only: true,
+    roc_auc_excludes_synthetic_negatives: true,
+    synthetic_negative_strategy: "leave_gold_out_delivered_results_only",
+    premise_invalid_available: false,
+    premise_invalid_default: false,
+    isotonic_fit_uses_true_abs_holdout: false,
+    limitation:
+      "This sidecar does not expose premise-validity labels; premise_invalid is reported false and excluded from threshold search."
+  };
+}
+
+function runtimeHandoff() {
+  return {
+    status: "uncalibrated",
+    scorable: false,
+    recall_scope: "answerable_recall",
+    abstention_handling: "excluded_from_recall_denominator",
+    promotion_eligible: false,
+    scorer_field: null,
+    scorer_threshold: null,
+    diagnostic_field: "abstention_confidence_score",
+    diagnostic_fused_margin_scale: 1 / 60,
+    diagnostic_producer:
+      "apps/bench-runner/src/longmemeval/abstention-confidence.ts — fused_score ranking dominance (top1−top2 and top1−mean(top2..top5)) with scale=1/60 (RRF k), never relevance_score",
+    missing_confidence_behavior:
+      "Missing, null, or present confidence does not change the fail-closed unscorable verdict.",
+    threshold_reflection:
+      "There is no runtime abstention threshold. This script reports offline ROC/AUC and sweep evidence without creating a production scorer and without claiming a production AUC.",
+    historical_threshold_reference: {
+      value: 0.91,
+      scope: "offline_comparison_only",
+      current_runtime_effect: false
+    }
+  };
+}
+
+function signalSummaries(args, examples, isotonic) {
+  return [
+    ...SIGNALS.map((signal) =>
+      summarizeSignal(examples.training, examples.holdoutAbstentions, signal, {
+        includeSweep: args.includeSweep
+      })
+    ),
+    ...isotonic.signals
+  ];
+}
+
+function rocAucSummaries(examples, isotonic) {
+  return [
+    ...SIGNALS.map((signal) => ({
+      ...signalDefinition(signal),
+      ...summarizeRocAuc(examples.answerable, examples.holdoutAbstentions, signal)
+    })),
+    ...isotonic.roc
+  ];
 }
 
 main().catch((error) => {

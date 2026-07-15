@@ -3,7 +3,7 @@ import type { KpiPayload } from "../../schema/kpi-schema.js";
 import {
   collectReleaseHardGates,
   releaseHardGateAllowsLatestPassing,
-  releaseHardGateVerdict
+  releaseMetricGateVerdict
 } from "../../gates/release-gates.js";
 import {
   buildLimitedTier1Payload,
@@ -20,7 +20,7 @@ it.each([
   const payload = buildLimitedTier1Payload(benchName, datasetName);
 
   expect(collectReleaseHardGates(payload)).toEqual([]);
-  expect(releaseHardGateVerdict(payload)).toBe("ok");
+  expect(releaseMetricGateVerdict(payload)).toBe("ok");
   expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
 });
 
@@ -28,7 +28,7 @@ it("keeps staged LoCoMo Tier 1 archives out of latest-passing", () => {
   const payload = buildLocomoPayload(100, 100, 0.99);
 
   expect(collectReleaseHardGates(payload)).toEqual([]);
-  expect(releaseHardGateVerdict(payload)).toBe("ok");
+  expect(releaseMetricGateVerdict(payload)).toBe("ok");
   expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
 });
 
@@ -60,7 +60,7 @@ it("does not treat a live strict-real payload alone as latest-passing proof", ()
   };
 
   expect(collectReleaseHardGates(payload)).toEqual([]);
-  expect(releaseHardGateVerdict(payload)).toBe("ok");
+  expect(releaseMetricGateVerdict(payload)).toBe("ok");
   expect(releaseHardGateAllowsLatestPassing(payload)).toBe(false);
 });
 
@@ -68,7 +68,7 @@ it("does not require release hard gates for self archives", () => {
   const payload = buildPayload("def5678");
 
   expect(collectReleaseHardGates(payload)).toEqual([]);
-  expect(releaseHardGateVerdict(payload)).toBe("ok");
+  expect(releaseMetricGateVerdict(payload)).toBe("ok");
   expect(releaseHardGateAllowsLatestPassing(payload)).toBe(true);
 });
 

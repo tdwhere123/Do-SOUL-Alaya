@@ -2,11 +2,25 @@ import { describe, expect, it } from "vitest";
 import { renderAbsoluteKpis } from "../../reporting/report-absolute-kpis.js";
 import { QualityMetricsSchema } from "../../schema/kpi-quality-schema.js";
 import {
+  buildFullLongMemEvalPayload,
   buildPayload,
   passingQualityMetrics
 } from "../history/history-fixture.js";
 
 describe("abstention report contract", () => {
+  it("renders answerable recall scope without promoting abstention", () => {
+    const payload = buildFullLongMemEvalPayload("public", "05d98df", 1);
+    const lines: string[] = [];
+
+    renderAbsoluteKpis(lines, payload);
+
+    expect(lines).toContain(
+      "- Measurement scope: answerable_recall (gate_eligible=true; " +
+        "dataset-declared abstention=excluded_not_evaluated, " +
+        "calibration=uncalibrated, abstention_gate_eligible=false)"
+    );
+  });
+
   it("labels the shared top-5 fused-margin verdict as uncalibrated", () => {
     const payload = buildPayload("05d98df");
     payload.kpi.quality_metrics = {

@@ -11,6 +11,8 @@ import {
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
 
+export const RECALL_TOTAL_CANDIDATE_CAP = 1000;
+
 export type RecallPolicyFilterSpec = Readonly<{
   readonly scopeFilter: readonly ScopeClass[] | null;
   readonly dimensionFilter: readonly MemoryDimension[] | null;
@@ -44,14 +46,8 @@ export function resolveRecallPolicyFiltersFromSearchRequest(
 
 export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy {
   const maxResults = Math.max(input.maxResults, 1);
-  const coarseFloor = Number.isFinite(input.coarseFloor ?? 0)
-    ? Math.max(input.coarseFloor ?? 0, 0)
-    : 0;
-  const coarseCandidateLimit = Math.min(Math.max(maxResults * 10, maxResults, coarseFloor), 1000);
-  const keywordCandidateLimit = Math.min(
-    Math.max(coarseCandidateLimit, maxResults * 10, 1),
-    1000
-  );
+  const limits = resolveRecallPolicyCandidateLimits(input, maxResults);
+  const semanticSupplementEnabled = input.embeddingSupplementEnabled ?? true;
 
   return {
     runtime_id: input.runtimeId,
@@ -67,12 +63,12 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
         domain_tag_filter: input.filters.domainTagFilter
       },
       precomputed_rank: {
-        max_candidates: coarseCandidateLimit,
+        max_candidates: limits.coarse,
         min_activation_score: null
       },
       semantic_supplement: {
-        enabled: input.embeddingSupplementEnabled ?? true,
-        max_supplement: keywordCandidateLimit,
+        enabled: semanticSupplementEnabled,
+        max_supplement: limits.semantic,
         embedding_enabled: true,
         ...(input.embeddingInjectionCap === undefined || input.embeddingInjectionCap === null
           ? {}
@@ -83,6 +79,7 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
       }
     },
     fine_assessment: {
+      max_candidates: limits.fine,
       budgets: {
         max_total_tokens: input.maxTotalTokens,
         max_entries: maxResults,
@@ -91,6 +88,32 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
       conflict_awareness: input.conflictAwareness
     }
   };
+}
+
+function resolveRecallPolicyCandidateLimits(
+  input: RecallPolicyBuilderInput,
+  maxResults: number
+): Readonly<{ coarse: number; semantic: number; fine: number }> {
+  const coarseFloor = Number.isFinite(input.coarseFloor ?? 0)
+    ? Math.max(input.coarseFloor ?? 0, 0)
+    : 0;
+  const coarse = Math.min(
+    Math.max(maxResults * 10, maxResults, coarseFloor),
+    RECALL_TOTAL_CANDIDATE_CAP
+  );
+  const keywordCandidateLimit = Math.min(
+    Math.max(coarse, maxResults * 10, 1),
+    RECALL_TOTAL_CANDIDATE_CAP
+  );
+  const semanticSupplementEnabled = input.embeddingSupplementEnabled ?? true;
+  const injectionCandidateLimit = input.embeddingInjectionCap ?? 0;
+  const fine = coarse +
+    (semanticSupplementEnabled ? keywordCandidateLimit + injectionCandidateLimit : 0);
+  return Object.freeze({
+    coarse,
+    semantic: keywordCandidateLimit,
+    fine: Math.min(fine, RECALL_TOTAL_CANDIDATE_CAP)
+  });
 }
 
 export function parseRecallPolicy(value: RecallPolicy): Readonly<RecallPolicy> {

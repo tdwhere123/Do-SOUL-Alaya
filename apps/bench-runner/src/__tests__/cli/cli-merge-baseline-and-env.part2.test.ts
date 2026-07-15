@@ -188,7 +188,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       shardA,
       shardB
     ]);
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
 
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")

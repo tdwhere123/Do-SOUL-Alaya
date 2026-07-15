@@ -1,7 +1,8 @@
-import type { TrustSummary } from "@do-soul/alaya-protocol";
+import type { SourceGroundingDeferStats, TrustSummary } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
 import type { RecallUtilizationService, RecallUtilizationStats } from "../services/recall-utilization-service.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "./bridge.js";
+import { projectSourceGroundingDeferStats } from "./source-grounding-defers/projection.js";
 
 const DEFAULT_RECALL_STATS_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -9,15 +10,8 @@ export interface StatusCommandDependencies {
   readonly trustStateSummaryProvider: (agentTarget: string) => Promise<TrustSummary>;
   readonly resolveAgentTargets?: () => Promise<readonly string[]> | readonly string[];
   readonly getGardenStatus?: () => Promise<Readonly<{ last_pass_at: string | null }>>;
-  readonly getSourceGroundingDeferStats?: () => Promise<Readonly<{
-    queue_depth: number;
-    queue_cap: number;
-    deferred_by_reason: Readonly<Record<string, number>>;
-  }>> | Readonly<{
-    queue_depth: number;
-    queue_cap: number;
-    deferred_by_reason: Readonly<Record<string, number>>;
-  }>;
+  readonly getSourceGroundingDeferStats?: () =>
+    Promise<SourceGroundingDeferStats> | SourceGroundingDeferStats;
   readonly recallUtilizationService: RecallUtilizationService;
   readonly startupStepsProvider?: (
     context: Pick<AlayaCliContext, "daemon">
@@ -43,11 +37,7 @@ interface StatusReport {
   readonly trust: readonly TrustSummary[];
   readonly garden: Readonly<{
     last_pass_at: string | null;
-    source_grounding_defers?: Readonly<{
-      queue_depth: number;
-      queue_cap: number;
-      deferred_by_reason: Readonly<Record<string, number>>;
-    }>;
+    source_grounding_defers?: SourceGroundingDeferStats;
   }>;
   readonly recall_stats?: RecallUtilizationStats;
 }
@@ -109,7 +99,7 @@ function writeHumanSummary(stream: NodeJS.WritableStream, report: StatusReport):
       .map(([reason, count]) => `${reason}=${count}`)
       .join(" ") || "(none)";
     stream.write(
-      `garden source-grounding defers: queue=${defers.queue_depth}/${defers.queue_cap} by_reason: ${reasons}\n`
+      `garden source-grounding defers: queue_total=${defers.queue_depth} cap_per_workspace=${defers.queue_cap_per_workspace} hard_limit_per_workspace=${defers.queue_hard_limit_per_workspace} blocked_total=${defers.capacity_blocked_depth} capacity=${defers.capacity_state} scope=${defers.queue_scope} by_reason: ${reasons}\n`
     );
   }
   stream.write("memory inspector: run `alaya inspect --open` to launch the loopback UI (http://127.0.0.1:5174).\n");
@@ -179,7 +169,7 @@ async function buildStatusReport(
   }
   const gardenBase = deps.getGardenStatus ? await deps.getGardenStatus() : { last_pass_at: null };
   const sourceGroundingDefers = deps.getSourceGroundingDeferStats
-    ? await deps.getSourceGroundingDeferStats()
+    ? projectSourceGroundingDeferStats(await deps.getSourceGroundingDeferStats())
     : undefined;
   const report: StatusReport = {
     checked_at: now(),

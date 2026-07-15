@@ -17,11 +17,8 @@ import type {
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { selectRecallAdmissionAttributionPlane } from "../scoring/scoring.js";
 import { buildRecallCandidateAnswerFeatures } from "./fine-assessment-answer-features.js";
-import {
-  COVERAGE_MAX_PER_GIST_SAFETY,
-  orderByCoverageMarginalGain,
-  resolveCoverageIdentity
-} from "./coverage-selection.js";
+import { orderByCoverageMarginalGain } from "./coverage-selection.js";
+import { selectEmbeddingHeadEvictions } from "./admission/embedding-head-dominance.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -32,9 +29,13 @@ export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
 interface FineAssessmentAccumulator {
   readonly selected: RecallCandidate[];
   readonly diagnostics: RecallCandidateDiagnostic[];
+  readonly admission: FineAssessmentAdmissionState;
+}
+
+interface FineAssessmentAdmissionState {
   readonly seenObjects: Set<string>;
-  readonly gistCounts: Map<string, number>;
   readonly perDimensionCounts: Map<MemoryDimensionType, number>;
+  selectedCount: number;
   totalTokens: number;
 }
 
@@ -45,7 +46,9 @@ interface FineAssessmentSelectionContext {
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
   readonly finalRelevanceByCandidateKey: ReadonlyMap<string, number>;
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
+  readonly answerRerankedCandidateKeys: ReadonlySet<string>;
   readonly captureAnswerFeatures: boolean;
+  readonly tokenEstimateByCandidateKey: Map<string, number>;
 }
 
 interface FineAssessmentAdmission {
@@ -53,7 +56,7 @@ interface FineAssessmentAdmission {
   readonly tokenEstimate: number | null;
 }
 
-export function selectFineAssessmentCandidates(params: {
+type FineAssessmentSelectionParams = Readonly<{
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
@@ -64,42 +67,89 @@ export function selectFineAssessmentCandidates(params: {
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
-}): Readonly<{
+}>;
+
+export function selectFineAssessmentCandidates(params: FineAssessmentSelectionParams): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
 }> {
-  const finalRelevanceByCandidateKey = params.finalRelevanceByCandidateKey ?? new Map();
-  const context = Object.freeze({
-    config: params.config,
-    supplementaryData: params.supplementaryData,
-    tokenEstimator: params.tokenEstimator,
-    rankByCandidateKey: params.rankByCandidateKey,
-    finalRelevanceByCandidateKey,
-    answerRelevanceRankByCandidateKey: params.answerRelevanceRankByCandidateKey ?? new Map(),
-    captureAnswerFeatures: params.captureAnswerFeatures ?? false
-  });
+  const context = createSelectionContext(params);
   const coverageOrdered = orderByCoverageMarginalGain({
     candidates: params.orderedCandidates,
-    relevanceByCandidateKey: params.coverageRelevanceByCandidateKey ?? finalRelevanceByCandidateKey,
+    relevanceByCandidateKey:
+      params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey,
     supplementaryData: params.supplementaryData
   });
-  const finalAccumulator = coverageOrdered.reduce(
-    (accumulator, candidate, index) => appendFineAssessmentCandidate(accumulator, candidate, index + 1, context),
-    createFineAssessmentAccumulator()
-  );
+  const evictions = resolveEmbeddingHeadEvictions(coverageOrdered, context);
+  const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
   return Object.freeze({
     candidates: Object.freeze([...finalAccumulator.selected]),
     diagnostics: Object.freeze([...finalAccumulator.diagnostics])
   });
 }
 
+function createSelectionContext(
+  params: FineAssessmentSelectionParams
+): FineAssessmentSelectionContext {
+  const answerRelevanceRankByCandidateKey =
+    params.answerRelevanceRankByCandidateKey ?? new Map();
+  return Object.freeze({
+    config: params.config,
+    supplementaryData: params.supplementaryData,
+    tokenEstimator: params.tokenEstimator,
+    rankByCandidateKey: params.rankByCandidateKey,
+    finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
+    answerRelevanceRankByCandidateKey,
+    answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
+    captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    tokenEstimateByCandidateKey: new Map()
+  });
+}
+
+function resolveEmbeddingHeadEvictions(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
+): ReadonlySet<string> {
+  return selectEmbeddingHeadEvictions({
+    candidates,
+    maxEntries: context.config.budgets.max_entries,
+    embeddingScores: context.supplementaryData.embeddingSimilarityScores,
+    queryProbes: context.supplementaryData.queryProbes,
+    answerRerankedCandidateKeys: context.answerRerankedCandidateKeys,
+    selectDelivered: (evictions) => collectAdmittedCandidates(candidates, context, evictions)
+  });
+}
+
+function reduceFineAssessmentCandidates(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext,
+  evictions: ReadonlySet<string>
+): FineAssessmentAccumulator {
+  return candidates.reduce(
+    (accumulator, candidate, index) => appendFineAssessmentCandidate(
+      accumulator,
+      candidate,
+      index + 1,
+      context,
+      evictions.has(candidate.fusion.candidate_key)
+    ),
+    createFineAssessmentAccumulator()
+  );
+}
+
 function createFineAssessmentAccumulator(): FineAssessmentAccumulator {
   return {
     selected: [],
     diagnostics: [],
+    admission: createAdmissionState()
+  };
+}
+
+function createAdmissionState(): FineAssessmentAdmissionState {
+  return {
     seenObjects: new Set<string>(),
-    gistCounts: new Map<string, number>(),
     perDimensionCounts: new Map<MemoryDimensionType, number>(),
+    selectedCount: 0,
     totalTokens: 0
   };
 }
@@ -108,16 +158,23 @@ function appendFineAssessmentCandidate(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
   selectionOrder: number,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  dominanceEvicted: boolean
 ): FineAssessmentAccumulator {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  const objectKey = `${candidate.objectKind ?? candidate.entry.object_kind}:${candidate.entry.object_id}`;
-  const admission = resolveAdmission(accumulator, candidate, objectKey, context);
+  if (dominanceEvicted) {
+    accumulator.diagnostics.push(createFineAssessmentDiagnostic(
+      candidate, candidateKey, selectionOrder, null, "embedding_head_dominance", context
+    ));
+    return accumulator;
+  }
+  const objectKey = buildFineAssessmentObjectKey(candidate);
+  const admission = resolveAdmission(accumulator.admission, candidate, objectKey, context);
   if (admission.droppedReason !== null) {
     accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, null, admission.droppedReason, context));
     return accumulator;
   }
-  const tokenEstimate = admission.tokenEstimate ?? context.tokenEstimator.estimate(candidate.entry.content);
+  const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
   const finalRelevance = context.finalRelevanceByCandidateKey.get(candidateKey) ?? candidate.fusion.fused_score;
   const finalRelevanceSource = context.answerRelevanceRankByCandidateKey.has(candidateKey)
     ? "answer_rerank" as const
@@ -132,45 +189,87 @@ function appendFineAssessmentCandidate(
     tokenEstimate,
     budgets: context.config.budgets,
     index: accumulator.selected.length,
-    usedTokensBeforeCandidate: accumulator.totalTokens,
+    usedTokensBeforeCandidate: accumulator.admission.totalTokens,
     governanceCeiling: context.supplementaryData.governanceCeilingByMemoryId[candidate.entry.object_id]
   });
-  const gistKey = resolveCoverageIdentity(candidate, context.supplementaryData).gistKey;
   accumulator.selected.push(nextCandidate);
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context));
-  accumulator.seenObjects.add(objectKey);
-  accumulator.gistCounts.set(gistKey, (accumulator.gistCounts.get(gistKey) ?? 0) + 1);
-  accumulator.perDimensionCounts.set(candidate.entry.dimension, (accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0) + 1);
-  accumulator.totalTokens += tokenEstimate;
+  recordAcceptedAdmission(accumulator.admission, candidate, objectKey, tokenEstimate);
   return accumulator;
 }
 
 function resolveAdmission(
-  accumulator: FineAssessmentAccumulator,
+  state: FineAssessmentAdmissionState,
   candidate: FineAssessmentCandidate,
   objectKey: string,
   context: FineAssessmentSelectionContext
 ): FineAssessmentAdmission {
-  if (accumulator.seenObjects.has(objectKey)) {
+  if (state.seenObjects.has(objectKey)) {
     return { droppedReason: "duplicate", tokenEstimate: null };
   }
-  const gistKey = resolveCoverageIdentity(candidate, context.supplementaryData).gistKey;
-  if ((accumulator.gistCounts.get(gistKey) ?? 0) >= COVERAGE_MAX_PER_GIST_SAFETY) {
-    return { droppedReason: "duplicate", tokenEstimate: null };
-  }
-  const dimensionCount = accumulator.perDimensionCounts.get(candidate.entry.dimension) ?? 0;
+  const dimensionCount = state.perDimensionCounts.get(candidate.entry.dimension) ?? 0;
   const dimensionLimit = context.config.budgets.per_dimension_limits?.[candidate.entry.dimension] ?? null;
   if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
     return { droppedReason: "dimension_limit", tokenEstimate: null };
   }
-  if (accumulator.selected.length + 1 > context.config.budgets.max_entries) {
+  if (state.selectedCount + 1 > context.config.budgets.max_entries) {
     return { droppedReason: "max_entries", tokenEstimate: null };
   }
-  const tokenEstimate = context.tokenEstimator.estimate(candidate.entry.content);
-  if (accumulator.totalTokens + tokenEstimate > context.config.budgets.max_total_tokens) {
+  const tokenEstimate = estimateCandidateTokens(candidate, context);
+  if (state.totalTokens + tokenEstimate > context.config.budgets.max_total_tokens) {
     return { droppedReason: "max_total_tokens", tokenEstimate };
   }
   return { droppedReason: null, tokenEstimate };
+}
+
+function collectAdmittedCandidates(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext,
+  evictions: ReadonlySet<string>
+): readonly FineAssessmentCandidate[] {
+  const state = createAdmissionState();
+  const delivered: FineAssessmentCandidate[] = [];
+  for (const candidate of candidates) {
+    if (evictions.has(candidate.fusion.candidate_key)) continue;
+    const objectKey = buildFineAssessmentObjectKey(candidate);
+    const admission = resolveAdmission(state, candidate, objectKey, context);
+    if (admission.droppedReason !== null) continue;
+    const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
+    recordAcceptedAdmission(state, candidate, objectKey, tokenEstimate);
+    delivered.push(candidate);
+  }
+  return delivered;
+}
+
+function recordAcceptedAdmission(
+  state: FineAssessmentAdmissionState,
+  candidate: FineAssessmentCandidate,
+  objectKey: string,
+  tokenEstimate: number
+): void {
+  state.seenObjects.add(objectKey);
+  state.perDimensionCounts.set(
+    candidate.entry.dimension,
+    (state.perDimensionCounts.get(candidate.entry.dimension) ?? 0) + 1
+  );
+  state.selectedCount += 1;
+  state.totalTokens += tokenEstimate;
+}
+
+function estimateCandidateTokens(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): number {
+  const candidateKey = buildRecallCandidateDedupeKey(candidate);
+  const cached = context.tokenEstimateByCandidateKey.get(candidateKey);
+  if (cached !== undefined) return cached;
+  const estimated = context.tokenEstimator.estimate(candidate.entry.content);
+  context.tokenEstimateByCandidateKey.set(candidateKey, estimated);
+  return estimated;
+}
+
+function buildFineAssessmentObjectKey(candidate: FineAssessmentCandidate): string {
+  return `${candidate.objectKind ?? candidate.entry.object_kind}:${candidate.entry.object_id}`;
 }
 
 function createFineAssessmentDiagnostic(

@@ -7,17 +7,40 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
 } from "../../longmemeval/extraction-cache-manifest.js";
+import { computeQuestionIdDigest } from "../../longmemeval/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../longmemeval/selection/contract.js";
+import { MERGE_TEST_DATASET_SHA256 } from
+  "../cli/cli-merge-dataset-fixture.js";
+
+const DATASET_SHA = MERGE_TEST_DATASET_SHA256;
 
 export function makeShardProvenance(
   offset: number,
   limit: number
 ): LongMemEvalRunProvenance {
+  const questionIds = Array.from({ length: limit }, (_, index) => `q-${offset + index + 1}`);
+  const assignments = questionIds.map((question_id) => ({
+    question_id,
+    dataset_cohort: "answerable" as const
+  }));
   return {
     schema_version: 1,
+    dataset_sha256: DATASET_SHA,
+    selection: {
+      schema_version: 1,
+      dataset_sha256: DATASET_SHA,
+      selected_id_digest: computeQuestionIdDigest(questionIds),
+      selected_count: questionIds.length,
+      expected_cohort_counts: { answerable: questionIds.length, abstention: 0 },
+      cohort_assignment_digest: computeCohortAssignmentDigest(assignments)
+    },
     code: {
       commit_sha7: "abc1234",
+      commit_sha: "abc1234" + "0".repeat(33),
       gate_sha256: "a".repeat(64),
+      gate_contract_path: "/tmp/frozen-contract.json",
       worktree_state_sha256: "b".repeat(64),
+      worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
         sha256: "9".repeat(64),
@@ -34,7 +57,7 @@ export function makeShardProvenance(
       system_prompt_sha256: "e".repeat(64),
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
       dataset: "longmemeval-s",
-      dataset_revision: "f".repeat(64),
+      dataset_revision: DATASET_SHA,
       requested_turns: 10,
       cached_turns: 10,
       coverage: 1,
@@ -73,14 +96,32 @@ export function makeShardProvenance(
 }
 
 export function makeRangeKpi(offset: number, limit: number) {
+  const questionIds = Array.from(
+    { length: limit },
+    (_, index) => `q-${offset + index + 1}`
+  );
+  const assignments = questionIds.map((question_id) => ({
+    question_id,
+    dataset_cohort: "answerable" as const
+  }));
   return makeShardKpi({
     evaluated_count: limit,
+    selection_contract: {
+      schema_version: 1,
+      dataset_sha256: DATASET_SHA,
+      selected_id_digest: computeQuestionIdDigest(questionIds),
+      selected_count: limit,
+      expected_cohort_counts: { answerable: limit, abstention: 0 },
+      cohort_assignment_digest: computeCohortAssignmentDigest(assignments)
+    },
     kpi: {
       ...makeShardKpi().kpi,
-      per_scenario: Array.from({ length: limit }, (_, index) => ({
-        id: `range-${offset + index}`,
+      per_scenario: questionIds.map((id) => ({
+        id,
         version: 1,
         hit_at_5: true,
+        scorable: true,
+        measurement_cohort: "answerable" as const,
         tier: "warm" as const
       }))
     }
@@ -90,8 +131,28 @@ export function makeRangeKpi(offset: number, limit: number) {
 export function makeRangeDiagnostics(offset: number, limit: number) {
   return makeShardDiagnostics({
     questions: Array.from({ length: limit }, (_, index) => ({
-      question_id: `range-${offset + index}`,
+      question_id: `q-${offset + index + 1}`,
+      candidate_pool_complete: true,
+      cohort_ledger: answerableCohortLedger(),
       candidates: []
     }))
   });
+}
+
+function answerableCohortLedger() {
+  return {
+    dataset_cohort: "answerable" as const,
+    extraction_materialization: {
+      status: "memory_emitted" as const,
+      emitted_memory_count: 1,
+      reason: null
+    },
+    evaluator_gold_identity: { status: "present" as const, object_ids: ["gold"] },
+    retrieval_status: "hit_at_5" as const,
+    evidence_status: "complete" as const,
+    evaluation_issue_reason: null,
+    candidate_pool_complete: true,
+    stage_ranks: [],
+    final_verdict: "hit_at_5" as const
+  };
 }

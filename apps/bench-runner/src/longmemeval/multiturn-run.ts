@@ -1,25 +1,40 @@
 import { resolveBenchRunnerVersion } from "../shared/version.js";
 import { EmbeddingReadinessTracker } from "./embedding-readiness.js";
-import { loadDataset } from "./fetch.js";
+import {
+  deriveLongMemEvalReleaseEvidenceAuthority,
+  loadDatasetWithIdentity
+} from "./fetch.js";
+import type { LongMemEvalReleaseEvidenceAuthority } from
+  "@do-soul/alaya-eval/internal";
 import {
   createCompileSeedRunner,
-  EXTRACTION_CACHE_ROOT,
-  resolveBenchAllowLiveExtraction
+  resolveBenchAllowLiveExtraction,
+  resolveEffectiveExtractionCacheRoot
 } from "./compile-seed.js";
 import { runLongMemEvalMultiturnQuestion } from "./multiturn-question.js";
 import { resolveBenchEmbeddingProviderLabel, resolveCommitInfo } from "./runner-helpers.js";
+import {
+  createLongMemEvalSelectionContract,
+  type LongMemEvalSelectionContract
+} from "./selection/contract.js";
 import type {
   LongMemEvalMultiturnRunOptions,
   QuestionResult
 } from "./multiturn.js";
 
-type LongMemEvalQuestions = Awaited<ReturnType<typeof loadDataset>>;
+type LoadedLongMemEvalDataset = Awaited<ReturnType<typeof loadDatasetWithIdentity>>;
+type LongMemEvalQuestions = LoadedLongMemEvalDataset["questions"];
 type LongMemEvalQuestion = LongMemEvalQuestions[number];
 
 export interface MultiturnRunContext {
   readonly opts: LongMemEvalMultiturnRunOptions;
   readonly questions: LongMemEvalQuestions;
   readonly window: readonly LongMemEvalQuestion[];
+  readonly datasetSha256: string;
+  readonly datasetChecksumSource: string;
+  readonly datasetSourcePath: string;
+  readonly releaseEvidenceAuthority: LongMemEvalReleaseEvidenceAuthority | null;
+  readonly selectionContract: LongMemEvalSelectionContract;
   readonly rounds: number;
   readonly alayaVersion: string;
   readonly commitInfo: ReturnType<typeof resolveCommitInfo>;
@@ -36,16 +51,35 @@ export interface MultiturnExecutionResult {
 export async function prepareMultiturnRun(
   opts: LongMemEvalMultiturnRunOptions
 ): Promise<MultiturnRunContext> {
-  const questions = await loadDataset(opts.variant, {
+  const extractionCacheRoot = resolveEffectiveExtractionCacheRoot(
+    opts.extractionCacheRoot
+  );
+  const effectiveOpts = { ...opts, extractionCacheRoot };
+  const dataset = await loadDatasetWithIdentity(opts.variant, {
     dataDir: opts.dataDir,
     pinnedMetaRoot: opts.pinnedMetaRoot
   });
+  const questions = dataset.questions;
   const commitInfo = resolveCommitInfo();
   const window = selectQuestionWindow(questions, opts);
   return {
-    opts,
+    opts: effectiveOpts,
     questions,
     window,
+    datasetSha256: dataset.sha256,
+    datasetChecksumSource: dataset.checksumSource,
+    datasetSourcePath: dataset.sourcePath,
+    releaseEvidenceAuthority: deriveLongMemEvalReleaseEvidenceAuthority(
+      dataset.promotionAuthority,
+      {
+        kind: "dataset_order_subset",
+        questionIds: window.map((question) => question.question_id)
+      }
+    ),
+    selectionContract: createLongMemEvalSelectionContract({
+      datasetSha256: dataset.sha256,
+      questions: window
+    }),
     rounds: Math.max(1, opts.rounds ?? 3),
     alayaVersion: resolveBenchRunnerVersion(),
     commitInfo,
@@ -54,7 +88,7 @@ export async function prepareMultiturnRun(
     embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
       opts.embeddingMode ?? "disabled", process.env, opts.embeddingProviderKind
     ),
-    seedRunner: createMultiturnSeedRunner(opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT)
+    seedRunner: createMultiturnSeedRunner(extractionCacheRoot)
   };
 }
 

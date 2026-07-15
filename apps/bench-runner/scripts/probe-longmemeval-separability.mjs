@@ -2,7 +2,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-
 import {
   assertCompleteReplayQuestion,
   loadEvidenceBundle
@@ -14,17 +13,18 @@ import {
 } from "./longmemeval-replay/separability-features.mjs";
 import { assignGroupedStratifiedFolds } from "./longmemeval-replay/separability-folds.mjs";
 import { runBoundaryObjectiveLane } from "./longmemeval-replay/separability-boundary-objective.mjs";
-import { isScorableMeasurementCohort } from "./longmemeval-replay/measurement-status.mjs";
+import { resolveSeparabilityEvidenceMode } from "./longmemeval-replay/separability-evidence-mode.mjs";
+import { isScorableMeasurementCohort, measurementUnscorableReason } from "./longmemeval-replay/measurement-status.mjs";
 
 const ITERATIONS = 300;
 const INITIAL_LEARNING_RATE = 0.05;
 const L2 = 1e-3;
 const TRACKS = ["baseline", "typed_path"];
 
-export function runSeparabilityProbe(diagnostics, options = {}) {
+export function runSeparabilityProbe(diagnostics, options) {
+  const cohortById = resolveSeparabilityEvidenceMode(diagnostics, options);
   const emit = createProgressEmitter(options.on_progress);
   emit({ stage: "probe_start" });
-  const cohortById = indexCohort(options.cohort);
   const questions = answerableQuestions(diagnostics, cohortById);
   const assignments = assignGroupedStratifiedFolds(questions, options.fold_count ?? 5);
   const foldCount = new Set(assignments.values()).size;
@@ -92,9 +92,7 @@ function runTrack(questions, assignments, foldCount, track, cohortById, emit) {
     emit({ stage: "fold_complete", track, fold, ...optimizer.work });
   }
   const rows = questions.map((question) => renderQuestionRow(
-    question,
-    predictions.get(question.question_id),
-    cohortById
+    question, predictions.get(question.question_id), cohortById
   ));
   const anyAt5 = rows.filter((row) => row.any_at_5 === true).length;
   const currentHits = rows.filter((row) => row.current_any_at_5).length;
@@ -180,7 +178,7 @@ function renderQuestionRow(question, prediction, cohortById) {
       question_id: question.question_id,
       question_type: question.question_type ?? null,
       status: "unscorable",
-      unscorable_reason: unscorableReason(question),
+      unscorable_reason: unscorableReason(question, cohortById?.get(question.question_id)),
       current_any_at_5: question.hit_at_5 === true,
       any_at_5: null,
       top_5_candidate_keys: Object.freeze([])
@@ -237,12 +235,21 @@ function answerableQuestions(diagnostics, cohortById) {
   }
   const questions = diagnostics.questions.filter((question) =>
     question !== null && typeof question === "object" &&
-    question.is_abstention !== true && question.premise_invalid !== true &&
-    !String(question.question_id ?? "").includes("_abs") &&
-    (cohortById === null || cohortById.get(question.question_id)?.dataset_cohort === "answerable")
+    isAnswerableQuestion(question, cohortById)
   );
   if (questions.length === 0) throw new Error("separability requires answerable questions");
   return [...questions].sort((left, right) => left.question_id.localeCompare(right.question_id));
+}
+
+function isAnswerableQuestion(question, cohortById) {
+  return cohortById === null
+    ? isLegacyDiagnosticAnswerable(question)
+    : cohortById.get(question.question_id)?.dataset_cohort === "answerable";
+}
+
+function isLegacyDiagnosticAnswerable(question) {
+  return question.is_abstention !== true && question.premise_invalid !== true
+    && !String(question.question_id ?? "").includes("_abs");
 }
 
 function isScorable(question, cohortById = null) {
@@ -258,7 +265,12 @@ function isScorable(question, cohortById = null) {
     top50Candidates(question).some((candidate) => !goldObjectIds(question).has(candidate.object_id));
 }
 
-function unscorableReason(question) {
+function unscorableReason(question, cohort) {
+  if (cohort !== undefined && !isScorableMeasurementCohort(cohort)) {
+    return measurementUnscorableReason(cohort);
+  }
+  if (cohort !== undefined && cohort.candidate_pool_complete !== true)
+    return "candidate_pool_incomplete";
   if (question.candidate_pool_complete !== true) return "candidate_pool_incomplete";
   if (goldObjectIds(question).size === 0) return "runtime_gold_absent";
   if (top50Candidates(question).length <= 1) return "insufficient_candidate_pool";
@@ -432,14 +444,6 @@ function positiveRank(value) {
 
 function ratio(numerator, denominator) {
   return denominator === 0 ? 0 : numerator / denominator;
-}
-
-function indexCohort(cohort) {
-  if (cohort === undefined) return null;
-  if (cohort === null || typeof cohort !== "object" || !Array.isArray(cohort.rows)) {
-    throw new Error("cohort.rows is required when cohort is supplied");
-  }
-  return new Map(cohort.rows.map((row) => [row.question_id, row]));
 }
 
 export function parseArgs(argv) {

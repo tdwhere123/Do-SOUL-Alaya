@@ -5,6 +5,7 @@ import path from "node:path";
 export interface ContainedArtifactFile {
   readonly handle: FileHandle;
   readonly bytes: number;
+  readBytes(maxBytes?: number): Promise<Buffer>;
   readUtf8(maxBytes?: number): Promise<string>;
   close(): Promise<void>;
 }
@@ -61,17 +62,22 @@ function containedFile(
   bytes: number,
   reference: string
 ): ContainedArtifactFile {
+  const readBytes = async (maxBytes = Number.MAX_SAFE_INTEGER): Promise<Buffer> => {
+    if (bytes > maxBytes) {
+      throw new Error(`artifact exceeds ${maxBytes} bytes '${reference}'`);
+    }
+    const contents = await handle.readFile();
+    if (contents.byteLength > maxBytes) {
+      throw new Error(`artifact exceeds ${maxBytes} bytes '${reference}'`);
+    }
+    return contents;
+  };
   return {
     handle,
     bytes,
+    readBytes,
     async readUtf8(maxBytes = Number.MAX_SAFE_INTEGER): Promise<string> {
-      if (bytes > maxBytes) {
-        throw new Error(`artifact exceeds ${maxBytes} bytes '${reference}'`);
-      }
-      const contents = await handle.readFile();
-      if (contents.byteLength > maxBytes) {
-        throw new Error(`artifact exceeds ${maxBytes} bytes '${reference}'`);
-      }
+      const contents = await readBytes(maxBytes);
       try {
         return new TextDecoder("utf-8", { fatal: true }).decode(contents);
       } catch (error) {

@@ -7,13 +7,9 @@ import {
 } from "@do-soul/alaya-eval";
 import { aggregateBenchTokenMetrics } from "../harness/token-economy.js";
 import type { BenchTokenMetrics } from "../harness/daemon.js";
-import type {
-  LongMemEvalDiagnosticsSidecar,
-  LongMemEvalQuestionDiagnostic
-} from "../longmemeval/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
 import { resolveBenchCommitSha7 } from "../shared/version.js";
 import { buildMergedFullGoldCoverage } from "./merge-full-gold.js";
-import { pct } from "./result-format.js";
 import {
   mergeSeedExtractionPath,
   ratio,
@@ -23,27 +19,23 @@ import {
   assertMergeMeasurementContracts,
   mergeQualityMetrics
 } from "./merge-quality.js";
-import type { LongMemEvalDiagnosticsSpool } from "../longmemeval/diagnostics/spool.js";
+import type { LoadedMergeShards } from "./merge/canonical-shard-plan.js";
+export {
+  loadCanonicalMergeShards as loadMergeShards,
+  type LoadedMergeShards,
+  type ShardArchiveRef
+} from "./merge/canonical-shard-plan.js";
+import { buildMergedSelectionContract } from
+  "./merge/merged-selection-contract.js";
 import {
-  isCurrentStreamedDiagnostics,
-  readShardPayload
-} from "./merge/shard-diagnostics-reader.js";
+  selectionContractIdentity,
+  type LongMemEvalSelectionContract
+} from "../longmemeval/selection/contract.js";
 import { buildMergedRates, type MergedRates } from "./merge/merged-rates.js";
 
-export interface ShardArchiveRef {
-  readonly root: string;
-  readonly slug: string;
-  readonly payload: KpiPayload;
-  readonly diagnostics: LongMemEvalDiagnosticsSidecar;
-}
-export interface LoadedMergeShards {
-  readonly payloads: readonly KpiPayload[];
-  readonly archiveRefs: readonly ShardArchiveRef[];
-  readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
-  readonly first: KpiPayload;
-}
 export interface MergedLongMemEvalBuild {
   readonly payload: KpiPayload;
+  readonly selectionContract: LongMemEvalSelectionContract | null;
   readonly runAt: Date;
   readonly commitSha7: string;
   readonly policyShape: NonNullable<KpiPayload["policy_shape"]>;
@@ -80,55 +72,6 @@ const SCALAR_IDENTITY_FIELDS: ReadonlyArray<ScalarIdentityField> = [
   "alaya_commit",
   "recall_pipeline_version"
 ];
-export async function loadMergeShards(
-  shards: readonly string[],
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<LoadedMergeShards> {
-  const payloads: KpiPayload[] = [];
-  const archiveRefs: ShardArchiveRef[] = [];
-  const questionDiagnostics: LongMemEvalQuestionDiagnostic[] = [];
-  for (const shardRoot of shards) {
-    const {
-      payload,
-      slug,
-      diagnostics,
-      questionDiagnostics: shardQuestionDiagnostics
-    } = await readShardPayload(shardRoot, diagnosticsSpool);
-    payloads.push(payload);
-    archiveRefs.push({ root: shardRoot, slug, payload, diagnostics });
-    questionDiagnostics.push(...shardQuestionDiagnostics);
-    process.stdout.write(
-      `  shard ${shardRoot}: ${payload.evaluated_count} questions, ` +
-        `R@5=${pct(payload.kpi.r_at_5)}\n`
-    );
-  }
-  const first = payloads[0];
-  if (first === undefined) {
-    throw new Error("no shards loaded");
-  }
-  assertCurrentDiagnosticsSpoolCount(payloads, archiveRefs, diagnosticsSpool);
-  return { payloads, archiveRefs, questionDiagnostics, first };
-}
-
-function assertCurrentDiagnosticsSpoolCount(
-  payloads: readonly KpiPayload[],
-  archiveRefs: readonly ShardArchiveRef[],
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): void {
-  if (!archiveRefs.every((shard) => isCurrentStreamedDiagnostics(shard.diagnostics))) {
-    return;
-  }
-  const evaluatedCount = payloads.reduce(
-    (total, payload) => total + payload.evaluated_count,
-    0
-  );
-  if (diagnosticsSpool.questionCount !== evaluatedCount) {
-    throw new Error(
-      `merged evaluated_count=${evaluatedCount} does not match diagnostics spool question count=${diagnosticsSpool.questionCount}`
-    );
-  }
-}
-
 export function buildMergedLongMemEvalPayload(
   loaded: LoadedMergeShards
 ): MergedLongMemEvalBuild {
@@ -141,11 +84,13 @@ export function buildMergedLongMemEvalPayload(
       `merge refused: evaluated_total=${aggregate.evaluatedTotal} > sample_size=${loaded.first.sample_size} (shards collectively over-evaluated; check --offset/--limit ranges)`
     );
   }
+  const selectionContract = buildMergedSelectionContract(loaded.archiveRefs);
   return buildMergedPayload(
     loaded.first,
     loaded.payloads,
     aggregate,
-    loaded.questionDiagnostics
+    loaded.questionDiagnostics,
+    selectionContract
   );
 }
 
@@ -352,7 +297,8 @@ function buildMergedPayload(
   first: KpiPayload,
   payloads: readonly KpiPayload[],
   aggregate: MergeShardAggregate,
-  questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[]
+  questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[],
+  selectionContract: LongMemEvalSelectionContract | null
 ): MergedLongMemEvalBuild {
   const runAt = new Date();
   const commitSha7 = resolveBenchCommitSha7();
@@ -365,6 +311,7 @@ function buildMergedPayload(
     commitSha7,
     policyShape,
     simulateReport,
+    selectionContract,
     payload: {
       bench_name: first.bench_name,
       split: first.split,
@@ -380,6 +327,9 @@ function buildMergedPayload(
         ? {}
         : { recall_weight_overrides: first.recall_weight_overrides }),
       ...(first.seed_policy === undefined ? {} : { seed_policy: first.seed_policy }),
+      ...(selectionContract === null
+        ? {}
+        : { selection_contract: selectionContractIdentity(selectionContract) }),
       dataset: first.dataset,
       sample_size: first.sample_size,
       evaluated_count: aggregate.evaluatedTotal,

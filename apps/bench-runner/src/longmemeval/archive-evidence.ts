@@ -87,7 +87,7 @@ export interface LatestLongMemEvalArchive {
 export interface LongMemEvalColdWarmComparisonSidecar {
   readonly schema_version: 1;
   readonly comparison: "cold-none-vs-warm-mixed";
-  readonly bench_name: "public";
+  readonly bench_name: BenchName;
   readonly split: string;
   readonly policy_shape: BenchPolicyShape;
   readonly current: LongMemEvalArchiveComparisonEntry;
@@ -267,7 +267,7 @@ export function buildLongMemEvalColdWarmComparisonSidecar(input: {
   return {
     schema_version: 1,
     comparison: "cold-none-vs-warm-mixed",
-    bench_name: "public",
+    bench_name: input.current.bench_name,
     split: input.current.split,
     policy_shape: policyShape,
     current,

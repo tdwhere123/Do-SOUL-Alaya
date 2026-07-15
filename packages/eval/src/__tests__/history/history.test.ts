@@ -13,6 +13,7 @@ import {
   type HistoryLayout
 } from "../../history/history.js";
 import { KpiPayloadSchema, type KpiPayload } from "../../schema/kpi-schema.js";
+import { verifiedEvidenceForPayload } from "../gates/verified-evidence-fixture.js";
 import {
   buildFullLongMemEvalPayload,
   buildLivePayload,
@@ -209,6 +210,7 @@ describe("history archive", () => {
 
 
   it("ignores polluted latest-passing pointers for ineligible v0.3.11 Tier 1 archives", async () => {
+    const verifiedLayout = withVerifiedLongMemEvalEvidence(layout);
     const passingSlug = "2026-05-14T100000Z-0aaaaaa";
     const pollutedSlug = "2026-05-14T110000Z-0bbbbbb";
     const passing = KpiPayloadSchema.parse(
@@ -220,14 +222,14 @@ describe("history archive", () => {
       evaluated_count: 100
     };
 
-    await writeEntry(layout, "public", passingSlug, passing, "report", null);
+    await writeEntry(verifiedLayout, "public", passingSlug, passing, "report", null);
     await writePointerlessPayload(root, "public", pollutedSlug, polluted);
     await writeBenchPointer(root, "public", "latest-passing.json", pollutedSlug);
 
-    expect((await readLatest(layout, "public", { pointerKind: "passing" }))?.alaya_commit)
+    expect((await readLatest(verifiedLayout, "public", { pointerKind: "passing" }))?.alaya_commit)
       .toBe("0aaaaaa");
     expect(
-      (await readLatest(layout, "public", {
+      (await readLatest(verifiedLayout, "public", {
         split: "longmemeval-s",
         embeddingProvider: "none",
         pointerKind: "passing"
@@ -259,6 +261,7 @@ describe("history archive", () => {
 
 
   it("ignores polluted legacy baseline pointers for ineligible v0.3.11 Tier 1 archives", async () => {
+    const verifiedLayout = withVerifiedLongMemEvalEvidence(layout);
     const passingSlug = "2026-05-14T100000Z-1aaaaaa";
     const pollutedSlug = "2026-05-14T110000Z-1bbbbbb";
     const passing = KpiPayloadSchema.parse(
@@ -280,7 +283,7 @@ describe("history archive", () => {
     );
 
     expect(
-      (await readLatest(layout, "public-crossquestion", { pointerKind: "passing" }))
+      (await readLatest(verifiedLayout, "public-crossquestion", { pointerKind: "passing" }))
         ?.alaya_commit
     ).toBe("1aaaaaa");
   });
@@ -345,3 +348,13 @@ describe("history archive", () => {
   });
 
 });
+
+function withVerifiedLongMemEvalEvidence(layout: HistoryLayout): HistoryLayout {
+  return {
+    ...layout,
+    verifyLongMemEvalEvidence: async ({ payload }) =>
+      payload.selection_contract === undefined
+        ? null
+        : verifiedEvidenceForPayload(payload)
+  };
+}

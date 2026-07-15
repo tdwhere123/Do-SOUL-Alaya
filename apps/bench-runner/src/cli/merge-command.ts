@@ -9,10 +9,17 @@ import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
 } from "../longmemeval/diagnostics/spool.js";
+import { loadDatasetWithIdentity } from "../longmemeval/fetch.js";
+import type { LongMemEvalVariant } from "../longmemeval/dataset.js";
+import { deriveMergedLongMemEvalReleaseAuthority } from
+  "./merge/release-evidence-authority.js";
 
 export interface MergeLongMemEvalCommandOptions {
   readonly historyRoot: string;
   readonly shards?: readonly string[];
+  readonly variant: LongMemEvalVariant;
+  readonly dataDir?: string;
+  readonly pinnedMetaRoot?: string;
 }
 
 /**
@@ -49,8 +56,16 @@ async function executeMergeLongMemEval(
   process.stdout.write(`Merging ${shards.length} shard(s)...\n`);
   const loaded = await loadMergeShards(shards, diagnosticsSpool);
   const build = buildMergedLongMemEvalPayload(loaded);
+  const dataset = await loadDatasetWithIdentity(opts.variant, {
+    dataDir: opts.dataDir,
+    pinnedMetaRoot: opts.pinnedMetaRoot
+  });
   const archive = await writeMergedLongMemEvalArchive({
     historyRoot: opts.historyRoot,
+    releaseEvidenceAuthority: deriveMergedLongMemEvalReleaseAuthority(
+      dataset.promotionAuthority,
+      loaded.archiveRefs
+    ),
     build,
     shardArchiveRefs: loaded.archiveRefs,
     diagnosticsSpool
@@ -63,5 +78,8 @@ async function executeMergeLongMemEval(
         : `  latency p50<=${build.latencyP50}ms p95<=${build.latencyP95}ms (worst-shard upper bound)\n`) +
       `  KPI: ${archive.kpiPath}\n`
   );
-  return exitCodeForMergedLongMemEvalResult(archive.merged);
+  return exitCodeForMergedLongMemEvalResult(
+    archive.merged,
+    archive.evidenceContext ?? undefined
+  );
 }

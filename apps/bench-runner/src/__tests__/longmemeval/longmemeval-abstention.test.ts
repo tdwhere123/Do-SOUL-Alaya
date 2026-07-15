@@ -250,7 +250,7 @@ describe("abstention miss classification and KPI breakdown", () => {
     expect(metrics.evaluator_identity_unscorable_denominator).toBe(2);
   });
 
-  it("keeps cohort-less legacy abstention rows in the abstention total", () => {
+  it("rejects cohort-less legacy abstention rows from current aggregation", () => {
     const current = buildQuestionDiagnostic({
       questionId: "legacy_abs",
       goldMemoryIds: [],
@@ -266,10 +266,8 @@ describe("abstention miss classification and KPI breakdown", () => {
     });
     const { cohort_ledger: _cohortLedger, ...legacy } = current;
 
-    const metrics = buildLongMemEvalQualityMetrics([legacy]);
-    expect(metrics.abstention).toMatchObject({ total: 1, unscorable: 1 });
-    expect(metrics.evaluator_identity_issue_denominator).toBe(1);
-    expect(metrics.evaluator_identity_unscorable_denominator).toBe(1);
+    expect(() => buildLongMemEvalQualityMetrics([legacy]))
+      .toThrow(/no current cohort ledger/u);
   });
 
   it("persists fused-margin abstention_confidence_score on delivered_results", () => {

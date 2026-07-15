@@ -38,6 +38,7 @@ import { defaultRecallPathPlasticityLookupTelemetry } from "../garden/path-plast
 import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
+import { createSourceGroundingDefersCommand } from "./source-grounding-defers/command.js";
 import { createToolsCommand } from "./tools.js";
 import {
   ensureImplicitLocalWorkspace,
@@ -191,6 +192,15 @@ function createProfileAuditWriter(env: NodeJS.ProcessEnv): ProfileMutationAuditW
   };
 }
 
+function readSchemaSummary(dbPath: string) {
+  const summary = getCurrentSchemaSummary(initDatabase({ filename: dbPath }));
+  return {
+    persistedMaxVersion: summary.persistedMaxVersion,
+    knownMaxVersion: summary.knownMaxVersion,
+    schemaOk: summary.schemaOk
+  };
+}
+
 function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
   bridge.registerSubcommand(createDoctorCommand({
     getBuildInfo: readBuildInfo,
@@ -220,15 +230,7 @@ function registerPrimaryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRun
         causedBy: "user_action"
       }),
     getPathPlasticityLookupTelemetry: () => defaultRecallPathPlasticityLookupTelemetry.snapshot(),
-    getSchemaSummary: async (dbPath) => {
-      const database = initDatabase({ filename: dbPath });
-      const summary = getCurrentSchemaSummary(database);
-      return {
-        persistedMaxVersion: summary.persistedMaxVersion,
-        knownMaxVersion: summary.knownMaxVersion,
-        schemaOk: summary.schemaOk
-      };
-    }
+    getSchemaSummary: async (dbPath) => readSchemaSummary(dbPath)
   }));
   bridge.registerSubcommand(createStatusCommand({
     trustStateSummaryProvider: async (agentTarget) => await runtime.services.trustStateRecorder.summarize(agentTarget),
@@ -252,6 +254,9 @@ function registerAttachCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRunt
 }
 
 function registerMemoryCommands(bridge: AlayaCliBridge, runtime: AlayaDaemonRuntime): void {
+  bridge.registerSubcommand(createSourceGroundingDefersCommand({
+    signalService: runtime.services.signalService
+  }));
   bridge.registerSubcommand(createToolsCommand({
     handler: runtime.services.mcpMemoryToolHandler,
     ensureLocalWorkspace: runtime.services.workspaceService,

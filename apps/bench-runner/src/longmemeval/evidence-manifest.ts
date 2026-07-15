@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
+import {
+  LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
+  verifyLongMemEvalEvidenceArtifactIntegrity
+} from "@do-soul/alaya-eval";
+import type { LongMemEvalSelectionContractIdentity } from "./selection/contract.js";
 
-export const LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME =
-  "longmemeval-evidence-manifest.json";
+export { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME };
 
 export type LongMemEvalEvidenceArtifactRole =
   | "kpi"
@@ -44,6 +48,7 @@ export interface LongMemEvalEvidenceManifest {
     readonly dataset_sha256: string;
     readonly selection_manifest_sha256: string | null;
     readonly question_id_digest: string;
+    readonly selection_contract?: LongMemEvalSelectionContractIdentity;
     readonly candidate_pool_complete: boolean;
     readonly provenance_complete?: boolean;
   };
@@ -119,6 +124,19 @@ function assertRunBindings(run: LongMemEvalEvidenceManifest["run"]): void {
       throw new Error(`LongMemEval evidence manifest has invalid ${field}`);
     }
   }
+  const selection = run.selection_contract;
+  if (selection !== undefined && (
+    selection.schema_version !== 1 ||
+    !/^[a-f0-9]{64}$/u.test(selection.selected_id_digest) ||
+    !/^[a-f0-9]{64}$/u.test(selection.cohort_assignment_digest) ||
+    selection.dataset_sha256 !== run.dataset_sha256 ||
+    selection.selected_id_digest !== run.question_id_digest ||
+    selection.selected_count !==
+      selection.expected_cohort_counts.answerable +
+      selection.expected_cohort_counts.abstention
+  )) {
+    throw new Error("LongMemEval evidence manifest selection binding mismatch");
+  }
 }
 
 export function verifyLongMemEvalEvidenceManifest(
@@ -144,6 +162,11 @@ export function verifyLongMemEvalEvidenceManifest(
   const { bundle_sha256: _stored, ...unsigned } = manifest;
   if (sha256(JSON.stringify(unsigned)) !== manifest.bundle_sha256) {
     errors.push("bundle sha256 mismatch");
+  }
+  if (manifest.evidence_status === "complete" &&
+      manifest.run.selection_contract !== undefined) {
+    const shared = verifyLongMemEvalEvidenceArtifactIntegrity(manifest, artifacts);
+    errors.push(...shared.errors.filter((error) => !errors.includes(error)));
   }
   return { valid: errors.length === 0, errors };
 }

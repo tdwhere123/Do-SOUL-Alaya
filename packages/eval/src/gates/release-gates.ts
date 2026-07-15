@@ -1,7 +1,13 @@
 import type { KpiPayload, QualityMetrics, Verdict } from "../schema/kpi-schema.js";
 import { measurementContractAllowsEligibility } from "../schema/kpi-measurement-contract.js";
+import { longMemEvalSelectionContractAllowsEligibility } from
+  "../schema/longmemeval-selection-contract.js";
 import { evaluateSeedExtractionReleaseBlocker } from "./seed-extraction-blocker.js";
 import { rollupWorstVerdict } from "./thresholds.js";
+import {
+  verifiedLongMemEvalEvidenceMatches,
+  type VerifiedLongMemEvalEvidenceContext
+} from "./longmemeval-verified-evidence.js";
 
 const LONGMEMEVAL_BUDGET_DROPPED_RATE_TARGET = 0.02;
 
@@ -36,13 +42,20 @@ export function collectReleaseHardGates(
   return gates;
 }
 
-export function releaseHardGateVerdict(current: KpiPayload): Verdict {
+export function releaseMetricGateVerdict(current: KpiPayload): Verdict {
   return collectReleaseHardGates(current).some((gate) => !gate.passed)
     ? "fail"
     : "ok";
 }
 
-export function releaseHardGateAllowsLatestPassing(current: KpiPayload): boolean {
+export function releaseHardGateAllowsLatestPassing(
+  current: KpiPayload,
+  evidence?: VerifiedLongMemEvalEvidenceContext
+): boolean {
+  if (isLongMemEvalMeasurementSurface(current) &&
+      !verifiedLongMemEvalEvidenceMatches(current, evidence)) {
+    return false;
+  }
   // @anchor seed-extraction-release-blocker
   // Reject degraded seed-extraction provenance before any numeric gate, so a
   // degraded archive cannot reach latest_passing through any caller that
@@ -87,6 +100,7 @@ function collectPipelineIntegrityGates(
   const gates: BenchmarkHardGate[] = [];
   pushMeasurementAttributionGate(gates, current);
   pushEmbeddingProviderReturnedGate(gates, current, embeddingEnabled);
+  pushLongMemEvalEmbeddingActivationGate(gates, current, embeddingEnabled);
   pushLongMemEvalPipelineGates(gates, current, metrics);
   pushRecallLatencyGate(gates, current, embeddingEnabled);
   return gates;
@@ -110,7 +124,9 @@ function pushMeasurementAttributionGate(
 function measurementAllowsLatestPassing(current: KpiPayload): boolean {
   const attribution = current.measurement_attribution;
   if (attribution !== undefined) {
-    return measurementContractAllowsEligibility(current);
+    return measurementContractAllowsEligibility(current) &&
+      (!isLongMemEvalMeasurementSurface(current) ||
+        longMemEvalSelectionContractAllowsEligibility(current));
   }
   return !isLongMemEvalMeasurementSurface(current);
 }
@@ -149,7 +165,7 @@ function createLongMemEvalSampleGate(
     `longmemeval_s_${sampleSize}_${embeddingEnabled ? "embedding_on" : "embedding_off"}_r_at_5`,
     `LongMemEval-S ${sampleSize} ${embeddingEnabled ? "embedding-on" : "embedding-off"} R@5`,
     currentValue,
-    embeddingEnabled ? 0.55 : sampleSize === 100 ? 0.7 : 0.9
+    embeddingEnabled ? 0.9 : sampleSize === 100 ? 0.7 : 0.9
   );
 }
 
@@ -219,6 +235,35 @@ function pushEmbeddingProviderReturnedGate(
       "ratio"
     )
   );
+}
+
+function pushLongMemEvalEmbeddingActivationGate(
+  gates: BenchmarkHardGate[],
+  current: KpiPayload,
+  embeddingEnabled: boolean
+): void {
+  if (
+    !embeddingEnabled ||
+    current.bench_name !== "public" ||
+    current.split !== "longmemeval-s"
+  ) {
+    return;
+  }
+  gates.push(minGate(
+    "longmemeval_s_embedding_inference_calls_mean",
+    "in-timer query embedding inference calls per recall",
+    readCompleteEmbeddingInferenceMean(current),
+    1,
+    "count"
+  ));
+}
+
+function readCompleteEmbeddingInferenceMean(current: KpiPayload): number | null {
+  const economy = current.kpi.recall_token_economy;
+  if (economy === undefined || economy.sample_count !== current.evaluated_count) {
+    return null;
+  }
+  return economy.embedding_inference_calls.mean;
 }
 
 function pushLongMemEvalPipelineGates(

@@ -79,6 +79,7 @@ function buildTokenEconomy(
     // Waist survivors actually scored in fine assessment — not the pre-prune coarse pool.
     fineEvaluated: assessment.finalAssessment.fineEvaluated,
     finePrunedCount: assessment.finalAssessment.finePrunedCount,
+    finePriorityOverflowCount: assessment.finalAssessment.finePriorityOverflowCount,
     preBudgetCandidates: manifested.candidateDiagnostics,
     embeddingInferenceCalls:
       assessment.embeddingCoarseInjection.embeddingInferenceCalls + preparedEmbeddingInferenceCalls

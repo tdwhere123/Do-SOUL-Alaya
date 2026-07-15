@@ -12,7 +12,10 @@ import type {
 import type { QaQuestionVerdict } from "./qa-harness.js";
 import type { CompileSeedExtractionStats } from "./compile-seed.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
-import { classifyQuestionMeasurementStatus } from "./measurement/question-validity.js";
+import {
+  classifyQuestionMeasurementCohort,
+  classifyQuestionMeasurementStatus
+} from "./measurement/question-validity.js";
 
 export interface LongMemEvalRunArchiveAggregate {
   readonly perScenario: PerScenarioRow[];
@@ -112,6 +115,7 @@ function addLongMemEvalWorkerResult(
     version: 1,
     hit_at_5: result.hitAt5,
     scorable,
+    measurement_cohort: classifyQuestionMeasurementCohort(result.diagnostics),
     tier: result.firstTier,
     latency_ms: result.latencyMs
   });

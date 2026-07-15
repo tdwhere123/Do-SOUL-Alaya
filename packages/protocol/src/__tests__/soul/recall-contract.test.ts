@@ -125,6 +125,25 @@ describe("v0.2 recall protocol contract", () => {
     expect(RecallPolicySchema.parse(recallPolicyBase).domain_weight_overrides).toBeUndefined();
   });
 
+  it("accepts an optional fine-evaluation hard candidate budget", () => {
+    expect(RecallPolicySchema.parse({
+      ...recallPolicyBase,
+      fine_assessment: {
+        ...recallPolicyBase.fine_assessment,
+        max_candidates: 40
+      }
+    }).fine_assessment.max_candidates).toBe(40);
+    expect(RecallPolicySchema.parse(recallPolicyBase).fine_assessment.max_candidates)
+      .toBeUndefined();
+    expect(RecallPolicySchema.safeParse({
+      ...recallPolicyBase,
+      fine_assessment: {
+        ...recallPolicyBase.fine_assessment,
+        max_candidates: -1
+      }
+    }).success).toBe(false);
+  });
+
   it("keeps RecallScoreFactors backward-compatible and accepts resolved activation weights", () => {
     const baseCandidate = {
       object_id: "memory-1",

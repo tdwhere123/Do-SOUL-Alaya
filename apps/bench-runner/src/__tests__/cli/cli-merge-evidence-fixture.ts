@@ -12,12 +12,18 @@ import {
 import {
   makeShardDiagnostics,
   makeShardKpi,
+  withEligibleMeasurementContract,
   writeShardRoot
 } from "./cli-merge-validations-fixture.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
 } from "../../longmemeval/extraction-cache-manifest.js";
+import { computeQuestionIdDigest } from "../../longmemeval/selection/question-manifest.js";
+import { computeCohortAssignmentDigest } from "../../longmemeval/selection/contract.js";
+import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
+
+const DATASET_SHA = MERGE_TEST_DATASET_SHA256;
 
 export const roots: string[] = [];
 
@@ -104,37 +110,20 @@ export function streamedQuestion(id: string) {
   });
 }
 
-export function provenance(offset: number, count: number) {
+export function provenance(
+  offset: number,
+  count: number,
+  questionIds: readonly string[] = Array.from(
+    { length: count }, (_, index) => `fixture-${offset + index}`
+  )
+) {
+  const selection = selectionIdentity(questionIds);
   return {
     schema_version: 1,
-    code: {
-      commit_sha7: "abc1234",
-      gate_sha256: "a".repeat(64),
-      worktree_state_sha256: "b".repeat(64),
-      executed_dist: {
-        algorithm: "sha256-reachable-path-file-sha256-v1",
-        sha256: "f".repeat(64),
-        file_count: 3
-      }
-    },
-    extraction_cache: {
-      manifest_sha256: "c".repeat(64),
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-      extraction_model: "fixture-model",
-      model_family: "fixture-model-family",
-      request_profile: "provider-default-v1",
-      provider_url: "redacted",
-      system_prompt_sha256: "e".repeat(64),
-      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-      dataset: "longmemeval_s",
-      dataset_revision: "fixture",
-      requested_turns: count,
-      cached_turns: count,
-      coverage: 1,
-      storage: "git-tracked",
-      built_at: "2026-07-11T00:00:00.000Z",
-      builder: "fixture"
-    },
+    dataset_sha256: DATASET_SHA,
+    selection,
+    code: fixtureCodeProvenance(),
+    extraction_cache: fixtureExtractionCache(count),
     runtime: {
       node_version: process.version,
       platform: process.platform,
@@ -166,6 +155,43 @@ export function provenance(offset: number, count: number) {
   };
 }
 
+function fixtureCodeProvenance() {
+  return {
+    commit_sha7: "abc1234",
+    commit_sha: "abc1234" + "0".repeat(33),
+    gate_sha256: "a".repeat(64),
+    gate_contract_path: "/tmp/frozen-contract.json",
+    worktree_state_sha256: "b".repeat(64),
+    worktree_clean: true,
+    executed_dist: {
+      algorithm: "sha256-reachable-path-file-sha256-v1",
+      sha256: "f".repeat(64),
+      file_count: 3
+    }
+  };
+}
+
+function fixtureExtractionCache(count: number) {
+  return {
+    manifest_sha256: "c".repeat(64),
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    extraction_model: "fixture-model",
+    model_family: "fixture-model-family",
+    request_profile: "provider-default-v1",
+    provider_url: "redacted",
+    system_prompt_sha256: "e".repeat(64),
+    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+    dataset: "longmemeval_s",
+    dataset_revision: DATASET_SHA,
+    requested_turns: count,
+    cached_turns: count,
+    coverage: 1,
+    storage: "git-tracked",
+    built_at: "2026-07-11T00:00:00.000Z",
+    builder: "fixture"
+  };
+}
+
 export async function writeProvenance(root: string, body: unknown): Promise<void> {
   const archive = path.join(root, "public", "2026-05-14T100000Z-abc1234");
   await mkdir(archive, { recursive: true });
@@ -177,26 +203,94 @@ export async function writeProvenance(root: string, body: unknown): Promise<void
 }
 
 export async function setupShard(root: string, id: string, offset: number): Promise<void> {
-  const kpi = makeShardKpi({
-    evaluated_count: 1,
-    kpi: {
-      ...makeShardKpi().kpi,
-      r_at_5: 1,
-      per_scenario: [{ id, version: 1, hit_at_5: true, tier: "warm" }]
-    }
+  const kpi = eligibleShardKpi(id);
+  const diagnostics = makeShardDiagnostics({
+    recall_pipeline_version: kpi.recall_pipeline_version,
+    policy_shape: kpi.policy_shape,
+    simulate_report: kpi.simulate_report,
+    seed_extraction_path: kpi.kpi.seed_extraction_path,
+    report_usage: {
+      mode: "none",
+      reports_attempted: 0,
+      reports_used: 0,
+      reports_skipped: 1,
+      used_object_count: 0
+    },
+    report_side_effects: undefined,
+    questions: [{
+      ...streamedQuestion(id),
+      hit_at_1: true,
+      hit_at_5: true,
+      hit_at_10: true,
+      miss_classification: "hit_at_5",
+      cohort_ledger: cohort()
+    }]
   });
-  const diagnostics = makeShardDiagnostics({ questions: [question(id)] });
-  const provenanceBody = provenance(offset, 1);
+  const provenanceBody = provenance(offset, 1, [id]);
   await writeShardRoot(root, kpi, diagnostics);
   await writeProvenance(root, provenanceBody);
-  await writeShardEvidence(root, kpi, diagnostics, provenanceBody);
+  await writeShardEvidenceBundle(
+    root,
+    kpi,
+    diagnostics,
+    provenanceBody,
+    diagnostics
+  );
 }
 
-async function writeShardEvidence(
+export async function setupCompactShard(
+  root: string,
+  id: string,
+  offset: number
+): Promise<void> {
+  const kpi = eligibleShardKpi(id);
+  const fullDiagnostics = makeShardDiagnostics({ questions: [streamedQuestion(id)] });
+  const compactDiagnostics = makeShardDiagnostics({
+    compact_schema_version: 1,
+    question_count: 1,
+    full_diagnostics_artifact_path: "longmemeval-diagnostics.json.gz",
+    questions: undefined
+  });
+  const provenanceBody = provenance(offset, 1, [id]);
+  await writeShardRoot(root, kpi, compactDiagnostics);
+  await writeProvenance(root, provenanceBody);
+  await writeShardEvidenceBundle(
+    root,
+    kpi,
+    compactDiagnostics,
+    provenanceBody,
+    fullDiagnostics
+  );
+}
+
+function eligibleShardKpi(id: string) {
+  const eligible = withEligibleMeasurementContract(makeShardKpi({
+    evaluated_count: 1,
+    kpi: { ...makeShardKpi().kpi, r_at_1: 1, r_at_5: 1, r_at_10: 1 }
+  }));
+  return {
+    ...eligible,
+    selection_contract: selectionIdentity([id]),
+    kpi: {
+      ...eligible.kpi,
+      per_scenario: [{
+        id,
+        version: 1,
+        hit_at_5: true,
+        scorable: true,
+        measurement_cohort: "answerable" as const,
+        tier: "warm" as const
+      }]
+    }
+  };
+}
+
+export async function writeShardEvidenceBundle(
   root: string,
   kpi: ReturnType<typeof makeShardKpi>,
   diagnostics: ReturnType<typeof makeShardDiagnostics>,
-  provenanceBody: ReturnType<typeof provenance>
+  provenanceBody: unknown,
+  fullDiagnostics: ReturnType<typeof makeShardDiagnostics> = diagnostics
 ): Promise<void> {
   const slug = `2026-05-14T100000Z-${kpi.alaya_commit}`;
   const archive = path.join(root, "public", slug);
@@ -207,44 +301,90 @@ async function writeShardEvidence(
   const questionIdDigest = createHash("sha256")
     .update(questionIds.join("\0"), "utf8")
     .digest("hex");
+  const selection = selectionIdentity(questionIds);
   const cohortContents = `${JSON.stringify({
     schema_version: 1,
     question_count: questionIds.length,
     question_id_digest: questionIdDigest,
+    selection_contract: selection,
     rows: questionIds.map((question_id) => ({ question_id, ...cohort() }))
   }, null, 2)}\n`;
   const comparisonContents = "{}\n";
-  const fullBytes = gzipSync(diagnosticsContents);
+  const fullBytes = gzipSync(`${JSON.stringify(fullDiagnostics, null, 2)}\n`);
   await writeFile(path.join(archive, "longmemeval-diagnostics.json.gz"), fullBytes);
   await writeFile(path.join(archive, "longmemeval-cohort-ledger.json"), cohortContents);
   await writeFile(path.join(archive, "longmemeval-cold-warm-comparison.json"), comparisonContents);
-  const manifest = buildLongMemEvalEvidenceManifest({
-    run: {
-      slug,
-      bench_name: "public",
-      split: kpi.split,
-      run_at: kpi.run_at,
-      alaya_commit: kpi.alaya_commit,
-      dataset_sha256: kpi.dataset.checksum_sha256 ?? "a".repeat(64),
-      selection_manifest_sha256: null,
-      question_id_digest: questionIdDigest,
-      candidate_pool_complete: true,
-      provenance_complete: true
-    },
-    artifacts: [
-      { role: "kpi", path: "kpi.json", contents: kpiContents },
-      { role: "report", path: "report.md", contents: "report\n" },
-      { role: "diagnostics", path: "longmemeval-diagnostics.json", contents: diagnosticsContents },
-      { role: "full_diagnostics", path: "longmemeval-diagnostics.json.gz", contents: fullBytes },
-      { role: "cohort_ledger", path: "longmemeval-cohort-ledger.json", contents: cohortContents },
-      { role: "comparison", path: "longmemeval-cold-warm-comparison.json", contents: comparisonContents },
-      { role: "run_provenance", path: "longmemeval-run-provenance.json", contents: provenanceContents }
-    ]
+  const manifest = buildShardEvidenceManifest({
+    slug,
+    kpi,
+    questionIdDigest,
+    selection,
+    kpiContents,
+    diagnosticsContents,
+    fullBytes,
+    cohortContents,
+    comparisonContents,
+    provenanceContents
   });
   await writeFile(
     path.join(archive, "longmemeval-evidence-manifest.json"),
     renderLongMemEvalEvidenceManifest(manifest)
   );
+}
+
+interface ShardEvidenceManifestInput {
+  readonly slug: string;
+  readonly kpi: ReturnType<typeof makeShardKpi>;
+  readonly questionIdDigest: string;
+  readonly selection: ReturnType<typeof selectionIdentity>;
+  readonly kpiContents: string;
+  readonly diagnosticsContents: string;
+  readonly fullBytes: ReturnType<typeof gzipSync>;
+  readonly cohortContents: string;
+  readonly comparisonContents: string;
+  readonly provenanceContents: string;
+}
+
+function buildShardEvidenceManifest(input: ShardEvidenceManifestInput) {
+  return buildLongMemEvalEvidenceManifest({
+    run: {
+      slug: input.slug,
+      bench_name: "public",
+      split: input.kpi.split,
+      run_at: input.kpi.run_at,
+      alaya_commit: input.kpi.alaya_commit,
+      dataset_sha256: input.kpi.dataset.checksum_sha256 ?? "a".repeat(64),
+      selection_manifest_sha256: null,
+      question_id_digest: input.questionIdDigest,
+      selection_contract: input.selection,
+      candidate_pool_complete: true,
+      provenance_complete: true
+    },
+    artifacts: [
+      { role: "kpi", path: "kpi.json", contents: input.kpiContents },
+      { role: "report", path: "report.md", contents: "report\n" },
+      { role: "diagnostics", path: "longmemeval-diagnostics.json", contents: input.diagnosticsContents },
+      { role: "full_diagnostics", path: "longmemeval-diagnostics.json.gz", contents: input.fullBytes },
+      { role: "cohort_ledger", path: "longmemeval-cohort-ledger.json", contents: input.cohortContents },
+      { role: "comparison", path: "longmemeval-cold-warm-comparison.json", contents: input.comparisonContents },
+      { role: "run_provenance", path: "longmemeval-run-provenance.json", contents: input.provenanceContents }
+    ]
+  });
+}
+
+function selectionIdentity(questionIds: readonly string[]) {
+  const assignments = questionIds.map((question_id) => ({
+    question_id,
+    dataset_cohort: "answerable" as const
+  }));
+  return {
+    schema_version: 1 as const,
+    dataset_sha256: DATASET_SHA,
+    selected_id_digest: computeQuestionIdDigest(questionIds),
+    selected_count: questionIds.length,
+    expected_cohort_counts: { answerable: questionIds.length, abstention: 0 },
+    cohort_assignment_digest: computeCohortAssignmentDigest(assignments)
+  };
 }
 
 export async function archiveRoot(history: string): Promise<string> {

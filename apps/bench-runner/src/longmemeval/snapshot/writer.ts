@@ -43,8 +43,8 @@ export async function writeRecallEvalSnapshotArtifacts(
     questions: input.snapshotQuestions
   });
   const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
-  const datasetSha = resolveSnapshotDatasetSha(input, extraction);
   const questionDigest = snapshotQuestionIdDigest(input.snapshotQuestions);
+  const datasetSha = resolveSnapshotDatasetSha(input, extraction, questionDigest);
   writeSnapshotManifest(input.snapshotOut, buildManifest({
     input, schemaMigrationVersion, extraction, integrity, datasetSha, questionDigest
   }));
@@ -117,16 +117,26 @@ function buildManifest(context: {
 
 function resolveSnapshotDatasetSha(
   input: WriteRecallEvalSnapshotInput,
-  extraction: SnapshotExtractionProvenance | null
+  extraction: SnapshotExtractionProvenance | null,
+  questionDigest: string
 ): string {
   if (!/^[a-f0-9]{64}$/u.test(input.datasetSha256)) {
     throw new Error("recall-eval snapshot requires a valid dataset SHA-256");
   }
-  const provenanceSha = input.runProvenance.question_manifest?.dataset_sha256 ??
+  const provenanceSha = input.runProvenance.dataset_sha256 ??
+    input.runProvenance.question_manifest?.dataset_sha256 ??
     extraction?.dataset_revision;
   if (provenanceSha !== undefined && /^[a-f0-9]{64}$/u.test(provenanceSha) &&
       provenanceSha !== input.datasetSha256) {
     throw new Error("recall-eval snapshot dataset provenance mismatch");
+  }
+  const selection = input.runProvenance.selection;
+  if (selection !== undefined && (
+    selection.dataset_sha256 !== input.datasetSha256 ||
+    selection.selected_id_digest !== questionDigest ||
+    selection.selected_count !== input.snapshotQuestions.length
+  )) {
+    throw new Error("recall-eval snapshot selection provenance mismatch");
   }
   return input.datasetSha256;
 }

@@ -61,6 +61,7 @@ export const RecallBudgetsSchema = z
 export const FineAssessmentConfigSchema = z
   .object({
     budgets: RecallBudgetsSchema,
+    max_candidates: NonNegativeIntSchema.optional(),
     conflict_awareness: z.boolean()
   })
   .strict()

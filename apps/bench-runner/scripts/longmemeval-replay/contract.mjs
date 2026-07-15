@@ -5,6 +5,7 @@ import path from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { gunzip } from "node:zlib";
 import { readDiagnosticsJsonStream } from "./diagnostics-json-stream-reader.mjs";
+import { validateQuestionMeasurementStatus } from "./measurement-status.mjs";
 
 const gunzipAsync = promisify(gunzip);
 
@@ -23,7 +24,7 @@ export const STAGE_FIELDS = Object.freeze({
 
 export const STAGE_ORDER = Object.freeze(Object.keys(STAGE_FIELDS));
 
-export async function loadEvidenceBundle(manifestPath) {
+export async function loadEvidenceBundle(manifestPath, options = {}) {
   const manifestBuffer = await readFile(manifestPath);
   const manifest = parseJson(manifestBuffer, manifestPath);
   const artifacts = await loadAndVerifyArtifacts(manifest, path.dirname(manifestPath));
@@ -31,7 +32,7 @@ export async function loadEvidenceBundle(manifestPath) {
     parseRoleJson(manifest, artifacts, "full_diagnostics"),
     parseRoleJson(manifest, artifacts, "cohort_ledger")
   ]);
-  return validateEvidenceBundle({ manifest, diagnostics, cohort });
+  return validateEvidenceBundle({ manifest, diagnostics, cohort }, options);
 }
 
 export async function loadReplayContract(manifestPath) {
@@ -70,16 +71,17 @@ export async function consumeReplayContract(manifestPath, options = {}) {
   return { manifest, diagnostics, cohort };
 }
 
-export function validateEvidenceBundle(input) {
+export function validateEvidenceBundle(input, options = {}) {
   requireObject(input, "contract");
   const diagnostics = requireObject(input.diagnostics, "diagnostics");
   const cohort = requireObject(input.cohort, "cohort");
   const questions = requireArray(diagnostics.questions, "diagnostics.questions");
   const rows = requireArray(cohort.rows, "cohort.rows");
-  assertQuestionIdentity(questions, rows, input.manifest, cohort);
+  const legacyDiagnostic = options?.legacyDiagnostic === true;
+  assertQuestionIdentity(questions, rows, input.manifest, cohort, legacyDiagnostic);
   const rowById = new Map(rows.map((row) => [row.question_id, row]));
   for (const question of questions) {
-    validateEvidenceQuestion(question, rowById.get(question.question_id));
+    validateEvidenceQuestion(question, rowById.get(question.question_id), legacyDiagnostic);
   }
   return { manifest: input.manifest, diagnostics, cohort };
 }
@@ -192,31 +194,29 @@ function assertCompleteManifest(manifest) {
   }
 }
 
-function assertQuestionIdentity(questions, rows, manifest, cohort) {
+function assertQuestionIdentity(questions, rows, manifest, cohort, legacyDiagnostic) {
   if (questions.length > rows.length || cohort.question_count !== undefined &&
       cohort.question_count !== rows.length) {
     throw new Error("diagnostics/cohort question count mismatch");
   }
   const questionIds = questions.map((question) => requireString(question?.question_id, "question_id"));
-  if (new Set(questionIds).size !== questionIds.length) {
-    throw new Error("duplicate question ID in replay contract");
-  }
+  assertCanonicalQuestionIds(questionIds);
   const rowIds = rows.map((row) => requireString(row?.question_id, "cohort question_id"));
   if (questionIds.some((id, index) => id !== rowIds[index])) {
     throw new Error("diagnostics/cohort question order mismatch");
   }
+  assertCohortIdentity(rows, manifest, cohort, legacyDiagnostic);
   assertTrailingPartialRows(rows.slice(questions.length));
-  assertCohortIdentity(rows, manifest, cohort);
 }
 
-function assertCohortIdentity(rows, manifest, cohort) {
+function assertCohortIdentity(rows, manifest, cohort, legacyDiagnostic = false) {
   if (cohort.question_count !== undefined && cohort.question_count !== rows.length) {
     throw new Error("diagnostics/cohort question count mismatch");
   }
-  const rowIds = rows.map((row) => requireString(row?.question_id, "cohort question_id"));
-  if (new Set(rowIds).size !== rowIds.length) {
-    throw new Error("duplicate question ID in replay contract");
-  }
+  const rowIds = rows.map((row) =>
+    validateCohortMeasurementRow(row, legacyDiagnostic)
+  );
+  assertCanonicalQuestionIds(rowIds);
   const digest = sha256(rowIds.join("\0"));
   if (cohort.question_id_digest !== undefined && cohort.question_id_digest !== digest) {
     throw new Error("cohort question_id_digest mismatch");
@@ -224,6 +224,24 @@ function assertCohortIdentity(rows, manifest, cohort) {
   if (manifest?.run?.question_id_digest !== undefined &&
       manifest.run.question_id_digest !== digest) {
     throw new Error("manifest question_id_digest mismatch");
+  }
+}
+
+function validateCohortMeasurementRow(row, legacyDiagnostic) {
+  const ledger = requireObject(row, "cohort row");
+  const questionId = requireString(ledger.question_id, "cohort question_id");
+  validateQuestionMeasurementStatus({
+    isAbstention: ledger.dataset_cohort === "abstention",
+    legacyDiagnostic,
+    cohortLedger: ledger
+  });
+  return questionId;
+}
+
+function assertCanonicalQuestionIds(questionIds) {
+  if (questionIds.some((id) => id.length === 0 || id.includes("\0")) ||
+      new Set(questionIds).size !== questionIds.length) {
+    throw new Error("canonical digest requires unique non-empty NUL-free question IDs");
   }
 }
 
@@ -238,13 +256,13 @@ function assertTrailingPartialRows(rows) {
   }
 }
 
-function validateEvidenceQuestion(question, row) {
+function validateEvidenceQuestion(question, row, legacyDiagnostic = false) {
   requireObject(question, "diagnostic question");
   requireObject(row, `cohort row for ${question.question_id}`);
   requireArray(question.candidates, `${question.question_id}.candidates`);
   validateQualityAxes(question.quality_axes, `${question.question_id}.quality_axes`);
   validateQualityAxes(row.quality_axes, `${question.question_id}.cohort.quality_axes`);
-  validateEmbeddedCohort(question, row);
+  validateEmbeddedCohort(question, row, legacyDiagnostic);
 }
 
 function validateQualityAxes(axes, label) {
@@ -319,14 +337,16 @@ function validateCandidate(candidate, label) {
   }
 }
 
-function validateEmbeddedCohort(question, row) {
+function validateEmbeddedCohort(question, row, legacyDiagnostic) {
   if (question.cohort_ledger === undefined) {
     throw new Error(`missing embedded cohort_ledger for ${question.question_id}`);
   }
   const { question_id: _questionId, ...expected } = row;
-  if (!isDeepStrictEqual(question.cohort_ledger, expected)) {
-    throw new Error(`embedded cohort_ledger drift for ${question.question_id}`);
-  }
+  if (isDeepStrictEqual(question.cohort_ledger, expected)) return;
+  const { measurement_evidence_mode: evidenceMode, ...legacyExpected } = expected;
+  if (legacyDiagnostic && evidenceMode === "legacy_synthesized" &&
+      isDeepStrictEqual(question.cohort_ledger, legacyExpected)) return;
+  throw new Error(`embedded cohort_ledger drift for ${question.question_id}`);
 }
 
 function requireArray(value, field) {

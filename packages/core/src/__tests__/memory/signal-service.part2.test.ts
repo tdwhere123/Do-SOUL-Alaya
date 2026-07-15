@@ -42,11 +42,14 @@ it("marks the signal failed when post-triage materializer throws", async () => {
     });
     expect(warn).toHaveBeenCalledWith(
       "Signal materialization failed.",
-      expect.objectContaining({
-        signal_id: "signal-1",
-        error: expect.any(Error)
-      })
+      {
+        phase: "materialization",
+        code: "MATERIALIZER_THROW",
+        detail_sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        detail_char_count: expect.any(Number)
+      }
     );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("materializer exploded");
   });
 
 it("lists persisted signals for a run", async () => {

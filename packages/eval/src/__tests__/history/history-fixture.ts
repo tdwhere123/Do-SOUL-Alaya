@@ -1,6 +1,30 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { KpiPayload } from "../../schema/kpi-schema.js";
+import { createLongMemEvalSelectionContractIdentity } from
+  "../../schema/longmemeval-selection-contract.js";
+import { VERIFIED_TEST_DATASET_SHA256 } from
+  "../gates/verified-dataset-fixture.js";
+
+export const FIXTURE_LONGMEMEVAL_DATASET_SHA = VERIFIED_TEST_DATASET_SHA256;
+
+export function selectionContractForRows(
+  rows: KpiPayload["kpi"]["per_scenario"],
+  datasetSha256 = FIXTURE_LONGMEMEVAL_DATASET_SHA
+) {
+  if (rows.some((row) => row.measurement_cohort === undefined)) {
+    throw new Error("selection fixture rows require explicit measurement cohorts");
+  }
+  return createLongMemEvalSelectionContractIdentity({
+    datasetSha256,
+    assignments: rows.map((row) => ({
+      question_id: row.id,
+      dataset_cohort: row.measurement_cohort === "dataset_declared_abstention"
+        ? "abstention"
+        : "answerable"
+    }))
+  });
+}
 
 export function buildPayload(commit: string): KpiPayload {
   return {
@@ -116,6 +140,17 @@ export function buildFullLongMemEvalPayload(
   commit: string,
   rAt5: number
 ): KpiPayload {
+  const evaluated = 500;
+  const hitCount = Math.round(rAt5 * evaluated);
+  const missCount = evaluated - hitCount;
+  const perScenario = Array.from({ length: evaluated }, (_, index) => ({
+    id: `question-${index + 1}`,
+    version: 1,
+    hit_at_5: index < hitCount,
+    scorable: true,
+    measurement_cohort: "answerable" as const,
+    tier: "hot" as const
+  }));
   return {
     ...buildPayload(commit),
     alaya_version: "0.3.11",
@@ -130,34 +165,52 @@ export function buildFullLongMemEvalPayload(
             ? "longmemeval_s:multiturn"
             : "longmemeval_s:crossquestion",
       size: 500,
-      source: "fixture"
+      source: "fixture",
+      checksum_sha256: FIXTURE_LONGMEMEVAL_DATASET_SHA
     },
-    sample_size: 500,
-    evaluated_count: 500,
-    answerable_evaluated_count: 500,
+    selection_contract: selectionContractForRows(perScenario),
+    sample_size: evaluated,
+    evaluated_count: evaluated,
+    answerable_evaluated_count: evaluated,
     measurement_attribution: {
-      schema_version: "bench-measurement-attribution.v2",
+      schema_version: "bench-measurement-attribution.v3",
       status: "eligible",
       gate_eligible: true,
       evidence_status: "complete",
       candidate_pool_complete: true,
       provenance_complete: true,
-      abstention_calibration_status: "not_applicable",
+      measurement_scope: "answerable_recall",
+      abstention_evaluation_status: "excluded_not_evaluated",
+      abstention_calibration_status: "uncalibrated",
+      abstention_gate_eligible: false,
+      abstention_evidence_status: "current_uncalibrated",
       evaluator_identity_status: "complete"
     },
     kpi: {
       ...buildPayload(commit).kpi,
       r_at_5: rAt5,
       latency_ms_p95: 120,
-      per_scenario: Array.from({ length: 500 }, (_, index) => ({
-        id: `question-${index + 1}`,
-        version: 1,
-        hit_at_5: index < Math.round(rAt5 * 500),
-        scorable: true,
-        tier: "hot" as const
-      })),
+      per_scenario: perScenario,
       quality_metrics: {
         ...passingQualityMetrics(),
+        measurement_cohort_counts: {
+          evaluated,
+          non_abstention: evaluated,
+          abstention: 0,
+          scorable_answerable: evaluated,
+          unscorable_answerable: 0,
+          hit_at_5: hitCount,
+          miss_at_5: missCount
+        },
+        unscorable_reason_distribution: {},
+        miss_taxonomy_distribution: {
+          candidate_absent: 0,
+          materialization_drop: 0,
+          budget_drop: 0,
+          delivery_order_drop: missCount,
+          answer_set_coverage_drop: 0,
+          evaluation_or_gold_issue: 0
+        },
         abstention: {
           schema_version: "bench-abstention.v2",
           total: 0,

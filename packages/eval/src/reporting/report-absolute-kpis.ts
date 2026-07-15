@@ -165,6 +165,17 @@ function pushSeedAndQualityKpis(lines: string[], current: KpiPayload): void {
       `- Quality metrics: non_monotonic=${formatRatio(metrics.non_monotonic_rate)} (${metrics.non_monotonic_count}/${metrics.non_monotonic_denominator}) budget_drop_loss=${metrics.miss_distribution.budget_dropped ?? 0} budget_dropped_entries=${metrics.budget_drop_distribution.max_entries?.count ?? 0} candidate_absent=${metrics.candidate_absent_count} no_gold=${metrics.no_gold_count} evaluator_identity_issue=${metrics.evaluator_identity_issue_count ?? "N/A"} evaluator_identity_unscorable=${metrics.evaluator_identity_unscorable_count ?? "N/A"} miss_taxonomy=[candidate_absent=${taxonomy.candidate_absent} materialization_drop=${taxonomy.materialization_drop} budget_drop=${taxonomy.budget_drop} delivery_order_drop=${taxonomy.delivery_order_drop} answer_set_coverage_drop=${taxonomy.answer_set_coverage_drop} evaluation_or_gold_issue=${taxonomy.evaluation_or_gold_issue}] evidence_gold=${formatRatio(metrics.evidence_stream_gold_delivery_rate)} path_top10=${formatRatio(metrics.path_stream_top10_rate)}`
     );
     pushMeasurementCohortAccounting(lines, metrics);
+    if (current.measurement_attribution?.schema_version ===
+        "bench-measurement-attribution.v3") {
+      const attribution = current.measurement_attribution;
+      lines.push(
+        `- Measurement scope: ${attribution.measurement_scope} ` +
+          `(gate_eligible=${attribution.gate_eligible}; ` +
+          `dataset-declared abstention=${attribution.abstention_evaluation_status}, ` +
+          `calibration=${attribution.abstention_calibration_status}, ` +
+          `abstention_gate_eligible=${attribution.abstention_gate_eligible})`
+      );
+    }
     const abstention = metrics.abstention;
     if (abstention !== undefined && abstention.total > 0) {
       if (abstention.schema_version === "bench-abstention.v1") {

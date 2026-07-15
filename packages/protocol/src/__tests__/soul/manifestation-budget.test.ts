@@ -107,6 +107,14 @@ describe("manifestation budget contracts", () => {
     expect(ManifestationEscalationDecidedPayloadSchema.parse(batchedDecisionPayload)).toEqual(
       batchedDecisionPayload
     );
+    for (const invalidBatch of [
+      { ...decisionPayload, batch_index: 0 },
+      { ...decisionPayload, batch_count: 1 },
+      { ...decisionPayload, batch_index: 0, batch_count: 0 },
+      { ...decisionPayload, batch_index: 2, batch_count: 2 }
+    ]) {
+      expect(ManifestationEscalationDecidedPayloadSchema.safeParse(invalidBatch).success).toBe(false);
+    }
     expect(
       parseRuntimeGovernanceEventPayload(RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED, budgetPayload)
     ).toEqual(budgetPayload);

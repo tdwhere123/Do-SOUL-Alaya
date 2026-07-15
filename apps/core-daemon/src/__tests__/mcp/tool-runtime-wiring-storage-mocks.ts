@@ -50,7 +50,9 @@ export async function buildToolRuntimeWiringStorageMocks(params: {
     SqliteEventLogRepo: vi.fn().mockImplementation(function SqliteEventLogRepo() {
       return hoisted.eventLogRepo;
     }),
-    SqliteSignalRepo: makeRepo(),
+    SqliteSignalRepo: makeRepo({
+      getStorageConnectionIdentity: () => hoisted.database
+    }),
     SqliteEdgeProposalRepo: makeRepo(),
     SqliteEvidenceCapsuleRepo: makeRepo(),
     SqliteMemoryEntryRepo: vi.fn().mockImplementation(function SqliteMemoryEntryRepo() {

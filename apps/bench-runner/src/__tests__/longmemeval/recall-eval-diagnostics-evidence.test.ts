@@ -8,6 +8,8 @@ import {
   buildLongMemEvalEvidenceManifest,
   verifyLongMemEvalEvidenceManifest
 } from "../../longmemeval/evidence-manifest.js";
+import { LongMemEvalQuestionDiagnosticSchema } from
+  "../../longmemeval/diagnostics-schema.js";
 import {
   buildGoldDiagnostic,
   buildQuestionDiagnosticFixture
@@ -153,7 +155,7 @@ describe("recall-eval diagnostics evidence", () => {
 
   it("accepts pooled-only bi activation when warmup proves the effective identity", () => {
     const source = question("q-pooled-only", "not_applicable");
-    const diagnostics = {
+    const diagnostics = LongMemEvalQuestionDiagnosticSchema.parse({
       ...source.diagnostics,
       embedding_workspace_scanned_count: undefined,
       embedding_workspace_truncated: undefined,
@@ -175,7 +177,7 @@ describe("recall-eval diagnostics evidence", () => {
         fused_rank_contribution_per_stream: null,
         score_factors: { embedding_similarity: 0.8 }
       }]
-    };
+    });
 
     expect(() => buildRecallEvalDiagnosticsEvidence({
       questions: [{ ...source, diagnostics }],

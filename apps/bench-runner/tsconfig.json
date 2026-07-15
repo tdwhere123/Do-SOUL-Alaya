@@ -15,7 +15,8 @@
       "@do-soul/alaya/cli/bridge": ["../../apps/core-daemon/src/cli/bridge.ts"],
       "@do-soul/alaya/cli/register": ["../../apps/core-daemon/src/cli/register.ts"],
       "@do-soul/alaya/recall/bound-execution": ["../../apps/core-daemon/src/recall/recall-bound-execution.ts"],
-      "@do-soul/alaya-eval": ["../../packages/eval/src/index.ts"]
+      "@do-soul/alaya-eval": ["../../packages/eval/src/index.ts"],
+      "@do-soul/alaya-eval/internal": ["../../packages/eval/src/internal.ts"]
     }
   },
   "include": ["src/**/*.ts"],

@@ -20,10 +20,13 @@ import {
   ExecutionConservatismSchema,
   ExecutionVerificationAttentionSchema
 } from "../../soul/execution-stance.js";
-import { ManifestationLevelSchema } from "../../soul/manifestation-budget.js";
 import { OutputShapingResultSchema } from "../../soul/output-shaping.js";
 import { SecurityPostureSchema } from "../../soul/security-status.js";
 
+import {
+  ManifestationBudgetEvaluatedPayloadSchema,
+  ManifestationEscalationDecidedPayloadSchema
+} from "./payloads/manifestation-payloads.js";
 import {
   PathRelationCreatedPayloadSchema,
   PathRelationRejectedPayloadSchema,
@@ -44,6 +47,10 @@ import {
   SurfaceDriftAlertPayloadSchema
 } from "./payloads/surface-drift-payloads.js";
 
+export {
+  ManifestationBudgetEvaluatedPayloadSchema,
+  ManifestationEscalationDecidedPayloadSchema
+} from "./payloads/manifestation-payloads.js";
 export {
   PathRelationCreatedPayloadSchema,
   PathRelationRejectedPayloadSchema,
@@ -288,20 +295,6 @@ export const OutputCommandCompressedPayloadSchema = z
   .strict()
   .readonly();
 
-export const ManifestationBudgetEvaluatedPayloadSchema = z
-  .object({
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema,
-    total_candidates: NonNegativeIntSchema,
-    stance_bias_assigned: NonNegativeIntSchema,
-    dialogue_nudge_assigned: NonNegativeIntSchema,
-    lens_entry_assigned: NonNegativeIntSchema,
-    discarded: NonNegativeIntSchema,
-    evaluated_at: IsoDatetimeStringSchema
-  })
-  .strict()
-  .readonly();
-
 export const SecurityPassthroughStatusChangedPayloadSchema = z
   .object({
     workspace_id: NonEmptyStringSchema,
@@ -327,33 +320,6 @@ export const SecurityPassthroughInitializationFailedPayloadSchema = z
     failed_at: IsoDatetimeStringSchema,
     reason: BoundedReasonSchema.nullable().optional(),
     error_code: BoundedLabelSchema.nullable().optional()
-  })
-  .strict()
-  .readonly();
-
-export const ManifestationEscalationDecidedPayloadSchema = z
-  .object({
-    workspace_id: NonEmptyStringSchema,
-    run_id: NonEmptyStringSchema,
-    decisions: z
-      .array(
-        z
-          .object({
-            candidate_id: NonEmptyStringSchema,
-            assigned_level: ManifestationLevelSchema.nullable(),
-            reason: NonEmptyStringSchema
-          })
-          .strict()
-          .readonly()
-      )
-      .readonly(),
-    decided_at: IsoDatetimeStringSchema,
-    // invariant: one resolve may emit 0..N DECIDED events when the decision
-    // list exceeds the bounded JSON size. Consumers fold by matching
-    // (run_id, decided_at) and concatenate `decisions` in batch_index order
-    // when present. Omitting batch_* remains valid for single-batch emits.
-    batch_index: NonNegativeIntSchema.optional(),
-    batch_count: NonNegativeIntSchema.optional()
   })
   .strict()
   .readonly();

@@ -26,7 +26,7 @@ type DecisionEventItem = Readonly<{
 // Wide placeholders so a later real batch_index/batch_count stamp cannot
 // push a previously-accepted batch over the bounded JSON limit.
 const BATCH_FIT_PROBE_INDEX = 999_999;
-const BATCH_FIT_PROBE_COUNT = 999_999;
+const BATCH_FIT_PROBE_COUNT = 1_000_000;
 
 export async function appendManifestationGovernanceEvents(
   input: AppendManifestationEventsInput
@@ -76,7 +76,7 @@ function createBoundedDecisionPayloads(input: AppendManifestationEventsInput) {
     batches.push(batch);
     batch = [toDecisionEventItem(decision)];
   }
-  if (batch.length > 0 || input.decisions.length === 0) {
+  if (batch.length > 0) {
     batches.push(batch);
   }
   const batchCount = batches.length;

@@ -1,39 +1,79 @@
-import { createHash } from "node:crypto";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import type { LongMemEvalQuestionDiagnostic } from "./diagnostics-types.js";
+import { classifyLongMemEvalDatasetCohort } from "./selection/dataset-cohort.js";
+import {
+  assertSelectionCohortBinding,
+  selectionContractIdentity,
+  type LongMemEvalSelectionContract
+} from "./selection/contract.js";
 
 export const LONGMEMEVAL_COHORT_LEDGER_FILENAME =
   "longmemeval-cohort-ledger.json";
 
 export function renderLongMemEvalCohortLedger(
   questions: readonly LongMemEvalQuestionDiagnostic[],
-  failedQuestionIds: readonly string[] = []
+  failedQuestionIds: readonly string[] = [],
+  selectionContract?: LongMemEvalSelectionContract
 ): string {
   const diagnosticIds = new Set(questions.map((question) => question.question_id));
   const duplicateFailures = failedQuestionIds.filter((id) => diagnosticIds.has(id));
   if (duplicateFailures.length > 0) {
     throw new Error(`LongMemEval cohort ledger duplicates failed question: ${duplicateFailures[0]}`);
   }
-  const ids = [...questions.map((question) => question.question_id), ...failedQuestionIds];
+  const rows = buildCohortRows(questions, failedQuestionIds, selectionContract);
+  const ids = rows.map((row) => row.question_id);
   if (new Set(ids).size !== ids.length) {
     throw new Error("LongMemEval cohort ledger refuses duplicate question IDs");
   }
-  const rows = questions.map((question) => {
-    if (question.cohort_ledger === undefined) {
-      throw new Error(`LongMemEval cohort ledger missing for ${question.question_id}`);
-    }
-    return { question_id: question.question_id, ...question.cohort_ledger };
-  });
-  rows.push(...failedQuestionIds.map(failedQuestionCohortRow));
+  if (selectionContract !== undefined) {
+    assertSelectionCohortBinding(selectionContract, rows);
+  }
   return `${JSON.stringify({
     schema_version: 1,
     question_count: rows.length,
-    question_id_digest: createHash("sha256").update(ids.join("\0"), "utf8").digest("hex"),
+    question_id_digest: computeLongMemEvalQuestionIdDigest(ids),
+    ...(selectionContract === undefined
+      ? {}
+      : { selection_contract: selectionContractIdentity(selectionContract) }),
     rows
   }, null, 2)}\n`;
 }
 
-function failedQuestionCohortRow(questionId: string) {
-  const abstention = questionId.endsWith("_abs");
+function buildCohortRows(
+  questions: readonly LongMemEvalQuestionDiagnostic[],
+  failedQuestionIds: readonly string[],
+  contract: LongMemEvalSelectionContract | undefined
+) {
+  const cohortById = new Map(contract?.assignments.map((row) =>
+    [row.question_id, row.dataset_cohort] as const
+  ));
+  const rows = questions.map(diagnosticCohortRow);
+  rows.push(...failedQuestionIds.map((id) => failedQuestionCohortRow(id, cohortById.get(id))));
+  if (contract === undefined) return rows;
+  if (rows.length !== contract.assignments.length) {
+    throw new Error("selection cohort binding row count differs from immutable contract");
+  }
+  const byId = new Map(rows.map((row) => [row.question_id, row] as const));
+  return contract.assignments.map((assignment) => {
+    const row = byId.get(assignment.question_id);
+    if (row === undefined) throw new Error(`selection cohort binding missing ${assignment.question_id}`);
+    return row;
+  });
+}
+
+function diagnosticCohortRow(question: LongMemEvalQuestionDiagnostic) {
+  if (question.cohort_ledger === undefined) {
+    throw new Error(`LongMemEval cohort ledger missing for ${question.question_id}`);
+  }
+  return { question_id: question.question_id, ...question.cohort_ledger };
+}
+
+function failedQuestionCohortRow(
+  questionId: string,
+  expectedCohort?: "answerable" | "abstention"
+) {
+  const cohort = expectedCohort ?? classifyLongMemEvalDatasetCohort({ question_id: questionId });
+  const abstention = cohort === "abstention";
   return {
     question_id: questionId,
     measurement_status: abstention

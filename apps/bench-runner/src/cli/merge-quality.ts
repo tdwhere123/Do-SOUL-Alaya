@@ -61,7 +61,7 @@ function assertCompleteCurrentMeasurementContract(shard: KpiPayload): void {
     throw new Error("merge refused: current measurement contract missing from one or more shards");
   }
   if (shard.measurement_attribution.schema_version !==
-      "bench-measurement-attribution.v2") {
+      "bench-measurement-attribution.v3") {
     throw new Error("merge refused: legacy measurement attribution cannot be promoted");
   }
   if (shard.kpi.quality_metrics === undefined) {

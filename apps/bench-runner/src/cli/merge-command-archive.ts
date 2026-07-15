@@ -6,11 +6,10 @@ import {
   readLatest,
   renderFindings,
   renderReport,
-  writeEntry,
-  isHistoryEntryCommittedError,
   isCacheOnlySeedExtractionPath,
   type HistoryLayout,
-  type KpiPayload
+  type KpiPayload,
+  type VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -44,10 +43,9 @@ import {
 } from "../longmemeval/provenance/shard-aggregate.js";
 import type { LongMemEvalDiagnosticsSpool } from "../longmemeval/diagnostics/spool.js";
 import { buildBenchmarkMeasurementAttribution } from "../longmemeval/measurement/attribution.js";
-import {
-  prepareDiagnosticsArtifactStagingPath,
-  withPublishedDiagnosticsArtifact
-} from "../longmemeval/measurement/artifact-transaction.js";
+import { assertMeasurementCohortBinding } from "../longmemeval/measurement/cohort-binding.js";
+import { prepareDiagnosticsArtifactStagingPath } from
+  "../longmemeval/measurement/artifact-transaction.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
@@ -63,6 +61,15 @@ import type {
   ShardArchiveRef
 } from "./merge-command-shards.js";
 import { hasVerifiedShardEvidence } from "./merge/shard-evidence-verifier.js";
+import {
+  selectionContractIdentity,
+  type LongMemEvalSelectionContract
+} from "../longmemeval/selection/contract.js";
+import { createLongMemEvalHistoryLayout } from
+  "../longmemeval/history/evidence-context.js";
+import { publishMergedArchive } from "./merge/archive-publisher.js";
+import type { LongMemEvalReleaseEvidenceAuthority } from
+  "@do-soul/alaya-eval/internal";
 
 type ShardDiagnostics = ShardArchiveRef["diagnostics"];
 type PreviousKpiPayload = Awaited<ReturnType<typeof readLatest>>;
@@ -73,16 +80,18 @@ export interface WrittenMergedLongMemEvalArchive {
   readonly slug: string;
   readonly kpiPath: string;
   readonly diagnosticsPath: string | null;
+  readonly evidenceContext: VerifiedLongMemEvalEvidenceContext | null;
 }
 
 export async function writeMergedLongMemEvalArchive(input: {
   readonly historyRoot: string;
+  readonly releaseEvidenceAuthority?: LongMemEvalReleaseEvidenceAuthority | null;
   readonly build: MergedLongMemEvalBuild;
   readonly shardArchiveRefs: readonly ShardArchiveRef[];
   readonly requestedConcurrency?: number;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<WrittenMergedLongMemEvalArchive> {
-  const layout: HistoryLayout = { historyRoot: input.historyRoot };
+  const layout = createMergedHistoryLayout(input);
   const shardDiagnostics = input.shardArchiveRefs.map((shard) => shard.diagnostics);
   const prepared = await prepareMergedWithDiff(
     layout,
@@ -103,26 +112,29 @@ export async function writeMergedLongMemEvalArchive(input: {
     diff: prepared.diff,
     shardDiagnostics,
     shardArchiveRefs: input.shardArchiveRefs,
+    selectionContract: input.build.selectionContract,
     requestedConcurrency: input.requestedConcurrency,
     diagnosticsSpool: input.diagnosticsSpool
   });
-  const entry = await withPublishedDiagnosticsArtifact(
-    archive.diagnosticsArtifact,
-    () => writeEntry(layout, "public", slug, archive.merged, archive.report, archive.findings, {
-      sidecars: archive.sidecars,
-      fileSidecars: [{
-        filename: `${LONGMEMEVAL_DIAGNOSTICS_FILENAME}.gz`,
-        sourcePath: archive.diagnosticsArtifact.finalPath
-      }]
-    }),
-    isHistoryEntryCommittedError
-  );
+  const published = await publishMergedArchive({ layout, slug, archive });
   return {
     merged: archive.merged,
     slug,
-    kpiPath: entry.kpiPath,
-    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null
+    ...published
   };
+}
+
+function createMergedHistoryLayout(
+  input: Parameters<typeof writeMergedLongMemEvalArchive>[0]
+): HistoryLayout {
+  if (input.build.selectionContract === null ||
+      input.releaseEvidenceAuthority === undefined) {
+    return { historyRoot: input.historyRoot };
+  }
+  return createLongMemEvalHistoryLayout({
+    historyRoot: input.historyRoot,
+    authority: input.releaseEvidenceAuthority
+  });
 }
 
 function withCacheReadiness(
@@ -191,6 +203,7 @@ async function buildMergedArchiveSidecars(input: {
   readonly diff: KpiDiff;
   readonly shardDiagnostics: readonly ShardDiagnostics[];
   readonly shardArchiveRefs: readonly ShardArchiveRef[];
+  readonly selectionContract: LongMemEvalSelectionContract | null;
   readonly requestedConcurrency?: number;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<{
@@ -216,19 +229,24 @@ async function finishMergedArchiveSidecars(
   input: Parameters<typeof buildMergedArchiveSidecars>[0],
   diagnostics: Awaited<ReturnType<typeof buildMergedDiagnosticsSidecar>>
 ): ReturnType<typeof buildMergedArchiveSidecars> {
-  const cohort = renderLongMemEvalCohortLedger(
-    diagnostics.payload.sidecar.questions,
-    diagnostics.payload.failed_question_ids
-  );
   const provenance = await buildMergedRunProvenanceSidecars({
     shardArchiveRefs: input.shardArchiveRefs,
-    requestedConcurrency: input.requestedConcurrency
+    requestedConcurrency: input.requestedConcurrency,
+    selectionContract: input.selectionContract
   });
+  assertMergedSelectionIdentity(input.merged, provenance.selectionContract);
+  const cohort = renderLongMemEvalCohortLedger(
+    diagnostics.payload.sidecar.questions,
+    diagnostics.payload.failed_question_ids,
+    provenance.selectionContract ?? undefined
+  );
   const provenanceComplete = provenance.gateEligible &&
+    provenance.selectionContract !== null &&
     input.shardDiagnostics.every(hasVerifiedShardEvidence) &&
     isCacheOnlySeedExtractionPath(input.merged.kpi.seed_extraction_path);
   const merged = buildAttributedMergedPayload(
     input,
+    diagnostics.payload.sidecar.questions,
     mergedCandidatePoolComplete(input, diagnostics),
     provenanceComplete
   );
@@ -257,11 +275,26 @@ async function finishMergedArchiveSidecars(
   };
 }
 
+function assertMergedSelectionIdentity(
+  merged: KpiPayload,
+  contract: LongMemEvalSelectionContract | null
+): void {
+  const expected = contract === null ? undefined : selectionContractIdentity(contract);
+  if (JSON.stringify(merged.selection_contract) !== JSON.stringify(expected)) {
+    throw new Error("merged KPI selection contract differs from verified shard evidence");
+  }
+}
+
 function buildAttributedMergedPayload(
   input: Parameters<typeof buildMergedArchiveSidecars>[0],
+  diagnostics: Awaited<ReturnType<typeof buildMergedDiagnosticsSidecar>>["payload"]["sidecar"]["questions"],
   candidatePoolComplete: boolean,
   provenanceComplete: boolean
 ): KpiPayload {
+  if (input.merged.answerable_evaluated_count === undefined) {
+    return input.merged;
+  }
+  assertMeasurementCohortBinding(input.merged.kpi.per_scenario, diagnostics);
   const metrics = input.merged.kpi.quality_metrics;
   return {
     ...input.merged,
@@ -374,11 +407,21 @@ function buildMergedEvidenceManifest(input: MergedEvidenceInput) {
   if (datasetSha === undefined) {
     throw new Error("LongMemEval evidence manifest requires dataset.checksum_sha256");
   }
-  const cohort = JSON.parse(input.cohort) as { readonly question_id_digest: string };
+  const cohort = JSON.parse(input.cohort) as {
+    readonly question_id_digest: string;
+    readonly selection_contract?: KpiPayload["selection_contract"];
+  };
   const questions = input.diagnostics.payload.sidecar.questions;
   const candidatePoolsComplete = input.diagnostics.payload.failed_question_ids.length === 0 &&
     questions.length === input.input.merged.evaluated_count &&
     questions.every((question) => question.candidate_pool_complete);
+  const selection = input.provenance.selectionContract === null
+    ? undefined
+    : selectionContractIdentity(input.provenance.selectionContract);
+  if (JSON.stringify(cohort.selection_contract) !== JSON.stringify(selection) ||
+      JSON.stringify(input.input.merged.selection_contract) !== JSON.stringify(selection)) {
+    throw new Error("merged evidence selection differs across KPI, cohort, and provenance");
+  }
   const manifest = buildLongMemEvalEvidenceManifest({
     run: {
       slug: input.input.slug,
@@ -389,6 +432,9 @@ function buildMergedEvidenceManifest(input: MergedEvidenceInput) {
       dataset_sha256: datasetSha,
       selection_manifest_sha256: input.provenance.selectionManifestSha256,
       question_id_digest: cohort.question_id_digest,
+      ...(selection === undefined
+        ? {}
+        : { selection_contract: selection }),
       candidate_pool_complete: candidatePoolsComplete,
       provenance_complete: input.provenanceComplete
     },

@@ -5,6 +5,7 @@ import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
 } from "../../longmemeval/archive-evidence.js";
+import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
 
 export {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
@@ -31,7 +32,7 @@ export function makeShardKpi(overrides: Partial<KpiPayload> = {}): KpiPayload {
       name: "longmemeval_s",
       size: 500,
       source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
-      checksum_sha256: "d".repeat(64),
+      checksum_sha256: MERGE_TEST_DATASET_SHA256,
       checksum_source: "downloaded_bytes"
     },
     sample_size: 500,
@@ -71,19 +72,24 @@ export function makeEligibleMeasurementAttribution(): NonNullable<
   KpiPayload["measurement_attribution"]
 > {
   return {
-    schema_version: "bench-measurement-attribution.v2",
+    schema_version: "bench-measurement-attribution.v3",
     status: "eligible",
     gate_eligible: true,
     evidence_status: "complete",
     candidate_pool_complete: true,
     provenance_complete: true,
-    abstention_calibration_status: "not_applicable",
+    measurement_scope: "answerable_recall",
+    abstention_evaluation_status: "excluded_not_evaluated",
+    abstention_calibration_status: "uncalibrated",
+    abstention_gate_eligible: false,
+    abstention_evidence_status: "current_uncalibrated",
     evaluator_identity_status: "complete"
   };
 }
 
 export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload {
   const evaluated = payload.evaluated_count;
+  const hitCount = Math.round(payload.kpi.r_at_5 * evaluated);
   return {
     ...payload,
     answerable_evaluated_count: evaluated,
@@ -93,12 +99,31 @@ export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload
       per_scenario: Array.from({ length: evaluated }, (_, index) => ({
         id: `question-${index + 1}`,
         version: 1,
-        hit_at_5: index < Math.round(payload.kpi.r_at_5 * evaluated),
+        hit_at_5: index < hitCount,
         scorable: true,
+        measurement_cohort: "answerable" as const,
         tier: "warm" as const
       })),
       quality_metrics: {
         ...(payload.kpi.quality_metrics ?? makeQualityMetrics()),
+        measurement_cohort_counts: {
+          evaluated,
+          non_abstention: evaluated,
+          abstention: 0,
+          scorable_answerable: evaluated,
+          unscorable_answerable: 0,
+          hit_at_5: hitCount,
+          miss_at_5: evaluated - hitCount
+        },
+        unscorable_reason_distribution: {},
+        miss_taxonomy_distribution: {
+          candidate_absent: 0,
+          materialization_drop: 0,
+          budget_drop: 0,
+          delivery_order_drop: evaluated - hitCount,
+          answer_set_coverage_drop: 0,
+          evaluation_or_gold_issue: 0
+        },
         abstention: {
           schema_version: "bench-abstention.v2",
           total: 0,
@@ -324,16 +349,50 @@ function bindEmptyDiagnosticsQuestions(diagnostics: unknown, kpi: KpiPayload): u
     ...record,
     questions: kpi.kpi.per_scenario.map((row) => ({
       question_id: row.id,
-      is_abstention: row.id.endsWith("_abs"),
+      is_abstention: row.measurement_cohort === "dataset_declared_abstention",
       gold_memory_ids: [],
       delivered_memory_ids: [],
       delivered_gold_ids: [],
       hit_at_5: row.hit_at_5,
       miss_reasons: [],
       provider_state: "provider_not_requested",
-      candidate_pool_complete: false,
+      candidate_pool_complete: row.measurement_cohort !== undefined,
+      ...(row.measurement_cohort === undefined
+        ? {}
+        : { cohort_ledger: measurementCohortLedger(row) }),
       candidates: []
     }))
+  };
+}
+
+function measurementCohortLedger(
+  row: KpiPayload["kpi"]["per_scenario"][number]
+): Record<string, unknown> {
+  const abstention = row.measurement_cohort === "dataset_declared_abstention";
+  return {
+    measurement_status: abstention
+      ? "abstention_unscorable"
+      : "scorable",
+    dataset_cohort: abstention ? "abstention" : "answerable",
+    extraction_materialization: {
+      status: "memory_emitted",
+      emitted_memory_count: 1,
+      reason: null
+    },
+    evaluator_gold_identity: {
+      status: abstention ? "absent" : "present",
+      object_ids: abstention ? [] : [`gold-${row.id}`]
+    },
+    retrieval_status: abstention
+      ? "not_applicable"
+      : row.hit_at_5 ? "hit_at_5" : "miss_at_5",
+    evidence_status: "complete",
+    evaluation_issue_reason: null,
+    candidate_pool_complete: true,
+    stage_ranks: [],
+    final_verdict: abstention
+      ? "not_applicable"
+      : row.hit_at_5 ? "hit_at_5" : "miss_at_5"
   };
 }
 

@@ -3,7 +3,7 @@ import { describeEmbeddingLatencyHonesty } from "../../reporting/report-absolute
 import type { KpiPayload } from "../../schema/kpi-schema.js";
 
 function basePayload(
-  overrides: Partial<KpiPayload> & {
+  overrides: Omit<Partial<KpiPayload>, "kpi"> & {
     readonly kpi?: Partial<KpiPayload["kpi"]>;
   }
 ): KpiPayload {

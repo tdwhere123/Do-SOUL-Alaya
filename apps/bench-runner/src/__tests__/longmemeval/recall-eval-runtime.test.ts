@@ -47,10 +47,22 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
     attribution: { status: "attributed", gate_eligible: true },
     run_provenance: {
       schema_version: 1,
+      dataset_sha256: "d".repeat(64),
+      selection: {
+        schema_version: 1,
+        dataset_sha256: "d".repeat(64),
+        selected_id_digest: "c".repeat(64),
+        selected_count: 1,
+        expected_cohort_counts: { answerable: 1, abstention: 0 },
+        cohort_assignment_digest: "8".repeat(64)
+      },
       code: {
         commit_sha7: "05d98df",
+        commit_sha: "05d98df" + "0".repeat(33),
         gate_sha256: "e".repeat(64),
+        gate_contract_path: "/tmp/frozen-contract.json",
         worktree_state_sha256: "f".repeat(64),
+        worktree_clean: true,
         executed_dist: {
           algorithm: "sha256-reachable-path-file-sha256-v1",
           sha256: "9".repeat(64),

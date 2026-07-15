@@ -8,7 +8,7 @@ import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
 const PRODUCER_PIPELINE = "fusion-rrf-synthesis-v2";
 const CONSUMER_PIPELINE = "fusion-evidence-first-v3";
 const PRODUCER_SCHEMA = 103;
-const CONSUMER_SCHEMA = 105;
+const CONSUMER_SCHEMA = 106;
 const HISTORICAL_GAPS = new Set([70, 75]);
 
 export function assertLegacySnapshotSourceCompatibility(

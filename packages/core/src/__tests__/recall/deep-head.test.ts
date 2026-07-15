@@ -10,7 +10,6 @@ import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-de
 import type { RecallFusionBreakdown } from "../../recall/runtime/recall-service-types.js";
 import {
   computeLightweightDeepHeadScores,
-  DEEP_HEAD_CANDIDATE_LIMIT,
   resolveDeepHeadScores
 } from "../../recall/rerank/deep-head.js";
 
@@ -97,8 +96,8 @@ function emptySupplementary(overrides: {
 }
 
 describe("deep head", () => {
-  it("windows lightweight scores to the fused top-30 only", () => {
-    const candidates = Array.from({ length: DEEP_HEAD_CANDIDATE_LIMIT + 5 }, (_, index) =>
+  it("scores every candidate in the already-pruned waist", () => {
+    const candidates = Array.from({ length: 37 }, (_, index) =>
       fusedCandidate({
         objectId: `c-${index + 1}`,
         fusedScore: 1 - index * 0.01,
@@ -109,8 +108,8 @@ describe("deep head", () => {
 
     const scores = computeLightweightDeepHeadScores(candidates, emptySupplementary());
 
-    expect(scores.size).toBe(DEEP_HEAD_CANDIDATE_LIMIT);
-    expect(scores.has(candidates[DEEP_HEAD_CANDIDATE_LIMIT]!.fusion.candidate_key)).toBe(false);
+    expect(scores.size).toBe(candidates.length);
+    expect(scores.has(candidates.at(-1)!.fusion.candidate_key)).toBe(true);
   });
 
   it("prefers cross-encoder scores when present and otherwise uses lightweight head", () => {
@@ -141,39 +140,55 @@ describe("deep head", () => {
       .toBeGreaterThan(withoutCe.get(candidates[0]!.fusion.candidate_key)!);
   });
 
-  it("keeps fusion order outside the deep-head window after delivery selection", () => {
-    const head = Array.from({ length: DEEP_HEAD_CANDIDATE_LIMIT }, (_, index) =>
+  it("lets independent semantic support promote a candidate from a distant fused rank", () => {
+    const candidates = Array.from({ length: 40 }, (_, index) =>
       fusedCandidate({
-        objectId: `head-${index + 1}`,
+        objectId: `candidate-${index + 1}`,
         fusedScore: 1 - index * 0.001,
         fusedRank: index + 1,
-        embedding: index === 5 ? 1 : 0.1
+        embedding: index === 39 ? 1 : 0.1
       })
     );
-    const tail = [
-      fusedCandidate({ objectId: "tail-a", fusedScore: 0.05, fusedRank: 31, embedding: 0 }),
-      fusedCandidate({ objectId: "tail-b", fusedScore: 0.04, fusedRank: 32, embedding: 1 })
-    ];
-    const scores = computeLightweightDeepHeadScores([...head, ...tail], emptySupplementary());
-    const result = applyDeliverySelection([...head, ...tail], scores, {
+    const scores = computeLightweightDeepHeadScores(candidates, emptySupplementary());
+    const result = applyDeliverySelection(candidates, scores, {
       replacePublicRelevance: false
     });
     const orderedIds = result.orderedCandidates.map((candidate) => candidate.entry.object_id);
 
-    expect(orderedIds.slice(0, DEEP_HEAD_CANDIDATE_LIMIT)).toContain("head-6");
-    expect(orderedIds[0]).toBe("head-6");
-    expect(orderedIds.slice(DEEP_HEAD_CANDIDATE_LIMIT)).toEqual(["tail-a", "tail-b"]);
-    // Lightweight head reorders; fused_score remains the public relevance scalar.
-    expect(result.finalRelevanceByCandidateKey.get(head[5]!.fusion.candidate_key))
-      .toBe(head[5]!.fusion.fused_score);
+    expect(orderedIds[0]).toBe("candidate-40");
+    expect(result.finalRelevanceByCandidateKey.get(candidates[39]!.fusion.candidate_key))
+      .toBe(candidates[39]!.fusion.fused_score);
     expect(result.answerRelevanceRankByCandidateKey.size).toBe(0);
+  });
+
+  it("combines semantic support and evidence agreement monotonically", () => {
+    const semanticOnly = fusedCandidate({
+      objectId: "semantic-only",
+      fusedScore: 0.3,
+      embedding: 0.6
+    });
+    const corroborated = fusedCandidate({
+      objectId: "corroborated",
+      fusedScore: 0.2,
+      embedding: 0.6
+    });
+    const scores = computeLightweightDeepHeadScores(
+      [semanticOnly, corroborated],
+      emptySupplementary({
+        evidenceFtsRanks: { corroborated: 1 },
+        structuralScores: { corroborated: 0.36 }
+      })
+    );
+
+    expect(scores.get(semanticOnly.fusion.candidate_key)).toBeCloseTo(0.6);
+    expect(scores.get(corroborated.fusion.candidate_key)).toBeCloseTo(0.84);
   });
 
   it("keeps query-supported fusion wins when emb is cold and agreement-gates conflict-only piles", () => {
     // Path rescue with a lexical foothold must keep fused mass; content-disjoint
     // path piles stay agreement-gated so they cannot lead over lexical hits.
-    const pathGold = fusedCandidate({
-      objectId: "path-gold",
+    const lexicalRescue = fusedCandidate({
+      objectId: "lexical-rescue",
       fusedScore: 0.08,
       fusedRank: 2,
       contributions: { path_expansion: 0.016, lexical_fts: 0.012 }
@@ -197,34 +212,34 @@ describe("deep head", () => {
       contributions: { path_expansion: 0.015, lexical_fts: 0.014 }
     });
     const scores = computeLightweightDeepHeadScores(
-      [seed, pathGold, conflictOnly, lexicalPeer],
+      [seed, lexicalRescue, conflictOnly, lexicalPeer],
       emptySupplementary({
         evidenceFtsRanks: {
           "lexical-peer": 1,
-          "path-gold": 0.2,
+          "lexical-rescue": 0.2,
           "path-seed": 0.3,
           "conflict-only": 0.01
         },
         structuralScores: {
           "lexical-peer": 1,
-          "path-gold": 0.2,
+          "lexical-rescue": 0.2,
           "path-seed": 0.3,
           "conflict-only": 0.01
         }
       })
     );
-    expect(scores.get(pathGold.fusion.candidate_key)).toBeCloseTo(0.08);
+    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.08);
     expect(scores.get(lexicalPeer.fusion.candidate_key)).toBeCloseTo(0.04);
     expect(scores.get(conflictOnly.fusion.candidate_key)!)
       .toBeLessThan(scores.get(lexicalPeer.fusion.candidate_key)!);
 
     const result = applyDeliverySelection(
-      [seed, pathGold, conflictOnly, lexicalPeer],
+      [seed, lexicalRescue, conflictOnly, lexicalPeer],
       scores,
       { replacePublicRelevance: false }
     );
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["path-seed", "path-gold", "lexical-peer", "conflict-only"]);
+      .toEqual(["path-seed", "lexical-rescue", "lexical-peer", "conflict-only"]);
   });
 
   it("is a no-op when emb and agreement are both cold (fused order binds)", () => {

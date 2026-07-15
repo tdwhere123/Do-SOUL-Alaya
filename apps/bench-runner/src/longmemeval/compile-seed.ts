@@ -3,6 +3,7 @@ export {
   EXTRACTION_CACHE_ROOT,
   resolveBenchAllowLiveExtraction,
   resolveCompileSeedExtractionConfig,
+  resolveEffectiveExtractionCacheRoot,
   toSeedExtractionPathKpi
 } from "./compile-seed-config.js";
 export {

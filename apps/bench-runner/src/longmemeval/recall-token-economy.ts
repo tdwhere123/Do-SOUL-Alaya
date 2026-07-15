@@ -11,6 +11,13 @@ function readNonNegativeInt(
   return Math.floor(value);
 }
 
+function readOptionalNonNegativeInt(
+  record: Readonly<Record<string, unknown>>,
+  key: string
+): number | null {
+  return record[key] === undefined ? 0 : readNonNegativeInt(record, key);
+}
+
 /**
  * Narrow `recallResult.diagnostics.token_economy` from the typed `unknown`
  * surface back to a BenchRecallTokenEconomy without re-parsing the whole
@@ -38,6 +45,10 @@ export function extractRecallTokenEconomy(
   const coarse = readNonNegativeInt(record, "coarse_pool_size");
   const fine = readNonNegativeInt(record, "fine_evaluated");
   const pruned = readNonNegativeInt(record, "fine_pruned_count");
+  const priorityOverflow = readOptionalNonNegativeInt(
+    record,
+    "fine_priority_overflow_count"
+  );
   const families = readNonNegativeInt(record, "fusion_families_with_hits");
   const inferences = readNonNegativeInt(record, "embedding_inference_calls");
   if (
@@ -45,6 +56,7 @@ export function extractRecallTokenEconomy(
     coarse === null ||
     fine === null ||
     pruned === null ||
+    priorityOverflow === null ||
     families === null ||
     inferences === null
   ) {
@@ -55,6 +67,7 @@ export function extractRecallTokenEconomy(
     coarse_pool_size: coarse,
     fine_evaluated: fine,
     fine_pruned_count: pruned,
+    fine_priority_overflow_count: priorityOverflow,
     fusion_families_with_hits: families,
     embedding_inference_calls: inferences
   });
@@ -66,9 +79,9 @@ export function extractRecallTokenEconomy(
  * by computeRecallTokenEconomy) into the run-level KPI
  * shape consumed by kpi.json / report.md.
  *
- * The block is measure-only (D5 decision, phase 7): no field gates
- * ranking or admission; figures publish what the recall pipeline did,
- * never what it must do.
+ * The block never gates ranking or admission. Release policy uses only
+ * embedding_inference_calls as an embedding-on liveness check; the remaining
+ * fields stay descriptive telemetry.
  *
  * Distribution stats are computed with linear-interpolation percentiles
  * over the sorted per-recall samples. Empty input yields an all-zero
@@ -154,6 +167,10 @@ export function aggregateRecallTokenEconomy(
     coarse_pool_size: summarizeField(samples, (s) => s.coarse_pool_size),
     fine_evaluated: summarizeField(samples, (s) => s.fine_evaluated),
     fine_pruned_count: summarizeField(samples, (s) => s.fine_pruned_count),
+    fine_priority_overflow_count: summarizeField(
+      samples,
+      (s) => s.fine_priority_overflow_count
+    ),
     fusion_families_with_hits: summarizeField(
       samples,
       (s) => s.fusion_families_with_hits

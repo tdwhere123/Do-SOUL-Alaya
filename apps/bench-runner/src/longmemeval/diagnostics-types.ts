@@ -262,6 +262,8 @@ export interface LongMemEvalDiagnosticsSidecar {
   readonly embedding_vector_cache?: LongMemEvalEmbeddingVectorCacheSummary;
   readonly query_embedding_cache?: LongMemEvalQueryEmbeddingCacheSummary;
   readonly miss_taxonomy_summary?: LongMemEvalMissTaxonomySummary;
+  // Diagnostic-only: qualification keeps one final row per selected question.
+  readonly round_diagnostics?: readonly LongMemEvalQuestionDiagnostic[];
   readonly provider_state_summary: ProviderStateSummary;
   readonly questions: readonly LongMemEvalQuestionDiagnostic[];
 }

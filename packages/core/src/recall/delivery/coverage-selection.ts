@@ -1,20 +1,6 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallSupplementaryData } from "../runtime/recall-service-types.js";
 
-/**
- * Hard backstop only. Primary redundancy control is marginal-gain selection
- * over gist identity — blind dedup alone lowers full-gold coverage.
- */
-export const COVERAGE_MAX_PER_GIST_SAFETY = 2;
-
-/**
- * Facility-location novelty: same gist is full redundancy (1); else novel (0).
- * Cohort soft-overlap (formerly 1/2) displaced deep-head / CE top ranks on any@5
- * by promoting weaker novel-cohort items ahead of stronger same-cohort golds.
- * Cohort stays on the identity record for diagnostics; it does not cut gain.
- */
-const SAME_GIST_SIMILARITY = 1;
-
 export type CoverageIdentity = Readonly<{
   readonly gistKey: string;
   readonly cohortKey: string | null;
@@ -33,10 +19,6 @@ type CoverageSupplementary = Readonly<Pick<
   "evidenceGistsByMemoryId" | "sourceCohortKeys"
 >>;
 
-/**
- * Greedy facility-location packing over gist identity so later novel-gist
- * items can outrank earlier duplicate-gist ones before admission.
- */
 export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate>(
   params: Readonly<{
     readonly candidates: readonly T[];
@@ -49,27 +31,24 @@ export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidat
   }
   const remaining = [...params.candidates];
   const selected: T[] = [];
-  const selectedIdentities: CoverageIdentity[] = [];
+  const gistCounts = new Map<string, number>();
+  const cohortCounts = new Map<string, number>();
 
   while (remaining.length > 0) {
-    let bestIndex = 0;
-    let bestGain = Number.NEGATIVE_INFINITY;
-    for (let index = 0; index < remaining.length; index += 1) {
-      const candidate = remaining[index]!;
-      const gain = marginalCoverageGain({
-        candidate,
-        selectedIdentities,
-        relevance: resolveRelevance(candidate, params.relevanceByCandidateKey),
-        supplementaryData: params.supplementaryData
-      });
-      if (gain > bestGain) {
-        bestGain = gain;
-        bestIndex = index;
-      }
-    }
+    const bestIndex = selectBestCoverageIndex({
+      candidates: remaining,
+      relevanceByCandidateKey: params.relevanceByCandidateKey,
+      supplementaryData: params.supplementaryData,
+      gistCounts,
+      cohortCounts
+    });
     const picked = remaining.splice(bestIndex, 1)[0]!;
     selected.push(picked);
-    selectedIdentities.push(resolveCoverageIdentity(picked, params.supplementaryData));
+    incrementCoverageCounts(
+      resolveCoverageIdentity(picked, params.supplementaryData),
+      gistCounts,
+      cohortCounts
+    );
   }
 
   return Object.freeze(selected);
@@ -93,25 +72,56 @@ export function resolveCoverageIdentity(
   });
 }
 
-function coverageSimilarity(
-  left: CoverageIdentity,
-  right: CoverageIdentity
-): number {
-  return left.gistKey === right.gistKey ? SAME_GIST_SIMILARITY : 0;
-}
-
 function marginalCoverageGain(params: Readonly<{
   readonly candidate: CoverageSelectableCandidate;
-  readonly selectedIdentities: readonly CoverageIdentity[];
   readonly relevance: number;
   readonly supplementaryData: CoverageSupplementary;
+  readonly gistCounts: ReadonlyMap<string, number>;
+  readonly cohortCounts: ReadonlyMap<string, number>;
 }>): number {
   const identity = resolveCoverageIdentity(params.candidate, params.supplementaryData);
-  let maxSimilarity = 0;
-  for (const selected of params.selectedIdentities) {
-    maxSimilarity = Math.max(maxSimilarity, coverageSimilarity(identity, selected));
+  const sameGistCount = params.gistCounts.get(identity.gistKey) ?? 0;
+  const sameCohortCount = identity.cohortKey === null
+    ? 0
+    : params.cohortCounts.get(identity.cohortKey) ?? 0;
+  return params.relevance / (1 + sameGistCount + sameCohortCount);
+}
+
+function selectBestCoverageIndex<T extends CoverageSelectableCandidate>(params: Readonly<{
+  readonly candidates: readonly T[];
+  readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly supplementaryData: CoverageSupplementary;
+  readonly gistCounts: ReadonlyMap<string, number>;
+  readonly cohortCounts: ReadonlyMap<string, number>;
+}>): number {
+  let bestIndex = 0;
+  let bestGain = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < params.candidates.length; index += 1) {
+    const candidate = params.candidates[index]!;
+    const gain = marginalCoverageGain({
+      candidate,
+      relevance: resolveRelevance(candidate, params.relevanceByCandidateKey),
+      supplementaryData: params.supplementaryData,
+      gistCounts: params.gistCounts,
+      cohortCounts: params.cohortCounts
+    });
+    if (gain > bestGain) {
+      bestGain = gain;
+      bestIndex = index;
+    }
   }
-  return params.relevance * (1 - maxSimilarity);
+  return bestIndex;
+}
+
+function incrementCoverageCounts(
+  identity: CoverageIdentity,
+  gistCounts: Map<string, number>,
+  cohortCounts: Map<string, number>
+): void {
+  gistCounts.set(identity.gistKey, (gistCounts.get(identity.gistKey) ?? 0) + 1);
+  if (identity.cohortKey !== null) {
+    cohortCounts.set(identity.cohortKey, (cohortCounts.get(identity.cohortKey) ?? 0) + 1);
+  }
 }
 
 function resolveRelevance(

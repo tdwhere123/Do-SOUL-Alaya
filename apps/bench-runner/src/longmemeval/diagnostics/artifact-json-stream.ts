@@ -25,12 +25,15 @@ export async function readDiagnosticsJsonStream(
 
 export async function* streamDiagnosticsJsonQuestions(
   artifactPath: ArtifactReadSource,
-  options: { readonly maxQuestionChars?: number } = {}
+  options: {
+    readonly maxQuestionChars?: number;
+    readonly observeArtifactChunk?: (chunk: Uint8Array) => void;
+  } = {}
 ): AsyncGenerator<LongMemEvalDiagnosticsSidecar["questions"][number]> {
   const reader = new DiagnosticsJsonStreamReader(options.maxQuestionChars, true);
   const source = createArtifactReadStream(artifactPath);
   try {
-    for await (const chunk of decodeArtifactUtf8(source)) {
+    for await (const chunk of decodeArtifactUtf8(source, options.observeArtifactChunk)) {
       reader.consume(chunk);
       yield* reader.takeQuestions();
     }

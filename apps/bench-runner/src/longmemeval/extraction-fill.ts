@@ -23,13 +23,16 @@ import {
   type ExtractionCacheWriteLease
 } from "./extraction/fill-root-guard.js";
 import { ExtractionCacheInvariantError } from "./extraction/cache-invariant-error.js";
-import { buildFillManifest } from "./extraction/fill-manifest.js";
+import {
+  buildFillManifest,
+  pinExtractionCacheIdentity
+} from "./extraction/fill-manifest.js";
 import {
   newFillStats,
   readFillRetryTelemetry,
   type FillRetryTelemetry
 } from "./extraction/fill-stats.js";
-import { loadDataset } from "./fetch.js";
+import { loadDatasetWithIdentity } from "./fetch.js";
 import {
   pairSessionIntoRounds,
   type LongMemEvalQuestion,
@@ -236,6 +239,7 @@ interface PreparedExtractionFill {
   readonly pinnedManifestSha256: string;
   readonly distinctTurns: readonly string[];
   readonly requestedTurns: number;
+  readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
 }
 
@@ -252,26 +256,15 @@ async function prepareExtractionFill(
 
   const window = await prepareExtractionWindow(options);
   const { distinctTurns, requestedTurns } = window;
-  const currentIdentity = readExtractionCacheManifestIdentity(cacheRoot);
-  assertPreparationIdentityUnchanged(startingIdentity, currentIdentity);
-  if (currentIdentity === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
-  const currentManifest = currentIdentity?.manifest;
-  preflightExtractionCache({
-    cacheRoot,
-    manifest: currentManifest,
-    config,
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    requiredTurnContents: distinctTurns,
-    allowLiveExtraction: true,
-    liveExtractionPossible: config.apiKey !== null,
-    warn: log
-  });
-  const pinned = pinExtractionCacheIdentity({
+  const pinned = preflightAndPinExtractionIdentity({
+    startingIdentity,
     cacheRoot,
     config,
+    distinctTurns,
+    log,
     variant: options.variant,
-    existingIdentity: currentIdentity,
-    requestedTurns
+    requestedTurns,
+    datasetRevision: window.datasetRevision
   });
   log(
     `[extraction-fill] variant=${options.variant} questions=${window.questionCount} ` +
@@ -284,8 +277,42 @@ async function prepareExtractionFill(
     pinnedManifestSha256: pinned.manifestSha256,
     distinctTurns,
     requestedTurns,
+    datasetRevision: window.datasetRevision,
     variant: options.variant
   };
+}
+
+function preflightAndPinExtractionIdentity(input: {
+  readonly startingIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>;
+  readonly cacheRoot: string;
+  readonly config: CompileSeedExtractionConfig;
+  readonly distinctTurns: readonly string[];
+  readonly log: (message: string) => void;
+  readonly variant: LongMemEvalVariant;
+  readonly requestedTurns: number;
+  readonly datasetRevision: string;
+}) {
+  const currentIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
+  assertPreparationIdentityUnchanged(input.startingIdentity, currentIdentity);
+  if (currentIdentity === undefined) assertManifestlessCacheIsEmpty(input.cacheRoot);
+  preflightExtractionCache({
+    cacheRoot: input.cacheRoot,
+    manifest: currentIdentity?.manifest,
+    config: input.config,
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    requiredTurnContents: input.distinctTurns,
+    allowLiveExtraction: true,
+    liveExtractionPossible: input.config.apiKey !== null,
+    warn: input.log
+  });
+  return pinExtractionCacheIdentity({
+    cacheRoot: input.cacheRoot,
+    config: input.config,
+    variant: input.variant,
+    existingIdentity: currentIdentity,
+    requestedTurns: input.requestedTurns,
+    datasetRevision: input.datasetRevision
+  });
 }
 
 function resolveFillConfig(
@@ -313,11 +340,13 @@ async function prepareExtractionWindow(options: ExtractionFillOptions): Promise<
   readonly distinctTurns: readonly string[];
   readonly requestedTurns: number;
   readonly questionCount: number;
+  readonly datasetRevision: string;
 }> {
-  const questions = await loadDataset(options.variant, {
+  const dataset = await loadDatasetWithIdentity(options.variant, {
     dataDir: options.dataDir,
     pinnedMetaRoot: options.pinnedMetaRoot
   });
+  const questions = dataset.questions;
   const offset = Math.max(0, options.offset ?? 0);
   const sliceEnd =
     options.limit !== undefined ? offset + options.limit : questions.length;
@@ -326,36 +355,9 @@ async function prepareExtractionWindow(options: ExtractionFillOptions): Promise<
   return {
     distinctTurns,
     requestedTurns: distinctTurns.length,
-    questionCount: window.length
+    questionCount: window.length,
+    datasetRevision: dataset.sha256
   };
-}
-
-function pinExtractionCacheIdentity(input: {
-  readonly cacheRoot: string;
-  readonly config: CompileSeedExtractionConfig;
-  readonly variant: LongMemEvalVariant;
-  readonly existingIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>;
-  readonly requestedTurns: number;
-}): { readonly manifest: ExtractionCacheManifest; readonly manifestSha256: string } {
-  if (input.existingIdentity === undefined) {
-    writeExtractionCacheManifest(input.cacheRoot, buildFillManifest({
-      config: input.config,
-      variant: input.variant,
-      existingManifest: undefined,
-      requestedTurns: input.requestedTurns,
-      cachedTurns: 0,
-      coverage: input.requestedTurns === 0 ? 1 : 0
-    }));
-  } else {
-    return input.existingIdentity;
-  }
-  const identity = readExtractionCacheManifestIdentity(input.cacheRoot);
-  if (identity === undefined) {
-    throw new ExtractionCacheInvariantError(
-      "extraction-fill failed to pin its cache manifest identity"
-    );
-  }
-  return identity;
 }
 
 async function executeExtractionFill(
@@ -406,6 +408,7 @@ function finishExtractionFill(
     config: prepared.config,
     variant: prepared.variant,
     existingManifest: prepared.existingManifest,
+    datasetRevision: prepared.datasetRevision,
     requestedTurns,
     cachedTurns,
     coverage

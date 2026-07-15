@@ -1,14 +1,6 @@
 import {
-  buildDiffVsPrevious,
   buildTokenEconomy,
   computeTokenSavedRatio,
-  diffKpis,
-  entrySlug,
-  readLatest,
-  renderFindings,
-  renderReport,
-  writeEntry,
-  type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
@@ -17,17 +9,18 @@ import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import {
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
-  renderCompactDiagnosticsSidecar,
-  renderDiagnosticsSidecar,
   summarizeProviderStates
 } from "./diagnostics.js";
-import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
 import { aggregateRecallTokenEconomy } from "./recall-token-economy.js";
-import {
-  appendSeedExtractionReleaseBlockerToFindings,
-  appendSeedExtractionReleaseBlockerToReport
-} from "./seed-extraction-release-blocker.js";
 import { toSeedExtractionPathKpi } from "./compile-seed.js";
+import {
+  classifyQuestionMeasurementCohort,
+  classifyQuestionMeasurementStatus
+} from "./measurement/question-validity.js";
+import {
+  answerableRecallAt5,
+  summarizeAnswerableRecall
+} from "./measurement/answerable-recall.js";
 import {
   computePercentile,
   countDegradationReasons,
@@ -40,8 +33,8 @@ import type {
   CrossQuestionExecutionResult,
   CrossQuestionRunContext
 } from "./crossquestion-run.js";
-
-const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
+import { selectionContractIdentity } from "./selection/contract.js";
+import { writeTierOneLongMemEvalArchive } from "./archive/tier-one-evidence.js";
 
 export interface CrossQuestionPayloadBuild {
   readonly payload: KpiPayload;
@@ -56,6 +49,7 @@ export function buildCrossQuestionPayload(
   const allDiagnostics = execution.collected.map((result) => result.diagnostics);
   const providerSummary = summarizeProviderStates(allDiagnostics);
   const split = variantToSplit(context.opts.variant);
+  const kpi = buildCrossQuestionKpi(context, execution, allDiagnostics, providerSummary);
   const payload: KpiPayload = {
     bench_name: "public-crossquestion",
     split,
@@ -68,10 +62,14 @@ export function buildCrossQuestionPayload(
     policy_shape: "stress",
     simulate_report: "none",
     dataset: buildCrossQuestionDataset(context),
+    selection_contract: selectionContractIdentity(context.selectionContract),
     sample_size: context.opts.fetchResult?.questionCount ?? context.questions.length,
     evaluated_count: context.window.length,
+    answerable_evaluated_count: kpi.per_scenario.filter(
+      (row) => row.scorable === true
+    ).length,
     harness_mode: "mcp_propose_review",
-    kpi: buildCrossQuestionKpi(context, execution, allDiagnostics, providerSummary)
+    kpi
   };
   return {
     payload,
@@ -88,19 +86,21 @@ export async function writeCrossQuestionArtifacts(
   context: CrossQuestionRunContext,
   payloadBuild: CrossQuestionPayloadBuild
 ): Promise<LongMemEvalCrossQuestionRunResult> {
-  const layout: HistoryLayout = { historyRoot: context.opts.historyRoot };
-  const previous = await readLatest(layout, "public-crossquestion", {
-    split: payloadBuild.payload.split,
-    embeddingProvider: payloadBuild.payload.embedding_provider,
-    pointerKind: "passing"
+  return writeTierOneLongMemEvalArchive({
+    benchName: "public-crossquestion",
+    opts: context.opts,
+    datasetSha256: context.datasetSha256,
+    datasetChecksumSource: context.datasetChecksumSource,
+    datasetSourcePath: context.datasetSourcePath,
+    releaseEvidenceAuthority: context.releaseEvidenceAuthority,
+    selectionContract: context.selectionContract,
+    payload: payloadBuild.payload,
+    diagnosticsPayload: payloadBuild.diagnosticsPayload,
+    releaseDiagnostics: payloadBuild.diagnosticsPayload.questions,
+    commitSha7: context.commitSha7,
+    embeddingProviderLabel: context.embeddingProviderLabel,
+    runAt: context.runAt
   });
-  const diff = diffKpis(payloadBuild.payload, previous);
-  payloadBuild.payload.diff_vs_previous = buildDiffVsPrevious(
-    payloadBuild.payload,
-    previous,
-    previous?.run_at ?? ""
-  );
-  return writeCrossQuestionEntry(context, layout, payloadBuild, diff, previous);
 }
 
 function buildCrossQuestionDataset(
@@ -109,7 +109,9 @@ function buildCrossQuestionDataset(
   return {
     name: `${context.opts.variant}:crossquestion`,
     size: context.opts.fetchResult?.questionCount ?? context.questions.length,
-    source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+    source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    checksum_sha256: context.datasetSha256,
+    checksum_source: context.datasetChecksumSource
   };
 }
 
@@ -121,6 +123,7 @@ function buildCrossQuestionKpi(
 ): KpiPayload["kpi"] {
   const collected = execution.collected;
   const n = collected.length;
+  const recall = summarizeAnswerableRecall(allDiagnostics);
   const halfRates = computeHalfRates(collected);
   const recallTokenEconomy = aggregateRecallTokenEconomy(
     collected
@@ -128,9 +131,9 @@ function buildCrossQuestionKpi(
       .filter((sample): sample is NonNullable<typeof sample> => sample !== null)
   );
   return {
-    r_at_1: ratio(collected.filter((r) => r.hitAt1).length, n),
-    r_at_5: ratio(collected.filter((r) => r.hitAt5).length, n),
-    r_at_10: ratio(collected.filter((r) => r.hitAt10).length, n),
+    r_at_1: recall.rAt1,
+    r_at_5: recall.rAt5,
+    r_at_10: recall.rAt10,
     ...halfRates,
     crossquestion_questions: n,
     ...buildEmbeddingProviderKpi(context, allDiagnostics, providerSummary),
@@ -156,8 +159,8 @@ function computeHalfRates(collected: readonly CrossQuestionExecutionResult["coll
   const lastHalf = collected.slice(n - half);
   if (half === 0) return {};
   return {
-    r_at_5_first_half: ratio(firstHalf.filter((r) => r.hitAt5).length, firstHalf.length),
-    r_at_5_last_half: ratio(lastHalf.filter((r) => r.hitAt5).length, lastHalf.length)
+    r_at_5_first_half: answerableRecallAt5(firstHalf.map((row) => row.diagnostics)),
+    r_at_5_last_half: answerableRecallAt5(lastHalf.map((row) => row.diagnostics))
   };
 }
 
@@ -195,6 +198,8 @@ function buildPerScenarioRows(
     id: result.questionId,
     version: 1,
     hit_at_5: result.hitAt5,
+    scorable: classifyQuestionMeasurementStatus(result.diagnostics) === "scorable",
+    measurement_cohort: classifyQuestionMeasurementCohort(result.diagnostics),
     tier: result.firstTier
   }));
 }
@@ -215,85 +220,10 @@ function buildCrossQuestionDiagnosticsPayload(
     recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
     embedding_mode: context.opts.embeddingMode ?? "disabled",
+    policy_shape: payload.policy_shape,
+    simulate_report: payload.simulate_report,
     seed_extraction_path: payload.kpi.seed_extraction_path,
     provider_state_summary: providerSummary,
     questions: allDiagnostics
   } as const;
-}
-
-async function writeCrossQuestionEntry(
-  context: CrossQuestionRunContext,
-  layout: HistoryLayout,
-  payloadBuild: CrossQuestionPayloadBuild,
-  diff: ReturnType<typeof diffKpis>,
-  previous: KpiPayload | null
-): Promise<LongMemEvalCrossQuestionRunResult> {
-  const slug = entrySlug(context.runAt, context.commitSha7);
-  const diagnosticsPath = await writeCrossQuestionDiagnostics(
-    context,
-    slug,
-    payloadBuild.diagnosticsPayload
-  );
-  const entry = await writeEntry(
-    layout,
-    "public-crossquestion",
-    slug,
-    payloadBuild.payload,
-    buildCrossQuestionReport(payloadBuild.payload, previous, diff),
-    buildCrossQuestionFindings(payloadBuild.payload, diff),
-    { sidecars: [diagnosticsSidecar(payloadBuild.diagnosticsPayload, diagnosticsPath)] }
-  );
-  return {
-    slug,
-    kpiPath: entry.kpiPath,
-    reportPath: entry.reportPath,
-    findingsPath: entry.findingsPath,
-    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
-    payload: payloadBuild.payload
-  };
-}
-
-async function writeCrossQuestionDiagnostics(
-  context: CrossQuestionRunContext,
-  slug: string,
-  diagnosticsPayload: CrossQuestionPayloadBuild["diagnosticsPayload"]
-): Promise<string> {
-  return writeExternalDiagnosticsArtifact({
-    historyRoot: context.opts.historyRoot,
-    benchName: "public-crossquestion",
-    slug,
-    filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-    contents: renderDiagnosticsSidecar(diagnosticsPayload)
-  });
-}
-
-function diagnosticsSidecar(
-  diagnosticsPayload: CrossQuestionPayloadBuild["diagnosticsPayload"],
-  diagnosticsPath: string
-) {
-  return {
-    filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-    contents: renderCompactDiagnosticsSidecar(diagnosticsPayload, diagnosticsPath)
-  };
-}
-
-function buildCrossQuestionReport(
-  payload: KpiPayload,
-  previous: KpiPayload | null,
-  diff: ReturnType<typeof diffKpis>
-): string {
-  return appendSeedExtractionReleaseBlockerToReport(
-    renderReport(payload, previous, diff),
-    payload
-  );
-}
-
-function buildCrossQuestionFindings(
-  payload: KpiPayload,
-  diff: ReturnType<typeof diffKpis>
-): string | null {
-  return appendSeedExtractionReleaseBlockerToFindings(
-    renderFindings(payload, diff),
-    payload
-  );
 }

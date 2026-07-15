@@ -45,6 +45,8 @@ describe("LoCoMo runner", () => {
     expect(warmQueryEmbeddingCache).not.toHaveBeenCalled();
     expect(kpi.kpi.query_embedding_cache_ready_rate).toBeUndefined();
     expect(diagnostics.query_embedding_cache).toBeUndefined();
+    expect(result.payload.kpi.recall_token_economy?.fine_priority_overflow_count)
+      .toMatchObject({ mean: 1, max: 1 });
   });
 
   it("keeps answerless adversarial rows in the retrieval denominator while still using the abstention QA judge", async () => {

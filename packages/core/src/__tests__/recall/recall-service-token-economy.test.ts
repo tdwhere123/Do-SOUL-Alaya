@@ -108,6 +108,7 @@ describe("RecallService", () => {
     // coarse_pool_size and fine_pruned_count is zero.
     expect(tokenEconomy?.fine_evaluated).toBe(tokenEconomy?.coarse_pool_size);
     expect(tokenEconomy?.fine_pruned_count).toBe(0);
+    expect(tokenEconomy?.fine_priority_overflow_count).toBe(0);
     // No embedding provider was wired into the deps factory, so the
     // pipeline reports zero fresh provider inferences for this recall.
     expect(tokenEconomy?.embedding_inference_calls).toBe(0);
@@ -146,6 +147,36 @@ describe("RecallService", () => {
     expect(first.diagnostics?.token_economy).toEqual(
       second.diagnostics?.token_economy
     );
+  });
+
+  it("keeps priority-overflow telemetry measure-only", () => {
+    const shared = {
+      deliveredCandidates: Object.freeze([]),
+      coarsePoolSize: 8,
+      fineEvaluated: 3,
+      finePrunedCount: 5,
+      preBudgetCandidates: Object.freeze([]),
+      embeddingInferenceCalls: 0
+    };
+    const baseline = computeRecallTokenEconomy({
+      ...shared,
+      finePriorityOverflowCount: 0
+    });
+    const overflow = computeRecallTokenEconomy({
+      ...shared,
+      finePriorityOverflowCount: 4
+    });
+    const {
+      fine_priority_overflow_count: _baselineOverflow,
+      ...baselineRankingIndependentFields
+    } = baseline;
+    const {
+      fine_priority_overflow_count: _observedOverflow,
+      ...overflowRankingIndependentFields
+    } = overflow;
+
+    expect(overflow.fine_priority_overflow_count).toBe(4);
+    expect(overflowRankingIndependentFields).toEqual(baselineRankingIndependentFields);
   });
 
   // O-1 regression guard for the per-call instrument's latency contract.
@@ -294,6 +325,7 @@ describe("RecallService", () => {
         coarse_pool_size: result.diagnostics?.candidate_pool_count,
         fine_evaluated: result.diagnostics?.candidate_pool_count,
         fine_pruned_count: 0,
+        fine_priority_overflow_count: 0,
         embedding_inference_calls: 0
       })
     );

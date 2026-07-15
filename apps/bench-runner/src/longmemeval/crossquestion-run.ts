@@ -6,11 +6,16 @@ import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.j
 import { aggregateBenchTokenMetrics } from "../harness/token-economy.js";
 import { resolveBenchRunnerVersion } from "../shared/version.js";
 import type { LongMemEvalQuestion } from "./dataset.js";
-import { loadDataset } from "./fetch.js";
+import {
+  deriveLongMemEvalReleaseEvidenceAuthority,
+  loadDatasetWithIdentity
+} from "./fetch.js";
+import type { LongMemEvalReleaseEvidenceAuthority } from
+  "@do-soul/alaya-eval/internal";
 import {
   createCompileSeedRunner,
-  EXTRACTION_CACHE_ROOT,
   resolveBenchAllowLiveExtraction,
+  resolveEffectiveExtractionCacheRoot,
   type CompileSeedExtractionStats,
   type CompileSeedRunner
 } from "./compile-seed.js";
@@ -18,6 +23,10 @@ import { EmbeddingReadinessTracker } from "./embedding-readiness.js";
 import { runLongMemEvalCrossQuestionItem } from "./crossquestion-question.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import { resolveCommitInfo } from "./runner-helpers.js";
+import {
+  createLongMemEvalSelectionContract,
+  type LongMemEvalSelectionContract
+} from "./selection/contract.js";
 import type {
   LongMemEvalCrossQuestionRunOptions,
   QuestionResult,
@@ -28,6 +37,11 @@ export interface CrossQuestionRunContext {
   readonly opts: LongMemEvalCrossQuestionRunOptions;
   readonly questions: readonly LongMemEvalQuestion[];
   readonly window: readonly LongMemEvalQuestion[];
+  readonly datasetSha256: string;
+  readonly datasetChecksumSource: string;
+  readonly datasetSourcePath: string;
+  readonly releaseEvidenceAuthority: LongMemEvalReleaseEvidenceAuthority | null;
+  readonly selectionContract: LongMemEvalSelectionContract;
   readonly alayaVersion: string;
   readonly commitInfo: ReturnType<typeof resolveCommitInfo>;
   readonly commitSha7: string;
@@ -45,16 +59,37 @@ export interface CrossQuestionExecutionResult {
 export async function prepareCrossQuestionRun(
   opts: LongMemEvalCrossQuestionRunOptions
 ): Promise<CrossQuestionRunContext> {
-  const questions = await loadDataset(opts.variant, {
+  const extractionCacheRoot = resolveEffectiveExtractionCacheRoot(
+    opts.extractionCacheRoot
+  );
+  const effectiveOpts = { ...opts, extractionCacheRoot };
+  const dataset = await loadDatasetWithIdentity(opts.variant, {
     dataDir: opts.dataDir,
     pinnedMetaRoot: opts.pinnedMetaRoot
   });
+  const questions = dataset.questions;
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const commitInfo = resolveCommitInfo();
+  const window = selectQuestionWindow(questions, opts);
   return {
-    opts,
+    opts: effectiveOpts,
     questions,
-    window: selectQuestionWindow(questions, opts),
+    window,
+    datasetSha256: dataset.sha256,
+    datasetChecksumSource: dataset.checksumSource,
+    datasetSourcePath: dataset.sourcePath,
+    releaseEvidenceAuthority: deriveLongMemEvalReleaseEvidenceAuthority(
+      dataset.promotionAuthority,
+      {
+        kind: "execution_window",
+        offset: Math.max(0, opts.offset ?? 0),
+        limit: window.length
+      }
+    ),
+    selectionContract: createLongMemEvalSelectionContract({
+      datasetSha256: dataset.sha256,
+      questions: window
+    }),
     alayaVersion: resolveBenchRunnerVersion(),
     commitInfo,
     commitSha7: commitInfo.sha7,
@@ -62,7 +97,7 @@ export async function prepareCrossQuestionRun(
     embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
       embeddingMode, process.env, opts.embeddingProviderKind
     ),
-    seedRunner: createCrossQuestionSeedRunner(opts)
+    seedRunner: createCrossQuestionSeedRunner(extractionCacheRoot)
   };
 }
 
@@ -101,10 +136,10 @@ function selectQuestionWindow(
 }
 
 function createCrossQuestionSeedRunner(
-  opts: LongMemEvalCrossQuestionRunOptions
+  extractionCacheRoot: string
 ): CompileSeedRunner {
   return createCompileSeedRunner({
-    cacheRoot: opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT,
+    cacheRoot: extractionCacheRoot,
     ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
   });
 }

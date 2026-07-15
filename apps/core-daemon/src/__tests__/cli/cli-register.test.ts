@@ -199,6 +199,7 @@ describe("cli registration", () => {
       "update",
       "attach",
       "detach",
+      "source-grounding-defers",
       "tools",
       // A1 (HITL daemon backbone) — `alaya review pending|accept|reject`
       // routes through the same MCP handler attached agents use.

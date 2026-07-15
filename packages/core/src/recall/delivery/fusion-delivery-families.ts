@@ -11,8 +11,8 @@ export type RecallFusionFamilyId =
   | "graph_path"
   | "temporal_facet";
 
-// Five orthogonal votes. Correlated lanes (ρ 0.71–0.99 within lexical/structural)
-// share a family so topical popularity cannot stack into multiple RRF ballots.
+// Correlated projections share one family ballot so repeated views of the same
+// evidence cannot multiply topical popularity against independent signals.
 export const RECALL_FUSION_FAMILY_STREAMS: Readonly<
   Record<RecallFusionFamilyId, readonly RecallFusionStream[]>
 > = Object.freeze({

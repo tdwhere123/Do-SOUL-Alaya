@@ -6,7 +6,10 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { KpiPayload } from "@do-soul/alaya-eval";
+import {
+  evaluateSeedExtractionReleaseBlocker,
+  type KpiPayload
+} from "@do-soul/alaya-eval";
 
 import { runCli } from "../../cli/index.js";
 
@@ -32,7 +35,7 @@ describe("merge-longmemeval release gates", () => {
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it("writes merged policy-shape slugs and diffs against the matching policy baseline", async () => {
+  it("writes policy-shape slugs without diffing an unverified matching baseline", async () => {
     const shard = path.join(tmpRoot, "shard-chat");
     const rows = Array.from({ length: 5 }, (_, index) => ({
       id: `q-chat-${index + 1}`,
@@ -101,7 +104,7 @@ describe("merge-longmemeval release gates", () => {
       "--shards",
       shard
     ]);
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
 
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
@@ -121,7 +124,8 @@ describe("merge-longmemeval release gates", () => {
     expect(merged.policy_shape).toBe("chat");
     expect(merged.seed_policy?.mode).toBe("label_independent_all_fact");
     expect(report).toContain("Seed policy: label_independent_all_fact");
-    expect(report).toContain("| r_at_5 | 0.4000 | 0.8000 | +0.4000 |");
+    expect(merged.diff_vs_previous).toBeNull();
+    expect(report).toContain("_No previous baseline; this is the first entry._");
     expect(report).not.toContain("| r_at_5 | 1.0000 | 0.8000 |");
   });
 
@@ -326,7 +330,7 @@ describe("merge-longmemeval release gates", () => {
     expect(findings).toContain("live_failures=1");
   });
 
-  it("does not block merged official seed extraction when offline fallbacks are zero", async () => {
+  it("does not add an offline-fallback blocker when merged official extraction has none", async () => {
     const shardA = path.join(tmpRoot, "shard-official-zero-a");
     const shardB = path.join(tmpRoot, "shard-official-zero-b");
     const rowsA = Array.from({ length: 5 }, (_, index) => ({
@@ -374,17 +378,28 @@ describe("merge-longmemeval release gates", () => {
       })
     );
 
+    const historyRoot = path.join(tmpRoot, "history-seed-official-zero");
     const exitCode = await runCli([
       "merge-longmemeval",
       "--variant",
       "s",
       "--history-root",
-      path.join(tmpRoot, "history-seed-official-zero"),
+      historyRoot,
       "--shards",
       shardA,
       shardB
     ]);
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
+    const pointer = JSON.parse(
+      await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
+    ) as { slug: string };
+    const merged = JSON.parse(
+      await readFile(
+        path.join(historyRoot, "public", pointer.slug, "kpi.json"),
+        "utf8"
+      )
+    ) as KpiPayload;
+    expect(evaluateSeedExtractionReleaseBlocker(merged)).toBeNull();
   });
 });

@@ -2,6 +2,10 @@ import { z } from "zod";
 import { QualityMetricsSchema } from "./kpi-quality-schema.js";
 import { validateMeasurementDenominatorContract } from "./kpi-measurement-contract.js";
 import { BenchmarkMeasurementAttributionSchema } from "./kpi-measurement-schema.js";
+import {
+  LongMemEvalSelectionContractIdentitySchema,
+  validateLongMemEvalSelectionContract
+} from "./longmemeval-selection-contract.js";
 export {
   BenchmarkMeasurementAttributionSchema,
   type BenchmarkMeasurementAttribution
@@ -107,6 +111,10 @@ const PerScenarioRowSchema = z.object({
   // Additive migration field. Missing means legacy denominator semantics;
   // consumers must never infer scorable from hit_at_5.
   scorable: z.boolean().optional(),
+  measurement_cohort: z.enum([
+    "answerable",
+    "dataset_declared_abstention"
+  ]).optional(),
   tier: z.enum(["hot", "warm", "cold"]),
   latency_ms: z.number().nonnegative().optional()
 });
@@ -410,6 +418,7 @@ export const KpiPayloadSchema = z
     recall_weight_overrides: RecallWeightOverridesSummarySchema.optional(),
     recall_eval_attribution: RecallEvalAttributionSchema.optional(),
     measurement_attribution: BenchmarkMeasurementAttributionSchema.optional(),
+    selection_contract: LongMemEvalSelectionContractIdentitySchema.optional(),
     seed_policy: SeedPolicySchema.optional(),
     dataset: z.object({
       name: z.string(),
@@ -445,5 +454,6 @@ export const KpiPayloadSchema = z
       path: ["answerable_evaluated_count"]
     }
   )
-  .superRefine(validateMeasurementDenominatorContract);
+  .superRefine(validateMeasurementDenominatorContract)
+  .superRefine(validateLongMemEvalSelectionContract);
 export type KpiPayload = z.infer<typeof KpiPayloadSchema>;

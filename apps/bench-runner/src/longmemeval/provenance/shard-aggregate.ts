@@ -9,6 +9,11 @@ import {
   LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
 } from "./run.js";
+import {
+  selectionContractIdentity,
+  type LongMemEvalSelectionContract,
+  type LongMemEvalSelectionContractIdentity
+} from "../selection/contract.js";
 
 interface LoadedShardProvenance {
   readonly body: Buffer;
@@ -24,12 +29,14 @@ export interface MergedRunProvenanceSidecars {
   }[];
   readonly gateEligible: boolean;
   readonly selectionManifestSha256: string | null;
+  readonly selectionContract: LongMemEvalSelectionContract | null;
   readonly executions: readonly LongMemEvalRunProvenance["execution"][];
 }
 
 export async function buildMergedRunProvenanceSidecars(input: {
   readonly shardArchiveRefs: readonly ShardArchiveRef[];
   readonly requestedConcurrency?: number;
+  readonly selectionContract: LongMemEvalSelectionContract | null;
 }): Promise<MergedRunProvenanceSidecars> {
   const loaded = await Promise.all(input.shardArchiveRefs.map(loadShardProvenance));
   const present = loaded.filter((item): item is LoadedShardProvenance => item !== null);
@@ -43,6 +50,10 @@ export async function buildMergedRunProvenanceSidecars(input: {
 async function loadShardProvenance(
   shard: ShardArchiveRef
 ): Promise<LoadedShardProvenance | null> {
+  const verified = shard.verifiedEvidence?.runProvenance;
+  if (verified !== undefined) {
+    return { body: Buffer.from(verified.contents, "utf8"), parsed: verified.parsed };
+  }
   const source = join(shard.root, "public", shard.slug, LONGMEMEVAL_RUN_PROVENANCE_FILENAME);
   let body: Buffer;
   try {
@@ -116,7 +127,10 @@ function buildSidecars(
   const gateEligible = present.length === loaded.length && present.every((item) =>
     isLongMemEvalRunProvenanceGateEligible(item.parsed)
   );
-  const aggregate = renderAggregate(input, loaded, gateEligible);
+  const selectionContract = gateEligible ? input.selectionContract : null;
+  const aggregate = renderAggregate(
+    input, loaded, gateEligible && selectionContract !== null, selectionContract
+  );
   const sidecars = [{ filename: LONGMEMEVAL_RUN_PROVENANCE_FILENAME, contents: aggregate }, ...childSidecars];
   return {
     sidecars,
@@ -125,8 +139,9 @@ function buildSidecars(
       path: sidecar.filename,
       contents: sidecar.contents
     })),
-    gateEligible,
+    gateEligible: gateEligible && selectionContract !== null,
     selectionManifestSha256: present[0]?.parsed.question_manifest?.file_sha256 ?? null,
+    selectionContract,
     executions: present.map((item) => item.parsed.execution)
   };
 }
@@ -134,7 +149,8 @@ function buildSidecars(
 function renderAggregate(
   input: Parameters<typeof buildMergedRunProvenanceSidecars>[0],
   loaded: readonly (LoadedShardProvenance | null)[],
-  gateEligible: boolean
+  gateEligible: boolean,
+  selectionContract: LongMemEvalSelectionContract | null
 ): string {
   const shards = loaded.map((item, index) => ({
     shard_index: index,
@@ -151,6 +167,9 @@ function renderAggregate(
     effective_concurrency: input.shardArchiveRefs.length,
     evaluated_count: input.shardArchiveRefs.reduce((sum, shard) => sum + shard.payload.evaluated_count, 0),
     executed_dist: loaded[0]?.parsed.code.executed_dist ?? null,
+    selection_contract: selectionContract === null
+      ? null
+      : selectionContractIdentity(selectionContract),
     shards
   }, null, 2)}\n`;
 }
@@ -159,6 +178,7 @@ export async function validateShardRunProvenancePlans(input: {
   readonly shardArchiveRefs: readonly ShardArchiveRef[];
   readonly plans: readonly LongMemEvalWorkerShardPlan[];
   readonly requestedConcurrency: number;
+  readonly selectionContract: LongMemEvalSelectionContract | null;
 }): Promise<void> {
   if (input.shardArchiveRefs.length !== input.plans.length) {
     throw new Error("merge refused: shard provenance plan count mismatch");
@@ -181,6 +201,7 @@ function validatePlans(
 
 function stableIdentity(provenance: LongMemEvalRunProvenance): string {
   return JSON.stringify({
+    dataset_sha256: provenance.dataset_sha256,
     code: provenance.code,
     extraction_cache: provenance.extraction_cache,
     runtime: provenance.runtime,

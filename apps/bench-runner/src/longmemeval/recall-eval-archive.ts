@@ -217,5 +217,13 @@ async function entryIsPassingFullRun(
   if (evaluateSeedExtractionReleaseBlocker(payload) !== null) {
     return false;
   }
-  return releaseHardGateAllowsLatestPassing(payload);
+  try {
+    const evidence = await layout.verifyLongMemEvalEvidence?.({
+      entryRoot: join(layout.historyRoot, benchName, slug),
+      payload
+    });
+    return releaseHardGateAllowsLatestPassing(payload, evidence ?? undefined);
+  } catch {
+    return false;
+  }
 }

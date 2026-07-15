@@ -31,6 +31,10 @@ const benchRunnerAlias = [
     replacement: path.resolve(rootDir, "apps/core-daemon/src/recall/recall-bound-execution.ts")
   },
   { find: "@do-soul/alaya", replacement: path.resolve(rootDir, "apps/core-daemon/src/index.ts") },
+  {
+    find: "@do-soul/alaya-eval/internal",
+    replacement: path.resolve(rootDir, "packages/eval/src/internal.ts")
+  },
   { find: "@do-soul/alaya-eval", replacement: path.resolve(rootDir, "packages/eval/src/index.ts") }
 ];
 

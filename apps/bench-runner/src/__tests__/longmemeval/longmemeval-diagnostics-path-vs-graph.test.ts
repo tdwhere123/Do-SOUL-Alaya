@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildLongMemEvalQualityMetrics } from "../../longmemeval/diagnostics.js";
+import {
+  buildLongMemEvalQualityMetrics,
+  type LongMemEvalQuestionDiagnostic
+} from "../../longmemeval/diagnostics.js";
 import {
   buildGoldDiagnostic,
   buildQuestionDiagnosticFixture
@@ -12,7 +15,10 @@ describe("LongMemEval recall diagnostics", () => {
     const buildGold = buildGoldDiagnostic;
     const buildQuestion = (
       gold: ReadonlyArray<ReturnType<typeof buildGold>>
-    ) => buildQuestionDiagnosticFixture({ questionId: "q-path-vs-graph", gold });
+    ) => ({
+      ...buildQuestionDiagnosticFixture({ questionId: "q-path-vs-graph", gold }),
+      cohort_ledger: currentAnswerableLedger(gold.map((item) => item.object_id))
+    });
 
     it("counts a hop-1 path gold (path plane + graphSupport-polluted per_stream_rank) as path-primary, NOT graph", () => {
       // The hop-1 path gold fired a nonzero graph_expansion per_stream_rank purely
@@ -67,3 +73,24 @@ describe("LongMemEval recall diagnostics", () => {
     });
   });
 });
+
+function currentAnswerableLedger(
+  goldMemoryIds: readonly string[]
+): NonNullable<LongMemEvalQuestionDiagnostic["cohort_ledger"]> {
+  return {
+    measurement_status: "scorable",
+    dataset_cohort: "answerable",
+    extraction_materialization: {
+      status: "memory_emitted",
+      emitted_memory_count: goldMemoryIds.length,
+      reason: null
+    },
+    evaluator_gold_identity: { status: "present", object_ids: goldMemoryIds },
+    retrieval_status: "hit_at_5",
+    evidence_status: "complete",
+    evaluation_issue_reason: null,
+    candidate_pool_complete: true,
+    stage_ranks: [],
+    final_verdict: "hit_at_5"
+  };
+}

@@ -314,10 +314,12 @@ it("does not replay materialization side effects for post-triage signal states",
       expect(materialize).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
         "Signal replay found a post-triage signal; not replaying materialization side effects.",
-        expect.objectContaining({
-          signal_id: "signal-1",
-          signal_state: state
-        })
+        {
+          phase: "signal_replay",
+          code: "POST_TRIAGE_REPLAY_SKIPPED",
+          detail_sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+          detail_char_count: expect.any(Number)
+        }
       );
     }
   });

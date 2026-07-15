@@ -70,6 +70,20 @@ describe("classifyDeliveryMissTaxonomy", () => {
     ).toBe("budget_drop");
   });
 
+  it("classifies embedding-head dominance as an explicit delivery admission drop", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: null,
+        candidate: candidate({
+          preBudgetRank: 2,
+          droppedReason: "embedding_head_dominance"
+        }),
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: true
+      })
+    ).toBe("budget_drop");
+  });
+
   it("classifies answer_set_coverage_drop when fused top-5 gold is displaced by the coverage selector", () => {
     expect(
       classifyDeliveryMissTaxonomy({

@@ -1,4 +1,5 @@
 import {
+  BoundedJsonObjectSchema,
   CandidateMemorySignalSchema,
   SignalState,
   SignalStateSchema,
@@ -16,6 +17,15 @@ export interface SignalRepo {
   listByRunAll?(runId: string): Promise<readonly CandidateMemorySignal[]>;
   countByRun(runId: string): Promise<number>;
   updateState(signalId: string, state: SignalStateType): Promise<CandidateMemorySignal>;
+  compareAndSwapState(input: SignalStateCasInput): CandidateMemorySignal | null;
+}
+
+export interface SignalStateCasInput {
+  readonly signalId: string;
+  readonly workspaceId: string;
+  readonly expectedState: SignalStateType;
+  readonly nextState: SignalStateType;
+  readonly rawPayload?: CandidateMemorySignal["raw_payload"];
 }
 
 export interface SignalListPageOptions {
@@ -113,6 +123,7 @@ interface SignalStatements {
   readonly listByRunPagedStatement: SqliteStatement;
   readonly countByRunStatement: SqliteStatement;
   readonly updateStateStatement: SqliteStatement;
+  readonly compareAndSwapStateStatement: SqliteStatement;
 }
 
 export class SqliteSignalRepo implements SignalRepo {
@@ -122,8 +133,9 @@ export class SqliteSignalRepo implements SignalRepo {
   private readonly listByRunPagedStatement;
   private readonly countByRunStatement;
   private readonly updateStateStatement;
+  private readonly compareAndSwapStateStatement;
 
-  public constructor(db: StorageDatabase) {
+  public constructor(private readonly db: StorageDatabase) {
     const statements = prepareSignalStatements(db);
     this.createStatement = statements.createStatement;
     this.getByIdStatement = statements.getByIdStatement;
@@ -131,6 +143,7 @@ export class SqliteSignalRepo implements SignalRepo {
     this.listByRunPagedStatement = statements.listByRunPagedStatement;
     this.countByRunStatement = statements.countByRunStatement;
     this.updateStateStatement = statements.updateStateStatement;
+    this.compareAndSwapStateStatement = statements.compareAndSwapStateStatement;
   }
 
   public async create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal> {
@@ -172,8 +185,7 @@ export class SqliteSignalRepo implements SignalRepo {
 
   public async getById(signalId: string): Promise<CandidateMemorySignal | null> {
     try {
-      const row = this.getByIdStatement.get(signalId) as SignalRow | undefined;
-      return row === undefined ? null : parseSignalRow(row);
+      return this.getByIdInCurrentTransaction(signalId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load signal ${signalId}.`, error);
     }
@@ -235,6 +247,37 @@ export class SqliteSignalRepo implements SignalRepo {
       throw new StorageError("QUERY_FAILED", `Failed to update signal state for ${signalId}.`, error);
     }
   }
+
+  public compareAndSwapState(input: SignalStateCasInput): CandidateMemorySignal | null {
+    const expectedState = parseSignalState(input.expectedState);
+    const nextState = parseSignalState(input.nextState);
+    const rawPayload = input.rawPayload === undefined
+      ? null
+      : JSON.stringify(BoundedJsonObjectSchema.parse(input.rawPayload));
+    try {
+      const result = this.compareAndSwapStateStatement.run(
+        nextState,
+        rawPayload,
+        input.signalId,
+        input.workspaceId,
+        expectedState
+      );
+      if (result.changes === 0) return null;
+      return this.getByIdInCurrentTransaction(input.signalId);
+    } catch (error) {
+      if (error instanceof StorageError) throw error;
+      throw new StorageError("QUERY_FAILED", `Failed to CAS signal ${input.signalId}.`, error);
+    }
+  }
+
+  public getStorageConnectionIdentity(): StorageDatabase {
+    return this.db;
+  }
+
+  private getByIdInCurrentTransaction(signalId: string): CandidateMemorySignal | null {
+    const row = this.getByIdStatement.get(signalId) as SignalRow | undefined;
+    return row === undefined ? null : parseSignalRow(row);
+  }
 }
 
 function prepareSignalStatements(db: StorageDatabase): SignalStatements {
@@ -268,6 +311,14 @@ function prepareSignalStatements(db: StorageDatabase): SignalStatements {
       UPDATE signals
       SET signal_state = ?
       WHERE signal_id = ?
+    `),
+    compareAndSwapStateStatement: db.connection.prepare(`
+      UPDATE signals
+      SET signal_state = ?,
+          raw_payload_json = COALESCE(?, raw_payload_json)
+      WHERE signal_id = ?
+        AND workspace_id = ?
+        AND signal_state = ?
     `)
   };
 }

@@ -85,12 +85,11 @@ describe("rank-5 boundary objective", () => {
       { name: "negative", end_to_end_any_at_5_count: 77, gain_count: 1, loss_count: 2, net_gain_count: -1 }
     ];
 
-    expect(summarizeGuardDecision(guards, 78, 94)).toEqual({
+    expect(summarizeGuardDecision(guards)).toEqual({
       acceptance_rule: "held_out_net_gain_strictly_positive",
       candidate_guard_names: ["positive"],
       zero_loss_candidate_guard_names: [],
       best_candidate_guard: "positive",
-      theoretical_gate: { target_hits: 85, target_denominator: 94, reached: false },
       production_authorization: "offline_evidence_only"
     });
   });

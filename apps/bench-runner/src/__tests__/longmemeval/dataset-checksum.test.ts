@@ -2,8 +2,35 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadDataset } from "../../longmemeval/fetch.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  loadDataset,
+  loadDatasetWithIdentity
+} from "../../longmemeval/fetch.js";
+import { aggregateLongMemEvalRunResults } from "../../longmemeval/runner-archive-aggregate.js";
+import { buildLongMemEvalRunPayload } from "../../longmemeval/runner-archive-payload.js";
+import { prepareLongMemEvalRun } from
+  "../../longmemeval/runner/prepare-context.js";
+import { LongMemEvalDiagnosticsSpool } from "../../longmemeval/diagnostics/spool.js";
+import { emptySeedFuelInventory } from "../../longmemeval/seed-fuel-inventory.js";
+
+const committedPinRead = vi.hoisted(() => ({ sha256: null as string | null }));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: (...args: unknown[]) => {
+      const requestedPath = String(args[0]).replaceAll("\\", "/");
+      if (committedPinRead.sha256 !== null && requestedPath.endsWith(
+        "/docs/bench-history/datasets/longmemeval_oracle.meta.json"
+      )) {
+        return Promise.resolve(JSON.stringify({ sha256: committedPinRead.sha256 }));
+      }
+      return Reflect.apply(actual.readFile, undefined, args);
+    }
+  };
+});
 
 let tmpDir: string;
 let dataDir: string;
@@ -61,6 +88,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  committedPinRead.sha256 = null;
+  vi.unstubAllEnvs();
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -75,6 +104,32 @@ describe("loadDataset checksum verification", () => {
     expect(result[0]?.question_id).toBe("fixture-1");
   });
 
+  it("keeps a custom checksum authority diagnostic-only", async () => {
+    const sha = await seedLocalDataset();
+    await seedPinnedMeta(sha);
+
+    const result = await loadDatasetWithIdentity(VARIANT, {
+      dataDir,
+      pinnedMetaRoot
+    });
+
+    expect(result.promotionAuthority).toBeNull();
+  });
+
+  it("grants custom data bytes authority only through the default committed pin", async () => {
+    committedPinRead.sha256 = await seedLocalDataset();
+
+    const result = await loadDatasetWithIdentity(VARIANT, { dataDir });
+
+    expect(result.sourcePath).toBe(join(dataDir, `${VARIANT}.json`));
+    expect(result.checksumSource.replaceAll("\\", "/")).toMatch(
+      /\/docs\/bench-history\/datasets\/longmemeval_oracle\.meta\.json$/u
+    );
+    expect(result.promotionAuthority).not.toBeNull();
+  });
+});
+
+describe("loadDataset checksum verification", () => {
   it("throws checksum mismatch when the local file is mutated after pinning", async () => {
     const sha = await seedLocalDataset();
     await seedPinnedMeta(sha);
@@ -99,5 +154,54 @@ describe("loadDataset checksum verification", () => {
     await expect(
       loadDataset(VARIANT, { dataDir, pinnedMetaRoot })
     ).rejects.toThrow(/dataset not pinned: longmemeval_oracle/);
+  });
+});
+
+describe("loadDataset checksum verification", () => {
+  it("archives the verified dataset identity when pinned meta changes after preparation", async () => {
+    const verifiedSha = await seedLocalDataset();
+    await seedPinnedMeta(verifiedSha);
+    vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+    const spool = await LongMemEvalDiagnosticsSpool.create();
+
+    try {
+      const context = await prepareLongMemEvalRun({
+        variant: VARIANT,
+        historyRoot: join(tmpDir, "history"),
+        dataDir,
+        dataDirRoot: join(tmpDir, "seed-root"),
+        pinnedMetaRoot,
+        extractionCacheRoot: join(tmpDir, "extraction-cache"),
+        embeddingMode: "disabled"
+      }, undefined, spool);
+
+      await seedPinnedMeta("f".repeat(64));
+      const build = buildLongMemEvalRunPayload({
+        opts: context.opts,
+        questionsLength: context.questions.length,
+        windowLength: context.window.length,
+        datasetSha256: context.datasetSha256,
+        datasetChecksumSource: context.datasetChecksumSource,
+        selectionContract: context.selectionContract,
+        aggregate: aggregateLongMemEvalRunResults([]),
+        extractionStats: context.seedRunner.stats,
+        seedFuelInventory: emptySeedFuelInventory(),
+        alayaVersion: context.alayaVersion,
+        commitSha7: context.commitSha7,
+        runAt: context.runAt,
+        embeddingProviderLabel: context.embeddingProviderLabel,
+        policyShape: context.policyShape,
+        simulateReport: context.simulateReport,
+        recallWeightOverrides: undefined
+      });
+
+      expect(build.payload.dataset).toMatchObject({
+        checksum_sha256: verifiedSha,
+        checksum_source: join(pinnedMetaRoot, `${VARIANT}.meta.json`)
+      });
+    } finally {
+      await spool.dispose();
+    }
   });
 });

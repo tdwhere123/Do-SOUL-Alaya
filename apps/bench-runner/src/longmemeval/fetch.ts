@@ -7,6 +7,12 @@ import {
   LongMemEvalVariant,
   type LongMemEvalQuestion
 } from "./dataset.js";
+import {
+  createLongMemEvalReleaseEvidenceAuthority,
+  type LongMemEvalReleaseEvidenceAuthority
+} from "@do-soul/alaya-eval/internal";
+import type { LongMemEvalSelectionAssignment } from "@do-soul/alaya-eval";
+import { classifyLongMemEvalDatasetCohort } from "./selection/dataset-cohort.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR_ROOT = path.resolve(__dirname, "../../data/longmemeval");
@@ -48,6 +54,41 @@ export interface FetchResult {
   readonly sha256: string;
   readonly questionCount: number;
 }
+
+export interface LoadedLongMemEvalDataset {
+  readonly questions: LongMemEvalQuestion[];
+  readonly sha256: string;
+  readonly checksumSource: string;
+  readonly sourcePath: string;
+  readonly promotionAuthority: VerifiedLongMemEvalDatasetAuthority | null;
+}
+
+declare const verifiedDatasetAuthorityBrand: unique symbol;
+
+export interface VerifiedLongMemEvalDatasetAuthority {
+  readonly [verifiedDatasetAuthorityBrand]: true;
+}
+
+interface VerifiedDatasetAuthorityRecord {
+  readonly datasetSha256: string;
+  readonly assignments: readonly LongMemEvalSelectionAssignment[];
+}
+
+export type LongMemEvalAuthoritySelection =
+  | {
+      readonly kind: "execution_window";
+      readonly offset: number;
+      readonly limit: number;
+    }
+  | {
+      readonly kind: "dataset_order_subset";
+      readonly questionIds: readonly string[];
+    };
+
+const verifiedDatasetAuthorities = new WeakMap<
+  object,
+  VerifiedDatasetAuthorityRecord
+>();
 
 /**
  * Fetch a LongMemEval variant JSON from HuggingFace if not already cached,
@@ -118,10 +159,40 @@ export async function loadDataset(
   variant: LongMemEvalVariant,
   options: { dataDir?: string; pinnedMetaRoot?: string } = {}
 ): Promise<LongMemEvalQuestion[]> {
+  return (await loadDatasetWithIdentity(variant, options)).questions;
+}
+
+/** Return the verified bytes' identity with the parsed dataset. */
+export async function loadDatasetWithIdentity(
+  variant: LongMemEvalVariant,
+  options: { dataDir?: string; pinnedMetaRoot?: string } = {}
+): Promise<LoadedLongMemEvalDataset> {
   const dataDir = options.dataDir ?? DATA_DIR_ROOT;
   const localPath = path.join(dataDir, `${variant}.json`);
   const pinnedPath = pinnedMetaPath(variant, options.pinnedMetaRoot);
+  const pinnedSha = await readPinnedDatasetSha(variant, pinnedPath);
+  const { raw, actualSha } = await readVerifiedDatasetBytes({
+    variant,
+    localPath,
+    pinnedSha,
+    dataDir: options.dataDir
+  });
+  const questions = validateDataset(JSON.parse(raw) as unknown);
+  return {
+    questions,
+    sha256: actualSha,
+    checksumSource: pinnedPath,
+    sourcePath: localPath,
+    promotionAuthority: options.pinnedMetaRoot === undefined
+      ? mintVerifiedDatasetAuthority(actualSha, datasetAssignments(questions))
+      : null
+  };
+}
 
+async function readPinnedDatasetSha(
+  variant: LongMemEvalVariant,
+  pinnedPath: string
+): Promise<string> {
   let pinnedRaw: string;
   try {
     pinnedRaw = await readFile(pinnedPath, "utf8");
@@ -144,20 +215,107 @@ export async function loadDataset(
       `dataset pinned meta unreadable: ${variant}; pinnedPath=${pinnedPath}; detail=${detail}`
     );
   }
+  return pinnedSha;
+}
 
-  const raw = await readFile(localPath, "utf8");
+async function readVerifiedDatasetBytes(input: {
+  readonly variant: LongMemEvalVariant;
+  readonly localPath: string;
+  readonly pinnedSha: string;
+  readonly dataDir?: string;
+}): Promise<{ readonly raw: string; readonly actualSha: string }> {
+  const raw = await readFile(input.localPath, "utf8");
   const actualSha = createHash("sha256").update(raw, "utf8").digest("hex");
-  if (actualSha !== pinnedSha) {
-    const dataDirArg = options.dataDir === undefined
+  if (actualSha !== input.pinnedSha) {
+    const dataDirArg = input.dataDir === undefined
       ? ""
-      : ` --data-dir ${shellQuote(options.dataDir)}`;
+      : ` --data-dir ${shellQuote(input.dataDir)}`;
     throw new Error(
-      `dataset checksum mismatch: ${variant}; pinned=${pinnedSha}; actual=${actualSha}; refresh with 'alaya-bench-runner fetch-longmemeval --variant ${variant}${dataDirArg} --force'`
+      `dataset checksum mismatch: ${input.variant}; pinned=${input.pinnedSha}; actual=${actualSha}; refresh with 'alaya-bench-runner fetch-longmemeval --variant ${input.variant}${dataDirArg} --force'`
     );
   }
+  return { raw, actualSha };
+}
 
-  const parsed = JSON.parse(raw) as unknown;
-  return validateDataset(parsed);
+export function deriveLongMemEvalReleaseEvidenceAuthority(
+  datasetAuthority: VerifiedLongMemEvalDatasetAuthority | null,
+  selection: LongMemEvalAuthoritySelection
+): LongMemEvalReleaseEvidenceAuthority | null {
+  if (datasetAuthority === null) return null;
+  const dataset = verifiedDatasetAuthorities.get(datasetAuthority);
+  if (dataset === undefined) {
+    throw new Error("LongMemEval dataset promotion authority is not verified");
+  }
+  const assignments = selection.kind === "execution_window"
+    ? selectExecutionWindow(dataset.assignments, selection)
+    : selectDatasetOrderSubset(dataset.assignments, selection.questionIds);
+  return createLongMemEvalReleaseEvidenceAuthority({
+    datasetSha256: dataset.datasetSha256,
+    assignments
+  });
+}
+
+export function createTestLongMemEvalDatasetAuthority(input: {
+  readonly datasetSha256: string;
+  readonly assignments: readonly LongMemEvalSelectionAssignment[];
+}): VerifiedLongMemEvalDatasetAuthority {
+  if (process.env.VITEST !== "true") {
+    throw new Error("test-only LongMemEval authority seam is unavailable");
+  }
+  return mintVerifiedDatasetAuthority(input.datasetSha256, input.assignments);
+}
+
+function mintVerifiedDatasetAuthority(
+  datasetSha256: string,
+  assignments: readonly LongMemEvalSelectionAssignment[]
+): VerifiedLongMemEvalDatasetAuthority {
+  const authority = Object.freeze({}) as VerifiedLongMemEvalDatasetAuthority;
+  verifiedDatasetAuthorities.set(authority, {
+    datasetSha256,
+    assignments: Object.freeze(assignments.map((row) => Object.freeze({ ...row })))
+  });
+  return authority;
+}
+
+function datasetAssignments(
+  questions: readonly LongMemEvalQuestion[]
+): LongMemEvalSelectionAssignment[] {
+  return questions.map((question) => ({
+    question_id: question.question_id,
+    dataset_cohort: classifyLongMemEvalDatasetCohort(question)
+  }));
+}
+
+function selectExecutionWindow(
+  assignments: readonly LongMemEvalSelectionAssignment[],
+  selection: Extract<LongMemEvalAuthoritySelection, { readonly kind: "execution_window" }>
+): readonly LongMemEvalSelectionAssignment[] {
+  if (!Number.isSafeInteger(selection.offset) || selection.offset < 0 ||
+      !Number.isSafeInteger(selection.limit) || selection.limit < 0) {
+    throw new Error("LongMemEval authority execution window is invalid");
+  }
+  const selected = assignments.slice(selection.offset, selection.offset + selection.limit);
+  if (selected.length !== selection.limit) {
+    throw new Error("LongMemEval authority execution window exceeds the dataset");
+  }
+  return selected;
+}
+
+function selectDatasetOrderSubset(
+  assignments: readonly LongMemEvalSelectionAssignment[],
+  questionIds: readonly string[]
+): readonly LongMemEvalSelectionAssignment[] {
+  const requested = new Set(questionIds);
+  if (requested.size !== questionIds.length) {
+    throw new Error("LongMemEval authority selection contains duplicate question ids");
+  }
+  const selected = assignments.filter((row) => requested.has(row.question_id));
+  if (selected.length !== questionIds.length || selected.some(
+    (row, index) => row.question_id !== questionIds[index]
+  )) {
+    throw new Error("LongMemEval authority selection does not preserve dataset order");
+  }
+  return selected;
 }
 
 function validateDataset(raw: unknown): LongMemEvalQuestion[] {

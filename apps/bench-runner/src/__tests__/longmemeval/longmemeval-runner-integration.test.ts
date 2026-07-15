@@ -233,7 +233,7 @@ describe("LongMemEval runner", () => {
           lexical_fts: 0.5
         }
       });
-      expect(result.payload.diff_vs_previous?.previous_run).toBe(priorPassingRunAt);
+      expect(result.payload.diff_vs_previous).toBeNull();
 
       // KPI payload must pass schema validation
       const parseResult = KpiPayloadSchema.safeParse(result.payload);

@@ -2,15 +2,15 @@ import { describe, expect, it } from "vitest";
 import { buildBenchmarkMeasurementAttribution } from "../../longmemeval/measurement/attribution.js";
 
 describe("LongMemEval measurement attribution", () => {
-  it("emits current eligible attribution only for complete evaluator identity", () => {
+  it("emits scoped eligibility while keeping dataset abstentions uncalibrated", () => {
     expect(buildBenchmarkMeasurementAttribution({
       candidatePoolComplete: true,
       provenanceComplete: true,
       abstention: {
         schema_version: "bench-abstention.v2",
-        total: 0,
+        total: 6,
         scored: 0,
-        unscorable: 0,
+        unscorable: 6,
         method: "fused_margin_diagnostic_only",
         calibration_status: "uncalibrated",
         gate_eligible: false
@@ -19,9 +19,13 @@ describe("LongMemEval measurement attribution", () => {
       evaluatorIdentityIssueCount: 0,
       evaluatorIdentityUnscorableCount: 0
     })).toMatchObject({
-      schema_version: "bench-measurement-attribution.v2",
+      schema_version: "bench-measurement-attribution.v3",
       status: "eligible",
       gate_eligible: true,
+      measurement_scope: "answerable_recall",
+      abstention_evaluation_status: "excluded_not_evaluated",
+      abstention_calibration_status: "uncalibrated",
+      abstention_gate_eligible: false,
       evaluator_identity_status: "complete"
     });
   });
@@ -47,7 +51,7 @@ describe("LongMemEval measurement attribution", () => {
     });
   });
 
-  it("fails closed when abstention evidence is uncalibrated", () => {
+  it("fails closed when evaluator identity is incomplete, not because abstention is nonzero", () => {
     expect(buildBenchmarkMeasurementAttribution({
       candidatePoolComplete: true,
       provenanceComplete: true,
@@ -59,12 +63,16 @@ describe("LongMemEval measurement attribution", () => {
         method: "fused_margin_diagnostic_only",
         calibration_status: "uncalibrated",
         gate_eligible: false
-      }
+      },
+      noGoldCount: 1,
+      evaluatorIdentityIssueCount: 1,
+      evaluatorIdentityUnscorableCount: 1
     })).toMatchObject({
       status: "ineligible",
       gate_eligible: false,
       evidence_status: "complete",
-      abstention_calibration_status: "uncalibrated"
+      abstention_calibration_status: "uncalibrated",
+      evaluator_identity_status: "invalid"
     });
   });
 

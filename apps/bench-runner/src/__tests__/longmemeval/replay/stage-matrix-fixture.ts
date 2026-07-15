@@ -40,16 +40,17 @@ export function cohortRow(input: {
   measurementStatus?: "scorable" | "abstention_unscorable" | "evaluator_identity_unscorable";
   qualityAxes?: ReturnType<typeof qualityAxes>;
 }) {
+  const evaluatorStatus = input.status ?? "present";
   return {
     question_id: input.id,
     dataset_cohort: input.datasetCohort ?? "answerable",
     extraction_materialization: {
-      status: input.status === "present" ? "memory_emitted" : "unknown",
-      emitted_memory_count: input.status === "present" ? input.goldIds.length : 0,
+      status: evaluatorStatus === "present" ? "memory_emitted" : "unknown",
+      emitted_memory_count: evaluatorStatus === "present" ? input.goldIds.length : 0,
       reason: null
     },
     evaluator_gold_identity: {
-      status: input.status ?? "present",
+      status: evaluatorStatus,
       object_ids: input.goldIds
     },
     retrieval_status: input.retrieval ?? "miss_at_5",
@@ -58,7 +59,7 @@ export function cohortRow(input: {
     measurement_status: input.measurementStatus ??
       (input.datasetCohort === "abstention"
         ? "abstention_unscorable"
-        : input.status === "absent" || input.status === "ambiguous" || input.issue != null
+        : evaluatorStatus === "absent" || evaluatorStatus === "ambiguous" || input.issue != null
           ? "evaluator_identity_unscorable"
           : "scorable"),
     candidate_pool_complete: true,

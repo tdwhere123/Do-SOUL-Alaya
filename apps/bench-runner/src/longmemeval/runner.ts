@@ -1,7 +1,8 @@
 import type {
   BenchPolicyShape,
   BenchSimulateReportMode,
-  KpiPayload
+  KpiPayload,
+  VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
 import type {
   BenchEmbeddingMode,
@@ -20,10 +21,8 @@ import {
   runLongMemEvalConcurrent,
   shouldFanOutLongMemEvalWorkers
 } from "./runner-concurrency.js";
-import {
-  prepareLongMemEvalRun,
-  executeLongMemEvalRun
-} from "./runner-execution.js";
+import { executeLongMemEvalRun } from "./runner-execution.js";
+import { prepareLongMemEvalRun } from "./runner/prepare-context.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
@@ -107,6 +106,7 @@ export interface LongMemEvalRunResult {
   readonly findingsPath: string;
   readonly diagnosticsPath: string | null;
   readonly payload: KpiPayload;
+  readonly evidenceContext: VerifiedLongMemEvalEvidenceContext | null;
 }
 
 /**
@@ -181,6 +181,11 @@ async function runSingleLongMemEval(
     opts,
     questionsLength: context.questions.length,
     windowLength: context.window.length,
+    datasetSha256: context.datasetSha256,
+    datasetChecksumSource: context.datasetChecksumSource,
+    datasetSourcePath: context.datasetSourcePath,
+    releaseEvidenceAuthority: context.releaseEvidenceAuthority,
+    selectionContract: context.selectionContract,
     collected: execution.collected,
     extractionStats: context.seedRunner.stats,
     seedFuelInventory: execution.seedFuelInventory,

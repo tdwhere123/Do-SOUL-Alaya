@@ -15,15 +15,15 @@ import {
   type KpiPayload
 } from "../schema/kpi-schema.js";
 import { releaseHardGateAllowsLatestPassing } from "../gates/release-gates.js";
+import type { VerifiedLongMemEvalEvidenceContext } from
+  "../gates/longmemeval-verified-evidence.js";
 import { evaluateSeedExtractionReleaseBlocker } from "../gates/seed-extraction-blocker.js";
 import {
   FINDINGS_FILENAME,
   KPI_FILENAME,
   LATEST_BASELINE_FILENAME,
-  LATEST_PASSING_FILENAME,
   LATEST_RUN_FILENAME,
   LIVE_GATES_FILENAME,
-  REPORT_FILENAME,
   latestPointerFilename,
   latestProviderPointerFilename,
   type HistoryPointerKind
@@ -52,6 +52,10 @@ export type { HistoryPointerKind } from "./history-files.js";
 
 export interface HistoryLayout {
   readonly historyRoot: string;
+  readonly verifyLongMemEvalEvidence?: (input: {
+    readonly entryRoot: string;
+    readonly payload: KpiPayload;
+  }) => Promise<VerifiedLongMemEvalEvidenceContext | null>;
 }
 
 export interface HistoryEntry {
@@ -399,7 +403,34 @@ async function entryAllowsLatestPassing(
       isNotFound
     );
   }
-  return releaseHardGateAllowsLatestPassing(payload);
+  const evidence = await resolveLongMemEvalEvidenceContext(
+    layout,
+    benchName,
+    slug,
+    payload
+  );
+  return releaseHardGateAllowsLatestPassing(payload, evidence ?? undefined);
+}
+
+async function resolveLongMemEvalEvidenceContext(
+  layout: HistoryLayout,
+  benchName: BenchName,
+  slug: string,
+  payload: KpiPayload
+): Promise<VerifiedLongMemEvalEvidenceContext | null> {
+  if (layout.verifyLongMemEvalEvidence === undefined) return null;
+  try {
+    return await layout.verifyLongMemEvalEvidence({
+      entryRoot: path.join(layout.historyRoot, benchName, slug),
+      payload
+    });
+  } catch (error) {
+    console.warn(
+      `[bench-history] LongMemEval evidence verification failed for '${slug}': ` +
+        `${error instanceof Error ? error.message : String(error)}`
+    );
+    return null;
+  }
 }
 
 export async function readPrevious(

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { QualityMetricsSchema } from "../../schema/kpi-quality-schema.js";
 import { KpiPayloadSchema } from "../../schema/kpi-schema.js";
-import { buildFullLongMemEvalPayload } from "../history/history-fixture.js";
+import {
+  buildFullLongMemEvalPayload,
+  selectionContractForRows
+} from "../history/history-fixture.js";
 
 describe("KPI measurement denominator contract", () => {
   it.each([
@@ -11,9 +14,14 @@ describe("KPI measurement denominator contract", () => {
     const quality = buildFullLongMemEvalPayload("public", "abc1234", 1)
       .kpi.quality_metrics!;
     const accounting = currentMeasurementAccounting();
+    const {
+      measurement_cohort_counts: _counts,
+      unscorable_reason_distribution: _reasons,
+      ...qualityWithoutAccounting
+    } = quality;
 
     expect(() => QualityMetricsSchema.parse({
-      ...quality,
+      ...qualityWithoutAccounting,
       ...(includeCounts
         ? { measurement_cohort_counts: accounting.measurement_cohort_counts }
         : { unscorable_reason_distribution: accounting.unscorable_reason_distribution })
@@ -127,24 +135,35 @@ describe("KPI measurement denominator contract", () => {
 
   it("defines zero answerable rows as r_at_5=0", () => {
     const base = buildFullLongMemEvalPayload("public", "abc1234", 1);
+    const rows = [
+      {
+        id: "q-abstention", version: 1, hit_at_5: false, scorable: false,
+        measurement_cohort: "dataset_declared_abstention" as const,
+        tier: "cold" as const
+      }
+    ];
     const payload = {
       ...base,
       evaluated_count: 1,
       answerable_evaluated_count: 0,
-      measurement_attribution: {
-        ...base.measurement_attribution,
-        status: "ineligible",
-        gate_eligible: false,
-        abstention_calibration_status: "uncalibrated"
-      },
+      selection_contract: selectionContractForRows(rows),
       kpi: {
         ...base.kpi,
         r_at_5: 0,
-        per_scenario: [
-          { id: "q-abstention", version: 1, hit_at_5: false, scorable: false, tier: "cold" }
-        ],
+        per_scenario: rows,
         quality_metrics: {
           ...base.kpi.quality_metrics,
+          measurement_cohort_counts: {
+            evaluated: 1, non_abstention: 0, abstention: 1,
+            scorable_answerable: 0, unscorable_answerable: 0,
+            hit_at_5: 0, miss_at_5: 0
+          },
+          unscorable_reason_distribution: { abstention_uncalibrated: 1 },
+          miss_taxonomy_distribution: {
+            candidate_absent: 0, materialization_drop: 0, budget_drop: 0,
+            delivery_order_drop: 0, answer_set_coverage_drop: 0,
+            evaluation_or_gold_issue: 0
+          },
           abstention: {
             schema_version: "bench-abstention.v2",
             total: 1,
@@ -220,12 +239,17 @@ describe("KPI measurement denominator contract", () => {
       measurement_attribution: _attribution,
       ...legacyBase
     } = base;
+    const {
+      measurement_cohort_counts: _counts,
+      unscorable_reason_distribution: _reasons,
+      ...legacyQuality
+    } = base.kpi.quality_metrics!;
     const legacy = {
       ...legacyBase,
       kpi: {
         ...base.kpi,
         quality_metrics: {
-          ...base.kpi.quality_metrics,
+          ...legacyQuality,
           abstention: {
             schema_version: "bench-abstention.v1",
             total: 6,
@@ -378,65 +402,28 @@ describe("KPI measurement denominator contract", () => {
     expect(KpiPayloadSchema.parse(current).seed_policy).not.toHaveProperty("object_kind");
   });
 
-  it("accounts for evaluator-invalid answerable rows outside the recall denominator", () => {
-    const base = buildFullLongMemEvalPayload("public", "abc1234", 1);
-    const payload = {
-      ...base,
-      evaluated_count: 2,
-      answerable_evaluated_count: 1,
-      measurement_attribution: {
-        ...base.measurement_attribution,
-        status: "ineligible",
-        gate_eligible: false,
-        evidence_status: "partial",
-        candidate_pool_complete: false
-      },
-      kpi: {
-        ...base.kpi,
-        per_scenario: [
-          { id: "q-valid", version: 1, hit_at_5: true, scorable: true, tier: "hot" },
-          { id: "q-invalid", version: 1, hit_at_5: false, scorable: false, tier: "cold" }
-        ],
-        quality_metrics: {
-          ...base.kpi.quality_metrics,
-          evaluator_identity_issue_count: 1,
-          evaluator_identity_issue_denominator: 2,
-          evaluator_identity_unscorable_count: 1,
-          evaluator_identity_unscorable_denominator: 2,
-          abstention: {
-            schema_version: "bench-abstention.v2",
-            total: 0,
-            scored: 0,
-            unscorable: 0,
-            method: "fused_margin_diagnostic_only",
-            calibration_status: "uncalibrated",
-            gate_eligible: false
-          }
-        }
-      }
-    };
-
-    expect(() => KpiPayloadSchema.parse(payload)).not.toThrow();
-    const missingIdentityCount = {
-      ...payload,
-      kpi: {
-        ...payload.kpi,
-        quality_metrics: {
-          ...payload.kpi.quality_metrics,
-          evaluator_identity_unscorable_count: 0
-        }
-      }
-    };
-    expect(() => KpiPayloadSchema.parse(missingIdentityCount))
-      .toThrow(/scorable=false.*evaluator identity/u);
-  });
-
   it("accounts for abstention and evaluator-invalid rows additively", () => {
     const base = buildFullLongMemEvalPayload("public", "abc1234", 1);
+    const rows = [
+      {
+        id: "q-valid", version: 1, hit_at_5: true, scorable: true,
+        measurement_cohort: "answerable" as const, tier: "hot" as const
+      },
+      {
+        id: "q-abstention", version: 1, hit_at_5: false, scorable: false,
+        measurement_cohort: "dataset_declared_abstention" as const,
+        tier: "cold" as const
+      },
+      {
+        id: "q-identity-invalid", version: 1, hit_at_5: false, scorable: false,
+        measurement_cohort: "answerable" as const, tier: "cold" as const
+      }
+    ];
     const payload = {
       ...base,
       evaluated_count: 3,
       answerable_evaluated_count: 1,
+      selection_contract: selectionContractForRows(rows),
       measurement_attribution: {
         ...base.measurement_attribution,
         status: "ineligible",
@@ -446,16 +433,26 @@ describe("KPI measurement denominator contract", () => {
       },
       kpi: {
         ...base.kpi,
-        per_scenario: [
-          { id: "q-valid", version: 1, hit_at_5: true, scorable: true, tier: "hot" },
-          { id: "q-abstention", version: 1, hit_at_5: false, scorable: false, tier: "cold" },
-          { id: "q-identity-invalid", version: 1, hit_at_5: false, scorable: false, tier: "cold" }
-        ],
+        per_scenario: rows,
         quality_metrics: {
           ...base.kpi.quality_metrics,
           no_gold_count: 1,
           evaluator_identity_unscorable_count: 1,
           evaluator_identity_unscorable_denominator: 3,
+          measurement_cohort_counts: {
+            evaluated: 3, non_abstention: 2, abstention: 1,
+            scorable_answerable: 1, unscorable_answerable: 1,
+            hit_at_5: 1, miss_at_5: 0
+          },
+          unscorable_reason_distribution: {
+            abstention_uncalibrated: 1,
+            evaluator_identity_unscorable: 1
+          },
+          miss_taxonomy_distribution: {
+            candidate_absent: 0, materialization_drop: 0, budget_drop: 0,
+            delivery_order_drop: 0, answer_set_coverage_drop: 0,
+            evaluation_or_gold_issue: 0
+          },
           abstention: {
             schema_version: "bench-abstention.v2",
             total: 1,

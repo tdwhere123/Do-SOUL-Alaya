@@ -147,11 +147,23 @@ describe("evaluate-abstention-calibration script", () => {
     expect(report.signal_comparison.runtime_confidence).toEqual(["abstention_confidence_score"]);
     expect(report.signal_comparison.isotonic).toContain("isotonic_top1_top2_fused_margin");
     expect(report.runtime_handoff).toMatchObject({
-      scorer_field: "abstention_confidence_score",
-      scorer_threshold: 0.91,
-      fused_margin_scale: 1 / 60
+      status: "uncalibrated",
+      scorable: false,
+      recall_scope: "answerable_recall",
+      abstention_handling: "excluded_from_recall_denominator",
+      promotion_eligible: false,
+      scorer_field: null,
+      scorer_threshold: null,
+      diagnostic_field: "abstention_confidence_score",
+      diagnostic_fused_margin_scale: 1 / 60,
+      historical_threshold_reference: {
+        value: 0.91,
+        scope: "offline_comparison_only",
+        current_runtime_effect: false
+      }
     });
-    expect(report.runtime_handoff.threshold_reflection).toMatch(/scale=1\/60/);
+    expect(report.runtime_handoff.missing_confidence_behavior).toMatch(/does not change/);
+    expect(report.runtime_handoff.threshold_reflection).toMatch(/no runtime abstention threshold/i);
     expect(report.runtime_handoff.threshold_reflection).toMatch(
       /without claiming a production AUC/
     );

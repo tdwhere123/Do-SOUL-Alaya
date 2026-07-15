@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { z } from "zod";
 import type { LongMemEvalQuestion, LongMemEvalVariant } from "../dataset.js";
+import {
+  classifyLongMemEvalDatasetCohort,
+  type LongMemEvalDatasetCohort
+} from "./dataset-cohort.js";
 
 export const QUESTION_MANIFEST_SCHEMA_VERSION = 1;
 export const QUESTION_MANIFEST_ALGORITHM_VERSION =
@@ -33,7 +36,7 @@ export const QuestionManifestSchema = z.object({
 }).strict();
 
 export type QuestionManifest = z.infer<typeof QuestionManifestSchema>;
-type Answerability = "answerable" | "abstention";
+type Answerability = LongMemEvalDatasetCohort;
 type Stratum = {
   readonly key: string;
   readonly questionType: string;
@@ -122,12 +125,9 @@ export async function loadQuestionManifestSelection(input: {
   readonly manifestPath: string;
   readonly questions: readonly LongMemEvalQuestion[];
   readonly variant: LongMemEvalVariant;
-  readonly pinnedMetaRoot?: string;
+  readonly datasetSha256: string;
 }): Promise<LongMemEvalQuestion[]> {
-  const [manifestRaw, datasetSha256] = await Promise.all([
-    readFile(input.manifestPath, "utf8"),
-    readPinnedDatasetSha(input.variant, input.pinnedMetaRoot)
-  ]);
+  const manifestRaw = await readFile(input.manifestPath, "utf8");
   let decoded: unknown;
   try {
     decoded = JSON.parse(manifestRaw) as unknown;
@@ -137,13 +137,11 @@ export async function loadQuestionManifestSelection(input: {
   }
   return applyQuestionManifest(input.questions, parseQuestionManifest(decoded), {
     variant: input.variant,
-    datasetSha256
+    datasetSha256: input.datasetSha256
   });
 }
 
-export function computeQuestionIdDigest(questionIds: readonly string[]): string {
-  return createHash("sha256").update(questionIds.join("\0"), "utf8").digest("hex");
-}
+export const computeQuestionIdDigest = computeLongMemEvalQuestionIdDigest;
 
 function validateGenerationInput(input: {
   readonly datasetSha256: string;
@@ -164,7 +162,7 @@ function validateGenerationInput(input: {
 function buildStrata(questions: readonly LongMemEvalQuestion[]): Stratum[] {
   const byKey = new Map<string, Stratum>();
   for (const question of questions) {
-    const answerability = classifyAnswerability(question.question_id);
+    const answerability = classifyLongMemEvalDatasetCohort(question);
     const key = stratumKey(question.question_type, answerability);
     const existing = byKey.get(key);
     if (existing !== undefined) existing.questions.push(question);
@@ -276,7 +274,7 @@ function validateManifestQuotas(
   );
   let abstentions = 0;
   for (const question of selected) {
-    const answerability = classifyAnswerability(question.question_id);
+    const answerability = classifyLongMemEvalDatasetCohort(question);
     const key = stratumKey(question.question_type, answerability);
     actualJoint.set(key, (actualJoint.get(key) ?? 0) + 1);
     actualTypes[question.question_type] = (actualTypes[question.question_type] ?? 0) + 1;
@@ -343,24 +341,6 @@ function indexIds(ids: readonly string[], label: string): Set<string> {
     indexed.add(id);
   }
   return indexed;
-}
-
-async function readPinnedDatasetSha(
-  variant: LongMemEvalVariant,
-  pinnedMetaRoot?: string
-): Promise<string> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const root = pinnedMetaRoot ?? resolve(here, "../../../../../docs/bench-history/datasets");
-  const raw = await readFile(join(root, `${variant}.meta.json`), "utf8");
-  const parsed = JSON.parse(raw) as { sha256?: unknown };
-  if (typeof parsed.sha256 !== "string" || !SHA256_PATTERN.test(parsed.sha256)) {
-    throw new Error(`pinned dataset metadata has invalid SHA-256: ${variant}`);
-  }
-  return parsed.sha256;
-}
-
-function classifyAnswerability(questionId: string): Answerability {
-  return questionId.endsWith("_abs") ? "abstention" : "answerable";
 }
 
 function stratumKey(questionType: string, answerability: Answerability): string {

@@ -1,71 +1,29 @@
-import { resolveBenchRunnerVersion } from "../shared/version.js";
 import {
   startBenchDaemon,
   type BenchDaemonHandle
 } from "../harness/daemon.js";
 import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.js";
-import type { BenchRecallWeightOverrides } from "../harness/recall-weight-overrides.js";
 import { collectBenchSeedFuelInventory } from "./seed-fuel-collector.js";
-import { collectDistinctTurnContents } from "./extraction-fill.js";
-import { loadDataset } from "./fetch.js";
-import {
-  createCompileSeedRunner,
-  EXTRACTION_CACHE_ROOT,
-  resolveBenchAllowLiveExtraction
-} from "./compile-seed.js";
 import { QaChatError } from "./qa-chat.js";
-import { loadQuestionManifestSelection } from "./selection/question-manifest.js";
-import {
-  recallOptionsForPolicyShape,
-  readLongMemEvalPinnedMeta,
-  resolveBenchEmbeddingProviderLabel,
-  resolveCommitInfo,
-  writeRecallEvalSnapshot
-} from "./runner-helpers.js";
+import { selectionContractIdentity } from "./selection/contract.js";
+import { writeRecallEvalSnapshot } from "./runner-helpers.js";
 import {
   runLongMemEvalQuestion,
   type LongMemEvalWorkerResult
 } from "./runner-question.js";
+import type { LongMemEvalQuestion } from "./dataset.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { LongMemEvalRunOptions } from "./runner.js";
-import {
-  createOwnedTempRoot,
-  externalTempRoot,
-  finalizeOwnedTempRoot
-} from "./lifecycle/owned-temp-root.js";
+import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
 import { buildLongMemEvalRunProvenance } from "./provenance/run.js";
 import { throwLifecycleErrors } from "./lifecycle/errors.js";
 import { runIsolatedQuestionSequence } from "./lifecycle/question-isolated-execution.js";
+import type { LongMemEvalRunContext } from "./runner/prepare-context.js";
 import {
   emptySeedFuelInventory,
   mergeSeedFuelInventories,
   type SeedFuelInventory
 } from "./seed-fuel-inventory.js";
-import type { LongMemEvalDiagnosticsSpool } from "./diagnostics/spool.js";
-
-type LongMemEvalQuestions = Awaited<ReturnType<typeof loadDataset>>;
-type LongMemEvalQuestion = LongMemEvalQuestions[number];
-
-export interface LongMemEvalRunContext {
-  readonly opts: LongMemEvalRunOptions;
-  readonly questions: LongMemEvalQuestions;
-  readonly window: readonly LongMemEvalQuestion[];
-  readonly alayaVersion: string;
-  readonly commitInfo: ReturnType<typeof resolveCommitInfo>;
-  readonly commitSha7: string;
-  readonly runAt: Date;
-  readonly embeddingProviderLabel: string;
-  readonly policyShape: NonNullable<LongMemEvalRunOptions["policyShape"]>;
-  readonly simulateReport: NonNullable<LongMemEvalRunOptions["simulateReport"]>;
-  readonly recallOptions: ReturnType<typeof recallOptionsForPolicyShape>;
-  readonly seedRunner: ReturnType<typeof createCompileSeedRunner>;
-  readonly captureSnapshot: boolean;
-  readonly extractionCacheRoot: string;
-  readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
-  readonly seedDataDirRoot?: string;
-  readonly removeSeedDataDirRoot: boolean;
-  readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
-}
 
 export interface LongMemEvalExecutionResult {
   readonly collected: readonly LongMemEvalWorkerResult[];
@@ -74,56 +32,6 @@ export interface LongMemEvalExecutionResult {
   readonly seedFuelInventory: Awaited<
     ReturnType<typeof collectBenchSeedFuelInventory>
   >;
-}
-
-export async function prepareLongMemEvalRun(
-  opts: LongMemEvalRunOptions,
-  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<LongMemEvalRunContext> {
-  const questions = await loadDataset(opts.variant, {
-    dataDir: opts.dataDir,
-    pinnedMetaRoot: opts.pinnedMetaRoot
-  });
-  const selectedQuestions = opts.questionManifest === undefined
-    ? questions
-    : await loadQuestionManifestSelection({
-        manifestPath: opts.questionManifest,
-        questions,
-        variant: opts.variant,
-        ...(opts.pinnedMetaRoot === undefined
-          ? {}
-          : { pinnedMetaRoot: opts.pinnedMetaRoot })
-      });
-  const window = selectQuestionWindow(selectedQuestions, opts);
-  const commitInfo = resolveCommitInfo();
-  const extractionCacheRoot = opts.extractionCacheRoot ?? EXTRACTION_CACHE_ROOT;
-  return {
-    opts,
-    questions,
-    window,
-    alayaVersion: resolveBenchRunnerVersion(),
-    commitInfo,
-    commitSha7: commitInfo.sha7,
-    runAt: new Date(),
-    embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
-      opts.embeddingMode ?? "disabled",
-      process.env,
-      opts.embeddingProviderKind
-    ),
-    policyShape: opts.policyShape ?? "stress",
-    simulateReport: opts.simulateReport ?? "none",
-    recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
-    seedRunner: createLongMemEvalSeedRunner(
-      window,
-      extractionCacheRoot
-    ),
-    captureSnapshot: opts.snapshotOut !== undefined,
-    extractionCacheRoot,
-    recallWeightOverrides,
-    diagnosticsSpool,
-    ...(await resolveSeedDataDirRoot(opts))
-  };
 }
 
 export async function executeLongMemEvalRun(
@@ -247,44 +155,6 @@ async function captureSeedRootCleanupError(
   } catch (error) {
     return error;
   }
-}
-
-function selectQuestionWindow(
-  questions: LongMemEvalQuestions,
-  opts: LongMemEvalRunOptions
-) {
-  const offset = Math.max(0, opts.offset ?? 0);
-  const sliceEnd = opts.limit !== undefined ? offset + opts.limit : questions.length;
-  return questions.slice(offset, sliceEnd);
-}
-
-function createLongMemEvalSeedRunner(
-  window: readonly LongMemEvalQuestion[],
-  extractionCacheRoot: string
-) {
-  const requiredTurnContents = collectDistinctTurnContents(window);
-  return createCompileSeedRunner({
-    requiredTurnContents,
-    cacheRoot: extractionCacheRoot,
-    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
-  });
-}
-
-async function resolveSeedDataDirRoot(
-  opts: LongMemEvalRunOptions
-): Promise<{
-  readonly seedDataDirRoot?: string;
-  readonly removeSeedDataDirRoot: boolean;
-}> {
-  if (opts.dataDirRoot !== undefined) {
-    const root = externalTempRoot(opts.dataDirRoot);
-    return { seedDataDirRoot: root.path, removeSeedDataDirRoot: root.owned };
-  }
-  const root = await createOwnedTempRoot("alaya-bench-seed-");
-  return {
-    seedDataDirRoot: root.path,
-    removeSeedDataDirRoot: root.owned
-  };
 }
 
 function createExecutionState(): {
@@ -423,7 +293,9 @@ async function writeLongMemEvalSnapshotIfRequested(
     commitSha7: context.commitSha7,
     embeddingProviderLabel: context.embeddingProviderLabel,
     env: process.env,
-    recallOptions: context.recallOptions
+    recallOptions: context.recallOptions,
+    datasetSha256: context.datasetSha256,
+    selection: selectionContractIdentity(context.selectionContract)
   });
   await writeRecallEvalSnapshot({
     snapshotOut: context.opts.snapshotOut,
@@ -432,10 +304,7 @@ async function writeLongMemEvalSnapshotIfRequested(
     commitSha7: context.commitSha7,
     snapshotQuestions,
     extractionCacheRoot: context.extractionCacheRoot,
-    datasetSha256: readLongMemEvalPinnedMeta(
-      context.opts.variant,
-      context.opts.pinnedMetaRoot
-    ).sha256,
+    datasetSha256: context.datasetSha256,
     runProvenance
   });
   process.stdout.write(

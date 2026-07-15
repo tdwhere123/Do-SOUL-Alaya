@@ -105,7 +105,7 @@ describe("merge-longmemeval validations", () => {
       shardB
     ]);
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
@@ -167,7 +167,7 @@ describe("merge-longmemeval validations", () => {
       shardB
     ]);
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
@@ -248,7 +248,7 @@ describe("merge-longmemeval validations", () => {
       shardB
     ]);
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
@@ -310,7 +310,7 @@ describe("merge-longmemeval validations", () => {
       shard
     ]);
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
     ) as { slug: string };
@@ -400,7 +400,7 @@ describe("merge-longmemeval validations", () => {
       shardB
     ]);
 
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
   });
 
   it("fails closed when present side-effect counters are malformed", async () => {

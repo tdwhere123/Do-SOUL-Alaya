@@ -185,6 +185,25 @@ describe("ManifestationResolver", () => {
     expect(deps.eventLogWriter.appendAtomically).toHaveBeenCalledTimes(1);
   });
 
+  it("writes only the budget event when there are no decisions", async () => {
+    const deps = createDependencies({ config: null });
+    const service = await createService(deps);
+
+    const decisions = await service.resolve({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      candidates: [],
+      taskSurfaceRef: createTaskSurface([])
+    });
+
+    expect(decisions).toEqual([]);
+    expect(deps.eventLogWriter.appendAtomically).toHaveBeenCalledWith([
+      expect.objectContaining({
+        event_type: RuntimeGovernanceEventType.MANIFESTATION_BUDGET_EVALUATED
+      })
+    ]);
+  });
+
   it("downgrades and discards once manifestation budgets are exhausted", async () => {
     const deps = createDependencies({
       config: createBudgetConfig({

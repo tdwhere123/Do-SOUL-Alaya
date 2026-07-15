@@ -141,6 +141,7 @@ describe("recall diagnostics", () => {
         coarse_pool_size: 1,
         fine_evaluated: 1,
         fine_pruned_count: 0,
+        fine_priority_overflow_count: 0,
         fusion_families_with_hits: 1,
         embedding_inference_calls: 0
       }

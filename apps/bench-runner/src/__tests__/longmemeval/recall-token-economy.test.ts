@@ -11,6 +11,7 @@ function sample(overrides: Partial<BenchRecallTokenEconomy> = {}): BenchRecallTo
     coarse_pool_size: 80,
     fine_evaluated: 80,
     fine_pruned_count: 0,
+    fine_priority_overflow_count: 0,
     fusion_families_with_hits: 6,
     embedding_inference_calls: 0,
     ...overrides
@@ -47,6 +48,17 @@ describe("aggregateRecallTokenEconomy", () => {
     const aggregate = aggregateRecallTokenEconomy(samples);
     expect(aggregate?.embedding_inference_calls.mean).toBeCloseTo(0.5, 5);
     expect(aggregate?.embedding_inference_calls.max).toBe(1);
+  });
+
+  it("aggregates fine-assessment priority overflow without affecting other fields", () => {
+    const aggregate = aggregateRecallTokenEconomy([
+      sample({ fine_priority_overflow_count: 0 }),
+      sample({ fine_priority_overflow_count: 4 })
+    ]);
+
+    expect(aggregate?.fine_priority_overflow_count?.mean).toBe(2);
+    expect(aggregate?.fine_priority_overflow_count?.max).toBe(4);
+    expect(aggregate?.fine_evaluated.mean).toBe(80);
   });
 
   it("stamps the schema_version literal so kpi.json readers can pin versioning", () => {
@@ -92,6 +104,25 @@ describe("extractRecallTokenEconomy", () => {
         }
       })
     ).toBeNull();
+  });
+
+  it("defaults missing priority overflow to zero for legacy diagnostics", () => {
+    const { fine_priority_overflow_count: _omitted, ...legacy } = sample();
+
+    expect(extractRecallTokenEconomy({
+      diagnostics: { token_economy: legacy }
+    })?.fine_priority_overflow_count).toBe(0);
+  });
+
+  it("rejects malformed priority overflow instead of polluting aggregates", () => {
+    expect(extractRecallTokenEconomy({
+      diagnostics: {
+        token_economy: {
+          ...sample(),
+          fine_priority_overflow_count: -1
+        }
+      }
+    })).toBeNull();
   });
 
   it("narrows a well-formed token_economy block to BenchRecallTokenEconomy", () => {

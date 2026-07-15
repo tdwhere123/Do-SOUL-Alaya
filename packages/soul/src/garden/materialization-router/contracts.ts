@@ -6,6 +6,7 @@ import {
   type MemoryGraphEdgeTypeValue,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
+  type SourceGroundingDeferReason,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import { type HandoffGapHandler } from "../handoff-gap-handler.js";
@@ -36,7 +37,7 @@ export interface MaterializationTarget {
   readonly route_target: RouteTarget;
   readonly routing_reason: string;
   /** Structured fail-closed reason when kind is deferred for source grounding. */
-  readonly defer_reason?: string;
+  readonly defer_reason?: SourceGroundingDeferReason;
   readonly defer_class?: "source_grounding";
 }
 
@@ -46,7 +47,7 @@ export interface MaterializationResultFields {
   readonly route_target: RouteTarget;
   readonly routing_reason: string;
   readonly created_objects: readonly MaterializationCreatedObject[];
-  readonly defer_reason?: string;
+  readonly defer_reason?: SourceGroundingDeferReason;
   readonly defer_class?: "source_grounding";
 }
 

@@ -13,7 +13,8 @@ import {
   buildMergedLongMemEvalPayload,
   loadMergeShards
 } from "../cli/merge-command-shards.js";
-import { loadDataset } from "./fetch.js";
+import { loadDatasetWithIdentity } from "./fetch.js";
+import type { VerifiedLongMemEvalDatasetAuthority } from "./fetch.js";
 import type { LongMemEvalVariant } from "./dataset.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
@@ -24,6 +25,9 @@ import {
   type LongMemEvalDiagnosticsSpool
 } from "./diagnostics/spool.js";
 import { readOptionalTreatmentBoolean } from "../harness/strict-treatment-config.js";
+import { loadQuestionManifestSelection } from "./selection/question-manifest.js";
+import { deriveMergedLongMemEvalReleaseAuthority } from
+  "../cli/merge/release-evidence-authority.js";
 
 export interface LongMemEvalWorkerShardPlan {
   readonly shardIndex: number;
@@ -56,6 +60,7 @@ interface LongMemEvalConcurrentContext {
   readonly cliPath: string;
   readonly spawnWorker: LongMemEvalWorkerSpawner;
   readonly logDir: string;
+  readonly datasetAuthority: VerifiedLongMemEvalDatasetAuthority | null;
 }
 
 export function freezeProcessEnvForWorkers(
@@ -185,18 +190,8 @@ async function prepareLongMemEvalConcurrentRun(
   deps: LongMemEvalConcurrencyDeps
 ): Promise<LongMemEvalConcurrentContext> {
   const concurrency = resolveLongMemEvalConcurrency(opts);
-  const questions = await loadDataset(opts.variant, {
-    dataDir: opts.dataDir,
-    pinnedMetaRoot: opts.pinnedMetaRoot
-  });
-  const baseOffset = Math.max(0, opts.offset ?? 0);
-  const sliceEnd =
-    opts.limit !== undefined ? baseOffset + opts.limit : questions.length;
-  const windowLength = Math.max(0, Math.min(sliceEnd, questions.length) - baseOffset);
-  if (windowLength === 0) {
-    throw new Error("longmemeval --concurrency: no questions in the selected window");
-  }
-
+  const selection = await loadConcurrentSelection(opts);
+  const { baseOffset, windowLength } = selection;
   const shardRoot = await mkdtemp(join(tmpdir(), "alaya-lme-shards-"));
   const plans = buildLongMemEvalWorkerShardPlans({
     windowLength,
@@ -213,7 +208,43 @@ async function prepareLongMemEvalConcurrentRun(
     `[longmemeval concurrency] process-backed workers=${plans.length} ` +
       `window=${windowLength} cli=${cliPath}\n`
   );
-  return { opts, concurrency, shardRoot, plans, cliPath, spawnWorker, logDir };
+  return {
+    opts, concurrency, shardRoot, plans, cliPath, spawnWorker, logDir,
+    datasetAuthority: selection.datasetAuthority
+  };
+}
+
+async function loadConcurrentSelection(
+  opts: LongMemEvalRunOptions
+): Promise<{
+  readonly baseOffset: number;
+  readonly windowLength: number;
+  readonly datasetAuthority: VerifiedLongMemEvalDatasetAuthority | null;
+}> {
+  const dataset = await loadDatasetWithIdentity(opts.variant, {
+    dataDir: opts.dataDir,
+    pinnedMetaRoot: opts.pinnedMetaRoot
+  });
+  const questions = opts.questionManifest === undefined
+    ? dataset.questions
+    : await loadQuestionManifestSelection({
+        manifestPath: opts.questionManifest,
+        questions: dataset.questions,
+        variant: opts.variant,
+        datasetSha256: dataset.sha256
+      });
+  const baseOffset = Math.max(0, opts.offset ?? 0);
+  const sliceEnd =
+    opts.limit !== undefined ? baseOffset + opts.limit : questions.length;
+  const windowLength = Math.max(0, Math.min(sliceEnd, questions.length) - baseOffset);
+  if (windowLength === 0) {
+    throw new Error("longmemeval --concurrency: no questions in the selected window");
+  }
+  return {
+    baseOffset,
+    windowLength,
+    datasetAuthority: dataset.promotionAuthority
+  };
 }
 
 async function runLongMemEvalConcurrentWorkers(
@@ -282,10 +313,15 @@ async function mergeLongMemEvalConcurrentRunWithSpool(
   await validateShardRunProvenancePlans({
     shardArchiveRefs: loaded.archiveRefs,
     plans: context.plans,
-    requestedConcurrency: context.concurrency
+    requestedConcurrency: context.concurrency,
+    selectionContract: build.selectionContract
   });
   const archive = await writeMergedLongMemEvalArchive({
     historyRoot: context.opts.historyRoot,
+    releaseEvidenceAuthority: deriveMergedLongMemEvalReleaseAuthority(
+      context.datasetAuthority,
+      loaded.archiveRefs
+    ),
     build,
     shardArchiveRefs: loaded.archiveRefs,
     requestedConcurrency: context.concurrency,
@@ -297,7 +333,8 @@ async function mergeLongMemEvalConcurrentRunWithSpool(
     reportPath: join(dirname(archive.kpiPath), "report.md"),
     findingsPath: join(dirname(archive.kpiPath), "findings.md"),
     diagnosticsPath: archive.diagnosticsPath,
-    payload: archive.merged
+    payload: archive.merged,
+    evidenceContext: archive.evidenceContext
   };
 }
 

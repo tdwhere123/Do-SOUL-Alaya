@@ -2,11 +2,13 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  executeLongMemEvalRun,
-  type LongMemEvalRunContext
-} from "../../longmemeval/runner-execution.js";
+import { executeLongMemEvalRun } from
+  "../../longmemeval/runner-execution.js";
+import type { LongMemEvalRunContext } from
+  "../../longmemeval/runner/prepare-context.js";
 import { LongMemEvalDiagnosticsSpool } from "../../longmemeval/diagnostics/spool.js";
+import { createLongMemEvalSelectionContractFromAssignments } from
+  "../../longmemeval/selection/contract.js";
 
 const mocks = vi.hoisted(() => ({
   collectInventory: vi.fn(),
@@ -127,8 +129,19 @@ async function runContext(
       embeddingMode: "disabled",
       historyRoot: join(seedDataDirRoot, "history")
     },
+    releaseEvidenceAuthority: null,
     questions: [] as unknown as LongMemEvalRunContext["questions"],
     window: questionIds.map((question_id) => ({ question_id })) as unknown as LongMemEvalRunContext["window"],
+    datasetSha256: "d".repeat(64),
+    datasetChecksumSource: "fixture",
+    datasetSourcePath: join(seedDataDirRoot, "dataset.json"),
+    selectionContract: createLongMemEvalSelectionContractFromAssignments({
+      datasetSha256: "d".repeat(64),
+      assignments: questionIds.map((question_id) => ({
+        question_id,
+        dataset_cohort: "answerable"
+      }))
+    }),
     alayaVersion: "test",
     commitInfo: {} as LongMemEvalRunContext["commitInfo"],
     commitSha7: "deadbee",

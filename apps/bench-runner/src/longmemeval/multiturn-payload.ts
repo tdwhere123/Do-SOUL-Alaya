@@ -1,14 +1,6 @@
 import {
   buildTokenEconomy,
   computeTokenSavedRatio,
-  buildDiffVsPrevious,
-  diffKpis,
-  entrySlug,
-  readLatest,
-  renderFindings,
-  renderReport,
-  writeEntry,
-  type HistoryLayout,
   type KpiPayload,
   type PerScenarioRow
 } from "@do-soul/alaya-eval";
@@ -20,30 +12,30 @@ import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import {
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
-  renderCompactDiagnosticsSidecar,
-  renderDiagnosticsSidecar,
   summarizeProviderStates
 } from "./diagnostics.js";
-import { writeExternalDiagnosticsArtifact } from "./diagnostics-artifacts.js";
 import { aggregateRecallTokenEconomy } from "./recall-token-economy.js";
-import {
-  appendSeedExtractionReleaseBlockerToFindings,
-  appendSeedExtractionReleaseBlockerToReport
-} from "./seed-extraction-release-blocker.js";
 import { toSeedExtractionPathKpi } from "./compile-seed.js";
+import {
+  classifyQuestionMeasurementCohort,
+  classifyQuestionMeasurementStatus
+} from "./measurement/question-validity.js";
+import {
+  answerableRecallAt5,
+  summarizeAnswerableRecall
+} from "./measurement/answerable-recall.js";
 import {
   computePercentile,
   countDegradationReasons,
   countTiers,
-  rAt5ForRound,
   ratio,
   variantToSplit
 } from "./multiturn-helpers.js";
 import type { LongMemEvalMultiturnRunResult, RoundResult } from "./multiturn.js";
 import type { MultiturnExecutionResult, MultiturnRunContext } from "./multiturn-run.js";
 import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
-
-const LONGMEMEVAL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json";
+import { selectionContractIdentity } from "./selection/contract.js";
+import { writeTierOneLongMemEvalArchive } from "./archive/tier-one-evidence.js";
 
 export interface MultiturnPayloadBuild {
   readonly payload: KpiPayload;
@@ -59,7 +51,13 @@ export function buildMultiturnPayload(
   );
   const finalRounds = collectFinalRounds(execution.collected);
   const finalDiagnostics = finalRounds.map((round) => round.diagnostics);
-  const providerSummary = summarizeProviderStates(allDiagnostics);
+  const providerSummary = summarizeProviderStates(finalDiagnostics);
+  const kpi = buildMultiturnKpi(
+    context,
+    execution,
+    finalDiagnostics,
+    providerSummary
+  );
   const payload: KpiPayload = {
     bench_name: "public-multiturn",
     split: variantToSplit(context.opts.variant),
@@ -72,10 +70,14 @@ export function buildMultiturnPayload(
     policy_shape: "stress",
     simulate_report: "none",
     dataset: buildMultiturnDataset(context),
+    selection_contract: selectionContractIdentity(context.selectionContract),
     sample_size: context.opts.fetchResult?.questionCount ?? context.questions.length,
     evaluated_count: context.window.length,
+    answerable_evaluated_count: kpi.per_scenario.filter(
+      (row) => row.scorable === true
+    ).length,
     harness_mode: "mcp_propose_review",
-    kpi: buildMultiturnKpi(context, execution, allDiagnostics, finalDiagnostics, providerSummary)
+    kpi
   };
   return {
     payload,
@@ -83,7 +85,8 @@ export function buildMultiturnPayload(
       context,
       payload,
       providerSummary,
-      allDiagnostics
+      allDiagnostics,
+      finalDiagnostics
     )
   };
 }
@@ -92,19 +95,21 @@ export async function writeMultiturnArtifacts(
   context: MultiturnRunContext,
   payloadBuild: MultiturnPayloadBuild
 ): Promise<LongMemEvalMultiturnRunResult> {
-  const layout: HistoryLayout = { historyRoot: context.opts.historyRoot };
-  const previous = await readLatest(layout, "public-multiturn", {
-    split: payloadBuild.payload.split,
-    embeddingProvider: payloadBuild.payload.embedding_provider,
-    pointerKind: "passing"
+  return writeTierOneLongMemEvalArchive({
+    benchName: "public-multiturn",
+    opts: context.opts,
+    datasetSha256: context.datasetSha256,
+    datasetChecksumSource: context.datasetChecksumSource,
+    datasetSourcePath: context.datasetSourcePath,
+    releaseEvidenceAuthority: context.releaseEvidenceAuthority,
+    selectionContract: context.selectionContract,
+    payload: payloadBuild.payload,
+    diagnosticsPayload: payloadBuild.diagnosticsPayload,
+    releaseDiagnostics: payloadBuild.diagnosticsPayload.questions,
+    commitSha7: context.commitSha7,
+    embeddingProviderLabel: context.embeddingProviderLabel,
+    runAt: context.runAt
   });
-  const diff = diffKpis(payloadBuild.payload, previous);
-  payloadBuild.payload.diff_vs_previous = buildDiffVsPrevious(
-    payloadBuild.payload,
-    previous,
-    previous?.run_at ?? ""
-  );
-  return writeMultiturnEntry(context, layout, payloadBuild, diff, previous);
 }
 
 function collectFinalRounds(collected: MultiturnExecutionResult["collected"]) {
@@ -117,14 +122,15 @@ function buildMultiturnDataset(context: MultiturnRunContext): KpiPayload["datase
   return {
     name: `${context.opts.variant}:multiturn`,
     size: context.opts.fetchResult?.questionCount ?? context.questions.length,
-    source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned"
+    source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    checksum_sha256: context.datasetSha256,
+    checksum_source: context.datasetChecksumSource
   };
 }
 
 function buildMultiturnKpi(
   context: MultiturnRunContext,
   execution: MultiturnExecutionResult,
-  allDiagnostics: Parameters<typeof summarizeProviderStates>[0],
   finalDiagnostics: Parameters<typeof summarizeProviderStates>[0],
   providerSummary: ReturnType<typeof summarizeProviderStates>
 ): KpiPayload["kpi"] {
@@ -141,12 +147,7 @@ function buildMultiturnKpi(
   );
   assertBenchTokenEconomyContract("public", tokenEconomyInput);
   return {
-    r_at_1: ratio(finalRounds.filter((round) => round.hitAt1).length, finalRounds.length),
-    r_at_5: ratio(finalRounds.filter((round) => round.hitAt5).length, finalRounds.length),
-    r_at_10: ratio(finalRounds.filter((round) => round.hitAt10).length, finalRounds.length),
-    r_at_5_round_1: rAt5ForRound(execution.collected, 1),
-    ...(context.rounds >= 2 ? { r_at_5_round_2: rAt5ForRound(execution.collected, 2) } : {}),
-    r_at_5_round_n: ratio(finalRounds.filter((round) => round.hitAt5).length, finalRounds.length),
+    ...buildMultiturnRecallKpi(context, execution, finalDiagnostics),
     multiturn_rounds: context.rounds,
     ...buildMultiturnEmbeddingKpi(context, finalDiagnostics, providerSummary),
     latency_ms_p50: computePercentile(finalRounds.map((round) => round.latencyMs), 50),
@@ -162,6 +163,34 @@ function buildMultiturnKpi(
     quality_metrics: buildLongMemEvalQualityMetrics(finalDiagnostics),
     per_scenario: buildMultiturnPerScenario(execution.collected)
   };
+}
+
+function buildMultiturnRecallKpi(
+  context: MultiturnRunContext,
+  execution: MultiturnExecutionResult,
+  finalDiagnostics: Parameters<typeof summarizeProviderStates>[0]
+) {
+  const final = summarizeAnswerableRecall(finalDiagnostics);
+  return {
+    r_at_1: final.rAt1,
+    r_at_5: final.rAt5,
+    r_at_10: final.rAt10,
+    r_at_5_round_1: answerableRecallAt5(roundDiagnostics(execution, 1)),
+    ...(context.rounds >= 2
+      ? { r_at_5_round_2: answerableRecallAt5(roundDiagnostics(execution, 2)) }
+      : {}),
+    r_at_5_round_n: final.rAt5
+  };
+}
+
+function roundDiagnostics(
+  execution: MultiturnExecutionResult,
+  roundIndex: number
+) {
+  return execution.collected.flatMap((result) => {
+    const round = result.rounds[roundIndex - 1];
+    return round === undefined ? [] : [round.diagnostics];
+  });
 }
 
 function buildMultiturnEmbeddingKpi(
@@ -194,19 +223,26 @@ function buildMultiturnSeedTruncation(
 function buildMultiturnPerScenario(
   collected: MultiturnExecutionResult["collected"]
 ): PerScenarioRow[] {
-  return collectFinalRounds(collected).map((round, index) => ({
-    id: collected[index]?.questionId ?? `question-${index + 1}`,
-    version: 1,
-    hit_at_5: round.hitAt5,
-    tier: round.firstTier
-  }));
+  return collected.flatMap((result) => {
+    const round = result.rounds[result.rounds.length - 1];
+    if (round === undefined) return [];
+    return [{
+      id: result.questionId,
+      version: 1,
+      hit_at_5: round.hitAt5,
+      scorable: classifyQuestionMeasurementStatus(round.diagnostics) === "scorable",
+      measurement_cohort: classifyQuestionMeasurementCohort(round.diagnostics),
+      tier: round.firstTier
+    }];
+  });
 }
 
 function buildMultiturnDiagnosticsPayload(
   context: MultiturnRunContext,
   payload: KpiPayload,
   providerSummary: ReturnType<typeof summarizeProviderStates>,
-  allDiagnostics: Parameters<typeof summarizeProviderStates>[0]
+  allDiagnostics: Parameters<typeof summarizeProviderStates>[0],
+  finalDiagnostics: Parameters<typeof summarizeProviderStates>[0]
 ) {
   return {
     schema_version: 1,
@@ -218,85 +254,11 @@ function buildMultiturnDiagnosticsPayload(
     recall_pipeline_version: payload.recall_pipeline_version,
     embedding_provider: payload.embedding_provider,
     embedding_mode: context.opts.embeddingMode ?? "disabled",
+    policy_shape: payload.policy_shape,
+    simulate_report: payload.simulate_report,
     seed_extraction_path: payload.kpi.seed_extraction_path,
     provider_state_summary: providerSummary,
-    questions: allDiagnostics
+    round_diagnostics: allDiagnostics,
+    questions: finalDiagnostics
   } as const;
-}
-
-async function writeMultiturnEntry(
-  context: MultiturnRunContext,
-  layout: HistoryLayout,
-  payloadBuild: MultiturnPayloadBuild,
-  diff: ReturnType<typeof diffKpis>,
-  previous: KpiPayload | null
-): Promise<LongMemEvalMultiturnRunResult> {
-  const slug = entrySlug(context.runAt, context.commitSha7);
-  const diagnosticsPath = await writeMultiturnDiagnostics(
-    context,
-    slug,
-    payloadBuild.diagnosticsPayload
-  );
-  const entry = await writeEntry(
-    layout,
-    "public-multiturn",
-    slug,
-    payloadBuild.payload,
-    buildMultiturnReport(payloadBuild.payload, previous, diff),
-    buildMultiturnFindings(payloadBuild.payload, diff),
-    { sidecars: [multiturnDiagnosticsSidecar(payloadBuild.diagnosticsPayload, diagnosticsPath)] }
-  );
-  return {
-    slug,
-    kpiPath: entry.kpiPath,
-    reportPath: entry.reportPath,
-    findingsPath: entry.findingsPath,
-    diagnosticsPath: entry.sidecarPaths[LONGMEMEVAL_DIAGNOSTICS_FILENAME] ?? null,
-    payload: payloadBuild.payload
-  };
-}
-
-async function writeMultiturnDiagnostics(
-  context: MultiturnRunContext,
-  slug: string,
-  diagnosticsPayload: MultiturnPayloadBuild["diagnosticsPayload"]
-): Promise<string> {
-  return writeExternalDiagnosticsArtifact({
-    historyRoot: context.opts.historyRoot,
-    benchName: "public-multiturn",
-    slug,
-    filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-    contents: renderDiagnosticsSidecar(diagnosticsPayload)
-  });
-}
-
-function multiturnDiagnosticsSidecar(
-  diagnosticsPayload: MultiturnPayloadBuild["diagnosticsPayload"],
-  diagnosticsPath: string
-) {
-  return {
-    filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME,
-    contents: renderCompactDiagnosticsSidecar(diagnosticsPayload, diagnosticsPath)
-  };
-}
-
-function buildMultiturnReport(
-  payload: KpiPayload,
-  previous: KpiPayload | null,
-  diff: ReturnType<typeof diffKpis>
-): string {
-  return appendSeedExtractionReleaseBlockerToReport(
-    renderReport(payload, previous, diff),
-    payload
-  );
-}
-
-function buildMultiturnFindings(
-  payload: KpiPayload,
-  diff: ReturnType<typeof diffKpis>
-): string | null {
-  return appendSeedExtractionReleaseBlockerToFindings(
-    renderFindings(payload, diff),
-    payload
-  );
 }

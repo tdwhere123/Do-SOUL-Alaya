@@ -87,7 +87,11 @@ export interface AlayaDaemonRuntimeServices {
   // bench-seeded signal materializes a memory_entry exactly as production.
   readonly signalService: Pick<
     SignalService,
-    "receiveSignal" | "getSourceGroundingDeferStats" | "redriveSourceGroundingDefer" | "listSourceGroundingDefers"
+    | "receiveSignal"
+    | "getSourceGroundingDeferStats"
+    | "redriveSourceGroundingDefer"
+    | "reconcileStaleSourceGroundingRedrive"
+    | "listSourceGroundingDefers"
   >;
   // invariant: the bench harness seeds session-level synthesis_capsule rows
   // by calling SynthesisService.create directly, bypassing the

@@ -100,8 +100,11 @@ export function provenance(
     schema_version: 1,
     code: {
       commit_sha7: "05d98df",
+      commit_sha: "05d98df" + "0".repeat(33),
       gate_sha256: "d".repeat(64),
-      worktree_state_sha256: "1".repeat(64)
+      gate_contract_path: "/tmp/frozen-contract.json",
+      worktree_state_sha256: "1".repeat(64),
+      worktree_clean: true
     },
     extraction_cache: extractionCacheIdentity(),
     runtime: runtimeIdentity(),

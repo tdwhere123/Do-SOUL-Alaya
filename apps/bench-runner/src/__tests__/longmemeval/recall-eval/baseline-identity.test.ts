@@ -44,6 +44,11 @@ function withSliceDrift(
 }
 
 function treatmentDrifts(base: KpiPayload, exact: KpiPayload): KpiPayload[] {
+  const answerRerank = exact.recall_eval_attribution!.answer_rerank;
+  const embeddingSupplement = exact.recall_eval_attribution!.embedding_supplement;
+  if (!answerRerank?.enabled || !embeddingSupplement?.enabled) {
+    throw new Error("exact treatment fixture must enable both embedding models");
+  }
   return [
     withBiIdentity({ ...base, alaya_commit: "6".repeat(7) }, {
       artifact: "d".repeat(64), schema: 2, d2q: "content_plus_hq"
@@ -68,7 +73,7 @@ function treatmentDrifts(base: KpiPayload, exact: KpiPayload): KpiPayload[] {
       recall_eval_attribution: {
         ...exact.recall_eval_attribution!,
         answer_rerank: {
-          ...exact.recall_eval_attribution!.answer_rerank!,
+          ...answerRerank,
           model_artifact_sha256: "e".repeat(64)
         }
       }
@@ -79,7 +84,7 @@ function treatmentDrifts(base: KpiPayload, exact: KpiPayload): KpiPayload[] {
       recall_eval_attribution: {
         ...exact.recall_eval_attribution!,
         embedding_supplement: {
-          ...exact.recall_eval_attribution!.embedding_supplement!,
+          ...embeddingSupplement,
           effective_model_id: "Xenova/other-bi"
         }
       }
@@ -106,7 +111,7 @@ function treatmentDrifts(base: KpiPayload, exact: KpiPayload): KpiPayload[] {
       recall_eval_attribution: {
         ...exact.recall_eval_attribution!,
         answer_rerank: {
-          ...exact.recall_eval_attribution!.answer_rerank!,
+          ...answerRerank,
           effective_model_id: "Xenova/other-reranker"
         }
       }

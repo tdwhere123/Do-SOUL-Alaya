@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../../cli/index.js";
 import { loadMergeShards } from "../../cli/merge-command-shards.js";
 import { LongMemEvalDiagnosticsSpool } from "../../longmemeval/diagnostics/spool.js";
+// @ts-expect-error The executable replay verifier is intentionally outside package declarations.
+import { loadEvidenceBundle } from "../../../scripts/longmemeval-replay/contract.mjs";
 import {
   makeShardDiagnostics,
   makeShardKpi,
@@ -19,6 +21,7 @@ import {
   roots,
   setupShard
 } from "./cli-merge-evidence-fixture.js";
+import { createMergeDatasetSource } from "./cli-merge-dataset-fixture.js";
 
 afterEach(cleanupRoots);
 
@@ -28,12 +31,14 @@ describe("merge-longmemeval evidence bundle", () => {
     roots.push(root);
     const shard = path.join(root, "shard");
     const history = path.join(root, "history");
+    const dataset = await createMergeDatasetSource(root);
     await setupShard(shard, "q-1", 0);
 
     expect(await runCli([
       "merge-longmemeval", "--variant", "s", "--history-root", history,
+      ...dataset.cliArgs,
       "--shards", shard
-    ])).toBe(0);
+    ])).toBe(1);
 
     const archive = await archiveRoot(history);
     const compact = JSON.parse(await readFile(
@@ -84,19 +89,21 @@ describe("merge-longmemeval evidence bundle", () => {
     ])).toBe(2);
   });
 
-  it("preserves coherent provenance for two shards", async () => {
+  it("canonicalizes reversed shards and binds the final selection ledger", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "merge-evidence-two-"));
     roots.push(root);
     const shardA = path.join(root, "a");
     const shardB = path.join(root, "b");
     const history = path.join(root, "history");
+    const dataset = await createMergeDatasetSource(root);
     await setupShard(shardA, "q-a", 0);
     await setupShard(shardB, "q-b", 1);
 
     expect(await runCli([
       "merge-longmemeval", "--variant", "s", "--history-root", history,
-      "--shards", shardA, shardB
-    ])).toBe(0);
+      ...dataset.cliArgs,
+      "--shards", shardB, shardA
+    ])).toBe(1);
 
     const archive = await archiveRoot(history);
     const aggregate = JSON.parse(await readFile(
@@ -109,6 +116,44 @@ describe("merge-longmemeval evidence bundle", () => {
       executed_dist: { sha256: "f".repeat(64) }
     });
     expect(aggregate.shards.map((shard) => shard.execution.offset)).toEqual([0, 1]);
+    const kpi = JSON.parse(await readFile(path.join(archive, "kpi.json"), "utf8")) as {
+      selection_contract: { selected_count: number; cohort_assignment_digest: string };
+      kpi: { per_scenario: Array<{ id: string }> };
+    };
+    const ledger = JSON.parse(await readFile(
+      path.join(archive, "longmemeval-cohort-ledger.json"), "utf8"
+    )) as {
+      selection_contract: { selected_count: number; cohort_assignment_digest: string };
+      rows: Array<{ question_id: string }>;
+    };
+    expect(kpi.kpi.per_scenario.map((row) => row.id)).toEqual(["q-a", "q-b"]);
+    expect(ledger.rows.map((row) => row.question_id)).toEqual(["q-a", "q-b"]);
+    expect(ledger.selection_contract).toEqual(kpi.selection_contract);
+    await expect(loadEvidenceBundle(path.join(
+      archive,
+      "longmemeval-evidence-manifest.json"
+    ))).resolves.toMatchObject({
+      diagnostics: {
+        questions: [
+          { question_id: "q-a" },
+          { question_id: "q-b" }
+        ]
+      }
+    });
+  });
+
+  it("rejects a gap between verified shard execution ranges", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "merge-evidence-gap-"));
+    roots.push(root);
+    const shardA = path.join(root, "a");
+    const shardB = path.join(root, "b");
+    await setupShard(shardA, "q-a", 0);
+    await setupShard(shardB, "q-b", 2);
+
+    expect(await runCli([
+      "merge-longmemeval", "--variant", "s", "--history-root", path.join(root, "history"),
+      "--shards", shardB, shardA
+    ])).toBe(2);
   });
 
   it("rejects a shard evidence manifest whose bundle hash was changed", async () => {
@@ -162,7 +207,13 @@ describe("merge-longmemeval evidence bundle", () => {
     await setupShard(shard, "q-binding", 0);
     await rewriteShardManifest(shard, (manifest) => ({
       ...manifest.run,
-      dataset_sha256: "e".repeat(64)
+      dataset_sha256: "e".repeat(64),
+      selection_contract: manifest.run.selection_contract === undefined
+        ? undefined
+        : {
+            ...manifest.run.selection_contract,
+            dataset_sha256: "e".repeat(64)
+          }
     }));
     const spool = await LongMemEvalDiagnosticsSpool.create();
     try {

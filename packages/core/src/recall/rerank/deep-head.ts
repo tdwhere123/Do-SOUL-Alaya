@@ -1,16 +1,9 @@
 import { clamp01 } from "../../shared/clamp.js";
 import type { DeliverySelectionCandidate } from "../delivery/delivery-selection.js";
-import { compareFusedRecallCandidates } from "../delivery/fusion-delivery-scoring.js";
 import type {
   RecallFusionStreamContributions,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
-
-/**
- * Gold's pre-deep fused rank p95 ≈ 16 and is within fused@30 for 100% of
- * scorable questions. Window is that coverage bound — not an R@5 knob.
- */
-export const DEEP_HEAD_CANDIDATE_LIMIT = 30;
 
 type DeepHeadSupplementary = Readonly<Pick<
   RecallSupplementaryData,
@@ -20,10 +13,7 @@ type DeepHeadSupplementary = Readonly<Pick<
   | "sourceProximityScores"
 >>;
 
-/**
- * Prefer cross-encoder answer scores when present; otherwise score the fused
- * top-30 with cheap embedding + evidence-agreement signals (no CE path).
- */
+/** Prefer cross-encoder scores when present; otherwise score the pruned waist. */
 export function resolveDeepHeadScores(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
   readonly answerRelevanceScores: ReadonlyMap<string, number>;
@@ -39,35 +29,25 @@ export function computeLightweightDeepHeadScores(
   candidates: readonly DeliverySelectionCandidate[],
   supplementaryData: DeepHeadSupplementary
 ): ReadonlyMap<string, number> {
-  // Three tiers by what orthogonal signal exists anywhere in the fused head:
-  // 1) emb-active → (2·emb+agreement)/3 (query-conditioned primary)
-  // 2) emb-cold + agreement present somewhere → keep fused_score for
-  //    query-supported candidates; agreement-gate conflict-only piles
-  // 3) emb-cold + agreement-cold → empty map (fused order binds; no rescoring)
-  const head = [...candidates]
-    .sort(compareFusedRecallCandidates)
-    .slice(0, DEEP_HEAD_CANDIDATE_LIMIT);
-  const embeddingActive = head.some(
+  const embeddingActive = candidates.some(
     (candidate) => embeddingSignal(candidate, supplementaryData) > 0
   );
   if (embeddingActive) {
     return new Map(
-      head.map((candidate) => [
+      candidates.map((candidate) => [
         candidate.fusion.candidate_key,
         lightweightDeepHeadScore(candidate, supplementaryData)
       ])
     );
   }
-  // "Agreement present somewhere" = any head candidate has evidence∩structural
-  // or evidence∩source proximity > 0. That unlocks tier 2 for the whole head.
-  const agreementActive = head.some(
+  const agreementActive = candidates.some(
     (candidate) => evidenceAgreementSignal(candidate, supplementaryData) > 0
   );
   if (!agreementActive) {
     return new Map();
   }
   return new Map(
-    head.map((candidate) => [
+    candidates.map((candidate) => [
       candidate.fusion.candidate_key,
       coldEmbeddingDeepHeadScore(candidate, supplementaryData)
     ])
@@ -80,10 +60,7 @@ function lightweightDeepHeadScore(
 ): number {
   const embedding = embeddingSignal(candidate, supplementaryData);
   const evidenceAgreement = evidenceAgreementSignal(candidate, supplementaryData);
-  // Two available signals without CE: emb is query-conditioned primary, agreement
-  // is corroboration. Majority vote of the pair (2:1) — emb stays decisive while
-  // agreement breaks near-ties without reintroducing shallow RRF ordinals.
-  return clamp01((2 * embedding + evidenceAgreement) / 3);
+  return probabilisticOr(embedding, evidenceAgreement);
 }
 
 // Emb-cold head: keep post-gate fused mass for query-supported candidates so
@@ -131,14 +108,19 @@ function evidenceAgreementSignal(
     candidate.structuralScore ?? supplementaryData.structuralScores[objectId] ?? 0
   );
   const source = clamp01(supplementaryData.sourceProximityScores[objectId] ?? 0);
-  const structuralAgreement = agreementProduct(evidence, structural);
-  const sourceAgreement = agreementProduct(evidence, source);
-  return Math.max(evidence, structuralAgreement, sourceAgreement);
+  return Math.max(
+    geometricAgreement(evidence, structural),
+    geometricAgreement(evidence, source)
+  );
 }
 
-function agreementProduct(left: number, right: number): number {
+function geometricAgreement(left: number, right: number): number {
   if (left <= 0 || right <= 0) {
     return 0;
   }
-  return clamp01(Math.sqrt(left * right) + Math.min(left, right) * 0.1);
+  return clamp01(Math.sqrt(left * right));
+}
+
+function probabilisticOr(left: number, right: number): number {
+  return clamp01(left + right - left * right);
 }

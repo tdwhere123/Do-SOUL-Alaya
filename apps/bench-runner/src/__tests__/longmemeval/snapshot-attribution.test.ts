@@ -11,13 +11,28 @@ function provenance(input: {
   readonly questionManifestDatasetSha?: string;
   readonly modelFamily?: string;
   readonly requestProfile?: ExtractionRequestProfile;
+  readonly currentSelection?: boolean;
 }): LongMemEvalRunProvenance {
   return {
     schema_version: 1,
+    ...(input.currentSelection !== true ? {} : {
+      dataset_sha256: DATASET_SHA,
+      selection: {
+        schema_version: 1,
+        dataset_sha256: DATASET_SHA,
+        selected_id_digest: "5".repeat(64),
+        selected_count: 1,
+        expected_cohort_counts: { answerable: 1, abstention: 0 },
+        cohort_assignment_digest: "8".repeat(64)
+      }
+    }),
     code: {
       commit_sha7: "05d98df",
+      commit_sha: "05d98df" + "0".repeat(33),
       gate_sha256: "b".repeat(64),
+      gate_contract_path: "/tmp/frozen-contract.json",
       worktree_state_sha256: "c".repeat(64),
+      worktree_clean: true,
       executed_dist: {
         algorithm: "sha256-reachable-path-file-sha256-v1",
         sha256: "6".repeat(64),
@@ -145,6 +160,7 @@ function attribution(input: {
   readonly legacySchema?: 1 | 2;
   readonly snapshotManifestSha?: string;
   readonly snapshotCacheKeyAlgo?: string;
+  readonly currentSelection?: boolean;
 }) {
   const family = input.snapshotModelFamily ?? input.modelFamily ?? "fixture-family";
   const profile = input.snapshotRequestProfile ?? input.requestProfile ?? "provider-default-v1";
@@ -177,11 +193,19 @@ function attribution(input: {
 }
 
 describe("snapshot attribution dataset binding", () => {
-  it("accepts an unpinned cache revision when the question manifest binds dataset bytes", () => {
+  it("accepts a v3 cache bound to carried dataset and selection identities", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true
+    })).toEqual({ status: "attributed", gate_eligible: true });
+  });
+
+  it("rejects an unpinned v3 cache even when the question manifest binds dataset bytes", () => {
     expect(attribution({
       datasetRevision: "unpinned",
       questionManifestDatasetSha: DATASET_SHA
-    })).toEqual({ status: "attributed", gate_eligible: true });
+    })).toEqual({ status: "attributed", gate_eligible: false });
   });
 
   it("rejects a question manifest whose dataset SHA differs from the snapshot", () => {
@@ -251,10 +275,10 @@ describe("snapshot attribution dataset binding", () => {
     })).toEqual({ status: "attributed", gate_eligible: false });
   });
 
-  it("uses a hash-shaped cache revision as the legacy dataset binding fallback", () => {
+  it("rejects a hash-shaped cache revision without current carried selection identity", () => {
     expect(attribution({ datasetRevision: DATASET_SHA })).toEqual({
       status: "attributed",
-      gate_eligible: true
+      gate_eligible: false
     });
   });
 });

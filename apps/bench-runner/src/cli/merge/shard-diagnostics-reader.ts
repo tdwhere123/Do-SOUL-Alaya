@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import { LONGMEMEVAL_DIAGNOSTICS_FILENAME } from
+  "../../longmemeval/archive-evidence.js";
 import {
   resolveBenchDiagnosticsArtifactRoot
 } from "../../longmemeval/diagnostics-artifacts.js";
@@ -13,7 +16,12 @@ import type {
 } from "../../longmemeval/diagnostics.js";
 import type { LongMemEvalDiagnosticsSpool } from "../../longmemeval/diagnostics/spool.js";
 import { resolveShardPointerPath } from "../merge-shared.js";
-import { verifyShardEvidenceBundle } from "./shard-evidence-verifier.js";
+import {
+  bindVerifiedShardDiagnostics,
+  verifyShardEvidenceBundle,
+  type VerifiedArtifactIdentity,
+  type VerifiedShardEvidence
+} from "./shard-evidence-verifier.js";
 import {
   openContainedArtifact,
   type ContainedArtifactFile
@@ -24,12 +32,30 @@ export interface ReadShardPayloadResult {
   readonly slug: string;
   readonly diagnostics: LongMemEvalDiagnosticsSidecar;
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
+  readonly verifiedEvidence: VerifiedShardEvidence | null;
+}
+
+export interface ShardPayloadPlan {
+  readonly root: string;
+  readonly payload: KpiPayload;
+  readonly slug: string;
+  readonly diagnostics: ShardDiagnosticsPlan;
+  readonly verifiedEvidence: VerifiedShardEvidence | null;
 }
 
 export async function readShardPayload(
   shardRoot: string,
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<ReadShardPayloadResult> {
+  return materializeShardPayload(
+    await readShardPayloadPlan(shardRoot),
+    diagnosticsSpool
+  );
+}
+
+export async function readShardPayloadPlan(
+  shardRoot: string
+): Promise<ShardPayloadPlan> {
   const pointerPath = await resolveShardPointerPath(shardRoot);
   const pointer = await readContainedJson<{ slug?: string }>(
     shardRoot,
@@ -41,24 +67,35 @@ export async function readShardPayload(
     );
   }
   const payload = await readShardKpi(shardRoot, pointer.slug);
-  const diagnostics = await readRequiredShardDiagnostics(
+  const verifiedEvidence = await verifyShardEvidenceBundle({
+    shardRoot,
+    slug: pointer.slug,
+    payload
+  });
+  const diagnostics = await readRequiredShardDiagnosticsPlan(
     shardRoot,
     pointer.slug,
-    diagnosticsSpool
+    verifiedEvidence
   );
+  return { root: shardRoot, payload, slug: pointer.slug, diagnostics, verifiedEvidence };
+}
+
+export async function materializeShardPayload(
+  plan: ShardPayloadPlan,
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
+): Promise<ReadShardPayloadResult> {
+  const diagnostics = await materializeShardDiagnostics(plan.diagnostics, diagnosticsSpool);
   const questionDiagnostics = diagnostics.questions ?? [];
-  validateShardQuestionIdentity(payload, questionDiagnostics, shardRoot);
-  await verifyShardEvidenceBundle({
-    shardRoot,
-    slug: pointer.slug,
-    payload,
-    diagnostics
-  });
+  validateShardQuestionIdentity(plan.payload, questionDiagnostics, plan.root);
+  if (plan.verifiedEvidence !== null) {
+    bindVerifiedShardDiagnostics(plan.verifiedEvidence, diagnostics);
+  }
   return {
-    payload,
-    slug: pointer.slug,
+    payload: plan.payload,
+    slug: plan.slug,
     diagnostics,
-    questionDiagnostics
+    questionDiagnostics,
+    verifiedEvidence: plan.verifiedEvidence
   };
 }
 
@@ -101,53 +138,80 @@ async function readShardKpi(shardRoot: string, slug: string): Promise<KpiPayload
   return KpiPayloadSchema.parse(raw);
 }
 
-async function readRequiredShardDiagnostics(
+async function readRequiredShardDiagnosticsPlan(
   shardRoot: string,
   slug: string,
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<LongMemEvalDiagnosticsSidecar> {
-  const reference = path.join("public", slug, "longmemeval-diagnostics.json");
+  verifiedEvidence: VerifiedShardEvidence | null
+): Promise<ShardDiagnosticsPlan> {
+  const reference = path.join("public", slug, LONGMEMEVAL_DIAGNOSTICS_FILENAME);
   const file = await openContainedArtifact(shardRoot, reference);
   if (file === null) {
     throw new Error(
       `merge refused: missing diagnostics sidecar for shard root=${shardRoot} slug=${slug}`
     );
   }
-  return readShardDiagnostics(
+  return readShardDiagnosticsPlan(
     path.join(shardRoot, reference),
     file,
-    diagnosticsSpool
+    verifiedEvidence?.diagnosticsArtifact ?? null,
+    verifiedEvidence?.fullDiagnosticsArtifact ?? null
   );
 }
 
-async function readShardDiagnostics(
+interface ShardDiagnosticsPlan {
+  readonly diagnosticsPath: string;
+  readonly raw: LongMemEvalDiagnosticsSidecar & CompactDiagnostics;
+  readonly declaredCount: number | null;
+  readonly fullDiagnosticsArtifact: VerifiedArtifactIdentity | null;
+}
+
+async function readShardDiagnosticsPlan(
   diagnosticsPath: string,
   file: ContainedArtifactFile,
-  diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<LongMemEvalDiagnosticsSidecar> {
+  diagnosticsArtifact: VerifiedArtifactIdentity | null,
+  fullDiagnosticsArtifact: VerifiedArtifactIdentity | null
+): Promise<ShardDiagnosticsPlan> {
   try {
     if (file.bytes > MAX_INLINE_DIAGNOSTICS_BYTES) {
       throw new Error(
         `inline diagnostics exceeds ${MAX_INLINE_DIAGNOSTICS_BYTES} bytes; migrate to compact external artifact`
       );
     }
-    const raw = JSON.parse(await file.readUtf8(MAX_INLINE_DIAGNOSTICS_BYTES)) as
+    const contents = await file.readUtf8(MAX_INLINE_DIAGNOSTICS_BYTES);
+    assertCompactArtifactIdentity(contents, diagnosticsArtifact);
+    const raw = JSON.parse(contents) as
       LongMemEvalDiagnosticsSidecar & CompactDiagnostics;
-    const declaredCount = validateCompactQuestionCount(raw);
-    const source = await resolveQuestionSource(diagnosticsPath, raw);
-    const questions: LongMemEvalQuestionDiagnostic[] = [];
-    for await (const question of source) {
-      questions.push(await diagnosticsSpool.append(question));
-    }
-    if (declaredCount !== null && questions.length !== declaredCount) {
-      throw new Error(
-        `compact diagnostics question_count=${declaredCount} does not match streamed question count=${questions.length}`
-      );
-    }
-    return { ...raw, questions };
+    assertFullArtifactReference(raw, fullDiagnosticsArtifact);
+    return {
+      diagnosticsPath,
+      raw,
+      declaredCount: validateCompactQuestionCount(raw),
+      fullDiagnosticsArtifact
+    };
   } finally {
     await file.close();
   }
+}
+
+async function materializeShardDiagnostics(
+  plan: ShardDiagnosticsPlan,
+  diagnosticsSpool: LongMemEvalDiagnosticsSpool
+): Promise<LongMemEvalDiagnosticsSidecar> {
+  const source = await resolveQuestionSource(
+    plan.diagnosticsPath,
+    plan.raw,
+    plan.fullDiagnosticsArtifact
+  );
+  const questions: LongMemEvalQuestionDiagnostic[] = [];
+  for await (const question of source) {
+    questions.push(await diagnosticsSpool.append(question));
+  }
+  if (plan.declaredCount !== null && questions.length !== plan.declaredCount) {
+    throw new Error(
+      `compact diagnostics question_count=${plan.declaredCount} does not match streamed question count=${questions.length}`
+    );
+  }
+  return { ...plan.raw, questions };
 }
 
 interface CompactDiagnostics {
@@ -169,7 +233,8 @@ function validateCompactQuestionCount(diagnostics: CompactDiagnostics): number |
 
 async function resolveQuestionSource(
   diagnosticsPath: string,
-  diagnostics: LongMemEvalDiagnosticsSidecar & CompactDiagnostics
+  diagnostics: LongMemEvalDiagnosticsSidecar & CompactDiagnostics,
+  fullDiagnosticsArtifact: VerifiedArtifactIdentity | null
 ): Promise<AsyncIterable<LongMemEvalQuestionDiagnostic>> {
   if (diagnostics.compact_schema_version !== 1 ||
     typeof diagnostics.full_diagnostics_artifact_path !== "string") {
@@ -177,7 +242,8 @@ async function resolveQuestionSource(
   }
   return streamContainedQuestions(
     diagnosticsPath,
-    diagnostics.full_diagnostics_artifact_path
+    diagnostics.full_diagnostics_artifact_path,
+    fullDiagnosticsArtifact
   );
 }
 
@@ -200,16 +266,53 @@ async function openFullArtifact(
 
 async function* streamContainedQuestions(
   diagnosticsPath: string,
-  artifactPath: string
+  artifactPath: string,
+  expected: VerifiedArtifactIdentity | null
 ): AsyncGenerator<LongMemEvalQuestionDiagnostic> {
+  if (expected !== null && artifactPath !== expected.path) {
+    throw new Error("merge refused: full diagnostics artifact identity mismatch");
+  }
   const file = await openFullArtifact(diagnosticsPath, artifactPath);
+  const hash = createHash("sha256");
+  let bytes = 0;
+  const observeArtifactChunk = (chunk: Uint8Array): void => {
+    hash.update(chunk);
+    bytes += chunk.byteLength;
+  };
   try {
     const source = artifactPath.endsWith(".gz")
-      ? streamDiagnosticsGzipQuestions(file.handle)
-      : streamDiagnosticsJsonQuestions(file.handle);
+      ? streamDiagnosticsGzipQuestions(file.handle, { observeArtifactChunk })
+      : streamDiagnosticsJsonQuestions(file.handle, { observeArtifactChunk });
     yield* source;
+    if (expected !== null &&
+        (bytes !== expected.bytes || hash.digest("hex") !== expected.sha256)) {
+      throw new Error("merge refused: full diagnostics artifact identity mismatch");
+    }
   } finally {
     await file.close();
+  }
+}
+
+function assertCompactArtifactIdentity(
+  contents: string,
+  expected: VerifiedArtifactIdentity | null
+): void {
+  if (expected === null) return;
+  const bytes = Buffer.from(contents, "utf8");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (expected.path !== LONGMEMEVAL_DIAGNOSTICS_FILENAME ||
+      expected.bytes !== bytes.byteLength || expected.sha256 !== sha256) {
+    throw new Error("merge refused: compact diagnostics artifact identity mismatch");
+  }
+}
+
+function assertFullArtifactReference(
+  diagnostics: CompactDiagnostics,
+  expected: VerifiedArtifactIdentity | null
+): void {
+  if (expected === null || diagnostics.compact_schema_version !== 1) return;
+  if (diagnostics.full_diagnostics_artifact_path !== expected.path) {
+    throw new Error("merge refused: full diagnostics artifact identity mismatch");
   }
 }
 

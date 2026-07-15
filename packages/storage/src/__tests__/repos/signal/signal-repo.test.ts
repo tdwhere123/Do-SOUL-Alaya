@@ -112,6 +112,51 @@ describe("SqliteSignalRepo", () => {
     expect(stored.signal_state).toBe("normalized");
   });
 
+  it("claims a signal only from the expected workspace and state", async () => {
+    const { signalRepo } = await createSignalRepo();
+    const signal = createSignal({ signal_state: "deferred" });
+    await signalRepo.create(signal);
+    await signalRepo.updateState(signal.signal_id, "deferred");
+
+    expect(signalRepo.compareAndSwapState({
+      signalId: signal.signal_id,
+      workspaceId: "other-workspace",
+      expectedState: "deferred",
+      nextState: "compiled"
+    })).toBeNull();
+    expect(signalRepo.compareAndSwapState({
+      signalId: signal.signal_id,
+      workspaceId: signal.workspace_id,
+      expectedState: "deferred",
+      nextState: "compiled"
+    })?.signal_state).toBe("compiled");
+    expect(signalRepo.compareAndSwapState({
+      signalId: signal.signal_id,
+      workspaceId: signal.workspace_id,
+      expectedState: "deferred",
+      nextState: "compiled"
+    })).toBeNull();
+  });
+
+  it("persists a redrive raw-payload patch in the same CAS", async () => {
+    const { signalRepo } = await createSignalRepo();
+    const signal = createSignal();
+    await signalRepo.create(signal);
+    await signalRepo.updateState(signal.signal_id, "deferred");
+    const rawPayload = { full_turn_content: "I moved to Berlin." };
+
+    const claimed = signalRepo.compareAndSwapState({
+      signalId: signal.signal_id,
+      workspaceId: signal.workspace_id,
+      expectedState: "deferred",
+      nextState: "compiled",
+      rawPayload
+    });
+
+    expect(claimed?.raw_payload).toEqual(rawPayload);
+    await expect(signalRepo.getById(signal.signal_id)).resolves.toMatchObject({ raw_payload: rawPayload });
+  });
+
   it("round-trips first-class memory refs outside raw_payload", async () => {
     const { database, signalRepo } = await createSignalRepo();
     const signal = createSignal({

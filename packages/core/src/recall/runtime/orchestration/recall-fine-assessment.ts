@@ -73,7 +73,8 @@ function preparationFromAssessment(
     candidates: assessment.preparedCandidates,
     coarsePoolSize: assessment.coarsePoolSize,
     fineEvaluated: assessment.fineEvaluated,
-    finePrunedCount: assessment.finePrunedCount
+    finePrunedCount: assessment.finePrunedCount,
+    finePriorityOverflowCount: assessment.finePriorityOverflowCount
   });
 }
 

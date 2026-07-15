@@ -8,6 +8,7 @@
  * @see apps/bench-runner/src/harness/daemon.ts
  */
 import type { AlayaDaemonRuntime } from "../index.js";
+import { writeCliFailure } from "./errors/error-reporting.js";
 
 export const ALAYA_SYSEXITS = Object.freeze({
   OK: 0,
@@ -178,23 +179,9 @@ function writeSubcommandHelp(stream: NodeJS.WritableStream, spec: AlayaSubcomman
 function writeHandlerError(
   stream: NodeJS.WritableStream,
   error: unknown,
-  env: NodeJS.ProcessEnv
+  _env: NodeJS.ProcessEnv
 ): void {
-  const debugEnabled = env.ALAYA_DEBUG === "1";
-  if (debugEnabled && error instanceof Error && typeof error.stack === "string") {
-    writeLine(stream, error.stack);
-    return;
-  }
-
-  writeLine(stream, sanitizeErrorMessage(error));
-}
-
-function sanitizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    return message.length > 0 ? message : "Subcommand failed.";
-  }
-  return "Subcommand failed.";
+  writeCliFailure(stream, error, "subcommand");
 }
 
 function writeLine(stream: NodeJS.WritableStream, line: string): void {

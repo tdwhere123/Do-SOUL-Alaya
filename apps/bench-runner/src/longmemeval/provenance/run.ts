@@ -21,6 +21,7 @@ import {
   EXTRACTION_REQUEST_PROFILES,
   readExtractionCacheManifestIdentity
 } from "../extraction-cache-manifest.js";
+import { resolveEffectiveExtractionCacheRoot } from "../compile-seed-config.js";
 import {
   resolveEmbeddingSupplementRuntimeProvenance,
   resolveLocalCrossEncoderRuntimeProvenance
@@ -31,6 +32,18 @@ import {
   EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION,
   type EffectiveRecallOptions
 } from "./effective-recall-config.js";
+import {
+  resolveFrozenCodeIdentity,
+  type FrozenCodeIdentity
+} from "./frozen-code-contract.js";
+import {
+  collectPairedEnvironment,
+  redactProvenanceUrl
+} from "./paired-environment.js";
+import type { LongMemEvalSelectionContractIdentity } from "../selection/contract.js";
+import { SelectionContractIdentitySchema } from "./selection-contract-schema.js";
+
+export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environment.js";
 
 export const LONGMEMEVAL_RUN_PROVENANCE_FILENAME =
   "longmemeval-run-provenance.json";
@@ -65,42 +78,6 @@ const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
   }).strict()
 ]);
 const execFileAsync = promisify(execFile);
-const PAIRED_ENV_ALLOWLIST = new Set([
-  "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION",
-  "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE",
-  "ALAYA_BENCH_EXTRACTION_MODEL_FAMILY",
-  "ALAYA_CONFLICT_DETECTION_ENABLED",
-  "ALAYA_EMBEDDING_PROVIDER",
-  "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
-  "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
-  "ALAYA_EXP_ANSWERS_WITH_BAR",
-  "ALAYA_EXP_ANSWERS_WITH_CAP",
-  "ALAYA_EXP_ANSWERS_WITH_XSESSION",
-  "ALAYA_EXP_COHERENCE_CAP",
-  "ALAYA_EXP_COHERENCE_EDGES",
-  "ALAYA_EXP_COHERENCE_FLOOR",
-  "ALAYA_EXP_COHERENCE_XSESSION",
-  "ALAYA_GARDEN_PROVIDER_KIND",
-  "ALAYA_INGEST_RECONCILIATION_ENABLED",
-  "ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT",
-  "ALAYA_LOCAL_ONNX_THREADS",
-  "ALAYA_LOCAL_EMBEDDING_MODEL",
-  "ALAYA_LOCAL_CROSS_ENCODER_MODEL",
-  "ALAYA_RECALL_ANSWERS_WITH",
-  "ALAYA_RECALL_COARSE_FLOOR",
-  "ALAYA_RECALL_CONF_EVIDENCE_BETA",
-  "ALAYA_RECALL_CONF_FLOOD_CAP",
-  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
-  "ALAYA_RECALL_CONF_RHO_EVIDENCE",
-  "ALAYA_RECALL_CONF_RHO_PATH",
-  "ALAYA_RECALL_CONF_W_PATH",
-  "ALAYA_RECALL_FACET_TAGS",
-  "ALAYA_RECALL_D2Q",
-  "ALAYA_RECALL_EVAL_EMBEDDING",
-  "ALAYA_RECALL_SOURCE_REF_ROBUST",
-  "OFFICIAL_API_GARDEN_MODEL"
-]);
-
 const ExtractionCacheIdentityBaseSchema = z.object({
   manifest_sha256: Sha256Schema,
   extraction_model: z.string().min(1),
@@ -139,10 +116,15 @@ const ExtractionCacheIdentitySchema = z.discriminatedUnion("schema_version", [
 
 export const LongMemEvalRunProvenanceSchema = z.object({
   schema_version: z.literal(1),
+  dataset_sha256: Sha256Schema.optional(),
+  selection: SelectionContractIdentitySchema.optional(),
   code: z.object({
     commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u),
+    commit_sha: z.string().regex(/^[a-f0-9]{40}$/u).optional(),
     gate_sha256: Sha256Schema.nullable(),
+    gate_contract_path: z.string().min(1).optional(),
     worktree_state_sha256: Sha256Schema.nullable(),
+    worktree_clean: z.literal(true).optional(),
     executed_dist: ExecutedDistIdentitySchema.nullable().default(null)
   }).strict(),
   extraction_cache: ExtractionCacheIdentitySchema.nullable(),
@@ -207,31 +189,52 @@ export async function buildLongMemEvalRunProvenance(input: {
     readonly arch: string;
   };
   readonly computeExecutedDistIdentity?: () => Promise<unknown>;
+  readonly datasetSha256?: string;
+  readonly selection?: LongMemEvalSelectionContractIdentity;
 }): Promise<LongMemEvalRunProvenance> {
-  const executedDist = await resolveExecutedDistIdentity(input);
+  const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
+  const [executedDist, frozenCode] = await Promise.all([
+    resolveExecutedDistIdentity(input),
+    resolveFrozenCodeIdentity({
+      checkoutRoot,
+      expectedCommitSha7: input.commitSha7,
+      env: input.env
+    })
+  ]);
+  const [extractionCache, questionManifest] = await Promise.all([
+    readExtractionCacheIdentity(input.opts, input.env),
+    readManifestIdentity(input.opts.questionManifest)
+  ]);
   return LongMemEvalRunProvenanceSchema.parse({
     schema_version: 1,
-    code: buildCodeIdentity(input, executedDist),
-    extraction_cache: await readExtractionCacheIdentity(input.opts, input.env),
+    ...(input.datasetSha256 === undefined
+      ? {}
+      : { dataset_sha256: input.datasetSha256 }),
+    ...(input.selection === undefined ? {} : { selection: input.selection }),
+    code: buildCodeIdentity(input, executedDist, frozenCode),
+    extraction_cache: extractionCache,
     runtime: await buildRuntimeIdentity(input),
     execution: buildExecutionIdentity(input),
     recall_config: buildRunRecallConfig(input),
     seed_capabilities: buildSeedCapabilities(input.env),
-    question_manifest: await readManifestIdentity(input.opts.questionManifest)
+    question_manifest: questionManifest
   });
 }
 
 function buildCodeIdentity(
   input: Parameters<typeof buildLongMemEvalRunProvenance>[0],
-  executedDist: NonNullable<LongMemEvalRunProvenance["code"]["executed_dist"]>
+  executedDist: NonNullable<LongMemEvalRunProvenance["code"]["executed_dist"]>,
+  frozen: FrozenCodeIdentity | null
 ) {
   return {
-    commit_sha7: input.commitSha7,
-    gate_sha256: readOptionalSha(input.env.ALAYA_BENCH_GATE_SHA256, "ALAYA_BENCH_GATE_SHA256"),
-    worktree_state_sha256: readOptionalSha(
-      input.env.ALAYA_BENCH_WORKTREE_STATE_SHA256,
-      "ALAYA_BENCH_WORKTREE_STATE_SHA256"
-    ),
+    commit_sha7: frozen?.commitSha7 ?? input.commitSha7,
+    ...(frozen === null ? {} : {
+      commit_sha: frozen.commitSha,
+      gate_contract_path: frozen.gateContractPath,
+      worktree_clean: frozen.worktreeClean
+    }),
+    gate_sha256: frozen?.gateSha256 ?? null,
+    worktree_state_sha256: frozen?.worktreeStateSha256 ?? null,
     executed_dist: executedDist
   };
 }
@@ -357,10 +360,15 @@ export function isLongMemEvalRunProvenanceGateEligible(
   provenance: LongMemEvalRunProvenance
 ): boolean {
   const cache = provenance.extraction_cache;
-  return provenance.code.gate_sha256 !== null &&
+  return provenance.code.commit_sha !== undefined &&
+    provenance.code.commit_sha.startsWith(provenance.code.commit_sha7) &&
+    provenance.code.gate_contract_path !== undefined &&
+    provenance.code.worktree_clean === true &&
+    provenance.code.gate_sha256 !== null &&
     provenance.code.worktree_state_sha256 !== null &&
     provenance.code.executed_dist !== null && cache !== null &&
     cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    hasCurrentDatasetBinding(provenance) &&
     cache.requested_turns !== undefined && cache.cached_turns !== undefined &&
     cache.coverage === 1 && cache.cached_turns >= cache.requested_turns &&
     hasCurrentRecallConfigIdentity(provenance.recall_config) &&
@@ -369,6 +377,20 @@ export function isLongMemEvalRunProvenanceGateEligible(
     (provenance.runtime.answer_rerank?.enabled !== true ||
       provenance.runtime.answer_rerank.model_artifact_sha256.length === 64) &&
     hasConsistentAnswerRerankProvenance(provenance.runtime);
+}
+
+function hasCurrentDatasetBinding(
+  provenance: LongMemEvalRunProvenance
+): boolean {
+  const revision = provenance.extraction_cache?.dataset_revision;
+  const datasetSha = provenance.dataset_sha256;
+  const selection = provenance.selection;
+  const manifestSha = provenance.question_manifest?.dataset_sha256;
+  return datasetSha !== undefined && selection !== undefined &&
+    revision === datasetSha && selection.dataset_sha256 === datasetSha &&
+    selection.selected_count === provenance.execution.evaluated_count &&
+    (manifestSha === undefined || manifestSha === datasetSha) &&
+    Sha256Schema.safeParse(revision).success;
 }
 
 function hasCurrentRecallConfigIdentity(
@@ -442,8 +464,10 @@ async function readExtractionCacheIdentity(
   opts: LongMemEvalRunOptions,
   env: Readonly<Record<string, string | undefined>>
 ): Promise<LongMemEvalRunProvenance["extraction_cache"]> {
-  const cacheRoot = opts.extractionCacheRoot ?? env.ALAYA_BENCH_EXTRACTION_CACHE_ROOT;
-  if (cacheRoot === undefined || cacheRoot.trim().length === 0) return null;
+  const cacheRoot = resolveEffectiveExtractionCacheRoot(
+    opts.extractionCacheRoot,
+    env
+  );
   const identity = readExtractionCacheManifestIdentity(cacheRoot);
   if (identity === undefined) return null;
   const { manifest } = identity;
@@ -455,36 +479,6 @@ async function readExtractionCacheIdentity(
       ? {}
       : { archive_url: redactProvenanceUrl(manifest.archive_url) })
   });
-}
-
-export function collectPairedEnvironment(
-  env: Readonly<Record<string, string | undefined>>
-): Readonly<Record<string, string>> {
-  const entries = Object.entries(env)
-    .filter(([key, value]) => value !== undefined && isPairedEnvironmentKey(key))
-    .map(([key, value]) => [key, redactPairedEnvironmentValue(value!)] as const)
-    .sort(([left], [right]) => left.localeCompare(right));
-  return Object.fromEntries(entries) as Readonly<Record<string, string>>;
-}
-
-function isPairedEnvironmentKey(key: string): boolean {
-  return PAIRED_ENV_ALLOWLIST.has(key);
-}
-
-function redactPairedEnvironmentValue(value: string): string {
-  return redactProvenanceUrl(value);
-}
-
-export function redactProvenanceUrl(value: string): string {
-  if (!/(?:https?|wss?):\/\//iu.test(value)) return value;
-  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
-}
-
-export function readOptionalSha(raw: string | undefined, field: string): string | null {
-  if (raw === undefined || raw.trim().length === 0) return null;
-  const value = raw.trim().toLowerCase();
-  if (!/^[a-f0-9]{64}$/u.test(value)) throw new Error(`${field} must be a SHA-256 hex digest`);
-  return value;
 }
 
 function questionManifestIdentity(manifest: QuestionManifest) {

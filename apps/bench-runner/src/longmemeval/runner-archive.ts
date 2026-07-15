@@ -14,12 +14,20 @@ import type { BenchCommitInfo } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
 import type { LongMemEvalDiagnosticsSpool } from "./diagnostics/spool.js";
+import type { LongMemEvalSelectionContract } from "./selection/contract.js";
+import type { LongMemEvalReleaseEvidenceAuthority } from
+  "@do-soul/alaya-eval/internal";
 
 // End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
 export async function finalizeLongMemEvalRun(input: {
   readonly opts: LongMemEvalRunOptions;
   readonly questionsLength: number;
   readonly windowLength: number;
+  readonly datasetSha256: string;
+  readonly datasetChecksumSource: string;
+  readonly datasetSourcePath: string;
+  readonly releaseEvidenceAuthority: LongMemEvalReleaseEvidenceAuthority | null;
+  readonly selectionContract: LongMemEvalSelectionContract;
   readonly collected: readonly LongMemEvalWorkerResult[];
   readonly extractionStats: CompileSeedExtractionStats;
   readonly seedFuelInventory: import("./seed-fuel-inventory.js").SeedFuelInventory;
@@ -43,6 +51,11 @@ export async function finalizeLongMemEvalRun(input: {
   });
   return writeLongMemEvalRunArchive({
     opts: input.opts,
+    datasetSha256: input.datasetSha256,
+    datasetSourcePath: input.datasetSourcePath,
+    datasetChecksumSource: input.datasetChecksumSource,
+    releaseEvidenceAuthority: input.releaseEvidenceAuthority,
+    selectionContract: input.selectionContract,
     aggregate,
     build,
     commitInfo: input.commitInfo,

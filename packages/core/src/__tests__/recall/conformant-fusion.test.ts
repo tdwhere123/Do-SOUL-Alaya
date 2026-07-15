@@ -242,13 +242,13 @@ describe("conformant compositional combine (real SQLite)", () => {
       .toBeGreaterThan(without.get(keyOf(objectId(2)))!.fused_score);
   });
 
-  it("object base is the additive RRF sum: more matching streams raise R_O", async () => {
+  it("does not multiply R_O for repeated projections from one family", async () => {
     const all = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1, trigram: 1, evidence: 1 }]);
     const one = await runFusion(GENERIC_QUERY, [{ id: objectId(1), lexical: 1 }]);
     const raAll = all.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     const raOne = one.get(keyOf(objectId(1)))!.per_axis_contribution!.object;
     expect(raOne).toBeGreaterThan(0);
-    expect(raAll).toBeGreaterThan(raOne);
+    expect(raAll).toBeCloseTo(raOne, 12);
   });
 
   it("path is compositional: a high-base source floods its target; a candidate with no inflow gets ~0 path", async () => {
@@ -282,14 +282,14 @@ describe("conformant compositional combine (real SQLite)", () => {
     );
   });
 
-  it("a magnitude-dominant candidate outranks a broad-but-individually-weak one under additive RRF", async () => {
+  it("rewards support across more orthogonal fusion families", async () => {
     const dominant: CandidateSpec = { id: objectId(1), lexical: 1, embedding: 1 };
     const broadWeak: CandidateSpec = { id: objectId(2), lexical: 0.2, path: 0.3, sourceProximity: 0.3 };
     const fusion = await runFusion(GENERIC_QUERY, [dominant, broadWeak]);
-    expect(fusion.get(keyOf(dominant.id))!.fused_score)
-      .toBeGreaterThan(fusion.get(keyOf(broadWeak.id))!.fused_score);
-    expect(fusion.get(keyOf(dominant.id))!.fused_rank)
-      .toBeLessThan(fusion.get(keyOf(broadWeak.id))!.fused_rank);
+    expect(fusion.get(keyOf(broadWeak.id))!.fused_score)
+      .toBeGreaterThan(fusion.get(keyOf(dominant.id))!.fused_score);
+    expect(fusion.get(keyOf(broadWeak.id))!.fused_rank)
+      .toBeLessThan(fusion.get(keyOf(dominant.id))!.fused_rank);
   });
 
   it("builds live evidence support vectors from candidate evidence_refs", async () => {
@@ -373,21 +373,18 @@ describe("conformant compositional combine (real SQLite)", () => {
     expect(foldedPath).toBeGreaterThan(0.01);
   });
 
-  // B2 regression lock: single_fact gold (lexical answer + its own embedding) must out-rank a purely
-  // semantic co-topical neighbor in the additive RRF delivery path, even when the neighbor owns the top
-  // embedding similarity. The extra lexical stream keeps gold ahead — the property that holds single_fact ≈96.9.
-  it("single_fact: the lexical gold out-ranks a pure-embedding neighbor (fused_rank lock)", async () => {
+  it("single_fact: lexical and semantic agreement outranks a semantic-only neighbor", async () => {
     const singleFactQuery = "what is the staging database password";
     expect(classifyRecallIntent(compileRecallQueryProbes(singleFactQuery))).toBe("single_fact");
     const fusion = await runFusion(singleFactQuery, [
       { id: objectId(1), lexical: 1, embedding: 0.9 },
       { id: objectId(2), embedding: 1 }
     ]);
-    const gold = fusion.get(keyOf(objectId(1)))!;
+    const answer = fusion.get(keyOf(objectId(1)))!;
     const neighbor = fusion.get(keyOf(objectId(2)))!;
-    expect(gold.fused_score).toBeGreaterThan(neighbor.fused_score);
-    expect(gold.fused_rank).toBe(1);
-    expect(gold.fused_rank).toBeLessThan(neighbor.fused_rank);
+    expect(answer.fused_score).toBeGreaterThan(neighbor.fused_score);
+    expect(answer.fused_rank).toBe(1);
+    expect(answer.fused_rank).toBeLessThan(neighbor.fused_rank);
   });
 
   it("non-single_fact: the embedding co-facet lifts R_O above a surface-only sibling, absence never demotes it", async () => {

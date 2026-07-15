@@ -1,10 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error The executable MJS analyzer is intentionally outside the package declaration surface.
-import { assertCompleteReplayQuestion, loadEvidenceBundle, loadReplayContract } from "../../../../scripts/longmemeval-replay/contract.mjs";
+import { assertCompleteReplayQuestion, loadEvidenceBundle, loadReplayContract, validateEvidenceBundle } from "../../../../scripts/longmemeval-replay/contract.mjs";
 // @ts-expect-error The executable MJS analyzer is intentionally outside the package declaration surface.
 import { buildStageMatrix, loadStageMatrix, renderStageMatrix } from "../../../../scripts/longmemeval-replay/stage-matrix.mjs";
-// @ts-expect-error The executable MJS analyzer is intentionally outside the package declaration surface.
 import { measurementUnscorableReason } from "../../../../scripts/longmemeval-replay/measurement-status.mjs";
 import {
   HASH,
@@ -84,17 +83,102 @@ describe("LongMemEval stage matrix replay", () => {
     expect(matrix.summary.by_stage.final_rank.at_5.denominator).toBe(0);
   });
 
-  it("consumes the persisted measurement-status contract", () => {
+  it("rejects a persisted measurement status that contradicts primitive axes", () => {
     const row = cohortRow({
       id: "q-status",
       goldIds: ["gold-a"],
       status: "present",
       measurementStatus: "evaluator_identity_unscorable"
     });
-    const matrix = buildStageMatrix(contract([
+    expect(() => buildStageMatrix(contract([
       question("q-status", [candidate("gold-a", { fused_rank: 1 })], row)
-    ], [row]));
+    ], [row]))).toThrow(/measurement status contradicts primitive axes/u);
+  });
 
+  it.each([
+    ["abstention", "abstention"],
+    ["adjudicated", "adjudicated_invalid"]
+  ] as const)("rejects a forged %s status before cohort filtering", (
+    _label,
+    datasetCohort
+  ) => {
+    const row = {
+      ...cohortRow({
+        id: `q-${datasetCohort}`,
+        goldIds: datasetCohort === "abstention" ? [] : ["gold-a"],
+        datasetCohort: datasetCohort === "abstention" ? "abstention" : "answerable",
+        status: datasetCohort === "abstention" ? "absent" : "present"
+      }),
+      dataset_cohort: datasetCohort,
+      measurement_status: "scorable"
+    };
+    expect(() => buildStageMatrix(contract([
+      question(row.question_id, [], row as ReturnType<typeof cohortRow>)
+    ], [row as ReturnType<typeof cohortRow>]))).toThrow(
+      /measurement status contradicts primitive axes/u
+    );
+  });
+
+  it("rejects a forged status on a cohort-only partial row", () => {
+    const complete = cohortRow({ id: "q-complete-status", goldIds: ["gold-a"] });
+    const forged = {
+      ...cohortRow({
+        id: "q-cohort-only-status",
+        goldIds: [],
+        datasetCohort: "abstention",
+        status: "absent",
+        measurementStatus: "scorable"
+      }),
+      evidence_status: "missing",
+      candidate_pool_complete: false
+    };
+    expect(() => buildStageMatrix(contract([
+      question("q-complete-status", [candidate("gold-a", { fused_rank: 1 })], complete)
+    ], [complete, forged]))).toThrow(/measurement status contradicts primitive axes/u);
+  });
+
+  it("rejects malformed measurement primitives before cohort filtering", () => {
+    const row = {
+      ...cohortRow({
+        id: "q-malformed-primitive",
+        goldIds: [],
+        datasetCohort: "abstention",
+        status: "absent"
+      }),
+      evaluator_gold_identity: { status: "absent", object_ids: "not-an-array" }
+    };
+    expect(() => buildStageMatrix(contract([
+      question(row.question_id, [], row as unknown as ReturnType<typeof cohortRow>)
+    ], [row as unknown as ReturnType<typeof cohortRow>]))).toThrow(
+      /evaluator_gold_identity\.object_ids/u
+    );
+  });
+
+  it("rejects a missing materialization primitive before scoring", () => {
+    const complete = cohortRow({ id: "q-missing-materialization", goldIds: ["gold-a"] });
+    const { extraction_materialization: _missing, ...row } = complete;
+
+    expect(() => buildStageMatrix(contract([
+      question(
+        row.question_id,
+        [candidate("gold-a", { fused_rank: 1 })],
+        row as unknown as ReturnType<typeof cohortRow>
+      )
+    ], [row as unknown as ReturnType<typeof cohortRow>]))).toThrow(
+      /extraction_materialization/u
+    );
+  });
+
+  it("consumes a persisted unscorable status backed by primitive axes", () => {
+    const row = cohortRow({
+      id: "q-unscorable-status",
+      goldIds: [],
+      status: "absent",
+      measurementStatus: "evaluator_identity_unscorable"
+    });
+    const matrix = buildStageMatrix(contract([
+      question("q-unscorable-status", [], row)
+    ], [row]));
     expect(matrix.questions[0]).toMatchObject({
       classification: "unscorable",
       unscorable_reason: "evaluator_identity_unscorable"
@@ -102,7 +186,7 @@ describe("LongMemEval stage matrix replay", () => {
     expect(matrix.summary.scorable_answerable).toBe(0);
   });
 
-  it("keeps pre-contract cohort rows readable through the legacy fallback", () => {
+  it("derives status when current primitives predate the persisted status", () => {
     const row = cohortRow({ id: "q-legacy-status", goldIds: ["gold-a"] });
     delete (row as { measurement_status?: string }).measurement_status;
     const matrix = buildStageMatrix(contract([
@@ -113,7 +197,7 @@ describe("LongMemEval stage matrix replay", () => {
     expect(matrix.summary.scorable_answerable).toBe(1);
   });
 
-  it("keeps legacy abstentions distinct from evaluator identity failures", () => {
+  it("keeps unstamped abstentions distinct from evaluator identity failures", () => {
     const row = cohortRow({
       id: "q-legacy-abstention",
       goldIds: [],
@@ -159,13 +243,38 @@ describe("LongMemEval stage matrix replay", () => {
     });
   });
 
+  it("reports primitive failures before incomplete candidate-pool symptoms", () => {
+    const absent = {
+      ...cohortRow({ id: "q-absent-incomplete", goldIds: [], status: "absent" }),
+      candidate_pool_complete: false
+    };
+    const unknown = {
+      ...cohortRow({ id: "q-unknown-incomplete", goldIds: ["gold-a"] }),
+      measurement_status: "evaluator_identity_unscorable" as const,
+      extraction_materialization: {
+        status: "unknown" as const, emitted_memory_count: 0, reason: null
+      },
+      candidate_pool_complete: false
+    };
+    const questions = [absent, unknown].map((row) => ({
+      ...question(row.question_id, [], row),
+      candidate_pool_complete: false
+    }));
+
+    const matrix = buildStageMatrix(contract(questions, [absent, unknown]));
+    expect(matrix.questions.map((row: { unscorable_reason: string }) =>
+      row.unscorable_reason
+    )).toEqual(["evaluator_identity_unscorable", "evaluator_identity_unscorable"]);
+  });
+
   it("retains cohort-only failed answerable rows in source and answerable denominators", () => {
     const complete = cohortRow({ id: "q-complete", goldIds: ["gold-a"] });
     const failed = {
       ...cohortRow({ id: "q-failed", goldIds: ["gold-b"] }),
       evidence_status: "missing",
       candidate_pool_complete: false,
-      evaluation_issue_reason: "missing_diagnostics"
+      evaluation_issue_reason: "missing_diagnostics",
+      measurement_status: "evaluator_identity_unscorable" as const
     };
     const matrix = buildStageMatrix(contract([
       question("q-complete", [candidate("gold-a", {
@@ -242,6 +351,55 @@ describe("LongMemEval stage matrix replay", () => {
     expect(loaded.manifest.run).toMatchObject({ slug: "run-1", candidate_pool_complete: true });
     expect(loaded.diagnostics.questions[0].question_id).toBe("q-load");
     expect(JSON.parse(await readFile(bundle.manifestPath, "utf8")).bundle_sha256).toMatch(HASH);
+  });
+
+  it("conforms to the shared canonical question-ID digest contract", async () => {
+    const vectorFile = JSON.parse(await readFile(new URL(
+      "../../../../scripts/longmemeval-replay/question-id-digest-vectors.json",
+      import.meta.url
+    ), "utf8")) as {
+      invalid_canonical_preimages: Array<{
+        name: string;
+        question_id_sequences: string[][];
+      }>;
+      vectors: Array<{
+        name: string;
+        question_ids: string[];
+        canonical_nul_v1: string;
+        legacy_snapshot_length_prefix_v1: string;
+      }>;
+    };
+    const vector = vectorFile.vectors.find((row) => row.name === "ordered_unicode_pair")!;
+    const rows = vector.question_ids.map((id, index) =>
+      cohortRow({ id, goldIds: [`gold-${index}`] })
+    );
+    const raw = contract(rows.map((row, index) =>
+      question(row.question_id, [], row)
+    ), rows);
+    expect(() => validateEvidenceBundle({
+      ...raw,
+      cohort: { ...raw.cohort, question_id_digest: vector.canonical_nul_v1 }
+    })).not.toThrow();
+    expect(() => validateEvidenceBundle({
+      ...raw,
+      cohort: { ...raw.cohort, question_id_digest: vector.legacy_snapshot_length_prefix_v1 }
+    })).toThrow(/question_id_digest mismatch/u);
+
+    const collision = vectorFile.invalid_canonical_preimages.find(
+      (row) => row.name === "nul_delimiter_collision"
+    )!;
+    expect(collision.question_id_sequences).toHaveLength(2);
+    const [left, right] = collision.question_id_sequences;
+    expect(left!.join("\0")).toBe(right!.join("\0"));
+    for (const questionIds of collision.question_id_sequences) {
+      const invalidRows = questionIds.map((id, index) =>
+        cohortRow({ id, goldIds: [`gold-invalid-${index}`] })
+      );
+      const invalid = contract(invalidRows.map((row, index) =>
+        question(row.question_id, [], row)
+      ), invalidRows);
+      expect(() => validateEvidenceBundle(invalid)).toThrow(/NUL-free/u);
+    }
   });
 
   it("runs as a thin manifest CLI and exposes help without loading evidence", async () => {

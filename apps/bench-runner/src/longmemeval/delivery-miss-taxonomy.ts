@@ -1,6 +1,7 @@
 export type DeliveryMissDropReason =
   | "duplicate"
   | "dimension_limit"
+  | "embedding_head_dominance"
   | "max_entries"
   | "max_total_tokens";
 

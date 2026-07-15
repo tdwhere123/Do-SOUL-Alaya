@@ -20,6 +20,7 @@ import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
 import { computeRecallEvalAggregates, type RecallEvalAggregates } from "./recall-eval-aggregates.js";
 import { accumulateRecallEvalRows, type RecallEvalAccumulator } from "./recall-eval-accumulator.js";
 import { buildBenchmarkMeasurementAttribution } from "../measurement/attribution.js";
+import { assertMeasurementCohortBinding } from "../measurement/cohort-binding.js";
 import {
   summarizeEmbeddingVectorCache,
   summarizeQueryEmbeddingCache
@@ -61,10 +62,19 @@ function buildPayload(
   aggregates: RecallEvalAggregates
 ): KpiPayload {
   const kpi = buildKpiCore(accumulator, aggregates, input.collected);
-  const candidatePoolComplete = accumulator.questionDiagnostics.length ===
-    input.evaluatedCount && accumulator.questionDiagnostics.every(
-      (question) => question.candidate_pool_complete
-    );
+  assertMeasurementCohortBinding(
+    accumulator.perScenario,
+    accumulator.questionDiagnostics
+  );
+  const candidatePoolComplete = isCandidatePoolComplete(
+    accumulator,
+    input.evaluatedCount
+  );
+  const measurementAttribution = buildPayloadMeasurementAttribution(
+    kpi,
+    candidatePoolComplete,
+    input.provenanceComplete
+  );
   return {
     bench_name: "public", split: VARIANT_TO_SPLIT[input.variant],
     run_at: input.runAt.toISOString(), alaya_commit: input.commitSha7,
@@ -72,16 +82,7 @@ function buildPayload(
     embedding_provider: input.embeddingProviderLabel, chat_provider: "none",
     policy_shape: input.policyShape, simulate_report: input.simulateReport,
     recall_eval_attribution: input.runtimeAttribution,
-    measurement_attribution: buildBenchmarkMeasurementAttribution({
-      candidatePoolComplete,
-      provenanceComplete: input.provenanceComplete,
-      abstention: kpi.quality_metrics?.abstention,
-      noGoldCount: kpi.quality_metrics?.no_gold_count,
-      evaluatorIdentityIssueCount:
-        kpi.quality_metrics?.evaluator_identity_issue_count,
-      evaluatorIdentityUnscorableCount:
-        kpi.quality_metrics?.evaluator_identity_unscorable_count
-    }),
+    measurement_attribution: measurementAttribution,
     ...(input.recallWeightOverrides === undefined ? {} : {
       recall_weight_overrides: input.recallWeightOverrides.summary
     }),
@@ -100,6 +101,33 @@ function buildPayload(
     harness_mode: "mcp_propose_review",
     kpi
   };
+}
+
+function buildPayloadMeasurementAttribution(
+  kpi: KpiPayload["kpi"],
+  candidatePoolComplete: boolean,
+  provenanceComplete: boolean
+) {
+  return buildBenchmarkMeasurementAttribution({
+    candidatePoolComplete,
+    provenanceComplete,
+    abstention: kpi.quality_metrics?.abstention,
+    noGoldCount: kpi.quality_metrics?.no_gold_count,
+    evaluatorIdentityIssueCount:
+      kpi.quality_metrics?.evaluator_identity_issue_count,
+    evaluatorIdentityUnscorableCount:
+      kpi.quality_metrics?.evaluator_identity_unscorable_count
+  });
+}
+
+function isCandidatePoolComplete(
+  accumulator: RecallEvalAccumulator,
+  evaluatedCount: number
+): boolean {
+  return accumulator.questionDiagnostics.length === evaluatedCount &&
+    accumulator.questionDiagnostics.every(
+      (question) => question.candidate_pool_complete
+    );
 }
 
 function buildKpiCore(

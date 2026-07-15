@@ -175,6 +175,7 @@ export function computeRecallTokenEconomy(params: Readonly<{
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount?: number;
+  readonly finePriorityOverflowCount?: number;
   readonly preBudgetCandidates: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly embeddingInferenceCalls: number;
 }>): Readonly<RecallTokenEconomy> {
@@ -191,6 +192,10 @@ export function computeRecallTokenEconomy(params: Readonly<{
     coarse_pool_size: params.coarsePoolSize,
     fine_evaluated: params.fineEvaluated,
     fine_pruned_count: finePrunedCount,
+    fine_priority_overflow_count: Math.max(
+      0,
+      Math.trunc(params.finePriorityOverflowCount ?? 0)
+    ),
     fusion_families_with_hits: fusionFamiliesWithHits,
     embedding_inference_calls: Math.max(0, Math.trunc(params.embeddingInferenceCalls))
   });

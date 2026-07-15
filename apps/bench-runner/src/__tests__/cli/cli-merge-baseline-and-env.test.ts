@@ -43,7 +43,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
     await rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it("diffs merged shards against the matching simulate_report baseline", async () => {
+  it("does not diff merged shards against an unverified simulate_report baseline", async () => {
     const shard = path.join(tmpRoot, "shard-chat-mixed");
     const rows = Array.from({ length: 5 }, (_, index) => ({
       id: `q-chat-mixed-${index + 1}`,
@@ -145,7 +145,7 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       "--shards",
       shard
     ]);
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(1);
 
     const pointer = JSON.parse(
       await readFile(path.join(historyRoot, "public", "latest-run.json"), "utf8")
@@ -189,7 +189,8 @@ describe("merge-longmemeval baseline and env aggregation", () => {
       questions?: Array<{ question_id: string }>;
     };
     expect(merged.simulate_report).toBe("mixed");
-    expect(report).toContain("| r_at_5 | 0.4000 | 0.8000 | +0.4000 |");
+    expect(merged.diff_vs_previous).toBeNull();
+    expect(report).toContain("_No previous baseline; this is the first entry._");
     expect(report).not.toContain("| r_at_5 | 1.0000 | 0.8000 |");
     expect(diagnostics.report_usage?.reports_attempted).toBe(1);
     expect(diagnostics.scored_recall_evidence?.graph_support_gold_count).toBe(1);

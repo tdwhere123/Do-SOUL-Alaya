@@ -6,11 +6,7 @@ import type {
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
 import {
-  buildConflictGateContext,
   resolveFusionContribution,
-  selectWouldOutrankSuppressedKeys,
-  zeroConflictStreamContributions,
-  type ConflictGateContext,
   type ResolvedRecallFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
 import type {
@@ -36,38 +32,9 @@ export function buildFusionCandidateStreamSnapshots(params: Readonly<{
   readonly resolved: ResolvedRecallFusionWeights;
   readonly supplementaryData: RecallSupplementaryData;
 }>): readonly RecallFusionCandidateStreamSnapshot[] {
-  const conflictGate = buildConflictGateContext({
-    candidateKeys: params.candidates.map((candidate) => candidate.candidateKey),
-    embeddingRanks: params.ranksByStream.get("embedding_similarity"),
-    embeddingScores: collectEmbeddingScores(params.candidates, params.supplementaryData)
-  });
-  const rawSnapshots = params.candidates.map((candidate) =>
-    collectRawCandidateContributions(candidate, params, conflictGate)
+  return params.candidates.map((candidate) =>
+    finalizeCandidateStreamSnapshot(collectRawCandidateContributions(candidate, params))
   );
-  const contributionsByKey = new Map(
-    rawSnapshots.map((snapshot) => [snapshot.candidateKey, snapshot.rawContributions] as const)
-  );
-  const suppressedKeys = selectWouldOutrankSuppressedKeys({
-    gate: conflictGate,
-    contributionsByKey
-  });
-  return rawSnapshots.map((snapshot) => finalizeCandidateStreamSnapshot(snapshot, suppressedKeys));
-}
-
-function collectEmbeddingScores(
-  candidates: readonly KeyedRecallFusionCandidate[],
-  supplementaryData: RecallSupplementaryData
-): Readonly<Record<string, number>> {
-  const scores: Record<string, number> = {
-    ...(supplementaryData.embeddingSimilarityScores ?? {})
-  };
-  for (const { candidate } of candidates) {
-    const factor = candidate.effectiveFactors.embedding_similarity;
-    if (typeof factor === "number" && Number.isFinite(factor) && factor > 0) {
-      scores[candidate.entry.object_id] ??= factor;
-    }
-  }
-  return Object.freeze(scores);
 }
 
 type RawCandidateContributions = Readonly<{
@@ -79,8 +46,7 @@ type RawCandidateContributions = Readonly<{
 
 function collectRawCandidateContributions(
   keyed: KeyedRecallFusionCandidate,
-  params: Parameters<typeof buildFusionCandidateStreamSnapshots>[0],
-  conflictGate: ConflictGateContext
+  params: Parameters<typeof buildFusionCandidateStreamSnapshots>[0]
 ): RawCandidateContributions {
   const perStreamRank = {} as Record<RecallFusionStream, number | null>;
   const rawContributions = {} as Record<RecallFusionStream, number>;
@@ -91,9 +57,7 @@ function collectRawCandidateContributions(
       supplementaryData: params.supplementaryData,
       resolved: params.resolved,
       stream,
-      rank,
-      candidateKey: keyed.candidateKey,
-      conflictGate
+      rank
     });
     perStreamRank[stream] = rank;
     rawContributions[stream] = contribution;
@@ -107,14 +71,9 @@ function collectRawCandidateContributions(
 }
 
 function finalizeCandidateStreamSnapshot(
-  snapshot: RawCandidateContributions,
-  suppressedKeys: ReadonlySet<string>
+  snapshot: RawCandidateContributions
 ): RecallFusionCandidateStreamSnapshot {
-  const contributions = suppressedKeys.has(snapshot.candidateKey)
-    ? Object.freeze(zeroConflictStreamContributions({ ...snapshot.rawContributions }))
-    : snapshot.rawContributions;
-  // Per-stream contributions stay for diagnostics; objectBase is the decorrelated family vote sum.
-  // Conflict suppression runs on member lanes before this max-aggregation.
+  const contributions = snapshot.rawContributions;
   const objectBase = aggregateFamilyContributions(contributions);
   return Object.freeze({
     ...snapshot.keyed,

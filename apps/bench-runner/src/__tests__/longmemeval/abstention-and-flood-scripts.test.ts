@@ -147,7 +147,14 @@ describe("bench-run .do-it abstention and flood scripts", () => {
       premise_invalid_available: false,
       premise_invalid_default: false
     });
-    expect(report.runtime_handoff.scorer_field).toBe("abstention_confidence_score");
+    expect(report.runtime_handoff).toMatchObject({
+      status: "uncalibrated",
+      scorable: false,
+      scorer_field: null,
+      scorer_threshold: null,
+      diagnostic_field: "abstention_confidence_score",
+      promotion_eligible: false
+    });
     expect(report.signal_comparison.runtime_confidence).toEqual(["abstention_confidence_score"]);
     const relevanceSweep = report.signals.find(
       (signal: { signal: string }) => signal.signal === "top1_top2_relevance_margin"

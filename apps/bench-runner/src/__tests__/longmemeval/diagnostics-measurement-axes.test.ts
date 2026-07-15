@@ -219,8 +219,21 @@ describe("LongMemEval measurement-only quality axes", () => {
       gold: [],
       cohort_ledger: {
         dataset_cohort: "answerable",
+        measurement_status: "scorable",
+        extraction_materialization: {
+          status: "memory_emitted",
+          emitted_memory_count: 1,
+          reason: null
+        },
+        evaluator_gold_identity: {
+          status: "present",
+          object_ids: ["memory-a"]
+        },
         retrieval_status: "hit_at_5",
+        evidence_status: "complete",
         evaluation_issue_reason: null,
+        candidate_pool_complete: true,
+        stage_ranks: [],
         final_verdict: "hit_at_5"
       }
     } as unknown as LongMemEvalQuestionDiagnostic;

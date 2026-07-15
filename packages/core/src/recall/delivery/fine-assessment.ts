@@ -24,6 +24,7 @@ import {
 } from "./fine-assessment-selection.js";
 import {
   pruneCoarseCandidatesForFineAssessment,
+  resolveFineAssessmentCandidateBudget,
   type FineAssessmentPruneResult
 } from "./fine-assessment-prune.js";
 import { resolveDeepHeadScores } from "../rerank/deep-head.js";
@@ -44,6 +45,7 @@ export type FineAssessmentPreparation = Readonly<{
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
+  readonly finePriorityOverflowCount: number;
 }>;
 
 export function fineAssess(params: FineAssessParams): Readonly<{
@@ -53,6 +55,7 @@ export function fineAssess(params: FineAssessParams): Readonly<{
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
+  readonly finePriorityOverflowCount: number;
 }> {
   return deliverFineAssessment(params, prepareFineAssessment(params));
 }
@@ -66,8 +69,10 @@ export function prepareFineAssessment(
   const pruned = pruneCoarseCandidatesForFineAssessment({
     candidates: params.candidates,
     supplementaryData: params.supplementaryData,
-    winnerMemoryIds: params.winnerMemoryIds
+    winnerMemoryIds: params.winnerMemoryIds,
+    cap: resolveFineAssessmentCandidateBudget(params.policy)
   });
+  warnOnPriorityOverflow(params.warn, pruned);
   const scoredCandidates = scoreFineAssessmentCandidates({
     ...params,
     candidates: pruned.survivors
@@ -79,6 +84,18 @@ export function prepareFineAssessment(
     params.now()
   );
   return preparationFromPrune(pruned, fusedCandidates);
+}
+
+function warnOnPriorityOverflow(
+  warn: RecallServiceWarnPort,
+  pruned: FineAssessmentPruneResult
+): void {
+  if (pruned.priorityOverflowCount === 0) return;
+  warn("Fine-assessment priority candidates exceeded the hard evaluation budget.", {
+    hard_budget: pruned.hardBudget,
+    priority_candidate_count: pruned.priorityCandidateCount,
+    priority_overflow_count: pruned.priorityOverflowCount
+  });
 }
 
 export function deliverFineAssessment(
@@ -116,7 +133,8 @@ export function deliverFineAssessment(
     preparedCandidates: preparation.candidates,
     coarsePoolSize: preparation.coarsePoolSize,
     fineEvaluated: preparation.fineEvaluated,
-    finePrunedCount: preparation.finePrunedCount
+    finePrunedCount: preparation.finePrunedCount,
+    finePriorityOverflowCount: preparation.finePriorityOverflowCount
   });
 }
 
@@ -165,7 +183,8 @@ function emptyFineAssessmentPreparation(): FineAssessmentPreparation {
     candidates: Object.freeze([]),
     coarsePoolSize: 0,
     fineEvaluated: 0,
-    finePrunedCount: 0
+    finePrunedCount: 0,
+    finePriorityOverflowCount: 0
   });
 }
 
@@ -177,6 +196,7 @@ function preparationFromPrune(
     candidates,
     coarsePoolSize: pruned.coarsePoolSize,
     fineEvaluated: pruned.fineEvaluated,
-    finePrunedCount: pruned.finePrunedCount
+    finePrunedCount: pruned.finePrunedCount,
+    finePriorityOverflowCount: pruned.priorityOverflowCount
   });
 }

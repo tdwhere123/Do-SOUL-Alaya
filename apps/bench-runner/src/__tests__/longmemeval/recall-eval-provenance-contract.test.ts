@@ -99,8 +99,6 @@ function runtimeAttribution(
 function env(enabled: boolean, modelRoot: string): Readonly<Record<string, string>> {
   return {
     ...archived.runtime.paired_env,
-    ALAYA_BENCH_GATE_SHA256: archived.code.gate_sha256!,
-    ALAYA_BENCH_WORKTREE_STATE_SHA256: archived.code.worktree_state_sha256!,
     ALAYA_LOCAL_ONNX_THREADS: "2",
     ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
     ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelRoot,
@@ -122,8 +120,8 @@ describe("recall-eval provenance producer/comparator contract", () => {
     try {
       const biSha = await resolveLocalArtifactTreeSha256(modelRoot, "Xenova/test");
       const crossSha = await resolveLocalArtifactTreeSha256(modelRoot, "Xenova/reranker");
-      const build = async (enabled: boolean): Promise<LongMemEvalRunProvenance> =>
-        await buildRecallEvalRunProvenance({
+      const build = async (enabled: boolean): Promise<LongMemEvalRunProvenance> => {
+        const built = await buildRecallEvalRunProvenance({
           manifest: manifest(),
           runtimeAttribution: runtimeAttribution(biSha, crossSha),
           evaluatedCount: dataset.length,
@@ -137,6 +135,11 @@ describe("recall-eval provenance producer/comparator contract", () => {
             file_count: 3
           })
         });
+        return LongMemEvalRunProvenanceSchema.parse({
+          ...built,
+          code: { ...built.code, ...archived.code, executed_dist: built.code.executed_dist }
+        });
+      };
       const [control, treatment] = await Promise.all([build(false), build(true)]);
       const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
 

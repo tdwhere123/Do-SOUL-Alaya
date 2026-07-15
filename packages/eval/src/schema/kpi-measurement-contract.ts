@@ -6,20 +6,27 @@ interface MeasurementDenominatorPayload {
   readonly measurement_attribution?: {
     readonly schema_version:
       | "bench-measurement-attribution.v1"
-      | "bench-measurement-attribution.v2";
+      | "bench-measurement-attribution.v2"
+      | "bench-measurement-attribution.v3";
     readonly status: "eligible" | "ineligible";
     readonly gate_eligible: boolean;
     readonly evidence_status: "complete" | "partial";
     readonly candidate_pool_complete: boolean;
     readonly provenance_complete: boolean;
     readonly abstention_calibration_status: "not_applicable" | "uncalibrated";
+    readonly measurement_scope?: "answerable_recall";
+    readonly abstention_evaluation_status?: "excluded_not_evaluated";
+    readonly abstention_gate_eligible?: false;
+    readonly abstention_evidence_status?: "current_uncalibrated" | "missing_or_legacy";
     readonly evaluator_identity_status?: "complete" | "invalid";
   };
   readonly kpi: {
     readonly r_at_5: number;
     readonly per_scenario: readonly {
+      readonly id: string;
       readonly hit_at_5: boolean;
       readonly scorable?: boolean;
+      readonly measurement_cohort?: "answerable" | "dataset_declared_abstention";
     }[];
     readonly quality_metrics?: {
       readonly no_gold_count: number;
@@ -37,6 +44,9 @@ interface MeasurementDenominatorPayload {
       readonly abstention?: {
         readonly schema_version: "bench-abstention.v1" | "bench-abstention.v2";
         readonly total: number;
+        readonly scored?: number;
+        readonly unscorable?: number;
+        readonly gate_eligible?: boolean;
       };
     };
   };
@@ -48,9 +58,10 @@ export function validateMeasurementDenominatorContract(
 ): void {
   validateAbstentionAttribution(payload, context);
   validateMeasurementCohortAgreement(payload, context);
+  validateCurrentRowCohorts(payload, context);
   const attribution = payload.measurement_attribution;
   const claimsEligibility = attribution?.schema_version ===
-    "bench-measurement-attribution.v2" &&
+    "bench-measurement-attribution.v3" &&
     (attribution.status === "eligible" || attribution.gate_eligible === true);
   const identityComplete = hasCompleteEvaluatorIdentity(payload);
   addIssue(
@@ -62,7 +73,7 @@ export function validateMeasurementDenominatorContract(
   addIssue(
     context,
     !claimsEligibility || measurementContractAllowsEligibility(payload),
-    "current eligible measurement attribution requires complete denominator, scorable rows, evaluator identity, and v2 abstention evidence",
+    "current eligible measurement attribution requires exact answerable-recall cohorts, evaluator identity, and v2 abstention evidence",
     ["measurement_attribution"]
   );
   const answerable = payload.answerable_evaluated_count;
@@ -132,6 +143,41 @@ function validateMeasurementCohortAgreement(
     scorableRows.length - hitCount === counts.miss_at_5,
     "miss_at_5 must match per-scenario rows"
   );
+  validateExplicitRowCohorts(payload, context);
+}
+
+function validateExplicitRowCohorts(
+  payload: MeasurementDenominatorPayload,
+  context: RefinementCtx
+): void {
+  const rows = payload.kpi.per_scenario;
+  if (!rows.some((row) => row.measurement_cohort !== undefined)) return;
+  const counts = payload.kpi.quality_metrics?.measurement_cohort_counts;
+  const answerable = rows.filter((row) => row.measurement_cohort === "answerable");
+  const abstention = rows.filter(
+    (row) => row.measurement_cohort === "dataset_declared_abstention"
+  );
+  addMeasurementCohortIssue(context, rows.every(hasConsistentDeclaredCohort),
+    "explicit row cohorts must agree with scorable state");
+  addMeasurementCohortIssue(context,
+    counts !== undefined && answerable.length === counts.non_abstention,
+    "answerable rows must match non_abstention count");
+  addMeasurementCohortIssue(context,
+    counts !== undefined && abstention.length === counts.abstention,
+    "dataset-declared abstention rows must match abstention count");
+}
+
+function validateCurrentRowCohorts(
+  payload: MeasurementDenominatorPayload,
+  context: RefinementCtx
+): void {
+  if (payload.measurement_attribution?.schema_version !==
+    "bench-measurement-attribution.v3") return;
+  addMeasurementCohortIssue(
+    context,
+    payload.kpi.per_scenario.every((row) => row.measurement_cohort !== undefined),
+    "v3 requires an explicit cohort on every row"
+  );
 }
 
 function addMeasurementCohortIssue(
@@ -157,14 +203,19 @@ export function measurementContractAllowsEligibility(
   if (!attribution || answerable === undefined || !abstention) return false;
   const scorable = rows.filter((row) => row.scorable === true).length;
   const attributionEligible = attribution.status === "eligible" &&
-    attribution.schema_version === "bench-measurement-attribution.v2" &&
+    attribution.schema_version === "bench-measurement-attribution.v3" &&
     attribution.gate_eligible &&
     attribution.evidence_status === "complete" &&
     attribution.candidate_pool_complete && attribution.provenance_complete &&
-    attribution.abstention_calibration_status === "not_applicable" &&
+    attribution.measurement_scope === "answerable_recall" &&
+    attribution.abstention_evaluation_status === "excluded_not_evaluated" &&
+    attribution.abstention_calibration_status === "uncalibrated" &&
+    attribution.abstention_gate_eligible === false &&
+    attribution.abstention_evidence_status === "current_uncalibrated" &&
     attribution.evaluator_identity_status === "complete";
   const abstentionEligible = abstention.schema_version === "bench-abstention.v2" &&
-    abstention.total === 0;
+    abstention.scored === 0 && abstention.unscorable === abstention.total &&
+    abstention.gate_eligible === false;
   const rowsComplete = rows.length === payload.evaluated_count &&
     rows.every((row) => row.scorable !== undefined);
   const identityUnscorable =
@@ -173,7 +224,29 @@ export function measurementContractAllowsEligibility(
     identityUnscorable !== undefined &&
     rows.length - scorable === abstention.total + identityUnscorable;
   return attributionEligible && abstentionEligible && rowsComplete &&
-    denominatorMatches && hasCompleteEvaluatorIdentity(payload);
+    denominatorMatches && scopedCohortsAllowEligibility(payload) &&
+    hasCompleteEvaluatorIdentity(payload);
+}
+
+function scopedCohortsAllowEligibility(payload: MeasurementDenominatorPayload): boolean {
+  const counts = payload.kpi.quality_metrics?.measurement_cohort_counts;
+  const answerable = payload.answerable_evaluated_count;
+  if (counts === undefined || answerable === undefined) return false;
+  const rows = payload.kpi.per_scenario;
+  return rows.every(hasConsistentDeclaredCohort) &&
+    counts.evaluated === payload.evaluated_count &&
+    counts.non_abstention === answerable &&
+    counts.scorable_answerable === answerable &&
+    counts.unscorable_answerable === 0 &&
+    counts.abstention === rows.length - answerable;
+}
+
+function hasConsistentDeclaredCohort(
+  row: MeasurementDenominatorPayload["kpi"]["per_scenario"][number]
+): boolean {
+  return row.measurement_cohort === "dataset_declared_abstention"
+    ? row.scorable === false
+    : row.measurement_cohort === "answerable" && row.scorable !== undefined;
 }
 
 function hasCompleteEvaluatorIdentity(payload: MeasurementDenominatorPayload): boolean {
@@ -190,6 +263,15 @@ function validateAbstentionAttribution(
   const attribution = payload.measurement_attribution;
   if (!attribution) return;
   if (!abstention) return;
+  if (attribution.schema_version === "bench-measurement-attribution.v3") {
+    if (abstention.schema_version === "bench-abstention.v2") return;
+    context.addIssue({
+      code: "custom",
+      path: ["measurement_attribution"],
+      message: "scoped answerable-recall attribution requires v2 abstention evidence"
+    });
+    return;
+  }
   if (abstention.schema_version === "bench-abstention.v2" && abstention.total === 0) return;
   const valid = attribution.abstention_calibration_status === "uncalibrated" &&
     attribution.status === "ineligible" && !attribution.gate_eligible;

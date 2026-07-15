@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AlayaCliBridge, AlayaCliBridgeOptions, AlayaCliResult } from "./bridge.js";
 import type { AlayaDaemonRuntime } from "../index.js";
+import { writeCliFailure } from "./errors/error-reporting.js";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDirectory, "..", "..", "..", "..");
@@ -128,35 +129,15 @@ export async function runAlayaCli(
     const result: AlayaCliResult | undefined = await bridge.dispatch([...argv]);
     return toExitCode(result?.exitCode, softwareExit);
   } catch (error) {
-    writeCliError(stderr, error, env);
+    writeCliFailure(stderr, error, "bootstrap");
     return softwareExit;
   } finally {
     if (runtime !== null && typeof runtime.shutdown === "function") {
       try {
         await runtime.shutdown();
       } catch (shutdownError) {
-        writeCliError(stderr, shutdownError, env);
+        writeCliFailure(stderr, shutdownError, "shutdown");
       }
     }
   }
-}
-
-function writeCliError(
-  stream: NodeJS.WritableStream,
-  error: unknown,
-  env: NodeJS.ProcessEnv
-): void {
-  const debugEnabled = env.ALAYA_DEBUG === "1";
-  if (debugEnabled && error instanceof Error && typeof error.stack === "string") {
-    stream.write(`${error.stack}\n`);
-    return;
-  }
-
-  if (error instanceof Error) {
-    const message = error.message.trim();
-    stream.write(`${message.length > 0 ? message : "CLI bridge failed."}\n`);
-    return;
-  }
-
-  stream.write("CLI bridge failed.\n");
 }

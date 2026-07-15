@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import {
+  KpiPayloadSchema,
+  computeLongMemEvalCohortAssignmentDigest,
+  computeLongMemEvalQuestionIdDigest,
+  type KpiPayload,
+  type LongMemEvalSelectionAssignment,
+  type LongMemEvalSelectionContractIdentity
+} from "@do-soul/alaya-eval";
 import {
   resolveBenchDiagnosticsArtifactRoot
 } from "../../longmemeval/diagnostics-artifacts.js";
@@ -13,28 +20,48 @@ import {
 } from "../../longmemeval/evidence-manifest.js";
 import {
   isLongMemEvalRunProvenanceGateEligible,
-  LongMemEvalRunProvenanceSchema
+  LongMemEvalRunProvenanceSchema,
+  type LongMemEvalRunProvenance
 } from "../../longmemeval/provenance/run.js";
 import {
   openContainedArtifact,
   type ContainedArtifactFile
 } from "./contained-artifact-path.js";
-
 const verifiedDiagnostics = new WeakSet<object>();
+const verifiedShardEvidence = new WeakSet<object>();
 const MAX_BINDING_ARTIFACT_BYTES = 16 * 1024 * 1024;
+
+export interface VerifiedShardEvidence {
+  readonly execution: LongMemEvalRunProvenance["execution"];
+  readonly selectionContract: LongMemEvalSelectionContractIdentity;
+  readonly assignments: readonly LongMemEvalSelectionAssignment[];
+  readonly diagnosticsArtifact: VerifiedArtifactIdentity;
+  readonly fullDiagnosticsArtifact: VerifiedArtifactIdentity;
+  readonly runProvenance: {
+    readonly contents: string;
+    readonly parsed: LongMemEvalRunProvenance;
+  };
+}
+
+export interface VerifiedArtifactIdentity {
+  readonly path: string;
+  readonly sha256: string;
+  readonly bytes: number;
+}
 
 export async function verifyShardEvidenceBundle(input: {
   readonly shardRoot: string;
   readonly slug: string;
   readonly payload: KpiPayload;
-  readonly diagnostics: LongMemEvalDiagnosticsSidecar;
-}): Promise<boolean> {
+}, hooks: {
+  readonly afterBindingArtifactSnapshot?: (path: string) => void | Promise<void>;
+} = {}): Promise<VerifiedShardEvidence | null> {
   const entryRoot = path.join(input.shardRoot, "public", input.slug);
   const manifestFile = await openContainedArtifact(
     entryRoot,
     LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME
   );
-  if (manifestFile === null) return false;
+  if (manifestFile === null) return null;
   let manifest: LongMemEvalEvidenceManifest;
   try {
     manifest = await readJson<LongMemEvalEvidenceManifest>(manifestFile);
@@ -43,21 +70,12 @@ export async function verifyShardEvidenceBundle(input: {
   }
   assertManifestBinding(manifest, input.slug, input.payload);
   assertCompleteEvidence(manifest);
-  const inspected = await Promise.all(manifest.artifacts.map(async (artifact) => {
-    const file = await openArtifact(input.shardRoot, entryRoot, artifact);
-    try {
-      const contents = isBindingRole(artifact.role)
-        ? await file.readUtf8(MAX_BINDING_ARTIFACT_BYTES)
-        : undefined;
-      return {
-        evidence: { role: artifact.role, path: artifact.path, identity: await hashFile(file) },
-        role: artifact.role,
-        contents
-      };
-    } finally {
-      await file.close();
-    }
-  }));
+  const inspected = await inspectEvidenceArtifacts(
+    input.shardRoot,
+    entryRoot,
+    manifest,
+    hooks
+  );
   const result = verifyLongMemEvalEvidenceManifest(
     manifest,
     inspected.map((artifact) => artifact.evidence)
@@ -65,9 +83,13 @@ export async function verifyShardEvidenceBundle(input: {
   if (!result.valid) {
     throw new Error(`merge refused: invalid shard evidence: ${result.errors.join("; ")}`);
   }
-  assertArtifactBindings(manifest, inspected, input.payload, input.diagnostics);
-  verifiedDiagnostics.add(input.diagnostics);
-  return true;
+  const verified = assertArtifactBindings(
+    manifest,
+    inspected,
+    input.payload
+  );
+  verifiedShardEvidence.add(verified);
+  return verified;
 }
 
 function assertCompleteEvidence(manifest: LongMemEvalEvidenceManifest): void {
@@ -88,6 +110,19 @@ export function hasVerifiedShardEvidence(
   diagnostics: LongMemEvalDiagnosticsSidecar
 ): boolean {
   return verifiedDiagnostics.has(diagnostics);
+}
+
+export function bindVerifiedShardDiagnostics(
+  evidence: VerifiedShardEvidence,
+  diagnostics: LongMemEvalDiagnosticsSidecar
+): void {
+  if (!verifiedShardEvidence.has(evidence) ||
+      !diagnostics.questions.every((question) =>
+        question.candidate_pool_complete === true
+      )) {
+    throw new Error("merge refused: shard evidence candidate pool binding mismatch");
+  }
+  verifiedDiagnostics.add(diagnostics);
 }
 
 function assertManifestBinding(
@@ -114,19 +149,82 @@ interface InspectedArtifact {
   readonly contents: string | undefined;
 }
 
+async function inspectEvidenceArtifacts(
+  shardRoot: string,
+  entryRoot: string,
+  manifest: LongMemEvalEvidenceManifest,
+  hooks: {
+    readonly afterBindingArtifactSnapshot?: (path: string) => void | Promise<void>;
+  }
+): Promise<readonly InspectedArtifact[]> {
+  return Promise.all(manifest.artifacts.map(async (artifact) => {
+    const file = await openArtifact(shardRoot, entryRoot, artifact);
+    try {
+      if (isBindingRole(artifact.role)) {
+        const bytes = await file.readBytes(MAX_BINDING_ARTIFACT_BYTES);
+        await hooks.afterBindingArtifactSnapshot?.(artifact.path);
+        return {
+          evidence: { role: artifact.role, path: artifact.path, contents: bytes },
+          role: artifact.role,
+          contents: decodeBindingArtifact(bytes, artifact.path)
+        };
+      }
+      return {
+        evidence: { role: artifact.role, path: artifact.path, identity: await hashFile(file) },
+        role: artifact.role,
+        contents: undefined
+      };
+    } finally {
+      await file.close();
+    }
+  }));
+}
+
+function decodeBindingArtifact(bytes: Uint8Array, artifactPath: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`merge refused: invalid UTF-8 in '${artifactPath}': ${message}`);
+  }
+}
+
 function assertArtifactBindings(
   manifest: LongMemEvalEvidenceManifest,
   artifacts: readonly InspectedArtifact[],
-  payload: KpiPayload,
-  diagnostics: LongMemEvalDiagnosticsSidecar
-): void {
-  const cohort = parseRoleJson(artifacts, "cohort_ledger") as {
-    question_count?: unknown; question_id_digest?: unknown; rows?: unknown;
-  };
-  const boundKpi = KpiPayloadSchema.parse(parseRoleJson(artifacts, "kpi"));
-  const provenance = LongMemEvalRunProvenanceSchema.parse(
-    parseRoleJson(artifacts, "run_provenance")
+  payload: KpiPayload
+): VerifiedShardEvidence {
+  const { cohort, boundKpi, provenance, provenanceContents } =
+    parseBindingArtifacts(artifacts);
+  const questionIdDigest = assertKpiCohortBinding(
+    manifest,
+    cohort,
+    boundKpi,
+    payload
   );
+  assertProvenanceBinding(provenance, manifest, payload);
+  const selection = assertSelectionContractBinding(
+    provenance, manifest, cohort, cohort.rows, questionIdDigest
+  );
+  if (JSON.stringify(boundKpi.selection_contract) !==
+      JSON.stringify(selection.selectionContract)) {
+    throw new Error("merge refused: shard KPI selection contract binding mismatch");
+  }
+  return {
+    execution: provenance.execution,
+    ...selection,
+    diagnosticsArtifact: verifiedArtifactIdentity(manifest, "diagnostics"),
+    fullDiagnosticsArtifact: verifiedArtifactIdentity(manifest, "full_diagnostics"),
+    runProvenance: { contents: provenanceContents, parsed: provenance }
+  };
+}
+
+function assertKpiCohortBinding(
+  manifest: LongMemEvalEvidenceManifest,
+  cohort: ReturnType<typeof parseBindingArtifacts>["cohort"],
+  boundKpi: KpiPayload,
+  payload: KpiPayload
+): string {
   if (JSON.stringify(boundKpi) !== JSON.stringify(payload)) {
     throw new Error("merge refused: shard evidence KPI binding mismatch");
   }
@@ -139,37 +237,125 @@ function assertArtifactBindings(
   if (!sameValues(cohortIds, payload.kpi.per_scenario.map((row) => row.id))) {
     throw new Error("merge refused: shard evidence cohort question binding mismatch");
   }
-  const questionIdDigest = createHash("sha256")
-    .update(cohortIds.join("\0"), "utf8")
-    .digest("hex");
+  const questionIdDigest = computeLongMemEvalQuestionIdDigest(
+    payload.kpi.per_scenario.map((row) => row.id)
+  );
   if (cohort.question_id_digest !== questionIdDigest ||
     manifest.run.question_id_digest !== questionIdDigest) {
     throw new Error("merge refused: shard evidence cohort digest binding mismatch");
   }
+  return questionIdDigest;
+}
+
+function assertProvenanceBinding(
+  provenance: LongMemEvalRunProvenance,
+  manifest: LongMemEvalEvidenceManifest,
+  payload: KpiPayload
+): void {
   if (provenance.code.commit_sha7 !== payload.alaya_commit ||
+    provenance.dataset_sha256 !== manifest.run.dataset_sha256 ||
     provenance.execution.evaluated_count !== payload.evaluated_count ||
     !isLongMemEvalRunProvenanceGateEligible(provenance)) {
     throw new Error("merge refused: shard evidence provenance binding mismatch");
   }
+  assertSourceManifestBinding(provenance, manifest);
+}
+
+function parseBindingArtifacts(artifacts: readonly InspectedArtifact[]) {
+  const cohort = parseRoleJson(artifacts, "cohort_ledger") as {
+    question_count?: unknown;
+    question_id_digest?: unknown;
+    rows?: unknown;
+    selection_contract?: unknown;
+  };
+  const provenanceContents = roleContents(artifacts, "run_provenance");
+  return {
+    cohort,
+    boundKpi: KpiPayloadSchema.parse(parseRoleJson(artifacts, "kpi")),
+    provenanceContents,
+    provenance: LongMemEvalRunProvenanceSchema.parse(
+      JSON.parse(provenanceContents) as unknown
+    )
+  };
+}
+
+function assertSourceManifestBinding(
+  provenance: LongMemEvalRunProvenance,
+  manifest: LongMemEvalEvidenceManifest
+): void {
   if (manifest.run.selection_manifest_sha256 !==
     (provenance.question_manifest?.file_sha256 ?? null) ||
     (provenance.question_manifest !== null &&
-      (provenance.question_manifest.dataset_sha256 !== manifest.run.dataset_sha256 ||
-        provenance.question_manifest.selected_id_digest !== questionIdDigest))) {
+      provenance.question_manifest.dataset_sha256 !== manifest.run.dataset_sha256)) {
     throw new Error("merge refused: shard evidence selection binding mismatch");
   }
-  if (!diagnostics.questions.every((question) => question.candidate_pool_complete === true)) {
-    throw new Error("merge refused: shard evidence candidate pool binding mismatch");
+}
+
+function assertSelectionContractBinding(
+  provenance: LongMemEvalRunProvenance,
+  manifest: LongMemEvalEvidenceManifest,
+  cohort: { readonly question_count?: unknown; readonly selection_contract?: unknown },
+  rows: unknown,
+  questionIdDigest: string
+): Pick<VerifiedShardEvidence, "selectionContract" | "assignments"> {
+  const selection = provenance.selection;
+  if (selection === undefined || !Array.isArray(rows) ||
+      selection.selected_id_digest !== questionIdDigest ||
+      selection.selected_count !== cohort.question_count ||
+      JSON.stringify(selection) !== JSON.stringify(cohort.selection_contract) ||
+      JSON.stringify(selection) !== JSON.stringify(manifest.run.selection_contract)) {
+    throw new Error("merge refused: shard evidence immutable selection binding mismatch");
   }
+  const assignments = rows.map(readCohortAssignment);
+  const counts = {
+    answerable: assignments.filter((row) => row.dataset_cohort === "answerable").length,
+    abstention: assignments.filter((row) => row.dataset_cohort === "abstention").length
+  };
+  if (JSON.stringify(counts) !== JSON.stringify(selection.expected_cohort_counts) ||
+      computeLongMemEvalCohortAssignmentDigest(assignments) !==
+        selection.cohort_assignment_digest) {
+    throw new Error("merge refused: shard evidence cohort assignment binding mismatch");
+  }
+  return { selectionContract: selection, assignments };
+}
+
+function readCohortAssignment(row: unknown): LongMemEvalSelectionAssignment {
+  if (typeof row !== "object" || row === null) {
+    throw new Error("merge refused: shard evidence cohort row is invalid");
+  }
+  const value = row as { readonly question_id?: unknown; readonly dataset_cohort?: unknown };
+  if (typeof value.question_id !== "string" ||
+      (value.dataset_cohort !== "answerable" && value.dataset_cohort !== "abstention")) {
+    throw new Error("merge refused: shard evidence cohort assignment is not immutable");
+  }
+  return { question_id: value.question_id, dataset_cohort: value.dataset_cohort };
 }
 
 function parseRoleJson(
   artifacts: readonly InspectedArtifact[],
   role: InspectedArtifact["role"]
 ): unknown {
+  return JSON.parse(roleContents(artifacts, role)) as unknown;
+}
+
+function roleContents(
+  artifacts: readonly InspectedArtifact[],
+  role: InspectedArtifact["role"]
+): string {
   const contents = artifacts.find((artifact) => artifact.role === role)?.contents;
   if (contents === undefined) throw new Error(`merge refused: missing ${role} binding contents`);
-  return JSON.parse(contents) as unknown;
+  return contents;
+}
+
+function verifiedArtifactIdentity(
+  manifest: LongMemEvalEvidenceManifest,
+  role: LongMemEvalEvidenceManifest["artifacts"][number]["role"]
+): VerifiedArtifactIdentity {
+  const artifact = manifest.artifacts.find((candidate) => candidate.role === role);
+  if (artifact === undefined) {
+    throw new Error(`merge refused: missing ${role} artifact identity`);
+  }
+  return { path: artifact.path, sha256: artifact.sha256, bytes: artifact.bytes };
 }
 
 function sameValues(actual: readonly unknown[], expected: readonly string[]): boolean {

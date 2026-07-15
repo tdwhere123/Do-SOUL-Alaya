@@ -24,7 +24,6 @@ import {
 } from "./qa-harness.js";
 import {
   computePercentile,
-  readLongMemEvalPinnedMeta,
   summarizeEmbeddingVectorCache,
   summarizeQueryEmbeddingCache
 } from "./runner-helpers.js";
@@ -32,6 +31,11 @@ import type { LongMemEvalRunOptions } from "./runner.js";
 import { toSeedExtractionPathKpi, type CompileSeedExtractionStats } from "./compile-seed.js";
 import { toSeedFuelInventoryKpi } from "./seed-fuel-inventory-kpi.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
+import {
+  assertSelectionCohortBinding,
+  selectionContractIdentity,
+  type LongMemEvalSelectionContract
+} from "./selection/contract.js";
 
 const LONGMEMEVAL_SEED_POLICY = Object.freeze({
   mode: "label_independent_open_vocabulary_extraction",
@@ -57,6 +61,9 @@ export function buildLongMemEvalRunPayload(input: {
   readonly opts: LongMemEvalRunOptions;
   readonly questionsLength: number;
   readonly windowLength: number;
+  readonly datasetSha256: string;
+  readonly datasetChecksumSource: string;
+  readonly selectionContract: LongMemEvalSelectionContract;
   readonly aggregate: LongMemEvalRunArchiveAggregate;
   readonly extractionStats: CompileSeedExtractionStats;
   readonly seedFuelInventory: import("./seed-fuel-inventory.js").SeedFuelInventory;
@@ -115,6 +122,7 @@ function buildPayload(
   );
   const edgeProposalAutoAccept = aggregateEdgeProposalAutoAccept(edgeRows);
   const split = variantToSplit(input.opts.variant);
+  const selectionContract = kpiSelectionContract(input);
   return {
     bench_name: "public",
     split,
@@ -130,6 +138,7 @@ function buildPayload(
       ? {}
       : { recall_weight_overrides: input.recallWeightOverrides.summary }),
     seed_policy: LONGMEMEVAL_SEED_POLICY,
+    ...(selectionContract === undefined ? {} : { selection_contract: selectionContract }),
     dataset: buildDataset(input),
     sample_size: input.opts.fetchResult?.questionCount ?? input.questionsLength,
     evaluated_count: input.aggregate.perScenario.length,
@@ -137,6 +146,24 @@ function buildPayload(
     harness_mode: "mcp_propose_review",
     kpi: buildKpi(input, rates, providerSummary, embeddingVectorCache, queryEmbeddingCache, tokenEconomyInput, edgeProposalRate, edgeProposalAutoAccept)
   };
+}
+
+function kpiSelectionContract(
+  input: Parameters<typeof buildLongMemEvalRunPayload>[0]
+) {
+  if (input.selectionContract.selected_count !== input.aggregate.perScenario.length) {
+    return undefined;
+  }
+  assertSelectionCohortBinding(
+    input.selectionContract,
+    input.aggregate.perScenario.map((row) => ({
+      question_id: row.id,
+      dataset_cohort: row.measurement_cohort === "dataset_declared_abstention"
+        ? "abstention" as const
+        : "answerable" as const
+    }))
+  );
+  return selectionContractIdentity(input.selectionContract);
 }
 
 function variantToSplit(variant: LongMemEvalRunOptions["variant"]): BenchSplit {
@@ -149,16 +176,12 @@ function variantToSplit(variant: LongMemEvalRunOptions["variant"]): BenchSplit {
 }
 
 function buildDataset(input: Parameters<typeof buildLongMemEvalRunPayload>[0]): KpiPayload["dataset"] {
-  const pinnedMeta = readLongMemEvalPinnedMeta(
-    input.opts.variant,
-    input.opts.pinnedMetaRoot
-  );
   return {
     name: input.opts.variant,
     size: input.opts.fetchResult?.questionCount ?? input.questionsLength,
     source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
-    checksum_sha256: pinnedMeta.sha256,
-    checksum_source: pinnedMeta.source
+    checksum_sha256: input.datasetSha256,
+    checksum_source: input.datasetChecksumSource
   };
 }
 

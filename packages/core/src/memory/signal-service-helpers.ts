@@ -77,6 +77,38 @@ export function buildEventLogRawPayloadSummary(
   };
 }
 
+export function hashAuditText(value: string): string {
+  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
+}
+
+export function buildSignalWarningMeta(input: {
+  readonly phase:
+    | "signal_replay"
+    | "materialization"
+    | "event_notification"
+    | "source_grounding_redrive"
+    | "source_grounding_defer_queue";
+  readonly code:
+    | "POST_TRIAGE_REPLAY_SKIPPED"
+    | "MATERIALIZER_THROW"
+    | "MATERIALIZATION_UNSUCCESSFUL"
+    | "RUNTIME_NOTIFY_FAILED"
+    | "REDRIVE_UNCERTAIN"
+    | "FIFO_EVICTION";
+  readonly detail?: string;
+  readonly itemCount?: number;
+}): Record<string, unknown> {
+  return {
+    phase: input.phase,
+    code: input.code,
+    ...(input.detail === undefined ? {} : {
+      detail_sha256: hashAuditText(input.detail),
+      detail_char_count: input.detail.length
+    }),
+    ...(input.itemCount === undefined ? {} : { item_count: input.itemCount })
+  };
+}
+
 export function hasInvalidSchemaGrounding(
   signal: CandidateMemorySignal
 ): boolean {

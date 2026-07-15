@@ -64,13 +64,13 @@ describe("buildRecallFusionDetails temporal lane", () => {
     expect(classifyRecallIntent(supplementaryData.queryProbes)).toBe("single_fact");
     expect(fusion.get(`workspace_local:memory_entry:${matching.object_id}`)?.fused_rank).toBe(1);
     expect(fusion.get(`workspace_local:memory_entry:${matching.object_id}`)
-      ?.fused_rank_contribution_per_stream.temporal_recency).toBeCloseTo(4 / 41, 6);
+      ?.fused_rank_contribution_per_stream.temporal_recency).toBeCloseTo(4 / 61, 6);
   });
 
   it.each([
     ["May 2023 preference", "2023-05-15T00:00:00.000Z"],
     ["2023 preference", "2023-08-15T00:00:00.000Z"]
-  ])("keeps an absolute %s window intent-neutral while using temporal k", (query, eventTime) => {
+  ])("keeps an absolute %s window intent-neutral with the shared RRF k", (query, eventTime) => {
     const entry = createMemoryEntry({
       object_id: "77777777-7777-4777-8777-777777777777",
       event_time_start: eventTime
@@ -89,7 +89,7 @@ describe("buildRecallFusionDetails temporal lane", () => {
 
     expect(classifyRecallIntent(supplementaryData.queryProbes)).toBe("preference");
     expect(fusion.get(`workspace_local:memory_entry:${entry.object_id}`)
-      ?.fused_rank_contribution_per_stream.temporal_recency).toBeCloseTo(4 / 41, 6);
+      ?.fused_rank_contribution_per_stream.temporal_recency).toBeCloseTo(4 / 61, 6);
   });
 
   it("recognizes an open temporal question without an explicit date", () => {
@@ -148,7 +148,7 @@ describe("buildRecallFusionDetails temporal lane", () => {
     expect(createdOnlyContribution).toBe(0);
   });
 
-  it("uses temporal intent k instead of the global RRF constant", () => {
+  it("uses the common default RRF k for temporal intent", () => {
     const policy = {} as RecallPolicy;
     const eventMemory = createMemoryEntry({
       object_id: "66666666-6666-4666-8666-666666666666",
@@ -177,7 +177,7 @@ describe("buildRecallFusionDetails temporal lane", () => {
     expect(
       fusion.get("workspace_local:memory_entry:66666666-6666-4666-8666-666666666666")
         ?.fused_rank_contribution_per_stream.temporal_recency ?? 0
-    ).toBeCloseTo(4 / 41, 6);
+    ).toBeCloseTo(4 / 61, 6);
   });
 
   it("does not apply temporal-recency scoring to month-name path-source text", () => {
@@ -304,9 +304,9 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
     const breakdown = fusion.get("workspace_local:memory_entry:77777777-7777-4777-8777-777777777777")!;
     const contributions = breakdown.fused_rank_contribution_per_stream;
     // Lane contributions remain full identity-weight RRF (no partial reliability discount).
-    expect(contributions.lexical_fts).toBeCloseTo(1 / 73, 6);
-    expect(contributions.trigram_fts).toBeCloseTo(1 / 91, 6);
-    expect(contributions.evidence_fts).toBeCloseTo(1 / 69, 6);
+    expect(contributions.lexical_fts).toBeCloseTo(1 / 61, 6);
+    expect(contributions.trigram_fts).toBeCloseTo(1 / 61, 6);
+    expect(contributions.evidence_fts).toBeCloseTo(1 / 61, 6);
     const laneSum = Object.values(contributions).reduce((sum, value) => sum + value, 0);
     // Object axis uses family max, so it is strictly below the raw lane sum.
     expect(breakdown.per_axis_contribution?.object ?? 0).toBeLessThan(laneSum);

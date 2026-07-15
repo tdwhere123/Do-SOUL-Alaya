@@ -14,7 +14,7 @@ const LegacyBenchmarkMeasurementAttributionSchema = z.object({
   ...MeasurementAttributionFields
 }).strict();
 
-const CurrentBenchmarkMeasurementAttributionSchema = z.object({
+const LegacyV2BenchmarkMeasurementAttributionSchema = z.object({
   schema_version: z.literal("bench-measurement-attribution.v2"),
   ...MeasurementAttributionFields,
   evaluator_identity_status: z.enum(["complete", "invalid"])
@@ -32,9 +32,36 @@ const CurrentBenchmarkMeasurementAttributionSchema = z.object({
   }
 });
 
+const CurrentBenchmarkMeasurementAttributionSchema = z.object({
+  schema_version: z.literal("bench-measurement-attribution.v3"),
+  ...MeasurementAttributionFields,
+  measurement_scope: z.literal("answerable_recall"),
+  abstention_evaluation_status: z.literal("excluded_not_evaluated"),
+  abstention_calibration_status: z.literal("uncalibrated"),
+  abstention_gate_eligible: z.literal(false),
+  abstention_evidence_status: z.enum(["current_uncalibrated", "missing_or_legacy"]),
+  evaluator_identity_status: z.enum(["complete", "invalid"])
+}).strict().superRefine((value, context) => {
+  const eligible = value.evidence_status === "complete" &&
+    value.candidate_pool_complete && value.provenance_complete &&
+    value.abstention_evidence_status === "current_uncalibrated" &&
+    value.evaluator_identity_status === "complete";
+  if (value.gate_eligible !== eligible ||
+      value.status !== (eligible ? "eligible" : "ineligible")) {
+    context.addIssue({
+      code: "custom",
+      message: "scoped measurement attribution eligibility fields are inconsistent"
+    });
+  }
+});
+
 export const BenchmarkMeasurementAttributionSchema = z.discriminatedUnion(
   "schema_version",
-  [LegacyBenchmarkMeasurementAttributionSchema, CurrentBenchmarkMeasurementAttributionSchema]
+  [
+    LegacyBenchmarkMeasurementAttributionSchema,
+    LegacyV2BenchmarkMeasurementAttributionSchema,
+    CurrentBenchmarkMeasurementAttributionSchema
+  ]
 );
 
 export type BenchmarkMeasurementAttribution = z.infer<

@@ -1,0 +1,52 @@
+import { createHash } from "node:crypto";
+
+const PAIRED_ENV_ALLOWLIST = new Set([
+  "ALAYA_BENCH_ALLOW_LIVE_EXTRACTION",
+  "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE",
+  "ALAYA_BENCH_EXTRACTION_MODEL_FAMILY",
+  "ALAYA_CONFLICT_DETECTION_ENABLED",
+  "ALAYA_EMBEDDING_PROVIDER",
+  "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
+  "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
+  "ALAYA_EXP_ANSWERS_WITH_BAR",
+  "ALAYA_EXP_ANSWERS_WITH_CAP",
+  "ALAYA_EXP_ANSWERS_WITH_XSESSION",
+  "ALAYA_EXP_COHERENCE_CAP",
+  "ALAYA_EXP_COHERENCE_EDGES",
+  "ALAYA_EXP_COHERENCE_FLOOR",
+  "ALAYA_EXP_COHERENCE_XSESSION",
+  "ALAYA_GARDEN_PROVIDER_KIND",
+  "ALAYA_INGEST_RECONCILIATION_ENABLED",
+  "ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT",
+  "ALAYA_LOCAL_ONNX_THREADS",
+  "ALAYA_LOCAL_EMBEDDING_MODEL",
+  "ALAYA_LOCAL_CROSS_ENCODER_MODEL",
+  "ALAYA_RECALL_ANSWERS_WITH",
+  "ALAYA_RECALL_COARSE_FLOOR",
+  "ALAYA_RECALL_CONF_EVIDENCE_BETA",
+  "ALAYA_RECALL_CONF_FLOOD_CAP",
+  "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
+  "ALAYA_RECALL_CONF_RHO_EVIDENCE",
+  "ALAYA_RECALL_CONF_RHO_PATH",
+  "ALAYA_RECALL_CONF_W_PATH",
+  "ALAYA_RECALL_FACET_TAGS",
+  "ALAYA_RECALL_D2Q",
+  "ALAYA_RECALL_EVAL_EMBEDDING",
+  "ALAYA_RECALL_SOURCE_REF_ROBUST",
+  "OFFICIAL_API_GARDEN_MODEL"
+]);
+
+export function collectPairedEnvironment(
+  env: Readonly<Record<string, string | undefined>>
+): Readonly<Record<string, string>> {
+  const entries = Object.entries(env)
+    .filter(([key, value]) => value !== undefined && PAIRED_ENV_ALLOWLIST.has(key))
+    .map(([key, value]) => [key, redactProvenanceUrl(value!)] as const)
+    .sort(([left], [right]) => left.localeCompare(right));
+  return Object.fromEntries(entries) as Readonly<Record<string, string>>;
+}
+
+export function redactProvenanceUrl(value: string): string {
+  if (!/(?:https?|wss?):\/\//iu.test(value)) return value;
+  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
+}

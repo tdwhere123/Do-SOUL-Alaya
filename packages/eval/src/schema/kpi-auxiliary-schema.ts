@@ -96,11 +96,9 @@ export type RecallEvalAttribution = z.infer<typeof RecallEvalAttributionSchema>;
 // call cost in token-shaped work — delivered tokens, pool sizes, evaluated
 // candidates, fusion-stream coverage, and embedding provider invocations.
 //
-// Measure-only. The figures publish what the recall pipeline ACTUALLY did,
-// on every call, without setting a "must pass" threshold. They feed honest
-// release notes, not a marketing target; the "对标 95% data-driven design"
-// anti-pattern (designing the system to hit a chosen headline number) is
-// intentionally avoided.
+// These figures publish what the recall pipeline ACTUALLY did on every call.
+// Release policy uses only embedding_inference_calls as a liveness check for
+// embedding-on LongMemEval; the remaining figures stay descriptive telemetry.
 //
 // @anchor recall-token-economy-token-units: every *_tokens / *_token_*
 // figure under this block is the chars/4 approximation produced by
@@ -141,6 +139,9 @@ export const RecallTokenEconomySchema = z
     fine_evaluated: PerCallStatSchema,
     // Coarse candidates dropped by the coarse→fine waist before scoring.
     fine_pruned_count: PerCallStatSchema,
+    // Priority candidates excluded by the shared hard fine-assessment budget.
+    // Optional so archived v1 payloads remain readable; current runs emit it.
+    fine_priority_overflow_count: PerCallStatSchema.optional(),
     // Distinct fusion families with any member-stream hit (~5), not raw lane
     // count, across the pre-budget candidate set per recall.
     fusion_families_with_hits: PerCallStatSchema,

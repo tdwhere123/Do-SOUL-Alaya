@@ -7,6 +7,8 @@ import {
   writeEntry,
   type HistoryLayout
 } from "@do-soul/alaya-eval";
+import { verifiedEvidenceForPayload } from
+  "../../../../../packages/eval/src/__tests__/gates/verified-evidence-fixture.js";
 import {
   RECALL_EVAL_ARCHIVE_MARKER,
   isRecallEvalArchive,
@@ -26,7 +28,13 @@ let layout: HistoryLayout;
 
 beforeEach(async () => {
   historyRoot = await mkdtemp(join(tmpdir(), "recall-eval-isolation-"));
-  layout = { historyRoot };
+  layout = {
+    historyRoot,
+    verifyLongMemEvalEvidence: async ({ payload }) =>
+      payload.selection_contract === undefined
+        ? null
+        : verifiedEvidenceForPayload(payload)
+  };
 });
 
 afterEach(async () => {
@@ -47,7 +55,8 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
         alaya_commit: "d7266aa",
         db_filename: "snapshot.db",
         sidecar_filename: "snapshot.db.sidecar.json",
-        built_at: "2026-07-12T00:00:00.000Z"
+        built_at: "2026-07-12T00:00:00.000Z",
+        extraction_provenance: null
       },
       variant: "longmemeval_s",
       runAt: new Date("2026-07-12T00:00:00.000Z"),
@@ -74,6 +83,12 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
         onnx_model_artifact_sha256: null,
         embedding_supplement: { enabled: false },
         answer_rerank: { enabled: false },
+        recall_config: {
+          schema_version: 2,
+          max_results: 10,
+          conflict_awareness: true,
+          effective_config_sha256: "e".repeat(64)
+        },
         hydration_binding: {
           dataset_sha256: "b".repeat(64),
           source: "external_expected_sha256"
@@ -137,6 +152,20 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
     expect(isRecallEvalArchive(baseline!)).toBe(false);
     expect(baseline!.alaya_commit).toBe("f".repeat(7));
     expect(baseline!.kpi.r_at_5).toBe(0.8);
+  });
+
+  it("rejects an otherwise passing full-run baseline without verified evidence", async () => {
+    layout = { historyRoot };
+    const fullRun = buildPublicPayload({ commit: "f".repeat(7), rAt5: 0.8, recallEval: false });
+    const slug = entrySlug(new Date("2026-05-20T10:00:00.000Z"), "f".repeat(7), "policy-stress");
+    await writeEntry(layout, "public", slug, fullRun, "# report\n", null);
+
+    await expect(selectFullRunBaseline(layout, "public", {
+      split: "longmemeval-oracle",
+      policyShape: "stress",
+      simulateReport: "none",
+      embeddingProvider: "none"
+    })).resolves.toBeNull();
   });
 
   it("returns null when the only passing entry in the bucket is a recall-eval archive", async () => {

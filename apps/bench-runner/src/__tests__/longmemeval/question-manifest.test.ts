@@ -83,7 +83,7 @@ describe("LongMemEval question manifests", () => {
         },
         { variant: "longmemeval_s", datasetSha256: DATASET_SHA }
       )
-    ).toThrow(/duplicate/);
+    ).toThrow(/unique/u);
     expect(() =>
       applyQuestionManifest(
         questions,

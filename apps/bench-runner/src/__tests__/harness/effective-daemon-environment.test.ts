@@ -108,6 +108,7 @@ describe("effective bench daemon environment", () => {
     expect(policy.coarse_filter.semantic_supplement)
       .not.toHaveProperty("injection_similarity_floor");
     expect(policy.fine_assessment.budgets.max_total_tokens).toBe(2_000);
+    expect(policy.fine_assessment.max_candidates).toBe(200);
     expect(policy.coarse_filter.precomputed_rank.max_candidates).toBeGreaterThan(0);
   });
 

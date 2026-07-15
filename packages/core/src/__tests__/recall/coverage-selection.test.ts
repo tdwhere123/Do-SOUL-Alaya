@@ -5,10 +5,7 @@ import {
   type MemoryEntry,
   type RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import {
-  COVERAGE_MAX_PER_GIST_SAFETY,
-  orderByCoverageMarginalGain
-} from "../../recall/delivery/coverage-selection.js";
+import { orderByCoverageMarginalGain } from "../../recall/delivery/coverage-selection.js";
 import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
@@ -74,7 +71,7 @@ describe("coverage-aware delivery", () => {
     expect(result.diagnostics.filter((row) => row.dropped_reason === "max_total_tokens")).toHaveLength(1);
   });
 
-  it("enforces the max-2-per-gist safety backstop", () => {
+  it("uses diminishing returns without discarding repeated-gist items", () => {
     const candidates = Array.from({ length: 4 }, (_, index) =>
       createCandidate(`same-gist-${index + 1}`, 1 - index * 0.01)
     );
@@ -98,8 +95,8 @@ describe("coverage-aware delivery", () => {
       finalRelevanceByCandidateKey: relevanceMap(candidates)
     });
 
-    expect(result.candidates).toHaveLength(COVERAGE_MAX_PER_GIST_SAFETY);
-    expect(result.diagnostics.filter((row) => row.dropped_reason === "duplicate")).toHaveLength(2);
+    expect(result.candidates).toHaveLength(candidates.length);
+    expect(result.diagnostics.filter((row) => row.dropped_reason === "duplicate")).toHaveLength(0);
   });
 
   it("does not let fused_score fallback outrank a tiny CE deep-head map", () => {
@@ -123,29 +120,34 @@ describe("coverage-aware delivery", () => {
     ]);
   });
 
-  it("does not demote a stronger same-cohort gold behind a weaker novel cohort sibling", () => {
-    const strong = createCandidate("strong-gold", 0.9);
-    const weakNovel = createCandidate("weak-novel", 0.4);
+  it("applies a soft cohort penalty when another cohort adds more utility", () => {
+    const anchor = createCandidate("cohort-anchor", 0.9);
+    const sameCohort = createCandidate("same-cohort", 0.8);
+    const otherCohort = createCandidate("other-cohort", 0.5);
     const ordered = orderByCoverageMarginalGain({
-      candidates: [strong, weakNovel],
+      candidates: [anchor, sameCohort, otherCohort],
       relevanceByCandidateKey: new Map([
-        [strong.fusion.candidate_key, 0.9],
-        [weakNovel.fusion.candidate_key, 0.4]
+        [anchor.fusion.candidate_key, 0.9],
+        [sameCohort.fusion.candidate_key, 0.8],
+        [otherCohort.fusion.candidate_key, 0.5]
       ]),
       supplementaryData: createSupplementaryData({
         evidenceGistsByMemoryId: {
-          "strong-gold": "gist-a",
-          "weak-novel": "gist-b"
+          "cohort-anchor": "gist-a",
+          "same-cohort": "gist-b",
+          "other-cohort": "gist-c"
         },
         sourceCohortKeys: {
-          "strong-gold": "cohort-1",
-          "weak-novel": "cohort-1"
+          "cohort-anchor": "cohort-1",
+          "same-cohort": "cohort-1",
+          "other-cohort": "cohort-2"
         }
       })
     });
     expect(ordered.map((candidate) => candidate.entry.object_id)).toEqual([
-      "strong-gold",
-      "weak-novel"
+      "cohort-anchor",
+      "other-cohort",
+      "same-cohort"
     ]);
   });
 
@@ -190,7 +192,9 @@ describe("coverage-aware delivery", () => {
       "dup-b"
     ]);
     // Public relevance scalar remains the fused values passed as finalRelevance.
-    expect(result.candidates[0]?.score_factors.relevance).toBe(0.4);
+    expect(result.candidates[0]).toMatchObject({
+      score_factors: { relevance: 0.4 }
+    });
   });
 
   it("still deduplicates object_id across provenance projections", () => {

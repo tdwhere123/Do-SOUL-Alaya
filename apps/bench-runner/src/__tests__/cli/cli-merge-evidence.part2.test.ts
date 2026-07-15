@@ -11,6 +11,7 @@ import { loadEvidenceBundle } from "../../../scripts/longmemeval-replay/contract
 import {
   makeShardDiagnostics,
   makeShardKpi,
+  withEligibleMeasurementContract,
   writeShardRoot
 } from "./cli-merge-validations-fixture.js";
 import {
@@ -164,7 +165,7 @@ describe("merge-longmemeval evidence bundle", () => {
     expect(await runCli([
       "merge-longmemeval", "--variant", "s", "--history-root", history,
       "--shards", shard
-    ])).toBe(0);
+    ])).toBe(1);
 
     const archive = await archiveRoot(history);
     const manifestPath = path.join(archive, "longmemeval-evidence-manifest.json");
@@ -181,7 +182,12 @@ describe("merge-longmemeval evidence bundle", () => {
     });
     expect(ledger.question_count).toBe(2);
     expect(ledger.rows[1]).toMatchObject({ question_id: "q-failed", evidence_status: "missing" });
-    await expect(loadEvidenceBundle(manifestPath)).resolves.toMatchObject({
+    await expect(loadEvidenceBundle(manifestPath)).rejects.toThrow(
+      /legacy synthesized measurement evidence/u
+    );
+    await expect(loadEvidenceBundle(manifestPath, {
+      legacyDiagnostic: true
+    })).resolves.toMatchObject({
       cohort: { question_count: 2 }
     });
   });
@@ -191,19 +197,20 @@ describe("merge-longmemeval evidence bundle", () => {
     roots.push(root);
     const shard = path.join(root, "shard");
     const history = path.join(root, "history");
-    await writeShardRoot(shard, makeShardKpi({
+    await writeShardRoot(shard, withEligibleMeasurementContract(makeShardKpi({
       evaluated_count: 1,
       kpi: {
         ...makeShardKpi().kpi,
+        r_at_5: 1,
         per_scenario: [{ id: "q-unverified", version: 1, hit_at_5: true, tier: "warm" }]
       }
-    }), makeShardDiagnostics({ questions: [question("q-unverified")] }));
+    })), makeShardDiagnostics({ questions: [question("question-1")] }));
     await writeProvenance(shard, provenance(0, 1));
 
     expect(await runCli([
       "merge-longmemeval", "--variant", "s", "--history-root", history,
       "--shards", shard
-    ])).toBe(0);
+    ])).toBe(1);
 
     const archive = await archiveRoot(history);
     const kpi = JSON.parse(await readFile(path.join(archive, "kpi.json"), "utf8")) as {

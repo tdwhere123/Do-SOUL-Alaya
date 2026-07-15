@@ -6,6 +6,7 @@ import {
 } from "../../../longmemeval/provenance/effective-recall-config.js";
 import { prepareRecallEvalRunContext } from "../../../longmemeval/lifecycle/recall-eval-run-context.js";
 import { resolveBenchRecallWeightOverrides } from "../../../harness/recall-weight-overrides.js";
+import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon-recall-result.js";
 
 describe("effective recall config identity", () => {
   it("parses recall-eval max results strictly", () => {
@@ -41,6 +42,24 @@ describe("effective recall config identity", () => {
     expect(runtimeDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(requestDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(adapterDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
+  });
+
+  it("binds the policy-derived fine-evaluation budget into provenance", () => {
+    const tenResultPolicy = buildBenchDiagnosticRecallPolicy("surface", 10, true);
+    const twentyResultPolicy = buildBenchDiagnosticRecallPolicy("surface", 20, true);
+    const tenResultIdentity = buildEffectiveRecallConfigIdentity({}, {
+      maxResults: 10,
+      conflictAwareness: true
+    });
+    const twentyResultIdentity = buildEffectiveRecallConfigIdentity({}, {
+      maxResults: 20,
+      conflictAwareness: true
+    });
+
+    expect(tenResultPolicy.fine_assessment.max_candidates).toBe(200);
+    expect(twentyResultPolicy.fine_assessment.max_candidates).toBe(400);
+    expect(twentyResultIdentity.effective_config_sha256)
+      .not.toBe(tenResultIdentity.effective_config_sha256);
   });
 
   it.each([
@@ -101,7 +120,7 @@ describe("effective recall config identity", () => {
   it("rejects legacy policy knobs at the recall-eval entry before reading inputs", async () => {
     await expect(prepareRecallEvalRunContext({
       snapshotDbPath: "/missing/snapshot.db",
-      variant: "oracle",
+      variant: "longmemeval_oracle",
       historyRoot: "/missing/history"
     }, undefined, {
       ALAYA_BENCH_EMBEDDING_INJECTION_CAP: ""

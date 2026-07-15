@@ -11,28 +11,40 @@ import { MaterializationRouter } from "@do-soul/alaya-soul";
 import type { SqliteHandoffGapAdapter } from "../handoff/gap-adapter.js";
 import type { PathRelationProposalPort } from "./recall-materialization-path-relation.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
+import { createSourceGroundingDeferTransitions } from "./source-grounding-defer/transitions.js";
 
-export function createSignalMaterializationRuntime(input: {
+type SignalMaterializationRuntimeInput = Readonly<{
   readonly wiring: CreateRecallMaterializationWiringInput;
   readonly pathRelationProposalPort: PathRelationProposalPort;
   readonly pathCandidateSinkPort: PathCandidateSink;
   readonly conflictDetectionService: ConflictDetectionService | null;
   readonly reconciliationService: ReconciliationService | null;
   readonly handoffGapHandler: SqliteHandoffGapAdapter;
-}): Readonly<{
+}>;
+
+export function createSignalMaterializationRuntime(
+  input: SignalMaterializationRuntimeInput
+): Readonly<{
   readonly materializationRouter: MaterializationRouter;
   readonly signalService: SignalService;
 }> {
-  const { wiring } = input;
+  const materializationRouter = createMaterializationRouter(input);
+  const signalService = createMaterializationSignalService(input.wiring, materializationRouter);
+  return Object.freeze({ materializationRouter, signalService });
+}
+
+function createMaterializationRouter(
+  input: SignalMaterializationRuntimeInput
+): MaterializationRouter {
   const routerOptions = readMaterializationRouterOptions();
-  const materializationRouter = new MaterializationRouter({
-    evidenceService: wiring.evidenceService,
-    memoryService: createMaterializationMemoryService(wiring),
-    synthesisService: wiring.synthesisService as SynthesisService,
-    claimService: wiring.claimService as ClaimService,
+  return new MaterializationRouter({
+    evidenceService: input.wiring.evidenceService,
+    memoryService: createMaterializationMemoryService(input.wiring),
+    synthesisService: input.wiring.synthesisService as SynthesisService,
+    claimService: input.wiring.claimService as ClaimService,
     pathRelationProposalPort: input.pathRelationProposalPort,
     pathCandidateSinkPort: input.pathCandidateSinkPort,
-    enrichPendingPort: { enqueue: wiring.enqueueEnrichPending },
+    enrichPendingPort: { enqueue: input.wiring.enqueueEnrichPending },
     ...(input.conflictDetectionService === null
       ? {}
       : { conflictDetectionPort: input.conflictDetectionService }),
@@ -48,18 +60,27 @@ export function createSignalMaterializationRuntime(input: {
       ? {}
       : { materializationConfidenceFloor: routerOptions.materializationConfidenceFloor })
   });
-  const signalService = new SignalService({
+}
+
+function createMaterializationSignalService(
+  wiring: CreateRecallMaterializationWiringInput,
+  materializationRouter: MaterializationRouter
+): SignalService {
+  return new SignalService({
     eventLogRepo: wiring.eventLogRepo,
     signalRepo: wiring.signalRepo,
     runtimeNotifier: wiring.runtimeNotifier,
     sourceGroundingDeferQueue: wiring.sourceGroundingDeferQueueRepo,
+    sourceGroundingDeferTransitions: createSourceGroundingDeferTransitions({
+      eventLogRepo: wiring.eventLogRepo,
+      signalRepo: wiring.signalRepo,
+      queueRepo: wiring.sourceGroundingDeferQueueRepo
+    }),
     postTriageMaterializer: {
       materialize: async (signal: CandidateMemorySignal) =>
         await materializationRouter.materializeSignal(signal)
     }
   });
-
-  return Object.freeze({ materializationRouter, signalService });
 }
 
 function createMaterializationMemoryService(
