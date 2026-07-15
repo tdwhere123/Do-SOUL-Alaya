@@ -13,7 +13,6 @@ import {
   createCachingSignalExtractor,
   createCompileSeedRunner,
   createGardenHttpExtractor,
-  extractContentFromChatCompletionBody,
   resolveCompileSeedExtractionConfig,
   toSeedExtractionPathKpi,
   type BenchSignalExtractor,
@@ -143,41 +142,31 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     ).rejects.toThrow(/garden extraction returned unparseable content/i);
   });
 
-  it("skips a malformed mid-stream chunk but keeps surrounding content", async () => {
-    // Partial keep-alive noise must not throw; a defensively-skipped bad frame
-    // still yields the real content from the good frames.
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      makeSseResponse(
-        ": keep-alive ping\n\n" +
-          'data: {"choices":[{"delta":{"content":"{\\"signals"}}]}\n\n' +
-          "data: {not valid json\n\n" +
-          'data: {"choices":[{"delta":{"content":"\\":[]}"}}]}\n\n' +
-          "data: [DONE]\n\n"
-      )
-    );
+  it("rejects a malformed data frame after a schema-valid prefix", async () => {
+    const body =
+      'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+      "data: {not valid json\n\n" +
+      "data: [DONE]\n\n";
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => makeSseResponse(body));
     const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
       fetch: fetchMock,
       sleep: vi.fn(async () => undefined),
       random: () => 0
     });
-    const result = await extractor.extract({
-      systemPrompt: "s",
-      userPrompt: "t"
-    });
-    expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
+    await expect(
+      extractor.extract({ systemPrompt: "s", userPrompt: "t" })
+    ).rejects.toThrow(/chunk is not valid JSON/i);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("throws on a truncated SSE stream (non-empty but unparseable) so it is never cached", async () => {
     // B1 regression: a provider/proxy delivers a PARTIAL SSE body then cleanly
     // closes the socket -> `response.text()` RESOLVES with partial bytes (no
-    // stall, so the wall-clock backstop does NOT fire). The SSE parser keeps
-    // the valid early delta and silently skips the truncated final frame,
-    // accumulating `{"signals":[{"a"` — non-empty (passes the empty-content
-    // guard) but unparseable. Pre-fix this returned success and the poison
-    // shard was written to cache as a permanent 0-seed "success". The validity
-    // gate (parseOfficialApiSignals, the same downstream consumer) must THROW
-    // so the attempt routes to retry then a content/invalid terminal failure —
-    // the extractor throws, so createCachingSignalExtractor never writes it.
+    // stall, so the wall-clock backstop does NOT fire). The malformed data
+    // frame must fail before any valid prefix can be mistaken for a complete
+    // response and written to the cache.
     // A fresh Response per call: a content error has no HTTP status so the
     // retry loop treats it as unknown-transport and retries; each attempt
     // reads a fresh (unconsumed) body.
@@ -204,7 +193,7 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect(result).toBeNull();
     expect(thrown).toBeInstanceOf(Error);
     expect((thrown as Error).message).toContain(
-      "garden extraction returned unparseable content"
+      "garden extraction chat completion chunk is not valid JSON"
     );
     // Terminal classification is a retryable content failure that exhausts
     // retries (mirrors the no-content style), NOT a hang or silent success.
@@ -323,72 +312,6 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect(benchRetry?.retryClassification).toBe("failure_timeout");
     // 2 = first attempt + 1 timeout retry; each settles via the backstop.
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-// invariant: the SSE-or-JSON content extraction is a pure helper so it is unit
-// testable without a live fetch. Same parse the transport uses; covers the
-// shapes the integration tests above exercise plus edge framing.
-describe("extractContentFromChatCompletionBody", () => {
-  it("concatenates delta content across data: frames up to [DONE]", () => {
-    const body =
-      'data: {"choices":[{"delta":{"content":"ab"}}]}\n\n' +
-      'data: {"choices":[{"delta":{"content":"cd"}}]}\n\n' +
-      "data: [DONE]\n\n";
-    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
-      "abcd"
-    );
-  });
-
-  it("detects SSE by leading data: even without an event-stream content-type", () => {
-    const body = 'data: {"choices":[{"delta":{"content":"x"}}]}\n\ndata: [DONE]\n\n';
-    expect(extractContentFromChatCompletionBody(body, null)).toBe("x");
-  });
-
-  it("returns empty string for a [DONE]-only stream", () => {
-    expect(
-      extractContentFromChatCompletionBody("data: [DONE]\n\n", "text/event-stream")
-    ).toBe("");
-  });
-
-  it("ignores blank lines and comment lines", () => {
-    const body =
-      ": ping\n\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n";
-    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
-      "ok"
-    );
-  });
-
-  it("reads message.content from a compliant plain-JSON body", () => {
-    const body = JSON.stringify({
-      choices: [{ message: { content: "json-content" } }]
-    });
-    expect(extractContentFromChatCompletionBody(body, "application/json")).toBe(
-      "json-content"
-    );
-  });
-
-  it("skips a malformed chunk without throwing", () => {
-    const body =
-      "data: {bad\n\n" +
-      'data: {"choices":[{"delta":{"content":"good"}}]}\n\n' +
-      "data: [DONE]\n\n";
-    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
-      "good"
-    );
-  });
-
-  it("N1: takes content ONCE when a frame carries both delta.content and message.content", () => {
-    // A provider that echoes the running message.content alongside each delta
-    // would double-count if both branches appended. The message.content branch
-    // is an `else if` of the delta branch, so delta wins and content is taken
-    // once — not "xx".
-    const body =
-      'data: {"choices":[{"delta":{"content":"x"},"message":{"content":"x"}}]}\n\n' +
-      "data: [DONE]\n\n";
-    expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
-      "x"
-    );
   });
 });
 

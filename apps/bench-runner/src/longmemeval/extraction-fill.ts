@@ -84,6 +84,8 @@ export interface ExtractionFillOptions {
   ) => BenchSignalExtractor;
   /** Progress sink (default: stderr). */
   readonly log?: (message: string) => void;
+  /** Stops new work and aborts in-flight provider requests. */
+  readonly signal?: AbortSignal;
 }
 
 export interface ExtractionFillResult extends FillRetryTelemetry {
@@ -228,6 +230,7 @@ async function runLockedExtractionFill(
     log,
     writeLease
   );
+  options.signal?.throwIfAborted();
   return finishExtractionFill(
     prepared, cacheRoot, failures, stats, log, writeLease
   );
@@ -385,7 +388,8 @@ async function executeExtractionFill(
     concurrency,
     requestedTurns: prepared.requestedTurns,
     stats,
-    log
+    log,
+    signal: options.signal
   });
 }
 
@@ -456,6 +460,7 @@ async function runExtractionPool(input: {
   readonly requestedTurns: number;
   readonly stats: CompileSeedExtractionStats;
   readonly log: (message: string) => void;
+  readonly signal?: AbortSignal;
 }): Promise<number> {
   const { extractor, stats, requestedTurns, log } = input;
   let failures = 0;
@@ -463,23 +468,25 @@ async function runExtractionPool(input: {
   const progressEvery = Math.max(1, Math.floor(requestedTurns / 20));
 
   await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
+    input.signal?.throwIfAborted();
     try {
       await extractor.extract({
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-        userPrompt: buildFillUserPrompt(turnContent)
+        userPrompt: buildFillUserPrompt(turnContent),
+        abortSignal: input.signal
       });
     } catch (cause) {
+      input.signal?.throwIfAborted();
       if (cause instanceof ExtractionCacheInvariantError) throw cause;
       failures++;
-    } finally {
-      processed++;
-      if (processed % progressEvery === 0 || processed === requestedTurns) {
-        log(
-          `[extraction-fill] ${processed}/${requestedTurns} ` +
-            `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
-            `failures=${failures}`
-        );
-      }
+    }
+    processed++;
+    if (processed % progressEvery === 0 || processed === requestedTurns) {
+      log(
+        `[extraction-fill] ${processed}/${requestedTurns} ` +
+          `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
+          `failures=${failures}`
+      );
     }
   });
   return failures;

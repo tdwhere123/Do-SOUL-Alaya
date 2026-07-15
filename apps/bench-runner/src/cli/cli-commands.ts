@@ -22,6 +22,11 @@ import {
 } from "../longmemeval/qa-chat.js";
 import { runExtractionFill } from "../longmemeval/extraction-fill.js";
 import {
+  ExtractionFillInterruptedError,
+  withExtractionFillSignalScope,
+  type ExtractionFillSignalSource
+} from "./extraction-fill/signal-scope.js";
+import {
   seedExtractionReleaseBlockerExitCode
 } from "../longmemeval/seed-extraction-release-blocker.js";
 import { runSelfBench } from "../self/runner.js";
@@ -438,7 +443,13 @@ function isLongMemEvalSplit(split: KpiPayload["split"]): boolean {
  * Fills the extraction cache + writes the cache manifest (incl. coverage).
  * see also: apps/bench-runner/src/longmemeval/extraction-fill.ts
  */
-export async function runExtractionFillCommand(opts: ParsedFlags): Promise<number> {
+export async function runExtractionFillCommand(
+  opts: ParsedFlags,
+  deps: {
+    readonly runExtractionFill: typeof runExtractionFill;
+    readonly signalSource: ExtractionFillSignalSource;
+  } = { runExtractionFill, signalSource: process }
+): Promise<number> {
   try {
     process.stdout.write(
       `Filling extraction cache for ${opts.variant}` +
@@ -447,13 +458,17 @@ export async function runExtractionFillCommand(opts: ParsedFlags): Promise<numbe
         (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
         "...\n"
     );
-    const result = await runExtractionFill({
-      variant: opts.variant,
-      ...(opts.limit === undefined ? {} : { limit: opts.limit }),
-      ...(opts.offset === undefined ? {} : { offset: opts.offset }),
-      ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
-      ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir })
-    });
+    const result = await withExtractionFillSignalScope(
+      deps.signalSource,
+      (signal) => deps.runExtractionFill({
+        variant: opts.variant,
+        ...(opts.limit === undefined ? {} : { limit: opts.limit }),
+        ...(opts.offset === undefined ? {} : { offset: opts.offset }),
+        ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+        ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
+        signal
+      })
+    );
     process.stdout.write(
       `Done. requested_turns=${result.requestedTurns} ` +
         `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
@@ -466,6 +481,7 @@ export async function runExtractionFillCommand(opts: ParsedFlags): Promise<numbe
     );
     return result.failures > 0 ? 1 : 0;
   } catch (err) {
+    if (err instanceof ExtractionFillInterruptedError) return err.exitCode;
     process.stderr.write(
       `alaya-bench-runner extraction-fill: ${err instanceof Error ? err.message : String(err)}\n`
     );

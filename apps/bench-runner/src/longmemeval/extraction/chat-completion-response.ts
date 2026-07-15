@@ -2,8 +2,8 @@ import { z } from "zod";
 
 const ChatCompletionPayloadSchema = z.object({
   choices: z.array(z.object({
-    delta: z.object({ content: z.unknown() }).loose().optional(),
-    message: z.object({ content: z.unknown() }).loose().optional()
+    delta: z.object({ content: z.unknown().optional() }).loose().optional(),
+    message: z.object({ content: z.unknown().optional() }).loose().optional()
   }).loose()).optional()
 }).loose().readonly();
 
@@ -52,7 +52,6 @@ function readSseDataLine(rawLine: string): string | null {
 
 function extractContentFromSseChunk(chunkText: string): string {
   const chunk = tryParseChatCompletionSseChunk(chunkText);
-  if (chunk === null) return "";
   const choice = chunk.choices?.[0];
   const deltaContent = choice?.delta?.content;
   if (typeof deltaContent === "string") return deltaContent;
@@ -82,12 +81,14 @@ function parseChatCompletionPayload(
 
 function tryParseChatCompletionSseChunk(
   chunkText: string
-): z.infer<typeof ChatCompletionPayloadSchema> | null {
+): z.infer<typeof ChatCompletionPayloadSchema> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(chunkText);
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error("garden extraction chat completion chunk is not valid JSON", {
+      cause: error
+    });
   }
   const result = ChatCompletionPayloadSchema.safeParse(parsed);
   if (!result.success) {
