@@ -103,9 +103,7 @@ async function extractGardenHttpSignals(
   deps: GardenHttpExtractorDeps,
   input: GardenHttpExtractInput
 ): Promise<GardenHttpExtractResult> {
-  if (config.apiKey === null) {
-    throw new Error("garden API key is unavailable");
-  }
+  if (config.apiKey === null) throw new Error("garden API key is unavailable");
   const apiKey = config.apiKey;
   let attempt = 0;
   let timeoutRetries = 0;
@@ -113,6 +111,7 @@ async function extractGardenHttpSignals(
   let lastError: unknown = null;
   let lastClassification: BenchRetryClassification = "failure_max_retries";
   while (attempt <= BENCH_HTTP_MAX_RETRIES) {
+    throwIfGardenHttpAborted(input, attempt, rateLimitRetries);
     try {
       const rawJson = await runGardenHttpAttempt(
         config,
@@ -136,7 +135,7 @@ async function extractGardenHttpSignals(
         );
       }
       timeoutRetries = decision.timeoutRetries;
-      await deps.sleep(computeBenchJitterMs(attempt, deps.random));
+      await waitForGardenHttpRetry(deps, input, attempt, rateLimitRetries);
       attempt += 1;
     }
   }
@@ -146,6 +145,63 @@ async function extractGardenHttpSignals(
     attempt,
     rateLimitRetries
   );
+}
+
+function throwIfGardenHttpAborted(
+  input: GardenHttpExtractInput,
+  attempt: number,
+  rateLimitRetries: number
+): void {
+  if (input.abortSignal?.aborted !== true) return;
+  throw wrapBenchTransportError(
+    input.abortSignal.reason ?? new Error("garden extraction operator aborted"),
+    "failure_aborted",
+    attempt,
+    rateLimitRetries
+  );
+}
+
+async function waitForGardenHttpRetry(
+  deps: GardenHttpExtractorDeps,
+  input: GardenHttpExtractInput,
+  attempt: number,
+  rateLimitRetries: number
+): Promise<void> {
+  const completed = await waitForRetryDelay(
+    deps.sleep(computeBenchJitterMs(attempt, deps.random)),
+    input.abortSignal
+  );
+  if (!completed) throwIfGardenHttpAborted(input, attempt, rateLimitRetries);
+}
+
+async function waitForRetryDelay(
+  delay: Promise<void>,
+  signal: AbortSignal | undefined
+): Promise<boolean> {
+  if (signal === undefined) {
+    await delay;
+    return true;
+  }
+  if (signal.aborted) return false;
+  return new Promise<boolean>((resolve, reject) => {
+    let settled = false;
+    const finish = (completed: boolean): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      resolve(completed);
+    };
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      reject(error);
+    };
+    const onAbort = (): void => finish(false);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    delay.then(() => finish(true), fail);
+  });
 }
 
 async function runGardenHttpAttempt(

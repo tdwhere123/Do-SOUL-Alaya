@@ -154,46 +154,16 @@ export class EmbeddingRecallService {
     readonly baseCandidateCount: number;
   }): Promise<PreparedEmbeddingSupplement> {
     if (params.eligibleMemories.length === 0) {
-      return Object.freeze({
-        preparedQuery: null,
-        storedVectors: Object.freeze([]),
-        degradedReason: null
-      });
+      return this.emptyPreparedSupplement(null);
     }
 
-    let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
-    try {
-      storedVectors = await this.dependencies.embeddingRepo.listByObjectIds(
-        params.workspaceId,
-        params.eligibleMemories.map((memory) => memory.object_id)
-      );
-    } catch (error) {
-      this.warn("embedding supplement precheck failed", {
-        workspace_id: params.workspaceId,
-        reason: "local_vector_lookup_failed",
-        error: toErrorMessage(error)
-      });
-      await this.telemetry.recordDegraded({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        queryId: this.generateQueryId(),
-        reason: "local_vector_lookup_failed",
-        baseCandidateCount: params.baseCandidateCount,
-        fallbackCandidateCount: params.baseCandidateCount
-      });
-      return Object.freeze({
-        preparedQuery: null,
-        storedVectors: Object.freeze([]),
-        degradedReason: "local_vector_lookup_failed"
-      });
+    const storedVectors = await this.loadStoredVectors({ ...params, precheck: true });
+    if (storedVectors === null) {
+      return this.emptyPreparedSupplement("local_vector_lookup_failed");
     }
 
     if (storedVectors.length === 0) {
-      return Object.freeze({
-        preparedQuery: null,
-        storedVectors: Object.freeze([]),
-        degradedReason: null
-      });
+      return this.emptyPreparedSupplement(null);
     }
 
     return Object.freeze({
@@ -238,7 +208,8 @@ export class EmbeddingRecallService {
   }
 
   // cosine(query, stored-vector) for already-pooled candidates (inverse of injection,
-  // which excludes them). Provider-matched per (kind, model, schema); returns sim>0 only.
+  // which excludes them). Provider-matched per (kind, model, schema); finite
+  // non-positive similarities remain observed zero while missing/invalid vectors stay absent.
   public async scorePoolCandidates(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
@@ -286,14 +257,10 @@ export class EmbeddingRecallService {
 
     const queryId = this.generateQueryId();
     if (!this.dependencies.provider.isAvailable) {
-      await this.telemetry.recordDegraded({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        queryId,
-        reason: "provider_unavailable",
-        baseCandidateCount: params.baseCandidateIds.length,
-        fallbackCandidateCount: params.baseCandidateIds.length
-      });
+      await this.recordEmbeddingDegraded(
+        { ...params, queryId, baseCandidateCount: params.baseCandidateIds.length },
+        "provider_unavailable"
+      );
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
@@ -321,16 +288,7 @@ export class EmbeddingRecallService {
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
-    return await this.supplementBuilder.buildSupplementFromQueryEmbedding({
-      workspaceId: params.workspaceId,
-      runId: params.runId,
-      queryId,
-      queryEmbedding,
-      storedVectors,
-      eligibleMemories: params.eligibleMemories,
-      baseCandidateIds: params.baseCandidateIds,
-      maxSupplement: params.maxSupplement
-    });
+    return await this.buildSupplement(params, queryId, queryEmbedding, storedVectors);
   }
 
   public async querySupplementIfReady(params: {
@@ -360,53 +318,14 @@ export class EmbeddingRecallService {
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
-    const initialSnapshot = params.preparedQuery.getSnapshot();
-    const snapshot = initialSnapshot.status === "pending" && typeof params.preparedQuery.waitForSnapshot === "function"
-      ? await params.preparedQuery.waitForSnapshot(this.queryTimeoutMs)
-      : initialSnapshot;
-    if (snapshot.status === "pending") {
-      await this.telemetry.recordDegraded({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        queryId: params.preparedQuery.queryId,
-        reason: "query_embedding_pending",
-        baseCandidateCount: params.baseCandidateIds.length,
-        fallbackCandidateCount: params.baseCandidateIds.length
-      });
+    const queryEmbedding = await this.resolvePreparedQueryEmbedding(params);
+    if (queryEmbedding === null) {
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
-    if (snapshot.status !== "ready") {
-      if (snapshot.status === "failed") {
-        this.warn("embedding supplement degraded", {
-          workspace_id: params.workspaceId,
-          run_id: params.runId,
-          reason: snapshot.reason,
-          error_name: snapshot.error_name,
-          error: snapshot.error_message ?? snapshot.reason
-        });
-      }
-      await this.telemetry.recordDegraded({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        queryId: params.preparedQuery.queryId,
-        reason: snapshot.reason,
-        baseCandidateCount: params.baseCandidateIds.length,
-        fallbackCandidateCount: params.baseCandidateIds.length
-      });
-      return EMPTY_SUPPLEMENT_RESULT;
-    }
-
-    return await this.supplementBuilder.buildSupplementFromQueryEmbedding({
-      workspaceId: params.workspaceId,
-      runId: params.runId,
-      queryId: params.preparedQuery.queryId,
-      queryEmbedding: snapshot.embedding,
-      storedVectors,
-      eligibleMemories: params.eligibleMemories,
-      baseCandidateIds: params.baseCandidateIds,
-      maxSupplement: params.maxSupplement
-    });
+    return await this.buildSupplement(
+      params, params.preparedQuery.queryId, queryEmbedding, storedVectors
+    );
   }
 
   public async collectWorkspaceNeighbors(params: {
@@ -429,12 +348,84 @@ export class EmbeddingRecallService {
     return this.workspaceScanner.collectWorkspaceNeighborsWithMetadata(params);
   }
 
+  private emptyPreparedSupplement(degradedReason: string | null): PreparedEmbeddingSupplement {
+    return Object.freeze({
+      preparedQuery: null,
+      storedVectors: Object.freeze([]),
+      degradedReason
+    });
+  }
+
+  private async resolvePreparedQueryEmbedding(
+    params: PreparedQuerySupplementParams
+  ): Promise<Float32Array | null> {
+    const initialSnapshot = params.preparedQuery.getSnapshot();
+    const snapshot = initialSnapshot.status === "pending" &&
+      typeof params.preparedQuery.waitForSnapshot === "function"
+      ? await params.preparedQuery.waitForSnapshot(this.queryTimeoutMs)
+      : initialSnapshot;
+    if (snapshot.status === "ready") {
+      return snapshot.embedding;
+    }
+
+    if (snapshot.status === "failed") {
+      this.warn("embedding supplement degraded", {
+        workspace_id: params.workspaceId,
+        run_id: params.runId,
+        reason: snapshot.reason,
+        error_name: snapshot.error_name,
+        error: snapshot.error_message ?? snapshot.reason
+      });
+    }
+    const reason = snapshot.status === "pending" ? "query_embedding_pending" : snapshot.reason;
+    const degradation = {
+      ...params,
+      queryId: params.preparedQuery.queryId,
+      baseCandidateCount: params.baseCandidateIds.length
+    };
+    await this.recordEmbeddingDegraded(degradation, reason);
+    return null;
+  }
+
+  private buildSupplement(
+    params: SupplementBuildParams,
+    queryId: string,
+    queryEmbedding: Float32Array,
+    storedVectors: readonly Readonly<EmbeddingVectorRecord>[]
+  ): Promise<EmbeddingRecallSupplementResult> {
+    return this.supplementBuilder.buildSupplementFromQueryEmbedding({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId,
+      queryEmbedding,
+      storedVectors,
+      eligibleMemories: params.eligibleMemories,
+      baseCandidateIds: params.baseCandidateIds,
+      maxSupplement: params.maxSupplement
+    });
+  }
+
+  private recordEmbeddingDegraded(
+    params: EmbeddingDegradationContext,
+    reason: string
+  ): Promise<void> {
+    return this.telemetry.recordDegraded({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryId: params.queryId,
+      reason,
+      baseCandidateCount: params.baseCandidateCount,
+      fallbackCandidateCount: params.baseCandidateCount
+    });
+  }
+
   private async loadStoredVectors(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
-    readonly queryId: string;
+    readonly queryId?: string;
     readonly eligibleMemories: readonly Readonly<MemoryEntry>[];
     readonly baseCandidateCount: number;
+    readonly precheck?: boolean;
   }): Promise<readonly Readonly<EmbeddingVectorRecord>[] | null> {
     try {
       return await this.dependencies.embeddingRepo.listByObjectIds(
@@ -443,20 +434,20 @@ export class EmbeddingRecallService {
       );
     } catch (error) {
       const message = toErrorMessage(error);
-      this.warn("embedding supplement degraded", {
+      const warning = params.precheck
+        ? "embedding supplement precheck failed"
+        : "embedding supplement degraded";
+      this.warn(warning, {
         workspace_id: params.workspaceId,
-        run_id: params.runId,
+        ...(params.precheck ? {} : { run_id: params.runId }),
         reason: "local_vector_lookup_failed",
         error: message
       });
-      await this.telemetry.recordDegraded({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        queryId: params.queryId,
-        reason: "local_vector_lookup_failed",
-        baseCandidateCount: params.baseCandidateCount,
-        fallbackCandidateCount: params.baseCandidateCount
-      });
+      const degradation = {
+        ...params,
+        queryId: params.queryId ?? this.generateQueryId()
+      };
+      await this.recordEmbeddingDegraded(degradation, "local_vector_lookup_failed");
       return null;
     }
   }
@@ -478,15 +469,19 @@ export class EmbeddingRecallService {
         reason: "query_embedding_failed",
         error: message
       });
-      await this.telemetry.recordDegraded({
-        workspaceId: params.workspaceId,
-        runId: params.runId,
-        queryId: params.queryId,
-        reason: "query_embedding_failed",
-        baseCandidateCount: params.baseCandidateCount,
-        fallbackCandidateCount: params.baseCandidateCount
-      });
+      await this.recordEmbeddingDegraded(params, "query_embedding_failed");
       return null;
     }
   }
+}
+
+type PreparedQuerySupplementParams = Parameters<EmbeddingRecallService["querySupplementIfReady"]>[0];
+type QuerySupplementParams = Parameters<EmbeddingRecallService["querySupplement"]>[0];
+type SupplementBuildParams = QuerySupplementParams | PreparedQuerySupplementParams;
+
+interface EmbeddingDegradationContext {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryId: string;
+  readonly baseCandidateCount: number;
 }

@@ -1,13 +1,14 @@
 import { type GardenTaskDescriptor, type MemoryEntry } from "@do-soul/alaya-protocol";
 import { getCoreConfig } from "../config/install-core-config.js";
 import { toErrorMessage } from "../recall/runtime/recall-service-helpers.js";
+import { persistEmbeddedBackfillBatch } from "./backfill/persist-embedded-batch.js";
 import { resolveEmbedText } from "./embed-text-resolver.js";
+import { assertValidEmbeddingBatch } from "./helpers.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import {
   BACKFILL_ITEM_RETRY_ATTEMPTS,
   BACKFILL_ITEM_RETRY_DELAY_MS,
   BACKFILL_TIMEOUT_MS,
-  EmbeddingBackfillPartialFailureError,
   buildEmbeddingBackfillBatches,
   collectBackfillMemories,
   hashMemoryContent,
@@ -118,9 +119,17 @@ export class EmbeddingBackfillHandler {
     initialMemories: readonly MemoryEntry[]
   ): Promise<BackfillCandidateSelection> {
     const existingById = await this.findExistingBackfillMetadata(initialMemories);
+    const expectedDimensions = this.dependencies.expectedDimensions?.();
+    const mixedDimensions = this.hasMixedCurrentIdentityDimensions(existingById);
     const auditEntries: string[] = [];
     const memoriesToEmbed = initialMemories.flatMap((memory) =>
-      this.selectMemoryForEmbedding(memory, existingById, auditEntries)
+      this.selectMemoryForEmbedding(
+        memory,
+        existingById,
+        expectedDimensions,
+        mixedDimensions,
+        auditEntries
+      )
     );
 
     return { memoriesToEmbed, auditEntries };
@@ -138,12 +147,14 @@ export class EmbeddingBackfillHandler {
   private selectMemoryForEmbedding(
     memory: Readonly<MemoryEntry>,
     existingById: ReadonlyMap<string, Readonly<EmbeddingBackfillMetadata>>,
+    expectedDimensions: number | null | undefined,
+    mixedDimensions: boolean,
     auditEntries: string[]
   ): readonly EmbeddingBackfillCandidate[] {
     const contentHash = hashMemoryContent(memory.content);
     const existing = existingById.get(memory.object_id) ?? null;
 
-    if (this.isEmbeddingMetadataFresh(existing, contentHash)) {
+    if (this.isEmbeddingMetadataFresh(existing, contentHash, expectedDimensions, mixedDimensions)) {
       auditEntries.push(`embedding_skipped:unchanged:${memory.object_id}`);
       return Object.freeze([]);
     }
@@ -153,15 +164,38 @@ export class EmbeddingBackfillHandler {
 
   private isEmbeddingMetadataFresh(
     existing: Readonly<EmbeddingBackfillMetadata> | null,
-    contentHash: string
+    contentHash: string,
+    expectedDimensions: number | null | undefined,
+    mixedDimensions: boolean
   ): boolean {
     return (
       existing !== null &&
+      !mixedDimensions &&
+      existing.vector_valid &&
       existing.content_hash === contentHash &&
       existing.provider_kind === this.dependencies.provider.providerKind &&
       existing.model_id === this.dependencies.provider.modelId &&
-      existing.schema_version === this.dependencies.provider.schemaVersion
+      existing.schema_version === this.dependencies.provider.schemaVersion &&
+      (expectedDimensions === undefined ||
+        (expectedDimensions !== null && existing.dimensions === expectedDimensions))
     );
+  }
+
+  private hasMixedCurrentIdentityDimensions(
+    existingById: ReadonlyMap<string, Readonly<EmbeddingBackfillMetadata>>
+  ): boolean {
+    const dimensions = new Set<number>();
+    for (const existing of existingById.values()) {
+      if (!existing.vector_valid ||
+          existing.provider_kind !== this.dependencies.provider.providerKind ||
+          existing.model_id !== this.dependencies.provider.modelId ||
+          existing.schema_version !== this.dependencies.provider.schemaVersion) {
+        continue;
+      }
+      dimensions.add(existing.dimensions);
+      if (dimensions.size > 1) return true;
+    }
+    return false;
   }
 
   private async drainBackfillBatches(
@@ -217,70 +251,16 @@ export class EmbeddingBackfillHandler {
     objectsAffected: string[],
     auditEntries: string[]
   ): Promise<void> {
-    auditEntries.push(...result.auditFragments);
-    for (const { entry, embedding } of result.embedded) {
-      const latestMemory = snapshotMemories.get(entry.memory.object_id);
-      const latestHash = latestMemory === undefined ? null : hashMemoryContent(latestMemory.content);
-
-      if (latestMemory === undefined || latestHash !== entry.contentHash) {
-        auditEntries.push(`embedding_skipped:stale_content:${entry.memory.object_id}`);
-        continue;
-      }
-
-      const vector = new Float32Array(embedding);
-      try {
-        const persisted =
-          this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory === undefined
-            ? await this.dependencies.memoryEmbeddingRepo.upsert({
-                object_id: latestMemory.object_id,
-                workspace_id: latestMemory.workspace_id,
-                content_hash: entry.contentHash,
-                provider_kind: this.dependencies.provider.providerKind,
-                model_id: this.dependencies.provider.modelId,
-                schema_version: this.dependencies.provider.schemaVersion,
-                dimensions: vector.length,
-                embedding: vector,
-                created_at: entry.existing?.created_at ?? this.now(),
-                updated_at: this.now()
-              })
-            : await this.dependencies.memoryEmbeddingRepo.upsertIfContentHashMatchesCurrentMemory({
-                object_id: latestMemory.object_id,
-                workspace_id: latestMemory.workspace_id,
-                content_hash: entry.contentHash,
-                provider_kind: this.dependencies.provider.providerKind,
-                model_id: this.dependencies.provider.modelId,
-                schema_version: this.dependencies.provider.schemaVersion,
-                dimensions: vector.length,
-                embedding: vector,
-                created_at: entry.existing?.created_at ?? this.now(),
-                updated_at: this.now()
-              });
-
-        if (persisted === null) {
-          auditEntries.push(`embedding_skipped:stale_content:${entry.memory.object_id}`);
-          continue;
-        }
-
-        objectsAffected.push(latestMemory.object_id);
-        auditEntries.push(`embedding_upserted:${latestMemory.object_id}`);
-      } catch (error) {
-        const message = toErrorMessage(error);
-        auditEntries.push(`embedding_failed:persistence:${latestMemory.object_id}:${message}`);
-        this.warn("embedding backfill upsert failed", {
-          workspace_id: workspaceId,
-          object_id: latestMemory.object_id,
-          error: message
-        });
-        throw new EmbeddingBackfillPartialFailureError({
-          workspaceId,
-          failedObjectId: latestMemory.object_id,
-          message,
-          objectsAffected,
-          auditEntries,
-          cause: error
-        });
-      }
-    }
+    await persistEmbeddedBackfillBatch({
+      workspaceId,
+      result,
+      snapshotMemories,
+      objectsAffected,
+      auditEntries,
+      dependencies: this.dependencies,
+      now: this.now,
+      warn: this.warn
+    });
   }
 
   private async resolveBatchHqMap(
@@ -315,22 +295,7 @@ export class EmbeddingBackfillHandler {
       resolveEmbedText(entry.memory, hqByObjectId.get(entry.memory.object_id) ?? EMPTY_HQS)
     );
     try {
-      const embeddings = await this.dependencies.provider.embedTexts(texts, {
-        timeoutMs: BACKFILL_TIMEOUT_MS
-      });
-
-      if (embeddings.length !== batch.length) {
-        throw new Error(`Expected ${batch.length} embeddings but received ${embeddings.length}.`);
-      }
-
-      return Object.freeze(
-        batch.map((entry, index) =>
-          Object.freeze({
-            entry,
-            embedding: embeddings[index]!
-          })
-        )
-      );
+      return await this.embedBackfillBatch(batch, texts);
     } catch (error) {
       const message = toErrorMessage(error);
       const batchInputChars = texts.reduce((total, text) => total + text.length, 0);
@@ -368,6 +333,20 @@ export class EmbeddingBackfillHandler {
     }
   }
 
+  private async embedBackfillBatch(
+    batch: readonly EmbeddingBackfillCandidate[],
+    texts: readonly string[]
+  ): Promise<readonly EmbeddedBackfillCandidate[]> {
+    const embeddings = await this.dependencies.provider.embedTexts(texts, {
+      timeoutMs: BACKFILL_TIMEOUT_MS
+    });
+    assertValidEmbeddingBatch(embeddings, batch.length);
+    return Object.freeze(batch.map((entry, index) => Object.freeze({
+      entry,
+      embedding: embeddings[index]!
+    })));
+  }
+
   private async retrySingleItemEmbedding(
     workspaceId: string,
     entry: EmbeddingBackfillCandidate,
@@ -395,9 +374,7 @@ export class EmbeddingBackfillHandler {
         const embeddings = await this.dependencies.provider.embedTexts([entryText], {
           timeoutMs: BACKFILL_TIMEOUT_MS
         });
-        if (embeddings.length !== 1) {
-          throw new Error(`Expected 1 embedding but received ${embeddings.length}.`);
-        }
+        assertValidEmbeddingBatch(embeddings, 1);
         return Object.freeze({
           embedding: Object.freeze({
             entry,

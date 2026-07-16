@@ -6,15 +6,48 @@ const NonEmptyStringSchema = z.string().min(1).refine(
   (value) => value.trim() === value,
   "must not contain surrounding whitespace"
 );
+const CountSchema = z.number().int().nonnegative();
+const SourceRoundSchema = z.object({
+  sessionIndex: CountSchema,
+  roundIndex: CountSchema,
+  sessionId: NonEmptyStringSchema,
+  hasAnswer: z.boolean()
+}).strict();
 const SidecarEntrySchema = z.object({
   objectId: NonEmptyStringSchema,
   objectKind: z.enum(["memory_entry", "synthesis_capsule"]),
   sessionId: NonEmptyStringSchema,
-  hasAnswer: z.boolean()
+  hasAnswer: z.boolean(),
+  sourceRounds: z.array(SourceRoundSchema).optional()
 }).strict();
 const SeedDropReasonsSchema = z.object({
   candidate_absent: z.number().int().nonnegative(),
   materialization_drop: z.number().int().nonnegative()
+}).strict();
+const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
+const SeedBindingSchema = z.object({
+  objectId: NonEmptyStringSchema,
+  signalId: NonEmptyStringSchema,
+  evidenceId: NonEmptyStringSchema.nullable()
+}).strict();
+const SeedRoundSchema = z.object({
+  sessionIndex: CountSchema,
+  roundIndex: CountSchema,
+  sessionId: NonEmptyStringSchema,
+  contentSha256: Sha256Schema,
+  hasAnswer: z.boolean(),
+  extractionSource: z.enum(["cache", "live", "fallback"]),
+  cacheKey: Sha256Schema.nullable(),
+  rawJsonSha256: Sha256Schema.nullable(),
+  rawSignalCount: CountSchema.nullable(),
+  draftCount: CountSchema.nullable(),
+  factsProduced: CountSchema,
+  parseDropped: CountSchema,
+  compileOverflowDropped: CountSchema,
+  candidateAbsent: CountSchema,
+  materializationDrop: CountSchema,
+  memoryObjectIds: z.array(NonEmptyStringSchema),
+  memoryBindings: z.array(SeedBindingSchema).optional()
 }).strict();
 const SnapshotQuestionSchema = z.object({
   questionId: NonEmptyStringSchema,
@@ -22,6 +55,7 @@ const SnapshotQuestionSchema = z.object({
   questionDate: NonEmptyStringSchema,
   answerSessionIds: z.array(NonEmptyStringSchema),
   sidecar: z.array(SidecarEntrySchema),
+  seedRounds: z.array(SeedRoundSchema).optional(),
   workspaceId: NonEmptyStringSchema,
   runId: NonEmptyStringSchema,
   answerSeedDropReasons: SeedDropReasonsSchema.optional()

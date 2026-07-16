@@ -49,6 +49,16 @@ describe("memory embedding mappers", () => {
     }
   );
 
+  it("rejects zero-norm vectors at the storage write and read boundaries", () => {
+    const zero = new Float32Array([0, 0, 0]);
+    expect(() => parseMemoryEmbeddingRecord({
+      ...createRecord(),
+      embedding: zero
+    })).toThrow(expect.objectContaining({ code: "VALIDATION_FAILED" }));
+    expect(() => parseMemoryEmbeddingRow(createRow(zero)))
+      .toThrow(expect.objectContaining({ code: "VALIDATION_FAILED" }));
+  });
+
   it("rejects persisted vectors whose bytes do not match the declared dimensions", () => {
     expect(() => parseMemoryEmbeddingRow({
       ...createRow(new Float32Array([0.25, -0.5])),

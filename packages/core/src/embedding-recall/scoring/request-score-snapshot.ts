@@ -3,7 +3,9 @@ import {
   clamp01,
   createCosineBatchScorer,
   hashMemoryContent,
+  isFiniteNonzeroVector,
   isProviderMatchedEmbedding,
+  isUsableEmbeddingRecordVector,
   toErrorMessage
 } from "../helpers.js";
 import type { QueryEmbeddingEngine } from "../query-embedding-engine.js";
@@ -191,12 +193,18 @@ export class RequestScoreSnapshotBuilder {
     queryEmbedding: Float32Array
   ): ScoredLedger {
     const startedAtEpochMs = this.deps.nowEpochMs();
+    if (!isFiniteNonzeroVector(queryEmbedding)) {
+      return Object.freeze({
+        ...emptyScoredLedger(),
+        scoringLatencyMs: elapsedMs(this.deps.nowEpochMs(), startedAtEpochMs)
+      });
+    }
     const poolMemories = new Map(params.poolMemories.map((memory) => [memory.object_id, memory] as const));
     const poolScores: Record<string, number> = {};
     const neighbors: EmbeddingNeighborHit[] = [];
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
     for (const record of ledger.values()) {
-      if (record.dimensions !== record.embedding.length || record.dimensions !== queryEmbedding.length) {
+      if (!isUsableEmbeddingRecordVector(record, queryEmbedding.length)) {
         continue;
       }
       const poolMemory = poolMemories.get(record.object_id);
@@ -207,12 +215,9 @@ export class RequestScoreSnapshotBuilder {
         continue;
       }
       const similarity = clamp01(scoreCosine(record.embedding));
-      if (similarity <= 0) {
-        continue;
-      }
       if (poolMemory !== undefined) {
         poolScores[record.object_id] = similarity;
-      } else if (workspaceObjectIds.has(record.object_id)) {
+      } else if (similarity > 0 && workspaceObjectIds.has(record.object_id)) {
         neighbors.push(Object.freeze({
           object_id: record.object_id,
           normalized_similarity: similarity,

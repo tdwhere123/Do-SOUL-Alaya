@@ -177,6 +177,8 @@ function buildRecallMaterializationWiringResult(
     globalMemoryRecallInvalidationSubscription:
       globalMemoryRuntime.globalMemoryRecallInvalidationSubscription,
     embeddingStatusService: recallReadRuntime.embeddingRuntime.embeddingStatusService,
+    embeddingProviderWarmup: recallReadRuntime.embeddingRuntime.providerWarmup,
+    getEmbeddingProviderDimensions: recallReadRuntime.embeddingRuntime.getProviderDimensions,
     embeddingRecallService: recallReadRuntime.embeddingRuntime.embeddingRecallService,
     embeddingBackfillHandler: recallReadRuntime.embeddingRuntime.embeddingBackfillHandler,
     embeddingDefaultPolicyDecorator: recallReadRuntime.embeddingRuntime.defaultPolicyDecorator,

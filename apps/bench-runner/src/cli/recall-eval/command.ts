@@ -5,7 +5,10 @@ import {
   type RecallEvalResult
 } from "../../longmemeval/recall-eval.js";
 import type { ParsedFlags } from "../cli-options.js";
-import { exitCodeForVerdicts, pct } from "../result-format.js";
+import { exitCodeForReleaseHardGates } from "../release-hard-gate-exit.js";
+import { pct } from "../result-format.js";
+import { verifyLongMemEvalExpansionContractInput } from
+  "../promotion/expansion-input.js";
 
 export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   if (opts.snapshot === undefined) {
@@ -14,10 +17,15 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   }
   try {
     assertLegacyFlags(opts);
+    const expansionCapability = opts.promotionContract === undefined
+      ? undefined
+      : await verifyLongMemEvalExpansionContractInput(opts.promotionContract);
     process.stdout.write(renderStart(opts));
-    const result = await runRecallEval(buildRecallEvalOptions(opts, opts.snapshot));
+    const result = await runRecallEval(buildRecallEvalOptions(
+      opts, opts.snapshot, expansionCapability
+    ));
     process.stdout.write(renderResult(result, opts.legacySnapshot));
-    return exitCodeForVerdicts(result.payload.diff_vs_previous?.verdict_per_kpi);
+    return exitCodeForReleaseHardGates(result.payload);
   } catch (error) {
     process.stderr.write(
       `alaya-bench-runner recall-eval: ${error instanceof Error ? error.message : String(error)}\n`
@@ -26,7 +34,13 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   }
 }
 
-export function buildRecallEvalOptions(opts: ParsedFlags, snapshot: string): RecallEvalOptions {
+export function buildRecallEvalOptions(
+  opts: ParsedFlags,
+  snapshot: string,
+  expansionCapability?: Awaited<ReturnType<
+    typeof verifyLongMemEvalExpansionContractInput
+  >>
+): RecallEvalOptions {
   return {
     snapshotDbPath: snapshot, variant: opts.variant,
     historyRoot: opts.historyRoot, policyShape: opts.policyShape,
@@ -38,7 +52,8 @@ export function buildRecallEvalOptions(opts: ParsedFlags, snapshot: string): Rec
     ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.legacyManifestSha256 === undefined ? {} : { legacyManifestSha256: opts.legacyManifestSha256 }),
-    ...(opts.legacyDatasetSha256 === undefined ? {} : { legacyDatasetSha256: opts.legacyDatasetSha256 })
+    ...(opts.legacyDatasetSha256 === undefined ? {} : { legacyDatasetSha256: opts.legacyDatasetSha256 }),
+    ...(expansionCapability === undefined ? {} : { expansionCapability })
   };
 }
 

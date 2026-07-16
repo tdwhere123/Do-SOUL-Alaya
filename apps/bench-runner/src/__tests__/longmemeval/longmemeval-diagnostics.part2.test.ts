@@ -45,6 +45,7 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
     expect(LongMemEvalMissTaxonomySchema.options).toEqual([
       "candidate_absent",
       "materialization_drop",
+      "fine_assessment_drop",
       "budget_drop",
       "delivery_order_drop",
       "answer_set_coverage_drop",
@@ -260,6 +261,7 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
     expect(summary.miss_taxonomy_distribution).toEqual({
       candidate_absent: 1,
       materialization_drop: 1,
+      fine_assessment_drop: 0,
       budget_drop: 1,
       delivery_order_drop: 1,
       answer_set_coverage_drop: 0,

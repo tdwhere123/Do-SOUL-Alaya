@@ -238,6 +238,9 @@ export function stripReplayCandidatePoolsForGateWrite(
     questions: sidecar.questions.map((question) => ({
       ...question,
       candidate_pool_complete: false,
+      candidate_pool_count: null,
+      fine_pruned_count: null,
+      fine_assessment_pruned_candidates: [],
       query_probes: null,
       query_sought_facets: null,
       ...(question.cohort_ledger === undefined

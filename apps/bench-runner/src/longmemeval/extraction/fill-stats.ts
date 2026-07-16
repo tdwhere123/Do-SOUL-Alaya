@@ -14,6 +14,7 @@ export interface FillRetryTelemetry {
 export function newFillStats(): CompileSeedExtractionStats {
   return {
     path: "official_api_compile",
+    extractionAttempts: 0,
     cacheHits: 0,
     llmCalls: 0,
     offlineFallbacks: 0,
@@ -30,7 +31,8 @@ export function newFillStats(): CompileSeedExtractionStats {
     lastTurnRawSignalCount: 0,
     lastTurnDraftCount: 0,
     lastExtractionSource: null,
-    lastCacheKey: null
+    lastCacheKey: null,
+    lastRawJsonSha256: null
   };
 }
 

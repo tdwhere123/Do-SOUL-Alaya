@@ -1,7 +1,4 @@
 import type { QualityMetrics } from "@do-soul/alaya-eval";
-import {
-  isAbstentionQuestionId
-} from "./abstention.js";
 import { COHORT_PLANE, isDeliveryBudgetLoss } from "./diagnostics-private.js";
 import { readQuestionMissTaxonomy } from "./diagnostics-miss-taxonomy.js";
 import type {
@@ -163,7 +160,8 @@ export function recordQualityQuestion(
   for (const gold of question.gold) {
     recordGoldDiagnostic(state, gold);
   }
-  if (!isAbstentionQuestionId(question.question_id) && question.gold.length > 0) {
+  if (classifyQuestionMeasurementStatus(question) !== "abstention_unscorable" &&
+      question.gold.length > 0) {
     recordBestGoldMiss(state, question);
     recordPerGoldRankBuckets(state, question);
   }
@@ -190,7 +188,7 @@ function recordQuestionBasics(
     state.evaluatorIdentityUnscorableCount++;
   }
   recordAbstentionQuestion(state, question);
-  if (isAbstentionQuestionId(question.question_id)) return;
+  if (measurementStatus === "abstention_unscorable") return;
   if (question.delivered_results.length >= 2) {
     state.nonMonotonicDenominator++;
     if (isDeliveredOrderNonMonotonic(question.delivered_results)) {
@@ -246,8 +244,7 @@ function recordAbstentionQuestion(
   question: LongMemEvalQuestionDiagnostic
 ): void {
   const cohort = question.cohort_ledger?.dataset_cohort;
-  if (cohort === undefined && !isAbstentionQuestionId(question.question_id)) return;
-  if (cohort !== undefined && cohort !== "abstention") return;
+  if (cohort !== "abstention") return;
   state.abstentionTotal++;
   state.abstentionUnscorable++;
 }

@@ -19,6 +19,7 @@ import {
 } from "./diagnostics.js";
 import { normalizeQueryText } from "./recall-service-helpers.js";
 import type {
+  CoarseRecallCandidate,
   RecallDegradationReason,
   RecallEmbeddingProviderStatus,
   RecallResult,
@@ -43,6 +44,7 @@ import {
   collectTimedSupplementaryData,
   deliverOrReuseAssessment,
   prepareLegacyReassessment,
+  prepareRecallFineAssessmentWaist,
   prepareSnapshotAssessment
 } from "./orchestration/recall-fine-assessment.js";
 import {
@@ -167,17 +169,22 @@ async function assessLegacyCandidateStage(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
-  const embeddingPreparation = measureAsync(() => {
-    const pending = startEmbeddingAssessmentPreparation(context, params, prepared, coarse);
-    if (pending === null) {
-      throw new Error("legacy embedding preparation is unavailable");
-    }
-    return pending;
-  });
-  const initial = await collectInitialLegacyAssessment(context, params, prepared, coarse);
+  const waist = prepareRecallFineAssessmentWaist(context, prepared, coarse);
+  const embeddingPreparation = startLegacyEmbeddingPreparation(
+    context, params, prepared, coarse, waist.survivors
+  );
+  const initial = await collectInitialLegacyAssessment(
+    context, params, prepared, coarse, waist
+  );
   const preparedEmbeddingQuery = await embeddingPreparation;
   const embedding = await measureAsync(() => collectLegacyEmbeddingAssessmentData(
-    context, params, prepared, coarse, initial.assessment, preparedEmbeddingQuery.value
+    context,
+    params,
+    prepared,
+    coarse,
+    initial.assessment,
+    initial.waist.survivors,
+    preparedEmbeddingQuery.value
   ));
   const reassessment = measureSync(() => prepareLegacyReassessment(
     context, params, prepared, coarse, initial, embedding.value
@@ -205,6 +212,24 @@ async function assessLegacyCandidateStage(
   );
 }
 
+function startLegacyEmbeddingPreparation(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult,
+  fineCandidates: readonly Readonly<CoarseRecallCandidate>[]
+) {
+  return measureAsync(() => {
+    const pending = startEmbeddingAssessmentPreparation(
+      context, params, prepared, coarse, fineCandidates
+    );
+    if (pending === null) {
+      throw new Error("legacy embedding preparation is unavailable");
+    }
+    return pending;
+  });
+}
+
 async function assessSnapshotCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
@@ -213,7 +238,7 @@ async function assessSnapshotCandidateStage(
 ): Promise<AssessmentStageResult> {
   const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const embedding = await measureAsync(() => collectSnapshotEmbeddingAssessmentData(
-    context, prepared, coarse
+    context, prepared, coarse, base.value.waist.survivors
   ));
   const assessment = measureSync(() => prepareSnapshotAssessment(
     context, params, prepared, coarse, base.value, embedding.value
@@ -250,7 +275,7 @@ async function completeCandidateAssessment(
     context, prepared, preparedCandidates, supplementaryData
   ));
   const delivery = deliverOrReuseAssessment(
-    context, params, prepared, coarse, preparedCandidates, rerank.value, reusableAssessment
+    context, params, prepared, preparedCandidates, rerank.value, reusableAssessment
   );
   const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
   return Object.freeze({
@@ -284,6 +309,7 @@ async function collectAnswerRerankStage(
     service: context.dependencies.answerRerankService,
     queryText: prepared.queryText,
     candidates: preparedCandidates.candidates,
+    maxEntries: prepared.policy.fine_assessment.budgets.max_entries,
     warn: context.warn
   });
   if (rerank.scores.size === 0) {

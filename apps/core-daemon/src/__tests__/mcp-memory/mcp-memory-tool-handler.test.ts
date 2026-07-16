@@ -141,7 +141,7 @@ describe("mcp memory tool handler", () => {
     expect(callArg!.timeFilter).toBeUndefined();
   });
 
-  it("widens the coarse candidate pool without widening the delivered result count", async () => {
+  it("widens the coarse pool while leaving embedding activation to the runtime", async () => {
     const deps = createDeps();
     const handler = createMcpMemoryToolHandler(deps);
 
@@ -162,7 +162,7 @@ describe("mcp memory tool handler", () => {
     expect(callArg?.policyOverride?.fine_assessment.budgets.max_entries).toBe(3);
     expect(callArg?.policyOverride?.fine_assessment.max_candidates).toBe(60);
     expect(callArg?.policyOverride?.coarse_filter.semantic_supplement.max_supplement).toBe(30);
-    expect(callArg?.policyOverride?.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
+    expect(callArg?.policyOverride?.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
   });
 
   it("threads since/until/time_field from request into recallService.recall as timeFilter", async () => {

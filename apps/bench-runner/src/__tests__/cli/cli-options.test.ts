@@ -38,6 +38,7 @@ describe("parseFlags", () => {
       "--pinned-meta-root=/tmp/pinned",
       "--question-manifest=/tmp/questions.json",
       "--extraction-cache-root=/tmp/cache",
+      "--promotion-contract=/tmp/promotion.json",
       "--legacy-snapshot",
       `--legacy-manifest-sha256=${"a".repeat(64)}`,
       `--legacy-dataset-sha256=${"b".repeat(64)}`,
@@ -55,6 +56,7 @@ describe("parseFlags", () => {
     expect(parsed.pinnedMetaRoot).toBe("/tmp/pinned");
     expect(parsed.questionManifest).toBe("/tmp/questions.json");
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
+    expect(parsed.promotionContract).toBe("/tmp/promotion.json");
     expect(parsed.legacySnapshot).toBe(true);
     expect(parsed.legacyManifestSha256).toBe("a".repeat(64));
     expect(parsed.legacyDatasetSha256).toBe("b".repeat(64));
@@ -73,6 +75,9 @@ describe("parseFlags", () => {
     );
     expect(() => parseFlags(["--question-manifest"])).toThrow(
       "--question-manifest requires a path"
+    );
+    expect(() => parseFlags(["--promotion-contract", "--limit", "500"])).toThrow(
+      "--promotion-contract requires a path"
     );
   });
 });

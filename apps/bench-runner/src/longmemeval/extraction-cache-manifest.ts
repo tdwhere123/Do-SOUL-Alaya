@@ -7,6 +7,28 @@ import {
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import {
+  parseExtractionFillManifestContract,
+  type ExtractionFillManifestContract
+} from "./extraction/fill-manifest-contract.js";
+import {
+  EXTRACTION_REQUEST_PROFILES,
+  type ExtractionRequestProfile
+} from "./extraction/request-profile.js";
+import type { LongMemEvalExpansionLineage } from
+  "./promotion/expansion-lineage-schema.js";
+import type { LongMemEvalExpansionSourceAnchor } from
+  "./promotion/expansion-source-anchor-schema.js";
+import { parseExpansionManifestArtifacts } from
+  "./extraction/expansion-manifest-artifacts.js";
+import {
+  computeExtractionContentClosureSha256,
+  extractionContentClosureEntriesFromIndex
+} from "./extraction/content-closure.js";
+export {
+  EXTRACTION_REQUEST_PROFILES,
+  type ExtractionRequestProfile
+} from "./extraction/request-profile.js";
 
 /**
  * @anchor longmemeval-extraction-cache-manifest
@@ -60,14 +82,6 @@ export function resolveBenchExtractionModel(
   return model;
 }
 
-export const EXTRACTION_REQUEST_PROFILES = [
-  "provider-default-v1",
-  "deepseek-v4-nonthinking-v1"
-] as const;
-
-export type ExtractionRequestProfile =
-  (typeof EXTRACTION_REQUEST_PROFILES)[number];
-
 /**
  * Documented cache-key formula. Pinned in the manifest so a future change to
  * the key derivation (which would silently invalidate every shard) is a
@@ -84,7 +98,7 @@ export type ExtractionCacheStorage = "git-tracked" | "archive";
  * provenance is still valid (the coverage fields are optional so a pre-fill
  * writer does not have to commit to a denominator it cannot yet compute).
  */
-interface ExtractionCacheManifestBase {
+interface ExtractionCacheManifestBase extends ExtractionFillManifestContract {
   /** == every cache shard's `.model`; run-start asserts config.model equals this. */
   readonly extraction_model: string;
   /** Reproduces the provider; aligns with DEFAULT_GARDEN_PROVIDER_URL. */
@@ -112,6 +126,8 @@ interface ExtractionCacheManifestBase {
   readonly built_at: string;
   /** Provenance: what produced this cache. */
   readonly builder: string;
+  readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;
+  readonly expansion_lineage?: LongMemEvalExpansionLineage;
 }
 
 export interface ExtractionCacheManifestV1 extends ExtractionCacheManifestBase {
@@ -180,7 +196,7 @@ export function readExtractionCacheManifestIdentity(
     return undefined;
   }
   const raw = readManifestRaw(filePath);
-  const manifest = parseManifestRaw(raw, filePath);
+  const manifest = parseExtractionCacheManifestContents(raw, filePath);
   return {
     manifest,
     manifestSha256: createHash("sha256").update(raw, "utf8").digest("hex")
@@ -197,7 +213,10 @@ function readManifestRaw(filePath: string): string {
   }
 }
 
-function parseManifestRaw(raw: string, filePath: string): ExtractionCacheManifest {
+export function parseExtractionCacheManifestContents(
+  raw: string,
+  filePath: string
+): ExtractionCacheManifest {
   try {
     return validateManifest(JSON.parse(raw), filePath);
   } catch (cause) {
@@ -255,6 +274,7 @@ function validateManifest(
     ...optionalNonnegativeInteger(record.requested_turns, "requested_turns", filePath),
     ...optionalNonnegativeInteger(record.cached_turns, "cached_turns", filePath),
     ...optionalCoverage(record.coverage, filePath),
+    ...parseExtractionFillManifestContract(record, filePath),
     ...optionalString(record.archive_url, "archive_url"),
     ...optionalString(record.archive_sha256, "archive_sha256")
   };
@@ -288,6 +308,9 @@ function readVersionedManifest(
 ): ExtractionCacheManifest {
   const hasFamily = Object.hasOwn(record, "model_family");
   const hasProfile = Object.hasOwn(record, "request_profile");
+  const expansion = parseExpansionManifestArtifacts({
+    record, schemaVersion, fill: common, filePath
+  });
   if (schemaVersion === 1) {
     if (hasFamily) {
       throw new Error(
@@ -295,6 +318,7 @@ function readVersionedManifest(
       );
     }
     assertLegacyProfileAbsent(hasProfile, schemaVersion, filePath);
+    assertLegacyClosureIndexAbsent(common, schemaVersion, filePath);
     return { ...common, schema_version: 1 };
   }
   if (!hasFamily) {
@@ -309,14 +333,38 @@ function readVersionedManifest(
   );
   if (schemaVersion === 2) {
     assertLegacyProfileAbsent(hasProfile, schemaVersion, filePath);
+    assertLegacyClosureIndexAbsent(common, schemaVersion, filePath);
     return { ...common, schema_version: 2, model_family: modelFamily };
   }
+  const requestProfile = requireRequestProfile(record.request_profile, filePath);
+  assertContentClosureIndex(common, requestProfile, filePath);
   return {
     ...common,
     schema_version: schemaVersion,
     model_family: modelFamily,
-    request_profile: requireRequestProfile(record.request_profile, filePath)
+    request_profile: requestProfile,
+    ...expansion
   };
+}
+
+function assertContentClosureIndex(
+  manifest: ExtractionCacheManifestBase,
+  requestProfile: ExtractionRequestProfile,
+  filePath: string
+): void {
+  const index = manifest.content_closure_index;
+  if (index === undefined) return;
+  const digest = computeExtractionContentClosureSha256(
+    extractionContentClosureEntriesFromIndex(
+      index,
+      manifest.extraction_model,
+      requestProfile
+    )
+  );
+  if (digest === manifest.content_closure_sha256) return;
+  throw new Error(
+    `extraction cache manifest at ${filePath} has inconsistent content closure digest`
+  );
 }
 
 function assertLegacyProfileAbsent(
@@ -327,6 +375,18 @@ function assertLegacyProfileAbsent(
   if (!present) return;
   throw new Error(
     `extraction cache manifest at ${filePath} schema_version ${schemaVersion} must not define request_profile`
+  );
+}
+
+function assertLegacyClosureIndexAbsent(
+  manifest: ExtractionCacheManifestBase,
+  schemaVersion: 1 | 2,
+  filePath: string
+): void {
+  if (manifest.content_closure_index === undefined) return;
+  throw new Error(
+    `extraction cache manifest at ${filePath} schema_version ${schemaVersion} ` +
+      "must not define content_closure_index"
   );
 }
 

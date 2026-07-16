@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { RECALL_FUSION_FAMILY_IDS } from "../../recall/delivery/fusion-delivery-families.js";
 import { RecallService } from "../../recall/recall-service.js";
 import {
   createDependencies,
   createMemoryEntry,
-  createTaskSurface
+  createTaskSurface,
+  overridePolicy
 } from "./recall-service-test-fixtures.js";
 
 describe("RecallService answer rerank integration", () => {
@@ -76,6 +78,47 @@ describe("RecallService answer rerank integration", () => {
       answer_rerank_failure_class: "service_error"
     });
     expect(JSON.stringify(failed.diagnostics)).not.toContain("secret model path");
+  });
+
+  it("uses the request delivery budget to bound the prepared CE head", async () => {
+    const memories = Array.from({ length: 15 }, (_, index) => createMemoryEntry({
+      object_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      content: `candidate passage ${index + 1}`,
+      activation_score: 1 - index / 100
+    }));
+    const { dependencies } = createDependencies(memories);
+    const score = vi.fn(async (_query: string, passages: readonly string[]) =>
+      passages.map(() => 0.5)
+    );
+    const service = new RecallService({ ...dependencies, answerRerankService: { score } });
+    const taskSurface = createTaskSurface();
+    const basePolicy = service.buildDefaultPolicy("build", taskSurface.runtime_id);
+    const policy = overridePolicy(basePolicy, {
+      fine_assessment: {
+        ...basePolicy.fine_assessment,
+        budgets: {
+          ...basePolicy.fine_assessment.budgets,
+          max_entries: 2,
+          max_total_tokens: 10_000
+        }
+      }
+    });
+
+    const result = await service.recall({
+      taskSurface,
+      workspaceId: "workspace-1",
+      strategy: "build",
+      policyOverride: policy
+    });
+    const expectedCount = 2 * RECALL_FUSION_FAMILY_IDS.length;
+
+    expect(score.mock.calls[0]?.[1]).toHaveLength(expectedCount);
+    expect(result.diagnostics).toMatchObject({
+      answer_rerank_status: "returned",
+      answer_rerank_expected_count: expectedCount,
+      answer_rerank_scored_count: expectedCount
+    });
+    expect(result.diagnostics?.token_economy?.fine_evaluated).toBe(15);
   });
 
   it("marks an installed scorer not applicable when the normalized query is empty", async () => {

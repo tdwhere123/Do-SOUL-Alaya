@@ -131,7 +131,48 @@ function cosineWithLeftMagnitude(
   return dot / (leftMagnitude * Math.sqrt(rightMagnitudeSquared));
 }
 
+export function isFiniteNonzeroVector(vector: Float32Array): boolean {
+  return finiteNonzeroMagnitudeSquared(vector) !== null;
+}
+
+export function isUsableEmbeddingRecordVector(
+  record: { readonly dimensions: number; readonly embedding: Float32Array },
+  expectedDimensions: number
+): boolean {
+  return (
+    record.dimensions === expectedDimensions &&
+    record.embedding.length === expectedDimensions &&
+    isFiniteNonzeroVector(record.embedding)
+  );
+}
+
+export function assertValidEmbeddingBatch(
+  embeddings: readonly Float32Array[],
+  expectedCount: number
+): void {
+  if (embeddings.length !== expectedCount) {
+    throw new Error(`Expected ${expectedCount} embeddings but received ${embeddings.length}.`);
+  }
+  let dimensions: number | null = null;
+  embeddings.forEach((embedding, index) => {
+    if (!(embedding instanceof Float32Array) || !isFiniteNonzeroVector(embedding)) {
+      throw new Error(`Embedding ${index} must be a non-empty finite vector with nonzero norm.`);
+    }
+    dimensions ??= embedding.length;
+    if (embedding.length !== dimensions) {
+      throw new Error(
+        `Embedding batch dimensions must match; expected ${dimensions} but received ${embedding.length}.`
+      );
+    }
+  });
+}
+
 function nonzeroFiniteMagnitude(vector: Float32Array): number | null {
+  const squared = finiteNonzeroMagnitudeSquared(vector);
+  return squared === null ? null : Math.sqrt(squared);
+}
+
+function finiteNonzeroMagnitudeSquared(vector: Float32Array): number | null {
   if (vector.length === 0) {
     return null;
   }
@@ -139,8 +180,7 @@ function nonzeroFiniteMagnitude(vector: Float32Array): number | null {
   for (const value of vector) {
     squared += value * value;
   }
-  const magnitude = Math.sqrt(squared);
-  return magnitude === 0 || !Number.isFinite(magnitude) ? null : magnitude;
+  return squared === 0 || !Number.isFinite(squared) ? null : squared;
 }
 
 // cosine space is comparable only within one (provider_kind, model_id, schema_version).

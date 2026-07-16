@@ -71,7 +71,7 @@ export function buildQuestionCohortLedger(input: {
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
   readonly diagnosticsAvailable: boolean;
   readonly candidatePoolComplete: boolean;
-  readonly identityConflictObjectIds?: readonly string[];
+  readonly identityConflictObjectKeys?: readonly string[];
   readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
   readonly seedDropReasons?: LongMemEvalSeedDropReasons;
 }): LongMemEvalQuestionCohortLedger {
@@ -79,7 +79,7 @@ export function buildQuestionCohortLedger(input: {
     ? "adjudicated_invalid"
     : input.isAbstention ? "abstention" : "answerable";
   const ambiguousIdentity = input.goldMemoryIds.some((id) =>
-    input.identityConflictObjectIds?.includes(id) === true
+    input.identityConflictObjectKeys?.includes(`memory_entry:${id}`) === true
   );
   const identityPresent = input.goldMemoryIds.length > 0 && !ambiguousIdentity;
   const primitives = buildMeasurementPrimitives(input, datasetCohort, ambiguousIdentity);

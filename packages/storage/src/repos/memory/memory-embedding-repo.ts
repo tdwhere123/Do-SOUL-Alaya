@@ -51,6 +51,7 @@ export interface MemoryEmbeddingMetadata {
   readonly model_id: string;
   readonly schema_version: number;
   readonly dimensions: number;
+  readonly vector_valid: boolean;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -355,6 +356,7 @@ function buildWorkspaceEmbeddingQuery(
 ): MemoryEmbeddingWorkspaceQuery {
   const clauses = [
     "e.workspace_id = ?",
+    "e.vector_valid = 1",
     "m.lifecycle_state = 'active'",
     "COALESCE(m.retention_state, '') != 'tombstoned'"
   ];

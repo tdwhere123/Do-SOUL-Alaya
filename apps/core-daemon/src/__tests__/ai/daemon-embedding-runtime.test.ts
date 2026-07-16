@@ -192,6 +192,99 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       expect(semantic.enabled).toBe(true);
       expect(semantic.injection_cap).toBe(3);
       expect(semantic.injection_similarity_floor).toBe(0.8);
+      expect(decorated.fine_assessment.max_candidates).toBe(113);
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
+
+  it("preserves an explicit larger fine budget and remains idempotent", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      const provider = {
+        providerKind: "local_onnx" as const,
+        modelId: "local/idempotent-model",
+        schemaVersion: 1,
+        isAvailable: true,
+        embedTexts: vi.fn(async () => [new Float32Array([1])])
+      };
+      const runtime = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv: new Map(),
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: provider
+      });
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+      const base = makeBasePolicy();
+      const explicit: RecallPolicy = {
+        ...base,
+        coarse_filter: {
+          ...base.coarse_filter,
+          semantic_supplement: {
+            ...base.coarse_filter.semantic_supplement,
+            injection_cap: 3,
+            injection_similarity_floor: 0.8
+          }
+        },
+        fine_assessment: { ...base.fine_assessment, max_candidates: 300 }
+      };
+
+      const first = runtime.defaultPolicyDecorator!(explicit);
+      const second = runtime.defaultPolicyDecorator!(first);
+      expect(first.coarse_filter.semantic_supplement).toMatchObject({
+        injection_cap: 3,
+        injection_similarity_floor: 0.8
+      });
+      expect(first.fine_assessment.max_candidates).toBe(300);
+      expect(second.fine_assessment.max_candidates).toBe(300);
+    } finally {
+      teardown(fixture);
+      restoreEnv();
+    }
+  });
+
+  it("explicitly closes an already-decorated policy when the ready provider goes offline", async () => {
+    saveEnv();
+    const fixture = buildFixture();
+    try {
+      let available = true;
+      const provider = {
+        providerKind: "local_onnx" as const,
+        modelId: "local/availability-model",
+        schemaVersion: 1,
+        get isAvailable() {
+          return available;
+        },
+        embedTexts: vi.fn(async () => [new Float32Array([1])])
+      };
+      const runtime = createDaemonEmbeddingRuntime({
+        database: fixture.database,
+        configEnv: new Map(),
+        eventLogRepo: fixture.eventLogRepo,
+        healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
+        memoryEntryRepo: fixture.memoryEntryRepo,
+        warn: fixture.warn as unknown as WarnFn,
+        embeddingProviderOverride: provider
+      });
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+      const online = runtime.defaultPolicyDecorator!(makeBasePolicy());
+      expect(online.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
+      expect(online.fine_assessment.max_candidates).toBe(120);
+
+      available = false;
+      const offline = runtime.defaultPolicyDecorator!(online);
+      expect(offline.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
+      expect(offline.fine_assessment.max_candidates).toBe(120);
+
+      available = true;
+      const restored = runtime.defaultPolicyDecorator!(offline);
+      expect(restored.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
+      expect(restored.fine_assessment.max_candidates).toBe(120);
     } finally {
       teardown(fixture);
       restoreEnv();

@@ -39,6 +39,33 @@ export function buildRecallCandidateDedupeKey(candidate: Readonly<CoarseRecallCa
   return `${candidate.originPlane ?? "workspace_local"}:${candidate.objectKind ?? "memory_entry"}:${candidate.entry.object_id}`;
 }
 
+export function buildRecallLogicalObjectKey(candidate: Readonly<{
+  readonly entry: Readonly<{
+    readonly object_id: string;
+    readonly object_kind?: RecallCandidate["object_kind"];
+  }>;
+  readonly objectKind?: RecallCandidate["object_kind"];
+}>): string {
+  return `${candidate.objectKind ?? candidate.entry.object_kind ?? "memory_entry"}:${candidate.entry.object_id}`;
+}
+
+export function isSynthesisChildCandidate(candidate: Readonly<{
+  readonly sourceChannel?: string;
+  readonly sourceChannels?: readonly string[];
+  readonly admissionPlanes?: readonly string[];
+}>): boolean {
+  return candidate.sourceChannel === "synthesis_child"
+    || candidate.sourceChannels?.includes("synthesis_child") === true
+    || candidate.admissionPlanes?.includes("synthesis_child") === true;
+}
+
+export function isWorkspaceMemoryCandidate(
+  candidate: Readonly<Pick<CoarseRecallCandidate, "originPlane" | "objectKind">>
+): boolean {
+  return (candidate.originPlane ?? "workspace_local") === "workspace_local" &&
+    (candidate.objectKind ?? "memory_entry") === "memory_entry";
+}
+
 export function parseEmbeddingPrecheckReason(error: unknown): string | null {
   if (typeof error !== "object" || error === null || !("reason" in error)) {
     return null;

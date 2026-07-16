@@ -10,7 +10,10 @@ import {
   clamp01,
   cosineSimilarity,
   EMPTY_SUPPLEMENT_RESULT,
-  hashMemoryContent
+  hashMemoryContent,
+  isFiniteNonzeroVector,
+  isProviderMatchedEmbedding,
+  isUsableEmbeddingRecordVector
 } from "./helpers.js";
 import type {
   EmbeddingProviderPort,
@@ -130,13 +133,15 @@ export class EmbeddingSupplementBuilder {
     params: BuildSupplementFromQueryEmbeddingParams,
     eligibleMemoryMap: ReadonlyMap<string, Readonly<MemoryEntry>>
   ): readonly Readonly<EmbeddingSimilarityHint>[] {
+    if (!isFiniteNonzeroVector(params.queryEmbedding)) {
+      return Object.freeze([]);
+    }
+    const baseCandidateIds = new Set(params.baseCandidateIds);
     return params.storedVectors
       .filter(
         (record) =>
-          record.provider_kind === this.deps.provider.providerKind &&
-          record.model_id === this.deps.provider.modelId &&
-          record.schema_version === this.deps.provider.schemaVersion &&
-          record.dimensions === params.queryEmbedding.length
+          isProviderMatchedEmbedding(record, this.deps.provider) &&
+          isUsableEmbeddingRecordVector(record, params.queryEmbedding.length)
       )
       .flatMap((record) => {
         const memory = eligibleMemoryMap.get(record.object_id);
@@ -151,7 +156,7 @@ export class EmbeddingSupplementBuilder {
         const normalizedSimilarity = clamp01(
           cosineSimilarity(params.queryEmbedding, record.embedding)
         );
-        if (normalizedSimilarity <= 0) {
+        if (normalizedSimilarity <= 0 && !baseCandidateIds.has(record.object_id)) {
           return [];
         }
 
@@ -252,7 +257,11 @@ function selectSupplementaryEntries(
 ): readonly Readonly<MemoryEntry>[] {
   const baseCandidateIdSet = new Set(params.baseCandidateIds);
   return hints
-    .filter((hint) => !baseCandidateIdSet.has(hint.object_id))
+    .filter((hint) =>
+      !baseCandidateIdSet.has(hint.object_id) &&
+      Number.isFinite(hint.normalized_similarity) &&
+      hint.normalized_similarity > 0
+    )
     .slice(0, params.maxSupplement)
     .flatMap((hint) => {
       const memory = eligibleMemoryMap.get(hint.object_id);
@@ -264,12 +273,19 @@ function collectSnapshotHints(
   params: MaterializeEmbeddingSupplementFromSnapshotParams,
   eligibleMemoryMap: ReadonlyMap<string, Readonly<MemoryEntry>>
 ): readonly Readonly<EmbeddingSimilarityHint>[] {
+  const baseCandidateIds = new Set(params.baseCandidateIds);
   return Object.entries(params.snapshot.poolScoresByObjectId)
-    .flatMap(([objectId, normalizedSimilarity]) =>
-      eligibleMemoryMap.has(objectId) && normalizedSimilarity > 0
-        ? [Object.freeze({ object_id: objectId, normalized_similarity: normalizedSimilarity })]
-        : []
-    )
+    .flatMap(([objectId, normalizedSimilarity]) => {
+      if (
+        !eligibleMemoryMap.has(objectId) ||
+        !Number.isFinite(normalizedSimilarity) ||
+        normalizedSimilarity < 0 ||
+        (normalizedSimilarity === 0 && !baseCandidateIds.has(objectId))
+      ) {
+        return [];
+      }
+      return [Object.freeze({ object_id: objectId, normalized_similarity: normalizedSimilarity })];
+    })
     .sort((left, right) =>
       right.normalized_similarity - left.normalized_similarity ||
       left.object_id.localeCompare(right.object_id)

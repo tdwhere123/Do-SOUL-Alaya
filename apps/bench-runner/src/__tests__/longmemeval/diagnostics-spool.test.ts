@@ -84,6 +84,8 @@ function sidecar(
 function question(id: string, candidateCount: number) {
   const candidate = {
     object_id: "object-a",
+    object_kind: "memory_entry",
+    origin_plane: "workspace_local",
     candidate_key: "workspace_local:memory_entry:object-a",
     final_rank: 1,
     pre_budget_rank: 1,

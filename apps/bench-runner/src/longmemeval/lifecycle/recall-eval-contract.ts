@@ -13,6 +13,8 @@ import type { BenchRecallTokenEconomy } from "../../harness/recall-diagnostics-s
 import type { LongMemEvalQuestionDiagnostic } from "../diagnostics.js";
 import type { LongMemEvalVariant } from "../dataset.js";
 import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
+import type { LongMemEvalExpansionCapability } from
+  "../promotion/expansion-capability.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -30,6 +32,7 @@ export interface RecallEvalOptions {
   readonly pinnedMetaRoot?: string;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
+  readonly expansionCapability?: LongMemEvalExpansionCapability;
 }
 
 export interface RecallEvalResult {

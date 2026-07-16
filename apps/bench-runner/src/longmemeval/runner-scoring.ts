@@ -4,12 +4,17 @@ import {
   buildObjectIdentityKey,
   readRecallDiagnostics
 } from "./diagnostics-private.js";
+import {
+  isLongMemEvalGoldSource,
+  type LongMemEvalSourceRound
+} from "./provenance/source-rounds.js";
 
 export interface LongMemEvalSidecarEntry {
   readonly objectId: string;
   readonly objectKind: "memory_entry" | "synthesis_capsule";
   readonly sessionId: string;
   readonly hasAnswer: boolean;
+  readonly sourceRounds?: readonly LongMemEvalSourceRound[];
   readonly content?: string;
   readonly eventDate?: string;
 }
@@ -124,10 +129,8 @@ export function scoreLongMemEvalRecallHits(
     const meta = input.sidecar.get(
       buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
     );
-    const isHit =
-      meta !== undefined &&
-      meta.hasAnswer &&
-      input.answerSessionIds.has(meta.sessionId);
+    const isHit = meta !== undefined &&
+      isLongMemEvalGoldSource(meta, input.answerSessionIds);
     if (isHit) {
       if (rank === 0) hitAt1 = true;
       if (rank < 5) hitAt5 = true;
@@ -161,8 +164,7 @@ export function deriveLongMemEvalGoldMemoryIds(
       .filter(
         (entry) =>
           entry.objectKind === "memory_entry" &&
-          entry.hasAnswer &&
-          answerSessionIds.has(entry.sessionId)
+          isLongMemEvalGoldSource(entry, answerSessionIds)
       )
       .map((entry) => entry.objectId)
   );

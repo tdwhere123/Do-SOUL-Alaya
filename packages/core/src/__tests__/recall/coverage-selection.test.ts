@@ -71,6 +71,143 @@ describe("coverage-aware delivery", () => {
     expect(result.diagnostics.filter((row) => row.dropped_reason === "max_total_tokens")).toHaveLength(1);
   });
 
+  it("does not let a token-rejected candidate consume coverage", () => {
+    const rejected = createCandidate("rejected-shared", 0.99);
+    const deliverableShared = createCandidate("deliverable-shared", 0.8);
+    const novel = createCandidate("novel", 0.6);
+    const candidates = [rejected, deliverableShared, novel];
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: {
+        conflict_awareness: false,
+        budgets: {
+          max_entries: 1,
+          max_total_tokens: 5,
+          per_dimension_limits: null
+        }
+      },
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          "rejected-shared": "shared-gist",
+          "deliverable-shared": "shared-gist",
+          novel: "novel-gist"
+        }
+      }),
+      tokenEstimator: {
+        estimate: (content) => content.includes("rejected-shared") ? 6 : 5
+      },
+      rankByCandidateKey: createRanks(candidates),
+      finalRelevanceByCandidateKey: relevanceMap(candidates)
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "deliverable-shared"
+    ]);
+    expect(result.diagnostics.find(
+      (candidate) => candidate.object_id === "rejected-shared"
+    )?.dropped_reason).toBe("max_total_tokens");
+  });
+
+  it("does not let duplicate or dimension rejections consume coverage", () => {
+    const anchor = createCandidate("shared", 1);
+    const duplicateBase = createCandidate("shared", 0.95);
+    const duplicate = {
+      ...duplicateBase,
+      originPlane: "global" as const,
+      fusion: {
+        ...duplicateBase.fusion,
+        candidate_key: "global:memory_entry:shared"
+      }
+    };
+    const dimensionRejected = createCandidate("dimension-rejected", 0.9);
+    const deliverableShared = withDimension(
+      createCandidate("deliverable-shared", 0.8),
+      MemoryDimension.FACT
+    );
+    const novel = withDimension(createCandidate("novel", 0.35), MemoryDimension.PREFERENCE);
+    const candidates = [anchor, duplicate, dimensionRejected, deliverableShared, novel];
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: {
+        conflict_awareness: false,
+        budgets: {
+          max_entries: 2,
+          max_total_tokens: 100,
+          per_dimension_limits: { [MemoryDimension.PROCEDURE]: 1 }
+        }
+      },
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          shared: "shared-gist",
+          "dimension-rejected": "shared-gist",
+          "deliverable-shared": "shared-gist",
+          novel: "novel-gist"
+        }
+      }),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: createRanks(candidates),
+      finalRelevanceByCandidateKey: relevanceMap(candidates)
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "shared",
+      "deliverable-shared"
+    ]);
+    expect(result.diagnostics.find(
+      (candidate) => candidate.candidate_key === duplicate.fusion.candidate_key
+    )?.dropped_reason).toBe("duplicate");
+    expect(result.diagnostics.find(
+      (candidate) => candidate.object_id === "dimension-rejected"
+    )?.dropped_reason).toBe("dimension_limit");
+  });
+
+  it("replans coverage without a dominance-evicted candidate", () => {
+    const conflict = createCandidate("conflict", 0.99);
+    const protectedWinner = createCandidate("protected", 0.9);
+    const embeddingBase = createCandidate("embedding-head", 0.7);
+    const embeddingHead = {
+      ...embeddingBase,
+      fusion: {
+        ...embeddingBase.fusion,
+        per_stream_rank: {
+          ...embeddingBase.fusion.per_stream_rank,
+          embedding_similarity: 1
+        }
+      }
+    };
+    const novel = createCandidate("novel", 0.4);
+    const candidates = [conflict, protectedWinner, embeddingHead, novel];
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: {
+        conflict_awareness: false,
+        budgets: { max_entries: 2, max_total_tokens: 100, per_dimension_limits: null }
+      },
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          conflict: "shared-gist",
+          protected: "protected-gist",
+          "embedding-head": "shared-gist",
+          novel: "novel-gist"
+        },
+        embeddingSimilarityScores: { conflict: 0.2, "embedding-head": 0.9 }
+      }),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: createRanks(candidates),
+      finalRelevanceByCandidateKey: relevanceMap(candidates),
+      answerRelevanceRankByCandidateKey: new Map([
+        [protectedWinner.fusion.candidate_key, 1]
+      ])
+    });
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "protected",
+      "embedding-head"
+    ]);
+    expect(result.diagnostics.find(
+      (candidate) => candidate.object_id === "conflict"
+    )?.dropped_reason).toBe("embedding_head_dominance");
+  });
+
   it("uses diminishing returns without discarding repeated-gist items", () => {
     const candidates = Array.from({ length: 4 }, (_, index) =>
       createCandidate(`same-gist-${index + 1}`, 1 - index * 0.01)
@@ -300,6 +437,13 @@ function createMemoryEntry(objectId: string): MemoryEntry {
     contradiction_count: null,
     superseded_by: null
   };
+}
+
+function withDimension(
+  candidate: FineAssessmentCandidate,
+  dimension: MemoryDimension
+): FineAssessmentCandidate {
+  return { ...candidate, entry: { ...candidate.entry, dimension } };
 }
 
 function createScoreFactors(): RecallScoreFactors {

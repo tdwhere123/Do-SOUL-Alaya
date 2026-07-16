@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { buildRecallPolicy as buildRecallPolicyCore } from "@do-soul/alaya-core";
+import {
+  buildMemorySearchRecallPolicy,
+  buildRecallPolicy as buildRecallPolicyCore
+} from "@do-soul/alaya-core";
 import {
   type MemorySearchResult,
   type RecallBudgetState,
@@ -15,7 +18,7 @@ export function buildBenchDiagnosticRecallPolicy(
   conflictAwareness = true
 ): RecallPolicy {
   const maxResults = Math.max(maxResultsInput, 1);
-  return buildRecallPolicyCore({
+  const productInput = {
     runtimeId: randomUUID(),
     taskSurfaceId,
     maxResults,
@@ -23,7 +26,13 @@ export function buildBenchDiagnosticRecallPolicy(
       scopeFilter: null,
       dimensionFilter: null,
       domainTagFilter: null
-    },
+    }
+  } as const;
+  if (conflictAwareness) {
+    return buildMemorySearchRecallPolicy(productInput);
+  }
+  return buildRecallPolicyCore({
+    ...productInput,
     conflictAwareness,
     maxTotalTokens: 2_000,
     coarseFloor: 0

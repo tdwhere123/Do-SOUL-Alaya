@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { assertValidEmbeddingBatch } from "@do-soul/alaya-core";
 import type { BenchEmbeddingWarmupSummary } from "./daemon-types.js";
 import { embeddingInputIdentityForSchemaVersion } from "./strict-treatment-config.js";
 
@@ -11,7 +12,8 @@ interface EmbeddingReadinessRow {
   readonly model_id: string;
   readonly schema_version: number;
   readonly dimensions: number;
-  readonly embedding_blob_bytes: number;
+  readonly embedding_blob: Uint8Array;
+  readonly vector_valid: number;
   readonly content: string;
 }
 
@@ -24,6 +26,7 @@ export async function readEmbeddingWarmupSummary(input: {
   readonly providerKind: string;
   readonly modelId: string;
   readonly schemaVersion: number;
+  readonly expectedDimensions: number;
   readonly passCount: number;
 }): Promise<BenchEmbeddingWarmupSummary> {
   const expectedIds = [...new Set(input.objectIds)];
@@ -68,9 +71,10 @@ function readReadyEmbeddingIds(
   expectedIds: readonly string[]
 ): ReadonlySet<string> {
   const readyIds = new Set<string>();
+  const cachedDimensions = new Set<number>();
   const statement = db.prepare(`
     SELECT e.object_id, e.content_hash, e.provider_kind, e.model_id,
-           e.schema_version, e.dimensions, length(e.embedding_blob) AS embedding_blob_bytes,
+           e.schema_version, e.dimensions, e.embedding_blob, e.vector_valid,
            m.content
       FROM memory_embeddings e
       JOIN memory_entries m
@@ -84,10 +88,12 @@ function readReadyEmbeddingIds(
       input.workspaceId, JSON.stringify(chunk)
     ) as unknown as EmbeddingReadinessRow[];
     for (const row of rows) {
-      if (isReadyEmbeddingRow(row, input)) readyIds.add(row.object_id);
+      if (!isReadyEmbeddingRow(row, input)) continue;
+      cachedDimensions.add(row.dimensions);
+      if (row.dimensions === input.expectedDimensions) readyIds.add(row.object_id);
     }
   }
-  return readyIds;
+  return cachedDimensions.size > 1 ? new Set() : readyIds;
 }
 
 function isReadyEmbeddingRow(
@@ -97,9 +103,27 @@ function isReadyEmbeddingRow(
   return row.provider_kind === input.providerKind &&
     row.model_id === input.modelId &&
     row.schema_version === input.schemaVersion &&
+    row.vector_valid === 1 &&
     row.content_hash === hashMemoryContent(row.content) &&
-    row.dimensions > 0 &&
-    row.embedding_blob_bytes === row.dimensions * Float32Array.BYTES_PER_ELEMENT;
+    hasValidEmbeddingBlob(row.embedding_blob, row.dimensions);
+}
+
+function hasValidEmbeddingBlob(blob: Uint8Array, dimensions: number): boolean {
+  if (!Number.isInteger(dimensions) || dimensions <= 0 ||
+      blob.byteLength !== dimensions * Float32Array.BYTES_PER_ELEMENT) {
+    return false;
+  }
+  try {
+    const view = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+    const embedding = new Float32Array(dimensions);
+    for (let index = 0; index < dimensions; index += 1) {
+      embedding[index] = view.getFloat32(index * Float32Array.BYTES_PER_ELEMENT, true);
+    }
+    assertValidEmbeddingBatch([embedding], 1);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function hashMemoryContent(content: string): string {

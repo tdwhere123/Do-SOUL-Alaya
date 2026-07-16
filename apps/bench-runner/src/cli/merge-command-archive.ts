@@ -32,15 +32,15 @@ import {
   renderLongMemEvalCohortLedger
 } from "../longmemeval/cohort-ledger.js";
 import {
-  buildLongMemEvalEvidenceManifest,
-  LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
-  renderLongMemEvalEvidenceManifest,
-  type LongMemEvalEvidenceArtifactInput
-} from "../longmemeval/evidence-manifest.js";
+  buildMergedEvidenceManifest
+} from "./merge/merged-evidence-manifest.js";
 import {
   buildMergedRunProvenanceSidecars,
+  resolveMergedRequestedConcurrency,
   type MergedRunProvenanceSidecars
 } from "../longmemeval/provenance/shard-aggregate.js";
+import type { LoadedGlobalExtractionAuthority } from
+  "../longmemeval/provenance/extraction-authority-reference.js";
 import type { LongMemEvalDiagnosticsSpool } from "../longmemeval/diagnostics/spool.js";
 import { buildBenchmarkMeasurementAttribution } from "../longmemeval/measurement/attribution.js";
 import { assertMeasurementCohortBinding } from "../longmemeval/measurement/cohort-binding.js";
@@ -89,9 +89,15 @@ export async function writeMergedLongMemEvalArchive(input: {
   readonly build: MergedLongMemEvalBuild;
   readonly shardArchiveRefs: readonly ShardArchiveRef[];
   readonly requestedConcurrency?: number;
+  readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<WrittenMergedLongMemEvalArchive> {
-  const layout = createMergedHistoryLayout(input);
+  const trustedRequestedConcurrency = resolveMergedRequestedConcurrency({
+    requestedConcurrency: input.requestedConcurrency,
+    shardCount: input.shardArchiveRefs.length,
+    globalExtractionAuthority: input.globalExtractionAuthority
+  });
+  const layout = createMergedHistoryLayout(input, trustedRequestedConcurrency);
   const shardDiagnostics = input.shardArchiveRefs.map((shard) => shard.diagnostics);
   const prepared = await prepareMergedWithDiff(
     layout,
@@ -113,7 +119,8 @@ export async function writeMergedLongMemEvalArchive(input: {
     shardDiagnostics,
     shardArchiveRefs: input.shardArchiveRefs,
     selectionContract: input.build.selectionContract,
-    requestedConcurrency: input.requestedConcurrency,
+    requestedConcurrency: trustedRequestedConcurrency ?? undefined,
+    globalExtractionAuthority: input.globalExtractionAuthority,
     diagnosticsSpool: input.diagnosticsSpool
   });
   const published = await publishMergedArchive({ layout, slug, archive });
@@ -125,10 +132,12 @@ export async function writeMergedLongMemEvalArchive(input: {
 }
 
 function createMergedHistoryLayout(
-  input: Parameters<typeof writeMergedLongMemEvalArchive>[0]
+  input: Parameters<typeof writeMergedLongMemEvalArchive>[0],
+  trustedRequestedConcurrency: number | null
 ): HistoryLayout {
-  if (input.build.selectionContract === null ||
-      input.releaseEvidenceAuthority === undefined) {
+  if (trustedRequestedConcurrency === null ||
+      input.build.selectionContract === null ||
+      input.releaseEvidenceAuthority == null) {
     return { historyRoot: input.historyRoot };
   }
   return createLongMemEvalHistoryLayout({
@@ -205,6 +214,7 @@ async function buildMergedArchiveSidecars(input: {
   readonly shardArchiveRefs: readonly ShardArchiveRef[];
   readonly selectionContract: LongMemEvalSelectionContract | null;
   readonly requestedConcurrency?: number;
+  readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
   readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
 }): Promise<{
   readonly merged: KpiPayload;
@@ -232,8 +242,34 @@ async function finishMergedArchiveSidecars(
   const provenance = await buildMergedRunProvenanceSidecars({
     shardArchiveRefs: input.shardArchiveRefs,
     requestedConcurrency: input.requestedConcurrency,
-    selectionContract: input.selectionContract
+    selectionContract: input.selectionContract,
+    globalExtractionAuthority: input.globalExtractionAuthority
   });
+  const evidence = await buildMergedEvidenceSidecars(input, diagnostics, provenance);
+  return {
+    merged: evidence.merged,
+    report: evidence.report,
+    findings: evidence.findings,
+    sidecars: [
+      { filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME, contents: diagnostics.contents },
+      { filename: LONGMEMEVAL_COHORT_LEDGER_FILENAME, contents: evidence.cohort },
+      { filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
+        contents: evidence.comparison },
+      ...provenance.sidecars,
+      evidence.manifest
+    ],
+    diagnosticsArtifact: {
+      stagedPath: diagnostics.stagedArtifactPath,
+      finalPath: diagnostics.fullArtifactPath
+    }
+  };
+}
+
+async function buildMergedEvidenceSidecars(
+  input: Parameters<typeof buildMergedArchiveSidecars>[0],
+  diagnostics: Awaited<ReturnType<typeof buildMergedDiagnosticsSidecar>>,
+  provenance: Awaited<ReturnType<typeof buildMergedRunProvenanceSidecars>>
+) {
   assertMergedSelectionIdentity(input.merged, provenance.selectionContract);
   const cohort = renderLongMemEvalCohortLedger(
     diagnostics.payload.sidecar.questions,
@@ -254,24 +290,28 @@ async function finishMergedArchiveSidecars(
   const { report, findings } = renderMergedDocuments(attributedInput);
   const comparison = await buildMergedComparisonSidecar(attributedInput, diagnostics.evidence);
   const manifest = buildMergedEvidenceManifest({
-    input: attributedInput, diagnostics, comparison, cohort, provenance,
-    provenanceComplete, report, findings
+    slug: attributedInput.slug,
+    merged: attributedInput.merged,
+    diagnostics: {
+      contents: diagnostics.contents,
+      fullArtifactIdentity: diagnostics.fullArtifactIdentity,
+      failedQuestionIds: diagnostics.payload.failed_question_ids,
+      questions: diagnostics.payload.sidecar.questions
+    },
+    comparison,
+    cohort,
+    provenance,
+    provenanceComplete,
+    report,
+    findings
   });
   return {
     merged,
     report,
     findings,
-    sidecars: [
-      { filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME, contents: diagnostics.contents },
-      { filename: LONGMEMEVAL_COHORT_LEDGER_FILENAME, contents: cohort },
-      { filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: comparison },
-      ...provenance.sidecars,
-      manifest
-    ],
-    diagnosticsArtifact: {
-      stagedPath: diagnostics.stagedArtifactPath,
-      finalPath: diagnostics.fullArtifactPath
-    }
+    cohort,
+    comparison,
+    manifest
   };
 }
 
@@ -389,83 +429,6 @@ async function buildMergedDiagnosticsSidecar(input: MergedDiagnosticsInput): Pro
     payload: diagnosticsPayload,
     evidence
   };
-}
-
-interface MergedEvidenceInput {
-  readonly input: Parameters<typeof buildMergedArchiveSidecars>[0];
-  readonly diagnostics: Awaited<ReturnType<typeof buildMergedDiagnosticsSidecar>>;
-  readonly comparison: string;
-  readonly cohort: string;
-  readonly provenance: MergedRunProvenanceSidecars;
-  readonly provenanceComplete: boolean;
-  readonly report: string;
-  readonly findings: string | null;
-}
-
-function buildMergedEvidenceManifest(input: MergedEvidenceInput) {
-  const datasetSha = input.input.merged.dataset.checksum_sha256;
-  if (datasetSha === undefined) {
-    throw new Error("LongMemEval evidence manifest requires dataset.checksum_sha256");
-  }
-  const cohort = JSON.parse(input.cohort) as {
-    readonly question_id_digest: string;
-    readonly selection_contract?: KpiPayload["selection_contract"];
-  };
-  const questions = input.diagnostics.payload.sidecar.questions;
-  const candidatePoolsComplete = input.diagnostics.payload.failed_question_ids.length === 0 &&
-    questions.length === input.input.merged.evaluated_count &&
-    questions.every((question) => question.candidate_pool_complete);
-  const selection = input.provenance.selectionContract === null
-    ? undefined
-    : selectionContractIdentity(input.provenance.selectionContract);
-  if (JSON.stringify(cohort.selection_contract) !== JSON.stringify(selection) ||
-      JSON.stringify(input.input.merged.selection_contract) !== JSON.stringify(selection)) {
-    throw new Error("merged evidence selection differs across KPI, cohort, and provenance");
-  }
-  const manifest = buildLongMemEvalEvidenceManifest({
-    run: {
-      slug: input.input.slug,
-      bench_name: "public",
-      split: input.input.merged.split,
-      run_at: input.input.merged.run_at,
-      alaya_commit: input.input.merged.alaya_commit,
-      dataset_sha256: datasetSha,
-      selection_manifest_sha256: input.provenance.selectionManifestSha256,
-      question_id_digest: cohort.question_id_digest,
-      ...(selection === undefined
-        ? {}
-        : { selection_contract: selection }),
-      candidate_pool_complete: candidatePoolsComplete,
-      provenance_complete: input.provenanceComplete
-    },
-    artifacts: buildMergedEvidenceArtifacts(input)
-  });
-  return {
-    filename: LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
-    contents: renderLongMemEvalEvidenceManifest(manifest)
-  };
-}
-
-function buildMergedEvidenceArtifacts(
-  input: MergedEvidenceInput
-): LongMemEvalEvidenceArtifactInput[] {
-  const artifacts: LongMemEvalEvidenceArtifactInput[] = [
-    { role: "kpi", path: "kpi.json", contents: `${JSON.stringify(input.input.merged, null, 2)}\n` },
-    { role: "report", path: "report.md", contents: input.report },
-    { role: "diagnostics", path: LONGMEMEVAL_DIAGNOSTICS_FILENAME, contents: input.diagnostics.contents },
-    {
-      role: "full_diagnostics",
-      path: `${LONGMEMEVAL_DIAGNOSTICS_FILENAME}.gz`,
-      identity: input.diagnostics.fullArtifactIdentity
-    },
-    { role: "cohort_ledger", path: LONGMEMEVAL_COHORT_LEDGER_FILENAME, contents: input.cohort },
-    { role: "comparison", path: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: input.comparison },
-    ...input.provenance.artifacts
-  ];
-  if (input.findings !== null) {
-    artifacts.splice(2, 0, { role: "findings", path: "findings.md", contents: input.findings });
-  }
-  return artifacts;
 }
 
 async function buildMergedComparisonSidecar(

@@ -60,6 +60,7 @@ function candidate(
 ): MeasurementCandidate {
   return {
     object_id: objectId,
+    object_kind: "memory_entry",
     candidate_key: `workspace_local:memory_entry:${objectId}`,
     answer_features: {
       content,
@@ -136,6 +137,43 @@ describe("LongMemEval measurement-only quality axes", () => {
       available_count: 2,
       ratio: 1,
       all_available: true
+    });
+  });
+
+  it("expands reconciled source rounds for coverage, timestamps, and evaluator identity", () => {
+    const reconciled = sidecar("memory-survivor", "session-first");
+    const axes = buildQuestionMeasurementAxes(input({
+      answerSessionIds: ["session-answer"],
+      sourceDatesBySession: new Map([
+        ["session-first", "2026-01-01T00:00:00.000Z"],
+        ["session-answer", "2026-01-02T00:00:00.000Z"]
+      ]),
+      deliveredResults: [{ object_id: "memory-survivor", rank: 1 }],
+      candidates: [candidate("memory-survivor", "Unrelated", null)],
+      sidecar: new Map([["memory_entry:memory-survivor", {
+        ...reconciled,
+        sourceRounds: [
+          { sessionIndex: 0, roundIndex: 0, sessionId: "session-first", hasAnswer: false },
+          { sessionIndex: 1, roundIndex: 0, sessionId: "session-answer", hasAnswer: true }
+        ]
+      }]]),
+      evaluatorGoldMemoryIds: ["memory-survivor"],
+      evaluatorHitAt5: true
+    }));
+
+    expect(axes.answer_session_coverage_at_5).toMatchObject({
+      covered_count: 1,
+      total_count: 1,
+      full_coverage: true
+    });
+    expect(axes.source_timestamp_availability_at_5).toMatchObject({
+      available_count: 1,
+      all_available: true
+    });
+    expect(axes.evaluator_identity_integrity_at_5).toMatchObject({
+      status: "consistent",
+      answer_session_supported_count: 1,
+      top_five_answer_session_supported_count: 1
     });
   });
 

@@ -70,6 +70,8 @@ export interface AlayaDaemonRuntimeServices {
   }>;
   readonly environmentStatusService: EnvironmentStatusService;
   readonly embeddingStatusService: EmbeddingStatusService;
+  readonly embeddingProviderWarmup: Promise<"not_requested" | "ready" | "failed">;
+  readonly getEmbeddingProviderDimensions: () => number | null;
   readonly embeddingRecallService?: Pick<
     EmbeddingRecallService,
     "warmQueryEmbeddings" | "coherentPairKeys"

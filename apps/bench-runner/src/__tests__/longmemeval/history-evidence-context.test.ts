@@ -52,8 +52,9 @@ describe("LongMemEval history evidence byte revalidation", () => {
     const historyRoot = path.join(root, "history");
     const dataset = await createMergeDatasetSource(root);
     await setupShard(shard, "q-history", 0);
-    expect(await runCli([
+    expect(await runMergeWithFixtureCommit([
       "merge-longmemeval", "--variant", "s", "--history-root", historyRoot,
+      "--concurrency", "1",
       ...dataset.cliArgs,
       "--shards", shard
     ])).toBe(1);
@@ -220,8 +221,9 @@ async function mergedEvidenceFixture(input: {
   await Promise.all(shardRoots.map((shardRoot, index) =>
     setupShard(shardRoot, questionIds[index]!, index)
   ));
-  expect(await runCli([
+  expect(await runMergeWithFixtureCommit([
     "merge-longmemeval", "--variant", "s", "--history-root", historyRoot,
+    "--concurrency", String(shardRoots.length),
     ...dataset.cliArgs,
     "--shards", ...shardRoots
   ])).toBe(1);
@@ -251,6 +253,17 @@ async function mergedEvidenceFixture(input: {
       payload
     })
   };
+}
+
+async function runMergeWithFixtureCommit(args: readonly string[]): Promise<number> {
+  const previous = process.env.BENCH_COMMIT_SHA7;
+  process.env.BENCH_COMMIT_SHA7 = "abc1234";
+  try {
+    return await runCli(args);
+  } finally {
+    if (previous === undefined) delete process.env.BENCH_COMMIT_SHA7;
+    else process.env.BENCH_COMMIT_SHA7 = previous;
+  }
 }
 
 async function readManifestArtifacts(

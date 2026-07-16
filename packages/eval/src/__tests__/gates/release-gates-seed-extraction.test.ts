@@ -55,6 +55,20 @@ it.each([
 });
 
 it.each([
+  ["missing attempts", { extraction_attempts: undefined }],
+  ["zero attempts", { extraction_attempts: 0, cache_hits: 0 }],
+  ["cache-hit mismatch", { extraction_attempts: 276, cache_hits: 275 }],
+  ["zero facts", { facts_produced: 0 }],
+  ["drop mismatch", { signals_dropped: 5 }]
+] as const)("rejects non-substantive or inconsistent cache proof: %s", (_name, override) => {
+  const path = makeSeedExtractionPath(override);
+  expect(isCacheOnlySeedExtractionPath(path)).toBe(false);
+  expect(evaluateSeedExtractionReleaseBlocker(
+    buildReleaseGradePublic(path)
+  )).not.toBeNull();
+});
+
+it.each([
   ["longmemeval_s_no_gold", { no_gold_count: 1 }],
   ["longmemeval_s_evaluator_identity_issue", { evaluator_identity_issue_count: 1 }]
 ])("fails the %s hard gate independently of candidate absence", (gateId, override) => {

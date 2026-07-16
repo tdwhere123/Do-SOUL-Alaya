@@ -4,6 +4,11 @@ import {
   type LongMemEvalQuestion
 } from "../dataset.js";
 import {
+  assertCurrentComparisonEvidence,
+  parseCurrentKpiEvidence,
+  type CurrentKpiEvidence
+} from "./current-kpi-evidence.js";
+import {
   applyQuestionManifest,
   parseQuestionManifest,
   type QuestionManifest
@@ -12,6 +17,8 @@ import {
   LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
+import { assertProductFormationEnvironment } from
+  "../product-formation-policy.js";
 import { validateCacheDatasetBinding } from "./cache-dataset-binding.js";
 import {
   parseLongMemEvalVariant,
@@ -75,6 +82,7 @@ interface ParsedKpi {
   readonly hits: ReadonlyMap<string, boolean>;
   readonly latencyP95: number;
   readonly identity: Readonly<Record<string, unknown>>;
+  readonly currentEvidence: CurrentKpiEvidence;
 }
 export interface CompareQuestionTypesInput {
   readonly dataset: unknown;
@@ -145,9 +153,11 @@ function parseKpi(value: unknown, label: "control" | "treatment"): ParsedKpi {
   const hits = parsePerScenario(kpi.per_scenario, label);
   const latencyP95 = requireNonnegativeNumber(kpi.latency_ms_p95, `${label}.kpi.latency_ms_p95`);
   const dataset = requireRecord(root.dataset, `${label}.dataset`);
+  const currentEvidence = parseCurrentKpiEvidence(value);
   return {
     hits,
     latencyP95,
+    currentEvidence,
     identity: {
       bench_name: requireString(root.bench_name, `${label}.bench_name`),
       split: requireString(root.split, `${label}.split`),
@@ -203,6 +213,8 @@ function validatePairedProvenance(
   }
   const controlProvenance = parseProvenance(input.controlProvenance, "control");
   const treatmentProvenance = parseProvenance(input.treatmentProvenance, "treatment");
+  assertCurrentComparisonEvidence(control.currentEvidence, "control");
+  assertCurrentComparisonEvidence(treatment.currentEvidence, "treatment");
   assertSequentialProtocol(controlProvenance, "control", control.hits.size);
   assertSequentialProtocol(treatmentProvenance, "treatment", treatment.hits.size);
   assertPairedRunProvenance(controlProvenance, treatmentProvenance);
@@ -228,10 +240,17 @@ function assertPairedRunProvenance(
   control: LongMemEvalRunProvenance,
   treatment: LongMemEvalRunProvenance
 ): void {
-  const { recall_config: _controlSwitch, ...controlPaired } = control;
-  const { recall_config: _treatmentSwitch, ...treatmentPaired } = treatment;
+  const { recall_config: controlConfig, ...controlPaired } = control;
+  const { recall_config: treatmentConfig, ...treatmentPaired } = treatment;
   if (!isDeepStrictEqual(controlPaired, treatmentPaired)) {
     throw new Error("control/treatment provenance or config mismatch");
+  }
+  const { conf_slice_compatibility: _controlSwitch, ...controlStableConfig } =
+    controlConfig;
+  const { conf_slice_compatibility: _treatmentSwitch, ...treatmentStableConfig } =
+    treatmentConfig;
+  if (!isDeepStrictEqual(controlStableConfig, treatmentStableConfig)) {
+    throw new Error("control/treatment recall config mismatch");
   }
 }
 
@@ -274,9 +293,10 @@ function validateAttributedProvenance(
   requirePairedEnv(runtime.paired_env, "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE", "1");
   requirePairedEnv(runtime.paired_env, "OFFICIAL_API_GARDEN_MODEL", cache.extraction_model);
   requirePairedEnv(runtime.paired_env, "ALAYA_RECALL_ANSWERS_WITH", "1");
-  requirePairedEnv(runtime.paired_env, "ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
-  requirePairedEnv(runtime.paired_env, "ALAYA_CONFLICT_DETECTION_ENABLED", "0");
-  requirePairedEnv(runtime.paired_env, "ALAYA_GARDEN_PROVIDER_KIND", "local_heuristics");
+  assertProductFormationEnvironment(
+    runtime.paired_env,
+    "attributed comparison product formation"
+  );
 }
 
 function requirePairedEnv(

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { buildMemorySearchRecallPolicy } from "@do-soul/alaya-core";
 import {
   initDatabase,
   SqliteEventLogRepo,
@@ -8,37 +8,16 @@ import {
 import { createDaemonEmbeddingRuntime } from "../../ai/daemon-embedding-runtime.js";
 import { readEmbeddingRuntimeConfig } from "../../ai/daemon-embedding-runtime-config.js";
 
-function basePolicy(): RecallPolicy {
-  return {
-    runtime_id: "runtime-stub",
-    object_kind: "recall_policy",
-    task_surface_ref: "task-stub",
-    expires_at: null,
-    derived_from: null,
-    retention_policy: "session_only",
-    coarse_filter: {
-      deterministic_match: {
-        scope_filter: null,
-        dimension_filter: null,
-        domain_tag_filter: null
-      },
-      precomputed_rank: { max_candidates: 100, min_activation_score: null },
-      semantic_supplement: {
-        enabled: false,
-        max_supplement: 10,
-        embedding_enabled: false
-      }
-    },
-    fine_assessment: {
-      budgets: { max_total_tokens: 2_000, max_entries: 10, per_dimension_limits: null },
-      conflict_awareness: true
-    }
-  } as unknown as RecallPolicy;
-}
-
 function createRuntime(
   configEnv: ReadonlyMap<string, string>,
-  embedTexts: () => Promise<readonly Float32Array[]> = async () => [new Float32Array([1])]
+  embedTexts: () => Promise<readonly Float32Array[]> = async () => [new Float32Array([1])],
+  providerOverride: Parameters<typeof createDaemonEmbeddingRuntime>[0]["embeddingProviderOverride"] = {
+    providerKind: "local_onnx",
+    modelId: "local/model",
+    schemaVersion: 1,
+    isAvailable: true,
+    embedTexts
+  }
 ) {
   const database = initDatabase({ filename: ":memory:" });
   const runtime = createDaemonEmbeddingRuntime({
@@ -51,19 +30,33 @@ function createRuntime(
       record: vi.fn(async () => undefined)
     },
     warn: vi.fn(),
-    embeddingProviderOverride: {
-      providerKind: "local_onnx",
-      modelId: "local/model",
-      schemaVersion: 1,
-      isAvailable: true,
-      embedTexts
-    }
+    embeddingProviderOverride: providerOverride
   });
   return { database, runtime };
 }
 
+function sharedProductPolicy() {
+  return buildMemorySearchRecallPolicy({
+    runtimeId: "runtime-product",
+    taskSurfaceId: "surface-product",
+    maxResults: 10,
+    filters: {
+      scopeFilter: null,
+      dimensionFilter: null,
+      domainTagFilter: null
+    }
+  });
+}
+
+function effectiveSharedProductPolicy(
+  runtime: ReturnType<typeof createDaemonEmbeddingRuntime>
+): ReturnType<typeof sharedProductPolicy> {
+  const policy = sharedProductPolicy();
+  return runtime.defaultPolicyDecorator?.(policy) ?? policy;
+}
+
 function isPolicyEnabled(runtime: ReturnType<typeof createDaemonEmbeddingRuntime>): boolean {
-  return runtime.defaultPolicyDecorator?.(basePolicy())
+  return effectiveSharedProductPolicy(runtime)
     .coarse_filter.semantic_supplement.embedding_enabled === true;
 }
 
@@ -88,13 +81,15 @@ describe("daemon local embedding product default", () => {
   it.each(["false", "  FaLsE  ", "0", " 0 "])(
     "honors the explicit local opt-out %s",
     async (configuredValue) => {
+      const embedTexts = vi.fn(async () => [new Float32Array([1])]);
       const { database, runtime } = createRuntime(new Map([
         ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
         ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", configuredValue]
-      ]));
+      ]), embedTexts);
       try {
         await expect(runtime.providerWarmup).resolves.toBe("not_requested");
         expect(isPolicyEnabled(runtime)).toBe(false);
+        expect(embedTexts).not.toHaveBeenCalled();
       } finally {
         database.close();
       }
@@ -168,7 +163,11 @@ describe("daemon local embedding product default", () => {
   });
 
   it("keeps an explicitly selected API provider off unless the operator enables it", async () => {
-    const disabled = createRuntime(new Map([["ALAYA_EMBEDDING_PROVIDER", "openai"]]));
+    const disabledEmbedTexts = vi.fn(async () => [new Float32Array([1])]);
+    const disabled = createRuntime(
+      new Map([["ALAYA_EMBEDDING_PROVIDER", "openai"]]),
+      disabledEmbedTexts
+    );
     const enabled = createRuntime(new Map([
       ["ALAYA_EMBEDDING_PROVIDER", "openai"],
       ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "1"]
@@ -178,6 +177,7 @@ describe("daemon local embedding product default", () => {
       await expect(enabled.runtime.providerWarmup).resolves.toBe("ready");
       expect(isPolicyEnabled(disabled.runtime)).toBe(false);
       expect(isPolicyEnabled(enabled.runtime)).toBe(true);
+      expect(disabledEmbedTexts).not.toHaveBeenCalled();
     } finally {
       disabled.database.close();
       enabled.database.close();
@@ -195,6 +195,19 @@ describe("daemon local embedding product default", () => {
         effective_mode: "degraded",
         degraded_reason: "provider_warmup_failed"
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it.each([
+    ["zero", new Float32Array([0])],
+    ["NaN", new Float32Array([Number.NaN])]
+  ])("keeps policy degraded when warmup returns a %s vector", async (_label, vector) => {
+    const { database, runtime } = createRuntime(new Map(), async () => [vector]);
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("failed");
+      expect(isPolicyEnabled(runtime)).toBe(false);
     } finally {
       database.close();
     }
@@ -278,6 +291,75 @@ describe("daemon local embedding product default", () => {
       await expect(runtime.providerWarmup).resolves.toBe("ready");
       expect(isPolicyEnabled(runtime)).toBe(true);
       expect(runtime.getWarmupHoldReason()).toBeNull();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("keeps the shared product policy lexical-only when provider and service are absent", async () => {
+    const embedTexts = vi.fn(async () => [new Float32Array([1])]);
+    const { database, runtime } = createRuntime(new Map(), embedTexts, null);
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("not_requested");
+      expect(runtime.defaultPolicyDecorator).toBeUndefined();
+      expect(effectiveSharedProductPolicy(runtime).coarse_filter.semantic_supplement)
+        .toMatchObject({ enabled: true, embedding_enabled: false });
+      expect(embedTexts).not.toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
+
+  it("forces the shared product policy to lexical-only while warmup is pending", async () => {
+    let resolveWarmup: (value: readonly Float32Array[]) => void = () => undefined;
+    let markWarmupStarted: () => void = () => undefined;
+    const warmupStarted = new Promise<void>((resolve) => { markWarmupStarted = resolve; });
+    const { database, runtime } = createRuntime(
+      new Map(),
+      () => new Promise((resolve) => {
+        resolveWarmup = resolve;
+        markWarmupStarted();
+      })
+    );
+    try {
+      await warmupStarted;
+      const pending = effectiveSharedProductPolicy(runtime);
+      expect(pending.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
+      expect(pending.fine_assessment.max_candidates).toBe(200);
+
+      resolveWarmup([new Float32Array([1])]);
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+    } finally {
+      database.close();
+    }
+  });
+
+  it("forces the shared product policy to lexical-only after warmup fails", async () => {
+    const { database, runtime } = createRuntime(new Map(), async () => {
+      throw new Error("warmup failed");
+    });
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("failed");
+      const failed = effectiveSharedProductPolicy(runtime);
+      expect(failed.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
+      expect(failed.fine_assessment.max_candidates).toBe(200);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("atomically adds the default injection budget only after warmup is ready", async () => {
+    const { database, runtime } = createRuntime(new Map());
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+      const ready = effectiveSharedProductPolicy(runtime);
+      expect(ready.coarse_filter.semantic_supplement).toMatchObject({
+        embedding_enabled: true,
+        injection_cap: 10,
+        injection_similarity_floor: 0.5
+      });
+      expect(ready.fine_assessment.max_candidates).toBe(210);
+      expect(runtime.defaultPolicyDecorator!(ready).fine_assessment.max_candidates).toBe(210);
     } finally {
       database.close();
     }

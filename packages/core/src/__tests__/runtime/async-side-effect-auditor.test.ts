@@ -4,6 +4,7 @@ import {
   type EventLogEntry
 } from "@do-soul/alaya-protocol";
 import {
+  drainAuditedAsyncSideEffects,
   reportAsyncSideEffectFailure,
   scheduleAuditedAsyncSideEffect,
   type AuditedAsyncSideEffect
@@ -161,13 +162,84 @@ describe("async side-effect auditor", () => {
       scheduleAuditedAsyncSideEffect(Promise.reject(new Error("scheduled work failed")), baseAudit())
     ).not.toThrow();
 
-    // Let the fire-and-forget catch + report microtasks settle.
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await expect(drainAuditedAsyncSideEffects())
+      .rejects.toThrow(/1 failed task\(s\).*scheduled work failed/u);
 
     expect(emitWarning).toHaveBeenCalledWith(
       "[MemoryService] greenService.reevaluate rejected (fire-and-forget)",
       expect.objectContaining({ code: "ALAYA_MEMORY_GREEN_REEVALUATE_FAILED" })
     );
+    await expect(drainAuditedAsyncSideEffects({ timeoutMs: 10 }))
+      .resolves.toBeUndefined();
+  });
+
+  it("includes work scheduled while the drain is in progress", async () => {
+    vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    let resolveOuter: (() => void) | undefined;
+    const outer = new Promise<void>((resolve) => {
+      resolveOuter = resolve;
+    }).then(() => {
+      scheduleAuditedAsyncSideEffect(
+        Promise.reject(new Error("nested work failed")),
+        baseAudit({ operation: "nested_operation" })
+      );
+    });
+    scheduleAuditedAsyncSideEffect(outer, baseAudit({ operation: "outer_operation" }));
+
+    const drain = drainAuditedAsyncSideEffects({ timeoutMs: 1_000 });
+    resolveOuter?.();
+
+    await expect(drain)
+      .rejects.toThrow(/nested_operation: nested work failed/u);
+    await expect(drainAuditedAsyncSideEffects({ timeoutMs: 10 }))
+      .resolves.toBeUndefined();
+  });
+
+  it("reports concurrent failures in scheduling order", async () => {
+    vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    let rejectFirst: ((error: Error) => void) | undefined;
+    let rejectSecond: ((error: Error) => void) | undefined;
+    scheduleAuditedAsyncSideEffect(new Promise<void>((_resolve, reject) => {
+      rejectFirst = reject;
+    }), baseAudit({ operation: "first_operation" }));
+    scheduleAuditedAsyncSideEffect(new Promise<void>((_resolve, reject) => {
+      rejectSecond = reject;
+    }), baseAudit({ operation: "second_operation" }));
+    const drain = drainAuditedAsyncSideEffects({ timeoutMs: 1_000 });
+
+    rejectSecond?.(new Error("second failed"));
+    await Promise.resolve();
+    rejectFirst?.(new Error("first failed"));
+
+    const error = await drain.then(
+      () => undefined,
+      (failure: unknown) => failure instanceof Error
+        ? failure
+        : new Error(String(failure))
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error!.message.indexOf("first_operation"))
+      .toBeLessThan(error!.message.indexOf("second_operation"));
+  });
+
+  it("surfaces an audit-report failure without poisoning later drains", async () => {
+    vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+
+    expect(() => scheduleAuditedAsyncSideEffect(
+      Promise.reject(new Error("work failed")),
+      baseAudit({
+        eventLogRepo: {
+          append: vi.fn(async () => {
+            throw new Error("audit append failed");
+          })
+        }
+      })
+    )).not.toThrow();
+
+    await expect(drainAuditedAsyncSideEffects())
+      .rejects.toThrow(/work failed; audit report failed: audit append failed/u);
+    await expect(drainAuditedAsyncSideEffects({ timeoutMs: 10 }))
+      .resolves.toBeUndefined();
   });
 
   it("is a no-op for null or undefined work", async () => {
@@ -179,5 +251,38 @@ describe("async side-effect auditor", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     expect(emitWarning).not.toHaveBeenCalled();
+  });
+
+  it("waits for scheduled work and removes it after settlement", async () => {
+    let resolveWork: (() => void) | undefined;
+    const work = new Promise<void>((resolve) => {
+      resolveWork = resolve;
+    });
+    scheduleAuditedAsyncSideEffect(work, baseAudit());
+    let drained = false;
+    const drain = drainAuditedAsyncSideEffects({ timeoutMs: 1_000 })
+      .then(() => { drained = true; });
+
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    resolveWork?.();
+    await drain;
+    await expect(drainAuditedAsyncSideEffects({ timeoutMs: 10 }))
+      .resolves.toBeUndefined();
+  });
+
+  it("fails closed with diagnostics instead of waiting forever", async () => {
+    let resolveWork: (() => void) | undefined;
+    const work = new Promise<void>((resolve) => {
+      resolveWork = resolve;
+    });
+    scheduleAuditedAsyncSideEffect(work, baseAudit());
+    try {
+      await expect(drainAuditedAsyncSideEffects({ timeoutMs: 20 }))
+        .rejects.toThrow(/timed out after 20ms with 1 task\(s\) pending/u);
+    } finally {
+      resolveWork?.();
+      await drainAuditedAsyncSideEffects({ timeoutMs: 1_000 });
+    }
   });
 });

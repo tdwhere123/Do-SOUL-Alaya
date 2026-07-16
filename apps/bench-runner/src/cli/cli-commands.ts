@@ -1,7 +1,6 @@
 import process from "node:process";
 import { z } from "zod";
 import {
-  releaseMetricGateVerdict,
   verifiedLongMemEvalEvidenceMatches,
   type KpiPayload,
   type VerifiedLongMemEvalEvidenceContext
@@ -20,21 +19,15 @@ import {
   resolveQaChatConfig,
   resolveQaJudgeChatConfig
 } from "../longmemeval/qa-chat.js";
-import { runExtractionFill } from "../longmemeval/extraction-fill.js";
-import {
-  ExtractionFillInterruptedError,
-  withExtractionFillSignalScope,
-  type ExtractionFillSignalSource
-} from "./extraction-fill/signal-scope.js";
-import {
-  seedExtractionReleaseBlockerExitCode
-} from "../longmemeval/seed-extraction-release-blocker.js";
 import { runSelfBench } from "../self/runner.js";
 import { fetchLocomo } from "../locomo/fetch.js";
 import { runLocomo } from "../locomo/runner.js";
 import { runControlledReplay } from "../controlled-replay/runner.js";
 import { exitCodeForVerdicts, pct } from "./result-format.js";
+import { exitCodeForReleaseHardGates } from "./release-hard-gate-exit.js";
 import type { ParsedFlags } from "./cli-options.js";
+import { verifyLongMemEvalExpansionContractInput } from
+  "./promotion/expansion-input.js";
 
 const QaByTypeSchema = z.record(
   z.string(),
@@ -67,9 +60,14 @@ export async function runFetchLongMemEval(opts: ParsedFlags): Promise<number> {
 
 export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> {
   try {
+    const expansionCapability = opts.promotionContract === undefined
+      ? undefined
+      : await verifyLongMemEvalExpansionContractInput(opts.promotionContract);
     const qaOption = buildLongMemEvalQaOption(opts);
     process.stdout.write(renderLongMemEvalStart(opts, qaOption));
-    const result = await runLongMemEval(buildLongMemEvalRunOptions(opts, qaOption));
+    const result = await runLongMemEval(buildLongMemEvalRunOptions(
+      opts, qaOption, expansionCapability
+    ));
     process.stdout.write(renderLongMemEvalResult(result));
     return exitCodeForBenchmarkResult(
       result.payload,
@@ -116,7 +114,10 @@ function renderLongMemEvalStart(
 
 function buildLongMemEvalRunOptions(
   opts: ParsedFlags,
-  qaOption: LongMemEvalQaRunOption | undefined
+  qaOption: LongMemEvalQaRunOption | undefined,
+  expansionCapability?: Awaited<ReturnType<
+    typeof verifyLongMemEvalExpansionContractInput
+  >>
 ): Parameters<typeof runLongMemEval>[0] {
   return {
     variant: opts.variant,
@@ -135,7 +136,11 @@ function buildLongMemEvalRunOptions(
     ...(opts.dataDirRoot === undefined ? {} : { dataDirRoot: opts.dataDirRoot }),
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.extractionCacheRoot === undefined ? {} : { extractionCacheRoot: opts.extractionCacheRoot }),
-    ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency })
+    ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+    ...(expansionCapability === undefined ? {} : { expansionCapability }),
+    ...(opts.promotionContract === undefined
+      ? {}
+      : { promotionContractPath: opts.promotionContract })
   };
 }
 
@@ -425,12 +430,11 @@ function exitCodeForBenchmarkResult(
   payload: KpiPayload,
   evidence?: VerifiedLongMemEvalEvidenceContext
 ): number {
-  const seedExtractionExitCode = seedExtractionReleaseBlockerExitCode(payload);
-  if (seedExtractionExitCode !== 0) return seedExtractionExitCode;
-  if (releaseMetricGateVerdict(payload) === "fail") return 1;
+  const hardGateExitCode = exitCodeForReleaseHardGates(payload);
+  if (hardGateExitCode !== 0) return hardGateExitCode;
   if (isLongMemEvalSplit(payload.split) &&
       !verifiedLongMemEvalEvidenceMatches(payload, evidence)) return 1;
-  return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
+  return 0;
 }
 
 function isLongMemEvalSplit(split: KpiPayload["split"]): boolean {
@@ -438,55 +442,5 @@ function isLongMemEvalSplit(split: KpiPayload["split"]): boolean {
     split === "longmemeval-m";
 }
 
-/**
- * @anchor extraction-fill-command — Layer 1 (slow, one-time, daemon-free).
- * Fills the extraction cache + writes the cache manifest (incl. coverage).
- * see also: apps/bench-runner/src/longmemeval/extraction-fill.ts
- */
-export async function runExtractionFillCommand(
-  opts: ParsedFlags,
-  deps: {
-    readonly runExtractionFill: typeof runExtractionFill;
-    readonly signalSource: ExtractionFillSignalSource;
-  } = { runExtractionFill, signalSource: process }
-): Promise<number> {
-  try {
-    process.stdout.write(
-      `Filling extraction cache for ${opts.variant}` +
-        (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
-        (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
-        (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
-        "...\n"
-    );
-    const result = await withExtractionFillSignalScope(
-      deps.signalSource,
-      (signal) => deps.runExtractionFill({
-        variant: opts.variant,
-        ...(opts.limit === undefined ? {} : { limit: opts.limit }),
-        ...(opts.offset === undefined ? {} : { offset: opts.offset }),
-        ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
-        ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
-        signal
-      })
-    );
-    process.stdout.write(
-      `Done. requested_turns=${result.requestedTurns} ` +
-        `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
-        `failures=${result.failures} retry_successes=${result.retrySuccesses} ` +
-        `rate_limit_retries=${result.rateLimitRetries} ` +
-        `terminal_max_retries=${result.terminalRetryClassifications.failure_max_retries} ` +
-        `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +
-        `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
-        `coverage=${pct(result.coverage)}\n`
-    );
-    return result.failures > 0 ? 1 : 0;
-  } catch (err) {
-    if (err instanceof ExtractionFillInterruptedError) return err.exitCode;
-    process.stderr.write(
-      `alaya-bench-runner extraction-fill: ${err instanceof Error ? err.message : String(err)}\n`
-    );
-    return 2;
-  }
-}
-
+export { runExtractionFillCommand } from "./extraction-fill/command.js";
 export { runRecallEvalCommand } from "./recall-eval/command.js";

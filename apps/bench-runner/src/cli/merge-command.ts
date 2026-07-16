@@ -20,6 +20,7 @@ export interface MergeLongMemEvalCommandOptions {
   readonly variant: LongMemEvalVariant;
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
+  readonly concurrency?: number;
 }
 
 /**
@@ -68,6 +69,8 @@ async function executeMergeLongMemEval(
     ),
     build,
     shardArchiveRefs: loaded.archiveRefs,
+    requestedConcurrency: opts.concurrency,
+    globalExtractionAuthority: loaded.globalExtractionAuthority,
     diagnosticsSpool
   });
   process.stdout.write(

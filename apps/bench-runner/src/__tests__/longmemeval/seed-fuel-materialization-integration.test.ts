@@ -49,7 +49,8 @@ function freshStats(): CompileSeedExtractionStats {
     lastTurnRawSignalCount: 0,
     lastTurnDraftCount: 0,
     lastExtractionSource: null,
-    lastCacheKey: null
+    lastCacheKey: null,
+    lastRawJsonSha256: null
   };
 }
 

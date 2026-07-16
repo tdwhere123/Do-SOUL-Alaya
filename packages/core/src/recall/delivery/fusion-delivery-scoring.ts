@@ -1,5 +1,8 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
-import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
+import {
+  compareMemoryEntries,
+  isWorkspaceMemoryCandidate
+} from "../runtime/recall-service-helpers.js";
 import {
   resolveRrfFusionWeights
 } from "./fusion-delivery-adaptive-scoring.js";
@@ -86,7 +89,10 @@ export function applyPathSuppressionToFusionScores(
     return fusionByCandidateKey;
   }
   const adjusted = [...fusionByCandidateKey.values()].map((breakdown) => {
-    const delta = suppressionScores[breakdown.object_id] ?? 0;
+    const delta = breakdown.origin_plane === "workspace_local" &&
+      breakdown.object_kind === "memory_entry"
+      ? suppressionScores[breakdown.object_id] ?? 0
+      : 0;
     const fusedScore =
       delta > 0 && breakdown.fused_score > 0
         ? Math.min(
@@ -207,6 +213,7 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
   const ra = params.axisContext.raByKey.get(params.candidateKey);
   const scored = computeIntegratedFloodScore({
     entry: params.candidate.entry,
+    memorySupplementEligible: isWorkspaceMemoryCandidate(params.candidate),
     axisInputs: {
       R_obj: ra?.object ?? 0,
       A_path: ra?.path ?? 0,

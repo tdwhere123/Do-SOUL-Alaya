@@ -6,7 +6,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   assertActivationWeightsSumToOne,
+  buildRecallLogicalObjectKey,
   estimateTokens,
+  isSynthesisChildCandidate,
   mapBudgetPenalty,
   resolveActivationWeights
 } from "../../recall/runtime/recall-service-helpers.js";
@@ -67,5 +69,22 @@ describe("recall service helpers", () => {
     });
     expect(() => assertActivationWeightsSumToOne(resolved)).not.toThrow();
     expect(() => assertActivationWeightsSumToOne({ relevance: 0.2 })).toThrow();
+  });
+
+  it("builds logical object identity independently from origin projection", () => {
+    const entry = { object_id: "shared", object_kind: "memory_entry" as const };
+
+    expect(buildRecallLogicalObjectKey({ entry })).toBe("memory_entry:shared");
+    expect(buildRecallLogicalObjectKey({ entry, objectKind: "synthesis_capsule" }))
+      .toBe("synthesis_capsule:shared");
+  });
+
+  it("recognizes only producer-shaped synthesis children", () => {
+    expect(isSynthesisChildCandidate({ sourceChannel: "synthesis_child" })).toBe(true);
+    expect(isSynthesisChildCandidate({ sourceChannels: ["synthesis_child", "synthesis_fts"] }))
+      .toBe(true);
+    expect(isSynthesisChildCandidate({ admissionPlanes: ["synthesis_child"] })).toBe(true);
+    expect(isSynthesisChildCandidate({ sourceChannels: ["synthesis_fts"] })).toBe(false);
+    expect(isSynthesisChildCandidate({})).toBe(false);
   });
 });

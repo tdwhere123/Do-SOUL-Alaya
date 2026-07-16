@@ -8,9 +8,9 @@ import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 import {
   createCompileSeedRunner,
-  resolveBenchAllowLiveExtraction,
   resolveEffectiveExtractionCacheRoot
 } from "./compile-seed.js";
+import { collectDistinctTurnContents } from "./extraction-fill.js";
 import { runLongMemEvalMultiturnQuestion } from "./multiturn-question.js";
 import { resolveBenchEmbeddingProviderLabel, resolveCommitInfo } from "./runner-helpers.js";
 import {
@@ -88,7 +88,11 @@ export async function prepareMultiturnRun(
     embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
       opts.embeddingMode ?? "disabled", process.env, opts.embeddingProviderKind
     ),
-    seedRunner: createMultiturnSeedRunner(extractionCacheRoot)
+    seedRunner: createMultiturnSeedRunner(
+      extractionCacheRoot,
+      window,
+      Math.max(0, opts.offset ?? 0)
+    )
   };
 }
 
@@ -137,10 +141,16 @@ function filterQuestionsByIdEnv(
   return questions.filter((question) => ids.has(question.question_id));
 }
 
-function createMultiturnSeedRunner(extractionCacheRoot: string) {
+function createMultiturnSeedRunner(
+  extractionCacheRoot: string,
+  window: readonly LongMemEvalQuestion[],
+  offset: number
+) {
   return createCompileSeedRunner({
     cacheRoot: extractionCacheRoot,
-    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+    requiredTurnContents: collectDistinctTurnContents(window),
+    requiredQuestionWindow: { offset, limit: window.length },
+    allowLiveExtraction: false
   });
 }
 

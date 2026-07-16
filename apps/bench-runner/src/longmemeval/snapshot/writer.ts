@@ -1,32 +1,46 @@
-import { basename, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../../shared/version.js";
-import {
-  readExtractionCacheManifestIdentity
-} from "../extraction-cache-manifest.js";
-import type { LongMemEvalVariant } from "../dataset.js";
-import { redactProvenanceUrl, type LongMemEvalRunProvenance } from "../provenance/run.js";
+import type { LongMemEvalQuestion, LongMemEvalVariant } from "../dataset.js";
+import type { LongMemEvalRunProvenance } from "../provenance/run.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   checkpointAndCopyBenchDb,
   readSchemaMigrationVersion,
   snapshotQuestionIdDigest,
+  snapshotExtractionAuthorityPath,
   writeSnapshotManifest,
   writeSnapshotSidecar,
   type LongMemEvalSnapshotQuestion,
-  type SnapshotExtractionProvenance
+  type LongMemEvalSnapshotSidecarFile,
+  type SnapshotExtractionProvenanceV3
 } from "../snapshot.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
+import {
+  assertCurrentSnapshotWriteAuthority
+} from "./current-substrate-authority.js";
 import { buildSnapshotArtifactIntegrity } from "./integrity.js";
+import {
+  MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES,
+  assertSnapshotExtractionAuthorityBinding,
+  captureSnapshotExtractionAuthority,
+  parseSnapshotExtractionAuthorityBytes
+} from "./extraction-authority.js";
+import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
+import { compactSnapshotRunProvenance } from "./run-provenance.js";
 
 export interface WriteRecallEvalSnapshotInput {
   readonly snapshotOut: string;
   readonly seedDataDirRoot: string;
   readonly variant: LongMemEvalVariant;
   readonly commitSha7: string;
+  readonly canonicalQuestions: readonly LongMemEvalQuestion[];
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
   readonly datasetSha256: string;
+  readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
 }
 
@@ -34,61 +48,82 @@ export async function writeRecallEvalSnapshotArtifacts(
   input: WriteRecallEvalSnapshotInput
 ): Promise<void> {
   const liveDbPath = resolve(input.seedDataDirRoot, BENCH_DAEMON_DB_FILENAME);
-  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
-  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
-  const extraction = buildExtractionProvenance(input.extractionCacheRoot);
-  writeSnapshotSidecar(input.snapshotOut, {
-    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
-    variant: input.variant,
-    questions: input.snapshotQuestions
-  });
-  const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
+  const captured = captureSnapshotExtractionAuthority(input.extractionCacheRoot);
+  const extraction = captured.compact;
+  const sidecar = buildSidecar(input);
   const questionDigest = snapshotQuestionIdDigest(input.snapshotQuestions);
   const datasetSha = resolveSnapshotDatasetSha(input, extraction, questionDigest);
+  assertCurrentSnapshotWriteAuthority({
+    dbPath: liveDbPath,
+    sidecar,
+    canonicalQuestions: input.canonicalQuestions,
+    extraction,
+    extractionAuthority: captured.authority,
+    seedExtractionPath: input.seedExtractionPath,
+    runProvenance: input.runProvenance,
+    datasetSha256: datasetSha
+  });
+  const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
+  const authorityPath = snapshotExtractionAuthorityPath(input.snapshotOut);
+  mkdirSync(dirname(authorityPath), { recursive: true });
+  writeFileSync(authorityPath, captured.bytes, {
+    flag: "wx",
+    mode: 0o400
+  });
+  const persistedAuthority = readPersistedAuthority(
+    authorityPath,
+    captured.bytes,
+    extraction
+  );
+  checkpointAndCopyBenchDb(liveDbPath, input.snapshotOut);
+  writeSnapshotSidecar(input.snapshotOut, sidecar);
+  assertCurrentSnapshotWriteAuthority({
+    dbPath: input.snapshotOut,
+    sidecar,
+    canonicalQuestions: input.canonicalQuestions,
+    extraction,
+    extractionAuthority: persistedAuthority,
+    seedExtractionPath: input.seedExtractionPath,
+    runProvenance: input.runProvenance,
+    datasetSha256: datasetSha
+  });
+  const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
+  assertCapturedAuthorityIntegrity(integrity, authorityPath, captured.bytes);
   writeSnapshotManifest(input.snapshotOut, buildManifest({
     input, schemaMigrationVersion, extraction, integrity, datasetSha, questionDigest
   }));
 }
 
-function buildExtractionProvenance(root: string): SnapshotExtractionProvenance | null {
-  const identity = readExtractionCacheManifestIdentity(root);
-  if (identity === undefined) return null;
-  const { manifest } = identity;
-  const common = {
-    manifest_sha256: identity.manifestSha256,
-    extraction_model: manifest.extraction_model,
-    provider_url: redactProvenanceUrl(manifest.provider_url),
-    system_prompt_sha256: manifest.system_prompt_sha256,
-    cache_key_algo: manifest.cache_key_algo,
-    dataset: manifest.dataset,
-    dataset_revision: manifest.dataset_revision,
-    ...(manifest.coverage === undefined ? {} : { coverage: manifest.coverage }),
-    ...(manifest.cached_turns === undefined ? {} : { cached_turns: manifest.cached_turns }),
-    ...(manifest.requested_turns === undefined ? {} : { requested_turns: manifest.requested_turns })
-  };
-  if (manifest.schema_version === 1) {
-    return { ...common, schema_version: 1 };
+function assertCapturedAuthorityIntegrity(
+  integrity: Awaited<ReturnType<typeof buildSnapshotArtifactIntegrity>>,
+  filePath: string,
+  expectedBytes: Buffer
+): void {
+  if (integrity.extraction_authority_filename !== basename(filePath) ||
+      integrity.extraction_authority_sha256 !== sha256Buffer(expectedBytes) ||
+      integrity.extraction_authority_bytes !== expectedBytes.byteLength) {
+    throw new Error("snapshot extraction authority changed before manifest binding");
   }
-  if (manifest.schema_version === 2) {
-    return { ...common, schema_version: 2, model_family: manifest.model_family };
-  }
+}
+
+function buildSidecar(input: WriteRecallEvalSnapshotInput): LongMemEvalSnapshotSidecarFile {
   return {
-    ...common,
-    schema_version: manifest.schema_version,
-    model_family: manifest.model_family,
-    request_profile: manifest.request_profile
+    schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+    variant: input.variant,
+    questions: input.snapshotQuestions
   };
 }
 
 function buildManifest(context: {
   readonly input: WriteRecallEvalSnapshotInput;
   readonly schemaMigrationVersion: number;
-  readonly extraction: SnapshotExtractionProvenance | null;
+  readonly extraction: SnapshotExtractionProvenanceV3;
   readonly integrity: Awaited<ReturnType<typeof buildSnapshotArtifactIntegrity>>;
   readonly datasetSha: string;
   readonly questionDigest: string;
 }) {
   const { input } = context;
+  const runProvenance = compactSnapshotRunProvenance(input.runProvenance);
   return {
     schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
     variant: input.variant,
@@ -101,23 +136,42 @@ function buildManifest(context: {
     sidecar_filename: `${basename(input.snapshotOut)}.sidecar.json`,
     built_at: new Date().toISOString(),
     extraction_provenance: context.extraction,
+    seed_extraction_path: input.seedExtractionPath,
     artifact_integrity: context.integrity,
-    run_provenance: input.runProvenance,
+    run_provenance: runProvenance,
     question_id_digest: context.questionDigest,
     dataset_sha256: context.datasetSha,
     attribution: deriveSnapshotAttribution({
       artifactIntegrity: context.integrity,
-      runProvenance: input.runProvenance,
+      runProvenance,
       questionIdDigest: context.questionDigest,
       datasetSha256: context.datasetSha,
+      seedExtractionPath: input.seedExtractionPath,
       extractionProvenance: context.extraction
     })
   };
 }
 
+function readPersistedAuthority(
+  filePath: string,
+  expectedBytes: Buffer,
+  extraction: SnapshotExtractionProvenanceV3
+) {
+  const bytes = readRegularFileNoFollow(
+    filePath,
+    MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES
+  );
+  if (!bytes.equals(expectedBytes)) {
+    throw new Error("persisted snapshot extraction authority differs from capture");
+  }
+  const authority = parseSnapshotExtractionAuthorityBytes(bytes, filePath);
+  assertSnapshotExtractionAuthorityBinding(authority, extraction);
+  return authority;
+}
+
 function resolveSnapshotDatasetSha(
   input: WriteRecallEvalSnapshotInput,
-  extraction: SnapshotExtractionProvenance | null,
+  extraction: SnapshotExtractionProvenanceV3,
   questionDigest: string
 ): string {
   if (!/^[a-f0-9]{64}$/u.test(input.datasetSha256)) {

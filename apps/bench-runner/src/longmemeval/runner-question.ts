@@ -38,10 +38,17 @@ import type { QaQuestionVerdict } from "./qa-harness.js";
 import type { LongMemEvalSnapshotQuestion } from "./snapshot.js";
 import type { QaChatFn } from "./qa-chat.js";
 import { seedLongMemEvalQuestion } from "./runner-question-seeding.js";
-import { buildLongMemEvalQuestionResult } from "./runner-question-result.js";
+import type { LongMemEvalQuestionSeedState } from
+  "./runner-question-seeding.js";
+import {
+  buildLongMemEvalQuestionResult,
+  buildLongMemEvalSnapshotQuestion
+} from "./runner-question-result.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from "./selection/question-runtime-identity.js";
 import { requireLongMemEvalTimestamp } from "./ingestion/source-time.js";
 import { warmLongMemEvalEmbeddingCaches } from "./embedding-cache-warmup.js";
+import { resolveLongMemEvalEdgeFormationConfig } from
+  "./edge-formation-config.js";
 
 export interface LongMemEvalWorkerResult {
   readonly questionId: string;
@@ -80,11 +87,67 @@ export interface LongMemEvalQuestionRunInput {
   readonly qaJudgeChat?: QaChatFn;
 }
 
+export interface LongMemEvalPreparedQuestion {
+  readonly questionId: string;
+  readonly phase: ReturnType<typeof createPhaseTimer>;
+  readonly seedState: LongMemEvalQuestionSeedState;
+  readonly goldMemoryIds: readonly string[];
+  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
+  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
+  readonly snapshotQuestion: LongMemEvalSnapshotQuestion;
+}
+
 export async function runLongMemEvalQuestion(
   input: LongMemEvalQuestionRunInput
 ): Promise<LongMemEvalWorkerResult> {
-  const profileEnabled = isBenchProfileEnabled();
   const phase = createPhaseTimer();
+  try {
+    return await withQuestionWorkspace(input, phase, async (workspace) => {
+      const prepared = await prepareLongMemEvalQuestionInWorkspace(
+        input,
+        workspace,
+        phase
+      );
+      return completeLongMemEvalQuestionInWorkspace(input, workspace, prepared);
+    });
+  } finally {
+    writeQuestionProfile(input.question.question_id, phase);
+  }
+}
+
+export async function prepareLongMemEvalQuestion(
+  input: LongMemEvalQuestionRunInput
+): Promise<LongMemEvalPreparedQuestion> {
+  const phase = createPhaseTimer();
+  try {
+    return await withQuestionWorkspace(input, phase, (workspace) =>
+      prepareLongMemEvalQuestionInWorkspace(input, workspace, phase));
+  } catch (error) {
+    writeQuestionProfile(input.question.question_id, phase);
+    throw error;
+  }
+}
+
+export async function runPreparedLongMemEvalQuestion(
+  input: LongMemEvalQuestionRunInput,
+  prepared: LongMemEvalPreparedQuestion
+): Promise<LongMemEvalWorkerResult> {
+  if (prepared.questionId !== input.question.question_id) {
+    throw new Error("prepared LongMemEval question identity mismatch");
+  }
+  try {
+    return await withQuestionWorkspace(input, prepared.phase, (workspace) =>
+      completeLongMemEvalQuestionInWorkspace(input, workspace, prepared));
+  } finally {
+    writeQuestionProfile(input.question.question_id, prepared.phase);
+  }
+}
+
+async function withQuestionWorkspace<T>(
+  input: LongMemEvalQuestionRunInput,
+  phase: ReturnType<typeof createPhaseTimer>,
+  action: (workspace: BenchWorkspaceHandle) => Promise<T>
+): Promise<T> {
   const identity = buildLongMemEvalQuestionRuntimeIdentity(input.question.question_id);
   const workspace: BenchWorkspaceHandle = await runQuestionPhase(
     phase,
@@ -96,28 +159,26 @@ export async function runLongMemEvalQuestion(
       })
   );
   try {
-    return await runLongMemEvalQuestionInWorkspace(input, workspace, phase);
+    return await action(workspace);
   } finally {
     await runQuestionPhase(phase, "workspace_detach", () => workspace.detach());
-    if (profileEnabled) {
-      process.stderr.write(
-        `[bench_profile] question=${input.question.question_id} ${phase.format()}\n`
-      );
-    }
   }
 }
 
-async function runLongMemEvalQuestionInWorkspace(
+async function prepareLongMemEvalQuestionInWorkspace(
   input: LongMemEvalQuestionRunInput,
   workspace: BenchWorkspaceHandle,
   phase: ReturnType<typeof createPhaseTimer>
-): Promise<LongMemEvalWorkerResult> {
+): Promise<LongMemEvalPreparedQuestion> {
   const seedState = await runQuestionPhase(phase, "seed_loop", () =>
     seedLongMemEvalQuestion({
       workspace,
       question: input.question,
       seedRunner: input.seedRunner,
-      qaChat: input.qaChat
+      qaChat: input.qaChat,
+      seedFormationMode: input.captureSnapshot
+        ? "treatment_neutral"
+        : "diagnostic_warmup"
     })
   );
   const { embeddingWarmup, queryEmbeddingWarmup } = await runQuestionPhase(
@@ -139,18 +200,34 @@ async function runLongMemEvalQuestionInWorkspace(
     seedState.sidecar,
     seedState.answerSessionSet
   );
-  const recallCycle = await runQuestionPhase(phase, "recall", () =>
-    runQuestionRecallCycle(input, workspace, goldMemoryIds)
+  return {
+    questionId: input.question.question_id,
+    phase,
+    seedState,
+    goldMemoryIds,
+    embeddingWarmup,
+    queryEmbeddingWarmup,
+    snapshotQuestion: buildLongMemEvalSnapshotQuestion({
+      question: input.question,
+      workspace,
+      seedState
+    })
+  };
+}
+
+async function completeLongMemEvalQuestionInWorkspace(
+  input: LongMemEvalQuestionRunInput,
+  workspace: BenchWorkspaceHandle,
+  prepared: LongMemEvalPreparedQuestion
+): Promise<LongMemEvalWorkerResult> {
+  const recallCycle = await runQuestionPhase(prepared.phase, "recall", () =>
+    runQuestionRecallCycle(input, workspace, prepared.goldMemoryIds)
   );
   return await buildTimedQuestionResult({
     input,
     workspace,
-    phase,
-    seedState,
-    goldMemoryIds,
-    recallCycle,
-    embeddingWarmup,
-    queryEmbeddingWarmup
+    prepared,
+    recallCycle
   });
 }
 
@@ -178,23 +255,19 @@ export function isAnswersWithEdgesEnabled(): boolean {
 async function buildTimedQuestionResult(input: {
   readonly input: LongMemEvalQuestionRunInput;
   readonly workspace: BenchWorkspaceHandle;
-  readonly phase: ReturnType<typeof createPhaseTimer>;
-  readonly seedState: Awaited<ReturnType<typeof seedLongMemEvalQuestion>>;
-  readonly goldMemoryIds: readonly string[];
+  readonly prepared: LongMemEvalPreparedQuestion;
   readonly recallCycle: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>;
-  readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
-  readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
 }): Promise<LongMemEvalWorkerResult> {
-  return await runQuestionPhase(input.phase, "kpi_query", () =>
+  return await runQuestionPhase(input.prepared.phase, "kpi_query", () =>
     buildLongMemEvalQuestionResult({
       daemon: input.input.daemon,
       workspace: input.workspace,
       question: input.input.question,
-      seedState: input.seedState,
-      goldMemoryIds: input.goldMemoryIds,
+      seedState: input.prepared.seedState,
+      goldMemoryIds: input.prepared.goldMemoryIds,
       recallCycle: input.recallCycle,
-      embeddingWarmup: input.embeddingWarmup,
-      queryEmbeddingWarmup: input.queryEmbeddingWarmup,
+      embeddingWarmup: input.prepared.embeddingWarmup,
+      queryEmbeddingWarmup: input.prepared.queryEmbeddingWarmup,
       captureSnapshot: input.input.captureSnapshot,
       qaChat: input.input.qaChat,
       qaJudgeChat: input.input.qaJudgeChat,
@@ -203,21 +276,30 @@ async function buildTimedQuestionResult(input: {
   );
 }
 
+function writeQuestionProfile(
+  questionId: string,
+  phase: ReturnType<typeof createPhaseTimer>
+): void {
+  if (!isBenchProfileEnabled()) return;
+  process.stderr.write(`[bench_profile] question=${questionId} ${phase.format()}\n`);
+}
+
 async function runCoherenceEdgesIfEnabled(
   input: LongMemEvalQuestionRunInput,
   workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
   members: readonly BenchEdgeFormationMember[]
 ): Promise<void> {
+  const config = resolveLongMemEvalEdgeFormationConfig(process.env).coherence;
   if (
     input.embeddingMode !== "env" ||
-    process.env.ALAYA_EXP_COHERENCE_EDGES !== "1"
+    !config.enabled
   ) {
     return;
   }
   const summary = await workspace.accrueCoherenceCoRecall(members, {
-    floor: Number(process.env.ALAYA_EXP_COHERENCE_FLOOR ?? "0.6"),
-    capPerNode: Number(process.env.ALAYA_EXP_COHERENCE_CAP ?? "3"),
-    crossSessionOnly: process.env.ALAYA_EXP_COHERENCE_XSESSION !== "0"
+    floor: config.floor,
+    capPerNode: config.capPerNode,
+    crossSessionOnly: config.crossSessionOnly
   });
   console.error(
     `[coherence-edges] q=${input.question.question_id} ` +
@@ -235,10 +317,11 @@ async function runAnswersWithEdgesIfEnabled(
   if (input.embeddingMode !== "env") {
     return;
   }
+  const config = resolveLongMemEvalEdgeFormationConfig(process.env).answersWith;
   const summary = await workspace.accrueAnswersWithCoRelevance(members, {
-    bar: Number(process.env.ALAYA_EXP_ANSWERS_WITH_BAR ?? "3"),
-    capPerNode: Number(process.env.ALAYA_EXP_ANSWERS_WITH_CAP ?? "3"),
-    crossSessionOnly: process.env.ALAYA_EXP_ANSWERS_WITH_XSESSION !== "0"
+    bar: config.bar,
+    capPerNode: config.capPerNode,
+    crossSessionOnly: config.crossSessionOnly
   });
   console.error(
     `[answers-with-edges] q=${input.question.question_id} ` +

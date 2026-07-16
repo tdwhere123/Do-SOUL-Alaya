@@ -1,10 +1,60 @@
+import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import { describe, expect, it } from "vitest";
 import type { LongMemEvalRunProvenance } from "../../longmemeval/provenance/run.js";
 import type { SnapshotExtractionProvenance } from "../../longmemeval/snapshot.js";
 import { deriveSnapshotAttribution } from "../../longmemeval/snapshot/attribution.js";
 import type { ExtractionRequestProfile } from "../../longmemeval/extraction-cache-manifest.js";
+import { syntheticExtractionClosure } from "./extraction-closure-fixture.js";
+import { compactSnapshotRunProvenance } from
+  "../../longmemeval/snapshot/run-provenance.js";
 
 const DATASET_SHA = "a".repeat(64);
+type FillStatus = "in_progress" | "complete";
+const DEFAULT_CLOSURE = syntheticExtractionClosure({
+  count: 10,
+  model: "fixture-model",
+  requestProfile: "provider-default-v1",
+  seed: "snapshot-attribution"
+});
+
+function fillContract(
+  status: FillStatus | null = "complete",
+  digest = DEFAULT_CLOSURE.expected_key_set_sha256,
+  contentClosure = DEFAULT_CLOSURE.content_closure_sha256,
+  includeIndex = false
+) {
+  return status === null ? {} : {
+    fill_status: status,
+    window_offset: 0,
+    window_limit: 1,
+    expected_turns: 10,
+    expected_key_set_sha256: digest,
+    ...(status === "complete" ? {
+      content_closure_sha256: contentClosure,
+      ...(includeIndex ? {
+        content_closure_index: DEFAULT_CLOSURE.content_closure_index
+      } : {})
+    } : {})
+  } as const;
+}
+
+const CLEAN_SEED_EXTRACTION_PATH: SeedExtractionPath = {
+  path: "official_api_compile",
+  extraction_attempts: 10,
+  cache_hits: 10,
+  llm_calls: 0,
+  offline_fallbacks: 0,
+  live_extraction_failures: 0,
+  cached_extraction_failures: 0,
+  facts_produced: 10,
+  signals_dropped: 0,
+  parse_dropped: 0,
+  compile_overflow_dropped: 0,
+  signals_dropped_by_reason: {
+    candidate_absent: 0,
+    materialization_drop: 0
+  }
+};
 
 function provenance(input: {
   readonly datasetRevision: string;
@@ -12,6 +62,7 @@ function provenance(input: {
   readonly modelFamily?: string;
   readonly requestProfile?: ExtractionRequestProfile;
   readonly currentSelection?: boolean;
+  readonly fillStatus?: FillStatus | null;
 }): LongMemEvalRunProvenance {
   return {
     schema_version: 1,
@@ -42,7 +93,8 @@ function provenance(input: {
     extraction_cache: cacheIdentity(
       input.datasetRevision,
       input.modelFamily ?? "fixture-family",
-      input.requestProfile ?? "provider-default-v1"
+      input.requestProfile ?? "provider-default-v1",
+      input.fillStatus
     ),
     runtime: {
       node_version: "v24.0.0",
@@ -77,7 +129,8 @@ function provenance(input: {
 function cacheIdentity(
   datasetRevision: string,
   modelFamily?: string,
-  requestProfile?: ExtractionRequestProfile
+  requestProfile?: ExtractionRequestProfile,
+  fillStatus?: FillStatus | null
 ): NonNullable<LongMemEvalRunProvenance["extraction_cache"]> {
   const base = {
     manifest_sha256: "d".repeat(64),
@@ -102,7 +155,8 @@ function cacheIdentity(
           ...base,
           schema_version: 3,
           model_family: modelFamily,
-          request_profile: requestProfile
+          request_profile: requestProfile,
+          ...fillContract(fillStatus, undefined, undefined, true)
         };
 }
 
@@ -123,7 +177,10 @@ function questionManifestIdentity(
 function extraction(
   datasetRevision: string,
   modelFamily?: string,
-  requestProfile?: ExtractionRequestProfile
+  requestProfile?: ExtractionRequestProfile,
+  fillStatus?: FillStatus | null,
+  digest?: string,
+  contentClosure?: string
 ): SnapshotExtractionProvenance {
   const base = {
     manifest_sha256: "d".repeat(64),
@@ -145,7 +202,8 @@ function extraction(
           ...base,
           schema_version: 3,
           model_family: modelFamily,
-          request_profile: requestProfile
+          request_profile: requestProfile,
+          ...fillContract(fillStatus, digest, contentClosure)
         };
 }
 
@@ -161,6 +219,12 @@ function attribution(input: {
   readonly snapshotManifestSha?: string;
   readonly snapshotCacheKeyAlgo?: string;
   readonly currentSelection?: boolean;
+  readonly seedExtractionPath?: SeedExtractionPath | null;
+  readonly fillStatus?: FillStatus | null;
+  readonly snapshotFillStatus?: FillStatus | null;
+  readonly snapshotFillDigest?: string;
+  readonly snapshotContentClosure?: string;
+  readonly snapshotWindowOffset?: number;
 }) {
   const family = input.snapshotModelFamily ?? input.modelFamily ?? "fixture-family";
   const profile = input.snapshotRequestProfile ?? input.requestProfile ?? "provider-default-v1";
@@ -168,14 +232,24 @@ function attribution(input: {
     ? extraction(input.snapshotDatasetRevision ?? input.datasetRevision)
     : input.legacySchema === 2
       ? extraction(input.snapshotDatasetRevision ?? input.datasetRevision, family)
-      : extraction(input.snapshotDatasetRevision ?? input.datasetRevision, family, profile);
+      : extraction(
+          input.snapshotDatasetRevision ?? input.datasetRevision,
+          family,
+          profile,
+          input.snapshotFillStatus,
+          input.snapshotFillDigest,
+          input.snapshotContentClosure
+        );
   return deriveSnapshotAttribution({
     artifactIntegrity: {
       db_sha256: "3".repeat(64),
-      sidecar_sha256: "4".repeat(64)
+      sidecar_sha256: "4".repeat(64),
+      extraction_authority_filename: "snapshot.db.extraction-authority.json",
+      extraction_authority_sha256: "6".repeat(64),
+      extraction_authority_bytes: 1
     },
     runProvenance: input.legacySchema === undefined
-      ? provenance(input)
+      ? compactSnapshotRunProvenance(provenance(input))
       : {
           ...provenance(input),
           extraction_cache: input.legacySchema === 1
@@ -184,10 +258,16 @@ function attribution(input: {
         },
     questionIdDigest: "5".repeat(64),
     datasetSha256: DATASET_SHA,
+    ...(input.seedExtractionPath === null
+      ? {}
+      : { seedExtractionPath: input.seedExtractionPath ?? CLEAN_SEED_EXTRACTION_PATH }),
     extractionProvenance: {
       ...snapshotExtraction,
       manifest_sha256: input.snapshotManifestSha ?? snapshotExtraction.manifest_sha256,
-      cache_key_algo: input.snapshotCacheKeyAlgo ?? snapshotExtraction.cache_key_algo
+      cache_key_algo: input.snapshotCacheKeyAlgo ?? snapshotExtraction.cache_key_algo,
+      ...(input.snapshotWindowOffset === undefined
+        ? {}
+        : { window_offset: input.snapshotWindowOffset })
     }
   });
 }
@@ -199,6 +279,99 @@ describe("snapshot attribution dataset binding", () => {
       questionManifestDatasetSha: DATASET_SHA,
       currentSelection: true
     })).toEqual({ status: "attributed", gate_eligible: true });
+  });
+
+  it("keeps a statusless v3 cache readable but authority-ineligible", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      fillStatus: null,
+      snapshotFillStatus: null
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("keeps an in-progress v3 cache authority-ineligible", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      fillStatus: "in_progress"
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("rejects snapshot provenance with a different completed fill key set", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      snapshotFillDigest: "0".repeat(64)
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("rejects snapshot provenance with a different completed content closure", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      snapshotContentClosure: "0".repeat(64)
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("rejects snapshot provenance with a different completed fill window", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      snapshotWindowOffset: 1
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("keeps a snapshot without persisted seed extraction evidence gate-ineligible", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      seedExtractionPath: null
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("keeps a snapshot with degraded seed extraction evidence gate-ineligible", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      seedExtractionPath: {
+        ...CLEAN_SEED_EXTRACTION_PATH,
+        offline_fallbacks: 1
+      }
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("keeps all-zero official extraction evidence gate-ineligible", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      seedExtractionPath: {
+        ...CLEAN_SEED_EXTRACTION_PATH,
+        extraction_attempts: 0,
+        cache_hits: 0,
+        facts_produced: 0
+      }
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("keeps inconsistent seed drop accounting gate-ineligible", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      seedExtractionPath: {
+        ...CLEAN_SEED_EXTRACTION_PATH,
+        signals_dropped: 1
+      }
+    })).toEqual({ status: "attributed", gate_eligible: false });
   });
 
   it("rejects an unpinned v3 cache even when the question manifest binds dataset bytes", () => {

@@ -350,7 +350,7 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     createMemoryEntry({ object_id: "77777777-7777-4777-8777-777777777777", surface_id: "sB", activation_score: 0.7, content: "pnpm second session pnpm pnpm" })
   ];
 
-  it("marks the coverage selector noop and leaves its rank untouched when disabled", async () => {
+  it("marks unchanged coverage positions as kept and attributes the joint stage once", async () => {
     const { dependencies } = createDependencies(buildTwoSessionMemories());
     const service = new RecallService(dependencies);
     const result = await service.recall({
@@ -361,14 +361,15 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.coverage_selector_action).toBe("noop");
+      expect(candidate.coverage_selector_action).toBe("kept");
       expect(candidate.session_coverage_action).toBe("noop");
-      expect(candidate.rank_after_coverage_selector).toBe(candidate.rank_after_lexical_priority);
+      expect(candidate.rank_after_coverage_selector).toBe(candidate.selection_order);
+      expect(candidate.rank_after_session_coverage).toBe(candidate.selection_order);
       expect(candidate.session_key).toBeDefined();
     }
   });
 
-  it("keeps coverage diagnostics measure-only", async () => {
+  it("keeps coverage diagnostics observational without rewriting pre-stage ranks", async () => {
     const { dependencies } = createDependencies(buildTwoSessionMemories());
     const service = new RecallService(dependencies);
     const result = await service.recall({
@@ -379,19 +380,19 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     const candidates = result.diagnostics?.candidates ?? [];
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.coverage_selector_action).toBe("noop");
+      expect(candidate.coverage_selector_action).toBe("kept");
       expect(candidate.session_coverage_action).toBe("noop");
       expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
       expect(candidate.rank_after_lexical_priority).toBe(candidate.fused_rank);
-      expect(candidate.rank_after_coverage_selector).toBe(candidate.fused_rank);
-      expect(candidate.rank_after_session_coverage).toBe(candidate.fused_rank);
-      expect(candidate.rank_after_structural_reserve).toBe(candidate.fused_rank);
+      expect(candidate.rank_after_coverage_selector).toBe(candidate.selection_order);
+      expect(candidate.rank_after_session_coverage).toBe(candidate.selection_order);
+      expect(candidate.rank_after_structural_reserve).toBe(candidate.selection_order);
       expect(candidate.session_key).toBeDefined();
     }
     const secondSession = candidates.find((candidate) => candidate.object_id === "77777777-7777-4777-8777-777777777777");
-    expect(secondSession?.coverage_selector_action).toBe("noop");
+    expect(secondSession?.coverage_selector_action).toBe("kept");
     expect(secondSession?.session_coverage_action).toBe("noop");
     expect(secondSession?.session_key).toBe("sB");
-    expect(secondSession?.rank_after_coverage_selector).toBe(secondSession?.fused_rank);
+    expect(secondSession?.rank_after_coverage_selector).toBe(secondSession?.selection_order);
   });
 });

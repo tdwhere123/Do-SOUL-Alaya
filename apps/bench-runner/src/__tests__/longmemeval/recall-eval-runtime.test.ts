@@ -10,8 +10,17 @@ import { resolveLocalArtifactTreeSha256 } from "../../longmemeval/provenance/loc
 import type { LongMemEvalSnapshotManifest } from "../../longmemeval/snapshot.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../longmemeval/extraction-cache-manifest.js";
 import { buildEffectiveRecallConfigIdentity } from "../../longmemeval/provenance/effective-recall-config.js";
+import { syntheticExtractionClosure } from "./extraction-closure-fixture.js";
+import { compactSnapshotRunProvenance } from
+  "../../longmemeval/snapshot/run-provenance.js";
 
 function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
+  const extractionClosure = syntheticExtractionClosure({
+    count: 10,
+    model: "fixture-model",
+    requestProfile: "provider-default-v1",
+    seed: "recall-eval-runtime"
+  });
   return {
     schema_version: 1,
     variant: "longmemeval_s",
@@ -23,6 +32,23 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
     db_filename: "snapshot.db",
     sidecar_filename: "snapshot.db.sidecar.json",
     built_at: "2026-07-10T00:00:00.000Z",
+    seed_extraction_path: {
+      path: "official_api_compile",
+      extraction_attempts: 10,
+      cache_hits: 10,
+      llm_calls: 0,
+      offline_fallbacks: 0,
+      live_extraction_failures: 0,
+      cached_extraction_failures: 0,
+      facts_produced: 10,
+      signals_dropped: 0,
+      parse_dropped: 0,
+      compile_overflow_dropped: 0,
+      signals_dropped_by_reason: {
+        candidate_absent: 0,
+        materialization_drop: 0
+      }
+    },
     extraction_provenance: {
       manifest_sha256: "1".repeat(64),
       schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -36,16 +62,23 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
       dataset_revision: "d".repeat(64),
       requested_turns: 10,
       cached_turns: 10,
-      coverage: 1
+      coverage: 1,
+      fill_status: "complete",
+      window_offset: 0,
+      window_limit: 1,
+      ...extractionClosure
     },
     artifact_integrity: {
       db_sha256: "a".repeat(64),
-      sidecar_sha256: "b".repeat(64)
+      sidecar_sha256: "b".repeat(64),
+      extraction_authority_filename: "snapshot.db.extraction-authority.json",
+      extraction_authority_sha256: "4".repeat(64),
+      extraction_authority_bytes: 1
     },
     question_id_digest: "c".repeat(64),
     dataset_sha256: "d".repeat(64),
     attribution: { status: "attributed", gate_eligible: true },
-    run_provenance: {
+    run_provenance: compactSnapshotRunProvenance({
       schema_version: 1,
       dataset_sha256: "d".repeat(64),
       selection: {
@@ -83,6 +116,10 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
         requested_turns: 10,
         cached_turns: 10,
         coverage: 1,
+        fill_status: "complete",
+        window_offset: 0,
+        window_limit: 1,
+        ...extractionClosure,
         storage: "git-tracked",
         built_at: "2026-07-01T00:00:00.000Z",
         builder: "test"
@@ -122,7 +159,7 @@ function attributedManifest(onnxSha: string): LongMemEvalSnapshotManifest {
         })
       },
       question_manifest: null
-    }
+    })
   };
 }
 
@@ -301,6 +338,25 @@ describe("prepareRecallEvalDataDir", () => {
     };
     await expect(
       buildRecallEvalRuntimeAttribution(withSnapshotCacheDrift, env)
+    ).resolves.toMatchObject({ gate_eligible: false });
+
+    const withoutSeedExtractionPath = {
+      ...manifest,
+      seed_extraction_path: undefined
+    };
+    await expect(
+      buildRecallEvalRuntimeAttribution(withoutSeedExtractionPath, env)
+    ).resolves.toMatchObject({ gate_eligible: false });
+
+    const withDegradedSeedExtractionPath = {
+      ...manifest,
+      seed_extraction_path: {
+        ...manifest.seed_extraction_path!,
+        offline_fallbacks: 1
+      }
+    };
+    await expect(
+      buildRecallEvalRuntimeAttribution(withDegradedSeedExtractionPath, env)
     ).resolves.toMatchObject({ gate_eligible: false });
 
     const disabledProducer = {

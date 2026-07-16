@@ -182,6 +182,35 @@ describe("pruneCoarseCandidatesForFineAssessment", () => {
     expect(run(candidates)).toEqual(["winner-a", "winner-b", "injected-a"]);
   });
 
+  it("keeps memory-only signals scoped to logical candidate identity", () => {
+    const local = coarseCandidate("shared", { structuralScore: 0.4 });
+    const synthesis = coarseCandidate("shared", {
+      objectKind: "synthesis_capsule",
+      structuralScore: 0
+    });
+    const global = coarseCandidate("shared", {
+      originPlane: "global",
+      structuralScore: 0
+    });
+    const other = coarseCandidate("other", { structuralScore: 0.5 });
+    const run = (candidates: readonly Readonly<CoarseRecallCandidate>[]) =>
+      pruneCoarseCandidatesForFineAssessment({
+        candidates,
+        supplementaryData: emptySupplementaryScores({
+          structuralScores: { shared: 1 }
+        }),
+        winnerMemoryIds: new Set(),
+        cap: 2
+      }).survivors.map((candidate) => candidate.entry.object_id === "shared"
+        ? `${candidate.originPlane ?? "workspace_local"}:${candidate.objectKind ?? "memory_entry"}`
+        : candidate.entry.object_id
+      );
+    const candidates = [synthesis, global, other, local];
+
+    expect(run(candidates)).toEqual(["workspace_local:memory_entry", "other"]);
+    expect(run([...candidates].reverse())).toEqual(run(candidates));
+  });
+
   it("ranks competitive survivors by embedding + FTS + structural signals", () => {
     const low = coarseCandidate("low");
     const highEmb = coarseCandidate("high-emb");
@@ -204,6 +233,54 @@ describe("pruneCoarseCandidatesForFineAssessment", () => {
       "high-structural"
     ]);
     expect(result.finePrunedCount).toBe(1);
+  });
+
+  it("keeps a production-shape synthesis child visible through the cheap waist", () => {
+    const synthesisChild = coarseCandidate("z-synthesis-child", {
+      sourceChannel: "synthesis_child",
+      sourceChannels: ["synthesis_child", "synthesis_fts"],
+      admissionPlanes: ["synthesis_child"]
+    });
+    const filler = coarseCandidate("a-filler");
+    const supplementaryData = emptySupplementaryScores({
+      ftsRanks: { "a-filler": 0.4 },
+      synthesisFtsRanks: { "z-synthesis-child": 0.9 }
+    });
+    const run = (candidates: readonly Readonly<CoarseRecallCandidate>[]) =>
+      pruneCoarseCandidatesForFineAssessment({
+        candidates,
+        supplementaryData,
+        winnerMemoryIds: new Set(),
+        cap: 1
+      }).survivors.map((candidate) => candidate.entry.object_id);
+
+    expect(run([synthesisChild, filler])).toEqual(["z-synthesis-child"]);
+    expect(run([filler, synthesisChild])).toEqual(["z-synthesis-child"]);
+  });
+
+  it.each([
+    ["missing", {}],
+    ["invalid", { "z-cold": Number.NaN }]
+  ])("keeps an embedding-%s candidate ahead of observed zero at a tight waist", (
+    _label,
+    coldScores
+  ) => {
+    const observedZero = coarseCandidate("a-observed-zero");
+    const cold = coarseCandidate("z-cold");
+    const supplementaryData = emptySupplementaryScores({
+      embeddingSimilarityScores: { "a-observed-zero": 0, ...coldScores },
+      ftsRanks: { "a-observed-zero": 0.5, "z-cold": 0.5 }
+    });
+    const run = (candidates: readonly Readonly<CoarseRecallCandidate>[]) =>
+      pruneCoarseCandidatesForFineAssessment({
+        candidates,
+        supplementaryData,
+        winnerMemoryIds: new Set(),
+        cap: 1
+      }).survivors.map((candidate) => candidate.entry.object_id);
+
+    expect(run([observedZero, cold])).toEqual(["z-cold"]);
+    expect(run([cold, observedZero])).toEqual(["z-cold"]);
   });
 });
 
@@ -346,6 +423,7 @@ function emptySupplementaryScores(
     embeddingSimilarityScores: Record<string, number>;
     ftsRanks: Record<string, number>;
     trigramFtsRanks: Record<string, number>;
+    synthesisFtsRanks: Record<string, number>;
     evidenceFtsRanks: Record<string, number>;
     structuralScores: Record<string, number>;
   }> = {}
@@ -354,6 +432,7 @@ function emptySupplementaryScores(
     embeddingSimilarityScores: Object.freeze(overrides.embeddingSimilarityScores ?? {}),
     ftsRanks: Object.freeze(overrides.ftsRanks ?? {}),
     trigramFtsRanks: Object.freeze(overrides.trigramFtsRanks ?? {}),
+    synthesisFtsRanks: Object.freeze(overrides.synthesisFtsRanks ?? {}),
     evidenceFtsRanks: Object.freeze(overrides.evidenceFtsRanks ?? {}),
     structuralScores: Object.freeze(overrides.structuralScores ?? {})
   };

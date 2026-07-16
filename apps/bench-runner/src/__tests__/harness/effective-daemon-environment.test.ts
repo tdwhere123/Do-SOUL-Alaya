@@ -102,7 +102,7 @@ describe("effective bench daemon environment", () => {
 
     expect(policy.coarse_filter.semantic_supplement).toMatchObject({
       enabled: true,
-      embedding_enabled: true
+      embedding_enabled: false
     });
     expect(policy.coarse_filter.semantic_supplement).not.toHaveProperty("injection_cap");
     expect(policy.coarse_filter.semantic_supplement)

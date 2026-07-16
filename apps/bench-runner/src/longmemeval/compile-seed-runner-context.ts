@@ -37,14 +37,16 @@ export function createCompileSeedRunnerContext(
   options: CompileSeedRunnerOptions | undefined
 ): CompileSeedRunnerContext {
   const cacheRoot = options?.cacheRoot ?? resolveExtractionCacheRoot();
-  const manifest = options?.config
-    ? undefined
-    : readExtractionCacheManifest(cacheRoot);
+  const manifest = readExtractionCacheManifest(cacheRoot);
   const config =
     options?.config ?? resolveCompileSeedExtractionConfig(process.env, manifest);
   const credentialled = config.apiKey !== null;
+  const cacheOnly =
+    manifest !== undefined &&
+    !credentialled &&
+    options?.allowLiveExtraction !== true;
   runExtractionCachePreflight(options, cacheRoot, config, credentialled, manifest);
-  const stats = createCompileSeedStats(credentialled);
+  const stats = createCompileSeedStats(credentialled || cacheOnly);
   const diagnosticDir = resolveCompileSeedDiagnosticDir(options);
   ensureDiagnosticDir(diagnosticDir);
   return {
@@ -57,6 +59,7 @@ export function createCompileSeedRunnerContext(
       cacheRoot,
       stats,
       credentialled,
+      cacheOnly,
       diagnosticDir
     })
   };
@@ -84,13 +87,17 @@ function runExtractionCachePreflight(
     ...(options?.requiredTurnContents === undefined
       ? {}
       : { requiredTurnContents: options.requiredTurnContents }),
+    ...(options?.requiredQuestionWindow === undefined
+      ? {}
+      : { requiredQuestionWindow: options.requiredQuestionWindow }),
     ...(manifest === undefined ? {} : { manifest })
   });
 }
 
-function createCompileSeedStats(credentialled: boolean): CompileSeedExtractionStats {
+function createCompileSeedStats(usesOfficialCompile: boolean): CompileSeedExtractionStats {
   return {
-    path: credentialled ? "official_api_compile" : "no_credentials_fallback",
+    path: usesOfficialCompile ? "official_api_compile" : "no_credentials_fallback",
+    extractionAttempts: 0,
     cacheHits: 0,
     llmCalls: 0,
     offlineFallbacks: 0,
@@ -104,7 +111,8 @@ function createCompileSeedStats(credentialled: boolean): CompileSeedExtractionSt
     lastTurnRawSignalCount: 0,
     lastTurnDraftCount: 0,
     lastExtractionSource: null,
-    lastCacheKey: null
+    lastCacheKey: null,
+    lastRawJsonSha256: null
   };
 }
 
@@ -135,24 +143,29 @@ function createOfficialApiProvider(input: {
   readonly cacheRoot: string;
   readonly stats: CompileSeedExtractionStats;
   readonly credentialled: boolean;
+  readonly cacheOnly: boolean;
   readonly diagnosticDir: string | null;
 }): OfficialApiGardenProvider | null {
-  if (!input.credentialled) return null;
+  if (!input.credentialled && !input.cacheOnly) return null;
+  const extractor = createCachingSignalExtractor({
+    delegate:
+      input.options?.extractorFactory?.(input.config) ??
+      createGardenHttpExtractor(input.config),
+    config: input.config,
+    cacheRoot: input.cacheRoot,
+    stats: input.stats,
+    allowLiveExtraction: input.credentialled && input.options?.allowLiveExtraction === true
+  });
   return new OfficialApiGardenProvider({
     apiKey: input.config.apiKey,
     model: input.config.model,
     ...(input.config.providerUrl === ""
       ? {}
       : { endpoint: input.config.providerUrl }),
-    extractor: createCachingSignalExtractor({
-      delegate:
-        input.options?.extractorFactory?.(input.config) ??
-        createGardenHttpExtractor(input.config),
-      config: input.config,
-      cacheRoot: input.cacheRoot,
-      stats: input.stats,
-      allowLiveExtraction: input.options?.allowLiveExtraction === true
-    }),
+    extractor,
+    ...(input.cacheOnly
+      ? { injectedExtractorCapability: "cache_only" as const }
+      : {}),
     requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
     diagnosticDir: input.diagnosticDir
   });

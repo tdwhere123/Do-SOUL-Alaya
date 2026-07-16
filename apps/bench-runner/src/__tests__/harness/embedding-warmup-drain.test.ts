@@ -1,60 +1,15 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { EmbeddingBackfillHandler } from "@do-soul/alaya-core";
+import { describe, expect, it } from "vitest";
 import {
-  MemoryDimension,
-  RunMode,
-  RunState,
-  ScopeClass,
-  WorkspaceKind,
-  WorkspaceState,
-  type MemoryEntry
-} from "@do-soul/alaya-protocol";
-import {
-  initDatabase,
-  SqliteMemoryEmbeddingRepo,
-  SqliteMemoryEntryRepo,
-  SqliteRunRepo,
-  SqliteWorkspaceRepo
-} from "@do-soul/alaya-storage";
-import {
+  awaitBenchEmbeddingProviderReady,
   drainEmbeddingWarmupPasses,
-  formatEmbeddingWarmupNotReadyError,
-  readEmbeddingWarmupSummary,
-  type BenchEmbeddingWarmupSummary
-} from "../../harness/daemon.js";
+  formatEmbeddingWarmupNotReadyError
+} from "../../harness/embedding-warmup.js";
+import {
+  embeddingWarmupSummary as summaryFrom,
+  registerEmbeddingWarmupCleanup
+} from "./embedding-warmup-fixture.js";
 
-const tmpDirs = new Set<string>();
-const READY_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
-const MISSING_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
-
-afterEach(async () => {
-  vi.restoreAllMocks();
-  for (const dir of tmpDirs) {
-    await rm(dir, { recursive: true, force: true });
-  }
-  tmpDirs.clear();
-});
-
-function summaryFrom(expected: number, ready: number, passCount: number): BenchEmbeddingWarmupSummary {
-  const clampedReady = Math.min(ready, expected);
-  return {
-    status: "ready",
-    expected_count: expected,
-    ready_count: clampedReady,
-    ready_rate: expected === 0 ? 0 : clampedReady / expected,
-    pass_count: passCount,
-    missing_object_ids: [],
-    provider_kind: "openai",
-    model_id: "text-embedding-3-small",
-    schema_version: 1,
-    d2q_input: "raw_content"
-  };
-}
+registerEmbeddingWarmupCleanup();
 
 describe("drainEmbeddingWarmupPasses", () => {
   it("reaches all-ready as soon as one backfill pass drains the workspace, well under the maxPasses ceiling", async () => {
@@ -186,243 +141,43 @@ describe("drainEmbeddingWarmupPasses", () => {
   });
 });
 
-describe("readEmbeddingWarmupSummary", () => {
-  it("requires current content and a dimensionally valid embedding blob", async () => {
-    const dataDir = await mkdtemp(join(tmpdir(), "embedding-warmup-summary-"));
-    tmpDirs.add(dataDir);
-    const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-    try {
-      const workspaceRepo = new SqliteWorkspaceRepo(database);
-      const runRepo = new SqliteRunRepo(database);
-      const memoryRepo = new SqliteMemoryEntryRepo(database);
-      await workspaceRepo.create({
-        workspace_id: "workspace-1",
-        name: "workspace one",
-        root_path: "/tmp/workspace-1",
-        workspace_kind: WorkspaceKind.LOCAL_REPO,
-        default_engine_binding: null,
-        default_engine_class: "conversation_engine",
-        workspace_state: WorkspaceState.ACTIVE
-      });
-      await runRepo.create({
-        run_id: "run-1",
-        workspace_id: "workspace-1",
-        title: "run one",
-        goal: null,
-        run_mode: RunMode.CHAT,
-        engine_binding_id: null,
-        engine_class: null,
-        run_state: RunState.IDLE,
-        current_surface_id: null
-      });
-      await memoryRepo.create(createMemoryEntry(READY_MEMORY_ID));
-      database.connection
-        .prepare(
-          `INSERT INTO memory_embeddings (
-            object_id,
-            workspace_id,
-            content_hash,
-            provider_kind,
-            model_id,
-            schema_version,
-            dimensions,
-            embedding_blob,
-            created_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          READY_MEMORY_ID,
-          "workspace-1",
-          hashContent(`Embedding warmup source for ${READY_MEMORY_ID}.`),
-          "openai",
-          "text-embedding-3-small",
-          1,
-          1536,
-          Buffer.alloc(1536 * Float32Array.BYTES_PER_ELEMENT),
-          "2026-06-01T00:00:00.000Z",
-          "2026-06-01T00:00:00.000Z"
-        );
+describe("awaitBenchEmbeddingProviderReady", () => {
+  it("awaits the runtime warmup promise before declaring the provider ready", async () => {
+    let resolveWarmup: (status: "ready") => void = () => undefined;
+    const providerWarmup = new Promise<"ready">((resolve) => { resolveWarmup = resolve; });
+    let settled = false;
 
-      const summary = await readEmbeddingWarmupSummary({
-        dataDir,
-        workspaceId: "workspace-1",
-        objectIds: [READY_MEMORY_ID, MISSING_MEMORY_ID],
-        providerKind: "openai",
-        modelId: "text-embedding-3-small",
-        schemaVersion: 1,
-        passCount: 2
-      });
+    const barrier = awaitBenchEmbeddingProviderReady({
+      embeddingMode: "env",
+      providerWarmup
+    });
+    void barrier.then(() => { settled = true; });
+    await Promise.resolve();
 
-      expect(summary.ready_count).toBe(1);
-      expect(summary.expected_count).toBe(2);
-      expect(summary.missing_object_ids).toEqual([MISSING_MEMORY_ID]);
-    } finally {
-      database.close();
-    }
+    expect(settled).toBe(false);
+    resolveWarmup("ready");
+    await expect(barrier).resolves.toBeUndefined();
   });
 
-  it("treats a stale content hash as missing so a backfill pass repairs it", async () => {
-    const dataDir = await createReadinessFixture("sha256:stale", 4);
-    const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-    const handler = new EmbeddingBackfillHandler({
-      memoryRepo: new SqliteMemoryEntryRepo(database),
-      memoryEmbeddingRepo: new SqliteMemoryEmbeddingRepo(database),
-      provider: {
-        providerKind: "openai",
-        modelId: "text-embedding-3-small",
-        schemaVersion: 1,
-        isAvailable: true,
-        embedTexts: async (texts) => texts.map(() => new Float32Array([0.1, 0.2, 0.3]))
-      },
-      retryDelayMs: 0
-    });
-    let passes = 0;
-
-    const result = await drainEmbeddingWarmupPasses({
-      maxPasses: 2,
-      maxStallPasses: 2,
-      runPass: async () => {
-        passes += 1;
-        await handler.handle({ workspace_id: "workspace-1" });
-      },
-      readSummary: async (passCount) => await readEmbeddingWarmupSummary({
-        dataDir,
-        workspaceId: "workspace-1",
-        objectIds: [READY_MEMORY_ID],
-        providerKind: "openai",
-        modelId: "text-embedding-3-small",
-        schemaVersion: 1,
-        passCount
-      })
-    });
-
-    expect(passes).toBe(1);
-    expect(result.summary.ready_count).toBe(1);
+  it("fails closed when the runtime provider warmup fails", async () => {
+    await expect(awaitBenchEmbeddingProviderReady({
+      embeddingMode: "env",
+      providerWarmup: Promise.resolve("failed")
+    })).rejects.toThrow(/status=failed/u);
   });
 
-  it("does not count a blob whose byte length disagrees with dimensions", async () => {
-    const content = `Embedding warmup source for ${READY_MEMORY_ID}.`;
-    const dataDir = await createReadinessFixture(hashContent(content), 3);
-
-    const summary = await readEmbeddingWarmupSummary({
-      dataDir,
-      workspaceId: "workspace-1",
-      objectIds: [READY_MEMORY_ID],
-      providerKind: "openai",
-      modelId: "text-embedding-3-small",
-      schemaVersion: 1,
-      passCount: 0
-    });
-
-    expect(summary.ready_count).toBe(0);
-    expect(summary.missing_object_ids).toEqual([READY_MEMORY_ID]);
+  it("fails closed when an enabled cell has no provider to warm", async () => {
+    await expect(awaitBenchEmbeddingProviderReady({
+      embeddingMode: "env",
+      providerWarmup: Promise.resolve("not_requested")
+    })).rejects.toThrow(/status=not_requested/u);
   });
 
-  it("closes its read handle after a successful summary", async () => {
-    const content = `Embedding warmup source for ${READY_MEMORY_ID}.`;
-    const dataDir = await createReadinessFixture(hashContent(content), 4);
-    const close = vi.spyOn(DatabaseSync.prototype, "close");
-
-    await readEmbeddingWarmupSummary({
-      dataDir,
-      workspaceId: "workspace-1",
-      objectIds: [READY_MEMORY_ID],
-      providerKind: "openai",
-      modelId: "text-embedding-3-small",
-      schemaVersion: 1,
-      passCount: 0
-    });
-
-    expect(close).toHaveBeenCalledTimes(1);
-  });
-
-  it("closes its read handle when the readiness query fails", async () => {
-    const content = `Embedding warmup source for ${READY_MEMORY_ID}.`;
-    const dataDir = await createReadinessFixture(hashContent(content), 4);
-    vi.spyOn(DatabaseSync.prototype, "prepare").mockImplementationOnce(() => {
-      throw new Error("fixture query failure");
-    });
-    const close = vi.spyOn(DatabaseSync.prototype, "close");
-
-    await expect(readEmbeddingWarmupSummary({
-      dataDir,
-      workspaceId: "workspace-1",
-      objectIds: [READY_MEMORY_ID],
-      providerKind: "openai",
-      modelId: "text-embedding-3-small",
-      schemaVersion: 1,
-      passCount: 0
-    })).rejects.toThrow(/fixture query failure/u);
-
-    expect(close).toHaveBeenCalledTimes(1);
+  it("does not await provider warmup for disabled A/C cells", async () => {
+    const providerWarmup = new Promise<"ready">(() => undefined);
+    await expect(awaitBenchEmbeddingProviderReady({
+      embeddingMode: "disabled",
+      providerWarmup
+    })).resolves.toBeUndefined();
   });
 });
-
-async function createReadinessFixture(contentHash: string, blobBytes: number): Promise<string> {
-  const dataDir = await mkdtemp(join(tmpdir(), "embedding-readiness-fixture-"));
-  tmpDirs.add(dataDir);
-  const database = initDatabase({ filename: join(dataDir, "alaya.db") });
-  const workspaceRepo = new SqliteWorkspaceRepo(database);
-  const runRepo = new SqliteRunRepo(database);
-  const memoryRepo = new SqliteMemoryEntryRepo(database);
-  await workspaceRepo.create({
-    workspace_id: "workspace-1", name: "workspace one", root_path: "/tmp/workspace-1",
-    workspace_kind: WorkspaceKind.LOCAL_REPO, default_engine_binding: null,
-    default_engine_class: "conversation_engine", workspace_state: WorkspaceState.ACTIVE
-  });
-  await runRepo.create({
-    run_id: "run-1", workspace_id: "workspace-1", title: "run one", goal: null,
-    run_mode: RunMode.CHAT, engine_binding_id: null, engine_class: null,
-    run_state: RunState.IDLE, current_surface_id: null
-  });
-  await memoryRepo.create(createMemoryEntry(READY_MEMORY_ID));
-  database.connection.prepare(
-    `INSERT INTO memory_embeddings (
-      object_id, workspace_id, content_hash, provider_kind, model_id,
-      schema_version, dimensions, embedding_blob, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    READY_MEMORY_ID, "workspace-1", contentHash, "openai", "text-embedding-3-small",
-    1, 1, Buffer.alloc(blobBytes), "2026-06-01T00:00:00.000Z", "2026-06-01T00:00:00.000Z"
-  );
-  return dataDir;
-}
-
-function hashContent(content: string): string {
-  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
-}
-
-function createMemoryEntry(objectId: string): MemoryEntry {
-  return {
-    object_id: objectId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-06-01T00:00:00.000Z",
-    updated_at: "2026-06-01T00:00:00.000Z",
-    created_by: "embedding-warmup-summary-test",
-    dimension: MemoryDimension.FACT,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: `Embedding warmup source for ${objectId}.`,
-    domain_tags: [],
-    evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.5,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null
-  };
-}

@@ -29,18 +29,17 @@ afterEach(() => {
 it("prints extraction retry telemetry in the CLI done line", async () => {
   mocks.runExtractionFill.mockResolvedValue({
     requestedTurns: 2,
-    cacheHits: 0,
+    cacheHits: 1,
     newlyExtracted: 1,
-    failures: 1,
     retrySuccesses: 1,
     rateLimitRetries: 3,
     terminalRetryClassifications: {
-      failure_max_retries: 1,
+      failure_max_retries: 0,
       failure_non_retryable_4xx: 0,
       failure_timeout: 0,
       failure_aborted: 0
     },
-    coverage: 0.5,
+    coverage: 1,
     manifest: {}
   });
 
@@ -48,8 +47,37 @@ it("prints extraction retry telemetry in the CLI done line", async () => {
     variant: "longmemeval_oracle"
   } as ParsedFlags);
 
-  expect(exitCode).toBe(1);
+  expect(exitCode).toBe(0);
   expect(stdout).toMatch(
-    /retry_successes=1.*rate_limit_retries=3.*terminal_max_retries=1.*terminal_nonretryable_4xx=0.*terminal_timeouts=0/u
+    /failures=0.*retry_successes=1.*rate_limit_retries=3.*terminal_max_retries=0.*terminal_nonretryable_4xx=0.*terminal_timeouts=0/u
   );
+});
+
+it("forwards the selected cache and pinned dataset authority roots", async () => {
+  mocks.runExtractionFill.mockResolvedValue({
+    requestedTurns: 0,
+    cacheHits: 0,
+    newlyExtracted: 0,
+    retrySuccesses: 0,
+    rateLimitRetries: 0,
+    terminalRetryClassifications: {
+      failure_max_retries: 0,
+      failure_non_retryable_4xx: 0,
+      failure_timeout: 0,
+      failure_aborted: 0
+    },
+    coverage: 1,
+    manifest: {}
+  });
+
+  await runExtractionFillCommand({
+    variant: "longmemeval_s",
+    extractionCacheRoot: "/authority/cache",
+    pinnedMetaRoot: "/authority/meta"
+  } as ParsedFlags);
+
+  expect(mocks.runExtractionFill).toHaveBeenCalledWith(expect.objectContaining({
+    cacheRoot: "/authority/cache",
+    pinnedMetaRoot: "/authority/meta"
+  }));
 });

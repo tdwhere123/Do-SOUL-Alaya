@@ -35,9 +35,8 @@ import type { BenchCommitInfo } from "./runner-helpers.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import type { LongMemEvalRunArchiveAggregate } from "./runner-archive-aggregate.js";
 import type { LongMemEvalPayloadBuild } from "./runner-archive-payload.js";
-import {
-  buildLongMemEvalRunProvenanceSidecar
-} from "./provenance/run.js";
+import { buildArchiveRunProvenanceBundle } from
+  "./provenance/archive-run-provenance.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
@@ -199,7 +198,10 @@ async function buildArchiveSidecarsAfterDiagnostics(
       { filename: LONGMEMEVAL_DIAGNOSTICS_FILENAME, contents: diagnostics.compact },
       { filename: LONGMEMEVAL_COHORT_LEDGER_FILENAME, contents: prepared.cohortLedger },
       { filename: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: prepared.comparison },
-      prepared.runProvenanceSidecar,
+      prepared.runProvenance.sidecar,
+      ...(prepared.runProvenance.authorityReferenceSidecar === null
+        ? []
+        : [prepared.runProvenance.authorityReferenceSidecar]),
       prepared.evidenceManifest
     ],
     diagnosticsArtifact: {
@@ -221,46 +223,66 @@ async function prepareArchiveSidecars(
   });
   const diff = diffKpis(input.payload, previous);
   const comparison = await buildComparisonSidecar(input, diagnostics.currentEvidence);
-  const runProvenanceSidecar = await buildArchiveRunProvenance(input);
+  const runProvenance = await buildArchiveRunProvenance(input);
   const payload = KpiPayloadSchema.parse(
     withCurrentMeasurementAttribution({
       payload: input.payload,
       failedQuestionIds: input.failedQuestionIds,
       diagnostics: diagnostics.persistedPayload.questions,
-      provenanceContents: runProvenanceSidecar.contents
+      provenanceContents: runProvenance.fullContents
     })
   );
-  const attributedInput = { ...input, payload };
-  const { report, findings } = buildRenderedArchiveDocuments(payload, previous, diff);
+  return buildPreparedArchiveSidecars({
+    input, diagnostics, previous, diff, comparison, runProvenance, payload
+  });
+}
+
+function buildPreparedArchiveSidecars(input: {
+  readonly input: ArchiveSidecarBuildInput;
+  readonly diagnostics: Awaited<ReturnType<typeof buildDiagnosticsSidecar>>;
+  readonly previous: KpiPayload | null;
+  readonly diff: ReturnType<typeof diffKpis>;
+  readonly comparison: Awaited<ReturnType<typeof buildComparisonSidecar>>;
+  readonly runProvenance: Awaited<ReturnType<typeof buildArchiveRunProvenance>>;
+  readonly payload: KpiPayload;
+}) {
+  const attributedInput = { ...input.input, payload: input.payload };
+  const { report, findings } = buildRenderedArchiveDocuments(
+    input.payload,
+    input.previous,
+    input.diff
+  );
   const cohortLedger = renderLongMemEvalCohortLedger(
-    diagnostics.persistedPayload.questions,
-    input.failedQuestionIds,
-    input.selectionContract
+    input.diagnostics.persistedPayload.questions,
+    input.input.failedQuestionIds,
+    input.input.selectionContract
   );
   const evidenceManifest = buildArchiveEvidenceManifestSidecar({
     slug: attributedInput.slug,
     payload: attributedInput.payload,
     failedQuestionIds: attributedInput.failedQuestionIds,
-    diagnostics,
-    comparison,
-    runProvenanceSidecar,
+    diagnostics: input.diagnostics,
+    comparison: input.comparison,
+    runProvenanceSidecar: input.runProvenance.sidecar,
+    boundRunProvenance: input.runProvenance.full,
+    authorityReferenceSidecar: input.runProvenance.authorityReferenceSidecar,
     report,
     findings,
     cohortLedger
   });
   return {
-    payload,
+    payload: input.payload,
     report,
     findings,
-    comparison,
-    runProvenanceSidecar,
+    comparison: input.comparison,
+    runProvenance: input.runProvenance,
     evidenceManifest,
     cohortLedger
   };
 }
 
 function buildArchiveRunProvenance(input: ArchiveSidecarBuildInput) {
-  return buildLongMemEvalRunProvenanceSidecar({
+  return buildArchiveRunProvenanceBundle({
     opts: input.opts,
     evaluatedCount: input.payload.evaluated_count,
     commitSha7: input.payload.alaya_commit,

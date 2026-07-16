@@ -16,7 +16,10 @@ import {
   type LongMemEvalSnapshotManifest
 } from "../../../longmemeval/snapshot.js";
 import { sha256File } from "../../../longmemeval/snapshot/integrity.js";
-import { loadRecallEvalSnapshot } from "../../../longmemeval/snapshot/recall-eval-loader.js";
+import {
+  loadRecallEvalSnapshot,
+  withRecallEvalSnapshot
+} from "../../../longmemeval/snapshot/recall-eval-loader.js";
 import { prepareRecallEvalRestoredDb } from "../../../longmemeval/snapshot/recall-eval-db.js";
 import { restoreLegacySnapshotToDataDir } from "../../../longmemeval/snapshot/legacy-substrate.js";
 import { computeLegacySnapshotQuestionIdDigestV1 } from
@@ -112,10 +115,10 @@ describe("strict legacy snapshot loader", () => {
   }, 20_000);
 
   it("rejects v1 through the default current-snapshot path", async () => {
-    await expect(loadRecallEvalSnapshot({
+    await expect(withRecallEvalSnapshot({
       snapshotDbPath: fixture.snapshotDbPath,
       variant: VARIANT
-    })).rejects.toThrow(/unsupported schema_version/iu);
+    }, async () => undefined)).rejects.toThrow(/unsupported schema_version/iu);
   });
 
   it("requires both external trust-anchor hashes", async () => {

@@ -3,6 +3,11 @@ import { StorageError } from "../../shared/errors.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import type { MemoryEmbeddingMetadataRow, MemoryEmbeddingRow } from "../shared/sqlite-row-schemas.js";
 import type { MemoryEmbeddingMetadata, MemoryEmbeddingRecord } from "./memory-embedding-repo.js";
+import {
+  decodeValidEmbeddingBlob,
+  encodeEmbeddingBlob,
+  isFiniteNonzeroEmbedding
+} from "./embedding-vector-validity.js";
 
 export type { MemoryEmbeddingMetadataRow, MemoryEmbeddingRow } from "../shared/sqlite-row-schemas.js";
 
@@ -40,6 +45,7 @@ export const MEMORY_EMBEDDING_METADATA_COLUMNS = `
       model_id,
       schema_version,
       dimensions,
+      vector_valid,
       created_at,
       updated_at
 `;
@@ -130,17 +136,14 @@ export function parseMemoryEmbeddingMetadataRow(
     model_id: parseModelId(row.model_id),
     schema_version: parseSchemaVersion(row.schema_version),
     dimensions: parseDimensions(row.dimensions),
+    vector_valid: row.vector_valid === 1,
     created_at: parseTimestamp(row.created_at),
     updated_at: parseTimestamp(row.updated_at)
   });
 }
 
 function serializeEmbedding(embedding: Float32Array): Buffer {
-  return Buffer.from(copyBytes(new Uint8Array(
-    embedding.buffer,
-    embedding.byteOffset,
-    embedding.byteLength
-  )));
+  return encodeEmbeddingBlob(embedding);
 }
 
 function deserializeEmbedding(blob: Buffer, dimensions: number): Float32Array {
@@ -152,8 +155,13 @@ function deserializeEmbedding(blob: Buffer, dimensions: number): Float32Array {
     );
   }
 
-  const embedding = new Float32Array(copyBytes(blob));
-  assertValidEmbedding(embedding, "embedding");
+  const embedding = decodeValidEmbeddingBlob(blob, dimensions);
+  if (embedding === null) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "embedding must be a finite nonzero vector."
+    );
+  }
   return embedding;
 }
 
@@ -167,14 +175,11 @@ function assertValidEmbedding(value: Float32Array, fieldName: string): void {
     throw new StorageError("VALIDATION_FAILED", `${fieldName} must be a Float32Array.`);
   }
 
-  if (value.length === 0) {
-    throw new StorageError("VALIDATION_FAILED", `${fieldName} must not be empty.`);
-  }
-
-  for (const element of value) {
-    if (!Number.isFinite(element)) {
-      throw new StorageError("VALIDATION_FAILED", `${fieldName} must contain only finite numbers.`);
-    }
+  if (!isFiniteNonzeroEmbedding(value)) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      `${fieldName} must be a finite nonzero vector.`
+    );
   }
 }
 
@@ -185,11 +190,6 @@ function assertEmbeddingDimensions(embedding: Float32Array, dimensions: number):
       `Embedding length ${embedding.length} did not match declared dimensions ${dimensions}.`
     );
   }
-}
-
-// invariant: mapper outputs never retain caller- or SQLite-owned mutable bytes.
-function copyBytes(bytes: Uint8Array): ArrayBuffer {
-  return Uint8Array.from(bytes).buffer;
 }
 
 function parseDimensions(value: number): number {

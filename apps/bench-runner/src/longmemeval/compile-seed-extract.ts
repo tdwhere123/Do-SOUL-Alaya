@@ -38,13 +38,13 @@ export async function extractSeedInputs(
   const signals = await compileOfficialSeedSignals(input, provider);
   recordOfficialSignalDrops(input.stats, signals.length);
   const drafts = buildOfficialSeedDrafts(input, signals);
-  return drafts.length === 0 ? buildEmptyOfficialFallback(input) : finishSeedDrafts(input, drafts);
+  return finishSeedDrafts(input, drafts);
 }
 
 function buildNoCredentialsFallback(input: ExtractSeedInputsInput): readonly SeedInputDraft[] {
-  // invariant: no garden credentials => deterministic no-LLM fallback. The
-  // full turn becomes one candidate fact; credentialed extraction failures
-  // are not allowed to reuse this degraded path.
+  // invariant: no provider => deterministic no-LLM fallback. A manifest-backed
+  // cache-only run supplies a provider even without credentials; cache misses
+  // fail closed and never reuse this degraded path.
   input.stats.offlineFallbacks += 1;
   return finishSeedDrafts(input, [
     buildFullTurnSeedDraft(input, "no_credentials_fallback")
@@ -114,12 +114,6 @@ function buildOfficialSeedDrafts(
     });
   }
   return drafts;
-}
-
-function buildEmptyOfficialFallback(input: ExtractSeedInputsInput): readonly SeedInputDraft[] {
-  return finishSeedDrafts(input, [
-    buildFullTurnSeedDraft(input, "official_api_compile")
-  ]);
 }
 
 function buildFullTurnSeedDraft(

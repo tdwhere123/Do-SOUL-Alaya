@@ -4,7 +4,11 @@ import type {
   EmbeddingWorkspaceNeighborResult
 } from "../../embedding-recall/embedding-recall-service.js";
 import { hashMemoryContent } from "../../embedding-recall/helpers.js";
-import { errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
+import {
+  errorNameOf,
+  isWorkspaceMemoryCandidate,
+  toErrorMessage
+} from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import type {
   CoarseRecallCandidate,
@@ -78,7 +82,8 @@ async function prepareRequestScoreSnapshot(
     workspaceId: params.workspaceId,
     runId: params.runId,
     queryText: params.queryText,
-    poolMemories: params.poolCandidates.map((candidate) => candidate.entry),
+    poolMemories: selectLocalMemoryPoolCandidates(params.poolCandidates)
+      .map((candidate) => candidate.entry),
     maxNeighbors: request === null ? 0 : Math.max(request.maxSupplement, request.injectionCap)
   });
 }
@@ -150,8 +155,15 @@ function resolveEmbeddingInjectionRequest(params: EmbeddingCoarseInjectionParams
     queryText: params.queryText,
     maxSupplement,
     injectionCap,
-    poolObjectIds: params.poolCandidates.map((candidate) => candidate.entry.object_id)
+    poolObjectIds: selectLocalMemoryPoolCandidates(params.poolCandidates)
+      .map((candidate) => candidate.entry.object_id)
   });
+}
+
+function selectLocalMemoryPoolCandidates(
+  candidates: readonly Readonly<CoarseRecallCandidate>[]
+): readonly Readonly<CoarseRecallCandidate>[] {
+  return candidates.filter(isWorkspaceMemoryCandidate);
 }
 
 function supportsEmbeddingNeighborCollection(

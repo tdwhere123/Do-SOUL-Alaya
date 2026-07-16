@@ -1,5 +1,6 @@
 import {
   classifyDeliveryMissTaxonomy,
+  isDeliveryMissDropReason,
   type DeliveryMissCandidateInput
 } from "./delivery-miss-taxonomy.js";
 import { analyzeFullGoldDeliveryContribution } from "./full-gold-delivery-analysis.js";
@@ -8,7 +9,8 @@ import type {
   CandidateDiagnostic,
   LongMemEvalGoldDiagnostic,
   LongMemEvalMissTaxonomy,
-  LongMemEvalQuestionDiagnostic
+  LongMemEvalQuestionDiagnostic,
+  LongMemEvalReplayCandidate
 } from "./diagnostics-types.js";
 import { isAbstentionQuestionId } from "./abstention.js";
 
@@ -22,6 +24,7 @@ export function toDeliveryMissCandidateInput(
     finalRank: candidate.finalRank,
     droppedReason: parseDropReason(candidate.budgetDropReason),
     rankAfterFusion: candidate.rankAfterFusion,
+    rankAfterFeatureRerank: candidate.rankAfterFeatureRerank,
     rankAfterCoverageSelector: candidate.rankAfterCoverageSelector,
     coverageSelectorAction: candidate.coverageSelectorAction
   };
@@ -31,6 +34,8 @@ export function classifyGoldDeliveryMissTaxonomy(input: {
   readonly deliveredRank: number | null;
   readonly candidate: CandidateDiagnostic | undefined;
   readonly anyObjectCandidate: CandidateDiagnostic | undefined;
+  readonly fineAssessmentPruned?: boolean;
+  readonly anyObjectFineAssessmentPruned?: boolean;
   readonly diagnosticsAvailable: boolean;
 }): Exclude<LongMemEvalMissTaxonomy, "evaluation_or_gold_issue"> | null {
   return classifyDeliveryMissTaxonomy({
@@ -43,8 +48,45 @@ export function classifyGoldDeliveryMissTaxonomy(input: {
       input.anyObjectCandidate === undefined
         ? undefined
         : toDeliveryMissCandidateInput(input.anyObjectCandidate),
+    fineAssessmentPruned: input.fineAssessmentPruned,
+    anyObjectFineAssessmentPruned: input.anyObjectFineAssessmentPruned,
     diagnosticsAvailable: input.diagnosticsAvailable
   });
+}
+
+export function classifyReplayGoldDeliveryMissTaxonomy(input: {
+  readonly deliveredRank: number | null;
+  readonly candidate: LongMemEvalReplayCandidate | undefined;
+  readonly anyObjectCandidate: LongMemEvalReplayCandidate | undefined;
+  readonly fineAssessmentPruned?: boolean;
+  readonly anyObjectFineAssessmentPruned?: boolean;
+  readonly diagnosticsAvailable: boolean;
+}): Exclude<LongMemEvalMissTaxonomy, "evaluation_or_gold_issue"> | null {
+  return classifyDeliveryMissTaxonomy({
+    deliveredRank: input.deliveredRank,
+    candidate: toReplayDeliveryMissCandidateInput(input.candidate),
+    anyObjectCandidate: toReplayDeliveryMissCandidateInput(input.anyObjectCandidate),
+    fineAssessmentPruned: input.fineAssessmentPruned,
+    anyObjectFineAssessmentPruned: input.anyObjectFineAssessmentPruned,
+    diagnosticsAvailable: input.diagnosticsAvailable
+  });
+}
+
+function toReplayDeliveryMissCandidateInput(
+  candidate: LongMemEvalReplayCandidate | undefined
+): DeliveryMissCandidateInput | undefined {
+  if (candidate === undefined) return undefined;
+  return {
+    objectKind: candidate.object_kind ?? "memory_entry",
+    preBudgetRank: candidate.pre_budget_rank,
+    fusedRank: candidate.fused_rank,
+    finalRank: candidate.final_rank,
+    droppedReason: parseDropReason(candidate.budget_drop_reason),
+    rankAfterFusion: candidate.rank_after_fusion,
+    rankAfterFeatureRerank: candidate.rank_after_feature_rerank,
+    rankAfterCoverageSelector: candidate.rank_after_coverage_selector,
+    coverageSelectorAction: candidate.coverage_selector_action
+  };
 }
 
 export function resolveCoreDeliveryRank(
@@ -77,14 +119,5 @@ export function buildLongMemEvalDeliveryContribution(
 function parseDropReason(
   value: string | null
 ): DeliveryMissCandidateInput["droppedReason"] {
-  if (
-    value === "duplicate" ||
-    value === "dimension_limit" ||
-    value === "embedding_head_dominance" ||
-    value === "max_entries" ||
-    value === "max_total_tokens"
-  ) {
-    return value;
-  }
-  return null;
+  return value !== null && isDeliveryMissDropReason(value) ? value : null;
 }

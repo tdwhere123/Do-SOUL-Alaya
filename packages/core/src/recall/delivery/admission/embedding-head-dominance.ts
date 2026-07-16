@@ -1,22 +1,17 @@
 import { Buffer } from "node:buffer";
 import type {
-  RecallFusionStream,
+  CoarseRecallCandidate,
   RecallFusionStreamRanks
 } from "../../runtime/recall-service-types.js";
-import { hasTemporalQuerySignal } from "../../query/recall-query-plan.js";
+import { isWorkspaceMemoryCandidate } from "../../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
+import { hasNonEmbeddingQueryEvidenceRank } from
+  "../../scoring/query-evidence-support.js";
 
-const QUERY_EVIDENCE_STREAMS: readonly RecallFusionStream[] = Object.freeze([
-  "lexical_fts",
-  "trigram_fts",
-  "synthesis_fts",
-  "evidence_fts",
-  "subject_alignment",
-  "entity_seed",
-  "facet_overlap"
-]);
-
-type EmbeddingHeadCandidate = Readonly<{
+type EmbeddingHeadCandidate = Readonly<Pick<
+  CoarseRecallCandidate,
+  "originPlane" | "objectKind"
+> & {
   readonly entry: Readonly<{ readonly object_id: string }>;
   readonly effectiveFactors: Readonly<{ readonly embedding_similarity?: number }>;
   readonly fusion: Readonly<{
@@ -47,8 +42,6 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
 ): ReadonlySet<string> {
   const budget = normalizeBudget(params.maxEntries, params.candidates.length);
   if (budget === 0) return new Set();
-  const temporalQueryActive = params.queryProbes !== undefined
-    && hasTemporalQuerySignal(params.queryProbes);
   let evictions: ReadonlySet<string> = new Set();
   let delivered = params.selectDelivered(evictions);
   for (const head of orderedEmbeddingHead(params.candidates, budget)) {
@@ -57,7 +50,6 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
       ...params,
       head,
       budget,
-      temporalQueryActive,
       evictions,
       delivered
     });
@@ -72,7 +64,7 @@ function findReplacement<T extends EmbeddingHeadCandidate>(params: Readonly<{
   readonly head: T;
   readonly budget: number;
   readonly embeddingScores: Readonly<Record<string, number>>;
-  readonly temporalQueryActive: boolean;
+  readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly answerRerankedCandidateKeys?: ReadonlySet<string>;
   readonly evictions: ReadonlySet<string>;
   readonly delivered: readonly T[];
@@ -129,14 +121,14 @@ function isReplaceable(
   candidate: EmbeddingHeadCandidate,
   params: Readonly<{
     readonly budget: number;
-    readonly temporalQueryActive: boolean;
+    readonly queryProbes?: Readonly<RecallQueryProbes>;
     readonly answerRerankedCandidateKeys?: ReadonlySet<string>;
   }>
 ): boolean {
   return !isEmbeddingHead(candidate, params.budget)
     && !hasIndependentQueryEvidence(
       candidate,
-      params.temporalQueryActive,
+      params.queryProbes,
       params.answerRerankedCandidateKeys
     );
 }
@@ -191,13 +183,13 @@ function embeddingRank(candidate: EmbeddingHeadCandidate): number {
 
 function hasIndependentQueryEvidence(
   candidate: EmbeddingHeadCandidate,
-  temporalQueryActive: boolean,
+  queryProbes: Readonly<RecallQueryProbes> | undefined,
   answerRerankedCandidateKeys: ReadonlySet<string> | undefined
 ): boolean {
   if (answerRerankedCandidateKeys?.has(candidate.fusion.candidate_key) === true) return true;
-  if (temporalQueryActive && candidate.fusion.per_stream_rank.temporal_recency !== null) return true;
-  return QUERY_EVIDENCE_STREAMS.some(
-    (stream) => candidate.fusion.per_stream_rank[stream] !== null
+  return hasNonEmbeddingQueryEvidenceRank(
+    candidate.fusion.per_stream_rank,
+    queryProbes
   );
 }
 
@@ -233,7 +225,9 @@ function positiveEmbeddingScore(
   candidate: EmbeddingHeadCandidate,
   scores: Readonly<Record<string, number>>
 ): number | null {
-  const score = scores[candidate.entry.object_id]
+  const score = (isWorkspaceMemoryCandidate(candidate)
+    ? scores[candidate.entry.object_id]
+    : undefined)
     ?? candidate.effectiveFactors.embedding_similarity;
   return score !== undefined && Number.isFinite(score) && score > 0 ? score : null;
 }

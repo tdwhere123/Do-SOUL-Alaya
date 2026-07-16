@@ -8,6 +8,7 @@ import type {
   RecallDiagnostics,
   RecallEmbeddingProviderStatus,
   RecallEmbeddingWorkspaceScanDiagnostics,
+  FineAssessmentPrunedCandidateDiagnostic,
   RecallGraphExpansionDiagnostics,
   RecallTokenEconomy
 } from "./recall-service-types.js";
@@ -26,6 +27,8 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly degradationReasons?: readonly RecallDegradationReason[];
   readonly graphExpansionDiagnostics: Readonly<RecallGraphExpansionDiagnostics>;
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly fineAssessmentPrunedCandidates:
+    readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[];
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
   readonly embeddingWorkspaceScan?: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
   readonly phaseLatencyMs?: Readonly<Record<string, number>>;
@@ -41,9 +44,7 @@ export function buildRecallDiagnostics(params: Readonly<{
     embedding_provider_status: params.embeddingProviderStatus,
     provider_degradation_reason: params.providerDegradationReason,
     ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
-    ...(params.degradationReasons === undefined || params.degradationReasons.length === 0
-      ? {}
-      : { degradation_reasons: Object.freeze([...new Set(params.degradationReasons)]) }),
+    ...buildDegradationDiagnostics(params.degradationReasons),
     ...buildEmbeddingWorkspaceScanDiagnostics(embeddingWorkspaceScan),
     graph_expansion_plane_count_per_hop:
       params.graphExpansionDiagnostics.graph_expansion_plane_count_per_hop,
@@ -52,13 +53,37 @@ export function buildRecallDiagnostics(params: Readonly<{
     ...(params.graphExpansionDiagnostics.multi_seed_graph_fan_in === undefined
       ? {}
       : { multi_seed_graph_fan_in: params.graphExpansionDiagnostics.multi_seed_graph_fan_in }),
-    fusion_breakdown: freezeFusionBreakdown(params.candidates),
-    candidates: Object.freeze([...params.candidates]),
+    ...buildCandidateEvidenceDiagnostics(
+      params.candidates,
+      params.fineAssessmentPrunedCandidates
+    ),
     token_economy: params.tokenEconomy,
     ...(params.phaseLatencyMs === undefined
       ? {}
       : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
   });
+}
+
+function buildDegradationDiagnostics(
+  reasons: readonly RecallDegradationReason[] | undefined
+): Pick<RecallDiagnostics, "degradation_reasons"> | Record<string, never> {
+  return reasons === undefined || reasons.length === 0
+    ? {}
+    : { degradation_reasons: Object.freeze([...new Set(reasons)]) };
+}
+
+function buildCandidateEvidenceDiagnostics(
+  candidates: readonly Readonly<RecallCandidateDiagnostic>[],
+  prunedCandidates: readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[]
+): Pick<
+  RecallDiagnostics,
+  "fusion_breakdown" | "candidates" | "fine_assessment_pruned_candidates"
+> {
+  return {
+    fusion_breakdown: freezeFusionBreakdown(candidates),
+    candidates: Object.freeze([...candidates]),
+    fine_assessment_pruned_candidates: Object.freeze([...prunedCandidates])
+  };
 }
 
 function buildAnswerRerankDiagnostics(

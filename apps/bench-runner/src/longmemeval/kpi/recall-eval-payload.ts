@@ -1,8 +1,9 @@
-import type {
-  BenchPolicyShape,
-  BenchSimulateReportMode,
-  BenchSplit,
-  KpiPayload
+import {
+  findLongMemEvalSelectionBindingError,
+  type BenchPolicyShape,
+  type BenchSimulateReportMode,
+  type BenchSplit,
+  type KpiPayload
 } from "@do-soul/alaya-eval";
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 import type { BenchRecallWeightOverrides } from "../../harness/recall-weight-overrides.js";
@@ -61,7 +62,12 @@ function buildPayload(
   accumulator: RecallEvalAccumulator,
   aggregates: RecallEvalAggregates
 ): KpiPayload {
-  const kpi = buildKpiCore(accumulator, aggregates, input.collected);
+  const kpi = {
+    ...buildKpiCore(accumulator, aggregates, input.collected),
+    ...(input.manifest.seed_extraction_path === undefined
+      ? {}
+      : { seed_extraction_path: input.manifest.seed_extraction_path })
+  };
   assertMeasurementCohortBinding(
     accumulator.perScenario,
     accumulator.questionDiagnostics
@@ -70,11 +76,28 @@ function buildPayload(
     accumulator,
     input.evaluatedCount
   );
+  const selectionContract = resolveFullSnapshotSelection(input, accumulator);
   const measurementAttribution = buildPayloadMeasurementAttribution(
     kpi,
     candidatePoolComplete,
-    input.provenanceComplete
+    input.provenanceComplete && selectionContract !== undefined
   );
+  return renderRecallEvalPayload(
+    input,
+    kpi,
+    measurementAttribution,
+    selectionContract,
+    accumulator.answerableCount
+  );
+}
+
+function renderRecallEvalPayload(
+  input: RecallEvalKpiInput,
+  kpi: KpiPayload["kpi"],
+  measurementAttribution: ReturnType<typeof buildPayloadMeasurementAttribution>,
+  selectionContract: ReturnType<typeof resolveFullSnapshotSelection>,
+  answerableCount: number
+): KpiPayload {
   return {
     bench_name: "public", split: VARIANT_TO_SPLIT[input.variant],
     run_at: input.runAt.toISOString(), alaya_commit: input.commitSha7,
@@ -83,24 +106,56 @@ function buildPayload(
     policy_shape: input.policyShape, simulate_report: input.simulateReport,
     recall_eval_attribution: input.runtimeAttribution,
     measurement_attribution: measurementAttribution,
+    ...(selectionContract === undefined
+      ? {}
+      : { selection_contract: selectionContract }),
     ...(input.recallWeightOverrides === undefined ? {} : {
       recall_weight_overrides: input.recallWeightOverrides.summary
     }),
-    dataset: {
-      name: input.variant, size: input.sampleSize,
-      source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
-      ...(input.datasetSha256 === null
-        ? {}
-        : { checksum_sha256: input.datasetSha256 }),
-      checksum_source: input.runtimeAttribution.hydration_binding === undefined
-        ? `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
-        : `${RECALL_EVAL_ARCHIVE_MARKER} external evaluator dataset binding`
-    },
+    dataset: buildRecallEvalDataset(input),
     sample_size: input.sampleSize, evaluated_count: input.evaluatedCount,
-    answerable_evaluated_count: accumulator.answerableCount,
+    answerable_evaluated_count: answerableCount,
     harness_mode: "mcp_propose_review",
     kpi
   };
+}
+
+function buildRecallEvalDataset(input: RecallEvalKpiInput): KpiPayload["dataset"] {
+  return {
+    name: input.variant, size: input.sampleSize,
+    source: "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned",
+    ...(input.datasetSha256 === null
+      ? {}
+      : { checksum_sha256: input.datasetSha256 }),
+    checksum_source: input.runtimeAttribution.hydration_binding === undefined
+      ? `${RECALL_EVAL_ARCHIVE_MARKER} ${input.manifest.db_filename}`
+      : `${RECALL_EVAL_ARCHIVE_MARKER} external evaluator dataset binding`
+  };
+}
+
+function resolveFullSnapshotSelection(
+  input: RecallEvalKpiInput,
+  accumulator: RecallEvalAccumulator
+) {
+  const slice = input.runtimeAttribution.evaluation_slice;
+  const selection = input.manifest.run_provenance?.selection;
+  if (slice === undefined || slice.offset !== 0 || slice.limit !== null ||
+      slice.evaluated_count !== input.evaluatedCount ||
+      input.evaluatedCount !== input.manifest.question_count ||
+      selection === undefined) {
+    return undefined;
+  }
+  const bindingError = findLongMemEvalSelectionBindingError({
+    dataset: {
+      ...(input.datasetSha256 === null
+        ? {}
+        : { checksum_sha256: input.datasetSha256 })
+    },
+    evaluated_count: input.evaluatedCount,
+    selection_contract: selection,
+    kpi: { per_scenario: accumulator.perScenario }
+  });
+  return bindingError === null ? selection : undefined;
 }
 
 function buildPayloadMeasurementAttribution(

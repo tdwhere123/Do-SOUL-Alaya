@@ -8,6 +8,8 @@ import { readDiagnosticsJsonStream } from "./diagnostics-json-stream-reader.mjs"
 import { validateQuestionMeasurementStatus } from "./measurement-status.mjs";
 
 const gunzipAsync = promisify(gunzip);
+const RECALL_ORIGIN_PLANES = new Set(["workspace_local", "global"]);
+const RECALL_OBJECT_KINDS = new Set(["memory_entry", "synthesis_capsule"]);
 
 export const STAGE_FIELDS = Object.freeze({
   candidate_pool: "fused_rank",
@@ -317,15 +319,45 @@ export function assertCompleteReplayQuestion(question, row) {
   if (question.candidate_pool_complete !== true || row.candidate_pool_complete !== true) {
     throw new Error(`candidate_pool_complete=true required for question ${question.question_id}`);
   }
-  for (const [index, candidate] of question.candidates.entries()) {
-    validateCandidate(candidate, `${question.question_id}.candidates[${index}]`);
-  }
+  validateCandidatePoolClosure(question);
   return question;
+}
+
+function validateCandidatePoolClosure(question) {
+  const scoredKeys = new Set();
+  for (const [index, candidate] of question.candidates.entries()) {
+    const key = validateCandidate(candidate, `${question.question_id}.candidates[${index}]`);
+    if (scoredKeys.has(key)) throw new Error(`duplicate candidate identity key at ${question.question_id}`);
+    scoredKeys.add(key);
+  }
+  const pruned = requireArray(
+    question.fine_assessment_pruned_candidates,
+    `${question.question_id}.fine_assessment_pruned_candidates`
+  );
+  const prunedKeys = new Set();
+  let previousIndex = -1;
+  for (const [index, candidate] of pruned.entries()) {
+    const parsed = validatePrunedCandidate(
+      candidate, `${question.question_id}.fine_assessment_pruned_candidates[${index}]`
+    );
+    if (prunedKeys.has(parsed.key) || scoredKeys.has(parsed.key) ||
+        parsed.coarseIndex <= previousIndex) {
+      throw new Error(`duplicate candidate identity key at ${question.question_id}`);
+    }
+    previousIndex = parsed.coarseIndex;
+    prunedKeys.add(parsed.key);
+  }
+  if (!Number.isSafeInteger(question.candidate_pool_count) ||
+      question.candidate_pool_count !== scoredKeys.size + prunedKeys.size ||
+      question.fine_pruned_count !== prunedKeys.size ||
+      [...pruned].some((candidate) => candidate.coarse_index >= question.candidate_pool_count)) {
+    throw new Error(`candidate pool closure differs at ${question.question_id}`);
+  }
 }
 
 function validateCandidate(candidate, label) {
   requireObject(candidate, label);
-  requireString(candidate.object_id, `${label}.object_id`);
+  const key = validateCandidateIdentity(candidate, label);
   for (const field of Object.values(STAGE_FIELDS)) {
     if (!Object.hasOwn(candidate, field)) {
       throw new Error(`missing required rank field ${field} at ${label}`);
@@ -335,6 +367,29 @@ function validateCandidate(candidate, label) {
       throw new Error(`invalid explicit rank field ${field} at ${label}`);
     }
   }
+  return key;
+}
+
+function validatePrunedCandidate(candidate, label) {
+  requireObject(candidate, label);
+  const key = validateCandidateIdentity(candidate, label);
+  if (!Number.isSafeInteger(candidate.coarse_index) || candidate.coarse_index < 0 ||
+      candidate.drop_reason !== "fine_assessment_cap") {
+    throw new Error(`invalid fine-assessment pruned candidate at ${label}`);
+  }
+  return { key, coarseIndex: candidate.coarse_index };
+}
+
+function validateCandidateIdentity(candidate, label) {
+  const objectId = requireString(candidate.object_id, `${label}.object_id`);
+  const objectKind = candidate.object_kind;
+  const originPlane = candidate.origin_plane;
+  const candidateKey = requireString(candidate.candidate_key, `${label}.candidate_key`);
+  if (!RECALL_OBJECT_KINDS.has(objectKind) || !RECALL_ORIGIN_PLANES.has(originPlane) ||
+      candidateKey !== `${originPlane}:${objectKind}:${objectId}`) {
+    throw new Error(`candidate identity key differs at ${label}`);
+  }
+  return candidateKey;
 }
 
 function validateEmbeddedCohort(question, row, legacyDiagnostic) {

@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
@@ -94,6 +95,27 @@ describe("snapshot plumbing", () => {
     expect(row?.k).toBe("v");
     copy.close();
   }, 30_000);
+
+  it("refuses to copy a live DB when a reader blocks the WAL checkpoint", () => {
+    const liveDbPath = join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME);
+    freshMigratedDb(liveDbPath);
+    const live = initDatabase({ filename: liveDbPath });
+    live.connection.pragma("busy_timeout = 25");
+    const reader = new BetterSqlite3(liveDbPath);
+    reader.pragma("journal_mode = WAL");
+    reader.exec("BEGIN");
+    reader.prepare("SELECT k FROM snapshot_probe").all();
+    live.connection.prepare("INSERT INTO snapshot_probe (k) VALUES (?)").run("after-reader");
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    try {
+      expect(() => checkpointAndCopyBenchDb(liveDbPath, snapshotDbPath))
+        .toThrow(/incomplete WAL checkpoint \(busy=1/u);
+      expect(existsSync(snapshotDbPath)).toBe(false);
+    } finally {
+      reader.exec("ROLLBACK");
+      reader.close();
+    }
+  });
 
   it("restores a snapshot into a working copy under a dataDirRoot", () => {
     const liveDbPath = join(tmpDir, "live", BENCH_DAEMON_DB_FILENAME);
@@ -215,12 +237,24 @@ describe("snapshot plumbing", () => {
     writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
       extraction_provenance: {
         ...common,
-        request_profile: "deepseek-v4-nonthinking-v1"
+        request_profile: "deepseek-v4-nonthinking-v1",
+        fill_status: "complete",
+        window_offset: 0,
+        window_limit: 1,
+        expected_turns: 10,
+        expected_key_set_sha256: "e".repeat(64),
+        content_closure_sha256: "f".repeat(64),
+        requested_turns: 10,
+        cached_turns: 10,
+        coverage: 1
       } as LongMemEvalSnapshotManifest["extraction_provenance"]
     }));
     expect(readSnapshotManifest(snapshotDbPath).extraction_provenance).toMatchObject({
       schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-      request_profile: "deepseek-v4-nonthinking-v1"
+      request_profile: "deepseek-v4-nonthinking-v1",
+      fill_status: "complete",
+      expected_key_set_sha256: "e".repeat(64),
+      content_closure_sha256: "f".repeat(64)
     });
   });
 

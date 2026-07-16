@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   BenchEdgeFormationMember,
   BenchWorkspaceHandle
@@ -7,6 +8,7 @@ import { pairSessionIntoRounds, type LongMemEvalQuestion } from "./dataset.js";
 import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
+  type CompileSeedExtractionStats,
   type CompileSeedRunner,
   type SessionSeededTurn
 } from "./compile-seed.js";
@@ -23,12 +25,20 @@ import {
   assertLongMemEvalTimeline,
   requireLongMemEvalTimestamp
 } from "./ingestion/source-time.js";
+import type {
+  LongMemEvalSnapshotSeedRound
+} from "./snapshot.js";
+import {
+  mergeLongMemEvalSourceRounds,
+  type LongMemEvalSourceRound
+} from "./provenance/source-rounds.js";
 
 export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
   readonly answerSessionSet: Set<string>;
   answerSeedDropReasons: LongMemEvalSeedDropReasons;
   readonly coherenceMembers: BenchEdgeFormationMember[];
+  readonly seedRounds: LongMemEvalSnapshotSeedRound[];
   seedTurnsTruncated: number;
   answerTurnsTruncated: number;
   seedCharsClipped: number;
@@ -39,6 +49,7 @@ export async function seedLongMemEvalQuestion(input: {
   readonly question: LongMemEvalQuestion;
   readonly seedRunner: CompileSeedRunner;
   readonly qaChat?: QaChatFn;
+  readonly seedFormationMode: "treatment_neutral" | "diagnostic_warmup";
 }): Promise<LongMemEvalQuestionSeedState> {
   assertLongMemEvalTimeline(input.question);
   const state = createSeedState(input.question);
@@ -57,6 +68,7 @@ function createSeedState(question: LongMemEvalQuestion): LongMemEvalQuestionSeed
     answerSessionSet: new Set(question.answer_session_ids),
     answerSeedDropReasons: createEmptyLongMemEvalSeedDropReasons(),
     coherenceMembers: [],
+    seedRounds: [],
     seedTurnsTruncated: 0,
     answerTurnsTruncated: 0,
     seedCharsClipped: 0
@@ -92,7 +104,9 @@ async function seedQuestionSession(
     sessionHasAnswer = sessionHasAnswer || round.hasAnswer;
     previousTurnSeedMemoryIds = result.nextTurnSeedMemoryIds;
   }
-  await input.workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
+  if (input.seedFormationMode === "diagnostic_warmup") {
+    await input.workspace.accrueSessionCoRecall(sessionMemberMemoryIds);
+  }
   await seedSessionSynthesis(input.workspace, state, {
     questionId: input.question.question_id,
     sessionIndex,
@@ -103,18 +117,20 @@ async function seedQuestionSession(
   return seedIndex;
 }
 
+interface SeedRoundContext {
+  readonly sessionIndex: number;
+  readonly roundIndex: number;
+  readonly sessionId: string;
+  readonly seedIndex: number;
+  readonly previousTurnSeedMemoryIds: readonly string[];
+  readonly sessionTurns: SessionSeededTurn[];
+  readonly sessionMemberMemoryIds: string[];
+}
+
 async function seedQuestionRound(
   input: Parameters<typeof seedLongMemEvalQuestion>[0],
   state: LongMemEvalQuestionSeedState,
-  context: {
-    readonly sessionIndex: number;
-    readonly roundIndex: number;
-    readonly sessionId: string;
-    readonly seedIndex: number;
-    readonly previousTurnSeedMemoryIds: readonly string[];
-    readonly sessionTurns: SessionSeededTurn[];
-    readonly sessionMemberMemoryIds: string[];
-  }
+  context: SeedRoundContext
 ): Promise<{ readonly nextTurnSeedMemoryIds: readonly string[] }> {
   const round = pairSessionIntoRounds(input.question.haystack_sessions[context.sessionIndex]!)[context.roundIndex]!;
   const evidenceRef = buildLongMemEvalRoundEvidenceRef(
@@ -125,6 +141,7 @@ async function seedQuestionRound(
   const beforeDropReasons = {
     ...input.seedRunner.stats.signalsDroppedByReason
   };
+  const beforeCounters = snapshotSeedCounters(input.seedRunner.stats);
   const sourceObservedAt = requireLongMemEvalTimestamp(
     input.question.haystack_dates[context.sessionIndex]
   );
@@ -147,7 +164,84 @@ async function seedQuestionRound(
     input.seedRunner.stats.signalsDroppedByReason
   );
   addSeedSidecarEntries(input, state, context, round, seedResult);
+  state.seedRounds.push(buildSeedRoundLedger({
+    stats: input.seedRunner.stats,
+    before: beforeCounters,
+    context,
+    round,
+    seeds: seedResult.seeds
+  }));
   return { nextTurnSeedMemoryIds: computeNextTurnSeedRefs(seedResult) };
+}
+
+interface SeedCounterSnapshot {
+  readonly factsProduced: number;
+  readonly parseDropped: number;
+  readonly compileOverflowDropped: number;
+  readonly candidateAbsent: number;
+  readonly materializationDrop: number;
+}
+
+function snapshotSeedCounters(stats: CompileSeedExtractionStats): SeedCounterSnapshot {
+  return {
+    factsProduced: stats.factsProduced,
+    parseDropped: stats.parseDropped,
+    compileOverflowDropped: stats.compileOverflowDropped,
+    candidateAbsent: stats.signalsDroppedByReason.candidate_absent,
+    materializationDrop: stats.signalsDroppedByReason.materialization_drop
+  };
+}
+
+function buildSeedRoundLedger(input: {
+  readonly stats: CompileSeedExtractionStats;
+  readonly before: SeedCounterSnapshot;
+  readonly context: SeedRoundContext;
+  readonly round: ReturnType<typeof pairSessionIntoRounds>[number];
+  readonly seeds: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"];
+}): LongMemEvalSnapshotSeedRound {
+  const official = input.stats.lastExtractionSource !== null;
+  return {
+    sessionIndex: input.context.sessionIndex,
+    roundIndex: input.context.roundIndex,
+    sessionId: input.context.sessionId,
+    contentSha256: sha256(input.round.content.trim()),
+    hasAnswer: input.round.hasAnswer,
+    extractionSource: input.stats.lastExtractionSource ?? "fallback",
+    cacheKey: official ? input.stats.lastCacheKey ?? null : null,
+    rawJsonSha256: official ? input.stats.lastRawJsonSha256 : null,
+    rawSignalCount: official ? input.stats.lastTurnRawSignalCount : null,
+    draftCount: official ? input.stats.lastTurnDraftCount : null,
+    factsProduced: delta(input.stats.factsProduced, input.before.factsProduced),
+    parseDropped: delta(input.stats.parseDropped, input.before.parseDropped),
+    compileOverflowDropped: delta(
+      input.stats.compileOverflowDropped, input.before.compileOverflowDropped
+    ),
+    candidateAbsent: delta(
+      input.stats.signalsDroppedByReason.candidate_absent,
+      input.before.candidateAbsent
+    ),
+    materializationDrop: delta(
+      input.stats.signalsDroppedByReason.materialization_drop,
+      input.before.materializationDrop
+    ),
+    memoryObjectIds: uniqueSurvivorSeeds(input.seeds).map(({ seed }) => seed.memoryId),
+    memoryBindings: input.seeds.map((seed) => ({
+      objectId: seed.memoryId,
+      signalId: seed.signalId,
+      evidenceId: seed.evidenceId
+    }))
+  };
+}
+
+function delta(after: number, before: number): number {
+  if (after < before) {
+    throw new Error("seed extraction counters must be monotonic");
+  }
+  return after - before;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function recordAnswerSeedDrops(
@@ -183,30 +277,50 @@ function recordTruncation(
 function addSeedSidecarEntries(
   input: Parameters<typeof seedLongMemEvalQuestion>[0],
   state: LongMemEvalQuestionSeedState,
-  context: Parameters<typeof seedQuestionRound>[2],
+  context: SeedRoundContext,
   round: ReturnType<typeof pairSessionIntoRounds>[number],
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
-  for (const [seedOrdinal, seed] of seedResult.seeds.entries()) {
+  for (const { seed, seedOrdinal } of uniqueSurvivorSeeds(seedResult.seeds)) {
     addSidecarEntry(state, {
       objectId: seed.memoryId,
       objectKind: "memory_entry",
       sessionId: context.sessionId,
       hasAnswer: round.hasAnswer,
+      sourceRounds: [sourceRound(context, round)],
       ...optionalSeedContent(input, context.sessionIndex, round.content)
     });
     context.sessionTurns.push({ turnContent: round.content, evidenceId: seed.evidenceId });
-    context.sessionMemberMemoryIds.push(seed.memoryId);
-    state.coherenceMembers.push({
-      memoryId: seed.memoryId,
-      sessionId: context.sessionId,
-      formationKey: buildBenchFormationKey(context, seedOrdinal)
-    });
+    if (!context.sessionMemberMemoryIds.includes(seed.memoryId)) {
+      context.sessionMemberMemoryIds.push(seed.memoryId);
+    }
+    if (!state.coherenceMembers.some((member) => member.memoryId === seed.memoryId)) {
+      state.coherenceMembers.push({
+        memoryId: seed.memoryId,
+        sessionId: context.sessionId,
+        formationKey: buildBenchFormationKey(context, seedOrdinal)
+      });
+    }
   }
 }
 
+type SeededTurnMemory = Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"][number];
+
+function uniqueSurvivorSeeds(
+  seeds: readonly SeededTurnMemory[]
+): readonly { readonly seed: SeededTurnMemory; readonly seedOrdinal: number }[] {
+  const survivors = new Map<string, { seed: SeededTurnMemory; seedOrdinal: number }>();
+  for (const [seedOrdinal, seed] of seeds.entries()) {
+    const prior = survivors.get(seed.memoryId);
+    if (prior === undefined || (prior.seed.evidenceId === null && seed.evidenceId !== null)) {
+      survivors.set(seed.memoryId, { seed, seedOrdinal: prior?.seedOrdinal ?? seedOrdinal });
+    }
+  }
+  return [...survivors.values()];
+}
+
 function buildBenchFormationKey(
-  context: Pick<Parameters<typeof seedQuestionRound>[2], "sessionId" | "sessionIndex" | "roundIndex">,
+  context: Pick<SeedRoundContext, "sessionId" | "sessionIndex" | "roundIndex">,
   seedOrdinal: number
 ): string {
   // Fixed-width ordinals preserve numeric formation order under the core's
@@ -268,10 +382,41 @@ function addSidecarEntry(
   entry: LongMemEvalSidecarEntry
 ): void {
   const key = buildLongMemEvalSidecarKey(entry.objectKind, entry.objectId);
-  if (state.sidecar.has(key)) {
+  const prior = state.sidecar.get(key);
+  if (prior === undefined) {
+    state.sidecar.set(key, entry);
+    return;
+  }
+  if (entry.objectKind !== "memory_entry" || prior.objectKind !== "memory_entry") {
     throw new Error(`duplicate LongMemEval sidecar object identity ${key}`);
   }
-  state.sidecar.set(key, entry);
+  const sources = mergeLongMemEvalSourceRounds(
+    requireSourceRounds(prior),
+    requireSourceRounds(entry)
+  );
+  state.sidecar.set(key, {
+    ...prior,
+    sourceRounds: sources
+  });
+}
+
+function sourceRound(
+  context: Pick<SeedRoundContext, "sessionIndex" | "roundIndex" | "sessionId">,
+  round: ReturnType<typeof pairSessionIntoRounds>[number]
+): LongMemEvalSourceRound {
+  return {
+    sessionIndex: context.sessionIndex,
+    roundIndex: context.roundIndex,
+    sessionId: context.sessionId,
+    hasAnswer: round.hasAnswer
+  };
+}
+
+function requireSourceRounds(entry: LongMemEvalSidecarEntry): readonly LongMemEvalSourceRound[] {
+  if (entry.sourceRounds === undefined || entry.sourceRounds.length === 0) {
+    throw new Error("current LongMemEval memory sidecar requires source rounds");
+  }
+  return entry.sourceRounds;
 }
 
 export interface LongMemEvalSeedRoundIdentity {

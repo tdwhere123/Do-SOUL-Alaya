@@ -108,6 +108,7 @@ describe("LoCoMo runner", () => {
         readonly ready_rate: number;
       };
       readonly query_embedding_cache?: unknown;
+      readonly full_diagnostics_artifact_path: string;
     };
 
     expect(kpi.kpi.provider_returned_rate).toBe(1);
@@ -122,5 +123,11 @@ describe("LoCoMo runner", () => {
       })
     );
     expect(diagnostics.query_embedding_cache).toBeUndefined();
+    const fullDiagnostics = JSON.parse(await readFile(
+      diagnostics.full_diagnostics_artifact_path,
+      "utf8"
+    )) as { questions: Array<{ candidates: Array<{ origin_plane: string }> }> };
+    expect(fullDiagnostics.questions[0]?.candidates[0]?.origin_plane)
+      .toBe("workspace_local");
   });
 });

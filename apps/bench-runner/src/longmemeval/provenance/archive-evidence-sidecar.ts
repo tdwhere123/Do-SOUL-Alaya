@@ -13,6 +13,7 @@ import {
 } from "../evidence-manifest.js";
 import type { LongMemEvalSelectionContractIdentity } from "../selection/contract.js";
 import { LongMemEvalRunProvenanceSchema } from "./run.js";
+import type { LongMemEvalRunProvenance } from "./run.js";
 
 export interface ArchiveEvidenceSidecarInput {
   readonly slug: string;
@@ -25,6 +26,11 @@ export interface ArchiveEvidenceSidecarInput {
   };
   readonly comparison: string;
   readonly runProvenanceSidecar: { readonly filename: string; readonly contents: string };
+  readonly boundRunProvenance?: LongMemEvalRunProvenance;
+  readonly authorityReferenceSidecar?: {
+    readonly filename: string;
+    readonly contents: string;
+  } | null;
   readonly report: string;
   readonly findings: string | null;
   readonly cohortLedger: string;
@@ -33,9 +39,10 @@ export interface ArchiveEvidenceSidecarInput {
 export function buildArchiveEvidenceManifestSidecar(
   input: ArchiveEvidenceSidecarInput
 ) {
-  const provenance = LongMemEvalRunProvenanceSchema.parse(
-    JSON.parse(input.runProvenanceSidecar.contents)
-  );
+  const provenance = input.boundRunProvenance ??
+    LongMemEvalRunProvenanceSchema.parse(
+      JSON.parse(input.runProvenanceSidecar.contents)
+    );
   const cohortIdentity = JSON.parse(input.cohortLedger) as {
     readonly question_id_digest: string;
     readonly selection_contract?: LongMemEvalSelectionContractIdentity;
@@ -92,6 +99,14 @@ function buildEvidenceArtifacts(
     },
     { role: "cohort_ledger", path: LONGMEMEVAL_COHORT_LEDGER_FILENAME, contents: input.cohortLedger },
     { role: "comparison", path: LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME, contents: input.comparison },
-    { role: "run_provenance", path: input.runProvenanceSidecar.filename, contents: input.runProvenanceSidecar.contents }
+    { role: "run_provenance", path: input.runProvenanceSidecar.filename, contents: input.runProvenanceSidecar.contents },
+    ...(input.authorityReferenceSidecar === undefined ||
+      input.authorityReferenceSidecar === null
+      ? []
+      : [{
+          role: "extraction_authority_ref" as const,
+          path: input.authorityReferenceSidecar.filename,
+          contents: input.authorityReferenceSidecar.contents
+        }])
   ];
 }

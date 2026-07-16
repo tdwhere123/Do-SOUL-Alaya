@@ -153,6 +153,8 @@ function buildArtifacts(payload: KpiPayload): LongMemEvalEvidenceArtifact[] {
 
 function runProvenance(payload: KpiPayload) {
   const datasetSha256 = payload.dataset.checksum_sha256!;
+  const cacheKey = "e".repeat(64);
+  const rawSha = "f".repeat(64);
   return {
     schema_version: 1,
     dataset_sha256: datasetSha256,
@@ -164,21 +166,67 @@ function runProvenance(payload: KpiPayload) {
       gate_contract_path: "/fixture/gate.json",
       worktree_state_sha256: "b".repeat(64),
       worktree_clean: true,
-      executed_dist: { sha256: "c".repeat(64) }
+      executed_dist: {
+        algorithm: "sha256-reachable-path-file-sha256-v1",
+        sha256: "c".repeat(64),
+        file_count: 1
+      }
     },
     extraction_cache: {
+      schema_version: 3,
+      manifest_sha256: "1".repeat(64),
+      extraction_model: "fixture-model",
+      model_family: "fixture-family",
+      request_profile: "provider-default-v1",
+      provider_url: "redacted",
+      system_prompt_sha256: "2".repeat(64),
+      cache_key_algo: "sha256-content-v1",
+      dataset: "longmemeval-s",
       dataset_revision: datasetSha256,
-      requested_turns: payload.evaluated_count,
-      cached_turns: payload.evaluated_count,
-      coverage: 1
+      requested_turns: 1,
+      cached_turns: 1,
+      coverage: 1,
+      storage: "git-tracked",
+      built_at: "2026-07-17T00:00:00.000Z",
+      builder: "fixture",
+      fill_status: "complete",
+      window_offset: 0,
+      window_limit: payload.evaluated_count,
+      expected_turns: 1,
+      expected_key_set_sha256: sha256(cacheKey),
+      content_closure_sha256: sha256(JSON.stringify([
+        cacheKey, "fixture-model", "provider-default-v1", rawSha, 1, 1
+      ])),
+      content_closure_index: { [cacheKey]: [rawSha, 1, 1] }
     },
-    execution: { evaluated_count: payload.evaluated_count },
+    runtime: {
+      node_version: "v24.0.0",
+      platform: "linux",
+      arch: "x64",
+      embedding_mode: "disabled",
+      embedding_provider_kind: "openai",
+      embedding_provider_label: "none",
+      onnx_threads: null,
+      embedding_supplement: { enabled: false },
+      answer_rerank: { enabled: false },
+      paired_env: {}
+    },
+    execution: {
+      protocol: "sequential",
+      concurrency: 1,
+      offset: 0,
+      limit: payload.evaluated_count,
+      evaluated_count: payload.evaluated_count
+    },
     recall_config: {
+      conf_slice_compatibility: false,
       schema_version: 2,
       max_results: 10,
       conflict_awareness: true,
       effective_config_sha256: "d".repeat(64)
-    }
+    },
+    seed_capabilities: { facet_tags_enabled: false },
+    question_manifest: null
   };
 }
 

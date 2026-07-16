@@ -1,5 +1,3 @@
-import { readdirSync } from "node:fs";
-import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   EXTRACTION_CACHE_ROOT,
@@ -32,13 +30,24 @@ import {
   readFillRetryTelemetry,
   type FillRetryTelemetry
 } from "./extraction/fill-stats.js";
-import { loadDatasetWithIdentity } from "./fetch.js";
+import { runExtractionPool } from "./extraction/fill-pool.js";
 import {
-  pairSessionIntoRounds,
-  type LongMemEvalQuestion,
-  type LongMemEvalVariant
-} from "./dataset.js";
-
+  assertExtractionFillComplete,
+  inspectExtractionFillCompletion,
+  type ExtractionFillCompletion
+} from "./extraction/fill-completion.js";
+import type { ExtractionFillStatus } from "./extraction/fill-manifest-contract.js";
+import type { LongMemEvalVariant } from "./dataset.js";
+import {
+  finalizeExpansionFillAuthority,
+  prepareExpansionFillAuthority,
+  revalidateExpansionFillAuthority,
+  type PreparedExpansionFillAuthority
+} from "./extraction/expansion-fill-authority.js";
+import type { LongMemEvalExpansionCapability } from
+  "./promotion/expansion-capability.js";
+import { prepareExtractionFillWindow } from "./extraction/fill-window.js";
+export { collectDistinctTurnContents } from "./extraction/turn-contents.js";
 /**
  * @anchor longmemeval-extraction-fill
  *
@@ -61,13 +70,14 @@ import {
  */
 
 export const EXTRACTION_FILL_DEFAULT_CONCURRENCY = 32;
+export const EXTRACTION_FILL_MAX_CONCURRENCY = 32;
 
 export interface ExtractionFillOptions {
   readonly variant: LongMemEvalVariant;
   /** Stage with the first N questions (e.g. 100Q) before the full set. */
   readonly limit?: number;
   readonly offset?: number;
-  /** Bounded pool size. Default 32; raise toward provider rate ceiling. */
+  /** Bounded pool size. Product maximum and default: 32. */
   readonly concurrency?: number;
   /** Override the extraction cache root (tests). */
   readonly cacheRoot?: string;
@@ -86,6 +96,8 @@ export interface ExtractionFillOptions {
   readonly log?: (message: string) => void;
   /** Stops new work and aborts in-flight provider requests. */
   readonly signal?: AbortSignal;
+  /** Opaque live authority required only for canonical 100Q -> 500Q fill. */
+  readonly expansionCapability?: LongMemEvalExpansionCapability;
 }
 
 export interface ExtractionFillResult extends FillRetryTelemetry {
@@ -95,102 +107,9 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly cacheHits: number;
   /** Tasks that triggered a live LLM extraction + cache write. */
   readonly newlyExtracted: number;
-  /** Tasks whose extraction failed (counted, not silently dropped). */
-  readonly failures: number;
   /** cached_turns / requested_turns written into the manifest. */
   readonly coverage: number;
   readonly manifest: ExtractionCacheManifest;
-}
-
-/** The provider userPrompt shape — only turn_content is load-bearing for the cache key. */
-function buildFillUserPrompt(turnContent: string): string {
-  // Mirror OfficialApiGardenProvider.requestSignals: the cache key extractor
-  // (extractTurnContent) reads only `turn_content`, so the routing fields are
-  // stable constants here — they do not enter the key and the fixture this
-  // writes is shared with the real bench run.
-  return JSON.stringify({
-    workspace_id: "extraction-fill",
-    run_id: "extraction-fill",
-    surface_id: null,
-    turn_content: turnContent,
-    turn_messages: []
-  });
-}
-
-/**
- * Flatten every question's sessions into rounds and dedup by turn_content. The
- * cache key hashes model + requestProfile + systemPrompt + turn_content, so identical
- * round content collapses to one task (and one cache key) regardless of which
- * question / session it came from.
- */
-export function collectDistinctTurnContents(
-  questions: readonly LongMemEvalQuestion[]
-): readonly string[] {
-  const seen = new Set<string>();
-  for (const question of questions) {
-    for (const session of question.haystack_sessions) {
-      for (const round of pairSessionIntoRounds(session)) {
-        const normalized = round.content.trim();
-        if (normalized.length === 0) continue;
-        seen.add(normalized);
-      }
-    }
-  }
-  return [...seen];
-}
-
-/**
- * Count shard fixtures already on disk (cached_turns numerator). Shards live
- * under two-hex-char subdirs; the manifest.json at the root is not a shard.
- */
-function countCacheShards(cacheRoot: string): number {
-  let total = 0;
-  let shardDirs: string[];
-  try {
-    shardDirs = readdirSync(cacheRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && /^[0-9a-f]{2}$/u.test(entry.name))
-      .map((entry) => entry.name);
-  } catch {
-    return 0;
-  }
-  for (const shardDir of shardDirs) {
-    try {
-      total += readdirSync(join(cacheRoot, shardDir)).filter((name) =>
-        name.endsWith(".json")
-      ).length;
-    } catch {
-      // Unreadable shard dir contributes 0; the next manifest write reflects
-      // whatever is actually present.
-    }
-  }
-  return total;
-}
-
-/**
- * Run a bounded-concurrency pool over `tasks`, invoking `worker` on each. Used
- * instead of a p-limit dependency to keep the bench package dependency-free.
- */
-async function runBoundedPool<T>(
-  tasks: readonly T[],
-  concurrency: number,
-  worker: (task: T) => Promise<void>
-): Promise<void> {
-  const limit = Math.max(1, concurrency);
-  let cursor = 0;
-  async function pump(): Promise<void> {
-    while (cursor < tasks.length) {
-      const index = cursor++;
-      const task = tasks[index];
-      if (task === undefined) continue;
-      await worker(task);
-    }
-  }
-  const runners = Array.from({ length: Math.min(limit, tasks.length) }, () => pump());
-  const settled = await Promise.allSettled(runners);
-  const rejected = settled.find(
-    (result): result is PromiseRejectedResult => result.status === "rejected"
-  );
-  if (rejected !== undefined) throw rejected.reason;
 }
 
 /**
@@ -203,37 +122,62 @@ async function runBoundedPool<T>(
 export async function runExtractionFill(
   options: ExtractionFillOptions
 ): Promise<ExtractionFillResult> {
+  const concurrency = resolveExtractionFillConcurrency(options.concurrency);
   const cacheRoot = options.cacheRoot ?? EXTRACTION_CACHE_ROOT;
+  const initialIdentity = readExtractionCacheManifestIdentity(cacheRoot);
+  const expansion = await prepareExpansionFillAuthority(options, cacheRoot);
+  assertPreparationIdentityUnchanged(
+    initialIdentity,
+    readExtractionCacheManifestIdentity(cacheRoot)
+  );
   const lease = acquireExtractionCacheWriteLease(cacheRoot);
   return withExtractionCacheWriteLease(
     lease,
-    () => runLockedExtractionFill(options, cacheRoot, lease)
+    () => runLockedExtractionFill(
+      options, cacheRoot, lease, expansion, concurrency
+    )
   );
 }
 
 async function runLockedExtractionFill(
   options: ExtractionFillOptions,
   cacheRoot: string,
-  writeLease: ExtractionCacheWriteLease
+  writeLease: ExtractionCacheWriteLease,
+  expansion: PreparedExpansionFillAuthority | undefined,
+  concurrency: number
 ): Promise<ExtractionFillResult> {
   const log =
     options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
-  const concurrency = options.concurrency ?? EXTRACTION_FILL_DEFAULT_CONCURRENCY;
-  const prepared = await prepareExtractionFill(options, cacheRoot, concurrency, log);
+  const prepared = await prepareExtractionFill(
+    options, cacheRoot, concurrency, log, expansion
+  );
   const stats = newFillStats();
-  const failures = await executeExtractionFill(
-    options,
-    prepared,
-    cacheRoot,
-    concurrency,
-    stats,
-    log,
-    writeLease
-  );
-  options.signal?.throwIfAborted();
-  return finishExtractionFill(
-    prepared, cacheRoot, failures, stats, log, writeLease
-  );
+  try {
+    await executeExtractionFill(
+      options, prepared, cacheRoot, concurrency, stats, log, writeLease
+    );
+    options.signal?.throwIfAborted();
+    return finishExtractionFill(prepared, cacheRoot, stats, log, writeLease);
+  } catch (cause) {
+    try {
+      refreshIncompleteFill(prepared, cacheRoot, writeLease);
+    } catch (refreshFailure) {
+      throw new AggregateError(
+        [cause, refreshFailure],
+        "extraction-fill failed and its partial manifest could not be refreshed"
+      );
+    }
+    throw cause;
+  }
+}
+
+function resolveExtractionFillConcurrency(raw: number | undefined): number {
+  const value = raw ?? EXTRACTION_FILL_DEFAULT_CONCURRENCY;
+  if (!Number.isSafeInteger(value) || value < 1 ||
+      value > EXTRACTION_FILL_MAX_CONCURRENCY) {
+    throw new Error(`extraction-fill concurrency must be an integer from 1 to ${EXTRACTION_FILL_MAX_CONCURRENCY}`);
+  }
+  return value;
 }
 
 interface PreparedExtractionFill {
@@ -244,20 +188,23 @@ interface PreparedExtractionFill {
   readonly requestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
+  readonly windowOffset: number;
+  readonly windowLimit: number;
+  readonly expansion?: PreparedExpansionFillAuthority;
 }
 
 async function prepareExtractionFill(
-  options: ExtractionFillOptions,
-  cacheRoot: string,
-  concurrency: number,
-  log: (message: string) => void
+  options: ExtractionFillOptions, cacheRoot: string, concurrency: number,
+  log: (message: string) => void,
+  expansion: PreparedExpansionFillAuthority | undefined
 ): Promise<PreparedExtractionFill> {
   const startingIdentity = readExtractionCacheManifestIdentity(cacheRoot);
   const existingManifest = startingIdentity?.manifest;
   if (existingManifest === undefined) assertManifestlessCacheIsEmpty(cacheRoot);
   const config = resolveFillConfig(existingManifest);
-
-  const window = await prepareExtractionWindow(options);
+  const { window, completion } = await inspectPreparedFillWindow({
+    options, cacheRoot, startingIdentity, config, expansion
+  });
   const { distinctTurns, requestedTurns } = window;
   const pinned = preflightAndPinExtractionIdentity({
     startingIdentity,
@@ -266,14 +213,14 @@ async function prepareExtractionFill(
     distinctTurns,
     log,
     variant: options.variant,
-    requestedTurns,
-    datasetRevision: window.datasetRevision
+    datasetRevision: window.datasetRevision,
+    windowOffset: window.windowOffset,
+    windowLimit: window.questionCount,
+    completion,
+    ...(expansion === undefined ? {} : { expansionSourceAnchor: expansion.sourceAnchor })
   });
-  log(
-    `[extraction-fill] variant=${options.variant} questions=${window.questionCount} ` +
-      `distinct_turns=${requestedTurns} model=${config.model} ` +
-      `concurrency=${concurrency}`
-  );
+  log(`[extraction-fill] variant=${options.variant} questions=${window.questionCount} ` +
+    `distinct_turns=${requestedTurns} model=${config.model} concurrency=${concurrency}`);
   return {
     config,
     existingManifest: pinned.manifest,
@@ -281,8 +228,29 @@ async function prepareExtractionFill(
     distinctTurns,
     requestedTurns,
     datasetRevision: window.datasetRevision,
-    variant: options.variant
+    variant: options.variant,
+    windowOffset: window.windowOffset,
+    windowLimit: window.questionCount,
+    ...(expansion === undefined ? {} : { expansion })
   };
+}
+
+async function inspectPreparedFillWindow(input: {
+  readonly options: ExtractionFillOptions;
+  readonly cacheRoot: string;
+  readonly startingIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>;
+  readonly config: CompileSeedExtractionConfig;
+  readonly expansion: PreparedExpansionFillAuthority | undefined;
+}) {
+  const window = await prepareExtractionFillWindow(input.options, input.expansion);
+  assertPreparationIdentityUnchanged(
+    input.startingIdentity,
+    readExtractionCacheManifestIdentity(input.cacheRoot)
+  );
+  const completion = inspectFillWindow(input.cacheRoot, input.config, window.distinctTurns);
+  if (input.expansion !== undefined) revalidateExpansionFillAuthority(input.expansion);
+  assertNoOrphanFillSubstrate(completion);
+  return { window, completion };
 }
 
 function preflightAndPinExtractionIdentity(input: {
@@ -292,8 +260,11 @@ function preflightAndPinExtractionIdentity(input: {
   readonly distinctTurns: readonly string[];
   readonly log: (message: string) => void;
   readonly variant: LongMemEvalVariant;
-  readonly requestedTurns: number;
   readonly datasetRevision: string;
+  readonly windowOffset: number;
+  readonly windowLimit: number;
+  readonly completion: ExtractionFillCompletion;
+  readonly expansionSourceAnchor?: PreparedExpansionFillAuthority["sourceAnchor"];
 }) {
   const currentIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
   assertPreparationIdentityUnchanged(input.startingIdentity, currentIdentity);
@@ -304,6 +275,10 @@ function preflightAndPinExtractionIdentity(input: {
     config: input.config,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     requiredTurnContents: input.distinctTurns,
+    requiredQuestionWindow: {
+      offset: input.windowOffset,
+      limit: input.windowLimit
+    },
     allowLiveExtraction: true,
     liveExtractionPossible: input.config.apiKey !== null,
     warn: input.log
@@ -313,8 +288,13 @@ function preflightAndPinExtractionIdentity(input: {
     config: input.config,
     variant: input.variant,
     existingIdentity: currentIdentity,
-    requestedTurns: input.requestedTurns,
-    datasetRevision: input.datasetRevision
+    datasetRevision: input.datasetRevision,
+    windowOffset: input.windowOffset,
+    windowLimit: input.windowLimit,
+    completion: input.completion,
+    ...(input.expansionSourceAnchor === undefined ? {} : {
+      expansionSourceAnchor: input.expansionSourceAnchor
+    })
   });
 }
 
@@ -339,30 +319,6 @@ function assertPreparationIdentityUnchanged(
   );
 }
 
-async function prepareExtractionWindow(options: ExtractionFillOptions): Promise<{
-  readonly distinctTurns: readonly string[];
-  readonly requestedTurns: number;
-  readonly questionCount: number;
-  readonly datasetRevision: string;
-}> {
-  const dataset = await loadDatasetWithIdentity(options.variant, {
-    dataDir: options.dataDir,
-    pinnedMetaRoot: options.pinnedMetaRoot
-  });
-  const questions = dataset.questions;
-  const offset = Math.max(0, options.offset ?? 0);
-  const sliceEnd =
-    options.limit !== undefined ? offset + options.limit : questions.length;
-  const window = questions.slice(offset, sliceEnd);
-  const distinctTurns = collectDistinctTurnContents(window);
-  return {
-    distinctTurns,
-    requestedTurns: distinctTurns.length,
-    questionCount: window.length,
-    datasetRevision: dataset.sha256
-  };
-}
-
 async function executeExtractionFill(
   options: ExtractionFillOptions,
   prepared: PreparedExtractionFill,
@@ -371,7 +327,7 @@ async function executeExtractionFill(
   stats: CompileSeedExtractionStats,
   log: (message: string) => void,
   writeLease: ExtractionCacheWriteLease
-): Promise<number> {
+): Promise<void> {
   const delegate =
     options.extractorFactory?.(prepared.config) ??
     createGardenHttpExtractor(prepared.config);
@@ -382,7 +338,7 @@ async function executeExtractionFill(
     stats,
     writeLease
   });
-  return runExtractionPool({
+  await runExtractionPool({
     extractor,
     distinctTurns: prepared.distinctTurns,
     concurrency,
@@ -396,47 +352,136 @@ async function executeExtractionFill(
 function finishExtractionFill(
   prepared: PreparedExtractionFill,
   cacheRoot: string,
-  failures: number,
   stats: CompileSeedExtractionStats,
   log: (message: string) => void,
   writeLease: ExtractionCacheWriteLease
 ): ExtractionFillResult {
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
-  const { requestedTurns } = prepared;
+  const completion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.distinctTurns
+  );
+  assertExtractionFillComplete(completion);
+  assertTaskConservation(prepared, stats, completion);
+  assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
+  const manifest = persistFillManifest(prepared, cacheRoot, "complete", completion);
   const cacheHits = stats.cacheHits;
   const newlyExtracted = stats.llmCalls;
-  const coverage = requestedTurns === 0 ? 1 : (requestedTurns - failures) / requestedTurns;
-  const cachedTurns = countCacheShards(cacheRoot);
   const retryTelemetry = readFillRetryTelemetry(stats);
-  const manifest = buildFillManifest({
-    config: prepared.config,
-    variant: prepared.variant,
-    existingManifest: prepared.existingManifest,
-    datasetRevision: prepared.datasetRevision,
-    requestedTurns,
-    cachedTurns,
-    coverage
-  });
-  writeExtractionCacheManifest(cacheRoot, manifest);
   log(
     `[extraction-fill] done: cache_hits=${cacheHits} ` +
-      `newly_extracted=${newlyExtracted} failures=${failures} ` +
+      `newly_extracted=${newlyExtracted} failures=0 ` +
       `retry_successes=${retryTelemetry.retrySuccesses} ` +
       `rate_limit_retries=${retryTelemetry.rateLimitRetries} ` +
       `terminal_max_retries=${retryTelemetry.terminalRetryClassifications.failure_max_retries} ` +
       `terminal_nonretryable_4xx=${retryTelemetry.terminalRetryClassifications.failure_non_retryable_4xx} ` +
       `terminal_timeouts=${retryTelemetry.terminalRetryClassifications.failure_timeout} ` +
-      `coverage=${(coverage * 100).toFixed(1)}% cached_turns=${cachedTurns}`
+      `coverage=${(completion.coverage * 100).toFixed(1)}% ` +
+      `cached_turns=${completion.validTurns}`
   );
   return {
-    requestedTurns,
+    requestedTurns: prepared.requestedTurns,
     cacheHits,
     newlyExtracted,
-    failures,
-    coverage,
+    coverage: completion.coverage,
     ...retryTelemetry,
     manifest
   };
+}
+
+function refreshIncompleteFill(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  writeLease: ExtractionCacheWriteLease
+): void {
+  if (!canRefreshIncompleteFill(prepared, cacheRoot, writeLease)) return;
+  const completion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.distinctTurns
+  );
+  assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
+  persistFillManifest(prepared, cacheRoot, "in_progress", completion);
+}
+
+function canRefreshIncompleteFill(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  writeLease: ExtractionCacheWriteLease
+): boolean {
+  try {
+    writeLease.assertOwned();
+    return readExtractionCacheManifestIdentity(cacheRoot)?.manifestSha256 ===
+      prepared.pinnedManifestSha256;
+  } catch {
+    // Recovery bookkeeping must never overwrite changed or unreadable authority.
+    return false;
+  }
+}
+
+function inspectFillWindow(
+  cacheRoot: string,
+  config: CompileSeedExtractionConfig,
+  distinctTurns: readonly string[]
+): ExtractionFillCompletion {
+  return inspectExtractionFillCompletion({
+    cacheRoot,
+    model: config.model,
+    requestProfile: config.requestProfile,
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    turnContents: distinctTurns
+  });
+}
+
+function assertNoOrphanFillSubstrate(completion: ExtractionFillCompletion): void {
+  if (completion.orphanTurns === 0) return;
+  throw new ExtractionCacheInvariantError(
+    `extraction-fill cache contains ${completion.orphanTurns} shard(s) outside ` +
+      "the requested window; use a dedicated cache root for this exact window"
+  );
+}
+
+function persistFillManifest(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  status: ExtractionFillStatus,
+  completion: ExtractionFillCompletion
+): ExtractionCacheManifest {
+  const manifest = buildFillManifest({
+    config: prepared.config,
+    variant: prepared.variant,
+    existingManifest: prepared.existingManifest,
+    datasetRevision: prepared.datasetRevision,
+    status,
+    windowOffset: prepared.windowOffset,
+    windowLimit: prepared.windowLimit,
+    completion,
+    ...(prepared.expansion === undefined ? {} : {
+      expansionSourceAnchor: prepared.expansion.sourceAnchor
+    })
+  });
+  const finalized = prepared.expansion === undefined || status !== "complete"
+    ? manifest
+    : {
+        ...manifest,
+        expansion_lineage: finalizeExpansionFillAuthority(
+          prepared.expansion, manifest, completion
+        )
+      };
+  writeExtractionCacheManifest(cacheRoot, finalized);
+  return finalized;
+}
+
+function assertTaskConservation(
+  prepared: PreparedExtractionFill,
+  stats: CompileSeedExtractionStats,
+  completion: ExtractionFillCompletion
+): void {
+  const completedTasks = stats.cacheHits + stats.llmCalls;
+  if (completedTasks === prepared.requestedTurns &&
+    completion.expectedTurns === prepared.requestedTurns) return;
+  throw new ExtractionCacheInvariantError(
+    "extraction-fill task conservation failed: " +
+      `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
+      `requested=${prepared.requestedTurns} expected=${completion.expectedTurns}`
+  );
 }
 
 function assertPinnedFillIdentity(
@@ -451,43 +496,4 @@ function assertPinnedFillIdentity(
       "extraction-fill cache manifest identity changed before finalization"
     );
   }
-}
-
-async function runExtractionPool(input: {
-  readonly extractor: BenchSignalExtractor;
-  readonly distinctTurns: readonly string[];
-  readonly concurrency: number;
-  readonly requestedTurns: number;
-  readonly stats: CompileSeedExtractionStats;
-  readonly log: (message: string) => void;
-  readonly signal?: AbortSignal;
-}): Promise<number> {
-  const { extractor, stats, requestedTurns, log } = input;
-  let failures = 0;
-  let processed = 0;
-  const progressEvery = Math.max(1, Math.floor(requestedTurns / 20));
-
-  await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
-    input.signal?.throwIfAborted();
-    try {
-      await extractor.extract({
-        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-        userPrompt: buildFillUserPrompt(turnContent),
-        abortSignal: input.signal
-      });
-    } catch (cause) {
-      input.signal?.throwIfAborted();
-      if (cause instanceof ExtractionCacheInvariantError) throw cause;
-      failures++;
-    }
-    processed++;
-    if (processed % progressEvery === 0 || processed === requestedTurns) {
-      log(
-        `[extraction-fill] ${processed}/${requestedTurns} ` +
-          `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
-          `failures=${failures}`
-      );
-    }
-  });
-  return failures;
 }

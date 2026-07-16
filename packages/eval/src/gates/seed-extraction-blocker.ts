@@ -67,6 +67,12 @@ function seedExtractionPathBlocker(
 function cacheOnlyCounterBlocker(
   path: SeedExtractionPath
 ): SeedExtractionReleaseBlocker | null {
+  return cacheExecutionBlocker(path) ?? cacheContentBlocker(path);
+}
+
+function cacheExecutionBlocker(
+  path: SeedExtractionPath
+): SeedExtractionReleaseBlocker | null {
   if (path.llm_calls > 0) {
     return {
       id: "seed_extraction_path live_extraction_calls",
@@ -101,7 +107,48 @@ function cacheOnlyCounterBlocker(
       detail:
         "LongMemEval official seed extraction fell back to offline extraction " +
         `(${formatSeedExtractionCounters(path)}), so this archive is blocked ` +
-        "until official extraction is fully provider-backed."
+      "until official extraction is fully provider-backed."
+    };
+  }
+  return null;
+}
+
+function cacheContentBlocker(
+  path: SeedExtractionPath
+): SeedExtractionReleaseBlocker | null {
+  if (path.extraction_attempts === undefined || path.extraction_attempts === 0) {
+    return {
+      id: "seed_extraction_path missing_extraction_attempts",
+      detail:
+        "LongMemEval release evidence has no non-empty seed extraction attempts, " +
+        `so cache-only execution cannot be proven (${formatSeedExtractionCounters(path)}).`
+    };
+  }
+  if (path.cache_hits !== path.extraction_attempts) {
+    return {
+      id: "seed_extraction_path cache_hit_conservation",
+      detail:
+        "LongMemEval cache-only evidence must serve every extraction attempt " +
+        `from cache (${formatSeedExtractionCounters(path)}).`
+    };
+  }
+  if (path.facts_produced === 0) {
+    return {
+      id: "seed_extraction_path no_facts_produced",
+      detail:
+        "LongMemEval release evidence produced no seed facts from its cached " +
+        `extractions (${formatSeedExtractionCounters(path)}).`
+    };
+  }
+  const accountedDrops = path.parse_dropped + path.compile_overflow_dropped +
+    path.signals_dropped_by_reason.candidate_absent +
+    path.signals_dropped_by_reason.materialization_drop;
+  if (accountedDrops !== path.signals_dropped) {
+    return {
+      id: "seed_extraction_path drop_accounting_mismatch",
+      detail:
+        "LongMemEval seed drop stages do not conserve the reported total " +
+        `(${formatSeedExtractionCounters(path)}).`
     };
   }
   return null;
@@ -131,7 +178,8 @@ export function formatSeedExtractionCounters(
   path: SeedExtractionPath
 ): string {
   return (
-    `path=${path.path} cache_hits=${path.cache_hits} ` +
+    `path=${path.path} extraction_attempts=${path.extraction_attempts ?? "missing"} ` +
+    `cache_hits=${path.cache_hits} ` +
     `llm_calls=${path.llm_calls} offline_fallbacks=${path.offline_fallbacks} ` +
     `live_failures=${path.live_extraction_failures} ` +
     `cached_failures=${path.cached_extraction_failures} ` +

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,11 +18,8 @@ import {
   removeTempDirectory
 } from "../support/temp-cleanup.js";
 
-// @anchor cli-snapshot-out-e2e — producer half of the recall-eval fast
-// loop must be CLI-reachable. Drives `longmemeval --snapshot-out` through the
-// real CLI on a tiny fixture via the no-credentials offline seed path (NO live
-// LLM) and asserts the three-file snapshot lands, then recall-eval --snapshot
-// reads it. cross-file: apps/bench-runner/src/longmemeval/runner.ts (snapshotOut)
+// @anchor cli-snapshot-out-e2e — the snapshot producer must be CLI-reachable,
+// while synthetic dataset roots remain unable to mint release authority.
 
 const VARIANT = "longmemeval_oracle";
 
@@ -40,19 +37,16 @@ beforeEach(async () => {
   pinnedMetaRoot = join(tmpDir, "pinned");
   await mkdir(dataDir, { recursive: true });
   await mkdir(pinnedMetaRoot, { recursive: true });
-  // No-credentials offline seed path; the model is never used for a live call.
-  // Paired with an isolated --extraction-cache-root (no manifest ->
-  // first-ever-build preflight), this model is arbitrary: the test is decoupled
-  // from the production extraction-cache manifest's model.
+  // The hostile provider proves substrate rejection happens before extraction.
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "test-extraction-model");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
   vi.stubEnv("ALAYA_HOSTILE_DUMMY_KEY", "must-not-be-used");
   vi.stubEnv("ALAYA_BENCH_ALLOW_LIVE_EXTRACTION", "0");
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "http://127.0.0.1:1/v1");
-  vi.stubEnv("ALAYA_GARDEN_PROVIDER_KIND", "local_heuristics");
-  vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "0");
-  vi.stubEnv("ALAYA_CONFLICT_DETECTION_ENABLED", "0");
+  vi.stubEnv("ALAYA_GARDEN_PROVIDER_KIND", "host_worker");
+  vi.stubEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", "1");
+  vi.stubEnv("ALAYA_CONFLICT_DETECTION_ENABLED", "1");
   vi.spyOn(OfficialApiGardenProvider.prototype, "compile").mockRejectedValue(
     new Error("hostile fixture provider must not run")
   );
@@ -92,7 +86,7 @@ describe("longmemeval --snapshot-out CLI", () => {
   });
 
   it(
-    "produces <db> + .manifest.json + .sidecar.json from the offline seed path",
+    "rejects a synthetic pinned substrate before API or snapshot artifacts",
     async () => {
       await writeLongMemEvalFixtureDataset({
         variant: VARIANT,
@@ -124,52 +118,13 @@ describe("longmemeval --snapshot-out CLI", () => {
         join(tmpDir, "extraction-cache")
       ]);
 
-      // exit 2 == arg/IO error. The offline no-credentials seed path is a
-      // degraded-provenance run (no_credentials_fallback) so its verdict exit
-      // code is 1 by design; snapshot production happens
-      // before the verdict. Assert no arg/IO error and that the snapshot landed.
-      expect(exitCode).not.toBe(2);
-      expect(stderrBuf).not.toMatch(/alaya-bench-runner longmemeval:/);
-      expect(existsSync(snapshotDbPath)).toBe(true);
-      expect(existsSync(snapshotManifestPath(snapshotDbPath))).toBe(true);
-      expect(existsSync(snapshotSidecarPath(snapshotDbPath))).toBe(true);
-      expect(stdoutBuf).toContain("[longmemeval snapshot] wrote 2 questions");
-
-      // The consumer half reads it back out: recall-eval --snapshot scores R@5
-      // (exit 2 would mean it could not read the snapshot).
-      const evalHistoryRoot = join(tmpDir, "eval-history");
-      const recallExit = await runCli([
-        "recall-eval",
-        "--snapshot",
-        snapshotDbPath,
-        "--variant",
-        "oracle",
-        "--history-root",
-        evalHistoryRoot
-      ]);
-      expect(recallExit).not.toBe(2);
-      const manifest = JSON.parse(
-        await readFile(snapshotManifestPath(snapshotDbPath), "utf8")
-      ) as {
-        question_count: number;
-        variant: string;
-        artifact_integrity?: { db_sha256: string; sidecar_sha256: string };
-        dataset_sha256?: string;
-        run_provenance?: { runtime: { embedding_provider_label: string } };
-        attribution?: { status: string; gate_eligible: boolean };
-      };
-      expect(manifest.question_count).toBe(2);
-      expect(manifest.variant).toBe(VARIANT);
-      expect(manifest.artifact_integrity?.db_sha256).toMatch(/^[a-f0-9]{64}$/u);
-      expect(manifest.artifact_integrity?.sidecar_sha256).toMatch(/^[a-f0-9]{64}$/u);
-      expect(manifest.dataset_sha256).toMatch(/^[a-f0-9]{64}$/u);
-      expect(manifest.run_provenance?.runtime.embedding_provider_label).toBe(
-        "none"
+      expect(exitCode).toBe(2);
+      expect(stderrBuf).toContain(
+        "snapshot production requires canonical pinned dataset authority"
       );
-      expect(manifest.attribution).toEqual({
-        status: "attributed",
-        gate_eligible: false
-      });
+      expect(existsSync(snapshotDbPath)).toBe(false);
+      expect(existsSync(snapshotManifestPath(snapshotDbPath))).toBe(false);
+      expect(existsSync(snapshotSidecarPath(snapshotDbPath))).toBe(false);
       expect(OfficialApiGardenProvider.prototype.compile).not.toHaveBeenCalled();
     },
     120_000

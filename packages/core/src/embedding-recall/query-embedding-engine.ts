@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { QUERY_EMBEDDING_WARMUP_BATCH_SIZE } from "./constants.js";
 import {
+  assertValidEmbeddingBatch,
   createPreparedEmbeddingQueryHandle,
   toErrorMessage,
   waitForPreparedQuery
@@ -35,44 +36,53 @@ export class QueryEmbeddingEngine {
     const queryId = this.deps.generateQueryId();
 
     if (!this.deps.provider.isAvailable) {
-      // Provider unavailable means we never even attempted an inference;
-      // count this as a cache hit (== zero inference calls) so the recall
-      // token-economy figure is not inflated by failure-only paths.
-      return createPreparedEmbeddingQueryHandle(
-        queryId,
-        Object.freeze({
-          status: "failed",
-          reason: "provider_unavailable"
-        }),
-        { cacheHit: true }
-      );
+      return this.createUnavailableQueryHandle(queryId);
     }
 
     const queryCacheKey = this.queryCacheKey(params.queryText);
     const cachedEmbedding = this.getCachedQueryEmbedding(queryCacheKey);
     if (cachedEmbedding !== null) {
-      return createPreparedEmbeddingQueryHandle(
-        queryId,
-        Object.freeze({
-          status: "ready",
-          embedding: cachedEmbedding
-        }),
-        { cacheHit: true }
-      );
+      return this.createReadyQueryHandle(queryId, cachedEmbedding);
     }
 
+    return this.createPendingQueryHandle(queryId, queryCacheKey, params.queryText);
+  }
+
+  private createUnavailableQueryHandle(queryId: string): PreparedEmbeddingQueryHandle {
+    // No inference was attempted, so token-economy accounting treats this as a cache hit.
+    return createPreparedEmbeddingQueryHandle(
+      queryId,
+      Object.freeze({ status: "failed", reason: "provider_unavailable" }),
+      { cacheHit: true }
+    );
+  }
+
+  private createReadyQueryHandle(
+    queryId: string,
+    embedding: Float32Array
+  ): PreparedEmbeddingQueryHandle {
+    return createPreparedEmbeddingQueryHandle(
+      queryId,
+      Object.freeze({ status: "ready", embedding }),
+      { cacheHit: true }
+    );
+  }
+
+  private createPendingQueryHandle(
+    queryId: string,
+    queryCacheKey: string,
+    queryText: string
+  ): PreparedEmbeddingQueryHandle {
     let snapshot: PreparedEmbeddingQuerySnapshot = Object.freeze({
       status: "pending"
     });
 
     const settled = this.deps.provider
-      .embedTexts([params.queryText], {
+      .embedTexts([queryText], {
         timeoutMs: this.deps.queryTimeoutMs
       })
       .then((embeddings) => {
-        if (embeddings.length !== 1) {
-          throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);
-        }
+        assertValidEmbeddingBatch(embeddings, 1);
 
         snapshot = Object.freeze({
           status: "ready",
@@ -106,50 +116,43 @@ export class QueryEmbeddingEngine {
     readonly runId: string | null;
     readonly queryTexts: readonly string[];
   }): Promise<EmbeddingQueryWarmupSummary> {
-    const uniqueQueryTexts = [...new Set(params.queryTexts.map((text) => text.trim()))]
-      .filter((text) => text.length > 0);
+    const uniqueQueryTexts = this.uniqueQueryTexts(params.queryTexts);
     if (uniqueQueryTexts.length === 0) {
-      return Object.freeze({
-        status: "ready",
-        requested_count: 0,
-        ready_count: 0,
-        cache_hit_count: 0,
-        provider_requested_count: 0,
-        missing_count: 0,
-        provider_kind: this.deps.provider.providerKind,
-        model_id: this.deps.provider.modelId
-      });
+      return this.emptyWarmupSummary();
     }
     if (!this.deps.provider.isAvailable) {
-      return Object.freeze({
-        status: "not_requested",
-        requested_count: uniqueQueryTexts.length,
-        ready_count: 0,
-        cache_hit_count: 0,
-        provider_requested_count: 0,
-        missing_count: uniqueQueryTexts.length,
-        provider_kind: null,
-        model_id: null
-      });
+      return this.unavailableWarmupSummary(uniqueQueryTexts.length);
     }
 
-    const missingQueryTexts = uniqueQueryTexts.filter(
+    const missingQueryTexts = this.missingQueryTexts(uniqueQueryTexts);
+    const lastError = await this.warmMissingQueryTexts(missingQueryTexts);
+    return this.completedWarmupSummary(uniqueQueryTexts, missingQueryTexts, lastError);
+  }
+
+  private uniqueQueryTexts(queryTexts: readonly string[]): readonly string[] {
+    return [...new Set(queryTexts.map((text) => text.trim()))]
+      .filter((text) => text.length > 0);
+  }
+
+  private missingQueryTexts(queryTexts: readonly string[]): readonly string[] {
+    return queryTexts.filter(
       (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) === null
     );
+  }
+
+  private async warmMissingQueryTexts(queryTexts: readonly string[]): Promise<string | undefined> {
     let lastError: string | undefined;
     for (
       let offset = 0;
-      offset < missingQueryTexts.length;
+      offset < queryTexts.length;
       offset += QUERY_EMBEDDING_WARMUP_BATCH_SIZE
     ) {
-      const batch = missingQueryTexts.slice(offset, offset + QUERY_EMBEDDING_WARMUP_BATCH_SIZE);
+      const batch = queryTexts.slice(offset, offset + QUERY_EMBEDDING_WARMUP_BATCH_SIZE);
       try {
         const embeddings = await this.deps.provider.embedTexts(batch, {
           timeoutMs: this.deps.queryTimeoutMs
         });
-        if (embeddings.length !== batch.length) {
-          throw new Error(`Expected ${batch.length} warmed query embeddings, received ${embeddings.length}.`);
-        }
+        assertValidEmbeddingBatch(embeddings, batch.length);
         for (let i = 0; i < batch.length; i++) {
           const queryText = batch[i]!;
           this.putCachedQueryEmbedding(
@@ -161,17 +164,50 @@ export class QueryEmbeddingEngine {
         lastError = toErrorMessage(error);
       }
     }
+    return lastError;
+  }
 
-    const readyCount = uniqueQueryTexts.filter(
+  private emptyWarmupSummary(): EmbeddingQueryWarmupSummary {
+    return Object.freeze({
+      status: "ready",
+      requested_count: 0,
+      ready_count: 0,
+      cache_hit_count: 0,
+      provider_requested_count: 0,
+      missing_count: 0,
+      provider_kind: this.deps.provider.providerKind,
+      model_id: this.deps.provider.modelId
+    });
+  }
+
+  private unavailableWarmupSummary(requestedCount: number): EmbeddingQueryWarmupSummary {
+    return Object.freeze({
+      status: "not_requested",
+      requested_count: requestedCount,
+      ready_count: 0,
+      cache_hit_count: 0,
+      provider_requested_count: 0,
+      missing_count: requestedCount,
+      provider_kind: null,
+      model_id: null
+    });
+  }
+
+  private completedWarmupSummary(
+    queryTexts: readonly string[],
+    missingQueryTexts: readonly string[],
+    lastError: string | undefined
+  ): EmbeddingQueryWarmupSummary {
+    const readyCount = queryTexts.filter(
       (queryText) => this.getCachedQueryEmbedding(this.queryCacheKey(queryText)) !== null
     ).length;
     return Object.freeze({
       status: "ready",
-      requested_count: uniqueQueryTexts.length,
+      requested_count: queryTexts.length,
       ready_count: readyCount,
-      cache_hit_count: uniqueQueryTexts.length - missingQueryTexts.length,
+      cache_hit_count: queryTexts.length - missingQueryTexts.length,
       provider_requested_count: missingQueryTexts.length,
-      missing_count: Math.max(0, uniqueQueryTexts.length - readyCount),
+      missing_count: Math.max(0, queryTexts.length - readyCount),
       provider_kind: this.deps.provider.providerKind,
       model_id: this.deps.provider.modelId,
       ...(lastError === undefined ? {} : { last_error: lastError })
@@ -183,9 +219,7 @@ export class QueryEmbeddingEngine {
     const embeddings = await this.deps.provider.embedTexts([queryText], {
       timeoutMs: this.deps.queryTimeoutMs
     });
-    if (embeddings.length !== 1) {
-      throw new Error(`Expected exactly one query embedding, received ${embeddings.length}.`);
-    }
+    assertValidEmbeddingBatch(embeddings, 1);
     return new Float32Array(embeddings[0]!);
   }
 

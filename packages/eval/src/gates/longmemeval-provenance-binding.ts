@@ -3,66 +3,35 @@ import { z } from "zod";
 import type { KpiPayload } from "../schema/kpi-schema.js";
 import {
   createLongMemEvalSelectionContractIdentity,
-  LongMemEvalSelectionContractIdentitySchema,
   type LongMemEvalSelectionAssignment,
   type LongMemEvalSelectionContractIdentity
 } from "../schema/longmemeval-selection-contract.js";
 import { canonicalJson } from "./canonical-json.js";
-
-const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
-
-const SingleRunProvenanceBindingSchema = z.object({
-  schema_version: z.literal(1),
-  dataset_sha256: Sha256Schema,
-  selection: LongMemEvalSelectionContractIdentitySchema,
-  code: z.object({
-    commit_sha7: z.string().min(7),
-    commit_sha: z.string().regex(/^[a-f0-9]{40}$/u),
-    gate_sha256: Sha256Schema,
-    gate_contract_path: z.string().min(1),
-    worktree_state_sha256: Sha256Schema,
-    worktree_clean: z.literal(true),
-    executed_dist: z.object({ sha256: Sha256Schema }).passthrough()
-  }).passthrough(),
-  extraction_cache: z.object({
-    dataset_revision: Sha256Schema,
-    requested_turns: z.number().int().nonnegative(),
-    cached_turns: z.number().int().nonnegative(),
-    coverage: z.literal(1)
-  }).passthrough(),
-  execution: z.object({ evaluated_count: z.number().int().nonnegative() }).passthrough(),
-  recall_config: z.object({
-    schema_version: z.literal(2),
-    max_results: z.number().int().positive(),
-    conflict_awareness: z.boolean(),
-    effective_config_sha256: Sha256Schema
-  }).passthrough()
-}).passthrough();
-
-const MergedRunProvenanceBindingSchema = z.object({
-  schema_version: z.literal(1),
-  kind: z.literal("longmemeval_sharded_run_provenance"),
-  gate_eligible: z.literal(true),
-  evaluated_count: z.number().int().nonnegative(),
-  executed_dist: z.object({ sha256: Sha256Schema }).passthrough(),
-  selection_contract: LongMemEvalSelectionContractIdentitySchema,
-  shards: z.array(z.object({
-    filename: z.string().min(1),
-    sha256: Sha256Schema,
-    execution: z.object({
-      offset: z.number().int().nonnegative(),
-      limit: z.number().int().positive(),
-      evaluated_count: z.number().int().nonnegative()
-    }).passthrough()
-  }).passthrough())
-}).passthrough();
-
-export const RunProvenanceBindingSchema = z.union([
+import {
+  LongMemEvalFanoutAuthoritySchema,
+  LongMemEvalShardAuthorityReferenceSchema,
+  assertLongMemEvalExtractionAuthorityIntegrity,
+  assertLongMemEvalExpansionBinding,
+  assertLongMemEvalFanoutAuthorityBinding,
+  assertLongMemEvalFanoutReferenceBinding,
+  assertLongMemEvalFullExtractionClosure,
+  hydrateLongMemEvalExtractionAuthority,
+  type LongMemEvalArtifactDescriptor,
+  type LongMemEvalExtractionAuthority,
+  type LongMemEvalFanoutAuthority
+} from "./longmemeval-authority-wire.js";
+import {
+  MergedRunProvenanceBindingSchema,
   SingleRunProvenanceBindingSchema,
-  MergedRunProvenanceBindingSchema
-]);
+  type MergedRunProvenanceBinding,
+  type RunProvenanceBinding,
+  type SingleRunProvenanceBinding
+} from "./longmemeval-provenance-schemas.js";
 
-export type RunProvenanceBinding = z.infer<typeof RunProvenanceBindingSchema>;
+export { RunProvenanceBindingSchema } from
+  "./longmemeval-provenance-schemas.js";
+export type { RunProvenanceBinding } from
+  "./longmemeval-provenance-schemas.js";
 
 interface EvidenceArtifact {
   readonly role: string;
@@ -101,14 +70,16 @@ export function assertLongMemEvalProvenanceBinding(input: {
   assertSingleProvenanceBinding(
     input.payload,
     input.manifest,
-    SingleRunProvenanceBindingSchema.parse(input.provenance)
+    SingleRunProvenanceBindingSchema.parse(input.provenance),
+    input.artifacts
   );
 }
 
 function assertSingleProvenanceBinding(
   payload: KpiPayload,
   manifest: EvidenceManifestIdentity,
-  provenance: z.infer<typeof SingleRunProvenanceBindingSchema>
+  provenance: SingleRunProvenanceBinding,
+  artifacts: readonly EvidenceArtifact[]
 ): void {
   if (provenance.code.commit_sha7 !== payload.alaya_commit ||
       !provenance.code.commit_sha.startsWith(payload.alaya_commit) ||
@@ -117,6 +88,19 @@ function assertSingleProvenanceBinding(
       provenance.extraction_cache.cached_turns < provenance.extraction_cache.requested_turns ||
       provenance.execution.evaluated_count !== payload.evaluated_count) {
     throw new Error("run provenance is not release-bound to KPI evidence");
+  }
+  assertLongMemEvalFullExtractionClosure(provenance.extraction_cache);
+  const orphanAuthority = artifacts.some((artifact) =>
+    artifact.role === "extraction_authority" ||
+    artifact.role === "fanout_authority" ||
+    artifact.role === "shard_extraction_authority_ref"
+  );
+  if (orphanAuthority) {
+    throw new Error("single-run evidence rejects orphan compact authority artifacts");
+  }
+  if (payload.evaluated_count === 500 &&
+      provenance.extraction_cache.expansion_lineage !== undefined) {
+    assertProductBRun(provenance, payload.alaya_commit, true);
   }
 }
 
@@ -136,20 +120,186 @@ function assertMergedProvenanceBinding(input: {
       shardArtifacts.length !== input.provenance.shards.length) {
     throw new Error("merged run provenance summary differs from KPI evidence");
   }
-  const shards = loadChildProvenance(input.provenance, shardArtifacts);
+  assertMerged500ParentAuthority(input.payload, input.provenance);
+  const loadedShards = loadChildProvenance(input.provenance, shardArtifacts);
+  const shards = bindMergedExtractionAuthority(input, loadedShards);
   const expectedSelections = expectedChildSelections(input);
   const stableIdentity = childStableIdentity(shards[0]!);
   for (const [index, shard] of shards.entries()) {
     const plan = input.provenance.shards[index]!;
     if (shard.dataset_sha256 !== input.manifest.run.dataset_sha256 ||
+        shard.code.commit_sha7 !== input.payload.alaya_commit ||
+        !shard.code.commit_sha.startsWith(input.payload.alaya_commit) ||
         shard.code.executed_dist.sha256 !== input.provenance.executed_dist.sha256 ||
         canonicalJson(shard.execution) !== canonicalJson(plan.execution) ||
         canonicalJson(shard.selection) !== canonicalJson(expectedSelections[index]) ||
         childStableIdentity(shard) !== stableIdentity) {
       throw new Error("merged child provenance differs from canonical shard plan");
     }
+    if (input.payload.evaluated_count === 500 &&
+        input.provenance.fanout_authority !== null) {
+      assertProductBRun(shard, input.payload.alaya_commit, false);
+    }
     if (index > 0) assertContiguousPlan(input.provenance.shards, index);
   }
+}
+
+function assertMerged500ParentAuthority(
+  payload: KpiPayload,
+  provenance: MergedRunProvenanceBinding
+): void {
+  if (payload.evaluated_count === 500 &&
+      (provenance.extraction_authority === null ||
+        provenance.fanout_authority === null)) {
+    throw new Error("merged 500Q evidence requires compact parent authorities");
+  }
+}
+
+function bindMergedExtractionAuthority(
+  input: Parameters<typeof assertMergedProvenanceBinding>[0],
+  shards: readonly SingleRunProvenanceBinding[]
+): SingleRunProvenanceBinding[] {
+  const authorityArtifacts = artifactsByRole(input.artifacts, "extraction_authority");
+  const fanoutArtifacts = artifactsByRole(input.artifacts, "fanout_authority");
+  const referenceArtifacts = artifactsByRole(
+    input.artifacts,
+    "shard_extraction_authority_ref"
+  );
+  const descriptor = input.provenance.extraction_authority;
+  const fanoutDescriptor = input.provenance.fanout_authority;
+  if (descriptor === null && fanoutDescriptor === null) {
+    assertNoCompactAuthority(
+      input.provenance, shards,
+      [...authorityArtifacts, ...fanoutArtifacts], referenceArtifacts
+    );
+    shards.forEach((shard) =>
+      assertLongMemEvalFullExtractionClosure(shard.extraction_cache));
+    return [...shards];
+  }
+  if (descriptor === null || fanoutDescriptor === null ||
+      authorityArtifacts.length !== 1 || fanoutArtifacts.length !== 1 ||
+      referenceArtifacts.length !== shards.length) {
+    throw new Error("merged compact provenance has incomplete parent authority");
+  }
+  const authorityArtifact = authorityArtifacts[0]!;
+  const fanoutArtifact = fanoutArtifacts[0]!;
+  assertArtifactDescriptor(authorityArtifact, descriptor);
+  assertArtifactDescriptor(fanoutArtifact, fanoutDescriptor);
+  const authority = assertLongMemEvalExtractionAuthorityIntegrity(
+    parseArtifactJson(authorityArtifact)
+  );
+  const fanout = LongMemEvalFanoutAuthoritySchema.parse(
+    parseArtifactJson(fanoutArtifact)
+  );
+  assertFanoutAggregate(input.provenance, fanout);
+  return shards.map((shard, index) => bindCompactShard({
+    plan: input.provenance.shards[index]!,
+    shard,
+    referenceArtifact: referenceArtifacts[index]!,
+    descriptor,
+    authority,
+    fanoutDescriptor,
+    fanout
+  }));
+}
+
+function assertNoCompactAuthority(
+  provenance: MergedRunProvenanceBinding,
+  shards: readonly SingleRunProvenanceBinding[],
+  authorityArtifacts: readonly EvidenceArtifact[],
+  referenceArtifacts: readonly EvidenceArtifact[]
+): void {
+  const planHasReference = provenance.shards.some((shard) =>
+    shard.extraction_authority_ref_filename != null ||
+    shard.extraction_authority_ref_sha256 != null
+  );
+  const compactChild = shards.some((shard) =>
+    !("content_closure_index" in shard.extraction_cache)
+  );
+  if (authorityArtifacts.length > 0 || referenceArtifacts.length > 0 ||
+      planHasReference || compactChild) {
+    throw new Error("merged extraction authority descriptor is missing");
+  }
+}
+
+function bindCompactShard(input: {
+  readonly plan: MergedRunProvenanceBinding["shards"][number];
+  readonly shard: SingleRunProvenanceBinding;
+  readonly referenceArtifact: EvidenceArtifact;
+  readonly descriptor: LongMemEvalArtifactDescriptor;
+  readonly authority: LongMemEvalExtractionAuthority;
+  readonly fanoutDescriptor: LongMemEvalArtifactDescriptor;
+  readonly fanout: LongMemEvalFanoutAuthority;
+}): SingleRunProvenanceBinding {
+  if (input.plan.extraction_authority_ref_filename !== input.referenceArtifact.path ||
+      input.plan.extraction_authority_ref_sha256 !==
+        artifactSha256(input.referenceArtifact)) {
+    throw new Error("merged extraction authority reference order differs");
+  }
+  const reference = LongMemEvalShardAuthorityReferenceSchema.parse(
+    parseArtifactJson(input.referenceArtifact)
+  );
+  assertLongMemEvalFanoutAuthorityBinding({
+    fanout: input.fanout,
+    authority: input.authority,
+    compact: input.shard.extraction_cache,
+    extractionDescriptor: input.descriptor
+  });
+  assertLongMemEvalFanoutReferenceBinding({
+    reference,
+    fanout: input.fanout,
+    fanoutDescriptor: input.fanoutDescriptor,
+    extractionDescriptor: input.descriptor,
+    sourceManifestSha256: input.authority.source_manifest_sha256
+  });
+  if (reference.plan.offset !== input.plan.execution.offset ||
+      reference.plan.limit !== input.plan.execution.limit ||
+      input.shard.code.commit_sha !== input.fanout.code.commit_sha ||
+      input.shard.code.worktree_state_sha256 !==
+        input.fanout.code.worktree_state_sha256 ||
+      input.shard.code.gate_sha256 !== input.fanout.promotion.contract_sha256 ||
+      canonicalJson(input.shard.code.executed_dist) !==
+        canonicalJson(input.fanout.code.executed_dist)) {
+    throw new Error("merged child execution differs from parent fanout plan");
+  }
+  const hydrated = SingleRunProvenanceBindingSchema.parse(
+    hydrateLongMemEvalExtractionAuthority({
+      compact: input.shard,
+      authority: input.authority
+    })
+  );
+  assertLongMemEvalFullExtractionClosure(hydrated.extraction_cache);
+  return hydrated;
+}
+
+function assertFanoutAggregate(
+  provenance: MergedRunProvenanceBinding,
+  fanout: LongMemEvalFanoutAuthority
+): void {
+  if (provenance.requested_concurrency !== fanout.requested_concurrency ||
+      provenance.effective_concurrency !== fanout.effective_concurrency ||
+      provenance.shards.length !== fanout.plans.length ||
+      provenance.executed_dist.sha256 !== fanout.code.executed_dist.sha256) {
+    throw new Error("merged provenance differs from parent fanout authority");
+  }
+}
+
+function assertArtifactDescriptor(
+  artifact: EvidenceArtifact,
+  descriptor: LongMemEvalArtifactDescriptor
+): void {
+  if (artifact.path !== descriptor.path ||
+      artifactSha256(artifact) !== descriptor.sha256 ||
+      artifactBytes(artifact).byteLength !== descriptor.bytes) {
+    throw new Error("merged extraction authority artifact differs from descriptor");
+  }
+}
+
+function artifactsByRole(
+  artifacts: readonly EvidenceArtifact[],
+  role: string
+): EvidenceArtifact[] {
+  return artifacts.filter((artifact) => artifact.role === role);
 }
 
 function loadChildProvenance(
@@ -217,6 +367,58 @@ function childStableIdentity(
     question_manifest: provenance.question_manifest
   });
 }
+
+function assertProductBRun(
+  provenance: SingleRunProvenanceBinding,
+  commitSha7: string,
+  requireFullSelection: boolean
+): void {
+  const runtime = provenance.runtime;
+  const bi = ProductBiEncoderRuntimeSchema.safeParse(runtime.embedding_supplement);
+  const cross = ProductCrossEncoderRuntimeSchema.safeParse(runtime.answer_rerank);
+  if (!bi.success || !cross.success) {
+    throw new Error("500Q run provenance differs from product-B runtime defaults");
+  }
+  assertLongMemEvalExpansionBinding(provenance.extraction_cache, {
+    code: {
+      commit_sha: provenance.code.commit_sha,
+      commit_sha7: provenance.code.commit_sha7,
+      worktree_state_sha256: provenance.code.worktree_state_sha256,
+      executed_dist: provenance.code.executed_dist
+    }
+  });
+  if ((requireFullSelection && provenance.selection.selected_count !== 500) ||
+      provenance.code.commit_sha7 !== commitSha7 ||
+      provenance.extraction_cache.window_offset !== 0 ||
+      provenance.extraction_cache.window_limit !== 500 ||
+      runtime.embedding_mode !== "env" ||
+      runtime.embedding_provider_kind !== "local_onnx" ||
+      runtime.embedding_provider_label !== `local_onnx:${PRODUCT_BI_MODEL}` ||
+      runtime.onnx_threads !== null || bi.data.effective_model_id !== PRODUCT_BI_MODEL ||
+      runtime.onnx_model_artifact_sha256 !== bi.data.model_artifact_sha256 ||
+      cross.data.enabled !== false || provenance.recall_config.schema_version !== 2 ||
+      provenance.recall_config.max_results !== 10 ||
+      provenance.recall_config.conflict_awareness !== true ||
+      provenance.recall_config.conf_slice_compatibility !== false ||
+      provenance.seed_capabilities?.facet_tags_enabled !== false ||
+      provenance.question_manifest !== null) {
+    throw new Error("500Q run provenance differs from product-B runtime defaults");
+  }
+}
+
+const PRODUCT_BI_MODEL =
+  "Xenova/paraphrase-multilingual-MiniLM-L12-v2";
+const ProductBiEncoderRuntimeSchema = z.object({
+  enabled: z.literal(true),
+  provider_kind: z.literal("local_onnx"),
+  effective_model_id: z.literal(PRODUCT_BI_MODEL),
+  model_artifact_sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  effective_schema_version: z.literal(1),
+  d2q_input: z.literal("raw_content")
+}).strict();
+const ProductCrossEncoderRuntimeSchema = z.object({
+  enabled: z.literal(false)
+}).strict();
 
 function parseArtifactJson(artifact: EvidenceArtifact): unknown {
   if (artifact.contents === undefined) {

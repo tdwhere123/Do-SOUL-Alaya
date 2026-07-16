@@ -198,6 +198,8 @@ async function verifyCustomPinnedDatasetSource(): Promise<void> {
     "s",
     "--history-root",
     historyRoot,
+    "--concurrency",
+    "2",
     ...dataset.cliArgs,
     "--shards",
     shardA,
@@ -275,6 +277,7 @@ async function prepareTaxonomyShards(): Promise<ReadonlyArray<string>> {
   await writeTaxonomyShard(shardA, "q-taxonomy-a", true, {
     candidate_absent: 1,
     materialization_drop: 2,
+    fine_assessment_drop: 6,
     budget_drop: 0,
     delivery_order_drop: 0,
     answer_set_coverage_drop: 0,
@@ -283,6 +286,7 @@ async function prepareTaxonomyShards(): Promise<ReadonlyArray<string>> {
   await writeTaxonomyShard(shardB, "q-taxonomy-b", false, {
     candidate_absent: 0,
     materialization_drop: 0,
+    fine_assessment_drop: 7,
     budget_drop: 3,
     delivery_order_drop: 4,
     answer_set_coverage_drop: 0,
@@ -336,6 +340,7 @@ async function verifyTaxonomyDistributionMerged(): Promise<void> {
   expect(diagnostics.scored_recall_evidence?.miss_taxonomy_distribution).toEqual({
     candidate_absent: 1,
     materialization_drop: 2,
+    fine_assessment_drop: 13,
     budget_drop: 3,
     delivery_order_drop: 4,
     answer_set_coverage_drop: 0,

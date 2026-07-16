@@ -126,4 +126,47 @@ describe("effective recall config identity", () => {
       ALAYA_BENCH_EMBEDDING_INJECTION_CAP: ""
     })).rejects.toThrow(/ALAYA_BENCH_EMBEDDING_INJECTION_CAP/u);
   });
+
+  it.each([
+    { ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:GARDEN_API_KEY" },
+    { ALAYA_GARDEN_OPENAI_SECRET_REF: "env:LEGACY_GARDEN_API_KEY" },
+    { ALAYA_CONFLICT_LLM_PROVIDER_URL: "https://example.invalid/v1" },
+    { ALAYA_CONFLICT_LLM_API_KEY: "secret" },
+    { ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "true" }
+  ])("rejects post-fill extraction authority before reading recall inputs", async (env) => {
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, undefined, env)).rejects.toThrow(
+      /post-fill benchmark stages must be credentialless and cache-only/u
+    );
+  });
+
+  it.each([
+    { ALAYA_LOCAL_EMBEDDING_MODEL: "custom/local-model" },
+    { ALAYA_RECALL_D2Q: "true" }
+  ])("rejects non-product bi-encoder config before reading recall inputs", async (drift) => {
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, undefined, {
+      ALAYA_RECALL_EVAL_EMBEDDING: "env",
+      ...drift
+    })).rejects.toThrow(/product-default bi-encoder/u);
+  });
+
+  it.each([
+    { ALAYA_RECALL_EVAL_MAX_RESULTS: "20" },
+    { ALAYA_EMBEDDING_RECALL_TIERS: "cold" },
+    { ALAYA_EMBEDDING_BACKFILL_CONCURRENCY: "2" },
+    { ALAYA_RECALL_SOURCE_REF_ROBUST: "false" }
+  ])("rejects effective product recall drift before reading inputs", async (drift) => {
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, undefined, drift)).rejects.toThrow(/product-default recall policy/u);
+  });
 });

@@ -168,14 +168,13 @@ const SeedTruncationSchema = z
 // signal threw before memory_entry creation and was isolated PER SIGNAL, so one
 // bad pre-materialization signal no longer drops its whole turn batch — the fix
 // for the silent 1963-signal whole-batch swallow). Post-memory-entry accept /
-// review failures fail the bench closed instead of entering this ledger. So the
-// invariant is
-// signals_dropped >= parse_dropped + compile_overflow_dropped
+// review failures fail the bench closed instead of entering this ledger. The
+// release gate requires exact conservation:
+// signals_dropped === parse_dropped + compile_overflow_dropped
 //   + signals_dropped_by_reason.candidate_absent
-//   + signals_dropped_by_reason.materialization_drop,
-// not a clean equality (the >= absorbs any defensive whole-batch backstop drop,
-// which is also attributed to materialization_drop only when no materialized
-// memory_entry could contaminate scoring). see also:
+//   + signals_dropped_by_reason.materialization_drop.
+// Any defensive whole-batch backstop must therefore be attributed to
+// materialization_drop. see also:
 // apps/bench-runner/src/longmemeval/compile-seed.ts CompileSeedExtractionStats.
 
 function normalizeSeedDropReasons(value: unknown): {
@@ -220,9 +219,10 @@ const SeedFuelInventorySchema = z
   .strict();
 export type SeedFuelInventory = z.infer<typeof SeedFuelInventorySchema>;
 
-const SeedExtractionPathSchema = z
+export const SeedExtractionPathSchema = z
   .object({
     path: z.enum(["official_api_compile", "no_credentials_fallback"]),
+    extraction_attempts: z.number().int().nonnegative().optional(),
     cache_hits: z.number().int().nonnegative(),
     llm_calls: z.number().int().nonnegative(),
     offline_fallbacks: z.number().int().nonnegative(),

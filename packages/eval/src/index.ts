@@ -6,6 +6,7 @@ export {
   HarnessMode,
   KpiPayloadSchema,
   RecallWeightOverridesSummarySchema,
+  SeedExtractionPathSchema,
   Verdict,
   type DegradationReasons,
   type DiffVsPrevious,

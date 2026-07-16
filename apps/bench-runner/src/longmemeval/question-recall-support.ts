@@ -8,6 +8,7 @@ import {
   isLongMemEvalGoldEligibleResult,
   type LongMemEvalSidecarEntry
 } from "./runner-helpers.js";
+import { isLongMemEvalGoldSource } from "./provenance/source-rounds.js";
 import { truncateExcerpt } from "./multiturn-helpers.js";
 
 export function buildDeliveredResults(
@@ -57,7 +58,7 @@ export function collectDeliveredGoldObjectIds(input: {
     const meta = input.sidecar.get(
       buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
     );
-    if (meta !== undefined && meta.hasAnswer && input.answerSessionIds.has(meta.sessionId)) {
+    if (meta !== undefined && isLongMemEvalGoldSource(meta, input.answerSessionIds)) {
       usedGoldObjectIds.push(pointer.object_id);
     }
   }

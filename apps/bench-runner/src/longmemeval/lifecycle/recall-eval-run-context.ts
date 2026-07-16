@@ -12,15 +12,16 @@ import {
   type BenchDaemonLaunchConfig
 } from "../../harness/daemon-environment.js";
 import type { BenchRecallWeightOverrides } from "../../harness/recall-weight-overrides.js";
-import {
-  assertRecallEvalProductPolicyEnvironment,
-  readRecallEvalMaxResults
-} from "../provenance/effective-recall-config.js";
+import { readRecallEvalMaxResults } from
+  "../provenance/effective-recall-config.js";
 import type {
   LongMemEvalSnapshotManifest,
   LongMemEvalSnapshotQuestion
 } from "../snapshot.js";
-import { loadRecallEvalSnapshot } from "../snapshot/recall-eval-loader.js";
+import {
+  withRecallEvalSnapshot,
+  type RecallEvalSnapshotBundle
+} from "../snapshot/recall-eval-loader.js";
 import type { RecallEvalOptions } from "./recall-eval-contract.js";
 import {
   buildRecallEvalRuntimeAttribution,
@@ -29,6 +30,18 @@ import {
   recallEvalEmbeddingMode,
   recallEvalEmbeddingProviderKind
 } from "./recall-eval-runtime.js";
+import { assertExpansionRecallAuthority } from
+  "../promotion/expansion-recall-authority.js";
+import { assertCacheOnlyEnvironment } from
+  "../snapshot/current-substrate-authority.js";
+import type { SnapshotMeasurementOracleAccessor } from
+  "../snapshot/measurement-oracle.js";
+import type { SnapshotExtractionAuthority } from
+  "../snapshot/extraction-authority.js";
+import { assertProductDefaultBiEncoderEnvironment } from
+  "../product-bi-encoder-policy.js";
+import { assertProductDefaultRecallEnvironment } from
+  "../promotion/product-policy-verifier.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -47,6 +60,8 @@ export interface RecallEvalRunContext {
   readonly daemonLaunch: BenchDaemonLaunchConfig;
   readonly runtimeAttribution: Awaited<ReturnType<typeof buildRecallEvalRuntimeAttribution>>;
   readonly datasetSha256: string | null;
+  readonly measurementForQuestion: SnapshotMeasurementOracleAccessor | null;
+  readonly extractionAuthority: SnapshotExtractionAuthority | null;
 }
 
 export async function prepareRecallEvalRunContext(
@@ -54,20 +69,46 @@ export async function prepareRecallEvalRunContext(
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
   ambientEnv: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<RecallEvalRunContext> {
-  assertRecallEvalProductPolicyEnvironment(ambientEnv);
-  const bundle = await loadRecallEvalSnapshot(options);
-  const policyShape = options.policyShape ?? "stress";
-  const recallOptions = {
-    maxResults: readRecallEvalMaxResults(ambientEnv.ALAYA_RECALL_EVAL_MAX_RESULTS),
-    conflictAwareness: policyShape !== "chat"
-  };
-  const plannedDataDir = planRecallEvalDataRoot(options);
-  const daemonLaunch = createBenchDaemonLaunchConfig({
-    dataDir: plannedDataDir.path,
-    embeddingMode: recallEvalEmbeddingMode(ambientEnv),
-    embeddingProviderKind: recallEvalEmbeddingProviderKind(ambientEnv),
-    ambientEnv
+  assertProductDefaultRecallEnvironment(
+    ambientEnv,
+    {
+      maxResults: readRecallEvalMaxResults(
+        ambientEnv.ALAYA_RECALL_EVAL_MAX_RESULTS
+      ),
+      conflictAwareness: (options.policyShape ?? "stress") !== "chat"
+    },
+    recallWeightOverrides,
+    "recall-eval invocation"
+  );
+  assertCacheOnlyEnvironment(ambientEnv);
+  if (recallEvalEmbeddingMode(ambientEnv) === "env") {
+    assertProductDefaultBiEncoderEnvironment(
+      ambientEnv,
+      "recall-eval product treatment"
+    );
+  }
+  return withRecallEvalSnapshot(options, (bundle) => prepareBoundRecallEvalRunContext(
+    options,
+    recallWeightOverrides,
+    ambientEnv,
+    bundle
+  ));
+}
+
+async function prepareBoundRecallEvalRunContext(
+  options: RecallEvalOptions,
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  ambientEnv: Readonly<Record<string, string | undefined>>,
+  bundle: RecallEvalSnapshotBundle
+): Promise<RecallEvalRunContext> {
+  await assertExpansionRecallAuthority({
+    options,
+    bundle,
+    recallWeightOverrides,
+    env: ambientEnv
   });
+  const { policyShape, recallOptions, plannedDataDir, daemonLaunch } =
+    resolveRecallEvalLaunch(options, ambientEnv);
   const runtimeAttribution = await buildRecallEvalRuntimeAttribution(
     bundle.manifest,
     daemonLaunch.environment,
@@ -95,8 +136,29 @@ export async function prepareRecallEvalRunContext(
     recallWeightOverrides,
     daemonLaunch,
     runtimeAttribution,
-    datasetSha256: resolveDatasetSha(bundle)
+    datasetSha256: resolveDatasetSha(bundle),
+    measurementForQuestion: bundle.measurementForQuestion,
+    extractionAuthority: bundle.extractionAuthority
   };
+}
+
+function resolveRecallEvalLaunch(
+  options: RecallEvalOptions,
+  ambientEnv: Readonly<Record<string, string | undefined>>
+) {
+  const policyShape = options.policyShape ?? "stress";
+  const recallOptions = {
+    maxResults: readRecallEvalMaxResults(ambientEnv.ALAYA_RECALL_EVAL_MAX_RESULTS),
+    conflictAwareness: policyShape !== "chat"
+  };
+  const plannedDataDir = planRecallEvalDataRoot(options);
+  const daemonLaunch = createBenchDaemonLaunchConfig({
+    dataDir: plannedDataDir.path,
+    embeddingMode: recallEvalEmbeddingMode(ambientEnv),
+    embeddingProviderKind: recallEvalEmbeddingProviderKind(ambientEnv),
+    ambientEnv
+  });
+  return { policyShape, recallOptions, plannedDataDir, daemonLaunch };
 }
 
 function selectWindow(
@@ -109,7 +171,7 @@ function selectWindow(
 }
 
 function resolveDatasetSha(
-  bundle: Awaited<ReturnType<typeof loadRecallEvalSnapshot>>
+  bundle: RecallEvalSnapshotBundle
 ): string | null {
   if (bundle.datasetSha256 !== null) return bundle.datasetSha256;
   if (bundle.manifest.dataset_sha256 !== undefined) return bundle.manifest.dataset_sha256;

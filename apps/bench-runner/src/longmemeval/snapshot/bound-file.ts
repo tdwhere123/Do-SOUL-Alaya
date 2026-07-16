@@ -15,14 +15,32 @@ import { dirname } from "node:path";
 
 const NO_FOLLOW = constants.O_NOFOLLOW;
 
-export function readRegularFileNoFollow(filePath: string): Buffer {
+export function readRegularFileNoFollow(filePath: string, maxBytes?: number): Buffer {
   const descriptor = openSync(filePath, constants.O_RDONLY | NO_FOLLOW);
   try {
-    if (!fstatSync(descriptor).isFile()) throw new Error(`${filePath} is not a regular file`);
-    return readFileSync(descriptor);
+    const metadata = fstatSync(descriptor);
+    if (!metadata.isFile()) throw new Error(`${filePath} is not a regular file`);
+    if (maxBytes === undefined) return readFileSync(descriptor);
+    if (metadata.size > maxBytes) throw new Error(`${filePath} exceeds its size budget`);
+    const bytes = readFixedSize(descriptor, metadata.size, filePath);
+    if (fstatSync(descriptor).size !== metadata.size) {
+      throw new Error(`${filePath} changed while reading`);
+    }
+    return bytes;
   } finally {
     closeSync(descriptor);
   }
+}
+
+function readFixedSize(descriptor: number, size: number, filePath: string): Buffer {
+  const bytes = Buffer.allocUnsafe(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (count === 0) throw new Error(`${filePath} changed while reading`);
+    offset += count;
+  }
+  return bytes;
 }
 
 export function sha256Buffer(value: Uint8Array): string {

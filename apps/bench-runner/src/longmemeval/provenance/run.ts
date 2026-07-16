@@ -1,20 +1,16 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { arch, platform } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import { dirname, resolve } from "node:path";
 import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
 import { z } from "zod";
 import {
   readOptionalOnnxThreadCount,
   readOptionalTreatmentBoolean
 } from "../../harness/strict-treatment-config.js";
-import {
-  parseQuestionManifest,
-  type QuestionManifest
-} from "../selection/question-manifest.js";
+import { parseQuestionManifest, type QuestionManifest } from
+  "../selection/question-manifest.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -27,26 +23,31 @@ import {
   resolveLocalCrossEncoderRuntimeProvenance
 } from "./local-onnx.js";
 import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon-types.js";
-import {
-  buildEffectiveRecallConfigIdentity,
-  EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION,
-  type EffectiveRecallOptions
-} from "./effective-recall-config.js";
-import {
-  resolveFrozenCodeIdentity,
-  type FrozenCodeIdentity
-} from "./frozen-code-contract.js";
+import { buildEffectiveRecallConfigIdentity, EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION,
+  type EffectiveRecallOptions } from "./effective-recall-config.js";
+import { resolveFrozenCodeIdentity, type FrozenCodeIdentity } from
+  "./frozen-code-contract.js";
 import {
   collectPairedEnvironment,
   redactProvenanceUrl
 } from "./paired-environment.js";
 import type { LongMemEvalSelectionContractIdentity } from "../selection/contract.js";
 import { SelectionContractIdentitySchema } from "./selection-contract-schema.js";
+import {
+  EXTRACTION_FILL_AUTHORITY_SCHEMA_FIELDS,
+  containsExtractionFillQuestionWindow,
+  hasCompleteExtractionFillAuthority,
+  hasCompleteExtractionFillSummary
+} from "../extraction/fill-authority.js";
+import { LongMemEvalExpansionLineageSchema } from "../promotion/expansion-lineage-schema.js";
+import { LongMemEvalExpansionSourceAnchorSchema } from
+  "../promotion/expansion-source-anchor-schema.js";
+import { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
 
 export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environment.js";
+export { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
 
-export const LONGMEMEVAL_RUN_PROVENANCE_FILENAME =
-  "longmemeval-run-provenance.json";
+export const LONGMEMEVAL_RUN_PROVENANCE_FILENAME = "longmemeval-run-provenance.json";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const ExecutedDistIdentitySchema = z.object({
@@ -77,8 +78,7 @@ const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
     d2q_input: z.literal("raw_content")
   }).strict()
 ]);
-const execFileAsync = promisify(execFile);
-const ExtractionCacheIdentityBaseSchema = z.object({
+export const ExtractionCacheIdentityBaseSchema = z.object({
   manifest_sha256: Sha256Schema,
   extraction_model: z.string().min(1),
   provider_url: z.string().min(1),
@@ -110,7 +110,10 @@ const ExtractionCacheIdentitySchema = z.discriminatedUnion("schema_version", [
   ExtractionCacheIdentityBaseSchema.extend({
     schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
     model_family: z.string().min(1),
-    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES)
+    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
+    expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
+    expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
+    ...EXTRACTION_FILL_AUTHORITY_SCHEMA_FIELDS
   }).strict()
 ]);
 
@@ -298,13 +301,6 @@ function assertExpectedExecutedDistIdentity(
   }
 }
 
-async function computeExecutedDistIdentityFresh(): Promise<unknown> {
-  const checkoutRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
-  const script = join(checkoutRoot, "apps/bench-runner/scripts/executed-dist-closure.mjs");
-  const { stdout } = await execFileAsync(process.execPath, [script, "--root", checkoutRoot]);
-  return JSON.parse(stdout);
-}
-
 async function buildRuntimeIdentity(
   input: Parameters<typeof buildLongMemEvalRunProvenance>[0]
 ): Promise<LongMemEvalRunProvenance["runtime"]> {
@@ -360,6 +356,16 @@ export function isLongMemEvalRunProvenanceGateEligible(
   provenance: LongMemEvalRunProvenance
 ): boolean {
   const cache = provenance.extraction_cache;
+  return cache !== null &&
+    cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    hasCompleteExtractionFillAuthority(cache) &&
+    isLongMemEvalRunProvenanceSummaryGateEligible(provenance);
+}
+
+export function isLongMemEvalRunProvenanceSummaryGateEligible(
+  provenance: LongMemEvalRunProvenance
+): boolean {
+  const cache = provenance.extraction_cache;
   return provenance.code.commit_sha !== undefined &&
     provenance.code.commit_sha.startsWith(provenance.code.commit_sha7) &&
     provenance.code.gate_contract_path !== undefined &&
@@ -368,9 +374,9 @@ export function isLongMemEvalRunProvenanceGateEligible(
     provenance.code.worktree_state_sha256 !== null &&
     provenance.code.executed_dist !== null && cache !== null &&
     cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    hasCompleteExtractionFillSummary(cache) &&
+    containsExtractionFillQuestionWindow(cache, provenance.execution.offset, provenance.execution.evaluated_count) &&
     hasCurrentDatasetBinding(provenance) &&
-    cache.requested_turns !== undefined && cache.cached_turns !== undefined &&
-    cache.coverage === 1 && cache.cached_turns >= cache.requested_turns &&
     hasCurrentRecallConfigIdentity(provenance.recall_config) &&
     hasRequiredEmbeddingArtifact(provenance.runtime) &&
     hasConsistentEmbeddingSupplementProvenance(provenance.runtime) &&

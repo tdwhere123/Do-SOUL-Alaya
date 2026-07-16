@@ -4,7 +4,8 @@ import type {
   LongMemEvalGoldDiagnostic,
   LongMemEvalGraphExpansionPlaneCountPerEdgeType,
   LongMemEvalGraphExpansionPlaneCountPerHop,
-  NarrowRecallDiagnostics
+  NarrowRecallDiagnostics,
+  ReadCandidateDiagnosticsResult
 } from "./diagnostics-types.js";
 import {
   buildObjectIdentityKey,
@@ -43,11 +44,7 @@ export function readRecallDiagnostics(
     keys: Object.keys(record).sort(),
     queryProbes,
     querySoughtFacets,
-    candidatePoolComplete: candidates.candidatePoolComplete,
-    candidatesByObjectId: candidates.byObjectId,
-    candidatesByObjectIdentity: candidates.byObjectIdentity,
-    candidatesByCandidateKey: candidates.byCandidateKey,
-    candidateKeysByObjectId: candidates.keysByObjectId,
+    ...buildNarrowCandidateEvidence(candidates),
     providerState: readProviderState(record, embeddingMode),
     providerDegradationReason: readProviderDegradationReason(record),
     embeddingWorkspaceScannedCount:
@@ -70,6 +67,35 @@ export function readRecallDiagnostics(
       readGraphExpansionPlaneCountPerEdgeType(record.graph_expansion_plane_count_per_edge_type) ??
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
     phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
+  };
+}
+
+function buildNarrowCandidateEvidence(
+  candidates: ReadCandidateDiagnosticsResult
+): Pick<
+  NarrowRecallDiagnostics,
+  | "candidatePoolComplete"
+  | "candidatePoolCount"
+  | "finePrunedCount"
+  | "fineAssessmentPrunedCandidates"
+  | "fineAssessmentPrunedByObjectIdentity"
+  | "fineAssessmentPrunedObjectIds"
+  | "candidatesByObjectId"
+  | "candidatesByObjectIdentity"
+  | "candidatesByCandidateKey"
+  | "candidateIdentityObservations"
+> {
+  return {
+    candidatePoolComplete: candidates.candidatePoolComplete,
+    candidatePoolCount: candidates.candidatePoolCount,
+    finePrunedCount: candidates.finePrunedCount,
+    fineAssessmentPrunedCandidates: candidates.fineAssessmentPrunedCandidates,
+    fineAssessmentPrunedByObjectIdentity: candidates.fineAssessmentPrunedByObjectIdentity,
+    fineAssessmentPrunedObjectIds: candidates.fineAssessmentPrunedObjectIds,
+    candidatesByObjectId: candidates.byObjectId,
+    candidatesByObjectIdentity: candidates.byObjectIdentity,
+    candidatesByCandidateKey: candidates.byCandidateKey,
+    candidateIdentityObservations: candidates.identityObservations
   };
 }
 

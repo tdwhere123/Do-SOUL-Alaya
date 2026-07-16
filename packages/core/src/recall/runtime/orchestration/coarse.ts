@@ -7,7 +7,10 @@ import {
 import { fineAssess } from "../../delivery/fine-assessment.js";
 import type { FineAssessmentCandidate } from "../../delivery/fine-assessment-selection.js";
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
-import type { RecallTimeFilter } from "../recall-service-helpers.js";
+import {
+  isWorkspaceMemoryCandidate,
+  type RecallTimeFilter
+} from "../recall-service-helpers.js";
 import { collectSupplementaryData } from "../../supplements/supplementary-data.js";
 import type {
   CoarseRecallCandidate,
@@ -93,7 +96,9 @@ export async function collectCoarseFilterSupplementaryData(
   return collectSupplementaryData({
     dependencies: params.dependencies,
     warn: params.warn,
-    candidates: params.coarseFilter.candidates.map((candidate) => candidate.entry),
+    candidates: params.coarseFilter.candidates
+      .filter(isWorkspaceMemoryCandidate)
+      .map((candidate) => candidate.entry),
     workspaceId: params.workspaceId,
     runId: params.runId,
     queryText: params.queryText,

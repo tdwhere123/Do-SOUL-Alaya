@@ -157,6 +157,18 @@ describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when t
   });
 
 
+  it("permits only an explicitly injected cache-only extractor without credentials", async () => {
+    const extractor = createExtractor(JSON.stringify({ signals: [] }));
+    const provider = new OfficialApiGardenProvider({
+      extractor,
+      injectedExtractorCapability: "cache_only"
+    });
+
+    await expect(provider.compile("No durable memory here.", createContext())).resolves.toEqual([]);
+    expect(extractor.extract).toHaveBeenCalledOnce();
+  });
+
+
   it("surfaces extractor transport failures as network errors", async () => {
     const provider = new OfficialApiGardenProvider({
       apiKey: "sk-test",

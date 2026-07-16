@@ -14,6 +14,7 @@ import {
   isLongMemEvalGoldEligibleDiagnosticResult,
   readRecallDiagnostics
 } from "./diagnostics-private.js";
+import { requireDeliveryMissDropReason } from "./delivery-miss-taxonomy.js";
 import { buildGoldDiagnostics } from "./diagnostics/gold-diagnostics.js";
 import {
   assembleQuestionDiagnostic,
@@ -58,47 +59,73 @@ function buildReplayCandidates(
 ): readonly LongMemEvalReplayCandidate[] {
   return [...diagnostics.candidatesByCandidateKey.values()]
     .sort(compareReplayCandidateDiagnostics)
-    .map((candidate): LongMemEvalReplayCandidate => ({
-      object_id: candidate.objectId,
-      ...(candidate.objectKind === "memory_entry"
+    .map(buildReplayCandidate);
+}
+
+function buildReplayCandidate(
+  candidate: CandidateDiagnostic
+): LongMemEvalReplayCandidate {
+  return {
+    object_id: candidate.objectId,
+    object_kind: candidate.objectKind,
+    candidate_key: candidate.candidateKey,
+    origin_plane: candidate.originPlane,
+    ...buildReplayRankingFields(candidate),
+    ...buildReplayDeliveryFields(candidate),
+    answer_features: candidate.answerFeatures,
+    path_suppression_score: candidate.pathSuppressionScore,
+    score_factors: {
+      ...(candidate.scoreFactors ?? {}),
+      ...(candidate.facetOverlap === null
         ? {}
-        : { object_kind: candidate.objectKind }),
-      candidate_key: candidate.candidateKey,
-      dimension: candidate.dimension,
-      final_rank: candidate.finalRank,
-      pre_budget_rank: candidate.preBudgetRank,
-      selection_order: candidate.selectionOrder,
-      fused_rank: candidate.fusedRank,
-      fused_score: candidate.fusedScore,
-      answer_relevance_score: candidate.answerRelevanceScore,
-      answer_relevance_rank: candidate.answerRelevanceRank,
-      per_stream_rank: candidate.perStreamRank,
-      fused_rank_contribution_per_stream:
-        candidate.fusedRankContributionPerStream,
-      per_axis_rank: candidate.perAxisRank,
-      per_axis_contribution: candidate.perAxisContribution,
-      flood_potential: candidate.floodPotential,
-      plane_first_admitted: candidate.planeFirstAdmitted,
-      plane_winning_admission: candidate.planeWinningAdmission,
-      source_planes: candidate.sourcePlanes,
-      source_channels: candidate.sourceChannels,
-      rank_after_fusion: candidate.rankAfterFusion,
-      rank_after_feature_rerank: candidate.rankAfterFeatureRerank,
-      rank_after_lexical_priority: candidate.rankAfterLexicalPriority,
-      rank_after_synthesis_reserve: candidate.rankAfterSynthesisReserve,
-      rank_after_structural_reserve: candidate.rankAfterStructuralReserve,
-      rank_after_coverage_selector: candidate.rankAfterCoverageSelector,
-      rank_after_session_coverage: candidate.rankAfterSessionCoverage,
-      answer_features: candidate.answerFeatures,
-      path_suppression_score: candidate.pathSuppressionScore,
-      score_factors: {
-        ...(candidate.scoreFactors ?? {}),
-        ...(candidate.facetOverlap === null
-          ? {}
-          : { facet_overlap: candidate.facetOverlap }),
-        ...(candidate.createdAt === null ? {} : { created_at: candidate.createdAt })
-      }
-    }));
+        : { facet_overlap: candidate.facetOverlap }),
+      ...(candidate.createdAt === null ? {} : { created_at: candidate.createdAt })
+    }
+  };
+}
+
+function buildReplayRankingFields(candidate: CandidateDiagnostic) {
+  return {
+    dimension: candidate.dimension,
+    final_rank: candidate.finalRank,
+    pre_budget_rank: candidate.preBudgetRank,
+    selection_order: candidate.selectionOrder,
+    fused_rank: candidate.fusedRank,
+    fused_score: candidate.fusedScore,
+    answer_relevance_score: candidate.answerRelevanceScore,
+    answer_relevance_rank: candidate.answerRelevanceRank,
+    per_stream_rank: candidate.perStreamRank,
+    fused_rank_contribution_per_stream:
+      candidate.fusedRankContributionPerStream,
+    per_axis_rank: candidate.perAxisRank,
+    per_axis_contribution: candidate.perAxisContribution,
+    flood_potential: candidate.floodPotential,
+    flood_fuel_coverage: candidate.floodFuelCoverage
+  };
+}
+
+function buildReplayDeliveryFields(candidate: CandidateDiagnostic) {
+  return {
+    plane_first_admitted: candidate.planeFirstAdmitted,
+    plane_winning_admission: candidate.planeWinningAdmission,
+    source_planes: candidate.sourcePlanes,
+    source_channels: candidate.sourceChannels,
+    lexical_rank: candidate.lexicalRank,
+    structural_score: candidate.structuralScore,
+    budget_drop_reason: requireDeliveryMissDropReason(candidate.budgetDropReason),
+    rank_after_fusion: candidate.rankAfterFusion,
+    rank_after_feature_rerank: candidate.rankAfterFeatureRerank,
+    rank_after_lexical_priority: candidate.rankAfterLexicalPriority,
+    rank_after_synthesis_reserve: candidate.rankAfterSynthesisReserve,
+    rank_after_structural_reserve: candidate.rankAfterStructuralReserve,
+    rank_after_coverage_selector: candidate.rankAfterCoverageSelector,
+    rank_after_session_coverage: candidate.rankAfterSessionCoverage,
+    coverage_selector_action: candidate.coverageSelectorAction,
+    session_coverage_action: candidate.sessionCoverageAction,
+    session_key: candidate.sessionKey,
+    source_cohort_key: candidate.sourceCohortKey,
+    reserved_by: candidate.reservedBy
+  };
 }
 
 function compareReplayCandidateDiagnostics(

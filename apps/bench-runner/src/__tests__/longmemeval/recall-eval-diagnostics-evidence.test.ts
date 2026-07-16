@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRecallEvalDiagnosticsEvidence,
   RecallEvalDiagnosticsEvidenceSchema,
+  RecallEvalDiagnosticsEvidenceV2Schema,
   RECALL_EVAL_DIAGNOSTICS_FILENAME
 } from "../../longmemeval/provenance/recall-eval-diagnostics.js";
 import {
@@ -14,6 +15,10 @@ import {
   buildGoldDiagnostic,
   buildQuestionDiagnosticFixture
 } from "./gold-diagnostic-fixture.js";
+import {
+  createLongMemEvalSelectionContractFromAssignments,
+  selectionContractIdentity
+} from "../../longmemeval/selection/contract.js";
 
 const documentWarmup = {
   status: "ready" as const,
@@ -49,24 +54,51 @@ const biIdentity = {
 };
 
 function question(id: string, rerank: "returned" | "not_applicable") {
+  const diagnostics = LongMemEvalQuestionDiagnosticSchema.parse({
+    ...buildQuestionDiagnosticFixture({
+      questionId: id,
+      gold: [buildGoldDiagnostic({ object_id: `${id}-gold` })]
+    }),
+    provider_state: "provider_returned" as const,
+    embedding_workspace_scanned_count: 3,
+    embedding_workspace_truncated: false,
+    embedding_workspace_provider_kind: "local_onnx",
+    embedding_workspace_model_id: "Xenova/test",
+    embedding_workspace_schema_version: 2,
+    candidates: [{
+      object_id: `${id}-candidate`,
+      object_kind: "memory_entry",
+      origin_plane: "workspace_local",
+      candidate_key: `workspace_local:memory_entry:${id}-candidate`,
+      final_rank: 1,
+      pre_budget_rank: 1,
+      selection_order: 1,
+      fused_rank: 1,
+      fused_score: 0.5,
+      per_stream_rank: null,
+      fused_rank_contribution_per_stream: null,
+      score_factors: { embedding_similarity: 0 }
+    }],
+    answer_rerank_status: rerank,
+    answer_rerank_expected_count: rerank === "returned" ? 5 : 0,
+    answer_rerank_scored_count: rerank === "returned" ? 5 : 0,
+    answer_rerank_failure_class: null
+  });
   return {
     questionId: id,
-    diagnostics: {
-      ...buildQuestionDiagnosticFixture({
-        questionId: id,
-        gold: [buildGoldDiagnostic({ object_id: `${id}-gold` })]
-      }),
-      provider_state: "provider_returned" as const,
-      embedding_workspace_scanned_count: 3,
-      embedding_workspace_truncated: false,
-      embedding_workspace_provider_kind: "local_onnx",
-      embedding_workspace_model_id: "Xenova/test",
-      embedding_workspace_schema_version: 2,
-      answer_rerank_status: rerank,
-      answer_rerank_expected_count: rerank === "returned" ? 5 : 0,
-      answer_rerank_scored_count: rerank === "returned" ? 5 : 0,
-      answer_rerank_failure_class: null
+    latencyMs: 12,
+    firstTier: "hot" as const,
+    degradationReason: null,
+    recallTokenEconomy: {
+      delivered_context_tokens_estimate: 100,
+      coarse_pool_size: 10,
+      fine_evaluated: 5,
+      fine_pruned_count: 5,
+      fine_priority_overflow_count: 0,
+      fusion_families_with_hits: 2,
+      embedding_inference_calls: 1
     },
+    diagnostics,
     embeddingWarmup: documentWarmup,
     queryEmbeddingWarmup: queryWarmup
   };
@@ -86,6 +118,7 @@ describe("recall-eval diagnostics evidence", () => {
     });
 
     expect(RecallEvalDiagnosticsEvidenceSchema.parse(evidence)).toEqual(evidence);
+    expect(evidence.schema_version).toBe(2);
     expect(evidence.summary).toMatchObject({
       question_count: 2,
       document_embedding_cache: { expected_count: 6, ready_count: 6 },
@@ -101,6 +134,38 @@ describe("recall-eval diagnostics evidence", () => {
       }
     });
     expect(evidence.questions[0]).toHaveProperty("diagnostics.question_id", "q-1");
+    expect(evidence.questions[0]).toMatchObject({
+      latency_ms: 12,
+      first_tier: "hot",
+      degradation_reason: null,
+      recall_token_economy: { embedding_inference_calls: 1 }
+    });
+  });
+
+  it("keeps legacy v1 diagnostics readable without treating them as promotion evidence", () => {
+    const current = buildRecallEvalDiagnosticsEvidence({
+      questions: [question("q-legacy", "returned")],
+      embeddingSupplement: biIdentity,
+      answerRerank: {
+        enabled: true,
+        provider_kind: "local_onnx_cross_encoder",
+        effective_model_id: "Xenova/reranker",
+        model_artifact_sha256: "b".repeat(64)
+      }
+    });
+    const legacy = {
+      ...current,
+      schema_version: 1 as const,
+      questions: current.questions.map((row) => ({
+        question_id: row.question_id,
+        diagnostics: row.diagnostics,
+        document_embedding_warmup: row.document_embedding_warmup,
+        query_embedding_warmup: row.query_embedding_warmup
+      }))
+    };
+
+    expect(RecallEvalDiagnosticsEvidenceSchema.parse(legacy)).toEqual(legacy);
+    expect(RecallEvalDiagnosticsEvidenceV2Schema.safeParse(legacy).success).toBe(false);
   });
 
   it("rejects a cross-encoder arm that never scores an applicable candidate", () => {
@@ -167,7 +232,9 @@ describe("recall-eval diagnostics evidence", () => {
       answer_rerank_scored_count: 0,
       candidates: [{
         object_id: "pooled-candidate",
-        candidate_key: "memory_entry:pooled-candidate",
+        object_kind: "memory_entry",
+        origin_plane: "workspace_local",
+        candidate_key: "workspace_local:memory_entry:pooled-candidate",
         final_rank: 1,
         pre_budget_rank: 1,
         selection_order: 1,
@@ -239,6 +306,28 @@ describe("recall-eval diagnostics evidence", () => {
     })).toThrow(/disabled run produced embedding work/u);
   });
 
+  it("rejects an explicit zero embedding factor in a bi-encoder control arm", () => {
+    const source = question("q-disabled-zero", "not_applicable");
+    const {
+      embedding_workspace_scanned_count: _scanned,
+      embedding_workspace_truncated: _truncated,
+      embedding_workspace_provider_kind: _provider,
+      embedding_workspace_model_id: _model,
+      embedding_workspace_schema_version: _schema,
+      ...diagnostics
+    } = source.diagnostics;
+    expect(() => buildRecallEvalDiagnosticsEvidence({
+      questions: [{
+        ...source,
+        embeddingWarmup: null,
+        queryEmbeddingWarmup: null,
+        diagnostics: { ...diagnostics, provider_state: "provider_not_requested" }
+      }],
+      embeddingSupplement: { enabled: false },
+      answerRerank: { enabled: false }
+    })).toThrow(/disabled run produced embedding work/u);
+  });
+
   it("binds the recall-eval diagnostics bytes into a complete evidence bundle", () => {
     const evidence = buildRecallEvalDiagnosticsEvidence({
       questions: [question("q-1", "returned")],
@@ -258,6 +347,12 @@ describe("recall-eval diagnostics evidence", () => {
       { role: "run_provenance" as const, path: "longmemeval-run-provenance.json", contents: "{}\n" },
       { role: "recall_eval_diagnostics" as const, path: RECALL_EVAL_DIAGNOSTICS_FILENAME, contents: diagnostics }
     ];
+    const selection = selectionContractIdentity(
+      createLongMemEvalSelectionContractFromAssignments({
+        datasetSha256: "c".repeat(64),
+        assignments: [{ question_id: "q-1", dataset_cohort: "answerable" }]
+      })
+    );
     const manifest = buildLongMemEvalEvidenceManifest({
       profile: "recall_eval",
       run: {
@@ -268,7 +363,8 @@ describe("recall-eval diagnostics evidence", () => {
         alaya_commit: "05d98df",
         dataset_sha256: "c".repeat(64),
         selection_manifest_sha256: null,
-        question_id_digest: "d".repeat(64),
+        question_id_digest: selection.selected_id_digest,
+        selection_contract: selection,
         candidate_pool_complete: true,
         provenance_complete: true
       },
@@ -283,5 +379,33 @@ describe("recall-eval diagnostics evidence", () => {
       valid: true,
       errors: []
     });
+  });
+
+  it("keeps a recall-eval archive diagnostic-only until selection is bound", () => {
+    const artifacts = [
+      { role: "kpi" as const, path: "kpi.json", contents: "{}\n" },
+      { role: "report" as const, path: "report.md", contents: "# report\n" },
+      { role: "rank_identity" as const, path: "rank.json", contents: "{}\n" },
+      { role: "run_provenance" as const, path: "provenance.json", contents: "{}\n" },
+      { role: "recall_eval_diagnostics" as const, path: "diagnostics.json", contents: "{}\n" }
+    ];
+    const manifest = buildLongMemEvalEvidenceManifest({
+      profile: "recall_eval",
+      run: {
+        slug: "diagnostic-only",
+        bench_name: "public",
+        split: "longmemeval-s",
+        run_at: "2026-07-16T00:00:00.000Z",
+        alaya_commit: "05d98df",
+        dataset_sha256: "c".repeat(64),
+        selection_manifest_sha256: null,
+        question_id_digest: "d".repeat(64),
+        candidate_pool_complete: true,
+        provenance_complete: true
+      },
+      artifacts
+    });
+
+    expect(manifest.evidence_status).toBe("partial");
   });
 });

@@ -14,6 +14,7 @@ function candidate(
     finalRank: null,
     droppedReason: null,
     rankAfterFusion: 4,
+    rankAfterFeatureRerank: 4,
     rankAfterCoverageSelector: 4,
     coverageSelectorAction: "kept",
     ...overrides
@@ -27,6 +28,8 @@ describe("classifyDeliveryMissTaxonomy", () => {
         deliveredRank: 3,
         candidate: candidate({ finalRank: 3 }),
         anyObjectCandidate: undefined,
+        fineAssessmentPruned: false,
+        anyObjectFineAssessmentPruned: false,
         diagnosticsAvailable: true
       })
     ).toBeNull();
@@ -38,6 +41,8 @@ describe("classifyDeliveryMissTaxonomy", () => {
         deliveredRank: null,
         candidate: undefined,
         anyObjectCandidate: undefined,
+        fineAssessmentPruned: false,
+        anyObjectFineAssessmentPruned: false,
         diagnosticsAvailable: true
       })
     ).toBe("candidate_absent");
@@ -49,9 +54,22 @@ describe("classifyDeliveryMissTaxonomy", () => {
         deliveredRank: null,
         candidate: undefined,
         anyObjectCandidate: candidate({ objectKind: "synthesis_capsule" }),
+        fineAssessmentPruned: false,
+        anyObjectFineAssessmentPruned: false,
         diagnosticsAvailable: true
       })
     ).toBe("materialization_drop");
+  });
+
+  it("classifies an exact fine-waist prune before candidate absence", () => {
+    expect(classifyDeliveryMissTaxonomy({
+      deliveredRank: null,
+      candidate: undefined,
+      anyObjectCandidate: undefined,
+      fineAssessmentPruned: true,
+      anyObjectFineAssessmentPruned: true,
+      diagnosticsAvailable: true
+    })).toBe("fine_assessment_drop");
   });
 
   it("classifies budget_drop when a pool candidate is cut by max_entries inside the delivery window", () => {
@@ -84,13 +102,31 @@ describe("classifyDeliveryMissTaxonomy", () => {
     ).toBe("budget_drop");
   });
 
-  it("classifies answer_set_coverage_drop when fused top-5 gold is displaced by the coverage selector", () => {
+  it("does not blame coverage when the feature head already moved fused top-5 gold out", () => {
     expect(
       classifyDeliveryMissTaxonomy({
         deliveredRank: 8,
         candidate: candidate({
           finalRank: 8,
           rankAfterFusion: 3,
+          rankAfterFeatureRerank: 8,
+          rankAfterCoverageSelector: 9,
+          coverageSelectorAction: "displaced"
+        }),
+        anyObjectCandidate: undefined,
+        diagnosticsAvailable: true
+      })
+    ).toBe("delivery_order_drop");
+  });
+
+  it("classifies coverage only when the feature head enters top-5 before coverage removes it", () => {
+    expect(
+      classifyDeliveryMissTaxonomy({
+        deliveredRank: 8,
+        candidate: candidate({
+          finalRank: 8,
+          rankAfterFusion: 8,
+          rankAfterFeatureRerank: 3,
           rankAfterCoverageSelector: 8,
           coverageSelectorAction: "displaced"
         }),
@@ -107,6 +143,7 @@ describe("classifyDeliveryMissTaxonomy", () => {
         candidate: candidate({
           finalRank: 8,
           rankAfterFusion: 8,
+          rankAfterFeatureRerank: 8,
           rankAfterCoverageSelector: 8,
           coverageSelectorAction: "kept"
         }),

@@ -69,9 +69,10 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   expect(logs.some((message) => message.includes("2/2"))).toBe(false);
   expect(existsSync(join(cacheRoot, ".extraction-fill.lock"))).toBe(false);
   expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
+    fill_status: "in_progress",
     requested_turns: 2,
-    cached_turns: 0,
-    coverage: 0
+    cached_turns: 1,
+    coverage: 0.5
   });
   expect(countShards()).toBe(1);
 
@@ -88,6 +89,100 @@ it("aborts in-flight extraction, releases the lease, and resumes saved shards", 
   });
   expect(resumed).toMatchObject({ cacheHits: 1, newlyExtracted: 1, coverage: 1 });
   expect(countShards()).toBe(2);
+});
+
+it("stops peer workers on the first terminal task failure and releases the lease", async () => {
+  const peerStarted = deferred();
+  const logs: string[] = [];
+  let calls = 0;
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+    calls += 1;
+    if (calls === 1) {
+      await peerStarted.promise;
+      const error = new Error("sk-do-not-log PROMPT_BODY");
+      (error as { benchRetry?: unknown }).benchRetry = {
+        retryCount: 0,
+        retryClassification: "failure_non_retryable_4xx",
+        rateLimitRetries: 0
+      };
+      throw error;
+    }
+    peerStarted.resolve();
+    return waitForAbort(input.abortSignal);
+  });
+
+  const running = runExtractionFill({
+    variant: VARIANT,
+    cacheRoot,
+    dataDir,
+    pinnedMetaRoot,
+    concurrency: 2,
+    extractorFactory: () => ({ extract }),
+    log: (message) => logs.push(message)
+  });
+
+  await expect(running).rejects.toMatchObject({
+    name: "ExtractionFillTaskError",
+    exitCode: 1,
+    retryClassification: "failure_non_retryable_4xx"
+  });
+  expect(logs.join("\n")).toContain(
+    "retry_classification=failure_non_retryable_4xx"
+  );
+  expect(logs.join("\n")).not.toMatch(/sk-do-not-log|PROMPT_BODY/u);
+  expect(existsSync(join(cacheRoot, ".extraction-fill.lock"))).toBe(false);
+});
+
+it("stops on a failing extraction without finalizing the pinned manifest", async () => {
+  const extract = vi.fn<BenchSignalExtractor["extract"]>(async () => {
+    throw new Error("simulated provider 500");
+  });
+  const running = runExtractionFill({
+    variant: VARIANT,
+    cacheRoot,
+    dataDir,
+    pinnedMetaRoot,
+    concurrency: 1,
+    extractorFactory: () => ({ extract }),
+    log: () => undefined
+  });
+
+  await expect(running).rejects.toMatchObject({
+    name: "ExtractionFillTaskError",
+    retryClassification: "unknown"
+  });
+  expect(extract).toHaveBeenCalledOnce();
+  expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
+    fill_status: "in_progress",
+    requested_turns: 2,
+    cached_turns: 0,
+    coverage: 0
+  });
+});
+
+it("stops without caching a semantically invalid extraction payload", async () => {
+  const running = runExtractionFill({
+    variant: VARIANT,
+    cacheRoot,
+    dataDir,
+    pinnedMetaRoot,
+    concurrency: 1,
+    extractorFactory: () => ({
+      extract: async () => ({ rawJson: '{"not_signals":[]}' })
+    }),
+    log: () => undefined
+  });
+
+  await expect(running).rejects.toMatchObject({
+    name: "ExtractionFillTaskError",
+    retryClassification: "unknown"
+  });
+  expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
+    fill_status: "in_progress",
+    requested_turns: 2,
+    cached_turns: 0,
+    coverage: 0
+  });
 });
 
 it("does not finalize coverage when interruption follows the last response", async () => {
@@ -111,9 +206,10 @@ it("does not finalize coverage when interruption follows the last response", asy
   await expect(running).rejects.toBe(interrupted);
   expect(existsSync(join(cacheRoot, ".extraction-fill.lock"))).toBe(false);
   expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
+    fill_status: "in_progress",
     requested_turns: 2,
-    cached_turns: 0,
-    coverage: 0
+    cached_turns: 2,
+    coverage: 1
   });
   expect(countShards()).toBe(2);
 });

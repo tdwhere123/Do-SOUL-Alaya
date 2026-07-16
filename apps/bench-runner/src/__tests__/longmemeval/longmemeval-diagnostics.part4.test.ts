@@ -96,8 +96,8 @@ describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
       goldMemoryIds: ["memory-a"],
       answerSessionIds: ["session-a"],
       deliveredResults: [
-        { object_id: "memory-a", rank: 1, relevance_score: 0.8 },
-        { object_id: "memory-b", rank: 2, relevance_score: 0.95 },
+        { object_id: "memory-a", rank: 1, relevance_score: 0.95 },
+        { object_id: "memory-b", rank: 2, relevance_score: 0.8 },
         { object_id: "memory-c", rank: 3, relevance_score: 0.7 }
       ],
       hitAt1: true,
@@ -108,9 +108,30 @@ describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
       recallResult: {
         diagnostics: {
           candidate_pool: [
-            { object_id: "memory-a", final_rank: 1, fused_rank: 2 },
-            { object_id: "memory-b", final_rank: 2, fused_rank: 1 },
-            { object_id: "memory-c", final_rank: 3, fused_rank: 3 }
+            {
+              object_id: "memory-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:memory-a",
+              final_rank: 1,
+              fused_rank: 2
+            },
+            {
+              object_id: "memory-b",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:memory-b",
+              final_rank: 2,
+              fused_rank: 1
+            },
+            {
+              object_id: "memory-c",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:memory-c",
+              final_rank: 3,
+              fused_rank: 3
+            }
           ]
         }
       }
@@ -128,15 +149,15 @@ describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
     expect(metrics.non_monotonic_rate).toBe(0);
   });
 
-  it("flags delivered rows that are not ordered by final delivered rank", () => {
+  it("flags delivered rows whose relevance score increases", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-final-rank-disorder",
       goldMemoryIds: ["memory-a"],
       answerSessionIds: ["session-a"],
       deliveredResults: [
-        { object_id: "memory-a", rank: 1, relevance_score: 0.9 },
-        { object_id: "memory-b", rank: 3, relevance_score: 0.8 },
-        { object_id: "memory-c", rank: 2, relevance_score: 0.7 }
+        { object_id: "memory-a", rank: 1, relevance_score: 0.8 },
+        { object_id: "memory-b", rank: 2, relevance_score: 0.9 },
+        { object_id: "memory-c", rank: 3, relevance_score: 0.7 }
       ],
       hitAt1: true,
       hitAt5: true,
@@ -146,9 +167,30 @@ describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
       recallResult: {
         diagnostics: {
           candidate_pool: [
-            { object_id: "memory-a", final_rank: 1, fused_rank: 1 },
-            { object_id: "memory-b", final_rank: 3, fused_rank: 2 },
-            { object_id: "memory-c", final_rank: 2, fused_rank: 3 }
+            {
+              object_id: "memory-a",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:memory-a",
+              final_rank: 1,
+              fused_rank: 1
+            },
+            {
+              object_id: "memory-b",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:memory-b",
+              final_rank: 2,
+              fused_rank: 2
+            },
+            {
+              object_id: "memory-c",
+              object_kind: "memory_entry",
+              origin_plane: "workspace_local",
+              candidate_key: "workspace_local:memory_entry:memory-c",
+              final_rank: 3,
+              fused_rank: 3
+            }
           ]
         }
       }
@@ -160,7 +202,7 @@ describe("LongMemEval recall diagnostics (legacy/order/pool continued)", () => {
     expect(metrics.non_monotonic_rate).toBe(1);
   });
 
-  it("falls back to fused rank order for legacy rows without delivered ranks", () => {
+  it("uses relevance score order for legacy rows without delivered ranks", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-legacy-fused-rank",
       goldMemoryIds: [],

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BenchPolicyShape } from "@do-soul/alaya-eval";
+import type { BenchPolicyShape, SeedExtractionPath } from "@do-soul/alaya-eval";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
 import {
   resolveBenchCommitInfo
@@ -20,7 +20,7 @@ import type {
   LongMemEvalEmbeddingVectorCacheSummary,
   LongMemEvalQueryEmbeddingCacheSummary
 } from "./diagnostics.js";
-import type { LongMemEvalVariant } from "./dataset.js";
+import type { LongMemEvalQuestion, LongMemEvalVariant } from "./dataset.js";
 export {
   buildLongMemEvalReportContextUsage,
   readLongMemEvalReportSideEffectSnapshot,
@@ -118,9 +118,11 @@ export function writeRecallEvalSnapshot(input: {
   readonly seedDataDirRoot: string;
   readonly variant: LongMemEvalVariant;
   readonly commitSha7: string;
+  readonly canonicalQuestions: readonly LongMemEvalQuestion[];
   readonly snapshotQuestions: readonly LongMemEvalSnapshotQuestion[];
   readonly extractionCacheRoot: string;
   readonly datasetSha256: string;
+  readonly seedExtractionPath: SeedExtractionPath;
   readonly runProvenance: LongMemEvalRunProvenance;
 }): Promise<void> {
   return writeRecallEvalSnapshotArtifacts(input);

@@ -41,12 +41,24 @@ function buildService(input: {
 }
 
 describe("EmbeddingRecallService.scorePoolCandidates", () => {
-  it("scores provider-matched pooled candidates by cosine; drops orthogonal/mismatched", async () => {
+  it("records valid non-positive cosine as zero and drops unusable or mismatched vectors", async () => {
     const service = buildService({
       queryEmbedding: new Float32Array([1, 0]),
       storedVectors: [
         createEmbeddingRecord({ object_id: "aligned", embedding: new Float32Array([1, 0]) }),
         createEmbeddingRecord({ object_id: "orthogonal", embedding: new Float32Array([0, 1]) }),
+        createEmbeddingRecord({ object_id: "negative", embedding: new Float32Array([-1, 0]) }),
+        createEmbeddingRecord({ object_id: "unrequested", embedding: new Float32Array([0, 1]) }),
+        createEmbeddingRecord({ object_id: "zero-vector", embedding: new Float32Array([0, 0]) }),
+        createEmbeddingRecord({
+          object_id: "non-finite",
+          embedding: new Float32Array([Number.POSITIVE_INFINITY, 1])
+        }),
+        createEmbeddingRecord({
+          object_id: "dimension-mismatch",
+          dimensions: 3,
+          embedding: new Float32Array([1, 0])
+        }),
         createEmbeddingRecord({ object_id: "mismatch", model_id: "other-model", embedding: new Float32Array([1, 0]) })
       ]
     });
@@ -54,11 +66,41 @@ describe("EmbeddingRecallService.scorePoolCandidates", () => {
       workspaceId: "workspace-1",
       runId: "run-1",
       queryText: "anything",
-      objectIds: ["aligned", "orthogonal", "mismatch"]
+      objectIds: [
+        "aligned",
+        "orthogonal",
+        "negative",
+        "zero-vector",
+        "non-finite",
+        "dimension-mismatch",
+        "mismatch"
+      ]
     });
     expect(scores.get("aligned")).toBeCloseTo(1, 5);
-    expect(scores.has("orthogonal")).toBe(false); // cosine 0 is not > 0
-    expect(scores.has("mismatch")).toBe(false); // provider model mismatch
+    expect(scores.get("orthogonal")).toBe(0);
+    expect(scores.get("negative")).toBe(0);
+    expect([...scores.keys()].sort()).toEqual(["aligned", "negative", "orthogonal"]);
+  });
+
+  it.each([
+    ["zero norm", new Float32Array([0, 0])],
+    ["non-finite", new Float32Array([Number.NaN, 1])]
+  ])("treats a %s query vector as unobserved", async (_label, queryEmbedding) => {
+    const service = buildService({
+      queryEmbedding,
+      storedVectors: [
+        createEmbeddingRecord({ object_id: "candidate", embedding: new Float32Array([1, 0]) })
+      ]
+    });
+
+    const scores = await service.scorePoolCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "anything",
+      objectIds: ["candidate"]
+    });
+
+    expect(scores.size).toBe(0);
   });
 
   it("returns an empty map for empty objectIds or unavailable provider", async () => {

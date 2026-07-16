@@ -120,6 +120,7 @@ async function assertValidFullDiagnostics(
   expect(diagnostics.miss_taxonomy_summary).toEqual({
     candidate_absent: 0,
     materialization_drop: 0,
+    fine_assessment_drop: 0,
     budget_drop: 0,
     delivery_order_drop: 0,
     answer_set_coverage_drop: 0,

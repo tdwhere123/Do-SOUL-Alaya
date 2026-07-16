@@ -5,6 +5,8 @@ import {
   LocalOnnxCrossEncoderClient,
   LocalOnnxEmbeddingClient,
   OpenAIEmbeddingClient,
+  applyRecallPolicyEmbeddingState,
+  assertValidEmbeddingBatch,
   defaultLocalOnnxCacheDir,
   type EmbeddingProviderPort,
   type EmbeddingRecallEventLogPort,
@@ -56,6 +58,7 @@ export function createDaemonEmbeddingRuntime(input: {
     embeddingBackfillHandler: services.embeddingBackfillHandler,
     defaultPolicyDecorator: services.defaultPolicyDecorator,
     providerWarmup: services.providerWarmup,
+    getProviderDimensions: () => providerState.readiness.dimensions,
     getWarmupHoldReason: () => resolveEmbeddingWarmupHoldReason(providerState.readiness.status)
   };
 }
@@ -175,6 +178,7 @@ function createEmbeddingBackfillHandler(
     memoryRepo: input.memoryEntryRepo,
     memoryEmbeddingRepo: providerState.memoryEmbeddingRepo,
     provider: providerState.embeddingProvider,
+    expectedDimensions: () => providerState.readiness.dimensions,
     ...(hqProvider === null ? {} : { hqProvider }),
     warn: input.warn
   });
@@ -204,9 +208,8 @@ function createDefaultPolicyDecorator(
     return undefined;
   }
   return (policy: Readonly<RecallPolicy>): Readonly<RecallPolicy> => {
-    // Hold embedding-on until warmup verifies the provider; pending/failed stay lexical-only.
     if (readiness.status !== "ready") {
-      return policy;
+      return applyRecallPolicyEmbeddingState(policy, { embeddingEnabled: false });
     }
     return applyEmbeddingPolicyDecorator(policy, embeddingProvider);
   };
@@ -217,25 +220,20 @@ function applyEmbeddingPolicyDecorator(
   embeddingProvider: EmbeddingProviderPort | null
 ): Readonly<RecallPolicy> {
   if (embeddingProvider === null || !embeddingProvider.isAvailable) {
-    return policy;
+    return applyRecallPolicyEmbeddingState(policy, { embeddingEnabled: false });
   }
   const existingFusionWeights = policy.scoring_weight_overrides?.fusion_weights ?? {};
   const semantic = policy.coarse_filter.semantic_supplement;
+  const embeddingPolicy = applyRecallPolicyEmbeddingState(policy, {
+    embeddingEnabled: true,
+    injectionCap: semantic.injection_cap ?? DEFAULT_EMBEDDING_INJECTION_CAP,
+    injectionSimilarityFloor:
+      semantic.injection_similarity_floor ?? DEFAULT_EMBEDDING_INJECTION_FLOOR
+  });
   return {
-    ...policy,
-    coarse_filter: {
-      ...policy.coarse_filter,
-      semantic_supplement: {
-        ...semantic,
-        enabled: true,
-        embedding_enabled: true,
-        injection_cap: semantic.injection_cap ?? DEFAULT_EMBEDDING_INJECTION_CAP,
-        injection_similarity_floor:
-          semantic.injection_similarity_floor ?? DEFAULT_EMBEDDING_INJECTION_FLOOR
-      }
-    },
+    ...embeddingPolicy,
     scoring_weight_overrides: {
-      ...(policy.scoring_weight_overrides ?? {}),
+      ...(embeddingPolicy.scoring_weight_overrides ?? {}),
       fusion_weights: {
         embedding_similarity: DEFAULT_EMBEDDING_FUSION_WEIGHT,
         ...existingFusionWeights
@@ -254,7 +252,11 @@ function createProviderWarmup(
   }
   return Promise.resolve()
     .then(async () => {
-      await embeddingProvider.embedTexts(["alaya-init-probe"], { timeoutMs: 60_000 });
+      const embeddings = await embeddingProvider.embedTexts(
+        ["alaya-init-probe"],
+        { timeoutMs: 60_000 }
+      );
+      assertValidEmbeddingBatch(embeddings, 1);
       return "ready" as const;
     })
     .catch((error: unknown) => {

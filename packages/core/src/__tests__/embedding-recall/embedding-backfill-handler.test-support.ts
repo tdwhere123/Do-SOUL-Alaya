@@ -36,6 +36,7 @@ export function createEmbeddingMetadata(
     model_id: overrides.model_id ?? "text-embedding-3-small",
     schema_version: overrides.schema_version ?? 1,
     dimensions: overrides.dimensions ?? 3,
+    vector_valid: overrides.vector_valid ?? true,
     created_at: overrides.created_at ?? "2026-04-23T00:00:00.000Z",
     updated_at: overrides.updated_at ?? "2026-04-23T00:00:00.000Z"
   };

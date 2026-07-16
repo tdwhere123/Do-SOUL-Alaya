@@ -38,7 +38,8 @@ describe("LoCoMo runner", () => {
           lastTurnRawSignalCount: 0,
           lastTurnDraftCount: 0,
           lastExtractionSource: null,
-          lastCacheKey: null
+          lastCacheKey: null,
+          lastRawJsonSha256: null
         },
         seedTurn: vi.fn(async ({ evidenceRefBase }: { evidenceRefBase: string }) => {
           if (benchRefToDiaId(evidenceRefBase) === "d1") {
@@ -135,7 +136,8 @@ describe("LoCoMo runner", () => {
           lastTurnRawSignalCount: 0,
           lastTurnDraftCount: 0,
           lastExtractionSource: null,
-          lastCacheKey: null
+          lastCacheKey: null,
+          lastRawJsonSha256: null
         },
         seedTurn: vi.fn(async ({ evidenceRefBase }: { evidenceRefBase: string }) => {
           if (benchRefToDiaId(evidenceRefBase) === "d1") {

@@ -43,7 +43,10 @@ import type {
   BenchRecallOptions,
   BenchReportContextUsageInput
 } from "./daemon-types.js";
-import { drainEmbeddingWarmupPasses } from "./embedding-warmup.js";
+import {
+  awaitBenchEmbeddingProviderReady,
+  drainEmbeddingWarmupPasses
+} from "./embedding-warmup.js";
 import { resolveTreatmentEmbeddingInputIdentity } from "./strict-treatment-config.js";
 import {
   applyBenchRecallWeightOverrides,
@@ -201,9 +204,13 @@ function createWarmEmbeddingCacheOperation(
     objectIds: readonly string[],
     opts: BenchEmbeddingWarmupOptions = {}
   ): Promise<BenchEmbeddingWarmupSummary> => {
-    if (input.embeddingMode !== "env" || objectIds.length === 0) {
+    if (input.embeddingMode !== "env") {
       return notRequestedEmbeddingWarmupSummary(objectIds);
     }
+    await awaitBenchEmbeddingProviderReady({
+      embeddingMode: input.embeddingMode,
+      providerWarmup: input.activeRuntime.services.embeddingProviderWarmup
+    });
     const embedding = resolveBenchEmbeddingModelId(
       input.embeddingProviderKind,
       input.effectiveEnv
@@ -225,12 +232,21 @@ function createWarmEmbeddingCacheOperation(
           schemaVersion: resolveBenchEmbeddingSchemaVersion(
             input.embeddingProviderKind, input.effectiveEnv
           ),
+          expectedDimensions: requireEmbeddingProviderDimensions(input.activeRuntime),
           passCount
         })
     });
     assertWarmEmbeddingReady(warmed.summary, warmed.lastPassError);
     return warmed.summary;
   };
+}
+
+function requireEmbeddingProviderDimensions(runtime: AlayaDaemonRuntime): number {
+  const dimensions = runtime.services.getEmbeddingProviderDimensions();
+  if (dimensions === null) {
+    throw new Error("embedding provider ready without observed dimensions");
+  }
+  return dimensions;
 }
 
 function createWarmQueryEmbeddingCacheOperation(

@@ -135,6 +135,7 @@ export function structuralLikelihoodGate(R_obj: number): number {
 
 type IntegratedFloodScoreParams = Readonly<{
   readonly entry: Readonly<MemoryEntry>;
+  readonly memorySupplementEligible?: boolean;
   readonly axisInputs: IntegratedFloodAxisInputs;
   readonly supplementaryData: RecallSupplementaryData;
 }>;
@@ -159,20 +160,25 @@ function resolveIntegratedFloodScore(
 ): ResolvedIntegratedFloodScore {
   const lambda = resolveConformantPathWeight();
   const beta = resolveConformantEvidenceBeta();
+  const memorySupplementEligible = params.memorySupplementEligible ?? true;
   const slice = resolveSliceAxis(params.entry, params.supplementaryData.querySoughtFacets);
   const path = resolvePathAxis(
     params.axisInputs.A_path,
-    hasPathInflow(params.entry.object_id, params.supplementaryData)
+    memorySupplementEligible &&
+      hasPathInflow(params.entry.object_id, params.supplementaryData)
   );
   const evidence = resolveEvidenceAxis(
     params.axisInputs.B_evidence,
-    hasEvidenceVectors(params.entry.object_id, params.supplementaryData)
+    memorySupplementEligible &&
+      hasEvidenceVectors(params.entry.object_id, params.supplementaryData)
   );
   const fuelVerified = verifiedFloodFuel(slice, path, evidence);
   const flood = fuelVerified ? slice.value * path.value * evidence.value : 0;
   const omega = manifestationOmega(
     params.entry,
-    params.supplementaryData.governanceCeilingByMemoryId[params.entry.object_id]
+    memorySupplementEligible
+      ? params.supplementaryData.governanceCeilingByMemoryId[params.entry.object_id]
+      : undefined
   );
   const eDirect = clamp01(params.axisInputs.B_evidence);
   const eDirectStatus: FloodAxisInactiveReason =

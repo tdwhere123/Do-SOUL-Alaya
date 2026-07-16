@@ -54,7 +54,9 @@ export interface MemoryEmbeddingRow {
   readonly updated_at: string;
 }
 
-export type MemoryEmbeddingMetadataRow = Omit<MemoryEmbeddingRow, "embedding_blob">;
+export interface MemoryEmbeddingMetadataRow extends Omit<MemoryEmbeddingRow, "embedding_blob"> {
+  readonly vector_valid: number;
+}
 
 export const SurfaceBindingRowParser: RowParser<SurfaceBindingRow> = {
   parse(value: unknown): SurfaceBindingRow {
@@ -126,6 +128,7 @@ export const MemoryEmbeddingMetadataRowParser: RowParser<MemoryEmbeddingMetadata
       model_id: readNonEmptyStringField(record, "model_id"),
       schema_version: readPositiveIntField(record, "schema_version"),
       dimensions: readPositiveIntField(record, "dimensions"),
+      vector_valid: readSqliteBooleanIntField(record, "vector_valid"),
       created_at: readNonEmptyStringField(record, "created_at"),
       updated_at: readNonEmptyStringField(record, "updated_at")
     };

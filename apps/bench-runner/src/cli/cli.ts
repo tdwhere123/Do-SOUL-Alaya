@@ -1,6 +1,7 @@
 import process from "node:process";
 import { runMergeLongMemEvalCommand } from "./merge.js";
 import { parseFlags, type ParsedFlags } from "./cli-options.js";
+import { runAuthorizeLongMemEvalMatrixCommand } from "./promotion/command.js";
 import {
   runControlledReplayCommand,
   runExtractionFillCommand,
@@ -19,7 +20,7 @@ const HELP_TEXT = `alaya-bench-runner — daemon-attached benchmark harness
 
 Usage:
   alaya-bench-runner fetch-longmemeval [--variant oracle|s|m] [--data-dir <path>] [--force]
-  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
+  alaya-bench-runner longmemeval [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--policy-shape stress|chat] [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--qa] [--data-dir <path>] [--snapshot-out <db>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>] [--promotion-contract <json>]
     --qa  end-to-end QA accuracy (answer-LLM + LLM-judge over delivered recall). OFF by default. ON => 2 garden chat calls/question (costs money). Needs OFFICIAL_API_GARDEN_PROVIDER_URL / ALAYA_OFFICIAL_GARDEN_API_KEY / OFFICIAL_API_GARDEN_MODEL.
   alaya-bench-runner longmemeval-multiturn [--variant oracle|s|m] [--limit N] [--offset N] [--rounds N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
   alaya-bench-runner longmemeval-crossquestion [--variant oracle|s|m] [--limit N] [--offset N] [--embedding disabled|env] [--embedding-provider openai|local_onnx] [--edge-plane] [--data-dir <path>] [--history-root <path>]
@@ -29,9 +30,10 @@ Usage:
   alaya-bench-runner self [--history-root <path>]
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
-  alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path>
-  alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>]
-  alaya-bench-runner recall-eval --snapshot <db> [--legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
+  alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path> [--concurrency N]
+  alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] [--promotion-contract <json>]
+  alaya-bench-runner recall-eval --snapshot <db> [--legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>] [--promotion-contract <json>]
+  alaya-bench-runner authorize-longmemeval-matrix --contract <json> --out <json>
   alaya-bench-runner --help
 
 Variants:
@@ -58,16 +60,28 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
 
   const [command, ...rest] = argv;
-  let opts: ParsedFlags;
+  if (command === "authorize-longmemeval-matrix") {
+    return runAuthorizeLongMemEvalMatrixCommand(rest);
+  }
+  const opts = parseCommandFlags(rest);
+  return opts === null ? 2 : dispatchParsedCommand(command, opts);
+}
+
+function parseCommandFlags(rest: ReadonlyArray<string>): ParsedFlags | null {
   try {
-    opts = parseFlags(rest);
+    return parseFlags(rest);
   } catch (err) {
     process.stderr.write(
       `alaya-bench-runner: ${err instanceof Error ? err.message : String(err)}\n`
     );
-    return 2;
+    return null;
   }
+}
 
+function dispatchParsedCommand(
+  command: string | undefined,
+  opts: ParsedFlags
+): number | Promise<number> {
   switch (command) {
     case "fetch-longmemeval":
       return runFetchLongMemEval(opts);

@@ -167,7 +167,9 @@ export function dedupeDeliveredObjects(
   return deduped;
 }
 
-export function shouldRunBenchEdgePlane(): boolean {
-  const raw = process.env[BENCH_EDGE_PLANE_ENV]?.trim().toLowerCase();
+export function shouldRunBenchEdgePlane(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): boolean {
+  const raw = env[BENCH_EDGE_PLANE_ENV]?.trim().toLowerCase();
   return raw === "1" || raw === "true" || raw === "on" || raw === "yes";
 }

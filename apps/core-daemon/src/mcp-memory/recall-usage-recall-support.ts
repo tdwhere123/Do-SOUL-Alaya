@@ -3,9 +3,8 @@ import {
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
 import {
-  buildRecallPolicy as buildRecallPolicyCore,
+  buildMemorySearchRecallPolicy,
   resolveRecallPolicyFiltersFromSearchRequest,
-  type RecallPolicyBuilderInput
 } from "@do-soul/alaya-core";
 
 export function dedupeDeliveredObjectIdentities(
@@ -36,15 +35,10 @@ export function buildRecallPolicy(
   policyId: string
 ): RecallPolicy {
   const filters = resolveRecallPolicyFiltersFromSearchRequest(request);
-  const input: Omit<RecallPolicyBuilderInput, "runtimeId" | "taskSurfaceId"> = {
-    maxResults: request.max_results,
-    filters,
-    maxTotalTokens: 2000,
-    conflictAwareness: true
-  };
-  return buildRecallPolicyCore({
+  return buildMemorySearchRecallPolicy({
     runtimeId: policyId,
     taskSurfaceId,
-    ...input
+    maxResults: request.max_results,
+    filters
   });
 }

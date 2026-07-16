@@ -5,7 +5,7 @@ import {
   hasAbstentionIdentityConflict
 } from "../diagnostics-cohort.js";
 import type {
-  CandidateDiagnostic,
+  CandidateIdentityObservation,
   DiagnosticActiveConstraintResult,
   DiagnosticRecallResult,
   DiagnosticRecallResultInput,
@@ -19,6 +19,7 @@ import {
   type LongMemEvalSeedDropReasons
 } from "../seed-drop-reasons.js";
 import {
+  buildObjectIdentityKey,
   createEmptyGraphExpansionPlaneCountPerEdgeType,
   createEmptyGraphExpansionPlaneCountPerHop,
   hasStructuralPlane,
@@ -79,6 +80,10 @@ export function assembleQuestionDiagnostic(
     ...buildRecallTelemetryFields(input, parts, candidatePoolComplete),
     query_probes: parts.diagnostics?.queryProbes ?? null,
     query_sought_facets: parts.diagnostics?.querySoughtFacets ?? null,
+    candidate_pool_count: parts.diagnostics?.candidatePoolCount ?? null,
+    fine_pruned_count: parts.diagnostics?.finePrunedCount ?? null,
+    fine_assessment_pruned_candidates:
+      parts.diagnostics?.fineAssessmentPrunedCandidates ?? [],
     candidates: parts.candidates,
     candidate_key_collisions: candidateCollisions.rows,
     cohort_ledger: buildQuestionCohortLedger({
@@ -89,7 +94,7 @@ export function assembleQuestionDiagnostic(
       gold: parts.gold,
       diagnosticsAvailable: parts.diagnostics !== null,
       candidatePoolComplete,
-      identityConflictObjectIds: candidateCollisions.identityConflictObjectIds,
+      identityConflictObjectKeys: candidateCollisions.identityConflictObjectKeys,
       missTaxonomy: missFields.miss_taxonomy,
       seedDropReasons: input.seedDropReasons
     }),
@@ -188,38 +193,74 @@ function classifyCandidateCollisions(
   diagnostics: NarrowRecallDiagnostics | null
 ): Readonly<{
   rows: LongMemEvalQuestionDiagnostic["candidate_key_collisions"];
-  identityConflictObjectIds: readonly string[];
+  identityConflictObjectKeys: readonly string[];
 }> {
-  if (diagnostics === null) return { rows: [], identityConflictObjectIds: [] };
-  const rows = [...diagnostics.candidateKeysByObjectId.entries()]
-    .filter(([, candidateKeys]) => candidateKeys.length > 1)
-    .map(([objectId, candidateKeys]) => ({
+  if (diagnostics === null) return { rows: [], identityConflictObjectKeys: [] };
+  const groups = groupCandidateIdentityObservations(
+    diagnostics.candidateIdentityObservations
+  );
+  const rows = groups
+    .filter((group) => hasReportableCollision(group))
+    .map(({ objectId, observations }) => ({
       object_id: objectId,
-      candidate_keys: candidateKeys
+      candidate_keys: observations.map((item) => item.sourceCandidateKey).sort()
     }));
   return {
     rows,
-    identityConflictObjectIds: rows
-      .filter((row) => hasIdentityConflict(diagnostics, row.candidate_keys))
-      .map((row) => row.object_id)
+    identityConflictObjectKeys: groups
+      .filter(({ observations }) => hasIdentityConflict(observations))
+      .map(({ objectIdentity }) => objectIdentity)
   };
 }
 
-function hasIdentityConflict(
-  diagnostics: NarrowRecallDiagnostics,
-  candidateKeys: readonly string[]
-): boolean {
-  const candidates = candidateKeys
-    .map((key) => diagnostics.candidatesByCandidateKey.get(key))
-    .filter((candidate): candidate is CandidateDiagnostic => candidate !== undefined);
+interface CandidateIdentityGroup {
+  readonly objectId: string;
+  readonly objectIdentity: string;
+  readonly observations: readonly CandidateIdentityObservation[];
+}
+
+function groupCandidateIdentityObservations(
+  observations: readonly CandidateIdentityObservation[]
+): readonly CandidateIdentityGroup[] {
+  const byIdentity = new Map<string, CandidateIdentityObservation[]>();
+  for (const observation of observations) {
+    const identity = buildObjectIdentityKey(
+      observation.candidate.objectKind,
+      observation.candidate.objectId
+    );
+    const group = byIdentity.get(identity) ?? [];
+    group.push(observation);
+    byIdentity.set(identity, group);
+  }
+  return [...byIdentity.entries()].map(([objectIdentity, group]) => Object.freeze({
+    objectId: group[0]!.candidate.objectId,
+    objectIdentity,
+    observations: Object.freeze(group)
+  }));
+}
+
+function hasReportableCollision(group: CandidateIdentityGroup): boolean {
+  const keys = group.observations.map((item) => item.sourceCandidateKey);
+  return new Set(keys).size !== keys.length ||
+    (group.observations.length > 1 && group.observations.some((item) => item.legacy)) ||
+    hasIdentityConflict(group.observations);
+}
+
+function hasIdentityConflict(observations: readonly CandidateIdentityObservation[]): boolean {
+  const candidates = observations.map((item) => item.candidate);
   const first = candidates[0];
-  return first !== undefined && candidates.slice(1).some((candidate) =>
-    candidate.objectKind !== first.objectKind ||
-    candidate.createdAt !== first.createdAt ||
-    candidate.dimension !== first.dimension ||
-    candidate.sessionKey !== first.sessionKey ||
-    JSON.stringify(candidate.answerFeatures) !== JSON.stringify(first.answerFeatures)
-  );
+  if (first === undefined) return false;
+  return knownValuesConflict(candidates.map((row) => row.createdAt)) ||
+    knownValuesConflict(candidates.map((row) => row.dimension)) ||
+    knownValuesConflict(candidates.map((row) => row.sessionKey)) ||
+    knownValuesConflict(candidates.map((row) => row.answerFeatures === null
+      ? null
+      : JSON.stringify(row.answerFeatures)));
+}
+
+function knownValuesConflict(values: readonly (string | null)[]): boolean {
+  const known = values.filter((value): value is string => value !== null);
+  return new Set(known).size > 1;
 }
 
 function classifyMiss(

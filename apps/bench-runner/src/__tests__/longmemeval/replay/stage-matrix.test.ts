@@ -74,6 +74,9 @@ describe("LongMemEval stage matrix replay", () => {
     const row = cohortRow({ id: "q-alias", goldIds: ["gold-a"] });
     const aliased = {
       object_id: "gold-a",
+      object_kind: "memory_entry",
+      origin_plane: "workspace_local",
+      candidate_key: "workspace_local:memory_entry:gold-a",
       pre_budget_rank: 1,
       relevance_score: 0.99,
       rank: 1,
@@ -83,6 +86,31 @@ describe("LongMemEval stage matrix replay", () => {
     expect(() => validateReplayContract(contract([
       question("q-alias", [aliased], row)
     ], [row]))).toThrow(/missing required rank field.*fused_rank/u);
+  });
+
+  it("binds replay closure to exact origin-plane candidate keys", () => {
+    const row = cohortRow({ id: "q-origin-plane", goldIds: ["gold-a"] });
+    const local = candidate("gold-a", { fused_rank: 1 });
+    const global = {
+      ...candidate("gold-a", { fused_rank: 2 }),
+      origin_plane: "global",
+      candidate_key: "global:memory_entry:gold-a"
+    };
+    const aliases = {
+      ...question("q-origin-plane", [local, global], row),
+      candidate_pool_count: 2
+    };
+    expect(() => validateReplayContract(contract([aliases], [row]))).not.toThrow();
+
+    const forged = {
+      ...question("q-origin-plane", [{
+        ...local,
+        candidate_key: "global:memory_entry:gold-a"
+      }], row),
+      candidate_pool_count: 1
+    };
+    expect(() => validateReplayContract(contract([forged], [row])))
+      .toThrow(/candidate identity key/u);
   });
 
   it("uses the explicit stage order and computes K ceilings for any gold", () => {

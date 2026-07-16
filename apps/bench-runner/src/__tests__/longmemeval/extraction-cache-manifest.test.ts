@@ -13,8 +13,16 @@ import {
   readExtractionCacheManifestIdentity,
   resolveBenchExtractionModel,
   writeExtractionCacheManifest,
-  type ExtractionCacheManifest
+  type ExtractionCacheManifest,
+  type ExtractionCacheManifestV3
 } from "../../longmemeval/extraction-cache-manifest.js";
+import { hasCompleteExtractionFillAuthority } from
+  "../../longmemeval/extraction/fill-authority.js";
+import {
+  computeExtractionContentClosureSha256,
+  computeExtractionKeySetSha256
+} from
+  "../../longmemeval/extraction/content-closure.js";
 
 const BASE_MANIFEST: ExtractionCacheManifest = {
   schema_version: 1,
@@ -71,6 +79,76 @@ describe("extraction-cache-manifest", () => {
     };
     writeExtractionCacheManifest(cacheRoot, manifest);
     expect(readExtractionCacheManifest(cacheRoot)).toEqual(manifest);
+  });
+
+  it("keeps a digest-only finalized v3 closure readable but gate-ineligible", () => {
+    const manifest = scopedManifest({ content_closure_sha256: "c".repeat(64) });
+    writeExtractionCacheManifest(cacheRoot, manifest);
+    const read = readExtractionCacheManifest(cacheRoot);
+    expect(read).toEqual(manifest);
+    expect(hasCompleteExtractionFillAuthority(read ?? {})).toBe(false);
+  });
+
+  it("round-trips a subset-verifiable finalized content closure index", () => {
+    const cacheKey = "b".repeat(64);
+    const rawJsonSha256 = "d".repeat(64);
+    const content_closure_sha256 = computeExtractionContentClosureSha256([{
+      cacheKey,
+      model: BASE_MANIFEST.extraction_model,
+      requestProfile: "provider-default-v1",
+      rawJsonSha256,
+      rawSignalCount: 2,
+      parsedDraftCount: 1
+    }]);
+    const manifest = scopedManifest({
+      expected_key_set_sha256: computeExtractionKeySetSha256([cacheKey]),
+      content_closure_sha256,
+      content_closure_index: { [cacheKey]: [rawJsonSha256, 2, 1] }
+    });
+
+    writeExtractionCacheManifest(cacheRoot, manifest);
+
+    const read = readExtractionCacheManifest(cacheRoot);
+    expect(read).toEqual(manifest);
+    expect(hasCompleteExtractionFillAuthority(read ?? {})).toBe(true);
+  });
+
+  it("rejects a content closure index whose raw member differs from its digest", () => {
+    const cacheKey = "b".repeat(64);
+    const rawJsonSha256 = "d".repeat(64);
+    const manifest = scopedManifest({
+      expected_key_set_sha256: computeExtractionKeySetSha256([cacheKey]),
+      content_closure_sha256: computeExtractionContentClosureSha256([{
+        cacheKey,
+        model: BASE_MANIFEST.extraction_model,
+        requestProfile: "provider-default-v1",
+        rawJsonSha256,
+        rawSignalCount: 0,
+        parsedDraftCount: 0
+      }]),
+      content_closure_index: { [cacheKey]: ["e".repeat(64), 0, 0] }
+    });
+
+    expect(() => writeExtractionCacheManifest(cacheRoot, manifest))
+      .toThrow(/inconsistent content closure digest/u);
+  });
+
+  it("keeps legacy complete v3 readable but ineligible without a content closure", () => {
+    const manifest = scopedManifest();
+    writeExtractionCacheManifest(cacheRoot, manifest);
+    const read = readExtractionCacheManifest(cacheRoot);
+    expect(read).toEqual(manifest);
+    expect(hasCompleteExtractionFillAuthority(read ?? {})).toBe(false);
+  });
+
+  it("rejects malformed or prematurely finalized content closures", () => {
+    expect(() => writeExtractionCacheManifest(cacheRoot, scopedManifest({
+      content_closure_sha256: "invalid"
+    }))).toThrow(/content_closure_sha256/u);
+    expect(() => writeExtractionCacheManifest(cacheRoot, scopedManifest({
+      fill_status: "in_progress",
+      content_closure_sha256: "c".repeat(64)
+    }))).toThrow(/cannot finalize content while in_progress/u);
   });
 
   it("round-trips a coverage-less (pre-fill) manifest", () => {
@@ -324,3 +402,24 @@ describe("extraction-cache-manifest", () => {
     );
   });
 });
+
+function scopedManifest(
+  overrides: Partial<ExtractionCacheManifestV3> = {}
+): ExtractionCacheManifestV3 {
+  return {
+    ...BASE_MANIFEST,
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    model_family: BASE_MANIFEST.extraction_model,
+    request_profile: "provider-default-v1",
+    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+    requested_turns: 1,
+    cached_turns: 1,
+    coverage: 1,
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: 1,
+    expected_turns: 1,
+    expected_key_set_sha256: "b".repeat(64),
+    ...overrides
+  };
+}

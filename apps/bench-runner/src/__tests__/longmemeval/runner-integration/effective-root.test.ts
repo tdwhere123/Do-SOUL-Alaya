@@ -11,6 +11,10 @@ import {
 } from "../../../longmemeval/extraction-cache-manifest.js";
 import { prepareCrossQuestionRun } from "../../../longmemeval/crossquestion-run.js";
 import { prepareMultiturnRun } from "../../../longmemeval/multiturn-run.js";
+import { LongMemEvalDiagnosticsSpool } from
+  "../../../longmemeval/diagnostics/spool.js";
+import { prepareLongMemEvalRun } from
+  "../../../longmemeval/runner/prepare-context.js";
 import { buildLongMemEvalRunProvenance } from
   "../../../longmemeval/provenance/run.js";
 import { selectionContractIdentity } from "../../../longmemeval/selection/contract.js";
@@ -29,6 +33,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -53,6 +58,60 @@ describe("Tier 1 effective extraction root", () => {
         dataset_revision: fixture.datasetSha256,
         request_profile: "provider-default-v1"
       });
+    }
+  );
+
+  it.each(["recall", "snapshot"] as const)(
+    "fails the %s entrypoint closed on a cache miss despite live env opt-in",
+    async (surface) => {
+      const questions = buildRunnerQuestions(`q-${surface}-`, 1);
+      const fixture = await createRunnerFixture({
+        root: tmpRoot,
+        label: `cache-only-${surface}`,
+        variant: "longmemeval_s",
+        questions
+      });
+      writeCurrentCacheManifest(fixture.extractionCacheRoot, fixture.datasetSha256);
+      const fetchSpy = stubCredentialledLiveExtractionEnv();
+      const spool = await LongMemEvalDiagnosticsSpool.create();
+
+      try {
+        await expect(prepareLongMemEvalRun({
+          variant: fixture.variant,
+          limit: 1,
+          historyRoot: fixture.historyRoot,
+          dataDir: fixture.dataDir,
+          pinnedMetaRoot: fixture.pinnedMetaRoot,
+          extractionCacheRoot: fixture.extractionCacheRoot,
+          embeddingMode: "disabled",
+          ...(surface === "snapshot"
+            ? { snapshotOut: join(tmpRoot, "snapshot.db") }
+            : {})
+        }, undefined, spool)).rejects.toThrow(/cache covers only part/u);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        await spool.dispose();
+      }
+    }
+  );
+
+  it.each(["multiturn", "crossquestion"] as const)(
+    "fails the %s entrypoint at run start on a cache miss despite live env opt-in",
+    async (surface) => {
+      const fixture = await createRunnerFixture({
+        root: tmpRoot,
+        label: `cache-only-${surface}`,
+        variant: "longmemeval_s",
+        questions: buildRunnerQuestions(`q-${surface}-`, 1)
+      });
+      writeCurrentCacheManifest(fixture.extractionCacheRoot, fixture.datasetSha256);
+      vi.stubEnv("ALAYA_BENCH_EXTRACTION_CACHE_ROOT", fixture.extractionCacheRoot);
+      const fetchSpy = stubCredentialledLiveExtractionEnv();
+
+      await expect(prepareSurface(surface, fixture)).rejects.toThrow(
+        /cache covers only part/u
+      );
+      expect(fetchSpy).not.toHaveBeenCalled();
     }
   );
 });
@@ -112,4 +171,14 @@ function writeCurrentCacheManifest(cacheRoot: string, datasetSha256: string): vo
     built_at: "2026-07-16T00:00:00.000Z",
     builder: "test"
   });
+}
+
+function stubCredentialledLiveExtractionEnv() {
+  vi.stubEnv("ALAYA_BENCH_ALLOW_LIVE_EXTRACTION", "1");
+  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:TEST_GARDEN_API_KEY");
+  vi.stubEnv("TEST_GARDEN_API_KEY", "test-secret-never-used");
+  vi.stubEnv("ALAYA_SEED_EXTRACTION_DIAG_DIR", join(tmpRoot, "diagnostics"));
+  const fetchSpy = vi.fn(() => Promise.reject(new Error("network must not run")));
+  vi.stubGlobal("fetch", fetchSpy);
+  return fetchSpy;
 }

@@ -28,12 +28,17 @@ interface ValueScan {
   complete: boolean;
 }
 
-export class DiagnosticsJsonStreamReader {
+export class DiagnosticsJsonStreamReader<
+  Question = LongMemEvalQuestionDiagnostic,
+  Document = LongMemEvalDiagnosticsSidecar
+> {
   readonly #metadata: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  readonly #questions: LongMemEvalQuestionDiagnostic[] = [];
-  readonly #pendingQuestions: LongMemEvalQuestionDiagnostic[] = [];
+  readonly #questions: Question[] = [];
+  readonly #pendingQuestions: Question[] = [];
   readonly #maxQuestionChars: number;
   readonly #streamQuestions: boolean;
+  readonly #parseQuestion: (value: unknown, index: number) => Question;
+  readonly #expectedSchemaVersion: number;
   #state: ReaderState = "start";
   #key = "";
   #keyRaw = "";
@@ -45,13 +50,18 @@ export class DiagnosticsJsonStreamReader {
 
   constructor(
     maxQuestionChars = DEFAULT_MAX_QUESTION_CHARS,
-    streamQuestions = false
+    streamQuestions = false,
+    parseQuestion?: (value: unknown, index: number) => Question,
+    expectedSchemaVersion = 1
   ) {
     if (!Number.isSafeInteger(maxQuestionChars) || maxQuestionChars < 1) {
       throw new Error("diagnostics maxQuestionChars must be a positive integer");
     }
     this.#maxQuestionChars = maxQuestionChars;
     this.#streamQuestions = streamQuestions;
+    this.#parseQuestion = parseQuestion ??
+      (parseLongMemEvalQuestion as (value: unknown, index: number) => Question);
+    this.#expectedSchemaVersion = expectedSchemaVersion;
   }
 
   consume(chunk: string): void {
@@ -71,23 +81,23 @@ export class DiagnosticsJsonStreamReader {
     if (captureStart >= 0) this.#appendCaptured(chunk.slice(captureStart));
   }
 
-  finish(): LongMemEvalDiagnosticsSidecar {
+  finish(): Document {
     if (this.#state !== "done") {
       throw new Error(`truncated diagnostics JSON in state ${this.#state}`);
     }
     if (!this.#questionsSeen) {
       throw new Error("diagnostics JSON missing questions array");
     }
-    if (this.#metadata.schema_version !== 1) {
+    if (this.#metadata.schema_version !== this.#expectedSchemaVersion) {
       throw new Error("diagnostics JSON has invalid schema_version");
     }
     return {
       ...this.#metadata,
       questions: this.#questions
-    } as unknown as LongMemEvalDiagnosticsSidecar;
+    } as unknown as Document;
   }
 
-  takeQuestions(): LongMemEvalQuestionDiagnostic[] {
+  takeQuestions(): Question[] {
     return this.#pendingQuestions.splice(0);
   }
 
@@ -246,7 +256,7 @@ export class DiagnosticsJsonStreamReader {
     } else if (this.#state === "question_value") {
       const index = this.#questionCount;
       const raw = parseJson(this.#buffer, `diagnostics question[${index}]`);
-      const question = parseQuestion(raw, index);
+      const question = this.#parseQuestion(raw, index);
       if (this.#streamQuestions) this.#pendingQuestions.push(question);
       else this.#questions.push(question);
       this.#questionCount += 1;
@@ -289,7 +299,10 @@ function acceptValueChar(scan: ValueScan, char: string): void {
   }
 }
 
-function parseQuestion(value: unknown, index: number): LongMemEvalQuestionDiagnostic {
+function parseLongMemEvalQuestion(
+  value: unknown,
+  index: number
+): LongMemEvalQuestionDiagnostic {
   const parsed = LongMemEvalQuestionDiagnosticSchema.safeParse(value);
   if (!parsed.success) {
     throw new Error(`diagnostics question[${index}] failed schema validation: ${parsed.error.message}`);

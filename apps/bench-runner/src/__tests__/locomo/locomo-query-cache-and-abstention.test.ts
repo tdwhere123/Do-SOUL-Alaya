@@ -11,8 +11,22 @@ import {
 } from "./locomo-runner.test-support.js";
 import { readFile } from "node:fs/promises";
 import { runLocomo } from "../../locomo/runner.js";
+import { buildLongMemEvalQualityMetrics } from
+  "../../longmemeval/diagnostics-quality.js";
+import { promotionMeasurementDiagnostic } from
+  "../longmemeval/specialized-answerable-recall-fixture.js";
 
 describe("LoCoMo runner", () => {
+
+  it("uses the measurement cohort rather than an ID suffix for shared quality denominators", () => {
+    const row = promotionMeasurementDiagnostic("locomo-row_abs", "scorable", true);
+
+    expect(buildLongMemEvalQualityMetrics([row])).toMatchObject({
+      candidate_absent_denominator: 1,
+      non_monotonic_denominator: 1,
+      abstention: { total: 0 }
+    });
+  });
 
   it("leaves query encode to timed recall instead of pre-warming the query cache", async () => {
     const warmQueryEmbeddingCache = vi.fn();

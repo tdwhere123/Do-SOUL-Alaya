@@ -5,6 +5,7 @@ import type {
   NarrowRecallDiagnostics
 } from "../diagnostics-types.js";
 import { buildObjectIdentityKey } from "../diagnostics-private.js";
+import { requireDeliveryMissDropReason } from "../delivery-miss-taxonomy.js";
 
 interface GoldDiagnosticInput {
   readonly goldMemoryIds: readonly string[];
@@ -28,11 +29,21 @@ function buildGoldDiagnostic(
   const candidate = input.diagnostics?.candidatesByObjectIdentity.get(
     buildObjectIdentityKey("memory_entry", objectId)
   );
+  const fineAssessmentPruned = candidate === undefined && input.diagnostics
+    ?.fineAssessmentPrunedByObjectIdentity.has(
+      buildObjectIdentityKey("memory_entry", objectId)
+    ) === true;
   const anyObjectCandidate = input.diagnostics?.candidatesByObjectId.get(objectId);
+  const anyObjectFineAssessmentPruned = anyObjectCandidate === undefined && input.diagnostics
+    ?.fineAssessmentPrunedObjectIds.has(objectId) === true;
   return {
     object_id: objectId,
     candidate_status: resolveCandidateStatus(
-      deliveredRank, activeConstraintRank, candidate, input.diagnostics !== null
+      deliveredRank,
+      activeConstraintRank,
+      candidate,
+      fineAssessmentPruned,
+      input.diagnostics !== null
     ),
     ...buildGoldRankingFields(candidate, deliveredRank, activeConstraintRank),
     ...buildGoldPlaneFields(candidate),
@@ -40,6 +51,8 @@ function buildGoldDiagnostic(
       deliveredRank,
       candidate,
       anyObjectCandidate,
+      fineAssessmentPruned,
+      anyObjectFineAssessmentPruned,
       diagnosticsAvailable: input.diagnostics !== null
     }),
     ...buildGoldDeliveryFields(candidate)
@@ -50,11 +63,12 @@ function resolveCandidateStatus(
   deliveredRank: number | null,
   activeConstraintRank: number | null,
   candidate: CandidateDiagnostic | undefined,
+  fineAssessmentPruned: boolean,
   diagnosticsAvailable: boolean
 ): LongMemEvalGoldDiagnostic["candidate_status"] {
   if (deliveredRank !== null) return "delivered";
   if (activeConstraintRank !== null) return "active_constraint_delivered";
-  if (candidate !== undefined) return "candidate_not_delivered";
+  if (candidate !== undefined || fineAssessmentPruned) return "candidate_not_delivered";
   return diagnosticsAvailable ? "candidate_absent" : "unknown";
 }
 
@@ -96,7 +110,7 @@ function buildGoldDeliveryFields(candidate: CandidateDiagnostic | undefined) {
     structural_score: candidate?.structuralScore ?? null,
     score_factors: candidate?.scoreFactors ?? null,
     source_channels: candidate?.sourceChannels ?? [],
-    budget_drop_reason: candidate?.budgetDropReason ?? null,
+    budget_drop_reason: requireDeliveryMissDropReason(candidate?.budgetDropReason ?? null),
     rank_after_fusion: candidate?.rankAfterFusion ?? null,
     rank_after_feature_rerank: candidate?.rankAfterFeatureRerank ?? null,
     rank_after_lexical_priority: candidate?.rankAfterLexicalPriority ?? null,

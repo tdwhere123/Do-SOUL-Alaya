@@ -25,9 +25,11 @@ function makePayload(
 function makeSeedExtractionPath(
   input: Partial<NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>> = {}
 ): NonNullable<KpiPayload["kpi"]["seed_extraction_path"]> {
+  const cacheHits = input.cache_hits ?? 276;
   return {
     path: "official_api_compile",
-    cache_hits: 276,
+    extraction_attempts: input.extraction_attempts ?? cacheHits,
+    cache_hits: cacheHits,
     llm_calls: 0,
     offline_fallbacks: 0,
     live_extraction_failures: 0,

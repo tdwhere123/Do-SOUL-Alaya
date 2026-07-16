@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertBiEncoderRunActivation,
+  assertBiEncoderTreatmentActive,
   assertEmbeddingTreatmentDiagnosticsPresent,
   requiresEmbeddingTreatmentDiagnostics
 } from "../../harness/embedding-treatment-activation.js";
@@ -14,6 +16,53 @@ import {
 import { recallEvalEmbeddingMode } from "../../longmemeval/lifecycle/recall-eval-runtime.js";
 
 describe("embedding treatment activation", () => {
+  it("accepts an observed finite zero similarity", () => {
+    expect(() => assertBiEncoderTreatmentActive({
+      providerState: "provider_returned",
+      providerDegradationReason: null,
+      embeddingSimilarities: [0]
+    })).not.toThrow();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY]
+  ])("rejects %s candidate evidence even when workspace rows were scanned", (_label, value) => {
+    expect(() => assertBiEncoderTreatmentActive({
+      providerState: "provider_returned",
+      providerDegradationReason: null,
+      embeddingSimilarities: [value],
+      workspaceScannedCount: 2,
+      workspaceTruncated: false,
+      workspaceProviderKind: "local_onnx",
+      workspaceModelId: "fixture-bi",
+      workspaceSchemaVersion: 1
+    })).toThrow(/bi-encoder treatment activation failed/u);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["undefined", undefined],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY]
+  ])("rejects an observed %s similarity key in a disabled control cell", (_label, value) => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_not_requested",
+      provider_degradation_reason: null,
+      candidates: [{ score_factors: { embedding_similarity: value } }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" }))
+      .toThrow(/control activation failed/u);
+  });
+
+  it("accepts a disabled control cell with no embedding evidence key", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_not_requested",
+      provider_degradation_reason: null,
+      candidates: [{ score_factors: {} }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "false" })).not.toThrow();
+  });
+
   it.each([
     ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
     ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"],

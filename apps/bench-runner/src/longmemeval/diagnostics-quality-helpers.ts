@@ -162,31 +162,9 @@ export function hasGoldGraphExpansionStream(gold: LongMemEvalGoldDiagnostic): bo
 export function isDeliveredOrderNonMonotonic(
   results: readonly DiagnosticRecallResult[]
 ): boolean {
-  const deliveredRanks = results.map((result) => result.rank);
-  if (deliveredRanks.every(isFiniteDiagnosticRank)) {
-    return isDeliveredRankOrderNonMonotonic(deliveredRanks);
-  }
-  const fusedRanks = results.map((result) => result.fused_rank);
-  if (fusedRanks.every(isFiniteDiagnosticRank)) {
-    return isDeliveredRankOrderNonMonotonic(fusedRanks);
-  }
   return isDeliveredScoreOrderNonMonotonic(
     results.map((result) => result.relevance_score)
   );
-}
-
-function isFiniteDiagnosticRank(rank: number | null | undefined): rank is number {
-  return typeof rank === "number" && Number.isFinite(rank);
-}
-
-function isDeliveredRankOrderNonMonotonic(ranks: readonly number[]): boolean {
-  for (let i = 1; i < ranks.length; i++) {
-    const current = ranks[i];
-    const previous = ranks[i - 1];
-    if (current === undefined || previous === undefined) continue;
-    if (current < previous) return true;
-  }
-  return false;
 }
 
 function isDeliveredScoreOrderNonMonotonic(scores: readonly number[]): boolean {

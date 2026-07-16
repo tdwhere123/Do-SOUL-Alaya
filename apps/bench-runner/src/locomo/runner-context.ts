@@ -46,7 +46,7 @@ export async function prepareLocomoRun(
       process.env,
       opts.embeddingProviderKind
     ),
-    seedRunner: createLocomoSeedRunner(window)
+    seedRunner: createLocomoSeedRunner(window, Math.max(0, opts.offset ?? 0))
   };
 }
 
@@ -60,10 +60,12 @@ function selectLocomoWindow(
 }
 
 function createLocomoSeedRunner(
-  window: readonly LocomoSample[]
+  window: readonly LocomoSample[],
+  offset: number
 ): CompileSeedRunner {
   return createCompileSeedRunner({
     requiredTurnContents: collectDistinctLocomoTurnContents(window),
+    requiredQuestionWindow: { offset, limit: window.length },
     ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
   });
 }

@@ -18,7 +18,9 @@ export interface EmbeddingBackfillMemoryRepoPort {
   ): Promise<readonly Readonly<MemoryEntry>[]>;
 }
 
-export type EmbeddingBackfillMetadata = Omit<EmbeddingVectorRecord, "embedding">;
+export type EmbeddingBackfillMetadata = Omit<EmbeddingVectorRecord, "embedding"> & {
+  readonly vector_valid: boolean;
+};
 
 export interface EmbeddingBackfillRepoPort {
   findMetadataByObjectIds(
@@ -75,6 +77,7 @@ export interface EmbeddingBackfillHandlerDependencies {
   readonly memoryRepo: EmbeddingBackfillMemoryRepoPort;
   readonly memoryEmbeddingRepo: EmbeddingBackfillRepoPort;
   readonly provider: EmbeddingProviderPort;
+  readonly expectedDimensions?: () => number | null;
   // Absent = embed raw content (doc2query off, byte-identical to the prior path).
   readonly hqProvider?: HqProvider;
   readonly now?: () => string;

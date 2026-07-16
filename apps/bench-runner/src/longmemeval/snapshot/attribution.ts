@@ -1,19 +1,27 @@
 import {
-  isLongMemEvalRunProvenanceGateEligible,
-  type LongMemEvalRunProvenance
-} from "../provenance/run.js";
+  isCacheOnlySeedExtractionPath,
+  type SeedExtractionPath
+} from "@do-soul/alaya-eval";
+import type { LongMemEvalSnapshotRunProvenance } from "./run-provenance.js";
+import { isSnapshotRunProvenanceSummaryGateEligible } from
+  "./run-provenance.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../extraction-cache-manifest.js";
+import {
+  hasMatchingCompleteExtractionFillSummary
+} from "../extraction/fill-authority.js";
 import type {
   LongMemEvalSnapshotManifest,
   SnapshotExtractionProvenance
 } from "../snapshot.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
+import { isDeepStrictEqual } from "node:util";
 
 export function deriveSnapshotAttribution(input: {
   readonly artifactIntegrity?: SnapshotArtifactIntegrity;
-  readonly runProvenance?: LongMemEvalRunProvenance;
+  readonly runProvenance?: LongMemEvalSnapshotRunProvenance;
   readonly questionIdDigest?: string;
   readonly datasetSha256?: string;
+  readonly seedExtractionPath?: SeedExtractionPath;
   readonly extractionProvenance?: SnapshotExtractionProvenance | null;
 }): NonNullable<LongMemEvalSnapshotManifest["attribution"]> {
   if (!hasCompleteBinding(input)) {
@@ -23,8 +31,9 @@ export function deriveSnapshotAttribution(input: {
   return {
     status: "attributed",
     gate_eligible:
-      isLongMemEvalRunProvenanceGateEligible(provenance) &&
+      isSnapshotRunProvenanceSummaryGateEligible(provenance) &&
       input.questionIdDigest === provenance.selection?.selected_id_digest &&
+      isCacheOnlySeedExtractionPath(input.seedExtractionPath) &&
       hasGateEligibleExtractionCache(
         provenance,
         input.datasetSha256,
@@ -35,7 +44,9 @@ export function deriveSnapshotAttribution(input: {
 
 function hasCompleteBinding(input: Parameters<typeof deriveSnapshotAttribution>[0]): boolean {
   return (
-    input.artifactIntegrity !== undefined &&
+    input.artifactIntegrity?.extraction_authority_filename !== undefined &&
+    input.artifactIntegrity.extraction_authority_sha256 !== undefined &&
+    input.artifactIntegrity.extraction_authority_bytes !== undefined &&
     input.runProvenance !== undefined &&
     input.questionIdDigest !== undefined &&
     input.datasetSha256 !== undefined
@@ -43,7 +54,7 @@ function hasCompleteBinding(input: Parameters<typeof deriveSnapshotAttribution>[
 }
 
 function hasGateEligibleExtractionCache(
-  provenance: LongMemEvalRunProvenance,
+  provenance: LongMemEvalSnapshotRunProvenance,
   datasetSha256: string | undefined,
   snapshotCache: SnapshotExtractionProvenance | null | undefined
 ): boolean {
@@ -53,6 +64,7 @@ function hasGateEligibleExtractionCache(
     cache !== null && snapshotCache != null &&
     cache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
     snapshotCache.schema_version === EXTRACTION_CACHE_MANIFEST_VERSION &&
+    hasMatchingCompleteExtractionFillSummary(cache, snapshotCache) &&
     provenanceDatasetSha !== undefined &&
     datasetSha256 === provenanceDatasetSha &&
     snapshotCache.manifest_sha256 === cache.manifest_sha256 &&
@@ -64,6 +76,11 @@ function hasGateEligibleExtractionCache(
     snapshotCache.cache_key_algo === cache.cache_key_algo &&
     snapshotCache.dataset === cache.dataset &&
     snapshotCache.dataset_revision === cache.dataset_revision &&
+    isDeepStrictEqual(
+      snapshotCache.expansion_source_anchor,
+      cache.expansion_source_anchor
+    ) &&
+    isDeepStrictEqual(snapshotCache.expansion_lineage, cache.expansion_lineage) &&
     cache.requested_turns !== undefined && cache.cached_turns !== undefined &&
     cache.coverage === 1 && cache.cached_turns >= cache.requested_turns &&
     snapshotCache.requested_turns === cache.requested_turns &&
@@ -73,7 +90,7 @@ function hasGateEligibleExtractionCache(
 }
 
 function resolveProvenanceDatasetSha(
-  provenance: LongMemEvalRunProvenance
+  provenance: LongMemEvalSnapshotRunProvenance
 ): string | undefined {
   const manifestSha = provenance.dataset_sha256 ??
     provenance.question_manifest?.dataset_sha256;

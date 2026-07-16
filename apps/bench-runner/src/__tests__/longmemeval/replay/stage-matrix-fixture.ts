@@ -15,6 +15,9 @@ export const cliPath = path.resolve(
 export function candidate(objectId: string, ranks: Record<string, number | null>) {
   return {
     object_id: objectId,
+    object_kind: "memory_entry",
+    origin_plane: "workspace_local",
+    candidate_key: `workspace_local:memory_entry:${objectId}`,
     fused_rank: ranks.fused_rank ?? null,
     rank_after_fusion: ranks.rank_after_fusion ?? null,
     rank_after_feature_rerank: ranks.feature ?? null,
@@ -75,6 +78,9 @@ export function question(id: string, candidates: readonly unknown[], row: Return
     question_type: "single-session-user",
     phase_latency_ms: { recall: 12 },
     candidate_pool_complete: true,
+    candidate_pool_count: candidates.length,
+    fine_pruned_count: 0,
+    fine_assessment_pruned_candidates: [],
     ...(row.quality_axes === undefined ? {} : { quality_axes: row.quality_axes }),
     cohort_ledger: Object.fromEntries(Object.entries(row).filter(([key]) => key !== "question_id")),
     candidates

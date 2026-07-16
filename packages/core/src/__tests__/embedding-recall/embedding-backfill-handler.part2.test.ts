@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EmbeddingBackfillHandler, isEmbeddingBackfillPartialFailureError, resolveBackfillBatchConcurrency } from "../../embedding-recall/embedding-backfill-handler.js";
 import type { EmbeddingVectorRecord } from "../../embedding-recall/embedding-recall-service.js";
 
-import { createMemoryEntry, createProvider } from "./embedding-backfill-handler.test-support.js";
+import {
+  createEmbeddingMetadata,
+  createMemoryEntry,
+  createProvider,
+  hashContent
+} from "./embedding-backfill-handler.test-support.js";
 
 describe("EmbeddingBackfillHandler", () => {
 beforeEach(() => {
@@ -293,6 +298,94 @@ it("returns failed audit entries for an all-failing corpus without throwing", as
       );
     }
   });
+
+it.each([
+  ["zero", new Float32Array([0, 0])],
+  ["NaN", new Float32Array([Number.NaN, 1])]
+])("never persists a %s provider vector", async (_label, vector) => {
+  const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+  const handler = new EmbeddingBackfillHandler({
+    memoryRepo: { findByWorkspaceId: vi.fn(async () => [createMemoryEntry()]) },
+    memoryEmbeddingRepo: {
+      findMetadataByObjectIds: vi.fn(async () => []),
+      upsert,
+      upsertIfContentHashMatchesCurrentMemory: upsert
+    },
+    provider: createProvider({ embedTexts: vi.fn(async () => [vector]) }),
+    retryDelayMs: 0
+  });
+
+  const result = await handler.handle({ workspace_id: "workspace-1" });
+
+  expect(upsert).not.toHaveBeenCalled();
+  expect(result.objectsAffected).toEqual([]);
+  expect(result.auditEntries).toEqual([
+    expect.stringMatching(/^embedding_failed:provider:memory-1:/u)
+  ]);
+});
+
+it("rebuilds the whole current identity when cached dimensions disagree", async () => {
+  const memories = [
+    createMemoryEntry({ object_id: "memory-2d", content: "Two dimensional cache." }),
+    createMemoryEntry({ object_id: "memory-3d", content: "Three dimensional cache." })
+  ];
+  const metadata = memories.map((memory, index) => createEmbeddingMetadata({
+    object_id: memory.object_id,
+    content_hash: hashContent(memory.content),
+    dimensions: index === 0 ? 2 : 3
+  }));
+  const embedTexts = vi.fn(async (texts: readonly string[]) =>
+    texts.map(() => new Float32Array([1, 0, 0]))
+  );
+  const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+  const handler = new EmbeddingBackfillHandler({
+    memoryRepo: { findByWorkspaceId: vi.fn(async () => memories) },
+    memoryEmbeddingRepo: {
+      findMetadataByObjectIds: vi.fn(async () => metadata),
+      upsert,
+      upsertIfContentHashMatchesCurrentMemory: upsert
+    },
+    provider: createProvider({ embedTexts }),
+    expectedDimensions: () => 3,
+    retryDelayMs: 0
+  });
+
+  const result = await handler.handle({ workspace_id: "workspace-1" });
+
+  expect(embedTexts).toHaveBeenCalledOnce();
+  expect(upsert).toHaveBeenCalledTimes(2);
+  expect(upsert.mock.calls.every(([record]) => record.dimensions === 3)).toBe(true);
+  expect(result.objectsAffected).toEqual(memories.map(({ object_id }) => object_id));
+});
+
+it("rebuilds a dimensionally stale cache after provider restart and reuses a matching cache", async () => {
+  const memory = createMemoryEntry({ content: "Restart dimension contract." });
+  const embedTexts = vi.fn(async () => [new Float32Array([1, 0, 0])]);
+  const upsert = vi.fn(async (record: EmbeddingVectorRecord) => record);
+  const metadata = createEmbeddingMetadata({
+    content_hash: hashContent(memory.content),
+    dimensions: 2
+  });
+  const createHandler = (dimensions: number) => new EmbeddingBackfillHandler({
+    memoryRepo: { findByWorkspaceId: vi.fn(async () => [memory]) },
+    memoryEmbeddingRepo: {
+      findMetadataByObjectIds: vi.fn(async () => [{ ...metadata, dimensions }]),
+      upsert,
+      upsertIfContentHashMatchesCurrentMemory: upsert
+    },
+    provider: createProvider({ embedTexts }),
+    expectedDimensions: () => 3,
+    retryDelayMs: 0
+  });
+
+  await expect(createHandler(2).handle({ workspace_id: "workspace-1" }))
+    .resolves.toMatchObject({ objectsAffected: [memory.object_id] });
+  await expect(createHandler(3).handle({ workspace_id: "workspace-1" }))
+    .resolves.toMatchObject({ objectsAffected: [] });
+
+  expect(embedTexts).toHaveBeenCalledOnce();
+  expect(upsert).toHaveBeenCalledOnce();
+});
 });
 
 describe("resolveBackfillBatchConcurrency", () => {

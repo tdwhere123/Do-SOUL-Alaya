@@ -48,10 +48,11 @@ import { seedCompileTurn } from "./compile-seed-turn.js";
  * @anchor longmemeval-compile-seed
  *
  * Field-standard ingestion for the LongMemEval bench seed path. Each haystack
- * turn is run through production garden extraction when credentials exist, or
- * the explicit no-credentials full-turn fallback when they do not. The runner
- * keeps one stats object for the whole bench run so archive KPIs disclose the
- * actual extraction path and every drop stage.
+ * turn is run through production garden extraction from a validated cache or
+ * an explicitly enabled live transport. The full-turn fallback is reserved
+ * for the manifest-less no-credentials path. The runner keeps one stats object
+ * for the whole bench run so archive KPIs disclose the actual extraction path
+ * and every drop stage.
  */
 export function createCompileSeedRunner(
   options?: CompileSeedRunnerOptions

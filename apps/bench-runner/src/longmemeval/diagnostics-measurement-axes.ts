@@ -7,6 +7,10 @@ import {
   buildLongMemEvalSidecarKey,
   type LongMemEvalSidecarEntry
 } from "./runner-scoring.js";
+import {
+  isLongMemEvalGoldSource,
+  longMemEvalAttributionSources
+} from "./provenance/source-rounds.js";
 
 interface DeliveredMeasurementCandidate {
   readonly object_id: string;
@@ -62,6 +66,13 @@ export function attachQuestionMeasurementAxes(
     evaluatorGoldMemoryIds: diagnostic.gold_memory_ids,
     evaluatorHitAt5: diagnostic.hit_at_5
   });
+  return applyQuestionMeasurementAxes(diagnostic, qualityAxes);
+}
+
+export function applyQuestionMeasurementAxes(
+  diagnostic: LongMemEvalQuestionDiagnostic,
+  qualityAxes: LongMemEvalQuestionMeasurementAxes
+): LongMemEvalQuestionDiagnostic {
   const cohortLedger = failClosedIdentityClassification(
     diagnostic.cohort_ledger,
     qualityAxes.evaluator_identity_integrity_at_5.status
@@ -142,7 +153,9 @@ function buildAnswerSessionCoverage(
     return { applicable: false, covered_count: 0, total_count: targets.size, ratio: null, full_coverage: false };
   }
   const covered = new Set(topFive
-    .map((candidate) => candidate.sidecar?.sessionId)
+    .flatMap((candidate) => candidate.sidecar === undefined
+      ? []
+      : longMemEvalAttributionSources(candidate.sidecar).map((source) => source.sessionId))
     .filter((sessionId): sessionId is string => sessionId !== undefined && targets.has(sessionId)));
   return {
     applicable: true,
@@ -199,8 +212,9 @@ function buildTimestampAvailability(
   topFive: readonly TopFiveCandidate[]
 ): LongMemEvalQuestionMeasurementAxes["source_timestamp_availability_at_5"] {
   const available = topFive.filter((candidate) => {
-    const sessionId = candidate.sidecar?.sessionId;
-    return sessionId !== undefined && hasText(input.sourceDatesBySession.get(sessionId));
+    const sidecar = candidate.sidecar;
+    return sidecar !== undefined && longMemEvalAttributionSources(sidecar)
+      .every((source) => hasText(input.sourceDatesBySession.get(source.sessionId)));
   }).length;
   return {
     source: "dataset_session_timestamp_join",
@@ -250,18 +264,15 @@ function buildEvaluatorIdentityIntegrity(
   const exactGold = topFive.filter((candidate) =>
     candidate.objectKind === "memory_entry" && goldIds.has(candidate.objectId)
   );
+  const answerSessionIds = new Set(input.answerSessionIds);
   const sessionSupport = exactGold.filter((candidate) =>
-    candidate.sidecar?.hasAnswer === true &&
-    input.answerSessionIds.includes(candidate.sidecar.sessionId)
-  ).length;
+    hasAnswerSessionSupport(candidate, answerSessionIds)).length;
   const answer = normalizeLiteral(input.answer);
   const literalSupport = exactGold.filter((candidate) =>
     answer.length > 0 && literalWitness(candidate, answer).length > 0
   ).length;
   const topSessionSupport = topFive.filter((candidate) =>
-    candidate.sidecar?.hasAnswer === true &&
-    input.answerSessionIds.includes(candidate.sidecar.sessionId)
-  ).length;
+    hasAnswerSessionSupport(candidate, answerSessionIds)).length;
   const topLiteralSupport = topFive.filter((candidate) =>
     answer.length > 0 && literalWitness(candidate, answer).length > 0
   ).length;
@@ -273,6 +284,14 @@ function buildEvaluatorIdentityIntegrity(
     true, status, exactGold.length, sessionSupport, literalSupport,
     topSessionSupport, topLiteralSupport
   );
+}
+
+function hasAnswerSessionSupport(
+  candidate: TopFiveCandidate,
+  answerSessionIds: ReadonlySet<string>
+): boolean {
+  return candidate.sidecar !== undefined &&
+    isLongMemEvalGoldSource(candidate.sidecar, answerSessionIds);
 }
 
 function resolveIdentityStatus(

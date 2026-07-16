@@ -1,46 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  MemoryDimension,
-  ScopeClass,
-  type MemoryEntry,
-  type RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import {
-  selectFineAssessmentCandidates,
-  type FineAssessmentCandidate
-} from "../../recall/delivery/fine-assessment-selection.js";
+import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-assessment-selection.js";
 import { RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS } from "../../recall/delivery/fine-assessment-answer-features.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
+import {
+  createCandidate,
+  createConfig,
+  createRankedCandidate,
+  createRanks,
+  createSupplementaryData,
+  rankMap,
+  stageRanks
+} from "./fine-assessment-selection-fixtures.js";
 
 describe("selectFineAssessmentCandidates", () => {
-  it("uses a single token estimate per candidate that reaches token-budget evaluation", () => {
-    const estimate = vi.fn(() => 6);
-
-    const result = selectFineAssessmentCandidates({
-      orderedCandidates: [
-        createCandidate("memory-1"),
-        createCandidate("memory-2")
-      ],
-      config: {
-        conflict_awareness: false,
-        budgets: {
-          max_entries: 10,
-          max_total_tokens: 10,
-          per_dimension_limits: null
-        }
-      },
-      supplementaryData: createSupplementaryData(),
-      tokenEstimator: { estimate },
-      rankByCandidateKey: createRanks()
-    });
-
-    expect(result.candidates).toHaveLength(1);
-    expect(result.diagnostics[1]?.dropped_reason).toBe("max_total_tokens");
-    expect(estimate).toHaveBeenCalledTimes(2);
-  });
-
   it("copies bounded answer features and path suppression from existing recall state", () => {
     const longGist = `  ${"g".repeat(RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS + 4)}  `;
     const candidate = createCandidate("memory-1", {
@@ -141,6 +112,86 @@ describe("selectFineAssessmentCandidates", () => {
     expect(result.diagnostics[0]?.path_suppression_score).toBe(0);
   });
 
+  it("keeps memory-keyed diagnostics scoped away from same-id projections", () => {
+    const local = createCandidate("shared");
+    const synthesisBase = createCandidate("shared", {}, "synthesis_capsule");
+    const synthesis = {
+      ...synthesisBase,
+      fusion: {
+        ...synthesisBase.fusion,
+        candidate_key: "workspace_local:synthesis_capsule:shared"
+      }
+    };
+    const globalBase = createCandidate("shared");
+    const global = {
+      ...globalBase,
+      originPlane: "global" as const,
+      fusion: {
+        ...globalBase.fusion,
+        candidate_key: "global:memory_entry:shared"
+      }
+    };
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [local, synthesis, global],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        ftsRanks: { shared: 0.9 },
+        synthesisFtsRanks: { shared: 0.7 },
+        structuralScores: { shared: 1 },
+        sourceCohortKeys: { shared: "memory cohort" },
+        pathSuppressionScores: { shared: 0.25 },
+        evidenceGistsByMemoryId: { shared: "memory gist" }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([local, synthesis, global]),
+      captureAnswerFeatures: true
+    });
+    const diagnostics = new Map(result.diagnostics.map((row) => [row.candidate_key, row]));
+
+    expect(diagnostics.get(local.fusion.candidate_key)).toMatchObject({
+      lexical_rank: 0.9,
+      structural_score: 1,
+      path_suppression_score: 0.25,
+      source_cohort_key: "memory cohort"
+    });
+    for (const candidate of [synthesis, global]) {
+      expect(diagnostics.get(candidate.fusion.candidate_key)).toMatchObject({
+        structural_score: 0,
+        path_suppression_score: 0,
+        source_cohort_key: null
+      });
+    }
+    expect(diagnostics.get(synthesis.fusion.candidate_key)?.lexical_rank).toBe(0.7);
+    expect(diagnostics.get(global.fusion.candidate_key)?.lexical_rank).toBeNull();
+    expect(diagnostics.get(global.fusion.candidate_key)?.answer_features?.evidence_gist).toBeNull();
+  });
+
+  it("attributes synthesis rank only to a production-shape synthesis child", () => {
+    const child = {
+      ...createCandidate("synthesis-child"),
+      sourceChannel: "synthesis_child" as const,
+      sourceChannels: ["synthesis_child", "synthesis_fts"] as const,
+      admissionPlanes: ["synthesis_child"] as const
+    };
+    const ordinary = createCandidate("ordinary-memory");
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [child, ordinary],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        synthesisFtsRanks: {
+          "synthesis-child": 0.8,
+          "ordinary-memory": 0.9
+        }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([child, ordinary])
+    });
+    const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
+
+    expect(diagnostics.get("synthesis-child")?.lexical_rank).toBe(0.8);
+    expect(diagnostics.get("ordinary-memory")?.lexical_rank).toBeNull();
+  });
+
   it("omits answer features unless deep diagnostic capture is explicit", () => {
     const result = selectFineAssessmentCandidates({
       orderedCandidates: [createCandidate("memory-1")],
@@ -193,112 +244,38 @@ describe("selectFineAssessmentCandidates", () => {
       { candidateKey: global.fusion.candidate_key, droppedReason: "duplicate" }
     ]);
   });
+
+  it("attributes joint gist and cohort coverage movement to the coverage selector", () => {
+    const primary = createRankedCandidate("primary", 1, 1);
+    const redundant = createRankedCandidate("redundant", 2, 0.9);
+    const diverse = createRankedCandidate("diverse", 3, 0.8);
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [primary, redundant, diverse],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          primary: "shared gist",
+          redundant: "shared gist",
+          diverse: "different gist"
+        },
+        sourceCohortKeys: {
+          primary: "session-a",
+          redundant: "session-a",
+          diverse: "session-b"
+        }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([primary, redundant, diverse]),
+      coverageRelevanceByCandidateKey: new Map([
+        [primary.fusion.candidate_key, 1],
+        [redundant.fusion.candidate_key, 0.9],
+        [diverse.fusion.candidate_key, 0.8]
+      ])
+    });
+
+    expect(stageRanks(result, "primary")).toEqual([1, 1, "kept", "noop"]);
+    expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted", "noop"]);
+    expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced", "noop"]);
+  });
+
 });
-
-function createCandidate(
-  objectId: string,
-  entryOverrides: Partial<MemoryEntry> = {},
-  objectKind: FineAssessmentCandidate["objectKind"] = "memory_entry"
-): FineAssessmentCandidate {
-  const breakdown = buildEmptyRecallFusionBreakdown(objectId);
-  return {
-    entry: { ...createMemoryEntry(objectId), ...entryOverrides },
-    objectKind,
-    effectiveScore: 0.7,
-    effectiveFactors: createScoreFactors(),
-    fusion: {
-      ...breakdown,
-      fused_rank: 1,
-      fused_score: 0.7
-    }
-  };
-}
-
-function createConfig() {
-  return {
-    conflict_awareness: false,
-    budgets: {
-      max_entries: 10,
-      max_total_tokens: 100,
-      per_dimension_limits: null
-    }
-  } as const;
-}
-
-function createMemoryEntry(objectId: string): MemoryEntry {
-  return {
-    object_id: objectId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-05-13T00:00:00.000Z",
-    updated_at: "2026-05-13T00:00:00.000Z",
-    created_by: "system",
-    dimension: MemoryDimension.PROCEDURE,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: `Recall content for ${objectId}.`,
-    domain_tags: ["repo"],
-    evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.7,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null
-  };
-}
-
-function createScoreFactors(): RecallScoreFactors {
-  return {
-    activation: 0.7,
-    relevance: 0.6,
-    graph_support: 0,
-    path_plasticity: 0,
-    budget_penalty: 0,
-    conflict_penalty: 0
-  };
-}
-
-function createRanks(): ReadonlyMap<string, number> {
-  return new Map();
-}
-
-function createSupplementaryData(
-  overrides: Partial<RecallSupplementaryData> = {}
-): RecallSupplementaryData {
-  return {
-    queryProbes: compileRecallQueryProbes(null),
-    ftsRanks: {},
-    trigramFtsRanks: {},
-    synthesisFtsRanks: {},
-    evidenceFtsRanks: {},
-    sourceProximityScores: {},
-    sourceCohortKeys: {},
-    structuralScores: {},
-    graphExpansionScores: {},
-    entitySeedScores: {},
-    pathExpansionScores: {},
-    pathSuppressionScores: {},
-    embeddingSimilarityScores: {},
-    graphSupportCounts: {},
-    budgetPenaltyFactor: 0,
-    plasticityFactors: {},
-    graphAndPathColdScore: 0,
-    recallsEdgeCount: 0,
-    weightTransferAmount: 0,
-    evidenceGistsByMemoryId: {},
-    governanceCeilingByMemoryId: {},
-    ...overrides
-  };
-}

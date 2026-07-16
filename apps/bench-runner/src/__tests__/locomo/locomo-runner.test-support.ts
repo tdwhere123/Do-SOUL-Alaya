@@ -261,6 +261,9 @@ export function buildRecallResult(objectId = "memory-d1") {
       candidates: [
         {
           object_id: objectId,
+          object_kind: "memory_entry",
+          origin_plane: "workspace_local",
+          candidate_key: `workspace_local:memory_entry:${objectId}`,
           final_rank: 1,
           fused_rank: 1,
           fused_score: 1,

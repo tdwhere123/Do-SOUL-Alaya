@@ -4,11 +4,16 @@ import {
 } from "../harness/daemon.js";
 import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../harness/daemon-types.js";
 import { collectBenchSeedFuelInventory } from "./seed-fuel-collector.js";
+import { toSeedExtractionPathKpi } from "./compile-seed.js";
 import { QaChatError } from "./qa-chat.js";
 import { selectionContractIdentity } from "./selection/contract.js";
 import { writeRecallEvalSnapshot } from "./runner-helpers.js";
 import {
+  prepareLongMemEvalQuestion,
   runLongMemEvalQuestion,
+  runPreparedLongMemEvalQuestion,
+  type LongMemEvalPreparedQuestion,
+  type LongMemEvalQuestionRunInput,
   type LongMemEvalWorkerResult
 } from "./runner-question.js";
 import type { LongMemEvalQuestion } from "./dataset.js";
@@ -24,6 +29,16 @@ import {
   mergeSeedFuelInventories,
   type SeedFuelInventory
 } from "./seed-fuel-inventory.js";
+import { awaitLongMemEvalSnapshotQuiescence } from
+  "./snapshot/quiescence.js";
+import { assertLongMemEvalTreatmentNeutralEdgeFormation } from
+  "./edge-formation-config.js";
+import { collectDistinctTurnContents } from
+  "./extraction/turn-contents.js";
+import { assertCurrentPostFillCacheAuthority } from
+  "./snapshot/current-substrate-authority.js";
+import { assertProductFormationEnvironment } from
+  "./product-formation-policy.js";
 
 export interface LongMemEvalExecutionResult {
   readonly collected: readonly LongMemEvalWorkerResult[];
@@ -51,16 +66,9 @@ async function executeSnapshotCompatibleLongMemEvalRun(
   let primaryError: unknown;
   const execution = createExecutionState();
   try {
+    assertSnapshotProducerExecutionPolicy(context);
     daemon = await startLongMemEvalDaemon(context);
-    await runLongMemEvalWindow(context, daemon, execution);
-    const seedFuelInventory = await collectBenchSeedFuelInventory(daemon.dataDir);
-    await writeLongMemEvalSnapshotIfRequested(context, execution.snapshotQuestions);
-    result = {
-      collected: execution.collected,
-      questionFailures: execution.questionFailures,
-      failedQuestionIds: execution.failedQuestionIds,
-      seedFuelInventory
-    };
+    result = await runSnapshotCompatiblePhases(context, daemon, execution);
     succeeded = execution.questionFailures === 0;
   } catch (error) {
     primaryError = error;
@@ -87,6 +95,22 @@ async function executeSnapshotCompatibleLongMemEvalRun(
   ]);
   if (result === undefined) throw new Error("LongMemEval run produced no result");
   return result;
+}
+
+async function runSnapshotCompatiblePhases(
+  context: LongMemEvalRunContext,
+  daemon: BenchDaemonHandle,
+  execution: ReturnType<typeof createExecutionState>
+): Promise<LongMemEvalExecutionResult> {
+  const prepared = await prepareSnapshotWindow(context, daemon);
+  await awaitLongMemEvalSnapshotQuiescence();
+  const seedFuelInventory = await collectBenchSeedFuelInventory(daemon.dataDir);
+  await writeLongMemEvalSnapshotIfRequested(
+    context,
+    prepared.map((row) => row.prepared.snapshotQuestion)
+  );
+  await runPreparedSnapshotWindow(context, daemon, execution, prepared);
+  return buildExecutionResult(execution, seedFuelInventory);
 }
 
 async function executeQuestionIsolatedLongMemEvalRun(
@@ -159,13 +183,11 @@ async function captureSeedRootCleanupError(
 
 function createExecutionState(): {
   readonly collected: LongMemEvalWorkerResult[];
-  readonly snapshotQuestions: LongMemEvalSnapshotQuestion[];
   questionFailures: number;
   readonly failedQuestionIds: string[];
 } {
   return {
     collected: [],
-    snapshotQuestions: [],
     questionFailures: 0,
     failedQuestionIds: []
   };
@@ -189,15 +211,36 @@ async function startLongMemEvalDaemon(
   });
 }
 
-async function runLongMemEvalWindow(
+interface PreparedSnapshotQuestion {
+  readonly questionIndex: number;
+  readonly question: LongMemEvalQuestion;
+  readonly prepared: LongMemEvalPreparedQuestion;
+}
+
+async function prepareSnapshotWindow(
   context: LongMemEvalRunContext,
-  daemon: BenchDaemonHandle,
-  execution: ReturnType<typeof createExecutionState>
-): Promise<void> {
+  daemon: BenchDaemonHandle
+): Promise<readonly PreparedSnapshotQuestion[]> {
+  const prepared: PreparedSnapshotQuestion[] = [];
   for (let i = 0; i < context.window.length; i += 1) {
     const question = context.window[i];
     if (question === undefined) continue;
-    await runLongMemEvalQuestionSafely(context, daemon, execution, i, question);
+    const value = await prepareLongMemEvalQuestion(
+      buildQuestionRunInput(context, daemon, i, question)
+    );
+    prepared.push({ questionIndex: i, question, prepared: value });
+  }
+  return prepared;
+}
+
+async function runPreparedSnapshotWindow(
+  context: LongMemEvalRunContext,
+  daemon: BenchDaemonHandle,
+  execution: ReturnType<typeof createExecutionState>,
+  prepared: readonly PreparedSnapshotQuestion[]
+): Promise<void> {
+  for (const row of prepared) {
+    await runPreparedLongMemEvalQuestionSafely(context, daemon, execution, row);
   }
   if (execution.questionFailures > 0) {
     process.stdout.write(
@@ -214,25 +257,46 @@ async function runLongMemEvalQuestionSafely(
   questionIndex: number,
   question: LongMemEvalQuestion
 ): Promise<boolean> {
+  return collectLongMemEvalQuestionSafely(
+    context,
+    execution,
+    questionIndex,
+    question,
+    () => runLongMemEvalQuestion(
+      buildQuestionRunInput(context, daemon, questionIndex, question)
+    )
+  );
+}
+
+async function runPreparedLongMemEvalQuestionSafely(
+  context: LongMemEvalRunContext,
+  daemon: BenchDaemonHandle,
+  execution: ReturnType<typeof createExecutionState>,
+  row: PreparedSnapshotQuestion
+): Promise<boolean> {
+  return collectLongMemEvalQuestionSafely(
+    context,
+    execution,
+    row.questionIndex,
+    row.question,
+    () => runPreparedLongMemEvalQuestion(
+      buildQuestionRunInput(context, daemon, row.questionIndex, row.question),
+      row.prepared
+    )
+  );
+}
+
+async function collectLongMemEvalQuestionSafely(
+  context: LongMemEvalRunContext,
+  execution: ReturnType<typeof createExecutionState>,
+  questionIndex: number,
+  question: LongMemEvalQuestion,
+  run: () => Promise<LongMemEvalWorkerResult>
+): Promise<boolean> {
   try {
-    const result = await runLongMemEvalQuestion({
-      daemon,
-      question,
-      turnIndex: questionIndex + 1,
-      seedRunner: context.seedRunner,
-      recallOptions: context.recallOptions,
-      simulateReport: context.simulateReport,
-      embeddingMode: context.opts.embeddingMode ?? "disabled",
-      embeddingProviderKind: context.opts.embeddingProviderKind ??
-        DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
-      captureSnapshot: context.captureSnapshot,
-      ...(context.opts.qa === undefined ? {} : buildQaOptions(context.opts.qa))
-    });
+    const result = await run();
     const diagnostics = await context.diagnosticsSpool.append(result.diagnostics);
     execution.collected.push({ ...result, diagnostics });
-    if (context.captureSnapshot && result.snapshotQuestion !== undefined) {
-      execution.snapshotQuestions.push(result.snapshotQuestion);
-    }
     writeLongMemEvalQuestionProgress(questionIndex, context.window.length, question.question_id, result);
     return true;
   } catch (error) {
@@ -242,6 +306,27 @@ async function runLongMemEvalQuestionSafely(
     writeLongMemEvalQuestionFailure(questionIndex, context.window.length, question.question_id, error);
     return false;
   }
+}
+
+function buildQuestionRunInput(
+  context: LongMemEvalRunContext,
+  daemon: BenchDaemonHandle,
+  questionIndex: number,
+  question: LongMemEvalQuestion
+): LongMemEvalQuestionRunInput {
+  return {
+    daemon,
+    question,
+    turnIndex: questionIndex + 1,
+    seedRunner: context.seedRunner,
+    recallOptions: context.recallOptions,
+    simulateReport: context.simulateReport,
+    embeddingMode: context.opts.embeddingMode ?? "disabled",
+    embeddingProviderKind: context.opts.embeddingProviderKind ??
+      DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
+    captureSnapshot: context.captureSnapshot,
+    ...(context.opts.qa === undefined ? {} : buildQaOptions(context.opts.qa))
+  };
 }
 
 function buildQaOptions(
@@ -254,6 +339,34 @@ function buildQaOptions(
     qaChat: qa.chat,
     ...(qa.judgeChat === undefined ? {} : { qaJudgeChat: qa.judgeChat })
   };
+}
+
+function assertSnapshotProducerExecutionPolicy(context: LongMemEvalRunContext): void {
+  assertProductFormationEnvironment(
+    process.env,
+    "snapshot producer product formation"
+  );
+  assertLongMemEvalTreatmentNeutralEdgeFormation(process.env);
+  if (context.policyShape !== "stress" || context.simulateReport !== "none" ||
+      context.recallWeightOverrides !== undefined || context.opts.qa !== undefined ||
+      (context.opts.embeddingMode ?? "disabled") !== "disabled") {
+    throw new Error(
+      "snapshot production requires stress/none, neutral recall weights and embedding, and QA off"
+    );
+  }
+  if (context.releaseEvidenceAuthority === null) {
+    throw new Error("snapshot production requires canonical pinned dataset authority");
+  }
+  assertCurrentPostFillCacheAuthority({
+    cacheRoot: context.extractionCacheRoot,
+    datasetSha256: context.datasetSha256,
+    requiredTurnContents: collectDistinctTurnContents(context.window),
+    requiredQuestionWindow: {
+      offset: Math.max(0, context.opts.offset ?? 0),
+      limit: context.window.length
+    },
+    env: process.env
+  });
 }
 
 function writeLongMemEvalQuestionProgress(
@@ -302,9 +415,11 @@ async function writeLongMemEvalSnapshotIfRequested(
     seedDataDirRoot: context.seedDataDirRoot,
     variant: context.opts.variant,
     commitSha7: context.commitSha7,
+    canonicalQuestions: context.questions,
     snapshotQuestions,
     extractionCacheRoot: context.extractionCacheRoot,
     datasetSha256: context.datasetSha256,
+    seedExtractionPath: toSeedExtractionPathKpi(context.seedRunner.stats),
     runProvenance
   });
   process.stdout.write(

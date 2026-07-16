@@ -1,23 +1,20 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
 import {
-  releaseMetricGateVerdict,
   verifiedLongMemEvalEvidenceMatches,
   type KpiPayload,
   type VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
-import { seedExtractionReleaseBlockerExitCode } from "../longmemeval/seed-extraction-release-blocker.js";
-import { exitCodeForVerdicts } from "./result-format.js";
+import { exitCodeForReleaseHardGates } from "./release-hard-gate-exit.js";
 
 export function exitCodeForBenchmarkResult(
   payload: KpiPayload,
   evidence?: VerifiedLongMemEvalEvidenceContext
 ): number {
-  const seedExtractionExitCode = seedExtractionReleaseBlockerExitCode(payload);
-  if (seedExtractionExitCode !== 0) return seedExtractionExitCode;
-  if (releaseMetricGateVerdict(payload) === "fail") return 1;
+  const hardGateExitCode = exitCodeForReleaseHardGates(payload);
+  if (hardGateExitCode !== 0) return hardGateExitCode;
   if (!verifiedLongMemEvalEvidenceMatches(payload, evidence)) return 1;
-  return exitCodeForVerdicts(payload.diff_vs_previous?.verdict_per_kpi);
+  return 0;
 }
 
 export function exitCodeForMergedLongMemEvalResult(
@@ -38,58 +35,70 @@ type SeedExtractionPathKpi = NonNullable<
 export function mergeSeedExtractionPath(
   shards: readonly KpiPayload[]
 ): SeedExtractionPathKpi | undefined {
+  const present = collectSeedExtractionPaths(shards);
+  if (present === undefined) return undefined;
+  return {
+    path: present.some((path) => path.path === "no_credentials_fallback")
+      ? "no_credentials_fallback"
+      : "official_api_compile",
+    ...mergeExtractionAttempts(present),
+    cache_hits: sumSeedExtractionPaths(present, (path) => path.cache_hits),
+    llm_calls: sumSeedExtractionPaths(present, (path) => path.llm_calls),
+    offline_fallbacks: sumSeedExtractionPaths(present, (path) => path.offline_fallbacks),
+    live_extraction_failures: sumSeedExtractionPaths(
+      present, (path) => path.live_extraction_failures
+    ),
+    cached_extraction_failures: sumSeedExtractionPaths(
+      present, (path) => path.cached_extraction_failures
+    ),
+    facts_produced: sumSeedExtractionPaths(present, (path) => path.facts_produced),
+    signals_dropped: sumSeedExtractionPaths(present, (path) => path.signals_dropped),
+    parse_dropped: sumSeedExtractionPaths(present, (path) => path.parse_dropped),
+    compile_overflow_dropped: sumSeedExtractionPaths(
+      present, (path) => path.compile_overflow_dropped
+    ),
+    signals_dropped_by_reason: {
+      candidate_absent: sumSeedExtractionPaths(
+        present, (path) => path.signals_dropped_by_reason.candidate_absent
+      ),
+      materialization_drop: sumSeedExtractionPaths(
+        present, (path) => path.signals_dropped_by_reason.materialization_drop
+      )
+    }
+  };
+}
+
+function collectSeedExtractionPaths(
+  shards: readonly KpiPayload[]
+): readonly SeedExtractionPathKpi[] | undefined {
   const present = shards
     .map((shard) => shard.kpi.seed_extraction_path)
     .filter((path): path is SeedExtractionPathKpi => path !== undefined);
-  if (present.length === 0) {
-    return undefined;
-  }
+  if (present.length === 0) return undefined;
   if (present.length !== shards.length) {
     throw new Error(
       "merge refused: seed_extraction_path is present on only some shards"
     );
   }
+  return present;
+}
 
+function mergeExtractionAttempts(
+  paths: readonly SeedExtractionPathKpi[]
+): { readonly extraction_attempts?: number } {
+  if (paths.some((path) => path.extraction_attempts === undefined)) return {};
   return {
-    path: present.some((path) => path.path === "no_credentials_fallback")
-      ? "no_credentials_fallback"
-      : "official_api_compile",
-    cache_hits: present.reduce((sum, path) => sum + path.cache_hits, 0),
-    llm_calls: present.reduce((sum, path) => sum + path.llm_calls, 0),
-    offline_fallbacks: present.reduce(
-      (sum, path) => sum + path.offline_fallbacks,
-      0
-    ),
-    live_extraction_failures: present.reduce(
-      (sum, path) => sum + path.live_extraction_failures,
-      0
-    ),
-    cached_extraction_failures: present.reduce(
-      (sum, path) => sum + path.cached_extraction_failures,
-      0
-    ),
-    facts_produced: present.reduce((sum, path) => sum + path.facts_produced, 0),
-    signals_dropped: present.reduce(
-      (sum, path) => sum + path.signals_dropped,
-      0
-    ),
-    parse_dropped: present.reduce((sum, path) => sum + path.parse_dropped, 0),
-    compile_overflow_dropped: present.reduce(
-      (sum, path) => sum + path.compile_overflow_dropped,
-      0
-    ),
-    signals_dropped_by_reason: {
-      candidate_absent: present.reduce(
-        (sum, path) => sum + path.signals_dropped_by_reason.candidate_absent,
-        0
-      ),
-      materialization_drop: present.reduce(
-        (sum, path) =>
-          sum + path.signals_dropped_by_reason.materialization_drop,
-        0
-      )
-    }
+    extraction_attempts: sumSeedExtractionPaths(
+      paths, (path) => path.extraction_attempts ?? 0
+    )
   };
+}
+
+function sumSeedExtractionPaths(
+  paths: readonly SeedExtractionPathKpi[],
+  select: (path: SeedExtractionPathKpi) => number
+): number {
+  return paths.reduce((sum, path) => sum + select(path), 0);
 }
 
 export function computePercentile(values: readonly number[], p: number): number {

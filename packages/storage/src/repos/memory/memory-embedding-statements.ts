@@ -25,12 +25,14 @@ export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmb
       SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
       FROM memory_embeddings
       WHERE object_id = ?
+        AND vector_valid = 1
       LIMIT 1
     `),
     listByWorkspaceStatement: db.connection.prepare(`
       SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
       FROM memory_embeddings
       WHERE workspace_id = ?
+        AND vector_valid = 1
       ORDER BY object_id ASC
     `),
     findCurrentMemoryContentStatement: db.connection.prepare(`
@@ -48,6 +50,7 @@ export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmb
       INNER JOIN json_each(?) filter_ids
         ON filter_ids.value = memory_embeddings.object_id
       WHERE workspace_id = ?
+        AND memory_embeddings.vector_valid = 1
       ORDER BY memory_embeddings.object_id ASC
     `)
   };
@@ -63,9 +66,10 @@ const UPSERT_MEMORY_EMBEDDING_SQL = `
         schema_version,
         dimensions,
         embedding_blob,
+        vector_valid,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       ON CONFLICT(object_id) DO UPDATE SET
         workspace_id = excluded.workspace_id,
         content_hash = excluded.content_hash,
@@ -74,5 +78,6 @@ const UPSERT_MEMORY_EMBEDDING_SQL = `
         schema_version = excluded.schema_version,
         dimensions = excluded.dimensions,
         embedding_blob = excluded.embedding_blob,
+        vector_valid = 1,
         updated_at = excluded.updated_at
 `;

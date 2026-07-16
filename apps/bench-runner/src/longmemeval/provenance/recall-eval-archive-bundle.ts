@@ -67,7 +67,13 @@ export function buildRecallEvalArchiveBundle(input: {
 function renderRankIdentity(
   input: Parameters<typeof buildRecallEvalArchiveBundle>[0]
 ): string {
-  return renderRecallEvalRankIdentity(input.collected, {
+  return renderRecallEvalRankIdentity(input.collected.map((question) => ({
+    questionId: question.questionId,
+    deliveredObjects: question.diagnostics.delivered_results.map((result) => ({
+      object_id: result.object_id,
+      object_kind: result.object_kind ?? "memory_entry"
+    }))
+  })), {
     expectedQuestionCount: input.manifest.question_count,
     expectedQuestionIdDigest: input.manifest.question_id_digest ?? null,
     requireFullSnapshotMatch:
@@ -120,6 +126,9 @@ function buildRunBinding(
     dataset_sha256: datasetSha,
     selection_manifest_sha256: null,
     question_id_digest: questionIdDigest,
+    ...(input.payload.selection_contract === undefined
+      ? {}
+      : { selection_contract: input.payload.selection_contract }),
     candidate_pool_complete: input.collected.length === input.payload.evaluated_count &&
       input.collected.every((question) => question.diagnostics.candidate_pool_complete),
     provenance_complete: input.provenanceComplete

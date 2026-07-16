@@ -67,6 +67,8 @@ interface OfficialApiGardenProviderDependencies {
   // see also: packages/soul/src/garden/wall-clock-timeout.ts
   readonly wallClockBudgetMs?: number;
   readonly extractor?: SignalExtractor;
+  /** Allows a credentialless provider only for an explicitly injected cache reader. */
+  readonly injectedExtractorCapability?: "cache_only";
   readonly now?: () => string;
   readonly generateSignalId?: () => string;
   // When set, a requestSignals invalid_response failure dumps a diagnostic
@@ -141,6 +143,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
   private readonly requestTimeoutMs: number;
   private readonly wallClockBudgetMs: number;
   private readonly extractor: SignalExtractor | null;
+  private readonly canUseCredentiallessCacheExtractor: boolean;
   private readonly now: () => string;
   private readonly generateSignalId: () => string;
   // Absolute directory for invalid_response diagnostic dumps, or null when
@@ -150,6 +153,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
 
   public constructor(deps: OfficialApiGardenProviderDependencies = {}) {
     this.apiKey = normalizeOptionalString(deps.apiKey ?? null);
+    this.canUseCredentiallessCacheExtractor =
+      deps.injectedExtractorCapability === "cache_only";
+    if (this.canUseCredentiallessCacheExtractor && deps.extractor === undefined) {
+      throw new TypeError(
+        "cache-only official garden capability requires an injected extractor"
+      );
+    }
     this.model = normalizeOptionalString(deps.model) ?? OFFICIAL_API_GARDEN_MODEL;
     this.endpoint = normalizeOptionalString(deps.endpoint);
     this.requestTimeoutMs = normalizePositiveTimeoutMs(deps.requestTimeoutMs) ?? DEFAULT_OFFICIAL_API_REQUEST_TIMEOUT_MS;
@@ -185,7 +195,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       return [];
     }
 
-    if (this.apiKey === null) {
+    if (this.apiKey === null && !this.canUseCredentiallessCacheExtractor) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 

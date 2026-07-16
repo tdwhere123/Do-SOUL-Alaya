@@ -160,7 +160,7 @@ it("delivers one object for matching local and global ids while preserving prove
     const { dependencies } = createDependencies(memories);
     const preparedQuery = createPreparedQueryHandle("prepared-query-origin-collision");
     const querySupplementIfReady = vi.fn(async () => ({
-      supplementaryEntries: Object.freeze([]),
+      supplementaryEntries: Object.freeze([memories[0]!] as const),
       similarityHintsByObjectId: Object.freeze({
         [sharedObjectId]: Object.freeze({
           object_id: sharedObjectId,
@@ -236,17 +236,28 @@ it("delivers one object for matching local and global ids while preserving prove
     );
     expect(querySupplementIfReady).toHaveBeenCalled();
     expect(collidingCandidates).toHaveLength(1);
+    expect(collidingCandidates[0]).toMatchObject({
+      object_id: sharedObjectId,
+      origin_plane: "workspace_local"
+    });
+    expect(collidingCandidates[0]?.source_channels).toEqual(
+      expect.arrayContaining(["workspace_local", "global"])
+    );
+    expect(result.coarse_filter_count).toBe(1);
+    expect(result.diagnostics?.candidate_pool_count).toBe(1);
+    expect(result.diagnostics?.token_economy).toMatchObject({
+      coarse_pool_size: 1,
+      fine_evaluated: 1,
+      fine_pruned_count: 0
+    });
     const collidingDiagnostics = result.diagnostics?.candidates.filter(
       (candidate) => candidate.object_id === sharedObjectId
     );
-    expect(collidingDiagnostics).toHaveLength(2);
-    expect(collidingDiagnostics?.filter(
-      (candidate) => candidate.dropped_reason === "duplicate"
-    )).toHaveLength(1);
-    expect(collidingDiagnostics?.map((candidate) => candidate.origin_plane).sort()).toEqual([
-      "global",
-      "workspace_local"
-    ]);
+    expect(collidingDiagnostics).toHaveLength(1);
+    expect(collidingDiagnostics?.[0]).toMatchObject({
+      origin_plane: "workspace_local",
+      dropped_reason: null
+    });
   });
 
 it("applies embedding hits to the local candidate when a global candidate shares its object id", async () => {

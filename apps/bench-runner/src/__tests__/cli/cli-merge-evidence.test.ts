@@ -36,6 +36,7 @@ describe("merge-longmemeval evidence bundle", () => {
 
     expect(await runCli([
       "merge-longmemeval", "--variant", "s", "--history-root", history,
+      "--concurrency", "1",
       ...dataset.cliArgs,
       "--shards", shard
     ])).toBe(1);
@@ -110,12 +111,15 @@ describe("merge-longmemeval evidence bundle", () => {
       path.join(archive, "longmemeval-run-provenance.json"), "utf8"
     )) as { gate_eligible: boolean; requested_concurrency: number | null; evaluated_count: number; executed_dist: { sha256: string }; shards: Array<{ execution: { offset: number } }> };
     expect(aggregate).toMatchObject({
-      gate_eligible: true,
+      gate_eligible: false,
       requested_concurrency: null,
       evaluated_count: 2,
       executed_dist: { sha256: "f".repeat(64) }
     });
     expect(aggregate.shards.map((shard) => shard.execution.offset)).toEqual([0, 1]);
+    await expect(readFile(
+      path.join(archive, "longmemeval-evidence-manifest.json"), "utf8"
+    )).resolves.toContain(`"evidence_status": "partial"`);
     const kpi = JSON.parse(await readFile(path.join(archive, "kpi.json"), "utf8")) as {
       selection_contract: { selected_count: number; cohort_assignment_digest: string };
       kpi: { per_scenario: Array<{ id: string }> };

@@ -61,20 +61,17 @@ export function assertEmbeddingTreatmentDiagnosticsPresent(
 export function assertBiEncoderTreatmentActive(
   evidence: BiEncoderTreatmentActivationEvidence
 ): void {
-  const scoredCandidates = evidence.embeddingSimilarities.filter(
-    (similarity) => (similarity ?? 0) > 0
+  const observedCandidates = evidence.embeddingSimilarities.filter(
+    (similarity) => similarity !== undefined && Number.isFinite(similarity)
   ).length;
-  const workspaceScanActive = (evidence.workspaceScannedCount ?? 0) > 0 &&
-    evidence.workspaceTruncated === false && evidence.workspaceProviderKind !== undefined &&
-    evidence.workspaceModelId !== undefined && evidence.workspaceSchemaVersion !== undefined;
   const active = evidence.providerState === "provider_returned" &&
-    evidence.providerDegradationReason === null && (scoredCandidates > 0 || workspaceScanActive);
+    evidence.providerDegradationReason === null && observedCandidates > 0;
   if (!active) {
     throw new Error(
       "bi-encoder treatment activation failed: " +
       `status=${evidence.providerState} ` +
       `degraded=${evidence.providerDegradationReason ?? "none"} ` +
-      `scored_candidates=${scoredCandidates} ` +
+      `scored_candidates=${observedCandidates} ` +
       `scanned=${evidence.workspaceScannedCount ?? "missing"} ` +
       `truncated=${evidence.workspaceTruncated ?? "missing"} ` +
       `provider=${evidence.workspaceProviderKind ?? "missing"} ` +
@@ -104,7 +101,7 @@ function toActivationEvidence(
 function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void {
   const inactive = diagnostics.embedding_provider_status === "provider_not_requested" &&
     diagnostics.candidates.every(
-      (candidate) => (candidate.score_factors.embedding_similarity ?? 0) === 0
+      (candidate) => !("embedding_similarity" in candidate.score_factors)
     ) &&
     diagnostics.embedding_workspace_scanned_count === undefined &&
     diagnostics.embedding_workspace_provider_kind === undefined &&

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { runCli } from "../../cli/index.js";
 import { loadMergeShards } from "../../cli/merge-command-shards.js";
@@ -11,6 +11,7 @@ import { loadEvidenceBundle } from "../../../scripts/longmemeval-replay/contract
 import {
   makeShardDiagnostics,
   makeShardKpi,
+  makeValidShardDiagnostics,
   withEligibleMeasurementContract,
   writeShardRoot
 } from "./cli-merge-validations-fixture.js";
@@ -47,6 +48,15 @@ describe("merge-longmemeval evidence bundle", () => {
       expect(loaded.questionDiagnostics[0]?.candidates).toEqual([]);
       expect(loaded.questionDiagnostics[0]?.query_probes).not.toBeNull();
       expect(spool.questionCount).toBe(1);
+      const artifactPath = path.join(root, "merged.json.gz");
+      await spool.writeGzipArtifact(
+        artifactPath,
+        makeValidShardDiagnostics({ questions: loaded.questionDiagnostics })
+      );
+      const persisted = JSON.parse(gunzipSync(await readFile(artifactPath)).toString("utf8")) as {
+        questions: Array<{ candidates: Array<{ origin_plane: string }> }>;
+      };
+      expect(persisted.questions[0]?.candidates[0]?.origin_plane).toBe("workspace_local");
     } finally {
       await spool.dispose();
     }

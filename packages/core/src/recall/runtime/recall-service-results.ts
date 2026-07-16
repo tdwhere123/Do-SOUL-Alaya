@@ -70,6 +70,7 @@ export interface RecallSupplementaryData {
   // see also: recall-service.ts collectNegativePathSuppressions /
   // applyPathSuppressionToFusionScores.
   readonly pathSuppressionScores: Readonly<Record<string, number>>;
+  // Key presence means query embedding was observed; finite zero is distinct from cold absence.
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
   // Optional final query-to-candidate relevance owned by a local reranker.
   // Candidate-key identity preserves distinct provenance projections.

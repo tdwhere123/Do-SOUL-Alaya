@@ -9,20 +9,31 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
+import {
+  computeLongMemEvalQuestionIdDigest,
+  type SeedExtractionPath
+} from "@do-soul/alaya-eval";
 import { getCurrentSchemaSummary, initDatabase } from "@do-soul/alaya-storage";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import type { LongMemEvalSeedDropReasons } from "./seed-drop-reasons.js";
-import type { LongMemEvalRunProvenance } from "./provenance/run.js";
+import type { LongMemEvalSourceRound } from "./provenance/source-rounds.js";
+import type { LongMemEvalSnapshotRunProvenance } from
+  "./snapshot/run-provenance.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionRequestProfile
 } from "./extraction-cache-manifest.js";
 import type { SnapshotArtifactIntegrity } from "./snapshot/integrity.js";
+import type { ExtractionFillSummaryContract } from
+  "./extraction/fill-manifest-contract.js";
+import type { LongMemEvalExpansionLineage } from "./promotion/expansion-lineage-schema.js";
+import type { LongMemEvalExpansionSourceAnchor } from
+  "./promotion/expansion-source-anchor-schema.js";
 import { validateSnapshotManifest } from "./snapshot/manifest-validation.js";
 import { computeLegacySnapshotQuestionIdDigestV1 } from
   "./snapshot/legacy-question-id-digest.js";
 import { parseSnapshotSidecar } from "./snapshot/sidecar-validation.js";
+import { copyRegularFileNoFollow } from "./snapshot/bound-file.js";
 export { deriveSnapshotAttribution } from "./snapshot/attribution.js";
 
 /**
@@ -68,6 +79,33 @@ export interface LongMemEvalSnapshotSidecarEntry {
   readonly objectKind: LongMemEvalSnapshotSidecarObjectKind;
   readonly sessionId: string;
   readonly hasAnswer: boolean;
+  readonly sourceRounds?: readonly LongMemEvalSourceRound[];
+}
+
+export interface LongMemEvalSnapshotSeedBinding {
+  readonly objectId: string;
+  readonly signalId: string;
+  readonly evidenceId: string | null;
+}
+
+export interface LongMemEvalSnapshotSeedRound {
+  readonly sessionIndex: number;
+  readonly roundIndex: number;
+  readonly sessionId: string;
+  readonly contentSha256: string;
+  readonly hasAnswer: boolean;
+  readonly extractionSource: "cache" | "live" | "fallback";
+  readonly cacheKey: string | null;
+  readonly rawJsonSha256: string | null;
+  readonly rawSignalCount: number | null;
+  readonly draftCount: number | null;
+  readonly factsProduced: number;
+  readonly parseDropped: number;
+  readonly compileOverflowDropped: number;
+  readonly candidateAbsent: number;
+  readonly materializationDrop: number;
+  readonly memoryObjectIds: readonly string[];
+  readonly memoryBindings?: readonly LongMemEvalSnapshotSeedBinding[];
 }
 
 /** Per-question persisted recall-scoring inputs. */
@@ -79,6 +117,8 @@ export interface LongMemEvalSnapshotQuestion {
   readonly answerSessionIds: readonly string[];
   /** Sidecar entries seeded for this question (memory_entry + synthesis). */
   readonly sidecar: readonly LongMemEvalSnapshotSidecarEntry[];
+  /** Ordered extraction and materialization outcome for every canonical round. */
+  readonly seedRounds?: readonly LongMemEvalSnapshotSeedRound[];
   /** Workspace the question's memories were seeded under (recall isolation). */
   readonly workspaceId: string;
   /** Run id the question's workspace was attached with. */
@@ -129,8 +169,13 @@ export interface LongMemEvalSnapshotManifest {
    * run resolved an extraction-cache manifest; null otherwise.
    */
   readonly extraction_provenance: SnapshotExtractionProvenance | null;
+  /**
+   * Exact producer-side extraction counters. Current writers always persist
+   * this; older snapshots may omit it and remain diagnostic-only.
+   */
+  readonly seed_extraction_path?: SeedExtractionPath;
   readonly artifact_integrity?: SnapshotArtifactIntegrity;
-  readonly run_provenance?: LongMemEvalRunProvenance;
+  readonly run_provenance?: LongMemEvalSnapshotRunProvenance;
   readonly question_id_digest?: string;
   readonly dataset_sha256?: string;
   readonly attribution?: Readonly<{
@@ -172,10 +217,12 @@ export interface SnapshotExtractionProvenanceV2
 }
 
 export interface SnapshotExtractionProvenanceV3
-  extends SnapshotExtractionProvenanceBase {
+  extends SnapshotExtractionProvenanceBase, ExtractionFillSummaryContract {
   readonly schema_version: typeof EXTRACTION_CACHE_MANIFEST_VERSION;
   readonly model_family: string;
   readonly request_profile: ExtractionRequestProfile;
+  readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;
+  readonly expansion_lineage?: LongMemEvalExpansionLineage;
 }
 
 export type SnapshotExtractionProvenance =
@@ -191,6 +238,10 @@ export function snapshotSidecarPath(snapshotDbPath: string): string {
   return `${snapshotDbPath}.sidecar.json`;
 }
 
+export function snapshotExtractionAuthorityPath(snapshotDbPath: string): string {
+  return `${snapshotDbPath}.extraction-authority.json`;
+}
+
 /**
  * Read the SQLite max migration version off a DB file (the version recall-eval
  * binds the snapshot to). Opens via the storage connection cache; never closes
@@ -203,8 +254,8 @@ export function readSchemaMigrationVersion(dbPath: string): number {
 }
 
 /**
- * Checkpoint the WAL of a live bench DB then copy it (+ -wal / -shm sidecars)
- * to a frozen snapshot path. MUST run while the daemon connection is still open
+ * Checkpoint the WAL of a live bench DB then copy the complete main DB file to
+ * a frozen snapshot path. MUST run while the daemon connection is still open
  * so `wal_checkpoint(TRUNCATE)` flushes every committed frame into the main DB
  * file before the copy — under the bench fast-pragma (synchronous=NORMAL) an
  * un-checkpointed copy would lose the last frames.
@@ -218,7 +269,16 @@ export function checkpointAndCopyBenchDb(
   const db = initDatabase({ filename: liveDbPath });
   // TRUNCATE checkpoint flushes the WAL into the main DB and resets the WAL
   // file to zero length, so a plain file copy of the .db captures everything.
-  db.connection.pragma("wal_checkpoint(TRUNCATE)");
+  const [checkpoint] = db.connection.pragma(
+    "wal_checkpoint(TRUNCATE)"
+  ) as Array<{ readonly busy: number; readonly log: number; readonly checkpointed: number }>;
+  if (checkpoint === undefined || checkpoint.busy !== 0 ||
+      checkpoint.log !== checkpoint.checkpointed) {
+    const detail = checkpoint === undefined
+      ? "missing checkpoint status"
+      : `busy=${checkpoint.busy} log=${checkpoint.log} checkpointed=${checkpoint.checkpointed}`;
+    throw new Error(`cannot freeze live bench DB: incomplete WAL checkpoint (${detail})`);
+  }
   mkdirSync(dirname(snapshotDbPath), { recursive: true });
   atomicCopy(liveDbPath, snapshotDbPath);
 }
@@ -232,6 +292,7 @@ export function checkpointAndCopyBenchDb(
 export function restoreSnapshotToDataDir(input: {
   readonly snapshotDbPath: string;
   readonly dataDirRoot: string;
+  readonly expectedSha256?: string;
 }): string {
   if (!existsSync(input.snapshotDbPath)) {
     throw new Error(
@@ -245,7 +306,15 @@ export function restoreSnapshotToDataDir(input: {
   for (const suffix of ["", "-wal", "-shm"]) {
     rmSync(`${workingDbPath}${suffix}`, { force: true });
   }
-  atomicCopy(input.snapshotDbPath, workingDbPath);
+  if (input.expectedSha256 === undefined) {
+    atomicCopy(input.snapshotDbPath, workingDbPath);
+  } else {
+    copyRegularFileNoFollow({
+      sourcePath: input.snapshotDbPath,
+      targetPath: workingDbPath,
+      expectedSha256: input.expectedSha256
+    });
+  }
   return input.dataDirRoot;
 }
 

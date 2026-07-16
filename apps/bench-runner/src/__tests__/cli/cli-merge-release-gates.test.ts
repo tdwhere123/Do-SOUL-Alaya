@@ -12,6 +12,7 @@ import {
 } from "@do-soul/alaya-eval";
 
 import { runCli } from "../../cli/index.js";
+import { mergeSeedExtractionPath } from "../../cli/merge-shared.js";
 
 import {
   withEligibleMeasurementContract,
@@ -214,6 +215,7 @@ describe("merge-longmemeval release gates", () => {
 
     expect(merged.kpi.seed_extraction_path).toEqual({
       path: "no_credentials_fallback",
+      extraction_attempts: 1,
       cache_hits: 1,
       llm_calls: 2,
       offline_fallbacks: 8,
@@ -315,6 +317,7 @@ describe("merge-longmemeval release gates", () => {
 
     expect(merged.kpi.seed_extraction_path).toMatchObject({
       path: "official_api_compile",
+      extraction_attempts: 21,
       cache_hits: 21,
       offline_fallbacks: 1,
       live_extraction_failures: 1,
@@ -401,5 +404,28 @@ describe("merge-longmemeval release gates", () => {
       )
     ) as KpiPayload;
     expect(evaluateSeedExtractionReleaseBlocker(merged)).toBeNull();
+  });
+
+  it("keeps extraction attempts unknown when any shard predates the counter", () => {
+    const complete = makeShardKpi();
+    const legacyPath = makeSeedExtractionPath({ cache_hits: 2 });
+    const { extraction_attempts: _omitted, ...legacyCounters } = legacyPath;
+    const legacy = makeShardKpi({
+      kpi: {
+        ...makeShardKpi().kpi,
+        seed_extraction_path: legacyCounters
+      }
+    });
+
+    const mergedPath = mergeSeedExtractionPath([complete, legacy]);
+    const merged = makeShardKpi({
+      kpi: { ...makeShardKpi().kpi, seed_extraction_path: mergedPath }
+    });
+
+    expect(mergedPath).toMatchObject({ cache_hits: 3 });
+    expect(mergedPath?.extraction_attempts).toBeUndefined();
+    expect(evaluateSeedExtractionReleaseBlocker(merged)).toMatchObject({
+      id: "seed_extraction_path missing_extraction_attempts"
+    });
   });
 });

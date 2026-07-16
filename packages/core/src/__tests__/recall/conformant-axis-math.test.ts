@@ -128,6 +128,19 @@ describe("P1 — R_E is query-lexical orthogonal (∂R_E/∂L = 0)", () => {
     expect(collapseEvidenceRelevance(evidenceInputs([], { graphSupportCounts: { [OID]: 3 } }), 0.5)).toBeCloseTo(0, 12);
   });
 
+  it("does not project memory evidence vectors onto same-id non-memory candidates", () => {
+    const inputs = evidenceInputs([1]);
+
+    expect(collapseEvidenceRelevance({
+      ...inputs,
+      candidate: { ...inputs.candidate, objectKind: "synthesis_capsule" }
+    }, 0.5)).toBe(0);
+    expect(collapseEvidenceRelevance({
+      ...inputs,
+      candidate: { ...inputs.candidate, originPlane: "global" }
+    }, 0.5)).toBe(0);
+  });
+
   it("R_E is independent-support count only — ρ_ev is inert until a second support exists", () => {
     const base = collapseEvidenceRelevance(evidenceInputs([1 / 3]), 0);
     const atRhoOne = collapseEvidenceRelevance(evidenceInputs([1 / 3]), 1);

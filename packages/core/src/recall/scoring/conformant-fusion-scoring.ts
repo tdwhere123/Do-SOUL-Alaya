@@ -26,6 +26,7 @@ import type {
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
 import type { RecallFloodEdgeTraceV1 } from "../runtime/recall-service-types.js";
+import { isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import {
   recallEnvFlagEnabled,
   readRecallUnitFloat
@@ -80,6 +81,7 @@ type EvidenceCollapseInputs = Readonly<{
 }>;
 
 function independentSupportValues(inputs: EvidenceCollapseInputs): readonly number[] {
+  if (!isWorkspaceMemoryCandidate(inputs.candidate)) return [];
   const objectId = inputs.candidate.entry.object_id;
   const vector = inputs.supplementaryData.evidenceSupportVectorsByMemoryId?.[objectId];
   return vector?.map((support) => Math.max(0, support.support)).filter((support) => support > 0) ?? [];
@@ -113,6 +115,7 @@ interface SeededConformantCandidate {
   readonly candidateKey: string;
   readonly objectId: string;
   readonly entry: Readonly<MemoryEntry>;
+  readonly memorySupplementEligible: boolean;
   readonly object: number;
   readonly evidence: number;
   readonly temporal: number;
@@ -212,22 +215,33 @@ function seedConformantCandidates(
   params: Parameters<typeof buildConformantAxisContext>[0],
   rhoEvidence: number
 ): readonly SeededConformantCandidate[] {
-  return params.candidates.map((input) => ({
-    candidateKey: input.candidateKey,
-    objectId: input.candidate.entry.object_id,
-    entry: input.candidate.entry,
-    object: resolveObjectBase(input, params.ranksByStream, params.resolved, params.supplementaryData),
-    evidence: quantize(collapseEvidenceRelevance({
-      candidate: input.candidate,
-      supplementaryData: params.supplementaryData
-    }, rhoEvidence)),
-    temporal: quantize(scoreTemporalFusion(
-      input.candidate.entry,
-      params.supplementaryData.queryProbes,
-      params.nowIso
-    )),
-    control: quantize(scoreControlAxis(input.candidate))
-  }));
+  return params.candidates.map((input) => {
+    const memorySupplementEligible = isWorkspaceMemoryCandidate(input.candidate);
+    return {
+      candidateKey: input.candidateKey,
+      objectId: input.candidate.entry.object_id,
+      entry: input.candidate.entry,
+      memorySupplementEligible,
+      object: resolveObjectBase(
+        input,
+        params.ranksByStream,
+        params.resolved,
+        params.supplementaryData
+      ),
+      evidence: memorySupplementEligible
+        ? quantize(collapseEvidenceRelevance({
+          candidate: input.candidate,
+          supplementaryData: params.supplementaryData
+        }, rhoEvidence))
+        : 0,
+      temporal: quantize(scoreTemporalFusion(
+        input.candidate.entry,
+        params.supplementaryData.queryProbes,
+        params.nowIso
+      )),
+      control: quantize(scoreControlAxis(input.candidate))
+    };
+  });
 }
 
 function buildSliceSelectionContext(
@@ -238,6 +252,7 @@ function buildSliceSelectionContext(
   const parsedAsOfMs = Date.parse(params.nowIso);
   const asOfMs = Number.isSafeInteger(parsedAsOfMs) ? parsedAsOfMs : 0;
   for (const { candidate } of params.candidates) {
+    if (!isWorkspaceMemoryCandidate(candidate)) continue;
     const workspaceId = candidate.entry.workspace_id;
     if (!queryKeysByWorkspace.has(workspaceId)) {
       queryKeysByWorkspace.set(workspaceId, deriveQuerySliceKeysV1({
@@ -328,6 +343,7 @@ function buildObjectPotentialById(
 ): ReadonlyMap<string, number> {
   const result = new Map<string, number>();
   for (const candidate of candidates) {
+    if (!candidate.memorySupplementEligible) continue;
     result.set(candidate.objectId, Math.max(result.get(candidate.objectId) ?? 0, candidate.object));
   }
   return result;
@@ -348,7 +364,9 @@ function recordCandidateAxes(
     enforceSliceCompatibility: boolean;
   }>
 ): void {
-  const inflow = supplementaryData.pathInflowByTarget?.[candidate.objectId];
+  const inflow = candidate.memorySupplementEligible
+    ? supplementaryData.pathInflowByTarget?.[candidate.objectId]
+    : undefined;
   const sliceCompatibilityByPathId = selectCompatibilityByPathId(
     inflow, candidate.entry, state.sliceSelection
   );

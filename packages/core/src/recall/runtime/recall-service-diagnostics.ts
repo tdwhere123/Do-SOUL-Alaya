@@ -217,6 +217,15 @@ export interface RecallCandidateDiagnostic {
   readonly reserved_by?: "none" | "synthesis" | "structural";
 }
 
+export interface FineAssessmentPrunedCandidateDiagnostic {
+  readonly candidate_key: string;
+  readonly origin_plane: RecallOriginPlane;
+  readonly object_kind: RecallCandidate["object_kind"];
+  readonly object_id: string;
+  readonly coarse_index: number;
+  readonly drop_reason: "fine_assessment_cap";
+}
+
 export interface RecallCandidateAnswerFeatures {
   readonly content: MemoryEntry["content"];
   readonly evidence_gist: string | null;
@@ -359,6 +368,8 @@ export interface RecallDiagnostics {
   readonly multi_seed_graph_fan_in?: Readonly<RecallMultiSeedGraphFanInDiagnostics>;
   readonly fusion_breakdown: readonly Readonly<RecallFusionBreakdown>[];
   readonly candidates: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly fine_assessment_pruned_candidates:
+    readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[];
   // Per-recall token instrument; emitted on both normal and degraded paths to keep bench coverage at 100% without synthetic zero samples.
   readonly token_economy?: Readonly<RecallTokenEconomy>;
   // Exclusive critical-path contributions: an earlier phase owns concurrent overlap, and a later phase reports residual wait.

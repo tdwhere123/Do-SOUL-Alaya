@@ -73,6 +73,7 @@ describe("LongMemEval recall diagnostics", () => {
       },
       fusion_breakdown: [],
       candidates: [],
+      fine_assessment_pruned_candidates: [],
       token_economy: {
         delivered_context_tokens_estimate: 0,
         coarse_pool_size: 0,
@@ -168,6 +169,13 @@ describe("LongMemEval recall diagnostics", () => {
       embeddingMode: "disabled",
       recallResult: {
         diagnostics: {
+          candidate_pool_count: 1,
+          fine_assessment_pruned_candidates: [],
+          token_economy: {
+            coarse_pool_size: 1,
+            fine_evaluated: 1,
+            fine_pruned_count: 0
+          },
           candidates: [
             {
               object_id: "gold-a",
@@ -425,6 +433,7 @@ describe("LongMemEval recall diagnostics", () => {
         }
       ],
       candidates: [],
+      fine_assessment_pruned_candidates: [],
       token_economy: {
         delivered_context_tokens_estimate: 0,
         coarse_pool_size: 1,

@@ -7,7 +7,10 @@ export const RECALL_EVAL_RANK_IDENTITY_FILENAME =
 
 export interface RecallEvalRankIdentityInput {
   readonly questionId: string;
-  readonly deliveredObjectIds: readonly string[];
+  readonly deliveredObjects: readonly Readonly<{
+    object_id: string;
+    object_kind: string;
+  }>[];
 }
 
 export interface RecallEvalRankIdentityBinding {
@@ -33,10 +36,10 @@ export function renderRecallEvalRankIdentity(
   }
   const questions = collected.map((result) => ({
     question_id: result.questionId,
-    delivered_object_ids: [...result.deliveredObjectIds]
+    delivered_objects: result.deliveredObjects.map((object) => ({ ...object }))
   }));
   return `${JSON.stringify({
-    schema_version: 1,
+    schema_version: 2,
     snapshot_binding: {
       expected_question_count: binding.expectedQuestionCount,
       expected_question_id_digest: binding.expectedQuestionIdDigest

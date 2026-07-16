@@ -7,6 +7,16 @@ import {
   computeCacheKey,
   inspectCachedExtraction
 } from "./compile-seed-cache.js";
+import {
+  inspectExtractionCacheContentClosure,
+  inspectExtractionFillCompletion
+} from "./extraction/fill-completion.js";
+import {
+  containsExtractionFillQuestionWindow
+} from "./extraction/fill-authority.js";
+import type {
+  ExtractionFillQuestionWindow
+} from "./extraction/fill-manifest-contract.js";
 import type {
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
@@ -50,12 +60,12 @@ export interface ExtractionCachePreflightInput {
   readonly allowLiveExtraction?: boolean;
   // Whether THIS run can live-extract at all. The "uncovered window / coverage
   // gap" guards below exist to stop a credentialled run from silently spending
-  // ~466h live-extracting an unfilled cache window. The no-credentials offline
-  // fallback (createCompileSeedRunner provider === null -> seedOfflineFallback)
-  // never makes an LLM call: a missing fixture is served by the deterministic
-  // full-turn fallback, not by live extraction. So when live extraction is
-  // impossible the coverage gap is a category error, not a silent-cost hole,
-  // and the guard must NOT fire. Defaults to `config.apiKey !== null` — the
+  // ~466h live-extracting an unfilled cache window. In a manifest-backed,
+  // credentialless run, a missing fixture fails inside the cache-only extractor
+  // before its delegate. Manifest-less compatibility runs may still use the
+  // deterministic full-turn fallback. When live extraction is impossible the
+  // coverage gap is therefore not a silent-cost hole, and this guard must NOT
+  // fire. Defaults to `config.apiKey !== null` — the
   // single source createCompileSeedRunner reads for its `credentialled` flag —
   // so a direct caller that passes a credentialled config keeps the guard.
   // invariant: this only relaxes the live-extraction-gap guards; the
@@ -74,6 +84,8 @@ export interface ExtractionCachePreflightInput {
   // cross-file: apps/bench-runner/src/longmemeval/extraction-fill.ts
   //   collectDistinctTurnContents (the producer side of the same dedup)
   readonly requiredTurnContents?: readonly string[];
+  /** Exact question offset and effective count that produced required turns. */
+  readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
   readonly warn?: (message: string) => void;
   /** When set, coverage scalar gate uses this floor instead of the 0.95 default. */
   readonly minimumCoverage?: number;
@@ -96,7 +108,18 @@ export function preflightExtractionCache(input: ExtractionCachePreflightInput): 
     manifest,
     validateProvider: input.allowLiveExtraction === true
   });
+  assertConsumableFillContract(manifest, input);
   if (input.requiredTurnContents !== undefined) {
+    if (assertScopedWindowBinding({
+      cacheRoot: input.cacheRoot,
+      model: input.config.model,
+      requestProfile: input.config.requestProfile,
+      systemPrompt: input.systemPrompt,
+      requiredTurnContents: input.requiredTurnContents,
+      requiredQuestionWindow: input.requiredQuestionWindow,
+      manifest,
+      allowLiveExtraction: input.allowLiveExtraction
+    })) return;
     assertWindowContainment({
       cacheRoot: input.cacheRoot,
       model: input.config.model,
@@ -113,6 +136,124 @@ export function preflightExtractionCache(input: ExtractionCachePreflightInput): 
     input.allowLiveExtraction === true,
     liveExtractionPossible,
     minimumCoverage
+  );
+}
+
+function assertConsumableFillContract(
+  manifest: ExtractionCacheManifest,
+  input: ExtractionCachePreflightInput
+): void {
+  if (input.allowLiveExtraction === true || manifest.fill_status === undefined) return;
+  if (manifest.fill_status === "in_progress") {
+    throw new Error(
+      "[longmemeval preflight] extraction cache fill is in_progress; a cache-only " +
+        "run requires a finalized complete fill. Resume extraction-fill first."
+    );
+  }
+  if (input.requiredTurnContents !== undefined &&
+    input.requiredQuestionWindow !== undefined) return;
+  throw new Error(
+    "[longmemeval preflight] extraction cache complete fill requires the run's " +
+      "exact turn key set and question window metadata."
+  );
+}
+
+function assertScopedWindowBinding(input: {
+  readonly cacheRoot: string;
+  readonly model: string;
+  readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
+  readonly systemPrompt: string;
+  readonly requiredTurnContents: readonly string[];
+  readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
+  readonly manifest: ExtractionCacheManifest;
+  readonly allowLiveExtraction?: boolean;
+}): boolean {
+  if (input.allowLiveExtraction === true || input.manifest.fill_status !== "complete") {
+    return false;
+  }
+  const window = assertContainedFillWindow(input);
+  assertFinalizedContentClosure(input);
+  if (input.manifest.window_offset !== window.offset ||
+    input.manifest.window_limit !== window.limit) {
+    return assertScopedSubsetFixtures(input);
+  }
+  const completion = inspectExtractionFillCompletion({
+    cacheRoot: input.cacheRoot,
+    model: input.model,
+    requestProfile: input.requestProfile,
+    systemPrompt: input.systemPrompt,
+    turnContents: input.requiredTurnContents
+  });
+  if (completion.expectedTurns !== input.manifest.expected_turns ||
+    completion.expectedKeySetSha256 !== input.manifest.expected_key_set_sha256) {
+    throw new Error(
+      "[longmemeval preflight] extraction cache complete fill does not match " +
+        "this run's exact key set. Run extraction-fill for this question window."
+    );
+  }
+  if (completion.validTurns !== completion.expectedTurns ||
+    completion.missingTurns > 0 || completion.invalidTurns > 0 ||
+    completion.orphanTurns > 0) {
+    throw new Error(
+      "[longmemeval preflight] extraction cache complete fill is structurally " +
+        `invalid: missing=${completion.missingTurns} invalid=${completion.invalidTurns} ` +
+        `orphan=${completion.orphanTurns}. Resume extraction-fill first.`
+    );
+  }
+  return true;
+}
+
+function assertFinalizedContentClosure(
+  input: Parameters<typeof assertScopedWindowBinding>[0]
+): void {
+  const inspected = inspectExtractionCacheContentClosure({
+    cacheRoot: input.cacheRoot,
+    model: input.model,
+    requestProfile: input.requestProfile
+  });
+  const manifest = input.manifest;
+  if (manifest.content_closure_sha256 === undefined ||
+      inspected.shardTurns !== manifest.expected_turns ||
+      inspected.validTurns !== manifest.expected_turns ||
+      inspected.invalidTurns !== 0 ||
+      inspected.keySetSha256 !== manifest.expected_key_set_sha256 ||
+      inspected.contentClosureSha256 !== manifest.content_closure_sha256) {
+    throw new Error(
+      "[longmemeval preflight] extraction cache finalized content closure differs " +
+        "from its complete manifest. Resume extraction-fill before consuming it."
+    );
+  }
+}
+
+function assertContainedFillWindow(
+  input: Parameters<typeof assertScopedWindowBinding>[0]
+): ExtractionFillQuestionWindow {
+  const window = input.requiredQuestionWindow;
+  if (window !== undefined && containsExtractionFillQuestionWindow(
+    input.manifest, window.offset, window.limit
+  )) return window;
+  throw new Error(
+    "[longmemeval preflight] extraction cache complete fill question window " +
+      "does not contain this run's offset/limit. Run extraction-fill for " +
+      "this question window."
+  );
+}
+
+function assertScopedSubsetFixtures(
+  input: Parameters<typeof assertScopedWindowBinding>[0]
+): true {
+  const unavailable = inspectRequiredTurnFixtures(
+    input.cacheRoot,
+    input.model,
+    input.requestProfile,
+    input.systemPrompt,
+    input.requiredTurnContents
+  );
+  if (unavailable.total === 0) return true;
+  throw new Error(
+    "[longmemeval preflight] extraction cache complete fill has an invalid " +
+      `consumer subwindow: ${unavailable.missing} missing and ` +
+      `${unavailable.invalid} invalid required fixture(s).`
   );
 }
 

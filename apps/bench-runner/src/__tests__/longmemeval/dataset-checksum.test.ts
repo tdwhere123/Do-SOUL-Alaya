@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   loadDataset,
@@ -13,6 +14,11 @@ import { prepareLongMemEvalRun } from
   "../../longmemeval/runner/prepare-context.js";
 import { LongMemEvalDiagnosticsSpool } from "../../longmemeval/diagnostics/spool.js";
 import { emptySeedFuelInventory } from "../../longmemeval/seed-fuel-inventory.js";
+import { createStratifiedQuestionManifest } from
+  "../../longmemeval/selection/question-manifest.js";
+import type { LongMemEvalRunOptions } from "../../longmemeval/runner.js";
+import { writeExtractionCacheTestManifest } from
+  "./extraction-cache-test-fixture.js";
 
 const committedPinRead = vi.hoisted(() => ({ sha256: null as string | null }));
 
@@ -52,6 +58,19 @@ const FIXTURE_QUESTIONS = [
       [{ role: "user", content: "fixture content", has_answer: true }]
     ],
     answer_session_ids: ["session-a"]
+  },
+  {
+    question_id: "fixture-2",
+    question_type: "single_session",
+    question: "second fixture probe",
+    answer: "second fixture answer",
+    question_date: "2026-01-02",
+    haystack_session_ids: ["session-b"],
+    haystack_dates: ["2025-12-02"],
+    haystack_sessions: [
+      [{ role: "user", content: "second fixture content", has_answer: true }]
+    ],
+    answer_session_ids: ["session-b"]
   }
 ];
 
@@ -128,6 +147,76 @@ describe("loadDataset checksum verification", () => {
     expect(result.promotionAuthority).not.toBeNull();
   });
 });
+
+describe("prepareLongMemEvalRun release evidence authority", () => {
+  it.each([
+    ["full dataset", {}],
+    ["canonical prefix", { limit: 1 }]
+  ] satisfies ReadonlyArray<[string, Partial<LongMemEvalRunOptions>]>)(
+    "grants authority to an offset-zero %s",
+    async (_label, overrides) => {
+      committedPinRead.sha256 = await seedLocalDataset();
+
+      await expect(prepareCanonicalAuthority(overrides)).resolves.not.toBeNull();
+    }
+  );
+
+  it("keeps a nonzero-offset window diagnostic-only", async () => {
+    committedPinRead.sha256 = await seedLocalDataset();
+
+    await expect(prepareCanonicalAuthority({ offset: 1 })).resolves.toBeNull();
+  });
+
+  it("keeps a question-manifest selection diagnostic-only", async () => {
+    const datasetSha256 = await seedLocalDataset();
+    committedPinRead.sha256 = datasetSha256;
+    const manifestPath = join(tmpDir, "question-manifest.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify(createStratifiedQuestionManifest({
+        variant: VARIANT,
+        datasetSha256,
+        questions: FIXTURE_QUESTIONS,
+        targetCount: 1
+      })),
+      "utf8"
+    );
+
+    await expect(prepareCanonicalAuthority({
+      questionManifest: manifestPath
+    })).resolves.toBeNull();
+  });
+});
+
+async function prepareCanonicalAuthority(
+  overrides: Partial<LongMemEvalRunOptions>
+) {
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+  vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "");
+  vi.stubEnv("ALAYA_SEED_EXTRACTION_DIAG_DIR", join(tmpDir, "diagnostics"));
+  const extractionCacheRoot = join(tmpDir, "authority-extraction-cache");
+  writeExtractionCacheTestManifest({
+    cacheRoot: extractionCacheRoot,
+    model: "fixture-model",
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+  });
+  const spool = await LongMemEvalDiagnosticsSpool.create();
+  try {
+    const context = await prepareLongMemEvalRun({
+      variant: VARIANT,
+      historyRoot: join(tmpDir, "authority-history"),
+      dataDir,
+      dataDirRoot: join(tmpDir, "authority-seed-root"),
+      extractionCacheRoot,
+      embeddingMode: "disabled",
+      ...overrides
+    }, undefined, spool);
+    return context.releaseEvidenceAuthority;
+  } finally {
+    await spool.dispose();
+  }
+}
 
 describe("loadDataset checksum verification", () => {
   it("throws checksum mismatch when the local file is mutated after pinning", async () => {

@@ -13,6 +13,11 @@ import {
 } from "./shard-diagnostics-reader.js";
 import type { VerifiedShardEvidence } from "./shard-evidence-verifier.js";
 import { canonicalizeVerifiedShards } from "./shard-ordering.js";
+import path from "node:path";
+import {
+  loadGlobalExtractionAuthority,
+  type LoadedGlobalExtractionAuthority
+} from "../../longmemeval/provenance/extraction-authority-reference.js";
 
 export interface ShardArchiveRef {
   readonly root: string;
@@ -27,15 +32,19 @@ export interface LoadedMergeShards {
   readonly archiveRefs: readonly ShardArchiveRef[];
   readonly questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[];
   readonly first: KpiPayload;
+  readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
 }
 
 export async function loadCanonicalMergeShards(
   shards: readonly string[],
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
 ): Promise<LoadedMergeShards> {
+  const globalExtractionAuthority = await loadCommonGlobalAuthority(shards);
   const planned = [];
   for (const shardRoot of shards) {
-    const plan = await readShardPayloadPlan(shardRoot);
+    const plan = await readShardPayloadPlan(shardRoot, {
+      globalExtractionAuthority
+    });
     planned.push(plan);
     process.stdout.write(
       `  shard ${shardRoot}: ${plan.payload.evaluated_count} questions, ` +
@@ -50,13 +59,16 @@ export async function loadCanonicalMergeShards(
       ...await materializeShardPayload(plan, diagnosticsSpool)
     });
   }
-  return assembleLoadedShards(materialized, diagnosticsSpool);
+  return {
+    ...assembleLoadedShards(materialized, diagnosticsSpool),
+    globalExtractionAuthority
+  };
 }
 
 function assembleLoadedShards(
   ordered: readonly ShardArchiveRefWithQuestions[],
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): LoadedMergeShards {
+): Omit<LoadedMergeShards, "globalExtractionAuthority"> {
   const payloads = ordered.map((item) => item.payload);
   const archiveRefs = ordered.map(({ questionDiagnostics: _questions, ...item }) => item);
   const questionDiagnostics = ordered.flatMap((item) => item.questionDiagnostics);
@@ -86,4 +98,16 @@ function assertCurrentDiagnosticsSpoolCount(
         `diagnostics spool question count=${diagnosticsSpool.questionCount}`
     );
   }
+}
+
+async function loadCommonGlobalAuthority(
+  shards: readonly string[]
+): Promise<LoadedGlobalExtractionAuthority | null> {
+  const first = shards[0];
+  if (first === undefined) return null;
+  const parent = path.dirname(path.resolve(first));
+  if (!shards.every((shard) => path.dirname(path.resolve(shard)) === parent)) {
+    return null;
+  }
+  return loadGlobalExtractionAuthority(parent);
 }

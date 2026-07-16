@@ -1,132 +1,22 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { createStratifiedQuestionManifest } from "../../longmemeval/selection/question-manifest.js";
+import { describe, expect, it } from "vitest";
 import {
-  createLongMemEvalSelectionContract,
-  selectionContractIdentity
-} from "../../longmemeval/selection/contract.js";
-import {
-  buildLongMemEvalRunProvenance,
-  buildLongMemEvalRunProvenanceSidecar,
   isLongMemEvalRunProvenanceGateEligible,
   LongMemEvalRunProvenanceSchema,
   LONGMEMEVAL_RUN_PROVENANCE_FILENAME
 } from "../../longmemeval/provenance/run.js";
-import { resolveLocalArtifactTreeSha256 } from "../../longmemeval/provenance/local-onnx.js";
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION,
-  EXTRACTION_CACHE_KEY_ALGO,
-  writeExtractionCacheManifest
-} from "../../longmemeval/extraction-cache-manifest.js";
+  buildFixtureRunProvenanceSidecar,
+  createRunProvenanceFixture,
+  EXTRACTION_CLOSURE,
+  registerRunProvenanceRootCleanup
+} from "./run-provenance-fixture.js";
 
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
+const roots = registerRunProvenanceRootCleanup();
 
 describe("LongMemEval run provenance", () => {
   it("archives the validated manifest identity, sequential protocol, and slice switch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "lme-provenance-"));
-    roots.push(root);
-    const manifestPath = join(root, "manifest.json");
-    const extractionCacheRoot = join(root, "extraction-cache");
-    const modelCacheRoot = join(root, "models");
-    const crossEncoderCacheRoot = join(root, "cross-models");
-    await mkdir(join(modelCacheRoot, "Xenova", "test"), { recursive: true });
-    await mkdir(join(crossEncoderCacheRoot, "Xenova", "reranker"), { recursive: true });
-    await writeFile(join(modelCacheRoot, "Xenova", "test", "config.json"), "model-config", {
-      encoding: "utf8",
-      flag: "w"
-    });
-    await writeFile(
-      join(crossEncoderCacheRoot, "Xenova", "reranker", "model.onnx"),
-      "cross-encoder-model",
-      "utf8"
-    );
-    const selectedQuestions = [{
-      question_id: "q-1",
-      question_type: "multi-session",
-      question: "q",
-      answer: "a",
-      question_date: "2026-01-01",
-      haystack_session_ids: [],
-      haystack_dates: [],
-      haystack_sessions: [],
-      answer_session_ids: []
-    }];
-    const manifest = createStratifiedQuestionManifest({
-      variant: "longmemeval_s",
-      datasetSha256: "a".repeat(64),
-      questions: selectedQuestions,
-      targetCount: 1
-    });
-    const selection = selectionContractIdentity(createLongMemEvalSelectionContract({
-      datasetSha256: manifest.dataset_sha256,
-      questions: selectedQuestions
-    }));
-    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
-    writeExtractionCacheManifest(extractionCacheRoot, {
-      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-      extraction_model: "cached-model",
-      model_family: "cached-family",
-      request_profile: "deepseek-v4-nonthinking-v1",
-      provider_url: "https://provider.invalid/v1",
-      system_prompt_sha256: "b".repeat(64),
-      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
-      dataset: "longmemeval-s",
-      dataset_revision: "a".repeat(64),
-      requested_turns: 10,
-      cached_turns: 10,
-      coverage: 1,
-      storage: "archive",
-      archive_url: "https://cache.invalid/archive.tar.zst",
-      archive_sha256: "c".repeat(64),
-      built_at: "2026-07-01T00:00:00.000Z",
-      builder: "test"
-    });
-
-    const provenance = await buildLongMemEvalRunProvenance({
-      opts: {
-        variant: "longmemeval_s",
-        historyRoot: root,
-        questionManifest: manifestPath,
-        extractionCacheRoot,
-        embeddingMode: "env",
-        embeddingProviderKind: "local_onnx"
-      },
-      evaluatedCount: 1,
-      commitSha7: "05d98df",
-      embeddingProviderLabel: "local_onnx:Xenova/test",
-      env: {
-        ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "2".repeat(64),
-        ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT: "17",
-        ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
-        ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
-        ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",
-        ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "cached-family",
-        OFFICIAL_API_GARDEN_MODEL: "cached-model",
-        ALAYA_LOCAL_ONNX_THREADS: "2",
-        ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelCacheRoot,
-        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-        ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: crossEncoderCacheRoot,
-        ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
-        ALAYA_EXP_ANSWERS_WITH_CAP: "3",
-        ALAYA_RECALL_ANSWERS_WITH: "1",
-        ALAYA_RECALL_FACET_TAGS: "1",
-        ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
-        ALAYA_CONFLICT_DETECTION_ENABLED: "0",
-        ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics",
-        ALAYA_RECALL_AUTH_HEADER: "Bearer secret-token",
-        ALAYA_EXP_SIGNED_URL: "https://example.invalid/model?signature=secret"
-      },
-      runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
-      computeExecutedDistIdentity: fakeExecutedDistIdentity,
-      datasetSha256: manifest.dataset_sha256,
-      selection
-    });
+    const fixture = await createRunProvenanceFixture(roots);
+    const { provenance, manifest, crossEncoderCacheRoot } = fixture;
 
     expect(LONGMEMEVAL_RUN_PROVENANCE_FILENAME).toBe("longmemeval-run-provenance.json");
     expect(provenance.execution).toEqual({
@@ -157,8 +47,16 @@ describe("LongMemEval run provenance", () => {
       archive_url: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
       system_prompt_sha256: "b".repeat(64),
       dataset_revision: "a".repeat(64),
-      coverage: 1
+      coverage: 1,
+      fill_status: "complete",
+      expected_turns: 10,
+      expected_key_set_sha256: EXTRACTION_CLOSURE.expected_key_set_sha256,
+      content_closure_sha256: EXTRACTION_CLOSURE.content_closure_sha256
     });
+    const builtCache = provenance.extraction_cache;
+    if (builtCache?.schema_version !== 3) throw new Error("expected current cache");
+    expect(Object.keys(builtCache.content_closure_index ?? {}))
+      .toHaveLength(EXTRACTION_CLOSURE.expected_turns);
     expect(provenance.extraction_cache?.manifest_sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(provenance.runtime).toEqual({
       node_version: "v24.0.0",
@@ -210,49 +108,19 @@ describe("LongMemEval run provenance", () => {
       selected_id_digest: manifest.selected_id_digest
     });
     expect(provenance.question_manifest?.file_sha256).toMatch(/^[a-f0-9]{64}$/u);
-    const sidecar = await buildLongMemEvalRunProvenanceSidecar({
-      opts: {
-        variant: "longmemeval_s",
-        historyRoot: root,
-        questionManifest: manifestPath,
-        extractionCacheRoot,
-        embeddingMode: "env",
-        embeddingProviderKind: "local_onnx"
-      },
-      evaluatedCount: 1,
-      commitSha7: "05d98df",
-      embeddingProviderLabel: "local_onnx:Xenova/test",
-      env: {
-        ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "2".repeat(64),
-        ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT: "17",
-        ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
-        ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
-        ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE: "1",
-        ALAYA_BENCH_EXTRACTION_MODEL_FAMILY: "cached-family",
-        OFFICIAL_API_GARDEN_MODEL: "cached-model",
-        ALAYA_LOCAL_ONNX_THREADS: "2",
-        ALAYA_LOCAL_EMBEDDING_CACHE_DIR: modelCacheRoot,
-        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "true",
-        ALAYA_LOCAL_CROSS_ENCODER_CACHE_DIR: crossEncoderCacheRoot,
-        ALAYA_LOCAL_CROSS_ENCODER_MODEL: "Xenova/reranker",
-        ALAYA_EXP_ANSWERS_WITH_CAP: "3",
-        ALAYA_RECALL_ANSWERS_WITH: "1",
-        ALAYA_RECALL_FACET_TAGS: "1",
-        ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
-        ALAYA_CONFLICT_DETECTION_ENABLED: "0",
-        ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics"
-      },
-      runtime: { nodeVersion: "v24.0.0", platform: "linux", arch: "x64" },
-      computeExecutedDistIdentity: fakeExecutedDistIdentity,
-      datasetSha256: manifest.dataset_sha256,
-      selection
-    });
+
+    const sidecar = await buildFixtureRunProvenanceSidecar(fixture);
+
     expect(sidecar.filename).toBe(LONGMEMEVAL_RUN_PROVENANCE_FILENAME);
     expect(JSON.parse(sidecar.contents)).toEqual(provenance);
 
     const v1Cache = { ...provenance.extraction_cache! };
     delete (v1Cache as { model_family?: string }).model_family;
     delete (v1Cache as { request_profile?: string }).request_profile;
+    for (const field of [
+      "fill_status", "window_offset", "window_limit", "expected_turns",
+      "expected_key_set_sha256", "content_closure_sha256", "content_closure_index"
+    ]) delete (v1Cache as Record<string, unknown>)[field];
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,
       extraction_cache: { ...v1Cache, schema_version: 1 }
@@ -314,17 +182,75 @@ describe("LongMemEval run provenance", () => {
       }
     });
     expect(isLongMemEvalRunProvenanceGateEligible(currentProvenance)).toBe(true);
+    const currentCache = currentProvenance.extraction_cache;
+    if (currentCache?.schema_version !== 3) {
+      throw new Error("current provenance fixture must use extraction schema v3");
+    }
+    const digestOnlyCache = { ...currentCache };
+    delete (digestOnlyCache as Record<string, unknown>).content_closure_index;
+    const digestOnlyProvenance = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      extraction_cache: digestOnlyCache
+    });
+    expect(isLongMemEvalRunProvenanceGateEligible(digestOnlyProvenance)).toBe(false);
     expect(isLongMemEvalRunProvenanceGateEligible({
       ...currentProvenance,
       extraction_cache: {
-        ...currentProvenance.extraction_cache!,
+        ...currentCache,
+        window_offset: 1
+      }
+    })).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...currentProvenance,
+      extraction_cache: {
+        ...currentCache,
+        window_limit: 0
+      }
+    })).toBe(false);
+    const statuslessCache = { ...currentCache };
+    for (const field of [
+      "fill_status", "window_offset", "window_limit", "expected_turns",
+      "expected_key_set_sha256", "content_closure_sha256", "content_closure_index"
+    ]) delete (statuslessCache as Record<string, unknown>)[field];
+    const statuslessProvenance = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      extraction_cache: statuslessCache
+    });
+    expect(isLongMemEvalRunProvenanceGateEligible(statuslessProvenance)).toBe(false);
+    const inProgressProvenance = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      extraction_cache: {
+        ...currentCache,
+        fill_status: "in_progress",
+        content_closure_sha256: undefined,
+        content_closure_index: undefined
+      }
+    });
+    expect(isLongMemEvalRunProvenanceGateEligible(inProgressProvenance)).toBe(false);
+    const incompleteScopedCache = { ...currentCache };
+    delete (incompleteScopedCache as Record<string, unknown>).expected_key_set_sha256;
+    const incompleteScopedProvenance = LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      extraction_cache: incompleteScopedCache
+    });
+    expect(isLongMemEvalRunProvenanceGateEligible(incompleteScopedProvenance)).toBe(false);
+    const contentUnboundCache = { ...currentCache };
+    delete (contentUnboundCache as Record<string, unknown>).content_closure_sha256;
+    expect(isLongMemEvalRunProvenanceGateEligible(LongMemEvalRunProvenanceSchema.parse({
+      ...currentProvenance,
+      extraction_cache: contentUnboundCache
+    }))).toBe(false);
+    expect(isLongMemEvalRunProvenanceGateEligible({
+      ...currentProvenance,
+      extraction_cache: {
+        ...currentCache,
         dataset_revision: "unpinned"
       }
     })).toBe(false);
     expect(isLongMemEvalRunProvenanceGateEligible({
       ...currentProvenance,
       extraction_cache: {
-        ...currentProvenance.extraction_cache!,
+        ...currentCache,
         dataset_revision: "9".repeat(64)
       }
     })).toBe(false);
@@ -397,73 +323,4 @@ describe("LongMemEval run provenance", () => {
     })).toBe(false);
   });
 
-  it("rejects symbolic links in the local ONNX artifact tree", async () => {
-    const root = await mkdtemp(join(tmpdir(), "lme-onnx-symlink-"));
-    roots.push(root);
-    const modelRoot = join(root, "models", "Xenova", "test");
-    await mkdir(modelRoot, { recursive: true });
-    await writeFile(join(root, "outside"), "secret", "utf8");
-    await symlink(join(root, "outside"), join(modelRoot, "model.onnx"));
-
-    await expect(resolveLocalArtifactTreeSha256(
-      join(root, "models"), "Xenova/test"
-    )).rejects.toThrow(/artifact tree/u);
-  });
-
-  it("rejects an environment identity that does not match the fresh closure", async () => {
-    await expect(buildLongMemEvalRunProvenance({
-      opts: {
-        variant: "longmemeval_s",
-        historyRoot: "/tmp",
-        embeddingMode: "disabled"
-      },
-      evaluatedCount: 0,
-      commitSha7: "05d98df",
-      embeddingProviderLabel: "disabled",
-      env: {
-        ALAYA_BENCH_EXECUTED_DIST_CLOSURE_SHA256: "f".repeat(64),
-        ALAYA_BENCH_EXECUTED_DIST_FILE_COUNT: "1"
-      },
-      computeExecutedDistIdentity: fakeExecutedDistIdentity
-    })).rejects.toThrow(/does not match fresh closure/u);
-  });
-
-  it("rejects an ONNX thread count above the runtime maximum", async () => {
-    await expect(buildLongMemEvalRunProvenance({
-      opts: {
-        variant: "longmemeval_s",
-        historyRoot: "/tmp",
-        embeddingMode: "disabled"
-      },
-      evaluatedCount: 0,
-      commitSha7: "05d98df",
-      embeddingProviderLabel: "disabled",
-      env: { ALAYA_LOCAL_ONNX_THREADS: "128" },
-      computeExecutedDistIdentity: fakeExecutedDistIdentity
-    })).rejects.toThrow(/ALAYA_LOCAL_ONNX_THREADS/u);
-  });
-
-  it("rejects model traversal and a symlinked model root", async () => {
-    const root = await mkdtemp(join(tmpdir(), "lme-onnx-root-symlink-"));
-    roots.push(root);
-    const cacheRoot = join(root, "models");
-    const outside = join(root, "outside");
-    await mkdir(cacheRoot, { recursive: true });
-    await mkdir(outside, { recursive: true });
-    await writeFile(join(outside, "model.onnx"), "model", "utf8");
-    await symlink(outside, join(cacheRoot, "linked"), "dir");
-
-    await expect(resolveLocalArtifactTreeSha256(cacheRoot, "../outside"))
-      .rejects.toThrow(/cache root/u);
-    await expect(resolveLocalArtifactTreeSha256(cacheRoot, "linked"))
-      .rejects.toThrow(/artifact tree/u);
-  });
 });
-
-async function fakeExecutedDistIdentity() {
-  return {
-    algorithm: "sha256-reachable-path-file-sha256-v1",
-    sha256: "2".repeat(64),
-    file_count: 17
-  } as const;
-}

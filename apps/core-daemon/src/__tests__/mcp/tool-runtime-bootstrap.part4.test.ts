@@ -169,6 +169,8 @@ describe("daemon tool runtime bootstrap", () => {
       await vi.waitFor(() => {
         expect(bootResolved).toBe(true);
       });
+      const runtime = await runtimePromise;
+      expect(runtime.services.embeddingProviderWarmup).toBe(providerWarmup.promise);
 
       providerWarmup.resolve("failed");
       await Promise.resolve();

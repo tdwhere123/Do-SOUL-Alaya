@@ -14,6 +14,8 @@ import {
 import type { BenchCommitResolution } from "../shared/version.js";
 import type { z } from "zod";
 import type { BenchRecallDiagnostics } from "../harness/recall-diagnostics-schema.js";
+import type { DeliveryMissDropReason } from "./delivery-miss-taxonomy.js";
+import type { RecallCandidate, RecallOriginPlane } from "@do-soul/alaya-protocol";
 
 // @anchor diagnostics-schema: the persisted shape of these records is owned
 // by diagnostics-schema.ts; these aliases keep one source of truth.
@@ -49,8 +51,9 @@ export type DiagnosticFloodFuelCoverage = Readonly<{
 
 export type LongMemEvalReplayCandidate = Readonly<{
   readonly object_id: string;
-  readonly object_kind?: string;
+  readonly object_kind: RecallCandidate["object_kind"];
   readonly candidate_key: string;
+  readonly origin_plane: RecallOriginPlane;
   readonly dimension: string | null;
   readonly final_rank: number | null;
   readonly pre_budget_rank: number | null;
@@ -64,10 +67,14 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly per_axis_rank: DiagnosticAxisRanks | null;
   readonly per_axis_contribution: DiagnosticAxisContributions | null;
   readonly flood_potential: DiagnosticFloodPotential | null;
+  readonly flood_fuel_coverage: DiagnosticFloodFuelCoverage | null;
   readonly plane_first_admitted: string | null;
   readonly plane_winning_admission: string | null;
   readonly source_planes: readonly string[];
   readonly source_channels: readonly string[];
+  readonly lexical_rank: number | null;
+  readonly structural_score: number | null;
+  readonly budget_drop_reason: DeliveryMissDropReason | null;
   readonly rank_after_fusion: number | null;
   readonly rank_after_feature_rerank: number | null;
   readonly rank_after_lexical_priority: number | null;
@@ -75,10 +82,24 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly rank_after_structural_reserve: number | null;
   readonly rank_after_coverage_selector: number | null;
   readonly rank_after_session_coverage: number | null;
+  readonly coverage_selector_action: DeliveryStageAction | null;
+  readonly session_coverage_action: DeliveryStageAction | null;
+  readonly session_key: string | null;
+  readonly source_cohort_key: string | null;
+  readonly reserved_by: string | null;
   readonly answer_features: DiagnosticCandidateAnswerFeatures | null;
   readonly path_suppression_score: number | null;
   readonly score_factors: DiagnosticScoreFactors;
 }>;
+
+export interface FineAssessmentPrunedCandidateDiagnostic {
+  readonly candidate_key: string;
+  readonly origin_plane: RecallOriginPlane;
+  readonly object_kind: "memory_entry" | "synthesis_capsule";
+  readonly object_id: string;
+  readonly coarse_index: number;
+  readonly drop_reason: "fine_assessment_cap";
+}
 
 export interface DiagnosticRecallResultInput {
   readonly object_id: string;
@@ -302,10 +323,17 @@ export interface NarrowRecallDiagnostics {
   readonly queryProbes: DiagnosticQueryProbes | null;
   readonly querySoughtFacets: readonly string[] | null;
   readonly candidatePoolComplete: boolean;
+  readonly candidatePoolCount: number | null;
+  readonly finePrunedCount: number | null;
+  readonly fineAssessmentPrunedCandidates:
+    readonly FineAssessmentPrunedCandidateDiagnostic[];
+  readonly fineAssessmentPrunedByObjectIdentity:
+    ReadonlyMap<string, FineAssessmentPrunedCandidateDiagnostic>;
+  readonly fineAssessmentPrunedObjectIds: ReadonlySet<string>;
   readonly candidatesByObjectId: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidatesByObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
   readonly candidatesByCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
-  readonly candidateKeysByObjectId: ReadonlyMap<string, readonly string[]>;
+  readonly candidateIdentityObservations: readonly CandidateIdentityObservation[];
   readonly providerState: BenchEmbeddingProviderState;
   readonly providerDegradationReason: string | null;
   readonly embeddingWorkspaceScannedCount: number | null;
@@ -326,11 +354,11 @@ export interface NarrowRecallDiagnostics {
 export interface CandidateDiagnostic {
   readonly candidateKey: string;
   readonly objectId: string;
-  readonly objectKind: string;
+  readonly objectKind: RecallCandidate["object_kind"];
   readonly createdAt: string | null;
   readonly facetOverlap: number | null;
   readonly dimension: string | null;
-  readonly originPlane: string;
+  readonly originPlane: RecallOriginPlane;
   readonly preBudgetRank: number | null;
   readonly selectionOrder: number | null;
   readonly finalRank: number | null;
@@ -368,12 +396,25 @@ export interface CandidateDiagnostic {
   readonly reservedBy: string | null;
 }
 
+export interface CandidateIdentityObservation {
+  readonly candidate: CandidateDiagnostic;
+  readonly sourceCandidateKey: string;
+  readonly legacy: boolean;
+}
+
 export type DeliveryStageAction = "noop" | "kept" | "promoted" | "displaced";
 
 export interface ReadCandidateDiagnosticsResult {
   readonly candidatePoolComplete: boolean;
+  readonly candidatePoolCount: number | null;
+  readonly finePrunedCount: number | null;
+  readonly fineAssessmentPrunedCandidates:
+    readonly FineAssessmentPrunedCandidateDiagnostic[];
+  readonly fineAssessmentPrunedByObjectIdentity:
+    ReadonlyMap<string, FineAssessmentPrunedCandidateDiagnostic>;
+  readonly fineAssessmentPrunedObjectIds: ReadonlySet<string>;
   readonly byObjectId: ReadonlyMap<string, CandidateDiagnostic>;
   readonly byObjectIdentity: ReadonlyMap<string, CandidateDiagnostic>;
   readonly byCandidateKey: ReadonlyMap<string, CandidateDiagnostic>;
-  readonly keysByObjectId: ReadonlyMap<string, readonly string[]>;
+  readonly identityObservations: readonly CandidateIdentityObservation[];
 }

@@ -33,6 +33,7 @@ import {
   writeVerifiedHistoryArchive
 } from "../verified-history-archive-fixture.js";
 import { buildRunnerQuestions, readJson } from "./fixture.js";
+import { syntheticExtractionClosure } from "../extraction-closure-fixture.js";
 
 let tmpRoot: string;
 
@@ -233,6 +234,12 @@ function completeCode(commitSha7: string) {
 }
 
 function completeCache(datasetSha256: string, count: number) {
+  const extractionClosure = syntheticExtractionClosure({
+    count,
+    model: "test-model",
+    requestProfile: "provider-default-v1",
+    seed: `tier-one:${count}`
+  });
   return {
     schema_version: 3,
     manifest_sha256: "e".repeat(64),
@@ -247,6 +254,10 @@ function completeCache(datasetSha256: string, count: number) {
     requested_turns: count,
     cached_turns: count,
     coverage: 1,
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: count,
+    ...extractionClosure,
     storage: "git-tracked",
     built_at: "2026-07-16T00:00:00.000Z",
     builder: "test"

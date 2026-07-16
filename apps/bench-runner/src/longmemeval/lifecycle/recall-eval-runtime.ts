@@ -141,6 +141,7 @@ export async function buildRecallEvalRuntimeAttribution(
     runProvenance: manifest.run_provenance,
     questionIdDigest: manifest.question_id_digest,
     datasetSha256: manifest.dataset_sha256,
+    seedExtractionPath: manifest.seed_extraction_path,
     extractionProvenance: manifest.extraction_provenance
   });
   return {
@@ -246,7 +247,10 @@ export async function prepareRecallEvalDataDir(input: {
     if (input.restoreSnapshot === undefined) {
       restoreSnapshotToDataDir({
         snapshotDbPath: input.snapshotDbPath,
-        dataDirRoot: root.path
+        dataDirRoot: root.path,
+        ...(input.artifactIntegrity === undefined
+          ? {}
+          : { expectedSha256: input.artifactIntegrity.db_sha256 })
       });
     } else {
       input.restoreSnapshot(root.path);
@@ -272,12 +276,12 @@ export async function prepareRecallEvalDataRoot(
 ): Promise<OwnedTempRoot> {
   const { manifest } = bundle;
   return await prepareRecallEvalDataDir({
-    snapshotDbPath: options.snapshotDbPath,
+    snapshotDbPath: bundle.snapshotDbPath,
     requestedRoot: options.dataDirRoot,
     plannedRoot,
     ...(options.legacySnapshot === true
       ? { restoreSnapshot: (dataDirRoot: string) => restoreLegacySnapshotToDataDir({
-          snapshotDbPath: options.snapshotDbPath,
+          snapshotDbPath: bundle.snapshotDbPath,
           dataDirRoot,
           manifest
         }) }

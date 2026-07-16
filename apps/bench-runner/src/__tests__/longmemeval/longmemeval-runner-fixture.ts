@@ -91,8 +91,9 @@ function buildDefaultSeedExtractionPath(): NonNullable<
 > {
   return {
     path: "official_api_compile",
-    cache_hits: 0,
-    llm_calls: 1,
+    extraction_attempts: 1,
+    cache_hits: 1,
+    llm_calls: 0,
     offline_fallbacks: 0,
     live_extraction_failures: 0,
     cached_extraction_failures: 0,
@@ -301,6 +302,7 @@ function currentMissTaxonomy(denominator: number, hitCount: number) {
   return {
     candidate_absent: 0,
     materialization_drop: 0,
+    fine_assessment_drop: 0,
     budget_drop: 0,
     delivery_order_drop: denominator - hitCount,
     answer_set_coverage_drop: 0,

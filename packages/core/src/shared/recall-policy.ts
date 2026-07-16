@@ -10,8 +10,12 @@ import {
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
 import { CoreError } from "./errors.js";
+import {
+  RECALL_TOTAL_CANDIDATE_CAP,
+  normalizeRecallCandidateLimit
+} from "./internal/recall-candidate-limit.js";
 
-export const RECALL_TOTAL_CANDIDATE_CAP = 1000;
+export { RECALL_TOTAL_CANDIDATE_CAP };
 
 export type RecallPolicyFilterSpec = Readonly<{
   readonly scopeFilter: readonly ScopeClass[] | null;
@@ -32,6 +36,28 @@ export type RecallPolicyBuilderInput = Readonly<{
   readonly embeddingSupplementEnabled?: boolean;
 }>;
 
+export type RecallPolicyEmbeddingStateInput = Readonly<{
+  readonly embeddingEnabled: boolean;
+  readonly injectionCap?: number | null;
+  readonly injectionSimilarityFloor?: number | null;
+}>;
+
+export type MemorySearchRecallPolicyInput = Readonly<Pick<
+  RecallPolicyBuilderInput,
+  "runtimeId" | "taskSurfaceId" | "maxResults" | "filters"
+>>;
+
+export function buildMemorySearchRecallPolicy(
+  input: MemorySearchRecallPolicyInput
+): RecallPolicy {
+  const policy = buildRecallPolicy({
+    ...input,
+    conflictAwareness: true,
+    maxTotalTokens: 2_000
+  });
+  return applyRecallPolicyEmbeddingState(policy, { embeddingEnabled: false });
+}
+
 export function resolveRecallPolicyFiltersFromSearchRequest(
   request: Pick<SoulMemorySearchRequest, "scope_class" | "dimension" | "domain_tags">
 ): RecallPolicyFilterSpec {
@@ -49,7 +75,7 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
   const limits = resolveRecallPolicyCandidateLimits(input, maxResults);
   const semanticSupplementEnabled = input.embeddingSupplementEnabled ?? true;
 
-  return {
+  const basePolicy: RecallPolicy = {
     runtime_id: input.runtimeId,
     object_kind: ControlPlaneObjectKind.RECALL_POLICY,
     task_surface_ref: input.taskSurfaceId,
@@ -69,13 +95,7 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
       semantic_supplement: {
         enabled: semanticSupplementEnabled,
         max_supplement: limits.semantic,
-        embedding_enabled: true,
-        ...(input.embeddingInjectionCap === undefined || input.embeddingInjectionCap === null
-          ? {}
-          : { injection_cap: input.embeddingInjectionCap }),
-        ...(input.embeddingInjectionSimilarityFloor == null
-          ? {}
-          : { injection_similarity_floor: input.embeddingInjectionSimilarityFloor })
+        embedding_enabled: semanticSupplementEnabled
       }
     },
     fine_assessment: {
@@ -88,6 +108,14 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
       conflict_awareness: input.conflictAwareness
     }
   };
+  if (input.embeddingInjectionCap == null && input.embeddingInjectionSimilarityFloor == null) {
+    return basePolicy;
+  }
+  return applyRecallPolicyEmbeddingState(basePolicy, {
+    embeddingEnabled: semanticSupplementEnabled,
+    injectionCap: input.embeddingInjectionCap,
+    injectionSimilarityFloor: input.embeddingInjectionSimilarityFloor
+  });
 }
 
 function resolveRecallPolicyCandidateLimits(
@@ -106,14 +134,87 @@ function resolveRecallPolicyCandidateLimits(
     RECALL_TOTAL_CANDIDATE_CAP
   );
   const semanticSupplementEnabled = input.embeddingSupplementEnabled ?? true;
-  const injectionCandidateLimit = input.embeddingInjectionCap ?? 0;
   const fine = coarse +
-    (semanticSupplementEnabled ? keywordCandidateLimit + injectionCandidateLimit : 0);
+    (semanticSupplementEnabled ? keywordCandidateLimit : 0);
   return Object.freeze({
     coarse,
     semantic: keywordCandidateLimit,
     fine: Math.min(fine, RECALL_TOTAL_CANDIDATE_CAP)
   });
+}
+
+export function applyRecallPolicyEmbeddingState(
+  policy: Readonly<RecallPolicy>,
+  input: RecallPolicyEmbeddingStateInput
+): RecallPolicy {
+  const semantic = policy.coarse_filter.semantic_supplement;
+  const semanticEnabled = input.embeddingEnabled || semantic.enabled;
+  const configuredCap = resolveConfiguredInjectionCap(input.injectionCap, semantic.injection_cap);
+  const effectiveCap = input.embeddingEnabled
+    ? resolveEffectiveInjectionCap(policy, semanticEnabled, configuredCap)
+    : configuredCap;
+  const floor = input.injectionSimilarityFloor ?? semantic.injection_similarity_floor;
+  const fineMax = input.embeddingEnabled && effectiveCap !== undefined
+    ? resolveEmbeddingFineCandidateBudget(policy, semanticEnabled, effectiveCap)
+    : policy.fine_assessment.max_candidates;
+
+  return {
+    ...policy,
+    coarse_filter: {
+      ...policy.coarse_filter,
+      semantic_supplement: {
+        ...semantic,
+        enabled: semanticEnabled,
+        embedding_enabled: input.embeddingEnabled,
+        ...(effectiveCap === undefined ? {} : { injection_cap: effectiveCap }),
+        ...(floor === undefined ? {} : { injection_similarity_floor: floor })
+      }
+    },
+    fine_assessment: {
+      ...policy.fine_assessment,
+      ...(fineMax === undefined ? {} : { max_candidates: fineMax })
+    }
+  };
+}
+
+function resolveConfiguredInjectionCap(
+  requested: number | null | undefined,
+  existing: number | undefined
+): number | undefined {
+  const configured = requested ?? existing;
+  return configured === undefined ? undefined : normalizeRecallCandidateLimit(configured);
+}
+
+function resolveEffectiveInjectionCap(
+  policy: Readonly<RecallPolicy>,
+  semanticEnabled: boolean,
+  configuredCap: number | undefined
+): number | undefined {
+  if (configuredCap === undefined) return undefined;
+  const directBudget = resolveDirectCandidateBudget(policy, semanticEnabled);
+  return Math.min(configuredCap, RECALL_TOTAL_CANDIDATE_CAP - directBudget);
+}
+
+function resolveEmbeddingFineCandidateBudget(
+  policy: Readonly<RecallPolicy>,
+  semanticEnabled: boolean,
+  injectionCap: number
+): number {
+  const directBudget = resolveDirectCandidateBudget(policy, semanticEnabled);
+  const existing = normalizeRecallCandidateLimit(policy.fine_assessment.max_candidates ?? 0);
+  return Math.max(existing, directBudget + injectionCap);
+}
+
+function resolveDirectCandidateBudget(
+  policy: Readonly<RecallPolicy>,
+  semanticEnabled: boolean
+): number {
+  const semantic = policy.coarse_filter.semantic_supplement;
+  return normalizeRecallCandidateLimit(Math.max(
+    policy.fine_assessment.budgets.max_entries,
+    policy.coarse_filter.precomputed_rank.max_candidates +
+      (semanticEnabled ? semantic.max_supplement : 0)
+  ));
 }
 
 export function parseRecallPolicy(value: RecallPolicy): Readonly<RecallPolicy> {

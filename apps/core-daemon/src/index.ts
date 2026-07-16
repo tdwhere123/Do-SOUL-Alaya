@@ -338,6 +338,8 @@ function buildFinalizeDaemonRuntimeWiringInput(
     toolExecutionRecordRepo: repositories.toolExecutionRecordRepo,
     securityStatusService: foundation.securityStatusService,
     embeddingStatusService: runtimeWiring.recallWiring.embeddingStatusService,
+    embeddingProviderWarmup: runtimeWiring.recallWiring.embeddingProviderWarmup,
+    getEmbeddingProviderDimensions: runtimeWiring.recallWiring.getEmbeddingProviderDimensions,
     conversationService: runtimeWiring.coreWiring.conversationService,
     runHotStateService: foundation.runHotStateService,
     governanceLeaseService: foundation.governanceLeaseService,

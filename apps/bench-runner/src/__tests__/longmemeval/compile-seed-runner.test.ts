@@ -242,7 +242,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
-  it("seeds the full turn as one fact when the extractor finds no candidates", async () => {
+  it("does not synthesize a memory when official extraction finds no candidates", async () => {
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -265,11 +265,14 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       ...SEED_CONTEXT
     });
 
-    expect(result.seeds).toHaveLength(1);
-    expect(seeded[0]?.distilledFact).toBe("ok thanks");
+    expect(result.seeds).toHaveLength(0);
+    expect(seeded).toHaveLength(0);
+    expect(runner.stats.factsProduced).toBe(0);
+    expect(runner.stats.offlineFallbacks).toBe(0);
   });
 
   it("falls back to the full turn as one fact when no credentials are configured", async () => {
+    await rm(join(cacheRoot, "manifest.json"), { force: true });
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -386,13 +389,14 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       ...SEED_CONTEXT
     });
 
-    expect(seeded).toHaveLength(1);
+    expect(seeded).toHaveLength(0);
     expect(delegate).toHaveBeenCalledOnce();
     expect(secondRunner.stats.cacheHits).toBe(0);
     expect(secondRunner.stats.llmCalls).toBe(1);
     expect(secondRunner.stats.offlineFallbacks).toBe(0);
     expect(secondRunner.stats.liveExtractionFailures).toBe(0);
     expect(secondRunner.stats.cachedExtractionFailures).toBe(0);
+    expect(secondRunner.stats.factsProduced).toBe(0);
     expect(toSeedExtractionPathKpi(secondRunner.stats)).toMatchObject({
       cache_hits: 0,
       llm_calls: 1,

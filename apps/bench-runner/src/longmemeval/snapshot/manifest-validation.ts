@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { LongMemEvalRunProvenanceSchema } from "../provenance/run.js";
+import {
+  SeedExtractionPathSchema,
+  type SeedExtractionPath
+} from "@do-soul/alaya-eval";
+import { LongMemEvalSnapshotRunProvenanceSchema } from "./run-provenance.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES
@@ -10,6 +14,13 @@ import {
 } from "../snapshot.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
+import {
+  EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS
+} from "../extraction/fill-authority.js";
+import { LongMemEvalExpansionLineageSchema } from
+  "../promotion/expansion-lineage-schema.js";
+import { LongMemEvalExpansionSourceAnchorSchema } from
+  "../promotion/expansion-source-anchor-schema.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SnapshotExtractionBaseSchema = z.object({
@@ -38,14 +49,34 @@ const SnapshotExtractionProvenanceSchema = z.discriminatedUnion("schema_version"
   SnapshotExtractionBaseSchema.extend({
     schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
     model_family: z.string().min(1),
-    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES)
+    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
+    expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
+    expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
+    ...EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS
   }).strict()
 ]);
 const SnapshotManifestRecordSchema = z.record(z.string(), z.unknown());
 const SnapshotArtifactIntegritySchema = z
   .object({
     db_sha256: Sha256Schema,
-    sidecar_sha256: Sha256Schema
+    sidecar_sha256: Sha256Schema,
+    extraction_authority_filename: z.string().min(1).optional(),
+    extraction_authority_sha256: Sha256Schema.optional(),
+    extraction_authority_bytes: z.number().int().positive().optional()
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const fields = [
+      value.extraction_authority_filename,
+      value.extraction_authority_sha256,
+      value.extraction_authority_bytes
+    ];
+    if (fields.every((field) => field === undefined) ||
+        fields.every((field) => field !== undefined)) return;
+    context.addIssue({
+      code: "custom",
+      message: "extraction authority integrity fields must be complete"
+    });
   })
   .readonly();
 const SnapshotAttributionSchema = z
@@ -65,21 +96,29 @@ export function validateSnapshotManifest(
   validateOptionalShaFields(record, filePath);
   const runProvenance = record.run_provenance === undefined
     ? undefined
-    : LongMemEvalRunProvenanceSchema.parse(record.run_provenance);
+    : LongMemEvalSnapshotRunProvenanceSchema.parse(record.run_provenance);
   const artifactIntegrity = parseArtifactIntegrity(record.artifact_integrity, filePath);
   const storedAttribution = parseSnapshotAttribution(record.attribution, filePath);
+  const seedExtractionPath = parseSeedExtractionPath(
+    record.seed_extraction_path,
+    filePath
+  );
   const extractionProvenance = legacyV1
     ? null
     : parseExtractionProvenance(record.extraction_provenance, filePath);
   const manifest = {
     ...(parsed as LongMemEvalSnapshotManifest),
-    extraction_provenance: extractionProvenance
+    extraction_provenance: extractionProvenance,
+    ...(seedExtractionPath === undefined
+      ? {}
+      : { seed_extraction_path: seedExtractionPath })
   };
   const derivedAttribution = deriveSnapshotAttribution({
     artifactIntegrity,
     runProvenance,
     questionIdDigest: optionalString(record.question_id_digest),
     datasetSha256: optionalString(record.dataset_sha256),
+    seedExtractionPath,
     extractionProvenance
   });
   assertAttributionClaim(storedAttribution, derivedAttribution, filePath);
@@ -91,6 +130,18 @@ export function validateSnapshotManifest(
       ? derivedAttribution
       : { status: "legacy_unattributed", gate_eligible: false }
   };
+}
+
+function parseSeedExtractionPath(
+  value: unknown,
+  filePath: string
+): SeedExtractionPath | undefined {
+  if (value === undefined) return undefined;
+  const parsed = SeedExtractionPathSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw new Error(
+    `recall-eval snapshot manifest at ${filePath} has invalid seed_extraction_path`
+  );
 }
 
 function parseExtractionProvenance(
@@ -174,11 +225,18 @@ function assertAttributionClaim(
   derived: NonNullable<LongMemEvalSnapshotManifest["attribution"]>,
   filePath: string
 ): void {
+  if (stored === undefined) return;
   if (stored?.status === "attributed" && derived.status !== "attributed") {
     throw new Error(`recall-eval attributed snapshot manifest at ${filePath} is incomplete`);
   }
   if (stored?.gate_eligible === true && !derived.gate_eligible) {
     throw new Error(`recall-eval snapshot manifest at ${filePath} overclaims gate eligibility`);
+  }
+  if (stored.status !== derived.status ||
+      stored.gate_eligible !== derived.gate_eligible) {
+    throw new Error(
+      `recall-eval snapshot manifest at ${filePath} attribution claim differs from derived evidence`
+    );
   }
 }
 

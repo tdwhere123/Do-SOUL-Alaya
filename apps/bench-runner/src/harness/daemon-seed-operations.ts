@@ -358,11 +358,13 @@ async function persistBenchAnswerHq(
   const repo = new SqliteMemoryHqRepo(
     initDatabase({ filename: join(input.dataDir, "alaya.db") })
   );
+  const existing = (await repo.getHqByObjectIds([memoryId])).get(memoryId) ?? [];
+  const merged = [...new Set([...existing, ...hqs])].slice(0, BENCH_ANSWER_HQ_MAX);
   const now = new Date().toISOString();
   await repo.upsert({
     object_id: memoryId,
     workspace_id: input.activeContext.workspaceId,
-    hqs,
+    hqs: merged,
     created_at: now,
     updated_at: now
   });

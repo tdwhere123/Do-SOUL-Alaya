@@ -322,6 +322,7 @@ describe("compile() signal-drop count is observable", () => {
   });
 
   it("fails closed in no-credentials fallback when a seed memory materializes but accept fails", async () => {
+    await rm(join(cacheRoot, "manifest.json"), { force: true });
     const daemon: CompileSeedDaemon = {
       proposeMemoryFromSignal: async () => {
         throw createUnscoredMaterializedSeedError({

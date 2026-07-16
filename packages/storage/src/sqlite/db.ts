@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
 import { migrateEngineBindingApiKeysToCiphertext } from "../repos/shared/api-key-cipher.js";
+import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
 import { LruCache } from "./lru-cache.js";
 import type { SqliteWriteQueuePort } from "./write-queue-port.js";
 
@@ -331,7 +332,8 @@ function applyMigrationIfPending(
 }
 
 const DATA_MIGRATIONS: Readonly<Partial<Record<number, (database: SqliteConnection) => void>>> = {
-  104: migrateEngineBindingApiKeysToCiphertext
+  104: migrateEngineBindingApiKeysToCiphertext,
+  107: migrateEmbeddingVectorValidity
 };
 
 function runDataMigrationIfPresent(database: SqliteConnection, version: number): void {

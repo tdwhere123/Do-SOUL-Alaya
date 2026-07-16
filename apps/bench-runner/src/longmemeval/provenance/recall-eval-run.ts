@@ -1,5 +1,9 @@
 import type { RecallEvalRuntimeAttribution } from "../lifecycle/recall-eval-runtime.js";
 import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
+import { bindSnapshotRunProvenanceAuthority } from
+  "../snapshot/run-provenance.js";
+import type { SnapshotExtractionAuthority } from
+  "../snapshot/extraction-authority.js";
 import {
   buildLongMemEvalRunProvenance,
   isLongMemEvalRunProvenanceGateEligible,
@@ -16,8 +20,30 @@ export async function buildRecallEvalRunProvenance(input: {
   readonly commitSha7: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly computeExecutedDistIdentity?: () => Promise<unknown>;
+  readonly extractionAuthority: SnapshotExtractionAuthority | null;
 }): Promise<LongMemEvalRunProvenance> {
-  const current = await buildLongMemEvalRunProvenance({
+  const current = await buildCurrentRecallRunProvenance(input);
+  const snapshotIdentity = resolveFullSnapshotIdentity(input);
+  const extractionCache = resolveSnapshotExtractionCache(input);
+  return LongMemEvalRunProvenanceSchema.parse({
+    ...current,
+    ...(snapshotIdentity === null ? {} : snapshotIdentity),
+    recall_config: {
+      ...current.recall_config,
+      ...input.runtimeAttribution.recall_config
+    },
+    extraction_cache: extractionCache,
+    ...(input.manifest.run_provenance?.seed_capabilities === undefined
+      ? {}
+      : { seed_capabilities: input.manifest.run_provenance.seed_capabilities }),
+    question_manifest: input.manifest.run_provenance?.question_manifest ?? null
+  });
+}
+
+function buildCurrentRecallRunProvenance(
+  input: Parameters<typeof buildRecallEvalRunProvenance>[0]
+) {
+  return buildLongMemEvalRunProvenance({
     opts: {
       variant: input.manifest.variant as "longmemeval_oracle" | "longmemeval_s" | "longmemeval_m",
       historyRoot: "",
@@ -43,18 +69,38 @@ export async function buildRecallEvalRunProvenance(input: {
       ? {}
       : { computeExecutedDistIdentity: input.computeExecutedDistIdentity })
   });
-  return LongMemEvalRunProvenanceSchema.parse({
-    ...current,
-    recall_config: {
-      ...current.recall_config,
-      ...input.runtimeAttribution.recall_config
-    },
-    extraction_cache: input.manifest.run_provenance?.extraction_cache ?? null,
-    ...(input.manifest.run_provenance?.seed_capabilities === undefined
-      ? {}
-      : { seed_capabilities: input.manifest.run_provenance.seed_capabilities }),
-    question_manifest: input.manifest.run_provenance?.question_manifest ?? null
-  });
+}
+
+function resolveSnapshotExtractionCache(
+  input: Parameters<typeof buildRecallEvalRunProvenance>[0]
+) {
+  const snapshotProvenance = input.manifest.run_provenance;
+  return snapshotProvenance === undefined
+    ? null
+    : input.extractionAuthority === null
+      ? snapshotProvenance.extraction_cache
+      : bindSnapshotRunProvenanceAuthority(
+          snapshotProvenance,
+          input.extractionAuthority
+        ).extraction_cache;
+}
+
+function resolveFullSnapshotIdentity(
+  input: Parameters<typeof buildRecallEvalRunProvenance>[0]
+): Pick<LongMemEvalRunProvenance, "dataset_sha256" | "selection"> | null {
+  const provenance = input.manifest.run_provenance;
+  const datasetSha = provenance?.dataset_sha256;
+  const selection = provenance?.selection;
+  const fullSnapshot = input.offset === 0 && input.limit === null &&
+    input.evaluatedCount === input.manifest.question_count;
+  if (!fullSnapshot || datasetSha === undefined || selection === undefined ||
+      input.manifest.dataset_sha256 !== datasetSha ||
+      selection.dataset_sha256 !== datasetSha ||
+      selection.selected_count !== input.manifest.question_count ||
+      selection.selected_id_digest !== input.manifest.question_id_digest) {
+    return null;
+  }
+  return { dataset_sha256: datasetSha, selection };
 }
 
 export function isRecallEvalRunEvidenceEligible(input: {

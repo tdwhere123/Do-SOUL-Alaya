@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "./embedding-treatment-activation.js";
 import { readOptionalTreatmentBoolean } from "./strict-treatment-config.js";
 
@@ -174,7 +175,7 @@ const RecallCandidateDiagnosticSchema = z
     created_at: z.string().min(1).optional(),
     facet_overlap: z.number().int().nonnegative().optional(),
     dimension: z.string().min(1).optional(),
-    origin_plane: z.enum(["workspace_local", "global"]),
+    origin_plane: RecallOriginPlaneSchema,
     admission_planes: z.array(z.string().min(1)).readonly(),
     plane_first_admitted: z.string().min(1),
     plane_winning_admission: z.string().min(1),
@@ -221,13 +222,25 @@ const RecallCandidateDiagnosticSchema = z
   .strict()
   .readonly();
 
+const FineAssessmentPrunedCandidateDiagnosticSchema = z
+  .object({
+    candidate_key: z.string().min(1),
+    origin_plane: RecallOriginPlaneSchema,
+    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_id: z.string().min(1),
+    coarse_index: z.number().int().nonnegative(),
+    drop_reason: z.literal("fine_assessment_cap")
+  })
+  .strict()
+  .readonly();
+
 // invariant: mirrors RecallTokenEconomy from
 // packages/core/src/recall/recall-service-types.ts. The bench harness captures
 // these per-recall figures so the longmemeval / locomo KPI summaries can
 // aggregate p50 / p95 / mean across questions. Measure-only — no field
 // gates ranking or admission.
 // see also: packages/core/src/recall/diagnostics.ts:computeRecallTokenEconomy
-const RecallTokenEconomySchema = z
+export const RecallTokenEconomySchema = z
   .object({
     delivered_context_tokens_estimate: z.number().int().nonnegative(),
     coarse_pool_size: z.number().int().nonnegative(),
@@ -353,7 +366,7 @@ export const BenchRecallDiagnosticsSchema = z
             candidate_key: z.string().min(1),
             object_id: z.string().min(1),
             object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
-            origin_plane: z.enum(["workspace_local", "global"]),
+            origin_plane: RecallOriginPlaneSchema,
             // Mirrors RecallFusionBreakdown.facet_overlap from core diagnostics.
             facet_overlap: z.number().int().nonnegative(),
             per_stream_rank: RecallFusionStreamRankSchema,
@@ -374,6 +387,8 @@ export const BenchRecallDiagnosticsSchema = z
       )
       .readonly(),
     candidates: z.array(RecallCandidateDiagnosticSchema).readonly(),
+    fine_assessment_pruned_candidates:
+      z.array(FineAssessmentPrunedCandidateDiagnosticSchema).readonly(),
     // Optional only for legacy/malformed diagnostics. Current RecallService
     // emits token_economy on normal and degraded recall paths, and the bench
     // aggregator drops absent blocks instead of admitting a `{0,0,0,0,0}`

@@ -26,6 +26,8 @@ import {
   openContainedArtifact,
   type ContainedArtifactFile
 } from "./contained-artifact-path.js";
+import type { LoadedGlobalExtractionAuthority } from
+  "../../longmemeval/provenance/extraction-authority-reference.js";
 
 export interface ReadShardPayloadResult {
   readonly payload: KpiPayload;
@@ -54,7 +56,10 @@ export async function readShardPayload(
 }
 
 export async function readShardPayloadPlan(
-  shardRoot: string
+  shardRoot: string,
+  options: {
+    readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
+  } = {}
 ): Promise<ShardPayloadPlan> {
   const pointerPath = await resolveShardPointerPath(shardRoot);
   const pointer = await readContainedJson<{ slug?: string }>(
@@ -70,7 +75,8 @@ export async function readShardPayloadPlan(
   const verifiedEvidence = await verifyShardEvidenceBundle({
     shardRoot,
     slug: pointer.slug,
-    payload
+    payload,
+    globalExtractionAuthority: options.globalExtractionAuthority
   });
   const diagnostics = await readRequiredShardDiagnosticsPlan(
     shardRoot,

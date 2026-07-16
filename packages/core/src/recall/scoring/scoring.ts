@@ -25,6 +25,7 @@ import type {
   RecallServiceWarnPort,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
+import { readObservedUnitScore } from "./signals/observed-unit-score.js";
 
 const NO_EMBEDDING_RELEVANCE_DIRECT_WEIGHT = 0.24;
 const QUERY_EVIDENCE_BASE_TRANSFER_MAX = 0.25;
@@ -65,6 +66,7 @@ export function computeEffectiveScoreDetails(params: Readonly<{
   readonly isAdvisory: boolean;
   readonly scoreMultiplier?: number;
   readonly objectKind?: RecallCandidate["object_kind"];
+  readonly synthesisChild?: boolean;
   readonly now: () => string;
   readonly warn: RecallServiceWarnPort;
 }>): Readonly<{ readonly score: number; readonly factors: RecallScoreFactors }> {
@@ -79,6 +81,7 @@ type EffectiveScoreParams = Parameters<typeof computeEffectiveScoreDetails>[0];
 type EffectiveScoreContext = Readonly<EffectiveScoreParams & {
   readonly scoreMultiplier: number;
   readonly objectKind: RecallCandidate["object_kind"];
+  readonly synthesisChild: boolean;
   readonly additiveWeights: Readonly<ResolvedAdditiveScoringWeights>;
   readonly weights: ActivationWeights;
   readonly canUseMemorySupplement: boolean;
@@ -89,6 +92,7 @@ interface EffectiveScoreSignals {
   readonly relevanceFactor: number;
   readonly graphSupportFactor: number;
   readonly embeddingSimilarityFactor: number;
+  readonly embeddingSimilarityObserved: boolean;
   readonly budgetPenalty: number;
   readonly plasticityFactor: number;
   readonly conflictPenalty: number;
@@ -129,6 +133,7 @@ function resolveEffectiveScoreContext(params: EffectiveScoreParams): EffectiveSc
     ...params,
     scoreMultiplier: params.scoreMultiplier ?? 1,
     objectKind,
+    synthesisChild: params.synthesisChild ?? false,
     additiveWeights,
     weights: resolveDynamicActivationWeights(
       resolveEffectiveActivationWeights(params.entry, params.policy, params.warn),
@@ -170,17 +175,34 @@ function computeRecallActivationScore(context: EffectiveScoreContext): number {
   return Math.min(storedActivationScore, clamp01(nonFreshnessFloor + freshnessWeight * freshnessFactorNow));
 }
 
-function collectQueryEvidenceSignals(context: EffectiveScoreContext): Readonly<Pick<EffectiveScoreSignals, "relevanceFactor" | "graphSupportFactor" | "embeddingSimilarityFactor" | "plasticityFactor">> {
+function collectQueryEvidenceSignals(context: EffectiveScoreContext): Readonly<Pick<EffectiveScoreSignals, "relevanceFactor" | "graphSupportFactor" | "embeddingSimilarityFactor" | "embeddingSimilarityObserved" | "plasticityFactor">> {
   const ftsFactor = context.canUseMemorySupplement ? context.supplementaryData.ftsRanks[context.entry.object_id] ?? 0 : 0;
-  const synthesisFtsFactor = context.objectKind === "synthesis_capsule" && context.originPlane !== "global" ? context.supplementaryData.synthesisFtsRanks[context.entry.object_id] ?? 0 : 0;
+  const synthesisFtsFactor = context.originPlane !== "global" &&
+    (context.objectKind === "synthesis_capsule" || context.synthesisChild)
+    ? context.supplementaryData.synthesisFtsRanks[context.entry.object_id] ?? 0
+    : 0;
   const structuralFactor = context.canUseMemorySupplement ? context.supplementaryData.structuralScores[context.entry.object_id] ?? 0 : 0;
   const queryFtsFactor = Math.max(ftsFactor, synthesisFtsFactor);
+  const embeddingSimilarity = readObservedEmbeddingSimilarity(context);
   return Object.freeze({
     relevanceFactor: queryFtsFactor > 0 && structuralFactor > 0 ? clamp01(queryFtsFactor * 0.24 + structuralFactor * 0.76) : Math.max(queryFtsFactor * 0.62, structuralFactor),
     graphSupportFactor: context.canUseMemorySupplement ? normalizeGraphSupport(context.supplementaryData.graphSupportCounts[context.entry.object_id] ?? 0) : 0,
-    embeddingSimilarityFactor: context.canUseMemorySupplement ? clamp01(context.supplementaryData.embeddingSimilarityScores[context.entry.object_id] ?? 0) : 0,
+    embeddingSimilarityFactor: embeddingSimilarity.factor,
+    embeddingSimilarityObserved: embeddingSimilarity.observed,
     plasticityFactor: context.canUseMemorySupplement ? clamp01(context.supplementaryData.plasticityFactors[context.entry.object_id] ?? 0) : 0
   });
+}
+
+function readObservedEmbeddingSimilarity(
+  context: EffectiveScoreContext
+): Readonly<{ readonly factor: number; readonly observed: boolean }> {
+  if (!context.canUseMemorySupplement) return { factor: 0, observed: false };
+  const factor = readObservedUnitScore(
+    context.supplementaryData.embeddingSimilarityScores[context.entry.object_id]
+  );
+  return factor === null
+    ? { factor: 0, observed: false }
+    : { factor, observed: true };
 }
 
 function collectPenaltySignals(context: EffectiveScoreContext): Readonly<Pick<EffectiveScoreSignals, "conflictPenalty" | "contradictionPenalty">> {
@@ -231,7 +253,9 @@ function buildEffectiveScoreResult(context: EffectiveScoreContext, signals: Effe
       activation: signals.activationScore,
       relevance: weighted.score,
       graph_support: signals.graphSupportFactor,
-      ...(signals.embeddingSimilarityFactor > 0 ? { embedding_similarity: signals.embeddingSimilarityFactor } : {}),
+      ...(signals.embeddingSimilarityObserved
+        ? { embedding_similarity: signals.embeddingSimilarityFactor }
+        : {}),
       path_plasticity: signals.plasticityFactor,
       budget_penalty: signals.budgetPenalty,
       content_relevance: signals.relevanceFactor,

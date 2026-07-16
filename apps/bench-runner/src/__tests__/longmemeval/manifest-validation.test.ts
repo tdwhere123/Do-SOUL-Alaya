@@ -57,6 +57,33 @@ describe("validateSnapshotManifest invalid payload rejection", () => {
     ).toThrow(/invalid attribution/u);
   });
 
+  it("rejects an invalid persisted seed extraction path", () => {
+    expect(() => validateSnapshotManifest({
+      ...baseManifest(),
+      seed_extraction_path: {
+        path: "official_api_compile",
+        cache_hits: -1
+      }
+    }, FILE_PATH)).toThrow(/invalid seed_extraction_path/u);
+  });
+
+  it("keeps an old snapshot without seed extraction evidence diagnostic-only", () => {
+    expect(validateSnapshotManifest(baseManifest(), FILE_PATH).attribution).toEqual({
+      status: "legacy_unattributed",
+      gate_eligible: false
+    });
+  });
+
+  it("rejects a gate-eligible claim without seed extraction evidence", () => {
+    expect(() => validateSnapshotManifest({
+      ...baseManifest(),
+      attribution: {
+        status: "legacy_unattributed",
+        gate_eligible: true
+      }
+    }, FILE_PATH)).toThrow(/overclaims gate eligibility/u);
+  });
+
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     "rejects invalid schema migration version %s",
     (schemaMigrationVersion) => {

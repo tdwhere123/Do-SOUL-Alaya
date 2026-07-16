@@ -5,7 +5,11 @@ import type {
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
-import { buildRecallCandidateDedupeKey, clamp01 } from "../runtime/recall-service-helpers.js";
+import {
+  buildRecallCandidateDedupeKey,
+  buildRecallLogicalObjectKey,
+  isWorkspaceMemoryCandidate
+} from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallCandidateDiagnostic,
@@ -14,11 +18,12 @@ import type {
   RecallSupplementaryData,
   TokenEstimator
 } from "../runtime/recall-service-types.js";
-import { uniqueStrings } from "../expansion/path-relations.js";
-import { selectRecallAdmissionAttributionPlane } from "../scoring/scoring.js";
-import { buildRecallCandidateAnswerFeatures } from "./fine-assessment-answer-features.js";
 import { orderByCoverageMarginalGain } from "./coverage-selection.js";
 import { selectEmbeddingHeadEvictions } from "./admission/embedding-head-dominance.js";
+import {
+  buildFinalScoreFactors,
+  createFineAssessmentDiagnostic
+} from "./diagnostics/fine-assessment-diagnostics.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -39,7 +44,7 @@ interface FineAssessmentAdmissionState {
   totalTokens: number;
 }
 
-interface FineAssessmentSelectionContext {
+export interface FineAssessmentSelectionContext {
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
   readonly tokenEstimator: TokenEstimator;
@@ -74,17 +79,45 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
 }> {
   const context = createSelectionContext(params);
-  const coverageOrdered = orderByCoverageMarginalGain({
-    candidates: params.orderedCandidates,
-    relevanceByCandidateKey:
-      params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey,
-    supplementaryData: params.supplementaryData
-  });
-  const evictions = resolveEmbeddingHeadEvictions(coverageOrdered, context);
+  const coverageRelevance =
+    params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
+  const initialOrder = orderFineAssessmentByCoverage(
+    params.orderedCandidates,
+    context,
+    coverageRelevance,
+    new Set()
+  );
+  const evictions = resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance);
+  const coverageOrdered = orderFineAssessmentByCoverage(
+    initialOrder,
+    context,
+    coverageRelevance,
+    evictions
+  );
   const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
   return Object.freeze({
     candidates: Object.freeze([...finalAccumulator.selected]),
     diagnostics: Object.freeze([...finalAccumulator.diagnostics])
+  });
+}
+
+function orderFineAssessmentByCoverage(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext,
+  relevanceByCandidateKey: ReadonlyMap<string, number>,
+  evictions: ReadonlySet<string>
+): readonly FineAssessmentCandidate[] {
+  const admission = createAdmissionState();
+  return orderByCoverageMarginalGain({
+    candidates,
+    relevanceByCandidateKey,
+    supplementaryData: context.supplementaryData,
+    advancesCoverage: (candidate) => tryRecordAcceptedAdmission(
+      admission,
+      candidate,
+      context,
+      evictions
+    )
   });
 }
 
@@ -108,7 +141,8 @@ function createSelectionContext(
 
 function resolveEmbeddingHeadEvictions(
   candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  relevanceByCandidateKey: ReadonlyMap<string, number>
 ): ReadonlySet<string> {
   return selectEmbeddingHeadEvictions({
     candidates,
@@ -116,7 +150,11 @@ function resolveEmbeddingHeadEvictions(
     embeddingScores: context.supplementaryData.embeddingSimilarityScores,
     queryProbes: context.supplementaryData.queryProbes,
     answerRerankedCandidateKeys: context.answerRerankedCandidateKeys,
-    selectDelivered: (evictions) => collectAdmittedCandidates(candidates, context, evictions)
+    selectDelivered: (evictions) => collectAdmittedCandidates(
+      orderFineAssessmentByCoverage(candidates, context, relevanceByCandidateKey, evictions),
+      context,
+      evictions
+    )
   });
 }
 
@@ -168,7 +206,7 @@ function appendFineAssessmentCandidate(
     ));
     return accumulator;
   }
-  const objectKey = buildFineAssessmentObjectKey(candidate);
+  const objectKey = buildRecallLogicalObjectKey(candidate);
   const admission = resolveAdmission(accumulator.admission, candidate, objectKey, context);
   if (admission.droppedReason !== null) {
     accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, null, admission.droppedReason, context));
@@ -190,7 +228,9 @@ function appendFineAssessmentCandidate(
     budgets: context.config.budgets,
     index: accumulator.selected.length,
     usedTokensBeforeCandidate: accumulator.admission.totalTokens,
-    governanceCeiling: context.supplementaryData.governanceCeilingByMemoryId[candidate.entry.object_id]
+    governanceCeiling: isWorkspaceMemoryCandidate(candidate)
+      ? context.supplementaryData.governanceCeilingByMemoryId[candidate.entry.object_id]
+      : undefined
   });
   accumulator.selected.push(nextCandidate);
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context));
@@ -222,6 +262,21 @@ function resolveAdmission(
   return { droppedReason: null, tokenEstimate };
 }
 
+function tryRecordAcceptedAdmission(
+  state: FineAssessmentAdmissionState,
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext,
+  evictions: ReadonlySet<string>
+): boolean {
+  if (evictions.has(candidate.fusion.candidate_key)) return false;
+  const objectKey = buildRecallLogicalObjectKey(candidate);
+  const admission = resolveAdmission(state, candidate, objectKey, context);
+  if (admission.droppedReason !== null) return false;
+  const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
+  recordAcceptedAdmission(state, candidate, objectKey, tokenEstimate);
+  return true;
+}
+
 function collectAdmittedCandidates(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
@@ -230,12 +285,7 @@ function collectAdmittedCandidates(
   const state = createAdmissionState();
   const delivered: FineAssessmentCandidate[] = [];
   for (const candidate of candidates) {
-    if (evictions.has(candidate.fusion.candidate_key)) continue;
-    const objectKey = buildFineAssessmentObjectKey(candidate);
-    const admission = resolveAdmission(state, candidate, objectKey, context);
-    if (admission.droppedReason !== null) continue;
-    const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
-    recordAcceptedAdmission(state, candidate, objectKey, tokenEstimate);
+    if (!tryRecordAcceptedAdmission(state, candidate, context, evictions)) continue;
     delivered.push(candidate);
   }
   return delivered;
@@ -266,150 +316,4 @@ function estimateCandidateTokens(
   const estimated = context.tokenEstimator.estimate(candidate.entry.content);
   context.tokenEstimateByCandidateKey.set(candidateKey, estimated);
   return estimated;
-}
-
-function buildFineAssessmentObjectKey(candidate: FineAssessmentCandidate): string {
-  return `${candidate.objectKind ?? candidate.entry.object_kind}:${candidate.entry.object_id}`;
-}
-
-function createFineAssessmentDiagnostic(
-  candidate: FineAssessmentCandidate,
-  candidateKey: string,
-  selectionOrder: number,
-  finalRank: number | null,
-  droppedReason: RecallCandidateDropReason | null,
-  context: FineAssessmentSelectionContext
-): Readonly<RecallCandidateDiagnostic> {
-  const admissionPlanes = Object.freeze([...(candidate.admissionPlanes ?? ["activation"])]);
-  const ranks = resolveCandidateRankContext(candidate, candidateKey, context);
-  return Object.freeze({
-    candidate_key: candidateKey,
-    object_id: candidate.entry.object_id,
-    object_kind: candidate.objectKind ?? "memory_entry",
-    created_at: candidate.entry.created_at,
-    facet_overlap: candidate.fusion.facet_overlap,
-    dimension: candidate.entry.dimension,
-    origin_plane: candidate.originPlane ?? "workspace_local",
-    admission_planes: admissionPlanes,
-    plane_first_admitted: candidate.firstAdmissionPlane ?? admissionPlanes[0] ?? "activation",
-    plane_winning_admission: selectRecallAdmissionAttributionPlane(admissionPlanes, candidate.firstAdmissionPlane),
-    pre_budget_rank: selectionOrder,
-    selection_order: selectionOrder,
-    ...buildFusionDiagnosticFields(candidate),
-    final_rank: finalRank,
-    post_rank: finalRank,
-    in_final_packet: droppedReason === null,
-    eviction_reason: droppedReason,
-    dropped_reason: droppedReason,
-    within_budget: droppedReason === null,
-    relevance_score: ranks.finalRelevance,
-    ...(ranks.answerRelevanceRank === undefined ? {} : {
-      answer_relevance_score: ranks.finalRelevance,
-      answer_relevance_rank: ranks.answerRelevanceRank
-    }),
-    additive_score: candidate.effectiveScore,
-    lexical_rank: lexicalRank(candidate, context.supplementaryData),
-    structural_score: clamp01(candidate.structuralScore ?? context.supplementaryData.structuralScores[candidate.entry.object_id] ?? 0),
-    score_factors: buildFinalScoreFactors(candidate, ranks.finalRelevance),
-    source_channels: buildSourceChannels(candidate, admissionPlanes),
-    path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])]),
-    ...buildAnswerFeatureDiagnostics(candidate, context),
-    path_suppression_score:
-      context.supplementaryData.pathSuppressionScores[candidate.entry.object_id] ?? 0,
-    ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank),
-    session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>",
-    source_cohort_key: context.supplementaryData.sourceCohortKeys[candidate.entry.object_id] ?? null
-  });
-}
-
-function buildFinalScoreFactors(
-  candidate: FineAssessmentCandidate,
-  finalRelevance: number
-): RecallScoreFactors {
-  return Object.freeze({ ...candidate.effectiveFactors, relevance: finalRelevance });
-}
-
-function buildAnswerFeatureDiagnostics(
-  candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext
-) {
-  if (!context.captureAnswerFeatures) return {};
-  return {
-    answer_features: buildRecallCandidateAnswerFeatures(
-      candidate.entry,
-      candidate.objectKind ?? "memory_entry",
-      context.supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id]
-    )
-  };
-}
-
-function resolveCandidateRankContext(
-  candidate: FineAssessmentCandidate,
-  candidateKey: string,
-  context: FineAssessmentSelectionContext
-): Readonly<{
-  readonly deliveryRank: number | undefined;
-  readonly finalRelevance: number;
-  readonly answerRelevanceRank: number | undefined;
-}> {
-  return {
-    deliveryRank: context.rankByCandidateKey.get(candidateKey),
-    finalRelevance: context.finalRelevanceByCandidateKey.get(candidateKey) ?? candidate.fusion.fused_score,
-    answerRelevanceRank: context.answerRelevanceRankByCandidateKey.get(candidateKey)
-  };
-}
-
-function buildFusionDiagnosticFields(candidate: FineAssessmentCandidate) {
-  const fusion = candidate.fusion;
-  return {
-    fused_rank: fusion.fused_rank,
-    fused_score: fusion.fused_score,
-    per_stream_rank: fusion.per_stream_rank,
-    fused_rank_contribution_per_stream: fusion.fused_rank_contribution_per_stream,
-    ...(fusion.per_axis_rank === undefined ? {} : { per_axis_rank: fusion.per_axis_rank }),
-    ...(fusion.per_axis_contribution === undefined
-      ? {}
-      : { per_axis_contribution: fusion.per_axis_contribution }),
-    ...(fusion.flood_potential === undefined ? {} : { flood_potential: fusion.flood_potential }),
-    ...(fusion.flood_fuel_coverage === undefined
-      ? {}
-      : { flood_fuel_coverage: fusion.flood_fuel_coverage })
-  };
-}
-
-function buildCompatibilityStageDiagnosticAliases(
-  fusionRank: number | undefined,
-  deliveryRank: number | undefined
-) {
-  return {
-    rank_after_fusion: fusionRank,
-    rank_after_feature_rerank: deliveryRank,
-    rank_after_lexical_priority: deliveryRank,
-    rank_after_coverage_selector: deliveryRank,
-    rank_after_session_coverage: deliveryRank,
-    rank_after_synthesis_reserve: deliveryRank,
-    rank_after_structural_reserve: deliveryRank,
-    coverage_selector_action: "noop" as const,
-    session_coverage_action: "noop" as const,
-    reserved_by: "none" as const
-  };
-}
-
-function lexicalRank(candidate: FineAssessmentCandidate, supplementaryData: RecallSupplementaryData): number | null {
-  return candidate.objectKind === "synthesis_capsule"
-    ? supplementaryData.synthesisFtsRanks[candidate.entry.object_id] ?? null
-    : supplementaryData.ftsRanks[candidate.entry.object_id] ?? null;
-}
-
-function buildSourceChannels(
-  candidate: FineAssessmentCandidate,
-  admissionPlanes: readonly string[]
-): readonly string[] {
-  return Object.freeze(uniqueStrings([
-    candidate.originPlane ?? "workspace_local",
-    candidate.sourceChannel ?? "",
-    ...(candidate.sourceChannels ?? []),
-    ...((candidate.effectiveFactors.embedding_similarity ?? 0) > 0 ? ["semantic_supplement"] : []),
-    ...admissionPlanes.map((plane) => `plane:${plane}`)
-  ].filter((channel) => channel.length > 0)));
 }

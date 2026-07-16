@@ -10,10 +10,8 @@ export const RECALL_FUSION_STREAMS: readonly RecallFusionStream[] = [
   "facet_overlap"
 ];
 
-// Per-lane weights are identity inside families; objectBase sums one max-vote per family
-// (see fusion-delivery-families.ts). Bench-fitted embedding_similarity=12 is retired —
-// the semantic family's equal vote replaces that constant, not a retuned substitute.
-// temporal_recency / workspace_activation stay 0 until intent/policy enables them.
+// Per-lane weights are identity inside families; objectBase sums one max vote
+// per family. Temporal and activation stay inactive until policy enables them.
 export const RECALL_FUSION_DEFAULT_WEIGHTS: Readonly<Record<RecallFusionStream, number>> = Object.freeze({
   lexical_fts: 1, trigram_fts: 1, synthesis_fts: 1, evidence_fts: 1,
   evidence_structural_agreement: 1, source_proximity: 1, source_evidence_agreement: 1, subject_alignment: 1,

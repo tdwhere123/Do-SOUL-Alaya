@@ -62,7 +62,9 @@ describe("extraction-fill identity transaction", () => {
     const run = fillSuccessfully();
     mkdirSync(join(cacheRoot, "aa"));
     writeFileSync(join(cacheRoot, "aa", "injected.json"), "{}", "utf8");
-    await expect(run).rejects.toThrow(/cache identity.*shard|manifest-less cache.*shard/u);
+    await expect(run).rejects.toThrow(
+      /cache contains .*shard.*(?:outside the requested window|no manifest)|cache identity.*shard|manifest-less cache.*shard/u,
+    );
     expect(readExtractionCacheManifest(cacheRoot)).toBeUndefined();
   });
 

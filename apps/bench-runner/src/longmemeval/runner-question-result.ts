@@ -187,18 +187,32 @@ function snapshotQuestionField(
 ): Pick<LongMemEvalWorkerResult, "snapshotQuestion"> | Record<string, never> {
   if (!input.captureSnapshot) return {};
   return {
-    snapshotQuestion: {
-      questionId: input.question.question_id,
-      question: input.question.question,
-      questionDate: requireLongMemEvalTimestamp(input.question.question_date),
-      answerSessionIds: [...input.question.answer_session_ids],
-      workspaceId: input.workspace.workspaceId,
-      runId: input.workspace.runId,
-      sidecar: [...input.seedState.sidecar.values()].map(snapshotSidecarEntry),
-      ...(hasLongMemEvalSeedDropReasons(input.seedState.answerSeedDropReasons)
-        ? { answerSeedDropReasons: { ...input.seedState.answerSeedDropReasons } }
-        : {})
-    }
+    snapshotQuestion: buildLongMemEvalSnapshotQuestion(input)
+  };
+}
+
+export function buildLongMemEvalSnapshotQuestion(input: Pick<
+  Parameters<typeof buildLongMemEvalQuestionResult>[0],
+  "question" | "workspace" | "seedState"
+>) {
+  return {
+    questionId: input.question.question_id,
+    question: input.question.question,
+    questionDate: requireLongMemEvalTimestamp(input.question.question_date),
+    answerSessionIds: [...input.question.answer_session_ids],
+    workspaceId: input.workspace.workspaceId,
+    runId: input.workspace.runId,
+    sidecar: [...input.seedState.sidecar.values()].map(snapshotSidecarEntry),
+    seedRounds: input.seedState.seedRounds.map((round) => ({
+      ...round,
+      memoryObjectIds: [...round.memoryObjectIds],
+      ...(round.memoryBindings === undefined
+        ? {}
+        : { memoryBindings: round.memoryBindings.map((binding) => ({ ...binding })) })
+    })),
+    ...(hasLongMemEvalSeedDropReasons(input.seedState.answerSeedDropReasons)
+      ? { answerSeedDropReasons: { ...input.seedState.answerSeedDropReasons } }
+      : {})
   };
 }
 
@@ -207,6 +221,9 @@ function snapshotSidecarEntry(entry: LongMemEvalSidecarEntry) {
     objectId: entry.objectId,
     objectKind: entry.objectKind,
     sessionId: entry.sessionId,
-    hasAnswer: entry.hasAnswer
+    hasAnswer: entry.hasAnswer,
+    ...(entry.sourceRounds === undefined
+      ? {}
+      : { sourceRounds: entry.sourceRounds.map((source) => ({ ...source })) })
   };
 }

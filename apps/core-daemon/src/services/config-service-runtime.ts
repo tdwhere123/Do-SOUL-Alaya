@@ -1,10 +1,12 @@
-import { CoreError } from "@do-soul/alaya-core";
+import {
+  CoreError,
+  resolveProductGardenProviderKind
+} from "@do-soul/alaya-core";
 import {
   DEFAULT_SOUL_CONFIG,
   GardenEventType,
   HealthEventKind,
   RuntimeGardenComputeConfigSchema,
-  RuntimeGardenProviderKindSchema,
   RuntimeEmbeddingConfigSchema,
   secretRefScheme,
   SoulHealthJournalRecordedPayloadSchema,
@@ -356,14 +358,10 @@ async function defaultRuntimeGardenComputeConfig(
   const modelId =
     readNonEmptyEnv(readConfigEnvValue(configEnv, OFFICIAL_API_GARDEN_MODEL_ENV)) ??
     OFFICIAL_API_GARDEN_MODEL;
-  const declaredProviderKind = RuntimeGardenProviderKindSchema.safeParse(
-    readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV))
+  const providerKind = resolveProductGardenProviderKind(
+    readNonEmptyEnv(readConfigEnvValue(configEnv, ALAYA_GARDEN_PROVIDER_KIND_ENV)),
+    secretRef !== null
   );
-  const providerKind = declaredProviderKind.success
-    ? declaredProviderKind.data
-    : secretRef === null
-      ? "host_worker"
-      : "official_api";
 
   return parseGardenComputeConfigWithLegacyFallback(
     {

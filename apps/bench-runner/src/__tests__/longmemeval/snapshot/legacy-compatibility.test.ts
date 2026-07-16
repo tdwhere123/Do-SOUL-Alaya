@@ -59,7 +59,7 @@ describe("legacy snapshot migration compatibility", () => {
     copyFileSync(source, working);
     expect(() => prepareLegacySnapshotConsumer(manifest(), working)).not.toThrow();
     expect(readSchemaMigrationLedger(source).at(-1)).toBe(103);
-    expect(readSchemaMigrationLedger(working).at(-1)).toBe(106);
+    expect(readSchemaMigrationLedger(working).at(-1)).toBe(107);
     initDatabase({ filename: working }).close();
   });
 

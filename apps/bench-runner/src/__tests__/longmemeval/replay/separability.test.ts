@@ -10,7 +10,9 @@ import { optimizePairwiseDifferences, parseArgs, runSeparabilityProbe } from "..
 function candidate(id: string, gold: boolean, typed = true) {
   return {
     object_id: id,
-    candidate_key: `candidate:${id}`,
+    object_kind: "memory_entry",
+    origin_plane: "workspace_local",
+    candidate_key: `workspace_local:memory_entry:${id}`,
     fused_rank: gold ? 2 : 1,
     pre_budget_rank: gold ? 2 : 1,
     selection_order: gold ? 2 : 1,
@@ -53,6 +55,9 @@ function question(
     gold: goldIds.map((object_id) => ({ object_id })),
     hit_at_5: false,
     candidate_pool_complete: options.scorable !== false,
+    candidate_pool_count: options.scorable === false ? 0 : 7,
+    fine_pruned_count: 0,
+    fine_assessment_pruned_candidates: [],
     query_probes: { lexical_terms: ["shared"], dimensions: ["fact"] },
     query_sought_facets: ["fact"],
     candidates: options.scorable === false

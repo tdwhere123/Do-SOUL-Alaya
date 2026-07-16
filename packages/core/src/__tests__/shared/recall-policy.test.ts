@@ -7,6 +7,7 @@ import {
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
 import {
+  buildMemorySearchRecallPolicy,
   buildRecallPolicy,
   resolveRecallPolicyFiltersFromSearchRequest
 } from "../../shared/recall-policy.js";
@@ -106,5 +107,48 @@ describe("buildRecallPolicy", () => {
     expect(policy.coarse_filter.semantic_supplement).not.toHaveProperty(
       "injection_similarity_floor"
     );
+  });
+
+  it("does not let embedding injection consume an already-full direct candidate budget", () => {
+    const policy = buildRecallPolicy({
+      runtimeId: "policy-saturated",
+      taskSurfaceId: "surface-saturated",
+      maxResults: 50,
+      filters: {
+        scopeFilter: null,
+        dimensionFilter: null,
+        domainTagFilter: null
+      },
+      conflictAwareness: true,
+      maxTotalTokens: 2000,
+      embeddingInjectionCap: 20
+    });
+
+    expect(policy.coarse_filter.precomputed_rank.max_candidates).toBe(500);
+    expect(policy.coarse_filter.semantic_supplement.max_supplement).toBe(500);
+    expect(policy.coarse_filter.semantic_supplement.injection_cap).toBe(0);
+    expect(policy.fine_assessment.max_candidates).toBe(1000);
+  });
+});
+
+describe("buildMemorySearchRecallPolicy", () => {
+  it("keeps semantic retrieval enabled while embedding waits for runtime readiness", () => {
+    const policy = buildMemorySearchRecallPolicy({
+      runtimeId: "policy-product",
+      taskSurfaceId: "surface-product",
+      maxResults: 10,
+      filters: {
+        scopeFilter: null,
+        dimensionFilter: null,
+        domainTagFilter: null
+      }
+    });
+
+    expect(policy.coarse_filter.semantic_supplement).toMatchObject({
+      enabled: true,
+      embedding_enabled: false,
+      max_supplement: 100
+    });
+    expect(policy.fine_assessment.max_candidates).toBe(200);
   });
 });

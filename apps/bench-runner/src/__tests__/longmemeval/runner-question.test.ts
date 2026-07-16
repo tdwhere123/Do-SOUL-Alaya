@@ -142,6 +142,7 @@ describe("runLongMemEvalQuestion QA delivery", () => {
       question.question,
       expect.objectContaining({ referenceTime: "2026-01-01T00:00:00.000Z" })
     );
+    expect(workspace.accrueSessionCoRecall).not.toHaveBeenCalled();
     expect(result.snapshotQuestion?.questionDate).toBe("2026-01-01T00:00:00.000Z");
   });
 });

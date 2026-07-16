@@ -1,26 +1,17 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import {
   LongMemEvalQuestionSchema,
-  pairSessionIntoRounds,
   type LongMemEvalQuestion,
   type LongMemEvalVariant
 } from "../dataset.js";
 import { requireLongMemEvalTimestamp } from "../ingestion/source-time.js";
-import {
-  resolveLongMemEvalSeedRoundIdentity,
-  resolveLongMemEvalSeedSessionIndex,
-  type LongMemEvalSeedRoundIdentity
-} from "../runner-question-seeding.js";
 import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   BENCH_DAEMON_DB_FILENAME,
   snapshotManifestPath,
   snapshotSidecarPath,
   type LongMemEvalSnapshotManifest,
-  type LongMemEvalSnapshotQuestion,
-  type LongMemEvalSnapshotSidecarEntry,
   type LongMemEvalSnapshotSidecarFile
 } from "../snapshot.js";
 import {
@@ -30,6 +21,7 @@ import {
 } from "./bound-file.js";
 import { validateSnapshotManifest } from "./manifest-validation.js";
 import { parseSnapshotSidecar } from "./sidecar-validation.js";
+import { assertSnapshotDatasetSubstrateIdentity } from "./substrate-binding.js";
 const LEGACY_PIPELINE = "fusion-rrf-synthesis-v2";
 const LEGACY_MODEL = "deepseek-v4-flash";
 const LEGACY_PROMPT_SHA =
@@ -128,32 +120,40 @@ export function hydrateLegacySnapshotSidecar(
   const questions = sidecar.questions.map((value, index) =>
     hydrateQuestion(value, expectedQuestions[index], index)
   );
-  return parseSnapshotSidecar({
+  const hydrated = parseSnapshotSidecar({
     ...sidecar,
     schema_version: RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
     questions
   }, "legacy snapshot sidecar", RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION);
+  assertHydratedSessionIdentity(hydrated, expectedQuestions);
+  return hydrated;
+}
+
+function assertHydratedSessionIdentity(
+  sidecar: LongMemEvalSnapshotSidecarFile,
+  questions: readonly LongMemEvalQuestion[]
+): void {
+  sidecar.questions.forEach((question, index) => {
+    const expectedSessions = new Set(questions[index]?.haystack_session_ids ?? []);
+    for (const entry of question.sidecar) {
+      if (!expectedSessions.has(entry.sessionId)) {
+        throw new Error(`legacy sidecar session ${entry.sessionId} is absent from dataset`);
+      }
+    }
+  });
 }
 export function assertLegacySnapshotSidecarIdentity(
   snapshotDbPath: string,
   sidecar: LongMemEvalSnapshotSidecarFile,
   questions: readonly LongMemEvalQuestion[]
 ): void {
-  if (sidecar.questions.length !== questions.length) {
-    throw new Error("legacy sidecar question identity count mismatch");
-  }
-  const db = new DatabaseSync(snapshotDbPath, { readOnly: true });
-  try {
-    for (const [index, questionSidecar] of sidecar.questions.entries()) {
-      const source = questions[index];
-      if (source === undefined || source.question_id !== questionSidecar.questionId) {
-        throw new Error("legacy sidecar question identity mismatch");
-      }
-      assertQuestionObjectIdentity(db, questionSidecar, source);
-    }
-  } finally {
-    db.close();
-  }
+  assertSnapshotDatasetSubstrateIdentity({
+    dbPath: snapshotDbPath,
+    sidecar,
+    questions,
+    runtimeIdentity: "sidecar_bound",
+    duplicateObjectLabel: "legacy sidecar object identity"
+  });
 }
 function readBoundManifest(snapshotDbPath: string, expectedSha: string): {
   readonly raw: string;
@@ -193,7 +193,6 @@ function hydrateQuestion(
   if (!equalStringArrays(legacy.answerSessionIds, source.answer_session_ids)) {
     throw new Error(`legacy snapshot answer sessions mismatch for ${questionId}`);
   }
-  assertSidecarSessions(legacy.sidecar, source, questionId);
   return { ...legacy, questionDate: requireLongMemEvalTimestamp(source.question_date) };
 }
 function selectExpectedQuestions(
@@ -218,182 +217,6 @@ interface LegacyQuestionWindow {
       readonly evaluated_count: number;
     }>;
   }>;
-}
-
-interface LegacyDbScopedRow {
-  readonly object_id: string; readonly object_kind: string;
-  readonly workspace_id: string; readonly run_id: string;
-}
-interface LegacyDbObjectRow extends LegacyDbScopedRow {
-  readonly surface_id: string | null; readonly topic_key: string | null;
-  readonly evidence_refs: string;
-}
-interface LegacyEvidenceRow extends LegacyDbScopedRow {
-  readonly surface_id: string | null; readonly physical_anchor: string | null;
-}
-function assertQuestionObjectIdentity(
-  db: DatabaseSync, sidecar: LongMemEvalSnapshotQuestion,
-  source: LongMemEvalQuestion
-): void {
-  const expected = indexSidecarObjects(sidecar.sidecar);
-  const stored = readStoredObjects(db, sidecar.workspaceId);
-  if (stored.size !== expected.size) {
-    throw new Error(`legacy sidecar DB object count mismatch for ${sidecar.questionId}`);
-  }
-  const evidence = readStoredEvidence(db, sidecar.workspaceId);
-  for (const entry of expected.values()) {
-    const row = stored.get(objectIdentity(entry.objectKind, entry.objectId));
-    if (row === undefined) {
-      throw new Error(`legacy sidecar DB object missing for ${entry.objectId}`);
-    }
-    assertStoredObjectIdentity(row, entry, sidecar, source, evidence);
-  }
-}
-function indexSidecarObjects(
-  entries: readonly LongMemEvalSnapshotSidecarEntry[]
-): Map<string, LongMemEvalSnapshotSidecarEntry> {
-  const indexed = new Map<string, LongMemEvalSnapshotSidecarEntry>();
-  for (const entry of entries) {
-    const key = objectIdentity(entry.objectKind, entry.objectId);
-    if (indexed.has(key)) throw new Error(`duplicate legacy sidecar object identity ${key}`);
-    indexed.set(key, entry);
-  }
-  return indexed;
-}
-function readStoredObjects(db: DatabaseSync, workspaceId: string): Map<string, LegacyDbObjectRow> {
-  const rows = db.prepare(`
-    SELECT object_id, object_kind, workspace_id, run_id, surface_id,
-           NULL AS topic_key, evidence_refs
-      FROM memory_entries WHERE workspace_id = ?
-    UNION ALL
-    SELECT object_id, object_kind, workspace_id, run_id, NULL AS surface_id,
-           topic_key, evidence_refs
-      FROM synthesis_capsules WHERE workspace_id = ?
-  `).all(workspaceId, workspaceId) as unknown as readonly LegacyDbObjectRow[];
-  const indexed = new Map<string, LegacyDbObjectRow>();
-  for (const row of rows) {
-    const expectedKind = row.topic_key === null ? "memory_entry" : "synthesis_capsule";
-    const key = objectIdentity(row.object_kind, row.object_id);
-    if (row.object_kind !== expectedKind || indexed.has(key))
-      throw new Error(`ambiguous legacy DB object identity ${key}`);
-    indexed.set(key, row);
-  }
-  return indexed;
-}
-function readStoredEvidence(db: DatabaseSync, workspaceId: string): Map<string, LegacyEvidenceRow> {
-  const rows = db.prepare(`
-    SELECT object_id, object_kind, workspace_id, run_id, surface_id, physical_anchor
-      FROM evidence_capsules WHERE workspace_id = ?
-  `).all(workspaceId) as unknown as readonly LegacyEvidenceRow[];
-  return new Map(rows.map((row) => [row.object_id, row]));
-}
-function assertStoredObjectIdentity(
-  row: LegacyDbObjectRow, entry: LongMemEvalSnapshotSidecarEntry,
-  question: LongMemEvalSnapshotQuestion,
-  source: LongMemEvalQuestion,
-  evidence: ReadonlyMap<string, LegacyEvidenceRow>
-): void {
-  if (row.object_kind !== entry.objectKind || row.workspace_id !== question.workspaceId ||
-      row.run_id !== question.runId) {
-    throw new Error(`legacy sidecar DB identity mismatch for ${entry.objectId}`);
-  }
-  if (entry.objectKind === "memory_entry") {
-    assertMemoryAnswerIdentity(row, entry, question, source, evidence);
-    return;
-  }
-  assertSynthesisAnswerIdentity(row, entry, question, source, evidence);
-}
-function assertMemoryAnswerIdentity(
-  row: LegacyDbObjectRow, entry: LongMemEvalSnapshotSidecarEntry,
-  question: LongMemEvalSnapshotQuestion,
-  source: LongMemEvalQuestion,
-  evidence: ReadonlyMap<string, LegacyEvidenceRow>
-): void {
-  const refs = parseEvidenceRefs(row.evidence_refs, entry.objectId);
-  const rounds = refs.map((ref) => resolveEvidenceRound(ref, question, source, evidence));
-  const identities = new Set(rounds.map((round) => `${round.sessionIndex}:${round.roundIndex}`));
-  if (identities.size !== 1) throw new Error(`ambiguous round evidence for ${entry.objectId}`);
-  const round = rounds[0];
-  if (round === undefined || row.surface_id !== entry.sessionId ||
-      round.sessionId !== entry.sessionId || entry.hasAnswer !== round.hasAnswer) {
-    throw new Error(`memory_entry answer marker mismatch for ${entry.objectId}`);
-  }
-}
-function assertSynthesisAnswerIdentity(
-  row: LegacyDbObjectRow, entry: LongMemEvalSnapshotSidecarEntry,
-  question: LongMemEvalSnapshotQuestion,
-  source: LongMemEvalQuestion,
-  evidence: ReadonlyMap<string, LegacyEvidenceRow>
-): void {
-  const sessionIndex = resolveLongMemEvalSeedSessionIndex(row.topic_key, source);
-  const session = source.haystack_sessions[sessionIndex]!;
-  const aggregate = pairSessionIntoRounds(session).some((round) => round.hasAnswer);
-  if (source.haystack_session_ids[sessionIndex] !== entry.sessionId ||
-      entry.hasAnswer !== aggregate) {
-    throw new Error(`synthesis_capsule answer marker mismatch for ${entry.objectId}`);
-  }
-  const rounds = parseEvidenceRefs(row.evidence_refs, entry.objectId)
-    .map((ref) => resolveEvidenceRound(ref, question, source, evidence));
-  if (rounds.length < 2 || rounds.some((round) => round.sessionIndex !== sessionIndex)) {
-    throw new Error(`synthesis_capsule session evidence mismatch for ${entry.objectId}`);
-  }
-}
-function resolveEvidenceRound(
-  evidenceId: string, question: LongMemEvalSnapshotQuestion,
-  source: LongMemEvalQuestion,
-  evidence: ReadonlyMap<string, LegacyEvidenceRow>
-): LongMemEvalSeedRoundIdentity {
-  const row = evidence.get(evidenceId);
-  if (row === undefined || row.object_kind !== "evidence_capsule" ||
-      row.workspace_id !== question.workspaceId || row.run_id !== question.runId) {
-    throw new Error(`legacy sidecar evidence identity mismatch for ${evidenceId}`);
-  }
-  const anchor = parseJsonRecord(row.physical_anchor, `physical anchor ${evidenceId}`);
-  const round = resolveLongMemEvalSeedRoundIdentity(anchor.artifact_ref, source);
-  if (row.surface_id !== round.sessionId)
-    throw new Error(`legacy sidecar evidence session mismatch for ${evidenceId}`);
-  return round;
-}
-function parseEvidenceRefs(value: string, objectId: string): readonly string[] {
-  const parsed = parseJson(value, `evidence refs ${objectId}`);
-  if (!Array.isArray(parsed) || parsed.length === 0 ||
-      parsed.some((entry) => typeof entry !== "string" || entry.length === 0) ||
-      new Set(parsed).size !== parsed.length) {
-    throw new Error(`ambiguous round evidence for ${objectId}`);
-  }
-  return parsed as string[];
-}
-function parseJsonRecord(value: string | null, label: string): Record<string, unknown> {
-  return requireRecord(parseJson(value, label), label); }
-function parseJson(value: string | null, label: string): unknown {
-  if (value === null) throw new Error(`${label} is required`);
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new Error(`${label} must be valid JSON`);
-  }
-}
-function objectIdentity(kind: string, objectId: string): string { return `${kind}:${objectId}`; }
-function assertSidecarSessions(
-  value: unknown,
-  source: LongMemEvalQuestion,
-  questionId: string
-): void {
-  if (!Array.isArray(value)) throw new Error(`legacy snapshot sidecar missing for ${questionId}`);
-  const sessions = new Set(source.haystack_session_ids);
-  const objects = new Set<string>();
-  for (const rawEntry of value) {
-    const entry = requireRecord(rawEntry, `legacy sidecar entry for ${questionId}`);
-    const sessionId = requireString(entry.sessionId, "legacy sidecar session id");
-    if (!sessions.has(sessionId))
-      throw new Error(`legacy sidecar session ${sessionId} is absent from dataset`);
-    const objectId = requireString(entry.objectId, "legacy sidecar object id");
-    const kind = entry.objectKind;
-    if (kind !== "memory_entry" && kind !== "synthesis_capsule") continue;
-    const key = objectIdentity(kind, objectId);
-    if (objects.has(key)) throw new Error(`duplicate legacy sidecar object identity ${key}`);
-    objects.add(key);
-  }
 }
 
 function requireLegacyProducerIdentity(manifest: Record<string, unknown>): void {

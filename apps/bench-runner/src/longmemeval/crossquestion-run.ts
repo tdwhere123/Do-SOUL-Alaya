@@ -14,12 +14,12 @@ import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 import {
   createCompileSeedRunner,
-  resolveBenchAllowLiveExtraction,
   resolveEffectiveExtractionCacheRoot,
   type CompileSeedExtractionStats,
   type CompileSeedRunner
 } from "./compile-seed.js";
 import { EmbeddingReadinessTracker } from "./embedding-readiness.js";
+import { collectDistinctTurnContents } from "./extraction-fill.js";
 import { runLongMemEvalCrossQuestionItem } from "./crossquestion-question.js";
 import { resolveBenchEmbeddingProviderLabel } from "./runner.js";
 import { resolveCommitInfo } from "./runner-helpers.js";
@@ -97,7 +97,11 @@ export async function prepareCrossQuestionRun(
     embeddingProviderLabel: resolveBenchEmbeddingProviderLabel(
       embeddingMode, process.env, opts.embeddingProviderKind
     ),
-    seedRunner: createCrossQuestionSeedRunner(extractionCacheRoot)
+    seedRunner: createCrossQuestionSeedRunner(
+      extractionCacheRoot,
+      window,
+      Math.max(0, opts.offset ?? 0)
+    )
   };
 }
 
@@ -136,11 +140,15 @@ function selectQuestionWindow(
 }
 
 function createCrossQuestionSeedRunner(
-  extractionCacheRoot: string
+  extractionCacheRoot: string,
+  window: readonly LongMemEvalQuestion[],
+  offset: number
 ): CompileSeedRunner {
   return createCompileSeedRunner({
     cacheRoot: extractionCacheRoot,
-    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+    requiredTurnContents: collectDistinctTurnContents(window),
+    requiredQuestionWindow: { offset, limit: window.length },
+    allowLiveExtraction: false
   });
 }
 

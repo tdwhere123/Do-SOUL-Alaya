@@ -1,9 +1,7 @@
-import { spawn } from "node:child_process";
 import {
-  access,
   mkdir,
   mkdtemp,
-  readdir
+  writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -15,7 +13,6 @@ import {
 } from "../cli/merge-command-shards.js";
 import { loadDatasetWithIdentity } from "./fetch.js";
 import type { VerifiedLongMemEvalDatasetAuthority } from "./fetch.js";
-import type { LongMemEvalVariant } from "./dataset.js";
 import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "./runner.js";
 import { finalizeOwnedTempRoot } from "./lifecycle/owned-temp-root.js";
 import { throwLifecycleErrors } from "./lifecycle/errors.js";
@@ -28,24 +25,37 @@ import { readOptionalTreatmentBoolean } from "../harness/strict-treatment-config
 import { loadQuestionManifestSelection } from "./selection/question-manifest.js";
 import { deriveMergedLongMemEvalReleaseAuthority } from
   "../cli/merge/release-evidence-authority.js";
+import {
+  LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME
+} from "./provenance/extraction-authority-reference.js";
+import {
+  verifiedExpansionRunAuthority,
+  type VerifiedExpansionRunAuthority
+} from "./promotion/expansion-run-authority.js";
+import {
+  buildLongMemEvalFanoutAuthority,
+  longMemEvalFanoutChildEnv,
+  type BuiltLongMemEvalFanoutAuthority
+} from "./promotion/fanout-authority.js";
+import {
+  buildLongMemEvalWorkerCliArgs,
+  buildCredentiallessLongMemEvalWorkerEnv,
+  buildLongMemEvalWorkerEnvOverrides,
+  shardHasMergeableKpi,
+  spawnLongMemEvalWorkerProcess,
+  type LongMemEvalWorkerShardPlan,
+  type LongMemEvalWorkerSpawner
+} from "./runner-concurrency-worker.js";
 
-export interface LongMemEvalWorkerShardPlan {
-  readonly shardIndex: number;
-  readonly offset: number;
-  readonly limit: number;
-  readonly historyRoot: string;
-}
-
-export interface LongMemEvalWorkerSpawnOptions {
-  readonly cliPath: string;
-  readonly args: readonly string[];
-  readonly env: NodeJS.ProcessEnv;
-  readonly logPath: string;
-}
-
-export type LongMemEvalWorkerSpawner = (
-  options: LongMemEvalWorkerSpawnOptions
-) => Promise<number>;
+export {
+  buildLongMemEvalWorkerCliArgs,
+  buildCredentiallessLongMemEvalWorkerEnv,
+  buildLongMemEvalWorkerEnvOverrides,
+  freezeProcessEnvForWorkers,
+  type LongMemEvalWorkerShardPlan,
+  type LongMemEvalWorkerSpawnOptions,
+  type LongMemEvalWorkerSpawner
+} from "./runner-concurrency-worker.js";
 
 export interface LongMemEvalConcurrencyDeps {
   readonly spawnWorker?: LongMemEvalWorkerSpawner;
@@ -61,42 +71,16 @@ interface LongMemEvalConcurrentContext {
   readonly spawnWorker: LongMemEvalWorkerSpawner;
   readonly logDir: string;
   readonly datasetAuthority: VerifiedLongMemEvalDatasetAuthority | null;
-}
-
-export function freezeProcessEnvForWorkers(
-  env: NodeJS.ProcessEnv = process.env,
-  overrides: NodeJS.ProcessEnv = {}
-): NodeJS.ProcessEnv {
-  return Object.freeze({ ...env, ...overrides });
-}
-
-/** Shared ONNX single-flight lock for concurrent env-embedding workers. */
-export function buildLongMemEvalWorkerEnvOverrides(input: {
-  readonly concurrency: number;
-  readonly embeddingMode: LongMemEvalRunOptions["embeddingMode"];
-  readonly crossEncoderEnabled?: boolean;
-  readonly shardRoot: string;
-  readonly historyRoot: string;
-}): NodeJS.ProcessEnv {
-  const overrides: NodeJS.ProcessEnv = {
-    ALAYA_BENCH_ARTIFACT_ROOT: join(input.historyRoot, ".bench-artifacts")
-  };
-  if (
-    input.concurrency > 1 &&
-    (input.embeddingMode === "env" || input.crossEncoderEnabled === true)
-  ) {
-    overrides.ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT = "1";
-    overrides.ALAYA_LOCAL_ONNX_LOCK_PATH = join(
-      input.shardRoot,
-      "local-onnx-inference.lock"
-    );
-  }
-  return overrides;
+  readonly expansionAuthority: VerifiedExpansionRunAuthority | null;
+  readonly fanoutAuthority: BuiltLongMemEvalFanoutAuthority | null;
 }
 
 export function resolveLongMemEvalConcurrency(opts: LongMemEvalRunOptions): number {
   const raw = opts.concurrency ?? 1;
-  return Math.max(1, Math.floor(raw));
+  if (!Number.isSafeInteger(raw) || raw < 1 || raw > 32) {
+    throw new Error("longmemeval concurrency must be an integer from 1 to 32");
+  }
+  return raw;
 }
 
 export function shouldFanOutLongMemEvalWorkers(opts: LongMemEvalRunOptions): boolean {
@@ -125,6 +109,22 @@ export function buildLongMemEvalWorkerShardPlans(input: {
     });
   }
   return plans;
+}
+
+export function assertExactLongMemEvalShardCoverage(
+  plans: readonly LongMemEvalWorkerShardPlan[],
+  expectedCount: number
+): void {
+  let cursor = 0;
+  for (const plan of plans) {
+    if (plan.offset !== cursor || plan.limit < 1) {
+      throw new Error("longmemeval shard plan has a gap or overlap");
+    }
+    cursor += plan.limit;
+  }
+  if (cursor !== expectedCount) {
+    throw new Error("longmemeval shard plan does not cover the exact expected window");
+  }
 }
 
 export function validateLongMemEvalConcurrency(opts: LongMemEvalRunOptions): void {
@@ -199,6 +199,9 @@ async function prepareLongMemEvalConcurrentRun(
     concurrency,
     shardRoot
   });
+  const { expansionAuthority, fanoutAuthority } = await materializeRunAuthorities({
+    opts, concurrency, plans
+  }, shardRoot);
   const cliPath = deps.resolveCliPath?.() ?? resolveDefaultBenchRunnerCliPath();
   const spawnWorker = deps.spawnWorker ?? spawnLongMemEvalWorkerProcess;
   const logDir = join(shardRoot, "logs");
@@ -210,8 +213,65 @@ async function prepareLongMemEvalConcurrentRun(
   );
   return {
     opts, concurrency, shardRoot, plans, cliPath, spawnWorker, logDir,
-    datasetAuthority: selection.datasetAuthority
+    datasetAuthority: selection.datasetAuthority,
+    expansionAuthority,
+    fanoutAuthority
   };
+}
+
+async function materializeRunAuthorities(
+  input: Omit<Parameters<typeof buildConcurrentFanoutAuthority>[0],
+    "expansionAuthority">,
+  shardRoot: string
+): Promise<{
+  readonly expansionAuthority: VerifiedExpansionRunAuthority | null;
+  readonly fanoutAuthority: BuiltLongMemEvalFanoutAuthority | null;
+}> {
+  const expansionAuthority = verifiedExpansionRunAuthority(
+    input.opts.expansionCapability
+  );
+  if (input.opts.expansionCapability !== undefined && expansionAuthority === null) {
+    throw new Error("500Q process fan-out requires live expansion run authority");
+  }
+  if (expansionAuthority !== null) {
+    assertExactLongMemEvalShardCoverage(input.plans, expansionAuthority.questionCount);
+    await writeFile(
+      join(shardRoot, LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME),
+      expansionAuthority.extraction.bytes,
+      { flag: "wx" }
+    );
+  }
+  const fanoutAuthority = buildConcurrentFanoutAuthority({
+    ...input,
+    expansionAuthority
+  });
+  if (fanoutAuthority !== null) {
+    await writeFile(join(shardRoot, fanoutAuthority.descriptor.path),
+      fanoutAuthority.bytes, { flag: "wx" });
+  }
+  return { expansionAuthority, fanoutAuthority };
+}
+
+function buildConcurrentFanoutAuthority(input: {
+  readonly opts: LongMemEvalRunOptions;
+  readonly concurrency: number;
+  readonly plans: readonly LongMemEvalWorkerShardPlan[];
+  readonly expansionAuthority: VerifiedExpansionRunAuthority | null;
+}): BuiltLongMemEvalFanoutAuthority | null {
+  if (input.expansionAuthority === null) return null;
+  if (input.opts.expansionCapability === undefined) {
+    throw new Error("500Q fanout requires a live expansion capability");
+  }
+  return buildLongMemEvalFanoutAuthority({
+    capability: input.opts.expansionCapability,
+    extraction: input.expansionAuthority.extraction,
+    requestedConcurrency: input.concurrency,
+    plans: input.plans.map((plan) => ({
+      shard_index: plan.shardIndex,
+      offset: plan.offset,
+      limit: plan.limit
+    }))
+  });
 }
 
 async function loadConcurrentSelection(
@@ -267,19 +327,27 @@ async function runLongMemEvalConcurrentWorker(
   const logPath = join(context.logDir, `shard-${plan.shardIndex}.log`);
   const status = await context.spawnWorker({
     cliPath: context.cliPath,
-    args: buildWorkerCliArgs(context.opts, plan),
-    env: freezeProcessEnvForWorkers(
+    args: buildLongMemEvalWorkerCliArgs(context.opts, plan),
+    env: buildCredentiallessLongMemEvalWorkerEnv(
       process.env,
-      buildLongMemEvalWorkerEnvOverrides({
-        concurrency: context.concurrency,
-        embeddingMode: context.opts.embeddingMode,
-        crossEncoderEnabled: readOptionalTreatmentBoolean(
-          process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
-          "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
-        ) === true,
-        shardRoot: context.shardRoot,
-        historyRoot: plan.historyRoot
-      })
+      {
+        ...buildLongMemEvalWorkerEnvOverrides({
+          concurrency: context.concurrency,
+          embeddingMode: context.opts.embeddingMode,
+          crossEncoderEnabled: readOptionalTreatmentBoolean(
+            process.env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK,
+            "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK"
+          ) === true,
+          shardRoot: context.shardRoot,
+          historyRoot: plan.historyRoot
+        }),
+        ...(context.fanoutAuthority === null ? {} :
+          longMemEvalFanoutChildEnv({
+            root: context.shardRoot,
+            descriptor: context.fanoutAuthority.descriptor,
+            shardIndex: plan.shardIndex
+          }))
+      }
     ),
     logPath
   });
@@ -314,7 +382,8 @@ async function mergeLongMemEvalConcurrentRunWithSpool(
     shardArchiveRefs: loaded.archiveRefs,
     plans: context.plans,
     requestedConcurrency: context.concurrency,
-    selectionContract: build.selectionContract
+    selectionContract: build.selectionContract,
+    globalExtractionAuthority: loaded.globalExtractionAuthority
   });
   const archive = await writeMergedLongMemEvalArchive({
     historyRoot: context.opts.historyRoot,
@@ -325,6 +394,7 @@ async function mergeLongMemEvalConcurrentRunWithSpool(
     build,
     shardArchiveRefs: loaded.archiveRefs,
     requestedConcurrency: context.concurrency,
+    globalExtractionAuthority: loaded.globalExtractionAuthority,
     diagnosticsSpool
   });
   return {
@@ -345,92 +415,4 @@ function resolveDefaultBenchRunnerCliPath(): string {
   }
   const here = fileURLToPath(import.meta.url);
   return resolve(here, "../../../bin/alaya-bench-runner.mjs");
-}
-
-function variantToCliFlag(variant: LongMemEvalVariant): string {
-  const map: Record<LongMemEvalVariant, string> = {
-    longmemeval_oracle: "oracle",
-    longmemeval_s: "s",
-    longmemeval_m: "m"
-  };
-  return map[variant];
-}
-
-function buildWorkerCliArgs(
-  opts: LongMemEvalRunOptions,
-  plan: LongMemEvalWorkerShardPlan
-): string[] {
-  const args = [
-    "longmemeval",
-    "--variant",
-    variantToCliFlag(opts.variant),
-    "--offset",
-    String(plan.offset),
-    "--limit",
-    String(plan.limit),
-    "--embedding",
-    opts.embeddingMode ?? "disabled",
-    "--policy-shape",
-    opts.policyShape ?? "stress",
-    "--simulate-report",
-    opts.simulateReport ?? "none",
-    "--history-root",
-    plan.historyRoot
-  ];
-  if (opts.embeddingProviderKind !== undefined) {
-    args.push("--embedding-provider", opts.embeddingProviderKind);
-  }
-  if (opts.weightOverridesJson !== undefined) {
-    args.push("--weights", opts.weightOverridesJson);
-  }
-  if (opts.dataDir !== undefined) {
-    args.push("--data-dir", opts.dataDir);
-  }
-  if (opts.pinnedMetaRoot !== undefined) {
-    args.push("--pinned-meta-root", opts.pinnedMetaRoot);
-  }
-  if (opts.extractionCacheRoot !== undefined) {
-    args.push("--extraction-cache-root", opts.extractionCacheRoot);
-  }
-  return args;
-}
-
-async function spawnLongMemEvalWorkerProcess(
-  options: LongMemEvalWorkerSpawnOptions
-): Promise<number> {
-  const { open } = await import("node:fs/promises");
-  const logHandle = await open(options.logPath, "w");
-  try {
-    return await new Promise<number>((resolveExit, reject) => {
-      const child = spawn(process.execPath, [options.cliPath, ...options.args], {
-        env: options.env,
-        stdio: ["ignore", logHandle.fd, logHandle.fd]
-      });
-      child.once("error", reject);
-      child.once("close", (code) => resolveExit(code ?? 1));
-    });
-  } finally {
-    await logHandle.close();
-  }
-}
-
-async function shardHasMergeableKpi(historyRoot: string): Promise<boolean> {
-  const publicRoot = join(historyRoot, "public");
-  try {
-    const entries = await readdir(publicRoot, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      try {
-        await access(join(publicRoot, entry.name, "kpi.json"));
-        return true;
-      } catch {
-        // Keep scanning sibling archives.
-      }
-    }
-  } catch {
-    return false;
-  }
-  return false;
 }

@@ -19,10 +19,14 @@ import {
   type LongMemEvalEvidenceManifest
 } from "../../longmemeval/evidence-manifest.js";
 import {
-  isLongMemEvalRunProvenanceGateEligible,
-  LongMemEvalRunProvenanceSchema,
   type LongMemEvalRunProvenance
 } from "../../longmemeval/provenance/run.js";
+import type { LoadedGlobalExtractionAuthority } from
+  "../../longmemeval/provenance/extraction-authority-reference.js";
+import {
+  verifyShardRunProvenance,
+  type ShardArchivedRunProvenance
+} from "./shard-provenance-verifier.js";
 import {
   openContainedArtifact,
   type ContainedArtifactFile
@@ -30,6 +34,7 @@ import {
 const verifiedDiagnostics = new WeakSet<object>();
 const verifiedShardEvidence = new WeakSet<object>();
 const MAX_BINDING_ARTIFACT_BYTES = 16 * 1024 * 1024;
+const MAX_RUN_PROVENANCE_BYTES = 64 * 1024 * 1024;
 
 export interface VerifiedShardEvidence {
   readonly execution: LongMemEvalRunProvenance["execution"];
@@ -39,8 +44,12 @@ export interface VerifiedShardEvidence {
   readonly fullDiagnosticsArtifact: VerifiedArtifactIdentity;
   readonly runProvenance: {
     readonly contents: string;
-    readonly parsed: LongMemEvalRunProvenance;
+    readonly parsed: ShardArchivedRunProvenance;
+    readonly gateEligible: true;
   };
+  readonly extractionAuthorityReference: {
+    readonly contents: string;
+  } | null;
 }
 
 export interface VerifiedArtifactIdentity {
@@ -53,6 +62,7 @@ export async function verifyShardEvidenceBundle(input: {
   readonly shardRoot: string;
   readonly slug: string;
   readonly payload: KpiPayload;
+  readonly globalExtractionAuthority?: LoadedGlobalExtractionAuthority | null;
 }, hooks: {
   readonly afterBindingArtifactSnapshot?: (path: string) => void | Promise<void>;
 } = {}): Promise<VerifiedShardEvidence | null> {
@@ -86,7 +96,8 @@ export async function verifyShardEvidenceBundle(input: {
   const verified = assertArtifactBindings(
     manifest,
     inspected,
-    input.payload
+    input.payload,
+    input.globalExtractionAuthority ?? null
   );
   verifiedShardEvidence.add(verified);
   return verified;
@@ -161,7 +172,7 @@ async function inspectEvidenceArtifacts(
     const file = await openArtifact(shardRoot, entryRoot, artifact);
     try {
       if (isBindingRole(artifact.role)) {
-        const bytes = await file.readBytes(MAX_BINDING_ARTIFACT_BYTES);
+        const bytes = await file.readBytes(bindingArtifactByteLimit(artifact.role));
         await hooks.afterBindingArtifactSnapshot?.(artifact.path);
         return {
           evidence: { role: artifact.role, path: artifact.path, contents: bytes },
@@ -192,30 +203,38 @@ function decodeBindingArtifact(bytes: Uint8Array, artifactPath: string): string 
 function assertArtifactBindings(
   manifest: LongMemEvalEvidenceManifest,
   artifacts: readonly InspectedArtifact[],
-  payload: KpiPayload
+  payload: KpiPayload,
+  globalExtractionAuthority: LoadedGlobalExtractionAuthority | null
 ): VerifiedShardEvidence {
   const { cohort, boundKpi, provenance, provenanceContents } =
-    parseBindingArtifacts(artifacts);
+    parseBindingArtifacts(artifacts, globalExtractionAuthority);
   const questionIdDigest = assertKpiCohortBinding(
     manifest,
     cohort,
     boundKpi,
     payload
   );
-  assertProvenanceBinding(provenance, manifest, payload);
+  assertProvenanceBinding(provenance.hydrated, manifest, payload);
   const selection = assertSelectionContractBinding(
-    provenance, manifest, cohort, cohort.rows, questionIdDigest
+    provenance.hydrated, manifest, cohort, cohort.rows, questionIdDigest
   );
   if (JSON.stringify(boundKpi.selection_contract) !==
       JSON.stringify(selection.selectionContract)) {
     throw new Error("merge refused: shard KPI selection contract binding mismatch");
   }
   return {
-    execution: provenance.execution,
+    execution: provenance.hydrated.execution,
     ...selection,
     diagnosticsArtifact: verifiedArtifactIdentity(manifest, "diagnostics"),
     fullDiagnosticsArtifact: verifiedArtifactIdentity(manifest, "full_diagnostics"),
-    runProvenance: { contents: provenanceContents, parsed: provenance }
+    runProvenance: {
+      contents: provenanceContents,
+      parsed: provenance.archived,
+      gateEligible: true
+    },
+    extractionAuthorityReference: provenance.referenceContents === null
+      ? null
+      : { contents: provenance.referenceContents }
   };
 }
 
@@ -254,14 +273,16 @@ function assertProvenanceBinding(
 ): void {
   if (provenance.code.commit_sha7 !== payload.alaya_commit ||
     provenance.dataset_sha256 !== manifest.run.dataset_sha256 ||
-    provenance.execution.evaluated_count !== payload.evaluated_count ||
-    !isLongMemEvalRunProvenanceGateEligible(provenance)) {
+    provenance.execution.evaluated_count !== payload.evaluated_count) {
     throw new Error("merge refused: shard evidence provenance binding mismatch");
   }
   assertSourceManifestBinding(provenance, manifest);
 }
 
-function parseBindingArtifacts(artifacts: readonly InspectedArtifact[]) {
+function parseBindingArtifacts(
+  artifacts: readonly InspectedArtifact[],
+  globalExtractionAuthority: LoadedGlobalExtractionAuthority | null
+) {
   const cohort = parseRoleJson(artifacts, "cohort_ledger") as {
     question_count?: unknown;
     question_id_digest?: unknown;
@@ -269,13 +290,19 @@ function parseBindingArtifacts(artifacts: readonly InspectedArtifact[]) {
     selection_contract?: unknown;
   };
   const provenanceContents = roleContents(artifacts, "run_provenance");
+  const referenceContents = optionalRoleContents(
+    artifacts,
+    "extraction_authority_ref"
+  );
   return {
     cohort,
     boundKpi: KpiPayloadSchema.parse(parseRoleJson(artifacts, "kpi")),
     provenanceContents,
-    provenance: LongMemEvalRunProvenanceSchema.parse(
-      JSON.parse(provenanceContents) as unknown
-    )
+    provenance: verifyShardRunProvenance({
+      provenanceContents,
+      referenceContents,
+      globalAuthority: globalExtractionAuthority
+    })
   };
 }
 
@@ -347,6 +374,14 @@ function roleContents(
   return contents;
 }
 
+function optionalRoleContents(
+  artifacts: readonly InspectedArtifact[],
+  role: InspectedArtifact["role"]
+): string | null {
+  const contents = artifacts.find((artifact) => artifact.role === role)?.contents;
+  return contents ?? null;
+}
+
 function verifiedArtifactIdentity(
   manifest: LongMemEvalEvidenceManifest,
   role: LongMemEvalEvidenceManifest["artifacts"][number]["role"]
@@ -363,7 +398,14 @@ function sameValues(actual: readonly unknown[], expected: readonly string[]): bo
 }
 
 function isBindingRole(role: InspectedArtifact["role"]): boolean {
-  return role === "kpi" || role === "cohort_ledger" || role === "run_provenance";
+  return role === "kpi" || role === "cohort_ledger" ||
+    role === "run_provenance" || role === "extraction_authority_ref";
+}
+
+function bindingArtifactByteLimit(role: InspectedArtifact["role"]): number {
+  return role === "run_provenance"
+    ? MAX_RUN_PROVENANCE_BYTES
+    : MAX_BINDING_ARTIFACT_BYTES;
 }
 
 async function openArtifact(

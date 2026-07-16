@@ -1,11 +1,18 @@
 import { buildRecallDiagnostics, computeRecallTokenEconomy } from "./diagnostics.js";
+import { buildRecallCandidateDedupeKey } from "./recall-service-helpers.js";
 import type { CoarseStageResult } from "./recall-service-runner-coarse.js";
 import type {
   PreparedRecallRequest,
   RecallAssessmentStageResult,
   RecallManifestedResult
 } from "./recall-service-runner-types.js";
-import type { RecallDegradationReason, RecallResult, RecallTokenEconomy } from "./recall-service-types.js";
+import type {
+  CoarseRecallCandidate,
+  FineAssessmentPrunedCandidateDiagnostic,
+  RecallDegradationReason,
+  RecallResult,
+  RecallTokenEconomy
+} from "./recall-service-types.js";
 
 export function buildRecallResult(
   prepared: PreparedRecallRequest,
@@ -38,11 +45,39 @@ export function buildRecallResult(
       degradationReasons: [...degradationReasons],
       graphExpansionDiagnostics: coarse.coarseFilter.graphExpansionDiagnostics,
       candidates: manifested.candidateDiagnostics,
+      fineAssessmentPrunedCandidates: buildFineAssessmentPrunedDiagnostics(
+        coarse.combinedCoarseCandidates,
+        assessment.finalAssessment.prunedCandidates
+      ),
       tokenEconomy,
       embeddingWorkspaceScan: assessment.embeddingCoarseInjection.workspaceScan,
       phaseLatencyMs
     })
   });
+}
+
+function buildFineAssessmentPrunedDiagnostics(
+  coarseCandidates: readonly Readonly<CoarseRecallCandidate>[],
+  prunedCandidates: readonly Readonly<CoarseRecallCandidate>[]
+): readonly Readonly<FineAssessmentPrunedCandidateDiagnostic>[] {
+  const indexByKey = new Map(coarseCandidates.map((candidate, index) => [
+    buildRecallCandidateDedupeKey(candidate), index
+  ] as const));
+  return Object.freeze(prunedCandidates.map((candidate) => {
+    const candidateKey = buildRecallCandidateDedupeKey(candidate);
+    const coarseIndex = indexByKey.get(candidateKey);
+    if (coarseIndex === undefined) {
+      throw new Error(`fine-assessment pruned candidate missing from coarse pool: ${candidateKey}`);
+    }
+    return Object.freeze({
+      candidate_key: candidateKey,
+      origin_plane: candidate.originPlane ?? "workspace_local",
+      object_kind: candidate.objectKind ?? "memory_entry",
+      object_id: candidate.entry.object_id,
+      coarse_index: coarseIndex,
+      drop_reason: "fine_assessment_cap" as const
+    });
+  }));
 }
 
 function buildPhaseLatencyMs(

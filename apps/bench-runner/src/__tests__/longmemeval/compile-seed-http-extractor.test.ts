@@ -346,6 +346,39 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
+  it("does not start another fetch when the operator aborts during retry backoff", async () => {
+    const operator = new AbortController();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response("service unavailable", { status: 503 })
+    );
+    const sleep = vi.fn(() => {
+      queueMicrotask(() => operator.abort());
+      return new Promise<void>(() => {});
+    });
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, {
+      fetch: fetchMock,
+      sleep,
+      random: () => 0
+    });
+
+    let thrown: unknown;
+    try {
+      await extractor.extract({
+        systemPrompt: "s",
+        userPrompt: "t",
+        abortSignal: operator.signal
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect((thrown as {
+      benchRetry?: { retryClassification: string };
+    }).benchRetry?.retryClassification).toBe("failure_aborted");
+    expect(sleep).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("does NOT abort a fetch that resolves within the timeout budget", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })

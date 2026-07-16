@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
 import {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
@@ -7,6 +8,7 @@ import {
 import { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
 import { validateQuestionMeasurementStatus } from
   "./measurement/question-measurement-status.js";
+import { DELIVERY_MISS_DROP_REASONS } from "./delivery-miss-taxonomy.js";
 export { LongMemEvalQuestionMeasurementAxesSchema } from "./diagnostics/measurement-axes-schema.js";
 
 // Explicit zod schema for the bench-side diagnostic records produced by
@@ -23,6 +25,8 @@ export const BenchEmbeddingProviderStateSchema = z.enum([
   "provider_not_requested",
   "unknown"
 ]);
+
+export const DeliveryMissDropReasonSchema = z.enum(DELIVERY_MISS_DROP_REASONS);
 
 const DiagnosticStreamRanksSchema = z
   .record(z.string(), z.number().nullable())
@@ -147,6 +151,7 @@ const DeliveryStageActionSchema = z.enum([
 export const LongMemEvalMissTaxonomySchema = z.enum([
   "candidate_absent",
   "materialization_drop",
+  "fine_assessment_drop",
   "budget_drop",
   "delivery_order_drop",
   "answer_set_coverage_drop",
@@ -207,8 +212,9 @@ export const DiagnosticRecallResultSchema = z
 const LongMemEvalReplayCandidateSchema = z
   .object({
     object_id: z.string(),
-    object_kind: z.string().optional(),
+    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
     candidate_key: z.string(),
+    origin_plane: RecallOriginPlaneSchema,
     dimension: z.string().nullable().default(null),
     final_rank: z.number().nullable(),
     pre_budget_rank: z.number().nullable(),
@@ -223,10 +229,14 @@ const LongMemEvalReplayCandidateSchema = z
     per_axis_rank: DiagnosticAxisRanksSchema.nullable().default(null),
     per_axis_contribution: DiagnosticAxisContributionsSchema.nullable().default(null),
     flood_potential: DiagnosticFloodPotentialSchema.nullable().default(null),
+    flood_fuel_coverage: DiagnosticFloodFuelCoverageSchema.nullable().default(null),
     plane_first_admitted: z.string().nullable().default(null),
     plane_winning_admission: z.string().nullable().default(null),
     source_planes: z.array(z.string()).readonly().default([]),
     source_channels: z.array(z.string()).readonly().default([]),
+    lexical_rank: z.number().nullable().default(null),
+    structural_score: z.number().nullable().default(null),
+    budget_drop_reason: DeliveryMissDropReasonSchema.nullable().default(null),
     rank_after_fusion: z.number().nullable().default(null),
     rank_after_feature_rerank: z.number().nullable().default(null),
     rank_after_lexical_priority: z.number().nullable().default(null),
@@ -234,10 +244,27 @@ const LongMemEvalReplayCandidateSchema = z
     rank_after_structural_reserve: z.number().nullable().default(null),
     rank_after_coverage_selector: z.number().nullable().default(null),
     rank_after_session_coverage: z.number().nullable().default(null),
+    coverage_selector_action: DeliveryStageActionSchema.nullable().default(null),
+    session_coverage_action: DeliveryStageActionSchema.nullable().default(null),
+    session_key: z.string().nullable().default(null),
+    source_cohort_key: z.string().nullable().default(null),
+    reserved_by: z.string().nullable().default(null),
     answer_features: DiagnosticCandidateAnswerFeaturesSchema.nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     score_factors: DiagnosticScoreFactorsSchema
   })
+  .readonly();
+
+const FineAssessmentPrunedCandidateDiagnosticSchema = z
+  .object({
+    candidate_key: z.string().min(1),
+    origin_plane: RecallOriginPlaneSchema,
+    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_id: z.string().min(1),
+    coarse_index: z.number().int().nonnegative(),
+    drop_reason: z.literal("fine_assessment_cap")
+  })
+  .strict()
   .readonly();
 
 const LongMemEvalQuestionCohortLedgerSchema = z
@@ -345,7 +372,7 @@ export const LongMemEvalGoldDiagnosticSchema = z
     structural_score: z.number().nullable(),
     score_factors: DiagnosticScoreFactorsSchema.nullable(),
     source_channels: z.array(z.string()).readonly(),
-    budget_drop_reason: z.string().nullable(),
+    budget_drop_reason: DeliveryMissDropReasonSchema.nullable(),
     rank_after_fusion: z.number().nullable().default(null),
     rank_after_feature_rerank: z.number().nullable().default(null),
     rank_after_lexical_priority: z.number().nullable().default(null),
@@ -418,6 +445,12 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     graph_expansion_plane_count_per_edge_type:
       GraphExpansionPlaneCountPerEdgeTypeSchema,
     candidate_pool_complete: z.boolean().default(false),
+    candidate_pool_count: z.number().int().nonnegative().nullable().default(null),
+    fine_pruned_count: z.number().int().nonnegative().nullable().default(null),
+    fine_assessment_pruned_candidates: z
+      .array(FineAssessmentPrunedCandidateDiagnosticSchema)
+      .readonly()
+      .default([]),
     query_probes: DiagnosticQueryProbesSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),

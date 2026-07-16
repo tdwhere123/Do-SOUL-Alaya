@@ -33,6 +33,12 @@ import { createLongMemEvalHistoryLayout } from
   "../../longmemeval/history/evidence-context.js";
 import { classifyLongMemEvalDatasetCohort } from
   "../../longmemeval/selection/dataset-cohort.js";
+import {
+  EXTRACTION_CACHE_KEY_ALGO,
+  EXTRACTION_CACHE_MANIFEST_VERSION,
+  EXTRACTION_REQUEST_PROFILES
+} from "../../longmemeval/extraction-cache-manifest.js";
+import { syntheticExtractionClosure } from "./extraction-closure-fixture.js";
 
 const REPORT = "report\n";
 const FULL_DIAGNOSTICS_FILENAME = "longmemeval-diagnostics.json.gz";
@@ -244,6 +250,15 @@ function buildFixtureRecallResult(candidateId: string, delivered: boolean) {
   return {
     diagnostics: {
       provider_state: "provider_not_requested",
+      candidate_pool_complete: true,
+      candidate_pool_count: 1,
+      fine_pruned_count: 0,
+      fine_assessment_pruned_candidates: [],
+      token_economy: {
+        coarse_pool_size: 1,
+        fine_evaluated: 1,
+        fine_pruned_count: 0
+      },
       candidates: [{
         object_id: candidateId,
         object_kind: "memory_entry",
@@ -283,6 +298,14 @@ function renderCohortLedger(payload: KpiPayload): string {
 
 function buildRunProvenance(payload: KpiPayload) {
   const datasetSha256 = payload.dataset.checksum_sha256!;
+  const extractionModel = "fixture-model";
+  const requestProfile = EXTRACTION_REQUEST_PROFILES[0];
+  const extractionClosure = syntheticExtractionClosure({
+    count: payload.evaluated_count,
+    model: extractionModel,
+    requestProfile,
+    seed: `verified-history:${payload.bench_name}`
+  });
   return {
     schema_version: 1,
     dataset_sha256: datasetSha256,
@@ -294,21 +317,62 @@ function buildRunProvenance(payload: KpiPayload) {
       gate_contract_path: "/fixture/gate.json",
       worktree_state_sha256: "b".repeat(64),
       worktree_clean: true,
-      executed_dist: { sha256: "c".repeat(64) }
+      executed_dist: {
+        algorithm: "sha256-reachable-path-file-sha256-v1",
+        sha256: "c".repeat(64),
+        file_count: 1
+      }
     },
     extraction_cache: {
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      manifest_sha256: "e".repeat(64),
+      extraction_model: extractionModel,
+      model_family: "fixture-family",
+      request_profile: requestProfile,
+      provider_url: "redacted",
+      system_prompt_sha256: "1".repeat(64),
+      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+      dataset: "longmemeval_s",
       dataset_revision: datasetSha256,
       requested_turns: payload.evaluated_count,
       cached_turns: payload.evaluated_count,
-      coverage: 1
+      coverage: 1,
+      fill_status: "complete",
+      window_offset: 0,
+      window_limit: payload.evaluated_count,
+      ...extractionClosure,
+      storage: "git-tracked",
+      built_at: "2026-07-17T00:00:00.000Z",
+      builder: "fixture"
     },
-    execution: { evaluated_count: payload.evaluated_count },
+    runtime: {
+      node_version: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      embedding_mode: "disabled",
+      embedding_provider_kind: "openai",
+      embedding_provider_label: "none",
+      onnx_threads: null,
+      embedding_supplement: { enabled: false },
+      answer_rerank: { enabled: false },
+      paired_env: {}
+    },
+    execution: {
+      protocol: "sequential",
+      concurrency: 1,
+      offset: 0,
+      limit: payload.evaluated_count,
+      evaluated_count: payload.evaluated_count
+    },
     recall_config: {
+      conf_slice_compatibility: false,
       schema_version: 2,
       max_results: 10,
       conflict_awareness: true,
       effective_config_sha256: "d".repeat(64)
-    }
+    },
+    seed_capabilities: { facet_tags_enabled: false },
+    question_manifest: null
   };
 }
 

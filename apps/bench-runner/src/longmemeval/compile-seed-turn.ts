@@ -22,6 +22,7 @@ export async function seedCompileTurn(
   if (normalized.length === 0) {
     return { seeds: [], turnTruncated: false, charsClipped: 0 };
   }
+  context.stats.extractionAttempts = (context.stats.extractionAttempts ?? 0) + 1;
   const signalInputs = await buildTurnSignalInputs(context, input, normalized);
   const seeds =
     signalInputs[0]?.extractionProvider === "official_api_compile"

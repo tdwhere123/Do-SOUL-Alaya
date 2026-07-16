@@ -7,12 +7,19 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
 } from "../../longmemeval/extraction-cache-manifest.js";
+import { syntheticExtractionClosure } from "./extraction-closure-fixture.js";
 import { computeQuestionIdDigest } from "../../longmemeval/selection/question-manifest.js";
 import { computeCohortAssignmentDigest } from "../../longmemeval/selection/contract.js";
 import { MERGE_TEST_DATASET_SHA256 } from
   "../cli/cli-merge-dataset-fixture.js";
 
 const DATASET_SHA = MERGE_TEST_DATASET_SHA256;
+const EXTRACTION_CLOSURE = syntheticExtractionClosure({
+  count: 10,
+  model: "fixture-model",
+  requestProfile: "provider-default-v1",
+  seed: "runner-concurrency"
+});
 
 export function makeShardProvenance(
   offset: number,
@@ -58,9 +65,13 @@ export function makeShardProvenance(
       cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
       dataset: "longmemeval-s",
       dataset_revision: DATASET_SHA,
-      requested_turns: 10,
-      cached_turns: 10,
+      requested_turns: EXTRACTION_CLOSURE.expected_turns,
+      cached_turns: EXTRACTION_CLOSURE.expected_turns,
       coverage: 1,
+      fill_status: "complete",
+      window_offset: 0,
+      window_limit: 4,
+      ...EXTRACTION_CLOSURE,
       storage: "git-tracked",
       built_at: "2026-07-01T00:00:00.000Z",
       builder: "test"

@@ -1,9 +1,11 @@
 import {
   ConflictDetectionService,
   EdgeAutoProducerService,
+  PRODUCT_FORMATION_DEFAULTS,
   PreWriteRecallService,
   ReconciliationService,
   createRuleOnlyReconciliationDecisionPort,
+  resolveProductFormationEnabled,
   type PathCandidateSink
 } from "@do-soul/alaya-core";
 import type { SqliteGardenTaskRepo } from "@do-soul/alaya-storage";
@@ -96,7 +98,10 @@ function createConflictDetectionRuntime(
   input: CreateRecallMaterializationWiringInput,
   pathCandidatePort: PathCandidateSink
 ): ConflictDetectionService | null {
-  const conflictDetectionEnabled = readEnabledEnv("ALAYA_CONFLICT_DETECTION_ENABLED", true);
+  const conflictDetectionEnabled = readEnabledEnv(
+    "ALAYA_CONFLICT_DETECTION_ENABLED",
+    PRODUCT_FORMATION_DEFAULTS.conflictDetectionEnabled
+  );
   if (!conflictDetectionEnabled) {
     return null;
   }
@@ -123,7 +128,10 @@ function createConflictDetectionRuntime(
 async function createReconciliationRuntime(
   input: CreateRecallMaterializationWiringInput
 ): Promise<ReconciliationService | null> {
-  const ingestReconciliationEnabled = readEnabledEnv("ALAYA_INGEST_RECONCILIATION_ENABLED", true);
+  const ingestReconciliationEnabled = readEnabledEnv(
+    "ALAYA_INGEST_RECONCILIATION_ENABLED",
+    PRODUCT_FORMATION_DEFAULTS.ingestReconciliationEnabled
+  );
   if (!ingestReconciliationEnabled) {
     return null;
   }
@@ -206,11 +214,7 @@ export const edgeReconciliationTestInternals = {
 };
 
 function readEnabledEnv(name: string, defaultValue: boolean): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (raw === undefined || raw === "") {
-    return defaultValue;
-  }
-  return raw !== "0" && raw !== "false";
+  return resolveProductFormationEnabled(process.env[name], defaultValue);
 }
 
 function createEdgeClassifyRuntime(

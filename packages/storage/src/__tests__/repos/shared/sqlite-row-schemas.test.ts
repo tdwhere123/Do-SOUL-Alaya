@@ -78,7 +78,8 @@ describe("sqlite row schemas", () => {
 
   it("parses valid memory embedding metadata rows", () => {
     const { embedding_blob: _ignored, ...metadataRow } = VALID_MEMORY_EMBEDDING_ROW;
-    expect(MemoryEmbeddingMetadataRowParser.parse(metadataRow)).toEqual(metadataRow);
+    expect(MemoryEmbeddingMetadataRowParser.parse({ ...metadataRow, vector_valid: 1 }))
+      .toEqual({ ...metadataRow, vector_valid: 1 });
   });
 
   it("rejects invalid memory embedding metadata rows", () => {

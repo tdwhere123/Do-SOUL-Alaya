@@ -1,11 +1,10 @@
-import type { CoarseStageResult } from "../runtime/recall-service-runner-coarse.js";
 import type { PreparedRecallRequest, RecallExecutionContext, RecallExecutionParams } from "../runtime/recall-service-runner-types.js";
 
 export async function collectPoolEmbeddingRescore(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
+  objectIds: readonly string[]
 ): Promise<Readonly<Record<string, number>>> {
   const service = context.dependencies.embeddingRecallService;
   if (
@@ -16,7 +15,6 @@ export async function collectPoolEmbeddingRescore(
   ) {
     return {};
   }
-  const objectIds = coarse.combinedCoarseCandidates.map((candidate) => candidate.entry.object_id);
   if (objectIds.length === 0) {
     return {};
   }

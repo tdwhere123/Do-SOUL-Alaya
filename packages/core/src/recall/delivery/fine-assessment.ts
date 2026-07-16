@@ -3,7 +3,10 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { buildRecallCandidateDedupeKey } from "../runtime/recall-service-helpers.js";
+import {
+  buildRecallCandidateDedupeKey,
+  isSynthesisChildCandidate
+} from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallCandidateDiagnostic,
@@ -42,16 +45,28 @@ export interface FineAssessParams {
 
 export type FineAssessmentPreparation = Readonly<{
   readonly candidates: readonly FineAssessmentCandidate[];
+  readonly prunedCandidates: FineAssessmentPruneResult["prunedCandidates"];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
   readonly finePriorityOverflowCount: number;
 }>;
 
+export interface FineAssessmentWaistParams {
+  readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly policy: Readonly<RecallPolicy>;
+  readonly winnerMemoryIds: ReadonlySet<string>;
+  readonly supplementaryData: Parameters<
+    typeof pruneCoarseCandidatesForFineAssessment
+  >[0]["supplementaryData"];
+  readonly warn: RecallServiceWarnPort;
+}
+
 export function fineAssess(params: FineAssessParams): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
   readonly preparedCandidates: readonly FineAssessmentCandidate[];
+  readonly prunedCandidates: FineAssessmentPruneResult["prunedCandidates"];
   readonly coarsePoolSize: number;
   readonly fineEvaluated: number;
   readonly finePrunedCount: number;
@@ -61,21 +76,12 @@ export function fineAssess(params: FineAssessParams): Readonly<{
 }
 
 export function prepareFineAssessment(
-  params: FineAssessParams
+  params: FineAssessParams,
+  waist: FineAssessmentPruneResult = prepareFineAssessmentWaist(params)
 ): FineAssessmentPreparation {
-  if (params.candidates.length === 0) {
-    return emptyFineAssessmentPreparation();
-  }
-  const pruned = pruneCoarseCandidatesForFineAssessment({
-    candidates: params.candidates,
-    supplementaryData: params.supplementaryData,
-    winnerMemoryIds: params.winnerMemoryIds,
-    cap: resolveFineAssessmentCandidateBudget(params.policy)
-  });
-  warnOnPriorityOverflow(params.warn, pruned);
   const scoredCandidates = scoreFineAssessmentCandidates({
     ...params,
-    candidates: pruned.survivors
+    candidates: waist.survivors
   });
   const fusedCandidates = fuseFineAssessmentCandidates(
     scoredCandidates,
@@ -83,7 +89,20 @@ export function prepareFineAssessment(
     params.supplementaryData,
     params.now()
   );
-  return preparationFromPrune(pruned, fusedCandidates);
+  return preparationFromPrune(waist, fusedCandidates);
+}
+
+export function prepareFineAssessmentWaist(
+  params: FineAssessmentWaistParams
+): FineAssessmentPruneResult {
+  const waist = pruneCoarseCandidatesForFineAssessment({
+    candidates: params.candidates,
+    supplementaryData: params.supplementaryData,
+    winnerMemoryIds: params.winnerMemoryIds,
+    cap: resolveFineAssessmentCandidateBudget(params.policy)
+  });
+  warnOnPriorityOverflow(params.warn, waist);
+  return waist;
 }
 
 function warnOnPriorityOverflow(
@@ -131,6 +150,7 @@ export function deliverFineAssessment(
   return Object.freeze({
     ...selected,
     preparedCandidates: preparation.candidates,
+    prunedCandidates: preparation.prunedCandidates,
     coarsePoolSize: preparation.coarsePoolSize,
     fineEvaluated: preparation.fineEvaluated,
     finePrunedCount: preparation.finePrunedCount,
@@ -154,6 +174,7 @@ function scoreFineAssessmentCandidates(params: FineAssessParams): readonly Addit
       isAdvisory: candidate.isAdvisory ?? false,
       scoreMultiplier: candidate.scoreMultiplier ?? 1,
       objectKind: candidate.objectKind ?? "memory_entry",
+      synthesisChild: isSynthesisChildCandidate(candidate),
       now: params.now,
       warn: params.warn
     });
@@ -178,22 +199,13 @@ function fuseFineAssessmentCandidates(
   return fusedCandidates;
 }
 
-function emptyFineAssessmentPreparation(): FineAssessmentPreparation {
-  return Object.freeze({
-    candidates: Object.freeze([]),
-    coarsePoolSize: 0,
-    fineEvaluated: 0,
-    finePrunedCount: 0,
-    finePriorityOverflowCount: 0
-  });
-}
-
 function preparationFromPrune(
   pruned: FineAssessmentPruneResult,
   candidates: readonly FineAssessmentCandidate[]
 ): FineAssessmentPreparation {
   return Object.freeze({
     candidates,
+    prunedCandidates: pruned.prunedCandidates,
     coarsePoolSize: pruned.coarsePoolSize,
     fineEvaluated: pruned.fineEvaluated,
     finePrunedCount: pruned.finePrunedCount,

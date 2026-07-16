@@ -3,6 +3,7 @@ import type {
   DiagnosticAxisContributions,
   DiagnosticAxisRanks,
   DiagnosticCandidateAnswerFeatures,
+  CandidateIdentityObservation,
   DiagnosticFloodFuelCoverage,
   DiagnosticFloodPotential,
   DiagnosticScoreFactors,
@@ -13,7 +14,17 @@ import {
   DiagnosticFloodPotentialSchema,
   DiagnosticQueryProbesSchema
 } from "./diagnostics-schema.js";
-
+import { readFineAssessmentPrunedClosure } from
+  "./diagnostics-fine-pruned-reader.js";
+import { isPreferredCandidateManifestation } from
+  "./diagnostics/candidate-manifestation-order.js";
+import {
+  buildObjectIdentityKey,
+  readDiagnosticCandidateIdentity
+} from "./diagnostics/candidate-identity.js";
+import type { DiagnosticCandidateIdentityMode } from
+  "./diagnostics/candidate-identity.js";
+export { buildObjectIdentityKey } from "./diagnostics/candidate-identity.js";
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",
   "activation",
@@ -60,60 +71,77 @@ interface FusionBreakdownDiagnostic {
   readonly floodFuelCoverage: DiagnosticFloodFuelCoverage | null;
 }
 
-export function buildObjectIdentityKey(objectKind: string, objectId: string): string {
-  return `${objectKind}:${objectId}`;
-}
-
 export function readCandidates(
   diagnostics: Readonly<Record<string, unknown>>
 ): ReadCandidateDiagnosticsResult {
-  const source =
-    readArray(diagnostics.candidate_pool) ??
-    readArray(diagnostics.candidates) ??
-    readArray(diagnostics.pool);
+  const source = readCandidateSource(diagnostics);
   const fusionBreakdown = readFusionBreakdownDiagnostics(diagnostics.fusion_breakdown);
   const byObjectId = new Map<string, CandidateDiagnostic>();
   const byObjectIdentity = new Map<string, CandidateDiagnostic>();
   const byCandidateKey = new Map<string, CandidateDiagnostic>();
-  const mutableKeysByObjectId = new Map<string, string[]>();
+  const identityObservations: CandidateIdentityObservation[] = [];
   let parsedCandidateCount = 0;
-  for (const raw of source ?? []) {
-    const candidate = readCandidateRow(raw, fusionBreakdown.byCandidateKey);
-    if (candidate === null) continue;
+  for (const raw of source?.rows ?? []) {
+    const parsed = readCandidateRow(raw, fusionBreakdown.byCandidateKey, source!.mode);
+    if (parsed === null) continue;
     parsedCandidateCount += 1;
+    identityObservations.push(parsed.observation);
     indexCandidateDiagnostic(
-      candidate,
+      parsed.candidate,
       byCandidateKey,
       byObjectIdentity,
-      byObjectId,
-      mutableKeysByObjectId
+      byObjectId
     );
   }
-  const keysByObjectId = new Map(
-    [...mutableKeysByObjectId.entries()].map(([objectId, keys]) => [
-      objectId,
-      Object.freeze([...keys].sort())
-    ] as const)
+  const sourceCandidateKeys = new Set(
+    identityObservations.map((item) => item.sourceCandidateKey)
+  );
+  const scoredComplete = source !== null && parsedCandidateCount === source.rows.length &&
+    byCandidateKey.size === parsedCandidateCount &&
+    sourceCandidateKeys.size === parsedCandidateCount;
+  const pruned = readFineAssessmentPrunedClosure(
+    diagnostics,
+    new Set(byCandidateKey.keys())
   );
   return {
-    candidatePoolComplete: source !== null && parsedCandidateCount === source.length,
+    candidatePoolComplete: scoredComplete && pruned.complete,
+    candidatePoolCount: pruned.candidatePoolCount,
+    finePrunedCount: pruned.finePrunedCount,
+    fineAssessmentPrunedCandidates: pruned.candidates,
+    fineAssessmentPrunedByObjectIdentity: pruned.byObjectIdentity,
+    fineAssessmentPrunedObjectIds: pruned.objectIds,
     byObjectId: Object.freeze(byObjectId),
     byObjectIdentity: Object.freeze(byObjectIdentity),
     byCandidateKey: Object.freeze(byCandidateKey),
-    keysByObjectId: Object.freeze(keysByObjectId)
+    identityObservations: Object.freeze(identityObservations)
   };
+}
+
+function readCandidateSource(diagnostics: Readonly<Record<string, unknown>>): Readonly<{
+  readonly rows: readonly unknown[];
+  readonly mode: DiagnosticCandidateIdentityMode;
+}> | null {
+  const legacy = readArray(diagnostics.candidate_pool) ?? readArray(diagnostics.pool);
+  if (legacy !== null) return { rows: legacy, mode: "legacy" };
+  const strict = readArray(diagnostics.candidates);
+  return strict === null ? null : { rows: strict, mode: "strict" };
 }
 
 function readCandidateRow(
   raw: unknown,
-  fusionByCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>
-): CandidateDiagnostic | null {
+  fusionByCandidateKey: ReadonlyMap<string, FusionBreakdownDiagnostic>,
+  mode: DiagnosticCandidateIdentityMode
+): Readonly<{
+  readonly candidate: CandidateDiagnostic;
+  readonly observation: CandidateIdentityObservation;
+}> | null {
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
-  const identity = readCandidateIdentity(record);
+  const identity = readDiagnosticCandidateIdentity(record, mode);
   if (identity === null) return null;
   const fusion = matchingFusionBreakdown(
-    fusionByCandidateKey.get(identity.candidateKey),
+    fusionByCandidateKey.get(identity.sourceCandidateKey) ??
+      fusionByCandidateKey.get(identity.candidateKey),
     identity.objectId,
     identity.objectKind
   );
@@ -121,7 +149,7 @@ function readCandidateRow(
   if (record.answer_features != null && answerFeatures === null) return null;
   const pathSuppressionScore = readNumber(record.path_suppression_score);
   if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
-  return {
+  const candidate: CandidateDiagnostic = {
     candidateKey: identity.candidateKey,
     objectId: identity.objectId,
     objectKind: identity.objectKind,
@@ -133,6 +161,14 @@ function readCandidateRow(
     pathSuppressionScore,
     ...readCandidateDelivery(record)
   };
+  return {
+    candidate,
+    observation: {
+      candidate,
+      sourceCandidateKey: identity.sourceCandidateKey,
+      legacy: identity.legacy
+    }
+  };
 }
 
 function readCandidateBasics(record: Readonly<Record<string, unknown>>) {
@@ -140,24 +176,6 @@ function readCandidateBasics(record: Readonly<Record<string, unknown>>) {
     createdAt: readString(record.created_at),
     facetOverlap: readNumber(record.facet_overlap),
     dimension: readString(record.dimension)
-  };
-}
-
-function readCandidateIdentity(record: Readonly<Record<string, unknown>>) {
-  const objectId =
-    readString(record.object_id) ??
-    readString(record.memory_id) ??
-    readString(record.id);
-  if (objectId === null) return null;
-  const originPlane = readString(record.origin_plane) ?? "workspace_local";
-  const objectKind = readString(record.object_kind) ?? "memory_entry";
-  const candidateKey =
-    readString(record.candidate_key) ?? `${originPlane}:${objectKind}:${objectId}`;
-  return {
-    candidateKey,
-    objectId,
-    objectKind,
-    originPlane
   };
 }
 
@@ -231,23 +249,23 @@ function indexCandidateDiagnostic(
   candidate: CandidateDiagnostic,
   byCandidateKey: Map<string, CandidateDiagnostic>,
   byObjectIdentity: Map<string, CandidateDiagnostic>,
-  byObjectId: Map<string, CandidateDiagnostic>,
-  mutableKeysByObjectId: Map<string, string[]>
+  byObjectId: Map<string, CandidateDiagnostic>
 ): void {
   const objectIdentityKey = buildObjectIdentityKey(candidate.objectKind, candidate.objectId);
-  byCandidateKey.set(candidate.candidateKey, candidate);
+  const existingByKey = byCandidateKey.get(candidate.candidateKey);
+  if (existingByKey === undefined ||
+      isPreferredCandidateManifestation(candidate, existingByKey)) {
+    byCandidateKey.set(candidate.candidateKey, candidate);
+  }
   const existingByIdentity = byObjectIdentity.get(objectIdentityKey);
   if (
     existingByIdentity === undefined ||
-    shouldPreferCandidateDiagnostic(candidate, existingByIdentity)
+    isPreferredCandidateManifestation(candidate, existingByIdentity)
   ) {
     byObjectIdentity.set(objectIdentityKey, candidate);
   }
-  const keysForObject = mutableKeysByObjectId.get(candidate.objectId) ?? [];
-  keysForObject.push(candidate.candidateKey);
-  mutableKeysByObjectId.set(candidate.objectId, keysForObject);
   const existing = byObjectId.get(candidate.objectId);
-  if (existing === undefined || shouldPreferCandidateDiagnostic(candidate, existing)) {
+  if (existing === undefined || isPreferredCandidateManifestation(candidate, existing)) {
     byObjectId.set(candidate.objectId, candidate);
   }
 }
@@ -368,29 +386,6 @@ function readDeliveryStageAction(
     return null;
   }
   return raw as "noop" | "kept" | "promoted" | "displaced";
-}
-
-function shouldPreferCandidateDiagnostic(
-  candidate: CandidateDiagnostic,
-  existing: CandidateDiagnostic
-): boolean {
-  const candidateFinal = candidate.finalRank ?? Number.MAX_SAFE_INTEGER;
-  const existingFinal = existing.finalRank ?? Number.MAX_SAFE_INTEGER;
-  if (candidateFinal !== existingFinal) {
-    return candidateFinal < existingFinal;
-  }
-
-  const candidateFused = candidate.fusedRank ?? Number.MAX_SAFE_INTEGER;
-  const existingFused = existing.fusedRank ?? Number.MAX_SAFE_INTEGER;
-  if (candidateFused !== existingFused) {
-    return candidateFused < existingFused;
-  }
-
-  if (candidate.originPlane !== existing.originPlane) {
-    return candidate.originPlane === "workspace_local";
-  }
-
-  return candidate.candidateKey.localeCompare(existing.candidateKey) < 0;
 }
 
 function readScoreFactors(value: unknown): DiagnosticScoreFactors | null {

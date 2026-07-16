@@ -47,6 +47,40 @@ describe("embedding-head evidence order", () => {
     })).toBe("zero");
   });
 
+  it("does not project memory scores onto same-id synthesis or global candidates", () => {
+    const local = candidate("local", 3, 0.4);
+    const projectionBase = candidate("shared", 2, 0.2);
+    const synthesis = { ...projectionBase, objectKind: "synthesis_capsule" as const };
+    const global = { ...projectionBase, originPlane: "global" as const };
+    const memoryScores = { shared: 0.9, local: 0.4 };
+
+    expect(compareEmbeddingEvidenceStrength(synthesis, local, memoryScores)).toBe(-1);
+    expect(compareEmbeddingEvidenceStrength(global, local, memoryScores)).toBe(-1);
+  });
+
+  it("does not evict a candidate with independent non-embedding query evidence", () => {
+    const incumbentBase = candidate("incumbent", 2);
+    const incumbent = {
+      ...incumbentBase,
+      fusion: {
+        ...incumbentBase.fusion,
+        per_stream_rank: {
+          ...incumbentBase.fusion.per_stream_rank,
+          subject_alignment: 1
+        }
+      }
+    };
+    const head = candidate("head", 1);
+    const evictions = selectEmbeddingHeadEvictions({
+      candidates: [incumbent, head],
+      maxEntries: 1,
+      embeddingScores: { incumbent: 0.2, head: 0.9 },
+      selectDelivered: (excluded) => excluded.has("incumbent") ? [head] : [incumbent]
+    });
+
+    expect(evictions.size).toBe(0);
+  });
+
   it.each([undefined, Number.NaN])(
     "keeps positive finite evidence over an invalid score (%s)",
     (invalidScore) => {

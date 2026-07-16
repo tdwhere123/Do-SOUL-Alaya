@@ -7,6 +7,9 @@ import type {
   SeededSynthesisResult
 } from "../harness/daemon.js";
 import type { ExtractionRequestProfile } from "./extraction-cache-manifest.js";
+import type {
+  ExtractionFillQuestionWindow
+} from "./extraction/fill-manifest-contract.js";
 
 /**
  * The injectable `SignalExtractor` shape consumed by
@@ -95,6 +98,8 @@ export interface CompileSeedRunnerOptions {
    * disk.
    */
   readonly requiredTurnContents?: readonly string[];
+  /** Exact question offset and effective count represented by those turns. */
+  readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
   /**
    * Skip the run-start preflight entirely. For unit tests that drive the
    * runner with a hand-built config + temp cacheRoot and do not exercise the
@@ -113,6 +118,8 @@ export interface CompileSeedRunnerOptions {
 export interface CompileSeedExtractionStats {
   /** Which seed path ran. Disclosed in the bench report for honesty. */
   path: "official_api_compile" | "no_credentials_fallback";
+  /** Non-empty turns submitted to the extraction seam. */
+  extractionAttempts?: number;
   /** Turns whose extraction was served from the on-disk cache fixture. */
   cacheHits: number;
   /** Turns that triggered a live LLM extraction call. */
@@ -189,6 +196,8 @@ export interface CompileSeedExtractionStats {
    * predate the instrument.
    */
   lastCacheKey?: string | null;
+  /** SHA-256 of the exact raw_json string returned by the latest successful extraction. */
+  lastRawJsonSha256: string | null;
 }
 
 /**
@@ -201,6 +210,7 @@ export interface CompileSeedExtractionStats {
  */
 export interface SeedExtractionPathKpi {
   readonly path: "official_api_compile" | "no_credentials_fallback";
+  readonly extraction_attempts: number;
   readonly cache_hits: number;
   readonly llm_calls: number;
   readonly offline_fallbacks: number;

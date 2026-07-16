@@ -128,6 +128,74 @@ describe("RecallService embedding request score snapshot", () => {
       ?.score_factors?.embedding_similarity).toBeCloseTo(1, 5);
   });
 
+  it("propagates only a valid non-positive vector as observed zero into deep-head ranking", async () => {
+    const observed = createMemoryEntry({
+      object_id: "observed-zero",
+      content: "Producer zero query with a valid negative vector"
+    });
+    const invalid = createMemoryEntry({
+      object_id: "invalid-vector",
+      content: "Producer zero query with an invalid vector"
+    });
+    const degenerate = createMemoryEntry({
+      object_id: "degenerate-vector",
+      content: "Producer zero query with a degenerate vector"
+    });
+    const memories = [observed, invalid, degenerate];
+    const { dependencies } = createDependencies(memories);
+    const embeddingRecallService = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [
+          createEmbeddingRecord({
+            object_id: observed.object_id,
+            content_hash: hashMemoryContent(observed.content),
+            embedding: new Float32Array([-1, 0])
+          }),
+          createEmbeddingRecord({
+            object_id: invalid.object_id,
+            content_hash: hashMemoryContent(invalid.content),
+            embedding: new Float32Array([Number.NaN, 1])
+          }),
+          createEmbeddingRecord({
+            object_id: degenerate.object_id,
+            content_hash: hashMemoryContent(degenerate.content),
+            embedding: new Float32Array([0, 0])
+          })
+        ])
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([1, 0])])
+      }),
+      eventLogRepo: dependencies.eventLogRepo,
+      generateQueryId: () => "observed-zero-query"
+    });
+    const service = new RecallService({ ...dependencies, embeddingRecallService });
+
+    const { result } = await runSnapshotRecall(service, "Producer zero query", {
+      maxSupplement: 0,
+      injectionCap: 0
+    });
+    const candidates = new Map(result.candidates.map((candidate) => [candidate.object_id, candidate]));
+
+    expect(candidates.has(observed.object_id)).toBe(true);
+    expect(candidates.has(invalid.object_id)).toBe(true);
+    expect(candidates.has(degenerate.object_id)).toBe(true);
+    expect(candidates.get(observed.object_id)?.score_factors?.embedding_similarity).toBe(0);
+    expect(result.diagnostics?.candidates.find(
+      (candidate) => candidate.object_id === observed.object_id
+    )?.score_factors.embedding_similarity).toBe(0);
+    expect(candidates.get(invalid.object_id)?.score_factors?.embedding_similarity).toBeUndefined();
+    expect(candidates.get(degenerate.object_id)?.score_factors?.embedding_similarity)
+      .toBeUndefined();
+    const deliveredIds = result.candidates.map((candidate) => candidate.object_id);
+    expect(deliveredIds.indexOf(observed.object_id)).toBeGreaterThan(
+      deliveredIds.indexOf(invalid.object_id)
+    );
+    expect(deliveredIds.indexOf(observed.object_id)).toBeGreaterThan(
+      deliveredIds.indexOf(degenerate.object_id)
+    );
+  });
+
   it.each([
     ["provider_pending", "provider_pending", "query_embedding_pending"],
     ["provider_failed", "provider_failed", "provider_unavailable"],

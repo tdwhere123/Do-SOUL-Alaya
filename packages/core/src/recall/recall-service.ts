@@ -20,6 +20,7 @@ export type {
   KeywordSearchResult,
   RecallMemoryListPageOptions,
   RecallCandidate,
+  RecallCandidateDropReason,
   RecallResult,
   RecallServiceBudgetPenaltyPort,
   RecallServiceActiveConstraintsPort,

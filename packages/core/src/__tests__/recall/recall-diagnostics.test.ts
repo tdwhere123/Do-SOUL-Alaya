@@ -136,6 +136,7 @@ describe("recall diagnostics", () => {
         }
       },
       candidates: [candidate],
+      fineAssessmentPrunedCandidates: [],
       tokenEconomy: {
         delivered_context_tokens_estimate: 0,
         coarse_pool_size: 1,
@@ -153,6 +154,7 @@ describe("recall diagnostics", () => {
       flood_potential: { Flood: 0.2, fuel_verified: true },
       flood_fuel_coverage: { fuel_verified_count: 1 }
     });
+    expect(diagnostics.fine_assessment_pruned_candidates).toEqual([]);
     expect(diagnostics.query_probes.normalized_query).toBe("where did alice live");
     expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
   });

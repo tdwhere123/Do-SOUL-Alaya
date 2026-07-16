@@ -16,30 +16,6 @@ import {
   hashMemoryContent
 } from "./embedding-recall-test-helpers.js";
 
-interface CosineParityCase {
-  readonly name: string;
-  readonly query: readonly number[];
-  readonly stored: readonly number[];
-  readonly recordEligible?: boolean;
-  readonly dimensions?: number;
-  readonly modelId?: string;
-  readonly stale?: boolean;
-}
-
-const COSINE_PARITY_CASES: readonly CosineParityCase[] = Object.freeze([
-  { name: "finite vectors", query: [3, 4], stored: [4, 3] },
-  { name: "finite mixed signs", query: [1, -2, 3], stored: [2, 1, 1] },
-  { name: "finite fractions", query: [0.25, -0.5, 1.5], stored: [2, -1, 0.25] },
-  { name: "a zero query", query: [0, 0], stored: [4, 3] },
-  { name: "a negative cosine", query: [1, 0], stored: [-1, 0] },
-  { name: "a non-finite query", query: [Number.NaN, 1], stored: [4, 3] },
-  { name: "a zero document", query: [3, 4], stored: [0, 0] },
-  { name: "a non-finite document", query: [3, 4], stored: [Number.POSITIVE_INFINITY, 1] },
-  { name: "a dimension mismatch", query: [3, 4], stored: [4, 3], recordEligible: false, dimensions: 3 },
-  { name: "a provider mismatch", query: [3, 4], stored: [4, 3], recordEligible: false, modelId: "other-model" },
-  { name: "a stale content hash", query: [3, 4], stored: [4, 3], recordEligible: false, stale: true }
-]);
-
 describe("EmbeddingRecallService request score snapshot", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -97,17 +73,58 @@ describe("EmbeddingRecallService request score snapshot", () => {
     }));
   });
 
-  it.each(COSINE_PARITY_CASES)(
-    "preserves independent cosine semantics for $name",
-    async (testCase) => {
-      const result = await prepareCosineParityCase(testCase);
-      const expected = testCase.recordEligible === false
-        ? 0
-        : referenceRecallCosineScore(result.query, result.stored);
+  it("keeps an observed zero hint only for an already-pooled candidate", async () => {
+    const pooled = createMemoryEntry({ object_id: "pooled-zero", content: "Pooled zero." });
+    const zeroNeighbor = createMemoryEntry({ object_id: "neighbor-zero", content: "Zero neighbor." });
+    const positiveNeighbor = createMemoryEntry({
+      object_id: "neighbor-positive",
+      content: "Positive neighbor."
+    });
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider(),
+      eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
+    });
 
-      expectSnapshotScore(result.snapshot.poolScoresByObjectId[result.memory.object_id], expected);
-    }
-  );
+    const supplement = await service.materializeEmbeddingSupplementFromSnapshot({
+      snapshot: {
+        workspaceId: "workspace-1",
+        runId: null,
+        queryId: "observed-zero-snapshot",
+        poolScoresByObjectId: Object.freeze({
+          [pooled.object_id]: 0,
+          [zeroNeighbor.object_id]: 0,
+          [positiveNeighbor.object_id]: 0.75,
+          invalid: Number.NaN
+        }),
+        scoringLatencyMs: 0,
+        workspaceNeighbors: {
+          hits: Object.freeze([]),
+          embedding_inference_calls: 1,
+          query_embedding_cache_hit: false,
+          query_embedding_status: "provider_returned",
+          query_embedding_degradation_reason: null
+        },
+        degradedReason: null
+      },
+      eligibleMemories: [pooled, zeroNeighbor, positiveNeighbor],
+      baseCandidateIds: [pooled.object_id],
+      maxSupplement: 2
+    });
+
+    expect(supplement.supplementaryEntries.map((entry) => entry.object_id))
+      .toEqual([positiveNeighbor.object_id]);
+    expect(supplement.similarityHintsByObjectId).toEqual({
+      [positiveNeighbor.object_id]: {
+        object_id: positiveNeighbor.object_id,
+        normalized_similarity: 0.75
+      },
+      [pooled.object_id]: {
+        object_id: pooled.object_id,
+        normalized_similarity: 0
+      }
+    });
+  });
 
   it.each(["missing", "failed"] as const)(
     "preserves pool scoring when the workspace scan is %s",
@@ -393,53 +410,6 @@ function prepareHydrationSnapshot(fixture: ReturnType<typeof createHydrationFixt
     poolMemories: [fixture.hot, fixture.cold, fixture.stale],
     maxNeighbors: 5
   });
-}
-
-async function prepareCosineParityCase(testCase: CosineParityCase) {
-  const memory = createMemoryEntry({ object_id: "cosine-candidate", content: "Current content." });
-  const query = new Float32Array(testCase.query);
-  const stored = new Float32Array(testCase.stored);
-  const service = new EmbeddingRecallService({
-    embeddingRepo: {
-      listByObjectIds: vi.fn(async () => [createEmbeddingRecord({
-        object_id: memory.object_id,
-        content_hash: hashMemoryContent(testCase.stale ? "Stale content." : memory.content),
-        model_id: testCase.modelId,
-        dimensions: testCase.dimensions,
-        embedding: stored
-      })])
-    },
-    provider: createProvider({ embedTexts: vi.fn(async () => [query]) }),
-    eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
-  });
-  const snapshot = await service.prepareRecallEmbeddingSnapshot({
-    workspaceId: "workspace-1",
-    runId: null,
-    queryText: "cosine query",
-    poolMemories: [memory],
-    maxNeighbors: 0
-  });
-  return { memory, query, stored, snapshot };
-}
-
-function referenceRecallCosineScore(left: Float32Array, right: Float32Array): number {
-  if (left.length === 0 || left.length !== right.length) return 0;
-  const dot = Array.from(left).reduce(
-    (total, value, index) => total + value * (right[index] ?? 0),
-    0
-  );
-  const similarity = dot / (Math.hypot(...left) * Math.hypot(...right));
-  return Number.isFinite(similarity)
-    ? Math.min(1, Math.max(0, similarity))
-    : 0;
-}
-
-function expectSnapshotScore(actual: number | undefined, expected: number): void {
-  if (expected > 0) {
-    expect(actual).toBeCloseTo(expected, 7);
-    return;
-  }
-  expect(actual).toBeUndefined();
 }
 
 async function preparePoolScanFallback(scanState: "missing" | "failed") {

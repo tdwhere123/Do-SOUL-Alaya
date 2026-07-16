@@ -73,6 +73,7 @@ const baseDiagnostics = {
   graph_expansion_plane_count_per_hop: [0, 0],
   graph_expansion_plane_count_per_edge_type: { derives_from: 0, recalls: 0, supports: 0 },
   fusion_breakdown: [],
+  fine_assessment_pruned_candidates: [],
   token_economy: {
     delivered_context_tokens_estimate: 0,
     coarse_pool_size: 1,
@@ -226,7 +227,10 @@ describe("answer relevance candidate diagnostics", () => {
       embedding_workspace_provider_kind: "local_onnx",
       embedding_workspace_model_id: "Xenova/test",
       embedding_workspace_schema_version: 1,
-      candidates: [baseCandidate]
+      candidates: [{
+        ...baseCandidate,
+        score_factors: { embedding_similarity: 0.73 }
+      }]
     }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "1" }).embedding_provider_status).toBe(
       "provider_returned"
     );

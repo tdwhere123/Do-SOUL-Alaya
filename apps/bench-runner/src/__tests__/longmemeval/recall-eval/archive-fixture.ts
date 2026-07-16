@@ -35,6 +35,7 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
     miss_taxonomy_distribution: {
       candidate_absent: 0,
       materialization_drop: 0,
+      fine_assessment_drop: 0,
       budget_drop: 0,
       delivery_order_drop: 0,
       answer_set_coverage_drop: 0,
@@ -47,6 +48,7 @@ function passingQualityMetrics(): NonNullable<KpiPayload["kpi"]["quality_metrics
 function cleanSeedExtractionPath(): NonNullable<KpiPayload["kpi"]["seed_extraction_path"]> {
   return {
     path: "official_api_compile",
+    extraction_attempts: 276,
     cache_hits: 276,
     llm_calls: 0,
     offline_fallbacks: 0,

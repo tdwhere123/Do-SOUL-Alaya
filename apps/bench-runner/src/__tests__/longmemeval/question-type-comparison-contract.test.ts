@@ -117,7 +117,7 @@ describe("LongMemEval question-type manifest contracts", () => {
     expectInvalidCacheBindings(input, identity, cache);
   });
 
-  it("binds snapshot KPI unpinned checksums through the supplied manifest", () => {
+  it("keeps unpinned snapshot KPI checksums out of attributed evidence", () => {
     const { base, identity, manifest, rows } = buildManifestFixture();
     const input = {
       ...base,
@@ -127,16 +127,18 @@ describe("LongMemEval question-type manifest contracts", () => {
       controlProvenance: withCache(false, { dataset_revision: "unpinned" }, identity),
       treatmentProvenance: withCache(true, { dataset_revision: "unpinned" }, identity)
     };
-    expect(() => compareLongMemEvalQuestionTypes(input)).not.toThrow();
+    expect(() => compareLongMemEvalQuestionTypes(input)).toThrow(
+      /current valid KPI payload|bound selection evidence/u
+    );
     expect(() => compareLongMemEvalQuestionTypes({
       ...input,
       datasetSha256: "b".repeat(64)
-    })).toThrow(/dataset SHA-256 mismatch/u);
+    })).toThrow(/current valid KPI payload|bound selection evidence/u);
     expect(() => compareLongMemEvalQuestionTypes({
       ...input,
       control: kpi(rows, 100, "main"),
       treatment: kpi(rows, 100, "main")
-    })).toThrow(/KPI dataset checksum/u);
+    })).toThrow(/current valid KPI payload|bound selection evidence/u);
   });
 
 });
@@ -225,9 +227,90 @@ describe("LongMemEval question-type provenance contracts", () => {
     })).toThrow(error);
   });
 
+  it("rejects matching evidence formed under stale benchmark overrides", () => {
+    const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
+    const staleFormation = (enabled: boolean) => {
+      const value = provenance(enabled) as {
+        runtime: { paired_env: Readonly<Record<string, string>> };
+      };
+      return {
+        ...value,
+        runtime: {
+          ...value.runtime,
+          paired_env: {
+            ...value.runtime.paired_env,
+            ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
+            ALAYA_CONFLICT_DETECTION_ENABLED: "0",
+            ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics"
+          }
+        }
+      };
+    };
+    expect(() => compareLongMemEvalQuestionTypes({
+      dataset,
+      datasetSha256: DATASET_SHA,
+      control: kpi(rows),
+      treatment: kpi(rows),
+      controlProvenance: staleFormation(false),
+      treatmentProvenance: staleFormation(true)
+    })).toThrow(/product formation/u);
+  });
+
 });
 
 describe("LongMemEval question-type drift contracts", () => {
+  it("rejects drift in non-treatment recall config", () => {
+    const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
+    const treatment = provenance(true) as {
+      recall_config: Record<string, unknown>;
+    };
+    expect(() => compareLongMemEvalQuestionTypes({
+      dataset,
+      datasetSha256: DATASET_SHA,
+      control: kpi(rows),
+      treatment: kpi(rows),
+      controlProvenance: provenance(false),
+      treatmentProvenance: {
+        ...treatment,
+        recall_config: { ...treatment.recall_config, max_results: 25 }
+      }
+    })).toThrow(/recall config mismatch/u);
+  });
+
+  it.each([
+    ["recall attribution", "recall_eval_attribution"],
+    ["measurement attribution", "measurement_attribution"],
+    ["selection contract", "selection_contract"]
+  ])("rejects attributed evidence without %s", (_label, field) => {
+    const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
+    const control = { ...(kpi(rows) as Record<string, unknown>) };
+    delete control[field];
+    expect(() => compareLongMemEvalQuestionTypes({
+      dataset,
+      datasetSha256: DATASET_SHA,
+      control,
+      treatment: kpi(rows),
+      controlProvenance: provenance(false),
+      treatmentProvenance: provenance(true)
+    })).toThrow(/current valid KPI payload|eligible .* attribution|bound selection/u);
+  });
+
+  it("rejects attributed evidence without substantive cache-only seed proof", () => {
+    const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
+    const control = kpi(rows) as {
+      kpi: { seed_extraction_path?: unknown };
+    };
+    delete control.kpi.seed_extraction_path;
+    expect(() => compareLongMemEvalQuestionTypes({
+      dataset,
+      datasetSha256: DATASET_SHA,
+      control,
+      treatment: kpi(rows),
+      controlProvenance: provenance(false),
+      treatmentProvenance: provenance(true)
+    })).toThrow(/cache-only seed extraction/u);
+  });
+
   it.each(provenanceDriftCases())("rejects $name drift", ({ mutate }) => {
     const rows = dataset.map((row) => ({ id: row.question_id, hit_at_5: true }));
     expect(() => compareLongMemEvalQuestionTypes({

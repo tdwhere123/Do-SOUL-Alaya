@@ -61,6 +61,17 @@ export function buildToolRuntimeWiringCoreMocks(params: {
   }
 
   return {
+    PRODUCT_FORMATION_DEFAULTS: Object.freeze({
+      ingestReconciliationEnabled: true,
+      conflictDetectionEnabled: true,
+      gardenProviderKindWithoutSecret: "host_worker"
+    }),
+    resolveProductFormationEnabled: (value: string | undefined, defaultValue = true) => {
+      const normalized = value?.trim().toLowerCase();
+      return normalized === undefined || normalized === ""
+        ? defaultValue
+        : normalized !== "0" && normalized !== "false";
+    },
     ArbitrationService: makeClass(),
     ApprovalSink: vi.fn().mockImplementation(function ApprovalSink() {
       return { requestApproval: vi.fn(async () => "approved") };

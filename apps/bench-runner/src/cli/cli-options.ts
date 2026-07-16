@@ -34,6 +34,7 @@ export interface ParsedFlags {
   readonly pinnedMetaRoot?: string;
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
+  readonly promotionContract?: string;
   readonly concurrency?: number;
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
@@ -66,6 +67,7 @@ interface ParsedFlagsState {
   pinnedMetaRoot?: string;
   questionManifest?: string;
   extractionCacheRoot?: string;
+  promotionContract?: string;
   concurrency?: number;
   legacySnapshot: boolean;
   legacyManifestSha256?: string;
@@ -231,6 +233,8 @@ function consumeOtherPathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
+  const expansionIndex = consumePromotionContractFlag(args, index, token, state);
+  if (expansionIndex !== undefined) return expansionIndex;
   const legacyIdentityIndex = consumeLegacyIdentityFlags(args, index, token, state);
   if (legacyIdentityIndex !== undefined) return legacyIdentityIndex;
   if (token === "--data-dir") {
@@ -264,6 +268,21 @@ function consumeOtherPathFlags(
     return nextIndex(index, token);
   }
   return undefined;
+}
+
+function consumePromotionContractFlag(
+  args: ReadonlyArray<string>,
+  index: number,
+  token: string,
+  state: ParsedFlagsState
+): number | undefined {
+  if (!matchFlagToken(token, "--promotion-contract")) return undefined;
+  const value = readFlagValue(args, index, token, "--promotion-contract");
+  if (value === undefined || value.length === 0 || value.startsWith("--")) {
+    throw new Error("--promotion-contract requires a path");
+  }
+  state.promotionContract = value;
+  return nextIndex(index, token);
 }
 
 function consumeLegacyIdentityFlags(
@@ -456,6 +475,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     pinnedMetaRoot: state.pinnedMetaRoot,
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
+    promotionContract: state.promotionContract,
     concurrency: state.concurrency,
     legacySnapshot: state.legacySnapshot,
     legacyManifestSha256: state.legacyManifestSha256,

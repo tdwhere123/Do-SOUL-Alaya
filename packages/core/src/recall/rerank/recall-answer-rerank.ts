@@ -1,16 +1,16 @@
 import type { FineAssessmentCandidate } from "../delivery/fine-assessment-selection.js";
+import { RECALL_FUSION_FAMILY_IDS } from "../delivery/fusion-delivery-families.js";
 import type {
   RecallAnswerRerankDiagnostics,
   RecallServiceAnswerRerankPort,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 
-const ANSWER_RERANK_BATCH_LIMIT = 50;
-
 export async function collectAnswerRelevanceScores(params: Readonly<{
   readonly service: RecallServiceAnswerRerankPort | undefined;
   readonly queryText: string | null;
   readonly candidates: readonly FineAssessmentCandidate[];
+  readonly maxEntries: number;
   readonly warn: RecallServiceWarnPort;
 }>): Promise<Readonly<{
   readonly scores: ReadonlyMap<string, number>;
@@ -18,9 +18,7 @@ export async function collectAnswerRelevanceScores(params: Readonly<{
 }>> {
   if (params.service === undefined) return answerRerankResult("not_requested", 0, 0, null);
   if (params.queryText === null) return answerRerankResult("not_applicable", 0, 0, null);
-  const candidates = [...params.candidates]
-    .sort((left, right) => left.fusion.fused_rank - right.fusion.fused_rank)
-    .slice(0, ANSWER_RERANK_BATCH_LIMIT);
+  const candidates = selectAnswerRerankHead(params.candidates, params.maxEntries);
   if (candidates.length === 0) return answerRerankResult("not_applicable", 0, 0, null);
   try {
     const scores = await params.service.score(
@@ -54,6 +52,16 @@ export async function collectAnswerRelevanceScores(params: Readonly<{
     });
     return answerRerankResult("failed", candidates.length, 0, "service_error");
   }
+}
+
+function selectAnswerRerankHead(
+  candidates: readonly FineAssessmentCandidate[],
+  maxEntries: number
+): readonly FineAssessmentCandidate[] {
+  const limit = Math.max(0, maxEntries) * RECALL_FUSION_FAMILY_IDS.length;
+  return [...candidates]
+    .sort((left, right) => left.fusion.fused_rank - right.fusion.fused_rank)
+    .slice(0, limit);
 }
 
 function validateScores(

@@ -6,6 +6,7 @@ import type {
 } from "./local-onnx.js";
 import { embeddingInputIdentityForSchemaVersion } from "../../harness/strict-treatment-config.js";
 import { assertBiEncoderTreatmentActive } from "../../harness/embedding-treatment-activation.js";
+import { RecallTokenEconomySchema } from "../../harness/recall-diagnostics-schema.js";
 
 export const RECALL_EVAL_DIAGNOSTICS_FILENAME =
   "recall-eval-diagnostics.json";
@@ -63,8 +64,26 @@ const ExactCountsSchema = z.object({
   not_ready_count: z.number().int().nonnegative()
 }).strict();
 
-export const RecallEvalDiagnosticsEvidenceSchema = z.object({
-  schema_version: z.literal(1),
+export const RecallEvalDiagnosticsQuestionSchema = z.object({
+  question_id: z.string().min(1),
+  latency_ms: z.number().nonnegative(),
+  first_tier: z.enum(["hot", "warm", "cold"]),
+  degradation_reason: z.string().min(1).nullable(),
+  recall_token_economy: RecallTokenEconomySchema.nullable(),
+  diagnostics: LongMemEvalQuestionDiagnosticSchema,
+  document_embedding_warmup: DocumentWarmupSchema.nullable(),
+  query_embedding_warmup: QueryWarmupSchema.nullable()
+}).strict().readonly();
+
+const LegacyRecallEvalDiagnosticsQuestionSchema = z.object({
+  question_id: z.string().min(1),
+  diagnostics: LongMemEvalQuestionDiagnosticSchema,
+  document_embedding_warmup: DocumentWarmupSchema.nullable(),
+  query_embedding_warmup: QueryWarmupSchema.nullable()
+}).strict().readonly();
+
+export const RecallEvalDiagnosticsEvidenceV2Schema = z.object({
+  schema_version: z.literal(2),
   kind: z.literal("recall_eval_diagnostics"),
   runtime: z.object({
     embedding_supplement: BiIdentitySchema,
@@ -95,20 +114,33 @@ export const RecallEvalDiagnosticsEvidenceSchema = z.object({
       schema_version: z.number().int().positive().nullable(), consistent: z.literal(true)
     }).strict()
   }).strict(),
-  questions: z.array(z.object({
-    question_id: z.string().min(1),
-    diagnostics: LongMemEvalQuestionDiagnosticSchema,
-    document_embedding_warmup: DocumentWarmupSchema.nullable(),
-    query_embedding_warmup: QueryWarmupSchema.nullable()
-  }).strict()).readonly()
+  questions: z.array(RecallEvalDiagnosticsQuestionSchema).readonly()
 }).strict();
+
+export const RecallEvalDiagnosticsEvidenceV1Schema =
+  RecallEvalDiagnosticsEvidenceV2Schema.extend({
+    schema_version: z.literal(1),
+    questions: z.array(LegacyRecallEvalDiagnosticsQuestionSchema).readonly()
+  }).strict();
+
+export const RecallEvalDiagnosticsEvidenceSchema = z.discriminatedUnion(
+  "schema_version",
+  [RecallEvalDiagnosticsEvidenceV1Schema, RecallEvalDiagnosticsEvidenceV2Schema]
+);
 
 export type RecallEvalDiagnosticsEvidence = z.infer<
   typeof RecallEvalDiagnosticsEvidenceSchema
 >;
+export type RecallEvalDiagnosticsEvidenceV2 = z.infer<
+  typeof RecallEvalDiagnosticsEvidenceV2Schema
+>;
 
 type EvidenceQuestionInput = Readonly<{
   questionId: string;
+  latencyMs: number;
+  firstTier: "hot" | "warm" | "cold";
+  degradationReason: string | null;
+  recallTokenEconomy: z.infer<typeof RecallTokenEconomySchema> | null;
   diagnostics: z.infer<typeof LongMemEvalQuestionDiagnosticSchema>;
   embeddingWarmup: z.infer<typeof DocumentWarmupSchema> | null;
   queryEmbeddingWarmup: z.infer<typeof QueryWarmupSchema> | null;
@@ -118,12 +150,12 @@ export function buildRecallEvalDiagnosticsEvidence(input: {
   readonly questions: readonly EvidenceQuestionInput[];
   readonly embeddingSupplement: EmbeddingSupplementRuntimeProvenance;
   readonly answerRerank: LocalCrossEncoderRuntimeProvenance;
-}): RecallEvalDiagnosticsEvidence {
+}): RecallEvalDiagnosticsEvidenceV2 {
   const questions = input.questions.map(normalizeQuestion);
   assertEmbeddingIdentity(questions, input.embeddingSupplement);
   assertCrossIdentity(questions, input.answerRerank);
-  return RecallEvalDiagnosticsEvidenceSchema.parse({
-    schema_version: 1,
+  return RecallEvalDiagnosticsEvidenceV2Schema.parse({
+    schema_version: 2,
     kind: "recall_eval_diagnostics",
     runtime: {
       embedding_supplement: input.embeddingSupplement,
@@ -147,6 +179,12 @@ function normalizeQuestion(question: EvidenceQuestionInput) {
   }
   return {
     question_id: question.questionId,
+    latency_ms: question.latencyMs,
+    first_tier: question.firstTier,
+    degradation_reason: question.degradationReason,
+    recall_token_economy: RecallTokenEconomySchema.nullable().parse(
+      question.recallTokenEconomy
+    ),
     diagnostics,
     document_embedding_warmup: DocumentWarmupSchema.nullable().parse(question.embeddingWarmup),
     query_embedding_warmup: QueryWarmupSchema.nullable().parse(question.queryEmbeddingWarmup)
@@ -187,10 +225,9 @@ function assertDisabledEmbeddingEvidence(
     diagnostics.embedding_workspace_provider_kind !== undefined ||
     diagnostics.embedding_workspace_model_id !== undefined ||
     diagnostics.embedding_workspace_schema_version !== undefined;
-  const scored = diagnostics.candidates.some((candidate) => {
-    const score = candidate.score_factors.embedding_similarity;
-    return typeof score === "number" && score > 0;
-  });
+  const scored = diagnostics.candidates.some(
+    (candidate) => "embedding_similarity" in candidate.score_factors
+  );
   if (summaries.some((summary) => summary !== null) || workspaceWork || scored ||
     diagnostics.provider_state !== "provider_not_requested") {
     throw new Error("embedding identity drift: disabled run produced embedding work");

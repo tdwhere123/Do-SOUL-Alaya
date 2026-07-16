@@ -1,8 +1,12 @@
-import type { MemoryEntry, RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
+import type { RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
 import { recallEnvRaw } from "../../config/recall-env-access.js";
-import type { RecallFusionStream, RecallSupplementaryData } from "../runtime/recall-service-types.js";
+import type {
+  CoarseRecallCandidate,
+  RecallFusionStream,
+  RecallSupplementaryData
+} from "../runtime/recall-service-types.js";
 import { resolveDefaultFusionWeightForIntent } from "../scoring/temporal-fusion-scoring.js";
 
 const EMBEDDING_PATH_MODULATION_GAIN = 0.25;
@@ -13,10 +17,11 @@ export type ResolvedRecallFusionWeights = Readonly<{
   readonly weights: Readonly<Record<RecallFusionStream, number>>;
 }>;
 
-export type FusionContributionCandidate = Readonly<{
-  readonly entry: Readonly<MemoryEntry>;
+export type FusionContributionCandidate = Readonly<Pick<
+  CoarseRecallCandidate,
+  "entry" | "originPlane" | "objectKind" | "structuralScore"
+> & {
   readonly effectiveFactors: Readonly<RecallScoreFactors>;
-  readonly structuralScore?: number | null;
 }>;
 
 type FusionContributionParams = Readonly<{

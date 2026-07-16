@@ -5,8 +5,7 @@ import type { BenchRecallWeightOverrides } from
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import {
   createCompileSeedRunner,
-  EXTRACTION_CACHE_ROOT,
-  resolveBenchAllowLiveExtraction
+  EXTRACTION_CACHE_ROOT
 } from "../compile-seed.js";
 import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
 import { collectDistinctTurnContents } from "../extraction-fill.js";
@@ -96,7 +95,11 @@ export async function prepareLongMemEvalRun(
     policyShape: opts.policyShape ?? "stress",
     simulateReport: opts.simulateReport ?? "none",
     recallOptions: recallOptionsForPolicyShape(opts.policyShape ?? "stress"),
-    seedRunner: createLongMemEvalSeedRunner(window, extractionCacheRoot),
+    seedRunner: createLongMemEvalSeedRunner(
+      window,
+      extractionCacheRoot,
+      Math.max(0, opts.offset ?? 0)
+    ),
     captureSnapshot: opts.snapshotOut !== undefined,
     extractionCacheRoot,
     recallWeightOverrides,
@@ -110,16 +113,12 @@ function deriveRunEvidenceAuthority(
   opts: LongMemEvalRunOptions,
   window: readonly LongMemEvalQuestion[]
 ): LongMemEvalReleaseEvidenceAuthority | null {
-  if (opts.questionManifest === undefined) {
-    return deriveLongMemEvalReleaseEvidenceAuthority(dataset.promotionAuthority, {
-      kind: "execution_window",
-      offset: Math.max(0, opts.offset ?? 0),
-      limit: window.length
-    });
-  }
+  const offset = Math.max(0, opts.offset ?? 0);
+  if (opts.questionManifest !== undefined || offset !== 0) return null;
   return deriveLongMemEvalReleaseEvidenceAuthority(dataset.promotionAuthority, {
-    kind: "dataset_order_subset",
-    questionIds: window.map((question) => question.question_id)
+    kind: "execution_window",
+    offset,
+    limit: window.length
   });
 }
 
@@ -151,13 +150,15 @@ function selectQuestionWindow(
 
 function createLongMemEvalSeedRunner(
   window: readonly LongMemEvalQuestion[],
-  extractionCacheRoot: string
+  extractionCacheRoot: string,
+  offset: number
 ) {
   const requiredTurnContents = collectDistinctTurnContents(window);
   return createCompileSeedRunner({
     requiredTurnContents,
+    requiredQuestionWindow: { offset, limit: window.length },
     cacheRoot: extractionCacheRoot,
-    ...(resolveBenchAllowLiveExtraction() ? { allowLiveExtraction: true } : {})
+    allowLiveExtraction: false
   });
 }
 

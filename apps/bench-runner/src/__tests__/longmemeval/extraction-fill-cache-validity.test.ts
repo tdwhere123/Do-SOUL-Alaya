@@ -7,7 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { runExtractionFill } from "../../longmemeval/extraction-fill.js";
 import { readExtractionCacheManifest } from "../../longmemeval/extraction-cache-manifest.js";
-import { cacheFilePath, computeCacheKey } from "../../longmemeval/compile-seed-cache.js";
+import {
+  cacheFilePath,
+  computeCacheKey,
+  inspectCachedExtraction
+} from "../../longmemeval/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../longmemeval/dataset.js";
 
 const VARIANT = "longmemeval_oracle";
@@ -36,10 +40,15 @@ afterEach(async () => {
 describe("extraction-fill cache validity", () => {
   it("rejects a non-empty signals array with no valid entries", async () => {
     await writeDataset();
-    const result = await fill(() => ({ rawJson: '{"signals":[42]}' }));
-    expect(result.failures).toBe(2);
-    expect(result.coverage).toBe(0);
-    expect(result.manifest.cached_turns).toBe(0);
+    await expect(fill(() => ({ rawJson: '{"signals":[42]}' }))).rejects.toMatchObject({
+      name: "ExtractionFillTaskError",
+      retryClassification: "unknown"
+    });
+    expect(readExtractionCacheManifest(cacheRoot)).toMatchObject({
+      requested_turns: 2,
+      cached_turns: 0,
+      coverage: 0
+    });
   });
 
   it("keeps valid siblings when another signal entry is malformed", async () => {
@@ -54,7 +63,20 @@ describe("extraction-fill cache validity", () => {
       }]
     });
     const result = await fill(() => ({ rawJson }));
-    expect(result).toMatchObject({ failures: 0, coverage: 1, newlyExtracted: 2 });
+    expect(result).toMatchObject({ coverage: 1, newlyExtracted: 2 });
+    const shard = JSON.parse(readFileSync(firstShardPath(), "utf8")) as {
+      readonly cache_key: string;
+    };
+    expect(inspectCachedExtraction(
+      cacheRoot,
+      shard.cache_key,
+      "fixture-model",
+      "provider-default-v1"
+    )).toMatchObject({
+      status: "hit",
+      rawSignalCount: 2,
+      parsedDraftCount: 1
+    });
   });
 
   it("replaces a semantically invalid existing shard during live fill", async () => {
@@ -67,7 +89,7 @@ describe("extraction-fill cache validity", () => {
 
     const result = await fill(delegate);
 
-    expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1, failures: 0 });
+    expect(result).toMatchObject({ cacheHits: 1, newlyExtracted: 1 });
     expect(delegate).toHaveBeenCalledOnce();
     expect(JSON.parse(readFileSync(shardPath, "utf8"))).toMatchObject({
       raw_json: '{"signals":[]}'
@@ -117,7 +139,7 @@ describe("extraction-fill cache validity", () => {
     await writeDataset();
     let call = 0;
     const logs: string[] = [];
-    const result = await runExtractionFill({
+    const run = runExtractionFill({
       variant: VARIANT,
       cacheRoot,
       dataDir,
@@ -149,12 +171,14 @@ describe("extraction-fill cache validity", () => {
       log: (message) => logs.push(message)
     });
 
-    expect(result).toMatchObject({
-      retrySuccesses: 1,
-      rateLimitRetries: 3,
-      terminalRetryClassifications: { failure_max_retries: 1 }
+    await expect(run).rejects.toMatchObject({
+      name: "ExtractionFillTaskError",
+      retryClassification: "failure_max_retries"
     });
-    expect(logs.at(-1)).toMatch(/retry_successes=1.*rate_limit_retries=3.*terminal_max_retries=1/u);
+    expect(logs.at(-1)).toMatch(
+      /retry_classification=failure_max_retries.*retry_successes=1.*rate_limit_retries=3/u
+    );
+    expect(logs.some((message) => message.includes("[extraction-fill] done"))).toBe(false);
   });
 });
 

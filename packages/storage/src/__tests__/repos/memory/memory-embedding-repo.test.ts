@@ -47,7 +47,8 @@ describe("Memory embedding storage repo", () => {
       "dimensions",
       "embedding_blob",
       "created_at",
-      "updated_at"
+      "updated_at",
+      "vector_valid"
     ]);
 
     const persisted = await repo.upsert(
@@ -448,8 +449,8 @@ describe("Memory embedding storage repo", () => {
         `
         INSERT INTO memory_embeddings (
           object_id, workspace_id, content_hash, provider_kind, model_id,
-          schema_version, dimensions, embedding_blob, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          schema_version, dimensions, embedding_blob, vector_valid, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
       `
       )
       .run(
@@ -469,4 +470,5 @@ describe("Memory embedding storage repo", () => {
       code: "VALIDATION_FAILED"
     });
   });
+
 });

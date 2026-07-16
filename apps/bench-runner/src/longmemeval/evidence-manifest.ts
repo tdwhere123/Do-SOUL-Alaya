@@ -17,6 +17,10 @@ export type LongMemEvalEvidenceArtifactRole =
   | "comparison"
   | "run_provenance"
   | "shard_run_provenance"
+  | "extraction_authority"
+  | "fanout_authority"
+  | "extraction_authority_ref"
+  | "shard_extraction_authority_ref"
   | "rank_identity"
   | "recall_eval_diagnostics"
   | "stage_ledger"
@@ -107,6 +111,7 @@ function evidenceIsComplete(
   profile: "full_run" | "recall_eval" | undefined
 ): boolean {
   if (!run.candidate_pool_complete || run.provenance_complete !== true) return false;
+  if (profile === "recall_eval" && run.selection_contract === undefined) return false;
   const roles = new Set(artifacts.map((artifact) => artifact.role));
   const required = profile === "recall_eval"
     ? REQUIRED_RECALL_EVAL_EVIDENCE_ROLES

@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { z } from "zod";
 import {
   KpiPayloadSchema,
@@ -19,6 +17,8 @@ import {
   RunProvenanceBindingSchema
 } from "./longmemeval-provenance-binding.js";
 import { canonicalJson } from "./canonical-json.js";
+import { createLongMemEvalArtifactReader } from
+  "./longmemeval-artifact-reader.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const ArtifactSchema = z.object({
@@ -79,7 +79,7 @@ export interface VerifiedLongMemEvalEvidenceContext {
 }
 
 const verifiedContexts = new WeakMap<object, string>();
-const REQUIRED_ROLES = [
+const REQUIRED_FULL_RUN_ROLES = [
   "kpi",
   "report",
   "diagnostics",
@@ -88,6 +88,14 @@ const REQUIRED_ROLES = [
   "comparison",
   "run_provenance"
 ] as const;
+const REQUIRED_RECALL_EVAL_ROLES = [
+  "kpi",
+  "report",
+  "rank_identity",
+  "run_provenance",
+  "recall_eval_diagnostics"
+] as const;
+const OPTIONAL_RECALL_EVAL_ROLES = ["findings"] as const;
 
 declare const releaseEvidenceAuthorityBrand: unique symbol;
 
@@ -127,16 +135,23 @@ export async function loadLongMemEvalReleaseEvidenceFromAuthority(input: {
   readonly validateFullDiagnostics: LongMemEvalFullDiagnosticsValidator;
 }): Promise<VerifiedLongMemEvalEvidenceContext> {
   const payload = KpiPayloadSchema.parse(input.payload);
-  const manifestRaw = JSON.parse(await readFile(
-    path.join(input.entryRoot, LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME),
-    "utf8"
-  )) as unknown;
+  const reader = createLongMemEvalArtifactReader<EvidenceReadRole>({
+    root: input.entryRoot,
+    maxBytesByRole: EVIDENCE_ARTIFACT_LIMITS
+  });
+  const manifestRaw = await reader.readJson(
+    "manifest",
+    LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME
+  );
   const manifest = ManifestSchema.parse(manifestRaw);
-  const artifacts = await Promise.all(manifest.artifacts.map(async (artifact) => ({
-    role: artifact.role,
-    path: artifact.path,
-    contents: await readFile(resolveContainedPath(input.entryRoot, artifact.path))
-  })));
+  const artifacts = await Promise.all(manifest.artifacts.map(async (artifact) => {
+    const role = evidenceReadRole(artifact.role);
+    return {
+      role: artifact.role,
+      path: artifact.path,
+      contents: await reader.readBytes(role, artifact.path)
+    };
+  }));
   const actualSelection = releaseEvidenceAuthorities.get(input.authority);
   if (actualSelection === undefined) {
     throw new Error("LongMemEval release evidence authority is not verified");
@@ -230,7 +245,7 @@ function assertEvidenceArtifactIntegrity(
   artifacts: readonly LongMemEvalEvidenceArtifact[],
   rawManifest: unknown
 ): void {
-  const supplied = uniqueArtifacts(artifacts);
+  const supplied = uniqueArtifacts(artifacts, manifest.profile);
   for (const expected of manifest.artifacts) {
     const actual = supplied.get(expected.path);
     if (actual === undefined) throw new Error(`missing artifact: ${expected.path}`);
@@ -254,16 +269,35 @@ function assertEvidenceArtifactIntegrity(
 }
 
 function uniqueArtifacts(
-  artifacts: readonly LongMemEvalEvidenceArtifact[]
+  artifacts: readonly LongMemEvalEvidenceArtifact[],
+  profile: EvidenceManifest["profile"]
 ): ReadonlyMap<string, LongMemEvalEvidenceArtifact> {
   const supplied = new Map<string, LongMemEvalEvidenceArtifact>();
   for (const artifact of artifacts) {
     if (supplied.has(artifact.path)) throw new Error(`duplicate artifact: ${artifact.path}`);
     supplied.set(artifact.path, artifact);
   }
-  for (const role of REQUIRED_ROLES) {
+  const requiredRoles = profile === "recall_eval"
+    ? REQUIRED_RECALL_EVAL_ROLES
+    : REQUIRED_FULL_RUN_ROLES;
+  for (const role of requiredRoles) {
     if (artifacts.filter((artifact) => artifact.role === role).length !== 1) {
       throw new Error(`complete evidence requires exactly one ${role} artifact`);
+    }
+  }
+  if (profile === "recall_eval") {
+    const allowedRoles = new Set<string>([
+      ...REQUIRED_RECALL_EVAL_ROLES,
+      ...OPTIONAL_RECALL_EVAL_ROLES
+    ]);
+    const unexpected = artifacts.find((artifact) => !allowedRoles.has(artifact.role));
+    if (unexpected !== undefined) {
+      throw new Error(`recall_eval evidence rejects unexpected ${unexpected.role} artifact`);
+    }
+    for (const role of OPTIONAL_RECALL_EVAL_ROLES) {
+      if (artifacts.filter((artifact) => artifact.role === role).length > 1) {
+        throw new Error(`recall_eval evidence allows at most one ${role} artifact`);
+      }
     }
   }
   return supplied;
@@ -392,20 +426,38 @@ function parseRoleJson(
   return JSON.parse(text) as unknown;
 }
 
-function resolveContainedPath(root: string, reference: string): string {
-  if (reference.length === 0 || path.isAbsolute(reference)) {
-    throw new Error(`unsafe evidence artifact path: ${reference}`);
-  }
-  const resolved = path.resolve(root, reference);
-  const relative = path.relative(root, resolved);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`)) {
-    throw new Error(`unsafe evidence artifact path: ${reference}`);
-  }
-  return resolved;
-}
-
 function payloadIdentity(payload: KpiPayload): string {
   return sha256(canonicalJson(KpiPayloadSchema.parse(payload)));
+}
+
+const MIB = 1024 * 1024;
+const EVIDENCE_ARTIFACT_LIMITS = {
+  manifest: 4 * MIB,
+  kpi: 16 * MIB,
+  report: 16 * MIB,
+  findings: 16 * MIB,
+  diagnostics: 64 * MIB,
+  full_diagnostics: 256 * MIB,
+  cohort_ledger: 64 * MIB,
+  comparison: 64 * MIB,
+  run_provenance: 4 * MIB,
+  shard_run_provenance: 4 * MIB,
+  extraction_authority: 64 * MIB,
+  fanout_authority: MIB,
+  extraction_authority_ref: MIB,
+  shard_extraction_authority_ref: MIB,
+  rank_identity: 16 * MIB,
+  recall_eval_diagnostics: 64 * MIB,
+  stage_ledger: 64 * MIB,
+  oracle_derivation: 16 * MIB
+} as const;
+type EvidenceReadRole = keyof typeof EVIDENCE_ARTIFACT_LIMITS;
+
+function evidenceReadRole(role: string): EvidenceReadRole {
+  if (Object.prototype.hasOwnProperty.call(EVIDENCE_ARTIFACT_LIMITS, role)) {
+    return role as EvidenceReadRole;
+  }
+  throw new Error(`LongMemEval evidence rejects unsupported ${role} artifact`);
 }
 
 function artifactIdentity(artifact: LongMemEvalEvidenceArtifact) {

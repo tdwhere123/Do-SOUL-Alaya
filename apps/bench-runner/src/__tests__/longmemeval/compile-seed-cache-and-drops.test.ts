@@ -34,6 +34,8 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "./extraction-cache-test-fixture.js";
+import { computeExtractionRawJsonSha256 } from
+  "../../longmemeval/compile-seed-cache.js";
 
 describe("extraction cache key — load-bearing inputs only", () => {
   let cacheRoot: string;
@@ -79,7 +81,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
       lastTurnDraftCount: 0,
-      lastExtractionSource: null
+      lastExtractionSource: null,
+      lastRawJsonSha256: null
     };
     const firstRun = createCachingSignalExtractor({
       delegate,
@@ -97,6 +100,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
     });
     expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(firstStats.llmCalls).toBe(1);
+    expect(firstStats.lastRawJsonSha256)
+      .toBe(computeExtractionRawJsonSha256('{"signals":[]}'));
 
     // Same turn, a different wall-clock run_id — must be served from the
     // fixture with zero LLM calls. A run_id in the cache key would make
@@ -115,7 +120,8 @@ describe("extraction cache key — load-bearing inputs only", () => {
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
       lastTurnDraftCount: 0,
-      lastExtractionSource: null
+      lastExtractionSource: null,
+      lastRawJsonSha256: null
     };
     const secondRun = createCachingSignalExtractor({
       delegate,
@@ -135,6 +141,7 @@ describe("extraction cache key — load-bearing inputs only", () => {
     expect(delegate.extract).toHaveBeenCalledTimes(1);
     expect(secondStats.cacheHits).toBe(1);
     expect(secondStats.llmCalls).toBe(0);
+    expect(secondStats.lastRawJsonSha256).toBe(firstStats.lastRawJsonSha256);
     expect(cached.rawJson).toBe('{"signals":[]}');
   });
 
@@ -242,6 +249,7 @@ describe("bench evidence capsule — production-faithful span", () => {
   });
 
   it("carries the full turn only on the no-credentials fallback", async () => {
+    await rm(join(cacheRoot, "manifest.json"), { force: true });
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);

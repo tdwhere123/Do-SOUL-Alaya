@@ -2,6 +2,7 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
   clamp01,
+  isSynthesisChildCandidate,
   normalizeActivationScore,
   normalizeGraphSupport
 } from "../runtime/recall-service-helpers.js";
@@ -90,7 +91,7 @@ function scoreWorkspaceLocalFusionStream(
     case "trigram_fts":
       return clamp01(supplementaryData.trigramFtsRanks[objectId] ?? 0);
     case "synthesis_fts":
-      return candidate.sourceChannels?.includes("synthesis_child") === true
+      return isSynthesisChildCandidate(candidate)
         ? clamp01(supplementaryData.synthesisFtsRanks[objectId] ?? 0)
         : 0;
     case "evidence_fts":

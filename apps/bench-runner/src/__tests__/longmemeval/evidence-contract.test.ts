@@ -251,6 +251,7 @@ describe("LongMemEval evidence contract", () => {
           query_sought_facets: ["occupation_work"],
           candidates: [{
             object_id: "gold-a",
+            object_kind: "memory_entry",
             candidate_key: "workspace_local:memory_entry:gold-a",
             origin_plane: "workspace_local",
             created_at: "2026-07-11T00:00:00.000Z",
@@ -277,6 +278,7 @@ describe("LongMemEval evidence contract", () => {
     });
     expect(row.query_sought_facets).toEqual(["occupation_work"]);
     expect(row.candidates[0]).toMatchObject({
+      origin_plane: "workspace_local",
       selection_order: 4,
       fused_rank: 7,
       rank_after_feature_rerank: 5,
@@ -317,6 +319,9 @@ describe("LongMemEval evidence contract", () => {
     } satisfies LongMemEvalDiagnosticsSidecar);
     expect(stripped.questions[0]).toMatchObject({
       candidate_pool_complete: false,
+      candidate_pool_count: null,
+      fine_pruned_count: null,
+      fine_assessment_pruned_candidates: [],
       query_probes: null,
       query_sought_facets: null,
       candidates: [],
@@ -355,6 +360,7 @@ describe("LongMemEval evidence contract", () => {
         object_id: "synthesis-a",
         object_kind: "synthesis_capsule",
         candidate_key: "workspace_local:synthesis_capsule:synthesis-a",
+        origin_plane: "workspace_local",
         answer_features: answerFeatures,
         path_suppression_score: 0
       }] } }
@@ -365,7 +371,7 @@ describe("LongMemEval evidence contract", () => {
     });
   });
 
-  it("parses old rows with nullable compatibility defaults", () => {
+  it("keeps nullable defaults while requiring candidate identity primitives", () => {
     const current = diagnostic({ id: "q-old", recallResult: { diagnostics: { candidates: [] } } });
     const { query_sought_facets: _queryFacets, ...oldQuestion } = current as typeof current & {
       readonly query_sought_facets?: unknown;
@@ -373,19 +379,29 @@ describe("LongMemEval evidence contract", () => {
     const parsed = LongMemEvalQuestionDiagnosticSchema.parse(oldQuestion);
     expect(parsed.query_sought_facets).toBeNull();
 
+    const legacyCandidate = {
+      object_id: "legacy-a",
+      candidate_key: "workspace_local:memory_entry:legacy-a",
+      final_rank: null,
+      pre_budget_rank: null,
+      selection_order: null,
+      fused_rank: null,
+      fused_score: null,
+      per_stream_rank: null,
+      fused_rank_contribution_per_stream: null,
+      score_factors: {}
+    };
+    expect(() => LongMemEvalQuestionDiagnosticSchema.parse({
+      ...current,
+      candidates: [legacyCandidate]
+    })).toThrow();
+
     const candidate = LongMemEvalQuestionDiagnosticSchema.parse({
       ...current,
       candidates: [{
-        object_id: "legacy-a",
-        candidate_key: "legacy-a",
-        final_rank: null,
-        pre_budget_rank: null,
-        selection_order: null,
-        fused_rank: null,
-        fused_score: null,
-        per_stream_rank: null,
-        fused_rank_contribution_per_stream: null,
-        score_factors: {}
+        ...legacyCandidate,
+        object_kind: "memory_entry",
+        origin_plane: "workspace_local"
       }]
     }).candidates[0];
     expect(candidate).toMatchObject({

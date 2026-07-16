@@ -5,6 +5,8 @@ import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME
 } from "../../longmemeval/archive-evidence.js";
+import type { LongMemEvalDiagnosticsSidecar } from
+  "../../longmemeval/diagnostics.js";
 import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
 
 export {
@@ -119,6 +121,7 @@ export function withEligibleMeasurementContract(payload: KpiPayload): KpiPayload
         miss_taxonomy_distribution: {
           candidate_absent: 0,
           materialization_drop: 0,
+          fine_assessment_drop: 0,
           budget_drop: 0,
           delivery_order_drop: evaluated - hitCount,
           answer_set_coverage_drop: 0,
@@ -183,6 +186,7 @@ export function makeQualityMetrics(
     miss_taxonomy_distribution: {
       candidate_absent: candidateAbsent,
       materialization_drop: 0,
+      fine_assessment_drop: 0,
       budget_drop: budgetDropped,
       delivery_order_drop: 0,
       answer_set_coverage_drop: 0,
@@ -198,9 +202,13 @@ export function makeQualityMetrics(
 export function makeSeedExtractionPath(
   input: Partial<NonNullable<KpiPayload["kpi"]["seed_extraction_path"]>> = {}
 ): NonNullable<KpiPayload["kpi"]["seed_extraction_path"]> {
+  const cacheHits = input.cache_hits ?? (
+    input.path === "no_credentials_fallback" ? 0 : 1
+  );
   return {
     path: "official_api_compile",
-    cache_hits: 0,
+    extraction_attempts: input.extraction_attempts ?? cacheHits,
+    cache_hits: cacheHits,
     llm_calls: 0,
     offline_fallbacks: 0,
     live_extraction_failures: 0,
@@ -214,9 +222,9 @@ export function makeSeedExtractionPath(
   };
 }
 
-export function makeShardDiagnostics(
-  overrides: Record<string, unknown> = {}
-): Record<string, unknown> {
+export function makeValidShardDiagnostics(
+  overrides: Partial<LongMemEvalDiagnosticsSidecar> = {}
+): LongMemEvalDiagnosticsSidecar {
   return {
     schema_version: 1,
     bench_name: "public",
@@ -274,6 +282,7 @@ export function makeShardDiagnostics(
       miss_taxonomy_distribution: {
         candidate_absent: 0,
         materialization_drop: 0,
+        fine_assessment_drop: 0,
         budget_drop: 0,
         delivery_order_drop: 0,
         answer_set_coverage_drop: 0,
@@ -298,6 +307,12 @@ export function makeShardDiagnostics(
     questions: [],
     ...overrides
   };
+}
+
+export function makeShardDiagnostics(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return { ...makeValidShardDiagnostics(), ...overrides };
 }
 
 type ShardPointerKind = "run" | "passing" | "baseline";

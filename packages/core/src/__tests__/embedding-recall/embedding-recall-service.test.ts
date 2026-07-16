@@ -89,6 +89,65 @@ it("queries the local vector table, emits telemetry, and returns additive candid
     expect(healthJournal.record).not.toHaveBeenCalled();
   });
 
+it("keeps valid zero evidence for the base pool without admitting zero or invalid supplements", async () => {
+    const memories = [
+      createMemoryEntry({ object_id: "base-zero", content: "Base zero." }),
+      createMemoryEntry({ object_id: "supplement-zero", content: "Supplement zero." }),
+      createMemoryEntry({ object_id: "supplement-positive", content: "Supplement positive." }),
+      createMemoryEntry({ object_id: "supplement-invalid", content: "Supplement invalid." }),
+      createMemoryEntry({ object_id: "supplement-degenerate", content: "Supplement degenerate." })
+    ];
+    const vectors = [
+      ["base-zero", "Base zero.", new Float32Array([0, 1])],
+      ["supplement-zero", "Supplement zero.", new Float32Array([0, 1])],
+      ["supplement-positive", "Supplement positive.", new Float32Array([1, 0])],
+      ["supplement-invalid", "Supplement invalid.", new Float32Array([Number.NaN, 1])],
+      ["supplement-degenerate", "Supplement degenerate.", new Float32Array([0, 0])]
+    ] as const;
+    const append = vi.fn(async (
+      entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+    ) => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => vectors.map(([objectId, content, embedding]) =>
+          createEmbeddingRecord({
+            object_id: objectId,
+            content_hash: hashMemoryContent(content),
+            embedding
+          })
+        ))
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async () => [new Float32Array([1, 0])])
+      }),
+      eventLogRepo: { append, queryByEntity: vi.fn(async () => []) }
+    });
+
+    const result = await service.querySupplement({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "zero evidence",
+      eligibleMemories: memories,
+      baseCandidateIds: ["base-zero"],
+      maxSupplement: 5
+    });
+
+    expect(result.supplementaryEntries.map((entry) => entry.object_id))
+      .toEqual(["supplement-positive"]);
+    expect(result.similarityHintsByObjectId).toEqual({
+      "base-zero": { object_id: "base-zero", normalized_similarity: 0 },
+      "supplement-positive": { object_id: "supplement-positive", normalized_similarity: 1 }
+    });
+    expect(append.mock.calls[0]?.[0].payload_json).toEqual(expect.objectContaining({
+      returned_candidate_count: 2
+    }));
+  });
+
 it("uses a prepared query embedding when it is ready by merge time", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,

@@ -61,6 +61,8 @@ import {
 import { renderRecallEvalReport } from "./kpi/recall-eval-report.js";
 import { warmLongMemEvalEmbeddingCaches } from "./embedding-cache-warmup.js";
 import { deriveLongMemEvalMemoryObjectIds } from "./runner-helpers.js";
+import type { SnapshotQuestionMeasurementOracle } from
+  "./snapshot/measurement-oracle.js";
 import type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./lifecycle/recall-eval-contract.js";
 export type { RecallEvalOptions, RecallEvalQuestionResult, RecallEvalResult } from "./lifecycle/recall-eval-contract.js";
 
@@ -124,7 +126,8 @@ async function executeRecallEvalRun(
         turnIndex: i + 1,
         embeddingMode: context.daemonLaunch.embeddingMode,
         recallOptions: context.recallOptions,
-        simulateReport: context.simulateReport
+        simulateReport: context.simulateReport,
+        measurement: context.measurementForQuestion?.(question.questionId)
       });
       collected.push(result);
       writeRecallEvalProgress(i, context.window.length, question.questionId, result);
@@ -160,7 +163,8 @@ async function writeRecallEvalArtifacts(
   const runProvenance = await buildRecallEvalRunProvenance({
     manifest: context.manifest, runtimeAttribution,
     evaluatedCount: collected.length, offset, limit,
-    commitSha7: context.commitSha7, env: context.daemonLaunch.environment
+    commitSha7: context.commitSha7, env: context.daemonLaunch.environment,
+    extractionAuthority: context.extractionAuthority
   });
   const provenanceComplete = isRecallEvalRunEvidenceEligible({
     runtimeAttribution, provenance: runProvenance,
@@ -243,6 +247,7 @@ async function recallEvalOneQuestion(input: {
   readonly embeddingMode: BenchEmbeddingMode;
   readonly recallOptions: BenchRecallOptions;
   readonly simulateReport: BenchSimulateReportMode;
+  readonly measurement: SnapshotQuestionMeasurementOracle | undefined;
 }): Promise<RecallEvalQuestionResult> {
   const workspace = await input.daemon.attachWorkspace({
     workspaceId: input.question.workspaceId,
@@ -256,8 +261,11 @@ async function recallEvalOneQuestion(input: {
       objectIds: deriveLongMemEvalMemoryObjectIds(sidecar),
       queryText: input.question.question
     });
-    const answerSessionSet = new Set(input.question.answerSessionIds);
-    const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
+    const answerSessionSet = new Set(
+      input.measurement?.answerSessionIds ?? input.question.answerSessionIds
+    );
+    const goldMemoryIds = input.measurement?.goldMemoryIds ??
+      deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
     const recallCycle = await runRecallEvalQuestionCycle(input, workspace, goldMemoryIds);
     return await buildRecallEvalQuestionResult(
       input,
@@ -282,7 +290,10 @@ function buildSnapshotSidecar(
       objectId: entry.objectId,
       objectKind: entry.objectKind,
       sessionId: entry.sessionId,
-      hasAnswer: entry.hasAnswer
+      hasAnswer: entry.hasAnswer,
+      ...(entry.sourceRounds === undefined
+        ? {}
+        : { sourceRounds: entry.sourceRounds.map((source) => ({ ...source })) })
     });
   }
   return sidecar;
@@ -320,7 +331,8 @@ async function buildRecallEvalQuestionResult(
   const results = recallResult.results;
   writeRecallEvalPoolDump(input.question.questionId, goldMemoryIds, results);
   const scoredHits = resolveLongMemEvalHitVerdict({
-    isAbstention: isAbstentionQuestionId(input.question.questionId),
+    isAbstention: input.measurement?.isAbstention ??
+      isAbstentionQuestionId(input.question.questionId),
     results,
     sidecar,
     answerSessionIds: answerSessionSet,
@@ -360,26 +372,29 @@ function buildRecallEvalDiagnostics(
   const diagnostic = buildQuestionDiagnostic({
     questionId: input.question.questionId,
     goldMemoryIds,
-    answerSessionIds: input.question.answerSessionIds,
+    answerSessionIds: input.measurement?.answerSessionIds ??
+      input.question.answerSessionIds,
     deliveredResults: buildDeliveredResults(recallResult),
     activeConstraintResults: buildActiveConstraintResults(recallResult),
     hitAt1: scoredHits.hitAt1,
     hitAt5: scoredHits.hitAt5,
     hitAt10: scoredHits.hitAt10,
-    isAbstention: isAbstentionQuestionId(input.question.questionId),
+    isAbstention: input.measurement?.isAbstention ??
+      isAbstentionQuestionId(input.question.questionId),
     degradationReason: recallResult.degradation_reason ?? null,
     recallResult,
     embeddingMode: input.embeddingMode,
     seedDropReasons: input.question.answerSeedDropReasons
   });
   return attachQuestionMeasurementAxes(diagnostic, {
-    answer: "",
-    answerSessionIds: input.question.answerSessionIds,
-    sourceDatesBySession: new Map(),
+    answer: input.measurement?.answer ?? "",
+    answerSessionIds: input.measurement?.answerSessionIds ??
+      input.question.answerSessionIds,
+    sourceDatesBySession: input.measurement?.sourceDatesBySession ?? new Map(),
     deliveredResults: diagnostic.delivered_results,
     candidates: diagnostic.candidates,
-    sidecar,
-    isAbstention: diagnostic.is_abstention
+    sidecar: input.measurement?.sidecar ?? sidecar,
+    isAbstention: input.measurement?.isAbstention ?? diagnostic.is_abstention
   });
 }
 

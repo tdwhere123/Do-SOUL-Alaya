@@ -14,6 +14,7 @@ const MissTaxonomyDistributionSchema = z
   .object({
     candidate_absent: z.number().int().nonnegative(),
     materialization_drop: z.number().int().nonnegative(),
+    fine_assessment_drop: z.number().int().nonnegative().default(0),
     budget_drop: z.number().int().nonnegative(),
     delivery_order_drop: z.number().int().nonnegative(),
     answer_set_coverage_drop: z.number().int().nonnegative(),
@@ -264,6 +265,7 @@ export const QualityMetricsSchema = z
     miss_taxonomy_distribution: MissTaxonomyDistributionSchema.default({
       candidate_absent: 0,
       materialization_drop: 0,
+      fine_assessment_drop: 0,
       budget_drop: 0,
       delivery_order_drop: 0,
       answer_set_coverage_drop: 0,

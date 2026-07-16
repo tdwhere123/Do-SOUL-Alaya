@@ -15,6 +15,7 @@ export function createEmptyMissTaxonomyDistribution(): MutableMissTaxonomySummar
   return {
     candidate_absent: 0,
     materialization_drop: 0,
+    fine_assessment_drop: 0,
     budget_drop: 0,
     delivery_order_drop: 0,
     answer_set_coverage_drop: 0,
@@ -33,6 +34,7 @@ export function mergeMissTaxonomySummaries(
   for (const summary of summaries) {
     merged.candidate_absent += summary.candidate_absent;
     merged.materialization_drop += summary.materialization_drop;
+    merged.fine_assessment_drop += summary.fine_assessment_drop;
     merged.budget_drop += summary.budget_drop;
     merged.delivery_order_drop += summary.delivery_order_drop;
     merged.answer_set_coverage_drop += summary.answer_set_coverage_drop;
@@ -60,6 +62,10 @@ export function readCompactMissTaxonomySummary(
       record.materialization_drop,
       "miss_taxonomy_summary.materialization_drop"
     ),
+    fine_assessment_drop: optionalCompactNonNegativeInteger(
+      record.fine_assessment_drop,
+      "miss_taxonomy_summary.fine_assessment_drop"
+    ),
     budget_drop: requiredCompactNonNegativeInteger(
       record.budget_drop,
       "miss_taxonomy_summary.budget_drop"
@@ -83,6 +89,8 @@ export function classifyGoldMissTaxonomy(input: {
   readonly deliveredRank: number | null;
   readonly candidate: CandidateDiagnostic | undefined;
   readonly anyObjectCandidate: CandidateDiagnostic | undefined;
+  readonly fineAssessmentPruned?: boolean;
+  readonly anyObjectFineAssessmentPruned?: boolean;
   readonly diagnosticsAvailable: boolean;
 }): LongMemEvalMissTaxonomy | null {
   return classifyGoldDeliveryMissTaxonomy(input);
@@ -116,6 +124,7 @@ export function classifyQuestionMissTaxonomy(input: {
     .map((row) => row.miss_taxonomy)
     .filter((taxonomy): taxonomy is LongMemEvalMissTaxonomy => taxonomy !== null);
   return (
+    firstPresentTaxonomy(goldTaxonomies, "fine_assessment_drop") ??
     firstPresentTaxonomy(goldTaxonomies, "materialization_drop") ??
     firstPresentTaxonomy(goldTaxonomies, "budget_drop") ??
     firstPresentTaxonomy(goldTaxonomies, "answer_set_coverage_drop") ??

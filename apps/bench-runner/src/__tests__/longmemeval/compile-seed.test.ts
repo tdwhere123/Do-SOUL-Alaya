@@ -61,7 +61,8 @@ describe("createCachingSignalExtractor", () => {
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
       lastTurnDraftCount: 0,
-      lastExtractionSource: null
+      lastExtractionSource: null,
+      lastRawJsonSha256: null
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -109,7 +110,8 @@ describe("createCachingSignalExtractor", () => {
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
       lastTurnDraftCount: 0,
-      lastExtractionSource: null
+      lastExtractionSource: null,
+      lastRawJsonSha256: null
     };
     const firstRun = createCachingSignalExtractor({
       delegate,
@@ -140,7 +142,8 @@ describe("createCachingSignalExtractor", () => {
       compileOverflowDropped: 0,
       lastTurnRawSignalCount: 0,
       lastTurnDraftCount: 0,
-      lastExtractionSource: null
+      lastExtractionSource: null,
+      lastRawJsonSha256: null
     };
     const secondRun = createCachingSignalExtractor({
       delegate,

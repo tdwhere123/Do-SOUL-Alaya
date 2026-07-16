@@ -120,7 +120,7 @@ describe("LongMemEval runner", () => {
                 "openai_api_key",
                 "raw_memory_content"
               ],
-              budget_drop_reason: "delivery_budget"
+              budget_drop_reason: "max_total_tokens"
             }
           ]
         }
@@ -175,7 +175,7 @@ describe("LongMemEval runner", () => {
       lexical_rank: 0.42,
       structural_score: 0.88,
       source_channels: ["domain_tag_cluster", "plane:domain_tag_cluster"],
-      budget_drop_reason: "delivery_budget"
+      budget_drop_reason: "max_total_tokens"
     });
     expect(JSON.stringify(row)).not.toContain("sk-live-secret");
     expect(JSON.stringify(row)).not.toContain("sk_live_secret");
@@ -312,7 +312,7 @@ describe("LongMemEval runner", () => {
     });
   });
 
-  it("uses final delivered rank order for non-monotonic diagnostics", () => {
+  it("uses relevance score order for non-monotonic diagnostics", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-fused-rank-order",
       goldMemoryIds: ["memory-a"],
@@ -345,8 +345,8 @@ describe("LongMemEval runner", () => {
     });
 
     const metrics = buildLongMemEvalQualityMetrics([row]);
-    expect(metrics.non_monotonic_count).toBe(0);
-    expect(metrics.non_monotonic_rate).toBe(0);
+    expect(metrics.non_monotonic_count).toBe(1);
+    expect(metrics.non_monotonic_rate).toBe(1);
   });
 
   it("keeps delivered_results plane attribution for cohort diagnostics consumers", () => {

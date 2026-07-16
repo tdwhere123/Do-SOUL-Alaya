@@ -8,19 +8,27 @@ import {
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import {
-  parseOfficialApiSignals,
-  salvageRawSignalElements
-} from "@do-soul/alaya-soul";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "./extraction/cache-identity.js";
 import { ExtractionCacheInvariantError } from "./extraction/cache-invariant-error.js";
+import {
+  inspectExtractionRawJson,
+  type ExtractionRawJsonInspection
+} from "./extraction/content-closure.js";
 import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease,
   type ExtractionCacheWriteLease
 } from "./extraction/fill-root-guard.js";
 import { readExtractionCacheManifestIdentity } from "./extraction-cache-manifest.js";
+export {
+  computeExtractionContentClosureSha256,
+  computeExtractionKeySetSha256,
+  computeExtractionRawJsonSha256,
+  inspectExtractionRawJson,
+  type ExtractionContentClosureEntry,
+  type ExtractionRawJsonInspection
+} from "./extraction/content-closure.js";
 import type {
   BenchRetryClassification,
   BenchSignalExtractor,
@@ -83,6 +91,11 @@ async function extractWithCache(
     input.systemPrompt,
     extractTurnContent(input.userPrompt)
   );
+  if (options.stats !== undefined) {
+    options.stats.lastExtractionSource = null;
+    options.stats.lastCacheKey = cacheKey;
+    options.stats.lastRawJsonSha256 = null;
+  }
   const cached = inspectCachedExtraction(
     cacheRoot,
     cacheKey,
@@ -90,7 +103,7 @@ async function extractWithCache(
     options.config.requestProfile
   );
   if (cached.status === "hit") {
-    recordCacheHit(options.stats, cacheKey, cached.rawJson);
+    recordCacheHit(options.stats, cacheKey, cached);
     return { rawJson: cached.rawJson };
   }
   if (options.allowLiveExtraction === false) {
@@ -105,13 +118,13 @@ async function extractWithCache(
 function recordCacheHit(
   stats: CompileSeedExtractionStats | undefined,
   cacheKey: string,
-  rawJson: string
+  cached: ExtractionRawJsonInspection & { readonly rawJson: string }
 ): void {
   if (stats === undefined) return;
   stats.lastExtractionSource = "cache";
   stats.lastCacheKey = cacheKey;
   stats.cacheHits += 1;
-  recordExtractionDraftCounts(stats, rawJson);
+  recordExtractionInspection(stats, cached);
 }
 
 async function extractLive(
@@ -151,7 +164,7 @@ async function extractLiveWithLease(
     options.config.requestProfile
   );
   if (recached.status === "hit") {
-    recordCacheHit(options.stats, cacheKey, recached.rawJson);
+    recordCacheHit(options.stats, cacheKey, recached);
     return { rawJson: recached.rawJson };
   }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
@@ -163,7 +176,7 @@ async function extractLiveWithLease(
   const result = await extractLiveDelegate(options.delegate, input, stats);
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
-  parseOfficialApiSignals(result.rawJson);
+  const inspection = inspectExtractionRawJson(result.rawJson);
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {
       model: options.config.model,
@@ -180,7 +193,7 @@ async function extractLiveWithLease(
   }
   if (stats !== undefined) {
     stats.llmCalls += 1;
-    recordExtractionDraftCounts(stats, result.rawJson);
+    recordExtractionInspection(stats, inspection);
   }
   return result;
 }
@@ -317,49 +330,13 @@ function extractTurnContent(userPrompt: string): string {
  * signals_dropped blind to every malformed / over-cap entry the parser had
  * already silently discarded.
  */
-function recordExtractionDraftCounts(
+function recordExtractionInspection(
   stats: CompileSeedExtractionStats,
-  rawJson: string
+  inspection: ExtractionRawJsonInspection
 ): void {
-  stats.lastTurnRawSignalCount = countRawEnvelopeSignals(rawJson);
-  stats.lastTurnDraftCount = countParsedDrafts(rawJson);
-}
-
-/**
- * Count the entries in the model envelope's raw `.signals` array, with no
- * cap and no per-entry validation. When the whole envelope parses cleanly,
- * this is the array length. When the envelope is corrupt (parseOfficialApiSignals
- * now salvages it element-wise), count the RAW salvageable `{...}` element
- * population — including the corrupt element(s) — so the dropped corrupt
- * entries land in parseDropped (raw - parsed) instead of vanishing from the
- * attribution. A genuinely-degenerate envelope (no `.signals` region, or no
- * complete element) counts as 0, matching the whole-turn fallback the seed
- * path still applies when zero drafts survive.
- * see also: packages/soul/src/garden/compute-provider.ts salvageRawSignalElements
- */
-function countRawEnvelopeSignals(rawJson: string): number {
-  try {
-    const parsed = JSON.parse(rawJson) as unknown;
-    if (typeof parsed !== "object" || parsed === null) {
-      return 0;
-    }
-    const signals = (parsed as { readonly signals?: unknown }).signals;
-    return Array.isArray(signals) ? signals.length : 0;
-  } catch {
-    return salvageRawSignalElements(rawJson).length;
-  }
-}
-
-/**
- * Count the candidate-signal drafts the production parser recovers from a
- * raw extraction response, AFTER its malformed-entry drop and 64-cap.
- */
-function countParsedDrafts(rawJson: string): number {
-  try {
-    return parseOfficialApiSignals(rawJson).length;
-  } catch {
-    return 0;
-  }
+  stats.lastRawJsonSha256 = inspection.rawJsonSha256;
+  stats.lastTurnRawSignalCount = inspection.rawSignalCount;
+  stats.lastTurnDraftCount = inspection.parsedDraftCount;
 }
 
 export function computeCacheKey(
@@ -386,7 +363,13 @@ export function cacheFilePath(cacheRoot: string, cacheKey: string): string {
 }
 
 export type CachedExtractionInspection =
-  | { readonly status: "hit"; readonly rawJson: string }
+  | {
+    readonly status: "hit";
+    readonly rawJson: string;
+    readonly rawJsonSha256: string;
+    readonly rawSignalCount: number;
+    readonly parsedDraftCount: number;
+  }
   | { readonly status: "missing"; readonly reason?: undefined }
   | { readonly status: "invalid"; readonly reason: string };
 
@@ -417,8 +400,12 @@ export function inspectCachedExtraction(
     if (parsed.cache_key !== cacheKey) {
       return { status: "invalid", reason: "cache_key does not match fixture path" };
     }
-    parseOfficialApiSignals(parsed.raw_json);
-    return { status: "hit", rawJson: parsed.raw_json };
+    const inspection = inspectExtractionRawJson(parsed.raw_json);
+    return {
+      status: "hit",
+      rawJson: parsed.raw_json,
+      ...inspection
+    };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { status: "invalid", reason: `invalid cached extraction: ${reason}` };

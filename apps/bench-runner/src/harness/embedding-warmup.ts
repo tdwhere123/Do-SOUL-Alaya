@@ -1,5 +1,25 @@
+import type { AlayaDaemonRuntime } from "@do-soul/alaya";
+
 export interface BenchEmbeddingWarmupOptions {
   readonly maxPasses?: number;
+}
+
+export interface BenchEmbeddingProviderReadinessInput {
+  readonly embeddingMode: "disabled" | "env";
+  readonly providerWarmup?: AlayaDaemonRuntime["services"]["embeddingProviderWarmup"];
+}
+
+export async function awaitBenchEmbeddingProviderReady(
+  input: BenchEmbeddingProviderReadinessInput
+): Promise<void> {
+  if (input.embeddingMode !== "env") return;
+  if (input.providerWarmup === undefined) {
+    throw new Error("embedding provider readiness requested but provider warmup is unavailable");
+  }
+  const status = await input.providerWarmup;
+  if (status !== "ready") {
+    throw new Error(`embedding provider readiness barrier failed: status=${status}`);
+  }
 }
 
 export interface BenchEmbeddingWarmupSummary {

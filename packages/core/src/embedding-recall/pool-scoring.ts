@@ -1,6 +1,9 @@
 import {
+  clamp01,
   cosineSimilarity,
+  isFiniteNonzeroVector,
   isProviderMatchedEmbedding,
+  isUsableEmbeddingRecordVector,
   toErrorMessage
 } from "./helpers.js";
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
@@ -10,7 +13,7 @@ import type {
   PreparedEmbeddingQuerySnapshot
 } from "./types.js";
 
-export async function scoreEmbeddingPoolCandidates(params: {
+interface PoolScoringParams {
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly queryText: string;
@@ -20,14 +23,36 @@ export async function scoreEmbeddingPoolCandidates(params: {
   readonly queryEngine: Pick<QueryEmbeddingEngine, "prepareQueryEmbedding">;
   readonly queryTimeoutMs: number;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
-}): Promise<ReadonlyMap<string, number>> {
+}
+
+export async function scoreEmbeddingPoolCandidates(
+  params: PoolScoringParams
+): Promise<ReadonlyMap<string, number>> {
   const empty: ReadonlyMap<string, number> = new Map<string, number>();
   if (params.objectIds.length === 0 || !params.provider.isAvailable) {
     return empty;
   }
-  let storedVectors: readonly Readonly<EmbeddingVectorRecord>[];
+  const storedVectors = await loadPoolVectors(params);
+  if (storedVectors === null || storedVectors.length === 0) {
+    return empty;
+  }
+  const queryEmbedding = await resolvePoolQueryEmbeddingSafely(params);
+  if (queryEmbedding === null) {
+    return empty;
+  }
+  return scoreMatchedVectors(
+    queryEmbedding,
+    storedVectors,
+    params.provider,
+    new Set(params.objectIds)
+  );
+}
+
+async function loadPoolVectors(
+  params: PoolScoringParams
+): Promise<readonly Readonly<EmbeddingVectorRecord>[] | null> {
   try {
-    storedVectors = await params.embeddingRepo.listByObjectIds(params.workspaceId, params.objectIds);
+    return await params.embeddingRepo.listByObjectIds(params.workspaceId, params.objectIds);
   } catch (error) {
     params.warn("pool embedding rescoring degraded", {
       workspace_id: params.workspaceId,
@@ -35,14 +60,15 @@ export async function scoreEmbeddingPoolCandidates(params: {
       reason: "local_vector_lookup_failed",
       error: toErrorMessage(error)
     });
-    return empty;
+    return null;
   }
-  if (storedVectors.length === 0) {
-    return empty;
-  }
-  let queryEmbedding: Float32Array | null;
+}
+
+async function resolvePoolQueryEmbeddingSafely(
+  params: PoolScoringParams
+): Promise<Float32Array | null> {
   try {
-    queryEmbedding = await resolvePoolQueryEmbedding(params);
+    return await resolvePoolQueryEmbedding(params);
   } catch (error) {
     params.warn("pool embedding rescoring degraded", {
       workspace_id: params.workspaceId,
@@ -50,12 +76,8 @@ export async function scoreEmbeddingPoolCandidates(params: {
       reason: "query_embedding_failed",
       error: toErrorMessage(error)
     });
-    return empty;
+    return null;
   }
-  if (queryEmbedding === null) {
-    return empty;
-  }
-  return scoreMatchedVectors(queryEmbedding, storedVectors, params.provider);
 }
 
 async function resolvePoolQueryEmbedding(params: {
@@ -91,24 +113,29 @@ function embeddingFromSnapshot(snapshot: PreparedEmbeddingQuerySnapshot): Float3
 function scoreMatchedVectors(
   queryEmbedding: Float32Array,
   storedVectors: readonly Readonly<EmbeddingVectorRecord>[],
-  provider: EmbeddingRecallServiceDependencies["provider"]
+  provider: EmbeddingRecallServiceDependencies["provider"],
+  requestedObjectIds: ReadonlySet<string>
 ): ReadonlyMap<string, number> {
   const scores = new Map<string, number>();
+  if (!isFiniteNonzeroVector(queryEmbedding)) {
+    return scores;
+  }
   for (const record of storedVectors) {
-    if (!isProviderMatchedEmbedding(record, provider) || record.dimensions !== record.embedding.length) {
+    if (
+      !requestedObjectIds.has(record.object_id) ||
+      !isProviderMatchedEmbedding(record, provider) ||
+      !isUsableEmbeddingRecordVector(record, queryEmbedding.length)
+    ) {
       continue;
     }
     const sim = cosineSimilarity(queryEmbedding, record.embedding);
-    if (sim > 0) {
-      scores.set(record.object_id, sim);
-    }
+    scores.set(record.object_id, clamp01(sim));
   }
   return scores;
 }
 
-// invariant: cosine space is valid only within one (provider_kind, model_id,
-// schema_version); self-inconsistent records (dimensions !== embedding length)
-// are dropped before pair keys are emitted.
+// invariant: pairwise cosine consumes the same valid vector domain as query
+// scoring and only compares vectors from one embedding space.
 export function computeCoherentPairKeys(
   storedVectors: readonly Readonly<EmbeddingVectorRecord>[],
   objectIds: readonly string[],
@@ -118,10 +145,8 @@ export function computeCoherentPairKeys(
   const vectorsByObjectId = new Map<string, Float32Array>();
   for (const record of storedVectors) {
     if (
-      record.provider_kind === provider.providerKind &&
-      record.model_id === provider.modelId &&
-      record.schema_version === provider.schemaVersion &&
-      record.dimensions === record.embedding.length
+      isProviderMatchedEmbedding(record, provider) &&
+      isUsableEmbeddingRecordVector(record, record.dimensions)
     ) {
       vectorsByObjectId.set(record.object_id, record.embedding);
     }
@@ -148,7 +173,7 @@ function collectCoherentPairsForVector(
 ): void {
   for (let j = index + 1; j < objectIds.length; j += 1) {
     const vecB = vectorsByObjectId.get(objectIds[j]!);
-    if (vecB === undefined) {
+    if (vecB === undefined || vecA.length !== vecB.length) {
       continue;
     }
     if (cosineSimilarity(vecA, vecB) >= floor) {

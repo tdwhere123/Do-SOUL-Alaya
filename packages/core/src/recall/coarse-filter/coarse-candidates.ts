@@ -72,22 +72,13 @@ export function withEmbeddingSimilarityScores(
 ): RecallSupplementaryData {
   const merged = new Map<string, number>();
   for (const [objectId, hint] of Object.entries(hintsByObjectId)) {
-    const score = clamp01(hint.normalized_similarity);
-    if (score > 0) {
-      merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
-    }
+    mergeObservedEmbeddingScore(merged, objectId, hint.normalized_similarity);
   }
   for (const [objectId, rawScore] of Object.entries(injectedSimilarityScores)) {
-    const score = clamp01(rawScore);
-    if (score > 0) {
-      merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
-    }
+    mergeObservedEmbeddingScore(merged, objectId, rawScore);
   }
   for (const [objectId, rawScore] of Object.entries(poolRescoreScores)) {
-    const score = clamp01(rawScore);
-    if (score > 0) {
-      merged.set(objectId, Math.max(merged.get(objectId) ?? 0, score));
-    }
+    mergeObservedEmbeddingScore(merged, objectId, rawScore);
   }
   if (merged.size === 0) {
     return supplementaryData;
@@ -97,6 +88,16 @@ export function withEmbeddingSimilarityScores(
     ...supplementaryData,
     embeddingSimilarityScores: Object.freeze(Object.fromEntries(merged))
   });
+}
+
+function mergeObservedEmbeddingScore(
+  scores: Map<string, number>,
+  objectId: string,
+  rawScore: number
+): void {
+  if (!Number.isFinite(rawScore)) return;
+  const score = clamp01(rawScore);
+  scores.set(objectId, Math.max(scores.get(objectId) ?? 0, score));
 }
 
 // Deterministic OR-query of expanded lexical terms (morphology + synonym

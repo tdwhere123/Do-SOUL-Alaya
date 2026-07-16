@@ -27,6 +27,10 @@ import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
 } from "./diagnostics/spool.js";
+import { assertExpansionRunAuthority } from
+  "./promotion/expansion-run-authority.js";
+import type { LongMemEvalExpansionCapability } from
+  "./promotion/expansion-capability.js";
 export {
   buildLongMemEvalReportContextUsage,
   buildLongMemEvalSidecarKey,
@@ -97,6 +101,8 @@ export interface LongMemEvalRunOptions {
   // owns one daemon process; values > 1 fan out via child CLI processes and
   // merge shard archives into historyRoot.
   readonly concurrency?: number;
+  readonly expansionCapability?: LongMemEvalExpansionCapability;
+  readonly promotionContractPath?: string;
 }
 
 export interface LongMemEvalRunResult {
@@ -149,6 +155,7 @@ export interface LongMemEvalRunResult {
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
 ): Promise<LongMemEvalRunResult> {
+  await assertExpansionRunAuthority(opts);
   if (shouldFanOutLongMemEvalWorkers(opts)) {
     return runLongMemEvalConcurrent(opts);
   }

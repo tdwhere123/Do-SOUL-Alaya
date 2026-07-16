@@ -31,6 +31,22 @@ export interface AuditedAsyncSideEffect {
   readonly now?: NowProvider;
 }
 
+const DEFAULT_ASYNC_SIDE_EFFECT_DRAIN_TIMEOUT_MS = 30_000;
+const MAX_RETAINED_ASYNC_SIDE_EFFECT_FAILURES = 16;
+const pendingAuditedAsyncSideEffects = new Set<Promise<void>>();
+let auditedAsyncSideEffectDrainTail = Promise.resolve();
+let nextAuditedAsyncSideEffectSequence = 1;
+let settledAsyncSideEffectFailureCount = 0;
+let retainedAsyncSideEffectFailures: AuditedAsyncSideEffectFailure[] = [];
+
+interface AuditedAsyncSideEffectFailure {
+  readonly sequence: number;
+  readonly source: string;
+  readonly operation: string;
+  readonly workError: unknown;
+  readonly reportError?: unknown;
+}
+
 export function scheduleAuditedAsyncSideEffect<T>(
   work: Promise<T> | null | undefined,
   audit: AuditedAsyncSideEffect
@@ -39,15 +55,168 @@ export function scheduleAuditedAsyncSideEffect<T>(
     return;
   }
 
-  void work.catch((error: unknown) => {
-    void reportAsyncSideEffectFailure(audit, error);
+  const sequence = nextAuditedAsyncSideEffectSequence;
+  nextAuditedAsyncSideEffectSequence += 1;
+  const tracked = work.then(
+    () => undefined,
+    async (error: unknown) => await recordAsyncSideEffectFailure(
+      sequence,
+      audit,
+      error
+    )
+  );
+  pendingAuditedAsyncSideEffects.add(tracked);
+  void tracked.then(
+    () => pendingAuditedAsyncSideEffects.delete(tracked),
+    () => pendingAuditedAsyncSideEffects.delete(tracked)
+  );
+}
+
+export function drainAuditedAsyncSideEffects(
+  options: { readonly timeoutMs?: number } = {}
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_ASYNC_SIDE_EFFECT_DRAIN_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(
+      new Error("audited async side-effect drain timeout must be positive")
+    );
+  }
+  const priorDrain = auditedAsyncSideEffectDrainTail.catch(() => undefined);
+  const drain = priorDrain.then(
+    async () => await drainAuditedAsyncSideEffectEpoch(Math.floor(timeoutMs))
+  );
+  auditedAsyncSideEffectDrainTail = drain;
+  return drain;
+}
+
+async function drainAuditedAsyncSideEffectEpoch(timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + Math.floor(timeoutMs);
+  let waitError: unknown;
+  try {
+    while (pendingAuditedAsyncSideEffects.size > 0) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw asyncSideEffectDrainTimeout(timeoutMs);
+      await settlePendingAsyncSideEffects(
+        [...pendingAuditedAsyncSideEffects],
+        remainingMs,
+        timeoutMs
+      );
+    }
+  } catch (error) {
+    waitError = error;
+  }
+  const failures = consumeAsyncSideEffectFailures();
+  if (waitError !== undefined || failures.count > 0) {
+    throw buildAsyncSideEffectDrainError(waitError, failures);
+  }
+}
+
+async function settlePendingAsyncSideEffects(
+  pending: readonly Promise<void>[],
+  remainingMs: number,
+  timeoutMs: number
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.allSettled(pending).then(() => undefined),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(asyncSideEffectDrainTimeout(timeoutMs)), remainingMs);
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function asyncSideEffectDrainTimeout(timeoutMs: number): Error {
+  return new Error(
+    `audited async side-effect drain timed out after ${timeoutMs}ms with ` +
+      `${pendingAuditedAsyncSideEffects.size} task(s) pending`
+  );
+}
+
+async function recordAsyncSideEffectFailure(
+  sequence: number,
+  audit: AuditedAsyncSideEffect,
+  workError: unknown
+): Promise<void> {
+  let reportError: unknown;
+  try {
+    reportError = (await reportAsyncSideEffectFailureWithOutcome(
+      audit,
+      workError
+    )).failure;
+  } catch (error) {
+    reportError = error;
+  }
+  settledAsyncSideEffectFailureCount += 1;
+  retainedAsyncSideEffectFailures.push({
+    sequence,
+    source: audit.source,
+    operation: audit.operation,
+    workError,
+    ...(reportError === undefined ? {} : { reportError })
   });
+  retainedAsyncSideEffectFailures.sort((left, right) => left.sequence - right.sequence);
+  if (retainedAsyncSideEffectFailures.length > MAX_RETAINED_ASYNC_SIDE_EFFECT_FAILURES) {
+    retainedAsyncSideEffectFailures.pop();
+  }
+}
+
+function consumeAsyncSideEffectFailures(): {
+  readonly count: number;
+  readonly retained: readonly AuditedAsyncSideEffectFailure[];
+} {
+  const result = {
+    count: settledAsyncSideEffectFailureCount,
+    retained: retainedAsyncSideEffectFailures
+  };
+  settledAsyncSideEffectFailureCount = 0;
+  retainedAsyncSideEffectFailures = [];
+  return result;
+}
+
+function buildAsyncSideEffectDrainError(
+  waitError: unknown,
+  failures: ReturnType<typeof consumeAsyncSideEffectFailures>
+): Error {
+  const causes = [
+    ...(waitError === undefined ? [] : [waitError]),
+    ...failures.retained.flatMap((failure) => [
+      failure.workError,
+      ...(failure.reportError === undefined ? [] : [failure.reportError])
+    ])
+  ];
+  const details = failures.retained.map((failure) => {
+    const work = toErrorDetails(failure.workError).message;
+    const report = failure.reportError === undefined
+      ? ""
+      : `; audit report failed: ${toErrorDetails(failure.reportError).message}`;
+    return `#${failure.sequence} ${failure.source}.${failure.operation}: ${work}${report}`;
+  });
+  const omitted = failures.count - failures.retained.length;
+  if (omitted > 0) details.push(`${omitted} additional failure(s) omitted`);
+  const prefix = waitError === undefined
+    ? "audited async side-effect drain failed"
+    : toErrorDetails(waitError).message;
+  const message = failures.count === 0
+    ? prefix
+    : `${prefix} with ${failures.count} failed task(s): ${details.join(" | ")}`;
+  return new AggregateError(causes, message);
 }
 
 export async function reportAsyncSideEffectFailure(
   audit: AuditedAsyncSideEffect,
   error: unknown
 ): Promise<void> {
+  await reportAsyncSideEffectFailureWithOutcome(audit, error);
+}
+
+async function reportAsyncSideEffectFailureWithOutcome(
+  audit: AuditedAsyncSideEffect,
+  error: unknown
+): Promise<{ readonly failure?: unknown }> {
   const failure = buildAsyncSideEffectFailurePayload(audit, error);
   process.emitWarning(audit.warningMessage, {
     code: audit.warningCode,
@@ -55,7 +224,7 @@ export async function reportAsyncSideEffectFailure(
   });
 
   if (audit.eventLogRepo === undefined) {
-    return;
+    return {};
   }
 
   try {
@@ -83,7 +252,9 @@ export async function reportAsyncSideEffectFailure(
         error_message: auditFailure.message
       })
     });
+    return { failure: auditError };
   }
+  return {};
 }
 
 function buildAsyncSideEffectFailurePayload(

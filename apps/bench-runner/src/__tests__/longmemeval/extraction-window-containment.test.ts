@@ -186,6 +186,15 @@ describe("extraction window-containment preflight", () => {
       const manifest = readExtractionCacheManifest(cacheRoot);
       expect(manifest?.coverage).toBe(1);
 
+      const turnsA = collectDistinctTurnContents(windowAB.slice(0, 1));
+      expect(() => preflightExtractionCache({
+        cacheRoot,
+        config: CONFIG,
+        systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+        requiredTurnContents: turnsA,
+        requiredQuestionWindow: { offset: 0, limit: 1 }
+      })).not.toThrow();
+
       // The full window A+B still fails preflight despite coverage=1.0 — the
       // scalar is relative to the fill window, containment catches the gap.
       const turnsAB = collectDistinctTurnContents(windowAB);
@@ -194,9 +203,10 @@ describe("extraction window-containment preflight", () => {
           cacheRoot,
           config: CONFIG,
           systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-          requiredTurnContents: turnsAB
+          requiredTurnContents: turnsAB,
+          requiredQuestionWindow: { offset: 0, limit: 2 }
         })
-      ).toThrow(/covers only part of this run's question window/su);
+      ).toThrow(/complete fill question window.*contain.*offset\/limit/su);
     } finally {
       await rm(dataDir, { recursive: true, force: true });
       await rm(pinnedMetaRoot, { recursive: true, force: true });

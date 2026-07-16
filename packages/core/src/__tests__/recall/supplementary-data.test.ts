@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
+import { withEmbeddingSimilarityScores } from "../../recall/coarse-filter/coarse-candidates.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   collectSupplementaryData,
@@ -12,6 +13,36 @@ import {
 } from "./recall-service-test-fixtures.js";
 
 describe("collectSupplementaryData", () => {
+  it("preserves finite zero embedding observations and rejects non-finite scores", async () => {
+    const supplementary = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort()
+    });
+    const observed = withEmbeddingSimilarityScores(
+      supplementary,
+      {
+        "hint-zero": { object_id: "hint-zero", normalized_similarity: 0 },
+        "hint-invalid": { object_id: "hint-invalid", normalized_similarity: Number.NaN }
+      },
+      {
+        "injected-zero": 0,
+        "injected-invalid": Number.POSITIVE_INFINITY
+      },
+      {
+        "pool-zero": 0,
+        "pool-positive": 0.25,
+        "pool-invalid": Number.NaN
+      }
+    );
+
+    expect(observed.embeddingSimilarityScores).toEqual({
+      "hint-zero": 0,
+      "injected-zero": 0,
+      "pool-zero": 0,
+      "pool-positive": 0.25
+    });
+  });
+
   // Coverage packing needs gist identity; diagnostics no longer gate the load.
   it("loads evidence gists for coverage selection even without diagnostic capture", async () => {
     const findByIds = vi.fn(async () => []);

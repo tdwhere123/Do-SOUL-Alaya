@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { FullGoldDeliveryContributionSchema } from "@do-soul/alaya-eval";
 import {
   classifyGoldDeliveryMissTaxonomy,
+  classifyReplayGoldDeliveryMissTaxonomy,
   resolveCoreDeliveryRank,
   toDeliveryMissCandidateInput
 } from "../../longmemeval/diagnostics-delivery-bridge.js";
 import type {
   CandidateDiagnostic,
-  LongMemEvalGoldDiagnostic
+  LongMemEvalGoldDiagnostic,
+  LongMemEvalReplayCandidate
 } from "../../longmemeval/diagnostics-types.js";
 
 function sampleCandidate(
@@ -115,6 +117,7 @@ describe("diagnostics-delivery-bridge", () => {
       finalRank: null,
       droppedReason: "max_entries",
       rankAfterFusion: 4,
+      rankAfterFeatureRerank: null,
       rankAfterCoverageSelector: null,
       coverageSelectorAction: null
     });
@@ -166,7 +169,112 @@ describe("diagnostics-delivery-bridge", () => {
       })
     ).toBeNull();
   });
+
+  it("classifies live diagnostics from the feature-to-coverage crossing", () => {
+    expect(classifyGoldDeliveryMissTaxonomy({
+      deliveredRank: 9,
+      candidate: sampleCandidate({
+        preBudgetRank: null,
+        budgetDropReason: null,
+        finalRank: 9,
+        rankAfterFusion: 3,
+        rankAfterFeatureRerank: 8,
+        rankAfterCoverageSelector: 9,
+        coverageSelectorAction: "displaced"
+      }),
+      anyObjectCandidate: undefined,
+      diagnosticsAvailable: true
+    })).toBe("delivery_order_drop");
+    expect(classifyGoldDeliveryMissTaxonomy({
+      deliveredRank: 8,
+      candidate: sampleCandidate({
+        preBudgetRank: null,
+        budgetDropReason: null,
+        finalRank: 8,
+        rankAfterFusion: 8,
+        rankAfterFeatureRerank: 3,
+        rankAfterCoverageSelector: 8,
+        coverageSelectorAction: "displaced"
+      }),
+      anyObjectCandidate: undefined,
+      diagnosticsAvailable: true
+    })).toBe("answer_set_coverage_drop");
+  });
+
+  it("uses the replay feature rank as the pre-coverage boundary", () => {
+    expect(classifyReplayGoldDeliveryMissTaxonomy({
+      deliveredRank: 9,
+      candidate: sampleReplayCandidate({
+        rank_after_fusion: 3,
+        rank_after_feature_rerank: 8,
+        rank_after_coverage_selector: 9,
+        coverage_selector_action: "displaced"
+      }),
+      anyObjectCandidate: undefined,
+      diagnosticsAvailable: true
+    })).toBe("delivery_order_drop");
+    expect(classifyReplayGoldDeliveryMissTaxonomy({
+      deliveredRank: 8,
+      candidate: sampleReplayCandidate({
+        rank_after_fusion: 8,
+        rank_after_feature_rerank: 3,
+        rank_after_coverage_selector: 8,
+        coverage_selector_action: "displaced"
+      }),
+      anyObjectCandidate: undefined,
+      diagnosticsAvailable: true
+    })).toBe("answer_set_coverage_drop");
+  });
 });
+
+const BASE_REPLAY_CANDIDATE: LongMemEvalReplayCandidate = {
+  object_id: "gold-a",
+  object_kind: "memory_entry",
+  candidate_key: "workspace_local:memory_entry:gold-a",
+  origin_plane: "workspace_local",
+  dimension: null,
+  final_rank: null,
+  pre_budget_rank: null,
+  selection_order: null,
+  fused_rank: null,
+  fused_score: null,
+  answer_relevance_score: null,
+  answer_relevance_rank: null,
+  per_stream_rank: null,
+  fused_rank_contribution_per_stream: null,
+  per_axis_rank: null,
+  per_axis_contribution: null,
+  flood_potential: null,
+  flood_fuel_coverage: null,
+  plane_first_admitted: null,
+  plane_winning_admission: null,
+  source_planes: [],
+  source_channels: [],
+  lexical_rank: null,
+  structural_score: null,
+  budget_drop_reason: null,
+  rank_after_fusion: null,
+  rank_after_feature_rerank: null,
+  rank_after_lexical_priority: null,
+  rank_after_synthesis_reserve: null,
+  rank_after_structural_reserve: null,
+  rank_after_coverage_selector: null,
+  rank_after_session_coverage: null,
+  coverage_selector_action: null,
+  session_coverage_action: null,
+  session_key: null,
+  source_cohort_key: null,
+  reserved_by: null,
+  answer_features: null,
+  path_suppression_score: null,
+  score_factors: {}
+};
+
+function sampleReplayCandidate(
+  overrides: Partial<LongMemEvalReplayCandidate> = {}
+): LongMemEvalReplayCandidate {
+  return { ...BASE_REPLAY_CANDIDATE, ...overrides };
+}
 
 describe("FullGoldDeliveryContributionSchema", () => {
   it("accepts analyze output shape from buildLongMemEvalFullGoldCoverage", async () => {

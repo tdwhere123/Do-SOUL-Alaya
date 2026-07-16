@@ -22,6 +22,8 @@ import {
 import { computeQuestionIdDigest } from "../../longmemeval/selection/question-manifest.js";
 import { computeCohortAssignmentDigest } from "../../longmemeval/selection/contract.js";
 import { MERGE_TEST_DATASET_SHA256 } from "./cli-merge-dataset-fixture.js";
+import { syntheticExtractionClosure } from
+  "../longmemeval/extraction-closure-fixture.js";
 
 const DATASET_SHA = MERGE_TEST_DATASET_SHA256;
 
@@ -55,6 +57,9 @@ export function question(id: string, candidates: readonly unknown[] = []) {
     provider_state: "provider_not_requested",
     query_probes: { normalized_query: "synthetic" },
     candidate_pool_complete: true,
+    candidate_pool_count: candidates.length,
+    fine_pruned_count: 0,
+    fine_assessment_pruned_candidates: [],
     cohort_ledger: cohort(),
     candidates
   };
@@ -64,6 +69,7 @@ export function candidate() {
   return {
     object_id: "gold-a",
     candidate_key: "workspace_local:memory_entry:gold-a",
+    origin_plane: "workspace_local",
     final_rank: 1,
     pre_budget_rank: 1,
     selection_order: 1,
@@ -103,6 +109,9 @@ export function streamedQuestion(id: string) {
       supports: 0
     },
     candidate_pool_complete: true,
+    candidate_pool_count: 0,
+    fine_pruned_count: 0,
+    fine_assessment_pruned_candidates: [],
     query_sought_facets: null,
     candidates: [],
     candidate_key_collisions: [],
@@ -115,14 +124,15 @@ export function provenance(
   count: number,
   questionIds: readonly string[] = Array.from(
     { length: count }, (_, index) => `fixture-${offset + index}`
-  )
+  ),
+  commitSha7 = "abc1234"
 ) {
   const selection = selectionIdentity(questionIds);
   return {
     schema_version: 1,
     dataset_sha256: DATASET_SHA,
     selection,
-    code: fixtureCodeProvenance(),
+    code: fixtureCodeProvenance(commitSha7),
     extraction_cache: fixtureExtractionCache(count),
     runtime: {
       node_version: process.version,
@@ -155,10 +165,10 @@ export function provenance(
   };
 }
 
-function fixtureCodeProvenance() {
+function fixtureCodeProvenance(commitSha7: string) {
   return {
-    commit_sha7: "abc1234",
-    commit_sha: "abc1234" + "0".repeat(33),
+    commit_sha7: commitSha7,
+    commit_sha: commitSha7 + "0".repeat(33),
     gate_sha256: "a".repeat(64),
     gate_contract_path: "/tmp/frozen-contract.json",
     worktree_state_sha256: "b".repeat(64),
@@ -172,12 +182,20 @@ function fixtureCodeProvenance() {
 }
 
 function fixtureExtractionCache(count: number) {
+  const extractionModel = "fixture-model";
+  const requestProfile = "provider-default-v1" as const;
+  const closure = syntheticExtractionClosure({
+    count,
+    model: extractionModel,
+    requestProfile,
+    seed: `cli-merge-${count}`
+  });
   return {
     manifest_sha256: "c".repeat(64),
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
-    extraction_model: "fixture-model",
+    extraction_model: extractionModel,
     model_family: "fixture-model-family",
-    request_profile: "provider-default-v1",
+    request_profile: requestProfile,
     provider_url: "redacted",
     system_prompt_sha256: "e".repeat(64),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
@@ -186,6 +204,10 @@ function fixtureExtractionCache(count: number) {
     requested_turns: count,
     cached_turns: count,
     coverage: 1,
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: 500,
+    ...closure,
     storage: "git-tracked",
     built_at: "2026-07-11T00:00:00.000Z",
     builder: "fixture"
@@ -226,7 +248,7 @@ export async function setupShard(root: string, id: string, offset: number): Prom
       cohort_ledger: cohort()
     }]
   });
-  const provenanceBody = provenance(offset, 1, [id]);
+  const provenanceBody = provenance(offset, 1, [id], kpi.alaya_commit);
   await writeShardRoot(root, kpi, diagnostics);
   await writeProvenance(root, provenanceBody);
   await writeShardEvidenceBundle(
@@ -251,7 +273,7 @@ export async function setupCompactShard(
     full_diagnostics_artifact_path: "longmemeval-diagnostics.json.gz",
     questions: undefined
   });
-  const provenanceBody = provenance(offset, 1, [id]);
+  const provenanceBody = provenance(offset, 1, [id], kpi.alaya_commit);
   await writeShardRoot(root, kpi, compactDiagnostics);
   await writeProvenance(root, provenanceBody);
   await writeShardEvidenceBundle(

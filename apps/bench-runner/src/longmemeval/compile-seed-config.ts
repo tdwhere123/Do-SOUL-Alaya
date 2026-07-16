@@ -75,6 +75,7 @@ export function toSeedExtractionPathKpi(
 ): SeedExtractionPathKpi {
   return {
     path: stats.path,
+    extraction_attempts: stats.extractionAttempts ?? 0,
     cache_hits: stats.cacheHits,
     llm_calls: stats.llmCalls,
     offline_fallbacks: stats.offlineFallbacks,
