@@ -1,0 +1,85 @@
+---
+description: Alaya working contract — goal, honesty, modes, review loops, worktrees (fills do-it gaps)
+alwaysApply: true
+---
+
+# Alaya Agent Working Contract
+
+Hard stops from Codex/Claude memories and Alaya sessions. Complements
+`AGENTS.md` and do-it; skills/hooks are advisory — these bind.
+
+## 1. Goal before craft
+
+- Name the user's gate/metric/outcome in one sentence before editing.
+- Prefer the critical path over adjacent plumbing. Missing the gate is Spec
+  failure even if the craft is clean.
+- Do not retune weights/caps/cutoffs against bench matrix deltas (anti-fitting).
+- Pre-launch: do not invent user/compat constraints unless asked.
+- Prefer root-cause over speculative blame of externals/models; study OUR code
+  (and SOTA) first.
+
+## 2. No silent product semantics
+
+Product decisions (not "plumbing"): retrieval/FTS/fusion/delivery defaults,
+Garden grounding, embedding availability, trust keys, MCP shapes.
+
+Cite an existing decision or get an explicit call before changing defaults or
+memory formation. Flag-gated "intended" features left forever-off are dead
+code — either default them with proof or delete; "wired" ≠ "default-on".
+
+## 3. Honest claims only
+
+| Claim | Means |
+| --- | --- |
+| implemented | code+tests on this worktree |
+| matrix/gate passed | fresh run proves the named KPI |
+| ready to merge/push | verify + review + intended diff; full typecheck/test when pushing |
+
+- Never collapse these. `IMPLEMENTATION_CLEAN` ≠ gate passed. Green build ≠
+  lifecycle/runtime closed.
+- Re-check prior findings against live code; classify `fixed` / `stale` /
+  `overclaimed` / backlog — do not implement stale prose.
+- SLIs measure what they claim. Retrieval fail-open that hides empty hits is a
+  measurement lie. Cover-ups (empty catch, weakened tests, fixture edits) are
+  defects.
+- Trust live `git` / files over GitNexus when they conflict. Advisory hooks ≠
+  hard enforcement; validators ≠ tracked delivery completeness.
+
+## 4. Mode and artifact discipline
+
+- `先不写代码` / planning-only → update `.do-it` artifacts; do not edit source.
+- `只读验收` / `不要修改文件` → verdict only: Blocking/Important + evidence +
+  explicit `NOT_CHECKED`; no repair drift.
+- When the user points at a report/plan/findings file, that artifact is the
+  acceptance checklist.
+- If asked to list workers, put actual subagent/lane list at the top.
+- Optimize for minimal prompt ceremony and high execution quality.
+- Prefer `rtk`-prefixed commands; if the wrapper blocks inspection, use a
+  wrapper-safe variant rather than inventing raw flags.
+
+## 5. Source hygiene
+
+```ts
+// ❌ // G3 deep head / G5 coverage may reorder vs fused_rank
+// ✅ // Lexical family must not override independent embedding dominance.
+```
+
+Why-not-what only; one terse line. No ticket/wave/item IDs, experiment labels,
+or sales-pitch design comments. One reason to change per module; reuse before
+repeat; respect AGENTS.md size/phase limits. New tests: prefer real
+better-sqlite3 over mock soup.
+
+## 6. Multi-agent / worktree / review
+
+- Edit only the named worktree. Parallel waves → one branch per worktree from
+  fresh main; parent owns integration. Do not edit read-only benchmark trees.
+- Do not commit/push/merge/delete branches unless explicitly asked (or the user
+  already authorized that closeout).
+- Subagents: goal + ownership + closing evidence. Do not abort a mid-edit
+  worker on transient diagnostics — review products when the lane finishes.
+- Honor model allow-lists. Parent keeps final judgment; worker summaries are
+  not closeout proof.
+- Review/fix-loop: Nice-to-have findings must also be fixed before closeout
+  (rerun reviewer only if that fix expands scope/behavior/risk). Fix
+  pre-existing nits in remediation passes — do not defer as out-of-scope.
+  Blocking/Important still need a fresh reviewer pass.
