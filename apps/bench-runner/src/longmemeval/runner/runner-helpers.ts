@@ -47,7 +47,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BENCH_EMBEDDING_MODEL = "text-embedding-3-small";
 const PINNED_META_ROOT = resolve(
   __dirname,
-  "../../../../docs/bench-history/datasets"
+  "../../../../../docs/bench-history/datasets"
 );
 
 

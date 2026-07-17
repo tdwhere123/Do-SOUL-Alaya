@@ -278,9 +278,21 @@ async function loadExtractionAuthority(
   cacheRoot: string
 ): Promise<ReceiptBoundExtractionAuthority> {
   const receipt = readExtractionAuthorityReceipt(options.authorityReceiptPath!);
+  assertDirectDeepSeek500MetadataScope(options, receipt);
   const inspection = await inspectReceiptAuthority(options, cacheRoot, receipt);
   assertAuthorityInspection(receipt, inspection, cacheRoot);
   return Object.freeze({ receipt });
+}
+
+function assertDirectDeepSeek500MetadataScope(
+  options: ExtractionFillOptions,
+  receipt: ExtractionAuthorityReceipt
+): void {
+  if (receipt.direct_spend !== undefined && options.pinnedMetaRoot !== undefined) {
+    throw new ExtractionCacheInvariantError(
+      "direct DeepSeek 500 extraction cannot use pinnedMetaRoot (--pinned-meta-root)"
+    );
+  }
 }
 
 async function revalidateExtractionAuthority(

@@ -1,11 +1,41 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+
+const markerWriteFailure = vi.hoisted(() => ({ enabled: false, writeContent: false }));
+const rootStatFailure = vi.hoisted(() => ({ path: undefined as string | undefined }));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const path = await import("node:path");
+  const actualLstatSync = actual.lstatSync;
+  const actualWriteFileSync = actual.writeFileSync;
+  return {
+    ...actual,
+    lstatSync(...args: Parameters<typeof actualLstatSync>) {
+      if (rootStatFailure.path === String(args[0])) {
+        throw new Error("simulated root stat failure");
+      }
+      return actualLstatSync(...args);
+    },
+    writeFileSync(...args: Parameters<typeof actualWriteFileSync>) {
+      if (markerWriteFailure.enabled &&
+          String(args[0]).endsWith(".alaya-direct-deepseek-500-root.json")) {
+        if (markerWriteFailure.writeContent) {
+          actualWriteFileSync(path.join(path.dirname(String(args[0])), "content.json"), "{}\n", "utf8");
+        }
+        throw new Error("simulated marker write failure");
+      }
+      return actualWriteFileSync(...args);
+    }
+  };
+});
 import {
   assertDirectDeepSeek500Authorization,
   assertDirectDeepSeek500RootBinding,
-  createFreshDirectDeepSeek500Authorization
+  createFreshDirectDeepSeek500Authorization,
+  discardFreshDirectDeepSeek500Authorization
 } from "../../../../longmemeval/extraction/authority/direct-deepseek-500.js";
 import {
   createExtractionAuthorityReceipt,
@@ -16,6 +46,9 @@ import {
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
+  markerWriteFailure.enabled = false;
+  markerWriteFailure.writeContent = false;
+  rootStatFailure.path = undefined;
   for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
 });
 
@@ -102,6 +135,65 @@ it("limits the 64-way authority envelope to the direct DeepSeek scope", () => {
     inspection: availableInspection(),
     maxConcurrency: 33
   })).toThrow(/1-32/u);
+});
+
+it("retires only an unchanged empty direct target after failed authorization", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const authorization = createFreshDirectDeepSeek500Authorization({
+    cacheRoot,
+    operator: "local-operator"
+  });
+
+  discardFreshDirectDeepSeek500Authorization({ authorization, cacheRoot });
+  expect(existsSync(cacheRoot)).toBe(false);
+
+  const retainedRoot = join(parent, "retained-cache");
+  const retained = createFreshDirectDeepSeek500Authorization({
+    cacheRoot: retainedRoot,
+    operator: "local-operator"
+  });
+  writeFileSync(join(retainedRoot, "content.json"), "{}\n", "utf8");
+  discardFreshDirectDeepSeek500Authorization({ authorization: retained, cacheRoot: retainedRoot });
+  expect(existsSync(retainedRoot)).toBe(true);
+  expect(existsSync(join(retainedRoot, ".alaya-direct-deepseek-500-root.json"))).toBe(true);
+});
+
+it("removes an empty fresh root when marker creation fails", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  markerWriteFailure.enabled = true;
+
+  expect(() => createFreshDirectDeepSeek500Authorization({
+    cacheRoot,
+    operator: "local-operator"
+  })).toThrow(/simulated marker write failure/u);
+  expect(existsSync(cacheRoot)).toBe(false);
+});
+
+it("retains a fresh root when marker creation races with content", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  markerWriteFailure.enabled = true;
+  markerWriteFailure.writeContent = true;
+
+  expect(() => createFreshDirectDeepSeek500Authorization({
+    cacheRoot,
+    operator: "local-operator"
+  })).toThrow(/simulated marker write failure/u);
+  expect(existsSync(join(cacheRoot, "content.json"))).toBe(true);
+});
+
+it("removes an empty fresh root when root inspection fails", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  rootStatFailure.path = cacheRoot;
+
+  expect(() => createFreshDirectDeepSeek500Authorization({
+    cacheRoot,
+    operator: "local-operator"
+  })).toThrow(/simulated root stat failure/u);
+  expect(existsSync(cacheRoot)).toBe(false);
 });
 
 function createTemporaryRoot(): string {

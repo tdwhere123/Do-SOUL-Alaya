@@ -15,7 +15,7 @@ import type { LongMemEvalSelectionAssignment } from "@do-soul/alaya-eval";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR_ROOT = path.resolve(__dirname, "../../data/longmemeval");
+const DATA_DIR_ROOT = path.resolve(__dirname, "../../../data/longmemeval");
 const HUGGINGFACE_BASE =
   "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main";
 
@@ -36,11 +36,11 @@ const UPSTREAM_FILENAME: Record<LongMemEvalVariant, string> = {
 // is only a fetch-time scratch record and is NOT load-bearing.
 const PINNED_META_ROOT = path.resolve(
   __dirname,
-  "../../../../docs/bench-history/datasets"
+  "../../../../../docs/bench-history/datasets"
 );
-// @anchor pinned-meta-root-path: 4 segments up from
-// apps/bench-runner/dist/longmemeval/ -> apps/bench-runner/dist/ ->
-// apps/bench-runner/ -> apps/ -> repo-root, then docs/bench-history/datasets.
+// @anchor pinned-meta-root-path: 5 segments up from
+// apps/bench-runner/dist/longmemeval/ingestion/ -> apps/bench-runner/dist/longmemeval/ ->
+// apps/bench-runner/dist/ -> apps/bench-runner/ -> apps/ -> repo-root, then docs/bench-history/datasets.
 
 // Variant ids ("longmemeval_oracle", "longmemeval_s", ...) match the meta
 // filename stem directly: docs/bench-history/datasets/<variant>.meta.json.

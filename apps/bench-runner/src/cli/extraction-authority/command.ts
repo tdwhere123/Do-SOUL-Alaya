@@ -82,7 +82,7 @@ async function buildAuthorizedReceipt(
   const flags = parseFlags(args);
   const authority = parseAuthorizeExtractionArgs(args);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
-  const directSpend = createDirectSpend(authority, cacheRoot, deps);
+  const directSpend = createDirectSpend(authority, flags, cacheRoot, deps);
   onFreshDirectSpend(directSpend, cacheRoot);
   const { inspection, ledger } = await inspectAuthorityForReceipt(
     flags, authority, cacheRoot, deps
@@ -96,15 +96,26 @@ async function buildAuthorizedReceipt(
 
 function createDirectSpend(
   authority: AuthorizeExtractionArgs,
+  flags: ReturnType<typeof parseFlags>,
   cacheRoot: string,
   deps: AuthorizeExtractionDependencies
 ) {
-  return authority.directDeepSeek500Operator === undefined
-    ? undefined
-    : (deps.createDirectSpend ?? createFreshDirectDeepSeek500Authorization)({
-      cacheRoot,
-      operator: authority.directDeepSeek500Operator
-    });
+  if (authority.directDeepSeek500Operator === undefined) return undefined;
+  assertDirectDeepSeek500Scope(flags);
+  return (deps.createDirectSpend ?? createFreshDirectDeepSeek500Authorization)({
+    cacheRoot,
+    operator: authority.directDeepSeek500Operator
+  });
+}
+
+function assertDirectDeepSeek500Scope(flags: ReturnType<typeof parseFlags>): void {
+  if (flags.variant !== "longmemeval_s" || flags.offset !== 0 || flags.limit !== 500 ||
+      flags.pinnedMetaRoot !== undefined || flags.promotionContract !== undefined ||
+      flags.r3SpendApproval !== undefined) {
+    throw new Error(
+      "direct DeepSeek 500 requires canonical longmemeval_s 0..500 without custom metadata or R3 evidence"
+    );
+  }
 }
 
 async function inspectAuthorityForReceipt(

@@ -122,13 +122,38 @@ describe("500Q expansion fill authority", () => {
     }, "/cache")).resolves.toBeUndefined();
   });
 
-  it("does not let custom pinned metadata bypass the canonical 500Q R3 gate", async () => {
+  it.each([500, 501, 1_000])(
+    "does not let custom pinned metadata bypass the canonical 500Q R3 gate (%s)",
+    async (limit) => {
     state.dataset = { ...datasetFixture(), promotionAuthority: null };
-    await expect(prepareExpansionFillAuthority({
+    const extractorFactory = vi.fn();
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      limit,
+      pinnedMetaRoot: "/custom-meta",
+      cacheRoot: "/must-not-lock",
+      extractorFactory
+    })).rejects.toThrow(/promotion-authorized dataset/u);
+    expect(extractorFactory).not.toHaveBeenCalled();
+  });
+
+  it("does not let a larger custom pinned dataset bypass a selected 500Q R3 gate", async () => {
+    const fixture = datasetFixture();
+    state.dataset = {
+      ...fixture,
+      questions: [...fixture.questions, ...fixture.questions],
+      promotionAuthority: null
+    };
+    const extractorFactory = vi.fn();
+
+    await expect(runExtractionFill({
       variant: "longmemeval_s",
       limit: 500,
-      pinnedMetaRoot: "/custom-meta"
-    }, "/cache")).rejects.toThrow(/promotion-authorized dataset/u);
+      pinnedMetaRoot: "/custom-meta",
+      cacheRoot: "/must-not-lock",
+      extractorFactory
+    })).rejects.toThrow(/promotion-authorized dataset/u);
+    expect(extractorFactory).not.toHaveBeenCalled();
   });
 
   it("rejects extraction concurrency above the product ceiling before I/O", async () => {
@@ -151,6 +176,18 @@ describe("500Q expansion fill authority", () => {
       cacheRoot: "/must-not-lock",
       extractorFactory
     })).rejects.toThrow(/negative offsets/u);
+    expect(extractorFactory).not.toHaveBeenCalled();
+  });
+
+  it("rejects fractional windows before JavaScript slice can normalize them", async () => {
+    const extractorFactory = vi.fn();
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      offset: 0.5,
+      limit: 500,
+      cacheRoot: "/must-not-lock",
+      extractorFactory
+    })).rejects.toThrow(/non-integer offsets/u);
     expect(extractorFactory).not.toHaveBeenCalled();
   });
 

@@ -211,6 +211,22 @@ it("retires a newly created direct target when its offline inspection fails", as
   expect(stderr).toHaveBeenCalledWith(expect.stringContaining("dataset preflight failed"));
 });
 
+it("rejects custom pinned metadata before creating a direct target root", async () => {
+  const createDirectSpend = vi.fn();
+  const inspect = vi.fn();
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runAuthorizeExtractionCommand([
+    ...directAuthorizeArgs(),
+    "--pinned-meta-root", "/custom-meta"
+  ], { createDirectSpend, inspect });
+
+  expect(exitCode).toBe(2);
+  expect(createDirectSpend).not.toHaveBeenCalled();
+  expect(inspect).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("canonical longmemeval_s"));
+});
+
 function authorizeArgs(): string[] {
   return [
     "--variant", "s",

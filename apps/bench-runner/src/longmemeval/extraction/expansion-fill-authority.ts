@@ -90,7 +90,7 @@ function requiresCanonicalExpansionAuthority(
     return false;
   }
   if (dataset.promotionAuthority === null) {
-    if (isCanonicalFullExpansionRequest(options, dataset.questions.length)) {
+    if (selectsFiveHundredQuestions(options, dataset.questions.length)) {
       throw invariant("canonical 500Q extraction requires a promotion-authorized dataset");
     }
     assertCapabilityAbsent(options.expansionCapability);
@@ -106,12 +106,16 @@ function requiresCanonicalExpansionAuthority(
   return true;
 }
 
-function isCanonicalFullExpansionRequest(
+function selectsFiveHundredQuestions(
   options: ExpansionFillAuthorityOptions,
   questionCount: number
 ): boolean {
-  return (options.offset ?? 0) === 0 &&
-    (options.limit ?? questionCount) === 500;
+  const offset = Math.max(0, options.offset ?? 0);
+  const sliceEnd = options.limit === undefined
+    ? questionCount
+    : offset + options.limit;
+  const selectedQuestionCount = Math.max(0, Math.min(questionCount, sliceEnd) - offset);
+  return selectedQuestionCount >= 500;
 }
 
 function prepareCanonicalExpansionFillAuthority(
@@ -370,8 +374,14 @@ function sourceCacheAuthority(capability: LongMemEvalExpansionCapability) {
 }
 
 function assertNonnegativeExpansionWindow(options: ExpansionFillAuthorityOptions): void {
-  if ((options.offset ?? 0) >= 0) return;
-  throw invariant("negative offsets cannot normalize into a canonical 500Q fill");
+  const offset = options.offset ?? 0;
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw invariant("negative offsets or non-integer offsets cannot normalize into a canonical 500Q fill");
+  }
+  if (options.limit !== undefined &&
+      (!Number.isSafeInteger(options.limit) || options.limit < 0)) {
+    throw invariant("extraction fill limit must be a non-negative safe integer");
+  }
 }
 
 function classifyCanonicalExpansionWindow(

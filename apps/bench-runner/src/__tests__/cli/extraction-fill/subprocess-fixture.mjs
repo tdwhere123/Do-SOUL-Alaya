@@ -30,7 +30,7 @@ const server = await createServer({
 try {
   const cli = await server.ssrLoadModule("/apps/bench-runner/src/cli/cli-commands.ts");
   const fill = await server.ssrLoadModule(
-    "/apps/bench-runner/src/longmemeval/extraction-fill.ts"
+    "/apps/bench-runner/src/longmemeval/extraction/extraction-fill.ts"
   );
   const authorityInspection = await server.ssrLoadModule(
     "/apps/bench-runner/src/longmemeval/extraction/authority/inspection.ts"

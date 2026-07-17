@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmdirSync,
@@ -81,8 +82,16 @@ export function discardFreshDirectDeepSeek500Authorization(input: {
 }): void {
   try {
     assertDirectDeepSeek500RootBinding(input);
-    unlinkSync(markerPath(canonicalRoot(input.cacheRoot)));
-    rmdirSync(canonicalRoot(input.cacheRoot));
+    const root = canonicalRoot(input.cacheRoot);
+    if (!hasOnlyRootMarker(root)) return;
+    const marker = markerPath(root);
+    const markerBytes = readFileSync(marker);
+    unlinkSync(marker);
+    try {
+      rmdirSync(root);
+    } catch {
+      restoreRootMarker(root, input.authorization, markerBytes);
+    }
   } catch {
     // A failed preflight must never remove a root that acquired content or changed identity.
   }
@@ -124,15 +133,18 @@ function createFreshRoot(root: string): {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`direct DeepSeek 500 target root must be new: ${detail}`);
   }
-  const stat = lstatSync(root, { bigint: true });
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error("direct DeepSeek 500 target root is not a real directory");
+  let identity: { readonly device: string; readonly inode: string } | undefined;
+  try {
+    const stat = lstatSync(root, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new Error("direct DeepSeek 500 target root is not a real directory");
+    }
+    identity = Object.freeze({ device: stat.dev.toString(), inode: stat.ino.toString() });
+    return Object.freeze({ ...identity, markerSha256: writeRootMarker(root) });
+  } catch (cause) {
+    discardEmptyUninitializedRoot(root, identity);
+    throw cause;
   }
-  return Object.freeze({
-    device: stat.dev.toString(),
-    inode: stat.ino.toString(),
-    markerSha256: writeRootMarker(root)
-  });
 }
 
 function canonicalRoot(cacheRoot: string): string {
@@ -166,6 +178,43 @@ function readMarkerSha256(root: string): string {
 
 function markerPath(root: string): string {
   return join(root, ROOT_MARKER_FILENAME);
+}
+
+function hasOnlyRootMarker(root: string): boolean {
+  const entries = readdirSync(root);
+  return entries.length === 1 && entries[0] === ROOT_MARKER_FILENAME;
+}
+
+function discardEmptyUninitializedRoot(
+  root: string,
+  identity: { readonly device: string; readonly inode: string } | undefined
+): void {
+  try {
+    if (identity !== undefined) {
+      const stat = lstatSync(root, { bigint: true });
+      if (!stat.isDirectory() || stat.isSymbolicLink() ||
+          stat.dev.toString() !== identity.device || stat.ino.toString() !== identity.inode) return;
+    }
+    rmdirSync(root);
+  } catch {
+    // An initialization failure must not remove content or a root whose identity changed.
+  }
+}
+
+function restoreRootMarker(
+  root: string,
+  authorization: DirectDeepSeek500SpendAuthorization,
+  markerBytes: Uint8Array
+): void {
+  try {
+    const stat = lstatSync(root, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink() ||
+        stat.dev.toString() !== authorization.cache_root_device ||
+        stat.ino.toString() !== authorization.cache_root_inode) return;
+    writeFileSync(markerPath(root), markerBytes, { flag: "wx" });
+  } catch {
+    // The target changed after marker removal, so it must remain untouched.
+  }
 }
 
 function hashBytes(bytes: Uint8Array): string {
