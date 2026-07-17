@@ -1,0 +1,46 @@
+---
+description: Durable Alaya recall/bench lessons — ranking vs coverage, CJK, measurement traps
+alwaysApply: true
+---
+
+# Alaya Domain Hard Lessons
+
+Compressed from Claude project memory and recall waves. Do not re-learn by
+reverting these. Algorithm details live in `.do-it/findings` / handbook — this
+is the behavioral guardrail.
+
+## Ranking vs coverage
+
+- Recall is two problems: (1) relevance ranking, (2) answer-set coverage.
+  Coverage/path/session signals in point-wise ranking often destroy ranking;
+  put set-coverage in delivery, not as a ranking replace.
+- Prefer additive RRF (or flat additive) as the ranking base; use axes as
+  bounded refinement on top (compose, do not replace). Saturating noisy-OR /
+  multiplicative collapses that bury embedding rescue have already failed
+  catastrophically in bench — do not revive without new independent proof.
+- Structural/topology "reserve" injection and correlated lexical double-count
+  can look like gains while injecting noise — measure both any@5 and
+  full-gold / single-fact, not one KPI.
+
+## Measurement honesty
+
+- R@5 any-gold alone is a trap; full-gold / coverage is often the real wall.
+- Embedding-ON claims need proof the embedding path is actually live (silent
+  OFF has happened). Cosine is within-model only — do not treat raw cosine as
+  a cross-model magnitude.
+- Judge/answer model choice can deflate preference scores; blame recall only
+  after ruling out judge/harness artifacts.
+- Single-card A/B is a probe, not a death sentence — think read/write/recall
+  as one pipeline. Neutral results can expose the next seam.
+- Benchmark scope is exact: if the user says recall-only / no chat / no QA,
+  keep that boundary. Defer benches until explicitly reopened. Align cache
+  manifest, extraction model, and prompt hash before launch.
+
+## Product / i18n / hygiene
+
+- Multilingual from the start: CJK must segment in tokenizers and lexical
+  overlap metrics — English whitespace tokenizers silently break HQ/facet.
+- Do not re-propose already-landed-and-neutral levers (anchor lane, workspace
+  activation weight, claim-key write-side for preference) without new evidence.
+- Prefer worktree isolation for parallel waves; archive superseded `.do-it`
+  plan/findings layers before pointing runtime at a new card.
