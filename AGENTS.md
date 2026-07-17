@@ -87,3 +87,14 @@ Policy: `docs/bench-history/README.md`.
 
 - Experiments → gitignored `.do-it/bench-runs/`; never commit.
 - Full-dataset baselines → `docs/bench-history/` via `latest-*.json` only.
+
+## CodeGraph
+
+Local code-intelligence graph (MCP + CLI). Each **git worktree needs its own
+index** — do not borrow the main checkout's `.codegraph/`.
+
+- **On every new worktree:** from that worktree root run `codegraph init -i`
+  before relying on `codegraph_explore` / `codegraph explore`.
+- After init, the MCP server auto-syncs edits in that tree; if a response
+  flags pending sync, `Read` the named files directly.
+- If `.codegraph/` is missing, skip CodeGraph and use normal search/read.
