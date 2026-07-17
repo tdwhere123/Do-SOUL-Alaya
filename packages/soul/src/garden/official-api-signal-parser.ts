@@ -6,7 +6,10 @@ import {
   type OfficialApiTemporalProjectionDraft
 } from "./temporal/observed-projection.js";
 
-const MAX_OFFICIAL_API_SIGNALS = 64;
+export const OFFICIAL_API_SIGNAL_LIMIT = 64;
+// invariant: C0 cache reuse binds this parser behavior explicitly rather than
+// inferring compatibility from raw cache identity alone.
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v1";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
@@ -189,7 +192,7 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
   }
 
   const drafts: OfficialApiSignalDraft[] = [];
-  for (const candidate of envelope.signals.slice(0, MAX_OFFICIAL_API_SIGNALS)) {
+  for (const candidate of envelope.signals.slice(0, OFFICIAL_API_SIGNAL_LIMIT)) {
     const draft = parseOfficialApiSignalEntry(candidate);
     if (draft !== null) {
       drafts.push(draft);
@@ -213,7 +216,7 @@ export function parseOfficialApiSignals(content: string): readonly OfficialApiSi
 function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalDraft[] {
   const drafts: OfficialApiSignalDraft[] = [];
   for (const element of salvageRawSignalElements(content)) {
-    if (drafts.length >= MAX_OFFICIAL_API_SIGNALS) {
+    if (drafts.length >= OFFICIAL_API_SIGNAL_LIMIT) {
       break;
     }
     let candidate: unknown;
@@ -238,6 +241,11 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
   return Object.freeze(drafts);
 }
 
+export interface RawOfficialApiSignalElementInspection {
+  readonly elements: readonly string[];
+  readonly truncated_final_element: boolean;
+}
+
 // Walk the `signals` array region of an envelope and return each top-level
 // `{...}` element as an independent substring. String-aware (braces inside a
 // JSON string literal do not change depth; `\` escapes the next char) so a
@@ -246,16 +254,14 @@ function salvageOfficialApiSignals(content: string): readonly OfficialApiSignalD
 // balanced elements are returned. Returns [] when no `signals` array region
 // is found; the production parsing path treats that as a hard failure.
 //
-// Exported so the LongMemEval bench seed path can count the RAW salvageable
-// element population (lastTurnRawSignalCount) when the strict envelope parse
-// fails — otherwise the dropped corrupt entries would vanish from the
-// parse-drop attribution instead of landing in parseDropped.
+// The inspection preserves the dropped-final-element fact so offline audit
+// tooling can account for it without changing production parse behavior.
 // see also: apps/bench-runner/src/longmemeval/compile-seed.ts
 //   countRawEnvelopeSignals
-export function salvageRawSignalElements(content: string): readonly string[] {
+export function inspectRawOfficialApiSignalElements(content: string): RawOfficialApiSignalElementInspection {
   const signalsKeyIndex = findSignalsArrayStart(content);
   if (signalsKeyIndex < 0) {
-    return [];
+    return { elements: [], truncated_final_element: false };
   }
   const elements: string[] = [];
   let depth = 0;
@@ -297,9 +303,18 @@ export function salvageRawSignalElements(content: string): readonly string[] {
       break;
     }
   }
-  // An element still open (depth > 0 / elementStart set) at end-of-buffer is
-  // the truncated final element — intentionally NOT pushed.
-  return elements;
+  return {
+    elements,
+    truncated_final_element: depth > 0 && elementStart >= 0
+  };
+}
+
+// Exported so the LongMemEval bench seed path can count the RAW salvageable
+// element population (lastTurnRawSignalCount) when the strict envelope parse
+// fails — otherwise the dropped corrupt entries would vanish from the
+// parse-drop attribution instead of landing in parseDropped.
+export function salvageRawSignalElements(content: string): readonly string[] {
+  return inspectRawOfficialApiSignalElements(content).elements;
 }
 
 // Find the index of the `[` that opens the `signals` array, scanning past the
@@ -318,7 +333,7 @@ function findSignalsArrayStart(content: string): number {
 // null — instead of throwing — when the entry is malformed (hallucinated
 // signal_kind, missing object_kind / matched_text / confidence, or a
 // non-object element), so one bad fact is dropped while the rest survive.
-function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft | null {
+export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSignalDraft | null {
   const parsed = OfficialApiSignalEntrySchema.safeParse(candidate);
   if (!parsed.success) {
     return null;

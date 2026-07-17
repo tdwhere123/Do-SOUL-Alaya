@@ -36,8 +36,21 @@ import {
   type OfficialApiExtractorMeta
 } from "./official-api/request-diagnostic.js";
 
-export { parseOfficialApiSignals, salvageRawSignalElements } from "./official-api-signal-parser.js";
+export {
+  OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
+  parseOfficialApiSignals,
+  salvageRawSignalElements
+} from "./official-api-signal-parser.js";
 export type { OfficialApiSignalDraft } from "./official-api-signal-parser.js";
+export {
+  OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
+  auditOfficialApiSignalFormation,
+  type OfficialApiSignalAuditDisposition,
+  type OfficialApiSignalAuditStage,
+  type OfficialApiSignalFormationAuditEntry,
+  type OfficialApiSignalFormationAuditInput,
+  type OfficialApiSignalFormationAuditResult
+} from "./official-api/formation-audit.js";
 
 export const GardenProviderKind = GardenProviderKinds;
 export type GardenProviderKind = GardenProviderKindValue;

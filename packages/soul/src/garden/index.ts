@@ -36,12 +36,20 @@ export {
   GardenProviderKind,
   GardenProviderError,
   OFFICIAL_API_GARDEN_MODEL,
+  OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION,
+  OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
   OFFICIAL_API_SYSTEM_PROMPT,
   OfficialApiGardenProvider,
+  auditOfficialApiSignalFormation,
   parseOfficialApiSignals,
   salvageRawSignalElements,
   type GardenCompileContext,
   type GardenComputeProvider,
+  type OfficialApiSignalAuditDisposition,
+  type OfficialApiSignalAuditStage,
+  type OfficialApiSignalFormationAuditEntry,
+  type OfficialApiSignalFormationAuditInput,
+  type OfficialApiSignalFormationAuditResult,
   type OfficialApiSignalDraft
 } from "./compute-provider.js";
 export {
