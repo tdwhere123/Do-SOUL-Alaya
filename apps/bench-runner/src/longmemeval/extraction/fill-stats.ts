@@ -6,6 +6,8 @@ import type {
 export interface FillRetryTelemetry {
   readonly retrySuccesses: number;
   readonly rateLimitRetries: number;
+  readonly adaptiveConcurrencyBackoffs: number;
+  readonly adaptiveConcurrencyBackoffMs: number;
   readonly terminalRetryClassifications: Readonly<
     Record<BenchTerminalRetryClassification, number>
   >;
@@ -22,6 +24,8 @@ export function newFillStats(): CompileSeedExtractionStats {
     cachedExtractionFailures: 0,
     retrySuccesses: 0,
     rateLimitRetries: 0,
+    adaptiveConcurrencyBackoffs: 0,
+    adaptiveConcurrencyBackoffMs: 0,
     terminalRetryClassifications: {},
     factsProduced: 0,
     signalsDropped: 0,
@@ -43,6 +47,8 @@ export function readFillRetryTelemetry(
   return {
     retrySuccesses: stats.retrySuccesses ?? 0,
     rateLimitRetries: stats.rateLimitRetries ?? 0,
+    adaptiveConcurrencyBackoffs: stats.adaptiveConcurrencyBackoffs ?? 0,
+    adaptiveConcurrencyBackoffMs: stats.adaptiveConcurrencyBackoffMs ?? 0,
     terminalRetryClassifications: {
       failure_max_retries: terminal.failure_max_retries ?? 0,
       failure_non_retryable_4xx: terminal.failure_non_retryable_4xx ?? 0,

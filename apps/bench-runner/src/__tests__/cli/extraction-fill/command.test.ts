@@ -42,6 +42,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it("blocks a bare extraction-fill command before it can reach live extraction", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => ({ requestedTurns: 0 }));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command(
+    { variant: "longmemeval_oracle" } as ParsedFlags,
+    { runExtractionFill: run, signalSource }
+  );
+
+  expect(exitCode).toBe(2);
+  expect(run).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(
+    expect.stringContaining("--extraction-authority")
+  );
+});
+
 it.each([
   ["SIGINT", 130],
   ["SIGTERM", 143]
@@ -78,5 +99,8 @@ async function invokeCommand(deps: {
     opts: ParsedFlags,
     dependencies: typeof deps
   ) => Promise<number>;
-  return command({ variant: "longmemeval_oracle" } as ParsedFlags, deps);
+  return command({
+    variant: "longmemeval_oracle",
+    extractionAuthority: "/fixture/extraction-authority.json"
+  } as ParsedFlags, deps);
 }

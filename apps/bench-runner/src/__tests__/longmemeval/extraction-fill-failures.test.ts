@@ -11,6 +11,14 @@ import { readExtractionCacheManifest } from "../../longmemeval/extraction-cache-
 import type { BenchSignalExtractor } from "../../longmemeval/compile-seed.js";
 import { cacheFilePath, computeCacheKey } from "../../longmemeval/compile-seed-cache.js";
 import {
+  inspectExtractionAuthority,
+  readCurrentExtractionAuthorityRevision
+} from "../../longmemeval/extraction/authority/inspection.js";
+import {
+  createExtractionAuthorityReceipt,
+  writeExtractionAuthorityReceipt
+} from "../../longmemeval/extraction/authority/receipt.js";
+import {
   acquireExtractionCacheWriteLease,
   withExtractionCacheWriteLease
 } from "../../longmemeval/extraction/fill-root-guard.js";
@@ -118,6 +126,7 @@ describe("runExtractionFill", () => {
       choices: [{ message: { content: '{"signals":[]}' } }]
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
+    const authorityReceiptPath = await writeLiveAuthorityReceipt();
 
     await runExtractionFill({
       variant: VARIANT,
@@ -125,6 +134,7 @@ describe("runExtractionFill", () => {
       dataDir,
       pinnedMetaRoot,
       concurrency: 1,
+      authorityReceiptPath,
       log: () => undefined
     });
 
@@ -215,3 +225,34 @@ describe("runExtractionFill", () => {
 
 
 });
+
+async function writeLiveAuthorityReceipt(): Promise<string> {
+  const inspection = await inspectExtractionAuthority({
+    variant: VARIANT,
+    cacheRoot,
+    dataDir,
+    pinnedMetaRoot,
+    revision: readCurrentExtractionAuthorityRevision(),
+    action: "fill"
+  });
+  const receipt = createExtractionAuthorityReceipt({
+    action: "fill",
+    observation: inspection.observation,
+    outputTokenCap: { field: "max_tokens", value: 512 },
+    priceEstimate: {
+      inputUsdPerMillion: 1,
+      outputUsdPerMillion: 2,
+      maximumInputTokensPerAttempt: 300
+    },
+    diskFloorBytes: 0,
+    inspection: {
+      writerLock: inspection.writerLock,
+      disk: inspection.disk,
+      credentialStatus: inspection.credentialStatus,
+      modelReadiness: inspection.modelReadiness
+    }
+  });
+  const path = join(cacheRoot, "authority-receipt.json");
+  writeExtractionAuthorityReceipt(path, receipt);
+  return path;
+}

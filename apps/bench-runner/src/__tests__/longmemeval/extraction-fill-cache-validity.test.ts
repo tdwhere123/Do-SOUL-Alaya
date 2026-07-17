@@ -175,9 +175,9 @@ describe("extraction-fill cache validity", () => {
       name: "ExtractionFillTaskError",
       retryClassification: "failure_max_retries"
     });
-    expect(logs.at(-1)).toMatch(
+    expect(logs).toEqual(expect.arrayContaining([expect.stringMatching(
       /retry_classification=failure_max_retries.*retry_successes=1.*rate_limit_retries=3/u
-    );
+    )]));
     expect(logs.some((message) => message.includes("[extraction-fill] done"))).toBe(false);
   });
 });

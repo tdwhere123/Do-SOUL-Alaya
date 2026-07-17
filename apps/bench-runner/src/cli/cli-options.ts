@@ -34,13 +34,14 @@ export interface ParsedFlags {
   readonly pinnedMetaRoot?: string;
   readonly questionManifest?: string;
   readonly extractionCacheRoot?: string;
+  /** Digest-bound extraction authority receipt required for live cache fills. */
+  readonly extractionAuthority?: string;
   readonly promotionContract?: string;
   readonly concurrency?: number;
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
-  // --qa: gate the end-to-end QA harness (answer-LLM + LLM-judge). Default off
-  // => zero LLM calls, zero cost, recall path + kpi bytes unchanged.
+  // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
   readonly qa: boolean;
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
   // modes only). Default off keeps embedding ON/OFF corpora comparable.
@@ -67,6 +68,7 @@ interface ParsedFlagsState {
   pinnedMetaRoot?: string;
   questionManifest?: string;
   extractionCacheRoot?: string;
+  extractionAuthority?: string;
   promotionContract?: string;
   concurrency?: number;
   legacySnapshot: boolean;
@@ -255,6 +257,16 @@ function consumeOtherPathFlags(
   }
   if (matchFlagToken(token, "--extraction-cache-root")) {
     state.extractionCacheRoot = readFlagValue(args, index, token, "--extraction-cache-root");
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-authority")) {
+    state.extractionAuthority = readRequiredFlagValue(
+      args,
+      index,
+      token,
+      "--extraction-authority",
+      "--extraction-authority requires a receipt path"
+    );
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--snapshot")) {
@@ -475,6 +487,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     pinnedMetaRoot: state.pinnedMetaRoot,
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
+    extractionAuthority: state.extractionAuthority,
     promotionContract: state.promotionContract,
     concurrency: state.concurrency,
     legacySnapshot: state.legacySnapshot,

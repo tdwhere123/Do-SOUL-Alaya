@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  initDatabase,
   readSchemaMigrationLedger
 } from "@do-soul/alaya-storage";
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,15 +51,15 @@ afterEach(async () => {
 });
 
 describe("legacy snapshot migration compatibility", () => {
-  it("checks the frozen producer before migrating only the working copy", async () => {
+  it("checks the frozen producer and refuses runtime migration of the working copy", async () => {
     const source = await sourceAtMigration();
     expect(() => assertLegacySnapshotSourceCompatibility(manifest(), source)).not.toThrow();
     const working = join(source, "..", "working.db");
     copyFileSync(source, working);
-    expect(() => prepareLegacySnapshotConsumer(manifest(), working)).not.toThrow();
+    expect(() => prepareLegacySnapshotConsumer(manifest(), working))
+      .toThrow(/offline candidate cutover/iu);
     expect(readSchemaMigrationLedger(source).at(-1)).toBe(103);
-    expect(readSchemaMigrationLedger(working).at(-1)).toBe(107);
-    initDatabase({ filename: working }).close();
+    expect(readSchemaMigrationLedger(working).at(-1)).toBe(103);
   });
 
   it("rejects a lower producer ledger", async () => {
@@ -69,8 +68,7 @@ describe("legacy snapshot migration compatibility", () => {
   });
 
   it("rejects a higher producer ledger", async () => {
-    const higher = await sourceAtMigration();
-    initDatabase({ filename: higher }).close();
+    const higher = await sourceAtMigration(107);
     expect(() => assertLegacySnapshotSourceCompatibility(manifest(), higher)).toThrow(/ledger mismatch/u);
   });
 

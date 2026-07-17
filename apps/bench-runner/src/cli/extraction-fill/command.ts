@@ -22,6 +22,13 @@ export async function runExtractionFillCommand(
   } = { runExtractionFill, signalSource: process }
 ): Promise<number> {
   try {
+    if (opts.extractionAuthority === undefined) {
+      process.stderr.write(
+        "alaya-bench-runner extraction-fill: live extraction is blocked without " +
+        "a digest-bound --extraction-authority receipt\n"
+      );
+      return 2;
+    }
     const expansionCapability = opts.promotionContract === undefined
       ? undefined
       : await (deps.verifyExpansionContract ??
@@ -38,6 +45,7 @@ export async function runExtractionFillCommand(
         ...(opts.extractionCacheRoot === undefined ? {} : {
           cacheRoot: opts.extractionCacheRoot
         }),
+        authorityReceiptPath: opts.extractionAuthority,
         ...(opts.pinnedMetaRoot === undefined ? {} : {
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),
@@ -67,10 +75,27 @@ function renderResult(
     `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
     `failures=0 retry_successes=${result.retrySuccesses} ` +
     `rate_limit_retries=${result.rateLimitRetries} ` +
+    `adaptive_backoffs=${result.adaptiveConcurrencyBackoffs} ` +
+    `adaptive_backoff_ms=${result.adaptiveConcurrencyBackoffMs} ` +
+    renderAuthorityTelemetry(result.authorityTelemetry) +
     `terminal_max_retries=${result.terminalRetryClassifications.failure_max_retries} ` +
     `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +
     `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
     `coverage=${pct(result.coverage)}\n`;
+}
+
+function renderAuthorityTelemetry(
+  telemetry: Awaited<ReturnType<typeof runExtractionFill>>["authorityTelemetry"]
+): string {
+  if (telemetry === undefined) return "authority=none ";
+  return `attempts=${telemetry.attempts}/${telemetry.maximumAttempts} ` +
+    `successful_shards=${telemetry.successfulShards}/${telemetry.successfulShardCeiling} ` +
+    `usage_input_tokens=${telemetry.telemetry.inputTokens} ` +
+    `usage_output_tokens=${telemetry.telemetry.outputTokens} ` +
+    `usage_total_tokens=${telemetry.telemetry.totalTokens} ` +
+    `usage_unavailable=${telemetry.telemetry.usageUnavailableRequests} ` +
+    `usage_unresolved=${telemetry.telemetry.unresolvedTransportAttempts} ` +
+    `usage_unknown=${telemetry.telemetry.usageUnknownAttempts} `;
 }
 
 function handleExtractionFillError(error: unknown): number {

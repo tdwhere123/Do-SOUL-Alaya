@@ -2,10 +2,12 @@ import { parseOfficialApiSignals } from "@do-soul/alaya-soul";
 import type {
   BenchRetryClassification,
   BenchSignalExtractor,
+  BenchProviderUsage,
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
 import { buildGardenHttpRequestInit } from "./extraction/http-request.js";
 import { extractContentFromChatCompletionBody } from "./extraction/chat-completion-response.js";
+import { extractUsageFromChatCompletionBody } from "./extraction/chat-completion-response.js";
 export { extractContentFromChatCompletionBody } from "./extraction/chat-completion-response.js";
 
 export const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
@@ -110,21 +112,24 @@ async function extractGardenHttpSignals(
   let rateLimitRetries = 0;
   let lastError: unknown = null;
   let lastClassification: BenchRetryClassification = "failure_max_retries";
-  while (attempt <= BENCH_HTTP_MAX_RETRIES) {
+  const maxRetries = input.retryMode === "disabled" ? 0 : BENCH_HTTP_MAX_RETRIES;
+  while (attempt <= maxRetries) {
     throwIfGardenHttpAborted(input, attempt, rateLimitRetries);
     try {
-      const rawJson = await runGardenHttpAttempt(
+      const response = await runGardenHttpAttempt(
         config,
         apiKey,
         deps,
         input,
         attempt
       );
-      return buildGardenHttpSuccess(rawJson, attempt, rateLimitRetries);
+      return buildGardenHttpSuccess(response, attempt, rateLimitRetries);
     } catch (error) {
       lastError = error;
       if (readStatusFromBenchError(error) === 429) rateLimitRetries += 1;
-      const decision = decideGardenHttpRetry(input, error, attempt, timeoutRetries);
+      const decision = decideGardenHttpRetry(
+        input, error, attempt, timeoutRetries, maxRetries
+      );
       lastClassification = decision.classification;
       if (!decision.retry) {
         throw wrapBenchTransportError(
@@ -210,7 +215,7 @@ async function runGardenHttpAttempt(
   deps: GardenHttpExtractorDeps,
   input: GardenHttpExtractInput,
   attempt: number
-): Promise<string> {
+): Promise<{ readonly rawJson: string; readonly usage?: BenchProviderUsage }> {
   const controller = new AbortController();
   const settlement = startGardenHttpAttemptSettlement(input, controller);
   let attemptSettled = false;
@@ -232,7 +237,12 @@ async function runGardenHttpAttempt(
       () => attemptSettled,
       attempt
     );
-    return extractValidGardenHttpContent(bodyText, response.headers.get("content-type"));
+    const contentType = response.headers.get("content-type");
+    const usage = extractUsageFromChatCompletionBody(bodyText, contentType);
+    return {
+      rawJson: extractValidGardenHttpContent(bodyText, contentType),
+      ...(usage === undefined ? {} : { usage })
+    };
   } catch (error) {
     throw markGardenHttpAttemptTimeout(error, settlement.hasTimedOut());
   } finally {
@@ -242,12 +252,13 @@ async function runGardenHttpAttempt(
 }
 
 function buildGardenHttpSuccess(
-  rawJson: string,
+  response: Awaited<ReturnType<typeof runGardenHttpAttempt>>,
   attempt: number,
   rateLimitRetries: number
 ): GardenHttpExtractResult {
   return {
-    rawJson,
+    rawJson: response.rawJson,
+    ...(response.usage === undefined ? {} : { usage: response.usage }),
     extractorMeta: {
       recoveryKind: "none",
       retryCount: attempt,
@@ -261,7 +272,8 @@ function decideGardenHttpRetry(
   input: GardenHttpExtractInput,
   error: unknown,
   attempt: number,
-  timeoutRetries: number
+  timeoutRetries: number,
+  maxRetries: number
 ): GardenHttpRetryDecision {
   if (input.abortSignal?.aborted === true && !readGardenHttpAttemptTimedOut(error)) {
     return { classification: "failure_aborted", retry: false, timeoutRetries };
@@ -270,8 +282,8 @@ function decideGardenHttpRetry(
     if (timeoutRetries >= BENCH_HTTP_MAX_TIMEOUT_RETRIES) {
       return { classification: "failure_timeout", retry: false, timeoutRetries };
     }
-    if (attempt >= BENCH_HTTP_MAX_RETRIES) {
-      return { classification: "failure_max_retries", retry: false, timeoutRetries };
+    if (attempt >= maxRetries) {
+      return { classification: "failure_timeout", retry: false, timeoutRetries };
     }
     return {
       classification: "failure_timeout",
@@ -280,7 +292,7 @@ function decideGardenHttpRetry(
     };
   }
   const classified = classifyBenchHttpError(error, readStatusFromBenchError(error));
-  if (!classified.retryable || attempt >= BENCH_HTTP_MAX_RETRIES) {
+  if (!classified.retryable || attempt >= maxRetries) {
     return {
       classification: classified.retryable ? "failure_max_retries" : classified.classification,
       retry: false,
@@ -348,6 +360,7 @@ type GardenHttpFetchInput = { readonly config: CompileSeedExtractionConfig; read
 async function fetchGardenHttpResponse(
   input: GardenHttpFetchInput
 ): Promise<Response> {
+  input.input.onTransportAttempt?.();
   const fetchPromise = input.deps.fetch(
     `${input.config.providerUrl}/chat/completions`,
     buildGardenHttpRequestInit(

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { BenchProviderUsage } from "../compile-seed-types.js";
 
 const ChatCompletionPayloadSchema = z.object({
   choices: z.array(z.object({
@@ -14,6 +15,20 @@ export function extractContentFromChatCompletionBody(
   return isSseChatCompletionBody(bodyText, contentType)
     ? extractContentFromSseChatCompletionBody(bodyText)
     : extractContentFromPlainChatCompletionBody(bodyText);
+}
+
+export function extractUsageFromChatCompletionBody(
+  bodyText: string,
+  contentType: string | null
+): BenchProviderUsage | undefined {
+  if (!isSseChatCompletionBody(bodyText, contentType)) return usageFromJson(bodyText);
+  let usage: BenchProviderUsage | undefined;
+  for (const rawLine of bodyText.split("\n")) {
+    const chunkText = readSseDataLine(rawLine);
+    if (chunkText === null || chunkText === "[DONE]") continue;
+    usage = usageFromJson(chunkText) ?? usage;
+  }
+  return usage;
 }
 
 function isSseChatCompletionBody(
@@ -97,4 +112,33 @@ function tryParseChatCompletionSseChunk(
     );
   }
   return result.data;
+}
+
+function usageFromJson(text: string): BenchProviderUsage | undefined {
+  try {
+    const parsed = JSON.parse(text) as { readonly usage?: unknown };
+    return toUsage(parsed.usage);
+  } catch {
+    return undefined;
+  }
+}
+
+function toUsage(value: unknown): BenchProviderUsage | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const usage = value as {
+    readonly prompt_tokens?: unknown;
+    readonly completion_tokens?: unknown;
+    readonly total_tokens?: unknown;
+  };
+  if (!isTokenCount(usage.prompt_tokens) || !isTokenCount(usage.completion_tokens) ||
+      !isTokenCount(usage.total_tokens)) return undefined;
+  return {
+    inputTokens: usage.prompt_tokens,
+    outputTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens
+  };
+}
+
+function isTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }

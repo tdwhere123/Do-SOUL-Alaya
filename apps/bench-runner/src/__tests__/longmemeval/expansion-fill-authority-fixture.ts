@@ -464,6 +464,11 @@ function completion(
     expectedKeySetSha256: key === canonicalKey
       ? exact.expected_key_set_sha256
       : key.repeat(64),
+    partialContentClosureSha256: closure === null
+      ? null
+      : closure === canonicalClosure
+        ? exact.content_closure_sha256
+        : closure.repeat(64),
     contentClosureSha256: closure === null
       ? null
       : closure === canonicalClosure

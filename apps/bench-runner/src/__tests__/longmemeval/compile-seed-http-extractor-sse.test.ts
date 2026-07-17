@@ -97,6 +97,21 @@ describe("createGardenHttpExtractor — SSE streaming body parse", () => {
     expect(result.extractorMeta?.retryClassification).toBe("success_first_try");
   });
 
+  it("retains exact provider usage emitted in the terminal SSE frame", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      makeSseResponse(
+        'data: {"choices":[{"delta":{"content":"{\\"signals\\":[]}"}}]}\n\n' +
+          'data: {"choices":[],"usage":{"prompt_tokens":13,"completion_tokens":5,"total_tokens":18}}\n\n' +
+          "data: [DONE]\n\n"
+      )
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    const result = await extractor.extract({ systemPrompt: "s", userPrompt: "t" });
+
+    expect(result.usage).toEqual({ inputTokens: 13, outputTokens: 5, totalTokens: 18 });
+  });
+
   it("classifies a [DONE]-only empty SSE stream as no-content (NOT a hang)", async () => {
     // yunwu's non-stream / empty answer shape. The empty-content guard must
     // throw so the run blocks on a real content failure instead of silently

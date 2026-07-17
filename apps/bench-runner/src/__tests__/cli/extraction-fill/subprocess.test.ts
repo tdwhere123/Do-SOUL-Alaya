@@ -59,7 +59,9 @@ async function runFixture(
       EXTRACTION_FILL_FIXTURE_ROOT: root,
       EXTRACTION_FILL_FIXTURE_MODE: mode,
       OFFICIAL_API_GARDEN_MODEL: "fixture-model",
-      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1"
+      ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE: "provider-default-v1",
+      ALAYA_OFFICIAL_GARDEN_SECRET_REF: "env:E0_SUBPROCESS_GARDEN_KEY",
+      E0_SUBPROCESS_GARDEN_KEY: "test-key"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });

@@ -32,8 +32,46 @@ try {
   const fill = await server.ssrLoadModule(
     "/apps/bench-runner/src/longmemeval/extraction-fill.ts"
   );
+  const authorityInspection = await server.ssrLoadModule(
+    "/apps/bench-runner/src/longmemeval/extraction/authority/inspection.ts"
+  );
+  const authorityReceipt = await server.ssrLoadModule(
+    "/apps/bench-runner/src/longmemeval/extraction/authority/receipt.ts"
+  );
+  const inspection = await authorityInspection.inspectExtractionAuthority({
+    variant: "longmemeval_oracle",
+    cacheRoot: join(fixtureRoot, "cache"),
+    dataDir: join(fixtureRoot, "data"),
+    pinnedMetaRoot: join(fixtureRoot, "pinned"),
+    revision: authorityInspection.readCurrentExtractionAuthorityRevision(),
+    action: "fill"
+  });
+  const receiptPath = join(fixtureRoot, "extraction-authority.json");
+  authorityReceipt.writeExtractionAuthorityReceipt(receiptPath,
+    authorityReceipt.createExtractionAuthorityReceipt({
+      action: "fill",
+      observation: inspection.observation,
+      outputTokenCap: { field: "max_tokens", value: 512 },
+      priceEstimate: {
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 2,
+        maximumInputTokensPerAttempt: 300
+      },
+      diskFloorBytes: 0,
+      inspection: {
+        writerLock: inspection.writerLock,
+        disk: inspection.disk,
+        credentialStatus: inspection.credentialStatus,
+        modelReadiness: inspection.modelReadiness
+      }
+    })
+  );
   const exitCode = await cli.runExtractionFillCommand(
-    { variant: "longmemeval_oracle", concurrency: 2 },
+    {
+      variant: "longmemeval_oracle",
+      concurrency: 2,
+      extractionAuthority: receiptPath
+    },
     {
       signalSource: process,
       runExtractionFill: (options) => fill.runExtractionFill({
@@ -59,6 +97,7 @@ function createFixtureExtractor(fixtureMode) {
   return {
     extract: async (input) => {
       calls += 1;
+      input.onTransportAttempt?.();
       if (fixtureMode === "terminal" && calls === 1) {
         await peerStarted;
         const error = new Error("sk-fixture-secret PROMPT_BODY");

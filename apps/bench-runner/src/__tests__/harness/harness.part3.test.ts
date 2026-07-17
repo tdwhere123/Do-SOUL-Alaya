@@ -163,7 +163,7 @@ afterEach(async () => {
 describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
   it(
-    "bench seed sourceMemoryRefs are first-class signal refs and submit derives_from path candidates",
+    "bench seed sourceMemoryRefs stay unasserted without a verified source observation",
     async () => {
       const daemon = await startBenchDaemon({
         workspaceId: "harness-first-class-ref-ws",
@@ -191,23 +191,19 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
 
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
+      expect(signal?.source_observation).toBeNull();
 
-      // sourceMemoryRefs fold into a governed derives_from path
-      // candidate (recall_bias +), not an edge_proposals row.
+      // A caller-supplied reference is preserved, but S4 does not mint a
+      // temporal relationship without a daemon-issued source observation.
       const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
-      expect(pathRow).toMatchObject({
-        relation_kind: "derives_from",
-        source_object_id: child.memoryId,
-        target_object_id: parent.memoryId
-      });
-      expect(pathRow!.recall_bias).toBeGreaterThan(0);
+      expect(pathRow).toBeUndefined();
       expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
     },
     60_000
   );
 
   it(
-    "compile seed sourceMemoryRefs are first-class signal refs and submit derives_from path candidates",
+    "compile seed sourceMemoryRefs stay unasserted without a verified source observation",
     async () => {
       const daemon = await startBenchDaemon({
         workspaceId: "harness-compile-first-class-ref-ws",
@@ -248,16 +244,12 @@ describe("BenchDaemon harness — real MCP propose+review chain", () => {
       expect(signal?.source).toBe(SignalSource.GARDEN_COMPILE);
       expect(signal?.source_memory_refs).toEqual([parent.memoryId]);
       expect(signal?.raw_payload).not.toHaveProperty("source_memory_refs");
+      expect(signal?.source_observation).toBeNull();
 
-      // sourceMemoryRefs fold into a governed derives_from path
-      // candidate (recall_bias +), not an edge_proposals row.
+      // A compile fixture without a daemon-issued completion receipt cannot
+      // create a temporal relationship from an unverified source reference.
       const pathRow = readDerivesFromPathRelation(db, child.memoryId, parent.memoryId);
-      expect(pathRow).toMatchObject({
-        relation_kind: "derives_from",
-        source_object_id: child.memoryId,
-        target_object_id: parent.memoryId
-      });
-      expect(pathRow!.recall_bias).toBeGreaterThan(0);
+      expect(pathRow).toBeUndefined();
       expect(edgeProposalCount(db, child.memoryId, parent.memoryId)).toBe(0);
     },
     60_000

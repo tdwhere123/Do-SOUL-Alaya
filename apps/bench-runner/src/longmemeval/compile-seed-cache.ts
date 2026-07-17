@@ -21,6 +21,10 @@ import {
   type ExtractionCacheWriteLease
 } from "./extraction/fill-root-guard.js";
 import { readExtractionCacheManifestIdentity } from "./extraction-cache-manifest.js";
+import {
+  extractLiveDelegate,
+  type ExtractionLiveTransportOutcome
+} from "./extraction/cache-live-delegate.js";
 export {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
@@ -30,11 +34,9 @@ export {
   type ExtractionRawJsonInspection
 } from "./extraction/content-closure.js";
 import type {
-  BenchRetryClassification,
   BenchSignalExtractor,
   CompileSeedExtractionConfig,
-  CompileSeedExtractionStats,
-  BenchTerminalRetryClassification
+  CompileSeedExtractionStats
 } from "./compile-seed-types.js";
 
 interface CachedExtraction {
@@ -55,6 +57,19 @@ interface CachingSignalExtractorOptions {
   readonly stats?: CompileSeedExtractionStats;
   readonly allowLiveExtraction?: boolean;
   readonly writeLease?: ExtractionCacheWriteLease;
+  /** Called before each actual provider HTTP attempt for an uncached shard. */
+  readonly onTransportAttempt?: (cacheKey: string) => void;
+  /** Called only after an atomic raw shard write succeeds. */
+  readonly onLiveExtractionSucceeded?: (cacheKey: string) => void;
+  /** Releases a reserved shard slot after its live delegate fails. */
+  readonly onLiveExtractionFailed?: (cacheKey: string) => void;
+  /** Records the exact provider-reported usage, or an explicit unavailable outcome. */
+  readonly onLiveExtractionOutcome?: (
+    cacheKey: string,
+    outcome: ExtractionLiveTransportOutcome
+  ) => void;
+  /** Advances a no-progress watchdog after a cache hit or durable write. */
+  readonly onExtractionProgress?: () => void;
 }
 
 /**
@@ -104,6 +119,7 @@ async function extractWithCache(
   );
   if (cached.status === "hit") {
     recordCacheHit(options.stats, cacheKey, cached);
+    options.onExtractionProgress?.();
     return { rawJson: cached.rawJson };
   }
   if (options.allowLiveExtraction === false) {
@@ -165,6 +181,7 @@ async function extractLiveWithLease(
   );
   if (recached.status === "hit") {
     recordCacheHit(options.stats, cacheKey, recached);
+    options.onExtractionProgress?.();
     return { rawJson: recached.rawJson };
   }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
@@ -173,7 +190,13 @@ async function extractLiveWithLease(
     stats.lastExtractionSource = "live";
     stats.lastCacheKey = cacheKey;
   }
-  const result = await extractLiveDelegate(options.delegate, input, stats);
+  const result = await extractLiveDelegate({
+    delegate: options.delegate,
+    request: withAuthorityAttemptHook(input, options, cacheKey),
+    stats,
+    onFailure: () => options.onLiveExtractionFailed?.(cacheKey),
+    onOutcome: (outcome) => options.onLiveExtractionOutcome?.(cacheKey, outcome)
+  });
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
   const inspection = inspectExtractionRawJson(result.rawJson);
@@ -195,65 +218,24 @@ async function extractLiveWithLease(
     stats.llmCalls += 1;
     recordExtractionInspection(stats, inspection);
   }
+  options.onLiveExtractionSucceeded?.(cacheKey);
+  options.onExtractionProgress?.();
   return result;
 }
 
-async function extractLiveDelegate(
-  delegate: BenchSignalExtractor,
+function withAuthorityAttemptHook(
   input: Parameters<BenchSignalExtractor["extract"]>[0],
-  stats: CompileSeedExtractionStats | undefined
-): ReturnType<BenchSignalExtractor["extract"]> {
-  try {
-    const result = await delegate.extract(input);
-    recordRetrySuccess(stats, result.extractorMeta);
-    return result;
-  } catch (cause) {
-    recordRetryFailure(stats, cause);
-    throw cause;
-  }
-}
-
-function recordRetrySuccess(
-  stats: CompileSeedExtractionStats | undefined,
-  meta: Awaited<ReturnType<BenchSignalExtractor["extract"]>>["extractorMeta"]
-): void {
-  if (stats === undefined || meta === undefined) return;
-  stats.rateLimitRetries = (stats.rateLimitRetries ?? 0) + meta.rateLimitRetries;
-  if (meta.retryClassification === "success_after_retry") {
-    stats.retrySuccesses = (stats.retrySuccesses ?? 0) + 1;
-  }
-}
-
-function recordRetryFailure(
-  stats: CompileSeedExtractionStats | undefined,
-  cause: unknown
-): void {
-  if (stats === undefined || typeof cause !== "object" || cause === null) return;
-  const meta = (cause as { readonly benchRetry?: unknown }).benchRetry;
-  if (!isBenchRetryFailure(meta)) return;
-  stats.rateLimitRetries = (stats.rateLimitRetries ?? 0) + meta.rateLimitRetries;
-  const totals = stats.terminalRetryClassifications ?? {};
-  totals[meta.retryClassification] = (totals[meta.retryClassification] ?? 0) + 1;
-  stats.terminalRetryClassifications = totals;
-}
-
-function isBenchRetryFailure(value: unknown): value is {
-  readonly rateLimitRetries: number;
-  readonly retryClassification: BenchTerminalRetryClassification;
-} {
-  if (typeof value !== "object" || value === null) return false;
-  const input = value as { rateLimitRetries?: unknown; retryClassification?: unknown };
-  return typeof input.rateLimitRetries === "number" &&
-    isTerminalRetryClassification(input.retryClassification);
-}
-
-function isTerminalRetryClassification(
-  value: unknown
-): value is BenchTerminalRetryClassification {
-  const classification = value as BenchRetryClassification;
-  return classification === "failure_max_retries" ||
-    classification === "failure_non_retryable_4xx" ||
-    classification === "failure_timeout" || classification === "failure_aborted";
+  options: CachingSignalExtractorOptions,
+  cacheKey: string
+): Parameters<BenchSignalExtractor["extract"]>[0] {
+  if (options.onTransportAttempt === undefined) return input;
+  return {
+    ...input,
+    onTransportAttempt: () => {
+      options.onTransportAttempt?.(cacheKey);
+      input.onTransportAttempt?.();
+    }
+  };
 }
 
 function assertWriteIdentity(

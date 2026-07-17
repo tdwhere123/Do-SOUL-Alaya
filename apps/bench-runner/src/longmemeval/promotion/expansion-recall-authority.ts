@@ -252,6 +252,7 @@ function snapshotCompletion(extraction: SnapshotExtractionProvenanceV3) {
     orphanTurns: 0,
     coverage: 1,
     expectedKeySetSha256: extraction.expected_key_set_sha256,
+    partialContentClosureSha256: extraction.content_closure_sha256,
     contentClosureSha256: extraction.content_closure_sha256
   };
 }

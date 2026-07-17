@@ -69,6 +69,23 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(body).not.toHaveProperty("thinking");
   });
 
+  it("requests and retains exact provider usage for a plain completion", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({
+        choices: [{ message: { content: '{"signals":[]}' } }],
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }
+      })
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    const result = await extractor.extract({ systemPrompt: "system", userPrompt: "turn" });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      stream_options: { include_usage: true }
+    });
+    expect(result.usage).toEqual({ inputTokens: 11, outputTokens: 7, totalTokens: 18 });
+  });
+
   it("retries 3 times on HTTP 5xx then succeeds with retryClassification=success_after_retry", async () => {
     // Models the dominant yunwu.ai outage shape: a brief 503 storm followed
     // by recovery. The 1-retry policy bench shipped with would have given up

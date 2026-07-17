@@ -26,8 +26,10 @@ export {
 } from "./compile-seed-session.js";
 export type {
   BenchRetryClassification,
+  BenchProviderUsage,
   BenchSignalExtractor,
   BenchSignalExtractorMeta,
+  BenchTerminalRetryClassification,
   CompileSeedDaemon,
   CompileSeedExtractionConfig,
   CompileSeedExtractionStats,

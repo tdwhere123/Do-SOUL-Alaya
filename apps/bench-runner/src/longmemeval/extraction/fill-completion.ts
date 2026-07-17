@@ -22,6 +22,8 @@ export interface ExtractionFillCompletion {
   readonly orphanTurns: number;
   readonly coverage: number;
   readonly expectedKeySetSha256: string;
+  /** Valid raw-shard closure for this authority check, even while incomplete. */
+  readonly partialContentClosureSha256: string | null;
   readonly contentClosureSha256: string | null;
   readonly contentClosureIndex?: ExtractionContentClosureIndex | null;
 }
@@ -46,6 +48,7 @@ export function inspectExtractionFillCompletion(input: {
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
   readonly turnContents: readonly string[];
+  readonly excludeContentClosureKeys?: readonly string[];
 }): ExtractionFillCompletion {
   const expectedKeys = new Set(input.turnContents.map((turnContent) =>
     computeCacheKey(input.model, input.requestProfile, input.systemPrompt, turnContent)
@@ -55,6 +58,12 @@ export function inspectExtractionFillCompletion(input: {
   const orphanTurns = inventory.invalidEntries + [...inventory.keys]
     .filter((cacheKey) => !expectedKeys.has(cacheKey)).length;
   const closure = completeContentClosure(counts, expectedKeys.size);
+  const excluded = new Set(input.excludeContentClosureKeys);
+  const partialClosure = counts.invalid === 0
+    ? computeExtractionContentClosureSha256(
+      counts.entries.filter((entry) => !excluded.has(entry.cacheKey))
+    )
+    : null;
   return {
     expectedTurns: expectedKeys.size,
     validTurns: counts.valid,
@@ -63,6 +72,7 @@ export function inspectExtractionFillCompletion(input: {
     orphanTurns,
     coverage: expectedKeys.size === 0 ? 1 : counts.valid / expectedKeys.size,
     expectedKeySetSha256: computeExtractionKeySetSha256(expectedKeys),
+    partialContentClosureSha256: partialClosure,
     contentClosureSha256: closure?.sha256 ?? null,
     contentClosureIndex: closure?.index ?? null
   };

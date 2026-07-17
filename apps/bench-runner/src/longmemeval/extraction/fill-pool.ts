@@ -5,6 +5,7 @@ import type {
   CompileSeedExtractionStats
 } from "../compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache-invariant-error.js";
+import { createAdaptiveConcurrencyController } from "./adaptive-concurrency.js";
 import { readFillRetryTelemetry } from "./fill-stats.js";
 
 type FillTaskRetryClassification = BenchTerminalRetryClassification | "unknown";
@@ -39,18 +40,29 @@ interface ExtractionPoolInput {
   readonly stats: CompileSeedExtractionStats;
   readonly log: (message: string) => void;
   readonly signal?: AbortSignal;
+  readonly transport?: {
+    readonly retryMode: "default" | "disabled";
+    readonly maxOutputTokens: number;
+    readonly outputTokenField: "max_tokens" | "max_completion_tokens";
+  };
 }
 
 export async function runExtractionPool(input: ExtractionPoolInput): Promise<void> {
   const scope = createPoolAbortScope(input.signal);
+  const adaptive = createAdaptiveConcurrencyController({ maximum: input.concurrency });
   let processed = 0;
   const progressEvery = Math.max(1, Math.floor(input.requestedTurns / 20));
   try {
     await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
       scope.signal.throwIfAborted();
+      await adaptive.acquire(scope.signal);
+      let rateLimited = false;
       try {
-        await extractTurn(input.extractor, turnContent, scope.signal);
+        rateLimited = await extractTurn(
+          input.extractor, turnContent, scope.signal, input.transport
+        ) > 0;
       } catch (cause) {
+        rateLimited = readRateLimitRetries(cause) > 0;
         scope.signal.throwIfAborted();
         if (cause instanceof ExtractionCacheInvariantError) {
           scope.abort(cause);
@@ -61,11 +73,15 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
         input.log(`[extraction-fill] stopping: ${failure.message}`);
         scope.abort(failure);
         throw failure;
+      } finally {
+        const concurrency = adaptive.release(rateLimited);
+        recordAdaptiveTelemetry(input, rateLimited, concurrency);
       }
       processed += 1;
       logProgress(input, processed, progressEvery);
     });
   } finally {
+    adaptive.dispose();
     scope.dispose();
   }
 }
@@ -93,9 +109,10 @@ async function runBoundedPool<T>(
 async function extractTurn(
   extractor: BenchSignalExtractor,
   turnContent: string,
-  signal: AbortSignal
-): Promise<void> {
-  await extractor.extract({
+  signal: AbortSignal,
+  transport: ExtractionPoolInput["transport"]
+): Promise<number> {
+  const result = await extractor.extract({
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     userPrompt: JSON.stringify({
       workspace_id: "extraction-fill",
@@ -104,8 +121,18 @@ async function extractTurn(
       turn_content: turnContent,
       turn_messages: []
     }),
-    abortSignal: signal
+    abortSignal: signal,
+    ...(transport === undefined ? {} : transport)
   });
+  return result.extractorMeta?.rateLimitRetries ?? 0;
+}
+
+function readRateLimitRetries(cause: unknown): number {
+  if (typeof cause !== "object" || cause === null) return 0;
+  const retry = (cause as { readonly benchRetry?: unknown }).benchRetry;
+  if (typeof retry !== "object" || retry === null) return 0;
+  const count = (retry as { readonly rateLimitRetries?: unknown }).rateLimitRetries;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
 function buildTaskFailure(
@@ -141,6 +168,20 @@ function logProgress(
   input.log(
     `[extraction-fill] ${processed}/${input.requestedTurns} ` +
       `cache_hits=${input.stats.cacheHits} newly_extracted=${input.stats.llmCalls} failures=0`
+  );
+}
+
+function recordAdaptiveTelemetry(
+  input: ExtractionPoolInput,
+  rateLimited: boolean,
+  concurrency: ReturnType<ReturnType<typeof createAdaptiveConcurrencyController>["snapshot"]>
+): void {
+  input.stats.adaptiveConcurrencyBackoffs = concurrency.rateLimitBackoffs;
+  input.stats.adaptiveConcurrencyBackoffMs = concurrency.backoffMs;
+  if (!rateLimited) return;
+  input.log(
+    `[extraction-fill] rate-limit backoff: concurrency=${concurrency.current}/` +
+      `${concurrency.maximum} total_backoff_ms=${concurrency.backoffMs}`
   );
 }
 

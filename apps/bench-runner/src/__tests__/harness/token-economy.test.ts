@@ -27,6 +27,12 @@ function emittedRow(rawPayload: Record<string, unknown>): TokenEconomyEventRow {
       run_id: "run-1",
       source: "garden_compile",
       signal_kind: "potential_preference",
+      source_observation: null,
+      source_memory_refs: [],
+      supersedes_refs: [],
+      exception_to_refs: [],
+      contradicts_refs: [],
+      incompatible_with_refs: [],
       raw_payload: rawPayload
     }
   };

@@ -29,10 +29,26 @@ export interface BenchSignalExtractor {
     readonly userPrompt: string;
     readonly abortSignal?: AbortSignal;
     readonly timeoutMs?: number;
+    /** A probe uses one transport attempt and never enters the retry loop. */
+    readonly retryMode?: "default" | "disabled";
+    /** Called immediately before each provider HTTP attempt. */
+    readonly onTransportAttempt?: () => void;
+    /** Provider output-token ceiling when the selected profile supports it. */
+    readonly maxOutputTokens?: number;
+    /** Exact provider request field pre-registered in the authority receipt. */
+    readonly outputTokenField?: "max_tokens" | "max_completion_tokens";
   }): Promise<{
     readonly rawJson: string;
     readonly extractorMeta?: BenchSignalExtractorMeta;
+    /** Exact provider-reported request usage, never locally estimated. */
+    readonly usage?: BenchProviderUsage;
   }>;
+}
+
+export interface BenchProviderUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
 }
 
 // invariant: closed enum mirrored from
@@ -134,6 +150,10 @@ export interface CompileSeedExtractionStats {
   retrySuccesses?: number;
   /** Provider attempts that returned HTTP 429. */
   rateLimitRetries?: number;
+  /** Rate-limit events that reduced the extraction pool's active concurrency. */
+  adaptiveConcurrencyBackoffs?: number;
+  /** Sum of scheduled global rate-limit backoff windows in milliseconds. */
+  adaptiveConcurrencyBackoffMs?: number;
   /** Terminal live transport outcomes, grouped without payload data. */
   terminalRetryClassifications?: Partial<
     Record<BenchTerminalRetryClassification, number>

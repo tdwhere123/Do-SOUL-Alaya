@@ -44,7 +44,8 @@ it("prints extraction retry telemetry in the CLI done line", async () => {
   });
 
   const exitCode = await runExtractionFillCommand({
-    variant: "longmemeval_oracle"
+    variant: "longmemeval_oracle",
+    extractionAuthority: "/authority/receipt.json"
   } as ParsedFlags);
 
   expect(exitCode).toBe(0);
@@ -73,7 +74,8 @@ it("forwards the selected cache and pinned dataset authority roots", async () =>
   await runExtractionFillCommand({
     variant: "longmemeval_s",
     extractionCacheRoot: "/authority/cache",
-    pinnedMetaRoot: "/authority/meta"
+    pinnedMetaRoot: "/authority/meta",
+    extractionAuthority: "/authority/receipt.json"
   } as ParsedFlags);
 
   expect(mocks.runExtractionFill).toHaveBeenCalledWith(expect.objectContaining({

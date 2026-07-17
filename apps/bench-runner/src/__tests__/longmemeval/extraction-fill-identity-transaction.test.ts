@@ -44,7 +44,7 @@ describe("extraction-fill identity transaction", () => {
     await fillSuccessfully();
     const rerun = fillSuccessfully();
     writeIdentityManifest("https://provider-b.invalid/v1", "family-b", "replacement");
-    await expect(rerun).rejects.toThrow(/changed during dataset preparation/u);
+    await expect(rerun).rejects.toThrow(/changed during authority preparation/u);
     expect(readExtractionCacheManifest(cacheRoot)?.builder).toBe("replacement");
   });
 
@@ -53,7 +53,7 @@ describe("extraction-fill identity transaction", () => {
     writeIdentityManifest("https://provider-a.invalid/v1", "family-a", "initial");
     const run = fillSuccessfully();
     writeIdentityManifest("https://provider-b.invalid/v1", "family-b", "replacement");
-    await expect(run).rejects.toThrow(/changed during dataset preparation/u);
+    await expect(run).rejects.toThrow(/changed during authority preparation/u);
     expect(readExtractionCacheManifest(cacheRoot)?.builder).toBe("replacement");
   });
 

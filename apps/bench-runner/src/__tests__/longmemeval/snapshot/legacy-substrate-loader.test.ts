@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
   closeCachedDatabase,
-  initDatabase,
   readSchemaMigrationLedger
 } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -160,28 +159,22 @@ describe("strict legacy snapshot loader", () => {
     await expect(loadLegacy()).rejects.toThrow(/sidecar SHA-256 mismatch/iu);
   });
 
-  it("rejects a rebound DB whose raw migration ledger is no longer historical", async () => {
-    const database = initDatabase({ filename: fixture.snapshotDbPath });
-    database.close();
-    fixture.manifest = {
-      ...fixture.manifest,
-      artifact_integrity: {
-        ...fixture.manifest.artifact_integrity,
-        db_sha256: await sha256File(fixture.snapshotDbPath)
-      }
-    };
-    fixture.manifestSha256 = await writeManifest(fixture);
-    const restoredRoot = join(fixture.root, "restore-current");
+  it("fails closed before runtime migration can rebind a restored legacy DB", async () => {
+    const restoredRoot = join(fixture.root, "restore-legacy");
     restoreLegacySnapshotToDataDir({
       snapshotDbPath: fixture.snapshotDbPath,
       dataDirRoot: restoredRoot,
       manifest: currentManifestShape(fixture.manifest)
     });
+    const restoredDbPath = join(restoredRoot, "alaya.db");
+    const restoredBefore = await readFile(restoredDbPath);
     expect(() => prepareRecallEvalRestoredDb({
       manifest: currentManifestShape(fixture.manifest),
-      restoredDbPath: join(restoredRoot, "alaya.db"),
+      restoredDbPath,
       legacySnapshot: true
-    })).toThrow(/producer migration ledger mismatch/iu);
+    })).toThrow(/offline candidate cutover/iu);
+    expect(readSchemaMigrationLedger(restoredDbPath).at(-1)).toBe(103);
+    expect(await readFile(restoredDbPath)).toEqual(restoredBefore);
   });
 
   it("rejects a custom dataset and pinned meta that drift together", async () => {
