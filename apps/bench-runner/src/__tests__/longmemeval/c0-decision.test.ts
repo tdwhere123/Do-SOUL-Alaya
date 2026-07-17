@@ -53,6 +53,19 @@ describe("C0 reuse decision", () => {
     expect(result.reasons).toContain("replay_not_closed");
   });
 
+  it("forces rebuild when the cache-root scan finds unbound raw paths", () => {
+    const result = decideC0Reuse({
+      sourceRoot: "/cache/canonical",
+      source: identity(),
+      final: identity(),
+      replay: completeReplay(),
+      rawInventoryClosed: false
+    });
+
+    expect(result.action).toBe("rebuild");
+    expect(result.reasons).toContain("raw_inventory_not_closed");
+  });
+
   it("accepts only a new, empty target root for rebuild", () => {
     const base = mkdtempSync(join(tmpdir(), "alaya-c0-decision-"));
     roots.push(base);

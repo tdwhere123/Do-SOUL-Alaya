@@ -158,5 +158,6 @@ const reuseReasons = new Set<C0ReuseReason>([
   "dataset_revision_mismatch", "model_mismatch", "model_family_mismatch",
   "request_profile_mismatch", "provider_url_mismatch", "system_prompt_mismatch",
   "cache_key_algorithm_mismatch", "raw_closure_mismatch", "parser_semantics_mismatch",
-  "formation_semantics_mismatch", "temporal_schema_mismatch", "replay_not_closed"
+  "formation_semantics_mismatch", "temporal_schema_mismatch", "raw_inventory_not_closed",
+  "replay_not_closed"
 ]);

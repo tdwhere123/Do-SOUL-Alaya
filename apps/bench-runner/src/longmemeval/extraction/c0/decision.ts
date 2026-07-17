@@ -40,6 +40,7 @@ export type C0ReuseReason =
   | "parser_semantics_mismatch"
   | "formation_semantics_mismatch"
   | "temporal_schema_mismatch"
+  | "raw_inventory_not_closed"
   | "replay_not_closed";
 
 export interface C0ReuseDecision {
@@ -56,9 +57,12 @@ export function decideC0Reuse(input: {
   readonly source: C0CacheCompatibilityIdentity;
   readonly final: C0CacheCompatibilityIdentity;
   readonly replay: C0ReplayClosure;
+  /** False when a source-root scan finds unbound raw shards or unexpected paths. */
+  readonly rawInventoryClosed?: boolean;
 }): C0ReuseDecision {
   const reasons = [
     ...identityDifferences(input.source, input.final),
+    ...(input.rawInventoryClosed === false ? ["raw_inventory_not_closed" as const] : []),
     ...(isReplayClosed(input.replay) ? [] : ["replay_not_closed" as const])
   ];
   return Object.freeze({
