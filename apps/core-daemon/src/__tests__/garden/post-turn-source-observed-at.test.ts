@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("post-turn Garden source observation", () => {
-  it("lets a host-supplied source_observed_at win over the enqueue clock", async () => {
+  it("passes the verified delivery observation time to the provider", async () => {
     const compile = vi.fn(async () => []);
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
@@ -21,7 +21,11 @@ describe("post-turn Garden source observation", () => {
       created_at: "2026-08-01T12:00:01.000Z",
       payload: createPostTurnPayload({
         created_at: "2026-08-01T12:00:01.000Z",
-        source_observed_at: "2026-08-01T11:59:00.000Z"
+        source_observation: {
+          observed_at: "2026-08-01T11:59:00.000Z",
+          authority: "verified_delivery_observation",
+          source_event_id: "event-delivery-1"
+        }
       })
     });
 
@@ -35,7 +39,7 @@ describe("post-turn Garden source observation", () => {
     );
   });
 
-  it("falls back to the enqueue clock when source_observed_at is absent", async () => {
+  it("omits source_observed_at when no verified delivery observation exists", async () => {
     const compile = vi.fn(async () => []);
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
@@ -50,13 +54,11 @@ describe("post-turn Garden source observation", () => {
 
     expect(compile).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({
-        source_observed_at: "2026-08-01T12:00:01.000Z"
-      })
+      expect.not.objectContaining({ source_observed_at: expect.anything() })
     );
   });
 
-  it("does not shift source_observed_at to worker process time after delay", async () => {
+  it("does not shift a verified delivery observation to worker process time after delay", async () => {
     const compile = vi.fn<GardenComputeProvider["compile"]>(async () => []);
     const harness = await createRoutingHarness({
       provider_kind: "local_heuristics",
@@ -65,7 +67,14 @@ describe("post-turn Garden source observation", () => {
     const enqueuedAt = "2026-07-13T10:00:00.000Z";
     harness.enqueuePostTurnTask({
       created_at: enqueuedAt,
-      payload: createPostTurnPayload({ created_at: enqueuedAt })
+      payload: createPostTurnPayload({
+        created_at: enqueuedAt,
+        source_observation: {
+          observed_at: enqueuedAt,
+          authority: "verified_delivery_observation",
+          source_event_id: "event-delivery-1"
+        }
+      })
     });
 
     const processStartedAt = new Date().toISOString();

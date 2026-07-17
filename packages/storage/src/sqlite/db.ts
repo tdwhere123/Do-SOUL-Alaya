@@ -1,17 +1,32 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import BetterSqlite3 from "better-sqlite3";
 import { StorageError } from "../shared/errors.js";
 import { migrateEngineBindingApiKeysToCiphertext } from "../repos/shared/api-key-cipher.js";
 import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
 import { LruCache } from "./lru-cache.js";
+import {
+  TEMPORAL_OFFLINE_MIGRATION_VERSION,
+  assertCanonicalSchemaVersionTable,
+  assertOrderedSafeMigrationVersions,
+  assertRuntimeTemporalDatabaseReady,
+  computeKnownMaxVersion,
+  listMigrationFiles,
+  migrateLegacyPathRelationsToTemporalCandidate,
+  resolveMigrationsDirectory,
+  resolveTemporalDatabaseMode,
+  type TemporalDatabaseMode
+} from "./temporal-cutover-gate.js";
 import type { SqliteWriteQueuePort } from "./write-queue-port.js";
+
+export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
 
 export type SqliteConnection = InstanceType<typeof BetterSqlite3>;
 
 export interface InitDatabaseOptions {
   readonly filename?: string;
+  /** Runtime only opens a verified temporal schema; offline migration is explicit. */
+  readonly temporalMode?: TemporalDatabaseMode;
 }
 
 const MAX_DATABASE_CACHE_ENTRIES = 32;
@@ -38,10 +53,16 @@ export class StorageDatabase {
   public connection: SqliteConnection;
   private closed = false;
   private connectionVersion = 0;
+  private reopenTemporalMode: TemporalDatabaseMode;
 
-  public constructor(filename: string, connection: SqliteConnection) {
+  public constructor(
+    filename: string,
+    connection: SqliteConnection,
+    reopenTemporalMode: TemporalDatabaseMode = "runtime"
+  ) {
     this.filename = filename;
     this.connection = connection;
+    this.reopenTemporalMode = reopenTemporalMode;
   }
 
   public isClosed(): boolean {
@@ -52,9 +73,17 @@ export class StorageDatabase {
     return this.connectionVersion;
   }
 
+  /** Selection promotes an offline/candidate handle to normal runtime reopen checks. */
+  public markRuntimeTemporalMode(): void {
+    this.reopenTemporalMode = "runtime";
+  }
+
   public reopenIfClosed(): void {
     if (!this.closed) {
       return;
+    }
+    if (this.filename !== ":memory:" && this.reopenTemporalMode === "runtime") {
+      assertRuntimeTemporalDatabaseReady(this.filename, knownMigrationMaxVersion());
     }
     const database = openDatabase(this.filename);
     database.pragma("foreign_keys = ON");
@@ -137,48 +166,22 @@ export function readSchemaMigrationLedger(
   }
 }
 
-function assertCanonicalSchemaVersionTable(database: SqliteConnection): void {
-  const columns = database.prepare("PRAGMA table_info(schema_version)").all() as
-    ReadonlyArray<Readonly<{
-      cid: number;
-      name: string;
-      type: string;
-      notnull: number;
-      dflt_value: unknown;
-      pk: number;
-    }>>;
-  const actual = columns.map(({ cid, name, type, notnull, dflt_value, pk }) => ({
-    cid, name, type: type.toUpperCase(), notnull, dflt_value, pk
-  }));
-  const expected = [
-    { cid: 0, name: "version", type: "INTEGER", notnull: 0, dflt_value: null, pk: 1 },
-    { cid: 1, name: "applied_at", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 }
-  ];
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error("schema_version table is not canonical");
-  }
-}
-
-function assertOrderedSafeMigrationVersions(versions: readonly unknown[]): asserts versions is number[] {
-  let previous = 0;
-  for (const version of versions) {
-    if (!Number.isSafeInteger(version) || (version as number) <= 0) {
-      throw new Error("schema_version ledger contains an unsafe migration version");
-    }
-    if ((version as number) <= previous) {
-      throw new Error("schema_version ledger is not strictly ordered and unique");
-    }
-    previous = version as number;
-  }
-}
-
 export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase {
   const filename = options.filename ?? ":memory:";
+  const temporalMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
 
   if (filename !== ":memory:") {
     const cached = databaseCache.get(filename);
     if (cached !== undefined) {
+      if (temporalMode === "runtime") {
+        assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
+      }
       return cached;
+    }
+    if (temporalMode === "runtime") {
+      // This readonly gate must happen before openDatabase() or any PRAGMA can
+      // mutate a legacy source database. Candidate conversion is offline-only.
+      assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
     }
   }
 
@@ -198,13 +201,13 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
     // Cap PRAGMA optimize/ANALYZE sampling so a stats refresh stays fast (ms)
     // on a large DB instead of a multi-second full scan. Persists per connection.
     database.pragma("analysis_limit = 400");
-    runMigrations(database);
+    runMigrations(database, temporalMode);
   } catch (error) {
     database.close();
     throw error;
   }
 
-  const storageDatabase = new StorageDatabase(filename, database);
+  const storageDatabase = new StorageDatabase(filename, database, temporalMode);
 
   if (filename !== ":memory:") {
     evictDatabaseCacheIfNeeded(filename);
@@ -227,7 +230,7 @@ function openDatabase(filename: string): SqliteConnection {
   }
 }
 
-function runMigrations(database: SqliteConnection): void {
+function runMigrations(database: SqliteConnection, temporalMode: TemporalDatabaseMode): void {
   const migrationsDirectory = resolveMigrationsDirectory();
   const migrationFiles = listMigrationFiles(migrationsDirectory);
   ensureSchemaVersionTable(database);
@@ -236,16 +239,12 @@ function runMigrations(database: SqliteConnection): void {
   const statements = prepareMigrationStatements(database);
 
   for (const fileName of migrationFiles) {
-    applyMigrationIfPending(database, migrationsDirectory, statements, fileName);
+    const version = parseMigrationVersion(fileName);
+    if (version === TEMPORAL_OFFLINE_MIGRATION_VERSION && temporalMode === "runtime") {
+      continue;
+    }
+    applyMigrationIfPending(database, migrationsDirectory, statements, fileName, temporalMode);
   }
-}
-
-function listMigrationFiles(migrationsDirectory: string): readonly string[] {
-  return fs
-    .readdirSync(migrationsDirectory, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
-    .map((entry) => entry.name)
-    .sort();
 }
 
 function ensureSchemaVersionTable(database: SqliteConnection): void {
@@ -302,6 +301,10 @@ function isSqliteNoSuchTableError(error: unknown): boolean {
   return error instanceof Error && /no such table/i.test(error.message);
 }
 
+function knownMigrationMaxVersion(): number {
+  return computeKnownMaxVersion(listMigrationFiles(resolveMigrationsDirectory()));
+}
+
 function prepareMigrationStatements(database: SqliteConnection): MigrationStatements {
   return {
     isAppliedStatement: database.prepare("SELECT 1 FROM schema_version WHERE version = ? LIMIT 1"),
@@ -313,7 +316,8 @@ function applyMigrationIfPending(
   database: SqliteConnection,
   migrationsDirectory: string,
   statements: MigrationStatements,
-  fileName: string
+  fileName: string,
+  temporalMode: TemporalDatabaseMode
 ): void {
   const version = parseMigrationVersion(fileName);
   if (statements.isAppliedStatement.get(version) !== undefined) {
@@ -323,7 +327,7 @@ function applyMigrationIfPending(
   try {
     database.transaction(() => {
       database.exec(migrationSql);
-      runDataMigrationIfPresent(database, version);
+      runDataMigrationIfPresent(database, version, temporalMode);
       statements.markAppliedStatement.run(version, new Date().toISOString());
     })();
   } catch (error) {
@@ -331,15 +335,33 @@ function applyMigrationIfPending(
   }
 }
 
-const DATA_MIGRATIONS: Readonly<Partial<Record<number, (database: SqliteConnection) => void>>> = {
+const DATA_MIGRATIONS: Readonly<Partial<Record<
+  number,
+  (database: SqliteConnection, temporalMode: TemporalDatabaseMode) => void
+>>> = {
   104: migrateEngineBindingApiKeysToCiphertext,
-  107: migrateEmbeddingVectorValidity
+  107: migrateEmbeddingVectorValidity,
+  [TEMPORAL_OFFLINE_MIGRATION_VERSION]: (database, temporalMode) => {
+    migrateLegacyPathRelationsToTemporalCandidate(database, {
+      selectionRequired: temporalMode === "candidate"
+    });
+  }
 };
 
-function runDataMigrationIfPresent(database: SqliteConnection, version: number): void {
+function runDataMigrationIfPresent(
+  database: SqliteConnection,
+  version: number,
+  temporalMode: TemporalDatabaseMode
+): void {
+  if (version === TEMPORAL_OFFLINE_MIGRATION_VERSION && temporalMode === "runtime") {
+    throw new StorageError(
+      "CONFLICT",
+      "Temporal relation migration is offline-only and cannot run in runtime mode."
+    );
+  }
   const migrate = DATA_MIGRATIONS[version];
   if (migrate !== undefined) {
-    migrate(database);
+    migrate(database, temporalMode);
   }
 }
 
@@ -366,10 +388,7 @@ export function getCurrentSchemaSummary(
   readonly schemaOk: boolean;
 }> {
   const migrationsDirectory = resolveMigrationsDirectory();
-  const migrationFiles = fs
-    .readdirSync(migrationsDirectory, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
-    .map((entry) => entry.name);
+  const migrationFiles = listMigrationFiles(migrationsDirectory);
   const knownMaxVersion = computeKnownMaxVersion(migrationFiles);
   const persistedMaxVersion = readPersistedMaxVersion(database.connection);
   return {
@@ -377,38 +396,6 @@ export function getCurrentSchemaSummary(
     knownMaxVersion,
     schemaOk: persistedMaxVersion === knownMaxVersion && knownMaxVersion > 0
   };
-}
-
-function computeKnownMaxVersion(migrationFiles: readonly string[]): number {
-  let maxVersion = 0;
-  for (const fileName of migrationFiles) {
-    const versionMatch = /^(\d+)-.+\.sql$/.exec(fileName);
-    if (versionMatch === null) {
-      continue;
-    }
-    const version = Number(versionMatch[1]);
-    if (Number.isFinite(version) && version > maxVersion) {
-      maxVersion = version;
-    }
-  }
-  return maxVersion;
-}
-
-function resolveMigrationsDirectory(): string {
-  const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-  // Source and compiled layouts both place migrations next to sqlite/.
-  const candidates = [
-    path.join(currentDirectory, "../migrations"),
-    path.join(currentDirectory, "../../src/migrations")
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new StorageError("MIGRATION_NOT_FOUND", "Unable to locate SQLite migration files.");
 }
 
 function evictDatabaseCacheIfNeeded(incomingFilename: string): void {

@@ -101,6 +101,25 @@ const MemoryRefsSchema = CandidateMemorySignalMemoryRefsSchema;
 const RawPayloadSchema = BoundedJsonObjectSchema;
 const SourceDeliveryIdsSchema = z.array(BoundedIdSchema).min(1).max(32).readonly();
 
+const signalSourceObservationAuthorityValues = [
+  "trusted_host_event",
+  "verified_delivery_observation"
+] as const;
+
+export const SignalSourceObservationAuthoritySchema = z.enum(signalSourceObservationAuthorityValues);
+
+// This receipt is bound by trusted daemon infrastructure, never by an MCP
+// content request. It proves the source observation separately from signal
+// admission time; its source event identity makes replay verification possible.
+export const SignalSourceObservationSchema = z
+  .object({
+    observed_at: IsoDatetimeStringSchema,
+    authority: SignalSourceObservationAuthoritySchema,
+    source_event_id: BoundedIdSchema
+  })
+  .strict()
+  .readonly();
+
 export const CandidateMemorySignalSchema = z.object({
   signal_id: BoundedIdSchema,
   workspace_id: BoundedIdSchema,
@@ -122,6 +141,7 @@ export const CandidateMemorySignalSchema = z.object({
   incompatible_with_refs: MemoryRefsSchema,
   raw_payload: RawPayloadSchema,
   source_delivery_ids: SourceDeliveryIdsSchema.optional(),
+  source_observation: SignalSourceObservationSchema.nullable().default(null),
   created_at: IsoDatetimeStringSchema
 }).readonly();
 
@@ -155,7 +175,8 @@ export const CandidateMemorySignalInputSchema = CandidateMemorySignalContentFiel
   .extend({
     workspace_id: BoundedIdSchema,
     run_id: BoundedIdSchema,
-    surface_id: BoundedIdSchema.nullable()
+    surface_id: BoundedIdSchema.nullable(),
+    source_observation: SignalSourceObservationSchema.nullable().optional()
   })
   .strict()
   .readonly();

@@ -109,7 +109,8 @@ async function prepareRecallRequest(
     loadActiveConstraints({
       activeConstraintsPort: context.dependencies.activeConstraintsPort,
       workspaceId: params.workspaceId,
-      cap: params.activeConstraintsCap ?? null
+      cap: params.activeConstraintsCap ?? null,
+      asOf: params.referenceTime
     })
   ]);
   return Object.freeze({
@@ -118,6 +119,7 @@ async function prepareRecallRequest(
     queryText,
     queryProbes,
     referenceTime,
+    temporalProjectionAsOf: params.referenceTime,
     activeConstraints,
     winnerMemoryIds: await resolveWinnerMemoryIds(context, params.workspaceId, slots)
   });

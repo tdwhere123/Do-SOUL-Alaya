@@ -212,6 +212,7 @@ function createLifecycleControlsInput(input: FinalizeDaemonRuntimeWiringInput) {
     globalMemoryRecallInvalidationSubscription: input.globalMemoryRecallInvalidationSubscription,
     requestProtection: input.requestProtection,
     database: input.database,
+    temporalRuntimeLease: input.temporalRuntimeLease,
     recallReadWorkerClient: input.recallReadWorkerClient,
     intervalsToClear: [input.pathRelationEvictionTimer]
   };

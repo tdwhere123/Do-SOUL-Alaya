@@ -8,6 +8,7 @@ import {
   type EdgeProposalStatusValue
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { assertLegacyPathRelationReadAllowed } from "../../sqlite/temporal-projection-selection.js";
 import { StorageError } from "../../shared/errors.js";
 import {
   edgeProposalPathIdentity,
@@ -189,6 +190,7 @@ export class SqliteEdgeProposalRepo implements EdgeProposalRepo {
     if (!Number.isInteger(limit) || limit <= 0) {
       throw new StorageError("VALIDATION_FAILED", `listAcceptedAwaitingPath limit must be a positive integer: ${limit}`);
     }
+    assertLegacyPathRelationReadAllowed(this.db.connection);
     try {
       const awaiting: EdgeProposalRow[] = [];
       const batchSize = Math.max(limit, 64);

@@ -11,10 +11,13 @@ import {
 import {
   PATH_RELATION_COUNTER_DEFAULT_TTL_MS,
   PathRelationProposalService,
-  scheduleAuditedAsyncSideEffect,
-  type PathCandidateSink
+  RelationAssertionService,
+  scheduleAuditedAsyncSideEffect
 } from "@do-soul/alaya-core";
-import type { PathRelationProposalPayload } from "@do-soul/alaya-soul";
+import type {
+  PathRelationProposalPayload,
+  TemporalRelationAssertionPort as SoulTemporalRelationAssertionPort
+} from "@do-soul/alaya-soul";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
 export type PathRelationProposalPort = {
@@ -29,10 +32,27 @@ export type PathRelationProposalPort = {
   }): Promise<Readonly<{ readonly object_kind: string; readonly object_id: string }>>;
 };
 
-export function createPathRelationRuntime(input: CreateRecallMaterializationWiringInput): Readonly<{
+export type TemporalRelationAssertionPort = SoulTemporalRelationAssertionPort;
+
+type PathRelationRuntimeInput = Pick<
+  CreateRecallMaterializationWiringInput,
+  | "coUsageCounterRepo"
+  | "eventLogRepo"
+  | "eventPublisher"
+  | "memoryEntryRepo"
+  | "pathFailureHealthInboxPort"
+  | "pathRelationRepo"
+  | "proposalRepo"
+  | "relationAssertionRepo"
+  | "runtimeNotifier"
+  | "temporalProjectionSelected"
+  | "warn"
+>;
+
+export function createPathRelationRuntime(input: PathRelationRuntimeInput): Readonly<{
   readonly pathRelationProposalService: PathRelationProposalService;
   readonly pathRelationProposalPort: PathRelationProposalPort;
-  readonly pathCandidatePort: PathCandidateSink;
+  readonly temporalRelationAssertionPort: TemporalRelationAssertionPort;
   readonly pathRelationEvictionTimer: NodeJS.Timeout;
 }> {
   const runtimeConfig = readPathRelationRuntimeConfig();
@@ -42,17 +62,46 @@ export function createPathRelationRuntime(input: CreateRecallMaterializationWiri
     pathRelationProposalService,
     runtimeConfig.counterTtlMs
   );
-  const pathCandidatePort: PathCandidateSink = {
-    submitCandidate: async (candidateInput) =>
-      await pathRelationProposalService.submitCandidate(candidateInput)
-  };
   const pathRelationProposalPort = createPathRelationProposalPort(input);
+  const temporalRelationAssertionPort = createTemporalRelationAssertionPort(input);
   return Object.freeze({
     pathRelationProposalService,
     pathRelationProposalPort,
-    pathCandidatePort,
+    temporalRelationAssertionPort,
     pathRelationEvictionTimer
   });
+}
+
+function createTemporalRelationAssertionPort(
+  input: Pick<PathRelationRuntimeInput, "eventLogRepo" | "eventPublisher" | "relationAssertionRepo">
+): TemporalRelationAssertionPort {
+  const service = new RelationAssertionService({
+    repo: input.relationAssertionRepo,
+    eventPublisher: input.eventPublisher,
+    eventHistory: input.eventLogRepo
+  });
+  return {
+    admit: async (admission) => {
+      const result = await service.admit({
+        workspaceId: admission.workspaceId,
+        runId: admission.runId,
+        causedBy: "garden",
+        evidenceIds: admission.evidenceIds,
+        anchors: admission.anchors,
+        relationKind: admission.relationKind,
+        validity: admission.validity,
+        sourceEventAnchor: {
+          eventType: admission.sourceEventAnchor.event_type,
+          eventId: admission.sourceEventAnchor.event_id,
+          occurredAt: admission.sourceEventAnchor.occurred_at
+        }
+      });
+      return {
+        object_kind: "relation_assertion",
+        object_id: result.assertion.assertion_id
+      };
+    }
+  };
 }
 
 function readPositiveNumberEnv(name: string): number | undefined {
@@ -81,7 +130,15 @@ function readPathRelationRuntimeConfig() {
 }
 
 function createPathRelationProposalService(
-  input: CreateRecallMaterializationWiringInput,
+  input: Pick<
+    PathRelationRuntimeInput,
+    | "coUsageCounterRepo"
+    | "eventPublisher"
+    | "memoryEntryRepo"
+    | "pathFailureHealthInboxPort"
+    | "pathRelationRepo"
+    | "warn"
+  >,
   runtimeConfig: ReturnType<typeof readPathRelationRuntimeConfig>
 ) {
   return new PathRelationProposalService({
@@ -111,7 +168,7 @@ function createPathRelationProposalService(
 }
 
 function createPathRelationEvictionTimer(
-  input: CreateRecallMaterializationWiringInput,
+  input: Pick<PathRelationRuntimeInput, "eventLogRepo" | "runtimeNotifier">,
   pathRelationProposalService: PathRelationProposalService,
   counterTtlMs: number | undefined
 ) {
@@ -134,7 +191,7 @@ function createPathRelationEvictionTimer(
 }
 
 function createPathRelationProposalPort(
-  input: CreateRecallMaterializationWiringInput
+  input: Pick<PathRelationRuntimeInput, "proposalRepo" | "runtimeNotifier">
 ): PathRelationProposalPort {
   return {
     assertPathRelationProposalAvailable: async (proposalInput) => {
@@ -146,7 +203,7 @@ function createPathRelationProposalPort(
 }
 
 async function createPathRelationProposal(
-  input: CreateRecallMaterializationWiringInput,
+  input: Pick<PathRelationRuntimeInput, "proposalRepo" | "runtimeNotifier">,
   proposalInput: Parameters<PathRelationProposalPort["createPathRelationProposal"]>[0]
 ) {
   const timestamp = new Date().toISOString();
@@ -217,7 +274,7 @@ function buildPathRelationProposalRecord(
 }
 
 async function notifyCreatedProposalEvents(
-  input: CreateRecallMaterializationWiringInput,
+  input: Pick<PathRelationRuntimeInput, "runtimeNotifier">,
   events: readonly Parameters<typeof input.runtimeNotifier.notifyEntry>[0][]
 ): Promise<void> {
   for (const event of events) {

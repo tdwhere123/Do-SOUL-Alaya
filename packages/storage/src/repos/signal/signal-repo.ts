@@ -12,6 +12,7 @@ import { DEFAULT_REPO_LIST_PAGE_LIMIT, parsePageLimit, parsePageOffset } from ".
 
 export interface SignalRepo {
   create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal>;
+  createInCurrentTransaction(signal: CandidateMemorySignal): CandidateMemorySignal;
   getById(signalId: string): Promise<CandidateMemorySignal | null>;
   listByRun(runId: string, page?: SignalListPageOptions): Promise<readonly CandidateMemorySignal[]>;
   listByRunAll?(runId: string): Promise<readonly CandidateMemorySignal[]>;
@@ -51,6 +52,8 @@ interface SignalRow {
   readonly contradicts_refs_json: string;
   readonly incompatible_with_refs_json: string;
   readonly raw_payload_json: string;
+  readonly source_delivery_ids_json: string | null;
+  readonly source_observation_json: string | null;
   readonly signal_state: string;
   readonly created_at: string;
 }
@@ -88,6 +91,8 @@ const SIGNAL_SELECT_COLUMNS = `
         contradicts_refs_json,
         incompatible_with_refs_json,
         raw_payload_json,
+        source_delivery_ids_json,
+        source_observation_json,
         signal_state,
         created_at
 `;
@@ -111,9 +116,11 @@ const CREATE_SIGNAL_SQL = `
         contradicts_refs_json,
         incompatible_with_refs_json,
         raw_payload_json,
+        source_delivery_ids_json,
+        source_observation_json,
         signal_state,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
 interface SignalStatements {
@@ -147,39 +154,47 @@ export class SqliteSignalRepo implements SignalRepo {
   }
 
   public async create(signal: CandidateMemorySignal): Promise<CandidateMemorySignal> {
-    const parsedSignal = parseSignal(signal);
-
+    const signalId = signal.signal_id;
     try {
-      this.createStatement.run(
-        parsedSignal.signal_id,
-        parsedSignal.workspace_id,
-        parsedSignal.run_id,
-        parsedSignal.surface_id,
-        parsedSignal.source,
-        parsedSignal.signal_kind,
-        parsedSignal.object_kind,
-        parsedSignal.scope_hint,
-        JSON.stringify(parsedSignal.domain_tags),
-        parsedSignal.confidence,
-        JSON.stringify(parsedSignal.evidence_refs),
-        JSON.stringify(parsedSignal.source_memory_refs),
-        JSON.stringify(parsedSignal.supersedes_refs),
-        JSON.stringify(parsedSignal.exception_to_refs),
-        JSON.stringify(parsedSignal.contradicts_refs),
-        JSON.stringify(parsedSignal.incompatible_with_refs),
-        JSON.stringify(parsedSignal.raw_payload),
-        SignalState.EMITTED,
-        parsedSignal.created_at
-      );
+      const create = () => this.createInCurrentTransaction(signal);
+      if (this.db.connection.inTransaction) {
+        return create();
+      }
+      return this.db.connection.transaction(create).immediate();
     } catch (error) {
-      throw new StorageError("QUERY_FAILED", `Failed to create signal ${parsedSignal.signal_id}.`, error);
+      throw new StorageError("QUERY_FAILED", `Failed to create signal ${signalId}.`, error);
     }
+  }
 
-    const persisted = await this.getById(parsedSignal.signal_id);
+  public createInCurrentTransaction(signal: CandidateMemorySignal): CandidateMemorySignal {
+    const parsedSignal = parseSignal(signal);
+    this.createStatement.run(
+      parsedSignal.signal_id,
+      parsedSignal.workspace_id,
+      parsedSignal.run_id,
+      parsedSignal.surface_id,
+      parsedSignal.source,
+      parsedSignal.signal_kind,
+      parsedSignal.object_kind,
+      parsedSignal.scope_hint,
+      JSON.stringify(parsedSignal.domain_tags),
+      parsedSignal.confidence,
+      JSON.stringify(parsedSignal.evidence_refs),
+      JSON.stringify(parsedSignal.source_memory_refs),
+      JSON.stringify(parsedSignal.supersedes_refs),
+      JSON.stringify(parsedSignal.exception_to_refs),
+      JSON.stringify(parsedSignal.contradicts_refs),
+      JSON.stringify(parsedSignal.incompatible_with_refs),
+      JSON.stringify(parsedSignal.raw_payload),
+      parsedSignal.source_delivery_ids === undefined ? null : JSON.stringify(parsedSignal.source_delivery_ids),
+      parsedSignal.source_observation === null ? null : JSON.stringify(parsedSignal.source_observation),
+      SignalState.EMITTED,
+      parsedSignal.created_at
+    );
+    const persisted = this.getByIdInCurrentTransaction(parsedSignal.signal_id);
     if (persisted === null) {
       throw new StorageError("NOT_FOUND", `Signal ${parsedSignal.signal_id} was not found after insert.`);
     }
-
     return persisted;
   }
 
@@ -274,7 +289,7 @@ export class SqliteSignalRepo implements SignalRepo {
     return this.db;
   }
 
-  private getByIdInCurrentTransaction(signalId: string): CandidateMemorySignal | null {
+  public getByIdInCurrentTransaction(signalId: string): CandidateMemorySignal | null {
     const row = this.getByIdStatement.get(signalId) as SignalRow | undefined;
     return row === undefined ? null : parseSignalRow(row);
   }
@@ -352,6 +367,11 @@ function parseSignalRow(row: SignalRow): CandidateMemorySignal {
       contradicts_refs: JSON.parse(row.contradicts_refs_json),
       incompatible_with_refs: JSON.parse(row.incompatible_with_refs_json),
       raw_payload: JSON.parse(row.raw_payload_json),
+      ...(row.source_delivery_ids_json === null
+        ? {}
+        : { source_delivery_ids: JSON.parse(row.source_delivery_ids_json) }),
+      source_observation:
+        row.source_observation_json === null ? null : JSON.parse(row.source_observation_json),
       created_at: row.created_at
     });
   } catch (error) {

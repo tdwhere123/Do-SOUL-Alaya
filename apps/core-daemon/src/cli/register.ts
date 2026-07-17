@@ -39,6 +39,7 @@ import { createOperationCommandSpecs } from "./operations.js";
 import { createReviewCommand } from "./review.js";
 import { createStatusCommand } from "./status.js";
 import { createSourceGroundingDefersCommand } from "./source-grounding-defers/command.js";
+import { createTemporalCutoverCommandSpec } from "./temporal-cutover.js";
 import { createToolsCommand } from "./tools.js";
 import {
   ensureImplicitLocalWorkspace,
@@ -55,6 +56,7 @@ export function registerAlayaCliCommands(
   registerAttachCommands(bridge, runtime);
   registerMemoryCommands(bridge, runtime);
   bridge.registerSubcommand(createMcpCommand(runtime));
+  bridge.registerSubcommand(createTemporalCutoverCommandSpec(runtime));
   registerOperationCommands(bridge);
 }
 

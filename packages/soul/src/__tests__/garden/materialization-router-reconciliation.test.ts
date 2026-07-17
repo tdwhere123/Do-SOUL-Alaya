@@ -328,10 +328,64 @@ describe("MaterializationRouter ingest reconciliation", () => {
     await expect(
       router.replaySignalRefs({
         newObjectId: "memory-1",
-        signal: factSignal({ source_memory_refs: ["mem-transient"] })
+        evidenceId: "evidence-memory-1",
+        signal: factSignal({ source_memory_refs: ["mem-transient"] }),
+        context: { source_event_anchor: null }
       })
     ).rejects.toThrow("source_memory_refs path_relation candidate derives_from");
     expect(pathRelationProposalPort.createPathRelationProposal).not.toHaveBeenCalled();
+  });
+
+  it("replays source refs through a temporal assertion when given a verified emission anchor", async () => {
+    const deps = createDeps();
+    const admit = vi.fn(async () => ({ object_kind: "relation_assertion", object_id: "assertion-1" }));
+    const router = new MaterializationRouter({
+      ...deps,
+      pathCandidateSinkPort: undefined,
+      temporalRelationAssertionPort: { admit }
+    });
+
+    await expect(router.replaySignalRefs({
+      newObjectId: "memory-1",
+      evidenceId: "evidence-memory-1",
+      signal: factSignal({ source_memory_refs: ["mem-prior-1"] }),
+      context: {
+        source_event_anchor: {
+          event_type: "soul.signal.emitted",
+          event_id: "event-signal-1",
+          occurred_at: "2026-05-25T00:00:00.000Z"
+        }
+      }
+    })).resolves.toEqual([{ object_kind: "relation_assertion", object_id: "assertion-1" }]);
+
+    expect(admit).toHaveBeenCalledWith(expect.objectContaining({
+      sourceSignalId: "signal-1",
+      relationKind: "derives_from",
+      sourceEventAnchor: {
+        event_type: "soul.signal.emitted",
+        event_id: "event-signal-1",
+        occurred_at: "2026-05-25T00:00:00.000Z"
+      }
+    }));
+    expect(deps.pathCandidateSinkPort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("refuses temporal source-ref replay with an empty materialization context", async () => {
+    const deps = createDeps();
+    const admit = vi.fn(async () => ({ object_kind: "relation_assertion", object_id: "assertion-1" }));
+    const router = new MaterializationRouter({
+      ...deps,
+      pathCandidateSinkPort: undefined,
+      temporalRelationAssertionPort: { admit }
+    });
+
+    await expect(router.replaySignalRefs({
+      newObjectId: "memory-1",
+      evidenceId: "evidence-memory-1",
+      signal: factSignal({ source_memory_refs: ["mem-prior-1"] }),
+      context: { source_event_anchor: null }
+    })).rejects.toThrow("Temporal signal-ref replay requires a verified signal emission anchor.");
+    expect(admit).not.toHaveBeenCalled();
   });
 
 

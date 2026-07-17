@@ -4,10 +4,11 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   ContextLensAssembler,
+  GraphExploreService,
   RecallService,
   RuleBasedEntityExtractor
 } from "@do-soul/alaya-core";
-import { findActiveConstraints } from "@do-soul/alaya-storage";
+import { findActiveConstraints, SqliteTemporalPathProjectionReader } from "@do-soul/alaya-storage";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../ai/daemon-embedding-runtime.js";
 import {
@@ -21,6 +22,11 @@ import {
 } from "../routes/memory/recall-utilization.js";
 import { createRecallUtilizationService } from "../services/recall-utilization-service.js";
 import { createGlobalMemoryRecallCachePort } from "./daemon-runtime-support.js";
+import {
+  createTemporalGraphExplorePathReader,
+  type RecallPathProjectionReadOptions,
+  type RecallPathReadPorts
+} from "./recall-path-readers.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
 export function createRecallUtilizationRuntime(input: CreateRecallMaterializationWiringInput) {
@@ -71,13 +77,14 @@ export function createRecallUtilizationRuntime(input: CreateRecallMaterializatio
 
 export function createRecallSearchRuntime(
   input: CreateRecallMaterializationWiringInput,
-  recallReadWorkerClient: ReturnType<typeof import("./recall-read-worker-client.js").createRecallReadWorkerClient>
+  recallReadWorkerClient: ReturnType<typeof import("./recall-read-worker-client.js").createRecallReadWorkerClient>,
+  directPathReadPorts: RecallPathReadPorts
 ) {
   return {
     recallMemoryRepo: recallReadWorkerClient?.memoryRepo ?? input.memoryEntryRepo,
     recallEvidenceSearchPort: createRecallEvidenceSearchPort(input, recallReadWorkerClient),
     recallSynthesisSearchPort: createRecallSynthesisSearchPort(input, recallReadWorkerClient),
-    recallActiveConstraintsPort: createRecallActiveConstraintsPort(input)
+    recallActiveConstraintsPort: createRecallActiveConstraintsPort(input, directPathReadPorts)
   };
 }
 
@@ -112,16 +119,33 @@ function createRecallSynthesisSearchPort(
   };
 }
 
-function createRecallActiveConstraintsPort(input: CreateRecallMaterializationWiringInput) {
+export function createRecallActiveConstraintsPort(
+  input: Readonly<{
+    readonly memoryEntryRepo: Parameters<typeof findActiveConstraints>[0]["memoryRepo"];
+    readonly claimFormRepo: Parameters<typeof findActiveConstraints>[0]["claimFormRepo"];
+  }>,
+  directPathReadPorts: RecallPathReadPorts
+) {
   return {
     findActiveConstraints: async (
-      activeConstraintsInput: Readonly<{ readonly workspaceId: string; readonly cap?: number | null }>
+      activeConstraintsInput: Readonly<{
+        readonly workspaceId: string;
+        readonly cap?: number | null;
+        readonly asOf?: string;
+      }>
     ) => {
       const result = await findActiveConstraints({
         workspaceId: activeConstraintsInput.workspaceId,
         memoryRepo: input.memoryEntryRepo,
         claimFormRepo: input.claimFormRepo,
-        pathRelationRepo: input.pathRelationRepo,
+        pathRelationRepo: {
+          findActiveAll: async (workspaceId: string) =>
+            activeConstraintsInput.asOf === undefined
+              ? await directPathReadPorts.findActiveByWorkspace(workspaceId)
+              : await directPathReadPorts.findActiveByWorkspace(workspaceId, {
+                  asOf: activeConstraintsInput.asOf
+                })
+        },
         cap: activeConstraintsInput.cap
       });
       return Object.freeze({
@@ -158,6 +182,7 @@ export function createRecallServiceRuntime(input: {
   readonly recallPathRuntime: {
     readonly recallPathPlasticityPort: unknown;
     readonly recallPathExpansionPort: unknown;
+    readonly directPathReadPorts: RecallPathReadPorts;
   };
   readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
@@ -184,6 +209,7 @@ function createRecallService(input: {
   readonly recallPathRuntime: {
     readonly recallPathPlasticityPort: unknown;
     readonly recallPathExpansionPort: unknown;
+    readonly directPathReadPorts: RecallPathReadPorts;
   };
   readonly manifestationSidecarPort: unknown;
   readonly recallSearchRuntime: ReturnType<typeof createRecallSearchRuntime>;
@@ -192,7 +218,10 @@ function createRecallService(input: {
     memoryRepo: input.recallSearchRuntime.recallMemoryRepo,
     slotRepo: input.input.slotRepo,
     eventLogRepo: input.input.eventLogRepo,
-    graphSupportPort: input.input.graphExploreService,
+    graphSupportPort: createRecallGraphSupportPort(
+      input.input,
+      input.recallPathRuntime.directPathReadPorts
+    ),
     projectMappingPort: input.input.projectMappingService,
     pathPlasticityPort: input.recallPathRuntime.recallPathPlasticityPort as never,
     pathExpansionPort: input.recallPathRuntime.recallPathExpansionPort as never,
@@ -217,6 +246,47 @@ function createRecallService(input: {
     warn: input.input.warn
   });
   return withEmbeddingWarmupHoldAnnotation(service, input.embeddingRuntime.getWarmupHoldReason);
+}
+
+function createRecallGraphSupportPort(
+  input: CreateRecallMaterializationWiringInput,
+  directPathReadPorts: RecallPathReadPorts
+) {
+  if (input.temporalProjectionSelected !== true) {
+    return input.graphExploreService;
+  }
+  const temporalReader = new SqliteTemporalPathProjectionReader(input.relationAssertionRepo);
+  const createGraphService = (options: RecallPathProjectionReadOptions = {}) =>
+    new GraphExploreService({
+      pathRepo: createTemporalGraphExplorePathReader(
+        temporalReader,
+        directPathReadPorts.ensureTemporalProjection,
+        options
+      ),
+      eventLogRepo: input.eventLogRepo
+    });
+  return {
+    countInboundSupports: async (
+      memoryId: string,
+      workspaceId: string,
+      options?: RecallPathProjectionReadOptions
+    ) => await createGraphService(options).countInboundSupports(memoryId, workspaceId),
+    countInboundEdgesWeighted: async (
+      memoryId: string,
+      workspaceId: string,
+      options?: RecallPathProjectionReadOptions
+    ) => await createGraphService(options).countInboundEdgesWeighted(memoryId, workspaceId),
+    countInboundRecalls: async (
+      memoryId: string,
+      workspaceId: string,
+      options?: RecallPathProjectionReadOptions
+    ) => await createGraphService(options).countInboundRecalls(memoryId, workspaceId),
+    countInboundRecallMetricsByMemoryId: async (
+      memoryIds: readonly string[],
+      workspaceId: string,
+      options?: RecallPathProjectionReadOptions
+    ) => await createGraphService(options).countInboundRecallMetricsByMemoryId(memoryIds, workspaceId)
+  };
 }
 
 function withEmbeddingWarmupHoldAnnotation(

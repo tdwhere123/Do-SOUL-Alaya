@@ -2,21 +2,24 @@ import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import {
   ClaimService,
   ConflictDetectionService,
-  type PathCandidateSink,
+  createSignalEmissionWriter,
   ReconciliationService,
   SignalService,
   SynthesisService
 } from "@do-soul/alaya-core";
 import { MaterializationRouter } from "@do-soul/alaya-soul";
 import type { SqliteHandoffGapAdapter } from "../handoff/gap-adapter.js";
-import type { PathRelationProposalPort } from "./recall-materialization-path-relation.js";
+import type {
+  PathRelationProposalPort,
+  TemporalRelationAssertionPort
+} from "./recall-materialization-path-relation.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 import { createSourceGroundingDeferTransitions } from "./source-grounding-defer/transitions.js";
 
 type SignalMaterializationRuntimeInput = Readonly<{
   readonly wiring: CreateRecallMaterializationWiringInput;
   readonly pathRelationProposalPort: PathRelationProposalPort;
-  readonly pathCandidateSinkPort: PathCandidateSink;
+  readonly temporalRelationAssertionPort: TemporalRelationAssertionPort;
   readonly conflictDetectionService: ConflictDetectionService | null;
   readonly reconciliationService: ReconciliationService | null;
   readonly handoffGapHandler: SqliteHandoffGapAdapter;
@@ -43,7 +46,7 @@ function createMaterializationRouter(
     synthesisService: input.wiring.synthesisService as SynthesisService,
     claimService: input.wiring.claimService as ClaimService,
     pathRelationProposalPort: input.pathRelationProposalPort,
-    pathCandidateSinkPort: input.pathCandidateSinkPort,
+    temporalRelationAssertionPort: input.temporalRelationAssertionPort,
     enrichPendingPort: { enqueue: input.wiring.enqueueEnrichPending },
     ...(input.conflictDetectionService === null
       ? {}
@@ -69,6 +72,10 @@ function createMaterializationSignalService(
   return new SignalService({
     eventLogRepo: wiring.eventLogRepo,
     signalRepo: wiring.signalRepo,
+    emissionWriter: createSignalEmissionWriter({
+      eventPublisher: wiring.eventPublisher,
+      signalRepo: wiring.signalRepo
+    }),
     runtimeNotifier: wiring.runtimeNotifier,
     sourceGroundingDeferQueue: wiring.sourceGroundingDeferQueueRepo,
     sourceGroundingDeferTransitions: createSourceGroundingDeferTransitions({
@@ -77,8 +84,8 @@ function createMaterializationSignalService(
       queueRepo: wiring.sourceGroundingDeferQueueRepo
     }),
     postTriageMaterializer: {
-      materialize: async (signal: CandidateMemorySignal) =>
-        await materializationRouter.materializeSignal(signal)
+      materialize: async (signal: CandidateMemorySignal, context) =>
+        await materializationRouter.materializeSignal(signal, context)
     }
   });
 }

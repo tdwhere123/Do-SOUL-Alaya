@@ -18,6 +18,7 @@ import type {
   RecallServiceWarnPort,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
+import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import { computeMaxWeightTransferAmount } from "../scoring/scoring.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
@@ -39,6 +40,7 @@ interface CollectSupplementaryDataParams {
   readonly warn: RecallServiceWarnPort;
   readonly candidates: readonly Readonly<MemoryEntry>[];
   readonly workspaceId: string;
+  readonly pathProjectionAsOf?: string;
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -110,11 +112,15 @@ async function collectGraphMetrics(
     return collectLegacyGraphMetrics(params);
   }
   try {
-    const metrics = await bulkReader.call(
-      params.dependencies.graphSupportPort,
-      params.candidates.map((candidate) => candidate.object_id),
-      params.workspaceId
-    );
+    const memoryIds = params.candidates.map((candidate) => candidate.object_id);
+    const metrics = params.pathProjectionAsOf === undefined
+      ? await bulkReader.call(params.dependencies.graphSupportPort, memoryIds, params.workspaceId)
+      : await bulkReader.call(
+        params.dependencies.graphSupportPort,
+        memoryIds,
+        params.workspaceId,
+        { asOf: params.pathProjectionAsOf }
+      );
     return Object.freeze({
       graphSupportCounts: Object.fromEntries(params.candidates.map((candidate) => [
         candidate.object_id,
@@ -170,6 +176,7 @@ async function collectEvidenceAndGovernanceData(
     dependencies: params.dependencies,
     warn: params.warn,
     workspaceId: params.workspaceId,
+    pathProjectionAsOf: params.pathProjectionAsOf,
     candidates
   });
   return Object.freeze({
@@ -188,7 +195,7 @@ async function collectGraphSupportCounts(
         return [candidate.object_id, 0] as const;
       }
       try {
-        const count = await params.dependencies.graphSupportPort.countInboundEdgesWeighted(candidate.object_id, params.workspaceId);
+        const count = await readInboundGraphWeight(params, candidate.object_id);
         return [candidate.object_id, count] as const;
       } catch (error) {
         params.warn("graph support lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, operation: "graph_support_lookup", errorName: errorNameOf(error), error: toErrorMessage(error) });
@@ -226,7 +233,7 @@ async function collectRecallEdgeCounts(
         return [candidate.object_id, 0] as const;
       }
       try {
-        const count = await params.dependencies.graphSupportPort.countInboundRecalls(candidate.object_id, params.workspaceId);
+        const count = await readInboundRecallCount(params, candidate.object_id);
         return [candidate.object_id, count] as const;
       } catch (error) {
         params.warn("recall edge count lookup failed", { workspace_id: params.workspaceId, memory_id: candidate.object_id, operation: "recall_edge_count_lookup", errorName: errorNameOf(error), error: toErrorMessage(error) });
@@ -234,6 +241,28 @@ async function collectRecallEdgeCounts(
       }
     })
   );
+}
+
+async function readInboundGraphWeight(
+  params: CollectSupplementaryDataParams,
+  memoryId: string
+): Promise<number> {
+  const port = params.dependencies.graphSupportPort;
+  if (port === undefined) return 0;
+  return params.pathProjectionAsOf === undefined
+    ? await port.countInboundEdgesWeighted(memoryId, params.workspaceId)
+    : await port.countInboundEdgesWeighted(memoryId, params.workspaceId, { asOf: params.pathProjectionAsOf });
+}
+
+async function readInboundRecallCount(
+  params: CollectSupplementaryDataParams,
+  memoryId: string
+): Promise<number> {
+  const port = params.dependencies.graphSupportPort;
+  if (port?.countInboundRecalls === undefined) return 0;
+  return params.pathProjectionAsOf === undefined
+    ? await port.countInboundRecalls(memoryId, params.workspaceId)
+    : await port.countInboundRecalls(memoryId, params.workspaceId, { asOf: params.pathProjectionAsOf });
 }
 
 async function collectBudgetPenaltyFactor(params: CollectSupplementaryDataParams): Promise<number> {
@@ -250,9 +279,12 @@ async function collectPlasticityFactors(
     return Object.freeze({});
   }
   try {
-    const strengthMap = await params.dependencies.pathPlasticityPort.getStrengthByMemoryId(
-      params.workspaceId,
-      params.candidates.map((candidate) => candidate.object_id)
+    const port = params.dependencies.pathPlasticityPort;
+    const memoryIds = params.candidates.map((candidate) => candidate.object_id);
+    const strengthMap = await readWithTemporalProjection(
+      params.pathProjectionAsOf,
+      () => port.getStrengthByMemoryId(params.workspaceId, memoryIds),
+      (options) => port.getStrengthByMemoryId(params.workspaceId, memoryIds, options)
     );
     return Object.freeze(Object.fromEntries([...strengthMap.entries()].map(([memoryId, strength]) => [memoryId, clamp01(strength)])));
   } catch (error) {

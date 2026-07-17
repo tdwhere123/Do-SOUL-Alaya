@@ -5,7 +5,20 @@ export {
   closeCachedDatabase,
   StorageDatabase,
   getCurrentSchemaSummary,
-  type InitDatabaseOptions
+  prepareTemporalCandidate,
+  inspectTemporalProjectionSelection,
+  isTemporalProjectionSelected,
+  selectTemporalProjection,
+  rollbackTemporalProjection,
+  type InitDatabaseOptions,
+  type TemporalCandidateFileDigest,
+  type TemporalCandidatePreparation,
+  acquireTemporalMaintenanceLease,
+  type TemporalMaintenanceLease,
+  type RollbackTemporalProjectionInput,
+  type SelectTemporalProjectionInput,
+  type TemporalProjectionSelectionAuditEntry,
+  type TemporalProjectionSelectionState
 } from "./sqlite/index.js";
 export {
   readSchemaMigrationLedger
@@ -126,6 +139,15 @@ export {
   SqlitePathRelationRepo,
   type PathRelationPageOptions,
   type PathRelationRepo
+} from "./repos/path/index.js";
+export {
+  SqliteRelationAssertionRepo,
+  type RelationAssertionProjectionGeneration,
+  type RelationAssertionRepo
+} from "./repos/path/index.js";
+export {
+  SqliteTemporalPathProjectionReader,
+  type TemporalProjectionReadOptions
 } from "./repos/path/index.js";
 export {
   SqliteCoUsageCounterRepo,

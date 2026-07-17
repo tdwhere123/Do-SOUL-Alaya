@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { RecallService } from "../../recall/recall-service.js";
 import {
@@ -75,5 +75,64 @@ describe("RecallService reference time", () => {
     });
 
     expect(result.candidates[0]?.object_id).toBe(localPrevious.object_id);
+  });
+
+  it("threads an explicit reference time to every temporal path-dependent read", async () => {
+    const first = temporalMemory("11111111-1111-4111-8111-111111111111", "2026-08-15");
+    const second = temporalMemory("99999999-9999-4999-8999-999999999999", "2026-08-16");
+    const { dependencies } = createDependencies([first, second]);
+    const findByAnchors = vi.fn(async () => []);
+    const getStrengthByMemoryId = vi.fn(async () => new Map<string, number>());
+    const findActiveConstraints = vi.fn(async () => ({ constraints: [], total_count: 0 }));
+    const countInboundEdgesWeighted = vi.fn(async () => 0);
+    const countInboundRecalls = vi.fn(async () => 0);
+    const service = new RecallService({
+      ...dependencies,
+      pathExpansionPort: { findByAnchors },
+      pathPlasticityPort: { getStrengthByMemoryId },
+      activeConstraintsPort: { findActiveConstraints },
+      graphSupportPort: {
+        countInboundSupports: vi.fn(async () => 0),
+        countInboundEdgesWeighted,
+        countInboundRecalls
+      }
+    });
+    const referenceTime = "2026-08-23T00:30:00+08:00";
+
+    await service.recall({
+      workspaceId: "workspace-1",
+      strategy: "analyze",
+      taskSurface: {
+        ...createTaskSurface(),
+        display_name: "Which concert memory is relevant?"
+      },
+      referenceTime
+    });
+
+    expect(findByAnchors).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.any(Array),
+      { asOf: referenceTime }
+    );
+    expect(getStrengthByMemoryId).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.any(Array),
+      { asOf: referenceTime }
+    );
+    expect(findActiveConstraints).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      cap: null,
+      asOf: referenceTime
+    });
+    expect(countInboundEdgesWeighted).toHaveBeenCalledWith(
+      expect.any(String),
+      "workspace-1",
+      { asOf: referenceTime }
+    );
+    expect(countInboundRecalls).toHaveBeenCalledWith(
+      expect.any(String),
+      "workspace-1",
+      { asOf: referenceTime }
+    );
   });
 });

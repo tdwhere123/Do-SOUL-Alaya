@@ -25,6 +25,36 @@ export interface SignalServiceSignalRepoPort {
   updateState(signalId: string, state: SignalStateValue): Promise<CandidateMemorySignal>;
 }
 
+/**
+ * The SQLite-only half of first-admission. Keeping it separate from the
+ * ordinary async repository port prevents an await from escaping the EventLog
+ * transaction boundary.
+ */
+export interface SignalServiceAtomicSignalRepoPort extends SignalServiceSignalRepoPort {
+  createInCurrentTransaction(signal: CandidateMemorySignal): CandidateMemorySignal;
+  getByIdInCurrentTransaction(signalId: string): CandidateMemorySignal | null;
+  getStorageConnectionIdentity(): object;
+}
+
+export type SignalEmittedEventInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
+
+export interface SignalEmissionReceipt {
+  readonly signal: CandidateMemorySignal;
+  /** Null means another writer already admitted an idempotent replay. */
+  readonly emitted_event: EventLogEntry | null;
+}
+
+/**
+ * Emits the canonical first-admission EventLog envelope and signal row in one
+ * transaction, then performs EventPublisher's post-commit propagation.
+ */
+export interface SignalServiceEmissionWriterPort {
+  emit(
+    signal: CandidateMemorySignal,
+    event: SignalEmittedEventInput
+  ): Promise<SignalEmissionReceipt>;
+}
+
 export interface SignalListPageOptions {
   readonly limit: number;
   readonly offset: number;
@@ -32,6 +62,17 @@ export interface SignalListPageOptions {
 
 export interface SignalRuntimeNotifier {
   notifyEntry(entry: EventLogEntry): void | Promise<void>;
+}
+
+export interface SignalSourceEventAnchor {
+  readonly event_type: "soul.signal.emitted";
+  readonly event_id: string;
+  readonly occurred_at: string;
+}
+
+/** Context that may be used for durable evidence, never reconstructed from clocks. */
+export interface SignalMaterializationContext {
+  readonly source_event_anchor: SignalSourceEventAnchor | null;
 }
 
 export type SignalTriageResult = "accepted" | "dropped" | "deferred";
@@ -70,7 +111,10 @@ export type SignalMaterializationResult =
   | SignalMaterializationFailureResult;
 
 export interface SignalServicePostTriageMaterializer {
-  materialize(signal: CandidateMemorySignal): Promise<SignalMaterializationResult>;
+  materialize(
+    signal: CandidateMemorySignal,
+    context: SignalMaterializationContext
+  ): Promise<SignalMaterializationResult>;
 }
 
 export interface SignalServiceReceiveResult {
@@ -87,6 +131,8 @@ export interface SignalServiceDependencies {
   readonly eventLogRepo: SignalServiceEventLogRepoPort;
   readonly signalRepo: SignalServiceSignalRepoPort;
   readonly runtimeNotifier: SignalRuntimeNotifier;
+  /** Required by production wiring; legacy fakes may use the compatibility seam. */
+  readonly emissionWriter?: SignalServiceEmissionWriterPort;
   readonly postTriageMaterializer?: SignalServicePostTriageMaterializer;
   readonly warn?: SignalServiceWarnPort;
   /** Optional bounded re-drive queue for source-grounding deferrals. */

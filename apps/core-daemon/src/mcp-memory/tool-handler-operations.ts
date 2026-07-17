@@ -58,6 +58,7 @@ import type {
   McpMemoryToolCallResult,
   McpMemoryToolHandlerDependencies
 } from "./tool-handler-types.js";
+import { createVerifiedDeliverySourceObservation } from "../runtime/recall-materialization-source-receipt.js";
 
 type GardenTaskOperations = Readonly<{
   listPendingGardenTasks(request: GardenListPendingTasksRequest, context: McpMemoryToolCallContext): Promise<unknown>;
@@ -189,8 +190,17 @@ async function emitCandidateSignal(
   if (context.runId === null) {
     throw new ToolValidationError("soul.emit_candidate_signal requires a runId in the MCP call context.");
   }
-  await validateSourceDeliveryAnchors(input.deps, request.source_delivery_ids, context);
-  const signal = buildCandidateSignal(input, request, context);
+  const deliveries = await validateSourceDeliveryAnchors(
+    input.deps,
+    request.source_delivery_ids,
+    context
+  );
+  const signal = buildCandidateSignal(
+    input,
+    request,
+    context,
+    createVerifiedDeliverySourceObservation(deliveries)
+  );
   warnIfModelToolSignalMissingDeliveryAnchor(signal, input.warn);
   const received = await input.deps.signalService.receiveSignal(signal);
   return SoulEmitCandidateSignalResponseSchema.parse({ signal_id: received.signal.signal_id, status: "emitted" });
@@ -199,7 +209,8 @@ async function emitCandidateSignal(
 function buildCandidateSignal(
   input: McpMemoryOperationFactoryInput,
   request: SoulEmitCandidateSignalRequest,
-  context: McpMemoryToolCallContext
+  context: McpMemoryToolCallContext,
+  sourceObservation: CandidateMemorySignal["source_observation"]
 ): CandidateMemorySignal {
   return CandidateMemorySignalSchema.parse({
     signal_id: `signal_${input.generateId()}`,
@@ -208,6 +219,7 @@ function buildCandidateSignal(
     run_id: context.runId,
     surface_id: context.surfaceId ?? null,
     source: SignalSource.MODEL_TOOL,
+    source_observation: sourceObservation,
     created_at: input.now()
   });
 }
@@ -415,11 +427,12 @@ async function validateSourceDeliveryAnchors(
   deps: McpMemoryToolHandlerDependencies,
   sourceDeliveryIds: readonly string[] | undefined,
   context: McpMemoryToolCallContext
-): Promise<void> {
+): Promise<readonly Readonly<ContextDeliveryRecord>[]> {
   if (sourceDeliveryIds === undefined) {
-    return;
+    return [];
   }
 
+  const deliveries: Readonly<ContextDeliveryRecord>[] = [];
   for (const deliveryId of sourceDeliveryIds) {
     const delivery = await deps.trustStateRecorder.findDeliveryById(deliveryId);
     if (!isSourceDeliveryInScope(delivery, context)) {
@@ -427,7 +440,9 @@ async function validateSourceDeliveryAnchors(
         `source_delivery_ids contains an unknown or out-of-scope delivery_id: ${deliveryId}`
       );
     }
+    deliveries.push(delivery);
   }
+  return deliveries;
 }
 
 function isSourceDeliveryInScope(

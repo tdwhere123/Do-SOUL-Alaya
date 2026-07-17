@@ -71,6 +71,7 @@ export type CreateGardenSchedulerRuntimeSupportInput = Readonly<{
     getSoulConfig?(workspaceId: string): Promise<SoulConfig>;
   };
   readonly consolidationExecutor: ConsolidationExecutor | null;
+  readonly legacyTopologyMutationsEnabled?: boolean;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;
   readonly edgeProposalReconcile?: {
     reconcileStuckAccepts(input: {

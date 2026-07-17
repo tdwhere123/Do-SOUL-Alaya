@@ -113,6 +113,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
 });
 
 import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenSignalRefReplayPort } from "../../runtime/garden-signal-ref-replay.js";
 
 type Runtime = ReturnType<typeof createGardenRuntime>;
 
@@ -185,6 +186,38 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(completion?.audit_entries).toContain("bulk_enrich:processed_0");
     expect(completion?.audit_entries).toContain("bulk_enrich:failed_1");
     expect(completion?.audit_entries).toContain("bulk_enrich:abandoned_0");
+  });
+
+  it("keeps a missing canonical signal-emission anchor pending through the real Garden replay adapter", async () => {
+    const enrichPendingRepo = new FakeEnrichPendingRepo();
+    enrichPendingRepo.enqueue("workspace-1", "memory-missing-anchor");
+    const recordFailedAttempt = vi.spyOn(enrichPendingRepo, "recordFailedAttempt");
+    const materializationRouter = { replaySignalRefs: vi.fn(async () => []) };
+    const signalRefReplayPort = createGardenSignalRefReplayPort({
+      eventLogRepo: { append: vi.fn(), queryByEntity: vi.fn(async () => []) },
+      evidenceCapsuleLookup: { findByIds: vi.fn(async () => []) },
+      materializationRouter
+    });
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        enrichPendingRepo,
+        findById: vi.fn(async (memoryId: string) => buildMemory(memoryId)),
+        omitEnrichmentServices: true,
+        sourceSignalLookup: vi.fn<SourceSignalLookupFn>(async (signalId) => buildSignal(signalId)),
+        replaySignalRefs: signalRefReplayPort.replaySignalRefs
+      })
+    );
+
+    await dispatchBulkEnrich(runtime);
+
+    expect(recordFailedAttempt).toHaveBeenCalledWith(
+      "workspace-1",
+      "memory-missing-anchor",
+      DYNAMICS_CONSTANTS.enrich.max_attempts,
+      expect.any(String)
+    );
+    expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
+    expect(materializationRouter.replaySignalRefs).not.toHaveBeenCalled();
   });
 
   it("does not mark processed when signal-ref replay cannot load the source signal", async () => {

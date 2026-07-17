@@ -196,7 +196,7 @@ async function processClaimedBatch(
         missingCount += 1;
         continue;
       }
-      await replayBulkEnrichSignalRefs(pending, memory.object_id, ports);
+      await replayBulkEnrichSignalRefs(pending, memory.object_id, memory.evidence_refs, ports);
       await produceBulkEnrichEdges(pending, memory, ports);
       await detectBulkEnrichConflicts(memory, ports);
       ports.enrichPendingRepo.markProcessed(pending.workspaceId, pending.memoryId, processedAt);
@@ -227,6 +227,7 @@ async function processClaimedBatch(
 async function replayBulkEnrichSignalRefs(
   pending: BulkEnrichPendingClaim,
   memoryId: string,
+  evidenceIds: readonly string[],
   ports: BulkEnrichReadyPorts
 ): Promise<void> {
   if (ports.signalRefReplay === undefined || pending.sourceSignalId === null) {
@@ -243,6 +244,7 @@ async function replayBulkEnrichSignalRefs(
   }
   await ports.signalRefReplay.replaySignalRefs({
     newMemoryId: memoryId,
+    memoryEvidenceIds: evidenceIds,
     signal: sourceSignal
   });
 }

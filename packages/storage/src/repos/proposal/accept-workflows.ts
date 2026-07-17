@@ -9,6 +9,7 @@ import {
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { assertLegacyPathRelationReadAllowed } from "../../sqlite/temporal-projection-selection.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { insertEventLogEntry } from "../shared/event-log-writer.js";
@@ -109,6 +110,7 @@ export async function acceptPendingPathRelationGovernanceWithEvents(
   readonly path_relation: Readonly<PathRelation>;
   readonly events: readonly EventLogEntry[];
 }>> {
+  assertLegacyPathRelationReadAllowed(ctx.db.connection);
   const request = parseAcceptRequest(proposalId, updatedAt, options);
   const parsedPathRelationGovernance = parseAcceptedPathRelationGovernanceInput(
     pathRelationGovernance

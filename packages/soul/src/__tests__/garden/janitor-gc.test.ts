@@ -118,6 +118,39 @@ describe("Janitor GC task kinds", () => {
     ]);
   });
 
+  it("completes an intentional S4 physical-GC deferral without calling a delete port", async () => {
+    const legacyTombstoneGcPort = {
+      findTombstonedMemories: vi.fn(async () => [{ memory_id: "memory-legacy" }]),
+      hardDelete: vi.fn(async () => true)
+    };
+    const scheduler = { reportCompletion: vi.fn(async () => undefined) };
+    const janitor = new Janitor({
+      cleanupPort: {
+        findExpiredObjects: vi.fn(async () => []),
+        removeExpiredObjects: vi.fn(async () => undefined)
+      },
+      tieringPort: {
+        findHotDemotionCandidates: vi.fn(async () => []),
+        demoteToWarm: vi.fn(async () => undefined)
+      },
+      tombstoneGcDeferredReason: "temporal_assertion_provenance_required",
+      scheduler,
+      now: () => "2026-07-17T00:00:00.000Z"
+    } as ConstructorParameters<typeof Janitor>[0]);
+
+    const result = await janitor.run(createTask(GardenTaskKind.TOMBSTONE_GC));
+
+    expect(legacyTombstoneGcPort.findTombstonedMemories).not.toHaveBeenCalled();
+    expect(legacyTombstoneGcPort.hardDelete).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(result.objects_affected).toEqual([]);
+    expect(result.audit_entries).toEqual([
+      "[SKIPPED] tombstone_gc: disposition sweep port not wired",
+      "[DEFERRED] tombstone_gc: temporal_assertion_provenance_required"
+    ]);
+    expect(scheduler.reportCompletion).toHaveBeenCalledWith(result);
+  });
+
   it("skips tombstone gc deletions for strong-ref protected memories", async () => {
     const tombstoneGcPort = {
       findTombstonedMemories: vi.fn(async () => [{ memory_id: "memory-1" }, { memory_id: "memory-2" }]),

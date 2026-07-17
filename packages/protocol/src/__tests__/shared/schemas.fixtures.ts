@@ -103,6 +103,7 @@ export const candidateMemorySignalBase = {
     summary: "Potential synthesis candidate",
     message_ids: ["message-1", "message-2"]
   },
+  source_observation: null,
   created_at: validTimestamp
 } as const;
 

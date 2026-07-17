@@ -8,6 +8,7 @@ import {
   seedSynthesisCapsule,
   trackedDatabases
 } from "./garden-data-ports-fixture.js";
+import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 
 const databases = trackedDatabases;
 
@@ -20,6 +21,35 @@ afterEach(() => {
 });
 
 describe("garden background data ports bootstrapping and candidate scans", () => {
+  it("fails closed after selection before compression reads legacy paths", async () => {
+    const { database, ports } = await createFixture();
+    seedRecallsPath(database, {
+      pathId: "path-selected-1",
+      workspaceId: "workspace-1",
+      sourceObjectId: "memory-a",
+      targetObjectId: "memory-b"
+    });
+    seedRecallsPath(database, {
+      pathId: "path-selected-2",
+      workspaceId: "workspace-1",
+      sourceObjectId: "memory-b",
+      targetObjectId: "memory-c"
+    });
+
+    await expect(ports.compressionPort.findCompressiblePaths("workspace-1")).resolves.toEqual([
+      {
+        chain_start: "memory-a",
+        chain_end: "memory-c",
+        intermediate_ids: ["memory-b"]
+      }
+    ]);
+
+    markTemporalProjectionSelectedForTest(database);
+
+    await expect(ports.compressionPort.findCompressiblePaths("workspace-1"))
+      .rejects.toThrow(/Legacy path relation reads are disabled after temporal projection selection/);
+  });
+
   it("assesses bootstrapping cold-start state and pattern candidate lifecycle", async () => {
     const { database, ports } = await createFixture();
     const coldStart = await ports.bootstrappingPort.assessColdStart("workspace-1");

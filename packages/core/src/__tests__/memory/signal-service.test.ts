@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SignalService } from "../../memory/signal-service.js";
+import { buildSignalEmittedEventInput } from "../../memory/signal-service-helpers.js";
 import type { CandidateMemorySignal, EventLogEntry } from "@do-soul/alaya-protocol";
 
 import { createSignal, signalServiceDependencies } from "./signal-service.test-support.js";
@@ -238,9 +239,16 @@ it("threads first-class graph refs into the emitted EventLog payload", async () 
 it("resumes an existing emitted signal through triage and materialization", async () => {
     const appendedEvents: string[] = [];
     const stateUpdates: string[] = [];
+    const existingSignal = createSignal({ signal_state: "emitted" });
+    const emittedEvent: EventLogEntry = {
+      event_id: "evt_existing",
+      created_at: "2026-03-18T00:00:00.000Z",
+      revision: 0,
+      ...buildSignalEmittedEventInput(existingSignal)
+    };
     const signalRepo = {
       create: vi.fn(async (signal: CandidateMemorySignal) => ({ ...signal, signal_state: "emitted" as const })),
-      getById: vi.fn(async () => createSignal({ signal_state: "emitted" })),
+      getById: vi.fn(async () => existingSignal),
       listByRun: vi.fn(async () => []),
       updateState: vi.fn(async (signalId: string, state: CandidateMemorySignal["signal_state"]) => {
         stateUpdates.push(state);
@@ -265,7 +273,7 @@ it("resumes an existing emitted signal through triage and materialization", asyn
             ...event
           };
         }),
-        queryByEntity: vi.fn(async () => [])
+        queryByEntity: vi.fn(async () => [emittedEvent])
       },
       signalRepo,
       runtimeNotifier: {
@@ -285,7 +293,10 @@ it("resumes an existing emitted signal through triage and materialization", asyn
       "soul.signal.materialized"
     ]);
     expect(stateUpdates).toEqual(["triaged", "compiled", "materialized"]);
-    expect(materialize).toHaveBeenCalledWith(expect.objectContaining({ signal_state: "compiled" }));
+    expect(materialize).toHaveBeenCalledWith(
+      expect.objectContaining({ signal_state: "compiled" }),
+      { source_event_anchor: null }
+    );
   });
 
 it("does not replay materialization side effects for post-triage signal states", async () => {

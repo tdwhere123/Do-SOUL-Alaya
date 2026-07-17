@@ -8,7 +8,92 @@ import {
   createSignal
 } from "./materialization-router-fixture.js";
 
+const TRUSTED_SOURCE_CONTEXT = {
+  source_event_anchor: {
+    event_type: "soul.signal.emitted",
+    event_id: "event-signal-1",
+    occurred_at: "2026-07-14T00:00:00.000Z"
+  }
+} as const;
+
 describe("MaterializationRouter path relations and distillation", () => {
+  it("routes source-anchored signal refs through immutable relation assertion admission", async () => {
+    const temporalRelationAssertionPort = {
+      admit: vi.fn(async () => ({
+        object_kind: "relation_assertion",
+        object_id: "assertion-1"
+      }))
+    };
+    const deps = createDeps();
+    const router = new MaterializationRouter({
+      ...deps,
+      temporalRelationAssertionPort
+    });
+
+    const result = await router.materializeSignal(createSignal({
+      object_kind: "fact",
+      source_memory_refs: ["memory-source-1"]
+    }), TRUSTED_SOURCE_CONTEXT);
+
+    expect(result.success).toBe(true);
+    expect(result.created_objects).toContainEqual({
+      object_kind: "relation_assertion",
+      object_id: "assertion-1"
+    });
+    expect(temporalRelationAssertionPort.admit).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      sourceSignalId: "signal-1",
+      evidenceIds: ["evidence-1"],
+      anchors: {
+        source_anchor: { kind: "object", object_id: "memory-1" },
+        target_anchor: { kind: "object", object_id: "memory-source-1" }
+      },
+      relationKind: "derives_from",
+      validity: { kind: "open", valid_from: "2026-07-14T00:00:00.000Z" },
+      sourceEventAnchor: TRUSTED_SOURCE_CONTEXT.source_event_anchor
+    });
+    expect(deps.pathCandidateSinkPort.submitCandidate).not.toHaveBeenCalled();
+  });
+
+  it("routes a time concern through immutable relation assertion admission", async () => {
+    const temporalRelationAssertionPort = {
+      admit: vi.fn(async () => ({
+        object_kind: "relation_assertion",
+        object_id: "assertion-time-1"
+      }))
+    };
+    const router = new MaterializationRouter({
+      ...createDeps(),
+      temporalRelationAssertionPort
+    });
+
+    const result = await router.materializeSignal(createSignal({
+      object_kind: "fact",
+      domain_tags: ["time_concern"],
+      raw_payload: {
+        excerpt: "We reviewed the issue yesterday.",
+        distilled_fact: "We reviewed the issue yesterday.",
+        time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
+      }
+    }), TRUSTED_SOURCE_CONTEXT);
+
+    expect(result.success).toBe(true);
+    expect(temporalRelationAssertionPort.admit).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceIds: ["evidence-1"],
+      relationKind: "time_concern",
+      validity: { kind: "open", valid_from: "2026-07-14T00:00:00.000Z" },
+      anchors: {
+        source_anchor: { kind: "object", object_id: "memory-1" },
+        target_anchor: {
+          kind: "time_concern",
+          source_object_id: "memory-1",
+          window_digest: "yesterday"
+        }
+      }
+    }));
+  });
+
   it("creates a time_concern path relation proposal after memory_entry_only materialization", async () => {
     const pathRelationProposalPort = {
       createPathRelationProposal: vi.fn(async () => ({
@@ -34,7 +119,8 @@ describe("MaterializationRouter path relations and distillation", () => {
             matched_text: "yesterday"
           }
         }
-      })
+      }),
+      TRUSTED_SOURCE_CONTEXT
     );
 
     expect(result).toMatchObject({
@@ -83,7 +169,8 @@ describe("MaterializationRouter path relations and distillation", () => {
           excerpt: "Never print secrets.",
           time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
         }
-      })
+      }),
+      TRUSTED_SOURCE_CONTEXT
     );
 
     expect(result.success).toBe(true);
@@ -114,7 +201,8 @@ describe("MaterializationRouter path relations and distillation", () => {
           distilled_fact: "We reviewed the issue yesterday.",
           time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
         }
-      })
+      }),
+      TRUSTED_SOURCE_CONTEXT
     );
 
     expect(result.success).toBe(true);
@@ -152,7 +240,7 @@ describe("MaterializationRouter path relations and distillation", () => {
       routing_reason: "object_kind=path_relation -> path_relation_proposal"
     });
 
-    const result = await router.materializeSignal(signal);
+    const result = await router.materializeSignal(signal, TRUSTED_SOURCE_CONTEXT);
 
     expect(result).toMatchObject({
       target_kind: "deferred",

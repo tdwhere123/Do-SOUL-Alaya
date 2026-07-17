@@ -17,6 +17,7 @@ export type {
   PathCandidateSinkPort,
   PathRelationProposalPayload,
   PathRelationProposalPort,
+  TemporalRelationAssertionPort,
   ReconciliationDecisionView,
   ReconciliationPort,
   RouteTarget,

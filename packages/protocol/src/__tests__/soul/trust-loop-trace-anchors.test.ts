@@ -24,7 +24,8 @@ const signalPayloadBase = {
   exception_to_refs: [],
   contradicts_refs: [],
   incompatible_with_refs: [],
-  raw_payload: { observation: "User prefers pnpm." }
+  raw_payload: { observation: "User prefers pnpm." },
+  source_observation: null
 } as const;
 
 const proposalCreatedPayloadBase = {
@@ -122,6 +123,16 @@ describe("Trustworthy Loop source_delivery_ids protocol contracts", () => {
         delivery_id: "delivery-1"
       }).success
     ).toBe(false);
+    expect(
+      SoulEmitCandidateSignalRequestSchema.safeParse({
+        ...candidateContentBase,
+        source_observation: {
+          observed_at: "2026-03-15T00:00:00.000Z",
+          authority: "trusted_host_event",
+          source_event_id: "event-host-1"
+        }
+      }).success
+    ).toBe(false);
 
     expect(
       SoulProposeMemoryUpdateRequestSchema.parse({
@@ -160,6 +171,16 @@ describe("Trustworthy Loop source_delivery_ids protocol contracts", () => {
       CandidateMemorySignalContentSchema.safeParse({
         ...candidateContentBase,
         source_delivery_ids: ["delivery-1"]
+      }).success
+    ).toBe(false);
+    expect(
+      CandidateMemorySignalContentSchema.safeParse({
+        ...candidateContentBase,
+        source_observation: {
+          observed_at: "2026-03-15T00:00:00.000Z",
+          authority: "trusted_host_event",
+          source_event_id: "event-host-1"
+        }
       }).success
     ).toBe(false);
     expect(

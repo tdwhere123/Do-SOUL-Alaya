@@ -1,21 +1,23 @@
-import {
-  isPathActiveForRecall
-} from "@do-soul/alaya-protocol";
+import { isPathActiveForRecall } from "@do-soul/alaya-protocol";
 import {
   DeferredObligationService,
   ManifestationResolver,
   PathActivationCandidateProducer,
+  RelationAssertionService,
   ResolutionService,
   type GlobalMemoryRecallSubscription,
   type ManifestationResolverEventLogWriterPort,
   type PathActivationCandidateProducerPathReaderPort
 } from "@do-soul/alaya-core";
+import { SqliteTemporalPathProjectionReader } from "@do-soul/alaya-storage";
 import { type GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../ai/daemon-embedding-runtime.js";
-import { createRecallPathPlasticityPort } from "../garden/path-plasticity-runtime.js";
 import { SqliteHandoffGapAdapter } from "../handoff/gap-adapter.js";
-import { normalizeRecallTimeConcernWindowDigest } from "./garden-compute-support.js";
 import { createRecallReadWorkerClient } from "./recall-read-worker-client.js";
+import {
+  createRecallPathReadPorts,
+  createRecallTemporalProjectionEnsurer
+} from "./recall-path-readers.js";
 import {
   createGlobalMemoryRecallCachePort,
   createGlobalMemoryRecallPort,
@@ -36,6 +38,7 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
   const globalMemoryRuntime = createGlobalMemoryRuntime(input);
   const recallReadWorkerClient = createRecallReadWorkerClient({
     databaseFilename: input.database.filename,
+    temporalProjectionSelected: input.temporalProjectionSelected === true,
     warn: input.warn
   });
 
@@ -99,7 +102,11 @@ function createRecallReadRuntime(
     input,
     recallPathRuntime.pathActivationCandidateProducer
   );
-  const recallSearchRuntime = createRecallSearchRuntime(input, recallReadWorkerClient);
+  const recallSearchRuntime = createRecallSearchRuntime(
+    input,
+    recallReadWorkerClient,
+    recallPathRuntime.directPathReadPorts
+  );
   return {
     embeddingRuntime,
     recallPathRuntime,
@@ -120,14 +127,11 @@ async function createRecallMaterializationRuntime(
   recallReadRuntime: ReturnType<typeof createRecallReadRuntime>
 ) {
   const pathRelationRuntime = createPathRelationRuntime(input);
-  const edgeRuntime = await createEdgeAndReconciliationRuntime({
-    wiring: input,
-    pathCandidatePort: pathRelationRuntime.pathCandidatePort
-  });
+  const edgeRuntime = await createEdgeAndReconciliationRuntime(input);
   const materializationRuntime = createSignalMaterializationRuntime({
     wiring: input,
     pathRelationProposalPort: pathRelationRuntime.pathRelationProposalPort,
-    pathCandidateSinkPort: pathRelationRuntime.pathCandidatePort,
+    temporalRelationAssertionPort: pathRelationRuntime.temporalRelationAssertionPort,
     conflictDetectionService: edgeRuntime.conflictDetectionService,
     reconciliationService: edgeRuntime.reconciliationService,
     handoffGapHandler: new SqliteHandoffGapAdapter(input.sqliteHandoffGapRepo)
@@ -235,29 +239,11 @@ function createRecallPathRuntime(
   input: CreateRecallMaterializationWiringInput,
   recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
 ) {
+  const directPathReadPorts = createDirectRecallPathReadPorts(input);
   const recallPathExpansionPort =
-    recallReadWorkerClient?.pathExpansionPort ?? {
-      findByAnchors: input.pathRelationRepo.findByAnchors.bind(input.pathRelationRepo),
-      findByTimeConcernWindowDigests: async (
-        workspaceId: string,
-        windowDigests: readonly string[]
-      ) => {
-        const normalized = new Set(windowDigests.map(normalizeRecallTimeConcernWindowDigest));
-        const paths = await input.pathRelationRepo.findByWorkspaceAll(workspaceId);
-        return paths.filter((path) =>
-          isPathActiveForRecall(path.lifecycle.status) &&
-          [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
-            anchor.kind === "time_concern" &&
-            normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
-          )
-        );
-      }
-    };
+    recallReadWorkerClient?.pathExpansionPort ?? directPathReadPorts.pathExpansionPort;
   const recallPathPlasticityPort =
-    recallReadWorkerClient?.pathPlasticityPort ??
-    createRecallPathPlasticityPort({
-      pathRelationRepo: input.pathRelationRepo
-    });
+    recallReadWorkerClient?.pathPlasticityPort ?? directPathReadPorts.pathPlasticityPort;
   const pathActivationReaderPort: PathActivationCandidateProducerPathReaderPort = {
     async findActiveByAnchorObjectIds(workspaceId, memoryObjectIds) {
       if (memoryObjectIds.length === 0) {
@@ -277,8 +263,27 @@ function createRecallPathRuntime(
   return {
     recallPathExpansionPort,
     recallPathPlasticityPort,
+    directPathReadPorts,
     pathActivationCandidateProducer
   };
+}
+
+function createDirectRecallPathReadPorts(input: CreateRecallMaterializationWiringInput) {
+  if (input.temporalProjectionSelected === true) {
+    const relationAssertionService = new RelationAssertionService({
+      repo: input.relationAssertionRepo,
+      eventPublisher: input.eventPublisher,
+      eventHistory: input.eventLogRepo
+    });
+    return createRecallPathReadPorts({
+      temporalProjectionSelected: true,
+      temporalPathProjectionReader: new SqliteTemporalPathProjectionReader(
+        input.relationAssertionRepo
+      ),
+      ensureTemporalProjection: createRecallTemporalProjectionEnsurer(relationAssertionService)
+    });
+  }
+  return createRecallPathReadPorts({ legacyPathReader: input.pathRelationRepo });
 }
 
 function createManifestationRuntime(

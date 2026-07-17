@@ -24,6 +24,7 @@ import {
   SqlitePathGraphSnapshotRepo,
   SqlitePathPlasticityWatermarkRepo,
   SqlitePathRelationRepo,
+  SqliteRelationAssertionRepo,
   SqliteProjectMappingAnchorRepo,
   SqliteProposalRepo,
   SqliteReconciliationLeaseRepo,
@@ -116,6 +117,7 @@ function createDaemonMemoryRepos(input: {
         ? new SqliteOrphanRadarRepo(input.database)
         : null,
     pathRelationRepo: new SqlitePathRelationRepo(input.database),
+    relationAssertionRepo: new SqliteRelationAssertionRepo(input.database),
     coUsageCounterRepo: new SqliteCoUsageCounterRepo(input.database),
     enrichPendingRepo,
     enqueueEnrichPending: createEnrichPendingEnqueue(enrichPendingRepo),

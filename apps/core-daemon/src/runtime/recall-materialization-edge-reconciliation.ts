@@ -19,12 +19,34 @@ import {
   resolveGardenSecretRefValue
 } from "./garden-compute-support.js";
 import { resolveEdgeClassifyWiring } from "./daemon-runtime-support.js";
+import { createGardenLegacyPathCandidateRejectionPort } from "./garden-legacy-path-admission.js";
 import type { CreateRecallMaterializationWiringInput } from "./recall-materialization-wiring-types.js";
 
-export async function createEdgeAndReconciliationRuntime(input: {
-  readonly wiring: CreateRecallMaterializationWiringInput;
-  readonly pathCandidatePort: PathCandidateSink;
-}): Promise<Readonly<{
+type EdgeRuntimeWiring = Pick<
+  CreateRecallMaterializationWiringInput,
+  | "memoryEntryRepo"
+  | "pathRelationRepo"
+  | "rawConfigService"
+  | "temporalProjectionSelected"
+  | "warn"
+>;
+
+type ReconciliationRuntimeWiring = Pick<
+  CreateRecallMaterializationWiringInput,
+  | "eventLogRepo"
+  | "memoryEntryRepo"
+  | "memoryService"
+  | "rawConfigService"
+  | "reconciliationLeaseRepo"
+  | "runLookup"
+  | "warn"
+>;
+
+type EdgeAndReconciliationRuntimeWiring = EdgeRuntimeWiring & ReconciliationRuntimeWiring;
+
+export async function createEdgeAndReconciliationRuntime(
+  wiring: EdgeAndReconciliationRuntimeWiring
+): Promise<Readonly<{
   readonly edgeAutoProducerService: EdgeAutoProducerService;
   readonly conflictDetectionService: ConflictDetectionService | null;
   readonly reconciliationService: ReconciliationService | null;
@@ -37,16 +59,16 @@ export async function createEdgeAndReconciliationRuntime(input: {
       | undefined;
   };
 }>> {
-  const { wiring } = input;
   const sharedGardenComputeConfig = await wiring.rawConfigService.getRuntimeGardenComputeConfig();
   const edgeClassifyRuntime = createEdgeClassifyRuntime(wiring, sharedGardenComputeConfig);
+  const pathCandidatePort = createGardenLegacyPathCandidateRejectionPort(wiring.warn);
   const edgeAutoProducerService = createEdgeAutoProducerService(
     wiring,
-    input.pathCandidatePort,
+    pathCandidatePort,
     edgeClassifyRuntime.edgeClassifyQueue,
     edgeClassifyRuntime.edgeAutoProducerLlmPort
   );
-  const conflictDetectionService = createConflictDetectionRuntime(wiring, input.pathCandidatePort);
+  const conflictDetectionService = createConflictDetectionRuntime(wiring, pathCandidatePort);
   const reconciliationService = await createReconciliationRuntime(wiring);
 
   return Object.freeze({
@@ -58,7 +80,7 @@ export async function createEdgeAndReconciliationRuntime(input: {
 }
 
 function createEdgeAutoProducerLlmPortFromConfig(
-  gardenComputeConfig: Awaited<ReturnType<CreateRecallMaterializationWiringInput["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
+  gardenComputeConfig: Awaited<ReturnType<EdgeRuntimeWiring["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
 ) {
   if (!canResolveOfficialGardenProvider(gardenComputeConfig)) {
     return null;
@@ -95,7 +117,7 @@ function createEdgeAutoProducerLlmPortFromConfig(
 }
 
 function createConflictDetectionRuntime(
-  input: CreateRecallMaterializationWiringInput,
+  input: Pick<EdgeRuntimeWiring, "memoryEntryRepo" | "warn">,
   pathCandidatePort: PathCandidateSink
 ): ConflictDetectionService | null {
   const conflictDetectionEnabled = readEnabledEnv(
@@ -117,16 +139,13 @@ function createConflictDetectionRuntime(
     },
     pathCandidatePort,
     ...(conflictDetectionLlmPort === null ? {} : { llmPort: conflictDetectionLlmPort }),
-    karmaEmitter: {
-      emitKarmaEvent: (emitInput) => input.dynamicsService.emitKarmaEvent(emitInput)
-    },
     ruleEnabled: readEnabledEnv("ALAYA_CONFLICT_RULE_ENABLED", true),
     warn: input.warn
   });
 }
 
 async function createReconciliationRuntime(
-  input: CreateRecallMaterializationWiringInput
+  input: ReconciliationRuntimeWiring
 ): Promise<ReconciliationService | null> {
   const ingestReconciliationEnabled = readEnabledEnv(
     "ALAYA_INGEST_RECONCILIATION_ENABLED",
@@ -172,7 +191,7 @@ async function createReconciliationRuntime(
 }
 
 function createReconciliationLlmPortFromConfig(
-  gardenComputeConfig: Awaited<ReturnType<CreateRecallMaterializationWiringInput["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
+  gardenComputeConfig: Awaited<ReturnType<ReconciliationRuntimeWiring["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
 ) {
   if (!canResolveOfficialGardenProvider(gardenComputeConfig)) {
     return null;
@@ -218,8 +237,8 @@ function readEnabledEnv(name: string, defaultValue: boolean): boolean {
 }
 
 function createEdgeClassifyRuntime(
-  wiring: CreateRecallMaterializationWiringInput,
-  sharedGardenComputeConfig: Awaited<ReturnType<CreateRecallMaterializationWiringInput["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
+  wiring: Pick<EdgeRuntimeWiring, "warn">,
+  sharedGardenComputeConfig: Awaited<ReturnType<EdgeRuntimeWiring["rawConfigService"]["getRuntimeGardenComputeConfig"]>>
 ) {
   const edgeClassifyWiring = resolveEdgeClassifyWiring(process.env, sharedGardenComputeConfig);
   const edgeClassifyQueueRepoHolder: {
@@ -254,7 +273,7 @@ function createEdgeClassifyRuntime(
 }
 
 function createEdgeAutoProducerService(
-  wiring: CreateRecallMaterializationWiringInput,
+  wiring: Pick<EdgeRuntimeWiring, "memoryEntryRepo" | "pathRelationRepo" | "warn">,
   pathCandidatePort: PathCandidateSink,
   edgeClassifyQueue: ReturnType<typeof createEdgeClassifyRuntime>["edgeClassifyQueue"],
   edgeAutoProducerLlmPort: ReturnType<typeof createEdgeClassifyRuntime>["edgeAutoProducerLlmPort"]

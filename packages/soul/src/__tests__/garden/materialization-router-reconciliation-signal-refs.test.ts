@@ -135,19 +135,19 @@ describe("MaterializationRouter ingest reconciliation", () => {
   });
 
 
-  it("ADD verdict keeps the memory enriched when the time_concern proposal throws", async () => {
+  it("ADD verdict keeps the memory enriched when temporal time_concern assertion admission throws", async () => {
     const deps = createDeps();
     const { reconciliationPort } = fakeReconciliationPort({ kind: "add" });
-    const pathRelationProposalPort = {
-      createPathRelationProposal: vi.fn(async () => {
-        throw new Error("path relation proposal port unavailable");
+    const temporalRelationAssertionPort = {
+      admit: vi.fn(async () => {
+        throw new Error("temporal relation assertion port unavailable");
       })
     };
     const enrichPendingPort = { enqueue: vi.fn<EnqueueFn>(() => undefined) };
     const router = new MaterializationRouter({
       ...deps,
       reconciliationPort,
-      pathRelationProposalPort,
+      temporalRelationAssertionPort,
       enrichPendingPort
     });
 
@@ -159,13 +159,21 @@ describe("MaterializationRouter ingest reconciliation", () => {
           distilled_fact: "We shipped it yesterday.",
           time_concern: { window_digest: "yesterday", matched_text: "yesterday" }
         }
-      })
+      }),
+      {
+        source_event_anchor: {
+          event_type: "soul.signal.emitted",
+          event_id: "event-signal-1",
+          occurred_at: "2026-07-16T12:34:56.000Z"
+        }
+      }
     );
 
     expect(result.success).toBe(true);
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
     expect(enrichPendingPort.enqueue.mock.calls[0]![0].memoryId).toBe("memory-1");
-    expect(pathRelationProposalPort.createPathRelationProposal).toHaveBeenCalledTimes(1);
+    expect(temporalRelationAssertionPort.admit).toHaveBeenCalledTimes(1);
+    expect(deps.pathCandidateSinkPort.submitCandidate).not.toHaveBeenCalled();
   });
 
 

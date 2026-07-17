@@ -6,6 +6,7 @@ import {
   type MemoryGraphEdgeTypeValue,
   type PathGovernanceClass as PathGovernanceClassValue,
   type PathRelation,
+  type RelationValidity,
   type SourceGroundingDeferReason,
   type SynthesisCapsule
 } from "@do-soul/alaya-protocol";
@@ -40,6 +41,21 @@ export interface MaterializationTarget {
   readonly defer_reason?: SourceGroundingDeferReason;
   readonly defer_class?: "source_grounding";
 }
+
+/** Immutable admission envelope plus separately trusted source observation. */
+export interface MaterializationSourceEventAnchor {
+  readonly event_type: "soul.signal.emitted";
+  readonly event_id: string;
+  readonly occurred_at: string;
+}
+
+export interface MaterializationContext {
+  readonly source_event_anchor: MaterializationSourceEventAnchor | null;
+}
+
+export const EMPTY_MATERIALIZATION_CONTEXT: MaterializationContext = Object.freeze({
+  source_event_anchor: null
+});
 
 export interface MaterializationResultFields {
   readonly signal_id: string;
@@ -184,6 +200,22 @@ export interface PathRelationProposalPort {
     readonly targetObjectId: string;
     readonly reason: string;
     readonly proposedPathRelation: PathRelationProposalPayload;
+  }): Promise<MaterializationCreatedObject>;
+}
+
+// A Garden signal may nominate a relation, but only the core truth boundary
+// can admit it. The evidence id and immutable EventLog/source-time receipt are
+// carried together so an inferred relation has no separate direct-write path.
+export interface TemporalRelationAssertionPort {
+  admit(input: {
+    readonly workspaceId: string;
+    readonly runId: string;
+    readonly sourceSignalId: string;
+    readonly evidenceIds: readonly string[];
+    readonly anchors: PathRelation["anchors"];
+    readonly relationKind: string;
+    readonly validity: RelationValidity;
+    readonly sourceEventAnchor: MaterializationSourceEventAnchor;
   }): Promise<MaterializationCreatedObject>;
 }
 
@@ -380,6 +412,7 @@ export interface MaterializationRouterDeps {
   readonly synthesisService: SynthesisMaterializationPort;
   readonly claimService: ClaimMaterializationPort;
   readonly pathRelationProposalPort?: PathRelationProposalPort;
+  readonly temporalRelationAssertionPort?: TemporalRelationAssertionPort;
   readonly pathCandidateSinkPort?: PathCandidateSinkPort;
   readonly handoffGapHandler: HandoffGapHandler;
   // invariant: post-materialization enrichment (edge auto-production +

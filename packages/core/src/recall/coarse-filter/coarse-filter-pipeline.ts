@@ -117,6 +117,7 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly tierMemories: readonly Readonly<MemoryEntry>[];
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly deliveryMaxEntries?: number;
+  readonly pathProjectionAsOf?: string;
   readonly state: CoarseFilterState;
 }>): Promise<DynamicCoarseFilterResult> {
   await admitSemanticAndContentCandidates(params);
@@ -129,6 +130,7 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
     drafts: params.state.drafts,
     suppressionScores: params.state.pathSuppressionScores,
     pathExpansionPort: params.context.dependencies.pathExpansionPort,
+    pathProjectionAsOf: params.pathProjectionAsOf,
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
   });
@@ -273,6 +275,7 @@ async function admitPathAndGraphExpansionCandidates(
     addCandidate: params.state.addCandidate,
     dynamicRecallPlaneCap: DYNAMIC_RECALL_PLANE_CAP,
     pathExpansionPort: params.context.dependencies.pathExpansionPort,
+    pathProjectionAsOf: params.pathProjectionAsOf,
     warn: params.context.warn,
     degradationReasons: params.context.degradationReasons
   });
@@ -288,6 +291,7 @@ async function admitPathAndGraphExpansionCandidates(
     drafts: params.state.drafts,
     addCandidate: params.state.addCandidate,
     pathExpansionPort: params.context.dependencies.pathExpansionPort,
+    pathProjectionAsOf: params.pathProjectionAsOf,
     extraSeedMemoryIds: graphExpansionSeedIds,
     draftSeedIds: prePathGraphSeedIds,
     maxGraphHops: MAX_GRAPH_HOPS,

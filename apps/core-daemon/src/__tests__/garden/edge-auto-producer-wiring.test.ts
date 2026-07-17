@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CandidateMemorySignalSchema,
   DYNAMICS_CONSTANTS,
   MemoryDimension,
+  RuntimeGardenComputeConfigSchema,
   RunMode,
   RunState,
   ScopeClass,
@@ -13,22 +14,18 @@ import {
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
 import {
-  EdgeAutoProducerService,
   EventPublisher,
   EvidenceService,
   MemoryService,
-  PathRelationProposalService,
   PreWriteRecallService,
   ReconciliationService,
-  createRuleOnlyReconciliationDecisionPort,
-  type PathCandidateSink
+  createRuleOnlyReconciliationDecisionPort
 } from "@do-soul/alaya-core";
 import {
   InMemoryHandoffGapHandler,
   MaterializationRouter
 } from "@do-soul/alaya-soul";
 import {
-  SqliteCoUsageCounterRepo,
   SqliteEnrichPendingRepo,
   SqliteEventLogRepo,
   SqliteEvidenceCapsuleRepo,
@@ -39,22 +36,26 @@ import {
   SqliteWorkspaceRepo,
   initDatabase
 } from "@do-soul/alaya-storage";
+import { createEdgeAndReconciliationRuntime } from "../../runtime/recall-materialization-edge-reconciliation.js";
 
 const OLD_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 const NEW_MEMORY_ID = "22222222-2222-4222-8222-222222222222";
-const EVIDENCE_ID = "33333333-3333-4333-8333-333333333333";
+const CONFLICT_MEMORY_ID = "33333333-3333-4333-8333-333333333333";
+const EVIDENCE_ID = "44444444-4444-4444-8444-444444444444";
 
-// invariant: the edge auto-producer folds into the governed path candidate
-// intake. A supports verdict becomes a weak attention_only path_relations row
-// that only earns recall eligibility through plasticity reinforcement. Post
-// After decoupling, this runs in the BULK_ENRICH worker, not inline: the router
-// enqueues an enrich_pending marker and the worker (here driven directly, as
-// the daemon dispatch branch does) runs produceForNewMemory off-path. This
-// wiring test pins the full decoupled chain: materialize enqueues, drain mints
-// the path_relations row.
+// invariant: Garden heuristics can nominate relations but cannot establish
+// evidence plus a trusted source EventLog anchor. The background drain must
+// reject those nominations rather than write the legacy projection.
 describe("edge auto producer daemon wiring", () => {
-  it("enqueues then folds a supports verdict into a weak SUPPORTS path candidate, not a durable edge", async () => {
+  it.each([
+    ["fresh default", undefined],
+    ["preselected temporal projection", true]
+  ] as const)("keeps BULK_ENRICH candidates out of legacy path_relations for %s", async (_mode, temporalProjectionSelected) => {
     const database = initDatabase({ filename: ":memory:" });
+    const previousEdgeClassifyHostWorker = process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER;
+    const previousIngestReconciliation = process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
+    process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER = "false";
+    process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = "false";
     try {
       const workspaceRepo = new SqliteWorkspaceRepo(database);
       const runRepo = new SqliteRunRepo(database);
@@ -62,7 +63,6 @@ describe("edge auto producer daemon wiring", () => {
       const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
       const memoryRepo = new SqliteMemoryEntryRepo(database);
       const pathRelationRepo = new SqlitePathRelationRepo(database);
-      const coUsageCounterRepo = new SqliteCoUsageCounterRepo(database);
       const enrichPendingRepo = new SqliteEnrichPendingRepo(database);
       const runtimeNotifier = {
         notify: async () => undefined,
@@ -78,39 +78,21 @@ describe("edge auto producer daemon wiring", () => {
       await memoryRepo.create(
         createMemoryEntry({
           object_id: OLD_MEMORY_ID,
+          content: "Production deployment requires signed artifact promotion.",
+          domain_tags: ["rtk", "workflow"],
+          created_at: "2026-05-24T00:00:00.000Z",
+          updated_at: "2026-05-24T00:00:00.000Z"
+        })
+      );
+      await memoryRepo.create(
+        createMemoryEntry({
+          object_id: CONFLICT_MEMORY_ID,
           content: "Repository shell commands must use the RTK wrapper.",
           domain_tags: ["rtk", "workflow"],
           created_at: "2026-05-24T00:00:00.000Z",
           updated_at: "2026-05-24T00:00:00.000Z"
         })
       );
-
-      const pathRelationProposalService = new PathRelationProposalService({
-        repo: {
-          create: (relation) => pathRelationRepo.create(relation),
-          findByAnchorMemoryId: async (memoryId, workspaceId) =>
-            await pathRelationRepo.findByAnchors(workspaceId, [
-              { kind: "object", object_id: memoryId }
-            ])
-        },
-        counterStore: coUsageCounterRepo,
-        eventPublisher,
-        generateId: () => "path-supports-1"
-      });
-      const pathCandidatePort: PathCandidateSink = {
-        submitCandidate: async (input) => await pathRelationProposalService.submitCandidate(input)
-      };
-      const edgeAutoProducerService = new EdgeAutoProducerService({
-        memoryRepo,
-        pathCandidatePort,
-        llmPort: {
-          classifyPair: async () => ({
-            edgeType: "supports",
-            confidence: 0.92,
-            rationale: "test pair classifier verdict"
-          })
-        }
-      });
       const evidenceService = new EvidenceService({
         evidenceCapsuleRepo: evidenceRepo,
         eventLogRepo,
@@ -144,6 +126,28 @@ describe("edge auto producer daemon wiring", () => {
         generateObjectId: () => NEW_MEMORY_ID,
         now: () => "2026-05-25T00:00:00.000Z"
       });
+      const warn = vi.fn();
+      const edgeRuntime = await createEdgeAndReconciliationRuntime({
+        eventLogRepo,
+        memoryEntryRepo: memoryRepo,
+        memoryService,
+        pathRelationRepo,
+        rawConfigService: {
+          getRuntimeGardenComputeConfig: async () =>
+            RuntimeGardenComputeConfigSchema.parse({
+              config_version: 1,
+              provider_kind: "local_heuristics",
+              model_id: null,
+              provider_url: null,
+              secret_ref: null,
+              enabled: false
+            })
+        },
+        reconciliationLeaseRepo: new SqliteReconciliationLeaseRepo(database),
+        runLookup: runRepo,
+        ...(temporalProjectionSelected === undefined ? {} : { temporalProjectionSelected }),
+        warn
+      });
       const router = new MaterializationRouter({
         evidenceService,
         memoryService: {
@@ -162,21 +166,19 @@ describe("edge auto producer daemon wiring", () => {
         claimService: {
           create: async () => ({ object_kind: "claim_form", object_id: "claim-1" })
         },
-        pathCandidateSinkPort: {
-          // Mirrors the daemon wiring seam: forward core's PathMintOutcome
-          // untouched so the rejected/failed distinction survives the boundary.
-          submitCandidate: async (input) => await pathCandidatePort.submitCandidate(input)
-        },
         enrichPendingPort: { enqueue: enqueueEnrichPending },
         handoffGapHandler: new InMemoryHandoffGapHandler()
       });
 
-      const result = await router.materializeSignal(createFactSignal());
+      const result = await router.materializeSignal(createFactSignal({
+        excerpt: "Production deployment requires signed artifact promotion.",
+        distilled_fact: "Production deployment requires signed artifact promotion."
+      }));
 
       expect(result.success).toBe(true);
 
-      // The write-path enqueued a durable enrich_pending marker and ran NO
-      // edge production inline — the path row does not exist yet.
+      // The write-path enqueued a durable enrich_pending marker and ran no
+      // edge production inline.
       expect(enrichPendingRepo.countPending("workspace-1")).toBe(1);
       expect(
         (await pathRelationRepo.findByAnchors("workspace-1", [
@@ -184,8 +186,9 @@ describe("edge auto producer daemon wiring", () => {
         ])).find((relation) => relation.constitution.relation_kind === "supports")
       ).toBeUndefined();
 
-      // The BULK_ENRICH worker drains the marker and runs produceForNewMemory
-      // off-path (driven directly here as the daemon dispatch branch does).
+      // The BULK_ENRICH worker drains the marker and reaches both background
+      // producers. Each nomination is permanently rejected at the daemon
+      // boundary because neither producer can admit a temporal assertion.
       const claimed = enrichPendingRepo.claimBatch(
         "workspace-1",
         50,
@@ -196,28 +199,51 @@ describe("edge auto producer daemon wiring", () => {
       for (const entry of claimed) {
         const memory = await memoryRepo.findById(entry.memoryId);
         expect(memory).not.toBeNull();
-        await edgeAutoProducerService.produceForNewMemory({
+        await edgeRuntime.edgeAutoProducerService.produceForNewMemory({
           newMemoryId: memory!.object_id,
           workspaceId: memory!.workspace_id,
           runId: memory!.run_id,
           sourceSignalId: entry.sourceSignalId ?? memory!.object_id
         });
+        const conflictDetectionService = edgeRuntime.conflictDetectionService;
+        expect(conflictDetectionService).not.toBeNull();
+        await conflictDetectionService!.detectAndLinkConflicts({
+          newMemoryId: memory!.object_id,
+          newMemoryDimension: memory!.dimension,
+          newMemoryScopeClass: memory!.scope_class,
+          newMemoryContent: memory!.content,
+          newMemoryDomainTags: memory!.domain_tags,
+          workspaceId: memory!.workspace_id,
+          runId: memory!.run_id!,
+          strictNoDrop: true
+        });
         enrichPendingRepo.markProcessed(entry.workspaceId, entry.memoryId, "2026-05-25T00:01:01.000Z");
       }
       expect(enrichPendingRepo.countPending("workspace-1")).toBe(0);
 
-      // A weak supports path_relations row exists, born attention_only.
       const relations = await pathRelationRepo.findByAnchors("workspace-1", [
         { kind: "object", object_id: NEW_MEMORY_ID }
       ]);
-      const supports = relations.find(
-        (relation) => relation.constitution.relation_kind === "supports"
+      expect(relations).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        "garden legacy path candidate rejected without temporal assertion evidence",
+        { workspace_id: "workspace-1", relation_kind: "supports" }
       );
-      expect(supports).toBeDefined();
-      expect(supports!.legitimacy.governance_class).toBe("attention_only");
-      expect(supports!.effect_vector.recall_bias).toBeGreaterThan(0);
-      expect(supports!.plasticity_state.strength).toBeCloseTo(0.5, 5);
+      expect(warn).toHaveBeenCalledWith(
+        "garden legacy path candidate rejected without temporal assertion evidence",
+        { workspace_id: "workspace-1", relation_kind: "contradicts" }
+      );
     } finally {
+      if (previousEdgeClassifyHostWorker === undefined) {
+        delete process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER;
+      } else {
+        process.env.ALAYA_EDGE_CLASSIFY_HOST_WORKER = previousEdgeClassifyHostWorker;
+      }
+      if (previousIngestReconciliation === undefined) {
+        delete process.env.ALAYA_INGEST_RECONCILIATION_ENABLED;
+      } else {
+        process.env.ALAYA_INGEST_RECONCILIATION_ENABLED = previousIngestReconciliation;
+      }
       database.close();
     }
   });
@@ -376,7 +402,12 @@ async function seedWorkspaceRun(
   });
 }
 
-function createFactSignal(): CandidateMemorySignal {
+function createFactSignal(
+  rawPayload: Readonly<{ readonly excerpt: string; readonly distilled_fact: string }> = {
+    excerpt: "RTK wrapper is required for shell commands in this repository.",
+    distilled_fact: "RTK wrapper is required for shell commands in this repository."
+  }
+): CandidateMemorySignal {
   return CandidateMemorySignalSchema.parse({
     signal_id: "signal-1",
     workspace_id: "workspace-1",
@@ -390,10 +421,7 @@ function createFactSignal(): CandidateMemorySignal {
     domain_tags: ["rtk", "workflow"],
     confidence: 0.8,
     evidence_refs: [],
-    raw_payload: {
-      excerpt: "RTK wrapper is required for shell commands in this repository.",
-      distilled_fact: "RTK wrapper is required for shell commands in this repository."
-    },
+    raw_payload: rawPayload,
     created_at: "2026-05-25T00:00:00.000Z"
   });
 }

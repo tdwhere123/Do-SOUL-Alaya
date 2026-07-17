@@ -32,6 +32,7 @@ function createControls(
     runEmbeddingBackfillPass: (workspaceId: string) => Promise<void>;
     recallReadWorkerClient: { close(): Promise<void> };
     database: { close(): void };
+    temporalRuntimeLease: { release(): Promise<void> };
     backgroundManagerStop: () => Promise<void>;
     gardenBacklogTelemetryStop: () => Promise<unknown>;
     processPort: FakeSignalProcess;
@@ -80,6 +81,7 @@ function createControls(
     globalMemoryRecallInvalidationSubscription: null,
     recallReadWorkerClient: overrides.recallReadWorkerClient,
     database: overrides.database ?? { close: vi.fn() },
+    temporalRuntimeLease: overrides.temporalRuntimeLease,
     requestProtection: {
       allowedOrigin: "http://localhost:5173",
       requestToken: "secret-token",
@@ -200,6 +202,26 @@ describe("createDaemonLifecycleControls", () => {
     expect(recallReadWorkerClient.close).toHaveBeenCalledTimes(1);
     expect(database.close).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["worker", "database"]);
+  });
+
+  it("releases the temporal runtime lease after database shutdown", async () => {
+    const order: string[] = [];
+    const database = {
+      close: vi.fn(() => {
+        order.push("database");
+      })
+    };
+    const temporalRuntimeLease = {
+      release: vi.fn(async () => {
+        order.push("lease");
+      })
+    };
+    const { controls } = createControls("env", { database, temporalRuntimeLease });
+
+    await controls.shutdown();
+
+    expect(temporalRuntimeLease.release).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["database", "lease"]);
   });
 
   it("continues shutdown cleanup when background manager stop throws", async () => {

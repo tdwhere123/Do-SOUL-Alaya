@@ -2,7 +2,6 @@ import {
   CandidateMemorySignalSchema,
   SignalEventType,
   SignalState,
-  SoulSignalEmittedPayloadSchema,
   SoulSignalTriagedPayloadSchema,
   readErrorMessage,
   type CandidateMemorySignal,
@@ -10,12 +9,17 @@ import {
 } from "@do-soul/alaya-protocol";
 import {
   assertReplayMatchesExistingSignal,
-  buildEventLogRawPayloadSummary,
+  buildSignalEmittedEventInput,
   buildSignalWarningMeta,
-  hasInvalidSchemaGrounding,
+  evaluateSignalTriage,
   mapExistingSignalStateToTriage,
-  mapTriageResultToSignalState
+  mapTriageResultToSignalState,
+  resolveSignalMaterializationContext
 } from "./signal-service-helpers.js";
+import {
+  deferUnverifiableSignalEmission,
+  resolveStoredSignalEmissionContext
+} from "./signal-emission-recovery.js";
 import {
   buildSignalMaterializationEvent,
   claimSourceGroundingRedrive,
@@ -32,6 +36,7 @@ import {
 import type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
+  SignalMaterializationContext,
   SignalMaterializationResult,
   SignalServiceDependencies,
   SignalServicePostTriageMaterializer,
@@ -43,6 +48,7 @@ import { CoreError } from "../shared/errors.js";
 export type {
   SignalListPageOptions,
   SignalMaterializationFailureResult,
+  SignalMaterializationContext,
   SignalMaterializationResult,
   SignalMaterializationResultFields,
   SignalMaterializationSuccessResult,
@@ -51,9 +57,14 @@ export type {
   SignalRuntimeNotifier,
   SignalServiceDependencies,
   SignalServiceEventLogRepoPort,
+  SignalServiceAtomicSignalRepoPort,
+  SignalEmittedEventInput,
+  SignalEmissionReceipt,
+  SignalServiceEmissionWriterPort,
   SignalServicePostTriageMaterializer,
   SignalServiceReceiveResult,
   SignalServiceSignalRepoPort,
+  SignalSourceEventAnchor,
   SignalServiceWarnPort,
   SignalTriageResult,
   SourceGroundingDeferStats
@@ -75,6 +86,7 @@ export {
   type SourceGroundingDeferRecordTransition,
   type SourceGroundingDeferTransitionPort
 } from "./source-grounding-defer-queue.js";
+export { resolveStoredSignalEmissionContext } from "./signal-emission-recovery.js";
 
 interface MaterializationAttempt {
   readonly materializingSignal: CandidateMemorySignal;
@@ -102,41 +114,24 @@ export class SignalService {
     const parsedSignal = CandidateMemorySignalSchema.parse(signal);
     const existingSignal = await this.dependencies.signalRepo.getById(parsedSignal.signal_id);
     if (existingSignal !== null) {
-      assertReplayMatchesExistingSignal(existingSignal, parsedSignal);
-      return await this.resumeExistingSignal(existingSignal);
+      const persistedSignal = CandidateMemorySignalSchema.parse(existingSignal);
+      assertReplayMatchesExistingSignal(persistedSignal, parsedSignal);
+      return await this.resumeExistingSignal(persistedSignal);
     }
-    const emittedEvent = await this.dependencies.eventLogRepo.append({
-      event_type: "soul.signal.emitted",
-      entity_type: "candidate_memory_signal",
-      entity_id: parsedSignal.signal_id,
-      workspace_id: parsedSignal.workspace_id,
-      run_id: parsedSignal.run_id,
-      caused_by: parsedSignal.source,
-      payload_json: SoulSignalEmittedPayloadSchema.parse({
-        signal_id: parsedSignal.signal_id,
-        workspace_id: parsedSignal.workspace_id,
-        run_id: parsedSignal.run_id,
-        source: parsedSignal.source,
-        signal_kind: parsedSignal.signal_kind,
-        ...(parsedSignal.source_delivery_ids === undefined
-          ? {}
-          : { source_delivery_ids: parsedSignal.source_delivery_ids }),
-        source_memory_refs: parsedSignal.source_memory_refs,
-        supersedes_refs: parsedSignal.supersedes_refs,
-        exception_to_refs: parsedSignal.exception_to_refs,
-        contradicts_refs: parsedSignal.contradicts_refs,
-        incompatible_with_refs: parsedSignal.incompatible_with_refs,
-        raw_payload: buildEventLogRawPayloadSummary(parsedSignal.raw_payload)
-      })
-    });
-
-    const storedSignal = await this.dependencies.signalRepo.create(parsedSignal);
-
-    if (emittedEvent.run_id !== null) {
-      await this.dependencies.runtimeNotifier.notifyEntry(emittedEvent);
+    const emittedInput = buildSignalEmittedEventInput(parsedSignal);
+    const writer = this.dependencies.emissionWriter;
+    if (writer !== undefined) {
+      const receipt = await writer.emit(parsedSignal, emittedInput);
+      if (receipt.emitted_event === null) {
+        return await this.resumeExistingSignal(receipt.signal);
+      }
+      const context = resolveSignalMaterializationContext(receipt.signal, receipt.emitted_event);
+      return context === null
+        ? await this.deferUnverifiableEmission(receipt.signal)
+        : await this.triageAndMaybeMaterialize(receipt.signal, context);
     }
 
-    return await this.triageAndMaybeMaterialize(storedSignal);
+    return await this.receiveSignalThroughLegacyPorts(parsedSignal, emittedInput);
   }
 
   public async listByRun(
@@ -175,6 +170,10 @@ export class SignalService {
     signalId: string,
     patch?: { readonly raw_payload?: CandidateMemorySignal["raw_payload"] }
   ): Promise<SignalServiceReceiveResult> {
+    const persistedSignal = await this.dependencies.signalRepo.getById(signalId);
+    const context = persistedSignal === null
+      ? null
+      : await this.resolveStoredEmissionContext(CandidateMemorySignalSchema.parse(persistedSignal));
     const claim = await claimSourceGroundingRedrive({
       dependencies: this.dependencies,
       warn: this.warn,
@@ -182,7 +181,13 @@ export class SignalService {
       signalId,
       ...(patch?.raw_payload === undefined ? {} : { rawPayload: patch.raw_payload })
     });
-    return await this.materializeAcceptedSignal(claim.signal, "accepted", claim.claim_token);
+    if (context === null) {
+      // The claim helper supplies the authoritative not-found error when no
+      // persisted signal exists; this branch only satisfies TypeScript's
+      // nullable control flow after that helper returns successfully.
+      return await this.deferUnverifiableEmission(claim.signal);
+    }
+    return await this.materializeAcceptedSignal(claim.signal, "accepted", context, claim.claim_token);
   }
 
   public async reconcileStaleSourceGroundingRedrive(input: {
@@ -204,7 +209,10 @@ export class SignalService {
       existingSignal.signal_state === SignalState.EMITTED ||
       existingSignal.signal_state === SignalState.NORMALIZED
     ) {
-      return await this.triageAndMaybeMaterialize(existingSignal);
+      const context = await this.resolveStoredEmissionContext(existingSignal);
+      return context === null
+        ? await this.deferUnverifiableEmission(existingSignal)
+        : await this.triageAndMaybeMaterialize(existingSignal, context);
     }
 
     if (
@@ -230,9 +238,10 @@ export class SignalService {
   }
 
   private async triageAndMaybeMaterialize(
-    storedSignal: CandidateMemorySignal
+    storedSignal: CandidateMemorySignal,
+    context: SignalMaterializationContext
   ): Promise<SignalServiceReceiveResult> {
-    const triageResult = this.evaluateTriage(storedSignal);
+    const triageResult = evaluateSignalTriage(storedSignal);
     const triagedState = mapTriageResultToSignalState(triageResult);
     const triagedEvent = await this.dependencies.eventLogRepo.append({
       event_type: SignalEventType.SOUL_SIGNAL_TRIAGED,
@@ -263,12 +272,13 @@ export class SignalService {
       };
     }
 
-    return await this.materializeAcceptedSignal(triagedSignal, triageResult);
+    return await this.materializeAcceptedSignal(triagedSignal, triageResult, context);
   }
 
   private async materializeAcceptedSignal(
     triagedSignal: CandidateMemorySignal,
     triageResult: SignalTriageResult,
+    context: SignalMaterializationContext,
     claimToken?: string
   ): Promise<SignalServiceReceiveResult> {
     const materializer = this.dependencies.postTriageMaterializer;
@@ -283,6 +293,7 @@ export class SignalService {
     const attempt = await this.runMaterializationAttempt(
       triagedSignal,
       materializer,
+      context,
       claimToken !== undefined
     );
     return await this.completeMaterializationAttempt(
@@ -339,6 +350,7 @@ export class SignalService {
   private async runMaterializationAttempt(
     triagedSignal: CandidateMemorySignal,
     materializer: SignalServicePostTriageMaterializer,
+    context: SignalMaterializationContext,
     alreadyClaimed: boolean
   ): Promise<MaterializationAttempt> {
     const materializingSignal = alreadyClaimed
@@ -348,7 +360,7 @@ export class SignalService {
     try {
       return {
         materializingSignal,
-        materialization: await materializer.materialize(materializingSignal),
+        materialization: await materializer.materialize(materializingSignal, context),
         caughtMaterializationError: false
       };
     } catch (error) {
@@ -450,23 +462,35 @@ export class SignalService {
     }
   }
 
-  private evaluateTriage(signal: CandidateMemorySignal): SignalTriageResult {
-    if (hasInvalidSchemaGrounding(signal)) {
-      return "deferred";
+  /** Compatibility path for isolated fakes; daemon wiring always supplies emissionWriter. */
+  private async receiveSignalThroughLegacyPorts(
+    signal: CandidateMemorySignal,
+    emittedInput: ReturnType<typeof buildSignalEmittedEventInput>
+  ): Promise<SignalServiceReceiveResult> {
+    const emittedEvent = await this.dependencies.eventLogRepo.append(emittedInput);
+    const storedSignal = await this.dependencies.signalRepo.create(signal);
+    if (emittedEvent.run_id !== null) {
+      await this.dependencies.runtimeNotifier.notifyEntry(emittedEvent);
     }
+    const context = resolveSignalMaterializationContext(storedSignal, emittedEvent);
+    return context === null
+      ? await this.deferUnverifiableEmission(storedSignal)
+      : await this.triageAndMaybeMaterialize(storedSignal, context);
+  }
 
-    if (signal.confidence < 0.3 && signal.signal_kind === "potential_conflict") {
-      return "deferred";
-    }
+  private async resolveStoredEmissionContext(
+    signal: CandidateMemorySignal
+  ): Promise<SignalMaterializationContext | null> {
+    return await resolveStoredSignalEmissionContext(this.dependencies, signal);
+  }
 
-    // Invariant #16: signals with no supporting evidence and below a minimum confidence
-    // threshold are deferred rather than immediately accepted. Higher-confidence
-    // heuristic signals (>= 0.4) are still accepted but will produce questionable
-    // evidence via buildEvidenceInput rather than verified evidence.
-    if (signal.evidence_refs.length === 0 && signal.confidence < 0.4) {
-      return "deferred";
-    }
-
-    return "accepted";
+  private async deferUnverifiableEmission(
+    signal: CandidateMemorySignal
+  ): Promise<SignalServiceReceiveResult> {
+    return await deferUnverifiableSignalEmission({
+      dependencies: this.dependencies,
+      warn: this.warn,
+      signal
+    });
   }
 }

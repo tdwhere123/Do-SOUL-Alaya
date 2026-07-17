@@ -16,6 +16,7 @@ import type {
   RecallServicePathPlasticityPort,
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
+import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_ENV = "ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS";
@@ -70,6 +71,7 @@ export interface RecallReadWorkerClient {
 
 export function createRecallReadWorkerClient(input: {
   readonly databaseFilename: string;
+  readonly temporalProjectionSelected?: boolean;
   readonly workerUrl?: URL;
   readonly requestTimeoutMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
@@ -96,6 +98,7 @@ export function createRecallReadWorkerClient(input: {
 class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly worker: Worker;
   private readonly requestTimeoutMs: number;
+  private readonly temporalProjectionSelected: boolean;
   private nextRequestId = 1;
   private readonly pending = new Map<
     number,
@@ -189,23 +192,37 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   };
 
   public readonly pathExpansionPort: RecallServicePathExpansionPort = {
-    findByAnchors: async (workspaceId: string, anchorRefs: readonly PathAnchorRef[]) =>
-      await this.request("path.findByAnchors", { workspaceId, anchorRefs }),
+    findByAnchors: async (
+      workspaceId: string,
+      anchorRefs: readonly PathAnchorRef[],
+      options?: RecallPathProjectionReadOptions
+    ) =>
+      await this.request("path.findByAnchors", {
+        workspaceId,
+        anchorRefs,
+        ...this.pathReadOptions(options)
+      }),
     findByTimeConcernWindowDigests: async (
       workspaceId: string,
-      windowDigests: readonly string[]
+      windowDigests: readonly string[],
+      options?: RecallPathProjectionReadOptions
     ) =>
       await this.request("path.findByTimeConcernWindowDigests", {
         workspaceId,
-        windowDigests
+        windowDigests,
+        ...this.pathReadOptions(options)
       })
   };
 
   public readonly pathPlasticityPort: RecallServicePathPlasticityPort = {
-    getStrengthByMemoryId: async (workspaceId: string, memoryIds: readonly string[]) => {
+    getStrengthByMemoryId: async (
+      workspaceId: string,
+      memoryIds: readonly string[],
+      options?: RecallPathProjectionReadOptions
+    ) => {
       const entries = await this.request<readonly (readonly [string, number])[]>(
         "pathPlasticity.getStrengthByMemoryId",
-        { workspaceId, memoryIds }
+        { workspaceId, memoryIds, ...this.pathReadOptions(options) }
       );
       return new Map(entries);
     }
@@ -213,15 +230,18 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   public constructor(input: {
     readonly databaseFilename: string;
+    readonly temporalProjectionSelected?: boolean;
     readonly workerUrl: URL;
     readonly requestTimeoutMs?: number;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
     this.requestTimeoutMs = normalizeRequestTimeoutMs(input.requestTimeoutMs);
+    this.temporalProjectionSelected = input.temporalProjectionSelected === true;
     this.worker = new Worker(input.workerUrl, {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
       workerData: {
-        databaseFilename: input.databaseFilename
+        databaseFilename: input.databaseFilename,
+        temporalProjectionSelected: this.temporalProjectionSelected
       }
     });
     this.worker.on("message", (message: unknown) => this.handleMessage(message));
@@ -275,6 +295,15 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       .then(async () => await this.dispatch<T>(operation, payload));
     this.requestTail = run.catch(() => undefined);
     return await run;
+  }
+
+  private pathReadOptions(
+    options: RecallPathProjectionReadOptions | undefined
+  ): Readonly<{ readonly asOf?: string }> {
+    if (!this.temporalProjectionSelected || options?.asOf === undefined) {
+      return Object.freeze({});
+    }
+    return Object.freeze({ asOf: options.asOf });
   }
 
   private async dispatch<T>(

@@ -114,7 +114,7 @@ export interface GardenMcpHarness {
       readonly workspace_id: string;
       readonly role: GardenRoleValue;
       readonly kind: GardenTaskKindValue;
-      readonly payload: GardenTaskDescriptor;
+      readonly payload: unknown;
       readonly created_at: string;
     }>
   ): void;

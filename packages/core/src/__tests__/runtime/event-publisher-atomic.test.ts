@@ -68,6 +68,84 @@ function buildFakeRepo(): EventPublisherEventLogRepoPort & {
 }
 
 describe("EventPublisher.appendManyWithMutation (atomic)", () => {
+  it("decides idempotency in the transaction before appending its EventLog row", async () => {
+    const repo = buildFakeRepo();
+    const publisher = new EventPublisher({
+      eventLogRepo: repo,
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
+    });
+    let existing = false;
+    const appendInput = {
+      event_type: "worker.state_changed",
+      entity_type: "worker_run",
+      entity_id: "worker-decision-1",
+      workspace_id: "ws-1",
+      run_id: "run-1",
+      caused_by: "worker_lifecycle",
+      payload_json: WorkerStateChangedPayloadSchema.parse({
+        workerId: "worker-decision-1",
+        state: "active",
+        previousState: "init"
+      })
+    } as const;
+
+    const first = await publisher.decideAppendThenApply(() => {
+      if (existing) {
+        return { eventInputs: [], apply: () => "existing" };
+      }
+      return {
+        eventInputs: [appendInput],
+        apply: (entries) => {
+          existing = true;
+          return firstDefined(entries)?.event_id ?? "<missing>";
+        }
+      };
+    });
+    const replay = await publisher.decideAppendThenApply(() => ({
+      eventInputs: [],
+      apply: () => "existing"
+    }));
+
+    expect(first).toBe("evt-0");
+    expect(replay).toBe("existing");
+    expect(repo.rows).toHaveLength(1);
+  });
+
+  it("rolls back a decision append when its state application fails", async () => {
+    const repo = buildFakeRepo();
+    const publisher = new EventPublisher({
+      eventLogRepo: repo,
+      runHotStateService: { apply: vi.fn() },
+      runtimeNotifier: { notify: vi.fn(), notifyEntry: vi.fn() }
+    });
+
+    await expect(
+      publisher.decideAppendThenApply(() => ({
+        eventInputs: [
+          {
+            event_type: "worker.state_changed",
+            entity_type: "worker_run",
+            entity_id: "worker-decision-rollback-1",
+            workspace_id: "ws-1",
+            run_id: "run-1",
+            caused_by: "worker_lifecycle",
+            payload_json: WorkerStateChangedPayloadSchema.parse({
+              workerId: "worker-decision-rollback-1",
+              state: "active",
+              previousState: "init"
+            })
+          }
+        ],
+        apply: () => {
+          throw new Error("decision application failed");
+        }
+      }))
+    ).rejects.toThrow("decision application failed");
+
+    expect(repo.rows).toEqual([]);
+  });
+
   it("rolls back the EventLog row when the synchronous mutate throws (#BL-022)", async () => {
     const repo = buildFakeRepo();
     const publisher = new EventPublisher({

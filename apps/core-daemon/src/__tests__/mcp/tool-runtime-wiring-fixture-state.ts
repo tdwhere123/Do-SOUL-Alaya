@@ -49,16 +49,22 @@ const hoisted = vi.hoisted(() => {
     // callable that runs the supplied function with its args (matching
     // better-sqlite3's transaction wrapper contract).
     connection: {
-      prepare: vi.fn(() => ({
+      prepare: vi.fn((sql: string) => ({
         run: vi.fn(() => ({ changes: 0 })),
-        get: vi.fn(() => undefined),
+        get: vi.fn(() => {
+          if (sql.includes("temporal_schema_state")) {
+            throw new Error("no such table: temporal_schema_state");
+          }
+          return undefined;
+        }),
         all: vi.fn(() => [])
       })),
       transaction: vi.fn(<Args extends readonly unknown[], Result>(fn: (...args: Args) => Result) => {
         return (...args: Args): Result => fn(...args);
       })
     },
-    close: vi.fn()
+    close: vi.fn(),
+    isClosed: vi.fn(() => false)
   };
 
   const workspace = {

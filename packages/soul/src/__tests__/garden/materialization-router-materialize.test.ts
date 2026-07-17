@@ -32,6 +32,33 @@ describe("MaterializationRouter", () => {  it("fails the branch loudly when the 
     expect(enrichPendingPort.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("threads a verified emitted-event anchor into created evidence", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter(deps);
+
+    const result = await router.materializeSignal(
+      createSignal(),
+      {
+        source_event_anchor: {
+          event_type: "soul.signal.emitted",
+          event_id: "event-1",
+          occurred_at: "2026-07-16T23:59:00.000Z"
+        }
+      }
+    );
+
+    expect(result.success).toBe(true);
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_anchor: {
+          event_type: "soul.signal.emitted",
+          event_id: "event-1",
+          occurred_at: "2026-07-16T23:59:00.000Z"
+        }
+      })
+    );
+  });
+
 
   it("fails the memory_entry_only append branch loudly when the marker enqueue throws", async () => {
     const deps = createDeps();

@@ -3,10 +3,17 @@ import {
   GreenGovernanceEventType,
   GreenState,
   MemoryGovernanceEventType,
-  RevokeReason
+  RevokeReason,
+  RunMode,
+  RunState,
+  WorkspaceKind,
+  WorkspaceState
 } from "@do-soul/alaya-protocol";
 import { SqliteGreenStatusRepo } from "../../../repos/health/green-status-repo.js";
 import { SqliteMemoryEntryRepo } from "../../../repos/memory-entry/index.js";
+import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
+import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import type { StorageDatabase } from "../../../sqlite/db.js";
 
 import {
   countGreenPiercedEvents,
@@ -19,6 +26,7 @@ import {
   createReviewEvents,
   trackedDatabases
 } from "./proposal-repo-fixture.js";
+import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 
 const databases = trackedDatabases;
 
@@ -31,6 +39,87 @@ afterEach(() => {
 });
 
 describe("SqliteProposalRepo acceptance workflows", () => {
+  it("accepts a path relation governance proposal before temporal selection", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    await createPathRelationScope(database);
+    const proposal = createProposal({
+      proposal_id: "61111111-1111-4111-8111-111111111111",
+      runtime_id: "61111111-1111-4111-8111-111111111111"
+    });
+    await memoryRepo.create(createMemoryEntry());
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "path_relation",
+      proposed_change_summary: "Promote a strictly governed path relation",
+      proposed_path_relation: null
+    });
+
+    const result = await repo.acceptPendingPathRelationGovernanceWithEvents(
+      proposal.proposal_id,
+      "2026-03-21T03:00:00.000Z",
+      createReviewEvents(proposal),
+      {
+        target_object_id: proposal.derived_from ?? "",
+        workspace_id: "workspace-1",
+        path_id_on_create: "62222222-2222-4222-8222-222222222222",
+        updated_at: "2026-03-21T03:00:00.000Z",
+        caused_by: `proposal_accept:${proposal.proposal_id}`
+      },
+      { reviewerIdentity: "user:alice" }
+    );
+
+    expect(result.proposal.resolution_state).toBe("accepted");
+    expect(result.path_relation).toMatchObject({
+      path_id: "62222222-2222-4222-8222-222222222222",
+      workspace_id: "workspace-1"
+    });
+  });
+
+  it("fails closed after selection before accepting a legacy path relation proposal", async () => {
+    const { repo, database } = createRepo();
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+    await createPathRelationScope(database);
+    const proposal = createProposal({
+      proposal_id: "63333333-3333-4333-8333-333333333333",
+      runtime_id: "63333333-3333-4333-8333-333333333333"
+    });
+    await memoryRepo.create(createMemoryEntry());
+    await repo.create({
+      proposal,
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      target_object_kind: "path_relation",
+      proposed_change_summary: "Promote a strictly governed path relation",
+      proposed_path_relation: null
+    });
+
+    markTemporalProjectionSelectedForTest(database);
+
+    await expect(
+      repo.acceptPendingPathRelationGovernanceWithEvents(
+        proposal.proposal_id,
+        "2026-03-21T03:00:00.000Z",
+        createReviewEvents(proposal),
+        {
+          target_object_id: proposal.derived_from ?? "",
+          workspace_id: "workspace-1",
+          path_id_on_create: "64444444-4444-4444-8444-444444444444",
+          updated_at: "2026-03-21T03:00:00.000Z",
+          caused_by: `proposal_accept:${proposal.proposal_id}`
+        },
+        { reviewerIdentity: "user:alice" }
+      )
+    ).rejects.toThrow(/Legacy path relation reads are disabled after temporal projection selection/);
+
+    await expect(repo.findById(proposal.proposal_id)).resolves.toMatchObject({
+      resolution_state: "pending"
+    });
+    expect(countProposalEvents(database, proposal.proposal_id)).toBe(0);
+  });
+
   it("atomically accepts a proposal, applies memory changes, and writes audit events", async () => {
     const { repo, database } = createRepo();
     const memoryRepo = new SqliteMemoryEntryRepo(database);
@@ -267,3 +356,27 @@ describe("SqliteProposalRepo acceptance workflows", () => {
 
 
 });
+
+async function createPathRelationScope(database: StorageDatabase): Promise<void> {
+  const workspaceRepo = new SqliteWorkspaceRepo(database);
+  const runRepo = new SqliteRunRepo(database);
+  await workspaceRepo.create({
+    workspace_id: "workspace-1",
+    name: "workspace",
+    root_path: "/tmp/workspace",
+    workspace_kind: WorkspaceKind.LOCAL_REPO,
+    default_engine_binding: null,
+    workspace_state: WorkspaceState.ACTIVE
+  });
+  await runRepo.create({
+    run_id: "run-1",
+    workspace_id: "workspace-1",
+    title: "proposal path relation acceptance",
+    goal: null,
+    run_mode: RunMode.CHAT,
+    engine_binding_id: null,
+    engine_class: null,
+    run_state: RunState.IDLE,
+    current_surface_id: null
+  });
+}

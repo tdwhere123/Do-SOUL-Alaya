@@ -143,6 +143,9 @@ export interface JanitorDependencies {
   readonly scheduler: JanitorSchedulerPort;
   readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   readonly tombstoneGcPort?: JanitorTombstoneGcPort;
+  // Enables a successful, explicit defer audit when the caller intentionally
+  // keeps physical GC fail-closed instead of merely omitting the port.
+  readonly tombstoneGcDeferredReason?: string;
   readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
   readonly retentionDecayPort?: JanitorRetentionDecayPort;
@@ -163,6 +166,7 @@ export class Janitor {
   private readonly scheduler: JanitorSchedulerPort;
   private readonly dormantDemotionPort?: JanitorDormantDemotionPort;
   private readonly tombstoneGcPort?: JanitorTombstoneGcPort;
+  private readonly tombstoneGcDeferredReason?: string;
   private readonly dispositionSweepPort?: JanitorDispositionSweepPort;
   private readonly strongRefProtectionPort?: JanitorStrongRefProtectionPort;
   private readonly retentionDecayPort?: JanitorRetentionDecayPort;
@@ -176,6 +180,7 @@ export class Janitor {
     this.scheduler = deps.scheduler;
     this.dormantDemotionPort = deps.dormantDemotionPort;
     this.tombstoneGcPort = deps.tombstoneGcPort;
+    this.tombstoneGcDeferredReason = deps.tombstoneGcDeferredReason;
     this.dispositionSweepPort = deps.dispositionSweepPort;
     this.strongRefProtectionPort = deps.strongRefProtectionPort;
     this.retentionDecayPort = deps.retentionDecayPort;
@@ -342,7 +347,11 @@ export class Janitor {
     const tombstonedNow = await this.runDispositionSweep(task, auditEntries);
 
     if (this.tombstoneGcPort === undefined) {
-      auditEntries.push("[SKIPPED] tombstone_gc: gc port not wired");
+      auditEntries.push(
+        this.tombstoneGcDeferredReason === undefined
+          ? "[SKIPPED] tombstone_gc: gc port not wired"
+          : `[DEFERRED] tombstone_gc: ${this.tombstoneGcDeferredReason}`
+      );
       const result = this.createSuccessResult(task, completedAt, tombstonedNow, auditEntries);
       await this.scheduler.reportCompletion(result);
       return result;

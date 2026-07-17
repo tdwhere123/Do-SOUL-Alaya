@@ -407,6 +407,7 @@ describe("garden runtime BULK_ENRICH drain worker", () => {
     expect(getById).toHaveBeenCalledWith("signal-memory-signal-ref");
     expect(replaySignalRefs).toHaveBeenCalledWith({
       newMemoryId: "memory-signal-ref",
+      memoryEvidenceIds: ["evidence-for-memory-signal-ref"],
       signal: sourceSignal
     });
     expect(markProcessed).toHaveBeenCalledWith(

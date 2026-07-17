@@ -11,6 +11,7 @@ import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,
+  type MaterializationContext,
   type MaterializationTarget,
   type MemoryMaterializationInput,
   type SynthesisMaterializationInput
@@ -177,7 +178,11 @@ function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
 export function buildEvidenceInput(
   signal: CandidateMemorySignal,
   summarySuffix?: string,
-  opts?: { readonly fullTurnExcerpt?: boolean; readonly artifactRef?: string | null }
+  opts?: {
+    readonly fullTurnExcerpt?: boolean;
+    readonly artifactRef?: string | null;
+    readonly context?: MaterializationContext;
+  }
 ): EvidenceMaterializationInput {
   // fullTurnExcerpt widens the searchable excerpt/gist to the signal's full
   // source turn so evidence FTS keeps the query terms distillation drops;
@@ -196,11 +201,9 @@ export function buildEvidenceInput(
       keywords: [...signal.domain_tags],
       summary: appendSummarySuffix(excerpt, summarySuffix)
     },
-    event_anchor: {
-      event_type: "soul.signal.emitted",
-      event_id: null,
-      occurred_at: signal.created_at
-    },
+    // Signal creation/admission clocks are not source time. A caller can only
+    // supply this through the verified EventLog receipt context.
+    event_anchor: opts?.context?.source_event_anchor ?? null,
     physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
     evidence_health_state: computeEvidenceHealthState(signal),
     gist: appendSummarySuffix(excerpt, summarySuffix),

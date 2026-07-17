@@ -1,6 +1,10 @@
 import { type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { HandoffGapCreatedObject } from "../handoff-gap-handler.js";
-import type { MaterializationResult, MaterializationTarget } from "./contracts.js";
+import type {
+  MaterializationContext,
+  MaterializationResult,
+  MaterializationTarget
+} from "./contracts.js";
 import { buildDistilledFact, buildEvidenceInput, buildSynthesisInput, readStringPayload } from "./inputs.js";
 import { materializationFailure, materializationSuccess } from "./materialization-results.js";
 import { MaterializationRouterMemoryRoutes } from "./memory-routes.js";
@@ -8,7 +12,8 @@ import { MaterializationRouterMemoryRoutes } from "./memory-routes.js";
 export class MaterializationRouterRouteHandlers extends MaterializationRouterMemoryRoutes {
   protected async materializeSynthesis(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
 
@@ -30,7 +35,8 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
       const evidenceInputs = evidenceRefs.map((evidenceRef) =>
         buildEvidenceInput(signal, evidenceRef, {
           artifactRef: evidenceRef,
-          fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt
+          fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+          context
         })
       );
 
@@ -77,7 +83,8 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
 
   protected async materializeHandoffGap(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    _context: MaterializationContext
   ): Promise<MaterializationResult> {
     try {
       const createdObject: HandoffGapCreatedObject =
@@ -107,7 +114,8 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
   /** Returns a deferred result without persisting anything. */
   protected materializeDeferred(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    _context: MaterializationContext
   ): MaterializationResult {
     return materializationSuccess({
       signal_id: signal.signal_id,
@@ -122,7 +130,8 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
 
   protected async materializePathRelationProposal(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     const targetObjectId = readStringPayload(signal.raw_payload, "target_object_id");
     if (targetObjectId === null) {
@@ -135,14 +144,49 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
       });
     }
 
-    const created = await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
-    return materializationSuccess({
-      signal_id: signal.signal_id,
-      target_kind: "deferred",
-      route_target: target.route_target,
-      routing_reason: target.routing_reason,
-      created_objects: created === null ? [] : [created]
-    });
+    try {
+      if (this.dependencies.temporalRelationAssertionPort !== undefined) {
+        if (context.source_event_anchor === null) {
+          return this.materializeDeferred(signal, target, context);
+        }
+        const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, {
+          fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+          context
+        }));
+        const created = await this.createTimeConcernPathRelationProposal(
+          targetObjectId,
+          evidence.object_id,
+          signal,
+          context
+        );
+        return materializationSuccess({
+          signal_id: signal.signal_id,
+          target_kind: "deferred",
+          route_target: target.route_target,
+          routing_reason: target.routing_reason,
+          created_objects: [
+            { object_kind: evidence.object_kind, object_id: evidence.object_id },
+            ...(created === null ? [] : [created])
+          ]
+        });
+      }
+      const created = await this.createTimeConcernPathRelationProposal(targetObjectId, "", signal, context);
+      return materializationSuccess({
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: target.routing_reason,
+        created_objects: created === null ? [] : [created]
+      });
+    } catch (error) {
+      return materializationFailure({
+        signal_id: signal.signal_id,
+        target_kind: "deferred",
+        route_target: target.route_target,
+        routing_reason: target.routing_reason,
+        created_objects: []
+      }, error);
+    }
   }
 
   // invariant: potential_conflict route sink. evaluate is the only
@@ -153,7 +197,8 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
   // conflict surface is not silently lost as questionable evidence.
   protected async materializeConflictEvaluation(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    _context: MaterializationContext
   ): Promise<MaterializationResult> {
     const port = this.dependencies.conflictDetectionPort;
     if (port === undefined || port.evaluate === undefined) {
@@ -200,10 +245,14 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
 
   protected async materializeEvidenceOnly(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     try {
-      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt }));
+      const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, {
+        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+        context
+      }));
 
       return materializationSuccess({
         signal_id: signal.signal_id,

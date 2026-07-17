@@ -231,6 +231,7 @@ describe("garden runtime consolidation cycle", () => {
           affectedPathIds: []
         })),
         databaseConnection: createConsolidationCapableConnection(),
+        legacyTopologyMutationsEnabled: true,
         pathRelationRepo: {
           findActive: vi.fn(async () => []),
           findByAnchors: vi.fn(async () => []),
@@ -268,6 +269,63 @@ describe("garden runtime consolidation cycle", () => {
         role: GardenRole.LIBRARIAN,
         success: true,
         audit_entries: ["consolidation_cycle:fuse_ok"]
+      })
+    );
+  });
+
+  it.each([
+    ["implicit fail-closed default", undefined],
+    ["explicit S4 fail-closed setting", false]
+  ] as const)("does not enqueue or execute legacy consolidation for the %s", async (_mode, enabled) => {
+    const findDormantAll = vi.fn(async (): Promise<readonly Readonly<PathRelation>[]> => []);
+    const planCycleSpy = vi.spyOn(ConsolidationPlanner.prototype, "planCycle");
+    const runCycleSpy = vi.spyOn(ConsolidationExecutor.prototype, "runCycle");
+    const runtime = createGardenRuntime(
+      createRuntimeInput({
+        computeAndApplyPlasticity: vi.fn(async () => ({
+          reinforced: 0,
+          weakened: 0,
+          retired: 0,
+          affectedPathIds: []
+        })),
+        databaseConnection: createConsolidationCapableConnection(),
+        ...(enabled === undefined ? {} : { legacyTopologyMutationsEnabled: enabled }),
+        pathRelationRepo: {
+          findActive: vi.fn(async () => []),
+          findByAnchors: vi.fn(async () => []),
+          findDormantAll
+        } as unknown as GardenRuntimeInput["pathRelationRepo"]
+      })
+    );
+    const scheduler = currentScheduler();
+
+    await getService(runtime, "Librarian").task();
+    expect(scheduler.queue.some((task) => task.task_kind === GardenTaskKind.CONSOLIDATION_CYCLE)).toBe(false);
+
+    // A task may have been persisted before the S4 cutover. It must complete
+    // as an explicit defer without invoking the legacy planner or executor.
+    scheduler.queue.splice(0, scheduler.queue.length);
+    scheduler.queue.push({
+      task_id: "stale-consolidation-task",
+      task_kind: GardenTaskKind.CONSOLIDATION_CYCLE,
+      required_tier: GardenTier.TIER_2,
+      workspace_id: "workspace-1",
+      run_id: null,
+      target_object_refs: ["workspace-1"],
+      priority: 10,
+      created_at: "2026-07-17T00:00:00.000Z"
+    });
+
+    await getService(runtime, "GardenScheduler").task();
+
+    expect(findDormantAll).not.toHaveBeenCalled();
+    expect(planCycleSpy).not.toHaveBeenCalled();
+    expect(runCycleSpy).not.toHaveBeenCalled();
+    expect(scheduler.completions).toContainEqual(
+      expect.objectContaining({
+        task_id: "stale-consolidation-task",
+        success: true,
+        audit_entries: ["consolidation_deferred:temporal_assertion_provenance_required"]
       })
     );
   });

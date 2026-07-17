@@ -46,6 +46,7 @@ type CreateDaemonLifecycleControlsInput = Readonly<{
   globalMemoryRecallInvalidationSubscription: Readonly<{ dispose(): void }> | null;
   recallReadWorkerClient?: Readonly<{ close(): Promise<void> }> | null;
   database: Readonly<{ close(): void }>;
+  temporalRuntimeLease?: Readonly<{ release(): Promise<void> }>;
   requestProtection: RequestProtectionConfig;
   intervalsToClear?: ReadonlyArray<NodeJS.Timeout>;
   processPort?: LifecycleProcessPort;
@@ -181,7 +182,11 @@ function createShutdownHandler(
       await drainInFlightRequests(input);
       await stopBackgroundServices(input, state);
       await closeRuntimeResources(input, state);
-      input.database.close();
+      try {
+        input.database.close();
+      } finally {
+        await input.temporalRuntimeLease?.release();
+      }
     })();
 
     return await state.shuttingDown;

@@ -20,6 +20,10 @@ import type {
   SqliteGardenTaskRepo
 } from "@do-soul/alaya-storage";
 import { buildGardenTaskSignalId } from "./task-signal-id.js";
+import {
+  readVerifiedDeliverySourceObservation,
+  type VerifiedDeliverySourceObservation
+} from "../runtime/recall-materialization-source-receipt.js";
 
 const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
 const HOST_WORKER_EXTRACT_FALLBACK_AFTER_MS = 15 * 60 * 1000;
@@ -29,8 +33,7 @@ export interface PostTurnExtractTaskPayload {
   readonly run_id: string;
   readonly workspace_id: string;
   readonly created_at?: string;
-  // Host wall-clock for the turn when supplied; otherwise the enqueue clock.
-  readonly source_observed_at?: string;
+  readonly source_observation: VerifiedDeliverySourceObservation | null;
   readonly turn_index: number;
   readonly turn_digest: Readonly<{
     readonly last_messages: readonly Readonly<{
@@ -149,7 +152,12 @@ async function processClaimedPostTurnExtractTask(
   }
   try {
     await publishPostTurnExtractDispatch(task, payload, input.eventPublisher);
-    const emittedSignalIds = await emitPostTurnExtractSignals(task.row, payload, task.provider, input);
+    const emittedSignalIds = await emitPostTurnExtractSignals(
+      task.row,
+      payload,
+      task.provider,
+      input
+    );
     await completePostTurnExtractTask(task.row, payload.run_id, emittedSignalIds, input.gardenTaskRepo);
   } catch (error) {
     await failPostTurnExtractTask(task.row, payload.run_id, error, input.gardenTaskRepo);
@@ -220,7 +228,7 @@ async function emitPostTurnExtractSignals(
   const candidateSignals = await compilePostTurnExtractTask(
     provider,
     payload,
-    resolvePostTurnSourceObservedAt(payload, row)
+    payload.source_observation
   );
   const emittedSignalIds: string[] = [];
   for (const [index, signal] of candidateSignals.entries()) {
@@ -228,7 +236,8 @@ async function emitPostTurnExtractSignals(
     const received = await input.signalReceiver.receiveSignal(
       CandidateMemorySignalSchema.parse({
         ...signal,
-        signal_id: buildGardenTaskSignalId(row.id, index)
+        signal_id: buildGardenTaskSignalId(row.id, index),
+        source_observation: payload.source_observation
       })
     );
     emittedSignalIds.push(received.signal.signal_id);
@@ -332,14 +341,14 @@ function buildPostTurnExtractCompletionPayload(
 async function compilePostTurnExtractTask(
   provider: GardenComputeProvider,
   payload: PostTurnExtractTaskPayload,
-  sourceObservedAt: string
+  sourceObservation: VerifiedDeliverySourceObservation | null
 ): Promise<readonly CandidateMemorySignal[]> {
   const context: GardenCompileContext = {
     workspace_id: payload.workspace_id,
     run_id: payload.run_id,
     surface_id: null,
     turn_messages: buildPostTurnConversationMessages(payload),
-    source_observed_at: sourceObservedAt
+    ...(sourceObservation === null ? {} : { source_observed_at: sourceObservation.observed_at })
   };
   const signals = await provider.compile(buildPostTurnContent(payload), context);
   return Object.freeze(
@@ -353,17 +362,6 @@ async function compilePostTurnExtractTask(
   );
 }
 
-function resolvePostTurnSourceObservedAt(
-  payload: PostTurnExtractTaskPayload,
-  row: GardenTaskRow
-): string {
-  const hostObservedAt = payload.source_observed_at?.trim();
-  if (hostObservedAt !== undefined && hostObservedAt.length > 0) {
-    return hostObservedAt;
-  }
-  return row.created_at;
-}
-
 function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskPayload {
   if (!isRecord(payload)) {
     throw new Error("Invalid post-turn extract task payload.");
@@ -371,14 +369,14 @@ function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskP
   const runId = parseStringField(payload, "run_id");
   const workspaceId = parseStringField(payload, "workspace_id");
   const createdAt = parseOptionalStringField(payload, "created_at");
-  const sourceObservedAt = parseOptionalStringField(payload, "source_observed_at");
+  const sourceObservation = readVerifiedDeliverySourceObservation(payload.source_observation);
   const turnIndex = parsePostTurnIndex(payload.turn_index);
   const lastMessages = parsePostTurnMessages(payload.turn_digest);
   return {
     run_id: runId,
     workspace_id: workspaceId,
     ...(createdAt === undefined ? {} : { created_at: createdAt }),
-    ...(sourceObservedAt === undefined ? {} : { source_observed_at: sourceObservedAt }),
+    source_observation: sourceObservation,
     turn_index: turnIndex,
     turn_digest: { last_messages: lastMessages }
   };

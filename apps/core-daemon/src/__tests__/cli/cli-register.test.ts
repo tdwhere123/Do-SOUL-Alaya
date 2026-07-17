@@ -205,6 +205,7 @@ describe("cli registration", () => {
       // routes through the same MCP handler attached agents use.
       "review",
       "mcp",
+      "temporal-cutover",
       "backup",
       "export",
       "import"

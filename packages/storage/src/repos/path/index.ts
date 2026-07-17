@@ -20,6 +20,15 @@ export {
   type PathRelationRepo
 } from "./path-relation-repo.js";
 export {
+  SqliteRelationAssertionRepo,
+  type RelationAssertionProjectionGeneration,
+  type RelationAssertionRepo
+} from "./relation-assertion-repo.js";
+export {
+  SqliteTemporalPathProjectionReader,
+  type TemporalProjectionReadOptions
+} from "./temporal-path-projection-reader.js";
+export {
   SqlitePathPlasticityWatermarkRepo,
   type PathPlasticityWatermarkRecord,
   type PathPlasticityWatermarkRepo

@@ -15,6 +15,9 @@ import type {
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import { buildGardenTaskSignalId } from "../garden/index.js";
 import {
+  readVerifiedDeliverySourceObservation
+} from "../runtime/recall-materialization-source-receipt.js";
+import {
   buildGardenCompletionEnvelopeJson,
   GardenTaskNotFoundError,
   GardenTaskUnavailableError,
@@ -169,12 +172,16 @@ async function completeCandidateSignalTask(
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
   try {
+    const sourceObservation = contentOnlySignals.length === 0
+      ? null
+      : resolveGardenTaskSourceObservation(row);
     const emittedSignalIds = await emitCandidateSignals(
       params,
       contentOnlySignals,
       row.id,
       context.workspaceId,
-      resolvedRunId
+      resolvedRunId,
+      sourceObservation
     );
     await repo.completeWithEvents(
       row.id,
@@ -238,7 +245,8 @@ async function emitCandidateSignals(
   contentOnlySignals: NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"],
   taskId: string,
   workspaceId: string,
-  resolvedRunId: string | null
+  resolvedRunId: string | null,
+  sourceObservation: ReturnType<typeof readVerifiedDeliverySourceObservation>
 ): Promise<string[]> {
   const emittedSignalIds: string[] = [];
   for (const [index, signalContent] of (contentOnlySignals ?? []).entries()) {
@@ -249,12 +257,21 @@ async function emitCandidateSignals(
       run_id: resolvedRunId,
       surface_id: null,
       source: SignalSource.GARDEN_COMPILE,
-      created_at: params.now()
+      created_at: params.now(),
+      source_observation: sourceObservation
     }));
     const received = await params.deps.signalService.receiveSignal(internalSignal);
     emittedSignalIds.push(received.signal.signal_id);
   }
   return emittedSignalIds;
+}
+
+function resolveGardenTaskSourceObservation(
+  row: GardenTaskRow
+): ReturnType<typeof readVerifiedDeliverySourceObservation> {
+  return isUnknownRecord(row.payload)
+    ? readVerifiedDeliverySourceObservation(row.payload.source_observation)
+    : null;
 }
 
 async function releaseCompletionClaim(

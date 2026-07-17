@@ -74,6 +74,7 @@ export type AssessCoarseFilterParams = Readonly<{
   readonly now: () => string;
   readonly coarseFilter: CoarseFilterResult;
   readonly workspaceId: string;
+  readonly pathProjectionAsOf?: string;
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -100,6 +101,7 @@ export async function collectCoarseFilterSupplementaryData(
       .filter(isWorkspaceMemoryCandidate)
       .map((candidate) => candidate.entry),
     workspaceId: params.workspaceId,
+    pathProjectionAsOf: params.pathProjectionAsOf,
     runId: params.runId,
     queryText: params.queryText,
     queryProbes: params.queryProbes,

@@ -1,6 +1,7 @@
 import { readErrorMessage, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type {
   MaterializationCreatedObject,
+  MaterializationContext,
   MaterializationRouterDeps,
   PathCandidateMintOutcome,
   SignalRefSeedSpec,
@@ -27,10 +28,12 @@ export class MaterializationRouterPathSideEffects {
   // see also: packages/core/src/memory/signal-service.ts terminal-FAILED on success!=true
   protected async createTimeConcernProposalBestEffort(
     targetObjectId: string,
-    signal: CandidateMemorySignal
+    evidenceId: string,
+    signal: CandidateMemorySignal,
+    context: MaterializationContext
   ): Promise<MaterializationCreatedObject | null> {
     try {
-      return await this.createTimeConcernPathRelationProposal(targetObjectId, signal);
+      return await this.createTimeConcernPathRelationProposal(targetObjectId, evidenceId, signal, context);
     } catch (err) {
       console.warn("materialization-router: time_concern proposal failed", {
         targetObjectId,
@@ -43,16 +46,41 @@ export class MaterializationRouterPathSideEffects {
 
   protected async createTimeConcernPathRelationProposal(
     targetObjectId: string,
-    signal: CandidateMemorySignal
+    evidenceId: string,
+    signal: CandidateMemorySignal,
+    context: MaterializationContext
   ): Promise<MaterializationCreatedObject | null> {
-    const port = this.dependencies.pathRelationProposalPort;
-    if (port === undefined) {
+    // A time concern cannot become a temporal proposal without a replayable
+    // EventLog identity and trusted source observation.
+    if (context.source_event_anchor === null) {
       return null;
     }
     const timeConcern = readTimeConcernPayload(signal.raw_payload);
     if (timeConcern === null) {
       return null;
     }
+    const temporalPort = this.dependencies.temporalRelationAssertionPort;
+    if (temporalPort !== undefined) {
+      return await temporalPort.admit({
+        workspaceId: signal.workspace_id,
+        runId: signal.run_id,
+        sourceSignalId: signal.signal_id,
+        evidenceIds: [evidenceId],
+        anchors: {
+          source_anchor: { kind: "object", object_id: targetObjectId },
+          target_anchor: {
+            kind: "time_concern",
+            source_object_id: targetObjectId,
+            window_digest: timeConcern.window_digest
+          }
+        },
+        relationKind: "time_concern",
+        validity: { kind: "open", valid_from: context.source_event_anchor.occurred_at },
+        sourceEventAnchor: context.source_event_anchor
+      });
+    }
+    const port = this.dependencies.pathRelationProposalPort;
+    if (port === undefined) return null;
     return await port.createPathRelationProposal({
       workspaceId: signal.workspace_id,
       runId: signal.run_id,
@@ -64,6 +92,9 @@ export class MaterializationRouterPathSideEffects {
   }
 
   protected async preflightSignalRefFallback(signal: CandidateMemorySignal): Promise<void> {
+    if (this.dependencies.temporalRelationAssertionPort !== undefined) {
+      return;
+    }
     if (
       this.dependencies.pathCandidateSinkPort === undefined ||
       !hasMaterializableSignalMemoryRefs(signal)
@@ -96,9 +127,14 @@ export class MaterializationRouterPathSideEffects {
    */
   protected async createAllMemoryRefEdges(
     newObjectId: string,
+    evidenceIds: readonly string[],
     signal: CandidateMemorySignal,
+    context: MaterializationContext,
     transientFailureMode: SignalRefTransientFailureMode = "durable_proposal"
   ): Promise<readonly MaterializationCreatedObject[]> {
+    if (this.dependencies.temporalRelationAssertionPort !== undefined) {
+      return await this.createAllMemoryRefAssertions(newObjectId, evidenceIds, signal, context);
+    }
     const createdObjects: MaterializationCreatedObject[] = [];
     for (const spec of SIGNAL_REF_SEED_SPECS) {
       createdObjects.push(
@@ -200,13 +236,17 @@ export class MaterializationRouterPathSideEffects {
 
   protected async createAllMemoryRefEdgesBestEffort(
     newObjectId: string,
+    evidenceIds: readonly string[],
     signal: CandidateMemorySignal,
+    context: MaterializationContext,
     retryAvailable: boolean
   ): Promise<readonly MaterializationCreatedObject[]> {
     try {
       return await this.createAllMemoryRefEdges(
         newObjectId,
+        evidenceIds,
         signal,
+        context,
         retryAvailable ? "throw_for_retry" : "durable_proposal"
       );
     } catch (error) {
@@ -222,6 +262,38 @@ export class MaterializationRouterPathSideEffects {
       });
       return [];
     }
+  }
+
+  private async createAllMemoryRefAssertions(
+    newObjectId: string,
+    evidenceIds: readonly string[],
+    signal: CandidateMemorySignal,
+    context: MaterializationContext
+  ): Promise<readonly MaterializationCreatedObject[]> {
+    const port = this.dependencies.temporalRelationAssertionPort;
+    if (port === undefined || context.source_event_anchor === null) {
+      return [];
+    }
+    const created: MaterializationCreatedObject[] = [];
+    for (const spec of SIGNAL_REF_SEED_SPECS) {
+      for (const ref of signal[spec.signalRefsKey]) {
+        if (typeof ref !== "string" || ref.trim().length === 0 || ref === newObjectId) continue;
+        created.push(await port.admit({
+          workspaceId: signal.workspace_id,
+          runId: signal.run_id,
+          sourceSignalId: signal.signal_id,
+          evidenceIds,
+          anchors: {
+            source_anchor: { kind: "object", object_id: newObjectId },
+            target_anchor: { kind: "object", object_id: ref }
+          },
+          relationKind: spec.relationKind,
+          validity: { kind: "open", valid_from: context.source_event_anchor.occurred_at },
+          sourceEventAnchor: context.source_event_anchor
+        }));
+      }
+    }
+    return created;
   }
 
   protected async createFailedSignalRefPathRelationProposal(params: {

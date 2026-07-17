@@ -26,6 +26,7 @@ import {
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
+import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import type {
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
@@ -51,6 +52,7 @@ export async function addPathExpansionCandidates(params: Readonly<{
   readonly addCandidate: CoarseCandidateAdder;
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
+  readonly pathProjectionAsOf?: string;
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<void> {
@@ -65,6 +67,7 @@ export async function addPathExpansionCandidates(params: Readonly<{
     addCandidate: params.addCandidate,
     dynamicRecallPlaneCap: params.dynamicRecallPlaneCap,
     pathExpansionPort,
+    pathProjectionAsOf: params.pathProjectionAsOf,
     warn: params.warn,
     degradationReasons: params.degradationReasons
   });
@@ -82,6 +85,7 @@ export async function addPathExpansionCandidates(params: Readonly<{
     params.workspaceId,
     seeds,
     pathExpansionPort,
+    params.pathProjectionAsOf,
     params.warn,
     "path expansion lookup failed",
     params.degradationReasons
@@ -103,6 +107,7 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   readonly addCandidate: CoarseCandidateAdder;
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
+  readonly pathProjectionAsOf?: string;
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<number> {
@@ -127,6 +132,7 @@ export async function collectNegativePathSuppressions(params: Readonly<{
   readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
   readonly suppressionScores: Map<string, number>;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
+  readonly pathProjectionAsOf?: string;
   readonly warn: RecallServiceWarnPort;
   readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
 }>): Promise<void> {
@@ -143,6 +149,7 @@ export async function collectNegativePathSuppressions(params: Readonly<{
     params.workspaceId,
     seeds,
     pathExpansionPort,
+    params.pathProjectionAsOf,
     params.warn,
     "path suppression lookup failed",
     params.degradationReasons
@@ -160,12 +167,18 @@ async function loadSeededPathExpansionPaths(
   workspaceId: string,
   seeds: readonly Readonly<{ readonly entry: Readonly<MemoryEntry> }>[],
   pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>,
+  pathProjectionAsOf: string | undefined,
   warn: RecallServiceWarnPort,
   warningMessage: string,
   degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>
 ): Promise<readonly Readonly<PathRelation>[]> {
   try {
-    return await pathExpansionPort.findByAnchors(workspaceId, buildSeedPathAnchors(seeds));
+    const anchors = buildSeedPathAnchors(seeds);
+    return await readWithTemporalProjection(
+      pathProjectionAsOf,
+      () => pathExpansionPort.findByAnchors(workspaceId, anchors),
+      (options) => pathExpansionPort.findByAnchors(workspaceId, anchors, options)
+    );
   } catch (error) {
     recordRecallDegradation({ degradationReasons }, "path_expansion_failed");
     warn(warningMessage, {
@@ -264,9 +277,12 @@ async function loadTimeConcernPathExpansionPaths(
   windowDigests: readonly string[]
 ): Promise<readonly Readonly<PathRelation>[]> {
   try {
-    return await params.pathExpansionPort!.findByTimeConcernWindowDigests!(
-      params.workspaceId,
-      windowDigests
+    const port = params.pathExpansionPort!;
+    const reader = port.findByTimeConcernWindowDigests!;
+    return await readWithTemporalProjection(
+      params.pathProjectionAsOf,
+      () => reader.call(port, params.workspaceId, windowDigests),
+      (options) => reader.call(port, params.workspaceId, windowDigests, options)
     );
   } catch (error) {
     params.warn("time concern path expansion lookup failed", {

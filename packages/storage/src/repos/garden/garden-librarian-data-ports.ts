@@ -16,6 +16,7 @@ import {
   prepareSynthesisStatements,
   type MergeStatements
 } from "./garden-librarian-statements.js";
+import { assertLegacyPathRelationReadAllowed } from "../../sqlite/temporal-projection-selection.js";
 
 const NEIGHBOR_GROUP_LIMIT = 120;
 const NEIGHBOR_ROW_LIMIT = 1000;
@@ -176,6 +177,7 @@ export function createCompressionPort(context: GardenDataPortFactoryContext): Ga
 
   return {
     findCompressiblePaths: async (workspaceId) => {
+      assertLegacyPathRelationReadAllowed(context.database.connection);
       const rows = statements.chainStatement.all(workspaceId) as readonly ChainRow[];
       const grouped = groupChains(rows);
       return grouped.map((entry) => ({

@@ -52,6 +52,9 @@ export interface PreparedRecallRequest {
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly referenceTime: string;
+  // Only an explicit caller value selects a historical projection. The normal
+  // current-recall clock must keep using the active runtime projection.
+  readonly temporalProjectionAsOf?: string;
   readonly activeConstraints: ActiveConstraintsResult;
   readonly winnerMemoryIds: ReadonlySet<string>;
 }

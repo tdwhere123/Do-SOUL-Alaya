@@ -224,6 +224,7 @@ function buildCoarseAssessmentParams(
     now: () => prepared.referenceTime,
     coarseFilter: Object.freeze({ ...coarse.coarseFilter, candidates }),
     workspaceId: params.workspaceId,
+    pathProjectionAsOf: prepared.temporalProjectionAsOf,
     runId: params.runId ?? null,
     queryText: prepared.queryText,
     policy: prepared.policy,

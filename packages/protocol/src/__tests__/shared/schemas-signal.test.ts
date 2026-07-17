@@ -72,7 +72,8 @@ describe("SignalEventSchema", () => {
         exception_to_refs: [],
         contradicts_refs: [],
         incompatible_with_refs: [],
-        raw_payload: { excerpt: "hello" }
+        raw_payload: { excerpt: "hello" },
+        source_observation: null
       }
     };
 
@@ -163,4 +164,3 @@ describe("SignalEventSchema", () => {
     expect(SignalEventSchema.safeParse(without(emittedEvent, "payload")).success).toBe(false);
   });
 });
-

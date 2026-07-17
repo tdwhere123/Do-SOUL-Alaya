@@ -27,6 +27,7 @@ import type {
   SqliteHandoffGapRepo,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
+  SqliteRelationAssertionRepo,
   SqliteProposalRepo,
   SqliteReconciliationLeaseRepo,
   SqliteSignalRepo,
@@ -40,6 +41,7 @@ import type { AlayaRuntimeNotifier } from "./runtime-notifier.js";
 
 export type CreateRecallMaterializationWiringInput = {
   readonly database: StorageDatabase;
+  readonly temporalProjectionSelected?: boolean;
   readonly configEnv: ReadonlyMap<string, string>;
   readonly rawConfigService: Pick<AppConfigService, "getRuntimeGardenComputeConfig">;
   readonly eventLogRepo: SqliteEventLogRepo;
@@ -49,6 +51,7 @@ export type CreateRecallMaterializationWiringInput = {
   readonly healthJournalService: HealthJournalService;
   readonly memoryEntryRepo: SqliteMemoryEntryRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  readonly relationAssertionRepo: SqliteRelationAssertionRepo;
   readonly manifestationBudgetConfigProvider: ManifestationBudgetConfigProviderPort;
   readonly projectMappingService: ProjectMappingService;
   readonly claimFormRepo: SqliteClaimFormRepo;

@@ -53,6 +53,7 @@ export interface RunCoarseFilterOptions {
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly pathProjectionAsOf?: string;
 }
 
 interface CoarseFilterInput {
@@ -257,6 +258,7 @@ export async function runCoarseFilter(
     tierMemories: input.tierMemories,
     byId: input.byId,
     deliveryMaxEntries: options.deliveryMaxEntries,
+    pathProjectionAsOf: options.pathProjectionAsOf,
     state
   });
   return buildCoarseFilterRunResult({

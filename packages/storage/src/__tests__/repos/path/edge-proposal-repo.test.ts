@@ -9,6 +9,7 @@ import {
   objectId,
   trackedDatabases
 } from "./edge-proposal-repo-fixture.js";
+import { markTemporalProjectionSelectedForTest } from "../../support/temporal-projection-selection.js";
 
 const databases = trackedDatabases;
 
@@ -20,6 +21,27 @@ afterEach(() => {
 });
 
 describe("SqliteEdgeProposalRepo", () => {
+  it("fails closed after selection before reconciliation reads legacy paths", async () => {
+    const { database, repo } = await createRepo();
+    repo.create(createProposalInput("proposal-selected", MEMORY_1, MEMORY_2, "recalls"));
+    repo.updateReview({
+      proposalId: "proposal-selected",
+      status: "accepted",
+      reviewerIdentity: "user:reviewer",
+      reviewReason: "accepted by test",
+      reviewedAt: "2026-05-24T00:05:00.000Z"
+    });
+
+    expect(repo.listAcceptedAwaitingPath("workspace-1", 1).map((row) => row.proposal_id)).toEqual([
+      "proposal-selected"
+    ]);
+
+    markTemporalProjectionSelectedForTest(database);
+
+    expect(() => repo.listAcceptedAwaitingPath("workspace-1", 1))
+      .toThrow(/Legacy path relation reads are disabled after temporal projection selection/);
+  });
+
   it("creates, filters, and reviews pending edge proposals", async () => {
     const { repo } = await createRepo();
 

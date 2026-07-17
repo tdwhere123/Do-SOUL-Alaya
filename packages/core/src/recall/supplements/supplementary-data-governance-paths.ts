@@ -11,6 +11,7 @@ import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
+import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import {
   GOVERNANCE_CEILING_FAILSAFE_BAND,
   memoryGovernanceCeiling,
@@ -24,6 +25,7 @@ export async function collectGovernancePathDerivations(params: {
   readonly dependencies: Pick<RecallServiceDependencies, "pathExpansionPort">;
   readonly warn: RecallServiceWarnPort;
   readonly workspaceId: string;
+  readonly pathProjectionAsOf?: string;
   readonly candidates: readonly Readonly<MemoryEntry>[];
 }): Promise<Readonly<{
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
@@ -37,7 +39,11 @@ export async function collectGovernancePathDerivations(params: {
   const anchors = buildGovernanceCandidateAnchors(candidateIds);
   let paths: readonly Readonly<PathRelation>[];
   try {
-    paths = await pathExpansionPort.findByAnchors(params.workspaceId, anchors);
+    paths = await readWithTemporalProjection(
+      params.pathProjectionAsOf,
+      () => pathExpansionPort.findByAnchors(params.workspaceId, anchors),
+      (options) => pathExpansionPort.findByAnchors(params.workspaceId, anchors, options)
+    );
   } catch (error) {
     params.warn("governance ceiling path lookup failed", {
       workspace_id: params.workspaceId,

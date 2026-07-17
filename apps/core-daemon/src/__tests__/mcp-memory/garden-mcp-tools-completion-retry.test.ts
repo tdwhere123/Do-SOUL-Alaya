@@ -15,7 +15,18 @@ describe("Garden MCP tools", () => {
 
   it("releases completion claim after completeWithEvents fails so the same signal can retry", async () => {
     let failCompleteOnce = true;
+    const sourceObservation = {
+      observed_at: "2026-05-06T23:59:59.000Z",
+      authority: "verified_delivery_observation" as const,
+      source_event_id: "event-delivery-1"
+    };
+    let receivedSignals = 0;
     const harness = await createGardenMcpHarness({
+      receiveSignal: async (signal, context) => {
+        expect(signal.source_observation).toEqual(sourceObservation);
+        receivedSignals += 1;
+        return await context.signalService.receiveSignal(signal);
+      },
       completeWithEvents: async (taskId, result, events, claimedBy, original) => {
         if (failCompleteOnce) {
           failCompleteOnce = false;
@@ -24,7 +35,9 @@ describe("Garden MCP tools", () => {
         await original(taskId, result, events, claimedBy);
       }
     });
-    harness.enqueueTask("task-complete-failure-retry");
+    harness.enqueueTask("task-complete-failure-retry", {
+      payload: { source_observation: sourceObservation }
+    });
     await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
       task_id: "task-complete-failure-retry"
     });
@@ -70,6 +83,17 @@ describe("Garden MCP tools", () => {
         .get() as { readonly n: number }
     ).n;
     expect(signalRows).toBe(1);
+    expect(receivedSignals).toBe(2);
+    const completedEvent = (await harness.eventLogRepo.queryByType(
+      GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+    ))[0];
+    const emittedId = (
+      completedEvent?.payload_json as { readonly objects_affected?: readonly string[] }
+    ).objects_affected?.[0];
+    expect(emittedId).toBeDefined();
+    await expect(harness.signalRepo.getById(emittedId!)).resolves.toMatchObject({
+      source_observation: sourceObservation
+    });
   });
 
   it("rejects a shortened completion retry after a partial completion failure", async () => {

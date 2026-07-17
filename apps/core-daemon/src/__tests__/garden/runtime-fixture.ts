@@ -79,6 +79,8 @@ export function createRuntimeInput(options: {
   // ConsolidationExecutor (else it is null and the consolidation cycle is
   // skipped). Default {} keeps the existing tests on the null-executor path.
   readonly databaseConnection?: GardenRuntimeInput["databaseConnection"];
+  // Legacy topology mutation is deliberately opt-in in non-S4 fixtures.
+  readonly legacyTopologyMutationsEnabled?: boolean;
 }): GardenRuntimeInput {
   let latestSnapshot: PathGraphSnapshot | null = null;
   const publish = vi.fn(async (entry: Record<string, unknown>) => ({
@@ -143,6 +145,9 @@ export function createRuntimeInput(options: {
         findActive: vi.fn(async () => []),
         findByAnchors: vi.fn(async () => [])
       } as unknown as GardenRuntimeInput["pathRelationRepo"]),
+    ...(options.legacyTopologyMutationsEnabled === true
+      ? { legacyTopologyMutationsEnabled: true }
+      : {}),
     ...(options.pathPlasticityWatermarkRepo === undefined
       ? {}
       : { pathPlasticityWatermarkRepo: options.pathPlasticityWatermarkRepo }),

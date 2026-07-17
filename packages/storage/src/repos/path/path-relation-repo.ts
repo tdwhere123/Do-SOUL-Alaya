@@ -1,5 +1,9 @@
 import type { PathAnchorRef, PathRelation } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import {
+  assertLegacyPathRelationReadAllowed,
+  assertLegacyPathRelationWriteAllowed
+} from "../../sqlite/temporal-projection-selection.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString } from "../shared/validators.js";
@@ -68,6 +72,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   }
 
   public create(relation: PathRelation): Readonly<PathRelation> {
+    assertLegacyPathRelationWriteAllowed(this.db.connection);
     const parsedRelation = parsePathRelation(relation);
 
     try {
@@ -127,6 +132,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
       >
     >
   ): Readonly<PathRelation> {
+    assertLegacyPathRelationWriteAllowed(this.db.connection);
     const parsedPathId = parseNonEmptyString(pathId, "path id");
     const existing = this.loadExistingRelationForUpdate(parsedPathId);
     const nextRelation = parsePathRelation({
@@ -268,6 +274,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   }
 
   public async delete(pathId: string): Promise<void> {
+    assertLegacyPathRelationWriteAllowed(this.db.connection);
     const parsedPathId = parseNonEmptyString(pathId, "path id");
 
     try {
@@ -334,6 +341,7 @@ export class SqlitePathRelationRepo implements PathRelationRepo {
   }
 
   private queryContext(): PathRelationQueryContext {
+    assertLegacyPathRelationReadAllowed(this.db.connection);
     return {
       db: this.db,
       statements: this.statements,

@@ -160,6 +160,7 @@ export function createSignal(signalId = "signal-1"): CandidateMemorySignal {
     contradicts_refs: [],
     incompatible_with_refs: [],
     raw_payload: { full_turn_content: "original" },
+    source_observation: null,
     created_at: "2026-07-15T00:00:00.000Z"
   };
 }

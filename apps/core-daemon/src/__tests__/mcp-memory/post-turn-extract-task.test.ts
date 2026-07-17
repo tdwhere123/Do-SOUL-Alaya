@@ -6,6 +6,7 @@ import {
   GardenTaskKind,
   SignalSource,
 } from "@do-soul/alaya-protocol";
+import type { GardenComputeProvider } from "@do-soul/alaya-soul";
 
 import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
 
@@ -62,8 +63,14 @@ describe("post-turn extract Garden task", () => {
     expect(payload).toMatchObject({
       run_id: "run-1",
       turn_index: 7,
-      workspace_id: "workspace-1"
+      workspace_id: "workspace-1",
+      source_observation: {
+        observed_at: "2026-05-07T00:00:00.000Z",
+        authority: "verified_delivery_observation",
+        source_event_id: "event-delivery"
+      }
     });
+    expect(payload).not.toHaveProperty("source_observed_at");
     expect(payload.turn_digest.context_manifest.delivered_object_ids).toEqual([
       "memory-a",
       "memory-b"
@@ -81,6 +88,24 @@ describe("post-turn extract Garden task", () => {
     expect(listed.tasks[0]).toMatchObject({
       role: "host_worker",
       kind: GardenTaskKind.POST_TURN_EXTRACT
+    });
+  });
+
+  it("ignores a public usage timestamp and persists the verified delivery observation", async () => {
+    const harness = await createHandlerHarness();
+
+    const result = await reportUsage(harness.handler, {
+      turn_index: 11,
+      source_observed_at: "1999-01-01T00:00:00.000Z"
+    });
+
+    expect(result.ok).toBe(true);
+    const payload = postTurnRows(harness.gardenTaskRepo)[0]!.payload as PostTurnPayload;
+    expect(payload).not.toHaveProperty("source_observed_at");
+    expect(payload.source_observation).toEqual({
+      observed_at: "2026-05-07T00:00:00.000Z",
+      authority: "verified_delivery_observation",
+      source_event_id: "event-delivery"
     });
   });
 
@@ -201,6 +226,21 @@ describe("post-turn extract Garden task", () => {
     expect(payload.turn_digest.last_messages).toEqual([
       { role: "user", content_excerpt: "remember that I always use pnpm for this project" }
     ]);
+    expect(payload.source_observation).toBeUndefined();
+    expect(payload).not.toHaveProperty("source_observed_at");
+  });
+
+  it("does not persist a public recall timestamp without a verified delivery", async () => {
+    const harness = await createHandlerHarness();
+
+    await recall(harness.handler, {
+      query: "remember that I always use pnpm for this project",
+      source_observed_at: "1999-01-01T00:00:00.000Z"
+    });
+
+    const payload = postTurnRows(harness.gardenTaskRepo)[0]!.payload as PostTurnPayload;
+    expect(payload.source_observation).toBeUndefined();
+    expect(payload).not.toHaveProperty("source_observed_at");
   });
 
   it("prefers recent_turn over query for the recall-driven extract task", async () => {
@@ -309,18 +349,37 @@ describe("post-turn extract Garden task", () => {
   });
 
   it("official_api healthy routing claims, compiles, completes, and records two signals", async () => {
-    const signalA = createSignal({ signal_id: "signal-official-a" });
+    const signalA = createSignal({
+      signal_id: "signal-official-a",
+      source_observation: {
+        observed_at: "2026-05-01T00:00:00.000Z",
+        authority: "verified_delivery_observation",
+        source_event_id: "model-forged-event"
+      }
+    });
     const signalB = createSignal({ signal_id: "signal-official-b" });
     const compile = vi.fn(async () => [signalA, signalB]);
     const harness = await createRoutingHarness({
       provider_kind: "official_api",
       officialCompile: compile
     });
-    harness.enqueuePostTurnTask();
+    harness.enqueuePostTurnTask({
+      payload: createPostTurnPayload({
+        source_observation: {
+          observed_at: "2026-05-07T00:00:00.000Z",
+          authority: "verified_delivery_observation",
+          source_event_id: "event-delivery"
+        }
+      })
+    });
 
     await harness.runScheduler();
 
     expect(compile).toHaveBeenCalledTimes(1);
+    expect(compile).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ source_observed_at: "2026-05-07T00:00:00.000Z" })
+    );
     expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
       status: "completed",
       claimed_by: "in-process"
@@ -335,11 +394,38 @@ describe("post-turn extract Garden task", () => {
     });
     await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
       signal_id: gardenTaskSignalId("post-turn-task-1", 0),
-      workspace_id: "workspace-1"
+      workspace_id: "workspace-1",
+      source_observation: {
+        observed_at: "2026-05-07T00:00:00.000Z",
+        authority: "verified_delivery_observation",
+        source_event_id: "event-delivery"
+      }
     });
     await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 1))).resolves.toMatchObject({
       signal_id: gardenTaskSignalId("post-turn-task-1", 1),
       workspace_id: "workspace-1"
+    });
+  });
+
+  it("sets null source observation when a host-worker task has no persisted delivery proof", async () => {
+    const compile = vi.fn<GardenComputeProvider["compile"]>(async () => [createSignal({
+      source_observation: {
+        observed_at: "1999-01-01T00:00:00.000Z",
+        authority: "verified_delivery_observation",
+        source_event_id: "model-forged-event"
+      }
+    })]);
+    const harness = await createRoutingHarness({
+      provider_kind: "official_api",
+      officialCompile: compile
+    });
+    harness.enqueuePostTurnTask({ payload: createPostTurnPayload({ source_observation: null }) });
+
+    await harness.runScheduler();
+
+    expect(compile.mock.calls[0]?.[1]?.source_observed_at).toBeUndefined();
+    await expect(harness.signalRepo.getById(gardenTaskSignalId("post-turn-task-1", 0))).resolves.toMatchObject({
+      source_observation: null
     });
   });
 

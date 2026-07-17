@@ -112,6 +112,9 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       evictExpired: vi.fn(async () => 0),
       counterSize: vi.fn(async () => 0)
     }),
+    RelationAssertionService: makeClass({
+      admit: vi.fn(async () => ({ assertion: { assertion_id: "relation-assertion-1" } }))
+    }),
     AnswersWithEdgeProducerService: makeClass({
       crystallize: vi.fn(async () => ({ coRelevantPairs: 0, keptPairs: 0, minted: 0 }))
     }),
@@ -142,6 +145,7 @@ export function buildToolRuntimeWiringCoreMocks(params: {
       hoisted.conversationServiceDeps = deps;
       return {};
     }),
+    createSignalEmissionWriter: vi.fn(() => ({})),
     createGlobalMemoryRecallPort: vi.fn().mockImplementation(() => ({
       recall: vi.fn(async () => []),
       // anchor: index.ts createAlayaDaemonRuntime subscribes the recall port

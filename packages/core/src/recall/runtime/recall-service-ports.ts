@@ -141,14 +141,27 @@ export interface RecallServiceEventLogRepoPort {
 export interface RecallServiceGraphSupportPort {
   /** @deprecated recall reads `countInboundEdgesWeighted` instead.
    * Kept on the port for non-recall callers (raw supports-only count). */
-  countInboundSupports(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundSupports(
+    memoryId: string,
+    workspaceId: string,
+    options?: RecallTemporalProjectionReadOptions
+  ): Promise<number>;
   // Inbound graph edges aggregated by edge_type weight into one signed support score (floor-clamped to 0). see also: MEMORY_GRAPH_EDGE_RECALL_WEIGHTS invariant.
-  countInboundEdgesWeighted(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundEdgesWeighted(
+    memoryId: string,
+    workspaceId: string,
+    options?: RecallTemporalProjectionReadOptions
+  ): Promise<number>;
   // Inbound RECALLS edges only; cold-mode transfer uses this as explicit evidence of recall graph activity.
-  countInboundRecalls?(memoryId: string, workspaceId: string): Promise<number>;
+  countInboundRecalls?(
+    memoryId: string,
+    workspaceId: string,
+    options?: RecallTemporalProjectionReadOptions
+  ): Promise<number>;
   countInboundRecallMetricsByMemoryId?(
     memoryIds: readonly string[],
-    workspaceId: string
+    workspaceId: string,
+    options?: RecallTemporalProjectionReadOptions
   ): Promise<ReadonlyMap<string, Readonly<{
     readonly weightedEdgeCount: number;
     readonly recallCount: number;
@@ -175,29 +188,49 @@ export interface RecallServiceClaimResolverPort {
   }>[]>;
 }
 
+export interface RecallTemporalProjectionReadOptions {
+  readonly asOf?: string;
+}
+
 /** Optional port: strongest direction-eligible PathPlasticityState.strength per memory (value in [0,1]); missing entry = no plasticity boost. Reads precomputed PathRelation rows; recall does not compute paths itself. */
 export interface RecallServicePathPlasticityPort {
   getStrengthByMemoryId(
     workspaceId: string,
-    memoryIds: readonly string[]
+    memoryIds: readonly string[],
+    options?: RecallTemporalProjectionReadOptions
   ): Promise<ReadonlyMap<string, number>>;
 }
 
 export interface RecallServicePathExpansionPort {
   findByAnchors(
     workspaceId: string,
-    anchorRefs: readonly PathAnchorRef[]
+    anchorRefs: readonly PathAnchorRef[],
+    options?: RecallTemporalProjectionReadOptions
   ): Promise<readonly Readonly<PathRelation>[]>;
   findByTimeConcernWindowDigests?(
     workspaceId: string,
-    windowDigests: readonly string[]
+    windowDigests: readonly string[],
+    options?: RecallTemporalProjectionReadOptions
   ): Promise<readonly Readonly<PathRelation>[]>;
+}
+
+/**
+ * Keeps the current-projection call shape compatible with legacy two-argument
+ * readers while making an explicit historical projection opt-in.
+ */
+export function readWithTemporalProjection<T>(
+  asOf: string | undefined,
+  readCurrent: () => Promise<T>,
+  readHistorical: (options: RecallTemporalProjectionReadOptions) => Promise<T>
+): Promise<T> {
+  return asOf === undefined ? readCurrent() : readHistorical({ asOf });
 }
 
 export interface RecallServiceActiveConstraintsPort {
   findActiveConstraints(params: Readonly<{
     readonly workspaceId: string;
     readonly cap?: number | null;
+    readonly asOf?: string;
   }>): Promise<Readonly<{
     readonly constraints: readonly Readonly<SoulActiveConstraint>[];
     readonly total_count: number;

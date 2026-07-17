@@ -1,7 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installCoreConfigFromProcessEnv } from "@do-soul/alaya-core";
-import { initDatabase } from "@do-soul/alaya-storage";
+import { initDatabase, isTemporalProjectionSelected } from "@do-soul/alaya-storage";
 import {
   type AlayaDaemonListenOptions,
   type AlayaDaemonRuntime,
@@ -31,6 +31,7 @@ import { createGardenRuntimeWiring } from "./runtime/garden-runtime-wiring.js";
 import { createRecallMaterializationWiring } from "./runtime/recall-materialization-wiring.js";
 import { createRuntimeNotifier } from "./runtime/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
+import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
 
 export type {
   AlayaDaemonListenOptions,
@@ -48,19 +49,28 @@ const repoRoot = resolve(__dirname, "..", "..", "..");
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const bootstrap = await createRuntimeBootstrapContext();
-  const repositories = createDaemonRepositoryWiring(bootstrap);
-  const foundation = await createDaemonFoundationWiring(bootstrap, repositories);
-  const recallAndCore = await createRecallAndCoreWiring(bootstrap, repositories, foundation);
-  const runtime = await createGardenAndFinalRuntime(
-    bootstrap,
-    repositories,
-    foundation,
-    recallAndCore
-  );
-  installUnhandledRejectionHandler(bootstrap.warnLogger, process, {
-    shutdown: runtime.shutdown
-  });
-  return runtime;
+  try {
+    const repositories = createDaemonRepositoryWiring(bootstrap);
+    const foundation = await createDaemonFoundationWiring(bootstrap, repositories);
+    const recallAndCore = await createRecallAndCoreWiring(bootstrap, repositories, foundation);
+    const runtime = await createGardenAndFinalRuntime(
+      bootstrap,
+      repositories,
+      foundation,
+      recallAndCore
+    );
+    installUnhandledRejectionHandler(bootstrap.warnLogger, process, {
+      shutdown: runtime.shutdown
+    });
+    return runtime;
+  } catch (error) {
+    try {
+      bootstrap.database.close();
+    } finally {
+      await bootstrap.temporalRuntimeLease.release();
+    }
+    throw error;
+  }
 }
 
 async function createRuntimeBootstrapContext() {
@@ -82,7 +92,14 @@ async function createRuntimeBootstrapContext() {
   installCoreConfigFromProcessEnv(process.env, configEnvResult);
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
-  const database = initDatabase({ filename: dbPath });
+  const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);
+  let database: ReturnType<typeof initDatabase>;
+  try {
+    database = initDatabase({ filename: dbPath });
+  } catch (error) {
+    await temporalRuntimeLease.release();
+    throw error;
+  }
   recordStartupStep(startupSteps, "database");
   return {
     startupSteps,
@@ -94,6 +111,7 @@ async function createRuntimeBootstrapContext() {
     configPaths,
     configEnv: configEnvResult,
     filesDirectory,
+    temporalRuntimeLease,
     database
   };
 }
@@ -155,6 +173,7 @@ async function createRecallAndCoreWiring(
 ) {
   const recallWiring = await createRecallMaterializationWiring({
     database: bootstrap.database,
+    temporalProjectionSelected: isTemporalProjectionSelected(bootstrap.database),
     configEnv: bootstrap.configEnv,
     rawConfigService: foundation.rawConfigService,
     eventLogRepo: repositories.eventLogRepo,
@@ -164,6 +183,7 @@ async function createRecallAndCoreWiring(
     healthJournalService: foundation.healthJournalService,
     memoryEntryRepo: repositories.memoryEntryRepo,
     pathRelationRepo: repositories.pathRelationRepo,
+    relationAssertionRepo: repositories.relationAssertionRepo,
     manifestationBudgetConfigProvider: foundation.manifestationBudgetConfigProvider,
     projectMappingService: foundation.projectMappingService,
     claimFormRepo: repositories.claimFormRepo,
@@ -181,10 +201,10 @@ async function createRecallAndCoreWiring(
     trustStateRecorder: foundation.trustStateRecorder,
     edgeProposalService: foundation.edgeProposalService,
     dynamicsService: foundation.dynamicsService,
-	    memoryService: foundation.memoryService,
-	    proposalRepo: repositories.proposalRepo,
-	    runLookup: repositories.runRepo,
-	    reconciliationLeaseRepo: repositories.reconciliationLeaseRepo,
+    memoryService: foundation.memoryService,
+    proposalRepo: repositories.proposalRepo,
+    runLookup: repositories.runRepo,
+    reconciliationLeaseRepo: repositories.reconciliationLeaseRepo,
     deferredObligationRepo: repositories.deferredObligationRepo,
     claimService: foundation.claimService,
     synthesisService: foundation.synthesisService,
@@ -229,6 +249,7 @@ async function buildGardenWiring(
     database: bootstrap.database,
     startupSteps: bootstrap.startupSteps,
     eventLogRepo: repositories.eventLogRepo,
+    evidenceCapsuleRepo: repositories.evidenceCapsuleRepo,
     eventPublisher: foundation.eventPublisher,
     runtimeNotifier: bootstrap.runtimeNotifier,
     warnLogger: bootstrap.warnLogger,
@@ -245,7 +266,6 @@ async function buildGardenWiring(
     pathGraphSnapshotRepo: repositories.pathGraphSnapshotRepo,
     pathRelationRepo: repositories.pathRelationRepo,
     pathPlasticityWatermarkRepo: repositories.pathPlasticityWatermarkRepo,
-    pathPlasticityService: runtimeWiring.coreWiring.pathPlasticityService,
     embeddingBackfillHandler: runtimeWiring.recallWiring.embeddingBackfillHandler,
     configService: runtimeWiring.coreWiring.configService,
     officialGardenProvider: runtimeWiring.coreWiring.officialGardenProvider,
@@ -258,11 +278,9 @@ async function buildGardenWiring(
     materializationRouter: runtimeWiring.recallWiring.materializationRouter,
     edgeAutoProducerService: runtimeWiring.recallWiring.edgeAutoProducerService,
     embeddingRecallService: runtimeWiring.recallWiring.embeddingRecallService,
-    pathRelationProposalService: runtimeWiring.recallWiring.pathRelationProposalService,
     conflictDetectionService: runtimeWiring.recallWiring.conflictDetectionService,
     edgeProposalService: foundation.edgeProposalService,
     edgeClassifyQueueRepoHolder: runtimeWiring.recallWiring.edgeClassifyQueueRepoHolder,
-    securedWorkspaceService: foundation.securedWorkspaceService,
     trustStateRecorder: foundation.trustStateRecorder
   });
 }
@@ -372,6 +390,7 @@ function buildFinalizeDaemonRuntimeWiringInput(
     globalMemoryRecallInvalidationSubscription:
       runtimeWiring.recallWiring.globalMemoryRecallInvalidationSubscription,
     database: bootstrap.database,
+    temporalRuntimeLease: bootstrap.temporalRuntimeLease,
     recallReadWorkerClient: runtimeWiring.recallWiring.recallReadWorkerClient,
     pathRelationEvictionTimer: runtimeWiring.recallWiring.pathRelationEvictionTimer,
     embeddingRecallService: runtimeWiring.recallWiring.embeddingRecallService,

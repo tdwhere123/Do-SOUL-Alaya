@@ -170,6 +170,7 @@ export function buildMemory(
   readonly scope_class: string;
   readonly content: string;
   readonly domain_tags: readonly string[];
+  readonly evidence_refs: readonly string[];
   readonly workspace_id: string;
   readonly run_id: string;
 }> {
@@ -179,6 +180,7 @@ export function buildMemory(
     scope_class: "project",
     content: `content-for-${memoryId}`,
     domain_tags: ["rtk"],
+    evidence_refs: [`evidence-for-${memoryId}`],
     workspace_id: workspaceId,
     run_id: "run-1"
   };
@@ -206,6 +208,7 @@ export function buildSignal(signalId: string): CandidateMemorySignal {
       distilled_fact: "Signal ref replay fact."
     },
     signal_state: "compiled",
+    source_observation: null,
     created_at: "2026-05-30T12:00:00.000Z"
   };
 }

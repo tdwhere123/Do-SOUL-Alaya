@@ -1,6 +1,7 @@
 import { readErrorMessage, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type {
   MaterializationCreatedObject,
+  MaterializationContext,
   MaterializationResult,
   MaterializationTarget,
   MemoryMaterializationCreatedObject,
@@ -43,14 +44,15 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   // surface's job, not the lexical ingest gate.
   protected async materializeMemoryAndClaim(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
 
     try {
       await this.preflightSignalRefFallback(signal);
 
-      const materializedMemory = await this.createEvidenceBackedMemoryEntry(signal);
+      const materializedMemory = await this.createEvidenceBackedMemoryEntry(signal, context);
       createdObjects.push(...materializedMemory.createdObjects);
 
       const claim = await this.dependencies.claimService.create(
@@ -93,16 +95,18 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   // default behavior.
   protected async materializeMemoryEntryOnly(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     if (this.dependencies.reconciliationPort !== undefined) {
       return await this.materializeReconciledMemoryEntry(
         signal,
         target,
-        this.dependencies.reconciliationPort
+        this.dependencies.reconciliationPort,
+        context
       );
     }
-    return await this.materializeMemoryEntryAppend(signal, target);
+    return await this.materializeMemoryEntryAppend(signal, target, context);
   }
 
   // invariant: the unchanged default ingest path — every fact is
@@ -110,13 +114,14 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   // the fallback when reconciliation throws.
   protected async materializeMemoryEntryAppend(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     const createdObjects: Array<{ object_kind: string; object_id: string }> = [];
     try {
       await this.preflightSignalRefFallback(signal);
 
-      const materializedMemory = await this.createEvidenceBackedMemoryEntry(signal);
+      const materializedMemory = await this.createEvidenceBackedMemoryEntry(signal, context);
       createdObjects.push(...materializedMemory.createdObjects);
 
       return materializationSuccess({
@@ -146,14 +151,16 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   }
 
   protected async createEvidenceBackedMemoryEntry(
-    signal: CandidateMemorySignal
+    signal: CandidateMemorySignal,
+    context: MaterializationContext
   ): Promise<MemoryEntryMaterialization> {
     await this.preflightSignalRefFallback(signal);
 
     const createdObjects: MaterializationCreatedObject[] = [];
     const evidence = await this.dependencies.evidenceService.create(
       buildEvidenceInput(signal, undefined, {
-        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt
+        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+        context
       })
     );
     createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
@@ -185,12 +192,19 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     createdObjects.push(
       ...(await this.createAllMemoryRefEdgesBestEffort(
         memory.object_id,
+        [evidence.object_id],
         signal,
+        context,
         this.isSignalRefRetryAvailable(memory)
       ))
     );
 
-    const timeConcernProposal = await this.createTimeConcernProposalBestEffort(memory.object_id, signal);
+    const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
+      memory.object_id,
+      evidence.object_id,
+      signal,
+      context
+    );
     if (timeConcernProposal !== null) {
       createdObjects.push(timeConcernProposal);
     }
@@ -213,16 +227,17 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   protected async materializeReconciledMemoryEntry(
     signal: CandidateMemorySignal,
     target: MaterializationTarget,
-    port: ReconciliationPort
+    port: ReconciliationPort,
+    context: MaterializationContext
   ): Promise<MaterializationResult> {
     const state = this.createReconciledMaterializationState();
 
     try {
-      const decision = await this.runReconciledDecision(signal, port, state);
-      await this.finalizeReconciledAppend(signal, state);
+      const decision = await this.runReconciledDecision(signal, port, state, context);
+      await this.finalizeReconciledAppend(signal, state, context);
       return this.buildReconciledMaterializationResult(signal, target, decision, state);
     } catch (error) {
-      return await this.handleReconciledMaterializationFailure(signal, target, error);
+      return await this.handleReconciledMaterializationFailure(signal, target, context, error);
     }
   }
 
@@ -233,7 +248,8 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   protected async runReconciledDecision(
     signal: CandidateMemorySignal,
     port: ReconciliationPort,
-    state: ReconciledMaterializationState
+    state: ReconciledMaterializationState,
+    context: MaterializationContext
   ) {
     const incomingContent = buildDistilledFact(signal);
     const { facet_tags: incomingFacetTags } = buildFacetTagsProjection(
@@ -252,19 +268,20 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
         ),
         ...(incomingFacetTags === undefined ? {} : { incomingFacetTags })
       },
-      async (verdict) => await this.applyReconciledVerdict(signal, verdict, state)
+      async (verdict) => await this.applyReconciledVerdict(signal, verdict, state, context)
     );
   }
 
   protected async applyReconciledVerdict(
     signal: CandidateMemorySignal,
     verdict: { readonly kind: "add" | "update" | "noop" },
-    state: ReconciledMaterializationState
+    state: ReconciledMaterializationState,
+    context: MaterializationContext
   ): Promise<{ readonly incomingEvidenceRef?: string }> {
     if (verdict.kind === "noop") {
       return {};
     }
-    const evidenceRef = await this.ensureReconciledEvidence(signal, state);
+    const evidenceRef = await this.ensureReconciledEvidence(signal, state, context);
     if (verdict.kind === "update") {
       return { incomingEvidenceRef: evidenceRef };
     }
@@ -281,14 +298,16 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
 
   protected async ensureReconciledEvidence(
     signal: CandidateMemorySignal,
-    state: ReconciledMaterializationState
+    state: ReconciledMaterializationState,
+    context: MaterializationContext
   ): Promise<string> {
     if (state.evidenceId !== undefined) {
       return state.evidenceId;
     }
     const evidence = await this.dependencies.evidenceService.create(
       buildEvidenceInput(signal, undefined, {
-        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt
+        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+        context
       })
     );
     state.evidenceId = evidence.object_id;
@@ -301,7 +320,8 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
 
   protected async finalizeReconciledAppend(
     signal: CandidateMemorySignal,
-    state: ReconciledMaterializationState
+    state: ReconciledMaterializationState,
+    context: MaterializationContext
   ): Promise<void> {
     if (state.appendedMemory === undefined) {
       return;
@@ -310,13 +330,17 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     state.createdObjects.push(
       ...(await this.createAllMemoryRefEdgesBestEffort(
         state.appendedMemory.object_id,
+        [requireReconciledEvidenceId(state)],
         signal,
+        context,
         this.isSignalRefRetryAvailable(state.appendedMemory)
       ))
     );
     const timeConcernProposal = await this.createTimeConcernProposalBestEffort(
       state.appendedMemory.object_id,
-      signal
+      requireReconciledEvidenceId(state),
+      signal,
+      context
     );
     if (timeConcernProposal !== null) {
       state.createdObjects.push(timeConcernProposal);
@@ -351,6 +375,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
   protected async handleReconciledMaterializationFailure(
     signal: CandidateMemorySignal,
     target: MaterializationTarget,
+    context: MaterializationContext,
     error: unknown
   ): Promise<MaterializationResult> {
     // A reconciliation backend failure must never drop the fact: fall back to
@@ -360,7 +385,7 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
       signalId: signal.signal_id,
       error: error instanceof Error ? error.message : String(error)
     });
-    return await this.materializeMemoryEntryAppend(signal, target);
+    return await this.materializeMemoryEntryAppend(signal, target, context);
   }
 
   // invariant: write-path/enrich-path decouple (S3c). The durable enrich_pending
@@ -424,6 +449,13 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     return memory.enrichmentEnqueued === true || this.dependencies.enrichPendingPort !== undefined;
   }
 
+}
+
+function requireReconciledEvidenceId(state: ReconciledMaterializationState): string {
+  if (state.evidenceId === undefined) {
+    throw new Error("Reconciled memory append is missing its evidence capsule.");
+  }
+  return state.evidenceId;
 }
 
 function readReconciliationProjectionFields(

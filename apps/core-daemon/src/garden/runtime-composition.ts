@@ -177,6 +177,9 @@ export function createGardenRuntimeJanitor(
       ? {}
       : { dispositionSweepPort: input.tombstoneDispositionSweepPort }),
     ...(input.tombstoneGcPort === undefined ? {} : { tombstoneGcPort: input.tombstoneGcPort }),
+    ...(input.tombstoneGcPort !== undefined || input.legacyTopologyMutationsEnabled === true
+      ? {}
+      : { tombstoneGcDeferredReason: "temporal_assertion_provenance_required" }),
     scheduler: janitorSchedulerPort,
     strongRefProtectionPort: {
       isProtected: async (workspaceId: string, targetEntityType: string, targetEntityId: string) =>
@@ -413,7 +416,10 @@ export function createGardenRuntimeFacade(input: Readonly<{
 function createConsolidationExecutor(
   input: CreateGardenRuntimeInput
 ): ConsolidationExecutor | null {
-  if (typeof (input.databaseConnection as { readonly prepare?: unknown }).prepare !== "function") {
+  if (
+    input.legacyTopologyMutationsEnabled !== true ||
+    typeof (input.databaseConnection as { readonly prepare?: unknown }).prepare !== "function"
+  ) {
     return null;
   }
   const consolidationBudgetStore = new SqliteConsolidationBudgetStore(

@@ -92,6 +92,10 @@ export interface BulkEnrichMemoryLookupPort {
         readonly scope_class: string;
         readonly content: string;
         readonly domain_tags: readonly string[];
+        // The memory row is the durable handoff for the evidence capsule that
+        // was created with it. Signal evidence_refs are external source hints,
+        // not the capsule identity required by temporal assertion admission.
+        readonly evidence_refs: readonly string[];
         readonly workspace_id: string;
         readonly run_id: string;
       }>
@@ -136,6 +140,7 @@ export interface BulkEnrichSourceSignalLookupPort {
 export interface BulkEnrichSignalRefReplayPort {
   replaySignalRefs(params: {
     readonly newMemoryId: string;
+    readonly memoryEvidenceIds: readonly string[];
     readonly signal: CandidateMemorySignal;
   }): Promise<void>;
 }
@@ -181,6 +186,10 @@ export type CreateGardenRuntimeInput = {
   };
   readonly pathGraphSnapshotRepo: SqlitePathGraphSnapshotRepo;
   readonly pathRelationRepo: SqlitePathRelationRepo;
+  // Legacy topology mutation is opt-in outside the S4 temporal clean break.
+  // Garden production wiring must leave this false until every mutation has
+  // temporal assertion provenance.
+  readonly legacyTopologyMutationsEnabled?: boolean;
   readonly pathPlasticityWatermarkRepo?: PathPlasticityWatermarkRepo;
   readonly pathPlasticityService?: Pick<PathPlasticityService, "computeAndApplyPlasticity">;
   readonly embeddingBackfillHandler?: Pick<EmbeddingBackfillHandler, "handle">;

@@ -51,6 +51,9 @@ async function resolveConsolidationSkipAuditEntry(
   input: CreateGardenSchedulerRuntimeSupportInput,
   workspaceId: string
 ): Promise<string | null> {
+  if (input.legacyTopologyMutationsEnabled !== true) {
+    return "consolidation_deferred:temporal_assertion_provenance_required";
+  }
   if (input.consolidationExecutor === null) {
     return "consolidation_skipped:no_durable_budget_table";
   }

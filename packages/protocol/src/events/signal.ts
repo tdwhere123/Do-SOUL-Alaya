@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CandidateMemorySignalMemoryRefsSchema,
+  SignalSourceObservationSchema,
   SignalKindSchema,
   SignalSourceSchema
 } from "../signals/candidate-memory-signal.js";
@@ -42,6 +43,7 @@ export const SoulSignalEmittedPayloadSchema = z.object({
   source: SignalSourceSchema,
   signal_kind: SignalKindSchema,
   source_delivery_ids: SourceDeliveryIdsSchema.optional(),
+  source_observation: SignalSourceObservationSchema.nullable(),
   source_memory_refs: CandidateMemorySignalMemoryRefsSchema,
   supersedes_refs: CandidateMemorySignalMemoryRefsSchema,
   exception_to_refs: CandidateMemorySignalMemoryRefsSchema,

@@ -22,6 +22,7 @@ type BulkEnrichMemoryRecord = Readonly<{
   readonly scope_class: string;
   readonly content: string;
   readonly domain_tags: readonly string[];
+  readonly evidence_refs: readonly string[];
   readonly workspace_id: string;
   readonly run_id: string | null;
 }>;
@@ -99,6 +100,7 @@ export type CreateBulkEnrichRuntimeSupportInput = Readonly<{
   readonly enrichSignalRefReplayPort?: {
     replaySignalRefs(input: {
       readonly newMemoryId: string;
+      readonly memoryEvidenceIds: readonly string[];
       readonly signal: Readonly<CandidateMemorySignal>;
     }): Promise<void>;
   };

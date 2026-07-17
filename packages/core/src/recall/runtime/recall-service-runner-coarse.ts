@@ -51,6 +51,7 @@ type CoarseFilterOptions = Readonly<{
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly pathProjectionAsOf?: string;
 }>;
 
 export interface CoarseStageResult {
@@ -108,7 +109,8 @@ async function collectHotCoarseFilter(
     timeFilter: params.timeFilter,
     queryProbes: prepared.queryProbes,
     winnerMemoryIds: prepared.winnerMemoryIds,
-    deliveryMaxEntries: prepared.policy.fine_assessment.budgets.max_entries
+    deliveryMaxEntries: prepared.policy.fine_assessment.budgets.max_entries,
+    pathProjectionAsOf: prepared.temporalProjectionAsOf
   });
 }
 
@@ -119,7 +121,13 @@ async function collectExpandedCoarseFilter(
   hotCoarseFilter: CoarseFilterResult
 ): Promise<CoarseFilterResult> {
   return expandTierCascade({
-    coarseFilter: (workspaceId, config, queryText, options) => collectCoarseFilter(context, workspaceId, config, queryText, options),
+    coarseFilter: (workspaceId, config, queryText, options) => collectCoarseFilter(
+      context,
+      workspaceId,
+      config,
+      queryText,
+      { ...options, pathProjectionAsOf: prepared.temporalProjectionAsOf }
+    ),
     projectMappingPort: context.dependencies.projectMappingPort,
     mergeCoarseFilters,
     workspaceId: params.workspaceId,

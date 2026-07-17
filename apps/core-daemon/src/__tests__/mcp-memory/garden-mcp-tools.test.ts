@@ -181,16 +181,24 @@ describe("Garden MCP tools", () => {
     expect(harness.getGardenTask("task-foreign").status).toBe("pending");
   });
 
-  it("complete with candidate_signals appends Garden completion and records signals through the review queue", async () => {
+  it("complete with candidate_signals preserves its persisted verified delivery observation", async () => {
+    const sourceObservation = {
+      observed_at: "2026-05-06T23:59:59.000Z",
+      authority: "verified_delivery_observation" as const,
+      source_event_id: "event-delivery-1"
+    };
     const harness = await createGardenMcpHarness();
     harness.enqueueTask("task-complete-signals", {
       role: GardenRole.LIBRARIAN,
       kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-      payload: createTaskDescriptor({
-        task_id: "task-complete-signals",
-        task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
-        required_tier: GardenTier.TIER_2
-      })
+      payload: {
+        ...createTaskDescriptor({
+          task_id: "task-complete-signals",
+          task_kind: GardenTaskKind.PATH_PLASTICITY_UPDATE,
+          required_tier: GardenTier.TIER_2
+        }),
+        source_observation: sourceObservation
+      }
     });
     await harness.callTool<GardenClaimTaskResponse>(
       "garden.claim_task",
@@ -241,7 +249,52 @@ describe("Garden MCP tools", () => {
     await expect(harness.signalRepo.getById(emittedId)).resolves.toMatchObject({
       signal_id: emittedId,
       workspace_id: "workspace-a",
-      source: "garden_compile"
+      source: "garden_compile",
+      source_observation: sourceObservation
+    });
+  });
+
+  it("sets null for an external Garden completion without persisted delivery proof", async () => {
+    const harness = await createGardenMcpHarness();
+    harness.enqueueTask("task-unverified-external-signal", {
+      payload: {
+        source_observed_at: "1999-01-01T00:00:00.000Z",
+        source_observation: {
+          observed_at: "1999-01-01T00:00:00.000Z",
+          authority: "trusted_host_event",
+          source_event_id: "event-untrusted"
+        }
+      }
+    });
+    await harness.callTool<GardenClaimTaskResponse>("garden.claim_task", {
+      task_id: "task-unverified-external-signal"
+    });
+    await harness.callTool<GardenCompleteTaskResponse>("garden.complete_task", {
+      task_id: "task-unverified-external-signal",
+      status: "completed",
+      result_envelope: {
+        candidate_signals: [
+          {
+            signal_kind: "potential_preference",
+            object_kind: "memory_entry",
+            scope_hint: "project",
+            domain_tags: ["garden"],
+            confidence: 0.9,
+            evidence_refs: ["memory-1"],
+            raw_payload: { observation: "no daemon-owned source receipt" }
+          }
+        ]
+      }
+    });
+    const completedEvents = await harness.eventLogRepo.queryByType(
+      GardenEventType.SOUL_GARDEN_TASK_COMPLETED
+    );
+    const emittedId = (
+      completedEvents[0]?.payload_json as { readonly objects_affected?: readonly string[] }
+    ).objects_affected?.[0];
+    expect(emittedId).toBeDefined();
+    await expect(harness.signalRepo.getById(emittedId!)).resolves.toMatchObject({
+      source_observation: null
     });
   });
 

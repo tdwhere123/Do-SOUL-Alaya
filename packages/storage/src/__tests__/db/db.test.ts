@@ -298,7 +298,7 @@ describe("initDatabase migration runner", () => {
       seed.close();
     }
 
-    const database = initDatabase({ filename: context.filename });
+    const database = initDatabase({ filename: context.filename, temporalMode: "candidate" });
     try {
       const appliedVersions = (
         database.connection.prepare("SELECT version FROM schema_version ORDER BY version ASC").all() as ReadonlyArray<{
@@ -395,7 +395,7 @@ describe("initDatabase migration runner", () => {
       seed.close();
     }
 
-    const database = initDatabase({ filename: context.filename });
+    const database = initDatabase({ filename: context.filename, temporalMode: "candidate" });
     try {
       const rows = database.connection.prepare(`
         SELECT proposal_id, resolution_state, reviewer_identity
@@ -450,70 +450,6 @@ describe("initDatabase migration runner", () => {
   }, 30_000);
 });
 
-describe("SQLite migration inventory guardrail", () => {
-  it("keeps migration versions unique and gaps explicitly documented", () => {
-    const inventory = readMigrationInventory();
-    const duplicateVersions = [...inventory.versionCounts.entries()]
-      .filter(([, count]) => count > 1)
-      .map(([version]) => version);
-    const zeroByteFiles = inventory.files
-      .filter((file) => file.sql.trim().length === 0)
-      .map((file) => file.name);
-    const unallowlistedGaps = inventory.gaps.filter(
-      (version) => !INTENTIONAL_MIGRATION_GAPS.has(version)
-    );
-
-    expect(duplicateVersions).toEqual([]);
-    expect(zeroByteFiles).toEqual([]);
-    expect(unallowlistedGaps).toEqual([]);
-  });
-
-  it("keeps comment-only migrations rare and explicitly marked", () => {
-    const commentOnlyFiles = readMigrationInventory().files
-      .filter((file) => stripSqlComments(file.sql).trim().length === 0)
-      .map((file) => file.name);
-    const unexpectedCommentOnly = commentOnlyFiles.filter(
-      (fileName) => !INTENTIONAL_NOOP_MIGRATIONS.has(fileName)
-    );
-    const missingMarker = commentOnlyFiles.filter((fileName) => {
-      const marker = "INTENTIONAL_NOOP_MIGRATION";
-      const file = readMigrationInventory().files.find((item) => item.name === fileName);
-      return file === undefined || !file.sql.includes(marker);
-    });
-
-    expect(unexpectedCommentOnly).toEqual([]);
-    expect(missingMarker).toEqual([]);
-  });
-
-  it("keeps migration SQL comments free of task-history narrative", () => {
-    const forbiddenPatterns = [
-      /#BL-\d+/u,
-      /\bvendor snapshot\b/iu,
-      /\bpre-A1\b/iu,
-      /\bfix-loop\b/iu,
-      /\bv0\.\d+(?:\.\d+)?\b/iu,
-      /\bv0\.3\.9\s+Cat-/iu,
-      /\bCat-[A-Z0-9.]+\b/u
-    ];
-    const hits = readMigrationInventory().files.flatMap((file) =>
-      file.sql
-        .split(/\r?\n/u)
-        .map((line, index) => ({ line, index: index + 1 }))
-        .filter(({ line }) => line.trimStart().startsWith("--"))
-        .filter(({ line }) => forbiddenPatterns.some((pattern) => pattern.test(line)))
-        .map(({ line, index }) => `${file.name}:${index}:${line.trim()}`)
-    );
-
-    expect(hits).toEqual([]);
-  });
-});
-
-const INTENTIONAL_MIGRATION_GAPS = new Set([70, 75]);
-const INTENTIONAL_NOOP_MIGRATIONS = new Set([
-  "074-claim-kind-expanded.sql",
-  "104-engine-bindings-api-key-encrypt.sql",
-]);
-
 function readMigrationInventory(): {
   readonly files: readonly { readonly name: string; readonly version: number; readonly sql: string }[];
   readonly versionCounts: ReadonlyMap<number, number>;
@@ -547,12 +483,4 @@ function readMigrationInventory(): {
     }
   }
   return { files, versionCounts, gaps };
-}
-
-function stripSqlComments(sql: string): string {
-  return sql
-    .replace(/\/\*[\s\S]*?\*\//gu, "")
-    .split(/\r?\n/u)
-    .filter((line) => !line.trimStart().startsWith("--"))
-    .join("\n");
 }

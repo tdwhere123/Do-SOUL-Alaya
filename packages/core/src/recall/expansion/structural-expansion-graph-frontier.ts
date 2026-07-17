@@ -13,6 +13,7 @@ import {
 import { collectPathGraphNeighbors } from "./path-relations.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
+import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -22,6 +23,7 @@ type ExpandGraphFrontierParams = Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
+  readonly pathProjectionAsOf?: string;
   readonly seedEntries: readonly Readonly<MemoryEntry>[];
   readonly maxGraphHops: number;
   readonly dynamicRecallEdgeFanout: number;
@@ -185,6 +187,7 @@ async function loadEligibleGraphExpansionPaths(
   params: Readonly<{
     readonly workspaceId: string;
     readonly pathExpansionPort: NonNullable<RecallServiceDependencies["pathExpansionPort"]>;
+    readonly pathProjectionAsOf?: string;
     readonly warn: RecallServiceWarnPort;
     readonly degradationReasons?: Set<import("../runtime/recall-service-types.js").RecallDegradationReason>;
   }>,
@@ -196,7 +199,11 @@ async function loadEligibleGraphExpansionPaths(
     object_id
   }));
   try {
-    const paths = await params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs);
+    const paths = await readWithTemporalProjection(
+      params.pathProjectionAsOf,
+      () => params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs),
+      (options) => params.pathExpansionPort.findByAnchors(params.workspaceId, anchorRefs, options)
+    );
     return paths.filter((path) => isPathRecallEligible(path));
   } catch (error) {
     for (const seedCount of failureSeedCounts) {

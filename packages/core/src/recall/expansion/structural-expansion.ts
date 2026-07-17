@@ -100,6 +100,7 @@ export async function addGraphExpansionCandidates(params: Readonly<{
   readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
   readonly addCandidate: CoarseCandidateAdder;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
+  readonly pathProjectionAsOf?: string;
   readonly extraSeedMemoryIds?: readonly string[];
   readonly draftSeedIds?: readonly string[];
   readonly maxGraphHops: number;
@@ -183,6 +184,7 @@ async function collectDraftGraphExpansionCandidates(
       workspaceId: params.workspaceId,
       byId: params.byId,
       pathExpansionPort,
+      pathProjectionAsOf: params.pathProjectionAsOf,
       seedEntries: draftSeedEntries,
       maxGraphHops: params.maxGraphHops,
       dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,
@@ -212,6 +214,7 @@ async function collectEntityGraphExpansionCandidates(
       workspaceId: params.workspaceId,
       byId: params.byId,
       pathExpansionPort,
+      pathProjectionAsOf: params.pathProjectionAsOf,
       seedEntries: entitySeedEntries,
       maxGraphHops: params.maxGraphHops,
       dynamicRecallEdgeFanout: params.dynamicRecallEdgeFanout,

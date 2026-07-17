@@ -4,8 +4,10 @@ import {
   requiresGardenSourceGrounding,
   resolveGardenSignalGrounding
 } from "../grounding/signal-source-grounding.js";
+import { EMPTY_MATERIALIZATION_CONTEXT } from "./contracts.js";
 import type {
   MaterializationCreatedObject,
+  MaterializationContext,
   MaterializationResult,
   MaterializationRouterDeps,
   MaterializationTarget
@@ -95,17 +97,35 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
 
   public async replaySignalRefs(input: {
     readonly newObjectId: string;
+    readonly evidenceId: string;
     readonly signal: CandidateMemorySignal;
+    readonly context: MaterializationContext;
   }): Promise<readonly MaterializationCreatedObject[]> {
-    if (
-      this.dependencies.pathCandidateSinkPort === undefined &&
-      hasMaterializableSignalMemoryRefs(input.signal)
-    ) {
-      throw new Error("PathCandidateSinkPort unavailable during signal-ref replay.");
+    if (hasMaterializableSignalMemoryRefs(input.signal)) {
+      if (
+        this.dependencies.pathCandidateSinkPort === undefined &&
+        this.dependencies.temporalRelationAssertionPort === undefined
+      ) {
+        throw new Error("Signal-ref replay has neither temporal assertion nor path candidate admission.");
+      }
+      if (
+        this.dependencies.temporalRelationAssertionPort !== undefined &&
+        input.context.source_event_anchor === null
+      ) {
+        throw new Error("Temporal signal-ref replay requires a verified signal emission anchor.");
+      }
+      if (
+        this.dependencies.temporalRelationAssertionPort !== undefined &&
+        input.evidenceId.trim().length === 0
+      ) {
+        throw new Error("Temporal signal-ref replay requires persisted evidence linked to the new memory.");
+      }
     }
     return await this.createAllMemoryRefEdges(
       input.newObjectId,
+      [input.evidenceId],
       input.signal,
+      input.context,
       "throw_for_retry"
     );
   }
@@ -182,38 +202,42 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
     };
   }
 
-  public async materializeSignal(signal: CandidateMemorySignal): Promise<MaterializationResult> {
-    return await this.materialize(signal, this.route(signal));
+  public async materializeSignal(
+    signal: CandidateMemorySignal,
+    context: MaterializationContext = EMPTY_MATERIALIZATION_CONTEXT
+  ): Promise<MaterializationResult> {
+    return await this.materialize(signal, this.route(signal), context);
   }
 
   public async materialize(
     signal: CandidateMemorySignal,
-    target: MaterializationTarget
+    target: MaterializationTarget,
+    context: MaterializationContext = EMPTY_MATERIALIZATION_CONTEXT
   ): Promise<MaterializationResult> {
     if (target.route_target === "memory_entry_only") {
-      return await this.materializeMemoryEntryOnly(signal, target);
+      return await this.materializeMemoryEntryOnly(signal, target, context);
     }
     if (target.route_target === "conflict_evaluation") {
-      return await this.materializeConflictEvaluation(signal, target);
+      return await this.materializeConflictEvaluation(signal, target, context);
     }
     if (target.route_target === "path_relation_proposal") {
-      return await this.materializePathRelationProposal(signal, target);
+      return await this.materializePathRelationProposal(signal, target, context);
     }
     if (target.route_target === "signal_only") {
-      return this.materializeDeferred(signal, target);
+      return this.materializeDeferred(signal, target, context);
     }
 
     switch (target.kind) {
       case "memory_and_claim":
-        return await this.materializeMemoryAndClaim(signal, target);
+        return await this.materializeMemoryAndClaim(signal, target, context);
       case "synthesis":
-        return await this.materializeSynthesis(signal, target);
+        return await this.materializeSynthesis(signal, target, context);
       case "handoff_gap":
-        return await this.materializeHandoffGap(signal, target);
+        return await this.materializeHandoffGap(signal, target, context);
       case "evidence_only":
-        return await this.materializeEvidenceOnly(signal, target);
+        return await this.materializeEvidenceOnly(signal, target, context);
       case "deferred":
-        return this.materializeDeferred(signal, target);
+        return this.materializeDeferred(signal, target, context);
       default: {
         const exhaustiveCheck: never = target.kind;
         return materializationFailure(

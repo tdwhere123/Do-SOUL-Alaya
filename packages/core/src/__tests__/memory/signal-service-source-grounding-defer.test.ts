@@ -9,6 +9,7 @@ import {
   type SourceGroundingDeferQueueStatePort,
   type SourceGroundingDeferTransitionPort
 } from "../../memory/signal-service.js";
+import type { EventLogEntry } from "@do-soul/alaya-protocol";
 import { createSignal } from "./signal-service.test-support.js";
 function createDeferredMaterialization(reason: string) {
   return {
@@ -29,10 +30,7 @@ function createHarness(options?: {
 }) {
   const queue = createInMemorySourceGroundingDeferQueue(options?.queueCap ?? 8);
   const signals = new Map<string, ReturnType<typeof createSignal>>();
-  const appendedEvents: Array<{
-    event_type: string;
-    payload_json: Record<string, unknown>;
-  }> = [];
+  const appendedEvents: EventLogEntry[] = [];
   let appendCallCount = 0;
   const materialize =
     options?.materialize ??
@@ -42,19 +40,17 @@ function createHarness(options?: {
   const notifyPort = notifyEntry as unknown as SignalRuntimeNotifier["notifyEntry"];
   const warnPort = options?.warn as unknown as SignalServiceWarnPort | undefined;
   const appendEvent = (
-    event: Parameters<SourceGroundingDeferTransitionPort["recordDefer"]>[0]["events"][number]
-  ) => {
+    event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
+  ): EventLogEntry => {
     appendCallCount += 1;
-    appendedEvents.push({
-      event_type: event.event_type,
-      payload_json: event.payload_json as Record<string, unknown>
-    });
-    return {
+    const appended: EventLogEntry = {
       event_id: `evt_${appendCallCount}`,
       created_at: "2026-07-14T00:00:00.000Z",
       revision: 0,
       ...event
     };
+    appendedEvents.push(appended);
+    return appended;
   };
   const transitions: SourceGroundingDeferTransitionPort = {
     recordDefer: (input) => {
@@ -143,7 +139,11 @@ function createHarness(options?: {
   const service = new SignalService({
     eventLogRepo: {
       append: vi.fn((event) => appendEvent(event)),
-      queryByEntity: vi.fn(async () => [])
+      queryByEntity: vi.fn(async (entityType, entityId) =>
+        appendedEvents.filter(
+          (event) => event.entity_type === entityType && event.entity_id === entityId
+        )
+      )
     },
     signalRepo: {
       create: vi.fn(async (signal) => {
@@ -163,7 +163,7 @@ function createHarness(options?: {
     runtimeNotifier: { notifyEntry: async (entry) => await notifyPort(entry) },
     sourceGroundingDeferQueue: queue,
     sourceGroundingDeferTransitions: transitions,
-    postTriageMaterializer: { materialize: async (signal) => await materializePort(signal) },
+    postTriageMaterializer: { materialize: async (signal, context) => await materializePort(signal, context) },
     ...(warnPort === undefined ? {} : { warn: warnPort })
   });
 

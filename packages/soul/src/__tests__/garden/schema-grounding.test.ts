@@ -8,6 +8,7 @@ import {
 } from "../../garden/schema-grounding.js";
 
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+  const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-1",
     workspace_id: "workspace-1",
@@ -30,7 +31,8 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
       matched_text: "Never print secrets."
     },
     created_at: "2026-05-13T00:00:00.000Z",
-    ...overrides
+    ...signalOverrides,
+    source_observation
   };
 }
 

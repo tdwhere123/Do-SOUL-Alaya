@@ -88,6 +88,7 @@ export async function loadActiveConstraints(params: Readonly<{
   readonly activeConstraintsPort?: RecallServiceDependencies["activeConstraintsPort"];
   readonly workspaceId: string;
   readonly cap: number | null;
+  readonly asOf?: string;
 }>): Promise<Readonly<{
   readonly constraints: RecallResult["active_constraints"];
   readonly total_count: number;
@@ -99,7 +100,11 @@ export async function loadActiveConstraints(params: Readonly<{
       total_count: 0
     });
   }
-  return port.findActiveConstraints({ workspaceId: params.workspaceId, cap: params.cap });
+  return port.findActiveConstraints({
+    workspaceId: params.workspaceId,
+    cap: params.cap,
+    asOf: params.asOf
+  });
 }
 
 export async function applyManifestationBiasSidecar(params: Readonly<{

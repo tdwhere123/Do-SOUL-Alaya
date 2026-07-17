@@ -133,6 +133,7 @@ export {
   type MaterializationTarget,
   type PathRelationProposalPayload,
   type PathRelationProposalPort,
+  type TemporalRelationAssertionPort,
   type PathCandidateSinkPort,
   type PathCandidateMintOutcome,
   type RouteTarget,

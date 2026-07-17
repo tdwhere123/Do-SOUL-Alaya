@@ -1,8 +1,4 @@
-import {
-  type CandidateMemorySignal,
-  type MemoryEntry,
-  type TransitionCausedBy
-} from "@do-soul/alaya-protocol";
+import { type MemoryEntry, type TransitionCausedBy } from "@do-soul/alaya-protocol";
 import {
   AnswersWithEdgeProducerService,
   CoherenceEdgeProducerService,
@@ -18,18 +14,20 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import {
-  createTombstoneDispositionSweepPort,
-  createTombstoneGcPort
+  createTombstoneDispositionSweepPort
 } from "../garden/forget-disposition-ports.js";
 import { createGardenRuntime } from "../garden/runtime.js";
-import {
-  reconcileBootstrapPathsForAllWorkspaces,
-  type WarnLogger
-} from "./daemon-runtime-helpers.js";
+import type { WarnLogger } from "./daemon-runtime-helpers.js";
 import { createOptionalMemoryHqRepo, recordStartupStep } from "./daemon-runtime-support.js";
 import {
   resolvePersistedGardenLastPassAt
 } from "./garden-compute-support.js";
+import {
+  createGardenEdgeProposalReconcileDeferralPort,
+  deferGardenBootstrapPathReconciliation,
+  createGardenLegacyPathCandidateRejectionPort
+} from "./garden-legacy-path-admission.js";
+import { createGardenSignalRefReplayPort } from "./garden-signal-ref-replay.js";
 import type { createDaemonRepositories } from "./daemon-repositories.js";
 import type { createDaemonServiceFoundation } from "./daemon-service-foundation.js";
 import type { createDaemonCoreServices } from "./daemon-service-wiring.js";
@@ -53,6 +51,7 @@ type GardenRuntimeWiringInput = Readonly<{
   Pick<
     DaemonRepositories,
     | "eventLogRepo"
+    | "evidenceCapsuleRepo"
     | "memoryEntryRepo"
     | "synthesisCapsuleRepo"
     | "healthJournalRepo"
@@ -74,13 +73,11 @@ type GardenRuntimeWiringInput = Readonly<{
     | "healthIssueGroupRepo"
     | "strongRefService"
     | "edgeProposalService"
-    | "securedWorkspaceService"
     | "trustStateRecorder"
   > &
   Pick<
     DaemonCoreServices,
     | "gardenBacklogThresholds"
-    | "pathPlasticityService"
     | "configService"
     | "officialGardenProvider"
     | "localHeuristicsProvider"
@@ -92,7 +89,6 @@ type GardenRuntimeWiringInput = Readonly<{
     | "materializationRouter"
     | "edgeAutoProducerService"
     | "embeddingRecallService"
-    | "pathRelationProposalService"
     | "conflictDetectionService"
     | "edgeClassifyQueueRepoHolder"
   >;
@@ -100,8 +96,18 @@ type GardenRuntimeWiringInput = Readonly<{
 export async function createGardenRuntimeWiring(input: GardenRuntimeWiringInput) {
   const forgetTombstoneAuthority = createForgetTombstoneAuthority(input);
   const gardenDataPorts = createGardenDataPorts(input);
-  const coherenceCrystallizer = createCoherenceCrystallizer(input);
-  const answersWithCrystallizer = createAnswersWithCrystallizer(input);
+  input.warnLogger.warn("garden path plasticity deferred without temporal assertion provenance", {
+    scope: "temporal_clean_break"
+  });
+  input.warnLogger.warn("garden consolidation deferred without temporal assertion provenance", {
+    scope: "temporal_clean_break"
+  });
+  input.warnLogger.warn("garden tombstone physical gc deferred without temporal assertion provenance", {
+    scope: "temporal_clean_break"
+  });
+  const legacyPathCandidateRejectionPort = createGardenLegacyPathCandidateRejectionPort(input.warnLogger.warn);
+  const coherenceCrystallizer = createCoherenceCrystallizer(input, legacyPathCandidateRejectionPort);
+  const answersWithCrystallizer = createAnswersWithCrystallizer(input, legacyPathCandidateRejectionPort);
   const gardenRuntime = createGardenSchedulerRuntime(
     input,
     gardenDataPorts,
@@ -166,28 +172,34 @@ function createGardenDataPorts(input: GardenRuntimeWiringInput) {
   };
 }
 
-function createCoherenceCrystallizer(input: GardenRuntimeWiringInput) {
+function createCoherenceCrystallizer(
+  input: GardenRuntimeWiringInput,
+  mintPort: ReturnType<typeof createGardenLegacyPathCandidateRejectionPort>
+) {
   if (input.embeddingRecallService === undefined) {
     return undefined;
   }
 
   return new CoherenceEdgeProducerService({
     pairSource: input.embeddingRecallService,
-    mintPort: input.pathRelationProposalService,
+    mintPort,
     warn: input.warnLogger.warn
   });
 }
 
 // invariant: answers_with crystallizer is always-on when the HQ repo is
 // present; null hqRepo → undefined → no mint.
-function createAnswersWithCrystallizer(input: GardenRuntimeWiringInput) {
+function createAnswersWithCrystallizer(
+  input: GardenRuntimeWiringInput,
+  mintPort: ReturnType<typeof createGardenLegacyPathCandidateRejectionPort>
+) {
   const hqRepo = createOptionalMemoryHqRepo(input.database);
   if (hqRepo === null) {
     return undefined;
   }
   return new AnswersWithEdgeProducerService({
     pairSource: new HqAnswerOverlapPairSource(hqRepo),
-    mintPort: input.pathRelationProposalService,
+    mintPort,
     warn: input.warnLogger.warn
   });
 }
@@ -212,8 +224,8 @@ function createGardenSchedulerRuntime(
     healthIssueGroupRepo: input.healthIssueGroupRepo,
     pathGraphSnapshotRepo: input.pathGraphSnapshotRepo,
     pathRelationRepo: input.pathRelationRepo,
+    legacyTopologyMutationsEnabled: false,
     pathPlasticityWatermarkRepo: input.pathPlasticityWatermarkRepo,
-    pathPlasticityService: input.pathPlasticityService,
     embeddingBackfillHandler: input.embeddingBackfillHandler,
     configService: input.configService,
     officialApiGardenProvider: input.officialGardenProvider,
@@ -224,7 +236,6 @@ function createGardenSchedulerRuntime(
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(
       createTombstoneDispositionSweepInput(input, forgetTombstoneAuthority)
     ),
-    tombstoneGcPort: createTombstoneGcPort({ tombstoneAuthority: forgetTombstoneAuthority }),
     ...createGardenEnrichmentPorts(input, coherenceCrystallizer, answersWithCrystallizer),
     ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),
     warn: input.warnLogger.warn
@@ -250,14 +261,21 @@ function createGardenEnrichmentPorts(
     enrichSourceSignalLookup: {
       getById: async (signalId: string) => await input.signalRepo.getById(signalId)
     },
-    enrichSignalRefReplayPort: createEnrichSignalRefReplayPort(input),
+    enrichSignalRefReplayPort: createGardenSignalRefReplayPort({
+      eventLogRepo: input.eventLogRepo,
+      evidenceCapsuleLookup: input.evidenceCapsuleRepo,
+      materializationRouter: input.materializationRouter
+    }),
     enrichEdgeProducerPort: input.edgeAutoProducerService,
     ...(coherenceEdgeProducerPort === undefined ? {} : { coherenceEdgeProducerPort }),
     ...(answersWithEdgeProducerPort === undefined ? {} : { answersWithEdgeProducerPort }),
     ...(input.conflictDetectionService === null
       ? {}
       : { enrichConflictDetectionPort: input.conflictDetectionService }),
-    edgeProposalReconcile: input.edgeProposalService
+    edgeProposalReconcile: createGardenEdgeProposalReconcileDeferralPort(
+      input.edgeProposalService,
+      input.warnLogger.warn
+    )
   };
 }
 
@@ -279,14 +297,6 @@ function createTombstoneDispositionSweepInput(
   };
 }
 
-function createEnrichSignalRefReplayPort(input: GardenRuntimeWiringInput) {
-  return {
-    replaySignalRefs: async ({ newMemoryId, signal }: { readonly newMemoryId: string; readonly signal: CandidateMemorySignal }) => {
-      await input.materializationRouter.replaySignalRefs({ newObjectId: newMemoryId, signal });
-    }
-  };
-}
-
 function createEnrichMemoryLookup(input: GardenRuntimeWiringInput) {
   return {
     findById: async (memoryId: string) => {
@@ -300,6 +310,7 @@ function createEnrichMemoryLookup(input: GardenRuntimeWiringInput) {
         scope_class: memory.scope_class,
         content: memory.content,
         domain_tags: memory.domain_tags,
+        evidence_refs: memory.evidence_refs,
         workspace_id: memory.workspace_id,
         run_id: memory.run_id
       };
@@ -414,13 +425,12 @@ function startGardenBootstrapSideEffects(
     eventLogRepo: input.eventLogRepo,
     runtimeNotifier: input.runtimeNotifier
   });
-  scheduleAuditedAsyncSideEffect(reconcileBootstrapPathsForAllWorkspaces({
-    workspaceRepo: input.workspaceRepo,
-    workspaceService: input.securedWorkspaceService,
-    warn: input.warnLogger.warn
-  }), {
+  scheduleAuditedAsyncSideEffect(deferGardenBootstrapPathReconciliation(
+    input.workspaceRepo,
+    input.warnLogger.warn
+  ), {
     source: "core-daemon.startup",
-    operation: "bootstrap_path_reconciliation",
+    operation: "bootstrap_path_reconciliation_deferred",
     subjectType: "daemon_runtime",
     subjectId: "__system__",
     workspaceId: "__system__",

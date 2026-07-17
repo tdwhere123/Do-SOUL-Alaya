@@ -1,36 +1,64 @@
 import { parentPort, workerData } from "node:worker_threads";
 import {
   MemoryDimensionSchema,
-  isPathActiveForRecall,
   type PathAnchorRef,
-  type PathRelation,
   ScopeClassSchema,
   StorageTierSchema,
   type StorageTier
 } from "@do-soul/alaya-protocol";
+import { EventPublisher, RelationAssertionService } from "@do-soul/alaya-core";
 import {
   initDatabase,
   SqliteEvidenceCapsuleRepo,
+  SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
-  SqliteSynthesisCapsuleRepo
+  SqliteRelationAssertionRepo,
+  SqliteSynthesisCapsuleRepo,
+  SqliteTemporalPathProjectionReader
 } from "@do-soul/alaya-storage";
 import type {
   RecallReadWorkerRequest,
   RecallReadWorkerResponse
 } from "./recall-read-worker-client.js";
-import { normalizeRecallTimeConcernWindowDigest } from "./garden-compute-support.js";
+import {
+  createRecallPathReadPorts,
+  createRecallTemporalProjectionEnsurer,
+  type RecallPathProjectionReadOptions
+} from "./recall-path-readers.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
 }
 
 const databaseFilename = readDatabaseFilename(workerData);
+const temporalProjectionSelected = readTemporalProjectionSelected(workerData);
 const database = initDatabase({ filename: databaseFilename });
 const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
 const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
-const pathRelationRepo = new SqlitePathRelationRepo(database);
+const eventLogRepo = new SqliteEventLogRepo(database);
+const recallPathReadPorts = temporalProjectionSelected
+  ? createRecallPathReadPorts({
+      temporalProjectionSelected,
+      temporalPathProjectionReader: new SqliteTemporalPathProjectionReader(
+        new SqliteRelationAssertionRepo(database)
+      ),
+      ensureTemporalProjection: createRecallTemporalProjectionEnsurer(
+        new RelationAssertionService({
+          repo: new SqliteRelationAssertionRepo(database),
+          eventPublisher: new EventPublisher({
+            eventLogRepo,
+            runHotStateService: { apply: () => undefined },
+            runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
+          }),
+          eventHistory: eventLogRepo
+        })
+      )
+    })
+  : createRecallPathReadPorts({
+      legacyPathReader: new SqlitePathRelationRepo(database)
+    });
 const MEMORY_ENTRY_PAGE_LIMIT = 500;
 const MAX_WORKER_PAGE_LIMIT = 5000;
 let closed = false;
@@ -260,32 +288,27 @@ async function runPathOperation(
   operation: Extract<RecallReadWorkerRequest["operation"], `path${string}`>,
   payload: Record<string, unknown>
 ) {
+  const options = readPathProjectionReadOptions(payload);
   if (operation === "path.findByAnchors") {
-    return await pathRelationRepo.findByAnchors(
+    return await recallPathReadPorts.pathExpansionPort.findByAnchors(
       readString(payload.workspaceId, "workspaceId"),
-      readAnchorRefs(payload.anchorRefs)
+      readAnchorRefs(payload.anchorRefs),
+      options
     );
   }
   if (operation === "pathPlasticity.getStrengthByMemoryId") {
-    return await getStrengthByMemoryId(
+    const strengths = await recallPathReadPorts.pathPlasticityPort.getStrengthByMemoryId(
       readString(payload.workspaceId, "workspaceId"),
-      readStringArray(payload.memoryIds, "memoryIds")
+      readStringArray(payload.memoryIds, "memoryIds"),
+      options
     );
+    return [...strengths.entries()];
   }
 
-  const workspaceId = readString(payload.workspaceId, "workspaceId");
-  const normalized = new Set(
-    readStringArray(payload.windowDigests, "windowDigests").map(
-      normalizeRecallTimeConcernWindowDigest
-    )
-  );
-  const paths = await pathRelationRepo.findByWorkspaceAll(workspaceId);
-  return paths.filter((path) =>
-    isPathActiveForRecall(path.lifecycle.status) &&
-    [path.anchors.source_anchor, path.anchors.target_anchor].some((anchor) =>
-      anchor.kind === "time_concern" &&
-      normalized.has(normalizeRecallTimeConcernWindowDigest(anchor.window_digest))
-    )
+  return await recallPathReadPorts.pathExpansionPort.findByTimeConcernWindowDigests(
+    readString(payload.workspaceId, "workspaceId"),
+    readStringArray(payload.windowDigests, "windowDigests"),
+    options
   );
 }
 
@@ -315,64 +338,6 @@ async function findMemoryEntriesByWorkspaceId(
     offset += chunk.length;
   }
   return rows;
-}
-
-async function getStrengthByMemoryId(
-  workspaceId: string,
-  memoryIds: readonly string[]
-): Promise<readonly (readonly [string, number])[]> {
-  const result = new Map<string, number>();
-  const uniqueMemoryIds = [...new Set(memoryIds)];
-  if (uniqueMemoryIds.length === 0) {
-    return [];
-  }
-  const requestedMemoryIds = new Set(uniqueMemoryIds);
-  const paths = await pathRelationRepo.findByAnchors(
-    workspaceId,
-    uniqueMemoryIds.map((memoryId) => ({
-      kind: "object",
-      object_id: memoryId
-    }))
-  );
-
-  for (const path of paths) {
-    if (!isPathActiveForRecall(path.lifecycle.status)) {
-      continue;
-    }
-    for (const memoryId of getDirectionEligibleObjectAnchorMemoryIds(path, requestedMemoryIds)) {
-      const strongest = result.get(memoryId) ?? 0;
-      if (path.plasticity_state.strength > strongest) {
-        result.set(memoryId, path.plasticity_state.strength);
-      }
-    }
-  }
-  return [...result.entries()];
-}
-
-function getDirectionEligibleObjectAnchorMemoryIds(
-  path: Readonly<PathRelation>,
-  requestedMemoryIds: ReadonlySet<string>
-): readonly string[] {
-  const memoryIds = new Set<string>();
-  const sourceAnchor = path.anchors.source_anchor;
-  const targetAnchor = path.anchors.target_anchor;
-  if (
-    (path.plasticity_state.direction_bias === "target_to_source" ||
-      path.plasticity_state.direction_bias === "bidirectional_asymmetric") &&
-    sourceAnchor.kind === "object" &&
-    requestedMemoryIds.has(sourceAnchor.object_id)
-  ) {
-    memoryIds.add(sourceAnchor.object_id);
-  }
-  if (
-    (path.plasticity_state.direction_bias === "source_to_target" ||
-      path.plasticity_state.direction_bias === "bidirectional_asymmetric") &&
-    targetAnchor.kind === "object" &&
-    requestedMemoryIds.has(targetAnchor.object_id)
-  ) {
-    memoryIds.add(targetAnchor.object_id);
-  }
-  return [...memoryIds];
 }
 
 function postResponse(response: RecallReadWorkerResponse): void {
@@ -419,6 +384,27 @@ function readNumericMessageId(value: unknown): number | null {
 function readDatabaseFilename(value: unknown): string {
   const payload = asPayload(value);
   return readString(payload.databaseFilename, "databaseFilename");
+}
+
+function readTemporalProjectionSelected(value: unknown): boolean {
+  const payload = asPayload(value);
+  const selected = payload.temporalProjectionSelected;
+  if (selected === undefined) {
+    return false;
+  }
+  if (typeof selected !== "boolean") {
+    throw new Error("worker payload temporalProjectionSelected must be a boolean");
+  }
+  return selected;
+}
+
+function readPathProjectionReadOptions(
+  payload: Record<string, unknown>
+): RecallPathProjectionReadOptions {
+  if (payload.asOf === undefined) {
+    return Object.freeze({});
+  }
+  return Object.freeze({ asOf: readString(payload.asOf, "asOf") });
 }
 
 function asPayload(value: unknown): Record<string, unknown> {

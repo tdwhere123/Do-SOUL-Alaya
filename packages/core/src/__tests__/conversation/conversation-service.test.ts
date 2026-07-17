@@ -197,7 +197,14 @@ describe("ConversationService", () => {
         surface_id: "surface://cli/main"
       })
     );
-    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(signal);
+    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith({
+      ...signal,
+      source_observation: {
+        authority: "trusted_host_event",
+        source_event_id: "event-2",
+        observed_at: expect.any(String)
+      }
+    });
     expect(sessionOverridePromotion.evaluateActiveForRun).toHaveBeenCalledWith({
       runId: "run-1",
       workspaceId: "workspace-1"
@@ -221,6 +228,132 @@ describe("ConversationService", () => {
         memory_and_claim: 1
       })
     );
+  });
+
+  it("binds daemon-owned local Garden compiles to a host completion receipt", async () => {
+    const signalReceiver = {
+      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
+        signal,
+        triage_result: "deferred" as const,
+        materialization: null
+      }))
+    };
+    const { service } = createService({
+      signalReceiver,
+      gardenComputeProvider: {
+        provider_kind: "local_heuristics",
+        compile: vi.fn(async () => [createSignal({
+          source_observation: {
+            authority: "trusted_host_event",
+            observed_at: "2020-01-01T00:00:00.000Z",
+            source_event_id: "provider-controlled-event"
+          }
+        })])
+      }
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "source receipt"),
+      assistantMessage: createMessage("msg-assistant", "assistant", "received")
+    });
+    await flushBackgroundTasks();
+
+    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      source_observation: {
+        authority: "trusted_host_event",
+        source_event_id: "event-1",
+        observed_at: expect.not.stringContaining("2020-01-01")
+      }
+    }));
+  });
+
+  it("drops a Garden receipt when the daemon cannot append its completion event", async () => {
+    const signalReceiver = {
+      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
+        signal,
+        triage_result: "deferred" as const,
+        materialization: null
+      }))
+    };
+    const { service } = createService({
+      eventLogRepo: {
+        queryConversationMessageEventsByRun: vi.fn(async () => [])
+      },
+      signalReceiver,
+      gardenComputeProvider: {
+        provider_kind: "local_heuristics",
+        compile: vi.fn(async () => [createSignal({
+          source_observation: {
+            authority: "trusted_host_event",
+            observed_at: "2020-01-01T00:00:00.000Z",
+            source_event_id: "provider-controlled-event"
+          }
+        })])
+      }
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "source receipt"),
+      assistantMessage: createMessage("msg-assistant", "assistant", "received")
+    });
+    await flushBackgroundTasks();
+
+    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      source_observation: null
+    }));
+  });
+
+  it("drops a Garden receipt when completion event append fails", async () => {
+    let appendCount = 0;
+    const completionError = new Error("completion append failed");
+    const eventLogRepo = {
+      queryConversationMessageEventsByRun: vi.fn(async () => []),
+      append: vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => {
+        appendCount += 1;
+        if (appendCount === 2) throw completionError;
+        return {
+          event_id: "event-1",
+          created_at: "2026-04-29T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        };
+      })
+    };
+    const signalReceiver = {
+      receiveSignal: vi.fn(async (signal: CandidateMemorySignal) => ({
+        signal,
+        triage_result: "deferred" as const,
+        materialization: null
+      }))
+    };
+    const { service } = createService({
+      eventLogRepo,
+      signalReceiver,
+      gardenComputeProvider: {
+        provider_kind: "local_heuristics",
+        compile: vi.fn(async () => [createSignal({
+          source_observation: {
+            authority: "trusted_host_event",
+            observed_at: "2020-01-01T00:00:00.000Z",
+            source_event_id: "provider-controlled-event"
+          }
+        })])
+      }
+    });
+
+    await service.orchestrateMemoryTurn({
+      runId: "run-1",
+      userMessage: createMessage("msg-user", "user", "source receipt"),
+      assistantMessage: createMessage("msg-assistant", "assistant", "received")
+    });
+    await flushBackgroundTasks();
+
+    expect(eventLogRepo.append).toHaveBeenCalledTimes(2);
+    expect(signalReceiver.receiveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      source_observation: null
+    }));
   });
 
   it("memory orchestration releases governance lease when Garden provider resolution fails", async () => {

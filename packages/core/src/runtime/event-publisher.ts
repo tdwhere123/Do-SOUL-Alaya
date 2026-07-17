@@ -36,6 +36,16 @@ export interface EventPublisherDependencies {
   readonly runtimeNotifier: RuntimeNotifier;
 }
 
+/**
+ * A synchronous decision made under the EventLog transaction. New durable
+ * state is applied only after its EventLog entries exist, while an idempotent
+ * decision can return an existing result without appending another event.
+ */
+export interface EventPublisherDecision<T> {
+  readonly eventInputs: readonly EventPublisherInput[];
+  apply(entries: readonly EventLogEntry[]): T;
+}
+
 export class EventPublisherPropagationError extends AlayaError {
   public readonly entry: EventLogEntry;
   public readonly entries: readonly EventLogEntry[];
@@ -151,6 +161,35 @@ export class EventPublisher {
     }
 
     return { result, entries };
+  }
+
+  /**
+   * Decide idempotency inside the EventLog transaction, append only when the
+   * decision is new, then apply state with the exact persisted envelope IDs.
+   * This is the EventLog-first primitive for immutable state that needs its
+   * envelope ID as a foreign key; callers must keep both callbacks synchronous.
+   */
+  public async decideAppendThenApply<T>(
+    decide: () => EventPublisherDecision<T>
+  ): Promise<T> {
+    const repo = this.dependencies.eventLogRepo;
+    const { entries, result } = repo.transactional(() => {
+      const decision = decide();
+      assertSynchronousMutationResult(decision);
+      const entries = decision.eventInputs.map((input) => repo.append(input));
+      const result = decision.apply(entries);
+      assertSynchronousMutationResult(result);
+      return { entries, result };
+    });
+
+    for (const entry of entries) {
+      try {
+        await this.propagate(entry);
+      } catch (propagateError) {
+        await this.reportPostCommitPropagationFailure(entry, propagateError, entries);
+      }
+    }
+    return result;
   }
 
   /**

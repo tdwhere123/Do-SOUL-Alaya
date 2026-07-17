@@ -108,7 +108,7 @@ export interface PostTurnPayload {
   readonly target_object_refs?: readonly string[];
   readonly priority?: number;
   readonly created_at?: string;
-  readonly source_observed_at?: string;
+  readonly source_observation?: NonNullable<CandidateMemorySignal["source_observation"]> | null;
   readonly turn_index: number;
   readonly workspace_id: string;
   readonly turn_digest: {
@@ -331,6 +331,7 @@ export async function recall(
   overrides: Partial<{
     readonly query: string;
     readonly recent_turn: string;
+    readonly source_observed_at: string;
     readonly context: McpMemoryToolCallContext;
   }> = {}
 ): Promise<McpMemoryToolCallResult> {
@@ -342,7 +343,10 @@ export async function recall(
       dimension: null,
       domain_tags: null,
       max_results: 5,
-      ...(overrides.recent_turn === undefined ? {} : { recent_turn: overrides.recent_turn })
+      ...(overrides.recent_turn === undefined ? {} : { recent_turn: overrides.recent_turn }),
+      ...(overrides.source_observed_at === undefined
+        ? {}
+        : { source_observed_at: overrides.source_observed_at })
     },
     context: overrides.context ?? defaultContext()
   });
@@ -362,6 +366,7 @@ export async function reportUsage(
       readonly role: string;
       readonly content_excerpt: string;
     }[];
+    readonly source_observed_at: string;
     readonly context: McpMemoryToolCallContext;
   }> = {}
 ): Promise<McpMemoryToolCallResult> {
@@ -386,6 +391,9 @@ export async function reportUsage(
             { role: "assistant", content_excerpt: "I used the project preference." }
           ]
       },
+      ...(overrides.source_observed_at === undefined
+        ? {}
+        : { source_observed_at: overrides.source_observed_at }),
       reason: "post-turn extract test"
     },
     context: overrides.context ?? defaultContext()
@@ -430,6 +438,7 @@ export function createPostTurnPayload(overrides: Partial<PostTurnPayload> = {}):
 }
 
 export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+  const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-post-turn",
     workspace_id: "workspace-1",
@@ -450,7 +459,8 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
     incompatible_with_refs: [],
     raw_payload: { observation: "post-turn extraction test" },
     created_at: "2026-05-07T00:11:00.000Z",
-    ...overrides
+    ...signalOverrides,
+    source_observation
   };
 }
 

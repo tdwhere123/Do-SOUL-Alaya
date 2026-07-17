@@ -19,6 +19,7 @@ type ClaimCreate = MaterializationRouterDeps["claimService"]["create"];
 // see also: packages/soul/src/garden/materialization-router/router.ts route()
 // see also: packages/core/src/governance/claim-service.ts create() (DRAFT default)
 function createSignal(overrides: Partial<CandidateMemorySignal> = {}): CandidateMemorySignal {
+  const { source_observation = null, ...signalOverrides } = overrides;
   return {
     signal_id: "signal-1",
     workspace_id: "workspace-1",
@@ -41,7 +42,8 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
       excerpt: "Sample distilled fact."
     },
     created_at: "2026-03-21T00:00:00.000Z",
-    ...overrides
+    ...signalOverrides,
+    source_observation
   };
 }
 

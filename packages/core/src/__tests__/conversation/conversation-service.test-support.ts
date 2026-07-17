@@ -144,6 +144,7 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
     raw_payload: {
       excerpt: "Use explicit evidence before durable memory."
     },
+    source_observation: null,
     created_at: "2026-04-29T00:00:00.000Z",
     ...overrides
   };

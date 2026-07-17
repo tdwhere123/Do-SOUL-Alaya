@@ -38,6 +38,7 @@ function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Candidate
     contradicts_refs: [],
     incompatible_with_refs: [],
     raw_payload: { excerpt: "Never print secrets." },
+    source_observation: null,
     created_at: "2026-03-18T00:00:00.000Z",
     ...restOverrides
   };

@@ -175,6 +175,11 @@ describe("CandidateMemorySignalSchema", () => {
     expect(CandidateMemorySignalSchema.parse(candidateMemorySignalBase)).toEqual(candidateMemorySignalBase);
   });
 
+  it("defaults a missing persisted source observation to null", () => {
+    const { source_observation: _sourceObservation, ...legacySignal } = candidateMemorySignalBase;
+    expect(CandidateMemorySignalSchema.parse(legacySignal).source_observation).toBeNull();
+  });
+
   it("accepts nullable surface and scope hints", () => {
     const value = {
       ...candidateMemorySignalBase,
@@ -227,7 +232,7 @@ describe("CandidateMemorySignalSchema", () => {
 
 
 describe("CandidateMemorySignalInputSchema", () => {
-  it("accepts a minimal MCP input payload", () => {
+  it("accepts a minimal internal input payload", () => {
     expect(CandidateMemorySignalInputSchema.parse(candidateMemorySignalInputBase)).toEqual({
       ...candidateMemorySignalInputBase,
       source_memory_refs: [],
@@ -238,7 +243,7 @@ describe("CandidateMemorySignalInputSchema", () => {
     });
   });
 
-  it("accepts a populated MCP input payload", () => {
+  it("accepts a populated internal input payload", () => {
     const value = {
       ...candidateMemorySignalInputBase,
       surface_id: "surface-1",
@@ -275,6 +280,32 @@ describe("CandidateMemorySignalInputSchema", () => {
       CandidateMemorySignalInputSchema.safeParse({
         ...candidateMemorySignalInputBase,
         signal_kind: "potential_memory"
+      }).success
+    ).toBe(false);
+  });
+
+  it("accepts only a structured trusted internal source observation", () => {
+    const value = CandidateMemorySignalInputSchema.parse({
+      ...candidateMemorySignalInputBase,
+      source_observation: {
+        observed_at: "2026-03-15T00:00:00.000Z",
+        authority: "trusted_host_event",
+        source_event_id: "event-host-1"
+      }
+    });
+    expect(value.source_observation).toEqual({
+      observed_at: "2026-03-15T00:00:00.000Z",
+      authority: "trusted_host_event",
+      source_event_id: "event-host-1"
+    });
+    expect(
+      CandidateMemorySignalInputSchema.safeParse({
+        ...candidateMemorySignalInputBase,
+        source_observation: {
+          observed_at: "not-a-time",
+          authority: "agent_claim",
+          source_event_id: ""
+        }
       }).success
     ).toBe(false);
   });
@@ -325,7 +356,8 @@ describe("signal payload parsing", () => {
         exception_to_refs: ["memory-rule"],
         contradicts_refs: ["memory-contradiction"],
         incompatible_with_refs: ["memory-incompatible"],
-        raw_payload: { excerpt: "hello" }
+        raw_payload: { excerpt: "hello" },
+        source_observation: null
       }
     },
     {
@@ -378,7 +410,8 @@ describe("signal payload parsing", () => {
       exception_to_refs: ["memory-rule"],
       contradicts_refs: ["memory-contradiction"],
       incompatible_with_refs: ["memory-incompatible"],
-      raw_payload: { excerpt: "hello" }
+      raw_payload: { excerpt: "hello" },
+      source_observation: null
     } as const;
 
     expect(parseSignalEventPayload(SignalEventType.SOUL_SIGNAL_EMITTED, payload)).toEqual(payload);
