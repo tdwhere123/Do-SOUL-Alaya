@@ -215,6 +215,8 @@ evt:runtime-governance.ts#PathRelationRejectedPayloadSchema(anchor_role,rejected
 evt:runtime-governance.ts#PathRelationRetiredPayloadSchema(final_strength,path_id,retired_at,retirement_reason)#a0f35fd
 evt:runtime-governance.ts#PathRelationRevivedPayloadSchema(new_strength,path_id,previous_strength,revive_trigger,revived_at)#b9bc93b
 evt:runtime-governance.ts#PathRelationWeakenedPayloadSchema(contradiction_events_count,new_strength,path_id,previous_strength,reason,weakened_at)#9f050e1
+evt:runtime-governance.ts#RelationAssertionAdmittedPayloadSchema(admitted_at,anchors,assertion_id,evidence_ids,relation_kind,validity,workspace_id)#1b0d347
+evt:runtime-governance.ts#RelationAssertionResolvedPayloadSchema(assertion_id,reason,resolution_id,resolution_kind,resolved_at,workspace_id)#77dfc14
 evt:runtime-governance.ts#RuntimeSideEffectFailedPayloadSchema(committed_event_id,error_message,error_name,failed_at,operation,run_id,severity,source,subject_id,subject_type,workspace_id)#68fd104
 evt:runtime-governance.ts#SecurityPassthroughInitializationFailedPayloadSchema(error_code,failed_at,operation,reason,workspace_id)#f9bc516
 evt:runtime-governance.ts#SecurityPassthroughStatusChangedPayloadSchema(active_security_locks,changed_at,posture,reason,workspace_id,zero_day_active)#33e96fe

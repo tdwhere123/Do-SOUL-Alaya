@@ -21,6 +21,8 @@ import {
   PathRelationReinforcedPayloadSchema,
   PathRelationRetiredPayloadSchema,
   PathRelationWeakenedPayloadSchema,
+  RelationAssertionAdmittedPayloadSchema,
+  RelationAssertionResolvedPayloadSchema,
   RuntimeGovernanceEventType,
   RuntimeGovernanceEventTypeSchema,
   RuntimeSideEffectFailedPayloadSchema,
@@ -44,6 +46,8 @@ import {
   canonicalizationAliasResolvedPayload,
   stancePolicyPayload,
   stanceResolutionPayload,
+  relationAssertionAdmittedPayload,
+  relationAssertionResolvedPayload,
   pathCreatedPayload,
   reinforcedPayload,
   legitimacyUpdatedPayload,
@@ -89,6 +93,12 @@ describe("Phase C event registry", () => {
     expect(StanceResolutionChangedPayloadSchema.parse(stanceResolutionPayload)).toEqual(
       stanceResolutionPayload
     );
+    expect(
+      RelationAssertionAdmittedPayloadSchema.parse(relationAssertionAdmittedPayload)
+    ).toEqual(relationAssertionAdmittedPayload);
+    expect(
+      RelationAssertionResolvedPayloadSchema.parse(relationAssertionResolvedPayload)
+    ).toEqual(relationAssertionResolvedPayload);
     expect(ComputeProviderRoutedPayloadSchema.parse(computeProviderRoutedPayload)).toEqual(
       computeProviderRoutedPayload
     );

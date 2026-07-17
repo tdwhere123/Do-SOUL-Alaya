@@ -64,6 +64,7 @@ export * from "./soul/memory-graph.js";
 export * from "./soul/edge-proposal.js";
 export * from "./soul/graph.js";
 export * from "./soul/path-relation.js";
+export * from "./soul/relation-assertion.js";
 export * from "./soul/bootstrapping.js";
 export * from "./soul/path-graph-snapshot.js";
 export * from "./soul/soul-topology.js";

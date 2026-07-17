@@ -7,6 +7,8 @@ export const expectedEventTypes = [
       "canonicalization.alias_resolved",
       "stance.policy_evaluated",
       "stance.resolution_changed",
+      "relation.assertion_admitted",
+      "relation.assertion_resolved",
       "path.relation_created",
       "path.relation_rejected",
       "path.relation_legitimacy_updated",
@@ -72,6 +74,29 @@ export const stanceResolutionPayload = {
       contributing_candidate_count: 2,
       has_model_ref: true,
       resolved_at: validTimestamp
+    } as const;
+export const relationAssertionAdmittedPayload = {
+      assertion_id: "assertion-1",
+      workspace_id: "workspace-1",
+      evidence_ids: ["evidence-1"],
+      anchors: {
+        source_anchor: { kind: "object", object_id: "object-1" },
+        target_anchor: { kind: "object", object_id: "object-2" }
+      },
+      relation_kind: "supports",
+      validity: {
+        kind: "open",
+        valid_from: validTimestamp
+      },
+      admitted_at: validTimestamp
+    } as const;
+export const relationAssertionResolvedPayload = {
+      resolution_id: "resolution-1",
+      assertion_id: "assertion-1",
+      workspace_id: "workspace-1",
+      resolution_kind: "contradicted",
+      resolved_at: validTimestamp,
+      reason: "contradicting evidence admitted"
     } as const;
 export const pathCreatedPayload = {
       path_id: "path-1",

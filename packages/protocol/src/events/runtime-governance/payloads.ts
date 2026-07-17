@@ -40,6 +40,10 @@ import {
   PathRelationMergedPayloadSchema
 } from "./payloads/path-relation-payloads.js";
 import {
+  RelationAssertionAdmittedPayloadSchema,
+  RelationAssertionResolvedPayloadSchema
+} from "./payloads/relation-assertion-payloads.js";
+import {
   SurfaceDriftDetectedPayloadSchema,
   SurfaceDriftLeaseAcquiredPayloadSchema,
   SurfaceDriftLeaseReleasedPayloadSchema,
@@ -66,6 +70,10 @@ export {
   PathRelationMergedPayloadSchema
 } from "./payloads/path-relation-payloads.js";
 export {
+  RelationAssertionAdmittedPayloadSchema,
+  RelationAssertionResolvedPayloadSchema
+} from "./payloads/relation-assertion-payloads.js";
+export {
   SurfaceDriftDetectedPayloadSchema,
   SurfaceDriftLeaseAcquiredPayloadSchema,
   SurfaceDriftLeaseReleasedPayloadSchema,
@@ -80,6 +88,8 @@ const runtimeGovernanceEventTypeValues = [
   "canonicalization.alias_resolved",
   "stance.policy_evaluated",
   "stance.resolution_changed",
+  "relation.assertion_admitted",
+  "relation.assertion_resolved",
   "path.relation_created",
   "path.relation_rejected",
   "path.relation_legitimacy_updated",
@@ -122,6 +132,8 @@ export const RuntimeGovernanceEventType = {
   CANONICALIZATION_ALIAS_RESOLVED: "canonicalization.alias_resolved",
   STANCE_POLICY_EVALUATED: "stance.policy_evaluated",
   STANCE_RESOLUTION_CHANGED: "stance.resolution_changed",
+  RELATION_ASSERTION_ADMITTED: "relation.assertion_admitted",
+  RELATION_ASSERTION_RESOLVED: "relation.assertion_resolved",
   PATH_RELATION_CREATED: "path.relation_created",
   // invariant: durable audit that an agent/Garden-proposed path candidate was
   // refused at the mint sink because an object anchor it carries does not
@@ -411,6 +423,8 @@ export const runtimeGovernancePayloadSchemas = {
   [RuntimeGovernanceEventType.CANONICALIZATION_ALIAS_RESOLVED]: CanonicalizationAliasResolvedPayloadSchema,
   [RuntimeGovernanceEventType.STANCE_POLICY_EVALUATED]: StancePolicyEvaluatedPayloadSchema,
   [RuntimeGovernanceEventType.STANCE_RESOLUTION_CHANGED]: StanceResolutionChangedPayloadSchema,
+  [RuntimeGovernanceEventType.RELATION_ASSERTION_ADMITTED]: RelationAssertionAdmittedPayloadSchema,
+  [RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED]: RelationAssertionResolvedPayloadSchema,
   [RuntimeGovernanceEventType.COMPUTE_PROVIDER_ROUTED]: ComputeProviderRoutedPayloadSchema,
   [RuntimeGovernanceEventType.BOOTSTRAPPING_PATHS_PLANTED]: BootstrappingPathsPlantedPayloadSchema,
   [RuntimeGovernanceEventType.PATH_RELATION_CREATED]: PathRelationCreatedPayloadSchema,
