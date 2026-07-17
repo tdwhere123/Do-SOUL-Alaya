@@ -54,11 +54,41 @@ These rules always win over lower-level docs and task-card convenience.
     visibility structures. The Path axis represents learnable
     conditional relation structures; recall, prediction, and reminder
     are runtime manifestations of paths, not paths themselves. A
-    `PathRelation` is durable governed structure; a query-time transfer
-    along one of its directed edges and the resulting fused score are
-    runtime decisions and projections. Rebuildable SliceKey routing
-    views remain workspace-scoped projections, not a second memory
-    ontology or an authority for durable truth.
+    `RelationAssertion` is the immutable, evidence-grounded relation
+    truth. A `PathRelation` is its rebuildable current/as-of routing
+    projection, never a second memory ontology or durable truth. A
+    query-time transfer along one of its directed edges and the
+    resulting fused score are runtime decisions and projections.
+    Rebuildable SliceKey routing views remain workspace-scoped
+    projections.
+12a. **Temporal relation authority.** Evidence owns the source
+    observation/event time. Storage or ingestion timestamps, including
+    `created_at`, must not be substituted for source time. Each active
+    `RelationAssertion` has exactly one typed validity form: bounded
+    `[from,to)`, open `[from,+infinity)`, or an explicitly
+    governance-permitted `timeless` form. Unknown validity belongs only
+    to proposal, deferred, or quarantine state and is never active.
+12b. **Assertion history and projection.** `RelationAssertion` rows are
+    immutable. An accepted assertion admission and every later typed
+    resolution — `contradicted`, `retracted`, `expired`, `superseded`,
+    and governance retirement — append an EventLog entry that owns the
+    transaction and revision history. An accepted admission atomically
+    appends its EventLog entry, applies its immutable assertion, and
+    applies the derived projection or an explicit no-active-projection
+    outcome before audit; a resolution atomically appends history and
+    rederives or invalidates the affected projection before audit.
+    Broadcast follows the audit. The EventLog is the one history ledger,
+    not a second relation ledger. These entries never overwrite or
+    delete assertion history. `PathRelation` is derived for current or
+    as-of recall, with an omitted `as_of` meaning now. A deterministic
+    replay of the same accepted admissions and resolutions must produce
+    the same projection; duplicate input is idempotent and concurrent
+    resolution attempts preserve one ordered EventLog history.
+12c. **Formation boundary.** An LLM or connected agent may nominate a
+    candidate only. Deterministic normalization and governance decide
+    whether it becomes evidence-grounded assertion state, stays
+    deferred, or enters quarantine; no model output can mutate truth or
+    a projection directly.
 13. Evidence and governance changes must be explicit, structured, and
     auditable, including path plasticity changes (reinforcement,
     weakening, redirection, retirement).
@@ -94,6 +124,33 @@ These rules always win over lower-level docs and task-card convenience.
     decay for path-strength reinforcement, `trust_mode = automatic`
     carries reduced weight, and durable truth still requires the
     proposal/governance path.
+
+### Temporal Relation Contract
+
+| Record | Authority | Active-state rule |
+| --- | --- | --- |
+| Evidence | Source observation/event time and supporting material | Time is captured as source evidence, never invented from storage metadata. |
+| RelationAssertion | Immutable relation truth | Evidence-grounded and exactly one typed validity form is required. |
+| EventLog admission or resolution | Ordered transaction and revision history | Accepted admission and a typed resolution append history; neither rewrites an assertion. |
+| PathRelation | Current/as-of recall routing projection | Rebuildable from accepted assertions and EventLog history; it is not truth. |
+| Nomination, deferred record, or quarantine row | Work awaiting proof or governance | Never eligible for active recall or projection formation. |
+
+| Validity state | Meaning | May be active |
+| --- | --- | --- |
+| `bounded [from,to)` | Relation is valid from `from` and before `to`. | Yes, only while `as_of` is in the interval and governance permits it. |
+| `open [from,+infinity)` | Relation is valid from `from` without a known end. | Yes, only from `from` and while governance permits it. |
+| `timeless` | Explicit policy exception with no temporal interval. | Yes, only when the governing policy explicitly permits it. |
+| Unknown | Time proof is absent, ambiguous, or invalid. | No; proposal, deferred, or quarantine only. |
+
+### Temporal Major-Cutover Contract
+
+| Stage | Required behavior |
+| --- | --- |
+| Migration | Work on a database copy and retain the original. Convert a legacy row only when its evidence and typed validity are provable; record input/output counts and digests. |
+| Quarantine | Move every unprovable legacy row to a reasoned, auditable quarantine record. Never manufacture `valid_from = created_at`; quarantine cannot form an active projection. |
+| Rebuild | Recreate each `PathRelation` deterministically from accepted EventLog admissions and appended resolutions for a named `as_of`; prove replay, idempotency, interval, and concurrent-resolution behavior. |
+| Cutover | Atomically select the new schema and derived projections only after reconciliation. Startup must fail closed when assertion, EventLog, or projection schema revisions are old, unknown, or mixed. |
+| Rollback | Atomically return to the retained original database or a verified assertion/EventLog/projection schema-and-data tuple. If that tuple has no retained projection, rebuild it from the selected history for a named `as_of` before service starts; otherwise fail closed. Do not mutate history, promote quarantine, or silently bridge mixed schemas. |
 
 ## Surface
 
@@ -173,6 +230,17 @@ These rules always win over lower-level docs and task-card convenience.
     - Major (`X.y.z`): any removal, rename, narrowed nullable,
       newly-required field, removed enum value, renamed tool, or
       semantic redefinition on any covered layer.
+
+    The temporal assertion cutover is an intentional **major** change:
+    covered protocol/EventLog schemas that introduce immutable
+    `RelationAssertion` authority, required typed validity, typed
+    resolution history, or redefine `PathRelation` from durable
+    structure to a derived projection cannot be shipped as a minor
+    compatibility shim. Runtime startup must identify the assertion,
+    EventLog, and projection schema revisions together and fail closed
+    for an old, unknown, or mixed combination. Any compatibility reader
+    belongs to an offline migration and must not make mixed-schema
+    formation or recall operational.
 
     Removing a public symbol requires `@deprecated` JSDoc on the
     schema at least one minor release before removal, a

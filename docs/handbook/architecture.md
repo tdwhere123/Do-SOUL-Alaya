@@ -11,15 +11,18 @@ SOUL has three execution-relevant layers:
 
 | Layer | Role | Examples |
 |---|---|---|
-| Memory ontology | Durable semantic truth | `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`, `ClaimForm` |
-| Structure registry | Routing, binding, arbitration, visibility | `PathRelation`, `ConflictMatrix`, `ManifestationDecision` |
+| Memory ontology | Durable semantic truth | `EvidenceCapsule`, `MemoryEntry`, `SynthesisCapsule`, `ClaimForm`, `RelationAssertion` |
+| Structure registry | Routing, binding, arbitration, visibility | `PathRelation` current/as-of projection, `ConflictMatrix`, `ManifestationDecision` |
 | Runtime control | Per-turn assembly, leases, gates, projection | `RecallQuery`, `ActivationCandidate`, `ContextPack`, `TrustSummary` |
 
 Objects are faceted stable semantic units forming the ontology. Paths
 (learnable conditional relation structures), surfaces, scopes, and
 projections route or filter objects; they do not redefine truth.
-Recall, prediction, and reminder are runtime manifestations of paths,
-not independent subsystems.
+Evidence owns a relation's source observation/event time.
+`RelationAssertion` is the immutable, evidence-grounded relation truth;
+`PathRelation` is a derived current/as-of routing projection over that
+truth. Recall, prediction, and reminder are runtime manifestations of
+paths, not independent subsystems.
 
 ## Four Axes
 
@@ -39,13 +42,81 @@ not independent subsystems.
 An object, index, or state may be source of truth on only one axis.
 Other axes may reference it but must not silently replace it.
 
+## Temporal Relation Contract
+
+The temporal relation path is:
+
+```text
+Evidence -- deterministic normalization and governance --> EventLog-first admission or typed resolution
+                                                                  |
+                                                                  v
+                                              atomic EventLog -> DB -> audit application
+                                                                  |
+                                                                  +--> immutable RelationAssertion history
+                                                                  |
+                                                                  v
+                                                   PathRelation current/as-of projection
+                                                                  |
+                                                                  v
+                                                                recall
+```
+
+| Artifact | Owns | Cannot do |
+| --- | --- | --- |
+| Evidence | Source observation/event time and supporting material | Infer source time from `created_at` or another storage timestamp. |
+| RelationAssertion | Immutable, evidence-grounded relation truth with typed validity | Be overwritten when it is contradicted, retracted, expired, superseded, or retired. |
+| EventLog | EventLog-first accepted admission plus append-only typed resolution and revision history | Become a second relation ledger, replace assertion history, or silently resolve an unknown temporal claim. |
+| PathRelation | Deterministic current/as-of routing projection | Act as durable truth, retain independent history, or bypass assertion governance. |
+| LLM nomination | Candidate input | Write an assertion or projection without deterministic normalization and governance. |
+
+The only active validity forms are shown below. `as_of` defaults to now
+when a caller omits it.
+
+| Validity | Interpretation | Projection eligibility |
+| --- | --- | --- |
+| `bounded [from,to)` | Valid at and after `from`, before `to`. | Eligible only while `as_of` is within the interval and governance permits it. |
+| `open [from,+infinity)` | Valid from `from` with no known end. | Eligible only at or after `from` and while governance permits it. |
+| `timeless` | Explicit, governance-permitted exception. | Eligible only under that explicit policy. |
+| Unknown | Missing, ambiguous, or invalid time proof. | Proposal, deferred, or quarantine only; never active. |
+
+Formation first records evidence and then admits or disposes of a
+candidate through deterministic normalization and governance. An
+accepted candidate appends its EventLog admission entry first; that
+entry, immutable `RelationAssertion` application, and either a derived
+projection or explicit no-active-projection outcome are one atomic
+transition before audit. A later typed EventLog resolution
+(`contradicted`, `retracted`, `expired`, `superseded`, or governance
+retirement) atomically rederives or invalidates its affected projection
+before audit. Broadcast follows audit. These entries use the same
+history, not a second ledger. Rebuild uses a stable EventLog admission
+and resolution order: the same accepted inputs yield the same
+projection, duplicate replay is idempotent, and concurrent resolutions
+retain one ordered history rather than losing a decision.
+
+### Temporal Migration, Cutover, and Rollback
+
+| Phase | Contract |
+| --- | --- |
+| Inventory and migration | Copy the database and retain the original. Convert a legacy relation only with evidence and provable typed validity; reconcile row counts and digests. |
+| Quarantine | Preserve each unprovable legacy row with a reason and provenance. Do not fake `valid_from = created_at`; quarantined material is excluded from projection and recall. |
+| Rebuild | Build `PathRelation` from accepted EventLog admissions plus resolution history for a specified `as_of`, then prove interval, replay, idempotency, and concurrent-resolution behavior. |
+| Atomic cutover | Select the new schema and projections only after reconciliation. The daemon rejects old, unknown, or mixed assertion/EventLog/projection schema revisions at startup. |
+| Rollback | Atomically select the retained original or a verified assertion/EventLog/projection schema-and-data tuple. If it has no retained projection, rebuild it from the selected history for a named `as_of` before service starts; otherwise fail closed. Do not mutate assertion history, release quarantine, or serve a mixed-schema bridge. |
+
+This is a covered protocol/EventLog semantic break and therefore a
+SemVer major. Offline migration may read a prior version to construct a
+new copy; runtime formation and recall must fail closed rather than
+operate a compatibility mixture.
+
 ## Recall Routing Projections
 
-`PathRelation` is the durable, governed conditional structure. Flood
-transfer is a query-time decision to carry potential along one directed
-edge under the current routing conditions. The object's `fused_score` is
-the aggregate projection produced after those edge decisions; it is not
-the flood or a new durable fact.
+`PathRelation` is the derived, governed current/as-of conditional-routing
+projection. It is rebuilt from accepted `RelationAssertion` records and
+their appended EventLog resolutions; it is not a durable relation claim
+or historical record. Flood transfer is a query-time decision to carry
+potential along one directed edge under the current routing conditions.
+The object's `fused_score` is the aggregate projection produced after
+those edge decisions; it is not the flood or a new durable fact.
 
 SliceKey is a workspace-scoped, versioned, rebuildable routing view over
 existing projections. Its seed taxonomy is extensible and keeps typed
@@ -55,12 +126,12 @@ and object anchors stay typed identities, spatial values stay spatial, and
 container. Query-time compatibility is the intersection of query, source,
 and target keys. A query with no valid key follows the neutral existing path;
 a keyed query with no three-way match may reject only the experimental edge
-decision, never rewrite the underlying memory or `PathRelation`.
+decision, never rewrite the underlying evidence or `RelationAssertion`.
 
 Single-edge transfer is the required baseline. Any bounded two-edge traversal
 must be earned by miss evidence, remain deterministic and budgeted, and pass
 the same governance and release gates; it is not implied by the existence of
-durable paths.
+projected paths.
 
 ## Package Shape
 
