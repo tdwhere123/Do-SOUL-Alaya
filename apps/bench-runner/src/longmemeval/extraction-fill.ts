@@ -19,6 +19,7 @@ import {
 import type { LongMemEvalVariant } from "./dataset.js";
 import type { LongMemEvalExpansionCapability } from
   "./promotion/expansion-capability.js";
+import type { R3SpendApproval } from "./promotion/r3-spend-approval.js";
 import {
   inspectExtractionAuthority,
   inspectExtractionAuthorityDisk,
@@ -72,6 +73,7 @@ export interface ExtractionFillOptions {
   readonly signal?: AbortSignal;
   readonly authorityReceiptPath?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
+  readonly r3SpendApproval?: R3SpendApproval;
 }
 
 export interface ExtractionFillResult extends FillRetryTelemetry {
@@ -99,8 +101,13 @@ export async function runExtractionFill(
   }
   const initialIdentity = readExtractionCacheManifestIdentity(cacheRoot);
   const expansion = await prepareExpansionFillAuthority(options, cacheRoot);
+  if (expansion !== undefined && authority === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "canonical 500Q extraction-fill requires a receipt-bound extraction authority"
+    );
+  }
   if (authority !== undefined && expansion !== undefined) {
-    throw new Error("receipt-bound extraction authority does not permit expansion fills");
+    assertReceiptBoundExpansionSpend(authority.receipt, expansion);
   }
   if (initialIdentity?.manifestSha256 !==
       readExtractionCacheManifestIdentity(cacheRoot)?.manifestSha256) {
@@ -183,9 +190,11 @@ async function prepareReceiptBoundExtractionFill(
 ) {
   const inspected = await inspectExtractionFillPreparation(options, cacheRoot, expansion);
   await revalidateExtractionAuthority(options, cacheRoot, authority, writeLease);
+  if (expansion !== undefined) assertReceiptBoundExpansionSpend(authority.receipt, expansion);
   const prepared = pinInspectedExtractionFill(inspected, cacheRoot, concurrency, log);
   try {
     await revalidateExtractionAuthority(options, cacheRoot, authority, writeLease);
+    if (expansion !== undefined) assertReceiptBoundExpansionSpend(authority.receipt, expansion);
   } catch (cause) {
     try {
       restoreInspectedExtractionFill(inspected, prepared, cacheRoot);
@@ -233,6 +242,29 @@ async function revalidateExtractionAuthority(
   writeLease.assertOwned();
   const inspection = await inspectReceiptAuthority(options, cacheRoot, authority.receipt);
   assertAuthorityInspection(authority.receipt, inspection, true);
+}
+
+function assertReceiptBoundExpansionSpend(
+  receipt: ExtractionAuthorityReceipt,
+  expansion: PreparedExpansionFillAuthority
+): void {
+  const approval = expansion.r3SpendApproval.approval;
+  const limits = receipt.limits;
+  if (receipt.action !== "fill" ||
+      receipt.observation.dataset.variant !== "longmemeval_s" ||
+      receipt.observation.dataset.windowOffset !== 0 ||
+      receipt.observation.dataset.windowLimit !== 500 ||
+      receipt.observation.extraction.manifestSha256 !== approval.r2.final_cache_identity_sha256 ||
+      receipt.observation.inventory.missingTurns !== approval.spend.starting_missing ||
+      limits.starting_missing !== approval.spend.starting_missing ||
+      limits.maximum_attempts !== approval.spend.maximum_attempts ||
+      limits.successful_shard_ceiling !== approval.spend.successful_shard_ceiling ||
+      limits.disk_floor_bytes < approval.spend.disk_floor_bytes ||
+      receipt.price.estimated_upper_usd > approval.spend.estimated_cost_usd) {
+    throw new ExtractionCacheInvariantError(
+      "500Q extraction authority receipt does not match the approved R3 spend envelope"
+    );
+  }
 }
 
 async function inspectReceiptAuthority(

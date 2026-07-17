@@ -5,6 +5,8 @@ import { ExtractionFillTaskError } from
 import type { ParsedFlags } from "../cli-options.js";
 import { verifyLongMemEvalExpansionContractInput } from
   "../promotion/expansion-input.js";
+import { readR3SpendApproval } from
+  "../../longmemeval/promotion/r3-spend-approval.js";
 import { pct } from "../result-format.js";
 import {
   ExtractionFillInterruptedError,
@@ -19,6 +21,7 @@ export async function runExtractionFillCommand(
     readonly runExtractionFill: typeof runExtractionFill;
     readonly signalSource: ExtractionFillSignalSource;
     readonly verifyExpansionContract?: typeof verifyLongMemEvalExpansionContractInput;
+    readonly readR3SpendApproval?: typeof readR3SpendApproval;
   } = { runExtractionFill, signalSource: process }
 ): Promise<number> {
   try {
@@ -33,6 +36,9 @@ export async function runExtractionFillCommand(
       ? undefined
       : await (deps.verifyExpansionContract ??
         verifyLongMemEvalExpansionContractInput)(opts.promotionContract);
+    const r3SpendApproval = opts.r3SpendApproval === undefined
+      ? undefined
+      : (deps.readR3SpendApproval ?? readR3SpendApproval)(opts.r3SpendApproval);
     process.stdout.write(renderStart(opts));
     const result = await withExtractionFillSignalScope(
       deps.signalSource,
@@ -50,6 +56,7 @@ export async function runExtractionFillCommand(
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),
         ...(expansionCapability === undefined ? {} : { expansionCapability }),
+        ...(r3SpendApproval === undefined ? {} : { r3SpendApproval }),
         signal
       })
     );

@@ -4,6 +4,7 @@ import {
   datasetFixture,
   mintCapability,
   prepare,
+  r3SpendApprovalFor,
   resetExpansionFillAuthorityFixture,
   state,
   targetManifest
@@ -66,6 +67,48 @@ describe("500Q expansion fill authority", () => {
       variant: "longmemeval_s",
       limit: 100
     }, "/cache")).resolves.toBeUndefined();
+  });
+
+  it("refuses canonical 0..500 before any fill preparation without a fresh R3 approval", async () => {
+    const capability = await mintCapability();
+
+    await expect(prepareExpansionFillAuthority({
+      variant: "longmemeval_s",
+      expansionCapability: capability
+    }, "/cache")).rejects.toThrow(/fresh R3 spend approval/u);
+  });
+
+  it("binds R3 material evidence, identity, and the measured 500Q caps", async () => {
+    const capability = await mintCapability();
+    const approval = r3SpendApprovalFor(capability);
+
+    await expect(prepareExpansionFillAuthority({
+      variant: "longmemeval_s",
+      expansionCapability: capability,
+      r3SpendApproval: {
+        ...approval,
+        r2: { ...approval.r2, b_a_net_r5_wins: 4 }
+      }
+    }, "/cache")).rejects.toThrow(/net R@5 wins/u);
+
+    await expect(prepareExpansionFillAuthority({
+      variant: "longmemeval_s",
+      expansionCapability: capability,
+      r3SpendApproval: {
+        ...approval,
+        spend: { ...approval.spend, maximum_attempts: approval.spend.maximum_attempts + 1 }
+      }
+    }, "/cache")).rejects.toThrow(/110 percent attempt/u);
+
+    await expect(prepareExpansionFillAuthority({
+      variant: "longmemeval_s",
+      expansionCapability: capability,
+      r3SpendApproval: {
+        ...approval,
+        r2: { ...approval.r2, final_cache_identity_sha256: "b".repeat(64) },
+        target: { ...approval.target, cache_identity_sha256: "b".repeat(64) }
+      }
+    }, "/cache")).rejects.toThrow(/cache identity/u);
   });
 
   it("preserves custom pinned datasets as experimental fill windows", async () => {

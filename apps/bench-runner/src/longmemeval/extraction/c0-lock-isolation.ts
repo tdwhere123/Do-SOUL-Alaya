@@ -13,12 +13,15 @@ export interface C0LockNodeStat {
   readonly size: number;
 }
 
-export interface C0LockFilesystem {
+export interface C0LockReadFilesystem {
   canonicalPath(path: string): string;
   lstat(path: string): C0LockNodeStat;
   lstatIfPresent(path: string): C0LockNodeStat | undefined;
   readDirectory(path: string): readonly string[];
   readFile(path: string): Uint8Array;
+}
+
+export interface C0LockFilesystem extends C0LockReadFilesystem {
   writeNewFile(path: string, contents: string): void;
   rename(source: string, target: string): void;
 }
@@ -41,20 +44,32 @@ export interface C0StoppedOwnerProof {
   readonly observed_at: string;
 }
 
-export interface C0LockRelocationInput {
-  readonly sourceCacheRoot: string;
-  readonly targetEvidenceRoot: string;
+export interface C0LockPreflightInput {
+  readonly sourceCacheRoot: string; readonly targetEvidenceRoot: string;
+  readonly filesystem: C0LockReadFilesystem;
+}
+
+export interface C0LockRelocationInput extends C0LockPreflightInput {
   readonly filesystem: C0LockFilesystem;
   readonly now: () => string;
-  readonly proveStoppedOwner?: (
-    owner: C0LockOwnerSummary
-  ) => C0StoppedOwnerProof | undefined;
+  readonly proveStoppedOwner?: (owner: C0LockOwnerSummary) => C0StoppedOwnerProof | undefined;
 }
 
 export interface C0LockTreeDigest {
   readonly sha256: string;
   readonly entry_count: number;
   readonly byte_length: number;
+}
+
+export interface C0LockPreflight {
+  readonly schema_version: 1;
+  readonly proof_status: "unproven";
+  readonly source_cache_root: string; readonly target_evidence_root: string;
+  readonly source_lock_path: string; readonly target_lock_path: string;
+  readonly source_device: number; readonly target_device: number;
+  readonly same_device: boolean; readonly destination_clear: boolean;
+  readonly prepared_journal_clear: boolean; readonly relocation_receipt_clear: boolean;
+  readonly owner: C0LockOwnerSummary; readonly tree: C0LockTreeDigest;
 }
 
 export interface C0LockInspection {
@@ -101,32 +116,53 @@ interface TreeAccumulator {
   byteLength: number;
 }
 
-export function inspectC0LockRelocation(
-  input: C0LockRelocationInput
-): C0LockInspection {
+export function preflightC0LockIsolation(
+  input: C0LockPreflightInput
+): C0LockPreflight {
   const roots = inspectRoots(input);
   const sourceLock = join(roots.source, C0_EXTRACTION_LOCK_DIR);
   const targetLock = join(roots.target, C0_EXTRACTION_LOCK_DIR);
-  const preparedJournalPath = join(roots.target, C0_LOCK_PREPARED_JOURNAL);
-  const receiptPath = join(roots.target, C0_LOCK_RELOCATION_RECEIPT);
   const sourceStat = assertDirectory(input.filesystem, sourceLock, "source lock");
-  const owner = readOwnerSummary(input.filesystem, sourceLock);
-  const proof = assertStoppedOwnerProof(input, owner);
-  const tree = digestLockTree(input.filesystem, sourceLock);
-  assertDestinationClear(input.filesystem, targetLock);
-  assertEvidenceArtifactsClear(input.filesystem, preparedJournalPath, receiptPath);
-  assertSameDevice(sourceStat, input.filesystem, roots.target);
+  const targetStat = assertDirectory(input.filesystem, roots.target, "target evidence root");
   return {
+    schema_version: 1,
+    proof_status: "unproven",
     source_cache_root: roots.source,
     target_evidence_root: roots.target,
     source_lock_path: sourceLock,
     target_lock_path: targetLock,
-    prepared_journal_path: preparedJournalPath,
-    receipt_path: receiptPath,
-    device: sourceStat.device,
-    owner,
+    source_device: sourceStat.device,
+    target_device: targetStat.device,
+    same_device: sourceStat.device === targetStat.device,
+    destination_clear: input.filesystem.lstatIfPresent(targetLock) === undefined,
+    prepared_journal_clear: input.filesystem.lstatIfPresent(
+      join(roots.target, C0_LOCK_PREPARED_JOURNAL)
+    ) === undefined,
+    relocation_receipt_clear: input.filesystem.lstatIfPresent(
+      join(roots.target, C0_LOCK_RELOCATION_RECEIPT)
+    ) === undefined,
+    owner: readOwnerSummary(input.filesystem, sourceLock),
+    tree: digestLockTree(input.filesystem, sourceLock)
+  };
+}
+
+export function inspectC0LockRelocation(
+  input: C0LockRelocationInput
+): C0LockInspection {
+  const preflight = preflightC0LockIsolation(input);
+  assertRelocationPreconditions(input, preflight);
+  const proof = assertStoppedOwnerProof(input, preflight.owner);
+  return {
+    source_cache_root: preflight.source_cache_root,
+    target_evidence_root: preflight.target_evidence_root,
+    source_lock_path: preflight.source_lock_path,
+    target_lock_path: preflight.target_lock_path,
+    prepared_journal_path: join(preflight.target_evidence_root, C0_LOCK_PREPARED_JOURNAL),
+    receipt_path: join(preflight.target_evidence_root, C0_LOCK_RELOCATION_RECEIPT),
+    device: preflight.source_device,
+    owner: preflight.owner,
     stopped_owner_proof: proof,
-    tree
+    tree: preflight.tree
   };
 }
 
@@ -140,7 +176,27 @@ export function relocateC0Lock(
   return validateAndRecordRelocation(input, inspection);
 }
 
-function inspectRoots(input: C0LockRelocationInput): C0LockRoots {
+function assertRelocationPreconditions(
+  input: C0LockRelocationInput,
+  preflight: C0LockPreflight
+): void {
+  if (!preflight.destination_clear) {
+    throw new C0LockIsolationError("target evidence root already contains an extraction lock");
+  }
+  if (!preflight.same_device) {
+    throw new C0LockIsolationError("C0 lock relocation requires a same-device atomic rename");
+  }
+  if (!preflight.prepared_journal_clear || !preflight.relocation_receipt_clear) {
+    throw new C0LockIsolationError("C0 lock relocation evidence artifacts must be clear");
+  }
+  assertEvidenceArtifactsClear(
+    input.filesystem,
+    join(preflight.target_evidence_root, C0_LOCK_PREPARED_JOURNAL),
+    join(preflight.target_evidence_root, C0_LOCK_RELOCATION_RECEIPT)
+  );
+}
+
+function inspectRoots(input: C0LockPreflightInput): C0LockRoots {
   const filesystem = input.filesystem;
   assertDirectory(filesystem, input.sourceCacheRoot, "source cache root");
   assertDirectory(filesystem, input.targetEvidenceRoot, "target evidence root");
@@ -155,7 +211,7 @@ function inspectRoots(input: C0LockRelocationInput): C0LockRoots {
 }
 
 function assertDirectory(
-  filesystem: C0LockFilesystem,
+  filesystem: C0LockReadFilesystem,
   path: string,
   label: string
 ): C0LockNodeStat {
@@ -179,7 +235,7 @@ function isNestedPath(parent: string, child: string): boolean {
 }
 
 function readOwnerSummary(
-  filesystem: C0LockFilesystem,
+  filesystem: C0LockReadFilesystem,
   lockPath: string
 ): C0LockOwnerSummary {
   const ownerPath = join(lockPath, "owner.json");
@@ -257,7 +313,7 @@ function isIsoDate(value: string): boolean {
 }
 
 function digestLockTree(
-  filesystem: C0LockFilesystem,
+  filesystem: C0LockReadFilesystem,
   lockPath: string
 ): C0LockTreeDigest {
   const records: string[] = [];
@@ -271,7 +327,7 @@ function digestLockTree(
 }
 
 function appendTreeDigestRecords(
-  filesystem: C0LockFilesystem,
+  filesystem: C0LockReadFilesystem,
   path: string,
   relativePath: string,
   records: string[],
@@ -290,7 +346,7 @@ function appendTreeDigestRecords(
 }
 
 function appendFileDigestRecord(
-  filesystem: C0LockFilesystem,
+  filesystem: C0LockReadFilesystem,
   path: string,
   relativePath: string,
   stat: C0LockNodeStat,

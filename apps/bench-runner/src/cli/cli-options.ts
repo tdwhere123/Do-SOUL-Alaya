@@ -10,6 +10,7 @@ import {
   type BenchEmbeddingProviderKind
 } from "../harness/daemon-types.js";
 import type { LongMemEvalVariant } from "../longmemeval/dataset.js";
+import { consumePromotionEvidencePathFlags } from "./cli-options-promotion.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -37,6 +38,7 @@ export interface ParsedFlags {
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
   readonly promotionContract?: string;
+  readonly r3SpendApproval?: string;
   readonly concurrency?: number;
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
@@ -48,7 +50,7 @@ export interface ParsedFlags {
   readonly edgePlane: boolean;
 }
 
-interface ParsedFlagsState {
+export interface ParsedFlagsState {
   variantRaw: string;
   limit?: number;
   offset?: number;
@@ -70,6 +72,7 @@ interface ParsedFlagsState {
   extractionCacheRoot?: string;
   extractionAuthority?: string;
   promotionContract?: string;
+  r3SpendApproval?: string;
   concurrency?: number;
   legacySnapshot: boolean;
   legacyManifestSha256?: string;
@@ -235,8 +238,8 @@ function consumeOtherPathFlags(
   token: string,
   state: ParsedFlagsState
 ): number | undefined {
-  const expansionIndex = consumePromotionContractFlag(args, index, token, state);
-  if (expansionIndex !== undefined) return expansionIndex;
+  const promotionEvidenceIndex = consumePromotionEvidencePathFlags(args, index, token, state);
+  if (promotionEvidenceIndex !== undefined) return promotionEvidenceIndex;
   const legacyIdentityIndex = consumeLegacyIdentityFlags(args, index, token, state);
   if (legacyIdentityIndex !== undefined) return legacyIdentityIndex;
   if (token === "--data-dir") {
@@ -280,21 +283,6 @@ function consumeOtherPathFlags(
     return nextIndex(index, token);
   }
   return undefined;
-}
-
-function consumePromotionContractFlag(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number | undefined {
-  if (!matchFlagToken(token, "--promotion-contract")) return undefined;
-  const value = readFlagValue(args, index, token, "--promotion-contract");
-  if (value === undefined || value.length === 0 || value.startsWith("--")) {
-    throw new Error("--promotion-contract requires a path");
-  }
-  state.promotionContract = value;
-  return nextIndex(index, token);
 }
 
 function consumeLegacyIdentityFlags(
@@ -489,6 +477,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     extractionCacheRoot: state.extractionCacheRoot,
     extractionAuthority: state.extractionAuthority,
     promotionContract: state.promotionContract,
+    r3SpendApproval: state.r3SpendApproval,
     concurrency: state.concurrency,
     legacySnapshot: state.legacySnapshot,
     legacyManifestSha256: state.legacyManifestSha256,

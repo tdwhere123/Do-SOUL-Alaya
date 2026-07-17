@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { vi, type Mock } from "vitest";
 import type { CompileSeedExtractionConfig } from
   "../../longmemeval/compile-seed-types.js";
@@ -112,6 +113,8 @@ import type { LongMemEvalExpansionSourceAnchor } from
   "../../longmemeval/promotion/expansion-source-anchor-schema.js";
 import { longMemEvalExpansionCapabilityData } from
   "../../longmemeval/promotion/expansion-capability.js";
+import type { R3SpendApproval } from
+  "../../longmemeval/promotion/r3-spend-approval.js";
 import type { RecallEvalSnapshotBundle } from
   "../../longmemeval/snapshot/recall-eval-loader.js";
 import {
@@ -149,9 +152,11 @@ function resetExpansionFillAuthorityFixture(): void {
 async function prepare(
   capabilityPromise: Promise<LongMemEvalExpansionCapability>
 ): Promise<PreparedExpansionFillAuthority> {
+  const capability = await capabilityPromise;
   return prepareExpansionFillAuthority({
     variant: "longmemeval_s",
-    expansionCapability: await capabilityPromise
+    expansionCapability: capability,
+    r3SpendApproval: r3SpendApprovalFor(capability)
   }, "/cache").then((result) => result!);
 }
 
@@ -445,6 +450,52 @@ function selection(questions: readonly LongMemEvalQuestion[]) {
   }));
 }
 
+function r3SpendApprovalFor(capability: LongMemEvalExpansionCapability): R3SpendApproval {
+  const identity = state.identity;
+  if (identity === undefined) throw new Error("fixture requires a cache manifest identity");
+  const data = longMemEvalExpansionCapabilityData(capability);
+  const startingMissing = state.targetCompletion.missingTurns;
+  return {
+    schema_version: 1,
+    kind: "longmemeval_r3_spend_approval",
+    status: "approved",
+    operator: { identity: "fixture-operator", approved_at: "2026-07-17T00:00:00.000Z" },
+    r2: {
+      matrix_authorization_sha256: data.matrixAuthorizationSha256,
+      source_selection_sha256: selectionSha256(data.sourceSelection),
+      source_selected_count: data.sourceSelection.selected_count,
+      final_cache_identity_sha256: identity.manifestSha256,
+      hard_gates_passed: true,
+      answerable_count: 94,
+      b_a_net_r5_wins: 5,
+      mcnemar: { method: "exact_two_sided", p_value: 0.049 }
+    },
+    target: {
+      selection_sha256: selectionSha256(data.nextSelection),
+      selected_count: data.nextSelection.selected_count,
+      cache_identity_sha256: identity.manifestSha256
+    },
+    spend: {
+      starting_missing: startingMissing,
+      maximum_attempts: Math.ceil(startingMissing * 1.1),
+      successful_shard_ceiling: startingMissing,
+      estimated_cost_usd: 1,
+      disk_floor_bytes: 0
+    }
+  };
+}
+
+function selectionSha256(selection: Readonly<Record<string, unknown>>): string {
+  return createHash("sha256").update(JSON.stringify({
+    schema_version: selection.schema_version,
+    dataset_sha256: selection.dataset_sha256,
+    selected_id_digest: selection.selected_id_digest,
+    selected_count: selection.selected_count,
+    expected_cohort_counts: selection.expected_cohort_counts,
+    cohort_assignment_digest: selection.cohort_assignment_digest
+  }), "utf8").digest("hex");
+}
+
 function completion(
   expected: number,
   valid: number,
@@ -498,6 +549,7 @@ export {
   prepare,
   recallBundle,
   resetExpansionFillAuthorityFixture,
+  r3SpendApprovalFor,
   state,
   targetManifest
 };

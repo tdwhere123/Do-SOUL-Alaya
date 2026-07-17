@@ -63,6 +63,31 @@ it("blocks a bare extraction-fill command before it can reach live extraction", 
   );
 });
 
+it("loads the R3 approval file before handing the fill to the runtime gate", async () => {
+  const signalSource = new FakeSignalSource();
+  const approval = { kind: "r3" };
+  const readR3SpendApproval = vi.fn(() => approval);
+  const run = vi.fn(async () => completedFillResult());
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: {
+      readonly runExtractionFill: typeof run;
+      readonly signalSource: FakeSignalSource;
+      readonly readR3SpendApproval: typeof readR3SpendApproval;
+    }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_oracle",
+    extractionAuthority: "/fixture/extraction-authority.json",
+    r3SpendApproval: "/fixture/r3-spend-approval.json"
+  } as ParsedFlags, { runExtractionFill: run, signalSource, readR3SpendApproval });
+
+  expect(exitCode).toBe(0);
+  expect(readR3SpendApproval).toHaveBeenCalledWith("/fixture/r3-spend-approval.json");
+  expect(run).toHaveBeenCalledWith(expect.objectContaining({ r3SpendApproval: approval }));
+});
+
 it.each([
   ["SIGINT", 130],
   ["SIGTERM", 143]
@@ -103,4 +128,24 @@ async function invokeCommand(deps: {
     variant: "longmemeval_oracle",
     extractionAuthority: "/fixture/extraction-authority.json"
   } as ParsedFlags, deps);
+}
+
+function completedFillResult() {
+  return {
+    requestedTurns: 0,
+    cacheHits: 0,
+    newlyExtracted: 0,
+    coverage: 1,
+    retrySuccesses: 0,
+    rateLimitRetries: 0,
+    adaptiveConcurrencyBackoffs: 0,
+    adaptiveConcurrencyBackoffMs: 0,
+    terminalRetryClassifications: {
+      failure_max_retries: 0,
+      failure_non_retryable_4xx: 0,
+      failure_timeout: 0,
+      failure_aborted: 0
+    },
+    manifest: {}
+  };
 }

@@ -1,4 +1,5 @@
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
@@ -14,6 +15,11 @@ import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability
 } from "../promotion/expansion-capability.js";
+import {
+  verifyR3SpendApproval,
+  type R3SpendApproval,
+  type VerifiedR3SpendApproval
+} from "../promotion/r3-spend-approval.js";
 import {
   assertLongMemEvalExpansionLineageMatchesCapability,
   buildLongMemEvalExpansionLineage
@@ -44,6 +50,7 @@ export interface ExpansionFillAuthorityOptions {
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
+  readonly r3SpendApproval?: R3SpendApproval;
 }
 
 export interface PreparedExpansionFillAuthority {
@@ -52,6 +59,7 @@ export interface PreparedExpansionFillAuthority {
   readonly config: CompileSeedExtractionConfig;
   readonly datasetRevision: string;
   readonly sourceAnchor: LongMemEvalExpansionSourceAnchor;
+  readonly r3SpendApproval: VerifiedR3SpendApproval;
   readonly sourceTurns: readonly string[];
   readonly nextTurns: readonly string[];
   readonly nextQuestions: readonly LongMemEvalQuestion[];
@@ -69,11 +77,13 @@ export async function prepareExpansionFillAuthority(
   if (options.variant !== "longmemeval_s" ||
       dataset.promotionAuthority === null) {
     assertCapabilityAbsent(options.expansionCapability);
+    assertR3SpendApprovalAbsent(options.r3SpendApproval);
     return undefined;
   }
   const window = classifyCanonicalExpansionWindow(options, dataset.questions.length);
   if (window === "source") {
     assertCapabilityAbsent(options.expansionCapability);
+    assertR3SpendApprovalAbsent(options.r3SpendApproval);
     return undefined;
   }
   const capability = requireCapability(options.expansionCapability);
@@ -85,15 +95,22 @@ export async function prepareExpansionFillAuthority(
   const config = resolveCompileSeedExtractionConfig(process.env, identity.manifest);
   const sourceTurns = collectDistinctTurnContents(selection.sourceQuestions);
   const nextTurns = collectDistinctTurnContents(selection.nextQuestions);
-  const sourceAnchor = authorizeCurrentCacheState({
+  const current = authorizeCurrentCacheState({
     capability, identity, config, cacheRoot, sourceTurns, nextTurns
+  });
+  const r3SpendApproval = verifyCurrentR3SpendApproval({
+    approval: requireR3SpendApproval(options.r3SpendApproval),
+    capability,
+    identity,
+    targetCompletion: current.targetCompletion
   });
   return Object.freeze({
     capability,
     cacheRoot,
     config,
     datasetRevision: dataset.sha256,
-    sourceAnchor,
+    sourceAnchor: current.sourceAnchor,
+    r3SpendApproval,
     sourceTurns: Object.freeze([...sourceTurns]),
     nextTurns: Object.freeze([...nextTurns]),
     nextQuestions: selection.nextQuestions
@@ -113,7 +130,13 @@ export function revalidateExpansionFillAuthority(
     sourceTurns: authority.sourceTurns,
     nextTurns: authority.nextTurns
   });
-  if (!isDeepStrictEqual(current, authority.sourceAnchor)) {
+  verifyCurrentR3SpendApproval({
+    approval: authority.r3SpendApproval.approval,
+    capability: authority.capability,
+    identity,
+    targetCompletion: current.targetCompletion
+  });
+  if (!isDeepStrictEqual(current.sourceAnchor, authority.sourceAnchor)) {
     throw invariant("source anchor changed before the write lease was acquired");
   }
 }
@@ -155,7 +178,10 @@ function authorizeCurrentCacheState(input: {
   readonly cacheRoot: string;
   readonly sourceTurns: readonly string[];
   readonly nextTurns: readonly string[];
-}): LongMemEvalExpansionSourceAnchor {
+}): {
+  readonly sourceAnchor: LongMemEvalExpansionSourceAnchor;
+  readonly targetCompletion: ExtractionFillCompletion;
+} {
   const source = sourceCacheAuthority(input.capability);
   const sourceCompletion = inspectCompletion(input, input.sourceTurns);
   const targetCompletion = inspectCompletion(input, input.nextTurns);
@@ -163,9 +189,12 @@ function authorizeCurrentCacheState(input: {
   if (input.identity.manifestSha256 === source.manifestSha256) {
     assertSourceManifest(source, input.identity.manifest);
     assertSourceCompletion(source, sourceCompletion, true);
-    return buildLongMemEvalExpansionSourceAnchor(
-      input.capability, input.config, targetCompletion
-    );
+    return {
+      sourceAnchor: buildLongMemEvalExpansionSourceAnchor(
+        input.capability, input.config, targetCompletion
+      ),
+      targetCompletion
+    };
   }
   const anchor = assertLongMemEvalExpansionSourceAnchor(
     input.identity.manifest.expansion_source_anchor,
@@ -177,7 +206,7 @@ function authorizeCurrentCacheState(input: {
   assertTargetManifestState(
     input.identity.manifest, anchor, targetCompletion, input.capability
   );
-  return anchor;
+  return { sourceAnchor: anchor, targetCompletion };
 }
 
 function assertSourceManifest(
@@ -339,11 +368,74 @@ function requireCapability(
   throw invariant("canonical 500Q extraction-fill requires live promotion capability");
 }
 
+function requireR3SpendApproval(
+  approval: R3SpendApproval | undefined
+): R3SpendApproval {
+  if (approval !== undefined) return approval;
+  throw invariant(
+    "canonical 500Q extraction-fill requires a valid fresh R3 spend approval"
+  );
+}
+
+function verifyCurrentR3SpendApproval(input: {
+  readonly approval: R3SpendApproval;
+  readonly capability: LongMemEvalExpansionCapability;
+  readonly identity: NonNullable<ReturnType<typeof readExtractionCacheManifestIdentity>>;
+  readonly targetCompletion: ExtractionFillCompletion;
+}): VerifiedR3SpendApproval {
+  const data = longMemEvalExpansionCapabilityData(input.capability);
+  const startingMissing = input.targetCompletion.missingTurns;
+  try {
+    return verifyR3SpendApproval(input.approval, {
+      matrixAuthorizationSha256: data.matrixAuthorizationSha256,
+      sourceSelectionSha256: selectionIdentitySha256(data.sourceSelection),
+      sourceSelectedCount: data.sourceSelection.selected_count,
+      finalCacheIdentitySha256: input.identity.manifestSha256,
+      targetSelectionSha256: selectionIdentitySha256(data.nextSelection),
+      targetSelectedCount: data.nextSelection.selected_count,
+      startingMissing,
+      maximumAttempts: Math.ceil(startingMissing * 1.1),
+      successfulShardCeiling: startingMissing
+    });
+  } catch (cause) {
+    throw invariant(
+      `R3 spend approval is not valid for the current 100Q to 500Q state: ${describeCause(cause)}`
+    );
+  }
+}
+
+function selectionIdentitySha256(selection: {
+  readonly schema_version: number;
+  readonly dataset_sha256: string;
+  readonly selected_id_digest: string;
+  readonly selected_count: number;
+  readonly expected_cohort_counts: Readonly<{ readonly answerable: number; readonly abstention: number }>;
+  readonly cohort_assignment_digest: string;
+}): string {
+  return createHash("sha256").update(JSON.stringify({
+    schema_version: selection.schema_version,
+    dataset_sha256: selection.dataset_sha256,
+    selected_id_digest: selection.selected_id_digest,
+    selected_count: selection.selected_count,
+    expected_cohort_counts: selection.expected_cohort_counts,
+    cohort_assignment_digest: selection.cohort_assignment_digest
+  }), "utf8").digest("hex");
+}
+
+function describeCause(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 function assertCapabilityAbsent(
   capability: LongMemEvalExpansionCapability | undefined
 ): void {
   if (capability === undefined) return;
   throw invariant("expansion capability may only authorize canonical full 500Q fill");
+}
+
+function assertR3SpendApprovalAbsent(approval: R3SpendApproval | undefined): void {
+  if (approval === undefined) return;
+  throw invariant("R3 spend approval may only authorize canonical full 500Q fill");
 }
 
 function invariant(message: string): ExtractionCacheInvariantError {

@@ -72,6 +72,8 @@ export interface LongMemEvalSourceSnapshotAuthority {
 
 export interface LongMemEvalExpansionCapabilityData {
   readonly contractSha256: string;
+  /** Live R2 authorization, not merely the enclosing promotion contract. */
+  readonly matrixAuthorizationSha256: string;
   readonly policyVersion: LongMemEvalMatrixPromotionContract["policy_version"];
   readonly code: LongMemEvalMatrixPromotionContract["code"];
   readonly sourceSelection: LongMemEvalMatrixPromotionAuthorization["source_selection"];
@@ -125,6 +127,7 @@ export async function verifyLongMemEvalExpansionCapability(
   await assertCurrentCodeIdentity(input, parsed, dependencies);
   return sealExpansionCapability({
     contractSha256: parsed.sha256,
+    matrixAuthorizationSha256: authorization.authorization_sha256,
     policyVersion: parsed.contract.policy_version,
     code: parsed.contract.code,
     sourceSelection: authorization.source_selection,

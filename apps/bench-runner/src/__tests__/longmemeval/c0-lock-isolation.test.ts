@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   inspectC0LockRelocation,
+  preflightC0LockIsolation,
   relocateC0Lock,
   type C0LockFilesystem,
   type C0LockOwnerSummary
@@ -37,6 +38,32 @@ afterEach(async () => {
 });
 
 describe("C0 lock isolation", () => {
+  it("returns an unproven read-only preflight for an operator proof gate", async () => {
+    const fixture = await createFixture();
+    const ownerBefore = readFileSync(join(fixture.sourceLock, "owner.json"), "utf8");
+
+    const preflight = preflightC0LockIsolation({
+      sourceCacheRoot: fixture.sourceRoot,
+      targetEvidenceRoot: fixture.targetRoot,
+      filesystem: nodeFilesystem
+    });
+
+    expect(preflight.proof_status).toBe("unproven");
+    expect(preflight.source_lock_path).toBe(join(realpathSync(fixture.sourceRoot), LOCK_NAME));
+    expect(preflight.target_lock_path).toBe(join(realpathSync(fixture.targetRoot), LOCK_NAME));
+    expect(preflight.same_device).toBe(true);
+    expect(preflight.destination_clear).toBe(true);
+    expect(preflight.prepared_journal_clear).toBe(true);
+    expect(preflight.relocation_receipt_clear).toBe(true);
+    expect(preflight.owner.token_present).toBe(true);
+    expect(JSON.stringify(preflight)).not.toContain(TOKEN);
+    expect(preflight.tree.entry_count).toBeGreaterThan(0);
+    expect(readFileSync(join(fixture.sourceLock, "owner.json"), "utf8")).toBe(ownerBefore);
+    expect(existsSync(join(fixture.targetRoot, LOCK_NAME))).toBe(false);
+    expect(existsSync(join(fixture.targetRoot, ".c0-lock-isolation-prepared.json"))).toBe(false);
+    expect(existsSync(join(fixture.targetRoot, ".c0-lock-isolation-receipt.json"))).toBe(false);
+  });
+
   it("fails closed for an unproven legacy owner without touching the lock", async () => {
     const fixture = await createFixture();
     const ownerBefore = readFileSync(join(fixture.sourceLock, "owner.json"), "utf8");
