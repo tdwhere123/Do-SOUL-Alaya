@@ -3,8 +3,7 @@ import { runMergeLongMemEvalCommand } from "./merge.js";
 import { parseFlags, type ParsedFlags } from "./cli-options.js";
 import { runAuthorizeLongMemEvalMatrixCommand } from "./promotion/command.js";
 import { runAuthorizeExtractionCommand } from "./extraction-authority/command.js";
-import { runC0ReuseDecisionCommand } from "./c0/command.js";
-import { runC0LockPreflightCommand } from "./c0/lock-preflight-command.js";
+import { runAuditExtractionCacheCommand } from "./cache-audit/command.js";
 import {
   runControlledReplayCommand,
   runExtractionFillCommand,
@@ -38,8 +37,7 @@ Usage:
   alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>]
   alaya-bench-runner recall-eval --snapshot <db> [--legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>] [--promotion-contract <json>]
   alaya-bench-runner authorize-longmemeval-matrix --contract <json> --out <json>
-  alaya-bench-runner c0-reuse-decision --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --c0-target-cache-root <new-root> --c0-evidence-root <new-dir> --c0-final-model <model> --c0-final-model-family <family> --c0-final-request-profile <profile> --c0-final-provider-url <url>
-  alaya-bench-runner c0-lock-preflight --c0-decision <evidence-root/decision.json>
+  alaya-bench-runner audit-extraction-cache --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --rebuild-cache-root <new-root> --cache-audit-output <new-dir> --target-model <model> --target-model-family <family> --target-request-profile <profile> --target-provider-url <url>
   alaya-bench-runner --help
 
 Variants:
@@ -72,11 +70,8 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   if (command === "authorize-extraction") {
     return runAuthorizeExtractionCommand(rest);
   }
-  if (command === "c0-reuse-decision") {
-    return runC0ReuseDecisionCommand(rest);
-  }
-  if (command === "c0-lock-preflight") {
-    return runC0LockPreflightCommand(rest);
+  if (command === "audit-extraction-cache") {
+    return runAuditExtractionCacheCommand(rest);
   }
   const opts = parseCommandFlags(rest);
   return opts === null ? 2 : dispatchParsedCommand(command, opts);

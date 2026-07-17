@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cacheFilePath } from "../../longmemeval/compile-seed-cache.js";
 import {
-  hashC0Replay,
-  replayC0Occurrences,
-  type C0ReplayAuditor
-} from "../../longmemeval/extraction/c0/replay.js";
+  hashExtractionReplay,
+  replayExtractionOccurrences,
+  type ExtractionReplayAuditor
+} from "../../longmemeval/extraction/cache-audit/replay.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
@@ -17,13 +17,13 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("C0 raw replay", () => {
+describe("extraction cache replay", () => {
   it("replays each occurrence with its explicit source time even when the raw key repeats", () => {
     const root = cacheRoot();
     const key = "a".repeat(64);
     writeShard(root, key, validRaw());
     const seen: { source: string; created: string; signalId: string }[] = [];
-    const result = replayC0Occurrences({
+    const result = replayExtractionOccurrences({
       cacheRoot: root,
       model,
       requestProfile,
@@ -44,7 +44,7 @@ describe("C0 raw replay", () => {
 
   it("makes a missing cache shard an explicit invalid occurrence and never invokes formation", () => {
     const calls: unknown[] = [];
-    const result = replayC0Occurrences({
+    const result = replayExtractionOccurrences({
       cacheRoot: cacheRoot(), model, requestProfile,
       occurrences: [occurrence("q-s0-r0", "b".repeat(64), "2025-01-01T00:00:00.000Z")],
       audit: auditor((input) => {
@@ -64,7 +64,7 @@ describe("C0 raw replay", () => {
     const root = cacheRoot();
     const key = "c".repeat(64);
     writeShard(root, key, JSON.stringify({ signals: [] }));
-    const result = replayC0Occurrences({
+    const result = replayExtractionOccurrences({
       cacheRoot: root, model, requestProfile,
       occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
       audit: auditor(() => resultFor([]))
@@ -83,19 +83,19 @@ describe("C0 raw replay", () => {
     const input = {
       cacheRoot: root, model, requestProfile, audit: auditor(() => resultFor([]))
     };
-    const forward = replayC0Occurrences({
+    const forward = replayExtractionOccurrences({
       ...input, occurrences: [occurrence("q-2-s0-r0", second, "2025-02-01T00:00:00.000Z"), occurrence("q-1-s0-r0", first, "2025-01-01T00:00:00.000Z")]
     });
-    const reversed = replayC0Occurrences({
+    const reversed = replayExtractionOccurrences({
       ...input, occurrences: [occurrence("q-1-s0-r0", first, "2025-01-01T00:00:00.000Z"), occurrence("q-2-s0-r0", second, "2025-02-01T00:00:00.000Z")]
     });
 
-    expect(hashC0Replay(forward)).toBe(hashC0Replay(reversed));
+    expect(hashExtractionReplay(forward)).toBe(hashExtractionReplay(reversed));
   });
 });
 
 function cacheRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "alaya-c0-replay-"));
+  const root = mkdtempSync(join(tmpdir(), "alaya-extraction-replay-"));
   roots.push(root);
   return root;
 }
@@ -129,7 +129,7 @@ function occurrence(id: string, cacheKey: string, sourceObservedAt: string) {
   };
 }
 
-function auditor(implementation: C0ReplayAuditor): C0ReplayAuditor {
+function auditor(implementation: ExtractionReplayAuditor): ExtractionReplayAuditor {
   return implementation;
 }
 

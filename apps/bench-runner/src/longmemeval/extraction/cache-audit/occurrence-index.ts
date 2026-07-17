@@ -7,7 +7,7 @@ import { computeCacheKey } from "../../compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed-types.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
 
-export interface C0ExtractionOccurrence {
+export interface ExtractionOccurrence {
   readonly id: string;
   readonly evidenceRef: string;
   readonly questionId: string;
@@ -18,12 +18,12 @@ export interface C0ExtractionOccurrence {
   readonly cacheKey: string;
 }
 
-export function buildC0OccurrenceIndex(input: {
+export function buildExtractionOccurrenceIndex(input: {
   readonly questions: readonly LongMemEvalQuestion[];
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
-}): readonly C0ExtractionOccurrence[] {
+}): readonly ExtractionOccurrence[] {
   const occurrences = input.questions.flatMap((question) =>
     occurrencesForQuestion(question, input.model, input.requestProfile, input.systemPrompt)
   );
@@ -31,7 +31,9 @@ export function buildC0OccurrenceIndex(input: {
   return Object.freeze(occurrences.sort(compareOccurrences));
 }
 
-export function hashC0OccurrenceIndex(occurrences: readonly C0ExtractionOccurrence[]): string {
+export function hashExtractionOccurrenceIndex(
+  occurrences: readonly ExtractionOccurrence[]
+): string {
   const canonical = [...occurrences].sort(compareOccurrences).map((occurrence) => ({
     id: occurrence.id,
     cache_key: occurrence.cacheKey,
@@ -45,7 +47,7 @@ function occurrencesForQuestion(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string
-): readonly C0ExtractionOccurrence[] {
+): readonly ExtractionOccurrence[] {
   return question.haystack_sessions.flatMap((session, sessionIndex) => {
     const sourceObservedAt = requireLongMemEvalTimestamp(question.haystack_dates[sessionIndex]);
     return pairSessionIntoRounds(session).map((round, roundIndex) => buildOccurrence({
@@ -64,7 +66,7 @@ function buildOccurrence(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
-}): C0ExtractionOccurrence {
+}): ExtractionOccurrence {
   const id = `${input.question.question_id}-s${input.sessionIndex}-r${input.roundIndex}`;
   return Object.freeze({
     id,
@@ -78,14 +80,16 @@ function buildOccurrence(input: {
   });
 }
 
-function assertUniqueOccurrenceIds(occurrences: readonly C0ExtractionOccurrence[]): void {
+function assertUniqueOccurrenceIds(occurrences: readonly ExtractionOccurrence[]): void {
   const ids = new Set<string>();
   for (const occurrence of occurrences) {
-    if (ids.has(occurrence.id)) throw new Error(`duplicate C0 occurrence id: ${occurrence.id}`);
+    if (ids.has(occurrence.id)) {
+      throw new Error(`duplicate extraction occurrence id: ${occurrence.id}`);
+    }
     ids.add(occurrence.id);
   }
 }
 
-function compareOccurrences(left: C0ExtractionOccurrence, right: C0ExtractionOccurrence): number {
+function compareOccurrences(left: ExtractionOccurrence, right: ExtractionOccurrence): number {
   return left.id.localeCompare(right.id);
 }

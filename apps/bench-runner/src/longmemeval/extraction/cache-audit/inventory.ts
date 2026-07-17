@@ -9,7 +9,7 @@ import type { CompileSeedExtractionConfig } from "../../compile-seed-types.js";
 
 const CACHE_KEY_FILE = /^([a-f0-9]{64})\.json$/u;
 
-export interface C0RawShard {
+export interface ExtractionCacheShard {
   readonly cacheKey: string;
   readonly status: CachedExtractionInspection["status"];
   readonly rawJsonSha256?: string;
@@ -18,8 +18,8 @@ export interface C0RawShard {
   readonly reason?: string;
 }
 
-export interface C0RawShardInventory {
-  readonly shards: readonly C0RawShard[];
+export interface ExtractionCacheInventory {
+  readonly shards: readonly ExtractionCacheShard[];
   readonly orphanKeys: readonly string[];
   readonly unexpectedPaths: readonly string[];
   readonly counts: Readonly<{
@@ -31,12 +31,12 @@ export interface C0RawShardInventory {
   }>;
 }
 
-export function inspectC0RawShardInventory(input: {
+export function inspectExtractionCacheInventory(input: {
   readonly cacheRoot: string;
   readonly cacheKeys: readonly string[];
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
-}): C0RawShardInventory {
+}): ExtractionCacheInventory {
   assertDirectoryNotSymlink(input.cacheRoot);
   const cacheKeys = uniqueSortedCacheKeys(input.cacheKeys);
   const shards = cacheKeys.map((cacheKey) => inspectShard(input, cacheKey));
@@ -51,7 +51,7 @@ export function inspectC0RawShardInventory(input: {
   });
 }
 
-export function hashC0RawShardInventory(inventory: C0RawShardInventory): string {
+export function hashExtractionCacheInventory(inventory: ExtractionCacheInventory): string {
   const canonical = {
     shards: inventory.shards.map((shard) => ({
       cache_key: shard.cacheKey,
@@ -70,22 +70,24 @@ export function hashC0RawShardInventory(inventory: C0RawShardInventory): string 
 function assertDirectoryNotSymlink(cacheRoot: string): void {
   if (!existsSync(cacheRoot)) return;
   const stat = lstatSync(cacheRoot);
-  if (stat.isSymbolicLink()) throw new Error("C0 cache root must not be a symlink");
-  if (!stat.isDirectory()) throw new Error("C0 cache root must be a directory");
+  if (stat.isSymbolicLink()) throw new Error("extraction cache root must not be a symlink");
+  if (!stat.isDirectory()) throw new Error("extraction cache root must be a directory");
 }
 
 function uniqueSortedCacheKeys(cacheKeys: readonly string[]): readonly string[] {
   const unique = [...new Set(cacheKeys)];
   for (const cacheKey of unique) {
-    if (!/^[a-f0-9]{64}$/u.test(cacheKey)) throw new Error(`invalid C0 cache key: ${cacheKey}`);
+    if (!/^[a-f0-9]{64}$/u.test(cacheKey)) {
+      throw new Error(`invalid extraction cache key: ${cacheKey}`);
+    }
   }
   return unique.sort((left, right) => left.localeCompare(right));
 }
 
 function inspectShard(
-  input: Parameters<typeof inspectC0RawShardInventory>[0],
+  input: Parameters<typeof inspectExtractionCacheInventory>[0],
   cacheKey: string
-): C0RawShard {
+): ExtractionCacheShard {
   const result = inspectCachedExtraction(input.cacheRoot, cacheKey, input.model, input.requestProfile);
   if (result.status === "hit") {
     return Object.freeze({
@@ -113,7 +115,9 @@ function discoverCacheShardFiles(cacheRoot: string): {
 function walkCacheRoot(root: string, directory: string, keys: string[], unexpectedPaths: string[]): void {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`C0 cache contains a symlink: ${relative(root, path)}`);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`extraction cache contains a symlink: ${relative(root, path)}`);
+    }
     if (entry.isDirectory()) {
       if (entry.name !== ".extraction-fill.lock") walkCacheRoot(root, path, keys, unexpectedPaths);
       continue;
@@ -132,7 +136,7 @@ function isCanonicalShardPath(root: string, path: string, cacheKey: string): boo
   return relative(root, path) === `${cacheKey.slice(0, 2)}/${cacheKey}.json`;
 }
 
-function countsFor(shards: readonly C0RawShard[], orphanKeys: readonly string[]) {
+function countsFor(shards: readonly ExtractionCacheShard[], orphanKeys: readonly string[]) {
   return {
     expected: shards.length,
     hit: shards.filter((shard) => shard.status === "hit").length,

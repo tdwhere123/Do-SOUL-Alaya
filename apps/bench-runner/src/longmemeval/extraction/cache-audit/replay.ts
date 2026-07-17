@@ -5,25 +5,25 @@ import {
   type CachedExtractionInspection
 } from "../../compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed-types.js";
-import type { C0ExtractionOccurrence } from "./occurrence-index.js";
+import type { ExtractionOccurrence } from "./occurrence-index.js";
 
-export type C0ReplayDisposition = "admitted" | "deferred" | "rejected" | "invalid";
+export type ExtractionReplayDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
-export interface C0ReplayEntry {
+export interface ExtractionReplayEntry {
   readonly index: number;
-  readonly disposition: C0ReplayDisposition;
+  readonly disposition: ExtractionReplayDisposition;
   readonly stage: string;
   readonly reason: string;
 }
 
-export interface C0ReplayOccurrence {
-  readonly occurrence: C0ExtractionOccurrence;
+export interface ExtractionReplayOccurrence {
+  readonly occurrence: ExtractionOccurrence;
   readonly rawJsonSha256: string | null;
-  readonly entries: readonly C0ReplayEntry[];
+  readonly entries: readonly ExtractionReplayEntry[];
 }
 
-export interface C0ReplayResult {
-  readonly occurrences: readonly C0ReplayOccurrence[];
+export interface ExtractionReplayResult {
+  readonly occurrences: readonly ExtractionReplayOccurrence[];
   readonly closure: Readonly<{
     occurrenceCount: number;
     accountedOccurrences: number;
@@ -37,16 +37,17 @@ export interface C0ReplayResult {
   }>;
 }
 
-export type C0ReplayAuditor = (input: Parameters<typeof auditOfficialApiSignalFormation>[0]) =>
-  Readonly<{ entries: readonly C0ReplayEntry[] }>;
+export type ExtractionReplayAuditor = (
+  input: Parameters<typeof auditOfficialApiSignalFormation>[0]
+) => Readonly<{ entries: readonly ExtractionReplayEntry[] }>;
 
-export function replayC0Occurrences(input: {
+export function replayExtractionOccurrences(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
-  readonly occurrences: readonly C0ExtractionOccurrence[];
-  readonly audit?: C0ReplayAuditor;
-}): C0ReplayResult {
+  readonly occurrences: readonly ExtractionOccurrence[];
+  readonly audit?: ExtractionReplayAuditor;
+}): ExtractionReplayResult {
   const cached = new Map<string, CachedExtractionInspection>();
   const audit = input.audit ?? auditOfficialApiSignalFormation;
   const occurrences = input.occurrences.map((occurrence) => replayOccurrence({
@@ -55,11 +56,11 @@ export function replayC0Occurrences(input: {
   return Object.freeze({ occurrences: Object.freeze(occurrences), closure: closeReplay(occurrences) });
 }
 
-export function hashC0Replay(result: C0ReplayResult): string {
+export function hashExtractionReplay(result: ExtractionReplayResult): string {
   return hashReplayOccurrences(result.occurrences);
 }
 
-function hashReplayOccurrences(occurrences: readonly C0ReplayOccurrence[]): string {
+function hashReplayOccurrences(occurrences: readonly ExtractionReplayOccurrence[]): string {
   const canonical = occurrences.map((occurrence) => ({
     occurrence_id: occurrence.occurrence.id,
     cache_key: occurrence.occurrence.cacheKey,
@@ -74,22 +75,22 @@ function replayOccurrence(input: {
   readonly cacheRoot: string;
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
-  readonly occurrence: C0ExtractionOccurrence;
+  readonly occurrence: ExtractionOccurrence;
   readonly cached: Map<string, CachedExtractionInspection>;
-  readonly audit: C0ReplayAuditor;
-}): C0ReplayOccurrence {
+  readonly audit: ExtractionReplayAuditor;
+}): ExtractionReplayOccurrence {
   const cached = cachedExtraction(input);
   if (cached.status !== "hit") return unavailableOccurrence(input.occurrence, cached);
   const result = input.audit({
     raw_json: cached.rawJson,
     turn_content: input.occurrence.turnContent,
-    workspace_id: c0ScopedId("workspace", input.occurrence.id),
-    run_id: c0ScopedId("run", input.occurrence.id),
+    workspace_id: replayScopedId("workspace", input.occurrence.id),
+    run_id: replayScopedId("run", input.occurrence.id),
     surface_id: null,
     created_at: input.occurrence.sourceObservedAt,
     source_observed_at: input.occurrence.sourceObservedAt,
     require_source_observed_at: true,
-    signal_id_for: (index) => c0ScopedId("signal", `${input.occurrence.id}:${index}`)
+    signal_id_for: (index) => replayScopedId("signal", `${input.occurrence.id}:${index}`)
   });
   return Object.freeze({
     occurrence: input.occurrence,
@@ -114,9 +115,9 @@ function cachedExtraction(input: Parameters<typeof replayOccurrence>[0]): Cached
 }
 
 function unavailableOccurrence(
-  occurrence: C0ExtractionOccurrence,
+  occurrence: ExtractionOccurrence,
   cached: Exclude<CachedExtractionInspection, { readonly status: "hit" }>
-): C0ReplayOccurrence {
+): ExtractionReplayOccurrence {
   const reason = cached.status === "missing" ? "shard_missing" : `shard_invalid:${cached.reason}`;
   return Object.freeze({
     occurrence,
@@ -130,9 +131,11 @@ function unavailableOccurrence(
   });
 }
 
-function closeReplay(occurrences: readonly C0ReplayOccurrence[]): C0ReplayResult["closure"] {
+function closeReplay(
+  occurrences: readonly ExtractionReplayOccurrence[]
+): ExtractionReplayResult["closure"] {
   const entries = occurrences.flatMap((occurrence) => occurrence.entries);
-  const count = (disposition: C0ReplayDisposition) =>
+  const count = (disposition: ExtractionReplayDisposition) =>
     entries.filter((entry) => entry.disposition === disposition).length;
   return Object.freeze({
     occurrenceCount: occurrences.length,
@@ -147,10 +150,13 @@ function closeReplay(occurrences: readonly C0ReplayOccurrence[]): C0ReplayResult
   });
 }
 
-function c0ScopedId(prefix: string, value: string): string {
-  return `c0-${prefix}-${createHash("sha256").update(value, "utf8").digest("hex")}`;
+function replayScopedId(prefix: string, value: string): string {
+  return `cache-audit-${prefix}-${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
-function compareReplayOccurrences(left: C0ReplayOccurrence, right: C0ReplayOccurrence): number {
+function compareReplayOccurrences(
+  left: ExtractionReplayOccurrence,
+  right: ExtractionReplayOccurrence
+): number {
   return left.occurrence.id.localeCompare(right.occurrence.id);
 }

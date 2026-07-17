@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cacheFilePath } from "../../longmemeval/compile-seed-cache.js";
 import {
-  inspectC0RawShardInventory,
-  hashC0RawShardInventory
-} from "../../longmemeval/extraction/c0/raw-inventory.js";
+  hashExtractionCacheInventory,
+  inspectExtractionCacheInventory
+} from "../../longmemeval/extraction/cache-audit/inventory.js";
 
 const roots: string[] = [];
 const model = "gpt-5.4-mini";
@@ -16,14 +16,14 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("C0 raw shard inventory", () => {
+describe("extraction cache inventory", () => {
   it("accounts for every expected shard and surfaces an orphan without reading a provider", () => {
     const root = cacheRoot();
     const [first, second] = ["a".repeat(64), "b".repeat(64)];
     writeShard(root, first);
     writeShard(root, "c".repeat(64));
 
-    const inventory = inspectC0RawShardInventory({
+    const inventory = inspectExtractionCacheInventory({
       cacheRoot: root,
       cacheKeys: [second, first],
       model,
@@ -44,10 +44,14 @@ describe("C0 raw shard inventory", () => {
     writeShard(root, first);
     writeShard(root, second);
 
-    const forward = inspectC0RawShardInventory({ cacheRoot: root, cacheKeys: [first, second], model, requestProfile });
-    const reversed = inspectC0RawShardInventory({ cacheRoot: root, cacheKeys: [second, first], model, requestProfile });
+    const forward = inspectExtractionCacheInventory({
+      cacheRoot: root, cacheKeys: [first, second], model, requestProfile
+    });
+    const reversed = inspectExtractionCacheInventory({
+      cacheRoot: root, cacheKeys: [second, first], model, requestProfile
+    });
 
-    expect(hashC0RawShardInventory(forward)).toBe(hashC0RawShardInventory(reversed));
+    expect(hashExtractionCacheInventory(forward)).toBe(hashExtractionCacheInventory(reversed));
   });
 
   it("rejects a symlinked cache root rather than following it", () => {
@@ -60,7 +64,7 @@ describe("C0 raw shard inventory", () => {
       return;
     }
 
-    expect(() => inspectC0RawShardInventory({
+    expect(() => inspectExtractionCacheInventory({
       cacheRoot: link,
       cacheKeys: [],
       model,
@@ -74,7 +78,7 @@ describe("C0 raw shard inventory", () => {
     mkdirSync(join(root, "wrong"), { recursive: true });
     writeFileSync(join(root, "wrong", `${key}.json`), "{}", "utf8");
 
-    const inventory = inspectC0RawShardInventory({
+    const inventory = inspectExtractionCacheInventory({
       cacheRoot: root, cacheKeys: [], model, requestProfile
     });
 
@@ -84,7 +88,7 @@ describe("C0 raw shard inventory", () => {
 });
 
 function cacheRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "alaya-c0-raw-inventory-"));
+  const root = mkdtempSync(join(tmpdir(), "alaya-extraction-cache-inventory-"));
   roots.push(root);
   return root;
 }

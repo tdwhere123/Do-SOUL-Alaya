@@ -20,7 +20,7 @@ import {
   type OfficialApiSourceGroundingAudit
 } from "./source-grounding.js";
 
-// invariant: C0 decisions pin formation behavior independently of raw JSON.
+// invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
 export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v1";
 
 export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";

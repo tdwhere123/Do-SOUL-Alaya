@@ -57,6 +57,26 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
   });
 
+  it("documents the extraction cache audit", async () => {
+    const exitCode = await runCli(["--help"]);
+
+    expect(exitCode).toBe(0);
+    expect(stdoutBuf).toContain("audit-extraction-cache");
+    expect(stdoutBuf).toContain("--rebuild-cache-root <new-root>");
+    expect(stdoutBuf).toContain("--cache-audit-output <new-dir>");
+    expect(stdoutBuf).toContain("--target-model <model>");
+    expect(stdoutBuf).toContain("--target-model-family <family>");
+    expect(stdoutBuf).toContain("--target-request-profile <profile>");
+    expect(stdoutBuf).toContain("--target-provider-url <url>");
+  });
+
+  it("dispatches the extraction cache audit command", async () => {
+    const exitCode = await runCli(["audit-extraction-cache"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toContain("alaya-bench-runner audit-extraction-cache:");
+  });
+
   it("recall-eval without --snapshot exits 2 with an actionable message", async () => {
     const exitCode = await runCli(["recall-eval", "--variant", "s"]);
 

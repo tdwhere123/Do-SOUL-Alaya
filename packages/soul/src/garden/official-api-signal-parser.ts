@@ -7,7 +7,7 @@ import {
 } from "./temporal/observed-projection.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
-// invariant: C0 cache reuse binds this parser behavior explicitly rather than
+// invariant: extraction-cache reuse binds this parser behavior explicitly rather than
 // inferring compatibility from raw cache identity alone.
 export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v1";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;

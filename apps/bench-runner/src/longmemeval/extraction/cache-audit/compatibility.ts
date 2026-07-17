@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 
-export interface C0CacheCompatibilityIdentity {
+export interface ExtractionCacheCompatibilityIdentity {
   readonly datasetRevision: string;
   readonly model: string;
   readonly modelFamily: string;
@@ -16,7 +16,7 @@ export interface C0CacheCompatibilityIdentity {
   readonly temporalSchemaRevision: string;
 }
 
-export interface C0ReplayClosure {
+export interface ExtractionReplayClosure {
   readonly occurrenceCount: number;
   readonly accountedOccurrences: number;
   readonly elementCount: number;
@@ -28,7 +28,7 @@ export interface C0ReplayClosure {
   readonly ledgerSha256: string;
 }
 
-export type C0ReuseReason =
+export type ExtractionCacheCompatibilityReason =
   | "dataset_revision_mismatch"
   | "model_mismatch"
   | "model_family_mismatch"
@@ -43,23 +43,23 @@ export type C0ReuseReason =
   | "raw_inventory_not_closed"
   | "replay_not_closed";
 
-export interface C0ReuseDecision {
+export interface ExtractionCacheCompatibilityDecision {
   readonly action: "reuse" | "rebuild";
   readonly sourceRoot: string;
-  readonly reasons: readonly C0ReuseReason[];
-  readonly source: C0CacheCompatibilityIdentity;
-  readonly final: C0CacheCompatibilityIdentity;
-  readonly replay: C0ReplayClosure;
+  readonly reasons: readonly ExtractionCacheCompatibilityReason[];
+  readonly source: ExtractionCacheCompatibilityIdentity;
+  readonly final: ExtractionCacheCompatibilityIdentity;
+  readonly replay: ExtractionReplayClosure;
 }
 
-export function decideC0Reuse(input: {
+export function decideExtractionCacheCompatibility(input: {
   readonly sourceRoot: string;
-  readonly source: C0CacheCompatibilityIdentity;
-  readonly final: C0CacheCompatibilityIdentity;
-  readonly replay: C0ReplayClosure;
+  readonly source: ExtractionCacheCompatibilityIdentity;
+  readonly final: ExtractionCacheCompatibilityIdentity;
+  readonly replay: ExtractionReplayClosure;
   /** False when a source-root scan finds unbound raw shards or unexpected paths. */
   readonly rawInventoryClosed?: boolean;
-}): C0ReuseDecision {
+}): ExtractionCacheCompatibilityDecision {
   const reasons = [
     ...identityDifferences(input.source, input.final),
     ...(input.rawInventoryClosed === false ? ["raw_inventory_not_closed" as const] : []),
@@ -75,7 +75,9 @@ export function decideC0Reuse(input: {
   });
 }
 
-export function hashC0Decision(decision: C0ReuseDecision): string {
+export function hashExtractionCacheCompatibilityDecision(
+  decision: ExtractionCacheCompatibilityDecision
+): string {
   return createHash("sha256").update(JSON.stringify({
     action: decision.action,
     source_root: decision.sourceRoot,
@@ -86,30 +88,34 @@ export function hashC0Decision(decision: C0ReuseDecision): string {
   }), "utf8").digest("hex");
 }
 
-export function assertFreshC0RebuildRoot(input: {
+export function assertFreshExtractionCacheRoot(input: {
   readonly sourceRoot: string;
   readonly targetRoot: string;
 }): void {
   const sourceRoot = resolve(input.sourceRoot);
   const targetRoot = resolve(input.targetRoot);
-  if (sourceRoot === targetRoot) throw new Error("C0 rebuild target must differ from source root");
-  if (existsSync(targetRoot)) throw new Error("C0 rebuild target must not exist before creation");
+  if (sourceRoot === targetRoot) {
+    throw new Error("extraction cache rebuild target must differ from source root");
+  }
+  if (existsSync(targetRoot)) {
+    throw new Error("extraction cache rebuild target must not exist before creation");
+  }
   const parent = resolve(targetRoot, "..");
   if (existsSync(parent) && lstatSync(parent).isSymbolicLink()) {
-    throw new Error("C0 rebuild target parent must not be a symlink");
+    throw new Error("extraction cache rebuild target parent must not be a symlink");
   }
 }
 
 function identityDifferences(
-  source: C0CacheCompatibilityIdentity,
-  final: C0CacheCompatibilityIdentity
-): readonly C0ReuseReason[] {
+  source: ExtractionCacheCompatibilityIdentity,
+  final: ExtractionCacheCompatibilityIdentity
+): readonly ExtractionCacheCompatibilityReason[] {
   return compatibilityFields.flatMap(({ field, reason }) =>
     source[field] === final[field] && isPresent(source[field]) ? [] : [reason]
   );
 }
 
-function isReplayClosed(replay: C0ReplayClosure): boolean {
+function isReplayClosed(replay: ExtractionReplayClosure): boolean {
   const terminalCount = replay.admitted + replay.deferred + replay.rejected + replay.invalid;
   return replay.occurrenceCount === replay.accountedOccurrences &&
     replay.elementCount === replay.accountedElements && terminalCount === replay.elementCount &&
@@ -117,8 +123,8 @@ function isReplayClosed(replay: C0ReplayClosure): boolean {
 }
 
 const compatibilityFields: readonly {
-  readonly field: keyof C0CacheCompatibilityIdentity;
-  readonly reason: C0ReuseReason;
+  readonly field: keyof ExtractionCacheCompatibilityIdentity;
+  readonly reason: ExtractionCacheCompatibilityReason;
 }[] = [
   { field: "datasetRevision", reason: "dataset_revision_mismatch" },
   { field: "model", reason: "model_mismatch" },

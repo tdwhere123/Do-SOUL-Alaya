@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  assertFreshC0RebuildRoot,
-  decideC0Reuse,
-  hashC0Decision
-} from "../../longmemeval/extraction/c0/decision.js";
+  assertFreshExtractionCacheRoot,
+  decideExtractionCacheCompatibility,
+  hashExtractionCacheCompatibilityDecision
+} from "../../longmemeval/extraction/cache-audit/compatibility.js";
 
 const roots: string[] = [];
 
@@ -14,9 +14,9 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
-describe("C0 reuse decision", () => {
+describe("extraction cache compatibility", () => {
   it("permits reuse only with complete replay and exact identity", () => {
-    const result = decideC0Reuse({
+    const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
       final: identity(),
@@ -25,12 +25,12 @@ describe("C0 reuse decision", () => {
 
     expect(result.action).toBe("reuse");
     expect(result.reasons).toEqual([]);
-    expect(hashC0Decision(result)).toMatch(/^[a-f0-9]{64}$/u);
+    expect(hashExtractionCacheCompatibilityDecision(result)).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it("forces rebuild for semantic drift even when raw identity matches", () => {
     const final = identity();
-    const result = decideC0Reuse({
+    const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
       final: { ...final, formationSemanticsSha256: "f".repeat(64) },
@@ -42,7 +42,7 @@ describe("C0 reuse decision", () => {
   });
 
   it("forces rebuild for any invalid or unaccounted replay outcome", () => {
-    const result = decideC0Reuse({
+    const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
       final: identity(),
@@ -54,7 +54,7 @@ describe("C0 reuse decision", () => {
   });
 
   it("forces rebuild when the cache-root scan finds unbound raw paths", () => {
-    const result = decideC0Reuse({
+    const result = decideExtractionCacheCompatibility({
       sourceRoot: "/cache/canonical",
       source: identity(),
       final: identity(),
@@ -67,16 +67,18 @@ describe("C0 reuse decision", () => {
   });
 
   it("accepts only a new, empty target root for rebuild", () => {
-    const base = mkdtempSync(join(tmpdir(), "alaya-c0-decision-"));
+    const base = mkdtempSync(join(tmpdir(), "alaya-extraction-cache-compatibility-"));
     roots.push(base);
     const source = join(base, "canonical");
     const target = join(base, "final-new");
     mkdirSync(source);
 
-    expect(() => assertFreshC0RebuildRoot({ sourceRoot: source, targetRoot: source })).toThrow(/differ/u);
-    assertFreshC0RebuildRoot({ sourceRoot: source, targetRoot: target });
+    expect(() => assertFreshExtractionCacheRoot({ sourceRoot: source, targetRoot: source }))
+      .toThrow(/differ/u);
+    assertFreshExtractionCacheRoot({ sourceRoot: source, targetRoot: target });
     mkdirSync(target);
-    expect(() => assertFreshC0RebuildRoot({ sourceRoot: source, targetRoot: target })).toThrow(/not exist/u);
+    expect(() => assertFreshExtractionCacheRoot({ sourceRoot: source, targetRoot: target }))
+      .toThrow(/not exist/u);
   });
 });
 

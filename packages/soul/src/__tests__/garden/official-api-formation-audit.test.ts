@@ -91,7 +91,7 @@ describe("auditOfficialApiSignalFormation", () => {
     });
   });
 
-  it("defers parsed elements when C0 requires source observation rather than inventing now", () => {
+  it("defers parsed elements when cache replay requires source observation", () => {
     const { source_observed_at: _sourceObservedAt, ...withoutSourceObservation } = auditInput({
       raw_json: JSON.stringify({ signals: [validSignal] })
     });
