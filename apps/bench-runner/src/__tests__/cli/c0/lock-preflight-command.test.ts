@@ -17,7 +17,10 @@ import { hashC0RawShardInventory } from
   "../../../longmemeval/extraction/c0/raw-inventory.js";
 import { hashC0OccurrenceIndex } from
   "../../../longmemeval/extraction/c0/occurrence-index.js";
-import { hashC0Replay } from "../../../longmemeval/extraction/c0/replay.js";
+import type { C0ExtractionOccurrence } from
+  "../../../longmemeval/extraction/c0/occurrence-index.js";
+import { hashC0Replay, type C0ReplayResult } from
+  "../../../longmemeval/extraction/c0/replay.js";
 
 const roots: string[] = [];
 const token = "must-not-leak-from-c0-lock-owner";
@@ -134,23 +137,69 @@ function createFixture() {
     counts: { expected: 0, hit: 0, missing: 0, invalid: 0, orphan: 0 }
   };
   const rawInventorySha256 = hashC0RawShardInventory(inventory);
-  const occurrenceIndexSha256 = hashC0OccurrenceIndex([]);
-  const replay = {
-    occurrences: [],
+  const occurrence: C0ExtractionOccurrence = {
+    id: "q-1-s0-r0",
+    evidenceRef: "q-1:0:0",
+    questionId: "q-1",
+    sessionIndex: 0,
+    roundIndex: 0,
+    sourceObservedAt: "2026-07-17T00:00:00.000Z",
+    turnContent: "fixture",
+    cacheKey: "a".repeat(64)
+  };
+  const occurrenceIndexSha256 = hashC0OccurrenceIndex([occurrence]);
+  const replayOccurrences: C0ReplayResult["occurrences"] = [{
+    occurrence,
+    rawJsonSha256: null,
+    entries: [{ index: -1, disposition: "invalid", stage: "cache", reason: "shard_missing" }]
+  }];
+  const replayLedgerSha256 = hashC0Replay({
+    occurrences: replayOccurrences,
     closure: {
-      occurrenceCount: 0, accountedOccurrences: 0, elementCount: 0, accountedElements: 0,
-      admitted: 0, deferred: 0, rejected: 0, invalid: 0, ledgerSha256: ""
+      occurrenceCount: 1, accountedOccurrences: 1, elementCount: 1, accountedElements: 1,
+      admitted: 0, deferred: 0, rejected: 0, invalid: 1, ledgerSha256: ""
+    }
+  });
+  const replay: C0ReplayResult = {
+    occurrences: replayOccurrences,
+    closure: {
+      occurrenceCount: 1, accountedOccurrences: 1, elementCount: 1, accountedElements: 1,
+      admitted: 0, deferred: 0, rejected: 0, invalid: 1, ledgerSha256: replayLedgerSha256
     }
   };
-  replay.closure.ledgerSha256 = hashC0Replay(replay);
   writeFileSync(join(evidenceRoot, "raw-inventory.json"), JSON.stringify({
     sha256: rawInventorySha256, inventory
   }), "utf8");
   writeFileSync(join(evidenceRoot, "occurrence-index.json"), JSON.stringify({
-    sha256: occurrenceIndexSha256, occurrences: []
+    sha256: occurrenceIndexSha256,
+    occurrences: [{
+      id: occurrence.id,
+      evidence_ref: occurrence.evidenceRef,
+      question_id: occurrence.questionId,
+      session_index: occurrence.sessionIndex,
+      round_index: occurrence.roundIndex,
+      source_observed_at: occurrence.sourceObservedAt,
+      turn_content_sha256: hash(occurrence.turnContent),
+      cache_key: occurrence.cacheKey
+    }]
   }), "utf8");
   writeFileSync(join(evidenceRoot, "replay-ledger.json"), JSON.stringify({
-    sha256: replay.closure.ledgerSha256, closure: replay.closure, occurrences: []
+    sha256: replay.closure.ledgerSha256,
+    closure: replay.closure,
+    occurrences: replay.occurrences.map((item) => ({
+      occurrence: {
+        id: item.occurrence.id,
+        evidence_ref: item.occurrence.evidenceRef,
+        question_id: item.occurrence.questionId,
+        session_index: item.occurrence.sessionIndex,
+        round_index: item.occurrence.roundIndex,
+        source_observed_at: item.occurrence.sourceObservedAt,
+        turn_content_sha256: hash(item.occurrence.turnContent),
+        cache_key: item.occurrence.cacheKey
+      },
+      raw_json_sha256: item.rawJsonSha256,
+      entries: item.entries
+    }))
   }), "utf8");
   const decision = buildC0DecisionReceipt({
     createdAt: "2026-07-17T00:00:00.000Z",

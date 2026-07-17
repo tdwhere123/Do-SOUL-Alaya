@@ -280,13 +280,18 @@ function readReplayForDigest(artifact: Record<string, unknown>): C0ReplayResult 
 function readReplayEntry(value: unknown): C0ReplayEntry {
   const entry = requireRecord(value, "C0 replay entry");
   const index = entry.index;
-  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0) {
+  const disposition = requireString(entry.disposition, "C0 replay disposition");
+  const stage = requireString(entry.stage, "C0 replay stage");
+  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < -1) {
     throw new Error("C0 replay entry index is invalid");
+  }
+  if (index === -1 && (disposition !== "invalid" || stage !== "cache")) {
+    throw new Error("C0 replay sentinel index is only valid for an invalid cache entry");
   }
   return {
     index,
-    disposition: requireString(entry.disposition, "C0 replay disposition") as C0ReplayEntry["disposition"],
-    stage: requireString(entry.stage, "C0 replay stage"),
+    disposition: disposition as C0ReplayEntry["disposition"],
+    stage,
     reason: requireString(entry.reason, "C0 replay reason")
   };
 }
