@@ -2,17 +2,22 @@ import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js
 import { inspectExtractionAuthorityDisk } from "../authority/inspection.js";
 import { openExtractionAttemptLedger } from "../authority/attempt-ledger.js";
 import { assertDirectDeepSeek500RootBinding } from "../authority/direct-deepseek-500.js";
+import {
+  assertExtractionTargetSelectionRootBinding,
+  type ExtractionTargetSelectionReceipt
+} from "../authority/target-selection/receipt.js";
 import { receiptExtractionCacheIdentity } from "../authority/receipt-cache-identity.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import type { ExecutionExtractionAuthority } from "./fill-execution.js";
 
 export function createExtractionExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
-  cacheRoot: string
+  cacheRoot: string,
+  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined
 ): ExecutionExtractionAuthority {
   return receipt.limits.maximum_attempts === 0
     ? createExhaustedExecutionAuthority(receipt)
-    : createLedgerExecutionAuthority(receipt, cacheRoot);
+    : createLedgerExecutionAuthority(receipt, cacheRoot, targetSelection);
 }
 
 function createExhaustedExecutionAuthority(
@@ -38,8 +43,11 @@ function createExhaustedExecutionAuthority(
 
 function createLedgerExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
-  cacheRoot: string
+  cacheRoot: string,
+  targetSelection: ExtractionTargetSelectionReceipt | undefined
 ): ExecutionExtractionAuthority {
+  const assertTarget = createTargetAssertion(receipt, cacheRoot, targetSelection);
+  assertTarget();
   const ledger = openExtractionAttemptLedger({
     cacheRoot,
     lineageDigest: receipt.lineage_digest,
@@ -48,7 +56,6 @@ function createLedgerExecutionAuthority(
     maximumAttempts: receipt.limits.maximum_attempts,
     successfulShardCeiling: receipt.limits.successful_shard_ceiling
   });
-  const assertTarget = createDirectTargetAssertion(receipt, cacheRoot);
   return {
     receipt,
     reserveAttempt: (cacheKey) => {
@@ -63,15 +70,20 @@ function createLedgerExecutionAuthority(
   };
 }
 
-function createDirectTargetAssertion(
+function createTargetAssertion(
   receipt: ExtractionAuthorityReceipt,
-  cacheRoot: string
+  cacheRoot: string,
+  targetSelection: ExtractionTargetSelectionReceipt | undefined
 ): () => void {
-  if (receipt.direct_spend === undefined) return () => undefined;
-  return () => assertDirectDeepSeek500RootBinding({
-    authorization: receipt.direct_spend!,
-    cacheRoot
-  });
+  if (receipt.direct_spend === undefined && targetSelection === undefined) return () => undefined;
+  return () => {
+    if (receipt.direct_spend !== undefined) {
+      assertDirectDeepSeek500RootBinding({ authorization: receipt.direct_spend, cacheRoot });
+    }
+    if (targetSelection !== undefined) {
+      assertExtractionTargetSelectionRootBinding(targetSelection, cacheRoot);
+    }
+  };
 }
 
 function assertAuthorityDiskFloor(cacheRoot: string, floorBytes: number): void {

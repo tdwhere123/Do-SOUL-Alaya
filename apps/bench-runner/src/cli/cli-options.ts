@@ -37,6 +37,8 @@ export interface ParsedFlags {
   readonly extractionCacheRoot?: string;
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
+  /** Immutable target-root selection receipt linked from a normal authority receipt. */
+  readonly extractionTargetSelection?: string;
   readonly promotionContract?: string;
   readonly r3SpendApproval?: string;
   readonly concurrency?: number;
@@ -71,6 +73,7 @@ export interface ParsedFlagsState {
   questionManifest?: string;
   extractionCacheRoot?: string;
   extractionAuthority?: string;
+  extractionTargetSelection?: string;
   promotionContract?: string;
   r3SpendApproval?: string;
   concurrency?: number;
@@ -269,6 +272,16 @@ function consumeOtherPathFlags(
       token,
       "--extraction-authority",
       "--extraction-authority requires a receipt path"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-target-selection")) {
+    state.extractionTargetSelection = readRequiredFlagValue(
+      args,
+      index,
+      token,
+      "--extraction-target-selection",
+      "--extraction-target-selection requires a receipt path"
     );
     return nextIndex(index, token);
   }
@@ -476,6 +489,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
     extractionAuthority: state.extractionAuthority,
+    extractionTargetSelection: state.extractionTargetSelection,
     promotionContract: state.promotionContract,
     r3SpendApproval: state.r3SpendApproval,
     concurrency: state.concurrency,

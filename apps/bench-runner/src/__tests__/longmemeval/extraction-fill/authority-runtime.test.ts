@@ -48,6 +48,31 @@ describe("extraction authority runtime", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("requires a target selection before canonical normal LongMemEval-S can reach the built-in provider", async () => {
+    setCredentialFixture();
+    const canonicalQuestions = Array.from(
+      { length: 100 },
+      (_, index) => question(`q${index + 1}`, "alpha", "decoy")
+    );
+    await writeCanonicalSFixtureDataset(canonicalQuestions);
+    const receiptPath = await writeAuthorityReceipt({ variant: "longmemeval_s", limit: 100 });
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      limit: 100,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      log: () => undefined
+    })).rejects.toThrow(/target selection/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(existsSync(join(cacheRoot, ".extraction-fill.lock"))).toBe(false);
+  });
+
   it("executes only the matching authority and persists exact usage telemetry", async () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
@@ -305,10 +330,12 @@ function question(id: string, fact: string, decoy: string): LongMemEvalQuestion 
 async function writeAuthorityReceipt(input: {
   readonly limit?: number;
   readonly action?: "probe" | "fill";
+  readonly variant?: typeof EXTRACTION_FILL_VARIANT | "longmemeval_s";
 }): Promise<string> {
   const action = input.action ?? "fill";
+  const variant = input.variant ?? EXTRACTION_FILL_VARIANT;
   const inspection = await inspectExtractionAuthority({
-    variant: EXTRACTION_FILL_VARIANT,
+    variant,
     ...(input.limit === undefined ? {} : { limit: input.limit }),
     cacheRoot,
     dataDir,
@@ -334,6 +361,13 @@ async function writeAuthorityReceipt(input: {
   return path;
 }
 
+async function writeCanonicalSFixtureDataset(
+  questions: readonly LongMemEvalQuestion[]
+): Promise<void> {
+  await writeFixtureDataset(questions);
+  writeFixtureData(questions, "longmemeval_s");
+}
+
 function inspectionSummary(inspection: Awaited<ReturnType<typeof inspectExtractionAuthority>>) {
   return {
     writerLock: inspection.writerLock,
@@ -343,12 +377,15 @@ function inspectionSummary(inspection: Awaited<ReturnType<typeof inspectExtracti
   };
 }
 
-function writeFixtureData(questions: readonly LongMemEvalQuestion[]): void {
+function writeFixtureData(
+  questions: readonly LongMemEvalQuestion[],
+  variant = EXTRACTION_FILL_VARIANT
+): void {
   const raw = JSON.stringify(questions);
   const sha256 = createHash("sha256").update(raw, "utf8").digest("hex");
-  writeFileSync(join(dataDir, `${EXTRACTION_FILL_VARIANT}.json`), raw, "utf8");
-  writeFileSync(join(pinnedMetaRoot, `${EXTRACTION_FILL_VARIANT}.meta.json`), JSON.stringify({
-    name: EXTRACTION_FILL_VARIANT,
+  writeFileSync(join(dataDir, `${variant}.json`), raw, "utf8");
+  writeFileSync(join(pinnedMetaRoot, `${variant}.meta.json`), JSON.stringify({
+    name: variant,
     sha256,
     question_count: questions.length
   }), "utf8");

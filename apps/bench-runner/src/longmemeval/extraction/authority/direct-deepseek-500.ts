@@ -1,27 +1,20 @@
-import { createHash, randomUUID } from "node:crypto";
-import {
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmdirSync,
-  unlinkSync,
-  writeFileSync
-} from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
 import type { ExtractionAuthorityObservation } from "./receipt.js";
+import {
+  assertExtractionTargetRootBinding,
+  createFreshExtractionTargetRoot,
+  discardFreshExtractionTargetRoot,
+  type ExtractionTargetRootBinding
+} from "./target-root-binding.js";
 
 export const DIRECT_DEEPSEEK_500_MAX_CONCURRENCY = 64;
-const ROOT_MARKER_FILENAME = ".alaya-direct-deepseek-500-root.json";
+const directRootMarker = {
+  filename: ".alaya-direct-deepseek-500-root.json",
+  kind: "alaya_direct_deepseek_500_root"
+} as const;
 
-export interface DirectDeepSeek500SpendAuthorization {
+export interface DirectDeepSeek500SpendAuthorization extends ExtractionTargetRootBinding {
   readonly kind: "deepseek_direct_500";
   readonly operator: string;
-  readonly cache_root_sha256: string;
-  readonly cache_root_device: string;
-  readonly cache_root_inode: string;
-  readonly cache_root_marker_sha256: string;
 }
 
 export function createFreshDirectDeepSeek500Authorization(input: {
@@ -29,15 +22,14 @@ export function createFreshDirectDeepSeek500Authorization(input: {
   readonly operator: string;
 }): DirectDeepSeek500SpendAuthorization {
   const operator = requireOperator(input.operator);
-  const root = canonicalRoot(input.cacheRoot);
-  const identity = createFreshRoot(root);
   return Object.freeze({
     kind: "deepseek_direct_500",
     operator,
-    cache_root_sha256: hashRoot(root),
-    cache_root_device: identity.device,
-    cache_root_inode: identity.inode,
-    cache_root_marker_sha256: identity.markerSha256
+    ...createFreshExtractionTargetRoot({
+      cacheRoot: input.cacheRoot,
+      marker: directRootMarker,
+      purpose: "direct DeepSeek 500"
+    })
   });
 }
 
@@ -64,37 +56,24 @@ export function assertDirectDeepSeek500RootBinding(input: {
   readonly authorization: DirectDeepSeek500SpendAuthorization;
   readonly cacheRoot: string;
 }): void {
-  const root = canonicalRoot(input.cacheRoot);
-  const stat = lstatSync(root, { bigint: true });
-  const marker = readMarkerSha256(root);
-  if (!stat.isDirectory() || stat.isSymbolicLink() ||
-      hashRoot(root) !== input.authorization.cache_root_sha256 ||
-      stat.dev.toString() !== input.authorization.cache_root_device ||
-      stat.ino.toString() !== input.authorization.cache_root_inode ||
-      marker !== input.authorization.cache_root_marker_sha256) {
-    throw new Error("direct DeepSeek 500 authorization target root changed");
-  }
+  assertExtractionTargetRootBinding({
+    cacheRoot: input.cacheRoot,
+    marker: directRootMarker,
+    purpose: "direct DeepSeek 500 authorization",
+    binding: input.authorization
+  });
 }
 
 export function discardFreshDirectDeepSeek500Authorization(input: {
   readonly authorization: DirectDeepSeek500SpendAuthorization;
   readonly cacheRoot: string;
 }): void {
-  try {
-    assertDirectDeepSeek500RootBinding(input);
-    const root = canonicalRoot(input.cacheRoot);
-    if (!hasOnlyRootMarker(root)) return;
-    const marker = markerPath(root);
-    const markerBytes = readFileSync(marker);
-    unlinkSync(marker);
-    try {
-      rmdirSync(root);
-    } catch {
-      restoreRootMarker(root, input.authorization, markerBytes);
-    }
-  } catch {
-    // A failed preflight must never remove a root that acquired content or changed identity.
-  }
+  discardFreshExtractionTargetRoot({
+    cacheRoot: input.cacheRoot,
+    marker: directRootMarker,
+    purpose: "direct DeepSeek 500 authorization",
+    binding: input.authorization
+  });
 }
 
 export function isDirectDeepSeek500Authorization(
@@ -120,105 +99,6 @@ function isFreshDeepSeek500Observation(observation: ExtractionAuthorityObservati
     extraction.manifestSha256 === null && inventory.expectedTurns > 0 &&
     inventory.validTurns === 0 && inventory.missingTurns === inventory.expectedTurns &&
     inventory.invalidTurns === 0 && inventory.orphanTurns === 0;
-}
-
-function createFreshRoot(root: string): {
-  readonly device: string;
-  readonly inode: string;
-  readonly markerSha256: string;
-} {
-  try {
-    mkdirSync(root);
-  } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    throw new Error(`direct DeepSeek 500 target root must be new: ${detail}`);
-  }
-  let identity: { readonly device: string; readonly inode: string } | undefined;
-  try {
-    const stat = lstatSync(root, { bigint: true });
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new Error("direct DeepSeek 500 target root is not a real directory");
-    }
-    identity = Object.freeze({ device: stat.dev.toString(), inode: stat.ino.toString() });
-    return Object.freeze({ ...identity, markerSha256: writeRootMarker(root) });
-  } catch (cause) {
-    discardEmptyUninitializedRoot(root, identity);
-    throw cause;
-  }
-}
-
-function canonicalRoot(cacheRoot: string): string {
-  const absolute = resolve(cacheRoot);
-  return join(realpathSync(dirname(absolute)), basename(absolute));
-}
-
-function hashRoot(root: string): string {
-  return createHash("sha256").update(root, "utf8").digest("hex");
-}
-
-function writeRootMarker(root: string): string {
-  const marker = `${JSON.stringify({
-    kind: "alaya_direct_deepseek_500_root",
-    root_id: randomUUID()
-  })}\n`;
-  writeFileSync(markerPath(root), marker, { encoding: "utf8", flag: "wx" });
-  return hashBytes(Buffer.from(marker, "utf8"));
-}
-
-function readMarkerSha256(root: string): string {
-  try {
-    const marker = markerPath(root);
-    const stat = lstatSync(marker);
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("marker is not a file");
-    return hashBytes(readFileSync(marker));
-  } catch {
-    throw new Error("direct DeepSeek 500 authorization target root changed");
-  }
-}
-
-function markerPath(root: string): string {
-  return join(root, ROOT_MARKER_FILENAME);
-}
-
-function hasOnlyRootMarker(root: string): boolean {
-  const entries = readdirSync(root);
-  return entries.length === 1 && entries[0] === ROOT_MARKER_FILENAME;
-}
-
-function discardEmptyUninitializedRoot(
-  root: string,
-  identity: { readonly device: string; readonly inode: string } | undefined
-): void {
-  try {
-    if (identity !== undefined) {
-      const stat = lstatSync(root, { bigint: true });
-      if (!stat.isDirectory() || stat.isSymbolicLink() ||
-          stat.dev.toString() !== identity.device || stat.ino.toString() !== identity.inode) return;
-    }
-    rmdirSync(root);
-  } catch {
-    // An initialization failure must not remove content or a root whose identity changed.
-  }
-}
-
-function restoreRootMarker(
-  root: string,
-  authorization: DirectDeepSeek500SpendAuthorization,
-  markerBytes: Uint8Array
-): void {
-  try {
-    const stat = lstatSync(root, { bigint: true });
-    if (!stat.isDirectory() || stat.isSymbolicLink() ||
-        stat.dev.toString() !== authorization.cache_root_device ||
-        stat.ino.toString() !== authorization.cache_root_inode) return;
-    writeFileSync(markerPath(root), markerBytes, { flag: "wx" });
-  } catch {
-    // The target changed after marker removal, so it must remain untouched.
-  }
-}
-
-function hashBytes(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function requireOperator(value: string): string {

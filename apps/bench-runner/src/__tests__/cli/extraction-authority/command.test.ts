@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   runAuthorizeExtractionCommand
 } from "../../../cli/extraction-authority/command.js";
+import type { ExtractionTargetSelectionReceipt } from
+  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -50,6 +52,7 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
 
   const exitCode = await runAuthorizeExtractionCommand([
     "--variant", "s",
+    "--extraction-target-selection", "/tmp/target-selection.json",
     "--extraction-action", "fill",
     "--extraction-receipt-out", "/tmp/authority.json",
     "--extraction-output-token-cap", "512",
@@ -62,7 +65,8 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
     inspect,
     write,
     readRevision: () => "a".repeat(40),
-    readLedger: () => undefined
+    readLedger: () => undefined,
+    ...targetSelectionDependencies()
   });
 
   expect(exitCode).toBe(0);
@@ -72,9 +76,30 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
   expect(write.mock.calls[0]?.[1]).toMatchObject({
     action: "fill",
     identity_digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
-    receipt_digest: expect.stringMatching(/^[a-f0-9]{64}$/u)
+    receipt_digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    target_selection_digest: "9".repeat(64)
   });
   expect(stdout).toHaveBeenCalledWith(expect.stringContaining("attempt_cap=3"));
+});
+
+it("does not require target selection outside the canonical longmemeval_s windows", async () => {
+  const base = authorityInspection("a".repeat(64));
+  const inspect = vi.fn(async () => ({
+    ...base,
+    observation: {
+      ...base.observation,
+      dataset: { ...base.observation.dataset, variant: "longmemeval_oracle" as const }
+    }
+  }));
+  const write = vi.fn();
+
+  const exitCode = await runAuthorizeExtractionCommand(
+    authorizeArgs({ variant: "oracle", targetSelection: false }),
+    { inspect, write, readRevision: () => "a".repeat(40), readLedger: () => undefined }
+  );
+
+  expect(exitCode).toBe(0);
+  expect(write.mock.calls[0]?.[1]).not.toHaveProperty("target_selection_digest");
 });
 
 it("carries an existing fill lineage cap while inspecting its completed shards out of closure", async () => {
@@ -115,7 +140,8 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
     inspect,
     write,
     readRevision: () => "a".repeat(40),
-    readLedger: () => ledger
+    readLedger: () => ledger,
+    ...targetSelectionDependencies()
   });
 
   expect(exitCode).toBe(0);
@@ -227,9 +253,15 @@ it("rejects custom pinned metadata before creating a direct target root", async 
   expect(stderr).toHaveBeenCalledWith(expect.stringContaining("canonical longmemeval_s"));
 });
 
-function authorizeArgs(): string[] {
+function authorizeArgs(input: {
+  readonly variant?: "oracle" | "s";
+  readonly targetSelection?: boolean;
+} = {}): string[] {
   return [
-    "--variant", "s",
+    "--variant", input.variant ?? "s",
+    ...(input.targetSelection === false
+      ? []
+      : ["--extraction-target-selection", "/tmp/target-selection.json"]),
     "--extraction-action", "fill",
     "--extraction-receipt-out", "/tmp/authority.json",
     "--extraction-output-token-cap", "512",
@@ -239,6 +271,14 @@ function authorizeArgs(): string[] {
     "--extraction-max-input-tokens", "300",
     "--extraction-disk-floor-bytes", "1024"
   ];
+}
+
+function targetSelectionDependencies() {
+  return {
+    readTargetSelection: () => ({ receipt_digest: "9".repeat(64) } as ExtractionTargetSelectionReceipt),
+    assertTargetSelection: () => undefined,
+    assertTargetSelectionWindow: () => undefined
+  };
 }
 
 function directAuthorizeArgs(): string[] {

@@ -15,6 +15,13 @@ import {
   createFreshDirectDeepSeek500Authorization,
   discardFreshDirectDeepSeek500Authorization
 } from "../../longmemeval/extraction/authority/direct-deepseek-500.js";
+import {
+  assertExtractionTargetSelectionReceipt,
+  assertExtractionTargetSelectionWindow,
+  readExtractionTargetSelectionReceipt,
+  requiresExtractionTargetSelection,
+  type ExtractionTargetSelectionReceipt
+} from "../../longmemeval/extraction/authority/target-selection/receipt.js";
 import { readExtractionAttemptLedger } from
   "../../longmemeval/extraction/authority/attempt-ledger.js";
 
@@ -29,6 +36,7 @@ interface AuthorizeExtractionArgs {
   readonly diskFloorBytes: number;
   readonly probeKey?: string;
   readonly directDeepSeek500Operator?: string;
+  readonly targetSelectionPath?: string;
 }
 
 interface AuthorizeExtractionDependencies {
@@ -38,6 +46,9 @@ interface AuthorizeExtractionDependencies {
   readonly readLedger?: typeof readExtractionAttemptLedger;
   readonly createDirectSpend?: typeof createFreshDirectDeepSeek500Authorization;
   readonly discardDirectSpend?: typeof discardFreshDirectDeepSeek500Authorization;
+  readonly readTargetSelection?: typeof readExtractionTargetSelectionReceipt;
+  readonly assertTargetSelection?: typeof assertExtractionTargetSelectionReceipt;
+  readonly assertTargetSelectionWindow?: typeof assertExtractionTargetSelectionWindow;
 }
 
 export async function runAuthorizeExtractionCommand(
@@ -88,9 +99,17 @@ async function buildAuthorizedReceipt(
     flags, authority, cacheRoot, deps
   );
   assertInspectableAuthority(inspection, authority);
+  const targetSelection = readTargetSelection(
+    authority, directSpend, inspection.observation, deps
+  );
+  assertTargetSelection(
+    targetSelection, cacheRoot, inspection.observation, deps
+  );
   return Object.freeze({
     outputPath: authority.outputPath,
-    receipt: createReceipt(authority, flags.concurrency, inspection, ledger, directSpend)
+    receipt: createReceipt(
+      authority, flags.concurrency, inspection, ledger, directSpend, targetSelection
+    )
   });
 }
 
@@ -106,6 +125,51 @@ function createDirectSpend(
     cacheRoot,
     operator: authority.directDeepSeek500Operator
   });
+}
+
+function readTargetSelection(
+  authority: AuthorizeExtractionArgs,
+  directSpend: ReturnType<typeof createFreshDirectDeepSeek500Authorization> | undefined,
+  observation: Awaited<ReturnType<typeof inspectExtractionAuthority>>["observation"],
+  deps: AuthorizeExtractionDependencies
+): ExtractionTargetSelectionReceipt | undefined {
+  if (directSpend !== undefined) {
+    if (authority.targetSelectionPath !== undefined) {
+      throw new Error("direct DeepSeek 500 cannot mix an extraction target selection receipt");
+    }
+    return undefined;
+  }
+  if (!requiresExtractionTargetSelection(observation)) {
+    if (authority.targetSelectionPath !== undefined) {
+      throw new Error(
+        "extraction target selection only applies to canonical longmemeval_s 0..100 or 0..500"
+      );
+    }
+    return undefined;
+  }
+  if (authority.targetSelectionPath === undefined) {
+    throw new Error(
+      "--extraction-target-selection is required for canonical normal longmemeval_s extraction authority"
+    );
+  }
+  return (deps.readTargetSelection ?? readExtractionTargetSelectionReceipt)(
+    authority.targetSelectionPath
+  );
+}
+
+function assertTargetSelection(
+  selection: ExtractionTargetSelectionReceipt | undefined,
+  cacheRoot: string,
+  observation: Awaited<ReturnType<typeof inspectExtractionAuthority>>["observation"],
+  deps: AuthorizeExtractionDependencies
+): void {
+  if (selection === undefined) return;
+  (deps.assertTargetSelection ?? assertExtractionTargetSelectionReceipt)({
+    receipt: selection,
+    cacheRoot,
+    observation
+  });
+  (deps.assertTargetSelectionWindow ?? assertExtractionTargetSelectionWindow)(selection, observation);
 }
 
 function assertDirectDeepSeek500Scope(flags: ReturnType<typeof parseFlags>): void {
@@ -164,7 +228,8 @@ function createReceipt(
   maxConcurrency: number | undefined,
   inspection: ExtractionAuthorityInspection,
   ledger: ReturnType<typeof readExtractionAttemptLedger>,
-  directSpend: ReturnType<typeof createFreshDirectDeepSeek500Authorization> | undefined
+  directSpend: ReturnType<typeof createFreshDirectDeepSeek500Authorization> | undefined,
+  targetSelection: ExtractionTargetSelectionReceipt | undefined
 ) {
   return createExtractionAuthorityReceipt({
     action: authority.action,
@@ -186,6 +251,9 @@ function createReceipt(
       }
     }),
     inspection: inspectionSummary(inspection),
+    ...(targetSelection === undefined ? {} : {
+      targetSelectionDigest: targetSelection.receipt_digest
+    }),
     ...(directSpend === undefined ? {} : { directSpend })
   });
 }
@@ -249,7 +317,8 @@ function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExt
     probeKey: optionalString(args, "--extraction-probe-key"),
     directDeepSeek500Operator: optionalRequiredString(
       args, "--direct-deepseek-500-operator"
-    )
+    ),
+    targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection")
   };
   if (parsed.action === "probe" && parsed.probeKey === undefined) {
     throw new Error("--extraction-probe-key is required when --extraction-action=probe");
@@ -259,6 +328,9 @@ function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExt
   }
   if (parsed.directDeepSeek500Operator !== undefined && parsed.action !== "fill") {
     throw new Error("--direct-deepseek-500-operator is only valid when --extraction-action=fill");
+  }
+  if (parsed.directDeepSeek500Operator !== undefined && parsed.targetSelectionPath !== undefined) {
+    throw new Error("--extraction-target-selection cannot mix with --direct-deepseek-500-operator");
   }
   return parsed;
 }

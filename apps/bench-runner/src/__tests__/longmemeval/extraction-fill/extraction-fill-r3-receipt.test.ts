@@ -4,7 +4,10 @@ const mocks = vi.hoisted(() => ({
   prepareExpansion: vi.fn(),
   readReceipt: vi.fn(),
   inspectAuthority: vi.fn(),
-  readLedger: vi.fn()
+  readLedger: vi.fn(),
+  readTargetSelection: vi.fn(),
+  assertTargetSelection: vi.fn(),
+  assertTargetSelectionWindow: vi.fn()
 }));
 
 vi.mock("../../../longmemeval/extraction/expansion-fill-authority.js", async (importOriginal) => ({
@@ -32,6 +35,12 @@ vi.mock("../../../longmemeval/extraction/authority/attempt-ledger.js", async (im
   readExtractionAttemptLedger: mocks.readLedger,
   openExtractionAttemptLedger: vi.fn()
 }));
+vi.mock("../../../longmemeval/extraction/authority/target-selection/receipt.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../longmemeval/extraction/authority/target-selection/receipt.js")>(),
+  readExtractionTargetSelectionReceipt: mocks.readTargetSelection,
+  assertExtractionTargetSelectionReceipt: mocks.assertTargetSelection,
+  assertExtractionTargetSelectionWindow: mocks.assertTargetSelectionWindow
+}));
 
 import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
 
@@ -47,6 +56,9 @@ describe("500Q R3 receipt binding", () => {
       modelReadiness: "not_probed"
     });
     mocks.readLedger.mockReturnValue(undefined);
+    mocks.readTargetSelection.mockReturnValue({ receipt_digest: "b".repeat(64) });
+    mocks.assertTargetSelection.mockReturnValue(undefined);
+    mocks.assertTargetSelectionWindow.mockReturnValue(undefined);
   });
 
   it("refuses canonical 500Q before the cache write lease without a receipt-bound authority", async () => {
@@ -65,7 +77,8 @@ describe("500Q R3 receipt binding", () => {
     await expect(runExtractionFill({
       variant: "longmemeval_s",
       cacheRoot: "/must-not-lock",
-      authorityReceiptPath: "/fixture/extraction-authority.json"
+      authorityReceiptPath: "/fixture/extraction-authority.json",
+      targetSelectionReceiptPath: "/fixture/target-selection.json"
     })).rejects.toThrow(/approved R3 spend envelope/u);
   });
 
@@ -78,7 +91,8 @@ describe("500Q R3 receipt binding", () => {
     await expect(runExtractionFill({
       variant: "longmemeval_s",
       cacheRoot: "/must-not-lock",
-      authorityReceiptPath: "/fixture/extraction-authority.json"
+      authorityReceiptPath: "/fixture/extraction-authority.json",
+      targetSelectionReceiptPath: "/fixture/target-selection.json"
     })).rejects.toThrow(/approved R3 spend envelope/u);
   });
 });
@@ -118,6 +132,7 @@ function receiptFixture() {
       successful_shard_ceiling: 400,
       disk_floor_bytes: 10
     },
-    price: { estimated_upper_usd: 5 }
+    price: { estimated_upper_usd: 5 },
+    target_selection_digest: "b".repeat(64)
   };
 }

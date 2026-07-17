@@ -17,7 +17,8 @@ import {
   type ExtractionAuthorityReceiptPrice
 } from "./receipt-limits.js";
 
-const RECEIPT_VERSION = 2;
+const LEGACY_RECEIPT_VERSION = 2;
+const CURRENT_RECEIPT_VERSION = 3;
 
 export interface ExtractionAuthorityObservation {
   readonly revision: string;
@@ -51,7 +52,7 @@ export interface ExtractionAuthorityObservation {
 }
 
 export interface ExtractionAuthorityReceipt {
-  readonly schema_version: typeof RECEIPT_VERSION;
+  readonly schema_version: typeof LEGACY_RECEIPT_VERSION | typeof CURRENT_RECEIPT_VERSION;
   readonly kind: "longmemeval-extraction-authority";
   readonly action: "probe" | "fill";
   readonly generated_at: string;
@@ -63,6 +64,8 @@ export interface ExtractionAuthorityReceipt {
   readonly limits: ExtractionAuthorityReceiptLimits;
   readonly price: ExtractionAuthorityReceiptPrice;
   readonly probe_key?: string;
+  /** Immutable target-selection receipt that binds the cache root for a new rebuild. */
+  readonly target_selection_digest?: string;
   readonly direct_spend?: DirectDeepSeek500SpendAuthorization;
 }
 
@@ -86,6 +89,7 @@ export interface ExtractionAuthorityReceiptInput {
   readonly inspection: ExtractionAuthorityInspection;
   readonly maxConcurrency?: number;
   readonly probeKey?: string;
+  readonly targetSelectionDigest?: string;
   readonly cumulativeLimits?: {
     readonly startingMissing: number;
     readonly maximumAttempts: number;
@@ -112,6 +116,12 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
       observation: input.observation
     });
   }
+  if (input.directSpend !== undefined && input.targetSelectionDigest !== undefined) {
+    throw new Error("direct DeepSeek 500 authorization cannot mix target selection evidence");
+  }
+  if (input.targetSelectionDigest !== undefined && !isDigest(input.targetSelectionDigest)) {
+    throw new Error("extraction target selection digest is invalid");
+  }
   assertInspection(input.inspection);
 }
 
@@ -122,7 +132,7 @@ function buildUnsignedReceipt(
   const price = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
   const probeKey = input.action === "probe" ? requireProbeKey(input.probeKey) : undefined;
   return {
-    schema_version: RECEIPT_VERSION,
+    schema_version: CURRENT_RECEIPT_VERSION,
     kind: "longmemeval-extraction-authority" as const,
     action: input.action,
     generated_at: (input.now ?? new Date()).toISOString(),
@@ -133,6 +143,9 @@ function buildUnsignedReceipt(
     limits,
     price,
     ...(probeKey === undefined ? {} : { probe_key: probeKey }),
+    ...(input.targetSelectionDigest === undefined ? {} : {
+      target_selection_digest: input.targetSelectionDigest
+    }),
     ...(input.directSpend === undefined ? {} : {
       direct_spend: Object.freeze({ ...input.directSpend })
     })
@@ -238,7 +251,8 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
     throw new Error("extraction authority receipt is invalid");
   }
   const receipt = value as Partial<ExtractionAuthorityReceipt>;
-  if (receipt.schema_version !== RECEIPT_VERSION ||
+  if ((receipt.schema_version !== LEGACY_RECEIPT_VERSION &&
+       receipt.schema_version !== CURRENT_RECEIPT_VERSION) ||
       receipt.kind !== "longmemeval-extraction-authority" ||
       (receipt.action !== "probe" && receipt.action !== "fill") ||
       typeof receipt.generated_at !== "string" ||
@@ -248,6 +262,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       !isObservation(receipt.observation) ||
       !isInspection(receipt.inspection) ||
       !isReceiptLimits(receipt.limits) || !isReceiptPrice(receipt.price) ||
+      (receipt.target_selection_digest !== undefined && !isDigest(receipt.target_selection_digest)) ||
       (receipt.direct_spend !== undefined &&
         !isDirectDeepSeek500Authorization(receipt.direct_spend))) {
     throw new Error("extraction authority receipt is invalid");

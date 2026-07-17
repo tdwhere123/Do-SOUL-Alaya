@@ -52,6 +52,9 @@ export async function runExtractionFillCommand(
           cacheRoot: opts.extractionCacheRoot
         }),
         authorityReceiptPath: opts.extractionAuthority,
+        ...(opts.extractionTargetSelection === undefined ? {} : {
+          targetSelectionReceiptPath: opts.extractionTargetSelection
+        }),
         ...(opts.pinnedMetaRoot === undefined ? {} : {
           pinnedMetaRoot: opts.pinnedMetaRoot
         }),

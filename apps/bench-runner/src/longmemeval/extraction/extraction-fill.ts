@@ -39,6 +39,13 @@ import {
   DIRECT_DEEPSEEK_500_MAX_CONCURRENCY
 } from "./authority/direct-deepseek-500.js";
 import {
+  assertExtractionTargetSelectionReceipt,
+  assertExtractionTargetSelectionWindow,
+  readExtractionTargetSelectionReceipt,
+  requiresExtractionTargetSelection,
+  type ExtractionTargetSelectionReceipt
+} from "./authority/target-selection/receipt.js";
+import {
   inspectExtractionFillPreparation,
   pinInspectedExtractionFill,
   prepareExtractionFill,
@@ -72,6 +79,7 @@ export interface ExtractionFillOptions {
   readonly log?: (message: string) => void;
   readonly signal?: AbortSignal;
   readonly authorityReceiptPath?: string;
+  readonly targetSelectionReceiptPath?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly r3SpendApproval?: R3SpendApproval;
 }
@@ -151,7 +159,9 @@ async function runLockedExtractionFill(
   const stats = newFillStats();
   const executionAuthority = authority === undefined
     ? undefined
-    : createExtractionExecutionAuthority(authority.receipt, cacheRoot);
+    : createExtractionExecutionAuthority(
+      authority.receipt, cacheRoot, authority.targetSelection
+    );
   const watchdog = executionAuthority === undefined
     ? undefined
     : createExtractionNoProgressWatchdog({
@@ -271,6 +281,7 @@ function resolveExtractionFillConcurrency(
 
 interface ReceiptBoundExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
+  readonly targetSelection?: ExtractionTargetSelectionReceipt;
 }
 
 async function loadExtractionAuthority(
@@ -279,9 +290,46 @@ async function loadExtractionAuthority(
 ): Promise<ReceiptBoundExtractionAuthority> {
   const receipt = readExtractionAuthorityReceipt(options.authorityReceiptPath!);
   assertDirectDeepSeek500MetadataScope(options, receipt);
+  const targetSelection = loadTargetSelection(options, receipt);
   const inspection = await inspectReceiptAuthority(options, cacheRoot, receipt);
-  assertAuthorityInspection(receipt, inspection, cacheRoot);
-  return Object.freeze({ receipt });
+  assertAuthorityInspection(receipt, inspection, cacheRoot, false, targetSelection);
+  return Object.freeze({
+    receipt,
+    ...(targetSelection === undefined ? {} : { targetSelection })
+  });
+}
+
+function loadTargetSelection(
+  options: ExtractionFillOptions,
+  receipt: ExtractionAuthorityReceipt,
+): ExtractionTargetSelectionReceipt | undefined {
+  const targetSelectionRequired = receipt.direct_spend === undefined &&
+    options.extractorFactory === undefined && requiresExtractionTargetSelection(receipt.observation);
+  if (receipt.target_selection_digest === undefined) {
+    if (options.targetSelectionReceiptPath !== undefined) {
+      throw new ExtractionCacheInvariantError(
+        "extraction authority receipt does not bind the supplied target selection"
+      );
+    }
+    if (targetSelectionRequired) {
+      throw new ExtractionCacheInvariantError(
+        "canonical normal LongMemEval-S live extraction authority requires a target selection receipt"
+      );
+    }
+    return undefined;
+  }
+  if (options.targetSelectionReceiptPath === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "extraction authority receipt requires --extraction-target-selection"
+    );
+  }
+  const targetSelection = readExtractionTargetSelectionReceipt(options.targetSelectionReceiptPath);
+  if (targetSelection.receipt_digest !== receipt.target_selection_digest) {
+    throw new ExtractionCacheInvariantError(
+      "extraction authority receipt does not match the target selection receipt"
+    );
+  }
+  return targetSelection;
 }
 
 function assertDirectDeepSeek500MetadataScope(
@@ -303,7 +351,9 @@ async function revalidateExtractionAuthority(
 ): Promise<void> {
   writeLease.assertOwned();
   const inspection = await inspectReceiptAuthority(options, cacheRoot, authority.receipt);
-  assertAuthorityInspection(authority.receipt, inspection, cacheRoot, true);
+  assertAuthorityInspection(
+    authority.receipt, inspection, cacheRoot, true, authority.targetSelection
+  );
 }
 
 function assertReceiptBoundExpansionSpend(
@@ -356,7 +406,8 @@ function assertAuthorityInspection(
   receipt: ExtractionAuthorityReceipt,
   inspection: Awaited<ReturnType<typeof inspectExtractionAuthority>>,
   cacheRoot: string,
-  allowOwnedWriterLock = false
+  allowOwnedWriterLock = false,
+  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined
 ): void {
   assertExtractionAuthorityReceipt(receipt, inspection.observation);
   if (receipt.direct_spend !== undefined) {
@@ -364,6 +415,14 @@ function assertAuthorityInspection(
       authorization: receipt.direct_spend,
       cacheRoot
     });
+  }
+  if (targetSelection !== undefined) {
+    assertExtractionTargetSelectionReceipt({
+      receipt: targetSelection,
+      cacheRoot,
+      observation: inspection.observation
+    });
+    assertExtractionTargetSelectionWindow(targetSelection, inspection.observation);
   }
   assertExtractionAuthorityRuntimeReadiness(receipt, {
     writerLock: inspection.writerLock,

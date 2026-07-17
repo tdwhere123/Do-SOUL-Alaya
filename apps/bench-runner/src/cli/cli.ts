@@ -4,6 +4,7 @@ import { parseFlags, type ParsedFlags } from "./cli-options.js";
 import { runAuthorizeLongMemEvalMatrixCommand } from "./promotion/command.js";
 import { runAuthorizeExtractionCommand } from "./extraction-authority/command.js";
 import { runAuditExtractionCacheCommand } from "./cache-audit/command.js";
+import { runSelectExtractionTargetCommand } from "./target-selection/command.js";
 import {
   runControlledReplayCommand,
   runExtractionFillCommand,
@@ -33,8 +34,9 @@ Usage:
   alaya-bench-runner live [--source <main-check.json|main-check-run.json>] [--history-root <path>]
   alaya-bench-runner controlled-replay [--history-root <path>]
   alaya-bench-runner merge-longmemeval --shards <dir1> <dir2> ... --variant <v> --history-root <path> [--concurrency N]
-  alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] --extraction-authority <receipt.json> [--pinned-meta-root <path>] [--promotion-contract <json>] [--r3-spend-approval <json>]
-  alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>]
+  alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] --extraction-authority <receipt.json> [--extraction-target-selection <receipt.json>] [--pinned-meta-root <path>] [--promotion-contract <json>] [--r3-spend-approval <json>]
+  alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>] [--extraction-target-selection <receipt.json>]
+  alaya-bench-runner select-extraction-target --variant s --offset 0 --limit 100 --extraction-cache-root <new-root> --cache-audit-receipt <audit-receipt.json> --target-selection-out <receipt.json> [--data-dir <path>] [--pinned-meta-root <path>]
   alaya-bench-runner recall-eval --snapshot <db> [--legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>] [--promotion-contract <json>]
   alaya-bench-runner authorize-longmemeval-matrix --contract <json> --out <json>
   alaya-bench-runner audit-extraction-cache --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --rebuild-cache-root <new-root> --cache-audit-output <new-dir> --target-model <model> --target-model-family <family> --target-request-profile <profile> --target-provider-url <url>
@@ -72,6 +74,9 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   if (command === "audit-extraction-cache") {
     return runAuditExtractionCacheCommand(rest);
+  }
+  if (command === "select-extraction-target") {
+    return runSelectExtractionTargetCommand(rest);
   }
   const opts = parseCommandFlags(rest);
   return opts === null ? 2 : dispatchParsedCommand(command, opts);
