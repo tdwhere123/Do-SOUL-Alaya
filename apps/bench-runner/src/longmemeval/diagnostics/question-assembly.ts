@@ -1,9 +1,9 @@
-import { resolvePremiseInvalid } from "../abstention.js";
-import { classifyQuestionMissTaxonomy } from "../diagnostics-miss-taxonomy.js";
+import { resolvePremiseInvalid } from "./abstention.js";
+import { classifyQuestionMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
 import {
   buildQuestionCohortLedger,
   hasAbstentionIdentityConflict
-} from "../diagnostics-cohort.js";
+} from "./diagnostics-cohort.js";
 import type {
   CandidateIdentityObservation,
   DiagnosticActiveConstraintResult,
@@ -13,18 +13,18 @@ import type {
   LongMemEvalQuestionDiagnostic,
   LongMemEvalReplayCandidate,
   NarrowRecallDiagnostics
-} from "../diagnostics-types.js";
+} from "./schema/diagnostics-types.js";
 import {
   hasLongMemEvalSeedDropReasons,
   type LongMemEvalSeedDropReasons
-} from "../seed-drop-reasons.js";
+} from "../extraction/seed-fuel/seed-drop-reasons.js";
 import {
   buildObjectIdentityKey,
   createEmptyGraphExpansionPlaneCountPerEdgeType,
   createEmptyGraphExpansionPlaneCountPerHop,
   hasStructuralPlane,
   isDeliveryBudgetLoss
-} from "../diagnostics-private.js";
+} from "./schema/diagnostics-private.js";
 
 export interface QuestionDiagnosticInput {
   readonly questionId: string;

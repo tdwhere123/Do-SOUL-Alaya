@@ -8,8 +8,8 @@ import {
   DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND,
   type BenchEmbeddingMode,
   type BenchEmbeddingProviderKind
-} from "../harness/daemon-types.js";
-import type { LongMemEvalVariant } from "../longmemeval/dataset.js";
+} from "../harness/daemon/daemon-types.js";
+import type { LongMemEvalVariant } from "../longmemeval/ingestion/dataset.js";
 import { consumePromotionEvidencePathFlags } from "./cli-options-promotion.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");

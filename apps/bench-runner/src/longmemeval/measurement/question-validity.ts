@@ -1,4 +1,4 @@
-import type { LongMemEvalQuestionDiagnostic } from "../diagnostics-types.js";
+import type { LongMemEvalQuestionDiagnostic } from "../diagnostics/schema/diagnostics-types.js";
 import {
   validateQuestionMeasurementStatus,
   type QuestionMeasurementStatus

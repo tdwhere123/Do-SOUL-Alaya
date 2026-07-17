@@ -4,6 +4,16 @@ import {
 } from "../../../longmemeval/extraction/adaptive-concurrency.js";
 
 describe("adaptive extraction concurrency", () => {
+  it("ramps a higher ceiling from its bounded initial concurrency", async () => {
+    const controller = createAdaptiveConcurrencyController({ maximum: 64, initial: 32 });
+    const signal = new AbortController().signal;
+
+    expect(controller.snapshot()).toMatchObject({ maximum: 64, current: 32, active: 0 });
+    await controller.acquire(signal);
+    expect(controller.release(false)).toMatchObject({ current: 33, active: 0 });
+    controller.dispose();
+  });
+
   it("halves concurrency and holds new work through exponential rate-limit backoff", async () => {
     let now = 0;
     let wake: (() => void) | undefined;

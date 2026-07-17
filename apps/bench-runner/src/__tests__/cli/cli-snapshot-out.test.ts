@@ -8,7 +8,7 @@ import { runCli } from "../../cli/index.js";
 import {
   snapshotManifestPath,
   snapshotSidecarPath
-} from "../../longmemeval/snapshot.js";
+} from "../../longmemeval/snapshot/materialize.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset

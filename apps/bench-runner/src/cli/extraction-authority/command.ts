@@ -1,6 +1,6 @@
 import process from "node:process";
 import { parseFlags } from "../cli-options.js";
-import { resolveEffectiveExtractionCacheRoot } from "../../longmemeval/compile-seed-config.js";
+import { resolveEffectiveExtractionCacheRoot } from "../../longmemeval/compile-seed/compile-seed-config.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision,
@@ -11,6 +11,10 @@ import {
   computeExtractionAuthorityLineageDigest,
   writeExtractionAuthorityReceipt
 } from "../../longmemeval/extraction/authority/receipt.js";
+import {
+  createFreshDirectDeepSeek500Authorization,
+  discardFreshDirectDeepSeek500Authorization
+} from "../../longmemeval/extraction/authority/direct-deepseek-500.js";
 import { readExtractionAttemptLedger } from
   "../../longmemeval/extraction/authority/attempt-ledger.js";
 
@@ -24,83 +28,40 @@ interface AuthorizeExtractionArgs {
   readonly maximumInputTokens: number;
   readonly diskFloorBytes: number;
   readonly probeKey?: string;
+  readonly directDeepSeek500Operator?: string;
+}
+
+interface AuthorizeExtractionDependencies {
+  readonly inspect?: typeof inspectExtractionAuthority;
+  readonly write?: typeof writeExtractionAuthorityReceipt;
+  readonly readRevision?: () => string;
+  readonly readLedger?: typeof readExtractionAttemptLedger;
+  readonly createDirectSpend?: typeof createFreshDirectDeepSeek500Authorization;
+  readonly discardDirectSpend?: typeof discardFreshDirectDeepSeek500Authorization;
 }
 
 export async function runAuthorizeExtractionCommand(
   args: ReadonlyArray<string>,
-  deps: {
-    readonly inspect?: typeof inspectExtractionAuthority;
-    readonly write?: typeof writeExtractionAuthorityReceipt;
-    readonly readRevision?: () => string;
-    readonly readLedger?: typeof readExtractionAttemptLedger;
-  } = {}
+  deps: AuthorizeExtractionDependencies = {}
 ): Promise<number> {
+  let freshDirectSpend: ReturnType<typeof createFreshDirectDeepSeek500Authorization> | undefined;
+  let freshDirectCacheRoot: string | undefined;
   try {
-    const flags = parseFlags(args);
-    const authority = parseAuthorizeExtractionArgs(args);
-    const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
-    const inspectInput = {
-      variant: flags.variant,
-      ...(flags.limit === undefined ? {} : { limit: flags.limit }),
-      ...(flags.offset === undefined ? {} : { offset: flags.offset }),
-      cacheRoot,
-      ...(flags.dataDir === undefined ? {} : { dataDir: flags.dataDir }),
-      ...(flags.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: flags.pinnedMetaRoot }),
-      revision: (deps.readRevision ?? readCurrentExtractionAuthorityRevision)(),
-      action: authority.action
-    } as const;
-    const inspect = deps.inspect ?? inspectExtractionAuthority;
-    const initial = await inspect(inspectInput);
-    const ledger = (deps.readLedger ?? readExtractionAttemptLedger)({
-      cacheRoot,
-      lineageDigest: computeExtractionAuthorityLineageDigest(initial.observation),
-      cacheIdentity: {
-        model: initial.observation.extraction.model,
-        requestProfile: initial.observation.extraction.requestProfile
-      }
+    const authorized = await buildAuthorizedReceipt(args, deps, (spend, cacheRoot) => {
+      freshDirectSpend = spend;
+      freshDirectCacheRoot = cacheRoot;
     });
-    const inspection = ledger === undefined
-      ? initial
-      : await inspect({ ...inspectInput, excludeContentClosureKeys: ledger.successfulKeys });
-    assertInspectableAuthority(inspection, authority);
-    const receipt = createExtractionAuthorityReceipt({
-      action: authority.action,
-      observation: inspection.observation,
-      outputTokenCap: {
-        field: authority.outputTokenField,
-        value: authority.outputTokenCap
-      },
-      priceEstimate: {
-        inputUsdPerMillion: authority.inputPriceUsdPerMillion,
-        outputUsdPerMillion: authority.outputPriceUsdPerMillion,
-        maximumInputTokensPerAttempt: authority.maximumInputTokens
-      },
-      diskFloorBytes: authority.diskFloorBytes,
-      ...(flags.concurrency === undefined ? {} : { maxConcurrency: flags.concurrency }),
-      ...(authority.probeKey === undefined ? {} : { probeKey: authority.probeKey }),
-      ...(ledger === undefined ? {} : {
-        cumulativeLimits: {
-          startingMissing: ledger.startingMissing,
-          maximumAttempts: ledger.maximumAttempts,
-          successfulShardCeiling: ledger.successfulShardCeiling
-        }
-      }),
-      inspection: {
-        writerLock: inspection.writerLock,
-        disk: inspection.disk,
-        credentialStatus: inspection.credentialStatus,
-        modelReadiness: inspection.modelReadiness
-      }
-    });
-    (deps.write ?? writeExtractionAuthorityReceipt)(authority.outputPath, receipt);
-    process.stdout.write(
-      `Extraction authority receipt written: ${authority.outputPath}\n` +
-      `  action=${receipt.action} identity=${receipt.identity_digest} ` +
-      `receipt=${receipt.receipt_digest} missing=${receipt.limits.starting_missing} ` +
-      `attempt_cap=${receipt.limits.maximum_attempts}\n`
-    );
+    (deps.write ?? writeExtractionAuthorityReceipt)(authorized.outputPath, authorized.receipt);
+    freshDirectSpend = undefined;
+    process.stdout.write(renderAuthorizedReceipt(authorized.outputPath, authorized.receipt));
     return 0;
   } catch (error) {
+    if (freshDirectSpend !== undefined && freshDirectCacheRoot !== undefined) {
+      (deps.discardDirectSpend ?? discardFreshDirectDeepSeek500Authorization)({
+        authorization: freshDirectSpend,
+        cacheRoot: freshDirectCacheRoot
+      });
+    }
     process.stderr.write(
       `alaya-bench-runner authorize-extraction: ${error instanceof Error
         ? error.message
@@ -108,6 +69,135 @@ export async function runAuthorizeExtractionCommand(
     );
     return 2;
   }
+}
+
+async function buildAuthorizedReceipt(
+  args: ReadonlyArray<string>,
+  deps: AuthorizeExtractionDependencies,
+  onFreshDirectSpend: (
+    spend: ReturnType<typeof createFreshDirectDeepSeek500Authorization> | undefined,
+    cacheRoot: string
+  ) => void
+) {
+  const flags = parseFlags(args);
+  const authority = parseAuthorizeExtractionArgs(args);
+  const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
+  const directSpend = createDirectSpend(authority, cacheRoot, deps);
+  onFreshDirectSpend(directSpend, cacheRoot);
+  const { inspection, ledger } = await inspectAuthorityForReceipt(
+    flags, authority, cacheRoot, deps
+  );
+  assertInspectableAuthority(inspection, authority);
+  return Object.freeze({
+    outputPath: authority.outputPath,
+    receipt: createReceipt(authority, flags.concurrency, inspection, ledger, directSpend)
+  });
+}
+
+function createDirectSpend(
+  authority: AuthorizeExtractionArgs,
+  cacheRoot: string,
+  deps: AuthorizeExtractionDependencies
+) {
+  return authority.directDeepSeek500Operator === undefined
+    ? undefined
+    : (deps.createDirectSpend ?? createFreshDirectDeepSeek500Authorization)({
+      cacheRoot,
+      operator: authority.directDeepSeek500Operator
+    });
+}
+
+async function inspectAuthorityForReceipt(
+  flags: ReturnType<typeof parseFlags>,
+  authority: AuthorizeExtractionArgs,
+  cacheRoot: string,
+  deps: AuthorizeExtractionDependencies
+) {
+  const inspectInput = {
+    variant: flags.variant,
+    ...(flags.limit === undefined ? {} : { limit: flags.limit }),
+    ...(flags.offset === undefined ? {} : { offset: flags.offset }),
+    cacheRoot,
+    ...(flags.dataDir === undefined ? {} : { dataDir: flags.dataDir }),
+    ...(flags.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: flags.pinnedMetaRoot }),
+    revision: (deps.readRevision ?? readCurrentExtractionAuthorityRevision)(),
+    action: authority.action
+  } as const;
+  const inspect = deps.inspect ?? inspectExtractionAuthority;
+  const initial = await inspect(inspectInput);
+  const ledger = (deps.readLedger ?? readExtractionAttemptLedger)(ledgerReadInput(
+    cacheRoot, initial.observation
+  ));
+  const inspection = ledger === undefined
+    ? initial
+    : await inspect({ ...inspectInput, excludeContentClosureKeys: ledger.successfulKeys });
+  return Object.freeze({ inspection, ledger });
+}
+
+function ledgerReadInput(
+  cacheRoot: string,
+  observation: Awaited<ReturnType<typeof inspectExtractionAuthority>>["observation"]
+) {
+  return {
+    cacheRoot,
+    lineageDigest: computeExtractionAuthorityLineageDigest(observation),
+    cacheIdentity: {
+      model: observation.extraction.model,
+      requestProfile: observation.extraction.requestProfile
+    }
+  };
+}
+
+function createReceipt(
+  authority: AuthorizeExtractionArgs,
+  maxConcurrency: number | undefined,
+  inspection: ExtractionAuthorityInspection,
+  ledger: ReturnType<typeof readExtractionAttemptLedger>,
+  directSpend: ReturnType<typeof createFreshDirectDeepSeek500Authorization> | undefined
+) {
+  return createExtractionAuthorityReceipt({
+    action: authority.action,
+    observation: inspection.observation,
+    outputTokenCap: { field: authority.outputTokenField, value: authority.outputTokenCap },
+    priceEstimate: {
+      inputUsdPerMillion: authority.inputPriceUsdPerMillion,
+      outputUsdPerMillion: authority.outputPriceUsdPerMillion,
+      maximumInputTokensPerAttempt: authority.maximumInputTokens
+    },
+    diskFloorBytes: authority.diskFloorBytes,
+    ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
+    ...(authority.probeKey === undefined ? {} : { probeKey: authority.probeKey }),
+    ...(ledger === undefined ? {} : {
+      cumulativeLimits: {
+        startingMissing: ledger.startingMissing,
+        maximumAttempts: ledger.maximumAttempts,
+        successfulShardCeiling: ledger.successfulShardCeiling
+      }
+    }),
+    inspection: inspectionSummary(inspection),
+    ...(directSpend === undefined ? {} : { directSpend })
+  });
+}
+
+function inspectionSummary(inspection: ExtractionAuthorityInspection) {
+  return {
+    writerLock: inspection.writerLock,
+    disk: inspection.disk,
+    credentialStatus: inspection.credentialStatus,
+    modelReadiness: inspection.modelReadiness
+  };
+}
+
+function renderAuthorizedReceipt(
+  outputPath: string,
+  receipt: ReturnType<typeof createExtractionAuthorityReceipt>
+): string {
+  return `Extraction authority receipt written: ${outputPath}\n` +
+    `  action=${receipt.action} identity=${receipt.identity_digest} ` +
+    `receipt=${receipt.receipt_digest} missing=${receipt.limits.starting_missing} ` +
+    `attempt_cap=${receipt.limits.maximum_attempts}` +
+    (receipt.direct_spend === undefined ? "" : " spend=deepseek_direct_500") +
+    "\n";
 }
 
 function assertInspectableAuthority(
@@ -145,13 +235,19 @@ function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExt
     ),
     maximumInputTokens: requiredNonNegativeInt(args, "--extraction-max-input-tokens"),
     diskFloorBytes: requiredNonNegativeInt(args, "--extraction-disk-floor-bytes"),
-    probeKey: optionalString(args, "--extraction-probe-key")
+    probeKey: optionalString(args, "--extraction-probe-key"),
+    directDeepSeek500Operator: optionalRequiredString(
+      args, "--direct-deepseek-500-operator"
+    )
   };
   if (parsed.action === "probe" && parsed.probeKey === undefined) {
     throw new Error("--extraction-probe-key is required when --extraction-action=probe");
   }
   if (parsed.action === "fill" && parsed.probeKey !== undefined) {
     throw new Error("--extraction-probe-key is only valid when --extraction-action=probe");
+  }
+  if (parsed.directDeepSeek500Operator !== undefined && parsed.action !== "fill") {
+    throw new Error("--direct-deepseek-500-operator is only valid when --extraction-action=fill");
   }
   return parsed;
 }
@@ -171,6 +267,12 @@ function optionalString(args: ReadonlyArray<string>, flag: string): string | und
     if (token?.startsWith(`${flag}=`)) return token.slice(flag.length + 1);
   }
   return undefined;
+}
+
+function optionalRequiredString(args: ReadonlyArray<string>, flag: string): string | undefined {
+  return args.some((token) => token === flag || token.startsWith(`${flag}=`))
+    ? requiredString(args, flag)
+    : undefined;
 }
 
 function requiredPositiveInt(args: ReadonlyArray<string>, flag: string): number {

@@ -4,8 +4,8 @@ import {
   buildTokenEconomy,
   computeTokenSavedRatio
 } from "@do-soul/alaya-eval";
-import { aggregateBenchTokenMetrics, assertBenchTokenEconomyContract } from "../../harness/token-economy.js";
-import { aggregateRecallTokenEconomy } from "../recall-token-economy.js";
+import { aggregateBenchTokenMetrics, assertBenchTokenEconomyContract } from "../../harness/token/token-economy.js";
+import { aggregateRecallTokenEconomy } from "../qa/recall-token-economy.js";
 import type { RecallEvalAccumulator } from "./recall-eval-accumulator.js";
 
 export interface RecallEvalAggregates {

@@ -6,7 +6,7 @@ import { entrySlug, writeEntry, type HistoryLayout, type KpiPayload } from "@do-
 import {
   RECALL_EVAL_ARCHIVE_MARKER,
   selectRecallEvalBaseline
-} from "../../../longmemeval/recall-eval-archive.js";
+} from "../../../longmemeval/lifecycle/recall-eval/recall-eval-archive-impl.js";
 import { buildPublicPayload, withAnswerRerank, withBiIdentity } from "./archive-fixture.js";
 
 let historyRoot: string;

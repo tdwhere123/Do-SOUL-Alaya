@@ -17,8 +17,8 @@ import {
   readExtractionCacheManifestIdentity,
   type ExtractionCacheManifestV3,
   type ExtractionRequestProfile
-} from "../../longmemeval/extraction-cache-manifest.js";
-import { loadDatasetWithIdentity } from "../../longmemeval/fetch.js";
+} from "../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { loadDatasetWithIdentity } from "../../longmemeval/ingestion/fetch.js";
 import {
   assertFreshExtractionCacheRoot,
   decideExtractionCacheCompatibility,

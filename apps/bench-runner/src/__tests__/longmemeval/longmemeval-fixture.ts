@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LongMemEvalQuestion } from "../../longmemeval/dataset.js";
+import type { LongMemEvalQuestion } from "../../longmemeval/ingestion/dataset.js";
 
 // @anchor longmemeval-test-fixture — shared tiny-dataset builder for the
 // offline (no-credentials) seed path. Reused by the snapshot / CLI / recall-eval

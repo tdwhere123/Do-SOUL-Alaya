@@ -1,7 +1,7 @@
 import process from "node:process";
-import { runExtractionFill } from "../../longmemeval/extraction-fill.js";
+import { runExtractionFill } from "../../longmemeval/extraction/extraction-fill.js";
 import { ExtractionFillTaskError } from
-  "../../longmemeval/extraction/fill-pool.js";
+  "../../longmemeval/extraction/fill/fill-pool.js";
 import type { ParsedFlags } from "../cli-options.js";
 import { verifyLongMemEvalExpansionContractInput } from
   "../promotion/expansion-input.js";

@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs";
-import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall/recall-diagnostics-schema.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
 import type { BenchEmbeddingMode, BenchWorkspaceHandle } from "../harness/daemon.js";
 import {
@@ -10,11 +10,11 @@ import {
   scoreQaQuestion,
   type QaDeliveredCandidate,
   type QaQuestionVerdict
-} from "../longmemeval/qa-harness.js";
-import { selectRelevantMemories } from "../longmemeval/qa-llm-filter.js";
-import { buildQaSupportPack } from "../longmemeval/qa-support-pack.js";
-import { resolveQaDeliveryBudget } from "../longmemeval/runner-question.js";
-import { extractRecallTokenEconomy } from "../longmemeval/recall-token-economy.js";
+} from "../longmemeval/qa/qa-harness.js";
+import { selectRelevantMemories } from "../longmemeval/qa/qa-llm-filter.js";
+import { buildQaSupportPack } from "../longmemeval/qa/qa-support-pack.js";
+import { resolveQaDeliveryBudget } from "../longmemeval/runner/question/runner-question.js";
+import { extractRecallTokenEconomy } from "../longmemeval/qa/recall-token-economy.js";
 import type { LocomoQa, LocomoSample } from "./dataset.js";
 import type { LocomoRunOptions } from "./runner-types.js";
 import type { LocomoSeededConversation } from "./runner-conversation-seed.js";

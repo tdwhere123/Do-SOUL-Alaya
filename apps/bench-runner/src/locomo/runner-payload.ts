@@ -6,12 +6,12 @@ import {
 import {
   aggregateBenchTokenMetrics,
   assertBenchTokenEconomyContract
-} from "../harness/token-economy.js";
+} from "../harness/token/token-economy.js";
 import type { BenchEmbeddingMode } from "../harness/daemon.js";
 import {
   aggregateQaVerdicts,
   buildQaDeliverySettings
-} from "../longmemeval/qa-harness.js";
+} from "../longmemeval/qa/qa-harness.js";
 import type { CompileSeedExtractionStats } from "../longmemeval/compile-seed.js";
 import { toSeedExtractionPathKpi } from "../longmemeval/compile-seed.js";
 import {
@@ -22,7 +22,7 @@ import {
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar
 } from "../longmemeval/diagnostics.js";
-import { aggregateRecallTokenEconomy } from "../longmemeval/recall-token-economy.js";
+import { aggregateRecallTokenEconomy } from "../longmemeval/qa/recall-token-economy.js";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import type { LocomoSample } from "./dataset.js";
 import type { LocomoConversationAggregate } from "./runner-window.js";

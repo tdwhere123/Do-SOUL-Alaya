@@ -11,6 +11,7 @@ export interface AdaptiveConcurrencySnapshot {
 
 export function createAdaptiveConcurrencyController(input: {
   readonly maximum: number;
+  readonly initial?: number;
   readonly now?: () => number;
   readonly setTimeout?: typeof setTimeout;
   readonly clearTimeout?: typeof clearTimeout;
@@ -21,7 +22,9 @@ export function createAdaptiveConcurrencyController(input: {
   readonly dispose: () => void;
 } {
   assertMaximum(input.maximum);
-  const state = createState(input.maximum, input.now ?? Date.now);
+  const initial = input.initial ?? input.maximum;
+  assertInitial(initial, input.maximum);
+  const state = createState(input.maximum, initial, input.now ?? Date.now);
   const schedule = input.setTimeout ?? setTimeout;
   const cancel = input.clearTimeout ?? clearTimeout;
   return {
@@ -44,11 +47,11 @@ interface AdaptiveState {
   waiters: Set<() => void>;
 }
 
-function createState(maximum: number, now: () => number): AdaptiveState {
+function createState(maximum: number, initial: number, now: () => number): AdaptiveState {
   return {
     maximum,
     now,
-    current: maximum,
+    current: initial,
     active: 0,
     rateLimitStreak: 0,
     resumeAt: 0,
@@ -148,5 +151,11 @@ function disposeWaiters(state: AdaptiveState, cancel: typeof clearTimeout): void
 function assertMaximum(value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error("adaptive extraction concurrency maximum must be a positive safe integer");
+  }
+}
+
+function assertInitial(value: number, maximum: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw new Error("adaptive extraction concurrency initial value is outside its maximum");
   }
 }

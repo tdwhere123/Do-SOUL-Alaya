@@ -1,6 +1,6 @@
 import { createLongMemEvalSelectionContractIdentity } from "@do-soul/alaya-eval";
 import { buildLongMemEvalMatrixPromotionAuthorization } from
-  "../../../longmemeval/promotion/authorization.js";
+  "../../../longmemeval/promotion/schema/authorization.js";
 
 export function promotionAuthorizationFixture() {
   const datasetSha256 = "d".repeat(64);

@@ -5,14 +5,14 @@ import {
 import type { LongMemEvalSnapshotRunProvenance } from "./run-provenance.js";
 import { isSnapshotRunProvenanceSummaryGateEligible } from
   "./run-provenance.js";
-import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../extraction-cache-manifest.js";
+import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../extraction/cache/extraction-cache-manifest.js";
 import {
   hasMatchingCompleteExtractionFillSummary
-} from "../extraction/fill-authority.js";
+} from "../extraction/fill/fill-authority.js";
 import type {
   LongMemEvalSnapshotManifest,
   SnapshotExtractionProvenance
-} from "../snapshot.js";
+} from "./materialize.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
 import { isDeepStrictEqual } from "node:util";
 

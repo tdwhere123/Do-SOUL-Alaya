@@ -22,11 +22,11 @@ import {
   LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME,
   LONGMEMEVAL_DIAGNOSTICS_FILENAME,
   renderLongMemEvalColdWarmComparisonSidecar
-} from "../archive-evidence.js";
+} from "./archive-evidence.js";
 import {
   LONGMEMEVAL_COHORT_LEDGER_FILENAME,
   renderLongMemEvalCohortLedger
-} from "../cohort-ledger.js";
+} from "../selection/cohort-ledger.js";
 import {
   renderCompactDiagnosticsSidecar,
   summarizeLongMemEvalRecallEvidence,
@@ -35,8 +35,8 @@ import {
   type LongMemEvalDiagnosticsSidecar,
   type LongMemEvalQuestionDiagnostic
 } from "../diagnostics.js";
-import { resolveBenchDiagnosticsArtifactRoot } from "../diagnostics-artifacts.js";
-import { writeDiagnosticsGzipStream } from "../diagnostics/artifact-gzip-stream.js";
+import { resolveBenchDiagnosticsArtifactRoot } from "../diagnostics/artifacts/diagnostics-artifacts.js";
+import { writeDiagnosticsGzipStream } from "../diagnostics/artifacts/artifact-gzip-stream.js";
 import { withCurrentMeasurementAttribution } from "../measurement/archive-attribution.js";
 import {
   createLongMemEvalHistoryLayout,
@@ -48,7 +48,7 @@ import {
   type StagedDiagnosticsArtifact
 } from "../measurement/artifact-transaction.js";
 import { buildArchiveEvidenceManifestSidecar } from
-  "../provenance/archive-evidence-sidecar.js";
+  "../provenance/archive/archive-evidence-sidecar.js";
 import { buildLongMemEvalRunProvenanceSidecar } from "../provenance/run.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import type { LongMemEvalSelectionContract } from "../selection/contract.js";
@@ -56,7 +56,7 @@ import { selectionContractIdentity } from "../selection/contract.js";
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
-} from "../seed-extraction-release-blocker.js";
+} from "../extraction/seed-fuel/seed-extraction-release-blocker.js";
 
 type TierOneLongMemEvalBenchName = Extract<
   BenchName,

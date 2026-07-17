@@ -1,0 +1,69 @@
+import type {
+  BenchPolicyShape,
+  BenchSimulateReportMode
+} from "@do-soul/alaya-eval";
+import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
+import {
+  aggregateLongMemEvalRunResults,
+  logLongMemEvalExtractionStats
+} from "./runner-archive-aggregate.js";
+import { buildLongMemEvalRunPayload } from "./runner-archive-payload.js";
+import { writeLongMemEvalRunArchive } from "./runner-archive-write.js";
+import type { CompileSeedExtractionStats } from "../../compile-seed.js";
+import type { BenchCommitInfo } from "../runner-helpers.js";
+import type { LongMemEvalRunOptions, LongMemEvalRunResult } from "../../runner.js";
+import type { LongMemEvalWorkerResult } from "../question/runner-question.js";
+import type { LongMemEvalDiagnosticsSpool } from "../../diagnostics/spool.js";
+import type { LongMemEvalSelectionContract } from "../../selection/contract.js";
+import type { LongMemEvalReleaseEvidenceAuthority } from
+  "@do-soul/alaya-eval/internal";
+
+// End-to-end QA option, shape mirrors cli.ts qaOption (chat fn + model labels).
+export async function finalizeLongMemEvalRun(input: {
+  readonly opts: LongMemEvalRunOptions;
+  readonly questionsLength: number;
+  readonly windowLength: number;
+  readonly datasetSha256: string;
+  readonly datasetChecksumSource: string;
+  readonly datasetSourcePath: string;
+  readonly releaseEvidenceAuthority: LongMemEvalReleaseEvidenceAuthority | null;
+  readonly selectionContract: LongMemEvalSelectionContract;
+  readonly collected: readonly LongMemEvalWorkerResult[];
+  readonly extractionStats: CompileSeedExtractionStats;
+  readonly seedFuelInventory: import("../../extraction/seed-fuel/seed-fuel-inventory.js").SeedFuelInventory;
+  readonly alayaVersion: string;
+  readonly commitInfo: BenchCommitInfo;
+  readonly commitSha7: string;
+  readonly runAt: Date;
+  readonly embeddingProviderLabel: string;
+  readonly policyShape: BenchPolicyShape;
+  readonly simulateReport: BenchSimulateReportMode;
+  readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
+  readonly questionFailures: number;
+  readonly failedQuestionIds: readonly string[];
+  readonly diagnosticsSpool: LongMemEvalDiagnosticsSpool;
+}): Promise<LongMemEvalRunResult> {
+  logLongMemEvalExtractionStats(input.extractionStats);
+  const aggregate = aggregateLongMemEvalRunResults(input.collected);
+  const build = buildLongMemEvalRunPayload({
+    ...input,
+    aggregate
+  });
+  return writeLongMemEvalRunArchive({
+    opts: input.opts,
+    datasetSha256: input.datasetSha256,
+    datasetSourcePath: input.datasetSourcePath,
+    datasetChecksumSource: input.datasetChecksumSource,
+    releaseEvidenceAuthority: input.releaseEvidenceAuthority,
+    selectionContract: input.selectionContract,
+    aggregate,
+    build,
+    commitInfo: input.commitInfo,
+    commitSha7: input.commitSha7,
+    runAt: input.runAt,
+    questionFailures: input.questionFailures,
+    failedQuestionIds: input.failedQuestionIds,
+    collectedLength: input.collected.length,
+    diagnosticsSpool: input.diagnosticsSpool
+  });
+}

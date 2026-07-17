@@ -1,6 +1,6 @@
 import {
   benchSessionSurfacesEnabled
-} from "../harness/daemon-support.js";
+} from "../harness/daemon/daemon-support.js";
 import type { BenchWorkspaceHandle } from "../harness/daemon.js";
 import {
   computeNextTurnSeedRefs,

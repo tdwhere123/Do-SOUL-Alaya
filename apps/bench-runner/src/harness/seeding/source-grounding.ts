@@ -3,7 +3,7 @@ import {
   filterSourceAssertionEntities,
   resolveSourceAssertion
 } from "@do-soul/alaya-soul";
-import type { BenchSignalSeedInput } from "../daemon-types.js";
+import type { BenchSignalSeedInput } from "../daemon/daemon-types.js";
 
 export function attachCompileSourceGrounding(
   rawPayload: Readonly<Record<string, unknown>>,

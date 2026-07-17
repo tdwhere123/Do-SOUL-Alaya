@@ -1,5 +1,5 @@
 import type { ExtractionRequestProfile } from "../request-profile.js";
-import { inspectCachedExtraction } from "../../compile-seed-cache.js";
+import { inspectCachedExtraction } from "../../compile-seed/compile-seed-cache.js";
 
 export interface ExtractionAttemptLedgerCacheIdentity {
   readonly model: string;

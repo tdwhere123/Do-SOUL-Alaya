@@ -1,10 +1,10 @@
 import { renderCompactDiagnosticsSidecar, summarizeLongMemEvalMissTaxonomy, summarizeProviderStates, type LongMemEvalDiagnosticsSidecar, type LongMemEvalEmbeddingVectorCacheSummary, type LongMemEvalMissTaxonomySummary, type LongMemEvalQueryEmbeddingCacheSummary, type LongMemEvalQuestionDiagnostic, type LongMemEvalReportUsageSummary } from "../longmemeval/diagnostics.js";
-import type { LongMemEvalArchiveEvidenceSummary } from "../longmemeval/archive-evidence.js";
+import type { LongMemEvalArchiveEvidenceSummary } from "../longmemeval/archive/archive-evidence.js";
 import type { KpiPayload } from "@do-soul/alaya-eval";
 import {
   mergeMissTaxonomySummaries,
   readCompactMissTaxonomySummary
-} from "../longmemeval/diagnostics-miss-taxonomy.js";
+} from "../longmemeval/diagnostics/miss/diagnostics-miss-taxonomy.js";
 import { ratio } from "./merge-shared.js";
 
 export function buildMergedLongMemEvalDiagnosticsSidecar(

@@ -1,13 +1,13 @@
 import { isDeepStrictEqual } from "node:util";
-import type { ExtractionFillManifestContract } from "./fill-manifest-contract.js";
+import type { ExtractionFillManifestContract } from "./fill/manifest/fill-manifest-contract.js";
 import {
   LongMemEvalExpansionLineageSchema,
   type LongMemEvalExpansionLineage
-} from "../promotion/expansion-lineage-schema.js";
+} from "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import {
   LongMemEvalExpansionSourceAnchorSchema,
   type LongMemEvalExpansionSourceAnchor
-} from "../promotion/expansion-source-anchor-schema.js";
+} from "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 
 export interface ExpansionManifestArtifacts {
   readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;

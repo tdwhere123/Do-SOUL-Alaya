@@ -1,10 +1,10 @@
-import type { LongMemEvalQuestion } from "../dataset.js";
-import type { LongMemEvalSnapshotSidecarFile } from "../snapshot.js";
+import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
+import type { LongMemEvalSnapshotSidecarFile } from "./materialize.js";
 import {
   buildLongMemEvalSidecarKey,
   deriveLongMemEvalGoldMemoryIds,
   type LongMemEvalSidecarEntry
-} from "../runner-scoring.js";
+} from "../runner/runner-scoring.js";
 import { classifyLongMemEvalDatasetCohort } from
   "../selection/dataset-cohort.js";
 

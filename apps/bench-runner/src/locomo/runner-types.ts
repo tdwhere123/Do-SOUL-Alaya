@@ -3,7 +3,7 @@ import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
 } from "../harness/daemon.js";
-import type { QaChatFn } from "../longmemeval/qa-chat.js";
+import type { QaChatFn } from "../longmemeval/qa/qa-chat.js";
 import type { LocomoVariant } from "./dataset.js";
 import type { LocomoFetchResult } from "./fetch.js";
 

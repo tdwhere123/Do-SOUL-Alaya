@@ -21,26 +21,26 @@ export type {
   LongMemEvalReportUsageSummary,
   LongMemEvalMissTaxonomySummary,
   ProviderStateSummary
-} from "./diagnostics-types.js";
+} from "./diagnostics/schema/diagnostics-types.js";
 export {
   buildQuestionDiagnostic,
   rAt5WithProviderReturned,
   summarizeProviderStates
-} from "./diagnostics-question.js";
+} from "./diagnostics/diagnostics-question.js";
 export {
   buildLongMemEvalQualityMetrics,
   buildPerPlaneRecallCoverage
-} from "./diagnostics-quality.js";
-export { buildLongMemEvalFullGoldCoverage } from "./diagnostics-full-gold-coverage.js";
+} from "./diagnostics/quality/diagnostics-quality.js";
+export { buildLongMemEvalFullGoldCoverage } from "./diagnostics/diagnostics-full-gold-coverage.js";
 export {
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
   stripReplayCandidatePoolsForGateWrite,
   summarizeLongMemEvalRecallEvidence,
   summarizeLongMemEvalReportSideEffects
-} from "./diagnostics-sidecar.js";
+} from "./diagnostics/diagnostics-sidecar.js";
 export {
   createEmptyMissTaxonomyDistribution,
   readQuestionMissTaxonomy,
   summarizeLongMemEvalMissTaxonomy
-} from "./diagnostics-miss-taxonomy.js";
+} from "./diagnostics/miss/diagnostics-miss-taxonomy.js";

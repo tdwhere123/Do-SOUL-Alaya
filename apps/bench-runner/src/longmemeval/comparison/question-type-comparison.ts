@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   LongMemEvalQuestionSchema,
   type LongMemEvalQuestion
-} from "../dataset.js";
+} from "../ingestion/dataset.js";
 import {
   assertCurrentComparisonEvidence,
   parseCurrentKpiEvidence,
@@ -18,7 +18,7 @@ import {
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
 import { assertProductFormationEnvironment } from
-  "../product-formation-policy.js";
+  "../promotion/product/product-formation-policy.js";
 import { validateCacheDatasetBinding } from "./cache-dataset-binding.js";
 import {
   parseLongMemEvalVariant,

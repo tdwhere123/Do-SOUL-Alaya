@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   verifyLongMemEvalExpansionCapability,
   type LongMemEvalExpansionCapability
-} from "../../longmemeval/promotion/expansion-capability.js";
+} from "../../longmemeval/promotion/expansion/expansion-capability.js";
 import { readLongMemEvalMatrixPromotionContract } from "./contract-input.js";
 
 export interface LongMemEvalExpansionContractInputDependencies {

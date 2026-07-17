@@ -12,25 +12,25 @@ import {
   ALAYA_RECALL_WEIGHT_OVERRIDES_ENV,
   formatBenchRecallWeightOverrides,
   resolveBenchRecallWeightOverrides
-} from "../harness/recall-weight-overrides.js";
-import type { FetchResult } from "./fetch.js";
-import type { LongMemEvalVariant } from "./dataset.js";
-import type { QaChatFn } from "./qa-chat.js";
-import { finalizeLongMemEvalRun } from "./runner-archive.js";
+} from "../harness/recall/recall-weight-overrides.js";
+import type { FetchResult } from "./ingestion/fetch.js";
+import type { LongMemEvalVariant } from "./ingestion/dataset.js";
+import type { QaChatFn } from "./qa/qa-chat.js";
+import { finalizeLongMemEvalRun } from "./runner/archive/runner-archive.js";
 import {
   runLongMemEvalConcurrent,
   shouldFanOutLongMemEvalWorkers
-} from "./runner-concurrency.js";
-import { executeLongMemEvalRun } from "./runner-execution.js";
+} from "./runner/runner-concurrency.js";
+import { executeLongMemEvalRun } from "./runner/runner-execution.js";
 import { prepareLongMemEvalRun } from "./runner/prepare-context.js";
 import {
   withLongMemEvalDiagnosticsSpool,
   type LongMemEvalDiagnosticsSpool
 } from "./diagnostics/spool.js";
 import { assertExpansionRunAuthority } from
-  "./promotion/expansion-run-authority.js";
+  "./promotion/expansion/authority/expansion-run-authority.js";
 import type { LongMemEvalExpansionCapability } from
-  "./promotion/expansion-capability.js";
+  "./promotion/expansion/expansion-capability.js";
 export {
   buildLongMemEvalReportContextUsage,
   buildLongMemEvalSidecarKey,
@@ -44,7 +44,7 @@ export {
   type LongMemEvalHitScoringResult,
   type LongMemEvalReportSimulationStats,
   type LongMemEvalSidecarEntry
-} from "./runner-helpers.js";
+} from "./runner/runner-helpers.js";
 
 export interface LongMemEvalQaRunOption {
   readonly chat: QaChatFn;

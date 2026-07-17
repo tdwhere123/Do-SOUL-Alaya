@@ -14,7 +14,7 @@ import {
 import { startBenchDaemon } from "../harness/daemon.js";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../shared/version.js";
 import { monotonicElapsedMs, monotonicNowNs } from "../shared/monotonic.js";
-import { rotatingSeedObjectKind } from "../harness/seed-rotation.js";
+import { rotatingSeedObjectKind } from "../harness/seeding/seed-rotation.js";
 import { SYNTHETIC_SCENARIOS, type SyntheticScenario } from "./scenarios.js";
 
 export interface SelfBenchRunOptions {

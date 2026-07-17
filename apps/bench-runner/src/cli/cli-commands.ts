@@ -5,7 +5,7 @@ import {
   type KpiPayload,
   type VerifiedLongMemEvalEvidenceContext
 } from "@do-soul/alaya-eval";
-import { fetchLongMemEval } from "../longmemeval/fetch.js";
+import { fetchLongMemEval } from "../longmemeval/ingestion/fetch.js";
 import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
 import { runLongMemEvalCrossQuestion } from "../longmemeval/crossquestion.js";
 import { runLiveBench } from "../live/runner.js";
@@ -18,7 +18,7 @@ import {
   createGardenChatFn,
   resolveQaChatConfig,
   resolveQaJudgeChatConfig
-} from "../longmemeval/qa-chat.js";
+} from "../longmemeval/qa/qa-chat.js";
 import { runSelfBench } from "../self/runner.js";
 import { fetchLocomo } from "../locomo/fetch.js";
 import { runLocomo } from "../locomo/runner.js";

@@ -2,12 +2,22 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExtractionRequestProfile } from "../request-profile.js";
-import { computeExtractionAttemptCeiling } from "./attempt-ledger.js";
+import {
+  assertDirectDeepSeek500Authorization,
+  isDirectDeepSeek500Authorization,
+  type DirectDeepSeek500SpendAuthorization
+} from "./direct-deepseek-500.js";
+import {
+  expectedExtractionAuthorityLimits,
+  EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS,
+  resolveExtractionAuthorityReceiptLimits,
+  resolveExtractionAuthorityReceiptPrice,
+  type ExtractionAuthorityPriceEstimate,
+  type ExtractionAuthorityReceiptLimits,
+  type ExtractionAuthorityReceiptPrice
+} from "./receipt-limits.js";
 
 const RECEIPT_VERSION = 2;
-const NO_PROGRESS_TIMEOUT_MS = 30 * 60 * 1_000;
-const DEFAULT_MAX_CONCURRENCY = 32;
-const MILLION = 1_000_000;
 
 export interface ExtractionAuthorityObservation {
   readonly revision: string;
@@ -50,23 +60,10 @@ export interface ExtractionAuthorityReceipt {
   readonly receipt_digest: string;
   readonly observation: ExtractionAuthorityObservation;
   readonly inspection: ExtractionAuthorityInspection;
-  readonly limits: {
-    readonly starting_missing: number;
-    readonly maximum_attempts: number;
-    readonly successful_shard_ceiling: number;
-    readonly max_concurrency: number;
-    readonly max_output_tokens: number;
-    readonly output_token_field: "max_tokens" | "max_completion_tokens";
-    readonly disk_floor_bytes: number;
-    readonly no_progress_timeout_ms: typeof NO_PROGRESS_TIMEOUT_MS;
-  };
-  readonly price: {
-    readonly input_usd_per_million: number;
-    readonly output_usd_per_million: number;
-    readonly maximum_input_tokens_per_attempt: number;
-    readonly estimated_upper_usd: number;
-  };
+  readonly limits: ExtractionAuthorityReceiptLimits;
+  readonly price: ExtractionAuthorityReceiptPrice;
   readonly probe_key?: string;
+  readonly direct_spend?: DirectDeepSeek500SpendAuthorization;
 }
 
 export interface ExtractionAuthorityInspection {
@@ -77,18 +74,14 @@ export interface ExtractionAuthorityInspection {
   readonly modelReadiness: "not_probed";
 }
 
-export function createExtractionAuthorityReceipt(input: {
+export interface ExtractionAuthorityReceiptInput {
   readonly action: ExtractionAuthorityReceipt["action"];
   readonly observation: ExtractionAuthorityObservation;
   readonly outputTokenCap: {
     readonly field: ExtractionAuthorityReceipt["limits"]["output_token_field"];
     readonly value: number;
   };
-  readonly priceEstimate: {
-    readonly inputUsdPerMillion: number;
-    readonly outputUsdPerMillion: number;
-    readonly maximumInputTokensPerAttempt: number;
-  };
+  readonly priceEstimate: ExtractionAuthorityPriceEstimate;
   readonly diskFloorBytes: number;
   readonly inspection: ExtractionAuthorityInspection;
   readonly maxConcurrency?: number;
@@ -98,14 +91,37 @@ export function createExtractionAuthorityReceipt(input: {
     readonly maximumAttempts: number;
     readonly successfulShardCeiling: number;
   };
+  readonly directSpend?: DirectDeepSeek500SpendAuthorization;
   readonly now?: Date;
-}): ExtractionAuthorityReceipt {
+}
+
+export function createExtractionAuthorityReceipt(
+  input: ExtractionAuthorityReceiptInput
+): ExtractionAuthorityReceipt {
+  assertReceiptCreationInput(input);
+  const unsigned = buildUnsignedReceipt(input);
+  return Object.freeze({ ...unsigned, receipt_digest: computeReceiptDigest(unsigned) });
+}
+
+function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): void {
   assertObservation(input.observation);
-  const limits = resolveLimits(input);
-  const price = resolvePrice(input.priceEstimate, limits);
+  if (input.directSpend !== undefined) {
+    assertDirectDeepSeek500Authorization({
+      action: input.action,
+      authorization: input.directSpend,
+      observation: input.observation
+    });
+  }
   assertInspection(input.inspection);
+}
+
+function buildUnsignedReceipt(
+  input: ExtractionAuthorityReceiptInput
+): Omit<ExtractionAuthorityReceipt, "receipt_digest"> {
+  const limits = resolveExtractionAuthorityReceiptLimits(input);
+  const price = resolveExtractionAuthorityReceiptPrice(input.priceEstimate, limits);
   const probeKey = input.action === "probe" ? requireProbeKey(input.probeKey) : undefined;
-  const unsigned: Omit<ExtractionAuthorityReceipt, "receipt_digest"> = {
+  return {
     schema_version: RECEIPT_VERSION,
     kind: "longmemeval-extraction-authority" as const,
     action: input.action,
@@ -116,12 +132,11 @@ export function createExtractionAuthorityReceipt(input: {
     inspection: freezeInspection(input.inspection),
     limits,
     price,
-    ...(probeKey === undefined ? {} : { probe_key: probeKey })
+    ...(probeKey === undefined ? {} : { probe_key: probeKey }),
+    ...(input.directSpend === undefined ? {} : {
+      direct_spend: Object.freeze({ ...input.directSpend })
+    })
   };
-  return Object.freeze({
-    ...unsigned,
-    receipt_digest: computeReceiptDigest(unsigned)
-  });
 }
 
 export function assertExtractionAuthorityReceipt(
@@ -130,6 +145,13 @@ export function assertExtractionAuthorityReceipt(
 ): void {
   assertReceiptShape(receipt);
   assertObservation(observation);
+  if (receipt.direct_spend !== undefined) {
+    assertDirectDeepSeek500Authorization({
+      action: receipt.action,
+      authorization: receipt.direct_spend,
+      observation: receipt.observation
+    });
+  }
   assertReceiptIdentity(receipt);
   if (receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(observation)) {
     throw new Error("extraction authority receipt does not match the current identity drift");
@@ -139,7 +161,10 @@ export function assertExtractionAuthorityReceipt(
       observation.extraction.rawContentClosureSha256) {
     throw new Error("extraction authority receipt raw cache closure drifted after inspection");
   }
-  const limits = expectedLimits(receipt.action, receipt.limits.starting_missing);
+  const limits = expectedExtractionAuthorityLimits(
+    receipt.action,
+    receipt.limits.starting_missing
+  );
   if (receipt.limits.maximum_attempts !== limits.maximumAttempts ||
       receipt.limits.successful_shard_ceiling !== limits.successfulShardCeiling) {
     throw new Error("extraction authority receipt has reset or widened its cumulative limits");
@@ -208,73 +233,6 @@ export function readExtractionAuthorityReceipt(outputPath: string): ExtractionAu
   return parsed;
 }
 
-function resolveLimits(input: Parameters<typeof createExtractionAuthorityReceipt>[0]): ExtractionAuthorityReceipt["limits"] {
-  const carried = input.cumulativeLimits;
-  const missing = carried?.startingMissing ?? input.observation.inventory.missingTurns;
-  const expected = expectedLimits(input.action, missing);
-  if (carried !== undefined && (carried.maximumAttempts !== expected.maximumAttempts ||
-      carried.successfulShardCeiling !== expected.successfulShardCeiling)) {
-    throw new Error("extraction authority cumulative limits are not derivable from its starting inventory");
-  }
-  const maxConcurrency = input.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
-  if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1 ||
-      maxConcurrency > DEFAULT_MAX_CONCURRENCY) {
-    throw new Error(`extraction authority max concurrency must be 1-${DEFAULT_MAX_CONCURRENCY}`);
-  }
-  if (!Number.isSafeInteger(input.outputTokenCap.value) || input.outputTokenCap.value < 1) {
-    throw new Error("extraction authority output token cap must be a positive integer");
-  }
-  if (!Number.isSafeInteger(input.diskFloorBytes) || input.diskFloorBytes < 0) {
-    throw new Error("extraction authority disk floor must be a non-negative safe integer");
-  }
-  return Object.freeze({
-    starting_missing: missing,
-    maximum_attempts: carried?.maximumAttempts ?? expected.maximumAttempts,
-    successful_shard_ceiling: carried?.successfulShardCeiling ?? expected.successfulShardCeiling,
-    max_concurrency: maxConcurrency,
-    max_output_tokens: input.outputTokenCap.value,
-    output_token_field: input.outputTokenCap.field,
-    disk_floor_bytes: input.diskFloorBytes,
-    no_progress_timeout_ms: NO_PROGRESS_TIMEOUT_MS
-  });
-}
-
-function resolvePrice(
-  input: Parameters<typeof createExtractionAuthorityReceipt>[0]["priceEstimate"],
-  limits: ExtractionAuthorityReceipt["limits"]
-): ExtractionAuthorityReceipt["price"] {
-  assertNonNegativeFinite(input.inputUsdPerMillion, "input price");
-  assertNonNegativeFinite(input.outputUsdPerMillion, "output price");
-  if (!Number.isSafeInteger(input.maximumInputTokensPerAttempt) ||
-      input.maximumInputTokensPerAttempt < 0) {
-    throw new Error("extraction authority maximum input tokens must be a non-negative integer");
-  }
-  const perAttempt = (
-    input.maximumInputTokensPerAttempt * input.inputUsdPerMillion +
-    limits.max_output_tokens * input.outputUsdPerMillion
-  ) / MILLION;
-  return Object.freeze({
-    input_usd_per_million: input.inputUsdPerMillion,
-    output_usd_per_million: input.outputUsdPerMillion,
-    maximum_input_tokens_per_attempt: input.maximumInputTokensPerAttempt,
-    estimated_upper_usd: perAttempt * limits.maximum_attempts
-  });
-}
-
-function expectedLimits(action: ExtractionAuthorityReceipt["action"], missing: number): {
-  readonly maximumAttempts: number;
-  readonly successfulShardCeiling: number;
-} {
-  if (action === "probe") {
-    if (missing < 1) throw new Error("extraction probe requires at least one missing shard");
-    return { maximumAttempts: 1, successfulShardCeiling: 1 };
-  }
-  return {
-    maximumAttempts: computeExtractionAttemptCeiling(missing),
-    successfulShardCeiling: missing
-  };
-}
-
 function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorityReceipt {
   if (typeof value !== "object" || value === null) {
     throw new Error("extraction authority receipt is invalid");
@@ -289,7 +247,9 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       !isDigest(receipt.receipt_digest) ||
       !isObservation(receipt.observation) ||
       !isInspection(receipt.inspection) ||
-      !isReceiptLimits(receipt.limits) || !isReceiptPrice(receipt.price)) {
+      !isReceiptLimits(receipt.limits) || !isReceiptPrice(receipt.price) ||
+      (receipt.direct_spend !== undefined &&
+        !isDirectDeepSeek500Authorization(receipt.direct_spend))) {
     throw new Error("extraction authority receipt is invalid");
   }
   if (receipt.action === "probe" && !isDigest(receipt.probe_key)) {
@@ -356,7 +316,7 @@ function isReceiptLimits(value: unknown): boolean {
     isNonNegativeSafeInteger(value.max_output_tokens) &&
     (value.output_token_field === "max_tokens" || value.output_token_field === "max_completion_tokens") &&
     isNonNegativeSafeInteger(value.disk_floor_bytes) &&
-    value.no_progress_timeout_ms === NO_PROGRESS_TIMEOUT_MS;
+    value.no_progress_timeout_ms === EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS;
 }
 
 function isReceiptPrice(value: unknown): boolean {
@@ -478,10 +438,4 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function assertNonNegativeFinite(value: number, name: string): void {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`extraction authority ${name} must be non-negative and finite`);
-  }
 }

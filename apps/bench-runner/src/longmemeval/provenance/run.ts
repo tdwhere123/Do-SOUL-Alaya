@@ -16,32 +16,32 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES,
   readExtractionCacheManifestIdentity
-} from "../extraction-cache-manifest.js";
-import { resolveEffectiveExtractionCacheRoot } from "../compile-seed-config.js";
+} from "../extraction/cache/extraction-cache-manifest.js";
+import { resolveEffectiveExtractionCacheRoot } from "../compile-seed/compile-seed-config.js";
 import {
   resolveEmbeddingSupplementRuntimeProvenance,
   resolveLocalCrossEncoderRuntimeProvenance
-} from "./local-onnx.js";
-import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon-types.js";
+} from "./embedding/local-onnx.js";
+import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon/daemon-types.js";
 import { buildEffectiveRecallConfigIdentity, EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION,
   type EffectiveRecallOptions } from "./effective-recall-config.js";
 import { resolveFrozenCodeIdentity, type FrozenCodeIdentity } from
-  "./frozen-code-contract.js";
+  "./contract/frozen-code-contract.js";
 import {
   collectPairedEnvironment,
   redactProvenanceUrl
 } from "./paired-environment.js";
 import type { LongMemEvalSelectionContractIdentity } from "../selection/contract.js";
-import { SelectionContractIdentitySchema } from "./selection-contract-schema.js";
+import { SelectionContractIdentitySchema } from "./contract/selection-contract-schema.js";
 import {
   EXTRACTION_FILL_AUTHORITY_SCHEMA_FIELDS,
   containsExtractionFillQuestionWindow,
   hasCompleteExtractionFillAuthority,
   hasCompleteExtractionFillSummary
-} from "../extraction/fill-authority.js";
-import { LongMemEvalExpansionLineageSchema } from "../promotion/expansion-lineage-schema.js";
+} from "../extraction/fill/fill-authority.js";
+import { LongMemEvalExpansionLineageSchema } from "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from
-  "../promotion/expansion-source-anchor-schema.js";
+  "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
 
 export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environment.js";

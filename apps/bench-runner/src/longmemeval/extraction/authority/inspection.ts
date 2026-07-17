@@ -3,16 +3,16 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { resolveCompileSeedExtractionConfig } from "../../compile-seed-config.js";
-import { computeCacheKey, inspectCachedExtraction } from "../../compile-seed-cache.js";
+import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
+import { computeCacheKey, inspectCachedExtraction } from "../../compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256,
   readExtractionCacheManifestIdentity
-} from "../../extraction-cache-manifest.js";
-import type { LongMemEvalVariant } from "../../dataset.js";
-import { inspectExtractionFillCompletion } from "../fill-completion.js";
-import { prepareExtractionFillWindow } from "../fill-window.js";
+} from "../cache/extraction-cache-manifest.js";
+import type { LongMemEvalVariant } from "../../ingestion/dataset.js";
+import { inspectExtractionFillCompletion } from "../fill/fill-completion.js";
+import { prepareExtractionFillWindow } from "../fill/fill-window.js";
 import type {
   ExtractionAuthorityObservation,
   ExtractionAuthorityReceipt
@@ -30,6 +30,10 @@ export interface ExtractionAuthorityInspection {
   readonly credentialStatus: "present" | "absent";
   readonly modelReadiness: "not_probed";
 }
+
+type ExtractionAuthorityInspectionInput = Parameters<typeof inspectExtractionAuthority>[0];
+type ExtractionAuthorityWindow = Awaited<ReturnType<typeof prepareExtractionFillWindow>>;
+type ExtractionAuthorityCompletion = ReturnType<typeof inspectExtractionFillCompletion>;
 
 /**
  * Read only the local dataset, cache and runtime configuration needed to bind
@@ -49,7 +53,18 @@ export async function inspectExtractionAuthority(input: {
   const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
   const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest);
   const window = await prepareExtractionFillWindow(input, undefined);
-  const completion = inspectExtractionFillCompletion({
+  const completion = inspectAuthorityCompletion(input, config, window);
+  const missingKeys = collectMissingKeys(input.cacheRoot, config, window.distinctTurns);
+  const observation = buildAuthorityObservation(input, manifestIdentity, config, window, completion);
+  return buildExtractionAuthorityInspection(input, config, missingKeys, observation);
+}
+
+function inspectAuthorityCompletion(
+  input: ExtractionAuthorityInspectionInput,
+  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  window: ExtractionAuthorityWindow
+): ExtractionAuthorityCompletion {
+  return inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
@@ -59,8 +74,16 @@ export async function inspectExtractionAuthority(input: {
       excludeContentClosureKeys: input.excludeContentClosureKeys
     })
   });
-  const missingKeys = collectMissingKeys(input.cacheRoot, config, window.distinctTurns);
-  const observation = Object.freeze({
+}
+
+function buildAuthorityObservation(
+  input: ExtractionAuthorityInspectionInput,
+  manifestIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>,
+  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  window: ExtractionAuthorityWindow,
+  completion: ExtractionAuthorityCompletion
+): ExtractionAuthorityObservation {
+  return Object.freeze({
     revision: input.revision,
     commandDigest: digest({
       operation: AUTHORIZED_EXTRACTION_OPERATION,
@@ -74,31 +97,59 @@ export async function inspectExtractionAuthority(input: {
       requestedTurns: window.requestedTurns
     }),
     keyDigest: completion.expectedKeySetSha256,
-    dataset: Object.freeze({
-      variant: input.variant,
-      revisionSha256: window.datasetRevision,
-      windowOffset: window.windowOffset,
-      windowLimit: window.questionCount,
-      expectedKeySetSha256: completion.expectedKeySetSha256
-    }),
-    extraction: Object.freeze({
-      model: config.model,
-      modelFamily: config.modelFamily ?? config.model,
-      requestProfile: config.requestProfile,
-      providerUrl: config.providerUrl,
-      systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
-      cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
-      manifestSha256: manifestIdentity?.manifestSha256 ?? null,
-      rawContentClosureSha256: completion.partialContentClosureSha256
-    }),
-    inventory: Object.freeze({
-      expectedTurns: completion.expectedTurns,
-      validTurns: completion.validTurns,
-      missingTurns: completion.missingTurns,
-      invalidTurns: completion.invalidTurns,
-      orphanTurns: completion.orphanTurns
-    })
+    dataset: buildAuthorityDatasetObservation(input, window, completion),
+    extraction: buildAuthorityExtractionObservation(config, manifestIdentity, completion),
+    inventory: buildAuthorityInventoryObservation(completion)
   } satisfies ExtractionAuthorityObservation);
+}
+
+function buildAuthorityDatasetObservation(
+  input: ExtractionAuthorityInspectionInput,
+  window: ExtractionAuthorityWindow,
+  completion: ExtractionAuthorityCompletion
+) {
+  return Object.freeze({
+    variant: input.variant,
+    revisionSha256: window.datasetRevision,
+    windowOffset: window.windowOffset,
+    windowLimit: window.questionCount,
+    expectedKeySetSha256: completion.expectedKeySetSha256
+  });
+}
+
+function buildAuthorityExtractionObservation(
+  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  manifestIdentity: ReturnType<typeof readExtractionCacheManifestIdentity>,
+  completion: ExtractionAuthorityCompletion
+) {
+  return Object.freeze({
+    model: config.model,
+    modelFamily: config.modelFamily ?? config.model,
+    requestProfile: config.requestProfile,
+    providerUrl: config.providerUrl,
+    systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT),
+    cacheKeyAlgorithm: EXTRACTION_CACHE_KEY_ALGO,
+    manifestSha256: manifestIdentity?.manifestSha256 ?? null,
+    rawContentClosureSha256: completion.partialContentClosureSha256
+  });
+}
+
+function buildAuthorityInventoryObservation(completion: ExtractionAuthorityCompletion) {
+  return Object.freeze({
+    expectedTurns: completion.expectedTurns,
+    validTurns: completion.validTurns,
+    missingTurns: completion.missingTurns,
+    invalidTurns: completion.invalidTurns,
+    orphanTurns: completion.orphanTurns
+  });
+}
+
+function buildExtractionAuthorityInspection(
+  input: ExtractionAuthorityInspectionInput,
+  config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
+  missingKeys: readonly string[],
+  observation: ExtractionAuthorityObservation
+): ExtractionAuthorityInspection {
   return Object.freeze({
     observation,
     missingKeys: Object.freeze(missingKeys),

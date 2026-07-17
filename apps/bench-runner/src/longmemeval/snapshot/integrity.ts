@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import {
   snapshotExtractionAuthorityPath,
   snapshotSidecarPath
-} from "../snapshot.js";
+} from "./materialize.js";
 import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
 import { MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES } from
   "./extraction-authority.js";

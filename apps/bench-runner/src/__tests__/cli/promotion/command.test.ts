@@ -10,7 +10,7 @@ import {
   type LongMemEvalMatrixPromotionCommandDependencies
 } from "../../../cli/promotion/command.js";
 import { LongMemEvalMatrixPromotionAuthorizationSchema } from
-  "../../../longmemeval/promotion/authorization.js";
+  "../../../longmemeval/promotion/schema/authorization.js";
 import { promotionAuthorizationFixture } from "./authorization-fixture.js";
 
 describe("LongMemEval matrix promotion command", () => {

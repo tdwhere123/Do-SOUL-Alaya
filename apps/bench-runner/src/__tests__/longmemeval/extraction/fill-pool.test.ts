@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
-import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed-types.js";
-import { runExtractionPool } from "../../../longmemeval/extraction/fill-pool.js";
-import { newFillStats } from "../../../longmemeval/extraction/fill-stats.js";
+import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed/compile-seed-types.js";
+import { runExtractionPool } from "../../../longmemeval/extraction/fill/fill-pool.js";
+import { newFillStats } from "../../../longmemeval/extraction/fill/fill-stats.js";
 
 it("attributes a concurrent 429 backoff to its own task instead of shared run stats", async () => {
   const stats = newFillStats();

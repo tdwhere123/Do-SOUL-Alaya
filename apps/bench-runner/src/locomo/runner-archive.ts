@@ -9,7 +9,7 @@ import {
   type HistoryLayout,
   type KpiPayload
 } from "@do-soul/alaya-eval";
-import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics-artifacts.js";
+import { writeExternalDiagnosticsArtifact } from "../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
 import {
   renderCompactDiagnosticsSidecar,
   renderDiagnosticsSidecar,
@@ -18,7 +18,7 @@ import {
 import {
   appendSeedExtractionReleaseBlockerToFindings,
   appendSeedExtractionReleaseBlockerToReport
-} from "../longmemeval/seed-extraction-release-blocker.js";
+} from "../longmemeval/extraction/seed-fuel/seed-extraction-release-blocker.js";
 import type { LocomoRunOptions, LocomoRunResult } from "./runner-types.js";
 
 export async function writeLocomoRunArchive(input: {

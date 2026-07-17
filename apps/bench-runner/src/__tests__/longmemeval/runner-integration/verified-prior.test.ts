@@ -10,13 +10,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildVerifiedPriorArchivePayload
-} from "../longmemeval-runner-fixture.js";
+} from "../runner/longmemeval-runner-fixture.js";
 import { readDiagnosticsGzipStream } from
-  "../../../longmemeval/diagnostics/artifact-gzip-reader.js";
+  "../../../longmemeval/diagnostics/artifacts/artifact-gzip-reader.js";
 import {
   createVerifiedHistoryAuthority,
   writeVerifiedHistoryArchive
-} from "../verified-history-archive-fixture.js";
+} from "../archive/verified-history-archive-fixture.js";
 import { buildRunnerQuestions, readJson } from "./fixture.js";
 
 let tmpRoot: string;

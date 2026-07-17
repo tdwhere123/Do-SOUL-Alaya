@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, expect, vi } from "vitest";
 
-import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
+import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 
 export const EXTRACTION_FILL_VARIANT = "longmemeval_oracle";
 

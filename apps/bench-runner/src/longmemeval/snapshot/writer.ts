@@ -2,7 +2,7 @@ import { basename, dirname, resolve } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import { RECALL_PIPELINE_VERSION, resolveBenchRunnerVersion } from "../../shared/version.js";
-import type { LongMemEvalQuestion, LongMemEvalVariant } from "../dataset.js";
+import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
 import type { LongMemEvalRunProvenance } from "../provenance/run.js";
 import {
   BENCH_DAEMON_DB_FILENAME,
@@ -16,11 +16,11 @@ import {
   type LongMemEvalSnapshotQuestion,
   type LongMemEvalSnapshotSidecarFile,
   type SnapshotExtractionProvenanceV3
-} from "../snapshot.js";
+} from "./materialize.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import {
   assertCurrentSnapshotWriteAuthority
-} from "./current-substrate-authority.js";
+} from "./current/current-substrate-authority.js";
 import { buildSnapshotArtifactIntegrity } from "./integrity.js";
 import {
   MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES,

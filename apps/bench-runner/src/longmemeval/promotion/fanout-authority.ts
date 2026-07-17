@@ -16,7 +16,7 @@ import type { CapturedSnapshotExtractionAuthority } from
 import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability
-} from "./expansion-capability.js";
+} from "./expansion/expansion-capability.js";
 
 export const ALAYA_LONGMEMEVAL_FANOUT_ROOT = "ALAYA_LONGMEMEVAL_FANOUT_ROOT";
 export const ALAYA_LONGMEMEVAL_FANOUT_SHA256 = "ALAYA_LONGMEMEVAL_FANOUT_SHA256";

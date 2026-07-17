@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import path from "node:path";
-import { loadDatasetWithIdentity } from "../fetch.js";
+import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import { classifyLongMemEvalDatasetCohort } from "../selection/dataset-cohort.js";
 import {
   createLongMemEvalSelectionContractFromAssignments,
@@ -9,24 +9,24 @@ import {
 import {
   parseLongMemEvalMatrixPromotionContract,
   type LongMemEvalMatrixPromotionContract
-} from "./contract.js";
+} from "./schema/contract.js";
 import {
   verifyRecallEvalPromotionEntry
-} from "./entry-verifier.js";
-import { authorizeVerifiedLongMemEvalMatrix } from "./matrix-validator.js";
-import type { LongMemEvalMatrixPromotionAuthorization } from "./authorization.js";
-import { verifyPromotionSnapshot } from "./snapshot-verifier.js";
+} from "./verifiers/entry-verifier.js";
+import { authorizeVerifiedLongMemEvalMatrix } from "./schema/matrix-validator.js";
+import type { LongMemEvalMatrixPromotionAuthorization } from "./schema/authorization.js";
+import { verifyPromotionSnapshot } from "./verifiers/snapshot-verifier.js";
 
 export {
   LongMemEvalMatrixPromotionAuthorizationSchema,
   renderLongMemEvalMatrixPromotionAuthorization,
   type LongMemEvalMatrixPromotionAuthorization
-} from "./authorization.js";
+} from "./schema/authorization.js";
 export {
   LongMemEvalMatrixPromotionContractSchema,
   parseLongMemEvalMatrixPromotionContract,
   type LongMemEvalMatrixPromotionContract
-} from "./contract.js";
+} from "./schema/contract.js";
 
 export async function authorizeLongMemEvalMatrixPromotion(input: {
   readonly contractRoot: string;

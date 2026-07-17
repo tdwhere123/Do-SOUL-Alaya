@@ -1,11 +1,11 @@
-import { classifyGoldMissTaxonomy } from "../diagnostics-miss-taxonomy.js";
+import { classifyGoldMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
 import type {
   CandidateDiagnostic,
   LongMemEvalGoldDiagnostic,
   NarrowRecallDiagnostics
-} from "../diagnostics-types.js";
-import { buildObjectIdentityKey } from "../diagnostics-private.js";
-import { requireDeliveryMissDropReason } from "../delivery-miss-taxonomy.js";
+} from "./schema/diagnostics-types.js";
+import { buildObjectIdentityKey } from "./schema/diagnostics-private.js";
+import { requireDeliveryMissDropReason } from "./miss/delivery-miss-taxonomy.js";
 
 interface GoldDiagnosticInput {
   readonly goldMemoryIds: readonly string[];

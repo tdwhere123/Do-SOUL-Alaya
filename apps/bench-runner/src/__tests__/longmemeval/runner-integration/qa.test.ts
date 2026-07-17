@@ -4,10 +4,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { KpiPayloadSchema } from "@do-soul/alaya-eval";
 import { LONGMEMEVAL_COHORT_LEDGER_FILENAME } from
-  "../../../longmemeval/cohort-ledger.js";
+  "../../../longmemeval/selection/cohort-ledger.js";
 import { LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME } from
-  "../../../longmemeval/evidence-manifest.js";
-import { QaChatError } from "../../../longmemeval/qa-chat.js";
+  "../../../longmemeval/provenance/evidence-manifest.js";
+import { QaChatError } from "../../../longmemeval/qa/qa-chat.js";
 import { runLongMemEval } from "../../../longmemeval/runner.js";
 import {
   buildRunnerQuestions,

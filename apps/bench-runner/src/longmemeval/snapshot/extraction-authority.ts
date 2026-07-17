@@ -12,10 +12,10 @@ import {
   extractionCacheManifestPath,
   parseExtractionCacheManifestContents,
   type ExtractionCacheManifestV3
-} from "../extraction-cache-manifest.js";
+} from "../extraction/cache/extraction-cache-manifest.js";
 import { hasCompleteExtractionFillAuthority } from
-  "../extraction/fill-authority.js";
-import type { SnapshotExtractionProvenanceV3 } from "../snapshot.js";
+  "../extraction/fill/fill-authority.js";
+import type { SnapshotExtractionProvenanceV3 } from "./materialize.js";
 import { redactProvenanceUrl } from "../provenance/paired-environment.js";
 import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
 

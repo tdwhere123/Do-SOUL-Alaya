@@ -4,9 +4,9 @@ import {
   buildEffectiveRecallConfigIdentity,
   readRecallEvalMaxResults
 } from "../../../longmemeval/provenance/effective-recall-config.js";
-import { prepareRecallEvalRunContext } from "../../../longmemeval/lifecycle/recall-eval-run-context.js";
-import { resolveBenchRecallWeightOverrides } from "../../../harness/recall-weight-overrides.js";
-import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon-recall-result.js";
+import { prepareRecallEvalRunContext } from "../../../longmemeval/lifecycle/recall-eval/recall-eval-run-context.js";
+import { resolveBenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
+import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/runtime/daemon-recall-result.js";
 
 describe("effective recall config identity", () => {
   it("parses recall-eval max results strictly", () => {

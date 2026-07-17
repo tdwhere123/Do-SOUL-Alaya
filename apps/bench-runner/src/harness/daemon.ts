@@ -6,8 +6,8 @@ import {
   type BenchDaemonHandle,
   type BenchDaemonOptions,
   type BenchEmbeddingProviderKind
-} from "./daemon-types.js";
-export { rotatingSeedObjectKind, type SeedObjectKind, BENCH_SEED_ROTATION } from "./seed-rotation.js";
+} from "./daemon/daemon-types.js";
+export { rotatingSeedObjectKind, type SeedObjectKind, BENCH_SEED_ROTATION } from "./seeding/seed-rotation.js";
 export {
   drainEmbeddingWarmupPasses,
   formatEmbeddingWarmupNotReadyError,
@@ -33,31 +33,31 @@ export {
   type DrainEmbeddingWarmupPassesResult,
   type SeededMemoryResult,
   type SeededSynthesisResult
-} from "./daemon-types.js";
-export { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "./daemon-types.js";
+} from "./daemon/daemon-types.js";
+export { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "./daemon/daemon-types.js";
 export {
   applyBenchFastPragmaIfRequested,
   readEmbeddingWarmupSummary
-} from "./daemon-support.js";
-export type { BenchFastPragmaResult } from "./daemon-support.js";
-export { BENCH_DAEMON_MANAGED_ENV_KEYS } from "./daemon-environment.js";
-import { createBenchDaemonOps } from "./daemon-handle-ops.js";
-import { initializeBenchDaemon } from "./daemon-startup.js";
+} from "./daemon/daemon-support.js";
+export type { BenchFastPragmaResult } from "./daemon/daemon-support.js";
+export { BENCH_DAEMON_MANAGED_ENV_KEYS } from "./daemon/daemon-environment.js";
+import { createBenchDaemonOps } from "./daemon/handle/daemon-handle-ops.js";
+import { initializeBenchDaemon } from "./daemon/daemon-startup.js";
 import {
   createBenchDaemonConfigDirectoryLease,
   type BenchDaemonConfigDirectoryLease
-} from "./daemon-config-directory.js";
+} from "./daemon/daemon-config-directory.js";
 import {
   createBenchDaemonLaunchConfig,
   queryEdgeProposalKpiRows,
   queryTokenMetrics,
   restoreEnv
-} from "./daemon-support.js";
+} from "./daemon/daemon-support.js";
 import {
   resolveBenchDaemonManagedEnvKeys,
   type BenchDaemonLaunchConfig
-} from "./daemon-environment.js";
-import { createBenchWorkspaceManager } from "./daemon-workspace-manager.js";
+} from "./daemon/daemon-environment.js";
+import { createBenchWorkspaceManager } from "./daemon/workspace/daemon-workspace-manager.js";
 
 let activeBenchDaemonCount = 0;
 

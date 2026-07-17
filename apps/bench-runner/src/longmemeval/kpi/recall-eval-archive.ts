@@ -4,7 +4,7 @@ import {
   type BenchPolicyShape,
   type BenchSimulateReportMode
 } from "@do-soul/alaya-eval";
-import { RECALL_EVAL_ARCHIVE_MARKER } from "../recall-eval-archive.js";
+import { RECALL_EVAL_ARCHIVE_MARKER } from "../lifecycle/recall-eval/recall-eval-archive-impl.js";
 
 export function buildRecallEvalArchiveSlug(input: {
   readonly runAt: Date;

@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   runRecallEval: vi.fn()
 }));
 
-vi.mock("../../../longmemeval/recall-eval.js", () => ({
+vi.mock("../../../longmemeval/lifecycle/recall-eval/recall-eval-impl.js", () => ({
   runRecallEval: mocks.runRecallEval
 }));
 

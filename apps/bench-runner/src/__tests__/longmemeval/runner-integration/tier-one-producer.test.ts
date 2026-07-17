@@ -26,14 +26,14 @@ vi.mock("../../../longmemeval/provenance/run.js", async (importOriginal) => ({
 import { writeTierOneLongMemEvalArchive } from
   "../../../longmemeval/archive/tier-one-evidence.js";
 import { buildVerifiedPriorArchivePayload } from
-  "../longmemeval-runner-fixture.js";
+  "../runner/longmemeval-runner-fixture.js";
 import {
   buildVerifiedQuestionDiagnostic,
   createVerifiedHistoryAuthority,
   writeVerifiedHistoryArchive
-} from "../verified-history-archive-fixture.js";
+} from "../archive/verified-history-archive-fixture.js";
 import { buildRunnerQuestions, readJson } from "./fixture.js";
-import { syntheticExtractionClosure } from "../extraction-closure-fixture.js";
+import { syntheticExtractionClosure } from "../extraction/extraction-closure-fixture.js";
 
 let tmpRoot: string;
 

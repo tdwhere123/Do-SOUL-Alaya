@@ -2,9 +2,9 @@ import { z } from "zod";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES
-} from "../extraction-cache-manifest.js";
+} from "../extraction/cache/extraction-cache-manifest.js";
 import { EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS } from
-  "../extraction/fill-authority.js";
+  "../extraction/fill/fill-authority.js";
 import {
   ExtractionCacheIdentityBaseSchema,
   LongMemEvalRunProvenanceSchema,
@@ -12,9 +12,9 @@ import {
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
 import { LongMemEvalExpansionLineageSchema } from
-  "../promotion/expansion-lineage-schema.js";
+  "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from
-  "../promotion/expansion-source-anchor-schema.js";
+  "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import {
   assertSnapshotExtractionAuthorityBinding,
   type SnapshotExtractionAuthority

@@ -12,12 +12,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { bindCurrentSnapshotArtifacts } from
-  "../../../longmemeval/snapshot/current-bound-artifacts.js";
+  "../../../longmemeval/snapshot/current/current-bound-artifacts.js";
 import {
   currentSnapshotExtractionAuthority,
   currentSnapshotManifestFor,
   currentSnapshotSidecarFor
-} from "../current-snapshot-fixture.js";
+} from "./current-snapshot-fixture.js";
 import { renderSnapshotExtractionAuthority } from
   "../../../longmemeval/snapshot/extraction-authority.js";
 import {

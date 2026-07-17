@@ -6,16 +6,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   readExtractionCacheManifest
-} from "../../../longmemeval/extraction-cache-manifest.js";
+} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   runExtractionFill
-} from "../../../longmemeval/extraction-fill.js";
+} from "../../../longmemeval/extraction/extraction-fill.js";
 import type {
   BenchSignalExtractor
 } from "../../../longmemeval/compile-seed.js";
 import type {
   LongMemEvalQuestion
-} from "../../../longmemeval/dataset.js";
+} from "../../../longmemeval/ingestion/dataset.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;

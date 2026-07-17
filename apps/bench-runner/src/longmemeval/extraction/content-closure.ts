@@ -3,8 +3,8 @@ import {
   parseOfficialApiSignals,
   salvageRawSignalElements
 } from "@do-soul/alaya-soul";
-import type { CompileSeedExtractionConfig } from "../compile-seed-types.js";
-import { ExtractionCacheInvariantError } from "./cache-invariant-error.js";
+import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
+import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 
 export interface ExtractionRawJsonInspection {
   readonly rawJsonSha256: string;

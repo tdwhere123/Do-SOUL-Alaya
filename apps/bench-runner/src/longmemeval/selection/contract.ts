@@ -5,7 +5,7 @@ import {
   type LongMemEvalSelectionContract as SharedSelectionContract,
   type LongMemEvalSelectionContractIdentity as SharedSelectionContractIdentity
 } from "@do-soul/alaya-eval";
-import type { LongMemEvalQuestion } from "../dataset.js";
+import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
 import {
   classifyLongMemEvalDatasetCohort,
   type LongMemEvalDatasetCohort

@@ -1,4 +1,4 @@
-import type { LongMemEvalQuestion } from "../dataset.js";
+import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
 
 export type LongMemEvalDatasetCohort = "answerable" | "abstention";
 

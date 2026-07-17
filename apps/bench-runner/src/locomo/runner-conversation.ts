@@ -1,4 +1,4 @@
-import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall/recall-diagnostics-schema.js";
 import type { BenchTokenMetrics } from "../harness/daemon.js";
 import type {
   BenchDaemonHandle,
@@ -7,7 +7,7 @@ import type {
   BenchWorkspaceHandle
 } from "../harness/daemon.js";
 import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
-import type { QaQuestionVerdict } from "../longmemeval/qa-harness.js";
+import type { QaQuestionVerdict } from "../longmemeval/qa/qa-harness.js";
 import type { CompileSeedRunner } from "../longmemeval/compile-seed.js";
 import type { LocomoSample } from "./dataset.js";
 import type { LocomoRunOptions } from "./runner-types.js";

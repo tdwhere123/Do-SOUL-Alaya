@@ -4,18 +4,18 @@ import type { LongMemEvalFullDiagnosticsValidationInput } from
 import {
   rAt5WithProviderReturned,
   summarizeProviderStates
-} from "../diagnostics-question.js";
+} from "./diagnostics-question.js";
 import type {
   LongMemEvalDiagnosticsSidecar,
   ProviderStateSummary
-} from "../diagnostics-types.js";
+} from "./schema/diagnostics-types.js";
 import {
   answerableRecallAt5,
   summarizeAnswerableRecall
 } from "../measurement/answerable-recall.js";
 import { classifyQuestionMeasurementStatus } from
   "../measurement/question-validity.js";
-import { readDiagnosticsGzipBytes } from "./artifact-gzip-reader.js";
+import { readDiagnosticsGzipBytes } from "./artifacts/artifact-gzip-reader.js";
 
 const PROVIDER_SUMMARY_KEYS = [
   "total",

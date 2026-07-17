@@ -1,8 +1,8 @@
 import type { EdgeProposalKpiEventRow, PerScenarioRow } from "@do-soul/alaya-eval";
 import type { BenchTokenMetrics } from "../../harness/daemon.js";
-import type { BenchRecallTokenEconomy } from "../../harness/recall-diagnostics-schema.js";
+import type { BenchRecallTokenEconomy } from "../../harness/recall/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "../diagnostics.js";
-import type { RecallEvalQuestionResult } from "../recall-eval.js";
+import type { RecallEvalQuestionResult } from "../lifecycle/recall-eval/recall-eval-impl.js";
 import {
   classifyQuestionMeasurementCohort,
   classifyQuestionMeasurementStatus

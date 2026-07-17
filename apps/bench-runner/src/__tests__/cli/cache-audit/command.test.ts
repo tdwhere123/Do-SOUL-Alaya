@@ -13,11 +13,11 @@ import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { afterEach, describe, expect, it } from "vitest";
 import { runAuditExtractionCacheCommand } from "../../../cli/cache-audit/command.js";
-import { cacheFilePath } from "../../../longmemeval/compile-seed-cache.js";
+import { cacheFilePath } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256
-} from "../../../longmemeval/extraction-cache-manifest.js";
+} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import { readExtractionCacheAuditReceipt } from
   "../../../longmemeval/extraction/cache-audit/receipt.js";
 import { buildExtractionOccurrenceIndex } from

@@ -6,11 +6,11 @@ import {
   readSchemaMigrationLedger
 } from "@do-soul/alaya-storage";
 import { afterEach, describe, expect, it } from "vitest";
-import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot.js";
+import type { LongMemEvalSnapshotManifest } from "../../../longmemeval/snapshot/materialize.js";
 import {
   assertLegacySnapshotSourceCompatibility,
   prepareLegacySnapshotConsumer
-} from "../../../longmemeval/snapshot/legacy-compatibility.js";
+} from "../../../longmemeval/snapshot/legacy/legacy-compatibility.js";
 import {
   createDatabaseThroughMigration,
   executeSqlite

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readExternalDiagnosticsArtifact } from
-  "../../../longmemeval/diagnostics-artifacts.js";
+  "../../../longmemeval/diagnostics/artifacts/diagnostics-artifacts.js";
 import { runLongMemEvalCrossQuestion } from "../../../longmemeval/crossquestion.js";
 import {
   assertPartialTierOneArchive,

@@ -6,18 +6,18 @@ import type {
   BenchEmbeddingMode,
   BenchEmbeddingProviderKind
 } from "../harness/daemon.js";
-import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "./diagnostics.js";
-import type { LongMemEvalVariant } from "./dataset.js";
-import type { FetchResult } from "./fetch.js";
+import type { LongMemEvalVariant } from "./ingestion/dataset.js";
+import type { FetchResult } from "./ingestion/fetch.js";
 import {
   buildCrossQuestionPayload,
   writeCrossQuestionArtifacts
-} from "./crossquestion-payload.js";
+} from "./crossquestion/crossquestion-payload.js";
 import {
   executeCrossQuestionRun,
   prepareCrossQuestionRun
-} from "./crossquestion-run.js";
+} from "./crossquestion/crossquestion-run.js";
 
 export interface LongMemEvalCrossQuestionRunOptions {
   readonly variant: LongMemEvalVariant;

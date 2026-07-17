@@ -8,9 +8,9 @@ import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   computeSystemPromptSha256,
   writeExtractionCacheManifest
-} from "../../../longmemeval/extraction-cache-manifest.js";
-import { prepareCrossQuestionRun } from "../../../longmemeval/crossquestion-run.js";
-import { prepareMultiturnRun } from "../../../longmemeval/multiturn-run.js";
+} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { prepareCrossQuestionRun } from "../../../longmemeval/crossquestion/crossquestion-run.js";
+import { prepareMultiturnRun } from "../../../longmemeval/multiturn/multiturn-run.js";
 import { LongMemEvalDiagnosticsSpool } from
   "../../../longmemeval/diagnostics/spool.js";
 import { prepareLongMemEvalRun } from

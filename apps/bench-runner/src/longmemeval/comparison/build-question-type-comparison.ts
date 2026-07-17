@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
-import type { LongMemEvalQuestion } from "../dataset.js";
-import { isAbstentionQuestionId } from "../abstention.js";
+import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
+import { isAbstentionQuestionId } from "../diagnostics/abstention.js";
 import type {
   AnswerabilitySummary,
   ComparisonSummary,

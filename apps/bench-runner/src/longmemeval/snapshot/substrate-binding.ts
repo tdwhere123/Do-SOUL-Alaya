@@ -2,13 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import {
   pairSessionIntoRounds,
   type LongMemEvalQuestion
-} from "../dataset.js";
+} from "../ingestion/dataset.js";
 import { requireLongMemEvalTimestamp } from "../ingestion/source-time.js";
 import {
   resolveLongMemEvalSeedRoundIdentity,
   resolveLongMemEvalSeedSessionIndex,
   type LongMemEvalSeedRoundIdentity
-} from "../runner-question-seeding.js";
+} from "../runner/question/runner-question-seeding.js";
 import { buildLongMemEvalQuestionRuntimeIdentity } from
   "../selection/question-runtime-identity.js";
 import {
@@ -20,7 +20,7 @@ import type {
   LongMemEvalSnapshotQuestion,
   LongMemEvalSnapshotSidecarEntry,
   LongMemEvalSnapshotSidecarFile
-} from "../snapshot.js";
+} from "./materialize.js";
 
 interface StoredObjectRow {
   readonly object_id: string;

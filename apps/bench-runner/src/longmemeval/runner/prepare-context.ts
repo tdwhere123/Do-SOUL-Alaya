@@ -1,18 +1,18 @@
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 import type { BenchRecallWeightOverrides } from
-  "../../harness/recall-weight-overrides.js";
+  "../../harness/recall/recall-weight-overrides.js";
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import {
   createCompileSeedRunner,
   EXTRACTION_CACHE_ROOT
 } from "../compile-seed.js";
 import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
-import { collectDistinctTurnContents } from "../extraction-fill.js";
+import { collectDistinctTurnContents } from "../extraction/extraction-fill.js";
 import {
   deriveLongMemEvalReleaseEvidenceAuthority,
   loadDatasetWithIdentity
-} from "../fetch.js";
+} from "../ingestion/fetch.js";
 import {
   createOwnedTempRoot,
   externalTempRoot
@@ -21,7 +21,7 @@ import {
   recallOptionsForPolicyShape,
   resolveBenchEmbeddingProviderLabel,
   resolveCommitInfo
-} from "../runner-helpers.js";
+} from "./runner-helpers.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import { loadQuestionManifestSelection } from
   "../selection/question-manifest.js";

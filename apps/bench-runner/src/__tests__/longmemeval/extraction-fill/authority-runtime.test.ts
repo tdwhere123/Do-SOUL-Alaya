@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
-import { runExtractionFill } from "../../../longmemeval/extraction-fill.js";
+import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
 import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
 import {
   inspectExtractionAuthority,

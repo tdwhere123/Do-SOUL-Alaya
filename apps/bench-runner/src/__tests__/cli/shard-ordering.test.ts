@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeVerifiedShards } from "../../cli/merge/shard-ordering.js";
+import { canonicalizeVerifiedShards } from "../../cli/merge/shard/shard-ordering.js";
 import type { VerifiedShardEvidence } from
-  "../../cli/merge/shard-evidence-verifier.js";
+  "../../cli/merge/shard/shard-evidence-verifier.js";
 
 describe("canonical verified shard ordering", () => {
   it("rejects an implicit limit even for a single verified shard", () => {

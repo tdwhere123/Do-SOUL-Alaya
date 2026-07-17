@@ -136,10 +136,104 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   });
 });
 
+it("writes a direct DeepSeek 500 receipt only after explicit operator authorization", async () => {
+  const inspect = vi.fn(async () => directAuthorityInspection());
+  const write = vi.fn();
+  const createDirectSpend = vi.fn(() => ({
+    kind: "deepseek_direct_500" as const,
+    operator: "local-operator",
+    cache_root_sha256: "a".repeat(64),
+    cache_root_device: "1",
+    cache_root_inode: "2",
+    cache_root_marker_sha256: "b".repeat(64)
+  }));
+
+  const exitCode = await runAuthorizeExtractionCommand([
+    "--variant", "s",
+    "--offset", "0",
+    "--limit", "500",
+    "--extraction-cache-root", "/tmp/direct-deepseek-cache",
+    "--extraction-action", "fill",
+    "--direct-deepseek-500-operator", "local-operator",
+    "--concurrency", "64",
+    "--extraction-receipt-out", "/tmp/authority.json",
+    "--extraction-output-token-cap", "512",
+    "--extraction-output-token-field", "max_tokens",
+    "--extraction-input-price-usd-per-million", "1",
+    "--extraction-output-price-usd-per-million", "2",
+    "--extraction-max-input-tokens", "300",
+    "--extraction-disk-floor-bytes", "1024"
+  ], {
+    inspect,
+    write,
+    createDirectSpend,
+    readRevision: () => "a".repeat(40),
+    readLedger: () => undefined
+  });
+
+  expect(exitCode).toBe(0);
+  expect(createDirectSpend).toHaveBeenCalledWith({
+    cacheRoot: "/tmp/direct-deepseek-cache",
+    operator: "local-operator"
+  });
+  expect(write.mock.calls[0]?.[1]).toMatchObject({
+    direct_spend: { kind: "deepseek_direct_500" },
+    limits: { max_concurrency: 64 }
+  });
+});
+
+it("retires a newly created direct target when its offline inspection fails", async () => {
+  const directSpend = {
+    kind: "deepseek_direct_500" as const,
+    operator: "local-operator",
+    cache_root_sha256: "a".repeat(64),
+    cache_root_device: "1",
+    cache_root_inode: "2",
+    cache_root_marker_sha256: "b".repeat(64)
+  };
+  const discardDirectSpend = vi.fn();
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runAuthorizeExtractionCommand(directAuthorizeArgs(), {
+    inspect: vi.fn(async () => {
+      throw new Error("dataset preflight failed");
+    }),
+    createDirectSpend: vi.fn(() => directSpend),
+    discardDirectSpend,
+    readRevision: () => "a".repeat(40)
+  });
+
+  expect(exitCode).toBe(2);
+  expect(discardDirectSpend).toHaveBeenCalledWith({
+    authorization: directSpend,
+    cacheRoot: "/tmp/direct-deepseek-cache"
+  });
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("dataset preflight failed"));
+});
+
 function authorizeArgs(): string[] {
   return [
     "--variant", "s",
     "--extraction-action", "fill",
+    "--extraction-receipt-out", "/tmp/authority.json",
+    "--extraction-output-token-cap", "512",
+    "--extraction-output-token-field", "max_tokens",
+    "--extraction-input-price-usd-per-million", "1",
+    "--extraction-output-price-usd-per-million", "2",
+    "--extraction-max-input-tokens", "300",
+    "--extraction-disk-floor-bytes", "1024"
+  ];
+}
+
+function directAuthorizeArgs(): string[] {
+  return [
+    "--variant", "s",
+    "--offset", "0",
+    "--limit", "500",
+    "--extraction-cache-root", "/tmp/direct-deepseek-cache",
+    "--extraction-action", "fill",
+    "--direct-deepseek-500-operator", "local-operator",
+    "--concurrency", "64",
     "--extraction-receipt-out", "/tmp/authority.json",
     "--extraction-output-token-cap", "512",
     "--extraction-output-token-field", "max_tokens",
@@ -183,6 +277,46 @@ function authorityInspection(rawContentClosureSha256: string) {
       }
     },
     missingKeys: ["2".repeat(64)],
+    writerLock: "absent" as const,
+    disk: { status: "available" as const, freeBytes: 10_000 },
+    credentialStatus: "present" as const,
+    modelReadiness: "not_probed" as const
+  };
+}
+
+function directAuthorityInspection() {
+  return {
+    observation: {
+      revision: "a".repeat(40),
+      commandDigest: "b".repeat(64),
+      selectionDigest: "c".repeat(64),
+      keyDigest: "d".repeat(64),
+      dataset: {
+        variant: "longmemeval_s",
+        revisionSha256: "e".repeat(64),
+        windowOffset: 0,
+        windowLimit: 500,
+        expectedKeySetSha256: "d".repeat(64)
+      },
+      extraction: {
+        model: "deepseek-v4-flash",
+        modelFamily: "deepseek-v4-flash-nonthinking",
+        requestProfile: "deepseek-v4-nonthinking-v1" as const,
+        providerUrl: "https://ai.loli.sh.cn/v1",
+        systemPromptSha256: "f".repeat(64),
+        cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
+        manifestSha256: null,
+        rawContentClosureSha256: "a".repeat(64)
+      },
+      inventory: {
+        expectedTurns: 500,
+        validTurns: 0,
+        missingTurns: 500,
+        invalidTurns: 0,
+        orphanTurns: 0
+      }
+    },
+    missingKeys: Array.from({ length: 500 }, (_, index) => index.toString(16).padStart(64, "0")),
     writerLock: "absent" as const,
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,

@@ -1,4 +1,4 @@
-import type { CompileSeedExtractionConfig } from "../compile-seed-types.js";
+import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 
 export function buildGardenHttpRequestInit(
   config: CompileSeedExtractionConfig,

@@ -1,4 +1,4 @@
-import type { LongMemEvalVariant } from "../dataset.js";
+import type { LongMemEvalVariant } from "../ingestion/dataset.js";
 
 export function parseLongMemEvalVariant(name: string): LongMemEvalVariant {
   if (name === "longmemeval_oracle" || name === "longmemeval_s" || name === "longmemeval_m") {

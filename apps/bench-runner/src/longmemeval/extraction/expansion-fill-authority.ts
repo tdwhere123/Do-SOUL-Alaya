@@ -6,15 +6,15 @@ import {
   computeSystemPromptSha256,
   readExtractionCacheManifestIdentity,
   type ExtractionCacheManifest
-} from "../extraction-cache-manifest.js";
-import { resolveCompileSeedExtractionConfig } from "../compile-seed-config.js";
-import type { CompileSeedExtractionConfig } from "../compile-seed-types.js";
-import type { LongMemEvalQuestion, LongMemEvalVariant } from "../dataset.js";
-import { loadDatasetWithIdentity } from "../fetch.js";
+} from "./cache/extraction-cache-manifest.js";
+import { resolveCompileSeedExtractionConfig } from "../compile-seed/compile-seed-config.js";
+import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
+import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
+import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability
-} from "../promotion/expansion-capability.js";
+} from "../promotion/expansion/expansion-capability.js";
 import {
   verifyR3SpendApproval,
   type R3SpendApproval,
@@ -23,24 +23,24 @@ import {
 import {
   assertLongMemEvalExpansionLineageMatchesCapability,
   buildLongMemEvalExpansionLineage
-} from "../promotion/expansion-lineage.js";
+} from "../promotion/expansion/lineage/expansion-lineage.js";
 import type { LongMemEvalExpansionLineage } from
-  "../promotion/expansion-lineage-schema.js";
+  "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import { assertCanonicalLongMemEvalExpansionSelection } from
-  "../promotion/expansion-selection.js";
+  "../promotion/expansion/expansion-selection.js";
 import {
   assertLongMemEvalExpansionSourceAnchor,
   buildLongMemEvalExpansionSourceAnchor
-} from "../promotion/expansion-source-anchor.js";
+} from "../promotion/expansion/lineage/expansion-source-anchor.js";
 import type { LongMemEvalExpansionSourceAnchor } from
-  "../promotion/expansion-source-anchor-schema.js";
+  "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import { redactProvenanceUrl } from "../provenance/paired-environment.js";
-import { hasCompleteExtractionFillAuthority } from "./fill-authority.js";
+import { hasCompleteExtractionFillAuthority } from "./fill/fill-authority.js";
 import {
   inspectExtractionFillCompletion,
   type ExtractionFillCompletion
-} from "./fill-completion.js";
-import { ExtractionCacheInvariantError } from "./cache-invariant-error.js";
+} from "./fill/fill-completion.js";
+import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import { collectDistinctTurnContents } from "./turn-contents.js";
 
 export interface ExpansionFillAuthorityOptions {
@@ -65,6 +65,8 @@ export interface PreparedExpansionFillAuthority {
   readonly nextQuestions: readonly LongMemEvalQuestion[];
 }
 
+type LongMemEvalDatasetWithIdentity = Awaited<ReturnType<typeof loadDatasetWithIdentity>>;
+
 export async function prepareExpansionFillAuthority(
   options: ExpansionFillAuthorityOptions,
   cacheRoot: string
@@ -74,18 +76,49 @@ export async function prepareExpansionFillAuthority(
     dataDir: options.dataDir,
     pinnedMetaRoot: options.pinnedMetaRoot
   });
-  if (options.variant !== "longmemeval_s" ||
-      dataset.promotionAuthority === null) {
+  if (!requiresCanonicalExpansionAuthority(options, dataset)) return undefined;
+  return prepareCanonicalExpansionFillAuthority(options, cacheRoot, dataset);
+}
+
+function requiresCanonicalExpansionAuthority(
+  options: ExpansionFillAuthorityOptions,
+  dataset: LongMemEvalDatasetWithIdentity
+): boolean {
+  if (options.variant !== "longmemeval_s") {
     assertCapabilityAbsent(options.expansionCapability);
     assertR3SpendApprovalAbsent(options.r3SpendApproval);
-    return undefined;
+    return false;
+  }
+  if (dataset.promotionAuthority === null) {
+    if (isCanonicalFullExpansionRequest(options, dataset.questions.length)) {
+      throw invariant("canonical 500Q extraction requires a promotion-authorized dataset");
+    }
+    assertCapabilityAbsent(options.expansionCapability);
+    assertR3SpendApprovalAbsent(options.r3SpendApproval);
+    return false;
   }
   const window = classifyCanonicalExpansionWindow(options, dataset.questions.length);
   if (window === "source") {
     assertCapabilityAbsent(options.expansionCapability);
     assertR3SpendApprovalAbsent(options.r3SpendApproval);
-    return undefined;
+    return false;
   }
+  return true;
+}
+
+function isCanonicalFullExpansionRequest(
+  options: ExpansionFillAuthorityOptions,
+  questionCount: number
+): boolean {
+  return (options.offset ?? 0) === 0 &&
+    (options.limit ?? questionCount) === 500;
+}
+
+function prepareCanonicalExpansionFillAuthority(
+  options: ExpansionFillAuthorityOptions,
+  cacheRoot: string,
+  dataset: LongMemEvalDatasetWithIdentity
+): PreparedExpansionFillAuthority {
   const capability = requireCapability(options.expansionCapability);
   const selection = assertCanonicalLongMemEvalExpansionSelection({
     capability,

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { computeLongMemEvalQuestionIdDigest } from "@do-soul/alaya-eval";
 import { z } from "zod";
-import type { LongMemEvalQuestion, LongMemEvalVariant } from "../dataset.js";
+import type { LongMemEvalQuestion, LongMemEvalVariant } from "../ingestion/dataset.js";
 import {
   classifyLongMemEvalDatasetCohort,
   type LongMemEvalDatasetCohort

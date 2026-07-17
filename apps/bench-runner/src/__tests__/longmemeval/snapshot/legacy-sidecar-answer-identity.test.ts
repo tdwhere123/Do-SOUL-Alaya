@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
+import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
   assertLegacySnapshotSidecarIdentity
-} from "../../../longmemeval/snapshot/legacy-substrate.js";
+} from "../../../longmemeval/snapshot/legacy/legacy-substrate.js";
 import type {
   LongMemEvalSnapshotSidecarFile
-} from "../../../longmemeval/snapshot.js";
+} from "../../../longmemeval/snapshot/materialize.js";
 
 const question = {
   question_id: "question-mixed",

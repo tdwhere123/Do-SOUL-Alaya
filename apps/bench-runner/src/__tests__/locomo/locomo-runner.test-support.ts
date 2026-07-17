@@ -176,7 +176,7 @@ export function buildMockDaemon(overrides: {
     }));
   // Stubbed event-sourced fold: a non-zero full-turn baseline so the harness
   // token-economy contract passes and the kpi carries a real token_economy.
-  // see also: apps/bench-runner/src/harness/token-economy.ts deriveBenchTokenMetrics
+  // see also: apps/bench-runner/src/harness/token/token-economy.ts deriveBenchTokenMetrics
   const queryTokenMetrics = vi.fn(async () => ({
     raw_history_tokens: 1_000,
     stored_memory_tokens: 200,

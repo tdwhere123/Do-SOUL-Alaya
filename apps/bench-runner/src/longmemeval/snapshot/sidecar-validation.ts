@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { normalizeCompileSeedSourceTime } from "../ingestion/source-time.js";
-import type { LongMemEvalSnapshotSidecarFile } from "../snapshot.js";
+import type { LongMemEvalSnapshotSidecarFile } from "./materialize.js";
 
 const NonEmptyStringSchema = z.string().min(1).refine(
   (value) => value.trim() === value,

@@ -12,17 +12,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   readExtractionCacheManifest
-} from "../../../longmemeval/extraction-cache-manifest.js";
+} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   collectDistinctTurnContents,
   runExtractionFill
-} from "../../../longmemeval/extraction-fill.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
+} from "../../../longmemeval/extraction/extraction-fill.js";
+import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
   inspectExtractionFillCompletion
-} from "../../../longmemeval/extraction/fill-completion.js";
+} from "../../../longmemeval/extraction/fill/fill-completion.js";
 import { preflightExtractionCache } from
-  "../../../longmemeval/compile-seed-preflight.js";
+  "../../../longmemeval/compile-seed/compile-seed-preflight.js";
 import {
   buildLongMemEvalFixtureQuestion,
   writeLongMemEvalFixtureDataset

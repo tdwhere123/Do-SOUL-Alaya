@@ -7,12 +7,12 @@ import {
   resolvePathRelContentStrengthEnabledFromConfig,
   stableStringify
 } from "@do-soul/alaya-core";
-import { buildBenchDiagnosticRecallPolicy } from "../../harness/daemon-recall-result.js";
+import { buildBenchDiagnosticRecallPolicy } from "../../harness/daemon/runtime/daemon-recall-result.js";
 import {
   applyBenchRecallWeightOverrides,
   type BenchRecallWeightOverrides
-} from "../../harness/recall-weight-overrides.js";
-import { resolveSourceRefRobust } from "../../harness/daemon-environment.js";
+} from "../../harness/recall/recall-weight-overrides.js";
+import { resolveSourceRefRobust } from "../../harness/daemon/daemon-environment.js";
 
 export const EFFECTIVE_RECALL_CONFIG_SCHEMA_VERSION = 2 as const;
 

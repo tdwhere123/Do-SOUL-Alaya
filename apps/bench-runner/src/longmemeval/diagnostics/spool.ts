@@ -7,12 +7,12 @@ import { StringDecoder } from "node:string_decoder";
 import type {
   LongMemEvalDiagnosticsSidecar,
   LongMemEvalQuestionDiagnostic
-} from "../diagnostics-types.js";
+} from "./schema/diagnostics-types.js";
 import { throwLifecycleErrors } from "../lifecycle/errors.js";
 import {
   writeDiagnosticsGzipStream,
   type StreamedArtifactIdentity
-} from "./artifact-gzip-stream.js";
+} from "./artifacts/artifact-gzip-stream.js";
 
 export interface DiagnosticsSpoolArtifactIdentity extends StreamedArtifactIdentity {
   readonly artifactPath: string;

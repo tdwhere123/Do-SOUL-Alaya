@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import {
   pairSessionIntoRounds,
   type LongMemEvalQuestion
-} from "../../dataset.js";
-import { computeCacheKey } from "../../compile-seed-cache.js";
-import type { CompileSeedExtractionConfig } from "../../compile-seed-types.js";
+} from "../../ingestion/dataset.js";
+import { computeCacheKey } from "../../compile-seed/compile-seed-cache.js";
+import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
 
 export interface ExtractionOccurrence {

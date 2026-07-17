@@ -3,7 +3,7 @@ import type { BenchDaemonHandle, BenchEmbeddingMode } from "../harness/daemon.js
 import { startBenchDaemon } from "../harness/daemon.js";
 import type { CompileSeedRunner } from "../longmemeval/compile-seed.js";
 import type { LongMemEvalQuestionDiagnostic } from "../longmemeval/diagnostics.js";
-import { QaChatError } from "../longmemeval/qa-chat.js";
+import { QaChatError } from "../longmemeval/qa/qa-chat.js";
 import type { LocomoSample } from "./dataset.js";
 import { runOneConversation, type ConversationResult } from "./runner-conversation.js";
 import type { LocomoRunOptions } from "./runner-types.js";

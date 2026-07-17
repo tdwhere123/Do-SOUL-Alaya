@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { BenchProviderUsage } from "../compile-seed-types.js";
+import type { BenchProviderUsage } from "../compile-seed/compile-seed-types.js";
 
 const ChatCompletionPayloadSchema = z.object({
   choices: z.array(z.object({

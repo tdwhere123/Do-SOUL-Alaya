@@ -4,8 +4,8 @@ import { join, relative } from "node:path";
 import {
   inspectCachedExtraction,
   type CachedExtractionInspection
-} from "../../compile-seed-cache.js";
-import type { CompileSeedExtractionConfig } from "../../compile-seed-types.js";
+} from "../../compile-seed/compile-seed-cache.js";
+import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 
 const CACHE_KEY_FILE = /^([a-f0-9]{64})\.json$/u;
 

@@ -6,18 +6,18 @@ import {
   type KpiPayload
 } from "@do-soul/alaya-eval";
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
-import type { BenchRecallWeightOverrides } from "../../harness/recall-weight-overrides.js";
+import type { BenchRecallWeightOverrides } from "../../harness/recall/recall-weight-overrides.js";
 import {
   buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeProviderStates
 } from "../diagnostics.js";
-import type { LongMemEvalVariant } from "../dataset.js";
-import { RECALL_EVAL_ARCHIVE_MARKER } from "../recall-eval-archive.js";
-import type { RecallEvalQuestionResult } from "../recall-eval.js";
-import type { RecallEvalRuntimeAttribution } from "../lifecycle/recall-eval-runtime.js";
-import type { LongMemEvalSnapshotManifest } from "../snapshot.js";
+import type { LongMemEvalVariant } from "../ingestion/dataset.js";
+import { RECALL_EVAL_ARCHIVE_MARKER } from "../lifecycle/recall-eval/recall-eval-archive-impl.js";
+import type { RecallEvalQuestionResult } from "../lifecycle/recall-eval/recall-eval-impl.js";
+import type { RecallEvalRuntimeAttribution } from "../lifecycle/recall-eval/recall-eval-runtime.js";
+import type { LongMemEvalSnapshotManifest } from "../snapshot/materialize.js";
 import { computeRecallEvalAggregates, type RecallEvalAggregates } from "./recall-eval-aggregates.js";
 import { accumulateRecallEvalRows, type RecallEvalAccumulator } from "./recall-eval-accumulator.js";
 import { buildBenchmarkMeasurementAttribution } from "../measurement/attribution.js";
@@ -25,7 +25,7 @@ import { assertMeasurementCohortBinding } from "../measurement/cohort-binding.js
 import {
   summarizeEmbeddingVectorCache,
   summarizeQueryEmbeddingCache
-} from "../runner-helpers.js";
+} from "../runner/runner-helpers.js";
 
 const VARIANT_TO_SPLIT: Record<LongMemEvalVariant, BenchSplit> = {
   longmemeval_oracle: "longmemeval-oracle",

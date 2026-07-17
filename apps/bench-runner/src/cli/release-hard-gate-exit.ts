@@ -4,7 +4,7 @@ import {
 } from "@do-soul/alaya-eval";
 import {
   seedExtractionReleaseBlockerExitCode
-} from "../longmemeval/seed-extraction-release-blocker.js";
+} from "../longmemeval/extraction/seed-fuel/seed-extraction-release-blocker.js";
 import { exitCodeForVerdicts } from "./result-format.js";
 
 export function exitCodeForReleaseHardGates(payload: KpiPayload): number {

@@ -3,7 +3,7 @@ import {
   runRecallEval,
   type RecallEvalOptions,
   type RecallEvalResult
-} from "../../longmemeval/recall-eval.js";
+} from "../../longmemeval/lifecycle/recall-eval/recall-eval-impl.js";
 import type { ParsedFlags } from "../cli-options.js";
 import { exitCodeForReleaseHardGates } from "../release-hard-gate-exit.js";
 import { pct } from "../result-format.js";

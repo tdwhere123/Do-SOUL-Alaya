@@ -7,22 +7,22 @@ import {
   readSchemaMigrationLedger
 } from "@do-soul/alaya-storage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
+import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import { LongMemEvalRunProvenanceSchema } from "../../../longmemeval/provenance/run.js";
 import {
   snapshotManifestPath,
   snapshotSidecarPath,
   type LongMemEvalSnapshotManifest
-} from "../../../longmemeval/snapshot.js";
+} from "../../../longmemeval/snapshot/materialize.js";
 import { sha256File } from "../../../longmemeval/snapshot/integrity.js";
 import {
   loadRecallEvalSnapshot,
   withRecallEvalSnapshot
-} from "../../../longmemeval/snapshot/recall-eval-loader.js";
-import { prepareRecallEvalRestoredDb } from "../../../longmemeval/snapshot/recall-eval-db.js";
-import { restoreLegacySnapshotToDataDir } from "../../../longmemeval/snapshot/legacy-substrate.js";
+} from "../../../longmemeval/snapshot/recall-eval/recall-eval-loader.js";
+import { prepareRecallEvalRestoredDb } from "../../../longmemeval/snapshot/recall-eval/recall-eval-db.js";
+import { restoreLegacySnapshotToDataDir } from "../../../longmemeval/snapshot/legacy/legacy-substrate.js";
 import { computeLegacySnapshotQuestionIdDigestV1 } from
-  "../../../longmemeval/snapshot/legacy-question-id-digest.js";
+  "../../../longmemeval/snapshot/legacy/legacy-question-id-digest.js";
 import { writeLongMemEvalFixtureDataset } from "../longmemeval-fixture.js";
 import {
   createDatabaseThroughMigration,

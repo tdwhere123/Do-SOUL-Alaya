@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ShardArchiveRef } from "../../cli/merge-command-shards.js";
+import type { ShardArchiveRef } from "../../cli/merge/command/merge-command-shards.js";
 import type { ShardArchivedRunProvenance } from
-  "../../cli/merge/shard-provenance-verifier.js";
-import type { LongMemEvalWorkerShardPlan } from "../runner-concurrency.js";
+  "../../cli/merge/shard/shard-provenance-verifier.js";
+import type { LongMemEvalWorkerShardPlan } from "../runner/runner-concurrency.js";
 import {
   selectionContractIdentity,
   type LongMemEvalSelectionContract,
@@ -19,7 +19,7 @@ import {
 import {
   LONGMEMEVAL_EXTRACTION_AUTHORITY_FILENAME,
   type LoadedGlobalExtractionAuthority
-} from "./extraction-authority-reference.js";
+} from "./contract/extraction-authority-reference.js";
 
 interface LoadedShardProvenance {
   readonly body: Buffer;

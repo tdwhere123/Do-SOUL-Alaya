@@ -7,19 +7,19 @@ import type {
   BenchEmbeddingProviderKind,
   BenchTokenMetrics
 } from "../harness/daemon.js";
-import type { BenchRecallTokenEconomy } from "../harness/recall-diagnostics-schema.js";
+import type { BenchRecallTokenEconomy } from "../harness/recall/recall-diagnostics-schema.js";
 import type { LongMemEvalQuestionDiagnostic } from "./diagnostics.js";
-import type { LongMemEvalVariant } from "./dataset.js";
-import type { FetchResult } from "./fetch.js";
-import type { LongMemEvalSidecarEntry } from "./runner-helpers.js";
+import type { LongMemEvalVariant } from "./ingestion/dataset.js";
+import type { FetchResult } from "./ingestion/fetch.js";
+import type { LongMemEvalSidecarEntry } from "./runner/runner-helpers.js";
 import {
   prepareMultiturnRun,
   executeMultiturnRun
-} from "./multiturn-run.js";
+} from "./multiturn/multiturn-run.js";
 import {
   buildMultiturnPayload,
   writeMultiturnArtifacts
-} from "./multiturn-payload.js";
+} from "./multiturn/multiturn-payload.js";
 
 export interface LongMemEvalMultiturnRunOptions {
   readonly variant: LongMemEvalVariant;

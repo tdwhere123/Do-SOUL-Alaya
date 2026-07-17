@@ -10,14 +10,14 @@ import {
   isCurrentStreamedDiagnostics,
   materializeShardPayload,
   readShardPayloadPlan
-} from "./shard-diagnostics-reader.js";
-import type { VerifiedShardEvidence } from "./shard-evidence-verifier.js";
-import { canonicalizeVerifiedShards } from "./shard-ordering.js";
+} from "./shard/shard-diagnostics-reader.js";
+import type { VerifiedShardEvidence } from "./shard/shard-evidence-verifier.js";
+import { canonicalizeVerifiedShards } from "./shard/shard-ordering.js";
 import path from "node:path";
 import {
   loadGlobalExtractionAuthority,
   type LoadedGlobalExtractionAuthority
-} from "../../longmemeval/provenance/extraction-authority-reference.js";
+} from "../../longmemeval/provenance/contract/extraction-authority-reference.js";
 
 export interface ShardArchiveRef {
   readonly root: string;

@@ -7,20 +7,20 @@ import { LongMemEvalSnapshotRunProvenanceSchema } from "./run-provenance.js";
 import {
   EXTRACTION_CACHE_MANIFEST_VERSION,
   EXTRACTION_REQUEST_PROFILES
-} from "../extraction-cache-manifest.js";
+} from "../extraction/cache/extraction-cache-manifest.js";
 import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
   type LongMemEvalSnapshotManifest
-} from "../snapshot.js";
+} from "./materialize.js";
 import { deriveSnapshotAttribution } from "./attribution.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
 import {
   EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS
-} from "../extraction/fill-authority.js";
+} from "../extraction/fill/fill-authority.js";
 import { LongMemEvalExpansionLineageSchema } from
-  "../promotion/expansion-lineage-schema.js";
+  "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from
-  "../promotion/expansion-source-anchor-schema.js";
+  "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SnapshotExtractionBaseSchema = z.object({

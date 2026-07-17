@@ -10,20 +10,20 @@ import {
   computeCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
-} from "../../../longmemeval/compile-seed-cache.js";
+} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from
-  "../../../longmemeval/dataset.js";
+  "../../../longmemeval/ingestion/dataset.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
   type ExtractionCacheManifestV3
-} from "../../../longmemeval/extraction-cache-manifest.js";
+} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import type {
   LongMemEvalSnapshotSeedRound,
   LongMemEvalSnapshotSidecarFile
-} from "../../../longmemeval/snapshot.js";
+} from "../../../longmemeval/snapshot/materialize.js";
 import { assertSnapshotSeedLedgerBinding } from
-  "../../../longmemeval/snapshot/seed-ledger-binding.js";
+  "../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js";
 import {
   buildSnapshotExtractionAuthority,
   buildSnapshotExtractionSummary

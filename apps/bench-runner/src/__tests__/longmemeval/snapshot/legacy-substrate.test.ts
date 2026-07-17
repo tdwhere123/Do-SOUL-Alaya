@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { LongMemEvalQuestion } from "../../../longmemeval/dataset.js";
+import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
   assertLegacySnapshotManifest,
   hydrateLegacySnapshotSidecar
-} from "../../../longmemeval/snapshot/legacy-substrate.js";
+} from "../../../longmemeval/snapshot/legacy/legacy-substrate.js";
 
 const question = {
   question_id: "question-1",

@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   })
 }));
 
-vi.mock("../../../longmemeval/extraction-fill.js", () => ({
+vi.mock("../../../longmemeval/extraction/extraction-fill.js", () => ({
   runExtractionFill: mocks.fallbackRun
 }));
 

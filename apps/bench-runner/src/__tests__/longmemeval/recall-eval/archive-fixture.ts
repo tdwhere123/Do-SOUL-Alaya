@@ -1,7 +1,7 @@
 import type { KpiPayload } from "@do-soul/alaya-eval";
-import { RECALL_EVAL_ARCHIVE_MARKER } from "../../../longmemeval/recall-eval-archive.js";
-import { snapshotQuestionIdDigest } from "../../../longmemeval/snapshot.js";
-import { withEligibleMeasurementContract } from "../longmemeval-runner-fixture.js";
+import { RECALL_EVAL_ARCHIVE_MARKER } from "../../../longmemeval/lifecycle/recall-eval/recall-eval-archive-impl.js";
+import { snapshotQuestionIdDigest } from "../../../longmemeval/snapshot/materialize.js";
+import { withEligibleMeasurementContract } from "../runner/longmemeval-runner-fixture.js";
 import { VERIFIED_TEST_DATASET_SHA256 } from
   "../../../../../../packages/eval/src/__tests__/gates/verified-dataset-fixture.js";
 

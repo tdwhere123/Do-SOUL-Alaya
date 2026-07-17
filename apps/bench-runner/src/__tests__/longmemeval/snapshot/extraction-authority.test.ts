@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LongMemEvalRunProvenance } from
   "../../../longmemeval/provenance/run.js";
 import type { ExtractionCacheManifestV3 } from
-  "../../../longmemeval/extraction-cache-manifest.js";
+  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
@@ -22,7 +22,7 @@ import {
   bindSnapshotRunProvenanceAuthority,
   compactSnapshotRunProvenance
 } from "../../../longmemeval/snapshot/run-provenance.js";
-import { makeShardProvenance } from "../runner-concurrency-fixture.js";
+import { makeShardProvenance } from "../runner/runner-concurrency-fixture.js";
 
 const SOURCE_SHA = "a".repeat(64);
 

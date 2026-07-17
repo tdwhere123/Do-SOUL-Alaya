@@ -1,7 +1,7 @@
 import {
   pairSessionIntoRounds,
   type LongMemEvalQuestion
-} from "../dataset.js";
+} from "../ingestion/dataset.js";
 
 export function collectDistinctTurnContents(
   questions: readonly LongMemEvalQuestion[]

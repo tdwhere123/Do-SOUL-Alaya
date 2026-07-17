@@ -1,6 +1,6 @@
 import { diffKpis, type KpiPayload } from "@do-soul/alaya-eval";
 import { describe, expect, it } from "vitest";
-import { makeShardKpi } from "../../cli/cli-merge-validations-fixture.js";
+import { makeShardKpi } from "../../cli/merge/cli-merge-validations-fixture.js";
 import { renderRecallEvalReport } from "../../../longmemeval/kpi/recall-eval-report.js";
 
 function diagnosticPayload(): KpiPayload {
