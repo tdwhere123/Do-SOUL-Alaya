@@ -338,6 +338,13 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_failed",
       "provider_not_requested"
     ]),
+    embedding_supplement_status: z.enum([
+      "disabled",
+      "provider_missing",
+      "query_missing",
+      "empty_candidate_pool",
+      "requested"
+    ]).optional(),
     provider_degradation_reason: z.string().nullable(),
     answer_rerank_status: BenchAnswerRerankStatusSchema,
     answer_rerank_expected_count: z.number().int().nonnegative(),

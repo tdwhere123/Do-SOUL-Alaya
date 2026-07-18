@@ -37,16 +37,17 @@ it("does not invoke embedding supplement work under the default policy", async (
       supplementaryEntries: Object.freeze([]),
       similarityHintsByObjectId: Object.freeze({})
     }));
+    const querySupplement = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([]),
+      similarityHintsByObjectId: Object.freeze({})
+    }));
     const service = new RecallService({
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
         prepareQueryEmbedding,
         querySupplementIfReady,
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        }))
+        querySupplement
       }
     });
 
@@ -59,6 +60,7 @@ it("does not invoke embedding supplement work under the default policy", async (
     expect(hasStoredVectors).not.toHaveBeenCalled();
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
+    expect(querySupplement).not.toHaveBeenCalled();
   });
 
 it("preserves the legacy query-embedding receiver", async () => {
@@ -365,16 +367,17 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
       supplementaryEntries: Object.freeze([]),
       similarityHintsByObjectId: Object.freeze({})
     }));
+    const querySupplement = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([]),
+      similarityHintsByObjectId: Object.freeze({})
+    }));
     const service = new RecallService({
       ...dependencies,
       embeddingRecallService: {
         hasStoredVectors,
         prepareQueryEmbedding,
         querySupplementIfReady,
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        }))
+        querySupplement
       }
     });
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
@@ -403,6 +406,7 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
     });
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
+    expect(querySupplement).not.toHaveBeenCalled();
   });
 
 it("fails closed and records degraded telemetry when the stored-vector precheck errors", async () => {
@@ -438,6 +442,10 @@ it("fails closed and records degraded telemetry when the stored-vector precheck 
       supplementaryEntries: Object.freeze([]),
       similarityHintsByObjectId: Object.freeze({})
     }));
+    const querySupplement = vi.fn(async () => ({
+      supplementaryEntries: Object.freeze([]),
+      similarityHintsByObjectId: Object.freeze({})
+    }));
     const service = new RecallService({
       ...dependencies,
       embeddingRecallService: {
@@ -445,10 +453,7 @@ it("fails closed and records degraded telemetry when the stored-vector precheck 
         recordPrecheckDegraded,
         prepareQueryEmbedding,
         querySupplementIfReady,
-        querySupplement: vi.fn(async () => ({
-          supplementaryEntries: Object.freeze([]),
-          similarityHintsByObjectId: Object.freeze({})
-        }))
+        querySupplement
       }
     });
     const basePolicy = service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
@@ -496,5 +501,6 @@ it("fails closed and records degraded telemetry when the stored-vector precheck 
     );
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
+    expect(querySupplement).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ export type SqliteStatement = BetterSqlite3.Statement;
 export interface SynthesisCapsuleStatements {
   readonly createStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
+  readonly findByIdsStatement: SqliteStatement;
   readonly findByWorkspaceIdStatement: SqliteStatement;
   readonly findByTopicKeyStatement: SqliteStatement;
   readonly updateEvidenceRefsStatement: SqliteStatement;
@@ -19,6 +20,7 @@ export function prepareSynthesisCapsuleStatements(db: StorageDatabase): Synthesi
   return {
     createStatement: db.connection.prepare(CREATE_SYNTHESIS_CAPSULE_SQL),
     findByIdStatement: db.connection.prepare(findSynthesisCapsuleSql("byId", "limitOne")),
+    findByIdsStatement: db.connection.prepare(FIND_SYNTHESIS_CAPSULES_BY_IDS_SQL),
     findByWorkspaceIdStatement: db.connection.prepare(findSynthesisCapsuleSql("byWorkspace")),
     findByTopicKeyStatement: db.connection.prepare(findSynthesisCapsuleSql("byTopic")),
     updateEvidenceRefsStatement: db.connection.prepare(updateRefsSql("evidence_refs")),
@@ -100,6 +102,14 @@ const CREATE_SYNTHESIS_CAPSULE_SQL = `
         run_id,
         synthesis_status
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+const FIND_SYNTHESIS_CAPSULES_BY_IDS_SQL = `
+      SELECT${SYNTHESIS_SELECT_COLUMNS}
+      FROM synthesis_capsules
+      WHERE workspace_id = ?
+        AND object_id IN (SELECT value FROM json_each(?))
+      ORDER BY created_at ASC, object_id ASC
 `;
 
 const SEARCH_SYNTHESIS_KEYWORD_SQL = `

@@ -20,6 +20,48 @@ const workspaceId = "workspace-temporal-reader";
 const path = createPathRelation();
 
 describe("createRecallPathReadPorts", () => {
+  it("ensures the current projection once while rebuilding exact historical projections", async () => {
+    let nowMs = Date.parse("2026-07-17T00:00:00.000Z");
+    let activeGeneration = "generation-a";
+    let releaseCurrentEnsure: (() => void) | undefined;
+    const currentEnsureBlocked = new Promise<void>((resolve) => {
+      releaseCurrentEnsure = resolve;
+    });
+    const verifyAndRebuild = vi.fn(async (asOf?: string) => {
+      if (asOf === undefined) {
+        await currentEnsureBlocked;
+        return {
+          projectionGeneration: activeGeneration,
+          nextProjectionRefreshAt: "2026-07-17T01:00:00.000Z"
+        };
+      }
+      return { projectionGeneration: "historical-generation", nextProjectionRefreshAt: null };
+    });
+    const ensureTemporalProjection = createRecallTemporalProjectionEnsurer({
+      verifyAndRebuild,
+      readActiveProjectionGeneration: () => activeGeneration,
+      clock: () => nowMs
+    });
+
+    const firstCurrent = ensureTemporalProjection();
+    const concurrentCurrent = ensureTemporalProjection({});
+    releaseCurrentEnsure?.();
+    await Promise.all([firstCurrent, concurrentCurrent]);
+    await ensureTemporalProjection();
+    await ensureTemporalProjection({ asOf: "2026-07-17T00:00:00.000Z" });
+    await ensureTemporalProjection({ asOf: "2026-07-17T00:00:00.000Z" });
+    nowMs = Date.parse("2026-07-17T01:00:00.000Z");
+    activeGeneration = "generation-a";
+    await ensureTemporalProjection();
+
+    expect(verifyAndRebuild.mock.calls).toEqual([
+      [],
+      ["2026-07-17T00:00:00.000Z"],
+      ["2026-07-17T00:00:00.000Z"],
+      []
+    ]);
+  });
+
   it("keeps the legacy reader as the default mode", async () => {
     const legacy = {
       findByAnchors: vi.fn(async () => [path]),
@@ -119,8 +161,15 @@ describe("createRecallPathReadPorts", () => {
   });
 
   it("derives graph lookups from the temporal projection without a legacy reader", async () => {
+    const sourceOnlyPath = createPathRelation({
+      path_id: "path-source-only",
+      anchors: {
+        source_anchor: path.anchors.target_anchor,
+        target_anchor: { kind: "object", object_id: "memory-c" }
+      }
+    });
     const temporal = {
-      findByAnchors: vi.fn(async () => [path]),
+      findByAnchors: vi.fn(async () => [path, sourceOnlyPath]),
       findByTimeConcernWindowDigests: vi.fn(async () => [path]),
       findByWorkspace: vi.fn(async () => [path])
     };
@@ -140,7 +189,12 @@ describe("createRecallPathReadPorts", () => {
     await expect(graphReader.findByBackingObjectIds!(workspaceId, ["memory-a"])).resolves.toEqual([path]);
     await expect(graphReader.findByBackingObjectId(workspaceId, "memory-b")).resolves.toEqual([]);
 
-    expect(temporal.findByWorkspace).toHaveBeenCalledTimes(3);
+    expect(temporal.findByAnchors).toHaveBeenCalledWith(
+      workspaceId,
+      [path.anchors.target_anchor],
+      options
+    );
+    expect(temporal.findByWorkspace).toHaveBeenCalledTimes(2);
     expect(temporal.findByWorkspace).toHaveBeenLastCalledWith(workspaceId, options);
     expect(ensureTemporalProjection).toHaveBeenCalledTimes(3);
   });
@@ -151,6 +205,7 @@ describe("createRecallPathReadPorts", () => {
     const eventLogRepo = new SqliteEventLogRepo(database);
     const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
     const relationAssertionRepo = new SqliteRelationAssertionRepo(database);
+    let currentAsOf = "2026-07-17T02:00:00.000Z";
     const relationAssertionService = new RelationAssertionService({
       repo: relationAssertionRepo,
       eventPublisher: new EventPublisher({
@@ -159,7 +214,7 @@ describe("createRecallPathReadPorts", () => {
         runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
       }),
       eventHistory: eventLogRepo,
-      now: () => "2026-07-17T02:00:00.000Z"
+      now: () => currentAsOf
     });
     const historicalAsOf = "2026-07-17T01:30:00.000Z";
     try {
@@ -222,7 +277,10 @@ describe("createRecallPathReadPorts", () => {
         runId: "run-temporal-direct",
         causedBy: "garden",
         evidenceIds: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"],
-        anchors: path.anchors,
+        anchors: {
+          source_anchor: { kind: "object", object_id: "memory-a" },
+          target_anchor: { kind: "object", object_id: "memory-b" }
+        },
         relationKind: "supports",
         validity: { kind: "open", valid_from: "2026-07-17T01:00:00.000Z" },
         sourceEventAnchor: {
@@ -242,6 +300,7 @@ describe("createRecallPathReadPorts", () => {
         resolvedAt: "2026-07-17T01:45:00.000Z"
       });
       const temporalReader = new SqliteTemporalPathProjectionReader(relationAssertionRepo);
+      const verifyAndRebuild = vi.spyOn(relationAssertionService, "verifyAndRebuild");
 
       const ports = createRecallPathReadPorts({
         temporalProjectionSelected: true,
@@ -261,13 +320,44 @@ describe("createRecallPathReadPorts", () => {
         { path_id: "assertion-selected-direct" }
       ]);
       await expect(ports.findActiveByWorkspace(workspaceId)).resolves.toEqual([]);
+      await relationAssertionService.admit({
+        assertionId: "assertion-selected-bounded",
+        workspaceId,
+        runId: "run-temporal-direct",
+        causedBy: "garden",
+        evidenceIds: ["85b3671a-d8d8-4848-9e5c-07d0a89f5ae9"],
+        anchors: path.anchors,
+        relationKind: "time_concern",
+        validity: {
+          kind: "bounded",
+          valid_from: "2026-07-17T02:00:00.000Z",
+          valid_to: "2026-07-17T03:00:00.000Z"
+        },
+        sourceEventAnchor: {
+          eventType: SignalEventType.SOUL_SIGNAL_EMITTED,
+          eventId: sourceEvent.event_id,
+          occurredAt: "2026-07-17T01:00:00.000Z"
+        },
+        admittedAt: "2026-07-17T02:00:00.000Z"
+      });
+      await expect(ports.findActiveByWorkspace(workspaceId)).resolves.toMatchObject([
+        { path_id: "assertion-selected-bounded" }
+      ]);
+      currentAsOf = "2026-07-17T03:00:00.000Z";
+      await expect(ports.findActiveByWorkspace(workspaceId)).resolves.toEqual([]);
+      expect(verifyAndRebuild.mock.calls).toEqual([
+        [],
+        [historicalAsOf],
+        [],
+        []
+      ]);
     } finally {
       database.close();
     }
   });
 });
 
-function createPathRelation(): PathRelation {
+function createPathRelation(overrides: Partial<PathRelation> = {}): PathRelation {
   return {
     path_id: "path-temporal-reader",
     workspace_id: workspaceId,
@@ -298,6 +388,7 @@ function createPathRelation(): PathRelation {
       status: "active",
       retirement_rule: "janitor_ttl_low_strength"
     },
+    ...overrides,
     legitimacy: {
       evidence_basis: ["evidence-test"],
       governance_class: "recall_allowed"

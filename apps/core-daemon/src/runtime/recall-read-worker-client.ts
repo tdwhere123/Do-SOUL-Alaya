@@ -96,9 +96,12 @@ export function createRecallReadWorkerClient(input: {
 }
 
 class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
-  private readonly worker: Worker;
+  private worker: Worker | null = null;
+  private readonly databaseFilename: string;
   private readonly requestTimeoutMs: number;
   private readonly temporalProjectionSelected: boolean;
+  private readonly warn?: (message: string, meta: Record<string, unknown>) => void;
+  private readonly workerUrl: URL;
   private nextRequestId = 1;
   private readonly pending = new Map<
     number,
@@ -235,32 +238,42 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     readonly requestTimeoutMs?: number;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
+    this.databaseFilename = input.databaseFilename;
     this.requestTimeoutMs = normalizeRequestTimeoutMs(input.requestTimeoutMs);
     this.temporalProjectionSelected = input.temporalProjectionSelected === true;
-    this.worker = new Worker(input.workerUrl, {
+    this.warn = input.warn;
+    this.workerUrl = input.workerUrl;
+    this.worker = this.spawnWorker();
+  }
+
+  private spawnWorker(): Worker {
+    const worker = new Worker(this.workerUrl, {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
       workerData: {
-        databaseFilename: input.databaseFilename,
+        databaseFilename: this.databaseFilename,
         temporalProjectionSelected: this.temporalProjectionSelected
       }
     });
-    this.worker.on("message", (message: unknown) => this.handleMessage(message));
-    this.worker.on("error", (error) => {
-      input.warn?.("recall read worker failed", {
+    worker.on("message", (message: unknown) => {
+      if (this.worker === worker) {
+        this.handleMessage(message);
+      }
+    });
+    worker.on("error", (error) => {
+      this.warn?.("recall read worker failed", {
         error: error instanceof Error ? error.message : String(error)
       });
-      this.closed = true;
-      this.rejectPending(error);
+      this.recoverWorker(worker, error);
     });
-    this.worker.on("exit", (code) => {
-      if (this.closed || code === 0) {
+    worker.on("exit", (code) => {
+      if (this.worker !== worker || this.closeStarted) {
         return;
       }
       const error = new Error(`recall read worker exited with code ${code}`);
-      input.warn?.("recall read worker exited unexpectedly", { code });
-      this.closed = true;
-      this.rejectPending(error);
+      this.warn?.("recall read worker exited unexpectedly", { code });
+      this.recoverWorker(worker, error);
     });
+    return worker;
   }
 
   public async close(): Promise<void> {
@@ -269,7 +282,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
     this.closeStarted = true;
     try {
-      if (!this.closed) {
+      if (!this.closed && this.worker !== null) {
         try {
           await this.request("close", {});
         } catch {
@@ -279,7 +292,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     } finally {
       this.closed = true;
       this.rejectPending(new Error("recall read worker closed"));
-      await this.worker.terminate();
+      const worker = this.worker;
+      this.worker = null;
+      if (worker !== null) await worker.terminate();
     }
   }
 
@@ -313,6 +328,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     if (this.closed && operation !== "close") {
       throw new Error("recall read worker is closed");
     }
+    const worker = this.requireWorker();
     const id = this.nextRequestId;
     this.nextRequestId += 1;
     return await new Promise<T>((resolve, reject) => {
@@ -325,10 +341,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         const error = new Error(
           `recall read worker ${operation} timed out after ${this.requestTimeoutMs}ms`
         );
-        this.closed = true;
         pending.reject(error);
-        this.rejectPending(error);
-        void this.worker.terminate().catch(() => undefined);
+        this.recoverWorker(worker, error);
       }, this.requestTimeoutMs);
       this.pending.set(id, {
         resolve: (value) => {
@@ -342,7 +356,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         timeout
       });
       try {
-        this.worker.postMessage({ id, operation, payload } satisfies RecallReadWorkerRequest);
+        worker.postMessage({ id, operation, payload } satisfies RecallReadWorkerRequest);
       } catch (error) {
         const pending = this.pending.get(id);
         this.pending.delete(id);
@@ -351,8 +365,26 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         } else {
           pending.reject(error);
         }
+        this.recoverWorker(worker, error);
       }
     });
+  }
+
+  private requireWorker(): Worker {
+    if (this.worker !== null) return this.worker;
+    if (this.closed || this.closeStarted) {
+      throw new Error("recall read worker is closed");
+    }
+    const worker = this.spawnWorker();
+    this.worker = worker;
+    return worker;
+  }
+
+  private recoverWorker(worker: Worker, error: unknown): void {
+    if (this.worker !== worker || this.closed) return;
+    this.worker = null;
+    this.rejectPending(error);
+    void worker.terminate().catch(() => undefined);
   }
 
   private handleMessage(message: unknown): void {

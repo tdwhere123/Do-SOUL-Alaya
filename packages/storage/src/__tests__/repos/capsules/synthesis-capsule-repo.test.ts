@@ -107,6 +107,42 @@ describe("SqliteSynthesisCapsuleRepo", () => {
     ]);
   });
 
+  it("does not prepare a new findByIds statement for each input cardinality", async () => {
+    const { database, repo } = await createRepo();
+    const capsule = createSynthesisCapsule();
+    await repo.create(capsule);
+    let prepareCount = 0;
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    database.connection.prepare = ((sql: string) => {
+      prepareCount += 1;
+      return originalPrepare(sql);
+    }) as typeof database.connection.prepare;
+
+    await repo.findByIds("workspace-1", [capsule.object_id]);
+    await repo.findByIds("workspace-1", [capsule.object_id, "missing-id"]);
+
+    expect(prepareCount).toBe(0);
+  });
+
+  it("preserves deterministic ordering across findByIds chunks", async () => {
+    const { repo } = await createRepo();
+    const earlier = createSynthesisCapsule({
+      object_id: "6f2c53a4-0c4a-41aa-a2b0-c26fd862aa75",
+      created_at: "2026-03-20T00:00:00.000Z"
+    });
+    const later = createSynthesisCapsule({
+      object_id: "420b0a6f-c74e-459b-947f-61353f82e0a3",
+      created_at: "2026-03-20T00:00:01.000Z"
+    });
+    await repo.create(earlier);
+    await repo.create(later);
+    const missingIds = Array.from({ length: 500 }, (_, index) => `missing-${index}`);
+
+    const rows = await repo.findByIds("workspace-1", [later.object_id, ...missingIds, earlier.object_id]);
+
+    expect(rows.map((row) => row.object_id)).toEqual([earlier.object_id, later.object_id]);
+  });
+
   it("updates synthesis status", async () => {
     const { repo } = await createRepo();
     const capsule = createSynthesisCapsule();

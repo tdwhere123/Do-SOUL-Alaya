@@ -72,6 +72,7 @@ describe("environment status service", () => {
         node: true
       },
       active_worktrees: 2,
+      active_worktrees_known: true,
       db_path: "/tmp/alaya.db",
       files_dir: "/tmp/alaya-files"
     });
@@ -112,6 +113,7 @@ describe("environment status service", () => {
         node: false
       },
       active_worktrees: 0,
+      active_worktrees_known: false,
       db_path: "/tmp/alaya.db",
       files_dir: "/tmp/alaya-files"
     });
@@ -166,6 +168,7 @@ describe("environment status service", () => {
         node: false
       },
       active_worktrees: 3,
+      active_worktrees_known: true,
       db_path: "/tmp/alaya.db",
       files_dir: "/tmp/alaya-files"
     });

@@ -73,4 +73,26 @@ describe("DynamicPreparedStatementCache", () => {
     expect(afterReopen).not.toBe(beforeClose);
     expect(afterReopen.all()[0]).toEqual({ value: 2 });
   });
+
+  it("evicts the least recently used statement when the cache reaches its bound", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-dynamic-prepared-"));
+    tempDirs.push(tempDir);
+    const db = initDatabase({ filename: path.join(tempDir, "dynamic-prepared-bounded.db") });
+    databases.push(db);
+    let prepareCount = 0;
+    const originalPrepare = db.connection.prepare.bind(db.connection);
+    db.connection.prepare = ((sql: string) => {
+      prepareCount += 1;
+      return originalPrepare(sql);
+    }) as typeof db.connection.prepare;
+
+    const cache = new DynamicPreparedStatementCache(db, () => db.reopenIfClosed(), 2);
+    cache.prepare("SELECT 1 AS value");
+    cache.prepare("SELECT 2 AS value");
+    cache.prepare("SELECT 1 AS value");
+    cache.prepare("SELECT 3 AS value");
+    cache.prepare("SELECT 2 AS value");
+
+    expect(prepareCount).toBe(4);
+  });
 });

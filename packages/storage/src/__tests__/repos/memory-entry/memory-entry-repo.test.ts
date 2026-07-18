@@ -176,6 +176,29 @@ describe("SqliteMemoryEntryRepo", () => {
     expect(rows.map((row) => row.object_id).sort()).toEqual([first.object_id, second.object_id].sort());
   });
 
+  it("reuses stable bulk-read statements across input cardinalities", async () => {
+    const { repo, database } = await createRepo();
+    const first = createMemoryEntry({ object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55" });
+    const second = createMemoryEntry({ object_id: "ca648194-c03c-4932-b103-3ec4d318732a" });
+    await repo.create(first);
+    await repo.create(second);
+    let prepareCount = 0;
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    database.connection.prepare = ((sql: string) => {
+      prepareCount += 1;
+      return originalPrepare(sql);
+    }) as typeof database.connection.prepare;
+
+    await repo.findByIds("workspace-1", [first.object_id]);
+    await repo.findByIds("workspace-1", [first.object_id, second.object_id]);
+    await repo.findBySharedDomainTags("workspace-1", ["tag-a"]);
+    await repo.findBySharedDomainTags("workspace-1", ["tag-a", "tag-b"]);
+    await repo.findByEvidenceRefs("workspace-1", ["evidence-a"]);
+    await repo.findByEvidenceRefs("workspace-1", ["evidence-a", "evidence-b"]);
+
+    expect(prepareCount).toBe(3);
+  });
+
   it("returns hot-tier records by default in findByWorkspaceId", async () => {
     const { repo } = await createRepo();
 

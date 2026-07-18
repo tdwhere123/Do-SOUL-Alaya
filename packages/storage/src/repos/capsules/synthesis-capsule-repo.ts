@@ -16,7 +16,6 @@ import {
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import {
   prepareSynthesisCapsuleStatements,
-  SYNTHESIS_SELECT_COLUMNS,
   type SqliteStatement
 } from "./synthesis-capsule-statements.js";
 
@@ -77,6 +76,7 @@ interface SynthesisCapsuleRow {
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
   private readonly createStatement: SqliteStatement;
   private readonly findByIdStatement: SqliteStatement;
+  private readonly findByIdsStatement: SqliteStatement;
   private readonly findByWorkspaceIdStatement: SqliteStatement;
   private readonly findByTopicKeyStatement: SqliteStatement;
   private readonly updateEvidenceRefsStatement: SqliteStatement;
@@ -91,6 +91,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     const statements = prepareSynthesisCapsuleStatements(db);
     this.createStatement = statements.createStatement;
     this.findByIdStatement = statements.findByIdStatement;
+    this.findByIdsStatement = statements.findByIdsStatement;
     this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
     this.findByTopicKeyStatement = statements.findByTopicKeyStatement;
     this.updateEvidenceRefsStatement = statements.updateEvidenceRefsStatement;
@@ -194,16 +195,18 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     if (parsedObjectIds.length === 0) {
       return Object.freeze([]);
     }
-    const placeholders = parsedObjectIds.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
-      SELECT${SYNTHESIS_SELECT_COLUMNS}
-      FROM synthesis_capsules
-      WHERE workspace_id = ?
-        AND object_id IN (${placeholders})
-      ORDER BY created_at ASC, object_id ASC
-    `);
     try {
-      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as SynthesisCapsuleRow[];
+      const rows: SynthesisCapsuleRow[] = [];
+      for (let offset = 0; offset < parsedObjectIds.length; offset += 500) {
+        const chunk = parsedObjectIds.slice(offset, offset + 500);
+        rows.push(...this.findByIdsStatement.all(
+          parsedWorkspaceId,
+          JSON.stringify(chunk)
+        ) as SynthesisCapsuleRow[]);
+      }
+      rows.sort((left, right) =>
+        left.created_at.localeCompare(right.created_at) || left.object_id.localeCompare(right.object_id)
+      );
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load synthesis capsules by ids.", error);

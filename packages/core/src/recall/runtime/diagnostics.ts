@@ -13,6 +13,7 @@ import type {
   RecallTokenEconomy
 } from "./recall-service-types.js";
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
+import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 
 export function buildRecallDiagnostics(params: Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -22,6 +23,7 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly preBudgetCount: number;
   readonly deliveredCount: number;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
+  readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly degradationReasons?: readonly RecallDegradationReason[];
@@ -42,6 +44,7 @@ export function buildRecallDiagnostics(params: Readonly<{
     pre_budget_count: params.preBudgetCount,
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
+    embedding_supplement_status: params.embeddingSupplementStatus,
     provider_degradation_reason: params.providerDegradationReason,
     ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
     ...buildDegradationDiagnostics(params.degradationReasons),

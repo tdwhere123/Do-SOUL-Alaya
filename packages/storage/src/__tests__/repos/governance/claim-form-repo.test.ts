@@ -93,6 +93,23 @@ describe("SqliteClaimFormRepo", () => {
     ]);
   });
 
+  it("does not prepare a new findByIds statement for each input cardinality", async () => {
+    const { database, repo } = await createRepo();
+    const claim = createClaimForm();
+    await repo.create(claim);
+    let prepareCount = 0;
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    database.connection.prepare = ((sql: string) => {
+      prepareCount += 1;
+      return originalPrepare(sql);
+    }) as typeof database.connection.prepare;
+
+    await repo.findByIds("workspace-1", [claim.object_id]);
+    await repo.findByIds("workspace-1", [claim.object_id, "missing-id"]);
+
+    expect(prepareCount).toBe(0);
+  });
+
   it("lists by canonical key", async () => {
     const { repo } = await createRepo();
 
@@ -218,6 +235,7 @@ describe("SqliteClaimFormRepo", () => {
 });
 
 async function createRepo(): Promise<{
+  readonly database: ReturnType<typeof initDatabase>;
   readonly repo: SqliteClaimFormRepo;
 }> {
   const database = initDatabase({ filename: ":memory:" });
@@ -243,6 +261,7 @@ async function createRepo(): Promise<{
   });
 
   return {
+    database,
     repo: new SqliteClaimFormRepo(database)
   };
 }

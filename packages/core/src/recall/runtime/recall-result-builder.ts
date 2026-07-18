@@ -40,6 +40,7 @@ export function buildRecallResult(
       preBudgetCount: manifested.candidateDiagnostics.length,
       deliveredCount: manifested.candidates.length,
       embeddingProviderStatus: assessment.embeddingProviderStatus,
+      embeddingSupplementStatus: assessment.embeddingSupplementStatus,
       providerDegradationReason: assessment.providerDegradationReason,
       answerRerankDiagnostics: assessment.answerRerankDiagnostics,
       degradationReasons: [...degradationReasons],

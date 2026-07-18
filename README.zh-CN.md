@@ -13,7 +13,7 @@
 [![status](https://img.shields.io/badge/status-v0.3.11--implementation--checkpoint-informational?style=flat-square)](#接下来的方向)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![evidence](https://img.shields.io/badge/evidence-full--bench--pending-yellow?style=flat-square)](#接下来的方向)
-[![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
+[![node](https://img.shields.io/badge/node-%E2%89%A524-339933?style=flat-square&logo=node.js&logoColor=white)](#快速开始)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#快速开始)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#架构总览)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#架构总览)
@@ -373,7 +373,7 @@ EventLog 接线）。
 graph TD
     subgraph Surfaces["对外面"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(13 个动词 · MCP 兜底)"]
+        CLIS["alaya CLI<br/>(15 个动词 · MCP 兜底)"]
     end
 
     subgraph Daemon["apps/core-daemon —— 接线 + 派发"]
@@ -470,15 +470,16 @@ schema-bounded（`maxLength` / `maxItems` /
 `alaya tools list --json` 打印 live MCP 目录（名字 + 描述 +
 请求 schema），`alaya tools call <tool> '<json>'` 在 CLI 调一个
 工具——两者都是同 daemon 路径上的脚本兜底。跑 `alaya --help`
-看 13 个 CLI 动词的完整目录（doctor / install / attach / detach
-/ status / inspect / update / tools / review / backup / export /
-import / mcp stdio）；每个会修改的动词都支持先 preview 再写，
-attach / detach 原子，审计日志在 `~/.config/alaya/audit/`。
+看 15 个 CLI 动词的完整目录（doctor / status / install / inspect
+/ update / attach / detach / source-grounding-defers / tools / review
+/ mcp / temporal-cutover / backup / export / import）；每个会修改的动词
+都支持先 preview 再写，attach / detach 原子，审计日志在
+`~/.config/alaya/audit/`。
 `review` 是一个 CLI 动词带四个子命令：`review
 pending|accept|reject` 处理 memory proposal，v0.3.11 新增
 `review edges pending|accept|reject` 处理 edge proposal 治理——
 edges 子命令属于现有 `review` 动词的子面扩展，不是新增顶层
-动词，所以顶层动词数仍是 13。新增的三个边提案 MCP 工具
+动词。新增的三个边提案 MCP 工具
 （`soul.propose_edge`、`soul.list_pending_edge_proposals`、
 `soul.batch_review_edge_proposals`）已经计入上面列出的 live MCP
 目录；13 个 `soul.*` + 3 个 `garden.*` = 16 个工具的口径已经

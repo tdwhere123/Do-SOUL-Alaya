@@ -350,6 +350,8 @@ export interface RecallDiagnostics {
   readonly pre_budget_count: number;
   readonly delivered_count: number;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
+  readonly embedding_supplement_status:
+    import("../supplements/supplements.js").EmbeddingSupplementCollectionStatus;
   readonly provider_degradation_reason: string | null;
   readonly answer_rerank_status: RecallAnswerRerankStatus;
   readonly answer_rerank_expected_count: number;

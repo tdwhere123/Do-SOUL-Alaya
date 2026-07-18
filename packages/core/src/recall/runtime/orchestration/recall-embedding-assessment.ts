@@ -2,7 +2,8 @@ import type { EmbeddingRecallSupplementResult } from "../../../embedding-recall/
 import { collectPoolEmbeddingRescore } from "../../rerank/recall-pool-embedding-rescore.js";
 import {
   collectEmbeddingSupplement,
-  prepareEmbeddingSupplementQuery
+  prepareEmbeddingSupplementQuery,
+  type CollectedEmbeddingSupplementResult
 } from "../../supplements/supplements.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
 import {
@@ -28,7 +29,7 @@ type PreparedQueryPromise = Promise<Settled<PreparedEmbeddingQuery>> | null;
 
 export interface EmbeddingAssessmentData {
   readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
-  readonly supplement: EmbeddingRecallSupplementResult;
+  readonly supplement: CollectedEmbeddingSupplementResult;
   readonly poolRescoreScores: Readonly<Record<string, number>>;
 }
 
@@ -123,9 +124,15 @@ export async function collectSnapshotEmbeddingAssessmentData(
     preparedEmbeddingQuery: Object.freeze({
       handle: null,
       storedVectors: null,
-      degradedReason: null
+      degradedReason: null,
+      preparedSupplementSupported: true
     }),
-    supplement,
+    supplement: Object.freeze({
+      ...supplement,
+      collectionStatus: localFineCandidates.length === 0
+        ? "empty_candidate_pool" as const
+        : "requested" as const
+    }),
     poolRescoreScores: selectLocalPoolScores(
       snapshot.poolScoresByObjectId,
       localFineCandidates
@@ -150,7 +157,7 @@ async function collectLegacySupplement(
   initialAssessment: FineAssessmentResult,
   preparedEmbeddingQuery: PreparedEmbeddingQuery,
   localEligibleCandidates: readonly Readonly<CoarseRecallCandidate>[]
-): Promise<EmbeddingRecallSupplementResult> {
+): Promise<CollectedEmbeddingSupplementResult> {
   const localEligibleIds = new Set(
     localEligibleCandidates.map((candidate) => candidate.entry.object_id)
   );
@@ -169,6 +176,7 @@ async function collectLegacySupplement(
     runId: params.runId ?? null,
     queryText: prepared.queryText,
     preparedEmbeddingQuery: preparedEmbeddingQuery.handle,
-    preparedStoredVectors: preparedEmbeddingQuery.storedVectors
+    preparedStoredVectors: preparedEmbeddingQuery.storedVectors,
+    preparedSupplementSupported: preparedEmbeddingQuery.preparedSupplementSupported
   });
 }

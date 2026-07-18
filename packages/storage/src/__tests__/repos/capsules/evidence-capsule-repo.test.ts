@@ -89,6 +89,44 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     ]);
   });
 
+  it("does not prepare new bulk-read statements for each input cardinality", async () => {
+    const { database, repo } = await createRepo();
+    const capsule = createEvidenceCapsule();
+    await repo.create(capsule);
+    let prepareCount = 0;
+    const originalPrepare = database.connection.prepare.bind(database.connection);
+    database.connection.prepare = ((sql: string) => {
+      prepareCount += 1;
+      return originalPrepare(sql);
+    }) as typeof database.connection.prepare;
+
+    await repo.findByIds("workspace-1", [capsule.object_id]);
+    await repo.findByIds("workspace-1", [capsule.object_id, "missing-id"]);
+    await repo.findSourceAnchorsByIds("workspace-1", [capsule.object_id]);
+    await repo.findSourceAnchorsByIds("workspace-1", [capsule.object_id, "missing-id"]);
+
+    expect(prepareCount).toBe(0);
+  });
+
+  it("preserves deterministic ordering across findByIds chunks", async () => {
+    const { repo } = await createRepo();
+    const earlier = createEvidenceCapsule({
+      object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4",
+      created_at: "2026-03-20T00:00:00.000Z"
+    });
+    const later = createEvidenceCapsule({
+      object_id: "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab",
+      created_at: "2026-03-20T00:00:01.000Z"
+    });
+    await repo.create(earlier);
+    await repo.create(later);
+    const missingIds = Array.from({ length: 500 }, (_, index) => `missing-${index}`);
+
+    const rows = await repo.findByIds("workspace-1", [later.object_id, ...missingIds, earlier.object_id]);
+
+    expect(rows.map((row) => row.object_id)).toEqual([earlier.object_id, later.object_id]);
+  });
+
   it("loads evidence capsules by ids only inside the requested workspace", async () => {
     const { repo } = await createRepo();
 

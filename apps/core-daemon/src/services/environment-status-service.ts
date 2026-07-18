@@ -11,7 +11,7 @@ export interface EnvironmentStatusService {
 export function createEnvironmentStatusService(dependencies?: {
   readonly toolNames?: readonly string[];
   readonly probeTool?: (toolName: string) => Promise<boolean>;
-  readonly countActiveWorktrees?: () => Promise<number>;
+  readonly countActiveWorktrees?: () => Promise<number | null>;
   readonly getDatabasePath?: () => string;
   readonly getFilesDirectory?: () => string;
 }): EnvironmentStatusService {
@@ -35,7 +35,8 @@ export function createEnvironmentStatusService(dependencies?: {
 
       return ToolchainStatusSchema.parse({
         tools,
-        active_worktrees: activeWorktrees,
+        active_worktrees: activeWorktrees ?? 0,
+        active_worktrees_known: activeWorktrees !== null,
         db_path: getDatabasePath(),
         files_dir: getFilesDirectory()
       });
@@ -62,14 +63,14 @@ async function defaultProbeTool(toolName: string): Promise<boolean> {
   return await findExecutableOnPath(toolName, process.env);
 }
 
-async function defaultCountActiveWorktrees(): Promise<number> {
+async function defaultCountActiveWorktrees(): Promise<number | null> {
   try {
     const result = await runExecFile("git", ["worktree", "list", "--porcelain"], {
       encoding: "utf8"
     });
 
     if (typeof result.stdout !== "string") {
-      return 0;
+      return null;
     }
 
     return result.stdout
@@ -77,16 +78,13 @@ async function defaultCountActiveWorktrees(): Promise<number> {
       .filter((line) => line.startsWith("worktree "))
       .length;
   } catch (error) {
-    // git failed: 0 here means "could not determine", not "zero worktrees" —
-    // the schema's active_worktrees is a NonNegativeInt with no unknown variant,
-    // so surface the degradation via a warning rather than silently reporting 0.
     process.emitWarning("[EnvironmentStatus] active worktree count unavailable; reporting 0", {
       code: "ALAYA_WORKTREE_COUNT_UNAVAILABLE",
       detail: JSON.stringify({
         error: error instanceof Error ? error.message : String(error)
       })
     });
-    return 0;
+    return null;
   }
 }
 

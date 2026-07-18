@@ -22,6 +22,7 @@ import type {
 import {
   type CoarseFilterRunResult
 } from "./coarse-filter-result.js";
+import { selectBoundedTopK } from "./selection/bounded-top-k.js";
 import {
   admitDynamicCoarseCandidates,
   admitInitialCoarseCandidates,
@@ -309,9 +310,10 @@ async function loadCoarseFilterInput(
     queryProbes,
     winnerMemoryIds,
     protectedCandidates,
-    rankedMatches: deterministicMatches
-      .filter((entry) => matchesPrecomputedRankFilter(entry, config))
-      .sort(compareMemoryEntries)
-      .slice(0, config.precomputed_rank.max_candidates)
+    rankedMatches: selectBoundedTopK(
+      deterministicMatches.filter((entry) => matchesPrecomputedRankFilter(entry, config)),
+      config.precomputed_rank.max_candidates,
+      compareMemoryEntries
+    )
   });
 }

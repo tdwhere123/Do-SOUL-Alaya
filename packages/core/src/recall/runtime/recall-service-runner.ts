@@ -286,6 +286,7 @@ async function completeCandidateAssessment(
     preparedEmbeddingQuery,
     embeddingCoarseInjection: coarse.embeddingCoarseInjection,
     embeddingProviderStatus: provider.status,
+    embeddingSupplementStatus: embeddingData.supplement.collectionStatus,
     providerDegradationReason: provider.degradationReason,
     answerRerankDiagnostics: rerank.value.diagnostics,
     phaseLatencyMs: Object.freeze({

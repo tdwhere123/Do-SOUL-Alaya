@@ -38,10 +38,24 @@ type RankedSynthesisChildRef = Readonly<{
 const SYNTHESIS_CHILDREN_PER_CAPSULE = 20;
 const SYNTHESIS_CHILDREN_GLOBAL_CAP = 40;
 
-export function emptyEmbeddingSupplementResult(): EmbeddingRecallSupplementResult {
+export type EmbeddingSupplementCollectionStatus =
+  | "disabled"
+  | "provider_missing"
+  | "query_missing"
+  | "empty_candidate_pool"
+  | "requested";
+
+export type CollectedEmbeddingSupplementResult = EmbeddingRecallSupplementResult & Readonly<{
+  readonly collectionStatus: EmbeddingSupplementCollectionStatus;
+}>;
+
+export function emptyEmbeddingSupplementResult(
+  collectionStatus: Exclude<EmbeddingSupplementCollectionStatus, "requested">
+): CollectedEmbeddingSupplementResult {
   return Object.freeze({
     supplementaryEntries: Object.freeze([]),
-    similarityHintsByObjectId: Object.freeze({})
+    similarityHintsByObjectId: Object.freeze({}),
+    collectionStatus
   });
 }
 
@@ -55,7 +69,7 @@ export function emptySynthesisCoarseFilter(): Readonly<{
   });
 }
 
-export async function collectEmbeddingSupplement(params: {
+type CollectEmbeddingSupplementParams = Readonly<{
   readonly dependencies: Pick<RecallServiceDependencies, "embeddingRecallService">;
   readonly baseCandidateIds: readonly string[];
   readonly localEligibleCandidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -65,38 +79,93 @@ export async function collectEmbeddingSupplement(params: {
   readonly queryText: string | null;
   readonly preparedEmbeddingQuery: PreparedEmbeddingQueryHandle | null;
   readonly preparedStoredVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
-}): Promise<EmbeddingRecallSupplementResult> {
+  readonly preparedSupplementSupported: boolean;
+}>;
+
+export async function collectEmbeddingSupplement(
+  params: CollectEmbeddingSupplementParams
+): Promise<CollectedEmbeddingSupplementResult> {
   const embeddingRecallService = params.dependencies.embeddingRecallService;
-  if (
-    embeddingRecallService === undefined ||
-    params.queryText === null ||
-    params.config.coarse_filter.semantic_supplement.embedding_enabled !== true ||
-    params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
-    params.localEligibleCandidates.length === 0
-  ) {
-    return emptyEmbeddingSupplementResult();
+  if (params.config.coarse_filter.semantic_supplement.embedding_enabled !== true ||
+      params.config.coarse_filter.semantic_supplement.max_supplement <= 0) {
+    return emptyEmbeddingSupplementResult("disabled");
+  }
+  if (embeddingRecallService === undefined) {
+    return emptyEmbeddingSupplementResult("provider_missing");
+  }
+  if (params.queryText === null) {
+    return emptyEmbeddingSupplementResult("query_missing");
+  }
+  const queryText = params.queryText;
+  if (params.localEligibleCandidates.length === 0) {
+    return emptyEmbeddingSupplementResult("empty_candidate_pool");
   }
 
-  if (
-    params.preparedEmbeddingQuery === null ||
-    typeof embeddingRecallService.querySupplementIfReady !== "function"
-  ) {
-    return emptyEmbeddingSupplementResult();
+  const preparedEmbeddingQuery = params.preparedEmbeddingQuery;
+  if (preparedEmbeddingQuery === null) {
+    return params.preparedSupplementSupported
+      ? emptyRequestedEmbeddingSupplementResult()
+      : collectLegacyEmbeddingSupplement(params, embeddingRecallService, queryText);
   }
 
-  const supplement = await embeddingRecallService.querySupplementIfReady({
+  if (typeof embeddingRecallService.querySupplementIfReady !== "function") {
+    return collectLegacyEmbeddingSupplement(params, embeddingRecallService, queryText);
+  }
+
+  return collectPreparedEmbeddingSupplement(
+    params,
+    embeddingRecallService,
+    preparedEmbeddingQuery
+  );
+}
+
+async function collectLegacyEmbeddingSupplement(
+  params: CollectEmbeddingSupplementParams,
+  service: NonNullable<RecallServiceDependencies["embeddingRecallService"]>,
+  queryText: string
+): Promise<CollectedEmbeddingSupplementResult> {
+  const supplement = await service.querySupplement({
+    workspaceId: params.workspaceId,
+    runId: params.runId,
+    queryText,
+    eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry),
+    baseCandidateIds: params.baseCandidateIds,
+    maxSupplement: params.config.coarse_filter.semantic_supplement.max_supplement
+  });
+  return withEmbeddingSupplementStatus(supplement);
+}
+
+async function collectPreparedEmbeddingSupplement(
+  params: CollectEmbeddingSupplementParams,
+  service: NonNullable<RecallServiceDependencies["embeddingRecallService"]>,
+  preparedQuery: PreparedEmbeddingQueryHandle
+): Promise<CollectedEmbeddingSupplementResult> {
+  const supplement = await service.querySupplementIfReady!({
     workspaceId: params.workspaceId,
     runId: params.runId,
     eligibleMemories: params.localEligibleCandidates.map((candidate) => candidate.entry),
     baseCandidateIds: params.baseCandidateIds,
     maxSupplement: params.config.coarse_filter.semantic_supplement.max_supplement,
-    preparedQuery: params.preparedEmbeddingQuery,
+    preparedQuery,
     ...(params.preparedStoredVectors === null
       ? {}
       : { storedVectors: params.preparedStoredVectors })
   });
 
-  return supplement;
+  return withEmbeddingSupplementStatus(supplement);
+}
+
+function emptyRequestedEmbeddingSupplementResult(): CollectedEmbeddingSupplementResult {
+  return withEmbeddingSupplementStatus({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({})
+  });
+}
+
+function withEmbeddingSupplementStatus(
+  supplement: EmbeddingRecallSupplementResult
+): CollectedEmbeddingSupplementResult {
+  return Object.freeze({ ...supplement, collectionStatus: "requested" });
 }
 
 export async function collectSynthesisCoarseCandidates(params: {
@@ -154,13 +223,25 @@ export async function prepareEmbeddingSupplementQuery(params: {
   readonly handle: PreparedEmbeddingQueryHandle | null;
   readonly storedVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
   readonly degradedReason: string | null;
+  readonly preparedSupplementSupported: boolean;
 }>> {
   const embeddingRecallService = params.dependencies.embeddingRecallService;
+  const preparedSupplementSupported = hasEmbeddingSupplementPreparation(embeddingRecallService);
   if (!canPrepareEmbeddingSupplementQuery(params, embeddingRecallService)) {
-    return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
+    return Object.freeze({
+      handle: null,
+      storedVectors: null,
+      degradedReason: null,
+      preparedSupplementSupported
+    });
   }
   if (embeddingRecallService === undefined || params.queryText === null) {
-    return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
+    return Object.freeze({
+      handle: null,
+      storedVectors: null,
+      degradedReason: null,
+      preparedSupplementSupported
+    });
   }
   const queryText = params.queryText;
   if (typeof embeddingRecallService.prepareQuerySupplement === "function") {
@@ -177,7 +258,8 @@ export async function prepareEmbeddingSupplementQuery(params: {
       degradedReason:
         prepared.degradedReason === null
           ? null
-          : normalizeEmbeddingProviderDegradationReason(prepared.degradedReason)
+          : normalizeEmbeddingProviderDegradationReason(prepared.degradedReason),
+      preparedSupplementSupported
     });
   }
   return prepareLegacyEmbeddingSupplementQuery(params, embeddingRecallService);
@@ -360,17 +442,21 @@ function canPrepareEmbeddingSupplementQuery(
   params: Parameters<typeof prepareEmbeddingSupplementQuery>[0],
   embeddingRecallService: RecallServiceDependencies["embeddingRecallService"]
 ): boolean {
-  const hasSupplementPreparation =
-    typeof embeddingRecallService?.prepareQuerySupplement === "function" ||
-    typeof embeddingRecallService?.prepareQueryEmbedding === "function";
   return !(
     embeddingRecallService === undefined ||
-    !hasSupplementPreparation ||
+    !hasEmbeddingSupplementPreparation(embeddingRecallService) ||
     params.queryText === null ||
     params.config.coarse_filter.semantic_supplement.embedding_enabled !== true ||
     params.config.coarse_filter.semantic_supplement.max_supplement <= 0 ||
     params.localEligibleCandidates.length === 0
   );
+}
+
+function hasEmbeddingSupplementPreparation(
+  embeddingRecallService: RecallServiceDependencies["embeddingRecallService"]
+): boolean {
+  return typeof embeddingRecallService?.prepareQuerySupplement === "function" ||
+    typeof embeddingRecallService?.prepareQueryEmbedding === "function";
 }
 
 async function prepareLegacyEmbeddingSupplementQuery(
@@ -380,10 +466,16 @@ async function prepareLegacyEmbeddingSupplementQuery(
   readonly handle: PreparedEmbeddingQueryHandle | null;
   readonly storedVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
   readonly degradedReason: string | null;
+  readonly preparedSupplementSupported: boolean;
 }>> {
   const prepareQueryEmbedding = embeddingRecallService.prepareQueryEmbedding;
   if (typeof prepareQueryEmbedding !== "function") {
-    return Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
+    return Object.freeze({
+      handle: null,
+      storedVectors: null,
+      degradedReason: null,
+      preparedSupplementSupported: false
+    });
   }
   const precheck = await precheckStoredVectorsForEmbeddingSupplement(params, embeddingRecallService);
   if (precheck !== null) {
@@ -396,7 +488,8 @@ async function prepareLegacyEmbeddingSupplementQuery(
       queryText: params.queryText!
     }),
     storedVectors: null,
-    degradedReason: null
+    degradedReason: null,
+    preparedSupplementSupported: true
   });
 }
 
@@ -407,6 +500,7 @@ async function precheckStoredVectorsForEmbeddingSupplement(
   readonly handle: PreparedEmbeddingQueryHandle | null;
   readonly storedVectors: PreparedEmbeddingSupplement["storedVectors"] | null;
   readonly degradedReason: string | null;
+  readonly preparedSupplementSupported: boolean;
 }> | null> {
   if (typeof embeddingRecallService.hasStoredVectors !== "function") {
     return null;
@@ -432,10 +526,16 @@ async function precheckStoredVectorsForEmbeddingSupplement(
     return Object.freeze({
       handle: null,
       storedVectors: null,
-      degradedReason: normalizeEmbeddingProviderDegradationReason(reason)
+      degradedReason: normalizeEmbeddingProviderDegradationReason(reason),
+      preparedSupplementSupported: true
     });
   }
   return hasStoredVectors
     ? null
-    : Object.freeze({ handle: null, storedVectors: null, degradedReason: null });
+    : Object.freeze({
+        handle: null,
+        storedVectors: null,
+        degradedReason: null,
+        preparedSupplementSupported: true
+      });
 }

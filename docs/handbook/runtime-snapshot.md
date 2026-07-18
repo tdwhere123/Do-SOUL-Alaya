@@ -35,7 +35,7 @@ not appear on new rows.
 |---|---|---|
 | MCP memory tools (12 legacy + `soul.resolve`) | `live_event_proven` catalog; `agent_used` for `soul.recall` + `soul.report_context_usage` | |
 | `soul.resolve` | `implementation_wired` | No autonomous host witness yet |
-| CLI (`alaya`, 13 verbs) | `live_event_proven` | CI smoke covers install/attach/doctor |
+| CLI (`alaya`, 15 verbs) | `live_event_proven` | CI smoke covers install/attach/doctor |
 | Memory Inspector | `live_event_proven` | Tooling only — not an agent surface |
 | `/alaya-inspect` slash | Unproven on Codex 0.130.0 | Use `alaya inspect --open` |
 | Garden `POST_TURN_EXTRACT` | `implementation_wired` | Live attach witness deferred |

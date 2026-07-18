@@ -18,6 +18,7 @@ import type {
   RecallServiceWarnPort,
   TokenEstimator
 } from "./recall-service-types.js";
+import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 import type { prepareEmbeddingSupplementQuery } from "../supplements/supplements.js";
 
 export interface RecallExecutionParams {
@@ -67,6 +68,7 @@ export interface RecallAssessmentStageResult {
   readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
   readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
+  readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly phaseLatencyMs: Readonly<{

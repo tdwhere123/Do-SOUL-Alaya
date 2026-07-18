@@ -7,6 +7,8 @@ export type SqliteStatement = BetterSqlite3.Statement;
 export interface EvidenceCapsuleStatements {
   readonly createStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
+  readonly findByIdsStatement: SqliteStatement;
+  readonly findSourceAnchorsByIdsStatement: SqliteStatement;
   readonly findByRunIdStatement: SqliteStatement;
   readonly findByRunIdPagedStatement: SqliteStatement;
   readonly findByWorkspaceIdStatement: SqliteStatement;
@@ -22,6 +24,8 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
   return {
     createStatement: db.connection.prepare(CREATE_EVIDENCE_CAPSULE_SQL),
     findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
+    findByIdsStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULES_BY_IDS_SQL),
+    findSourceAnchorsByIdsStatement: db.connection.prepare(FIND_EVIDENCE_SOURCE_ANCHORS_BY_IDS_SQL),
     findByRunIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun")),
     findByRunIdPagedStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun", "paged")),
     findByWorkspaceIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byWorkspace")),
@@ -90,6 +94,26 @@ const UPDATE_EVIDENCE_HEALTH_SQL = `
       UPDATE evidence_capsules
       SET evidence_health_state = ?, updated_at = ?
       WHERE object_id = ?
+`;
+
+const FIND_EVIDENCE_CAPSULES_BY_IDS_SQL = `
+      SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
+      FROM evidence_capsules
+      WHERE workspace_id = ?
+        AND object_id IN (SELECT value FROM json_each(?))
+      ORDER BY created_at ASC, object_id ASC
+`;
+
+const FIND_EVIDENCE_SOURCE_ANCHORS_BY_IDS_SQL = `
+      SELECT object_id AS evidence_object_id,
+             CASE WHEN json_valid(physical_anchor) THEN
+               CASE WHEN json_type(physical_anchor, '$.artifact_ref') = 'text' THEN
+                 NULLIF(trim(json_extract(physical_anchor, '$.artifact_ref')), '')
+               ELSE NULL END
+             ELSE NULL END AS artifact_ref
+      FROM evidence_capsules
+      WHERE workspace_id = ?
+        AND object_id IN (SELECT value FROM json_each(?))
 `;
 
 const SEARCH_EVIDENCE_KEYWORD_SQL = `

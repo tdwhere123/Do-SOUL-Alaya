@@ -37,6 +37,7 @@ export type RelationAssertionEvidenceAnchor = Readonly<{
 
 export interface RelationAssertionRepo {
   getStorageConnectionIdentity(): object;
+  readActiveProjectionGenerationInCurrentTransaction(): string | null;
   getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null;
   findByIdentityKeyInCurrentTransaction(identityKey: string): Readonly<RelationAssertion> | null;
   createInCurrentTransaction(input: {
@@ -96,6 +97,21 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   public getStorageConnectionIdentity(): StorageDatabase {
     return this.db;
   }
+
+  public readActiveProjectionGenerationInCurrentTransaction(): string | null {
+    try {
+      const row = this.db.connection.prepare(`
+        SELECT active_projection_generation
+        FROM temporal_schema_state
+        WHERE state_id = 1 AND status = 'ready'
+        LIMIT 1
+      `).get() as Readonly<{ readonly active_projection_generation: string | null }> | undefined;
+      return row?.active_projection_generation ?? null;
+    } catch (error) {
+      throw wrapRelationAssertionStorageError("read active projection generation", error);
+    }
+  }
+
   public getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null {
     try {
       const row = this.db.connection.prepare(`

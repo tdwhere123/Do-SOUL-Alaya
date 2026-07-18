@@ -1,5 +1,6 @@
 import type { MemoryEntry, ProjectMappingAnchor, RecallPolicy } from "@do-soul/alaya-protocol";
 import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
+import { selectBoundedTopK } from "./selection/bounded-top-k.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { CoarseFilterRunResult } from "./coarse-filter-result.js";
@@ -178,15 +179,17 @@ function addObjectProbeCandidates(
   queryProbes: Readonly<RecallQueryProbes>,
   addCandidate: AddCoarseCandidate
 ): void {
-  const objectProbeCandidates = tierMemories
+  const scoredCandidates = tierMemories
     .map((entry) => Object.freeze({ entry, score: scoreObjectProbeMatch(entry, queryProbes) }))
-    .filter((candidate) => candidate.score > 0)
-    .sort((left, right) =>
+    .filter((candidate) => candidate.score > 0);
+  const objectProbeCandidates = selectBoundedTopK(
+    scoredCandidates,
+    DYNAMIC_RECALL_PLANE_CAP,
+    (left, right) =>
       right.score === left.score
         ? compareMemoryEntries(left.entry, right.entry)
-        : right.score - left.score
-    )
-    .slice(0, DYNAMIC_RECALL_PLANE_CAP);
+      : right.score - left.score
+  );
   for (const candidate of objectProbeCandidates) {
     addCandidate(candidate.entry, "object_probe", candidate.score, "object_probe");
   }

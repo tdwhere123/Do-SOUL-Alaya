@@ -67,7 +67,10 @@ describe("routes-memory port batch", () => {
       resolveStrategy: vi.fn(() => "chat")
     };
     const recallService = {
-      recall: vi.fn(async () => ({ candidates: [{ object_id: "memory-1" }] }))
+      recall: vi.fn(async () => ({
+        candidates: [{ object_id: "memory-1" }],
+        degradation_reason: "warm_cascade_engaged"
+      }))
     };
 
     const app = new Hono();
@@ -85,7 +88,10 @@ describe("routes-memory port batch", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       success: true,
-      data: { candidates: [{ object_id: "memory-1" }] }
+      data: {
+        candidates: [{ object_id: "memory-1" }],
+        degradation_reason: "warm_cascade_engaged"
+      }
     });
     expect(taskSurfaceBuilder.build).toHaveBeenCalledTimes(1);
     expect(recallService.recall).toHaveBeenCalledWith({

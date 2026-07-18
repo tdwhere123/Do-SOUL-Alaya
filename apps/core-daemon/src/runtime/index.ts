@@ -15,4 +15,3 @@ export * from "./runtime-notifier.js";
 export * from "./server-options.js";
 export * from "./storage-config.js";
 export * from "./temporal-cutover/cutover.js";
-export * from "./worker-runtime-wiring.js";

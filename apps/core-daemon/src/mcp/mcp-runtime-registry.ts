@@ -44,6 +44,11 @@ type DaemonMcpRuntimeClientHandle = {
   readonly transport: DaemonMcpRuntimeTransport;
 };
 
+type DaemonMcpRuntimeClientLease = {
+  readonly handle: DaemonMcpRuntimeClientHandle;
+  readonly pendingHandle: Promise<DaemonMcpRuntimeClientHandle>;
+};
+
 type DaemonMcpRuntimeClientInfo = Readonly<{
   readonly name: "do-soul-alaya-core-daemon";
   readonly version: string;
@@ -54,6 +59,8 @@ type WarnLogger = Readonly<{
 }>;
 
 type WarnPort = WarnLogger | ((message: string, meta: Record<string, unknown>) => void);
+
+const DEFAULT_MCP_RUNTIME_REQUEST_TIMEOUT_MS = 30_000;
 
 export interface DaemonMcpRuntimeRegistry {
   close(): Promise<void>;
@@ -88,6 +95,7 @@ type DaemonMcpRuntimeRegistryInput = {
     options?: StreamableHTTPClientTransportOptions
   ) => StreamableHTTPClientTransport;
   readonly now?: () => string;
+  readonly requestTimeoutMs?: number;
   readonly warn: WarnPort;
 };
 
@@ -153,7 +161,7 @@ async function closePendingHandles(
 ): Promise<void> {
   const settledHandles = await Promise.allSettled(pendingHandles);
   await Promise.all(settledHandles.map(async (result) => {
-    if (result.status === "fulfilled") await closeHandle(result.value, state.warn);
+    if (result.status === "fulfilled") await closeHandle(result.value, state);
   }));
   state.clientHandles.clear();
   state.toolCache.clear();
@@ -208,16 +216,22 @@ async function callRuntimeTool(
   input: { readonly serverName: string; readonly toolName: string; readonly input: unknown }
 ): Promise<unknown> {
   assertOpen(state);
+  let lease: DaemonMcpRuntimeClientLease | undefined;
   try {
-    const handle = await getHandle(state, input.serverName);
-    const result = await handle.client.callTool(
+    lease = await getHandleLease(state, input.serverName);
+    const result = await lease.handle.client.callTool(
       { name: input.toolName, ...(isRecord(input.input) ? { arguments: input.input } : {}) },
-      CallToolResultSchema
+      CallToolResultSchema,
+      createRequestOptions(state)
     );
-    state.liveServerNames.add(input.serverName);
+    if (state.clientHandles.get(input.serverName) === lease.pendingHandle) {
+      state.liveServerNames.add(input.serverName);
+    }
     return formatMcpToolResult(result);
   } catch (error) {
-    await deactivateServer(state, input.serverName);
+    if (lease !== undefined) {
+      await deactivateServer(state, input.serverName, lease.pendingHandle);
+    }
     throw error;
   }
 }
@@ -226,21 +240,27 @@ function assertOpen(state: DaemonMcpRuntimeRegistryState): void {
   if (state.closed) throw new Error("Daemon MCP runtime registry is closed.");
 }
 
-async function getHandle(
+async function getHandleLease(
   state: DaemonMcpRuntimeRegistryState,
   serverName: string
-): Promise<DaemonMcpRuntimeClientHandle> {
+): Promise<DaemonMcpRuntimeClientLease> {
   assertOpen(state);
   const existing = state.clientHandles.get(serverName);
-  if (existing !== undefined) return await existing;
+  if (existing !== undefined) {
+    return { handle: await existing, pendingHandle: existing };
+  }
   const config = state.input.serverConfigs[serverName];
   if (config === undefined) throw new Error(`MCP server ${serverName} is not configured for daemon execution.`);
-  const pending = connectServer(state, config).catch((error) => {
-    state.clientHandles.delete(serverName);
-    throw error;
-  });
+  const pending = connectServer(state, config);
   state.clientHandles.set(serverName, pending);
-  return await pending;
+  try {
+    return { handle: await pending, pendingHandle: pending };
+  } catch (error) {
+    if (state.clientHandles.get(serverName) === pending) {
+      state.clientHandles.delete(serverName);
+    }
+    throw error;
+  }
 }
 
 async function connectServer(
@@ -250,10 +270,15 @@ async function connectServer(
   const client = state.input.createClient?.(state.clientInfo) ?? new Client(state.clientInfo, { capabilities: {} });
   const transport = createRuntimeTransport(state, config);
   try {
-    await client.connect(transport);
+    const requestOptions = createRequestOptions(state);
+    await withDeadline(
+      Promise.resolve(client.connect(transport, requestOptions)),
+      requestOptions.timeout,
+      `MCP runtime connection timed out after ${requestOptions.timeout}ms`
+    );
     return { client, transport };
   } catch (error) {
-    await closeHandle({ client, transport }, state.warn);
+    await closeHandle({ client, transport }, state);
     throw error;
   }
 }
@@ -296,15 +321,31 @@ function createHttpRuntimeTransport(
 
 async function refreshServerTools(state: DaemonMcpRuntimeRegistryState, serverName: string): Promise<void> {
   assertOpen(state);
+  let lease: DaemonMcpRuntimeClientLease | undefined;
   try {
-    const handle = await getHandle(state, serverName);
-    const listedTools = await handle.client.listTools();
-    state.toolCache.set(serverName, Object.freeze(listedTools.tools.map(toListedTool)));
-    state.liveServerNames.add(serverName);
+    lease = await getHandleLease(state, serverName);
+    const listedTools = await lease.handle.client.listTools(undefined, createRequestOptions(state));
+    if (state.clientHandles.get(serverName) === lease.pendingHandle) {
+      state.toolCache.set(serverName, Object.freeze(listedTools.tools.map(toListedTool)));
+      state.liveServerNames.add(serverName);
+    }
   } catch (error) {
-    await deactivateServer(state, serverName);
+    if (lease !== undefined) {
+      await deactivateServer(state, serverName, lease.pendingHandle);
+    }
     throw error;
   }
+}
+
+function createRequestOptions(
+  state: DaemonMcpRuntimeRegistryState
+): Readonly<{ readonly timeout: number; readonly maxTotalTimeout: number }> {
+  const configured = state.input.requestTimeoutMs;
+  const timeout =
+    configured !== undefined && Number.isFinite(configured) && configured > 0
+      ? Math.trunc(configured)
+      : DEFAULT_MCP_RUNTIME_REQUEST_TIMEOUT_MS;
+  return Object.freeze({ timeout, maxTotalTimeout: timeout });
 }
 
 function toListedTool(tool: { readonly name: string; readonly description?: string }): DaemonMcpListedTool {
@@ -321,14 +362,18 @@ function readServerTools(
   return state.liveServerNames.has(serverName) ? state.toolCache.get(serverName) ?? [] : [];
 }
 
-async function deactivateServer(state: DaemonMcpRuntimeRegistryState, serverName: string): Promise<void> {
+async function deactivateServer(
+  state: DaemonMcpRuntimeRegistryState,
+  serverName: string,
+  expectedHandle: Promise<DaemonMcpRuntimeClientHandle>
+): Promise<void> {
+  const pendingHandle = state.clientHandles.get(serverName);
+  if (pendingHandle === undefined || pendingHandle !== expectedHandle) return;
+  state.clientHandles.delete(serverName);
   state.liveServerNames.delete(serverName);
   state.toolCache.delete(serverName);
-  const pendingHandle = state.clientHandles.get(serverName);
-  if (pendingHandle === undefined) return;
-  state.clientHandles.delete(serverName);
   const [result] = await Promise.allSettled([pendingHandle]);
-  if (result?.status === "fulfilled") await closeHandle(result.value, state.warn);
+  if (result?.status === "fulfilled") await closeHandle(result.value, state);
 }
 
 function formatMcpToolResult(result: DaemonMcpRuntimeCallResult): unknown {
@@ -360,22 +405,46 @@ function resolveWarn(warn: WarnPort | undefined): (message: string, meta: Record
 
 async function closeHandle(
   handle: DaemonMcpRuntimeClientHandle,
-  warn: (message: string, meta: Record<string, unknown>) => void
+  state: DaemonMcpRuntimeRegistryState
 ): Promise<void> {
-  try {
-    await handle.client.close();
-  } catch (error) {
-    warn("failed to close MCP runtime client", { error });
-  }
+  await closeResource("client", () => handle.client.close(), state);
 
   if (typeof handle.transport.close !== "function") {
     return;
   }
 
+  await closeResource("transport", () => handle.transport.close!(), state);
+}
+
+async function closeResource(
+  resource: "client" | "transport",
+  close: () => Promise<void> | void,
+  state: DaemonMcpRuntimeRegistryState
+): Promise<void> {
   try {
-    await handle.transport.close();
+    const timeout = createRequestOptions(state).timeout;
+    await withDeadline(
+      Promise.resolve().then(close),
+      timeout,
+      `MCP runtime ${resource} close timed out after ${timeout}ms`
+    );
   } catch (error) {
-    warn("failed to close MCP runtime transport", { error });
+    state.warn(`failed to close MCP runtime ${resource}`, { error });
+  }
+}
+
+async function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        timer.unref();
+      })
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

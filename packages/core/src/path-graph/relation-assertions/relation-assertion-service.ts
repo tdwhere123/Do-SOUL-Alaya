@@ -218,11 +218,16 @@ export class RelationAssertionService {
           );
           return {
             activeProjectionCount: projection.activeProjectionCount,
-            projectionGeneration: projection.generation.generation
+            projectionGeneration: projection.generation.generation,
+            nextProjectionRefreshAt: projection.nextProjectionRefreshAt
           };
         }
       };
     });
+  }
+
+  public readActiveProjectionGeneration(): string | null | undefined {
+    return this.dependencies.repo.readActiveProjectionGenerationInCurrentTransaction?.();
   }
 
   private buildProjectionInCurrentTransaction(asOf: string): RelationAssertionProjectionResult {
@@ -268,6 +273,7 @@ export class RelationAssertionService {
     const generation = `temporal-${sha256(`${historyDigest}|${asOf}`).slice(0, 48)}`;
     return {
       activeProjectionCount: projections.length,
+      nextProjectionRefreshAt: findNextProjectionRefreshAt(assertions, resolutions, asOf),
       generation: {
         generation,
         assertionSchemaGeneration: ASSERTION_SCHEMA_GENERATION,
@@ -443,6 +449,28 @@ function verifyResolutionEvent(
   ) {
     throw new Error(`Relation assertion ${resolution.assertion_id} resolution EventLog payload is not canonical.`);
   }
+}
+
+function findNextProjectionRefreshAt(
+  assertions: readonly Readonly<RelationAssertion>[],
+  resolutions: readonly Readonly<RelationAssertionResolution>[],
+  asOf: string
+): string | null {
+  const asOfMs = Date.parse(asOf);
+  let nextMs = Number.POSITIVE_INFINITY;
+  const consider = (timestamp: string): void => {
+    const timestampMs = Date.parse(timestamp);
+    if (timestampMs > asOfMs && timestampMs < nextMs) nextMs = timestampMs;
+  };
+  for (const assertion of assertions) {
+    if (assertion.validity.kind === "open") consider(assertion.validity.valid_from);
+    if (assertion.validity.kind === "bounded") {
+      consider(assertion.validity.valid_from);
+      consider(assertion.validity.valid_to);
+    }
+  }
+  for (const resolution of resolutions) consider(resolution.resolved_at);
+  return Number.isFinite(nextMs) ? new Date(nextMs).toISOString() : null;
 }
 
 function sha256(value: string): string {

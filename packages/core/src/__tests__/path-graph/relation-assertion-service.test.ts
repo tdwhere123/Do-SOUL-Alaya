@@ -152,6 +152,31 @@ describe("RelationAssertionService", () => {
 
     await expect(harness.service.verifyAndRebuild()).rejects.toThrow(/resolution EventLog payload is not canonical/);
   });
+
+  it("reports the next validity boundary that can change the current projection", async () => {
+    const harness = await createHarness();
+    const sourceEvent = appendSourceSignalEvent(harness);
+    await createAnchoredEvidence(harness, sourceEvent.event_id);
+    await harness.service.admit({
+      ...admissionRequest(sourceEvent.event_id),
+      validity: {
+        kind: "bounded",
+        valid_from: "2026-07-17T00:00:00.000Z",
+        valid_to: "2026-07-18T00:00:00.000Z"
+      }
+    });
+
+    await expect(harness.service.verifyAndRebuild("2026-07-17T12:00:00.000Z"))
+      .resolves.toMatchObject({
+        activeProjectionCount: 1,
+        nextProjectionRefreshAt: "2026-07-18T00:00:00.000Z"
+      });
+    await expect(harness.service.verifyAndRebuild("2026-07-18T00:00:00.000Z"))
+      .resolves.toMatchObject({
+        activeProjectionCount: 0,
+        nextProjectionRefreshAt: null
+      });
+  });
 });
 
 async function createHarness(options: {

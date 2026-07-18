@@ -29,6 +29,7 @@ export type RelationAssertionProjectionGenerationInput = Readonly<{
 
 export interface RelationAssertionAtomicRepoPort {
   getStorageConnectionIdentity?(): object;
+  readActiveProjectionGenerationInCurrentTransaction?(): string | null;
   getByIdInCurrentTransaction(assertionId: string): Readonly<RelationAssertion> | null;
   findByIdentityKeyInCurrentTransaction(identityKey: string): Readonly<RelationAssertion> | null;
   createInCurrentTransaction(input: {
@@ -117,6 +118,7 @@ export type RelationAssertionResolutionResult = Readonly<{
 export type RelationAssertionReplayResult = Readonly<{
   readonly activeProjectionCount: number;
   readonly projectionGeneration: string;
+  readonly nextProjectionRefreshAt: string | null;
 }>;
 
 export type RelationAssertionServiceDependencies = Readonly<{
@@ -130,6 +132,7 @@ export type RelationAssertionServiceDependencies = Readonly<{
 export type RelationAssertionProjectionResult = Readonly<{
   readonly generation: RelationAssertionProjectionGenerationInput;
   readonly activeProjectionCount: number;
+  readonly nextProjectionRefreshAt: string | null;
 }>;
 
 export type RelationAssertionEventInput = EventPublisherInput;

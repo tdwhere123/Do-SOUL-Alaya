@@ -13,7 +13,7 @@
 [![status](https://img.shields.io/badge/status-v0.3.11--implementation--checkpoint-informational?style=flat-square)](#where-this-is-going)
 [![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![evidence](https://img.shields.io/badge/evidence-full--bench--pending-yellow?style=flat-square)](#where-this-is-going)
-[![node](https://img.shields.io/badge/node-%E2%89%A520.19-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
+[![node](https://img.shields.io/badge/node-%E2%89%A524-339933?style=flat-square&logo=node.js&logoColor=white)](#quickstart)
 [![pnpm](https://img.shields.io/badge/pnpm-%E2%89%A59-F69220?style=flat-square&logo=pnpm&logoColor=white)](#quickstart)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white)](#architecture-at-a-glance)
 [![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?style=flat-square&logo=sqlite&logoColor=white)](#architecture-at-a-glance)
@@ -457,7 +457,7 @@ truth boundary from leaking.
 graph TD
     subgraph Surfaces["Agent-facing surfaces"]
         MCPS["MCP stdio<br/>(alaya mcp stdio)"]
-        CLIS["alaya CLI<br/>(13 verbs · MCP fallback)"]
+        CLIS["alaya CLI<br/>(15 verbs · MCP fallback)"]
     end
 
     subgraph Daemon["apps/core-daemon — wiring + dispatch"]
@@ -556,15 +556,15 @@ the zod request schemas):
 descriptions + request schemas) and `alaya tools call <tool>
 '<json>'` invokes any tool from CLI — both are scripting fallbacks
 over the same daemon path. Run `alaya --help` for the full CLI
-catalog of 13 verbs (doctor / install / attach / detach / status /
-inspect / update / tools / review / backup / export / import / mcp
-stdio); every mutating verb supports preview before write, attach
-/ detach are atomic, and the audit log lives at
+catalog of 15 verbs (doctor / status / install / inspect / update /
+attach / detach / source-grounding-defers / tools / review / mcp /
+temporal-cutover / backup / export / import); every mutating verb supports
+preview before write, attach / detach are atomic, and the audit log lives at
 `~/.config/alaya/audit/`. The `review` verb is one CLI verb with
 four subcommands: `review pending|accept|reject` cover memory
 proposals, and v0.3.11 adds `review edges pending|accept|reject`
 for edge-proposal governance — the new edge subcommand surface
-does not change the top-level verb count (still 13). The new
+does not add another top-level verb. The new
 edge-proposal MCP tools (`soul.propose_edge`,
 `soul.list_pending_edge_proposals`,
 `soul.batch_review_edge_proposals`) extend the live MCP catalog

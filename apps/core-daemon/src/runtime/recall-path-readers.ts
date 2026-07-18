@@ -16,11 +16,69 @@ export type RecallTemporalProjectionEnsurer = (
 ) => Promise<void>;
 
 export function createRecallTemporalProjectionEnsurer(input: Readonly<{
-  verifyAndRebuild(asOf?: string): Promise<unknown>;
+  verifyAndRebuild(asOf?: string): Promise<Readonly<{
+    readonly projectionGeneration: string;
+    readonly nextProjectionRefreshAt: string | null;
+  }>>;
+  readActiveProjectionGeneration?(): string | null | undefined;
+  readonly clock?: () => number;
 }>): RecallTemporalProjectionEnsurer {
-  return async (options: RecallPathProjectionReadOptions = {}) => {
-    await input.verifyAndRebuild(options.asOf);
+  const state: CurrentProjectionEnsureState = {
+    pending: false,
+    nextRefreshAtMs: null
   };
+  const now = input.clock ?? Date.now;
+  return async (options: RecallPathProjectionReadOptions = {}) => {
+    if (options.asOf !== undefined) {
+      await input.verifyAndRebuild(options.asOf);
+      return;
+    }
+    const activeGeneration = input.readActiveProjectionGeneration?.();
+    if (shouldRefreshCurrentProjection(state, now(), activeGeneration)) {
+      state.pending = true;
+      state.promise = Promise.resolve()
+        .then(async () => {
+          const result = await input.verifyAndRebuild();
+          state.projectionGeneration = result.projectionGeneration;
+          state.nextRefreshAtMs = parseProjectionRefreshAt(result.nextProjectionRefreshAt);
+        })
+        .catch((error: unknown) => {
+          state.promise = undefined;
+          throw error;
+        })
+        .finally(() => {
+          state.pending = false;
+        });
+    }
+    await state.promise;
+  };
+}
+
+type CurrentProjectionEnsureState = {
+  promise?: Promise<void>;
+  pending: boolean;
+  projectionGeneration?: string;
+  nextRefreshAtMs: number | null;
+};
+
+function shouldRefreshCurrentProjection(
+  state: Readonly<CurrentProjectionEnsureState>,
+  nowMs: number,
+  activeGeneration: string | null | undefined
+): boolean {
+  if (state.promise === undefined) return true;
+  if (activeGeneration === undefined) return !state.pending;
+  if (activeGeneration !== state.projectionGeneration) return !state.pending;
+  return !state.pending && state.nextRefreshAtMs !== null && nowMs >= state.nextRefreshAtMs;
+}
+
+function parseProjectionRefreshAt(value: string | null): number | null {
+  if (value === null) return null;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Relation assertion projection returned an invalid refresh boundary.");
+  }
+  return parsed;
 }
 
 export interface LegacyRecallPathReader {
@@ -197,7 +255,7 @@ export function createTemporalGraphExplorePathReader(
     findByTargetAnchor: async (workspaceId: string, anchorRef: PathAnchorRef) => {
       await ensureTemporalProjection(options);
       const anchorKey = serializePathAnchorRef(anchorRef);
-      const paths = await reader.findByWorkspace(workspaceId, options);
+      const paths = await reader.findByAnchors(workspaceId, [anchorRef], options);
       return paths.filter((path) =>
         serializePathAnchorRef(path.anchors.target_anchor) === anchorKey
       );

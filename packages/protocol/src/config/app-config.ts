@@ -58,6 +58,7 @@ export const ToolchainStatusSchema = z
   .object({
     tools: z.record(BoundedLabelSchema, z.boolean()).readonly(),
     active_worktrees: NonNegativeIntSchema,
+    active_worktrees_known: z.boolean().optional(),
     db_path: BoundedPathSchema,
     files_dir: BoundedPathSchema
   })

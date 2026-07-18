@@ -1,22 +1,11 @@
-import {
-  ExtensionDescriptorRegisteredPayloadSchema,
-  ExtensionDescriptorRegistrationCompensationFailedPayloadSchema,
-  ExtensionDescriptorRegistrationRevertedPayloadSchema,
-  RuntimeGovernanceEventType,
-  type EventLogEntry,
-  type SkillPackage,
-  type ToolProvider,
-  type ToolSpec
-} from "@do-soul/alaya-protocol";
+import type { SkillPackage, ToolProvider, ToolSpec } from "@do-soul/alaya-protocol";
 import { reportAsyncSideEffectFailure } from "../runtime/async-side-effect-auditor.js";
 import { CoreError } from "../shared/errors.js";
-import { SYSTEM_ACTOR, resolveSystemWorkspaceId } from "../shared/actors.js";
-import { deepFreeze } from "../shared/deep-freeze.js";
+import { resolveSystemWorkspaceId } from "../shared/actors.js";
 import {
   parseExtensionSkillPackage,
   parseExtensionToolProvider
 } from "../shared/extension-descriptor-parsers.js";
-import { readNow } from "../shared/time.js";
 import {
   buildDefaultToolSpec,
   createProviderCacheSnapshot,
@@ -32,6 +21,12 @@ import type {
   ProviderCacheSnapshot,
   ToolSpecRollbackSnapshot
 } from "./extension-registry-service-types.js";
+import {
+  createDescriptorRegisteredEventEntry,
+  createDescriptorRegistrationCompensationFailedEventEntry,
+  createDescriptorRegistrationRevertedEventEntry,
+  type DescriptorEventInput
+} from "./extension-registry/events.js";
 export type {
   ExtensionRegistryDependencies,
   ExtensionRegistryToolSpecPort,
@@ -226,17 +221,12 @@ export class ExtensionRegistryService {
   }
 
   private async publishDescriptorRegisteredWithMutation<T>(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-      readonly name: string;
-      readonly source: ToolProvider["source"] | SkillPackage["source"];
-    },
+    input: DescriptorEventInput,
     mutate: () => Promise<T>,
     rollbackMutation?: () => Promise<void>
   ): Promise<T> {
     const entry = await this.deps.eventLogWriter.append(
-      this.createDescriptorRegisteredEventEntry(input)
+      createDescriptorRegisteredEventEntry(input, this.systemWorkspaceId, this.deps.now)
     );
 
     let result: T;
@@ -251,12 +241,7 @@ export class ExtensionRegistryService {
   }
 
   private async handleDescriptorMutationFailure(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-      readonly name: string;
-      readonly source: ToolProvider["source"] | SkillPackage["source"];
-    },
+    input: DescriptorEventInput,
     originalEventId: string,
     mutationError: unknown,
     rollbackMutation?: () => Promise<void>
@@ -265,18 +250,18 @@ export class ExtensionRegistryService {
       await this.rollbackDescriptorMutation(input, originalEventId, mutationError, rollbackMutation);
     }
     await this.deps.eventLogWriter.append(
-      this.createDescriptorRegistrationRevertedEventEntry(input, originalEventId)
+      createDescriptorRegistrationRevertedEventEntry(
+        input,
+        originalEventId,
+        this.systemWorkspaceId,
+        this.deps.now
+      )
     );
     throw mutationError;
   }
 
   private async rollbackDescriptorMutation(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-      readonly name: string;
-      readonly source: ToolProvider["source"] | SkillPackage["source"];
-    },
+    input: DescriptorEventInput,
     originalEventId: string,
     mutationError: unknown,
     rollbackMutation: () => Promise<void>
@@ -299,7 +284,12 @@ export class ExtensionRegistryService {
   ): Promise<never> {
     try {
       await this.deps.eventLogWriter.append(
-        this.createDescriptorRegistrationCompensationFailedEventEntry(input, originalEventId)
+        createDescriptorRegistrationCompensationFailedEventEntry(
+          input,
+          originalEventId,
+          this.systemWorkspaceId,
+          this.deps.now
+        )
       );
     } catch (compensationError) {
       throw this.createDescriptorRollbackError(input, mutationError, rollbackError, compensationError);
@@ -331,87 +321,6 @@ export class ExtensionRegistryService {
         )
       }
     );
-  }
-
-  private createDescriptorRegisteredEventEntry(input: {
-    readonly descriptor_type: "tool_provider" | "skill_package";
-    readonly descriptor_id: string;
-    readonly name: string;
-    readonly source: ToolProvider["source"] | SkillPackage["source"];
-  }): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
-    const payload = deepFreeze(
-      ExtensionDescriptorRegisteredPayloadSchema.parse({
-        descriptor_type: input.descriptor_type,
-        descriptor_id: input.descriptor_id,
-        name: input.name,
-        source: input.source,
-        registered_at: readNow(this.deps.now)
-      })
-    );
-
-    return {
-      event_type: RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTERED,
-      entity_type: "extension_descriptor",
-      entity_id: input.descriptor_id,
-      workspace_id: this.systemWorkspaceId,
-      run_id: null,
-      caused_by: SYSTEM_ACTOR,
-      payload_json: payload
-    };
-  }
-
-  private createDescriptorRegistrationRevertedEventEntry(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-    },
-    originalEventId: string
-  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
-    const payload = deepFreeze(
-      ExtensionDescriptorRegistrationRevertedPayloadSchema.parse({
-        descriptor_type: input.descriptor_type,
-        descriptor_id: input.descriptor_id,
-        original_event_id: originalEventId,
-        reverted_at: readNow(this.deps.now)
-      })
-    );
-
-    return {
-      event_type: RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_REVERTED,
-      entity_type: "extension_descriptor",
-      entity_id: input.descriptor_id,
-      workspace_id: this.systemWorkspaceId,
-      run_id: null,
-      caused_by: SYSTEM_ACTOR,
-      payload_json: payload
-    };
-  }
-
-  private createDescriptorRegistrationCompensationFailedEventEntry(
-    input: {
-      readonly descriptor_type: "tool_provider" | "skill_package";
-      readonly descriptor_id: string;
-    },
-    originalEventId: string
-  ): Omit<EventLogEntry, "event_id" | "created_at" | "revision"> {
-    const payload = deepFreeze(
-      ExtensionDescriptorRegistrationCompensationFailedPayloadSchema.parse({
-        descriptor_type: input.descriptor_type,
-        descriptor_id: input.descriptor_id,
-        original_event_id: originalEventId,
-        failed_at: readNow(this.deps.now)
-      })
-    );
-
-    return {
-      event_type: RuntimeGovernanceEventType.EXTENSION_DESCRIPTOR_REGISTRATION_COMPENSATION_FAILED,
-      entity_type: "extension_descriptor",
-      entity_id: input.descriptor_id,
-      workspace_id: this.systemWorkspaceId,
-      run_id: null,
-      caused_by: SYSTEM_ACTOR,
-      payload_json: payload
-    };
   }
 
   private async ensureProviderCache(): Promise<Readonly<ProviderCacheSnapshot>> {

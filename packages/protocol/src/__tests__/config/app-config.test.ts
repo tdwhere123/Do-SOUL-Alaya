@@ -81,6 +81,7 @@ describe("app config schemas", () => {
           rg: true
         },
         active_worktrees: 2,
+        active_worktrees_known: true,
         db_path: "/tmp/do-what.sqlite",
         files_dir: "/tmp/do-what-files"
       })
@@ -92,6 +93,7 @@ describe("app config schemas", () => {
         rg: true
       },
       active_worktrees: 2,
+      active_worktrees_known: true,
       db_path: "/tmp/do-what.sqlite",
       files_dir: "/tmp/do-what-files"
     });

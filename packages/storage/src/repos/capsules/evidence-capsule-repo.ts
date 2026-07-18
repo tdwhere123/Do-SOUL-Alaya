@@ -12,7 +12,6 @@ import {
 } from "../shared/fts-lane-routing.js";
 import {
   DEFAULT_EVIDENCE_PAGE,
-  EVIDENCE_CAPSULE_SELECT_COLUMNS,
   parseEvidenceCapsule,
   parseEvidenceCapsulePage,
   parseEvidenceCapsuleRow,
@@ -87,6 +86,8 @@ export interface EvidenceCapsuleListPageOptions {
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly createStatement: SqliteStatement;
   private readonly findByIdStatement: SqliteStatement;
+  private readonly findByIdsStatement: SqliteStatement;
+  private readonly findSourceAnchorsByIdsStatement: SqliteStatement;
   private readonly findByRunIdStatement: SqliteStatement;
   private readonly findByRunIdPagedStatement: SqliteStatement;
   private readonly findByWorkspaceIdStatement: SqliteStatement;
@@ -103,6 +104,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const statements = prepareEvidenceCapsuleStatements(db);
     this.createStatement = statements.createStatement;
     this.findByIdStatement = statements.findByIdStatement;
+    this.findByIdsStatement = statements.findByIdsStatement;
+    this.findSourceAnchorsByIdsStatement = statements.findSourceAnchorsByIdsStatement;
     this.findByRunIdStatement = statements.findByRunIdStatement;
     this.findByRunIdPagedStatement = statements.findByRunIdPagedStatement;
     this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
@@ -220,15 +223,14 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       const rows: EvidenceCapsuleRow[] = [];
       for (let offset = 0; offset < uniqueIds.length; offset += 500) {
         const chunk = uniqueIds.slice(offset, offset + 500);
-        const placeholders = chunk.map(() => "?").join(", ");
-        const statement = this.db.connection.prepare(`
-          SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
-          FROM evidence_capsules
-          WHERE workspace_id = ? AND object_id IN (${placeholders})
-          ORDER BY created_at ASC, object_id ASC
-        `);
-        rows.push(...statement.all(workspaceId, ...chunk) as EvidenceCapsuleRow[]);
+        rows.push(...this.findByIdsStatement.all(
+          workspaceId,
+          JSON.stringify(chunk)
+        ) as EvidenceCapsuleRow[]);
       }
+      rows.sort((left, right) =>
+        left.created_at.localeCompare(right.created_at) || left.object_id.localeCompare(right.object_id)
+      );
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load evidence capsules by ids.", error);
@@ -245,17 +247,10 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       const rows: EvidenceSourceAnchorRow[] = [];
       for (let offset = 0; offset < ids.length; offset += 500) {
         const chunk = ids.slice(offset, offset + 500);
-        const placeholders = chunk.map(() => "?").join(", ");
-        rows.push(...this.db.connection.prepare(
-          `SELECT object_id AS evidence_object_id,
-                  CASE WHEN json_valid(physical_anchor) THEN
-                    CASE WHEN json_type(physical_anchor, '$.artifact_ref') = 'text' THEN
-                      NULLIF(trim(json_extract(physical_anchor, '$.artifact_ref')), '')
-                    ELSE NULL END
-                  ELSE NULL END AS artifact_ref
-           FROM evidence_capsules
-           WHERE workspace_id = ? AND object_id IN (${placeholders})`
-        ).all(workspaceId, ...chunk) as EvidenceSourceAnchorRow[]);
+        rows.push(...this.findSourceAnchorsByIdsStatement.all(
+          workspaceId,
+          JSON.stringify(chunk)
+        ) as EvidenceSourceAnchorRow[]);
       }
       return sortSourceAnchors(rows.filter(
         (row): row is EvidenceSourceAnchor => row.artifact_ref !== null

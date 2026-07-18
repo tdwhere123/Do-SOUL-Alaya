@@ -32,17 +32,16 @@ export class MemoryEntryDynamicReadQueries {
       return [];
     }
 
-    const placeholders = parsedObjectIds.map(() => "?").join(", ");
     const statement = this.statementCache.prepare(`
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
       WHERE workspace_id = ?
-        AND object_id IN (${placeholders})
+        AND object_id IN (SELECT value FROM json_each(?))
       ORDER BY created_at ASC, object_id ASC
     `);
 
     try {
-      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as MemoryEntryRow[];
+      const rows = statement.all(parsedWorkspaceId, JSON.stringify(parsedObjectIds)) as MemoryEntryRow[];
       return rows.map((row) => parseMemoryEntryRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load memory entries by ids.", error);
@@ -60,12 +59,12 @@ export class MemoryEntryDynamicReadQueries {
       return Object.freeze([]);
     }
 
-    const placeholders = uniqueTags.map(() => "?").join(", ");
     const statement = this.statementCache.prepare(`
       SELECT DISTINCT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
       JOIN json_each(memory_entries.domain_tags) AS tag
-        ON tag.value IN (${placeholders})
+      JOIN json_each(?) AS filter_tags
+        ON filter_tags.value = tag.value
       WHERE memory_entries.workspace_id = ?
         AND memory_entries.storage_tier = 'hot'
         AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
@@ -74,7 +73,7 @@ export class MemoryEntryDynamicReadQueries {
     `);
 
     try {
-      const rows = statement.all(...uniqueTags, workspaceId) as MemoryEntryRow[];
+      const rows = statement.all(JSON.stringify(uniqueTags), workspaceId) as MemoryEntryRow[];
       return Object.freeze(rows.map((row) => parseMemoryEntryRow(row)));
     } catch (error) {
       throw new StorageError(
@@ -129,7 +128,6 @@ function queryEvidenceRefRows(
   workspaceId: string,
   evidenceObjectIds: readonly string[]
 ): readonly MemoryEntryRow[] {
-  const placeholders = evidenceObjectIds.map(() => "?").join(", ");
   return statementCache
     .prepare(
       `SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -141,12 +139,12 @@ function queryEvidenceRefRows(
            SELECT memory_id
            FROM memory_entry_evidence_refs
            WHERE workspace_id = ?
-             AND evidence_ref IN (${placeholders})
+             AND evidence_ref IN (SELECT value FROM json_each(?))
          )
        ORDER BY object_id ASC
        LIMIT ${FIND_BY_EVIDENCE_REFS_ROW_LIMIT}`
     )
-    .all(workspaceId, workspaceId, ...evidenceObjectIds) as MemoryEntryRow[];
+    .all(workspaceId, workspaceId, JSON.stringify(evidenceObjectIds)) as MemoryEntryRow[];
 }
 
 function reportEvidenceRefRowCap(

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { Worker } from "node:worker_threads";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { SynthesisStatus } from "@do-soul/alaya-protocol";
 import {
   initDatabase,
@@ -17,16 +17,15 @@ import { createRecallReadWorkerClient } from "../../runtime/recall-read-worker-c
 
 const builtWorkerUrl = new URL("../../../dist/runtime/recall-read-worker.js", import.meta.url);
 
-describe("RecallReadWorkerClient", () => {
-  // Loud failure (not skip): CI builds before testing, so a missing dist is a
-  // real regression, never an excuse to silently pass.
-  beforeAll(() => {
-    if (!existsSync(fileURLToPath(builtWorkerUrl))) {
-      throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
-    }
-  });
+function assertBuiltWorker(): void {
+  if (!existsSync(fileURLToPath(builtWorkerUrl))) {
+    throw new Error("Built recall-read-worker dist missing. Run `rtk pnpm build` before this test.");
+  }
+}
 
+describe("RecallReadWorkerClient", () => {
   it("keeps the daemon event loop available during a file-backed SQLite recall read", async () => {
+    assertBuiltWorker();
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-test-"));
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
@@ -80,6 +79,7 @@ describe("RecallReadWorkerClient", () => {
   }, 30_000);
 
   it("keeps worker batch reads scoped to the requested workspace", async () => {
+    assertBuiltWorker();
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-scope-test-"));
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });
@@ -186,6 +186,7 @@ describe("RecallReadWorkerClient", () => {
   }, 15_000);
 
   it("rejects worker page requests above the bounded read limit", async () => {
+    assertBuiltWorker();
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-page-test-"));
     const database = initDatabase({ filename: join(directory, "alaya.db") });
 
@@ -215,17 +216,31 @@ describe("RecallReadWorkerClient", () => {
     }
   });
 
-  it("times out pending worker requests and closes the client", async () => {
+  it("restarts the worker after a request timeout", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-timeout-test-"));
     const workerPath = join(directory, "silent-worker.mjs");
+    const databasePath = join(directory, "alaya.db");
     writeFileSync(
       workerPath,
-      `import { parentPort } from "node:worker_threads";\nparentPort?.on("message", () => {});\n`
+      [
+        'import { existsSync, writeFileSync } from "node:fs";',
+        'import { parentPort, workerData } from "node:worker_threads";',
+        'const marker = `${workerData.databaseFilename}.restart`;',
+        'if (!existsSync(marker)) {',
+        '  writeFileSync(marker, "ready", "utf8");',
+        '  parentPort?.on("message", () => {});',
+        '} else {',
+        '  parentPort?.on("message", ({ id, operation }) => {',
+        '    parentPort?.postMessage({ id, ok: true, result: operation === "close" ? null : [] });',
+        '  });',
+        '}',
+        ''
+      ].join("\n")
     );
     const client = createRecallReadWorkerClient({
-      databaseFilename: join(directory, "alaya.db"),
+      databaseFilename: databasePath,
       workerUrl: pathToFileURL(workerPath),
-      requestTimeoutMs: 5
+      requestTimeoutMs: 100
     });
 
     try {
@@ -239,10 +254,8 @@ describe("RecallReadWorkerClient", () => {
           limit: 1,
           offset: 0
         })
-      ).rejects.toThrow("timed out after 5ms");
-      await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).rejects.toThrow(
-        "recall read worker is closed"
-      );
+      ).rejects.toThrow("timed out after 100ms");
+      await expect(client.memoryRepo.findByWorkspaceId("workspace-1")).resolves.toEqual([]);
     } finally {
       await client?.close();
       rmSync(directory, { recursive: true, force: true });
@@ -279,6 +292,7 @@ describe("RecallReadWorkerClient", () => {
   });
 
   it("rejects a numeric-id message that fails request validation promptly", async () => {
+    assertBuiltWorker();
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-invalid-msg-"));
     const databasePath = join(directory, "alaya.db");
     const database = initDatabase({ filename: databasePath });

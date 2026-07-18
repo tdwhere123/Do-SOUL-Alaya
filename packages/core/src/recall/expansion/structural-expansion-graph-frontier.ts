@@ -10,7 +10,7 @@ import {
   type GraphExpansionCandidateDraft,
   type GraphExpansionFrontierNode
 } from "./graph-expansion.js";
-import { collectPathGraphNeighbors } from "./path-relations.js";
+import { collectPathGraphNeighbors, pathRelationMemoryIds } from "./path-relations.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
@@ -52,6 +52,8 @@ type PendingGraphFrontierState = Readonly<{
   readonly frontierIds: readonly string[];
 }>;
 
+type EligiblePathsByObjectId = ReadonlyMap<string, readonly Readonly<PathRelation>[]>;
+
 export async function expandGraphFrontier(params: ExpandGraphFrontierParams): Promise<void> {
   if (params.seedEntries.length === 0) {
     return;
@@ -68,10 +70,11 @@ export async function expandGraphFrontier(params: ExpandGraphFrontierParams): Pr
     if (eligiblePaths === null) {
       break;
     }
+    const eligiblePathsByObjectId = indexEligiblePathsByObjectId(eligiblePaths);
     frontier = expandGraphFrontierHop(
       params,
       frontier,
-      eligiblePaths,
+      eligiblePathsByObjectId,
       expandedIds,
       frontierIds,
       hop as 1 | 2
@@ -98,8 +101,9 @@ export async function expandGraphFrontiersBySeed(
       await expandPendingGraphFrontiersIndividually(params, pendingStates, hop as 1 | 2);
       continue;
     }
+    const eligiblePathsByObjectId = indexEligiblePathsByObjectId(eligiblePaths);
     for (const pending of pendingStates) {
-      expandPendingGraphFrontier(params, pending, eligiblePaths, hop as 1 | 2);
+      expandPendingGraphFrontier(params, pending, eligiblePathsByObjectId, hop as 1 | 2);
     }
   }
 }
@@ -115,14 +119,19 @@ async function expandPendingGraphFrontiersIndividually(
       pending.state.frontier = [];
       continue;
     }
-    expandPendingGraphFrontier(params, pending, eligiblePaths, hop);
+    expandPendingGraphFrontier(
+      params,
+      pending,
+      indexEligiblePathsByObjectId(eligiblePaths),
+      hop
+    );
   }
 }
 
 function expandPendingGraphFrontier(
   params: ExpandGraphFrontiersBySeedParams,
   pending: PendingGraphFrontierState,
-  eligiblePaths: readonly Readonly<PathRelation>[],
+  eligiblePathsByObjectId: EligiblePathsByObjectId,
   hop: 1 | 2
 ): void {
   pending.state.frontier = expandGraphFrontierHop(
@@ -132,7 +141,7 @@ function expandPendingGraphFrontier(
       onCandidate: (candidate) => params.onCandidate(pending.state.seedIndex, candidate)
     },
     pending.state.frontier,
-    eligiblePaths,
+    eligiblePathsByObjectId,
     pending.state.expandedIds,
     pending.frontierIds,
     hop
@@ -162,6 +171,20 @@ function collectUnionFrontierIds(
   states: readonly Readonly<{ readonly frontierIds: readonly string[] }>[]
 ): readonly string[] {
   return [...new Set(states.flatMap(({ frontierIds }) => frontierIds))];
+}
+
+function indexEligiblePathsByObjectId(
+  paths: readonly Readonly<PathRelation>[]
+): EligiblePathsByObjectId {
+  const mutableIndex = new Map<string, Readonly<PathRelation>[]>();
+  for (const path of paths) {
+    for (const objectId of pathRelationMemoryIds(path)) {
+      const indexedPaths = mutableIndex.get(objectId) ?? [];
+      indexedPaths.push(path);
+      mutableIndex.set(objectId, indexedPaths);
+    }
+  }
+  return mutableIndex;
 }
 
 function createInitialGraphFrontier(
@@ -223,7 +246,7 @@ async function loadEligibleGraphExpansionPaths(
 function expandGraphFrontierHop(
   params: ExpandGraphFrontierParams,
   frontier: readonly GraphExpansionFrontierNode[],
-  eligiblePaths: readonly Readonly<PathRelation>[],
+  eligiblePathsByObjectId: EligiblePathsByObjectId,
   expandedIds: Set<string>,
   frontierIds: readonly string[],
   hop: 1 | 2
@@ -235,7 +258,7 @@ function expandGraphFrontierHop(
       params,
       node,
       hop,
-      eligiblePaths,
+      eligiblePathsByObjectId,
       expandedIds,
       frontierIdSet,
       nextFrontier
@@ -248,7 +271,7 @@ function expandGraphFrontierNode(
   params: ExpandGraphFrontierParams,
   node: GraphExpansionFrontierNode,
   hop: 1 | 2,
-  eligiblePaths: readonly Readonly<PathRelation>[],
+  eligiblePathsByObjectId: EligiblePathsByObjectId,
   expandedIds: Set<string>,
   frontierIdSet: ReadonlySet<string>,
   nextFrontier: Map<string, GraphExpansionFrontierNode>
@@ -257,7 +280,10 @@ function expandGraphFrontierNode(
     return;
   }
   expandedIds.add(node.memoryId);
-  const nodeNeighbors = collectPathGraphNeighbors(eligiblePaths, node.memoryId)
+  const nodeNeighbors = collectPathGraphNeighbors(
+    eligiblePathsByObjectId.get(node.memoryId) ?? [],
+    node.memoryId
+  )
     .slice(0, params.dynamicRecallEdgeFanout);
   for (const neighbor of nodeNeighbors) {
     const candidate = buildGraphExpansionCandidate(params.byId, node, neighbor, hop, expandedIds);

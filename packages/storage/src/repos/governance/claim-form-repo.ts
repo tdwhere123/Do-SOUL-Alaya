@@ -81,6 +81,7 @@ interface ClaimFormRow {
 export class SqliteClaimFormRepo implements ClaimFormRepo {
   private readonly createStatement;
   private readonly findByIdStatement;
+  private readonly findByIdsStatement;
   private readonly findByWorkspaceIdStatement;
   private readonly findByStatusStatement;
   private readonly findByCanonicalKeyStatement;
@@ -117,6 +118,14 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
       FROM claim_forms
       WHERE object_id = ?
       LIMIT 1
+    `);
+
+    this.findByIdsStatement = db.connection.prepare(`
+      SELECT${CLAIM_FORM_SELECT_COLUMNS}
+      FROM claim_forms
+      WHERE workspace_id = ?
+        AND object_id IN (SELECT value FROM json_each(?))
+      ORDER BY created_at ASC, object_id ASC
     `);
 
     this.findByWorkspaceIdStatement = db.connection.prepare(`
@@ -223,17 +232,11 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
       return [];
     }
 
-    const placeholders = parsedObjectIds.map(() => "?").join(", ");
-    const statement = this.db.connection.prepare(`
-      SELECT${CLAIM_FORM_SELECT_COLUMNS}
-      FROM claim_forms
-      WHERE workspace_id = ?
-        AND object_id IN (${placeholders})
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
     try {
-      const rows = statement.all(parsedWorkspaceId, ...parsedObjectIds) as ClaimFormRow[];
+      const rows = this.findByIdsStatement.all(
+        parsedWorkspaceId,
+        JSON.stringify(parsedObjectIds)
+      ) as ClaimFormRow[];
       return rows.map((row) => parseClaimFormRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load claim forms by ids.", error);
