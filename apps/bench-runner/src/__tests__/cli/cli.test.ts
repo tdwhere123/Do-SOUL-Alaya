@@ -54,6 +54,8 @@ describe("bench-runner CLI", () => {
     expect(stdoutBuf).toContain("--legacy-manifest-sha256 <sha>");
     expect(stdoutBuf).toContain("--legacy-dataset-sha256 <sha>");
     expect(stdoutBuf).toContain("--concurrency N");
+    expect(stdoutBuf).toContain("--direct-deepseek-500-operator <operator>");
+    expect(stdoutBuf).toContain("--direct-newapi-deepseek-500-operator <operator>");
     expect(stdoutBuf).toMatch(/longmemeval[\s\S]*--concurrency N/);
   });
 

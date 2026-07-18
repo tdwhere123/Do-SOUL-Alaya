@@ -3,9 +3,9 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExtractionRequestProfile } from "../request-profile.js";
 import {
-  assertDirectDeepSeek500Authorization,
-  isDirectDeepSeek500Authorization,
-  type DirectDeepSeek500SpendAuthorization
+  assertDirectExtractionSpendAuthorization,
+  isDirectExtractionSpendAuthorization,
+  type DirectExtractionSpendAuthorization
 } from "./direct-deepseek-500.js";
 import {
   expectedExtractionAuthorityLimits,
@@ -66,7 +66,7 @@ export interface ExtractionAuthorityReceipt {
   readonly probe_key?: string;
   /** Immutable target-selection receipt that binds the cache root for a new rebuild. */
   readonly target_selection_digest?: string;
-  readonly direct_spend?: DirectDeepSeek500SpendAuthorization;
+  readonly direct_spend?: DirectExtractionSpendAuthorization;
 }
 
 export interface ExtractionAuthorityInspection {
@@ -95,7 +95,7 @@ export interface ExtractionAuthorityReceiptInput {
     readonly maximumAttempts: number;
     readonly successfulShardCeiling: number;
   };
-  readonly directSpend?: DirectDeepSeek500SpendAuthorization;
+  readonly directSpend?: DirectExtractionSpendAuthorization;
   readonly now?: Date;
 }
 
@@ -110,14 +110,14 @@ export function createExtractionAuthorityReceipt(
 function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): void {
   assertObservation(input.observation);
   if (input.directSpend !== undefined) {
-    assertDirectDeepSeek500Authorization({
+    assertDirectExtractionSpendAuthorization({
       action: input.action,
       authorization: input.directSpend,
       observation: input.observation
     });
   }
   if (input.directSpend !== undefined && input.targetSelectionDigest !== undefined) {
-    throw new Error("direct DeepSeek 500 authorization cannot mix target selection evidence");
+    throw new Error("direct extraction authorization cannot mix target selection evidence");
   }
   if (input.targetSelectionDigest !== undefined && !isDigest(input.targetSelectionDigest)) {
     throw new Error("extraction target selection digest is invalid");
@@ -159,7 +159,7 @@ export function assertExtractionAuthorityReceipt(
   assertReceiptShape(receipt);
   assertObservation(observation);
   if (receipt.direct_spend !== undefined) {
-    assertDirectDeepSeek500Authorization({
+    assertDirectExtractionSpendAuthorization({
       action: receipt.action,
       authorization: receipt.direct_spend,
       observation: receipt.observation
@@ -264,7 +264,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       !isReceiptLimits(receipt.limits) || !isReceiptPrice(receipt.price) ||
       (receipt.target_selection_digest !== undefined && !isDigest(receipt.target_selection_digest)) ||
       (receipt.direct_spend !== undefined &&
-        !isDirectDeepSeek500Authorization(receipt.direct_spend))) {
+        !isDirectExtractionSpendAuthorization(receipt.direct_spend))) {
     throw new Error("extraction authority receipt is invalid");
   }
   if (receipt.action === "probe" && !isDigest(receipt.probe_key)) {

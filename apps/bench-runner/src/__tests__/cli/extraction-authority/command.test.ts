@@ -209,6 +209,55 @@ it("writes a direct DeepSeek 500 receipt only after explicit operator authorizat
   });
 });
 
+it("writes a separately bound NewAPI direct 500 receipt", async () => {
+  const inspect = vi.fn(async () => newApiDirectAuthorityInspection());
+  const write = vi.fn();
+  const createNewApiDirectSpend = vi.fn(() => ({
+    kind: "deepseek_newapi_direct_500" as const,
+    operator: "newapi-operator",
+    cache_root_sha256: "a".repeat(64),
+    cache_root_device: "1",
+    cache_root_inode: "2",
+    cache_root_marker_sha256: "b".repeat(64)
+  }));
+
+  const exitCode = await runAuthorizeExtractionCommand(newApiDirectAuthorizeArgs(), {
+    inspect,
+    write,
+    createNewApiDirectSpend,
+    readRevision: () => "a".repeat(40),
+    readLedger: () => undefined
+  });
+
+  expect(exitCode).toBe(0);
+  expect(createNewApiDirectSpend).toHaveBeenCalledWith({
+    cacheRoot: "/tmp/direct-deepseek-cache",
+    operator: "newapi-operator"
+  });
+  expect(write.mock.calls[0]?.[1]).toMatchObject({
+    direct_spend: { kind: "deepseek_newapi_direct_500" },
+    limits: { max_concurrency: 32 }
+  });
+});
+
+it("rejects mixed legacy and NewAPI direct operator flags before creating a root", async () => {
+  const createDirectSpend = vi.fn();
+  const createNewApiDirectSpend = vi.fn();
+  const inspect = vi.fn();
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runAuthorizeExtractionCommand([
+    ...directAuthorizeArgs(),
+    "--direct-newapi-deepseek-500-operator", "newapi-operator"
+  ], { createDirectSpend, createNewApiDirectSpend, inspect });
+
+  expect(exitCode).toBe(2);
+  expect(createDirectSpend).not.toHaveBeenCalled();
+  expect(createNewApiDirectSpend).not.toHaveBeenCalled();
+  expect(inspect).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(expect.stringContaining("only one direct DeepSeek 500"));
+});
+
 it("retires a newly created direct target when its offline inspection fails", async () => {
   const directSpend = {
     kind: "deepseek_direct_500" as const,
@@ -302,6 +351,15 @@ function directAuthorizeArgs(): string[] {
   ];
 }
 
+function newApiDirectAuthorizeArgs(): string[] {
+  return directAuthorizeArgs().map((argument) => argument === "--direct-deepseek-500-operator"
+    ? "--direct-newapi-deepseek-500-operator"
+    : argument === "local-operator"
+      ? "newapi-operator"
+      : argument
+  );
+}
+
 function authorityInspection(rawContentClosureSha256: string) {
   return {
     observation: {
@@ -379,5 +437,16 @@ function directAuthorityInspection() {
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,
     modelReadiness: "not_probed" as const
+  };
+}
+
+function newApiDirectAuthorityInspection() {
+  const direct = directAuthorityInspection();
+  return {
+    ...direct,
+    observation: {
+      ...direct.observation,
+      extraction: { ...direct.observation.extraction, model: "DeepSeek-V4-Flash" }
+    }
   };
 }

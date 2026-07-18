@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
-  createFreshDirectDeepSeek500Authorization
+  createFreshDirectDeepSeek500Authorization,
+  createFreshNewApiDeepSeek500Authorization
 } from "../../../longmemeval/extraction/authority/direct-deepseek-500.js";
 import {
   inspectExtractionAuthority,
@@ -112,6 +113,33 @@ describe("direct DeepSeek runtime extraction", () => {
     expect(permittedTransports).toHaveBeenCalledOnce();
   });
 
+  it("starts bounded NewAPI direct workers without inheriting the legacy 30 RPM pacer", async () => {
+    const fixture = await createDirectRuntimeFixture("newapi");
+    const secondTransportStarted = deferred();
+    const release = deferred();
+    let transportStarts = 0;
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.(input.abortSignal);
+      transportStarts += 1;
+      if (transportStarts === 2) secondTransportStarted.resolve();
+      await release.promise;
+      return { rawJson: '{"signals":[]}' };
+    });
+    const running = runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      concurrency: 2,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    await resolvesWithin(secondTransportStarted.promise, 500);
+    release.resolve();
+    await expect(running).resolves.toMatchObject({ newlyExtracted: 2, coverage: 1 });
+  });
+
   it("rejects a replaced direct root marker before the simulated transport continues", async () => {
     const fixture = await createDirectRuntimeFixture();
     let transportStarted = false;
@@ -164,16 +192,17 @@ describe("direct DeepSeek runtime extraction", () => {
   });
 });
 
-async function createDirectRuntimeFixture(): Promise<DirectRuntimeFixture> {
-  configureDirectDeepSeekEnvironment();
+async function createDirectRuntimeFixture(
+  channel: "legacy" | "newapi" = "legacy"
+): Promise<DirectRuntimeFixture> {
+  configureDirectDeepSeekEnvironment(channel);
   configureCanonicalDataset();
   const root = mkdtempSync(join(tmpdir(), "alaya-direct-deepseek-runtime-"));
   temporaryRoots.push(root);
   const cacheRoot = join(root, "cache");
-  const directSpend = createFreshDirectDeepSeek500Authorization({
-    cacheRoot,
-    operator: "direct-runtime-test"
-  });
+  const directSpend = channel === "legacy"
+    ? createFreshDirectDeepSeek500Authorization({ cacheRoot, operator: "direct-runtime-test" })
+    : createFreshNewApiDeepSeek500Authorization({ cacheRoot, operator: "direct-runtime-test" });
   const inspection = await inspectExtractionAuthority({
     variant: DIRECT_VARIANT,
     limit: 500,
@@ -200,10 +229,12 @@ async function createDirectRuntimeFixture(): Promise<DirectRuntimeFixture> {
   return { cacheRoot, receiptPath };
 }
 
-function configureDirectDeepSeekEnvironment(): void {
+function configureDirectDeepSeekEnvironment(channel: "legacy" | "newapi"): void {
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:DIRECT_RUNTIME_GARDEN_KEY");
   vi.stubEnv("DIRECT_RUNTIME_GARDEN_KEY", "test-key");
-  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "deepseek-v4-flash");
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", channel === "legacy"
+    ? "deepseek-v4-flash"
+    : "DeepSeek-V4-Flash");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash-nonthinking");
   vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "deepseek-v4-nonthinking-v1");
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://example.test/v1");
@@ -269,4 +300,18 @@ function deferred(): { readonly promise: Promise<void>; readonly resolve: () => 
     resolve = complete;
   });
   return { promise, resolve };
+}
+
+async function resolvesWithin(promise: Promise<void>, timeoutMs: number): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("direct worker start timed out")), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }

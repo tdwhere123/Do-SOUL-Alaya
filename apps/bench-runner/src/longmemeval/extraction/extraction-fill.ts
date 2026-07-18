@@ -34,7 +34,7 @@ import { receiptExtractionCacheIdentity } from "./authority/receipt-cache-identi
 import { readExtractionAttemptLedger } from "./authority/attempt-ledger.js";
 import { createExtractionNoProgressWatchdog } from
   "./authority/no-progress-watchdog.js";
-import { assertDirectDeepSeek500RootBinding } from "./authority/direct-deepseek-500.js";
+import { assertDirectExtractionSpendRootBinding } from "./authority/direct-deepseek-500.js";
 import {
   assertExtractionTargetSelectionReceipt,
   assertExtractionTargetSelectionWindow,
@@ -277,7 +277,7 @@ async function loadExtractionAuthority(
   cacheRoot: string
 ): Promise<ReceiptBoundExtractionAuthority> {
   const receipt = readExtractionAuthorityReceipt(options.authorityReceiptPath!);
-  assertDirectDeepSeek500MetadataScope(options, receipt);
+  assertDirectExtractionMetadataScope(options, receipt);
   const targetSelection = loadTargetSelection(options, receipt);
   const inspection = await inspectReceiptAuthority(options, cacheRoot, receipt);
   assertAuthorityInspection(receipt, inspection, cacheRoot, false, targetSelection);
@@ -320,13 +320,13 @@ function loadTargetSelection(
   return targetSelection;
 }
 
-function assertDirectDeepSeek500MetadataScope(
+function assertDirectExtractionMetadataScope(
   options: ExtractionFillOptions,
   receipt: ExtractionAuthorityReceipt
 ): void {
   if (receipt.direct_spend !== undefined && options.pinnedMetaRoot !== undefined) {
     throw new ExtractionCacheInvariantError(
-      "direct DeepSeek 500 extraction cannot use pinnedMetaRoot (--pinned-meta-root)"
+      "direct extraction cannot use pinnedMetaRoot (--pinned-meta-root)"
     );
   }
 }
@@ -399,7 +399,7 @@ function assertAuthorityInspection(
 ): void {
   assertExtractionAuthorityReceipt(receipt, inspection.observation);
   if (receipt.direct_spend !== undefined) {
-    assertDirectDeepSeek500RootBinding({
+    assertDirectExtractionSpendRootBinding({
       authorization: receipt.direct_spend,
       cacheRoot
     });

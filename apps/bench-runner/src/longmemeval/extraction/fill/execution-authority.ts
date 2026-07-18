@@ -2,7 +2,8 @@ import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js
 import { inspectExtractionAuthorityDisk } from "../authority/inspection.js";
 import { openExtractionAttemptLedger } from "../authority/attempt-ledger.js";
 import {
-  assertDirectDeepSeek500RootBinding
+  assertDirectExtractionSpendRootBinding,
+  isDirectDeepSeek500Authorization
 } from "../authority/direct-deepseek-500.js";
 import { createRequestStartPacer } from
   "../authority/direct-deepseek-500/request-pacer.js";
@@ -62,7 +63,8 @@ function createLedgerExecutionAuthority(
     maximumAttempts: receipt.limits.maximum_attempts,
     successfulShardCeiling: receipt.limits.successful_shard_ceiling
   });
-  const directPacer = receipt.direct_spend === undefined
+  const directPacer = receipt.direct_spend === undefined ||
+      !isDirectDeepSeek500Authorization(receipt.direct_spend)
     ? undefined
     : createRequestStartPacer({
       requestsPerMinute: receipt.direct_spend.requests_per_minute,
@@ -97,7 +99,7 @@ function createTargetAssertion(
   if (receipt.direct_spend === undefined && targetSelection === undefined) return () => undefined;
   return () => {
     if (receipt.direct_spend !== undefined) {
-      assertDirectDeepSeek500RootBinding({ authorization: receipt.direct_spend, cacheRoot });
+      assertDirectExtractionSpendRootBinding({ authorization: receipt.direct_spend, cacheRoot });
     }
     if (targetSelection !== undefined) {
       assertExtractionTargetSelectionRootBinding(targetSelection, cacheRoot);
