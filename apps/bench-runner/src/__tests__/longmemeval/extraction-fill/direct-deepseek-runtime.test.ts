@@ -143,6 +143,56 @@ describe("direct DeepSeek runtime extraction", () => {
     await expect(running).resolves.toMatchObject({ newlyExtracted: 2, coverage: 1 });
   });
 
+  it("runs a question batch under the full NewAPI receipt without finalizing it", async () => {
+    const fixture = await createDirectRuntimeFixture(
+      "newapi",
+      readCurrentExtractionAuthorityRevision(),
+      uniqueDirectQuestions()
+    );
+    const receiptBefore = readExtractionAuthorityReceipt(fixture.receiptPath);
+    const extractedTurns: string[] = [];
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      extractedTurns.push((JSON.parse(input.userPrompt) as { turn_content: string }).turn_content);
+      return { rawJson: '{"signals":[]}' };
+    });
+
+    const result = await runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      questionBatchLimit: 2,
+      concurrency: 32,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extractedTurns).toEqual([
+      "User: Direct fact 0.", "User: Direct decoy 0.",
+      "User: Direct fact 1.", "User: Direct decoy 1."
+    ]);
+    expect(result).toMatchObject({
+      requestedTurns: 4,
+      newlyExtracted: 4,
+      authorityTelemetry: { attempts: 4, successfulShards: 4 },
+      manifest: {
+        fill_status: "in_progress",
+        window_offset: 0,
+        window_limit: 500,
+        expected_turns: 1_000,
+        cached_turns: 4,
+        coverage: 0.004
+      }
+    });
+    expect(result.manifest.content_closure_sha256).toBeUndefined();
+    expect(readExtractionAuthorityReceipt(fixture.receiptPath)).toMatchObject({
+      identity_digest: receiptBefore.identity_digest,
+      lineage_digest: receiptBefore.lineage_digest,
+      observation: { dataset: { windowLimit: 500 } }
+    });
+  });
+
   it("leaves a failed NewAPI key missing, finishes siblings, and retries it on resume", async () => {
     const fixture = await createDirectRuntimeFixture("newapi");
     let calls = 0;
@@ -286,10 +336,11 @@ describe("direct DeepSeek runtime extraction", () => {
 
 async function createDirectRuntimeFixture(
   channel: "legacy" | "newapi" = "legacy",
-  receiptRevision = readCurrentExtractionAuthorityRevision()
+  receiptRevision = readCurrentExtractionAuthorityRevision(),
+  questions: readonly LongMemEvalQuestion[] = directQuestions()
 ): Promise<DirectRuntimeFixture> {
   configureDirectDeepSeekEnvironment(channel);
-  configureCanonicalDataset();
+  configureCanonicalDataset(questions);
   const root = mkdtempSync(join(tmpdir(), "alaya-direct-deepseek-runtime-"));
   temporaryRoots.push(root);
   const cacheRoot = join(root, "cache");
@@ -337,14 +388,33 @@ function configureDirectDeepSeekEnvironment(channel: "legacy" | "newapi"): void 
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://example.test/v1");
 }
 
-function configureCanonicalDataset(): void {
+function configureCanonicalDataset(
+  questions: readonly LongMemEvalQuestion[] = directQuestions()
+): void {
   loadCanonicalDataset.mockResolvedValue({
-    questions: directQuestions(),
+    questions,
     sha256: "a".repeat(64),
     checksumSource: "in-process-canonical-dataset",
     sourcePath: "in-process-canonical-dataset",
     promotionAuthority: null
   });
+}
+
+function uniqueDirectQuestions(): readonly LongMemEvalQuestion[] {
+  return Array.from({ length: 500 }, (_, index) => ({
+    question_id: `direct-unique-${String(index).padStart(3, "0")}`,
+    question_type: "single_session",
+    question: `What was direct fact ${index}?`,
+    answer: `Direct fact ${index}.`,
+    question_date: "2026-01-01",
+    haystack_session_ids: [`fact-${index}`, `decoy-${index}`],
+    haystack_dates: ["2025-12-01", "2025-11-01"],
+    haystack_sessions: [
+      [{ role: "user", content: `Direct fact ${index}.`, has_answer: true }],
+      [{ role: "user", content: `Direct decoy ${index}.` }]
+    ],
+    answer_session_ids: [`fact-${index}`]
+  }));
 }
 
 function directQuestions(): readonly LongMemEvalQuestion[] {

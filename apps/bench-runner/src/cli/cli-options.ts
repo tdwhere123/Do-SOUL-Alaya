@@ -11,6 +11,14 @@ import {
 } from "../harness/daemon/daemon-types.js";
 import type { LongMemEvalVariant } from "../longmemeval/ingestion/dataset.js";
 import { consumePromotionEvidencePathFlags } from "./cli-options-promotion.js";
+import {
+  matchFlagToken,
+  nextIndex,
+  parseNonNegativeInt,
+  parsePositiveInt,
+  readFlagValue,
+  readRequiredFlagValue
+} from "./options/flag-values.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -42,6 +50,7 @@ export interface ParsedFlags {
   readonly promotionContract?: string;
   readonly r3SpendApproval?: string;
   readonly concurrency?: number;
+  readonly questionBatchLimit?: number;
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
@@ -77,6 +86,7 @@ export interface ParsedFlagsState {
   promotionContract?: string;
   r3SpendApproval?: string;
   concurrency?: number;
+  questionBatchLimit?: number;
   legacySnapshot: boolean;
   legacyManifestSha256?: string;
   legacyDatasetSha256?: string;
@@ -295,6 +305,13 @@ function consumeOtherPathFlags(
     );
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--question-batch-limit")) {
+    state.questionBatchLimit = parsePositiveInt(
+      readFlagValue(args, index, token, "--question-batch-limit"),
+      "--question-batch-limit"
+    );
+    return nextIndex(index, token);
+  }
   return undefined;
 }
 
@@ -348,79 +365,6 @@ function consumeBooleanFlags(
     return index + 1;
   }
   return index;
-}
-
-function matchFlagToken(token: string, flag: string): boolean {
-  return token === flag || token.startsWith(`${flag}=`);
-}
-
-function nextIndex(index: number, token: string): number {
-  return token.includes("=") ? index : index + 1;
-}
-
-function readFlagValue(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  flag: string,
-  fallback?: string
-): string | undefined {
-  if (token.startsWith(`${flag}=`)) {
-    return token.slice(flag.length + 1);
-  }
-  return args[index + 1] ?? fallback;
-}
-
-function readRequiredFlagValue(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  flag: string,
-  errorMessage: string
-): string {
-  const raw = readFlagValue(args, index, token, flag);
-  if (raw === undefined) {
-    throw new Error(errorMessage);
-  }
-  return raw;
-}
-
-function parsePositiveInt(
-  raw: string | undefined,
-  flag: string
-): number | undefined {
-  return parseIntegerFlag(raw, flag, (value) => value > 0, "positive integer");
-}
-
-function parseNonNegativeInt(
-  raw: string | undefined,
-  flag: string
-): number | undefined {
-  return parseIntegerFlag(
-    raw,
-    flag,
-    (value) => value >= 0,
-    "non-negative integer"
-  );
-}
-
-function parseIntegerFlag(
-  raw: string | undefined,
-  flag: string,
-  predicate: (value: number) => boolean,
-  expectation: string
-): number | undefined {
-  if (raw === undefined) {
-    return undefined;
-  }
-  if (!/^-?\d+$/u.test(raw)) {
-    throw new Error(`${flag} must be a ${expectation}`);
-  }
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || !predicate(parsed)) {
-    throw new Error(`${flag} must be a ${expectation}`);
-  }
-  return parsed;
 }
 
 function parseEmbeddingMode(raw: string): BenchEmbeddingMode {
@@ -493,6 +437,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     promotionContract: state.promotionContract,
     r3SpendApproval: state.r3SpendApproval,
     concurrency: state.concurrency,
+    questionBatchLimit: state.questionBatchLimit,
     legacySnapshot: state.legacySnapshot,
     legacyManifestSha256: state.legacyManifestSha256,
     legacyDatasetSha256: state.legacyDatasetSha256,

@@ -40,11 +40,13 @@ export interface PreparedExtractionFill {
   readonly existingManifest: ExtractionCacheManifest | undefined;
   readonly pinnedManifestSha256: string;
   readonly distinctTurns: readonly string[];
+  readonly executionTurns: readonly string[];
   readonly requestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
   readonly windowOffset: number;
   readonly windowLimit: number;
+  readonly questionBatchLimit?: number;
   readonly expansion?: PreparedExpansionFillAuthority;
 }
 
@@ -52,11 +54,13 @@ export interface InspectedExtractionFill {
   readonly manifestSnapshot: ExtractionCacheManifestSnapshot;
   readonly config: CompileSeedExtractionConfig;
   readonly distinctTurns: readonly string[];
+  readonly executionTurns: readonly string[];
   readonly requestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
   readonly windowOffset: number;
   readonly windowLimit: number;
+  readonly questionBatchLimit?: number;
   readonly completion: ExtractionFillCompletion;
   readonly expansion?: PreparedExpansionFillAuthority;
 }
@@ -89,11 +93,15 @@ export async function inspectExtractionFillPreparation(
     manifestSnapshot,
     config,
     distinctTurns: window.distinctTurns,
+    executionTurns: window.executionTurns,
     requestedTurns: window.requestedTurns,
     datasetRevision: window.datasetRevision,
     variant: options.variant,
     windowOffset: window.windowOffset,
     windowLimit: window.questionCount,
+    ...(window.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: window.questionBatchLimit
+    }),
     completion,
     ...(expansion === undefined ? {} : { expansion })
   };
@@ -128,11 +136,15 @@ export function pinInspectedExtractionFill(
     existingManifest: pinned.manifest,
     pinnedManifestSha256: pinned.manifestSha256,
     distinctTurns: inspected.distinctTurns,
+    executionTurns: inspected.executionTurns,
     requestedTurns: inspected.requestedTurns,
     datasetRevision: inspected.datasetRevision,
     variant: inspected.variant,
     windowOffset: inspected.windowOffset,
     windowLimit: inspected.windowLimit,
+    ...(inspected.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: inspected.questionBatchLimit
+    }),
     ...(inspected.expansion === undefined ? {} : { expansion: inspected.expansion })
   };
 }

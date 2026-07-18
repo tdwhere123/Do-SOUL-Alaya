@@ -57,3 +57,11 @@ export function readFillRetryTelemetry(
     }
   };
 }
+
+export function countTerminalProviderFailures(
+  telemetry: Pick<FillRetryTelemetry, "terminalRetryClassifications">
+): number {
+  const terminal = telemetry.terminalRetryClassifications;
+  return terminal.failure_max_retries + terminal.failure_non_retryable_4xx +
+    terminal.failure_timeout;
+}

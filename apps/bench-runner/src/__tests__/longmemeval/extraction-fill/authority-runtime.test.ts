@@ -125,6 +125,56 @@ describe("extraction authority runtime", () => {
     });
   });
 
+  it("runs a bounded question prefix without narrowing or finalizing its authority window", async () => {
+    setCredentialFixture();
+    await writeFixtureDataset([
+      question("q001", "alpha", "decoy"),
+      question("q002", "beta", "distraction")
+    ]);
+    const receiptPath = await writeAuthorityReceipt({});
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      return { rawJson: '{"signals":[]}' };
+    });
+
+    const batch = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      questionBatchLimit: 1,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledTimes(2);
+    expect(batch).toMatchObject({
+      requestedTurns: 2,
+      newlyExtracted: 2,
+      coverage: 1,
+      manifest: {
+        fill_status: "in_progress",
+        expected_turns: 4,
+        cached_turns: 2,
+        coverage: 0.5
+      }
+    });
+
+    const completed = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledTimes(4);
+    expect(completed.manifest.fill_status).toBe("complete");
+  });
+
   it("keeps the one-key probe ledger separate from its fresh fill lineage", async () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
@@ -164,6 +214,26 @@ describe("extraction authority runtime", () => {
       successfulShards: 1,
       telemetry: { usageUnavailableRequests: 1 }
     });
+  });
+
+  it("rejects a question batch on a one-key probe before delegation", async () => {
+    setCredentialFixture();
+    await writeFixtureDataset([question("q001", "alpha", "decoy")]);
+    const receiptPath = await writeAuthorityReceipt({ action: "probe" });
+    const extract = vi.fn<BenchSignalExtractor["extract"]>();
+
+    await expect(runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      questionBatchLimit: 1,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    })).rejects.toThrow(/question batch.*probe/u);
+
+    expect(extract).not.toHaveBeenCalled();
   });
 
   it("rejects a mutation of a ledger-recorded success before any resumed delegate", async () => {

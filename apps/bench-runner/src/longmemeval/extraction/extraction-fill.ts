@@ -51,6 +51,7 @@ import {
 import {
   executeExtractionFill,
   finishExtractionFill,
+  finishExtractionQuestionBatch,
   finishExtractionProbe,
   refreshIncompleteFill,
 } from "./fill/fill-execution.js";
@@ -67,6 +68,7 @@ export interface ExtractionFillOptions {
   readonly limit?: number;
   readonly offset?: number;
   readonly concurrency?: number;
+  readonly questionBatchLimit?: number;
   readonly cacheRoot?: string;
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
@@ -97,6 +99,11 @@ export async function runExtractionFill(
   const authority = options.authorityReceiptPath === undefined
     ? undefined
     : await loadExtractionAuthority(options, cacheRoot);
+  if (options.questionBatchLimit !== undefined && authority?.receipt.action === "probe") {
+    throw new ExtractionCacheInvariantError(
+      "question batch extraction cannot be combined with a one-key probe"
+    );
+  }
   const concurrency = resolveExtractionFillConcurrency(options.concurrency);
   if (authority !== undefined && concurrency > authority.receipt.limits.max_concurrency) {
     throw new Error(
@@ -222,9 +229,12 @@ function finishPreparedExtractionFill(
   authority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined
 ): ExtractionFillResult {
   const telemetry = authority?.snapshot();
-  return authority?.receipt.action === "probe"
-    ? finishExtractionProbe(prepared, cacheRoot, stats, log, writeLease, telemetry)
-    : finishExtractionFill(prepared, cacheRoot, stats, log, writeLease, telemetry);
+  if (authority?.receipt.action === "probe") {
+    return finishExtractionProbe(prepared, cacheRoot, stats, log, writeLease, telemetry);
+  }
+  return prepared.questionBatchLimit === undefined
+    ? finishExtractionFill(prepared, cacheRoot, stats, log, writeLease, telemetry)
+    : finishExtractionQuestionBatch(prepared, cacheRoot, stats, log, writeLease, telemetry);
 }
 
 async function prepareReceiptBoundExtractionFill(

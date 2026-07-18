@@ -8,6 +8,8 @@ import { verifyLongMemEvalExpansionContractInput } from
 import { readR3SpendApproval } from
   "../../longmemeval/promotion/r3-spend-approval.js";
 import { pct } from "../result-format.js";
+import { countTerminalProviderFailures } from
+  "../../longmemeval/extraction/fill/fill-stats.js";
 import {
   ExtractionFillInterruptedError,
   withExtractionFillSignalScope,
@@ -47,6 +49,9 @@ export async function runExtractionFillCommand(
         ...(opts.limit === undefined ? {} : { limit: opts.limit }),
         ...(opts.offset === undefined ? {} : { offset: opts.offset }),
         ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+        ...(opts.questionBatchLimit === undefined ? {} : {
+          questionBatchLimit: opts.questionBatchLimit
+        }),
         ...(opts.dataDir === undefined ? {} : { dataDir: opts.dataDir }),
         ...(opts.extractionCacheRoot === undefined ? {} : {
           cacheRoot: opts.extractionCacheRoot
@@ -75,15 +80,27 @@ function renderStart(opts: ParsedFlags): string {
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
     (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
     (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+    (opts.questionBatchLimit !== undefined
+      ? ` question_batch_limit=${opts.questionBatchLimit}`
+      : "") +
     "...\n";
 }
 
 function renderResult(
   result: Awaited<ReturnType<typeof runExtractionFill>>
 ): string {
-  return `Done. requested_turns=${result.requestedTurns} ` +
+  const partial = result.manifest.fill_status === "in_progress";
+  const outcome = partial ? "Partial." : "Done.";
+  const coverage = partial
+    ? `partial_coverage=${pct(result.coverage)} ` +
+      `full_coverage=${result.manifest.coverage === undefined
+        ? "unknown"
+        : pct(result.manifest.coverage)}`
+    : `coverage=${pct(result.coverage)}`;
+  return `${outcome} requested_turns=${result.requestedTurns} ` +
     `cache_hits=${result.cacheHits} newly_extracted=${result.newlyExtracted} ` +
-    `failures=0 retry_successes=${result.retrySuccesses} ` +
+    `failures=${countTerminalProviderFailures(result)} ` +
+    `retry_successes=${result.retrySuccesses} ` +
     `rate_limit_retries=${result.rateLimitRetries} ` +
     `adaptive_backoffs=${result.adaptiveConcurrencyBackoffs} ` +
     `adaptive_backoff_ms=${result.adaptiveConcurrencyBackoffMs} ` +
@@ -91,7 +108,7 @@ function renderResult(
     `terminal_max_retries=${result.terminalRetryClassifications.failure_max_retries} ` +
     `terminal_nonretryable_4xx=${result.terminalRetryClassifications.failure_non_retryable_4xx} ` +
     `terminal_timeouts=${result.terminalRetryClassifications.failure_timeout} ` +
-    `coverage=${pct(result.coverage)}\n`;
+    `${coverage}\n`;
 }
 
 function renderAuthorityTelemetry(

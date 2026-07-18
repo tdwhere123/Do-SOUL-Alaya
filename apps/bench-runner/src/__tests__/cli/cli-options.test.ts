@@ -43,7 +43,8 @@ describe("parseFlags", () => {
       "--legacy-snapshot",
       `--legacy-manifest-sha256=${"a".repeat(64)}`,
       `--legacy-dataset-sha256=${"b".repeat(64)}`,
-      "--concurrency=4"
+      "--concurrency=4",
+      "--question-batch-limit=100"
     ]);
 
     expect(parsed.embeddingMode).toBe("env");
@@ -63,6 +64,7 @@ describe("parseFlags", () => {
     expect(parsed.legacyManifestSha256).toBe("a".repeat(64));
     expect(parsed.legacyDatasetSha256).toBe("b".repeat(64));
     expect(parsed.concurrency).toBe(4);
+    expect(parsed.questionBatchLimit).toBe(100);
   });
 
   it("rejects invalid enumerated options", () => {

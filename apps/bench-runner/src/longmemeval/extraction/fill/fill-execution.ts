@@ -21,7 +21,10 @@ import type { ExtractionFillStatus } from "./manifest/fill-manifest-contract.js"
 import { buildFillManifest } from "./manifest/fill-manifest.js";
 import { runExtractionPool } from "./fill-pool.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
-import { readFillRetryTelemetry } from "./fill-stats.js";
+import {
+  countTerminalProviderFailures,
+  readFillRetryTelemetry
+} from "./fill-stats.js";
 import {
   assertPinnedFillIdentity,
   inspectFillWindow,
@@ -121,7 +124,7 @@ function resolveFillTurns(
 ): readonly string[] {
   const distinctTurns = authority?.receipt.action === "probe"
     ? selectProbeTurn(prepared, authority.receipt.probe_key!)
-    : prepared.distinctTurns;
+    : prepared.executionTurns;
   if (authority?.receipt.action === "probe") {
     assertProbeTargetIsMissing(prepared, cacheRoot, authority.receipt.probe_key!);
   }
@@ -172,6 +175,56 @@ export function finishExtractionFill(
     ...(authorityTelemetry === undefined ? {} : { authorityTelemetry }),
     manifest
   };
+}
+
+export function finishExtractionQuestionBatch(
+  prepared: PreparedExtractionFill,
+  cacheRoot: string,
+  stats: CompileSeedExtractionStats,
+  log: (message: string) => void,
+  writeLease: ExtractionCacheWriteLease,
+  authorityTelemetry: ExtractionAttemptLedgerSnapshot | undefined
+): ExtractionFillResult {
+  assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
+  const fullCompletion = inspectFillWindow(cacheRoot, prepared.config, prepared.distinctTurns);
+  const batchCompletion = inspectFillWindow(cacheRoot, prepared.config, prepared.executionTurns);
+  assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
+  const manifest = persistFillManifest(
+    prepared, cacheRoot, "in_progress", fullCompletion
+  );
+  const retryTelemetry = readFillRetryTelemetry(stats);
+  assertQuestionBatchTaskConservation(prepared, stats, retryTelemetry);
+  const failureCount = countTerminalProviderFailures(retryTelemetry);
+  log(
+    `[extraction-fill] question batch complete: questions=${prepared.questionBatchLimit} ` +
+      `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
+      `failures=${failureCount} ` +
+      `batch_status=${batchCompletion.missingTurns === 0 ? "complete" : "incomplete"} ` +
+      `batch_coverage=${(batchCompletion.coverage * 100).toFixed(1)}% ` +
+      `full_coverage=${(fullCompletion.coverage * 100).toFixed(1)}%`
+  );
+  return {
+    requestedTurns: prepared.executionTurns.length,
+    cacheHits: stats.cacheHits,
+    newlyExtracted: stats.llmCalls,
+    coverage: batchCompletion.coverage,
+    ...retryTelemetry,
+    ...(authorityTelemetry === undefined ? {} : { authorityTelemetry }),
+    manifest
+  };
+}
+
+function assertQuestionBatchTaskConservation(
+  prepared: PreparedExtractionFill,
+  stats: CompileSeedExtractionStats,
+  telemetry: ReturnType<typeof readFillRetryTelemetry>
+): void {
+  const completed = stats.cacheHits + stats.llmCalls + countTerminalProviderFailures(telemetry);
+  if (completed === prepared.executionTurns.length) return;
+  throw new ExtractionCacheInvariantError(
+    "question batch task conservation failed: " +
+      `completed=${completed} requested=${prepared.executionTurns.length}`
+  );
 }
 
 export function finishExtractionProbe(

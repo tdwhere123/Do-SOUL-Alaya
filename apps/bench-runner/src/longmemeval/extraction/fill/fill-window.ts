@@ -8,14 +8,19 @@ export async function prepareExtractionFillWindow(
     readonly variant: LongMemEvalVariant;
     readonly limit?: number;
     readonly offset?: number;
+    readonly questionBatchLimit?: number;
     readonly dataDir?: string;
     readonly pinnedMetaRoot?: string;
   },
   expansion: PreparedExpansionFillAuthority | undefined
 ) {
   if (expansion !== undefined) {
+    if (options.questionBatchLimit !== undefined) {
+      throw new Error("question-bounded extraction cannot mix an expansion capability");
+    }
     return {
       distinctTurns: expansion.nextTurns,
+      executionTurns: expansion.nextTurns,
       requestedTurns: expansion.nextTurns.length,
       questionCount: expansion.nextQuestions.length,
       datasetRevision: expansion.datasetRevision,
@@ -30,14 +35,27 @@ export async function prepareExtractionFillWindow(
   const sliceEnd = options.limit === undefined
     ? dataset.questions.length
     : offset + options.limit;
-  const distinctTurns = collectDistinctTurnContents(
-    dataset.questions.slice(offset, sliceEnd)
-  );
+  const questions = dataset.questions.slice(offset, sliceEnd);
+  const batchLimit = resolveQuestionBatchLimit(options.questionBatchLimit, questions.length);
+  const distinctTurns = collectDistinctTurnContents(questions);
+  const executionTurns = collectDistinctTurnContents(questions.slice(0, batchLimit));
   return {
     distinctTurns,
+    executionTurns,
     requestedTurns: distinctTurns.length,
-    questionCount: dataset.questions.slice(offset, sliceEnd).length,
+    questionCount: questions.length,
     datasetRevision: dataset.sha256,
-    windowOffset: offset
+    windowOffset: offset,
+    ...(options.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: options.questionBatchLimit
+    })
   };
+}
+
+function resolveQuestionBatchLimit(raw: number | undefined, questionCount: number): number {
+  if (raw === undefined) return questionCount;
+  if (!Number.isSafeInteger(raw) || raw < 1 || raw > questionCount) {
+    throw new Error(`question batch limit must be within the ${questionCount}-question window`);
+  }
+  return raw;
 }
