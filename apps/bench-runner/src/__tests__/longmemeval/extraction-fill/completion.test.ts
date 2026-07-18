@@ -17,6 +17,7 @@ import {
   collectDistinctTurnContents,
   runExtractionFill
 } from "../../../longmemeval/extraction/extraction-fill.js";
+import { computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
   inspectExtractionFillCompletion
@@ -225,6 +226,33 @@ it("exposes a reusable read-only exact-set completion inspection", async () => {
     .toBe(inspection.expectedKeySetSha256);
   expect(inspect([...turnContents].reverse()).contentClosureSha256)
     .toBe(inspection.contentClosureSha256);
+});
+
+it("uses no partial closure when ledger exclusions leave no valid raw entries", async () => {
+  const turnContents = collectDistinctTurnContents(questions.slice(0, 1));
+  await runExtractionFill({
+    variant: VARIANT,
+    cacheRoot,
+    dataDir,
+    pinnedMetaRoot,
+    limit: 1,
+    extractorFactory: emptyExtractor,
+    log: () => undefined
+  });
+  const excludedKeys = turnContents.map((turnContent) => computeCacheKey(
+    "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turnContent
+  ));
+  const inspection = inspectExtractionFillCompletion({
+    cacheRoot,
+    model: "gpt-5.4-mini",
+    requestProfile: "provider-default-v1",
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
+    turnContents,
+    excludeContentClosureKeys: excludedKeys
+  });
+
+  expect(inspect(turnContents).partialContentClosureSha256).toMatch(/^[0-9a-f]{64}$/u);
+  expect(inspection.partialContentClosureSha256).toBeNull();
 });
 
 it("rejects a valid shard whose raw JSON changed after finalization", async () => {

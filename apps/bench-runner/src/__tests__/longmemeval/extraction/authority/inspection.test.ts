@@ -60,6 +60,7 @@ describe("no-network extraction authority inspection", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(inspected.observation).toMatchObject({
       revision: "a".repeat(40),
+      extraction: { manifestSha256: null, rawContentClosureSha256: null },
       inventory: { expectedTurns: 4, validTurns: 0, missingTurns: 4, invalidTurns: 0, orphanTurns: 0 }
     });
     expect(inspected.missingKeys).toHaveLength(4);

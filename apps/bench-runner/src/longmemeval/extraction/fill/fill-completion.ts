@@ -22,7 +22,7 @@ export interface ExtractionFillCompletion {
   readonly orphanTurns: number;
   readonly coverage: number;
   readonly expectedKeySetSha256: string;
-  /** Valid raw-shard closure for this authority check, even while incomplete. */
+  /** Valid raw-shard closure after authority exclusions, or null when none remain. */
   readonly partialContentClosureSha256: string | null;
   readonly contentClosureSha256: string | null;
   readonly contentClosureIndex?: ExtractionContentClosureIndex | null;
@@ -59,10 +59,9 @@ export function inspectExtractionFillCompletion(input: {
     .filter((cacheKey) => !expectedKeys.has(cacheKey)).length;
   const closure = completeContentClosure(counts, expectedKeys.size);
   const excluded = new Set(input.excludeContentClosureKeys);
-  const partialClosure = counts.invalid === 0
-    ? computeExtractionContentClosureSha256(
-      counts.entries.filter((entry) => !excluded.has(entry.cacheKey))
-    )
+  const eligibleEntries = counts.entries.filter((entry) => !excluded.has(entry.cacheKey));
+  const partialClosure = counts.invalid === 0 && eligibleEntries.length > 0
+    ? computeExtractionContentClosureSha256(eligibleEntries)
     : null;
   return {
     expectedTurns: expectedKeys.size,
