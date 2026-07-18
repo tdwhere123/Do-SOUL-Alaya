@@ -4,13 +4,13 @@ import {
 } from "../../../longmemeval/extraction/adaptive-concurrency.js";
 
 describe("adaptive extraction concurrency", () => {
-  it("ramps a higher ceiling from its bounded initial concurrency", async () => {
+  it("starts a higher ceiling at its bounded initial concurrency", async () => {
     const controller = createAdaptiveConcurrencyController({ maximum: 64, initial: 32 });
     const signal = new AbortController().signal;
 
     expect(controller.snapshot()).toMatchObject({ maximum: 64, current: 32, active: 0 });
     await controller.acquire(signal);
-    expect(controller.release(false)).toMatchObject({ current: 33, active: 0 });
+    expect(controller.release(false)).toMatchObject({ current: 32, active: 0 });
     controller.dispose();
   });
 
@@ -28,8 +28,15 @@ describe("adaptive extraction concurrency", () => {
       clearTimeout: () => undefined
     });
     const signal = new AbortController().signal;
-    await controller.acquire(signal);
+    for (let active = 0; active < 8; active += 1) await controller.acquire(signal);
 
+    for (let active = 1; active < 8; active += 1) {
+      expect(controller.release(true)).toMatchObject({
+        current: 4,
+        rateLimitBackoffs: 1,
+        backoffMs: 250
+      });
+    }
     expect(controller.release(true)).toMatchObject({
       current: 4,
       rateLimitBackoffs: 1,
@@ -44,7 +51,31 @@ describe("adaptive extraction concurrency", () => {
 
     expect(controller.snapshot()).toMatchObject({ current: 4, active: 1 });
     controller.release(false);
-    expect(controller.snapshot()).toMatchObject({ current: 5, active: 0 });
+    expect(controller.snapshot()).toMatchObject({ current: 4, active: 0 });
+    await controller.acquire(signal);
+    expect(controller.release(true)).toMatchObject({
+      current: 2,
+      rateLimitBackoffs: 2,
+      backoffMs: 750
+    });
+  });
+
+  it("adds one worker only after a successful concurrency window", async () => {
+    const controller = createAdaptiveConcurrencyController({ maximum: 8, initial: 4 });
+    const signal = new AbortController().signal;
+
+    for (let completed = 0; completed < 3; completed += 1) {
+      await controller.acquire(signal);
+      expect(controller.release(false)).toMatchObject({ current: 4, active: 0 });
+    }
+    await controller.acquire(signal);
+    expect(controller.release(false)).toMatchObject({ current: 5, active: 0 });
+    for (let completed = 0; completed < 5; completed += 1) {
+      await controller.acquire(signal);
+      const expected = completed === 4 ? 6 : 5;
+      expect(controller.release(false)).toMatchObject({ current: expected, active: 0 });
+    }
+    controller.dispose();
   });
 
   it("wakes and fails closed when the operator aborts while waiting", async () => {

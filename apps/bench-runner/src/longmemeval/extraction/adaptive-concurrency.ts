@@ -40,6 +40,7 @@ interface AdaptiveState {
   readonly now: () => number;
   current: number;
   active: number;
+  successfulReleases: number;
   rateLimitStreak: number;
   resumeAt: number;
   rateLimitBackoffs: number;
@@ -53,6 +54,7 @@ function createState(maximum: number, initial: number, now: () => number): Adapt
     now,
     current: initial,
     active: 0,
+    successfulReleases: 0,
     rateLimitStreak: 0,
     resumeAt: 0,
     rateLimitBackoffs: 0,
@@ -112,7 +114,9 @@ function releaseSlot(state: AdaptiveState, rateLimited: boolean): AdaptiveConcur
 }
 
 function applyRateLimitBackoff(state: AdaptiveState): void {
+  if (state.now() < state.resumeAt) return;
   state.current = Math.max(1, Math.floor(state.current / 2));
+  state.successfulReleases = 0;
   state.rateLimitStreak += 1;
   const backoffMs = Math.min(
     BASE_BACKOFF_MS * 2 ** Math.max(0, state.rateLimitStreak - 1),
@@ -125,6 +129,13 @@ function applyRateLimitBackoff(state: AdaptiveState): void {
 
 function recoverConcurrency(state: AdaptiveState): void {
   if (state.now() < state.resumeAt) return;
+  if (state.current === state.maximum) {
+    state.successfulReleases = 0;
+    return;
+  }
+  state.successfulReleases += 1;
+  if (state.successfulReleases < state.current) return;
+  state.successfulReleases = 0;
   state.rateLimitStreak = 0;
   state.current = Math.min(state.maximum, state.current + 1);
 }

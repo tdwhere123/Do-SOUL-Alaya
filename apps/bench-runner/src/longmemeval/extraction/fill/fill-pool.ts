@@ -92,8 +92,11 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
         scope.abort(failure);
         throw failure;
       } finally {
+        const priorBackoffs = adaptive.snapshot().rateLimitBackoffs;
         const concurrency = adaptive.release(rateLimited);
-        recordAdaptiveTelemetry(input, rateLimited, concurrency);
+        recordAdaptiveTelemetry(
+          input, concurrency.rateLimitBackoffs > priorBackoffs, concurrency
+        );
       }
       processed += 1;
       logProgress(input, processed, progressEvery, toleratedFailures);
@@ -200,12 +203,12 @@ function logProgress(
 
 function recordAdaptiveTelemetry(
   input: ExtractionPoolInput,
-  rateLimited: boolean,
+  backoffApplied: boolean,
   concurrency: ReturnType<ReturnType<typeof createAdaptiveConcurrencyController>["snapshot"]>
 ): void {
   input.stats.adaptiveConcurrencyBackoffs = concurrency.rateLimitBackoffs;
   input.stats.adaptiveConcurrencyBackoffMs = concurrency.backoffMs;
-  if (!rateLimited) return;
+  if (!backoffApplied) return;
   input.log(
     `[extraction-fill] rate-limit backoff: concurrency=${concurrency.current}/` +
       `${concurrency.maximum} total_backoff_ms=${concurrency.backoffMs}`
