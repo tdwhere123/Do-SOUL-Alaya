@@ -29,7 +29,7 @@ import type { ExtractionFillSummaryContract } from
 import type { LongMemEvalExpansionLineage } from "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import type { LongMemEvalExpansionSourceAnchor } from
   "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
-import type { SupplementalSourceManifestBinding } from
+import type { SupplementalSourceProvenanceBinding } from
   "../extraction/cache/supplemental-source-receipt.js";
 import { validateSnapshotManifest } from "./manifest-validation.js";
 import { computeLegacySnapshotQuestionIdDigestV1 } from
@@ -225,7 +225,7 @@ export interface SnapshotExtractionProvenanceV3
   readonly request_profile: ExtractionRequestProfile;
   readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;
   readonly expansion_lineage?: LongMemEvalExpansionLineage;
-  readonly supplemental_source_receipt?: SupplementalSourceManifestBinding;
+  readonly supplemental_source_receipt?: SupplementalSourceProvenanceBinding;
 }
 
 export type SnapshotExtractionProvenance =
@@ -325,7 +325,8 @@ export function writeSnapshotManifest(
   snapshotDbPath: string,
   manifest: LongMemEvalSnapshotManifest
 ): void {
-  atomicWriteJson(snapshotManifestPath(snapshotDbPath), manifest);
+  const filePath = snapshotManifestPath(snapshotDbPath);
+  atomicWriteJson(filePath, validateSnapshotManifest(manifest, filePath));
 }
 
 export function writeSnapshotSidecar(

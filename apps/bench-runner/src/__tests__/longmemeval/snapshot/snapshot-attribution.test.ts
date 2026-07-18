@@ -62,6 +62,7 @@ function provenance(input: {
   readonly requestProfile?: ExtractionRequestProfile;
   readonly currentSelection?: boolean;
   readonly fillStatus?: FillStatus | null;
+  readonly supplementalReceiptSha?: string;
 }): LongMemEvalRunProvenance {
   return {
     schema_version: 1,
@@ -93,7 +94,8 @@ function provenance(input: {
       input.datasetRevision,
       input.modelFamily ?? "fixture-family",
       input.requestProfile ?? "provider-default-v1",
-      input.fillStatus
+      input.fillStatus,
+      input.supplementalReceiptSha
     ),
     runtime: {
       node_version: "v24.0.0",
@@ -129,7 +131,8 @@ function cacheIdentity(
   datasetRevision: string,
   modelFamily?: string,
   requestProfile?: ExtractionRequestProfile,
-  fillStatus?: FillStatus | null
+  fillStatus?: FillStatus | null,
+  supplementalReceiptSha?: string
 ): NonNullable<LongMemEvalRunProvenance["extraction_cache"]> {
   const base = {
     manifest_sha256: "d".repeat(64),
@@ -155,7 +158,10 @@ function cacheIdentity(
           schema_version: 3,
           model_family: modelFamily,
           request_profile: requestProfile,
-          ...fillContract(fillStatus, undefined, undefined, true)
+          ...fillContract(fillStatus, undefined, undefined, true),
+          ...(supplementalReceiptSha === undefined ? {} : {
+            supplemental_source_receipt: supplementalReceipt(supplementalReceiptSha)
+          })
         };
 }
 
@@ -179,7 +185,8 @@ function extraction(
   requestProfile?: ExtractionRequestProfile,
   fillStatus?: FillStatus | null,
   digest?: string,
-  contentClosure?: string
+  contentClosure?: string,
+  supplementalReceiptSha?: string
 ): SnapshotExtractionProvenance {
   const base = {
     manifest_sha256: "d".repeat(64),
@@ -202,8 +209,22 @@ function extraction(
           schema_version: 3,
           model_family: modelFamily,
           request_profile: requestProfile,
-          ...fillContract(fillStatus, digest, contentClosure)
+          ...fillContract(fillStatus, digest, contentClosure),
+          ...(supplementalReceiptSha === undefined ? {} : {
+            supplemental_source_receipt: supplementalReceipt(supplementalReceiptSha)
+          })
         };
+}
+
+function supplementalReceipt(receiptSha256: string) {
+  return {
+    kind: "longmemeval-extraction-supplemental-source" as const,
+    receipt_sha256: receiptSha256,
+    shard_count: 2,
+    key_set_sha256: "9".repeat(64),
+    physical_provider_url: `sha256:${"6".repeat(64)}`,
+    physical_model: "deepseek-v4-flash"
+  };
 }
 
 function attribution(input: {
@@ -224,6 +245,8 @@ function attribution(input: {
   readonly snapshotFillDigest?: string;
   readonly snapshotContentClosure?: string;
   readonly snapshotWindowOffset?: number;
+  readonly runSupplementalReceiptSha?: string;
+  readonly snapshotSupplementalReceiptSha?: string;
 }) {
   const family = input.snapshotModelFamily ?? input.modelFamily ?? "fixture-family";
   const profile = input.snapshotRequestProfile ?? input.requestProfile ?? "provider-default-v1";
@@ -237,7 +260,8 @@ function attribution(input: {
           profile,
           input.snapshotFillStatus,
           input.snapshotFillDigest,
-          input.snapshotContentClosure
+          input.snapshotContentClosure,
+          input.snapshotSupplementalReceiptSha
         );
   return deriveSnapshotAttribution({
     artifactIntegrity: {
@@ -248,7 +272,10 @@ function attribution(input: {
       extraction_authority_bytes: 1
     },
     runProvenance: input.legacySchema === undefined
-      ? compactSnapshotRunProvenance(provenance(input))
+      ? compactSnapshotRunProvenance(provenance({
+          ...input,
+          supplementalReceiptSha: input.runSupplementalReceiptSha
+        }))
       : {
           ...provenance(input),
           extraction_cache: input.legacySchema === 1
@@ -314,6 +341,16 @@ describe("snapshot attribution dataset binding", () => {
       questionManifestDatasetSha: DATASET_SHA,
       currentSelection: true,
       snapshotContentClosure: "0".repeat(64)
+    })).toEqual({ status: "attributed", gate_eligible: false });
+  });
+
+  it("rejects supplemental source receipt drift between run and snapshot provenance", () => {
+    expect(attribution({
+      datasetRevision: DATASET_SHA,
+      questionManifestDatasetSha: DATASET_SHA,
+      currentSelection: true,
+      runSupplementalReceiptSha: "1".repeat(64),
+      snapshotSupplementalReceiptSha: "2".repeat(64)
     })).toEqual({ status: "attributed", gate_eligible: false });
   });
 

@@ -6,15 +6,22 @@ import {
 import { EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS } from
   "../extraction/fill/fill-authority.js";
 import {
-  ExtractionCacheIdentityBaseSchema,
   LongMemEvalRunProvenanceSchema,
   isLongMemEvalRunProvenanceSummaryGateEligible,
   type LongMemEvalRunProvenance
 } from "../provenance/run.js";
+import { ExtractionCacheIdentityBaseSchema } from
+  "../provenance/extraction-cache-identity.js";
 import { LongMemEvalExpansionLineageSchema } from
   "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from
   "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
+import {
+  redactSupplementalSourceBinding,
+  SupplementalSourceProvenanceBindingSchema
+} from
+  "../extraction/cache/supplemental-source-receipt.js";
+import { redactProvenanceUrl } from "../provenance/paired-environment.js";
 import {
   assertSnapshotExtractionAuthorityBinding,
   type SnapshotExtractionAuthority
@@ -37,6 +44,7 @@ const SnapshotExtractionCacheIdentitySchema = z.discriminatedUnion(
       schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
       model_family: z.string().min(1),
       request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
+      supplemental_source_receipt: SupplementalSourceProvenanceBindingSchema.optional(),
       expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
       expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
       ...EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS
@@ -63,7 +71,15 @@ export function compactSnapshotRunProvenance(
   const { content_closure_index: _contentClosureIndex, ...summary } = cache;
   return LongMemEvalSnapshotRunProvenanceSchema.parse({
     ...provenance,
-    extraction_cache: summary
+    extraction_cache: {
+      ...summary,
+      ...(summary.supplemental_source_receipt === undefined ? {} : {
+        supplemental_source_receipt: redactSupplementalSourceBinding(
+          summary.supplemental_source_receipt,
+          redactProvenanceUrl
+        )
+      })
+    }
   });
 }
 

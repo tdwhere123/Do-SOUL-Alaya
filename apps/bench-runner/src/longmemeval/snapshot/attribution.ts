@@ -81,6 +81,10 @@ function hasGateEligibleExtractionCache(
       cache.expansion_source_anchor
     ) &&
     isDeepStrictEqual(snapshotCache.expansion_lineage, cache.expansion_lineage) &&
+    isDeepStrictEqual(
+      snapshotCache.supplemental_source_receipt,
+      cache.supplemental_source_receipt
+    ) &&
     cache.requested_turns !== undefined && cache.cached_turns !== undefined &&
     cache.coverage === 1 && cache.cached_turns >= cache.requested_turns &&
     snapshotCache.requested_turns === cache.requested_turns &&

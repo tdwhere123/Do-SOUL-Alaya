@@ -33,6 +33,9 @@ import {
   expansionPromotionContractFixture
 } from "../expansion-promotion-contract-fixture.js";
 import { closureFixture, state } from "./fixture.js";
+import { fixtureSupplementalSourceBinding } from "./manifest.js";
+import { computeSupplementalSourceBindingSha256 } from
+  "../../../../longmemeval/extraction/cache/supplemental-source-receipt.js";
 
 export async function prepare(
   capabilityPromise: Promise<LongMemEvalExpansionCapability>
@@ -154,7 +157,11 @@ function sourceAuthority(manifestSha256: string): LongMemEvalSourceSnapshotAutho
       windowLimit: 100,
       expectedTurns: closure.expected_turns,
       expectedKeySetSha256: closure.expected_key_set_sha256,
-      contentClosureSha256: closure.content_closure_sha256
+      contentClosureSha256: closure.content_closure_sha256,
+      supplementalSourceBindingSha256: computeSupplementalSourceBindingSha256(
+        fixtureSupplementalSourceBinding(),
+        redactProvenanceUrl
+      )
     }
   };
 }

@@ -59,6 +59,38 @@ function manifestFor(
   };
 }
 
+function supplementalExtractionProvenance(physicalProviderUrl: string) {
+  return {
+    manifest_sha256: "a".repeat(64),
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    extraction_model: "fixture-model",
+    model_family: "fixture-family",
+    request_profile: "deepseek-v4-nonthinking-v1" as const,
+    provider_url: `sha256:${"b".repeat(64)}`,
+    system_prompt_sha256: "c".repeat(64),
+    cache_key_algo: "fixture-v1",
+    dataset: "longmemeval-s",
+    dataset_revision: "d".repeat(64),
+    requested_turns: 10,
+    cached_turns: 10,
+    coverage: 1,
+    fill_status: "complete" as const,
+    window_offset: 0,
+    window_limit: 1,
+    expected_turns: 10,
+    expected_key_set_sha256: "e".repeat(64),
+    content_closure_sha256: "f".repeat(64),
+    supplemental_source_receipt: {
+      kind: "longmemeval-extraction-supplemental-source" as const,
+      receipt_sha256: "1".repeat(64),
+      shard_count: 2,
+      key_set_sha256: "2".repeat(64),
+      physical_provider_url: physicalProviderUrl,
+      physical_model: "deepseek-v4-flash"
+    }
+  };
+}
+
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "snapshot-test-"));
 });
@@ -186,18 +218,16 @@ describe("snapshot plumbing", () => {
 
   it("rejects an attributed manifest when its binding evidence is incomplete", () => {
     const snapshotDbPath = join(tmpDir, "snapshot.db");
-    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+    expect(() => writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
       attribution: { status: "attributed", gate_eligible: false }
-    }));
-
-    expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
+    }))).toThrow(
       /attributed snapshot manifest.*incomplete/u
     );
   });
 
   it("rejects v2 snapshot extraction provenance without model_family", () => {
     const snapshotDbPath = join(tmpDir, "snapshot.db");
-    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+    expect(() => writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
       extraction_provenance: {
         manifest_sha256: "a".repeat(64),
         schema_version: 2,
@@ -208,8 +238,7 @@ describe("snapshot plumbing", () => {
         dataset: "longmemeval-s",
         dataset_revision: "d".repeat(64)
       } as LongMemEvalSnapshotManifest["extraction_provenance"]
-    }));
-    expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
+    }))).toThrow(
       /extraction provenance.*model_family/u
     );
   });
@@ -227,10 +256,9 @@ describe("snapshot plumbing", () => {
       dataset: "longmemeval-s",
       dataset_revision: "d".repeat(64)
     };
-    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+    expect(() => writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
       extraction_provenance: common as LongMemEvalSnapshotManifest["extraction_provenance"]
-    }));
-    expect(() => readSnapshotManifest(snapshotDbPath)).toThrow(
+    }))).toThrow(
       /extraction provenance.*request_profile/u
     );
 
@@ -256,6 +284,36 @@ describe("snapshot plumbing", () => {
       expected_key_set_sha256: "e".repeat(64),
       content_closure_sha256: "f".repeat(64)
     });
+  });
+
+  it("round-trips a redacted supplemental extraction source binding", () => {
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    writeSnapshotManifest(snapshotDbPath, manifestFor(snapshotDbPath, {
+      extraction_provenance: supplementalExtractionProvenance(
+        `sha256:${"3".repeat(64)}`
+      )
+    }));
+
+    expect(readSnapshotManifest(snapshotDbPath).extraction_provenance)
+      .toMatchObject({
+        supplemental_source_receipt: {
+          receipt_sha256: "1".repeat(64),
+          shard_count: 2,
+          physical_provider_url: `sha256:${"3".repeat(64)}`
+        }
+      });
+  });
+
+  it("rejects an unredacted supplemental provider URL in snapshot provenance", () => {
+    const snapshotDbPath = join(tmpDir, "snapshot.db");
+    const manifest = manifestFor(snapshotDbPath, {
+      extraction_provenance: supplementalExtractionProvenance(
+        "https://secret.example/v1?key=hidden"
+      )
+    });
+
+    expect(() => writeSnapshotManifest(snapshotDbPath, manifest)).toThrow();
+    expect(existsSync(snapshotManifestPath(snapshotDbPath))).toBe(false);
   });
 
   it.each([

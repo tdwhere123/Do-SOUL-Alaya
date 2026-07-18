@@ -6,8 +6,10 @@ import {
   LongMemEvalExtractionSummarySchema,
   LongMemEvalFanoutAuthoritySchema,
   LongMemEvalShardAuthorityReferenceSchema,
+  assertLongMemEvalExpansionBinding,
   assertLongMemEvalFanoutReferenceBinding,
-  assertLongMemEvalFullExtractionClosure
+  assertLongMemEvalFullExtractionClosure,
+  hashLongMemEvalSupplementalSourceBinding
 } from "../../gates/longmemeval-authority-wire.js";
 
 describe("LongMemEval authority wire contract", () => {
@@ -25,6 +27,66 @@ describe("LongMemEval authority wire contract", () => {
       ...compact,
       content_closure_index: { [cacheKey()]: ["3".repeat(64), 99, 1] }
     })).toThrow(/content closure/u);
+  });
+
+  it("rejects raw supplemental bindings from persisted provenance", () => {
+    const compact = extractionSummary();
+    const {
+      expansion_source_anchor: _sourceAnchor,
+      expansion_lineage: _lineage,
+      ...withoutExpansion
+    } = compact;
+    const rawBinding = {
+      kind: "longmemeval-extraction-supplemental-source" as const,
+      receipt_sha256: "1".repeat(64),
+      shard_count: 2,
+      key_set_sha256: "2".repeat(64),
+      physical_provider_url: "https://secret.example/v1?key=hidden",
+      physical_model: "deepseek-v4-flash"
+    };
+
+    expect(() => LongMemEvalExtractionSummarySchema.parse({
+      ...compact,
+      supplemental_source_receipt: rawBinding
+    })).toThrow();
+    expect(() => assertLongMemEvalFullExtractionClosure({
+      ...withoutExpansion,
+      supplemental_source_receipt: rawBinding,
+      content_closure_index: closureIndex()
+    })).toThrow();
+    expect(() => assertLongMemEvalFullExtractionClosure({
+      ...withoutExpansion,
+      supplemental_source_receipt: {
+        ...rawBinding,
+        physical_provider_url: `sha256:${"3".repeat(64)}`
+      },
+      content_closure_index: closureIndex()
+    })).not.toThrow();
+  });
+
+  it("binds one supplemental source identity across 100Q and 500Q", () => {
+    const compact = extractionSummary();
+    const binding = {
+      kind: "longmemeval-extraction-supplemental-source" as const,
+      receipt_sha256: "1".repeat(64),
+      shard_count: 2,
+      key_set_sha256: "2".repeat(64),
+      physical_provider_url: `sha256:${"3".repeat(64)}`,
+      physical_model: "deepseek-v4-flash"
+    };
+    const digest = hashLongMemEvalSupplementalSourceBinding(binding);
+    const withReceipt = { ...compact, supplemental_source_receipt: binding };
+
+    expect(() => assertLongMemEvalExpansionBinding(withReceipt)).toThrow();
+    expect(() => assertLongMemEvalExpansionBinding({
+      ...withReceipt,
+      expansion_source_anchor: addSupplementalBinding(
+        compact.expansion_source_anchor!, digest
+      ),
+      expansion_lineage: addSupplementalBinding(
+        compact.expansion_lineage!, digest
+      )
+    })).not.toThrow();
   });
 
   it("requires exact [0,500) plans and rejects cross-run refs", () => {
@@ -136,6 +198,23 @@ function extractionSummary() {
     content_closure_sha256: closureSha256(),
     expansion_source_anchor: sourceAnchor(),
     expansion_lineage: expansionLineage()
+  };
+}
+
+function addSupplementalBinding<T extends {
+  readonly source_cache: object;
+  readonly target_cache: object;
+}>(value: T, digest: string): T {
+  return {
+    ...value,
+    source_cache: {
+      ...value.source_cache,
+      supplemental_source_binding_sha256: digest
+    },
+    target_cache: {
+      ...value.target_cache,
+      supplemental_source_binding_sha256: digest
+    }
   };
 }
 

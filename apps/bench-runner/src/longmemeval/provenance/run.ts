@@ -13,11 +13,8 @@ import { parseQuestionManifest, type QuestionManifest } from
   "../selection/question-manifest.js";
 import type { LongMemEvalRunOptions } from "../runner.js";
 import {
-  EXTRACTION_CACHE_MANIFEST_VERSION,
-  EXTRACTION_REQUEST_PROFILES,
-  readExtractionCacheManifestIdentity
+  EXTRACTION_CACHE_MANIFEST_VERSION
 } from "../extraction/cache/extraction-cache-manifest.js";
-import { resolveEffectiveExtractionCacheRoot } from "../compile-seed/compile-seed-config.js";
 import {
   resolveEmbeddingSupplementRuntimeProvenance,
   resolveLocalCrossEncoderRuntimeProvenance
@@ -34,15 +31,15 @@ import {
 import type { LongMemEvalSelectionContractIdentity } from "../selection/contract.js";
 import { SelectionContractIdentitySchema } from "./contract/selection-contract-schema.js";
 import {
-  EXTRACTION_FILL_AUTHORITY_SCHEMA_FIELDS,
   containsExtractionFillQuestionWindow,
   hasCompleteExtractionFillAuthority,
   hasCompleteExtractionFillSummary
 } from "../extraction/fill/fill-authority.js";
-import { LongMemEvalExpansionLineageSchema } from "../promotion/expansion/lineage/expansion-lineage-schema.js";
-import { LongMemEvalExpansionSourceAnchorSchema } from
-  "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
+import {
+  ExtractionCacheIdentitySchema,
+  readExtractionCacheIdentity
+} from "./extraction-cache-identity.js";
 
 export { collectPairedEnvironment, redactProvenanceUrl } from "./paired-environment.js";
 export { computeExecutedDistIdentityFresh } from "./executed-dist-identity.js";
@@ -78,45 +75,6 @@ const EmbeddingSupplementRuntimeProvenanceSchema = z.union([
     d2q_input: z.literal("raw_content")
   }).strict()
 ]);
-export const ExtractionCacheIdentityBaseSchema = z.object({
-  manifest_sha256: Sha256Schema,
-  extraction_model: z.string().min(1),
-  provider_url: z.string().min(1),
-  system_prompt_sha256: Sha256Schema,
-  cache_key_algo: z.string().min(1),
-  dataset: z.string().min(1),
-  dataset_revision: z.string().min(1),
-  requested_turns: z.number().int().nonnegative().optional(),
-  cached_turns: z.number().int().nonnegative().optional(),
-  coverage: z.number().min(0).max(1).optional(),
-  storage: z.enum(["git-tracked", "archive"]),
-  archive_url: z.string().min(1).optional(),
-  archive_sha256: Sha256Schema.optional(),
-  built_at: z.string().min(1),
-  builder: z.string().min(1)
-}).strict();
-
-const ExtractionCacheIdentitySchema = z.discriminatedUnion("schema_version", [
-  ExtractionCacheIdentityBaseSchema.extend({
-    schema_version: z.literal(1),
-    model_family: z.never().optional(),
-    request_profile: z.never().optional()
-  }).strict(),
-  ExtractionCacheIdentityBaseSchema.extend({
-    schema_version: z.literal(2),
-    model_family: z.string().min(1),
-    request_profile: z.never().optional()
-  }).strict(),
-  ExtractionCacheIdentityBaseSchema.extend({
-    schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
-    model_family: z.string().min(1),
-    request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
-    expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
-    expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
-    ...EXTRACTION_FILL_AUTHORITY_SCHEMA_FIELDS
-  }).strict()
-]);
-
 export const LongMemEvalRunProvenanceSchema = z.object({
   schema_version: z.literal(1),
   dataset_sha256: Sha256Schema.optional(),
@@ -464,27 +422,6 @@ async function readManifestIdentity(
     ...questionManifestIdentity(manifest),
     file_sha256: createHash("sha256").update(raw, "utf8").digest("hex")
   };
-}
-
-async function readExtractionCacheIdentity(
-  opts: LongMemEvalRunOptions,
-  env: Readonly<Record<string, string | undefined>>
-): Promise<LongMemEvalRunProvenance["extraction_cache"]> {
-  const cacheRoot = resolveEffectiveExtractionCacheRoot(
-    opts.extractionCacheRoot,
-    env
-  );
-  const identity = readExtractionCacheManifestIdentity(cacheRoot);
-  if (identity === undefined) return null;
-  const { manifest } = identity;
-  return ExtractionCacheIdentitySchema.parse({
-    manifest_sha256: identity.manifestSha256,
-    ...manifest,
-    provider_url: redactProvenanceUrl(manifest.provider_url),
-    ...(manifest.archive_url === undefined
-      ? {}
-      : { archive_url: redactProvenanceUrl(manifest.archive_url) })
-  });
 }
 
 function questionManifestIdentity(manifest: QuestionManifest) {

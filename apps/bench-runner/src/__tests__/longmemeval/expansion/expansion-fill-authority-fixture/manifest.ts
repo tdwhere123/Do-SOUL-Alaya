@@ -64,9 +64,21 @@ export function buildFixtureSourceManifest(
     window_offset: 0,
     window_limit: 100,
     ...closure,
+    supplemental_source_receipt: fixtureSupplementalSourceBinding(),
     storage: "git-tracked",
     built_at: "2026-07-16T00:00:00.000Z",
     builder: "extraction-fill"
+  };
+}
+
+export function fixtureSupplementalSourceBinding() {
+  return {
+    kind: "longmemeval-extraction-supplemental-source" as const,
+    receipt_sha256: "1".repeat(64),
+    shard_count: 2,
+    key_set_sha256: "2".repeat(64),
+    physical_provider_url: "https://supplement.example/v1",
+    physical_model: "deepseek-v4-flash"
   };
 }
 

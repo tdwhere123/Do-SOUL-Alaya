@@ -86,6 +86,9 @@ function targetExpectation(
     window_offset: 0,
     window_limit: 500,
     expected_turns: target.expectedTurns,
-    expected_key_set_sha256: target.expectedKeySetSha256
+    expected_key_set_sha256: target.expectedKeySetSha256,
+    ...(source.supplementalSourceBindingSha256 === undefined ? {} : {
+      supplemental_source_binding_sha256: source.supplementalSourceBindingSha256
+    })
   };
 }

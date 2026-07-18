@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import {
+  hashLongMemEvalSupplementalSourceBinding,
+  LongMemEvalSupplementalSourceManifestBindingWireSchema,
+  LongMemEvalSupplementalSourceProvenanceBindingWireSchema
+} from "@do-soul/alaya-eval/internal";
 import type { ExtractionRequestProfile } from "../request-profile.js";
 
 export interface SupplementalSourceShard {
@@ -28,14 +34,17 @@ export interface SupplementalSourceReceipt {
   readonly receipt_sha256: string;
 }
 
-export interface SupplementalSourceManifestBinding {
-  readonly kind: SupplementalSourceReceipt["kind"];
-  readonly receipt_sha256: string;
-  readonly shard_count: number;
-  readonly key_set_sha256: string;
-  readonly physical_provider_url: string;
-  readonly physical_model: string;
-}
+export const SupplementalSourceManifestBindingSchema =
+  LongMemEvalSupplementalSourceManifestBindingWireSchema;
+export const SupplementalSourceProvenanceBindingSchema =
+  LongMemEvalSupplementalSourceProvenanceBindingWireSchema;
+
+export type SupplementalSourceManifestBinding = z.infer<
+  typeof SupplementalSourceManifestBindingSchema
+>;
+export type SupplementalSourceProvenanceBinding = z.infer<
+  typeof SupplementalSourceProvenanceBindingSchema
+>;
 
 export function createSupplementalSourceReceipt(input: {
   readonly createdAt: string;
@@ -88,30 +97,42 @@ export function supplementalSourceManifestBinding(
   });
 }
 
+export function redactSupplementalSourceBinding(
+  binding: SupplementalSourceManifestBinding | SupplementalSourceProvenanceBinding,
+  redactProviderUrl: (value: string) => string
+): SupplementalSourceProvenanceBinding {
+  if (SupplementalSourceProvenanceBindingSchema.safeParse(binding).success) {
+    return SupplementalSourceProvenanceBindingSchema.parse(binding);
+  }
+  return SupplementalSourceProvenanceBindingSchema.parse({
+    ...binding,
+    physical_provider_url: redactProviderUrl(binding.physical_provider_url)
+  });
+}
+
+export function computeSupplementalSourceBindingSha256(
+  binding: SupplementalSourceManifestBinding | SupplementalSourceProvenanceBinding |
+    undefined,
+  redactProviderUrl: (value: string) => string
+): string | undefined {
+  if (binding === undefined) return undefined;
+  return hashLongMemEvalSupplementalSourceBinding(
+    redactSupplementalSourceBinding(binding, redactProviderUrl)
+  );
+}
+
 export function parseSupplementalSourceBinding(
   value: unknown,
   filePath: string
 ): SupplementalSourceManifestBinding | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null) throw invalidBinding(filePath);
-  const binding = value as Partial<SupplementalSourceManifestBinding>;
-  if (binding.kind !== "longmemeval-extraction-supplemental-source" ||
-      !isDigest(binding.receipt_sha256) || !isDigest(binding.key_set_sha256) ||
-      !Number.isSafeInteger(binding.shard_count) || (binding.shard_count ?? 0) < 1 ||
-      typeof binding.physical_provider_url !== "string" ||
-      binding.physical_provider_url.length === 0 ||
-      typeof binding.physical_model !== "string" || binding.physical_model.length === 0) {
-    throw invalidBinding(filePath);
-  }
-  return binding as SupplementalSourceManifestBinding;
+  const parsed = SupplementalSourceManifestBindingSchema.safeParse(value);
+  if (!parsed.success) throw invalidBinding(filePath);
+  return parsed.data;
 }
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function isDigest(value: unknown): value is string {
-  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
 
 function invalidBinding(filePath: string): Error {

@@ -115,6 +115,31 @@ describe("500Q expansion fill authority", () => {
     });
   });
 
+  it("rejects supplemental receipt drift in persisted 500Q run provenance", async () => {
+    const fixture = await completeExpansionFixture();
+    const bundle = structuredClone(recallBundle(fixture));
+    const runCache = bundle.manifest.run_provenance!.extraction_cache!;
+    if (runCache.schema_version !== 3 ||
+        runCache.supplemental_source_receipt === undefined) {
+      throw new Error("fixture requires current supplemental source provenance");
+    }
+    runCache.supplemental_source_receipt.receipt_sha256 = "0".repeat(64);
+
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle,
+      recallWeightOverrides: undefined,
+      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+    })).rejects.toThrow(/lineage|target cache authority/u);
+  });
+
   it("allows an unsliced full 500Q recall run", async () => {
     const fixture = await completeExpansionFixture();
     await assertExpansionRecallAuthority({

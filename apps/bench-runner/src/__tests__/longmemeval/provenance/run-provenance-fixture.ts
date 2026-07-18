@@ -137,6 +137,14 @@ function writeFixtureExtractionManifest(extractionCacheRoot: string): void {
     window_offset: 0,
     window_limit: 1,
     ...EXTRACTION_CLOSURE,
+    supplemental_source_receipt: {
+      kind: "longmemeval-extraction-supplemental-source",
+      receipt_sha256: "d".repeat(64),
+      shard_count: 2,
+      key_set_sha256: "e".repeat(64),
+      physical_provider_url: "https://user:secret@supplement.example/v1?key=hidden",
+      physical_model: "deepseek-v4-flash"
+    },
     storage: "archive",
     archive_url: "https://cache.invalid/archive.tar.zst",
     archive_sha256: "c".repeat(64),

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { hashLongMemEvalSupplementalSourceBinding } from
+  "@do-soul/alaya-eval/internal";
 import {
   LongMemEvalMatrixPromotionAuthorizationSchema,
   hashPromotionMatrix,
@@ -60,6 +62,7 @@ export interface LongMemEvalSourceCacheAuthority {
   readonly expectedTurns: number;
   readonly expectedKeySetSha256: string;
   readonly contentClosureSha256: string;
+  readonly supplementalSourceBindingSha256?: string;
 }
 
 export interface LongMemEvalSourceSnapshotAuthority {
@@ -350,7 +353,12 @@ function buildSourceSnapshotAuthority(
       windowLimit: extraction.window_limit,
       expectedTurns: extraction.expected_turns,
       expectedKeySetSha256: extraction.expected_key_set_sha256,
-      contentClosureSha256: extraction.content_closure_sha256
+      contentClosureSha256: extraction.content_closure_sha256,
+      ...(extraction.supplemental_source_receipt === undefined ? {} : {
+        supplementalSourceBindingSha256: hashLongMemEvalSupplementalSourceBinding(
+          extraction.supplemental_source_receipt
+        )
+      })
     }
   });
 }

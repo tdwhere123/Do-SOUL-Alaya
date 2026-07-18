@@ -79,6 +79,26 @@ describe("snapshot extraction authority", () => {
     });
     expect(JSON.stringify(compact)).not.toContain("supplement.example");
     expect(JSON.stringify(compact)).not.toContain("secret");
+
+    const run = compactSnapshotRunProvenance(runProvenance(manifest));
+    expect(run.extraction_cache?.supplemental_source_receipt).toEqual(
+      compact.supplemental_source_receipt
+    );
+  });
+
+  it("binds the supplemental source identity into extraction authority", () => {
+    const manifest = supplementalManifest("authority-binding");
+    const compact = buildSnapshotExtractionSummary(manifest, SOURCE_SHA);
+    const authority = buildSnapshotExtractionAuthority(manifest, SOURCE_SHA, compact);
+    const receipt = compact.supplemental_source_receipt!;
+
+    expect(() => assertSnapshotExtractionAuthorityBinding(authority, {
+      ...compact,
+      supplemental_source_receipt: {
+        ...receipt,
+        receipt_sha256: "0".repeat(64)
+      }
+    })).toThrow(/compact summary differs/u);
   });
 
   it("rejects inline closure indices and run-summary drift", () => {
@@ -163,6 +183,20 @@ function extractionManifest(count: number, seed: string): ExtractionCacheManifes
     ),
     content_closure_sha256: computeExtractionContentClosureSha256(entries),
     content_closure_index: contentClosureIndex
+  };
+}
+
+function supplementalManifest(seed: string): ExtractionCacheManifestV3 {
+  return {
+    ...extractionManifest(2, seed),
+    supplemental_source_receipt: {
+      kind: "longmemeval-extraction-supplemental-source",
+      receipt_sha256: "d".repeat(64),
+      shard_count: 34,
+      key_set_sha256: "e".repeat(64),
+      physical_provider_url: "https://secret.example/v1?key=hidden",
+      physical_model: "deepseek-v4-flash"
+    }
   };
 }
 

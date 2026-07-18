@@ -1,5 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { isCacheOnlySeedExtractionPath } from "@do-soul/alaya-eval";
+import { hashLongMemEvalSupplementalSourceBinding } from
+  "@do-soul/alaya-eval/internal";
 import type { BenchRecallWeightOverrides } from
   "../../../../harness/recall/recall-weight-overrides.js";
 import { ALAYA_RECALL_WEIGHT_OVERRIDES_ENV } from
@@ -271,7 +273,12 @@ function snapshotTarget(extraction: SnapshotExtractionProvenanceV3) {
     window_limit: 500,
     expected_turns: extraction.expected_turns,
     expected_key_set_sha256: extraction.expected_key_set_sha256,
-    content_closure_sha256: extraction.content_closure_sha256
+    content_closure_sha256: extraction.content_closure_sha256,
+    ...(extraction.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_binding_sha256: hashLongMemEvalSupplementalSourceBinding(
+        extraction.supplemental_source_receipt
+      )
+    })
   };
 }
 
@@ -285,7 +292,7 @@ function matchingRunCache(
     "dataset_revision", "requested_turns", "cached_turns", "coverage",
     "fill_status", "window_offset", "window_limit", "expected_turns",
     "expected_key_set_sha256", "content_closure_sha256",
-    "expansion_source_anchor", "expansion_lineage"
+    "supplemental_source_receipt", "expansion_source_anchor", "expansion_lineage"
   ] as const;
   return fields.every((field) => isDeepStrictEqual(extraction[field], runCache[field]));
 }

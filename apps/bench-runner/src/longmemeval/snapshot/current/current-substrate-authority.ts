@@ -16,7 +16,6 @@ import type { ExtractionFillQuestionWindow } from
 import { loadDatasetWithIdentity } from "../../ingestion/fetch.js";
 import {
   isLongMemEvalRunProvenanceGateEligible,
-  redactProvenanceUrl,
   type LongMemEvalRunProvenance
 } from "../../provenance/run.js";
 import {
@@ -38,7 +37,7 @@ import { assertSnapshotDatasetSubstrateIdentity } from
 import { assertCurrentSnapshotAttributionClaim } from "./current-attribution.js";
 import {
   assertSnapshotExtractionAuthorityBinding,
-  sanitizeSnapshotProvenanceValue,
+  buildSnapshotExtractionSummary,
   type SnapshotExtractionAuthority
 } from "../extraction-authority.js";
 import {
@@ -302,36 +301,5 @@ function extractionProvenance(
   if (manifest.schema_version !== 3) {
     throw new Error("snapshot extraction provenance requires schema v3");
   }
-  return {
-    manifest_sha256: identity.manifestSha256,
-    schema_version: 3,
-    extraction_model: manifest.extraction_model,
-    model_family: manifest.model_family,
-    request_profile: manifest.request_profile,
-    provider_url: redactProvenanceUrl(manifest.provider_url),
-    system_prompt_sha256: manifest.system_prompt_sha256,
-    cache_key_algo: manifest.cache_key_algo,
-    dataset: manifest.dataset,
-    dataset_revision: manifest.dataset_revision,
-    requested_turns: manifest.requested_turns,
-    cached_turns: manifest.cached_turns,
-    coverage: manifest.coverage,
-    fill_status: manifest.fill_status,
-    window_offset: manifest.window_offset,
-    window_limit: manifest.window_limit,
-    expected_turns: manifest.expected_turns,
-    expected_key_set_sha256: manifest.expected_key_set_sha256,
-    content_closure_sha256: manifest.content_closure_sha256,
-    ...(manifest.supplemental_source_receipt === undefined ? {} : {
-      supplemental_source_receipt: sanitizeSnapshotProvenanceValue(
-        manifest.supplemental_source_receipt
-      )
-    }),
-    ...(manifest.expansion_source_anchor === undefined ? {} : {
-      expansion_source_anchor: manifest.expansion_source_anchor
-    }),
-    ...(manifest.expansion_lineage === undefined ? {} : {
-      expansion_lineage: manifest.expansion_lineage
-    })
-  };
+  return buildSnapshotExtractionSummary(manifest, identity.manifestSha256);
 }

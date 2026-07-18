@@ -4,6 +4,7 @@ import {
   assertLongMemEvalExtractionAuthorityBinding,
   assertLongMemEvalExtractionAuthorityIntegrity,
   hashLongMemEvalExpansionArtifact,
+  hashLongMemEvalSupplementalSourceBinding,
   parseLongMemEvalExtractionAuthority,
   type LongMemEvalExtractionAuthority
 } from "@do-soul/alaya-eval/internal";
@@ -18,6 +19,8 @@ import { hasCompleteExtractionFillAuthority } from
 import type { SnapshotExtractionProvenanceV3 } from "./materialize.js";
 import { redactProvenanceUrl } from "../provenance/paired-environment.js";
 import { readRegularFileNoFollow, sha256Buffer } from "./bound-file.js";
+import { redactSupplementalSourceBinding } from
+  "../extraction/cache/supplemental-source-receipt.js";
 
 export const MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES =
   MAX_LONGMEMEVAL_EXTRACTION_AUTHORITY_BYTES;
@@ -73,8 +76,9 @@ export function buildSnapshotExtractionSummary(
     expected_key_set_sha256: manifest.expected_key_set_sha256,
     content_closure_sha256: manifest.content_closure_sha256,
     ...(manifest.supplemental_source_receipt === undefined ? {} : {
-      supplemental_source_receipt: sanitizeSnapshotProvenanceValue(
-        manifest.supplemental_source_receipt
+      supplemental_source_receipt: redactSupplementalSourceBinding(
+        manifest.supplemental_source_receipt,
+        redactProvenanceUrl
       )
     }),
     ...expansion
@@ -110,6 +114,11 @@ export function buildSnapshotExtractionAuthority(
     expected_key_set_sha256: manifest.expected_key_set_sha256,
     content_closure_sha256: manifest.content_closure_sha256,
     content_closure_index: manifest.content_closure_index,
+    ...(compact.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_binding_sha256: hashLongMemEvalSupplementalSourceBinding(
+        compact.supplemental_source_receipt
+      )
+    }),
     ...expansionDigests(compact)
   };
   return parseAuthority(candidate, "captured extraction authority");

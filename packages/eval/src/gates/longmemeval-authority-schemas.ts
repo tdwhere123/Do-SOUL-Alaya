@@ -19,6 +19,23 @@ const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const ExtractionRequestProfileSchema = z.enum(
   LONGMEMEVAL_EXTRACTION_REQUEST_PROFILES
 );
+const SupplementalSourceBindingBaseSchema = z.object({
+  kind: z.literal("longmemeval-extraction-supplemental-source"),
+  receipt_sha256: Sha256Schema,
+  shard_count: z.number().int().positive(),
+  key_set_sha256: Sha256Schema,
+  physical_model: z.string().min(1)
+}).strict();
+
+export const LongMemEvalSupplementalSourceManifestBindingWireSchema =
+  SupplementalSourceBindingBaseSchema.extend({
+    physical_provider_url: z.string().min(1)
+  }).strict().readonly();
+
+export const LongMemEvalSupplementalSourceProvenanceBindingWireSchema =
+  SupplementalSourceBindingBaseSchema.extend({
+    physical_provider_url: z.string().regex(/^sha256:[a-f0-9]{64}$/u)
+  }).strict().readonly();
 export const LongMemEvalContentClosureIndexSchema = z.record(
   Sha256Schema,
   z.tuple([
@@ -84,7 +101,8 @@ export const LongMemEvalExpansionSourceCacheWireSchema = z.object({
   window_limit: z.literal(100),
   expected_turns: z.number().int().positive(),
   expected_key_set_sha256: Sha256Schema,
-  content_closure_sha256: Sha256Schema
+  content_closure_sha256: Sha256Schema,
+  supplemental_source_binding_sha256: Sha256Schema.optional()
 }).strict().readonly();
 
 const TargetCacheBaseSchema = z.object({
@@ -99,7 +117,8 @@ const TargetCacheBaseSchema = z.object({
   window_offset: z.literal(0),
   window_limit: z.literal(500),
   expected_turns: z.number().int().positive(),
-  expected_key_set_sha256: Sha256Schema
+  expected_key_set_sha256: Sha256Schema,
+  supplemental_source_binding_sha256: Sha256Schema.optional()
 }).strict();
 
 export const LongMemEvalExpansionTargetCacheWireSchema =
@@ -155,10 +174,15 @@ const ExtractionSummaryBaseSchema = z.object({
 }).passthrough();
 
 export const LongMemEvalExtractionSummarySchema =
-  ExtractionSummaryBaseSchema.readonly();
+  ExtractionSummaryBaseSchema.extend({
+    supplemental_source_receipt:
+      LongMemEvalSupplementalSourceProvenanceBindingWireSchema.optional()
+  }).passthrough().readonly();
 
 export const LongMemEvalFullExtractionCacheSchema =
   ExtractionSummaryBaseSchema.extend({
+    supplemental_source_receipt:
+      LongMemEvalSupplementalSourceProvenanceBindingWireSchema.optional(),
     content_closure_index: LongMemEvalContentClosureIndexSchema
   }).passthrough().readonly();
 
@@ -183,6 +207,7 @@ export const LongMemEvalExtractionAuthoritySchema = z.object({
   expected_key_set_sha256: Sha256Schema,
   content_closure_sha256: Sha256Schema,
   content_closure_index: LongMemEvalContentClosureIndexSchema,
+  supplemental_source_binding_sha256: Sha256Schema.optional(),
   expansion_source_anchor_sha256: Sha256Schema.optional(),
   expansion_lineage_sha256: Sha256Schema.optional()
 }).strict().readonly();

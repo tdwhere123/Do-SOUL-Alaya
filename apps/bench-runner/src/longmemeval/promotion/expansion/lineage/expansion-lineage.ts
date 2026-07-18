@@ -6,6 +6,8 @@ import {
 import type { ExtractionFillCompletion } from "../../../extraction/fill/fill-completion.js";
 import type { ExtractionCacheManifest } from "../../../extraction/cache/extraction-cache-manifest.js";
 import { redactProvenanceUrl } from "../../../provenance/paired-environment.js";
+import { computeSupplementalSourceBindingSha256 } from
+  "../../../extraction/cache/supplemental-source-receipt.js";
 import {
   LongMemEvalExpansionLineageSchema,
   type LongMemEvalExpansionLineage
@@ -95,7 +97,10 @@ export function expansionSourceCacheRecord(
     window_limit: cache.windowLimit,
     expected_turns: cache.expectedTurns,
     expected_key_set_sha256: cache.expectedKeySetSha256,
-    content_closure_sha256: cache.contentClosureSha256
+    content_closure_sha256: cache.contentClosureSha256,
+    ...(cache.supplementalSourceBindingSha256 === undefined ? {} : {
+      supplemental_source_binding_sha256: cache.supplementalSourceBindingSha256
+    })
   };
 }
 
@@ -117,6 +122,10 @@ function assertTargetCacheContinuity(
       manifest.window_offset !== 0 || manifest.window_limit !== 500 ||
       manifest.expected_turns !== completion.expectedTurns ||
       manifest.expected_key_set_sha256 !== completion.expectedKeySetSha256 ||
+      computeSupplementalSourceBindingSha256(
+        manifest.supplemental_source_receipt,
+        redactProvenanceUrl
+      ) !== source.supplementalSourceBindingSha256 ||
       manifest.content_closure_sha256 !== completion.contentClosureSha256) {
     throw new Error("500Q target cache does not preserve source extraction identity");
   }
@@ -139,6 +148,12 @@ function targetCacheLineage(
     window_limit: 500,
     expected_turns: completion.expectedTurns,
     expected_key_set_sha256: completion.expectedKeySetSha256,
-    content_closure_sha256: completion.contentClosureSha256
+    content_closure_sha256: completion.contentClosureSha256,
+    ...(manifest.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_binding_sha256: computeSupplementalSourceBindingSha256(
+        manifest.supplemental_source_receipt,
+        redactProvenanceUrl
+      )
+    })
   };
 }

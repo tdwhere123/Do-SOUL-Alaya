@@ -11,6 +11,7 @@ import {
   LongMemEvalFanoutAuthoritySchema,
   LongMemEvalFullExtractionCacheSchema,
   LongMemEvalShardAuthorityReferenceSchema,
+  LongMemEvalSupplementalSourceProvenanceBindingWireSchema,
   type LongMemEvalArtifactDescriptor,
   type LongMemEvalExtractionAuthority,
   type LongMemEvalExtractionSummary,
@@ -65,6 +66,10 @@ export function assertLongMemEvalExtractionAuthorityBinding(input: {
   if (authority.expansion_lineage_sha256 !==
       expansionDigest(compact.expansion_lineage)) {
     mismatches.push("expansion_lineage_sha256");
+  }
+  if (authority.supplemental_source_binding_sha256 !==
+      supplementalSourceDigest(compact.supplemental_source_receipt)) {
+    mismatches.push("supplemental_source_binding_sha256");
   }
   if (mismatches.length > 0) {
     throw new Error(
@@ -207,6 +212,11 @@ export function hashLongMemEvalExpansionArtifact(value: unknown): string {
   return expansionDigest(value) ?? sha256(Buffer.from("undefined", "utf8"));
 }
 
+export function hashLongMemEvalSupplementalSourceBinding(value: unknown): string {
+  const digest = supplementalSourceDigest(value);
+  return digest ?? sha256(Buffer.from("undefined", "utf8"));
+}
+
 function assertClosureIntegrity(value: {
   readonly extraction_model: string;
   readonly request_profile: string;
@@ -246,6 +256,8 @@ function assertExpansionPair(
   if (canonicalJson(a) !== canonicalJson(l) ||
       canonicalJson(aTarget) !== canonicalJson(lineageTarget) ||
       canonicalJson(aTarget) !== canonicalJson(compactTarget) ||
+      anchor.source_cache.supplemental_source_binding_sha256 !==
+        aTarget.supplemental_source_binding_sha256 ||
       lineageClosure !== compact.content_closure_sha256) {
     throw new Error("500Q source anchor and lineage are not bound to target cache");
   }
@@ -264,7 +276,12 @@ function targetCacheFromSummary(compact: LongMemEvalExtractionSummary) {
     window_offset: compact.window_offset,
     window_limit: compact.window_limit,
     expected_turns: compact.expected_turns,
-    expected_key_set_sha256: compact.expected_key_set_sha256
+    expected_key_set_sha256: compact.expected_key_set_sha256,
+    ...(compact.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_binding_sha256: hashLongMemEvalSupplementalSourceBinding(
+        compact.supplemental_source_receipt
+      )
+    })
   };
 }
 
@@ -298,6 +315,12 @@ function expansionDigest(value: unknown): string | undefined {
     (key, nested: unknown) => key === "provider_url" ? undefined : nested
   )) as unknown;
   return sha256(Buffer.from(canonicalJson(sanitized), "utf8"));
+}
+
+function supplementalSourceDigest(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const binding = LongMemEvalSupplementalSourceProvenanceBindingWireSchema.parse(value);
+  return sha256(Buffer.from(canonicalJson(binding), "utf8"));
 }
 
 function parseJsonBytes(bytes: Uint8Array, label: string): unknown {

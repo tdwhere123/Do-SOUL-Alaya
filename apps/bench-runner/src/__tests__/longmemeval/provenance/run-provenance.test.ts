@@ -53,6 +53,12 @@ describe("LongMemEval run provenance", () => {
       expected_key_set_sha256: EXTRACTION_CLOSURE.expected_key_set_sha256,
       content_closure_sha256: EXTRACTION_CLOSURE.content_closure_sha256
     });
+    expect(provenance.extraction_cache?.supplemental_source_receipt).toMatchObject({
+      receipt_sha256: "d".repeat(64),
+      physical_provider_url: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u)
+    });
+    expect(JSON.stringify(provenance.extraction_cache)).not.toContain("supplement.example");
+    expect(JSON.stringify(provenance.extraction_cache)).not.toContain("secret");
     const builtCache = provenance.extraction_cache;
     if (builtCache?.schema_version !== 3) throw new Error("expected current cache");
     expect(Object.keys(builtCache.content_closure_index ?? {}))
@@ -119,7 +125,8 @@ describe("LongMemEval run provenance", () => {
     delete (v1Cache as { request_profile?: string }).request_profile;
     for (const field of [
       "fill_status", "window_offset", "window_limit", "expected_turns",
-      "expected_key_set_sha256", "content_closure_sha256", "content_closure_index"
+      "expected_key_set_sha256", "content_closure_sha256", "content_closure_index",
+      "supplemental_source_receipt"
     ]) delete (v1Cache as Record<string, unknown>)[field];
     expect(LongMemEvalRunProvenanceSchema.safeParse({
       ...provenance,

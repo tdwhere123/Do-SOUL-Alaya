@@ -21,6 +21,8 @@ import { LongMemEvalExpansionLineageSchema } from
   "../promotion/expansion/lineage/expansion-lineage-schema.js";
 import { LongMemEvalExpansionSourceAnchorSchema } from
   "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
+import { SupplementalSourceProvenanceBindingSchema } from
+  "../extraction/cache/supplemental-source-receipt.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SnapshotExtractionBaseSchema = z.object({
@@ -50,6 +52,7 @@ const SnapshotExtractionProvenanceSchema = z.discriminatedUnion("schema_version"
     schema_version: z.literal(EXTRACTION_CACHE_MANIFEST_VERSION),
     model_family: z.string().min(1),
     request_profile: z.enum(EXTRACTION_REQUEST_PROFILES),
+    supplemental_source_receipt: SupplementalSourceProvenanceBindingSchema.optional(),
     expansion_source_anchor: LongMemEvalExpansionSourceAnchorSchema.optional(),
     expansion_lineage: LongMemEvalExpansionLineageSchema.optional(),
     ...EXTRACTION_FILL_IDENTITY_SCHEMA_FIELDS

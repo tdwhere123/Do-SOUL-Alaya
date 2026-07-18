@@ -42,6 +42,8 @@ import {
 } from "./fill/fill-completion.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import { collectDistinctTurnContents } from "./turn-contents.js";
+import { computeSupplementalSourceBindingSha256 } from
+  "./cache/supplemental-source-receipt.js";
 
 export interface ExpansionFillAuthorityOptions {
   readonly variant: LongMemEvalVariant;
@@ -263,6 +265,10 @@ function assertSourceManifest(
       manifest.dataset_revision !== source.datasetRevision ||
       manifest.expected_turns !== source.expectedTurns ||
       manifest.expected_key_set_sha256 !== source.expectedKeySetSha256 ||
+      computeSupplementalSourceBindingSha256(
+        manifest.supplemental_source_receipt,
+        redactProvenanceUrl
+      ) !== source.supplementalSourceBindingSha256 ||
       manifest.content_closure_sha256 !== source.contentClosureSha256) {
     throw invariant("starting cache does not preserve the authorized 100Q identity");
   }
@@ -361,6 +367,10 @@ function assertTargetManifestIdentity(
       manifest.window_offset !== 0 || manifest.window_limit !== 500 ||
       manifest.expected_turns !== completion.expectedTurns ||
       manifest.expected_key_set_sha256 !== completion.expectedKeySetSha256 ||
+      computeSupplementalSourceBindingSha256(
+        manifest.supplemental_source_receipt,
+        redactProvenanceUrl
+      ) !== target.supplemental_source_binding_sha256 ||
       manifest.requested_turns !== completion.expectedTurns ||
       manifest.cached_turns !== completion.validTurns ||
       manifest.coverage !== completion.coverage ||

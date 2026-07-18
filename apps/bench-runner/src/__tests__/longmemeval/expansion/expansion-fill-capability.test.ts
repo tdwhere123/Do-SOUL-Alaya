@@ -36,6 +36,23 @@ describe("500Q expansion fill authority", () => {
     expect(resumed.nextTurns).toHaveLength(500);
   });
 
+  it("rejects supplemental source drift while resuming a target fill", async () => {
+    const first = await prepare(mintCapability());
+    const manifest = targetManifest(first.sourceAnchor);
+    state.identity = {
+      manifestSha256: "b".repeat(64),
+      manifest: {
+        ...manifest,
+        supplemental_source_receipt: {
+          ...manifest.supplemental_source_receipt!,
+          receipt_sha256: "0".repeat(64)
+        }
+      }
+    };
+
+    await expect(prepare(mintCapability())).rejects.toThrow(/partial cache state/u);
+  });
+
   it.each([101, 499, 501, 1_000])(
     "rejects a non-canonical paid fill window before delegate construction (%s)",
     async (limit) => {
