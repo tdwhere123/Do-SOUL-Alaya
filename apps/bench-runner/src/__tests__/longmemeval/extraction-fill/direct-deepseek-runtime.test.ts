@@ -174,8 +174,8 @@ function configureDirectDeepSeekEnvironment(): void {
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:DIRECT_RUNTIME_GARDEN_KEY");
   vi.stubEnv("DIRECT_RUNTIME_GARDEN_KEY", "test-key");
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "deepseek-v4-flash");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash-nonthinking");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "deepseek-v4-nonthinking-v1");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash-compatible");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
   vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://ai.loli.sh.cn/v1");
 }
 

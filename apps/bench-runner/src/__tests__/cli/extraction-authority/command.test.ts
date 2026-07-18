@@ -356,8 +356,8 @@ function directAuthorityInspection() {
       },
       extraction: {
         model: "deepseek-v4-flash",
-        modelFamily: "deepseek-v4-flash-nonthinking",
-        requestProfile: "deepseek-v4-nonthinking-v1" as const,
+        modelFamily: "deepseek-v4-flash-compatible",
+        requestProfile: "provider-default-v1" as const,
         providerUrl: "https://ai.loli.sh.cn/v1",
         systemPromptSha256: "f".repeat(64),
         cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",

@@ -99,6 +99,25 @@ it("rejects every non-fresh or non-DeepSeek direct scope", () => {
   })).toThrow(/wrong extraction scope/u);
 });
 
+it("accepts the compatible profile and rejects the retired DeepSeek-specific payload profile", () => {
+  const parent = createTemporaryRoot();
+  const authorization = createFreshDirectDeepSeek500Authorization({
+    cacheRoot: join(parent, "cache"),
+    operator: "local-operator"
+  });
+
+  expect(() => assertDirectDeepSeek500Authorization({
+    action: "fill",
+    authorization,
+    observation: directObservation()
+  })).not.toThrow();
+  expect(() => assertDirectDeepSeek500Authorization({
+    action: "fill",
+    authorization,
+    observation: retiredDeepSeekSpecificObservation()
+  })).toThrow(/wrong extraction scope/u);
+});
+
 it("limits the 64-way authority envelope to the direct DeepSeek scope", () => {
   const parent = createTemporaryRoot();
   const authorization = createFreshDirectDeepSeek500Authorization({
@@ -217,8 +236,8 @@ function directObservation(): ExtractionAuthorityObservation {
     },
     extraction: {
       model: "deepseek-v4-flash",
-      modelFamily: "deepseek-v4-flash-nonthinking",
-      requestProfile: "deepseek-v4-nonthinking-v1",
+      modelFamily: "deepseek-v4-flash-compatible",
+      requestProfile: "provider-default-v1",
       providerUrl: "https://ai.loli.sh.cn/v1",
       systemPromptSha256: "f".repeat(64),
       cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
@@ -231,6 +250,17 @@ function directObservation(): ExtractionAuthorityObservation {
       missingTurns: 72_277,
       invalidTurns: 0,
       orphanTurns: 0
+    }
+  };
+}
+
+function retiredDeepSeekSpecificObservation(): ExtractionAuthorityObservation {
+  return {
+    ...directObservation(),
+    extraction: {
+      ...directObservation().extraction,
+      modelFamily: "deepseek-v4-flash-nonthinking",
+      requestProfile: "deepseek-v4-nonthinking-v1"
     }
   };
 }

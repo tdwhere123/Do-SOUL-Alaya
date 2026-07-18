@@ -7,6 +7,8 @@ import {
 } from "./target-root-binding.js";
 
 export const DIRECT_DEEPSEEK_500_MAX_CONCURRENCY = 64;
+const DIRECT_DEEPSEEK_500_COMPATIBLE_MODEL_FAMILY = "deepseek-v4-flash-compatible";
+const DIRECT_DEEPSEEK_500_COMPATIBLE_REQUEST_PROFILE = "provider-default-v1";
 const directRootMarker = {
   filename: ".alaya-direct-deepseek-500-root.json",
   kind: "alaya_direct_deepseek_500_root"
@@ -47,7 +49,7 @@ export function assertDirectDeepSeek500Authorization(input: {
       !isSha256(authorization.cache_root_marker_sha256)) {
     throw new Error("direct DeepSeek 500 authorization is invalid");
   }
-  if (input.action !== "fill" || !isFreshDeepSeek500Observation(input.observation)) {
+  if (input.action !== "fill" || !isFreshCompatibleDeepSeek500Observation(input.observation)) {
     throw new Error("direct DeepSeek 500 authorization has the wrong extraction scope");
   }
 }
@@ -89,12 +91,14 @@ export function isDirectDeepSeek500Authorization(
     typeof authorization.cache_root_marker_sha256 === "string";
 }
 
-function isFreshDeepSeek500Observation(observation: ExtractionAuthorityObservation): boolean {
+function isFreshCompatibleDeepSeek500Observation(
+  observation: ExtractionAuthorityObservation
+): boolean {
   const { dataset, extraction, inventory } = observation;
   return dataset.variant === "longmemeval_s" && dataset.windowOffset === 0 &&
     dataset.windowLimit === 500 && extraction.model === "deepseek-v4-flash" &&
-    extraction.modelFamily === "deepseek-v4-flash-nonthinking" &&
-    extraction.requestProfile === "deepseek-v4-nonthinking-v1" &&
+    extraction.modelFamily === DIRECT_DEEPSEEK_500_COMPATIBLE_MODEL_FAMILY &&
+    extraction.requestProfile === DIRECT_DEEPSEEK_500_COMPATIBLE_REQUEST_PROFILE &&
     extraction.providerUrl === "https://ai.loli.sh.cn/v1" &&
     extraction.manifestSha256 === null && inventory.expectedTurns > 0 &&
     inventory.validTurns === 0 && inventory.missingTurns === inventory.expectedTurns &&
