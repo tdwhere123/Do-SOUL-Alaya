@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
@@ -21,6 +22,17 @@ export interface ExtractionTargetRootBinding {
   readonly cache_root_device: string;
   readonly cache_root_inode: string;
   readonly cache_root_marker_sha256: string;
+}
+
+export function assertFreshExtractionTargetRootPath(cacheRoot: string): void {
+  const root = resolve(cacheRoot);
+  if (existsSync(root)) {
+    throw new Error("extraction target root must not exist before creation");
+  }
+  const parent = resolve(root, "..");
+  if (existsSync(parent) && lstatSync(parent).isSymbolicLink()) {
+    throw new Error("extraction target root parent must not be a symlink");
+  }
 }
 
 interface TargetRootInput {

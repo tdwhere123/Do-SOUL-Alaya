@@ -46,9 +46,57 @@ it("selects a fresh canonical 100Q root without invoking a provider", async () =
   expect(write).toHaveBeenCalledOnce();
   expect(write.mock.calls[0]?.[1]).toMatchObject({
     kind: "longmemeval-extraction-target-selection",
+    selection_basis: { kind: "cache_audit" },
     initial_selection: { offset: 0, limit: 100 }
   });
   expect(stdout).toHaveBeenCalledWith(expect.stringContaining("Extraction target selection written"));
+});
+
+it("selects a fresh root from an explicit retired-source rebuild authorization", async () => {
+  const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-command-"));
+  roots.push(root);
+  const cacheRoot = join(root, "cache");
+  const write = vi.fn();
+
+  const exitCode = await runSelectExtractionTargetCommand([
+    "--variant", "s", "--offset", "0", "--limit", "100",
+    "--extraction-cache-root", cacheRoot,
+    "--retired-source-rebuild-operator", "local-operator",
+    "--target-selection-out", join(root, "target-selection.json")
+  ], {
+    inspect: async () => inspection(),
+    write,
+    readRevision: () => "a".repeat(40)
+  });
+
+  expect(exitCode).toBe(0);
+  expect(write.mock.calls[0]?.[1]).toMatchObject({
+    selection_basis: { kind: "retired_source_rebuild", operator: "local-operator" }
+  });
+});
+
+it("rejects ambiguous target-selection authority inputs before creating a root", async () => {
+  const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-command-"));
+  roots.push(root);
+  const cacheRoot = join(root, "cache");
+  const inspect = vi.fn(async () => inspection());
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runSelectExtractionTargetCommand([
+    "--variant", "s", "--offset", "0", "--limit", "100",
+    "--extraction-cache-root", cacheRoot,
+    "--cache-audit-receipt", "/audit.json",
+    "--retired-source-rebuild-operator", "local-operator",
+    "--target-selection-out", join(root, "target-selection.json")
+  ], {
+    inspect,
+    readAudit: () => rebuildAuditReceipt(),
+    readRevision: () => "a".repeat(40)
+  });
+
+  expect(exitCode).toBe(2);
+  expect(inspect).not.toHaveBeenCalled();
+  expect(existsSync(cacheRoot)).toBe(false);
 });
 
 it("keeps a selected root when reporting fails after its receipt is durable", async () => {

@@ -8,6 +8,7 @@ import {
 import type { ExtractionCacheAuditReceipt } from "../../cache-audit/receipt.js";
 import type { ExtractionAuthorityObservation } from "../receipt.js";
 import {
+  assertFreshExtractionTargetRootPath,
   assertExtractionTargetRootBinding,
   createFreshExtractionTargetRoot,
   discardFreshExtractionTargetRoot,
@@ -16,7 +17,7 @@ import {
 
 export type { ExtractionTargetRootBinding } from "../target-root-binding.js";
 
-const TARGET_SELECTION_SCHEMA_VERSION = 1;
+const TARGET_SELECTION_SCHEMA_VERSION = 2;
 const targetRootMarker = {
   filename: ".alaya-extraction-target-root.json",
   kind: "alaya_extraction_target_root"
@@ -26,12 +27,22 @@ export interface ExtractionTargetSelectionReceipt {
   readonly schema_version: typeof TARGET_SELECTION_SCHEMA_VERSION;
   readonly kind: "longmemeval-extraction-target-selection";
   readonly created_at: string;
-  readonly audit_decision_digest: string;
+  readonly selection_basis: ExtractionTargetSelectionBasis;
   readonly target_root: ExtractionTargetRootBinding;
   readonly final_identity: ExtractionTargetFinalIdentity;
   readonly initial_selection: ExtractionTargetInitialSelection;
   readonly receipt_digest: string;
 }
+
+export type ExtractionTargetSelectionBasis =
+  | {
+      readonly kind: "cache_audit";
+      readonly audit_decision_digest: string;
+    }
+  | {
+      readonly kind: "retired_source_rebuild";
+      readonly operator: string;
+    };
 
 export interface ExtractionTargetFinalIdentity {
   readonly revision: string;
@@ -87,6 +98,32 @@ export function createFreshExtractionTargetSelection(input: {
   }
 }
 
+export function createFreshRetiredSourceRebuildTargetSelection(input: {
+  readonly cacheRoot: string;
+  readonly operator: string;
+  readonly observation: ExtractionAuthorityObservation;
+  readonly now?: Date;
+}): ExtractionTargetSelectionReceipt {
+  const targetRoot = createFreshRetiredSourceRebuildTargetSelectionRoot({
+    cacheRoot: input.cacheRoot,
+    operator: input.operator
+  });
+  try {
+    return createRetiredSourceRebuildTargetSelectionReceipt({
+      operator: input.operator,
+      targetRoot,
+      observation: input.observation,
+      now: input.now
+    });
+  } catch (cause) {
+    discardFreshExtractionTargetSelectionRoot({
+      cacheRoot: input.cacheRoot,
+      targetRoot
+    });
+    throw cause;
+  }
+}
+
 export function createFreshExtractionTargetSelectionRoot(input: {
   readonly cacheRoot: string;
   readonly auditReceipt: ExtractionCacheAuditReceipt;
@@ -103,6 +140,19 @@ export function createFreshExtractionTargetSelectionRoot(input: {
   });
 }
 
+export function createFreshRetiredSourceRebuildTargetSelectionRoot(input: {
+  readonly cacheRoot: string;
+  readonly operator: string;
+}): ExtractionTargetRootBinding {
+  retiredSourceRebuildBasis(input.operator);
+  assertFreshExtractionTargetRootPath(input.cacheRoot);
+  return createFreshExtractionTargetRoot({
+    cacheRoot: input.cacheRoot,
+    marker: targetRootMarker,
+    purpose: "extraction target selection"
+  });
+}
+
 export function createExtractionTargetSelectionReceipt(input: {
   readonly auditReceipt: ExtractionCacheAuditReceipt;
   readonly targetRoot: ExtractionTargetRootBinding;
@@ -110,18 +160,63 @@ export function createExtractionTargetSelectionReceipt(input: {
   readonly now?: Date;
 }): ExtractionTargetSelectionReceipt {
   assertRebuildAudit(input.auditReceipt);
-  assertFreshInitialSelection(input.observation);
   assertAuditFinalIdentity(input.auditReceipt.decision.final, input.observation);
+  return createTargetSelectionReceipt({
+    selectionBasis: auditSelectionBasis(input.auditReceipt),
+    targetRoot: input.targetRoot,
+    observation: input.observation,
+    now: input.now
+  });
+}
+
+export function createRetiredSourceRebuildTargetSelectionReceipt(input: {
+  readonly operator: string;
+  readonly targetRoot: ExtractionTargetRootBinding;
+  readonly observation: ExtractionAuthorityObservation;
+  readonly now?: Date;
+}): ExtractionTargetSelectionReceipt {
+  return createTargetSelectionReceipt({
+    selectionBasis: retiredSourceRebuildBasis(input.operator),
+    targetRoot: input.targetRoot,
+    observation: input.observation,
+    now: input.now
+  });
+}
+
+function createTargetSelectionReceipt(input: {
+  readonly selectionBasis: ExtractionTargetSelectionBasis;
+  readonly targetRoot: ExtractionTargetRootBinding;
+  readonly observation: ExtractionAuthorityObservation;
+  readonly now?: Date;
+}): ExtractionTargetSelectionReceipt {
+  assertFreshInitialSelection(input.observation);
   const unsigned = {
-    schema_version: TARGET_SELECTION_SCHEMA_VERSION as 1,
+    schema_version: TARGET_SELECTION_SCHEMA_VERSION as typeof TARGET_SELECTION_SCHEMA_VERSION,
     kind: "longmemeval-extraction-target-selection" as const,
     created_at: (input.now ?? new Date()).toISOString(),
-    audit_decision_digest: input.auditReceipt.decision_digest,
+    selection_basis: Object.freeze({ ...input.selectionBasis }),
     target_root: Object.freeze({ ...input.targetRoot }),
     final_identity: finalIdentity(input.observation),
     initial_selection: initialSelection(input.observation)
   };
   return Object.freeze({ ...unsigned, receipt_digest: digest(unsigned) });
+}
+
+function auditSelectionBasis(
+  auditReceipt: ExtractionCacheAuditReceipt
+): ExtractionTargetSelectionBasis {
+  return Object.freeze({
+    kind: "cache_audit",
+    audit_decision_digest: auditReceipt.decision_digest
+  });
+}
+
+function retiredSourceRebuildBasis(operator: string): ExtractionTargetSelectionBasis {
+  const normalized = operator.trim();
+  if (normalized.length === 0 || normalized.length > 256) {
+    throw new Error("retired-source rebuild operator must be a non-empty short string");
+  }
+  return Object.freeze({ kind: "retired_source_rebuild", operator: normalized });
 }
 
 export function assertExtractionTargetSelectionReceipt(input: {
@@ -319,10 +414,17 @@ function digest(value: object): string {
 function isReceipt(value: unknown): value is ExtractionTargetSelectionReceipt {
   if (!isRecord(value) || value.schema_version !== TARGET_SELECTION_SCHEMA_VERSION ||
       value.kind !== "longmemeval-extraction-target-selection" || !isIsoDate(value.created_at) ||
-      !isSha256(value.audit_decision_digest) || !isTargetRootBinding(value.target_root) ||
+      !isSelectionBasis(value.selection_basis) || !isTargetRootBinding(value.target_root) ||
       !isFinalIdentity(value.final_identity) || !isInitialSelection(value.initial_selection) ||
       !isSha256(value.receipt_digest)) return false;
   return true;
+}
+
+function isSelectionBasis(value: unknown): value is ExtractionTargetSelectionBasis {
+  if (!isRecord(value)) return false;
+  if (value.kind === "cache_audit") return isSha256(value.audit_decision_digest);
+  return value.kind === "retired_source_rebuild" && typeof value.operator === "string" &&
+    value.operator.trim().length > 0 && value.operator.length <= 256;
 }
 
 function isTargetRootBinding(value: unknown): value is ExtractionTargetRootBinding {

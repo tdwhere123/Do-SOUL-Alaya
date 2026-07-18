@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -7,6 +7,8 @@ import { buildExtractionCacheAuditReceipt } from
 import {
   assertExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelection,
+  createFreshRetiredSourceRebuildTargetSelection,
+  readExtractionTargetSelectionReceipt,
   requiresExtractionTargetSelection
 } from "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
 import type { ExtractionAuthorityObservation } from
@@ -41,6 +43,51 @@ it("binds a fresh rebuild root to the audited final extraction identity", () => 
     cacheRoot,
     observation: initialObservation()
   })).toThrow(/target root changed/u);
+});
+
+it("binds an operator-authorized retired-source rebuild to a fresh target", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const receipt = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot,
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+
+  expect(receipt).toMatchObject({
+    schema_version: 2,
+    selection_basis: { kind: "retired_source_rebuild", operator: "local-operator" }
+  });
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: initialObservation()
+  })).not.toThrow();
+  expect(() => createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot: join(parent, "invalid-operator"),
+    operator: " ",
+    observation: initialObservation()
+  })).toThrow(/operator/u);
+});
+
+it("rejects legacy V1 target selections during deserialization", () => {
+  const parent = createTemporaryRoot();
+  const receipt = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot: join(parent, "cache"),
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+  const { selection_basis: _selectionBasis, ...legacyReceipt } = receipt;
+  const path = join(parent, "legacy-target-selection.json");
+  writeFileSync(path, `${JSON.stringify({
+    ...legacyReceipt,
+    schema_version: 1,
+    audit_decision_digest: "a".repeat(64)
+  })}\n`);
+
+  expect(() => readExtractionTargetSelectionReceipt(path)).toThrow(
+    /invalid extraction target selection receipt/u
+  );
 });
 
 it("rejects an audit final identity that disagrees with the selected root", () => {

@@ -10,6 +10,8 @@ import {
 import {
   createExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelectionRoot,
+  createFreshRetiredSourceRebuildTargetSelectionRoot,
+  createRetiredSourceRebuildTargetSelectionReceipt,
   discardFreshExtractionTargetSelectionRoot,
   writeExtractionTargetSelectionReceipt,
   type ExtractionTargetRootBinding
@@ -18,9 +20,17 @@ import { readExtractionCacheAuditReceipt } from
   "../../longmemeval/extraction/cache-audit/receipt.js";
 
 interface TargetSelectionArgs {
-  readonly auditReceiptPath: string;
+  readonly authority: TargetSelectionAuthority;
   readonly outputPath: string;
 }
+
+type TargetSelectionAuthority =
+  | { readonly kind: "cache_audit"; readonly receiptPath: string }
+  | { readonly kind: "retired_source_rebuild"; readonly operator: string };
+
+type ResolvedTargetSelectionAuthority =
+  | { readonly kind: "cache_audit"; readonly auditReceipt: ReturnType<typeof readExtractionCacheAuditReceipt> }
+  | { readonly kind: "retired_source_rebuild"; readonly operator: string };
 
 interface TargetSelectionDependencies {
   readonly inspect?: typeof inspectExtractionAuthority;
@@ -38,12 +48,18 @@ export async function runSelectExtractionTargetCommand(
   try {
     const flags = parseFlags(args);
     const selection = parseTargetSelectionArgs(args);
-    const auditReceipt = (deps.readAudit ?? readExtractionCacheAuditReceipt)(
-      selection.auditReceiptPath
-    );
     cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
     assertSelectionOutputOutsideCacheRoot(selection.outputPath, cacheRoot);
-    freshTargetRoot = createFreshExtractionTargetSelectionRoot({ cacheRoot, auditReceipt });
+    const selectionAuthority = resolveTargetSelectionAuthority(selection.authority, deps);
+    freshTargetRoot = selectionAuthority.kind === "retired_source_rebuild"
+      ? createFreshRetiredSourceRebuildTargetSelectionRoot({
+          cacheRoot,
+          operator: selectionAuthority.operator
+        })
+      : createFreshExtractionTargetSelectionRoot({
+          cacheRoot,
+          auditReceipt: selectionAuthority.auditReceipt
+        });
     const inspection = await (deps.inspect ?? inspectExtractionAuthority)({
       variant: flags.variant,
       ...(flags.limit === undefined ? {} : { limit: flags.limit }),
@@ -55,16 +71,22 @@ export async function runSelectExtractionTargetCommand(
       action: "probe"
     });
     assertSelectionInspection(inspection);
-    const selected = createExtractionTargetSelectionReceipt({
-      auditReceipt,
-      targetRoot: freshTargetRoot,
-      observation: inspection.observation
-    });
+    const selected = selectionAuthority.kind === "retired_source_rebuild"
+      ? createRetiredSourceRebuildTargetSelectionReceipt({
+          operator: selectionAuthority.operator,
+          targetRoot: freshTargetRoot,
+          observation: inspection.observation
+        })
+      : createExtractionTargetSelectionReceipt({
+          auditReceipt: selectionAuthority.auditReceipt,
+          targetRoot: freshTargetRoot,
+          observation: inspection.observation
+        });
     (deps.write ?? writeExtractionTargetSelectionReceipt)(selection.outputPath, selected);
     freshTargetRoot = undefined;
     process.stdout.write(
       `Extraction target selection written: ${selection.outputPath}\n` +
-      `  receipt=${selected.receipt_digest} audit=${selected.audit_decision_digest}\n`
+      `  receipt=${selected.receipt_digest} basis=${selected.selection_basis.kind}\n`
     );
     return 0;
   } catch (error) {
@@ -90,9 +112,31 @@ function assertSelectionInspection(
 }
 
 function parseTargetSelectionArgs(args: ReadonlyArray<string>): TargetSelectionArgs {
+  const auditReceiptPath = optionalRequiredString(args, "--cache-audit-receipt");
+  const retiredSourceRebuildOperator = optionalRequiredString(
+    args, "--retired-source-rebuild-operator"
+  );
+  if ((auditReceiptPath === undefined) === (retiredSourceRebuildOperator === undefined)) {
+    throw new Error(
+      "select-extraction-target requires exactly one of --cache-audit-receipt or --retired-source-rebuild-operator"
+    );
+  }
   return {
-    auditReceiptPath: requiredString(args, "--cache-audit-receipt"),
+    authority: auditReceiptPath === undefined
+      ? { kind: "retired_source_rebuild", operator: retiredSourceRebuildOperator! }
+      : { kind: "cache_audit", receiptPath: auditReceiptPath },
     outputPath: requiredString(args, "--target-selection-out")
+  };
+}
+
+function resolveTargetSelectionAuthority(
+  authority: TargetSelectionAuthority,
+  deps: TargetSelectionDependencies
+): ResolvedTargetSelectionAuthority {
+  if (authority.kind === "retired_source_rebuild") return authority;
+  return {
+    kind: "cache_audit",
+    auditReceipt: (deps.readAudit ?? readExtractionCacheAuditReceipt)(authority.receiptPath)
   };
 }
 
@@ -118,4 +162,10 @@ function optionalString(args: ReadonlyArray<string>, flag: string): string | und
     if (token?.startsWith(`${flag}=`)) return token.slice(flag.length + 1);
   }
   return undefined;
+}
+
+function optionalRequiredString(args: ReadonlyArray<string>, flag: string): string | undefined {
+  return args.some((token) => token === flag || token.startsWith(`${flag}=`))
+    ? requiredString(args, flag)
+    : undefined;
 }
