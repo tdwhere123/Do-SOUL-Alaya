@@ -7,6 +7,8 @@ import {
 } from "../runner/runner-scoring.js";
 import { classifyLongMemEvalDatasetCohort } from
   "../selection/dataset-cohort.js";
+import { buildLongMemEvalSourceDatesBySession } from
+  "../ingestion/source-time.js";
 
 export interface SnapshotQuestionMeasurementOracle {
   readonly answer: string;
@@ -56,7 +58,7 @@ function buildQuestionOracleFactory(
     sidecar.set(key, Object.freeze({ ...entry }));
   }
   const answerSessionIds = Object.freeze([...question.answer_session_ids]);
-  const sourceDates = [...buildSourceDates(question)];
+  const sourceDates = [...buildLongMemEvalSourceDatesBySession(question)];
   const sidecarEntries = [...sidecar];
   const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
     sidecar,
@@ -71,25 +73,4 @@ function buildQuestionOracleFactory(
     isAbstention,
     goldMemoryIds
   });
-}
-
-function buildSourceDates(
-  question: LongMemEvalQuestion
-): ReadonlyMap<string, string> {
-  if (question.haystack_dates.length !== question.haystack_session_ids.length) {
-    throw new Error(
-      `snapshot measurement oracle date/session mismatch for ${question.question_id}`
-    );
-  }
-  const dates = new Map<string, string>();
-  question.haystack_session_ids.forEach((sessionId, index) => {
-    const date = question.haystack_dates[index];
-    if (date === undefined || dates.has(sessionId)) {
-      throw new Error(
-        `snapshot measurement oracle session identity mismatch for ${question.question_id}`
-      );
-    }
-    dates.set(sessionId, date);
-  });
-  return dates;
 }

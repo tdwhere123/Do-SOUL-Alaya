@@ -21,7 +21,10 @@ import { writeQuestionDiagnosticDumps } from "./runner-question-dumps.js";
 import type { LongMemEvalWorkerResult } from "./runner-question.js";
 import { hasLongMemEvalSeedDropReasons } from "../../extraction/seed-fuel/seed-drop-reasons.js";
 import { attachQuestionMeasurementAxes } from "../../diagnostics/diagnostics-measurement-axes.js";
-import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
+import {
+  buildLongMemEvalSourceDatesBySession,
+  requireLongMemEvalTimestamp
+} from "../../ingestion/source-time.js";
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;
@@ -96,21 +99,12 @@ function buildDiagnostics(
   return attachQuestionMeasurementAxes(diagnostic, {
     answer: input.question.answer,
     answerSessionIds: input.question.answer_session_ids,
-    sourceDatesBySession: buildSourceDatesBySession(input.question),
+    sourceDatesBySession: buildLongMemEvalSourceDatesBySession(input.question),
     deliveredResults: diagnostic.delivered_results,
     candidates: diagnostic.candidates,
     sidecar: input.seedState.sidecar,
     isAbstention
   });
-}
-
-function buildSourceDatesBySession(
-  question: LongMemEvalQuestion
-): ReadonlyMap<string, string> {
-  return new Map(question.haystack_session_ids.flatMap((sessionId, index) => {
-    const sourceDate = question.haystack_dates[index];
-    return sourceDate === undefined ? [] : [[sessionId, sourceDate] as const];
-  }));
 }
 
 function deliveredResults(recallResult: LongMemEvalBenchRecallResult) {

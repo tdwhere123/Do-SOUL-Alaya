@@ -41,6 +41,25 @@ export function assertLongMemEvalTimeline(input: {
   input.haystack_dates.forEach((value) => requireLongMemEvalTimestamp(value));
 }
 
+export function buildLongMemEvalSourceDatesBySession(input: {
+  readonly haystack_session_ids: readonly string[];
+  readonly haystack_dates: readonly string[];
+}): ReadonlyMap<string, string> {
+  if (input.haystack_session_ids.length !== input.haystack_dates.length) {
+    throw new Error("LongMemEval source date/session count mismatch.");
+  }
+  const dates = new Map<string, string>();
+  input.haystack_session_ids.forEach((sessionId, index) => {
+    const sourceDate = input.haystack_dates[index];
+    if (sourceDate === undefined) {
+      throw new Error("LongMemEval source date/session count mismatch.");
+    }
+    // Canonical session labels can recur; use the last occurrence exactly as live scoring does.
+    dates.set(sessionId, sourceDate);
+  });
+  return dates;
+}
+
 function matchesUtcParts(date: Date, parts: readonly number[]): boolean {
   return date.getUTCFullYear() === parts[0] &&
     date.getUTCMonth() + 1 === parts[1] &&
