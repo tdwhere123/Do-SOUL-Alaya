@@ -15,6 +15,10 @@ import type {
   LongMemEvalQuestionDiagnostic,
   LongMemEvalReplayCandidate
 } from "../../diagnostics/schema/diagnostics-types.js";
+import {
+  deriveQuestionEvaluationIssueReason,
+  deriveQuestionExtractionMaterialization
+} from "../../diagnostics/diagnostics-cohort.js";
 
 export interface VerifiedPromotionHits {
   readonly hitAt1: boolean;
@@ -204,19 +208,42 @@ function assertGoldIdentity(
   expectedGold: readonly string[]
 ): void {
   const ledger = question.cohort_ledger;
+  assertPromotionEligibleEvaluationIdentity(question);
   const expectedStatus = expectedGold.length === 0 ? "absent" : "present";
-  const expectedIssue = question.is_abstention && expectedGold.length > 0
-    ? "evaluator_data_identity_inconsistency"
-    : !question.is_abstention && expectedGold.length === 0
-      ? "empty_gold_identity"
-      : null;
+  const expectedExtraction = deriveQuestionExtractionMaterialization({
+    goldMemoryIds: expectedGold,
+    seedDropReasons: question.seed_drop_reasons
+  });
+  const expectedIssue = deriveQuestionEvaluationIssueReason({
+    isAbstention: question.is_abstention,
+    premiseInvalid: false,
+    goldMemoryIds: expectedGold,
+    diagnosticsAvailable: question.recall_diagnostics_present,
+    missTaxonomy: question.miss_taxonomy,
+    seedDropReasons: question.seed_drop_reasons,
+    ambiguousIdentity: false
+  });
   if (ledger === undefined ||
       !isDeepStrictEqual(question.gold_memory_ids, expectedGold) ||
       !isDeepStrictEqual(ledger.evaluator_gold_identity.object_ids, expectedGold) ||
       ledger.evaluator_gold_identity.status !== expectedStatus ||
+      !isDeepStrictEqual(ledger.extraction_materialization, expectedExtraction) ||
       ledger.evaluation_issue_reason !== expectedIssue ||
       !isDeepStrictEqual(question.gold.map((row) => row.object_id), expectedGold)) {
     throw new Error(`recall-eval gold identity differs from snapshot for ${question.question_id}`);
+  }
+}
+
+function assertPromotionEligibleEvaluationIdentity(
+  question: LongMemEvalQuestionDiagnostic
+): void {
+  if (question.premise_invalid) {
+    throw new Error(`recall-eval premise-invalid row is not promotion eligible: ${question.question_id}`);
+  }
+  const ledger = question.cohort_ledger;
+  if (ledger?.evaluator_gold_identity.status === "ambiguous" ||
+      ledger?.evaluation_issue_reason === "identity_join_error") {
+    throw new Error(`recall-eval identity ambiguity is not promotion eligible: ${question.question_id}`);
   }
 }
 

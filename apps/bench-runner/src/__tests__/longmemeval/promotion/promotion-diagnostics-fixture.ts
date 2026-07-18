@@ -256,6 +256,10 @@ interface MeasurementOracle {
   }>[];
   readonly isAbstention: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly seedDropReasons: Readonly<{
+    candidate_absent: number;
+    materialization_drop: number;
+  }>;
 }
 
 function defaultMeasurementOracles(
@@ -284,7 +288,8 @@ function measurementOracle(
       hasAnswer: true
     })),
     isAbstention,
-    goldMemoryIds
+    goldMemoryIds,
+    seedDropReasons: { candidate_absent: 0, materialization_drop: 0 }
   };
 }
 

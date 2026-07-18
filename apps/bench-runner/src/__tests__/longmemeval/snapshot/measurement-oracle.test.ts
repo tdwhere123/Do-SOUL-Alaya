@@ -17,7 +17,8 @@ describe("snapshot measurement oracle", () => {
         answerSessionIds: [],
         sidecar: [],
         workspaceId: "workspace",
-        runId: "run"
+        runId: "run",
+        answerSeedDropReasons: { candidate_absent: 2, materialization_drop: 1 }
       }]
     })(question.question_id);
 
@@ -25,6 +26,10 @@ describe("snapshot measurement oracle", () => {
       ["repeated", "last-date"],
       ["unique", "unique-date"]
     ]));
+    expect(oracle?.seedDropReasons).toEqual({
+      candidate_absent: 2,
+      materialization_drop: 1
+    });
   });
 
   it("rejects a date/session count mismatch", () => {

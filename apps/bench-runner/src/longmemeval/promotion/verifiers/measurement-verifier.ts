@@ -13,6 +13,8 @@ import {
 } from "../../measurement/question-validity.js";
 import type { SnapshotQuestionMeasurementOracle } from
   "../../snapshot/measurement-oracle.js";
+import { createEmptyLongMemEvalSeedDropReasons } from
+  "../../extraction/seed-fuel/seed-drop-reasons.js";
 import { verifyPromotionGoldEvidence } from "./gold-verifier.js";
 
 export interface VerifiedPromotionQuestionMeasurement {
@@ -28,7 +30,15 @@ export function verifyPromotionQuestionMeasurement(input: {
   readonly expectedGold: readonly string[];
   readonly oracle: SnapshotQuestionMeasurementOracle;
 }): VerifiedPromotionQuestionMeasurement {
+  if (input.diagnostic.is_abstention !== input.oracle.isAbstention) {
+    throw new Error("recall-eval KPI row differs from snapshot abstention identity");
+  }
   const persistedStatus = classifyQuestionMeasurementStatus(input.diagnostic);
+  assertEqual(
+    input.diagnostic.seed_drop_reasons ?? createEmptyLongMemEvalSeedDropReasons(),
+    input.oracle.seedDropReasons,
+    "answer seed drop reasons"
+  );
   const hits = verifyPromotionGoldEvidence({
     question: input.diagnostic,
     expectedGold: input.expectedGold,

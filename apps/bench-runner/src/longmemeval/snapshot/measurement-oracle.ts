@@ -9,6 +9,10 @@ import { classifyLongMemEvalDatasetCohort } from
   "../selection/dataset-cohort.js";
 import { buildLongMemEvalSourceDatesBySession } from
   "../ingestion/source-time.js";
+import {
+  createEmptyLongMemEvalSeedDropReasons,
+  type LongMemEvalSeedDropReasons
+} from "../extraction/seed-fuel/seed-drop-reasons.js";
 
 export interface SnapshotQuestionMeasurementOracle {
   readonly answer: string;
@@ -17,6 +21,7 @@ export interface SnapshotQuestionMeasurementOracle {
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
   readonly isAbstention: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly seedDropReasons: LongMemEvalSeedDropReasons;
 }
 
 export type SnapshotMeasurementOracleAccessor = (
@@ -39,7 +44,7 @@ export function buildSnapshotMeasurementOracle(
     }
     oracles.set(question.question_id, buildQuestionOracleFactory(
       question,
-      snapshotQuestion.sidecar
+      snapshotQuestion
     ));
   });
   return Object.freeze((questionId: string) => oracles.get(questionId)?.());
@@ -47,8 +52,9 @@ export function buildSnapshotMeasurementOracle(
 
 function buildQuestionOracleFactory(
   question: LongMemEvalQuestion,
-  entries: LongMemEvalSnapshotSidecarFile["questions"][number]["sidecar"]
+  snapshotQuestion: LongMemEvalSnapshotSidecarFile["questions"][number]
 ): () => SnapshotQuestionMeasurementOracle {
+  const entries = snapshotQuestion.sidecar;
   const sidecar = new Map<string, LongMemEvalSidecarEntry>();
   for (const entry of entries) {
     const key = buildLongMemEvalSidecarKey(entry.objectKind, entry.objectId);
@@ -65,12 +71,16 @@ function buildQuestionOracleFactory(
     new Set(answerSessionIds)
   );
   const isAbstention = classifyLongMemEvalDatasetCohort(question) === "abstention";
+  const seedDropReasons = Object.freeze({
+    ...(snapshotQuestion.answerSeedDropReasons ?? createEmptyLongMemEvalSeedDropReasons())
+  });
   return () => Object.freeze({
     answer: question.answer,
     answerSessionIds,
     sourceDatesBySession: new Map(sourceDates),
     sidecar: new Map(sidecarEntries),
     isAbstention,
-    goldMemoryIds
+    goldMemoryIds,
+    seedDropReasons
   });
 }

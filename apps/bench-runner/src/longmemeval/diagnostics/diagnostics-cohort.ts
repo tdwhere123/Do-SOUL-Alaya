@@ -82,7 +82,7 @@ export function buildQuestionCohortLedger(input: {
     input.identityConflictObjectKeys?.includes(`memory_entry:${id}`) === true
   );
   const identityPresent = input.goldMemoryIds.length > 0 && !ambiguousIdentity;
-  const primitives = buildMeasurementPrimitives(input, datasetCohort, ambiguousIdentity);
+  const primitives = buildMeasurementPrimitives(input, ambiguousIdentity);
   return {
     measurement_status: deriveQuestionMeasurementStatus({
       isAbstention: input.isAbstention,
@@ -104,24 +104,29 @@ export function buildQuestionCohortLedger(input: {
 
 function buildMeasurementPrimitives(
   input: Parameters<typeof buildQuestionCohortLedger>[0],
-  cohort: LongMemEvalQuestionCohortLedger["dataset_cohort"],
   ambiguousIdentity: boolean
 ) {
   const identityPresent = input.goldMemoryIds.length > 0 && !ambiguousIdentity;
   return {
-    extraction_materialization: extractionStatus(input),
+    extraction_materialization: deriveQuestionExtractionMaterialization(input),
     evaluator_gold_identity: {
       status: ambiguousIdentity
         ? "ambiguous" as const
         : identityPresent ? "present" as const : "absent" as const,
       object_ids: input.goldMemoryIds
     },
-    evaluation_issue_reason: evaluationIssueReason(input, cohort, ambiguousIdentity)
+    evaluation_issue_reason: deriveQuestionEvaluationIssueReason({
+      ...input,
+      ambiguousIdentity
+    })
   };
 }
 
-function extractionStatus(
-  input: Parameters<typeof buildQuestionCohortLedger>[0]
+export function deriveQuestionExtractionMaterialization(
+  input: Pick<
+    Parameters<typeof buildQuestionCohortLedger>[0],
+    "goldMemoryIds" | "seedDropReasons"
+  >
 ): LongMemEvalQuestionCohortLedger["extraction_materialization"] {
   if (input.goldMemoryIds.length > 0) {
     return { status: "memory_emitted", emitted_memory_count: input.goldMemoryIds.length, reason: null };
@@ -135,20 +140,26 @@ function extractionStatus(
   return { status: "unknown", emitted_memory_count: 0, reason: null };
 }
 
-function evaluationIssueReason(
-  input: Parameters<typeof buildQuestionCohortLedger>[0],
-  cohort: LongMemEvalQuestionCohortLedger["dataset_cohort"],
-  ambiguousIdentity: boolean
-): LongMemEvalQuestionCohortLedger["evaluation_issue_reason"] {
+export function deriveQuestionEvaluationIssueReason(input: {
+  readonly isAbstention: boolean;
+  readonly premiseInvalid: boolean;
+  readonly goldMemoryIds: readonly string[];
+  readonly diagnosticsAvailable: boolean;
+  readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
+  readonly seedDropReasons?: LongMemEvalSeedDropReasons;
+  readonly ambiguousIdentity: boolean;
+}): LongMemEvalQuestionCohortLedger["evaluation_issue_reason"] {
   if (hasAbstentionIdentityConflict(input)) {
     return "evaluator_data_identity_inconsistency";
   }
-  if (cohort === "adjudicated_invalid") return "adjudicated_dataset_issue";
-  if (cohort === "abstention") return null;
+  if (input.premiseInvalid) return "adjudicated_dataset_issue";
+  if (input.isAbstention) return null;
   if (!input.diagnosticsAvailable) return "missing_diagnostics";
-  if (extractionStatus(input).status === "drop") return "extraction_materialization_drop";
+  if (deriveQuestionExtractionMaterialization(input).status === "drop") {
+    return "extraction_materialization_drop";
+  }
   if (input.goldMemoryIds.length === 0) return "empty_gold_identity";
-  if (ambiguousIdentity) return "identity_join_error";
+  if (input.ambiguousIdentity) return "identity_join_error";
   return input.missTaxonomy === "evaluation_or_gold_issue"
     ? "gold_taxonomy_fallthrough"
     : null;
