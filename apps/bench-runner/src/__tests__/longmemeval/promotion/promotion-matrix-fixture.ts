@@ -1,7 +1,6 @@
 import { vi } from "vitest";
 import {
   createLongMemEvalSelectionContractIdentity,
-  KpiPayloadSchema,
   type KpiPayload
 } from "@do-soul/alaya-eval";
 import { DEFAULT_LOCAL_ONNX_MODEL_ID } from "@do-soul/alaya-core";
@@ -38,8 +37,9 @@ function authorizePromotionMatrixFixture(
 }
 
 function matrixFixture() {
-  const payload = productPayload();
-  const sourceSelection = payload.selection_contract!;
+  const controlPayload = productPayload("control", "2026-07-16T00:00:01.000Z");
+  const productPayloadValue = productPayload("product", "2026-07-16T00:00:02.000Z");
+  const sourceSelection = controlPayload.selection_contract!;
   const nextSelection = createLongMemEvalSelectionContractIdentity({
     datasetSha256: sourceSelection.dataset_sha256,
     assignments: Array.from({ length: 500 }, (_, index) => ({
@@ -71,13 +71,26 @@ function matrixFixture() {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
+    execution_order: ["A", "B", "C", "D", "B2"],
     matrix: { entries: [
       contractEntry(false, false, "cell-a"),
       contractEntry(true, false, "cell-b"),
       contractEntry(false, true, "cell-c"),
       contractEntry(true, true, "cell-d")
-    ] }
+    ] },
+    product_default_replication: {
+      cell: "B2",
+      treatment: { embedding_supplement: true, answer_rerank: false },
+      evidence_root: "cell-b2"
+    },
+    material_effect_policy: materialEffectPolicy()
   });
+  const payloads = [
+    controlPayload,
+    productPayloadValue,
+    { ...controlPayload, run_at: "2026-07-16T00:00:03.000Z" },
+    { ...productPayloadValue, run_at: "2026-07-16T00:00:04.000Z" }
+  ];
   return {
     contract,
     contractSha256: "a".repeat(64),
@@ -86,9 +99,17 @@ function matrixFixture() {
     cells: contract.matrix.entries.map((entry, index) => ({
       ...testCell(
         entry.evidence_root,
-        entryData(payload, entry.treatment, String(index + 1))
+        entryData(payloads[index]!, entry.treatment, String(index + 1))
       )
-    }))
+    })),
+    productDefaultReplication: testCell(
+      contract.product_default_replication.evidence_root,
+      entryData(
+        { ...productPayloadValue, run_at: "2026-07-16T00:00:05.000Z" },
+        contract.product_default_replication.treatment,
+        "5"
+      )
+    )
   };
 }
 
@@ -100,7 +121,10 @@ function testCell(evidenceRoot: string, data: VerifiedRecallEvalPromotionEntryDa
   };
 }
 
-function productPayload(): KpiPayload {
+function productPayload(
+  effect: "control" | "product",
+  runAt: string
+): KpiPayload {
   const base = buildPayload("abc1234");
   const eligible = withEligibleMeasurementContract({
     ...base,
@@ -124,19 +148,96 @@ function productPayload(): KpiPayload {
       seed_extraction_path: makeSeedExtractionPath()
     }
   });
-  return KpiPayloadSchema.parse({
+  const answerableCount = 94;
+  const hitCount = effect === "control" ? 80 : 89;
+  const assignments = Array.from({ length: 100 }, (_, index) => ({
+    question_id: `question-${index + 1}`,
+    dataset_cohort: index < answerableCount
+      ? "answerable" as const
+      : "abstention" as const
+  }));
+  const selection = createLongMemEvalSelectionContractIdentity({
+    datasetSha256: eligible.selection_contract!.dataset_sha256,
+    assignments
+  });
+  return {
     ...eligible,
-    recall_eval_attribution: recallAttribution(eligible.selection_contract!),
+    run_at: runAt,
+    answerable_evaluated_count: answerableCount,
+    selection_contract: selection,
+    recall_eval_attribution: recallAttribution(selection),
     kpi: {
       ...eligible.kpi,
+      r_at_1: effect === "control" ? 0.8 : 0.81,
+      r_at_5: hitCount / answerableCount,
+      r_at_10: effect === "control" ? 0.9 : 0.91,
+      token_saved_ratio_vs_full_prompt: 0.9,
+      full_gold_coverage: {
+        gold_bearing_questions: answerableCount,
+        full_gold_at_5: effect === "control" ? 0.7 : 0.71,
+        full_gold_at_10: 0.8,
+        gold_coverage_at_5: effect === "control" ? 0.75 : 0.76,
+        gold_coverage_at_10: 0.85,
+        pool_recall_at_50: 0.9,
+        pool_recall_at_100: 0.95
+      },
       provider_returned_rate: 1,
       provider_pending_rate: 0,
       provider_failed_rate: 0,
       provider_not_requested_rate: 0,
       r_at_5_with_embedding_returned: 0.95,
-      recall_token_economy: recallTokenEconomy(100)
+      recall_token_economy: recallTokenEconomy(100),
+      quality_metrics: {
+        ...eligible.kpi.quality_metrics!,
+        measurement_cohort_counts: {
+          evaluated: 100,
+          non_abstention: answerableCount,
+          abstention: 6,
+          scorable_answerable: answerableCount,
+          unscorable_answerable: 0,
+          hit_at_5: hitCount,
+          miss_at_5: answerableCount - hitCount
+        },
+        abstention: {
+          schema_version: "bench-abstention.v2",
+          total: 6,
+          scored: 0,
+          unscorable: 6,
+          method: "fused_margin_diagnostic_only",
+          calibration_status: "uncalibrated",
+          gate_eligible: false
+        }
+      },
+      per_scenario: assignments.map((assignment, index) => ({
+        id: assignment.question_id,
+        version: 1,
+        hit_at_5: index < hitCount,
+        scorable: assignment.dataset_cohort === "answerable",
+        measurement_cohort: assignment.dataset_cohort === "answerable"
+          ? "answerable" as const
+          : "dataset_declared_abstention" as const,
+        tier: "hot" as const
+      }))
     }
-  });
+  } as KpiPayload;
+}
+
+function materialEffectPolicy() {
+  return {
+    control_cell: "A" as const,
+    product_cell: "B" as const,
+    answerable_count: 94 as const,
+    declared_abstention_count: 6 as const,
+    directional_metrics: [
+      "r_at_1", "r_at_5", "r_at_10", "full_gold_at_5"
+    ] as const,
+    token_non_regression_metric: "token_saved_ratio_vs_full_prompt" as const,
+    minimum_net_r_at_5_wins: 5 as const,
+    mcnemar: {
+      method: "exact_two_sided" as const,
+      p_value_max_exclusive: 0.05 as const
+    }
+  };
 }
 
 function recallAttribution(

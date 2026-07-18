@@ -30,6 +30,7 @@ import type { R3SpendApproval } from
   "../../../../longmemeval/promotion/r3-spend-approval.js";
 import {
   expansionHardGateFixture,
+  expansionMaterialEffectFixture,
   expansionPromotionContractFixture
 } from "../expansion-promotion-contract-fixture.js";
 import { closureFixture, state } from "./fixture.js";
@@ -77,7 +78,13 @@ export async function mintCapability(
       treatment: cells[1]!.treatment,
       bundle_sha256: cells[1]!.bundle_sha256
     },
-    hard_gates: [expansionHardGateFixture()]
+    hard_gates: [expansionHardGateFixture()],
+    product_default_replication: {
+      ...contract.product_default_replication,
+      bundle_sha256: "5".repeat(64),
+      hard_gates: [expansionHardGateFixture()]
+    },
+    material_effect: expansionMaterialEffectFixture()
   });
   return verifyLongMemEvalExpansionCapability({
     checkoutRoot: "/repo",
@@ -105,6 +112,7 @@ export function r3SpendApprovalFor(
   const identity = state.identity;
   if (identity === undefined) throw new Error("fixture requires a cache manifest identity");
   const data = longMemEvalExpansionCapabilityData(capability);
+  const effect = data.materialEffect.paired_r_at_5;
   const startingMissing = state.targetCompletion.missingTurns;
   return {
     schema_version: 1,
@@ -117,9 +125,9 @@ export function r3SpendApprovalFor(
       source_selected_count: data.sourceSelection.selected_count,
       final_cache_identity_sha256: identity.manifestSha256,
       hard_gates_passed: true,
-      answerable_count: 94,
-      b_a_net_r5_wins: 5,
-      mcnemar: { method: "exact_two_sided", p_value: 0.049 }
+      answerable_count: effect.answerable_count,
+      b_a_net_r5_wins: effect.net,
+      mcnemar: effect.mcnemar
     },
     target: {
       selection_sha256: selectionSha256(data.nextSelection),

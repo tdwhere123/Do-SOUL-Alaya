@@ -32,12 +32,19 @@ describe("LongMemEval promotion capability boundary", () => {
         db_path: "snapshot/source-100.db",
         manifest_sha256: "f".repeat(64)
       },
+      execution_order: ["A", "B", "C", "D", "B2"],
       matrix: { entries: [
         entry(false, false, "cell-a"),
         entry(true, false, "cell-b"),
         entry(false, true, "cell-c"),
         entry(true, true, "cell-d")
-      ] }
+      ] },
+      product_default_replication: {
+        cell: "B2",
+        treatment: { embedding_supplement: true, answer_rerank: false },
+        evidence_root: "cell-b2"
+      },
+      material_effect_policy: materialEffectPolicy()
     });
     const raw = {} as VerifiedRecallEvalPromotionEntry;
 
@@ -49,7 +56,11 @@ describe("LongMemEval promotion capability boundary", () => {
       cells: contract.matrix.entries.map((cell) => ({
         evidenceRoot: cell.evidence_root,
         entry: raw
-      }))
+      })),
+      productDefaultReplication: {
+        evidenceRoot: contract.product_default_replication.evidence_root,
+        entry: raw
+      }
     })).toThrow(/not verified/u);
   });
 });
@@ -62,6 +73,24 @@ function selection(count: number) {
       dataset_cohort: "answerable" as const
     }))
   });
+}
+
+function materialEffectPolicy() {
+  return {
+    control_cell: "A" as const,
+    product_cell: "B" as const,
+    answerable_count: 94 as const,
+    declared_abstention_count: 6 as const,
+    directional_metrics: [
+      "r_at_1", "r_at_5", "r_at_10", "full_gold_at_5"
+    ] as const,
+    token_non_regression_metric: "token_saved_ratio_vs_full_prompt" as const,
+    minimum_net_r_at_5_wins: 5 as const,
+    mcnemar: {
+      method: "exact_two_sided" as const,
+      p_value_max_exclusive: 0.05 as const
+    }
+  };
 }
 
 function entry(bi: boolean, cross: boolean, evidenceRoot: string) {

@@ -13,6 +13,8 @@ import {
 } from "./expansion-fill-authority-fixture/capability.js";
 import { buildLongMemEvalExpansionLineage } from
   "../../../longmemeval/promotion/expansion/lineage/expansion-lineage.js";
+import { longMemEvalExpansionCapabilityData } from
+  "../../../longmemeval/promotion/expansion/expansion-capability.js";
 import {
   prepareExpansionFillAuthority,
   revalidateExpansionFillAuthority
@@ -115,6 +117,22 @@ describe("500Q expansion fill authority", () => {
       expansionCapability: capability,
       r3SpendApproval: {
         ...approval,
+        r2: {
+          ...approval.r2,
+          b_a_net_r5_wins: approval.r2.b_a_net_r5_wins + 1,
+          mcnemar: {
+            ...approval.r2.mcnemar,
+            p_value: approval.r2.mcnemar.p_value / 2
+          }
+        }
+      }
+    }, "/cache")).rejects.toThrow(/material effect/u);
+
+    await expect(prepareExpansionFillAuthority({
+      variant: "longmemeval_s",
+      expansionCapability: capability,
+      r3SpendApproval: {
+        ...approval,
         spend: { ...approval.spend, maximum_attempts: approval.spend.maximum_attempts + 1 }
       }
     }, "/cache")).rejects.toThrow(/110 percent attempt/u);
@@ -128,6 +146,11 @@ describe("500Q expansion fill authority", () => {
         target: { ...approval.target, cache_identity_sha256: "b".repeat(64) }
       }
     }, "/cache")).rejects.toThrow(/cache identity/u);
+
+    const prepared = await prepare(Promise.resolve(capability));
+    expect(prepared.sourceAnchor.matrix_authorization_sha256).toBe(
+      longMemEvalExpansionCapabilityData(capability).matrixAuthorizationSha256
+    );
   });
 
   it("preserves custom pinned datasets as experimental fill windows", async () => {
@@ -276,6 +299,9 @@ describe("500Q expansion fill authority", () => {
       capability,
       state.targetCompletion,
       base
+    );
+    expect(lineage.matrix_authorization_sha256).toBe(
+      longMemEvalExpansionCapabilityData(capability).matrixAuthorizationSha256
     );
     state.identity = {
       manifestSha256: "b".repeat(64),

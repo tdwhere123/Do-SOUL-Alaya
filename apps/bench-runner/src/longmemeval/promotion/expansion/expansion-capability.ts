@@ -83,6 +83,9 @@ export interface LongMemEvalExpansionCapabilityData {
   readonly nextSelection: LongMemEvalMatrixPromotionAuthorization["next_selection"];
   readonly matrix: LongMemEvalMatrixPromotionAuthorization["matrix"];
   readonly productDefault: LongMemEvalMatrixPromotionAuthorization["product_default"];
+  readonly productDefaultReplication:
+    LongMemEvalMatrixPromotionAuthorization["product_default_replication"];
+  readonly materialEffect: LongMemEvalMatrixPromotionAuthorization["material_effect"];
   readonly sourceSnapshot: LongMemEvalSourceSnapshotAuthority;
 }
 
@@ -137,6 +140,8 @@ export async function verifyLongMemEvalExpansionCapability(
     nextSelection: authorization.next_selection,
     matrix: authorization.matrix,
     productDefault: authorization.product_default,
+    productDefaultReplication: authorization.product_default_replication,
+    materialEffect: authorization.material_effect,
     sourceSnapshot
   });
 }
@@ -275,10 +280,19 @@ function assertMatrixReceiptMatchesContract(
     evidence_root: cell.evidence_root
   })), true);
   const productCell = authorization.matrix.cells.find((cell) => cell.cell === "B");
+  const replication = authorization.product_default_replication;
+  const contractedReplication = contract.product_default_replication;
+  const matrixBundleDigests = new Set(
+    authorization.matrix.cells.map((cell) => cell.bundle_sha256)
+  );
   if (!isDeepStrictEqual(actual, expected) || productCell === undefined ||
       authorization.product_default.cell !== "B" ||
       !isDeepStrictEqual(authorization.product_default.treatment, productCell.treatment) ||
-      authorization.product_default.bundle_sha256 !== productCell.bundle_sha256) {
+      authorization.product_default.bundle_sha256 !== productCell.bundle_sha256 ||
+      replication.cell !== contractedReplication.cell ||
+      replication.evidence_root !== contractedReplication.evidence_root ||
+      !isDeepStrictEqual(replication.treatment, contractedReplication.treatment) ||
+      matrixBundleDigests.has(replication.bundle_sha256)) {
     throw new Error("live matrix authorization differs from frozen matrix contract");
   }
 }

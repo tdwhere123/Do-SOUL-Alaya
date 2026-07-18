@@ -294,6 +294,7 @@ function promotionIdentityFromExpansion(value: z.infer<
     code: value.code,
     source_selection: value.source_selection,
     next_selection: value.next_selection,
+    matrix_authorization_sha256: value.matrix_authorization_sha256,
     matrix_sha256: value.matrix_sha256,
     product_default: value.product_default
   };

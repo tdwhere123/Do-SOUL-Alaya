@@ -30,6 +30,7 @@ export function buildLongMemEvalExpansionSourceAnchor(
     code: data.code,
     source_selection: data.sourceSelection,
     next_selection: data.nextSelection,
+    matrix_authorization_sha256: data.matrixAuthorizationSha256,
     matrix_sha256: data.matrix.sha256,
     product_default: data.productDefault,
     source_snapshot: expansionSourceSnapshotRecord(data.sourceSnapshot),

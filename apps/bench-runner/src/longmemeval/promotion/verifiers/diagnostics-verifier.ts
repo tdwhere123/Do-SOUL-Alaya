@@ -13,6 +13,13 @@ import { classifyQuestionMeasurementStatus } from
   "../../measurement/question-validity.js";
 import { aggregateRecallTokenEconomy } from "../../qa/recall-token-economy.js";
 import { percentile } from "../../kpi/recall-eval-aggregates.js";
+import {
+  createLongMemEvalFullGoldCoverageAccumulator,
+  recordLongMemEvalFullGoldCoverage,
+  renderLongMemEvalFullGoldCoverage,
+  type LongMemEvalFullGoldCoverageAccumulator
+} from
+  "../../diagnostics/diagnostics-full-gold-coverage.js";
 import type { SnapshotMeasurementOracleAccessor } from
   "../../snapshot/measurement-oracle.js";
 import {
@@ -50,6 +57,7 @@ export interface VerifiedRecallEvalDiagnostics {
 
 interface StreamState {
   readonly quality: ReturnType<typeof createQualityMetricsState>;
+  readonly fullGold: LongMemEvalFullGoldCoverageAccumulator;
   readonly latencies: number[];
   readonly recallTokenEconomy: NonNullable<DiagnosticsRow["recall_token_economy"]>[];
   readonly tiers: Record<"hot" | "warm" | "cold", number>;
@@ -127,6 +135,7 @@ export async function verifyRecallEvalDiagnostics(input: {
 function createStreamState(): StreamState {
   return {
     quality: createQualityMetricsState(),
+    fullGold: createLongMemEvalFullGoldCoverageAccumulator(),
     latencies: [],
     recallTokenEconomy: [],
     tiers: { hot: 0, warm: 0, cold: 0 },
@@ -296,6 +305,7 @@ function recordVerifiedRow(
   measurement: VerifiedPromotionQuestionMeasurement
 ): void {
   recordQualityQuestion(state.quality, measurement.diagnostic);
+  recordLongMemEvalFullGoldCoverage(state.fullGold, measurement.diagnostic);
   state.latencies.push(row.latency_ms);
   state.recallTokenEconomy.push(row.recall_token_economy!);
   state.tiers[row.first_tier] += 1;
@@ -403,7 +413,8 @@ function assertKpiReaggregation(
     tier_distribution: state.tiers,
     degradation_reasons: state.degradation,
     recall_token_economy: tokenEconomy,
-    quality_metrics: qualityMetrics
+    quality_metrics: qualityMetrics,
+    full_gold_coverage: renderLongMemEvalFullGoldCoverage(state.fullGold)
   };
   for (const [key, value] of Object.entries(expected)) {
     assertDeepEqual(payload.kpi[key as keyof KpiPayload["kpi"]], value, `kpi.${key}`);

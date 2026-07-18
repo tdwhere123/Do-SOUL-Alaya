@@ -43,13 +43,14 @@ export async function authorizeLongMemEvalMatrixPromotion(input: {
     code: parsed.contract.code
   });
   const roots = await resolveEntryRoots(input.contractRoot, parsed.contract);
-  const cells = await verifyPromotionEntries(parsed, roots, selections.source, snapshot);
+  const evidence = await verifyPromotionEntries(parsed, roots, selections.source, snapshot);
   return authorizeVerifiedLongMemEvalMatrix({
     contract: parsed.contract,
     contractSha256: parsed.sha256,
     sourceSelection: selections.source,
     nextSelection: selections.next,
-    cells
+    cells: evidence.cells,
+    productDefaultReplication: evidence.productDefaultReplication
   });
 }
 
@@ -87,21 +88,37 @@ async function verifyPromotionEntries(
   sourceSelection: ReturnType<typeof selectionContractIdentity>,
   snapshot: Parameters<typeof verifyRecallEvalPromotionEntry>[0]["snapshot"]
 ) {
-  return Promise.all(parsed.contract.matrix.entries.map(async (entry) => {
-    const entryRoot = roots.get(entry.evidence_root)!;
-    const evidence = await verifyRecallEvalPromotionEntry({
-      entryRoot,
-      expectedSelection: sourceSelection,
-      treatment: entry.treatment,
-      code: parsed.contract.code,
-      gateSha256: parsed.sha256,
-      snapshot
-    });
-    return {
-      evidenceRoot: entry.evidence_root,
-      entry: evidence
-    };
-  }));
+  const cells = await Promise.all(parsed.contract.matrix.entries.map((entry) =>
+    verifyDeclaredPromotionEntry(parsed, roots, sourceSelection, snapshot, entry)));
+  const replication = parsed.contract.product_default_replication;
+  return {
+    cells,
+    productDefaultReplication: await verifyDeclaredPromotionEntry(
+      parsed,
+      roots,
+      sourceSelection,
+      snapshot,
+      replication
+    )
+  };
+}
+
+async function verifyDeclaredPromotionEntry(
+  parsed: ReturnType<typeof parseLongMemEvalMatrixPromotionContract>,
+  roots: ReadonlyMap<string, string>,
+  sourceSelection: ReturnType<typeof selectionContractIdentity>,
+  snapshot: Parameters<typeof verifyRecallEvalPromotionEntry>[0]["snapshot"],
+  declared: LongMemEvalMatrixPromotionContract["matrix"]["entries"][number]
+) {
+  const entry = await verifyRecallEvalPromotionEntry({
+    entryRoot: roots.get(declared.evidence_root)!,
+    expectedSelection: sourceSelection,
+    treatment: declared.treatment,
+    code: parsed.contract.code,
+    gateSha256: parsed.sha256,
+    snapshot
+  });
+  return { evidenceRoot: declared.evidence_root, entry };
 }
 
 async function resolveEntryRoots(
@@ -109,7 +126,11 @@ async function resolveEntryRoots(
   contract: LongMemEvalMatrixPromotionContract
 ): Promise<ReadonlyMap<string, string>> {
   const root = await realpath(contractRoot);
-  const entries = await Promise.all(contract.matrix.entries.map(async (entry) => {
+  const declarations = [
+    ...contract.matrix.entries,
+    contract.product_default_replication
+  ];
+  const entries = await Promise.all(declarations.map(async (entry) => {
     const resolved = await realpath(path.resolve(root, entry.evidence_root));
     const relative = path.relative(root, resolved);
     if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {

@@ -73,6 +73,7 @@ const PromotionIdentityBaseSchema = z.object({
   code: LongMemEvalPromotionCodeWireSchema,
   source_selection: LongMemEvalSelectionContractIdentitySchema,
   next_selection: LongMemEvalSelectionContractIdentitySchema,
+  matrix_authorization_sha256: Sha256Schema,
   matrix_sha256: Sha256Schema,
   product_default: ProductDefaultSchema
 }).strict();

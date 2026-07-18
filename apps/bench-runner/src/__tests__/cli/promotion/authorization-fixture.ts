@@ -1,6 +1,8 @@
 import { createLongMemEvalSelectionContractIdentity } from "@do-soul/alaya-eval";
 import { buildLongMemEvalMatrixPromotionAuthorization } from
   "../../../longmemeval/promotion/schema/authorization.js";
+import { expansionMaterialEffectFixture } from
+  "../../longmemeval/expansion/expansion-promotion-contract-fixture.js";
 
 export function promotionAuthorizationFixture() {
   const datasetSha256 = "d".repeat(64);
@@ -21,6 +23,16 @@ export function promotionAuthorizationFixture() {
     cell("C", false, true, "3"),
     cell("D", true, true, "4")
   ] as const;
+  const gate = {
+    id: "longmemeval_s_r_at_5",
+    label: "LongMemEval-S R@5",
+    current: 0.95,
+    target: 0.9,
+    direction: "min" as const,
+    unit: "ratio" as const,
+    passed: true as const,
+    missing: false as const
+  };
   return buildLongMemEvalMatrixPromotionAuthorization({
     schema_version: 1,
     kind: "longmemeval_matrix_promotion_authorization",
@@ -35,16 +47,15 @@ export function promotionAuthorizationFixture() {
       treatment: cells[1].treatment,
       bundle_sha256: cells[1].bundle_sha256
     },
-    hard_gates: [{
-      id: "longmemeval_s_r_at_5",
-      label: "LongMemEval-S R@5",
-      current: 0.95,
-      target: 0.9,
-      direction: "min",
-      unit: "ratio",
-      passed: true,
-      missing: false
-    }]
+    hard_gates: [gate],
+    product_default_replication: {
+      cell: "B2",
+      treatment: cells[1].treatment,
+      evidence_root: "cell-b2",
+      bundle_sha256: "5".repeat(64),
+      hard_gates: [gate]
+    },
+    material_effect: expansionMaterialEffectFixture()
   });
 }
 

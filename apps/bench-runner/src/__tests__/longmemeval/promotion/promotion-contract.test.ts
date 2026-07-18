@@ -18,6 +18,8 @@ describe("LongMemEval matrix promotion contract", () => {
       embedding_supplement: true,
       answer_rerank: false
     });
+    expect(parsed.contract.execution_order).toEqual(["A", "B", "C", "D", "B2"]);
+    expect(parsed.contract.product_default_replication.cell).toBe("B2");
   });
 
   it("rejects duplicate treatment cells even when four entries are present", () => {
@@ -57,6 +59,36 @@ describe("LongMemEval matrix promotion contract", () => {
       .toThrow(/contained relative path/u);
   });
 
+  it("rejects a replication that is not an independent product-default B run", () => {
+    const wrongTreatment = contractFixture();
+    wrongTreatment.product_default_replication.treatment = {
+      embedding_supplement: false,
+      answer_rerank: false
+    };
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(wrongTreatment))
+      .toThrow(/product-default treatment/u);
+
+    const duplicateRoot = contractFixture();
+    duplicateRoot.product_default_replication.evidence_root = "cell-b";
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(duplicateRoot))
+      .toThrow(/evidence roots must be unique/u);
+
+    const escapedRoot = contractFixture();
+    escapedRoot.product_default_replication.evidence_root = "../forged";
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(escapedRoot))
+      .toThrow(/contained relative path/u);
+  });
+
+  it("rejects result-fitted material-effect policy or run order", () => {
+    const fitted = contractFixture();
+    fitted.material_effect_policy.minimum_net_r_at_5_wins = 4;
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(fitted)).toThrow();
+
+    const reordered = contractFixture();
+    reordered.execution_order = ["B", "A", "C", "D", "B2"];
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(reordered)).toThrow();
+  });
+
   it("rejects a snapshot substrate outside the contract root", () => {
     const raw = contractFixture();
     raw.snapshot.db_path = "../snapshot.db";
@@ -91,6 +123,7 @@ function contractFixture() {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
+    execution_order: ["A", "B", "C", "D", "B2"] as ["A", "B", "C", "D", "B2"],
     matrix: {
       entries: [
         entry(false, false, "cell-a"),
@@ -98,6 +131,21 @@ function contractFixture() {
         entry(false, true, "cell-c"),
         entry(true, true, "cell-d")
       ]
+    },
+    product_default_replication: {
+      cell: "B2" as const,
+      treatment: { embedding_supplement: true, answer_rerank: false },
+      evidence_root: "cell-b2"
+    },
+    material_effect_policy: {
+      control_cell: "A" as const,
+      product_cell: "B" as const,
+      answerable_count: 94,
+      declared_abstention_count: 6,
+      directional_metrics: ["r_at_1", "r_at_5", "r_at_10", "full_gold_at_5"] as const,
+      token_non_regression_metric: "token_saved_ratio_vs_full_prompt" as const,
+      minimum_net_r_at_5_wins: 5,
+      mcnemar: { method: "exact_two_sided" as const, p_value_max_exclusive: 0.05 }
     }
   };
 }

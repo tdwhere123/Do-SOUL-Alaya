@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   createLongMemEvalSelectionContractIdentity,
-  KpiPayloadSchema
+  KpiPayloadSchema,
+  type KpiPayload
 } from "@do-soul/alaya-eval";
 import {
   computeExtractionContentClosureSha256,
@@ -209,6 +210,24 @@ async function duplicateFirstRankQuestion(entryRoot: string): Promise<void> {
   };
   rank.questions[1] = structuredClone(rank.questions[0]!);
   await writeFile(rankPath, `${JSON.stringify(rank, null, 2)}\n`, "utf8");
+  await rebindEntryManifest(entryRoot);
+}
+
+async function mutateKpiAndRebindManifest(
+  entryRoot: string,
+  mutate: (payload: KpiPayload) => KpiPayload
+): Promise<void> {
+  const kpiPath = path.join(entryRoot, "kpi.json");
+  const payload = KpiPayloadSchema.parse(JSON.parse(await readFile(kpiPath, "utf8")));
+  await writeFile(kpiPath, `${JSON.stringify(mutate(payload), null, 2)}\n`, "utf8");
+  await rebindEntryManifest(entryRoot);
+}
+
+async function rebindEntryManifest(entryRoot: string): Promise<void> {
+  const manifestPath = path.join(entryRoot, LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME);
+  const manifest = JSON.parse(
+    await readFile(manifestPath, "utf8")
+  ) as LongMemEvalEvidenceManifest;
   const artifacts = await Promise.all(manifest.artifacts.map(async (artifact) => ({
     role: artifact.role,
     path: artifact.path,
@@ -227,5 +246,6 @@ async function duplicateFirstRankQuestion(entryRoot: string): Promise<void> {
 export {
   cleanupPromotionEntryFixtureRoots,
   duplicateFirstRankQuestion,
+  mutateKpiAndRebindManifest,
   writeEntryFixture
 };

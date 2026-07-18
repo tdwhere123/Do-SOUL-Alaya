@@ -20,6 +20,17 @@ describe("R3 spend approval", () => {
     }, expectation())).toThrow(/net R@5 wins/u);
   });
 
+  it("rejects alternate material-effect values that still pass the thresholds", () => {
+    expect(() => verifyR3SpendApproval({
+      ...fixture(),
+      r2: {
+        ...fixture().r2,
+        b_a_net_r5_wins: 7,
+        mcnemar: { method: "exact_two_sided", p_value: 0.02 }
+      }
+    }, expectation())).toThrow(/material effect/u);
+  });
+
   it("rejects a mismatched target identity even when the effect passes", () => {
     expect(() => verifyR3SpendApproval({
       ...fixture(), target: { ...fixture().target, cache_identity_sha256: "9".repeat(64) }
@@ -58,8 +69,8 @@ function fixture() {
       final_cache_identity_sha256: "3".repeat(64),
       hard_gates_passed: true as const,
       answerable_count: 94,
-      b_a_net_r5_wins: 5,
-      mcnemar: { method: "exact_two_sided" as const, p_value: 0.049 }
+      b_a_net_r5_wins: 6,
+      mcnemar: { method: "exact_two_sided" as const, p_value: 0.03125 }
     },
     target: {
       selection_sha256: "4".repeat(64),
@@ -86,6 +97,17 @@ function expectation() {
     targetSelectedCount: 500,
     startingMissing: 72277,
     maximumAttempts: 79505,
-    successfulShardCeiling: 72277
+    successfulShardCeiling: 72277,
+    materialEffect: {
+      paired_r_at_5: {
+        answerable_count: 94 as const,
+        control_hits: 80,
+        product_hits: 86,
+        gained: 6,
+        lost: 0,
+        net: 6,
+        mcnemar: { method: "exact_two_sided" as const, p_value: 0.03125 }
+      }
+    }
   };
 }

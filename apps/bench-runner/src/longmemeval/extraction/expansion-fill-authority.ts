@@ -448,7 +448,8 @@ function verifyCurrentR3SpendApproval(input: {
       targetSelectedCount: data.nextSelection.selected_count,
       startingMissing,
       maximumAttempts: Math.ceil(startingMissing * 1.1),
-      successfulShardCeiling: startingMissing
+      successfulShardCeiling: startingMissing,
+      materialEffect: data.materialEffect
     });
   } catch (cause) {
     throw invariant(

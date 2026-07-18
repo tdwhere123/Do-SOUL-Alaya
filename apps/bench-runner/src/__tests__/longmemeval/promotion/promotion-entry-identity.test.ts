@@ -16,6 +16,7 @@ import {
 import {
   cleanupPromotionEntryFixtureRoots,
   duplicateFirstRankQuestion,
+  mutateKpiAndRebindManifest,
   writeEntryFixture
 } from "./promotion-entry-fixture.js";
 
@@ -65,6 +66,34 @@ describe("recall-eval promotion entry verifier", () => {
       gateSha256: GATE_SHA,
       snapshot: fixture.snapshot
     })).rejects.toThrow(/mismatch/u);
+  });
+
+  it("rejects a signed full-gold KPI that differs from verified diagnostics", async () => {
+    const fixture = await writeEntryFixture();
+    await mutateKpiAndRebindManifest(fixture.entryRoot, (payload) => {
+      const coverage = payload.kpi.full_gold_coverage!;
+      return {
+        ...payload,
+        kpi: {
+          ...payload.kpi,
+          full_gold_coverage: { ...coverage, full_gold_at_5: 0.5 }
+        }
+      };
+    });
+
+    await expect(verifyRecallEvalPromotionEntry({
+      entryRoot: fixture.entryRoot,
+      expectedSelection: fixture.selection,
+      treatment: { embedding_supplement: false, answer_rerank: false },
+      code: {
+        commit_sha: COMMIT_SHA,
+        commit_sha7: COMMIT_SHA7,
+        worktree_state_sha256: WORKTREE_SHA,
+        executed_dist: EXECUTED_DIST
+      },
+      gateSha256: GATE_SHA,
+      snapshot: fixture.snapshot
+    })).rejects.toThrow(/kpi\.full_gold_coverage/u);
   });
 
   it("rejects a snapshot binding that names neither the producer nor matrix gate", async () => {

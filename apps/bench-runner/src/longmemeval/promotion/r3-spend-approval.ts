@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import {
+  LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY,
+  type LongMemEvalMaterialEffect
+} from "./schema/material-effect.js";
 
 export interface R3SpendApproval {
   readonly schema_version: 1;
@@ -45,7 +49,15 @@ export interface R3SpendApprovalExpectation {
   readonly startingMissing: number;
   readonly maximumAttempts: number;
   readonly successfulShardCeiling: number;
+  readonly materialEffect: Pick<LongMemEvalMaterialEffect, "paired_r_at_5">;
 }
+
+type R2MaterialEffectEvidence = Readonly<{
+  hard_gates_passed: boolean;
+  answerable_count: number;
+  b_a_net_r5_wins: number;
+  mcnemar: Readonly<{ method: string; p_value: number }>;
+}>;
 
 export function readR3SpendApproval(path: string): R3SpendApproval {
   return parseR3SpendApproval(JSON.parse(readFileSync(path, "utf8")) as unknown);
@@ -93,12 +105,16 @@ function parseApproval(value: unknown): R3SpendApproval {
       source_selected_count: literal(r2.source_selected_count, 100, "R2 source_selected_count"),
       final_cache_identity_sha256: stringAt(r2, "final_cache_identity_sha256"),
       hard_gates_passed: literal(r2.hard_gates_passed, true, "R2 hard_gates_passed"),
-      answerable_count: literal(r2.answerable_count, 94, "R2 answerable_count"),
+      answerable_count: literal(
+        r2.answerable_count,
+        LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount,
+        "R2 answerable_count"
+      ),
       b_a_net_r5_wins: numberAt(r2, "b_a_net_r5_wins"),
       mcnemar: Object.freeze({
         method: literal(
           mcnemar.method,
-          "exact_two_sided",
+          LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod,
           "R3 requires exact two-sided McNemar evidence"
         ),
         p_value: numberAt(mcnemar, "p_value")
@@ -145,29 +161,49 @@ function assertExpectedScope(expected: R3SpendApprovalExpectation): void {
       expected.successfulShardCeiling !== expected.startingMissing) {
     throw new Error("R3 expectation must bind the canonical 100Q to 500Q expansion limits");
   }
+  const paired = expected.materialEffect.paired_r_at_5;
+  assertR2MaterialEffect({
+    hard_gates_passed: true,
+    answerable_count: paired.answerable_count,
+    b_a_net_r5_wins: paired.net,
+    mcnemar: {
+      method: paired.mcnemar.method,
+      p_value: paired.mcnemar.p_value
+    }
+  });
 }
 
-function assertR2MaterialEffect(r2: R3SpendApproval["r2"]): void {
-  if (r2.hard_gates_passed !== true || r2.answerable_count !== 94) {
+function assertR2MaterialEffect(r2: R2MaterialEffectEvidence): void {
+  if (r2.hard_gates_passed !== true ||
+      r2.answerable_count !== LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount) {
     throw new Error("R3 requires all R2 hard gates across exactly 94 answerable questions");
   }
-  if (!Number.isSafeInteger(r2.b_a_net_r5_wins) || r2.b_a_net_r5_wins < 5) {
+  if (!Number.isSafeInteger(r2.b_a_net_r5_wins) ||
+      r2.b_a_net_r5_wins < LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.minimumNetR5Wins) {
     throw new Error("R3 requires at least five net R@5 wins");
   }
-  if (r2.mcnemar.method !== "exact_two_sided") {
+  if (r2.mcnemar.method !== LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod) {
     throw new Error("R3 requires exact two-sided McNemar evidence");
   }
-  if (!Number.isFinite(r2.mcnemar.p_value) || r2.mcnemar.p_value >= 0.05 || r2.mcnemar.p_value < 0) {
+  if (!Number.isFinite(r2.mcnemar.p_value) ||
+      r2.mcnemar.p_value >=
+        LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarPValueMaxExclusive ||
+      r2.mcnemar.p_value < 0) {
     throw new Error("R3 requires exact two-sided McNemar p < 0.05");
   }
 }
 
 function assertExactBinding(approval: R3SpendApproval, expected: R3SpendApprovalExpectation): void {
+  const paired = expected.materialEffect.paired_r_at_5;
   const bindings: readonly [actual: string | number, required: string | number, label: string][] = [
     [approval.r2.matrix_authorization_sha256, expected.matrixAuthorizationSha256, "R2 matrix authorization"],
     [approval.r2.source_selection_sha256, expected.sourceSelectionSha256, "R2 source selection"],
     [approval.r2.source_selected_count, expected.sourceSelectedCount, "R2 source count"],
     [approval.r2.final_cache_identity_sha256, expected.finalCacheIdentitySha256, "R2 cache identity"],
+    [approval.r2.answerable_count, paired.answerable_count, "R2 material effect answerable count"],
+    [approval.r2.b_a_net_r5_wins, paired.net, "R2 material effect net R@5 wins"],
+    [approval.r2.mcnemar.method, paired.mcnemar.method, "R2 material effect McNemar method"],
+    [approval.r2.mcnemar.p_value, paired.mcnemar.p_value, "R2 material effect McNemar p-value"],
     [approval.target.selection_sha256, expected.targetSelectionSha256, "R3 target selection"],
     [approval.target.selected_count, expected.targetSelectedCount, "R3 target count"],
     [approval.target.cache_identity_sha256, expected.finalCacheIdentitySha256, "R3 target cache identity"],

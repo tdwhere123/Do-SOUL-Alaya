@@ -21,6 +21,7 @@ import {
 } from "../verifiers/entry-verifier.js";
 import { assertPromotionProductDefaultPolicy } from
   "../verifiers/product-policy-verifier.js";
+import { verifyLongMemEvalMaterialEffect } from "./material-effect.js";
 
 export interface VerifiedPromotionMatrixCell {
   readonly evidenceRoot: string;
@@ -29,6 +30,7 @@ export interface VerifiedPromotionMatrixCell {
 
 interface ResolvedPromotionMatrixCell {
   readonly evidenceRoot: string;
+  readonly entry: VerifiedRecallEvalPromotionEntry;
   readonly data: VerifiedRecallEvalPromotionEntryData;
 }
 
@@ -47,20 +49,39 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
   readonly sourceSelection: LongMemEvalSelectionContractIdentity;
   readonly nextSelection: LongMemEvalSelectionContractIdentity;
   readonly cells: readonly VerifiedPromotionMatrixCell[];
+  readonly productDefaultReplication: VerifiedPromotionMatrixCell;
 }): LongMemEvalMatrixPromotionAuthorization {
   const cells = indexCells(input);
+  const replication = resolveProductDefaultReplication(input);
   assertSelectionProgression(input.sourceSelection, input.nextSelection);
-  assertCommonIdentity([...cells.values()]);
-  assertPairedTreatmentIdentity(cells);
+  assertCommonIdentity([...cells.values(), replication]);
+  assertPairedTreatmentIdentity(cells, replication);
+  assertIndependentReplication(cells.get("B")!, replication);
+  assertExecutionOrder(cells, replication);
   const product = resolveProductDefaultCell(
     cells,
     input.contract.policy_version
   );
   const { productCell, productTreatment } = product;
   assertPromotionProductDefaultPolicy(productCell.data);
+  assertPromotionProductDefaultPolicy(replication.data);
   const hardGates = collectReleaseHardGates(productCell.data.payload);
-  assertMandatoryProductGates(hardGates);
-  return renderMatrixAuthorization(input, cells, product, hardGates);
+  const replicationHardGates = collectReleaseHardGates(replication.data.payload);
+  assertMandatoryProductGates(hardGates, "B product-default cell");
+  assertMandatoryProductGates(replicationHardGates, "B2 product-default replication");
+  const materialEffect = verifyLongMemEvalMaterialEffect({
+    control: cells.get("A")!.data.payload,
+    product: productCell.data.payload
+  });
+  return renderMatrixAuthorization(
+    input,
+    cells,
+    product,
+    replication,
+    hardGates,
+    replicationHardGates,
+    materialEffect
+  );
 }
 
 function resolveProductDefaultCell(
@@ -79,7 +100,10 @@ function renderMatrixAuthorization(
   input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>[0],
   cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
   product: ReturnType<typeof resolveProductDefaultCell>,
-  hardGates: ReturnType<typeof collectReleaseHardGates>
+  replication: ResolvedPromotionMatrixCell,
+  hardGates: ReturnType<typeof collectReleaseHardGates>,
+  replicationHardGates: ReturnType<typeof collectReleaseHardGates>,
+  materialEffect: ReturnType<typeof verifyLongMemEvalMaterialEffect>
 ): LongMemEvalMatrixPromotionAuthorization {
   const renderedCells = CELL_ORDER.map((cell) => renderMatrixCell(cells, cell));
   return buildLongMemEvalMatrixPromotionAuthorization({
@@ -103,7 +127,19 @@ function renderMatrixAuthorization(
       ...gate,
       passed: true as const,
       missing: false as const
-    }))
+    })),
+    product_default_replication: {
+      cell: "B2",
+      treatment: replication.data.treatment,
+      evidence_root: replication.evidenceRoot,
+      bundle_sha256: replication.data.manifest.bundle_sha256,
+      hard_gates: replicationHardGates.map((gate) => ({
+        ...gate,
+        passed: true as const,
+        missing: false as const
+      }))
+    },
+    material_effect: materialEffect
   });
 }
 
@@ -139,12 +175,30 @@ function indexCells(input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>
       input.sourceSelection,
       `${label} source selection`
     );
-    byCell.set(label, { evidenceRoot: cell.evidenceRoot, data });
+    byCell.set(label, { evidenceRoot: cell.evidenceRoot, entry: cell.entry, data });
   }
   if (CELL_ORDER.some((cell) => !byCell.has(cell))) {
     throw new Error("promotion matrix is not the exact treatment Cartesian product");
   }
   return byCell;
+}
+
+function resolveProductDefaultReplication(
+  input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>[0]
+): ResolvedPromotionMatrixCell {
+  const replication = input.productDefaultReplication;
+  if (replication === undefined) {
+    throw new Error("B2 requires a verified replication entry");
+  }
+  const data = verifiedRecallEvalPromotionEntryData(replication.entry);
+  const declared = input.contract.product_default_replication;
+  if (replication.evidenceRoot !== declared.evidence_root ||
+      treatmentKey(data.treatment) !== treatmentKey(declared.treatment) ||
+      matrixCellForTreatment(data.treatment) !== "B") {
+    throw new Error("verified B2 replication differs from promotion contract");
+  }
+  assertEqual(data.payload.selection_contract, input.sourceSelection, "B2 source selection");
+  return { evidenceRoot: replication.evidenceRoot, entry: replication.entry, data };
 }
 
 function assertSelectionProgression(
@@ -228,7 +282,8 @@ function nonTreatmentEnvironment(
 }
 
 function assertPairedTreatmentIdentity(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>
+  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
+  replication: ResolvedPromotionMatrixCell
 ): void {
   const a = cells.get("A")!.data.diagnosticsRuntime;
   const b = cells.get("B")!.data.diagnosticsRuntime;
@@ -244,10 +299,44 @@ function assertPairedTreatmentIdentity(
     "B/D bi-encoder model identity");
   assertEqual(c.answer_rerank, d.answer_rerank,
     "C/D cross-encoder model identity");
+  assertEqual(b.embedding_supplement, replication.data.diagnosticsRuntime.embedding_supplement,
+    "B/B2 bi-encoder model identity");
+  assertEqual(b.answer_rerank, replication.data.diagnosticsRuntime.answer_rerank,
+    "B/B2 answer-rerank identity");
+}
+
+function assertIndependentReplication(
+  product: ResolvedPromotionMatrixCell,
+  replication: ResolvedPromotionMatrixCell
+): void {
+  if (product.entry === replication.entry ||
+      product.data.manifest.bundle_sha256 === replication.data.manifest.bundle_sha256) {
+    throw new Error("B2 requires an independent evidence bundle");
+  }
+  if (product.data.manifest.run.slug === replication.data.manifest.run.slug ||
+      product.data.manifest.run.run_at === replication.data.manifest.run.run_at) {
+    throw new Error("B2 requires an independent run identity");
+  }
+}
+
+function assertExecutionOrder(
+  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
+  replication: ResolvedPromotionMatrixCell
+): void {
+  const ordered = [
+    ...CELL_ORDER.map((cell) => cells.get(cell)!),
+    replication
+  ];
+  const timestamps = ordered.map((cell) => Date.parse(cell.data.manifest.run.run_at));
+  if (timestamps.some((value) => !Number.isFinite(value)) ||
+      timestamps.some((value, index) => index > 0 && value <= timestamps[index - 1]!)) {
+    throw new Error("promotion evidence does not follow pre-registered A/B/C/D/B2 order");
+  }
 }
 
 function assertMandatoryProductGates(
-  gates: ReturnType<typeof collectReleaseHardGates>
+  gates: ReturnType<typeof collectReleaseHardGates>,
+  label: string
 ): void {
   const ids = new Set(gates.map((gate) => gate.id));
   const hasRecall = gates.some((gate) =>
@@ -261,12 +350,12 @@ function assertMandatoryProductGates(
     ...REQUIRED_PIPELINE_GATES
   ];
   if (!hasRecall || mandatory.some((id) => !ids.has(id))) {
-    throw new Error("product-default cell is missing a mandatory executable hard gate");
+    throw new Error(`${label} is missing a mandatory executable hard gate`);
   }
   const failed = gates.filter((gate) => !gate.passed || gate.missing);
   if (failed.length > 0) {
     throw new Error(
-      `product-default cell failed hard gates: ${failed.map((gate) => gate.id).join(", ")}`
+      `${label} failed hard gates: ${failed.map((gate) => gate.id).join(", ")}`
     );
   }
 }

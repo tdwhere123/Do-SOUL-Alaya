@@ -266,6 +266,7 @@ function expansionIdentity() {
     next_selection: selectionIdentity(
       Array.from({ length: 500 }, (_, index) => `q-${index}`)
     ),
+    matrix_authorization_sha256: "3".repeat(64),
     matrix_sha256: "4".repeat(64),
     product_default: {
       cell: "B" as const,

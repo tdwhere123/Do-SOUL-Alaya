@@ -329,6 +329,7 @@ function promotionIdentity(datasetSha256: string) {
     },
     source_selection: selection(datasetSha256, 100),
     next_selection: selection(datasetSha256, 500),
+    matrix_authorization_sha256: "5".repeat(64),
     matrix_sha256: "6".repeat(64),
     product_default: {
       cell: "B" as const,

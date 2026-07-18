@@ -5,6 +5,7 @@ import {
   LongMemEvalPromotionCodeWireSchema
 } from "@do-soul/alaya-eval/internal";
 import { z } from "zod";
+import { LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY } from "./material-effect.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -16,10 +17,41 @@ const MatrixEntrySchema = z.object({
   evidence_root: z.string().min(1)
 }).strict().readonly();
 
+const ProductDefaultReplicationSchema = z.object({
+  cell: z.literal("B2"),
+  treatment: LongMemEvalMatrixTreatmentSchema,
+  evidence_root: z.string().min(1)
+}).strict().readonly();
+
+const MaterialEffectPolicySchema = z.object({
+  control_cell: z.literal("A"),
+  product_cell: z.literal("B"),
+  answerable_count: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.answerableCount),
+  declared_abstention_count: z.literal(
+    LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.declaredAbstentionCount
+  ),
+  directional_metrics: z.tuple([
+    z.literal("r_at_1"),
+    z.literal("r_at_5"),
+    z.literal("r_at_10"),
+    z.literal("full_gold_at_5")
+  ]).readonly(),
+  token_non_regression_metric: z.literal("token_saved_ratio_vs_full_prompt"),
+  minimum_net_r_at_5_wins: z.literal(
+    LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.minimumNetR5Wins
+  ),
+  mcnemar: z.object({
+    method: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod),
+    p_value_max_exclusive: z.literal(
+      LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarPValueMaxExclusive
+    )
+  }).strict().readonly()
+}).strict().readonly();
+
 export const LongMemEvalMatrixPromotionCodeSchema =
   LongMemEvalPromotionCodeWireSchema;
 
-export const LongMemEvalMatrixPromotionContractSchema = z.object({
+const LongMemEvalMatrixPromotionContractBaseSchema = z.object({
   schema_version: z.literal(1),
   kind: z.literal("longmemeval_matrix_promotion_contract"),
   policy_version: z.literal("longmemeval-product-default-v1"),
@@ -36,10 +68,42 @@ export const LongMemEvalMatrixPromotionContractSchema = z.object({
     db_path: z.string().min(1),
     manifest_sha256: Sha256Schema
   }).strict(),
+  execution_order: z.tuple([
+    z.literal("A"),
+    z.literal("B"),
+    z.literal("C"),
+    z.literal("D"),
+    z.literal("B2")
+  ]).readonly(),
   matrix: z.object({
     entries: z.array(MatrixEntrySchema).length(4).readonly()
-  }).strict()
-}).strict().superRefine((contract, context) => {
+  }).strict(),
+  product_default_replication: ProductDefaultReplicationSchema,
+  material_effect_policy: MaterialEffectPolicySchema
+}).strict();
+
+export const LongMemEvalMatrixPromotionContractSchema =
+  LongMemEvalMatrixPromotionContractBaseSchema.superRefine(validatePromotionContract);
+
+type PromotionContractCandidate = z.infer<
+  typeof LongMemEvalMatrixPromotionContractBaseSchema
+>;
+
+function validatePromotionContract(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
+  validateCodeIdentity(contract, context);
+  validateMatrixTreatments(contract, context);
+  validateReplicationTreatment(contract, context);
+  validateEvidenceRoots(contract, context);
+  validateSnapshotPath(contract, context);
+}
+
+function validateCodeIdentity(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
   if (!contract.code.commit_sha.startsWith(contract.code.commit_sha7)) {
     context.addIssue({
       code: "custom",
@@ -47,6 +111,12 @@ export const LongMemEvalMatrixPromotionContractSchema = z.object({
       message: "commit_sha7 must prefix commit_sha"
     });
   }
+}
+
+function validateMatrixTreatments(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
   const treatments = contract.matrix.entries.map((entry) => treatmentKey(entry.treatment));
   if (new Set(treatments).size !== MATRIX_TREATMENTS.length ||
       MATRIX_TREATMENTS.some((treatment) => !treatments.includes(treatmentKey(treatment)))) {
@@ -56,12 +126,37 @@ export const LongMemEvalMatrixPromotionContractSchema = z.object({
       message: "matrix entries must be the exact four-cell treatment Cartesian product"
     });
   }
-  const roots = contract.matrix.entries.map((entry) => entry.evidence_root);
+}
+
+function validateReplicationTreatment(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
+  const replication = contract.product_default_replication;
+  const productTreatment = productDefaultTreatment(contract.policy_version);
+  if (treatmentKey(replication.treatment) !== treatmentKey(productTreatment)) {
+    context.addIssue({
+      code: "custom",
+      path: ["product_default_replication", "treatment"],
+      message: "B2 replication must use the product-default treatment"
+    });
+  }
+}
+
+function validateEvidenceRoots(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
+  const replication = contract.product_default_replication;
+  const roots = [
+    ...contract.matrix.entries.map((entry) => entry.evidence_root),
+    replication.evidence_root
+  ];
   if (new Set(roots).size !== roots.length) {
     context.addIssue({
       code: "custom",
-      path: ["matrix", "entries"],
-      message: "matrix evidence roots must be unique"
+      path: ["product_default_replication", "evidence_root"],
+      message: "matrix and replication evidence roots must be unique"
     });
   }
   contract.matrix.entries.forEach((entry, index) => {
@@ -73,6 +168,19 @@ export const LongMemEvalMatrixPromotionContractSchema = z.object({
       });
     }
   });
+  if (!isSafeRelativeRoot(replication.evidence_root)) {
+    context.addIssue({
+      code: "custom",
+      path: ["product_default_replication", "evidence_root"],
+      message: "replication evidence root must be a contained relative path"
+    });
+  }
+}
+
+function validateSnapshotPath(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
   if (!isSafeRelativeRoot(contract.snapshot.db_path)) {
     context.addIssue({
       code: "custom",
@@ -80,7 +188,7 @@ export const LongMemEvalMatrixPromotionContractSchema = z.object({
       message: "snapshot DB must be a contained relative path"
     });
   }
-});
+}
 
 export type LongMemEvalMatrixTreatment = z.infer<
   typeof LongMemEvalMatrixTreatmentSchema

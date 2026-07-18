@@ -16,6 +16,10 @@ import {
   type LongMemEvalExpansionCapabilityDependencies,
   type LongMemEvalSourceSnapshotAuthority
 } from "../../../longmemeval/promotion/expansion/expansion-capability.js";
+import {
+  expansionMaterialEffectFixture,
+  expansionMaterialEffectPolicyFixture
+} from "../expansion/expansion-promotion-contract-fixture.js";
 
 describe("LongMemEval 100Q to 500Q expansion capability", () => {
   it("seals the live-reverified matrix, code, snapshot, and cache closure", async () => {
@@ -32,6 +36,8 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
       sourceSelection: { selected_count: 100 },
       nextSelection: { selected_count: 500 },
       productDefault: { cell: "B" },
+      productDefaultReplication: { cell: "B2", evidence_root: "cell-b2" },
+      materialEffect: { paired_r_at_5: { net: 9 } },
       sourceSnapshot: {
         dbPath: "snapshot/source-100.db",
         extractionCache: {
@@ -62,6 +68,23 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
     expect(() => longMemEvalExpansionCapabilityData(
       modified as unknown as LongMemEvalExpansionCapability
     )).toThrow(/not live-verified/u);
+  });
+
+  it("rejects a self-hashed B2 receipt that differs from the frozen contract", async () => {
+    const fixture = expansionFixture();
+    const { authorization_sha256: _digest, ...unsigned } = fixture.authorization;
+    const modified = buildLongMemEvalMatrixPromotionAuthorization({
+      ...unsigned,
+      product_default_replication: {
+        ...unsigned.product_default_replication,
+        evidence_root: "different-b2"
+      }
+    });
+
+    await expect(verifyLongMemEvalExpansionCapability(fixture.input, {
+      ...fixture.dependencies,
+      authorize: async () => modified
+    })).rejects.toThrow(/authorization differs from frozen matrix contract/u);
   });
 
   it("rejects current executed-dist drift after matrix verification", async () => {
@@ -144,7 +167,14 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
-    matrix: { entries: order.map((index) => entries[index]!) }
+    execution_order: ["A", "B", "C", "D", "B2"],
+    matrix: { entries: order.map((index) => entries[index]!) },
+    product_default_replication: {
+      cell: "B2",
+      treatment: { embedding_supplement: true, answer_rerank: false },
+      evidence_root: "cell-b2"
+    },
+    material_effect_policy: expansionMaterialEffectPolicyFixture()
   });
   const contractContents = Buffer.from(JSON.stringify(contract), "utf8");
   const parsed = parseLongMemEvalMatrixPromotionContract(contractContents);
@@ -171,7 +201,15 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
       treatment: productCell.treatment,
       bundle_sha256: productCell.bundle_sha256
     },
-    hard_gates: [hardGate()]
+    hard_gates: [hardGate()],
+    product_default_replication: {
+      cell: "B2",
+      treatment: contract.product_default_replication.treatment,
+      evidence_root: contract.product_default_replication.evidence_root,
+      bundle_sha256: "5".repeat(64),
+      hard_gates: [hardGate()]
+    },
+    material_effect: expansionMaterialEffectFixture()
   });
   const sourceSnapshot = snapshotAuthority();
   const input = {

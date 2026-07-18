@@ -12,7 +12,7 @@ export interface FullGoldDeliveryQuestionInput {
   readonly gold: readonly FullGoldDeliveryGoldInput[];
 }
 
-interface FullGoldDeliveryCounters {
+export interface FullGoldDeliveryAccumulator {
   goldBearingQuestions: number;
   fullGoldAt5: number;
   coreFullGoldAt5: number;
@@ -36,11 +36,17 @@ function within(rank: number | null, k: number): boolean {
 export function analyzeFullGoldDeliveryContribution(
   questions: readonly FullGoldDeliveryQuestionInput[]
 ): FullGoldDeliveryContribution {
-  const counters = createFullGoldDeliveryCounters();
+  const counters = createFullGoldDeliveryAccumulator();
   for (const question of questions) {
-    accumulateFullGoldDeliveryQuestion(counters, question);
+    recordFullGoldDeliveryQuestion(counters, question);
   }
 
+  return renderFullGoldDeliveryContribution(counters);
+}
+
+export function renderFullGoldDeliveryContribution(
+  counters: FullGoldDeliveryAccumulator
+): FullGoldDeliveryContribution {
   return {
     gold_bearing_questions: counters.goldBearingQuestions,
     full_gold_at_5: ratio(counters.fullGoldAt5, counters.goldBearingQuestions),
@@ -54,7 +60,7 @@ export function analyzeFullGoldDeliveryContribution(
   } satisfies FullGoldDeliveryContribution;
 }
 
-function createFullGoldDeliveryCounters(): FullGoldDeliveryCounters {
+export function createFullGoldDeliveryAccumulator(): FullGoldDeliveryAccumulator {
   return {
     goldBearingQuestions: 0,
     fullGoldAt5: 0,
@@ -69,8 +75,8 @@ function createFullGoldDeliveryCounters(): FullGoldDeliveryCounters {
   };
 }
 
-function accumulateFullGoldDeliveryQuestion(
-  counters: FullGoldDeliveryCounters,
+export function recordFullGoldDeliveryQuestion(
+  counters: FullGoldDeliveryAccumulator,
   question: FullGoldDeliveryQuestionInput
 ): void {
   if (question.gold.length === 0) {
@@ -89,7 +95,7 @@ function accumulateFullGoldDeliveryQuestion(
 }
 
 function accumulateFullGoldCoverage(
-  counters: FullGoldDeliveryCounters,
+  counters: FullGoldDeliveryAccumulator,
   golds: readonly FullGoldDeliveryGoldInput[]
 ): { readonly allDeliveredAt5: boolean; readonly allCoreAt5: boolean } {
   let allDeliveredAt5 = true;
