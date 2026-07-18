@@ -14,8 +14,11 @@ import {
 } from "../../../longmemeval/extraction/authority/inspection.js";
 import {
   createExtractionAuthorityReceipt,
+  readExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
 } from "../../../longmemeval/extraction/authority/receipt.js";
+import { readExtractionCacheManifest } from
+  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
 
 const { acquireWriteLease, loadCanonicalDataset } = vi.hoisted(() => ({
@@ -140,6 +143,95 @@ describe("direct DeepSeek runtime extraction", () => {
     await expect(running).resolves.toMatchObject({ newlyExtracted: 2, coverage: 1 });
   });
 
+  it("leaves a failed NewAPI key missing, finishes siblings, and retries it on resume", async () => {
+    const fixture = await createDirectRuntimeFixture("newapi");
+    let calls = 0;
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      if (calls++ === 0) throw providerTimeoutFailure();
+      return { rawJson: '{"signals":[]}' };
+    });
+
+    await expect(runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      concurrency: 1,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    })).rejects.toThrow(/completion refused: valid=1\/2 missing=1/u);
+
+    expect(extract).toHaveBeenCalledTimes(2);
+    expect(readExtractionCacheManifest(fixture.cacheRoot)).toMatchObject({
+      fill_status: "in_progress", expected_turns: 2, cached_turns: 1, coverage: 0.5
+    });
+    const resumedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      return { rawJson: '{"signals":[]}' };
+    });
+    await expect(runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      concurrency: 1,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract: resumedExtract }),
+      log: () => undefined
+    })).resolves.toMatchObject({ newlyExtracted: 1, coverage: 1 });
+    expect(resumedExtract).toHaveBeenCalledTimes(1);
+    expect(readExtractionCacheManifest(fixture.cacheRoot)).toMatchObject({
+      fill_status: "complete", expected_turns: 2, cached_turns: 2, coverage: 1
+    });
+  });
+
+  it("resumes a NewAPI receipt after a worktree revision changes without replacing its lineage", async () => {
+    const priorRevision = priorWorktreeRevision();
+    expect(priorRevision).not.toBe(readCurrentExtractionAuthorityRevision());
+    const fixture = await createDirectRuntimeFixture("newapi", priorRevision);
+    const authorizedReceipt = readExtractionAuthorityReceipt(fixture.receiptPath);
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      return { rawJson: '{"signals":[]}' };
+    });
+
+    const result = await runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      concurrency: 32,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({ newlyExtracted: 2, coverage: 1 });
+    expect(readExtractionAuthorityReceipt(fixture.receiptPath)).toMatchObject({
+      identity_digest: authorizedReceipt.identity_digest,
+      lineage_digest: authorizedReceipt.lineage_digest
+    });
+  });
+
+  it("rejects NewAPI request-profile drift before creating its extractor", async () => {
+    const fixture = await createDirectRuntimeFixture("newapi");
+    vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+    const extractorFactory = vi.fn<() => BenchSignalExtractor>();
+
+    await expect(runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      concurrency: 32,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory,
+      log: () => undefined
+    })).rejects.toThrow(/current identity drift/u);
+
+    expect(extractorFactory).not.toHaveBeenCalled();
+    expect(acquireWriteLease).not.toHaveBeenCalled();
+  });
+
   it("rejects a replaced direct root marker before the simulated transport continues", async () => {
     const fixture = await createDirectRuntimeFixture();
     let transportStarted = false;
@@ -193,7 +285,8 @@ describe("direct DeepSeek runtime extraction", () => {
 });
 
 async function createDirectRuntimeFixture(
-  channel: "legacy" | "newapi" = "legacy"
+  channel: "legacy" | "newapi" = "legacy",
+  receiptRevision = readCurrentExtractionAuthorityRevision()
 ): Promise<DirectRuntimeFixture> {
   configureDirectDeepSeekEnvironment(channel);
   configureCanonicalDataset();
@@ -207,7 +300,7 @@ async function createDirectRuntimeFixture(
     variant: DIRECT_VARIANT,
     limit: 500,
     cacheRoot,
-    revision: readCurrentExtractionAuthorityRevision(),
+    revision: receiptRevision,
     action: "fill"
   });
   const receipt = createExtractionAuthorityReceipt({
@@ -227,6 +320,10 @@ async function createDirectRuntimeFixture(
   const receiptPath = join(root, "direct-authority.json");
   writeExtractionAuthorityReceipt(receiptPath, receipt);
   return { cacheRoot, receiptPath };
+}
+
+function priorWorktreeRevision(): string {
+  return `git-worktree-v1:${"e".repeat(40)}:${"f".repeat(64)}`;
 }
 
 function configureDirectDeepSeekEnvironment(channel: "legacy" | "newapi"): void {
@@ -282,6 +379,22 @@ function inspectionSummary(inspection: Awaited<ReturnType<typeof inspectExtracti
 function errorMessage(cause: unknown): string {
   if (!(cause instanceof Error)) throw new Error("expected an Error transport failure");
   return cause.message;
+}
+
+function providerTimeoutFailure(): Error & {
+  readonly benchRetry: {
+    readonly retryCount: 0;
+    readonly rateLimitRetries: 0;
+    readonly retryClassification: "failure_timeout";
+  };
+} {
+  return Object.assign(new Error("provider timed out for this fixture"), {
+    benchRetry: {
+      retryCount: 0 as const,
+      rateLimitRetries: 0 as const,
+      retryClassification: "failure_timeout" as const
+    }
+  });
 }
 
 function waitForAbort(signal: AbortSignal | undefined): Promise<never> {

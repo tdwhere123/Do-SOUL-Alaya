@@ -45,6 +45,8 @@ interface ExtractionPoolInput {
     readonly maxOutputTokens: number;
     readonly outputTokenField: "max_tokens" | "max_completion_tokens";
   };
+  /** Leaves failed provider tasks missing so a later fill can retry them. */
+  readonly tolerateProviderTaskFailures?: boolean;
 }
 
 export async function runExtractionPool(input: ExtractionPoolInput): Promise<void> {
@@ -54,6 +56,7 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
     initial: Math.min(input.concurrency, 32)
   });
   let processed = 0;
+  let toleratedFailures = 0;
   const progressEvery = Math.max(1, Math.floor(input.requestedTurns / 20));
   try {
     await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
@@ -72,6 +75,18 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
           throw cause;
         }
         processed += 1;
+        if (input.tolerateProviderTaskFailures === true && isContinuableProviderFailure(cause)) {
+          toleratedFailures += 1;
+          input.log(
+            `[extraction-fill] leaving provider failure for a later fill: ` +
+              `retry_classification=${readTerminalClassification(cause)} ` +
+              `processed_turns=${processed}/${input.requestedTurns}`
+          );
+          logProgress(
+            input, processed, progressEvery, toleratedFailures
+          );
+          return;
+        }
         const failure = buildTaskFailure(input, cause, processed);
         input.log(`[extraction-fill] stopping: ${failure.message}`);
         scope.abort(failure);
@@ -81,7 +96,7 @@ export async function runExtractionPool(input: ExtractionPoolInput): Promise<voi
         recordAdaptiveTelemetry(input, rateLimited, concurrency);
       }
       processed += 1;
-      logProgress(input, processed, progressEvery);
+      logProgress(input, processed, progressEvery, toleratedFailures);
     });
   } finally {
     adaptive.dispose();
@@ -162,15 +177,24 @@ function readTerminalClassification(cause: unknown): FillTaskRetryClassification
     value === "failure_timeout" || value === "failure_aborted" ? value : "unknown";
 }
 
+function isContinuableProviderFailure(cause: unknown): boolean {
+  const classification = readTerminalClassification(cause);
+  return classification === "failure_max_retries" ||
+    classification === "failure_non_retryable_4xx" ||
+    classification === "failure_timeout";
+}
+
 function logProgress(
   input: ExtractionPoolInput,
   processed: number,
-  progressEvery: number
+  progressEvery: number,
+  toleratedFailures: number
 ): void {
   if (processed % progressEvery !== 0 && processed !== input.requestedTurns) return;
   input.log(
     `[extraction-fill] ${processed}/${input.requestedTurns} ` +
-      `cache_hits=${input.stats.cacheHits} newly_extracted=${input.stats.llmCalls} failures=0`
+      `cache_hits=${input.stats.cacheHits} newly_extracted=${input.stats.llmCalls} ` +
+      `tolerated_failures=${toleratedFailures}`
   );
 }
 

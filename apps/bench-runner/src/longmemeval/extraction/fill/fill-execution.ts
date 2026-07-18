@@ -65,6 +65,7 @@ export async function executeExtractionFill(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress
   );
   const distinctTurns = resolveFillTurns(prepared, cacheRoot, authority);
+  const newApiDirect = isNewApiDirectFill(authority);
   await runExtractionPool({
     extractor,
     distinctTurns,
@@ -77,7 +78,8 @@ export async function executeExtractionFill(
       retryMode: authority.receipt.action === "probe" ? "disabled" : "default",
       maxOutputTokens: authority.receipt.limits.max_output_tokens,
       outputTokenField: authority.receipt.limits.output_token_field
-    } })
+    } }),
+    ...(newApiDirect ? { tolerateProviderTaskFailures: true } : {})
   });
 }
 
@@ -124,6 +126,10 @@ function resolveFillTurns(
     assertProbeTargetIsMissing(prepared, cacheRoot, authority.receipt.probe_key!);
   }
   return distinctTurns;
+}
+
+function isNewApiDirectFill(authority: ExecutionExtractionAuthority | undefined): boolean {
+  return authority?.receipt.direct_spend?.kind === "deepseek_newapi_direct_500";
 }
 
 export function finishExtractionFill(

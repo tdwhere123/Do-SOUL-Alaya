@@ -384,7 +384,12 @@ async function inspectReceiptAuthority(
     cacheRoot,
     ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
     ...(options.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: options.pinnedMetaRoot }),
-    revision: readCurrentExtractionAuthorityRevision(),
+    // The direct NewAPI receipt already binds the data and request semantics.
+    // Its worktree revision is an authorization snapshot, not a cache identity,
+    // so a local implementation fix must not strand its honest partial cache.
+    revision: receipt.direct_spend?.kind === "deepseek_newapi_direct_500"
+      ? receipt.observation.revision
+      : readCurrentExtractionAuthorityRevision(),
     action: receipt.action,
     ...(ledger === undefined ? {} : { excludeContentClosureKeys: ledger.successfulKeys })
   });
