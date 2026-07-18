@@ -56,6 +56,7 @@ describe("RecallReadWorkerClient", () => {
       }
 
       try {
+        await expect(client.ready()).resolves.toBeUndefined();
         const startedAt = performance.now();
         const timerDelayPromise = new Promise<number>((resolve) => {
           setTimeout(() => resolve(performance.now() - startedAt), 0);
@@ -240,6 +241,7 @@ describe("RecallReadWorkerClient", () => {
     const client = createRecallReadWorkerClient({
       databaseFilename: databasePath,
       workerUrl: pathToFileURL(workerPath),
+      workerCount: 1,
       requestTimeoutMs: 100
     });
 
@@ -272,6 +274,7 @@ describe("RecallReadWorkerClient", () => {
     const client = createRecallReadWorkerClient({
       databaseFilename: join(directory, "alaya.db"),
       workerUrl: pathToFileURL(workerPath),
+      workerCount: 1,
       requestTimeoutMs: 5
     });
 

@@ -97,6 +97,9 @@ function createDependencies(params: {
   readonly projectMappings?: readonly ProjectMappingAnchor[];
   readonly graphSupportPort?: RecallServiceDependencies["graphSupportPort"];
   readonly findByWorkspaceId?: RecallServiceDependencies["memoryRepo"]["findByWorkspaceId"];
+  readonly findRecallTierWindow?: NonNullable<
+    RecallServiceDependencies["memoryRepo"]["findRecallTierWindow"]
+  >;
   readonly warn?: RecallServiceDependencies["warn"];
 } = {}): {
   readonly dependencies: RecallServiceDependencies;
@@ -128,6 +131,9 @@ function createDependencies(params: {
       generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
       memoryRepo: {
         findByWorkspaceId: findByWorkspaceIdSpy,
+        ...(params.findRecallTierWindow === undefined
+          ? {}
+          : { findRecallTierWindow: vi.fn(params.findRecallTierWindow) }),
         findByDimension: vi.fn(async () => []),
         findByScopeClass: vi.fn(async () => [])
       },
@@ -259,6 +265,34 @@ describe("RecallService tier cascade", () => {
     expect(hotCalls).toHaveLength(2);
     expect(hotCalls[0]?.[2]).toEqual({ limit: 512, offset: 0 });
     expect(hotCalls[1]?.[2]).toEqual({ limit: 512, offset: 512 });
+  }, 30_000);
+
+  it("loads the bounded recall tier window in one repo call when supported", async () => {
+    const hot = Array.from({ length: 600 }, (_, index) =>
+      createMemoryEntry({
+        object_id: `hot-${String(index).padStart(3, "0")}`,
+        activation_score: 0.9 - index * 0.001
+      })
+    );
+    const findRecallTierWindow = vi.fn(async () => ({
+      memories: hot,
+      next_cursor: null,
+      truncated: false
+    }));
+
+    const { result, findByWorkspaceIdSpy } = await recallWith({
+      hot,
+      findRecallTierWindow
+    });
+
+    expect(result.candidates.length).toBeGreaterThan(0);
+    expect(findRecallTierWindow).toHaveBeenCalledTimes(1);
+    expect(findRecallTierWindow).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      tier: StorageTier.HOT,
+      limit: 102_400
+    });
+    expect(findByWorkspaceIdSpy).not.toHaveBeenCalled();
   }, 30_000);
 
   it("stops a HOT tier scan when the page source keeps returning full unique pages", async () => {

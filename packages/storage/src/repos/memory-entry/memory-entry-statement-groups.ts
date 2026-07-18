@@ -5,6 +5,10 @@ import {
   type SqlDefinitionMap,
   type SqliteStatement
 } from "./statement-group-utils.js";
+import {
+  prepareRecallTierWindowStatements,
+  type RecallTierWindowStatements
+} from "./recall/recall-tier-window-statements.js";
 
 export interface MemoryEntryCreateStatements {
   readonly createStatement: SqliteStatement;
@@ -15,7 +19,7 @@ export interface MemoryEntryEvidenceRefIndexStatements {
   readonly insertEvidenceRefStatement: SqliteStatement;
 }
 
-export interface MemoryEntryReadStatements {
+interface MemoryEntryBaseReadStatements {
   readonly findByIdStatement: SqliteStatement;
   readonly findByWorkspaceHotStatement: SqliteStatement;
   readonly findByWorkspaceHotPagedStatement: SqliteStatement;
@@ -42,15 +46,19 @@ export interface MemoryEntryReadStatements {
   readonly countByScopeClassAndDimensionHotConflictStatement: SqliteStatement;
 }
 
+export interface MemoryEntryReadStatements
+  extends MemoryEntryBaseReadStatements,
+    RecallTierWindowStatements {}
+
 export interface MemoryEntryUpdateStatements {
   readonly updateStatement: SqliteStatement;
   readonly updateScopedStatement: SqliteStatement;
 }
 
-export interface MemoryEntrySearchStatements {
-  readonly searchByKeywordStatement: SqliteStatement;
-  readonly searchByKeywordPorterStatement: SqliteStatement;
-}
+export {
+  prepareMemoryEntrySearchStatements,
+  type MemoryEntrySearchStatements
+} from "./search/search-statements.js";
 
 export interface MemoryEntryLifecycleStatements {
   readonly findLowActivityActiveMemoriesStatement: SqliteStatement;
@@ -137,7 +145,7 @@ const MEMORY_ENTRY_EVIDENCE_REF_INDEX_SQL: SqlDefinitionMap<MemoryEntryEvidenceR
     `
 };
 
-const MEMORY_ENTRY_READ_SQL: SqlDefinitionMap<MemoryEntryReadStatements> = {
+const MEMORY_ENTRY_READ_SQL: SqlDefinitionMap<MemoryEntryBaseReadStatements> = {
   findByIdStatement: `
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
       FROM memory_entries
@@ -343,37 +351,6 @@ const MEMORY_ENTRY_UPDATE_SQL: SqlDefinitionMap<MemoryEntryUpdateStatements> = {
     `
 };
 
-const MEMORY_ENTRY_SEARCH_SQL: SqlDefinitionMap<MemoryEntrySearchStatements> = {
-  searchByKeywordStatement: `
-      SELECT
-        memory_content_fts.object_id,
-        bm25(memory_content_fts) AS raw_rank
-      FROM memory_content_fts
-      JOIN memory_entries ON memory_entries.object_id = memory_content_fts.object_id
-      WHERE
-        memory_content_fts.workspace_id = ?
-        AND memory_content_fts MATCH ?
-        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-      ORDER BY raw_rank ASC, memory_content_fts.object_id ASC
-      LIMIT ?
-    `,
-  searchByKeywordPorterStatement: `
-      SELECT
-        memory_content_fts_porter.object_id,
-        bm25(memory_content_fts_porter) AS raw_rank
-      FROM memory_content_fts_porter
-      JOIN memory_entries ON memory_entries.object_id = memory_content_fts_porter.object_id
-      WHERE
-        memory_content_fts_porter.workspace_id = ?
-        AND memory_content_fts_porter MATCH ?
-        AND COALESCE(memory_entries.retention_state, '') != 'tombstoned'
-        AND COALESCE(memory_entries.lifecycle_state, '') != 'dormant'
-      ORDER BY raw_rank ASC, memory_content_fts_porter.object_id ASC
-      LIMIT ?
-    `
-};
-
 const MEMORY_ENTRY_LIFECYCLE_SQL: SqlDefinitionMap<MemoryEntryLifecycleStatements> = {
   findLowActivityActiveMemoriesStatement: `
       SELECT${MEMORY_ENTRY_SELECT_COLUMNS}
@@ -477,19 +454,16 @@ export function prepareMemoryEntryEvidenceRefIndexStatements(
 }
 
 export function prepareMemoryEntryReadStatements(db: StorageDatabase): MemoryEntryReadStatements {
-  return prepareStatementGroup(db, MEMORY_ENTRY_READ_SQL);
+  return {
+    ...prepareStatementGroup(db, MEMORY_ENTRY_READ_SQL),
+    ...prepareRecallTierWindowStatements(db)
+  };
 }
 
 export function prepareMemoryEntryUpdateStatements(
   db: StorageDatabase
 ): MemoryEntryUpdateStatements {
   return prepareStatementGroup(db, MEMORY_ENTRY_UPDATE_SQL);
-}
-
-export function prepareMemoryEntrySearchStatements(
-  db: StorageDatabase
-): MemoryEntrySearchStatements {
-  return prepareStatementGroup(db, MEMORY_ENTRY_SEARCH_SQL);
 }
 
 export function prepareMemoryEntryLifecycleStatements(

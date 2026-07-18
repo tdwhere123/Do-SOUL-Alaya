@@ -41,6 +41,10 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
     temporalProjectionSelected: input.temporalProjectionSelected === true,
     warn: input.warn
   });
+  const recallReadWorkerReady = recallReadWorkerClient?.ready() ?? Promise.resolve();
+  // Startup work intentionally overlaps readiness, so attach rejection handling
+  // now and still await the original promise before exposing the runtime.
+  void recallReadWorkerReady.catch(() => undefined);
 
   try {
     const recallReadRuntime = createRecallReadRuntime(
@@ -52,6 +56,7 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
       input,
       recallReadRuntime
     );
+    await recallReadWorkerReady;
 
     return buildRecallMaterializationWiringResult(
       globalMemoryRuntime,

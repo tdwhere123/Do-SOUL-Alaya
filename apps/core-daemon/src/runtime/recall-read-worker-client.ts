@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
-import { fileURLToPath } from "node:url";
 import type {
   MemoryDimension,
   PathAnchorRef,
@@ -10,6 +8,7 @@ import type {
 import type {
   KeywordSearchBatchQuery,
   RecallMemoryListPageOptions,
+  RecallServiceActiveConstraintsPort,
   RecallServiceEvidenceSearchPort,
   RecallServiceMemoryRepoPort,
   RecallServicePathExpansionPort,
@@ -17,48 +16,23 @@ import type {
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
 import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
+import type {
+  RecallReadWorkerOperation,
+  RecallReadWorkerRequest,
+  RecallReadWorkerResponse
+} from "./recall-read-worker/protocol.js";
+import {
+  isPathAffinityOperation,
+  isRecallReadWorkerResponse,
+  normalizeRequestTimeoutMs,
+  normalizeWorkerCount,
+  resolveDefaultWorkerUrl
+} from "./recall-read-worker/client-config.js";
+import { createTierWindowChunkConsumer } from "./recall-read-worker/tier-window-client.js";
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-const REQUEST_TIMEOUT_ENV = "ALAYA_RECALL_READ_WORKER_REQUEST_TIMEOUT_MS";
-
-export type RecallReadWorkerOperation =
-  | "memory.findByWorkspaceId"
-  | "memory.findByDimension"
-  | "memory.findByScopeClass"
-  | "memory.searchByKeyword"
-  | "memory.searchByKeywordWithinObjectIds"
-  | "memory.searchManyByKeywordWithinObjectIds"
-  | "memory.searchByAnchorWithinObjectIds"
-  | "memory.findByEvidenceRefs"
-  | "memory.findByIds"
-  | "evidence.searchByKeyword"
-  | "evidence.searchManyByKeyword"
-  | "evidence.findByIds"
-  | "evidence.findSourceAnchorsByIds"
-  | "synthesis.searchByKeyword"
-  | "synthesis.findByIds"
-  | "path.findByAnchors"
-  | "path.findByTimeConcernWindowDigests"
-  | "pathPlasticity.getStrengthByMemoryId"
-  | "close";
-
-export interface RecallReadWorkerRequest {
-  readonly id: number;
-  readonly operation: RecallReadWorkerOperation;
-  readonly payload: unknown;
-}
-
-export type RecallReadWorkerResponse =
-  | Readonly<{ readonly id: number; readonly ok: true; readonly result: unknown }>
-  | Readonly<{
-      readonly id: number;
-      readonly ok: false;
-      readonly error: Readonly<{
-        readonly name: string;
-        readonly message: string;
-        readonly stack?: string;
-      }>;
-    }>;
+type TierWindowReader = NonNullable<RecallServiceMemoryRepoPort["findRecallTierWindow"]>;
+type TierWindowResult = Awaited<ReturnType<TierWindowReader>>;
+type SuccessConsumption = Readonly<{ readonly done: boolean; readonly value?: unknown }>;
 
 export interface RecallReadWorkerClient {
   readonly memoryRepo: RecallServiceMemoryRepoPort;
@@ -66,6 +40,8 @@ export interface RecallReadWorkerClient {
   readonly synthesisSearchPort: RecallServiceSynthesisSearchPort;
   readonly pathExpansionPort: RecallServicePathExpansionPort;
   readonly pathPlasticityPort: RecallServicePathPlasticityPort;
+  readonly activeConstraintsPort: RecallServiceActiveConstraintsPort;
+  ready(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -73,6 +49,7 @@ export function createRecallReadWorkerClient(input: {
   readonly databaseFilename: string;
   readonly temporalProjectionSelected?: boolean;
   readonly workerUrl?: URL;
+  readonly workerCount?: number;
   readonly requestTimeoutMs?: number;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): RecallReadWorkerClient | null {
@@ -96,12 +73,13 @@ export function createRecallReadWorkerClient(input: {
 }
 
 class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
-  private worker: Worker | null = null;
+  private readonly workers: (Worker | null)[];
   private readonly databaseFilename: string;
   private readonly requestTimeoutMs: number;
   private readonly temporalProjectionSelected: boolean;
   private readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   private readonly workerUrl: URL;
+  private nextWorkerIndex = 0;
   private nextRequestId = 1;
   private readonly pending = new Map<
     number,
@@ -109,13 +87,22 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       readonly resolve: (value: unknown) => void;
       readonly reject: (error: unknown) => void;
       readonly timeout: ReturnType<typeof setTimeout>;
+      readonly worker: Worker;
+      readonly consumeSuccess?: (value: unknown) => SuccessConsumption;
     }
   >();
-  private requestTail: Promise<unknown> = Promise.resolve();
   private closed = false;
   private closeStarted = false;
+  private closePromise: Promise<void> | null = null;
+  private readyPromise: Promise<void> | null = null;
 
   public readonly memoryRepo: RecallServiceMemoryRepoPort = {
+    findRecallTierWindow: async (query) =>
+      await this.dispatch<TierWindowResult>(
+        "memory.findRecallTierWindow",
+        query,
+        createTierWindowChunkConsumer()
+      ),
     findByWorkspaceId: async (
       workspaceId: string,
       tier?: StorageTier,
@@ -144,6 +131,17 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         limit,
         objectIds
       }),
+    searchByKeywordWithinTier: async (
+      workspaceId: string,
+      queryText: string,
+      limit: number,
+      tier: StorageTier
+    ) => await this.request("memory.searchByKeywordWithinTier", {
+      workspaceId,
+      queryText,
+      limit,
+      tier
+    }),
     searchManyByKeywordWithinObjectIds: async (
       workspaceId: string,
       queries: readonly Readonly<KeywordSearchBatchQuery>[],
@@ -168,6 +166,19 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         limit,
         objectIds
       }),
+    searchByAnchorWithinTier: async (
+      workspaceId: string,
+      anchorTokens: readonly string[],
+      optionalTokens: readonly string[],
+      limit: number,
+      tier: StorageTier
+    ) => await this.request("memory.searchByAnchorWithinTier", {
+      workspaceId,
+      anchorTokens,
+      optionalTokens,
+      limit,
+      tier
+    }),
     findByEvidenceRefs: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
       await this.request("memory.findByEvidenceRefs", { workspaceId, evidenceObjectIds }),
     findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
@@ -231,10 +242,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
   };
 
+  public readonly activeConstraintsPort: RecallServiceActiveConstraintsPort = {
+    findActiveConstraints: async ({ workspaceId, cap, asOf }) =>
+      await this.request("constraints.findActive", { workspaceId, cap, asOf })
+  };
+
   public constructor(input: {
     readonly databaseFilename: string;
     readonly temporalProjectionSelected?: boolean;
     readonly workerUrl: URL;
+    readonly workerCount?: number;
     readonly requestTimeoutMs?: number;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
@@ -243,10 +260,20 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     this.temporalProjectionSelected = input.temporalProjectionSelected === true;
     this.warn = input.warn;
     this.workerUrl = input.workerUrl;
-    this.worker = this.spawnWorker();
+    const workerCount = normalizeWorkerCount(input.workerCount);
+    this.workers = Array.from({ length: workerCount }, () => null);
+    this.workers[0] = this.spawnWorker(0);
   }
 
-  private spawnWorker(): Worker {
+  public async ready(): Promise<void> {
+    if (this.readyPromise === null) {
+      const worker = this.workers[0] ?? this.requireWorker("ready");
+      this.readyPromise = this.dispatchToWorker(worker, "ready", {}).then(() => undefined);
+    }
+    await this.readyPromise;
+  }
+
+  private spawnWorker(index: number): Worker {
     const worker = new Worker(this.workerUrl, {
       execArgv: process.execArgv.filter((arg) => !arg.startsWith("--input-type")),
       workerData: {
@@ -255,46 +282,50 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       }
     });
     worker.on("message", (message: unknown) => {
-      if (this.worker === worker) {
-        this.handleMessage(message);
+      if (this.workers[index] === worker) {
+        this.handleMessage(worker, message);
       }
     });
     worker.on("error", (error) => {
       this.warn?.("recall read worker failed", {
         error: error instanceof Error ? error.message : String(error)
       });
-      this.recoverWorker(worker, error);
+      this.recoverWorker(index, worker, error);
     });
     worker.on("exit", (code) => {
-      if (this.worker !== worker || this.closeStarted) {
+      if (this.workers[index] !== worker || this.closeStarted) {
         return;
       }
       const error = new Error(`recall read worker exited with code ${code}`);
       this.warn?.("recall read worker exited unexpectedly", { code });
-      this.recoverWorker(worker, error);
+      this.recoverWorker(index, worker, error);
     });
     return worker;
   }
 
   public async close(): Promise<void> {
-    if (this.closeStarted) {
-      return;
-    }
+    this.closePromise ??= this.closeOnce();
+    await this.closePromise;
+  }
+
+  private async closeOnce(): Promise<void> {
     this.closeStarted = true;
     try {
-      if (!this.closed && this.worker !== null) {
-        try {
-          await this.request("close", {});
-        } catch {
-          // close is best-effort; terminate below is the bounded cleanup path.
-        }
+      if (!this.closed) {
+        await Promise.all(this.workers.map(async (worker) => {
+          if (worker === null) return;
+          try {
+            await this.dispatchToWorker(worker, "close", {});
+          } catch {
+            // close is best-effort; terminate below is the bounded cleanup path.
+          }
+        }));
       }
     } finally {
       this.closed = true;
       this.rejectPending(new Error("recall read worker closed"));
-      const worker = this.worker;
-      this.worker = null;
-      if (worker !== null) await worker.terminate();
+      const workers = this.workers.splice(0, this.workers.length);
+      await Promise.all(workers.map(async (worker) => await worker?.terminate()));
     }
   }
 
@@ -305,11 +336,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     if (this.closed) {
       throw new Error("recall read worker is closed");
     }
-    const run = this.requestTail
-      .catch(() => undefined)
-      .then(async () => await this.dispatch<T>(operation, payload));
-    this.requestTail = run.catch(() => undefined);
-    return await run;
+    return await this.dispatch<T>(operation, payload);
   }
 
   private pathReadOptions(
@@ -323,12 +350,22 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
 
   private async dispatch<T>(
     operation: RecallReadWorkerOperation,
-    payload: unknown
+    payload: unknown,
+    consumeSuccess?: (value: unknown) => SuccessConsumption
   ): Promise<T> {
     if (this.closed && operation !== "close") {
       throw new Error("recall read worker is closed");
     }
-    const worker = this.requireWorker();
+    const worker = this.requireWorker(operation);
+    return await this.dispatchToWorker<T>(worker, operation, payload, consumeSuccess);
+  }
+
+  private async dispatchToWorker<T>(
+    worker: Worker,
+    operation: RecallReadWorkerOperation,
+    payload: unknown,
+    consumeSuccess?: (value: unknown) => SuccessConsumption
+  ): Promise<T> {
     const id = this.nextRequestId;
     this.nextRequestId += 1;
     return await new Promise<T>((resolve, reject) => {
@@ -342,7 +379,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
           `recall read worker ${operation} timed out after ${this.requestTimeoutMs}ms`
         );
         pending.reject(error);
-        this.recoverWorker(worker, error);
+        this.recoverWorker(this.workers.indexOf(worker), worker, error);
       }, this.requestTimeoutMs);
       this.pending.set(id, {
         resolve: (value) => {
@@ -353,7 +390,9 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
           clearTimeout(timeout);
           reject(error);
         },
-        timeout
+        timeout,
+        worker,
+        ...(consumeSuccess === undefined ? {} : { consumeSuccess })
       });
       try {
         worker.postMessage({ id, operation, payload } satisfies RecallReadWorkerRequest);
@@ -365,41 +404,56 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
         } else {
           pending.reject(error);
         }
-        this.recoverWorker(worker, error);
+        this.recoverWorker(this.workers.indexOf(worker), worker, error);
       }
     });
   }
 
-  private requireWorker(): Worker {
-    if (this.worker !== null) return this.worker;
+  private requireWorker(operation: RecallReadWorkerOperation): Worker {
     if (this.closed || this.closeStarted) {
       throw new Error("recall read worker is closed");
     }
-    const worker = this.spawnWorker();
-    this.worker = worker;
+    const index = isPathAffinityOperation(operation)
+      ? 0
+      : this.nextWorkerIndex++ % this.workers.length;
+    const existing = this.workers[index] ?? null;
+    if (existing !== null) return existing;
+    const worker = this.spawnWorker(index);
+    this.workers[index] = worker;
     return worker;
   }
 
-  private recoverWorker(worker: Worker, error: unknown): void {
-    if (this.worker !== worker || this.closed) return;
-    this.worker = null;
-    this.rejectPending(error);
+  private recoverWorker(index: number, worker: Worker, error: unknown): void {
+    if (index < 0 || this.workers[index] !== worker || this.closed) return;
+    this.workers[index] = null;
+    this.rejectPendingForWorker(worker, error);
     void worker.terminate().catch(() => undefined);
   }
 
-  private handleMessage(message: unknown): void {
+  private handleMessage(worker: Worker, message: unknown): void {
     if (!isRecallReadWorkerResponse(message)) {
       return;
     }
     const pending = this.pending.get(message.id);
-    if (pending === undefined) {
+    if (pending === undefined || pending.worker !== worker) {
+      return;
+    }
+    if (message.ok) {
+      let consumed: SuccessConsumption | undefined;
+      try {
+        consumed = pending.consumeSuccess?.(message.result);
+      } catch (error) {
+        this.pending.delete(message.id);
+        pending.reject(error);
+        this.recoverWorker(this.workers.indexOf(worker), worker, error);
+        return;
+      }
+      if (consumed !== undefined && !consumed.done) return;
+      this.pending.delete(message.id);
+      pending.resolve(consumed?.value ?? message.result);
       return;
     }
     this.pending.delete(message.id);
-    if (message.ok) {
-      pending.resolve(message.result);
-      return;
-    }
     const error = new Error(message.error.message);
     error.name = message.error.name;
     if (message.error.stack !== undefined) {
@@ -415,38 +469,17 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }
     this.pending.clear();
   }
-}
 
-function normalizeRequestTimeoutMs(value: number | undefined): number {
-  const fromEnv = value ?? Number(process.env[REQUEST_TIMEOUT_ENV]);
-  if (Number.isFinite(fromEnv) && fromEnv > 0) {
-    return Math.trunc(fromEnv);
+  private rejectPendingForWorker(worker: Worker, error: unknown): void {
+    for (const [id, pending] of this.pending.entries()) {
+      if (pending.worker !== worker) continue;
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
   }
-  return DEFAULT_REQUEST_TIMEOUT_MS;
-}
-
-function resolveDefaultWorkerUrl(): URL | null {
-  const sibling = new URL("./recall-read-worker.js", import.meta.url);
-  if (existsSync(fileURLToPath(sibling))) {
-    return sibling;
-  }
-
-  const builtFromSource = new URL("../../dist/runtime/recall-read-worker.js", import.meta.url);
-  if (existsSync(fileURLToPath(builtFromSource))) {
-    return builtFromSource;
-  }
-
-  return null;
 }
 
 function isSourceRuntimeUrl(url: string): boolean {
   return url.includes("/src/runtime/");
-}
-
-function isRecallReadWorkerResponse(value: unknown): value is RecallReadWorkerResponse {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const record = value as { readonly id?: unknown; readonly ok?: unknown };
-  return typeof record.id === "number" && typeof record.ok === "boolean";
 }

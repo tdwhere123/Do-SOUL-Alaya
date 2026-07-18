@@ -154,6 +154,32 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
     ]);
   });
 
+  it("scopes keyword search by storage tier without an object-id list", async () => {
+    const { repo } = await createRepo();
+    await repo.create(createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      content: "Scoped recall needle in hot memory.",
+      storage_tier: "hot"
+    }));
+    await repo.create(createMemoryEntry({
+      object_id: "22222222-2222-4222-8222-222222222222",
+      run_id: "run-2",
+      content: "Scoped recall needle in warm memory.",
+      storage_tier: "warm"
+    }));
+
+    await expect(
+      repo.searchByKeywordWithinTier!("workspace-1", "needle", 5, "hot")
+    ).resolves.toEqual([
+      expect.objectContaining({ object_id: "11111111-1111-4111-8111-111111111111" })
+    ]);
+    await expect(
+      repo.searchByKeywordWithinTier!("workspace-1", "needle", 5, "warm")
+    ).resolves.toEqual([
+      expect.objectContaining({ object_id: "22222222-2222-4222-8222-222222222222" })
+    ]);
+  });
+
   it("finds short-token keyword matches beyond the first exact-scan batch", async () => {
     const { repo } = await createRepo();
     for (let index = 0; index < 205; index += 1) {

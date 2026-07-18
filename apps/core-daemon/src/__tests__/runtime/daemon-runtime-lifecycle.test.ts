@@ -112,6 +112,15 @@ describe("createDaemonLifecycleControls", () => {
     );
   });
 
+  it("starts a persistent HTTP listener with an explicit operator-owned token", async () => {
+    const { controls } = createControls("env");
+
+    const server = await controls.startHttpServer({ port: 0 });
+
+    expect(server.port).toBeGreaterThanOrEqual(0);
+    await server.close();
+  });
+
   it("allows managed ephemeral request tokens when explicitly requested", async () => {
     const { controls, warn } = createControls("ephemeral");
 

@@ -50,6 +50,17 @@ export interface RecallMemoryListPageOptions {
   readonly offset: number;
 }
 
+export interface RecallTierWindowCursor {
+  readonly created_at: string;
+  readonly object_id: string;
+}
+
+export interface RecallTierWindowResult {
+  readonly memories: readonly Readonly<MemoryEntry>[];
+  readonly next_cursor: Readonly<RecallTierWindowCursor> | null;
+  readonly truncated: boolean;
+}
+
 export interface RecallEvidenceSourceAnchor {
   readonly evidence_object_id: string;
   readonly artifact_ref: string;
@@ -61,6 +72,12 @@ export interface RecallServiceMemoryRepoPort {
     tier?: StorageTierType,
     page?: RecallMemoryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findRecallTierWindow?(query: Readonly<{
+    readonly workspaceId: string;
+    readonly tier: StorageTierType;
+    readonly limit: number;
+    readonly cursor?: Readonly<RecallTierWindowCursor>;
+  }>): Promise<Readonly<RecallTierWindowResult>>;
   findByDimension(workspaceId: string, dimension: MemoryDimensionType): Promise<readonly Readonly<MemoryEntry>[]>;
   findByScopeClass(workspaceId: string, scopeClass: ScopeClass): Promise<readonly Readonly<MemoryEntry>[]>;
   searchByKeyword?(workspaceId: string, queryText: string, limit: number): Promise<readonly KeywordSearchResult[]>;
@@ -69,6 +86,12 @@ export interface RecallServiceMemoryRepoPort {
     queryText: string,
     limit: number,
     objectIds: readonly string[]
+  ): Promise<readonly KeywordSearchResult[]>;
+  searchByKeywordWithinTier?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    tier: StorageTierType
   ): Promise<readonly KeywordSearchResult[]>;
   searchManyByKeywordWithinObjectIds?(
     workspaceId: string,
@@ -81,6 +104,13 @@ export interface RecallServiceMemoryRepoPort {
     optionalTokens: readonly string[],
     limit: number,
     objectIds: readonly string[]
+  ): Promise<readonly KeywordSearchResult[]>;
+  searchByAnchorWithinTier?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    tier: StorageTierType
   ): Promise<readonly KeywordSearchResult[]>;
   // Admits memories whose distilled content lost keywords but whose EvidenceCapsule.gist still matches. see also: 068-evidence-capsule-fts.sql.
   findByEvidenceRefs?(

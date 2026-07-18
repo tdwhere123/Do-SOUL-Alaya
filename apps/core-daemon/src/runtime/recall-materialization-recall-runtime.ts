@@ -84,7 +84,9 @@ export function createRecallSearchRuntime(
     recallMemoryRepo: recallReadWorkerClient?.memoryRepo ?? input.memoryEntryRepo,
     recallEvidenceSearchPort: createRecallEvidenceSearchPort(input, recallReadWorkerClient),
     recallSynthesisSearchPort: createRecallSynthesisSearchPort(input, recallReadWorkerClient),
-    recallActiveConstraintsPort: createRecallActiveConstraintsPort(input, directPathReadPorts)
+    recallActiveConstraintsPort:
+      recallReadWorkerClient?.activeConstraintsPort
+      ?? createRecallActiveConstraintsPort(input, directPathReadPorts)
   };
 }
 

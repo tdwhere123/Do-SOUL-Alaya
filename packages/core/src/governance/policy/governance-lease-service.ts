@@ -19,6 +19,7 @@ import { CoreError } from "../../shared/errors.js";
 import { SYSTEM_ACTOR } from "../../shared/actors.js";
 import { addDuration, isExpired, readNow } from "../../shared/time.js";
 import { normalizeOptionalNonEmptyString, parseNonEmptyString } from "../../shared/validators.js";
+import { EventLogBackedCache } from "../cache/event-log-backed-cache.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "./run-workspace-guard.js";
 
 const LEASE_DURATION_MS = 5 * 60 * 1000;
@@ -59,9 +60,7 @@ export interface GovernanceLeaseServiceDependencies {
  * reconstructed after daemon restart.
  */
 export class GovernanceLeaseService {
-  private readonly store = new Map<string, StoredLease>();
-  private readonly pendingLoads = new Map<string, Promise<StoredLease | null>>();
-  private readonly cacheVersions = new Map<string, number>();
+  private readonly cache = new EventLogBackedCache<StoredLease>();
   private readonly generateRuntimeId: () => string;
 
   public constructor(private readonly dependencies: GovernanceLeaseServiceDependencies) {
@@ -110,8 +109,7 @@ export class GovernanceLeaseService {
       })
     });
 
-    this.bumpCacheVersion(runId);
-    this.store.set(runId, { lease, workspaceId });
+    this.cache.set(runId, { lease, workspaceId });
     return lease;
   }
 
@@ -120,9 +118,7 @@ export class GovernanceLeaseService {
     const active = await this.resolveStoredLease(parsedRunId);
 
     if (active === null) {
-      this.bumpCacheVersion(parsedRunId);
-      this.store.delete(parsedRunId);
-      this.clearCacheMetadataIfIdle(parsedRunId);
+      this.cache.delete(parsedRunId);
       return;
     }
 
@@ -141,9 +137,7 @@ export class GovernanceLeaseService {
       })
     });
 
-    this.bumpCacheVersion(parsedRunId);
-    this.store.delete(parsedRunId);
-    this.clearCacheMetadataIfIdle(parsedRunId);
+    this.cache.delete(parsedRunId);
   }
 
   public async pierce(params: {
@@ -178,9 +172,7 @@ export class GovernanceLeaseService {
       })
     });
 
-    this.bumpCacheVersion(runId);
-    this.store.delete(runId);
-    this.clearCacheMetadataIfIdle(runId);
+    this.cache.delete(runId);
   }
 
   public async isHeld(runId: string): Promise<boolean> {
@@ -202,34 +194,19 @@ export class GovernanceLeaseService {
   }
 
   private clearExpiredAt(referenceTime: string): void {
-    for (const [runId, stored] of this.store.entries()) {
-      if (isExpired(stored.lease.expires_at, referenceTime)) {
-        this.bumpCacheVersion(runId);
-        this.store.delete(runId);
-        this.clearCacheMetadataIfIdle(runId);
-      }
+    for (const [runId] of this.cache.entries()) {
+      this.cache.refresh(runId, (stored) => this.activeLeaseOrUndefined(stored, referenceTime));
     }
   }
 
   private async resolveStoredLease(runId: string): Promise<StoredLease | null> {
     const referenceTime = readNow(this.dependencies.now);
-    const cached = this.store.get(runId) ?? null;
-
-    if (cached !== null) {
-      return this.resolveCachedLease(runId, cached, referenceTime);
-    }
-
-    const pending = this.pendingLoads.get(runId);
-
-    if (pending !== undefined) {
-      return pending;
-    }
-
-    const versionBeforeLoad = this.getCacheVersion(runId);
-    const loadPromise = this.createLoadPromise(runId, referenceTime, versionBeforeLoad);
-
-    this.pendingLoads.set(runId, loadPromise);
-    return loadPromise;
+    const resolved = await this.cache.resolve(
+      runId,
+      async () => (await this.rehydrateFromEventLog(runId)) ?? undefined,
+      (stored) => this.activeLeaseOrUndefined(stored, referenceTime)
+    );
+    return resolved ?? null;
   }
 
   private async rehydrateFromEventLog(runId: string): Promise<StoredLease | null> {
@@ -257,68 +234,14 @@ export class GovernanceLeaseService {
     return active;
   }
 
-  private getCacheVersion(runId: string): number {
-    return this.cacheVersions.get(runId) ?? 0;
-  }
-
-  private bumpCacheVersion(runId: string): void {
-    this.cacheVersions.set(runId, this.getCacheVersion(runId) + 1);
-  }
-
-  private resolveCachedLease(
-    runId: string,
+  private activeLeaseOrUndefined(
     cached: StoredLease,
     referenceTime: string
-  ): StoredLease | null {
+  ): StoredLease | undefined {
     if (!isExpired(cached.lease.expires_at, referenceTime)) {
       return cached;
     }
-
-    this.bumpCacheVersion(runId);
-    this.store.delete(runId);
-    this.clearCacheMetadataIfIdle(runId);
-    return null;
-  }
-
-  private createLoadPromise(
-    runId: string,
-    referenceTime: string,
-    versionBeforeLoad: number
-  ): Promise<StoredLease | null> {
-    const loadPromise = this.rehydrateFromEventLog(runId)
-      .then((rehydrated) => this.finishLeaseLoad(runId, referenceTime, versionBeforeLoad, rehydrated))
-      .finally(() => {
-        if (this.pendingLoads.get(runId) === loadPromise) {
-          this.pendingLoads.delete(runId);
-        }
-        this.clearCacheMetadataIfIdle(runId);
-      });
-    return loadPromise;
-  }
-
-  private finishLeaseLoad(
-    runId: string,
-    referenceTime: string,
-    versionBeforeLoad: number,
-    rehydrated: StoredLease | null
-  ): StoredLease | null {
-    const normalized =
-      rehydrated !== null && isExpired(rehydrated.lease.expires_at, referenceTime)
-        ? null
-        : rehydrated;
-    if (this.getCacheVersion(runId) !== versionBeforeLoad) {
-      return this.store.get(runId) ?? null;
-    }
-
-    const cachedAfterLoad = this.store.get(runId) ?? null;
-    if (cachedAfterLoad !== null) {
-      return cachedAfterLoad;
-    }
-
-    if (normalized !== null) {
-      this.store.set(runId, normalized);
-    }
-    return normalized;
+    return undefined;
   }
 
   private applyPersistedLeaseEvent(
@@ -381,11 +304,6 @@ export class GovernanceLeaseService {
     return active?.lease.lease_id === parsed.lease_id ? null : active;
   }
 
-  private clearCacheMetadataIfIdle(runId: string): void {
-    if (!this.store.has(runId) && !this.pendingLoads.has(runId)) {
-      this.cacheVersions.delete(runId);
-    }
-  }
 }
 
 interface StoredLease {

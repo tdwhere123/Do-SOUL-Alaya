@@ -54,6 +54,16 @@ function collectPrefixedEnv(
   return Object.freeze(out);
 }
 
+function collectRecallSemanticEnv(
+  env: Readonly<Record<string, string | undefined>>
+): Readonly<Record<string, string | undefined>> {
+  return Object.freeze({
+    ...collectPrefixedEnv(env, CORE_CONFIG_ENV_PREFIXES.recallSemantic),
+    ALAYA_RECALL_ANCHOR_LANE: env.ALAYA_RECALL_ANCHOR_LANE,
+    ALAYA_RECALL_SUBQUERY: env.ALAYA_RECALL_SUBQUERY
+  });
+}
+
 export function parseRecallRuntimeConfigFromEnv(
   env: Readonly<Record<string, string | undefined>>
 ): RecallRuntimeConfig {
@@ -73,9 +83,6 @@ export function parseRecallRuntimeConfigFromEnv(
     intentV2: /^(?:1|true|on|yes)$/iu.test(env[keys.intentV2] ?? ""),
     extraSynonymClusters: env[keys.extraSynonymClusters],
     sessionRoute: yesEnabled(env[keys.sessionRoute]),
-    coarseFilterSemanticFlags: collectPrefixedEnv(
-      env,
-      CORE_CONFIG_ENV_PREFIXES.recallSemantic
-    )
+    coarseFilterSemanticFlags: collectRecallSemanticEnv(env)
   });
 }

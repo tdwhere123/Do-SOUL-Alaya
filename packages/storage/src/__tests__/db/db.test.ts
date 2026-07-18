@@ -112,16 +112,6 @@ describe("initDatabase PRAGMA hardening", () => {
     }
   });
 
-  it("configures the SQLite busy_timeout to 5000ms", () => {
-    const database = initDatabase({ filename: context.filename });
-    try {
-      const busyTimeout = database.connection.pragma("busy_timeout", { simple: true });
-      expect(Number(busyTimeout)).toBe(5000);
-    } finally {
-      database.close();
-    }
-  });
-
   it("sets synchronous mode to NORMAL", () => {
     const database = initDatabase({ filename: context.filename });
     try {

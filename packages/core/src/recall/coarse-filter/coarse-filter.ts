@@ -38,6 +38,8 @@ import {
 const RECALL_TIER_MEMORY_PAGE_SIZE = 512;
 const STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE = 500;
 const MAX_RECALL_TIER_MEMORY_PAGES = 200;
+const MAX_RECALL_TIER_MEMORIES =
+  RECALL_TIER_MEMORY_PAGE_SIZE * MAX_RECALL_TIER_MEMORY_PAGES;
 
 export interface RunCoarseFilterContext {
   readonly dependencies: RecallServiceDependencies;
@@ -58,7 +60,9 @@ export interface RunCoarseFilterOptions {
 }
 
 interface CoarseFilterInput {
+  readonly tier: StorageTier;
   readonly tierMemories: readonly Readonly<MemoryEntry>[];
+  readonly tierScopedSearchEligible: boolean;
   readonly projectMappings: readonly Readonly<ProjectMappingAnchor>[];
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -66,6 +70,11 @@ interface CoarseFilterInput {
   readonly protectedCandidates: readonly Readonly<MemoryEntry>[];
   readonly rankedMatches: readonly Readonly<MemoryEntry>[];
 }
+
+type TierMemoryLoadResult = Readonly<{
+  readonly memories: readonly Readonly<MemoryEntry>[];
+  readonly complete: boolean;
+}>;
 
 function buildMemoryPageSignature(
   page: readonly Readonly<MemoryEntry>[]
@@ -84,12 +93,48 @@ async function loadTierMemoriesForRecall(
   context: RunCoarseFilterContext,
   workspaceId: string,
   tier: StorageTier
-): Promise<readonly Readonly<MemoryEntry>[]> {
+): Promise<TierMemoryLoadResult> {
+  const window = await loadRecallTierWindow(context, workspaceId, tier);
+  return window ?? loadRecallTierPages(context, workspaceId, tier);
+}
+
+async function loadRecallTierWindow(
+  context: RunCoarseFilterContext,
+  workspaceId: string,
+  tier: StorageTier
+): Promise<TierMemoryLoadResult | null> {
+  const loadWindow = context.dependencies.memoryRepo.findRecallTierWindow?.bind(
+    context.dependencies.memoryRepo
+  );
+  if (loadWindow === undefined) return null;
+  const window = await loadWindow({ workspaceId, tier, limit: MAX_RECALL_TIER_MEMORIES });
+  if (window.truncated) {
+    warnMaxRecallMemoryPagesReached(
+      context,
+      workspaceId,
+      tier,
+      STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE,
+      MAX_RECALL_TIER_MEMORY_PAGES,
+      window.memories.length
+    );
+  }
+  return Object.freeze({
+    memories: Object.freeze([...window.memories]),
+    complete: !window.truncated
+  });
+}
+
+async function loadRecallTierPages(
+  context: RunCoarseFilterContext,
+  workspaceId: string,
+  tier: StorageTier
+): Promise<TierMemoryLoadResult> {
   const memories: Readonly<MemoryEntry>[] = [];
   let offset = 0;
   let pageLimit = RECALL_TIER_MEMORY_PAGE_SIZE;
   let previousPageSignature: string | null = null;
   let pagesLoaded = 0;
+  let complete = true;
 
   for (;;) {
     const { pageMemories, effectiveLimit } = await loadTierMemoryPage(context, workspaceId, tier, {
@@ -98,15 +143,13 @@ async function loadTierMemoriesForRecall(
     });
     pageLimit = effectiveLimit;
     pagesLoaded += 1;
-    if (hasOversizedRecallMemoryPage(pageMemories, pageLimit)) {
-      warnOversizedRecallMemoryPage(context, workspaceId, tier, pageLimit, pageMemories.length);
-      memories.push(...pageMemories);
-      break;
-    }
-
     const pageSignature = buildMemoryPageSignature(pageMemories);
-    if (isDuplicateRecallMemoryPage(offset, pageSignature, previousPageSignature)) {
-      warnDuplicateRecallMemoryPage(context, workspaceId, tier, pageLimit, offset);
+    const failure = detectRecallTierPageFailure(context, workspaceId, tier, {
+      pageMemories, pageLimit, offset, pageSignature, previousPageSignature
+    });
+    if (failure !== null) {
+      if (failure === "oversized") memories.push(...pageMemories);
+      complete = false;
       break;
     }
 
@@ -116,13 +159,39 @@ async function loadTierMemoriesForRecall(
     }
     if (pagesLoaded >= MAX_RECALL_TIER_MEMORY_PAGES) {
       warnMaxRecallMemoryPagesReached(context, workspaceId, tier, pageLimit, pagesLoaded, memories.length);
+      complete = false;
       break;
     }
     offset += pageMemories.length;
     previousPageSignature = pageSignature;
   }
 
-  return Object.freeze(memories);
+  return Object.freeze({ memories: Object.freeze(memories), complete });
+}
+
+function detectRecallTierPageFailure(
+  context: RunCoarseFilterContext,
+  workspaceId: string,
+  tier: StorageTier,
+  page: Readonly<{
+    pageMemories: readonly Readonly<MemoryEntry>[];
+    pageLimit: number;
+    offset: number;
+    pageSignature: string | null;
+    previousPageSignature: string | null;
+  }>
+): "oversized" | "duplicate" | null {
+  if (hasOversizedRecallMemoryPage(page.pageMemories, page.pageLimit)) {
+    warnOversizedRecallMemoryPage(
+      context, workspaceId, tier, page.pageLimit, page.pageMemories.length
+    );
+    return "oversized";
+  }
+  if (isDuplicateRecallMemoryPage(page.offset, page.pageSignature, page.previousPageSignature)) {
+    warnDuplicateRecallMemoryPage(context, workspaceId, tier, page.pageLimit, page.offset);
+    return "duplicate";
+  }
+  return null;
 }
 
 function hasOversizedRecallMemoryPage(
@@ -256,7 +325,9 @@ export async function runCoarseFilter(
     config,
     queryText,
     queryProbes,
+    tier: input.tier,
     tierMemories: input.tierMemories,
+    tierScopedSearchEligible: input.tierScopedSearchEligible,
     byId: input.byId,
     deliveryMaxEntries: options.deliveryMaxEntries,
     pathProjectionAsOf: options.pathProjectionAsOf,
@@ -291,11 +362,11 @@ async function loadCoarseFilterInput(
   options: Readonly<RunCoarseFilterOptions>
 ): Promise<CoarseFilterInput> {
   const tier = options.tier ?? StorageTier.HOT;
-  const [rawTierMemories, projectMappings] = await Promise.all([
+  const [tierMemoryLoad, projectMappings] = await Promise.all([
     loadTierMemoriesForRecall(context, workspaceId, tier),
     options.projectMappings ?? context.dependencies.projectMappingPort?.findByWorkspace(workspaceId) ?? Promise.resolve([])
   ]);
-  const tierMemories = filterMemoriesByTimeWindow(rawTierMemories, options.timeFilter);
+  const tierMemories = filterMemoriesByTimeWindow(tierMemoryLoad.memories, options.timeFilter);
   const queryProbes = options.queryProbes ?? compileRecallQueryProbes(queryText);
   const winnerMemoryIds = options.winnerMemoryIds ?? new Set<string>();
   const protectedCandidates = tierMemories.filter((entry) => winnerMemoryIds.has(entry.object_id));
@@ -304,7 +375,9 @@ async function loadCoarseFilterInput(
     (entry) => !protectedIds.has(entry.object_id) && matchesDeterministicFilter(entry, config)
   );
   return Object.freeze({
+    tier,
     tierMemories,
+    tierScopedSearchEligible: tierMemoryLoad.complete && options.timeFilter === undefined,
     projectMappings,
     byId: new Map(tierMemories.map((memory) => [memory.object_id, memory])),
     queryProbes,

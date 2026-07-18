@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   MemoryDimension,
   ScopeClass,
+  ZeroDayPolicySchema,
 } from "@do-soul/alaya-protocol";
+import { ZeroDaySecurityLayer } from "@do-soul/alaya-core";
 
 import {
   createMcpMemoryToolHandler,
@@ -20,6 +22,44 @@ import {
 } from "./mcp-memory-tool-handler-fixture.js";
 
 describe("mcp memory tool handler", () => {
+
+  it("enforces active zero-day deny_tool policy before MCP dispatch", async () => {
+    const deps = createDeps();
+    const zeroDayToolAccess = new ZeroDaySecurityLayer({
+      loadPolicies: async () => [ZeroDayPolicySchema.parse({
+        policy_id: "deny-recall",
+        kind: "deny_tool",
+        target: "soul.recall",
+        reason: "emergency recall hold",
+        effective_at: "2026-04-29T00:00:00.000Z",
+        expires_at: "2026-05-01T00:00:00.000Z"
+      })],
+      now: () => "2026-04-30T00:00:00.000Z"
+    });
+    const handler = createMcpMemoryToolHandler({ ...deps, zeroDayToolAccess });
+
+    const result = await handler.call({
+      toolName: "soul.recall",
+      arguments: {
+        query: "deployment rules",
+        scope_class: null,
+        dimension: null,
+        domain_tags: null,
+        max_results: 3
+      },
+      context
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      tool_name: "soul.recall",
+      error: {
+        code: "VALIDATION",
+        message: "MCP tool soul.recall is denied by active zero-day policy deny-recall."
+      }
+    });
+    expect(deps.recallService.recall).not.toHaveBeenCalled();
+  });
 
   it("routes recall through RecallService and records trust delivery", async () => {
     const deps = createDeps();

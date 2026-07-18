@@ -48,9 +48,10 @@ export function createMcpMemoryToolHandler(deps: McpMemoryToolHandlerDependencie
       if (!hasAlayaMemoryToolName(toolName)) {
         return fail(toolName, "UNKNOWN_TOOL", `Unsupported Alaya memory tool: ${toolName}`);
       }
-      await surfaceRegistrar.ensureAgentSurfaceForCall(context);
 
       try {
+        await deps.zeroDayToolAccess?.enforceToolAccess(context.workspaceId, toolName);
+        await surfaceRegistrar.ensureAgentSurfaceForCall(context);
         return await dispatcher.dispatchToolCall({ toolName, rawArguments, context });
       } catch (error) {
         return fail(toolName, classifyError(error), sanitizeError(error));

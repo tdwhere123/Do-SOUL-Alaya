@@ -14,6 +14,8 @@ import { MemoryEntryConflictReadQueries } from "./memory-entry-conflict-read-que
 import { MemoryEntryDynamicReadQueries } from "./memory-entry-dynamic-read-queries.js";
 import { DEFAULT_MEMORY_ENTRY_PAGE, parseMemoryEntryPage } from "./memory-entry-read-page.js";
 import type { MemoryEntryListPageOptions, MemoryEntryRepoDiagnosticSink } from "./types.js";
+import type { RecallTierWindowQuery, RecallTierWindowResult } from "./types.js";
+import { findRecallTierWindow } from "./recall/recall-tier-window-query.js";
 
 interface CountRow {
   readonly total: number;
@@ -89,6 +91,12 @@ export class MemoryEntryReadQueries {
         error
       );
     }
+  }
+
+  public async findRecallTierWindow(
+    query: RecallTierWindowQuery
+  ): Promise<Readonly<RecallTierWindowResult>> {
+    return findRecallTierWindow(this.statements, query);
   }
 
   public async findByWorkspaceIdAll(

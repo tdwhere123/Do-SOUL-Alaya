@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   RelationAssertionAdmissionSchema,
   RelationAssertionAdmittedPayloadSchema,
@@ -9,10 +8,9 @@ import {
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../shared/stable-stringify.js";
 import {
-  buildTemporalPathProjection,
-  TEMPORAL_RELATION_PROJECTION_POLICY_ID,
-  TEMPORAL_RELATION_PROJECTION_POLICY_SHA256
-} from "./relation-projection-policy.js";
+  buildRelationProjection,
+  sha256RelationAssertionValue as sha256
+} from "./relation-projection-builder.js";
 import type {
   RelationAssertionAdmissionRequest,
   RelationAssertionAdmissionResult,
@@ -24,9 +22,6 @@ import type {
   RelationAssertionServiceDependencies
 } from "./relation-assertion-service-types.js";
 
-const ASSERTION_SCHEMA_GENERATION = "relation_assertion_v1";
-const ASSERTION_EVENT_CONTRACT_GENERATION = "relation_assertion_event_v1";
-const PROJECTION_SCHEMA_GENERATION = "relation_path_projection_v1";
 const ASSERTION_ENTITY_TYPE = "relation_assertion";
 
 /**
@@ -233,61 +228,12 @@ export class RelationAssertionService {
   private buildProjectionInCurrentTransaction(asOf: string): RelationAssertionProjectionResult {
     const assertions = this.dependencies.repo.listAssertionsInCurrentTransaction();
     const resolutions = this.dependencies.repo.listCurrentResolutionsInCurrentTransaction();
-    const resolutionsByAssertion = new Map<string, RelationAssertionResolution[]>();
-    for (const resolution of resolutions) {
-      const current = resolutionsByAssertion.get(resolution.assertion_id) ?? [];
-      current.push(resolution);
-      resolutionsByAssertion.set(resolution.assertion_id, current);
-    }
-    const projections = assertions.flatMap((assertion) => {
-      const projection = buildTemporalPathProjection({
-        assertion,
-        resolutions: resolutionsByAssertion.get(assertion.assertion_id) ?? [],
-        asOf,
-        permittedTimelessPolicyIds: this.permittedTimelessPolicyIds
-      });
-      return projection === null ? [] : [projection];
-    }).sort((left, right) => left.path_id.localeCompare(right.path_id));
-    const historyDigest = sha256(stableStringify({
-      assertions: assertions.map((assertion) => ({
-        assertion_id: assertion.assertion_id,
-        admission_event_id: assertion.admission_event_id,
-        workspace_id: assertion.workspace_id,
-        evidence_ids: assertion.evidence_ids,
-        anchors: assertion.anchors,
-        relation_kind: assertion.relation_kind,
-        validity: assertion.validity,
-        admitted_at: assertion.admitted_at
-      })),
-      resolutions: resolutions.map((resolution) => ({
-        resolution_id: resolution.resolution_id,
-        event_id: resolution.event_id,
-        assertion_id: resolution.assertion_id,
-        workspace_id: resolution.workspace_id,
-        resolution_kind: resolution.resolution_kind,
-        resolved_at: resolution.resolved_at,
-        reason: resolution.reason
-      }))
-    }));
-    const projectionDigest = sha256(stableStringify(projections));
-    const generation = `temporal-${sha256(`${historyDigest}|${asOf}`).slice(0, 48)}`;
-    return {
-      activeProjectionCount: projections.length,
-      nextProjectionRefreshAt: findNextProjectionRefreshAt(assertions, resolutions, asOf),
-      generation: {
-        generation,
-        assertionSchemaGeneration: ASSERTION_SCHEMA_GENERATION,
-        assertionEventContractGeneration: ASSERTION_EVENT_CONTRACT_GENERATION,
-        projectionSchemaGeneration: PROJECTION_SCHEMA_GENERATION,
-        projectionPolicyId: TEMPORAL_RELATION_PROJECTION_POLICY_ID,
-        projectionPolicySha256: TEMPORAL_RELATION_PROJECTION_POLICY_SHA256,
-        historyDigest,
-        asOf,
-        projectionDigest,
-        projections,
-        createdAt: asOf
-      }
-    };
+    return buildRelationProjection(
+      assertions,
+      resolutions,
+      asOf,
+      this.permittedTimelessPolicyIds
+    );
   }
 
   private async verifyEventHistory(
@@ -309,6 +255,7 @@ export class RelationAssertionService {
     }
   }
 }
+
 
 function assertSharedStorageBoundary(dependencies: RelationAssertionServiceDependencies): void {
   const publisherIdentity = dependencies.eventPublisher.getStorageConnectionIdentity?.();
@@ -449,32 +396,6 @@ function verifyResolutionEvent(
   ) {
     throw new Error(`Relation assertion ${resolution.assertion_id} resolution EventLog payload is not canonical.`);
   }
-}
-
-function findNextProjectionRefreshAt(
-  assertions: readonly Readonly<RelationAssertion>[],
-  resolutions: readonly Readonly<RelationAssertionResolution>[],
-  asOf: string
-): string | null {
-  const asOfMs = Date.parse(asOf);
-  let nextMs = Number.POSITIVE_INFINITY;
-  const consider = (timestamp: string): void => {
-    const timestampMs = Date.parse(timestamp);
-    if (timestampMs > asOfMs && timestampMs < nextMs) nextMs = timestampMs;
-  };
-  for (const assertion of assertions) {
-    if (assertion.validity.kind === "open") consider(assertion.validity.valid_from);
-    if (assertion.validity.kind === "bounded") {
-      consider(assertion.validity.valid_from);
-      consider(assertion.validity.valid_to);
-    }
-  }
-  for (const resolution of resolutions) consider(resolution.resolved_at);
-  return Number.isFinite(nextMs) ? new Date(nextMs).toISOString() : null;
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function parseAdmissionPayload(payload: unknown, assertionId: string) {

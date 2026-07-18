@@ -33,6 +33,8 @@ import { createRuntimeNotifier } from "./runtime/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
 
+const DAEMON_MAIN_THREAD_BUSY_TIMEOUT_MS = 250;
+
 export type {
   AlayaDaemonListenOptions,
   AlayaDaemonRuntime,
@@ -95,7 +97,10 @@ async function createRuntimeBootstrapContext() {
   const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);
   let database: ReturnType<typeof initDatabase>;
   try {
-    database = initDatabase({ filename: dbPath });
+    database = initDatabase({
+      filename: dbPath,
+      busyTimeoutMs: DAEMON_MAIN_THREAD_BUSY_TIMEOUT_MS
+    });
   } catch (error) {
     await temporalRuntimeLease.release();
     throw error;
@@ -317,12 +322,38 @@ function buildFinalizeDaemonRuntimeWiringInput(
   gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
 ) {
   return {
+    ...buildFinalizeSurfaceRuntimeInput(bootstrap, repositories, foundation, runtimeWiring),
+    ...buildFinalizeGovernanceRuntimeInput(
+      bootstrap,
+      repositories,
+      foundation,
+      runtimeWiring,
+      gardenWiring
+    ),
+    ...buildFinalizeOperationsRuntimeInput(
+      bootstrap,
+      repositories,
+      foundation,
+      runtimeWiring,
+      gardenWiring
+    )
+  };
+}
+
+function buildFinalizeSurfaceRuntimeInput(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
+  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>
+) {
+  return {
     requestProtection: bootstrap.requestProtection,
     runtimeNotifier: bootstrap.runtimeNotifier,
     startupSteps: bootstrap.startupSteps,
     eventLogRepo: repositories.eventLogRepo,
     extensionDescriptorRepo: repositories.extensionDescriptorRepo,
     toolSpecService: foundation.toolSpecService,
+    zeroDaySecurityLayer: foundation.zeroDaySecurityLayer,
     warnLogger: bootstrap.warnLogger,
     surfaceService: foundation.surfaceService,
     recallService: runtimeWiring.recallWiring.recallService,
@@ -334,7 +365,18 @@ function buildFinalizeDaemonRuntimeWiringInput(
     signalService: runtimeWiring.recallWiring.signalService,
     graphExploreService: foundation.graphExploreService,
     edgeProposalService: foundation.edgeProposalService,
-    graphEdgePort: runtimeWiring.recallWiring.graphEdgePort,
+    graphEdgePort: runtimeWiring.recallWiring.graphEdgePort
+  };
+}
+
+function buildFinalizeGovernanceRuntimeInput(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
+  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
+  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
+) {
+  return {
     sessionOverrideService: foundation.sessionOverrideService,
     trustStateRecorder: foundation.trustStateRecorder,
     eventPublisher: foundation.eventPublisher,
@@ -362,7 +404,18 @@ function buildFinalizeDaemonRuntimeWiringInput(
     runHotStateService: foundation.runHotStateService,
     governanceLeaseService: foundation.governanceLeaseService,
     budgetBankruptcyService: foundation.budgetBankruptcyService,
-    contextLensAssembler: runtimeWiring.recallWiring.contextLensAssembler,
+    contextLensAssembler: runtimeWiring.recallWiring.contextLensAssembler
+  };
+}
+
+function buildFinalizeOperationsRuntimeInput(
+  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
+  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
+  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>,
+  runtimeWiring: Awaited<ReturnType<typeof createRecallAndCoreWiring>>,
+  gardenWiring: Awaited<ReturnType<typeof buildGardenWiring>>
+) {
+  return {
     gardenBacklogTelemetryService: gardenWiring.gardenBacklogTelemetryService,
     greenService: foundation.greenService,
     healthJournalService: foundation.healthJournalService,

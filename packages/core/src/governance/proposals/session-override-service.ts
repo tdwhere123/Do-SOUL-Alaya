@@ -12,6 +12,7 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import { isExpired } from "../../shared/time.js";
 import { parseNonEmptyString } from "../../shared/validators.js";
+import { EventLogBackedCache } from "../cache/event-log-backed-cache.js";
 import { assertGovernanceRunWorkspace, type GovernanceRunWorkspaceLookup } from "../policy/run-workspace-guard.js";
 
 const OVERRIDE_REHYDRATE_FAILED_WARNING_CODE = "ALAYA_SESSION_OVERRIDE_REHYDRATE_FAILED";
@@ -36,9 +37,7 @@ export interface SessionOverrideServiceDependencies {
  * be reconstructed after daemon restart.
  */
 export class SessionOverrideService {
-  private readonly store: Map<string, readonly Readonly<SessionOverride>[]> = new Map();
-  private readonly pendingLoads = new Map<string, Promise<readonly Readonly<SessionOverride>[]>>();
-  private readonly cacheVersions = new Map<string, number>();
+  private readonly cache = new EventLogBackedCache<readonly Readonly<SessionOverride>[]>();
   private readonly generateRuntimeId: () => string;
   private readonly now: () => string;
 
@@ -66,8 +65,7 @@ export class SessionOverrideService {
     await this.appendAppliedOverrideEvent(runId, workspaceId, occurredAt, override);
 
     this.clearExpiredAt(occurredAt);
-    this.bumpCacheVersion(runId);
-    this.store.set(runId, Object.freeze([...existing, override].sort(compareOverrides)));
+    this.cache.set(runId, Object.freeze([...existing, override].sort(compareOverrides)));
 
     return override;
   }
@@ -89,9 +87,7 @@ export class SessionOverrideService {
       return;
     }
 
-    this.bumpCacheVersion(parsedRunId);
-    this.store.delete(parsedRunId);
-    this.clearCacheMetadataIfIdle(parsedRunId);
+    this.cache.delete(parsedRunId);
   }
 
   public clearExpired(): void {
@@ -173,70 +169,19 @@ export class SessionOverrideService {
   }
 
   private clearExpiredAt(referenceTime: string): void {
-    for (const [runId, overrides] of this.store.entries()) {
-      const active = overrides.filter((override) => !isExpired(override.expires_at, referenceTime));
-
-      if (active.length === 0) {
-        this.bumpCacheVersion(runId);
-        this.store.delete(runId);
-        this.clearCacheMetadataIfIdle(runId);
-        continue;
-      }
-
-      if (active.length !== overrides.length) {
-        this.bumpCacheVersion(runId);
-        this.store.set(runId, Object.freeze(active));
-      }
+    for (const [runId] of this.cache.entries()) {
+      this.cache.refresh(runId, (overrides) => this.activeOverridesOrUndefined(overrides, referenceTime));
     }
   }
 
   private async resolveStoredOverrides(runId: string): Promise<readonly Readonly<SessionOverride>[]> {
     const referenceTime = this.now();
-    const cached = this.store.get(runId);
-
-    if (cached !== undefined) {
-      return this.normalizeStoredOverrides(runId, cached, referenceTime);
-    }
-
-    const pending = this.pendingLoads.get(runId);
-
-    if (pending !== undefined) {
-      return pending;
-    }
-
-    const versionBeforeLoad = this.getCacheVersion(runId);
-    const loadPromise = this.rehydrateFromEventLog(runId)
-      .then((rehydrated) => {
-        const normalized = this.activeOverridesAt(rehydrated, referenceTime);
-
-        if (this.getCacheVersion(runId) !== versionBeforeLoad) {
-          return this.normalizeStoredOverrides(runId, this.store.get(runId) ?? Object.freeze([]), referenceTime);
-        }
-
-        const cachedAfterLoad = this.store.get(runId);
-
-        if (cachedAfterLoad !== undefined) {
-          return this.normalizeStoredOverrides(runId, cachedAfterLoad, referenceTime);
-        }
-
-        if (normalized.length === 0) {
-          this.clearCacheMetadataIfIdle(runId);
-          return normalized;
-        }
-
-        this.store.set(runId, normalized);
-        return normalized;
-      })
-      .finally(() => {
-        if (this.pendingLoads.get(runId) === loadPromise) {
-          this.pendingLoads.delete(runId);
-        }
-
-        this.clearCacheMetadataIfIdle(runId);
-      });
-
-    this.pendingLoads.set(runId, loadPromise);
-    return loadPromise;
+    const resolved = await this.cache.resolve(
+      runId,
+      async () => await this.rehydrateFromEventLog(runId),
+      (overrides) => this.activeOverridesOrUndefined(overrides, referenceTime)
+    );
+    return resolved ?? Object.freeze([]);
   }
 
   private async rehydrateFromEventLog(runId: string): Promise<readonly Readonly<SessionOverride>[]> {
@@ -283,48 +228,16 @@ export class SessionOverrideService {
     return Object.freeze(overrides.sort(compareOverrides));
   }
 
-  private getCacheVersion(runId: string): number {
-    return this.cacheVersions.get(runId) ?? 0;
-  }
-
-  private bumpCacheVersion(runId: string): void {
-    this.cacheVersions.set(runId, this.getCacheVersion(runId) + 1);
-  }
-
-  private activeOverridesAt(
+  private activeOverridesOrUndefined(
     overrides: readonly Readonly<SessionOverride>[],
     referenceTime: string
-  ): readonly Readonly<SessionOverride>[] {
-    return Object.freeze(overrides.filter((override) => !isExpired(override.expires_at, referenceTime)));
-  }
-
-  private normalizeStoredOverrides(
-    runId: string,
-    overrides: readonly Readonly<SessionOverride>[],
-    referenceTime: string
-  ): readonly Readonly<SessionOverride>[] {
-    const active = this.activeOverridesAt(overrides, referenceTime);
+  ): readonly Readonly<SessionOverride>[] | undefined {
+    const active = overrides.filter((override) => !isExpired(override.expires_at, referenceTime));
 
     if (active.length === overrides.length) {
       return overrides;
     }
-
-    this.bumpCacheVersion(runId);
-
-    if (active.length === 0) {
-      this.store.delete(runId);
-      this.clearCacheMetadataIfIdle(runId);
-      return active;
-    }
-
-    this.store.set(runId, active);
-    return active;
-  }
-
-  private clearCacheMetadataIfIdle(runId: string): void {
-    if (!this.store.has(runId) && !this.pendingLoads.has(runId)) {
-      this.cacheVersions.delete(runId);
-    }
+    return active.length === 0 ? undefined : Object.freeze(active);
   }
 }
 

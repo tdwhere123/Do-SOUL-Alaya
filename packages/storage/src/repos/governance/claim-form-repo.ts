@@ -90,89 +90,16 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
   private readonly updateStatusStatement;
 
   public constructor(private readonly db: StorageDatabase) {
-    this.createStatement = db.connection.prepare(`
-      INSERT INTO claim_forms (
-        object_id,
-        object_kind,
-        schema_version,
-        lifecycle_state,
-        created_at,
-        updated_at,
-        created_by,
-        governance_subject,
-        claim_kind,
-        scope_class,
-        enforcement_level,
-        origin_tier,
-        precedence_basis,
-        proposition_digest,
-        evidence_refs,
-        source_object_refs,
-        workspace_id,
-        claim_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    this.findByIdStatement = db.connection.prepare(`
-      SELECT${CLAIM_FORM_SELECT_COLUMNS}
-      FROM claim_forms
-      WHERE object_id = ?
-      LIMIT 1
-    `);
-
-    this.findByIdsStatement = db.connection.prepare(`
-      SELECT${CLAIM_FORM_SELECT_COLUMNS}
-      FROM claim_forms
-      WHERE workspace_id = ?
-        AND object_id IN (SELECT value FROM json_each(?))
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    this.findByWorkspaceIdStatement = db.connection.prepare(`
-      SELECT${CLAIM_FORM_SELECT_COLUMNS}
-      FROM claim_forms
-      WHERE workspace_id = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    this.findByStatusStatement = db.connection.prepare(`
-      SELECT${CLAIM_FORM_SELECT_COLUMNS}
-      FROM claim_forms
-      WHERE workspace_id = ?
-        AND claim_status = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    this.findByCanonicalKeyStatement = db.connection.prepare(`
-      SELECT${CLAIM_FORM_SELECT_COLUMNS}
-      FROM claim_forms
-      WHERE workspace_id = ?
-        AND json_extract(governance_subject, '$.canonical_key') = ?
-      ORDER BY created_at ASC, object_id ASC
-    `);
-
-    this.updateEvidenceRefsStatement = db.connection.prepare(`
-      UPDATE claim_forms
-      SET evidence_refs = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    this.updateSourceObjectRefsStatement = db.connection.prepare(`
-      UPDATE claim_forms
-      SET source_object_refs = ?, updated_at = ?
-      WHERE object_id = ?
-    `);
-
-    // invariant: WHERE clause includes the expected current claim_status
-    // so two concurrent transitions racing from the same starting
-    // state cannot both win. The first writer flips the status, the
-    // second writer's UPDATE finds zero matching rows and the service
-    // layer raises CONFLICT.
-    this.updateStatusStatement = db.connection.prepare(`
-      UPDATE claim_forms
-      SET claim_status = ?, updated_at = ?
-      WHERE object_id = ? AND claim_status = ?
-    `);
+    const statements = prepareClaimFormStatements(db);
+    this.createStatement = statements.createStatement;
+    this.findByIdStatement = statements.findByIdStatement;
+    this.findByIdsStatement = statements.findByIdsStatement;
+    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
+    this.findByStatusStatement = statements.findByStatusStatement;
+    this.findByCanonicalKeyStatement = statements.findByCanonicalKeyStatement;
+    this.updateEvidenceRefsStatement = statements.updateEvidenceRefsStatement;
+    this.updateSourceObjectRefsStatement = statements.updateSourceObjectRefsStatement;
+    this.updateStatusStatement = statements.updateStatusStatement;
   }
 
   public create(claim: ClaimForm): Readonly<ClaimForm> {
@@ -415,6 +342,98 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
       throw new StorageError("QUERY_FAILED", `Failed to update ${description} for claim form ${objectId}.`, error);
     }
   }
+}
+
+function prepareClaimFormStatements(db: StorageDatabase) {
+  return {
+    createStatement: prepareClaimFormCreateStatement(db),
+    ...prepareClaimFormReadStatements(db),
+    ...prepareClaimFormUpdateStatements(db)
+  };
+}
+
+function prepareClaimFormCreateStatement(db: StorageDatabase) {
+  return db.connection.prepare(`
+    INSERT INTO claim_forms (
+      object_id,
+      object_kind,
+      schema_version,
+      lifecycle_state,
+      created_at,
+      updated_at,
+      created_by,
+      governance_subject,
+      claim_kind,
+      scope_class,
+      enforcement_level,
+      origin_tier,
+      precedence_basis,
+      proposition_digest,
+      evidence_refs,
+      source_object_refs,
+      workspace_id,
+      claim_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+}
+
+function prepareClaimFormReadStatements(db: StorageDatabase) {
+  return {
+    findByIdStatement: db.connection.prepare(`
+      SELECT${CLAIM_FORM_SELECT_COLUMNS}
+      FROM claim_forms
+      WHERE object_id = ?
+      LIMIT 1
+    `),
+    findByIdsStatement: db.connection.prepare(`
+      SELECT${CLAIM_FORM_SELECT_COLUMNS}
+      FROM claim_forms
+      WHERE workspace_id = ?
+        AND object_id IN (SELECT value FROM json_each(?))
+      ORDER BY created_at ASC, object_id ASC
+    `),
+    findByWorkspaceIdStatement: db.connection.prepare(`
+      SELECT${CLAIM_FORM_SELECT_COLUMNS}
+      FROM claim_forms
+      WHERE workspace_id = ?
+      ORDER BY created_at ASC, object_id ASC
+    `),
+    findByStatusStatement: db.connection.prepare(`
+      SELECT${CLAIM_FORM_SELECT_COLUMNS}
+      FROM claim_forms
+      WHERE workspace_id = ?
+        AND claim_status = ?
+      ORDER BY created_at ASC, object_id ASC
+    `),
+    findByCanonicalKeyStatement: db.connection.prepare(`
+      SELECT${CLAIM_FORM_SELECT_COLUMNS}
+      FROM claim_forms
+      WHERE workspace_id = ?
+        AND json_extract(governance_subject, '$.canonical_key') = ?
+      ORDER BY created_at ASC, object_id ASC
+    `)
+  };
+}
+
+function prepareClaimFormUpdateStatements(db: StorageDatabase) {
+  return {
+    updateEvidenceRefsStatement: db.connection.prepare(`
+      UPDATE claim_forms
+      SET evidence_refs = ?, updated_at = ?
+      WHERE object_id = ?
+    `),
+    updateSourceObjectRefsStatement: db.connection.prepare(`
+      UPDATE claim_forms
+      SET source_object_refs = ?, updated_at = ?
+      WHERE object_id = ?
+    `),
+    // The expected status makes competing transitions a compare-and-swap.
+    updateStatusStatement: db.connection.prepare(`
+      UPDATE claim_forms
+      SET claim_status = ?, updated_at = ?
+      WHERE object_id = ? AND claim_status = ?
+    `)
+  };
 }
 
 function parseClaimForm(value: ClaimForm): Readonly<ClaimForm> {

@@ -17,6 +17,7 @@ import {
 } from "./resolve-handler.js";
 
 export interface DaemonMcpMemoryToolHandlerInput {
+  readonly zeroDayToolAccess: NonNullable<McpMemoryToolHandlerDependencies["zeroDayToolAccess"]>;
   readonly recallService: McpMemoryToolHandlerDependencies["recallService"];
   readonly memoryService: McpMemoryToolHandlerDependencies["memoryService"];
   readonly dynamicsService?: McpMemoryToolHandlerDependencies["dynamicsService"];
@@ -156,6 +157,7 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
     input.reviewerIdentityBinding ?? createReviewerIdentityBindingFromEnv(process.env);
   const soulResolveHandler = buildSoulResolveHandler(input);
   return createMcpMemoryToolHandler({
+    zeroDayToolAccess: input.zeroDayToolAccess,
     recallService: input.recallService,
     memoryService: input.memoryService,
     ...(input.dynamicsService === undefined ? {} : { dynamicsService: input.dynamicsService }),

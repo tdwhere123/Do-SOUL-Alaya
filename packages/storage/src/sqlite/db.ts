@@ -27,9 +27,13 @@ export interface InitDatabaseOptions {
   readonly filename?: string;
   /** Runtime only opens a verified temporal schema; offline migration is explicit. */
   readonly temporalMode?: TemporalDatabaseMode;
+  /** Maximum SQLite lock wait for this connection. Defaults to 5 seconds. */
+  readonly busyTimeoutMs?: number;
 }
 
 const MAX_DATABASE_CACHE_ENTRIES = 32;
+const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
+const MAX_SQLITE_BUSY_TIMEOUT_MS = 2_147_483_647;
 
 const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_ENTRIES);
 
@@ -58,7 +62,8 @@ export class StorageDatabase {
   public constructor(
     filename: string,
     connection: SqliteConnection,
-    reopenTemporalMode: TemporalDatabaseMode = "runtime"
+    reopenTemporalMode: TemporalDatabaseMode = "runtime",
+    private readonly reopenBusyTimeoutMs = DEFAULT_BUSY_TIMEOUT_MS
   ) {
     this.filename = filename;
     this.connection = connection;
@@ -71,6 +76,10 @@ export class StorageDatabase {
 
   public getConnectionVersion(): number {
     return this.connectionVersion;
+  }
+
+  public getBusyTimeoutMs(): number {
+    return this.reopenBusyTimeoutMs;
   }
 
   /** Selection promotes an offline/candidate handle to normal runtime reopen checks. */
@@ -88,7 +97,7 @@ export class StorageDatabase {
     const database = openDatabase(this.filename);
     database.pragma("foreign_keys = ON");
     database.pragma("journal_mode = WAL");
-    database.pragma("busy_timeout = 5000");
+    database.pragma(`busy_timeout = ${this.reopenBusyTimeoutMs}`);
     database.pragma("synchronous = NORMAL");
     database.pragma("analysis_limit = 400");
     this.connection = database;
@@ -169,10 +178,12 @@ export function readSchemaMigrationLedger(
 export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase {
   const filename = options.filename ?? ":memory:";
   const temporalMode = resolveTemporalDatabaseMode(filename, options.temporalMode);
+  const busyTimeoutMs = normalizeBusyTimeoutMs(options.busyTimeoutMs);
 
   if (filename !== ":memory:") {
     const cached = databaseCache.get(filename);
     if (cached !== undefined) {
+      assertCachedBusyTimeoutCompatible(cached, options.busyTimeoutMs);
       if (temporalMode === "runtime") {
         assertRuntimeTemporalDatabaseReady(filename, knownMigrationMaxVersion());
       }
@@ -188,26 +199,14 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
   const database = openDatabase(filename);
 
   try {
-    database.pragma("foreign_keys = ON");
-    // SQLite hardening for concurrent + crash-safe local-first usage.
-    // WAL is silently ignored on :memory: databases, so no branch is needed.
-    // - journal_mode=WAL: readers no longer block writers.
-    // - busy_timeout=5000: 5s wait window before SQLITE_BUSY surfaces, reducing
-    //   spurious failures when a daemon write coincides with a CLI read.
-    // - synchronous=NORMAL: durable enough for WAL while halving fsync cost.
-    database.pragma("journal_mode = WAL");
-    database.pragma("busy_timeout = 5000");
-    database.pragma("synchronous = NORMAL");
-    // Cap PRAGMA optimize/ANALYZE sampling so a stats refresh stays fast (ms)
-    // on a large DB instead of a multi-second full scan. Persists per connection.
-    database.pragma("analysis_limit = 400");
+    configureDatabaseConnection(database, busyTimeoutMs);
     runMigrations(database, temporalMode);
   } catch (error) {
     database.close();
     throw error;
   }
 
-  const storageDatabase = new StorageDatabase(filename, database, temporalMode);
+  const storageDatabase = new StorageDatabase(filename, database, temporalMode, busyTimeoutMs);
 
   if (filename !== ":memory:") {
     evictDatabaseCacheIfNeeded(filename);
@@ -215,6 +214,41 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
   }
 
   return storageDatabase;
+}
+
+function configureDatabaseConnection(
+  database: SqliteConnection,
+  busyTimeoutMs: number
+): void {
+  database.pragma("foreign_keys = ON");
+  // WAL keeps readers independent; timeout bounds lock waits for writers.
+  database.pragma("journal_mode = WAL");
+  database.pragma(`busy_timeout = ${busyTimeoutMs}`);
+  database.pragma("synchronous = NORMAL");
+  // Bounded planner sampling avoids multi-second full scans on large databases.
+  database.pragma("analysis_limit = 400");
+}
+
+function normalizeBusyTimeoutMs(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_BUSY_TIMEOUT_MS;
+  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_SQLITE_BUSY_TIMEOUT_MS) {
+    throw new StorageError(
+      "VALIDATION_FAILED",
+      "SQLite busy timeout must be a non-negative safe integer."
+    );
+  }
+  return value;
+}
+
+function assertCachedBusyTimeoutCompatible(
+  cached: StorageDatabase,
+  requested: number | undefined
+): void {
+  if (requested === undefined || cached.getBusyTimeoutMs() === requested) return;
+  throw new StorageError(
+    "CONFLICT",
+    "Cached SQLite connection uses a different busy timeout."
+  );
 }
 
 function openDatabase(filename: string): SqliteConnection {

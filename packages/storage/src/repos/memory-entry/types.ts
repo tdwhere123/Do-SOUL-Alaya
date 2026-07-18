@@ -27,6 +27,24 @@ export interface MemoryEntryListPageOptions {
   readonly offset: number;
 }
 
+export interface RecallTierWindowCursor {
+  readonly created_at: string;
+  readonly object_id: string;
+}
+
+export interface RecallTierWindowQuery {
+  readonly workspaceId: string;
+  readonly tier: StorageTier;
+  readonly limit: number;
+  readonly cursor?: Readonly<RecallTierWindowCursor>;
+}
+
+export interface RecallTierWindowResult {
+  readonly memories: readonly Readonly<MemoryEntry>[];
+  readonly next_cursor: Readonly<RecallTierWindowCursor> | null;
+  readonly truncated: boolean;
+}
+
 export interface MemoryEntryRepoTierUpdateInput {
   readonly objectId: string;
   readonly workspaceId: string;
@@ -70,6 +88,7 @@ export interface MemoryEntryRepo {
     tier?: StorageTier,
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findRecallTierWindow(query: RecallTierWindowQuery): Promise<Readonly<RecallTierWindowResult>>;
   findByWorkspaceIdAll(
     workspaceId: string,
     tier?: StorageTier
@@ -145,12 +164,25 @@ export interface MemoryEntryRepo {
     limit: number,
     objectIds: readonly string[]
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  searchByKeywordWithinTier?(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    tier: StorageTier
+  ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
   searchByAnchorWithinObjectIds?(
     workspaceId: string,
     anchorTokens: readonly string[],
     optionalTokens: readonly string[],
     limit: number,
     objectIds: readonly string[]
+  ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
+  searchByAnchorWithinTier?(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    tier: StorageTier
   ): Promise<readonly MemoryEntryKeywordSearchResult[]>;
   // see also: packages/storage/src/migrations/005-evidence-capsules.sql
   // see also: packages/storage/src/migrations/068-evidence-capsule-fts.sql

@@ -10,11 +10,9 @@ import {
   type ProjectMappingAnchor,
   type ProjectMappingState
 } from "@do-soul/alaya-protocol";
-import type {
-  GlobalMemoryRecallEntry,
-  GlobalMemoryRecallPort
-} from "./global-memory-recall-port.js";
+import type { GlobalMemoryRecallEntry, GlobalMemoryRecallPort } from "./global-memory-recall-port.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
+import { selectGlobalMemoryRecallEntries } from "./global-memory/selection.js";
 
 export interface GlobalMemoryRecallProjectMappingPort {
   findByWorkspace(workspaceId: string): Promise<readonly Readonly<ProjectMappingAnchor>[]>;
@@ -195,7 +193,6 @@ export function createGlobalMemoryRecallPort(params: {
 
 // Bounded LRU supplement cache keyed by workspaceId, queryText, and limit.
 const GLOBAL_RECALL_QUERY_CACHE_SIZE = 512;
-const GLOBAL_RECALL_CORPUS_PAGE_LIMIT = 500;
 
 class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
   private readonly cacheByQuery = new Map<string, readonly Readonly<GlobalMemoryRecallEntry>[]>();
@@ -217,13 +214,12 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
     }
 
     const normalizedQuery = normalizeGlobalMemoryQuery(params.queryText);
-    const entries = await loadGlobalMemoryRecallCorpus(this.globalMemorySource);
-    const matchedEntries =
-      normalizedQuery === null
-        ? entries
-        : entries.filter((entry) => matchesGlobalMemoryQuery(entry, normalizedQuery));
-    const sortedEntries = [...matchedEntries].sort(compareGlobalMemoryRecallEntries);
-    const recallEntries = sortedEntries.slice(0, params.limit).map((entry) =>
+    const selectedEntries = await selectGlobalMemoryRecallEntries(
+      this.globalMemorySource,
+      normalizedQuery,
+      params.limit
+    );
+    const recallEntries = selectedEntries.map((entry) =>
       Object.freeze({
         global_object_id: entry.global_object_id,
         dimension: entry.dimension,
@@ -271,31 +267,6 @@ class GlobalMemoryRecallService implements GlobalMemoryRecallServicePort {
       this.cacheByQuery.delete(cacheKey);
     }
   }
-}
-
-async function loadGlobalMemoryRecallCorpus(
-  source: GlobalMemoryRecallSourcePort
-): Promise<readonly Readonly<GlobalMemoryEntry>[]> {
-  if (source.listAll !== undefined) {
-    return await source.listAll();
-  }
-
-  if (source.listPage === undefined) {
-    return await source.list();
-  }
-
-  const entries: Readonly<GlobalMemoryEntry>[] = [];
-  for (let offset = 0; ; offset += GLOBAL_RECALL_CORPUS_PAGE_LIMIT) {
-    const page = await source.listPage({
-      limit: GLOBAL_RECALL_CORPUS_PAGE_LIMIT,
-      offset
-    });
-    entries.push(...page);
-    if (page.length < GLOBAL_RECALL_CORPUS_PAGE_LIMIT) {
-      break;
-    }
-  }
-  return Object.freeze(entries);
 }
 
 async function loadAnchorMap(params: {
@@ -416,44 +387,6 @@ function readNonEmptyString(value: unknown): string | null {
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function matchesGlobalMemoryQuery(
-  entry: Readonly<GlobalMemoryEntry>,
-  queryTokens: readonly string[]
-): boolean {
-  const haystack = [
-    entry.canonical_identity,
-    entry.content,
-    entry.provenance,
-    ...entry.domain_tags
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  return queryTokens.every((token) => haystack.includes(token));
-}
-
-function compareGlobalMemoryRecallEntries(
-  left: Readonly<GlobalMemoryEntry>,
-  right: Readonly<GlobalMemoryEntry>
-): number {
-  const leftScore = left.activation_score ?? -1;
-  const rightScore = right.activation_score ?? -1;
-
-  if (leftScore !== rightScore) {
-    return rightScore - leftScore;
-  }
-
-  if (left.updated_at !== right.updated_at) {
-    return right.updated_at.localeCompare(left.updated_at);
-  }
-
-  if (left.created_at !== right.created_at) {
-    return right.created_at.localeCompare(left.created_at);
-  }
-
-  return left.global_object_id.localeCompare(right.global_object_id);
 }
 
 function createPseudoMemoryEntry(

@@ -208,6 +208,14 @@ fallback parity with MCP is enforced by tests. The Inspector consumes
 daemon HTTP routes only and has its own contract surface (token-based
 auth + JSON over HTTP, no SSE / WebSocket).
 
+Persistent daemon HTTP authentication has an explicit operator-owned
+lifecycle: `ALAYA_REQUEST_TOKEN` remains stable across restarts, and changing
+that value then restarting rotates the credential so the old token is rejected.
+When it is unset, the runtime generates a process-local ephemeral token; normal
+HTTP startup fails closed, while managed temporary startup must opt in and pass
+that token directly to its child Inspector process. The daemon never silently
+persists a generated credential.
+
 ## Runtime Write Model
 
 State-changing runtime writes follow:

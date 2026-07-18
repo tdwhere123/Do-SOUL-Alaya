@@ -146,6 +146,7 @@ async function createEnvironmentSecurityFoundation(input: DaemonServiceFoundatio
     eventPublisher,
     runHotStateService,
     securityStatusService,
+    zeroDaySecurityLayer,
     securedWorkspaceService
   };
 }

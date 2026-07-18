@@ -1,4 +1,4 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import type { MemoryEntry, StorageTier } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import {
@@ -23,8 +23,10 @@ import {
   searchByAnchorWithinObjectIds,
   searchByKeyword,
   searchByKeywordWithinObjectIds,
+  searchByKeywordWithinTier,
   type MemoryEntrySearchWorkflowHost
 } from "./search-workflows.js";
+import { searchByAnchorWithinTier } from "./recall/tier-anchor-search-workflow.js";
 import { MemoryEntryReadQueries } from "./memory-entry-read-queries.js";
 import { prepareMemoryEntryStatements } from "./sqlite-memory-entry-statements.js";
 import type {
@@ -194,6 +196,15 @@ export class SqliteMemoryEntryRepo
     );
   }
 
+  public async searchByKeywordWithinTier(
+    workspaceId: string,
+    queryText: string,
+    limit: number,
+    tier: StorageTier
+  ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    return searchByKeywordWithinTier.call(this, workspaceId, queryText, limit, tier);
+  }
+
   public async searchByAnchorWithinObjectIds(
     workspaceId: string,
     anchorTokens: readonly string[],
@@ -208,6 +219,23 @@ export class SqliteMemoryEntryRepo
       optionalTokens,
       limit,
       objectIds
+    );
+  }
+
+  public async searchByAnchorWithinTier(
+    workspaceId: string,
+    anchorTokens: readonly string[],
+    optionalTokens: readonly string[],
+    limit: number,
+    tier: StorageTier
+  ): Promise<readonly MemoryEntryKeywordSearchResult[]> {
+    return searchByAnchorWithinTier.call(
+      this,
+      workspaceId,
+      anchorTokens,
+      optionalTokens,
+      limit,
+      tier
     );
   }
 

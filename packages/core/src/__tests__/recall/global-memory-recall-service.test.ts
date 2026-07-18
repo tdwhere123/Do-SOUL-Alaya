@@ -165,6 +165,64 @@ describe("loadGlobalRecallCandidates", () => {
 });
 
 describe("createGlobalMemoryRecallPort", () => {
+  it("selects the same bounded ranking across pages without using the full-load source", async () => {
+    const firstPage = Array.from({ length: 500 }, (_, index) =>
+      createSourceEntry({
+        global_object_id: `global-low-${index.toString().padStart(3, "0")}`,
+        activation_score: 0.1,
+        domain_tags: ["alpha"]
+      })
+    );
+    const secondPage = [
+      createSourceEntry({ global_object_id: "global-tie-b", activation_score: 0.9, domain_tags: ["alpha"] }),
+      createSourceEntry({ global_object_id: "global-best", activation_score: 1, domain_tags: ["alpha"] }),
+      createSourceEntry({ global_object_id: "global-tie-a", activation_score: 0.9, domain_tags: ["alpha"] })
+    ];
+    const corpus = [...firstPage, ...secondPage];
+    const list = vi.fn(async () => corpus);
+    const listAll = vi.fn(async () => corpus);
+    const listPage = vi.fn(async ({ offset }: { readonly offset: number }) =>
+      offset === 0 ? firstPage : secondPage
+    );
+    const port = createGlobalMemoryRecallPort({
+      globalMemorySource: { list, listAll, listPage }
+    });
+
+    const result = await port.recall({
+      workspaceId: "workspace-1",
+      queryText: "alpha",
+      limit: 3
+    });
+
+    expect(result.map((entry) => entry.global_object_id)).toEqual([
+      "global-best",
+      "global-tie-a",
+      "global-tie-b"
+    ]);
+    expect(listPage.mock.calls.map(([page]) => page.offset)).toEqual([0, 500]);
+    expect(listAll).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("preserves the prior full-load source when the optional paged source fails", async () => {
+    const list = vi.fn(async () => []);
+    const listAll = vi.fn(async () => [
+      createSourceEntry({ global_object_id: "global-list-all", activation_score: 0.7 })
+    ]);
+    const listPage = vi.fn(async () => {
+      throw new Error("paged source unavailable");
+    });
+    const port = createGlobalMemoryRecallPort({
+      globalMemorySource: { list, listAll, listPage }
+    });
+
+    await expect(port.recall({ workspaceId: "workspace-1", queryText: null, limit: 1 }))
+      .resolves.toEqual([expect.objectContaining({ global_object_id: "global-list-all" })]);
+    expect(listPage).toHaveBeenCalledOnce();
+    expect(listAll).toHaveBeenCalledOnce();
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it("owns global recall query matching and ranking outside daemon bootstrap", async () => {
     const list = vi.fn(async () => [
       createSourceEntry({

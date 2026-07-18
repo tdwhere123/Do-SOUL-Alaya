@@ -115,7 +115,9 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly config: Readonly<RecallPolicy>["coarse_filter"];
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly tier: MemoryEntry["storage_tier"];
   readonly tierMemories: readonly Readonly<MemoryEntry>[];
+  readonly tierScopedSearchEligible: boolean;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly deliveryMaxEntries?: number;
   readonly pathProjectionAsOf?: string;
@@ -204,6 +206,8 @@ async function admitSemanticAndContentCandidates(
     config: params.config,
     queryText: params.queryText,
     queryProbes: params.queryProbes,
+    tier: params.tier,
+    tierScopedSearchEligible: params.tierScopedSearchEligible,
     anchors: extractRecallAnchors(params.queryProbes),
     intent: classifyRecallIntent(params.queryProbes),
     byId: params.byId,

@@ -41,6 +41,7 @@ function createAttachSurfaceRegistrarInput(input: FinalizeDaemonRuntimeWiringInp
 function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput) {
   const coRecallCoherenceGate = createCoRecallCoherenceGate(input);
   return {
+    zeroDayToolAccess: input.zeroDaySecurityLayer,
     recallService: input.recallService,
     memoryService: input.memoryService,
     dynamicsService: {

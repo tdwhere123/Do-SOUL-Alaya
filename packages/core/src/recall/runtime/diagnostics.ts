@@ -15,7 +15,7 @@ import type {
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 
-export function buildRecallDiagnostics(params: Readonly<{
+type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
@@ -34,7 +34,11 @@ export function buildRecallDiagnostics(params: Readonly<{
   readonly tokenEconomy: Readonly<RecallTokenEconomy>;
   readonly embeddingWorkspaceScan?: Readonly<RecallEmbeddingWorkspaceScanDiagnostics> | null;
   readonly phaseLatencyMs?: Readonly<Record<string, number>>;
-}>): Readonly<RecallDiagnostics> {
+}>;
+
+export function buildRecallDiagnostics(
+  params: BuildRecallDiagnosticsParams
+): Readonly<RecallDiagnostics> {
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: freezeRecallQueryProbes(params.queryProbes),

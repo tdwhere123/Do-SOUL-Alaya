@@ -3,12 +3,12 @@ import {
   MemoryDimensionSchema,
   type PathAnchorRef,
   ScopeClassSchema,
-  StorageTierSchema,
-  type StorageTier
+  StorageTierSchema
 } from "@do-soul/alaya-protocol";
 import { EventPublisher, RelationAssertionService } from "@do-soul/alaya-core";
 import {
   initDatabase,
+  SqliteClaimFormRepo,
   SqliteEvidenceCapsuleRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
@@ -20,12 +20,18 @@ import {
 import type {
   RecallReadWorkerRequest,
   RecallReadWorkerResponse
-} from "./recall-read-worker-client.js";
+} from "./recall-read-worker/protocol.js";
 import {
   createRecallPathReadPorts,
   createRecallTemporalProjectionEnsurer,
   type RecallPathProjectionReadOptions
 } from "./recall-path-readers.js";
+import { runWorkerActiveConstraints } from "./recall-read-worker/active-constraints.js";
+import {
+  findMemoryEntriesByWorkspaceId,
+  readRecallTierWindowQuery
+} from "./recall-read-worker/memory-window.js";
+import { postRecallTierWindowChunks } from "./recall-read-worker/tier-window-stream.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
@@ -37,6 +43,7 @@ const database = initDatabase({ filename: databaseFilename });
 const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
 const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
+const claimFormRepo = new SqliteClaimFormRepo(database);
 const eventLogRepo = new SqliteEventLogRepo(database);
 const recallPathReadPorts = temporalProjectionSelected
   ? createRecallPathReadPorts({
@@ -59,7 +66,6 @@ const recallPathReadPorts = temporalProjectionSelected
   : createRecallPathReadPorts({
       legacyPathReader: new SqlitePathRelationRepo(database)
     });
-const MEMORY_ENTRY_PAGE_LIMIT = 500;
 const MAX_WORKER_PAGE_LIMIT = 5000;
 let closed = false;
 
@@ -89,6 +95,13 @@ async function handleRequest(message: unknown): Promise<void> {
     return;
   }
   try {
+    if (message.operation === "memory.findRecallTierWindow") {
+      const result = await memoryEntryRepo.findRecallTierWindow(
+        readRecallTierWindowQuery(asPayload(message.payload))
+      );
+      await postRecallTierWindowChunks(message.id, result, postResponse);
+      return;
+    }
     const result = await runOperation(message);
     postResponse({ id: message.id, ok: true, result });
   } catch (error) {
@@ -106,13 +119,17 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
   }
   const payload = asPayload(request.payload);
   switch (request.operation) {
+    case "ready":
+      return null;
     case "memory.findByWorkspaceId":
     case "memory.findByDimension":
     case "memory.findByScopeClass":
     case "memory.searchByKeyword":
     case "memory.searchByKeywordWithinObjectIds":
+    case "memory.searchByKeywordWithinTier":
     case "memory.searchManyByKeywordWithinObjectIds":
     case "memory.searchByAnchorWithinObjectIds":
+    case "memory.searchByAnchorWithinTier":
     case "memory.findByEvidenceRefs":
     case "memory.findByIds":
       return await runMemoryOperation(request.operation, payload);
@@ -128,6 +145,13 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "path.findByTimeConcernWindowDigests":
     case "pathPlasticity.getStrengthByMemoryId":
       return await runPathOperation(request.operation, payload);
+    case "constraints.findActive":
+      return await runWorkerActiveConstraints({
+        payload,
+        memoryRepo: memoryEntryRepo,
+        claimFormRepo,
+        pathReadPorts: recallPathReadPorts
+      });
     case "close":
       database.close();
       closed = true;
@@ -142,11 +166,14 @@ async function runMemoryOperation(
   switch (operation) {
     case "memory.searchByKeyword":
     case "memory.searchByKeywordWithinObjectIds":
+    case "memory.searchByKeywordWithinTier":
     case "memory.searchManyByKeywordWithinObjectIds":
     case "memory.searchByAnchorWithinObjectIds":
+    case "memory.searchByAnchorWithinTier":
       return await runMemorySearchOperation(operation, payload);
     case "memory.findByWorkspaceId":
       return await findMemoryEntriesByWorkspaceId(
+        memoryEntryRepo,
         readString(payload.workspaceId, "workspaceId"),
         payload.tier === undefined ? undefined : StorageTierSchema.parse(payload.tier),
         payload.page === undefined ? undefined : readPage(payload.page)
@@ -190,6 +217,12 @@ async function runMemorySearchOperation(
       limit
     );
   }
+  if (
+    operation === "memory.searchByKeywordWithinTier" ||
+    operation === "memory.searchByAnchorWithinTier"
+  ) {
+    return await runTierScopedMemorySearch(operation, payload, workspaceId, limit);
+  }
   const objectIds = readStringArray(payload.objectIds, "objectIds");
   if (operation === "memory.searchByKeywordWithinObjectIds") {
     return await memoryEntryRepo.searchByKeywordWithinObjectIds(
@@ -205,6 +238,24 @@ async function runMemorySearchOperation(
     readStringArray(payload.optionalTokens, "optionalTokens"),
     limit,
     objectIds
+  );
+}
+
+async function runTierScopedMemorySearch(
+  operation: "memory.searchByKeywordWithinTier" | "memory.searchByAnchorWithinTier",
+  payload: Record<string, unknown>,
+  workspaceId: string,
+  limit: number
+) {
+  const tier = StorageTierSchema.parse(payload.tier);
+  if (operation === "memory.searchByKeywordWithinTier") {
+    const queryText = readString(payload.queryText, "queryText");
+    return await memoryEntryRepo.searchByKeywordWithinTier(workspaceId, queryText, limit, tier);
+  }
+  const anchorTokens = readStringArray(payload.anchorTokens, "anchorTokens");
+  const optionalTokens = readStringArray(payload.optionalTokens, "optionalTokens");
+  return await memoryEntryRepo.searchByAnchorWithinTier(
+    workspaceId, anchorTokens, optionalTokens, limit, tier
   );
 }
 
@@ -310,34 +361,6 @@ async function runPathOperation(
     readStringArray(payload.windowDigests, "windowDigests"),
     options
   );
-}
-
-async function findMemoryEntriesByWorkspaceId(
-  workspaceId: string,
-  tier: StorageTier | undefined,
-  page: { readonly limit: number; readonly offset: number } | undefined
-) {
-  if (page === undefined || page.limit <= MEMORY_ENTRY_PAGE_LIMIT) {
-    return await memoryEntryRepo.findByWorkspaceId(workspaceId, tier, page);
-  }
-
-  const rows = [];
-  let remaining = page.limit;
-  let offset = page.offset;
-  while (remaining > 0) {
-    const limit = Math.min(remaining, MEMORY_ENTRY_PAGE_LIMIT);
-    const chunk = await memoryEntryRepo.findByWorkspaceId(workspaceId, tier, {
-      limit,
-      offset
-    });
-    rows.push(...chunk);
-    if (chunk.length < limit) {
-      break;
-    }
-    remaining -= chunk.length;
-    offset += chunk.length;
-  }
-  return rows;
 }
 
 function postResponse(response: RecallReadWorkerResponse): void {

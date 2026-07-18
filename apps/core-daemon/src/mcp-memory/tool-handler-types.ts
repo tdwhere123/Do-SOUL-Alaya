@@ -64,6 +64,9 @@ export interface McpMemoryToolCallContext {
 }
 
 export interface McpMemoryToolHandlerDependencies {
+  readonly zeroDayToolAccess?: Readonly<{
+    enforceToolAccess(workspaceId: string, toolName: string): Promise<void>;
+  }>;
   readonly recallService: {
     recall(params: {
       readonly taskSurface: ReturnType<typeof TaskObjectSurfaceSchema.parse>;

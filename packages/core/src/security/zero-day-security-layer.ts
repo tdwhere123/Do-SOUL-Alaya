@@ -91,6 +91,23 @@ export class ZeroDaySecurityLayer {
     return (await this.evaluateSecurityStatus(workspaceId)).status;
   }
 
+  public async enforceToolAccess(workspaceId: string, toolName: string): Promise<void> {
+    const parsedToolName = parseToolName(toolName);
+    const { activePolicies, status } = await this.evaluateSecurityStatus(workspaceId);
+
+    await this.notifyStatusEvaluated(status, "mcp.tool_evaluated");
+
+    const denyingPolicy = activePolicies.find(
+      (policy) => policy.kind === ZERO_DAY_POLICY_KIND_DENY_TOOL && policy.target === parsedToolName
+    );
+    if (denyingPolicy !== undefined) {
+      throw new CoreError(
+        "VALIDATION",
+        `MCP tool ${parsedToolName} is denied by active zero-day policy ${denyingPolicy.policy_id}.`
+      );
+    }
+  }
+
   public async initializeWorkspaceSecurity(workspaceId: string): Promise<boolean> {
     const parsedWorkspaceId = parseWorkspaceId(workspaceId);
     const nowMs = readClockSnapshot(this.deps.now).epochMs;
@@ -231,6 +248,10 @@ function parseWorkspaceId(workspaceId: string): string {
       cause: error instanceof Error ? error : undefined
     });
   }
+}
+
+function parseToolName(toolName: string): string {
+  return parseWorkspaceId(toolName);
 }
 
 function parseNow(now: string): string {

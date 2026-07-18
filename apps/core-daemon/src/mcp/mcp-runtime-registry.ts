@@ -13,6 +13,7 @@ import { readNow } from "@do-soul/alaya-core";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerInfo } from "@do-soul/alaya-protocol";
 import { readRuntimeVersion } from "../runtime/build-info.js";
+import { formatMcpToolResult } from "./runtime/tool-result-formatting.js";
 
 type DaemonMcpListedTool = {
   readonly name: string;
@@ -34,7 +35,6 @@ export type DaemonMcpServerRuntimeConfig =
     }>;
 
 type DaemonMcpRuntimeClient = Pick<Client, "callTool" | "close" | "connect" | "listTools">;
-type DaemonMcpRuntimeCallResult = Awaited<ReturnType<DaemonMcpRuntimeClient["callTool"]>>;
 type DaemonMcpRuntimeTransport = (StdioClientTransport | StreamableHTTPClientTransport) & Readonly<{
   close?: () => Promise<void> | void;
 }>;
@@ -376,21 +376,6 @@ async function deactivateServer(
   if (result?.status === "fulfilled") await closeHandle(result.value, state);
 }
 
-function formatMcpToolResult(result: DaemonMcpRuntimeCallResult): unknown {
-  const content = readMcpToolResultContent(result);
-  const structuredContent = readMcpToolStructuredContent(result);
-  if (readMcpToolIsError(result)) {
-    return {
-      ok: false,
-      code: "MCP_TOOL_ERROR",
-      message: readMcpToolErrorMessage(content),
-      content,
-      ...(structuredContent === undefined ? {} : { structuredContent })
-    };
-  }
-  return { content, ...(structuredContent === undefined ? {} : { structuredContent }) };
-}
-
 function resolveWarn(warn: WarnPort | undefined): (message: string, meta: Record<string, unknown>) => void {
   if (typeof warn === "function") {
     return warn;
@@ -464,39 +449,4 @@ function createServerInfo(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readMcpToolResultContent(result: DaemonMcpRuntimeCallResult): unknown {
-  if ("content" in result) {
-    return result.content;
-  }
-
-  return result.toolResult;
-}
-
-function readMcpToolStructuredContent(result: DaemonMcpRuntimeCallResult): unknown {
-  return "structuredContent" in result ? result.structuredContent : undefined;
-}
-
-function readMcpToolIsError(result: DaemonMcpRuntimeCallResult): boolean {
-  return "isError" in result && result.isError === true;
-}
-
-function readMcpToolErrorMessage(content: unknown): string {
-  if (!Array.isArray(content)) {
-    return "MCP tool call failed.";
-  }
-
-  for (const item of content) {
-    if (typeof item !== "object" || item === null || Array.isArray(item)) {
-      continue;
-    }
-
-    const text = (item as { readonly text?: unknown }).text;
-    if (typeof text === "string" && text.trim().length > 0) {
-      return text;
-    }
-  }
-
-  return "MCP tool call failed.";
 }
