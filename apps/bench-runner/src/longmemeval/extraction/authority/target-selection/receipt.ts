@@ -7,6 +7,7 @@ import {
 } from "../../cache-audit/compatibility.js";
 import type { ExtractionCacheAuditReceipt } from "../../cache-audit/receipt.js";
 import type { ExtractionAuthorityObservation } from "../receipt.js";
+import type { ExtractionCacheWriteLease } from "../../fill/manifest/fill-root-guard.js";
 import {
   assertFreshExtractionTargetRootPath,
   assertExtractionTargetRootBinding,
@@ -223,21 +224,24 @@ export function assertExtractionTargetSelectionReceipt(input: {
   readonly receipt: ExtractionTargetSelectionReceipt;
   readonly cacheRoot: string;
   readonly observation: ExtractionAuthorityObservation;
+  readonly writeLease?: ExtractionCacheWriteLease;
 }): void {
-  assertExtractionTargetSelectionRootBinding(input.receipt, input.cacheRoot);
+  assertExtractionTargetSelectionRootBinding(input.receipt, input.cacheRoot, input.writeLease);
   assertFinalIdentity(input.receipt.final_identity, input.observation);
 }
 
 export function assertExtractionTargetSelectionRootBinding(
   receipt: ExtractionTargetSelectionReceipt,
-  cacheRoot: string
+  cacheRoot: string,
+  writeLease: ExtractionCacheWriteLease | undefined = undefined
 ): void {
   assertReceiptIntegrity(receipt);
   assertExtractionTargetRootBinding({
     cacheRoot,
     marker: targetRootMarker,
     purpose: "extraction target selection",
-    binding: receipt.target_root
+    binding: receipt.target_root,
+    ...(writeLease === undefined ? {} : { writeLease })
   });
 }
 

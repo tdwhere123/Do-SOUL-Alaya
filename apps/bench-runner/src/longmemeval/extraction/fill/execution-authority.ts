@@ -16,15 +16,19 @@ import {
 import { receiptExtractionCacheIdentity } from "../authority/receipt-cache-identity.js";
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import type { ExecutionExtractionAuthority } from "./fill-execution.js";
+import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 
 export function createExtractionExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
   cacheRoot: string,
-  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined
+  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined,
+  writeLease: ExtractionCacheWriteLease | undefined = undefined
 ): ExecutionExtractionAuthority {
   return receipt.limits.maximum_attempts === 0
     ? createExhaustedExecutionAuthority(receipt)
-    : createLedgerExecutionAuthority(receipt, cacheRoot, targetSelection);
+    : createLedgerExecutionAuthority(
+      receipt, cacheRoot, targetSelection, writeLease
+    );
 }
 
 function createExhaustedExecutionAuthority(
@@ -51,9 +55,12 @@ function createExhaustedExecutionAuthority(
 function createLedgerExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
   cacheRoot: string,
-  targetSelection: ExtractionTargetSelectionReceipt | undefined
+  targetSelection: ExtractionTargetSelectionReceipt | undefined,
+  writeLease: ExtractionCacheWriteLease | undefined
 ): ExecutionExtractionAuthority {
-  const assertTarget = createTargetAssertion(receipt, cacheRoot, targetSelection);
+  const assertTarget = createTargetAssertion(
+    receipt, cacheRoot, targetSelection, writeLease
+  );
   assertTarget();
   const ledger = openExtractionAttemptLedger({
     cacheRoot,
@@ -94,15 +101,21 @@ function createLedgerExecutionAuthority(
 function createTargetAssertion(
   receipt: ExtractionAuthorityReceipt,
   cacheRoot: string,
-  targetSelection: ExtractionTargetSelectionReceipt | undefined
+  targetSelection: ExtractionTargetSelectionReceipt | undefined,
+  writeLease: ExtractionCacheWriteLease | undefined
 ): () => void {
   if (receipt.direct_spend === undefined && targetSelection === undefined) return () => undefined;
   return () => {
+    writeLease?.assertOwned();
     if (receipt.direct_spend !== undefined) {
-      assertDirectExtractionSpendRootBinding({ authorization: receipt.direct_spend, cacheRoot });
+      assertDirectExtractionSpendRootBinding({
+        authorization: receipt.direct_spend,
+        cacheRoot,
+        ...(writeLease === undefined ? {} : { writeLease })
+      });
     }
     if (targetSelection !== undefined) {
-      assertExtractionTargetSelectionRootBinding(targetSelection, cacheRoot);
+      assertExtractionTargetSelectionRootBinding(targetSelection, cacheRoot, writeLease);
     }
   };
 }

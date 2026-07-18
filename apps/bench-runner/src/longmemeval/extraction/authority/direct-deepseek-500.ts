@@ -5,6 +5,7 @@ import {
   discardFreshExtractionTargetRoot,
   type ExtractionTargetRootBinding
 } from "./target-root-binding.js";
+import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
 
 export const DIRECT_DEEPSEEK_500_REQUESTS_PER_MINUTE = 30;
 const DIRECT_DEEPSEEK_500_MODEL_FAMILY = "deepseek-v4-flash-nonthinking";
@@ -127,41 +128,48 @@ export function assertDirectExtractionSpendAuthorization(input: {
 export function assertDirectDeepSeek500RootBinding(input: {
   readonly authorization: DirectDeepSeek500SpendAuthorization;
   readonly cacheRoot: string;
+  readonly writeLease?: ExtractionCacheWriteLease;
 }): void {
   assertExtractionTargetRootBinding({
     cacheRoot: input.cacheRoot,
     marker: directRootMarker,
     purpose: "direct DeepSeek 500 authorization",
-    binding: input.authorization
+    binding: input.authorization,
+    ...(input.writeLease === undefined ? {} : { writeLease: input.writeLease })
   });
 }
 
 export function assertNewApiDeepSeek500RootBinding(input: {
   readonly authorization: NewApiDeepSeek500SpendAuthorization;
   readonly cacheRoot: string;
+  readonly writeLease?: ExtractionCacheWriteLease;
 }): void {
   assertExtractionTargetRootBinding({
     cacheRoot: input.cacheRoot,
     marker: newApiRootMarker,
     purpose: "direct NewAPI DeepSeek 500 authorization",
-    binding: input.authorization
+    binding: input.authorization,
+    ...(input.writeLease === undefined ? {} : { writeLease: input.writeLease })
   });
 }
 
 export function assertDirectExtractionSpendRootBinding(input: {
   readonly authorization: DirectExtractionSpendAuthorization;
   readonly cacheRoot: string;
+  readonly writeLease?: ExtractionCacheWriteLease;
 }): void {
   if (isDirectDeepSeek500Authorization(input.authorization)) {
     assertDirectDeepSeek500RootBinding({
       authorization: input.authorization,
-      cacheRoot: input.cacheRoot
+      cacheRoot: input.cacheRoot,
+      ...(input.writeLease === undefined ? {} : { writeLease: input.writeLease })
     });
     return;
   }
   assertNewApiDeepSeek500RootBinding({
     authorization: input.authorization,
-    cacheRoot: input.cacheRoot
+    cacheRoot: input.cacheRoot,
+    ...(input.writeLease === undefined ? {} : { writeLease: input.writeLease })
   });
 }
 

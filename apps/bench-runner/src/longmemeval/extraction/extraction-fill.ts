@@ -154,7 +154,7 @@ async function runLockedExtractionFill(
   const executionAuthority = authority === undefined
     ? undefined
     : createExtractionExecutionAuthority(
-      authority.receipt, cacheRoot, authority.targetSelection
+      authority.receipt, cacheRoot, authority.targetSelection, writeLease
     );
   const watchdog = executionAuthority === undefined
     ? undefined
@@ -280,7 +280,7 @@ async function loadExtractionAuthority(
   assertDirectExtractionMetadataScope(options, receipt);
   const targetSelection = loadTargetSelection(options, receipt);
   const inspection = await inspectReceiptAuthority(options, cacheRoot, receipt);
-  assertAuthorityInspection(receipt, inspection, cacheRoot, false, targetSelection);
+  assertAuthorityInspection(receipt, inspection, cacheRoot, undefined, targetSelection);
   return Object.freeze({
     receipt,
     ...(targetSelection === undefined ? {} : { targetSelection })
@@ -340,7 +340,7 @@ async function revalidateExtractionAuthority(
   writeLease.assertOwned();
   const inspection = await inspectReceiptAuthority(options, cacheRoot, authority.receipt);
   assertAuthorityInspection(
-    authority.receipt, inspection, cacheRoot, true, authority.targetSelection
+    authority.receipt, inspection, cacheRoot, writeLease, authority.targetSelection
   );
 }
 
@@ -394,21 +394,24 @@ function assertAuthorityInspection(
   receipt: ExtractionAuthorityReceipt,
   inspection: Awaited<ReturnType<typeof inspectExtractionAuthority>>,
   cacheRoot: string,
-  allowOwnedWriterLock = false,
+  writeLease: ExtractionCacheWriteLease | undefined = undefined,
   targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined
 ): void {
   assertExtractionAuthorityReceipt(receipt, inspection.observation);
+  writeLease?.assertOwned();
   if (receipt.direct_spend !== undefined) {
     assertDirectExtractionSpendRootBinding({
       authorization: receipt.direct_spend,
-      cacheRoot
+      cacheRoot,
+      ...(writeLease === undefined ? {} : { writeLease })
     });
   }
   if (targetSelection !== undefined) {
     assertExtractionTargetSelectionReceipt({
       receipt: targetSelection,
       cacheRoot,
-      observation: inspection.observation
+      observation: inspection.observation,
+      ...(writeLease === undefined ? {} : { writeLease })
     });
     assertExtractionTargetSelectionWindow(targetSelection, inspection.observation);
   }
@@ -417,7 +420,7 @@ function assertAuthorityInspection(
     disk: inspection.disk,
     credentialStatus: inspection.credentialStatus,
     modelReadiness: inspection.modelReadiness
-  }, { allowOwnedWriterLock });
+  }, { allowOwnedWriterLock: writeLease !== undefined });
   if (receipt.action === "probe" &&
       (receipt.probe_key === undefined || !inspection.missingKeys.includes(receipt.probe_key))) {
     throw new Error("extraction probe authority target is no longer a missing cache key");

@@ -11,6 +11,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import type { ExtractionCacheWriteLease } from "../fill/manifest/fill-root-guard.js";
 
 export interface ExtractionTargetRootMarker {
   readonly filename: string;
@@ -56,16 +57,14 @@ export function createFreshExtractionTargetRoot(
 
 export function assertExtractionTargetRootBinding(input: TargetRootInput & {
   readonly binding: ExtractionTargetRootBinding;
+  /** The active writer lease may prove the root still belongs to this fill. */
+  readonly writeLease?: ExtractionCacheWriteLease;
 }): void {
   const root = canonicalExtractionTargetRoot(input.cacheRoot);
   try {
-    const stat = lstatSync(root, { bigint: true });
-    const marker = readMarkerSha256(root, input.marker);
-    if (!stat.isDirectory() || stat.isSymbolicLink() ||
-        hashRoot(root) !== input.binding.cache_root_sha256 ||
-        stat.dev.toString() !== input.binding.cache_root_device ||
-        stat.ino.toString() !== input.binding.cache_root_inode ||
-        marker !== input.binding.cache_root_marker_sha256) {
+    if (!hasRuntimeTargetRootBinding(
+      root, input.marker, input.binding, ownsTargetRootWriteLease(root, input.writeLease)
+    )) {
       throw new Error("binding mismatch");
     }
   } catch {
@@ -77,8 +76,8 @@ export function discardFreshExtractionTargetRoot(input: TargetRootInput & {
   readonly binding: ExtractionTargetRootBinding;
 }): void {
   try {
-    assertExtractionTargetRootBinding(input);
     const root = canonicalExtractionTargetRoot(input.cacheRoot);
+    if (!hasUnchangedFreshTargetRoot(root, input.marker, input.binding)) return;
     if (!hasOnlyMarker(root, input.marker)) return;
     const markerPath = markerPathFor(root, input.marker);
     const markerBytes = readFileSync(markerPath);
@@ -91,6 +90,40 @@ export function discardFreshExtractionTargetRoot(input: TargetRootInput & {
   } catch {
     // A failed preflight must never remove a root that acquired content or changed identity.
   }
+}
+
+function hasRuntimeTargetRootBinding(
+  root: string,
+  marker: ExtractionTargetRootMarker,
+  binding: ExtractionTargetRootBinding,
+  allowRootInodeDrift = false
+): boolean {
+  const stat = lstatSync(root, { bigint: true });
+  return stat.isDirectory() && !stat.isSymbolicLink() &&
+    hashRoot(root) === binding.cache_root_sha256 &&
+    readMarkerSha256(root, marker) === binding.cache_root_marker_sha256 &&
+    stat.dev.toString() === binding.cache_root_device &&
+    (allowRootInodeDrift || stat.ino.toString() === binding.cache_root_inode);
+}
+
+function ownsTargetRootWriteLease(
+  root: string,
+  writeLease: ExtractionCacheWriteLease | undefined
+): boolean {
+  if (writeLease === undefined) return false;
+  writeLease.assertOwned();
+  return canonicalExtractionTargetRoot(writeLease.cacheRoot) === root;
+}
+
+function hasUnchangedFreshTargetRoot(
+  root: string,
+  marker: ExtractionTargetRootMarker,
+  binding: ExtractionTargetRootBinding
+): boolean {
+  const stat = lstatSync(root, { bigint: true });
+  return hasRuntimeTargetRootBinding(root, marker, binding) &&
+    stat.dev.toString() === binding.cache_root_device &&
+    stat.ino.toString() === binding.cache_root_inode;
 }
 
 export function canonicalExtractionTargetRoot(cacheRoot: string): string {
