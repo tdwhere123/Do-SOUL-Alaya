@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { MemoryDimension, ScopeClass, StorageTier } from "@do-soul/alaya-protocol";
 import { SqliteEnrichPendingRepo } from "../../../repos/garden/enrich-pending-repo.js";
 import { SqliteEventLogRepo } from "../../../repos/runtime/event-log-repo.js";
 import { prepareMemoryEntryStatements } from "../../../repos/memory-entry/sqlite-memory-entry-statements.js";
-import { removeTempDirectorySync } from "../../temp-directory.js";
 import {
   createMemoryCreatedEventInput,
   createMemoryEntry,
@@ -62,23 +58,6 @@ describe("SqliteMemoryEntryRepo", () => {
     await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
     await expect(eventLogRepo.queryByEntity("memory_entry", entry.object_id)).resolves.toHaveLength(1);
     expect(enrichRepo.countPending(entry.workspace_id)).toBe(1);
-  });
-
-  it("createWithinTransaction reopens a closed file database before starting the transaction", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-memory-entry-"));
-    const { repo, database } = await createRepo({
-      filename: path.join(tempDir, "memory-entry.db")
-    });
-    const entry = createMemoryEntry();
-
-    database.close();
-    const returned = repo.createWithinTransaction(entry, {});
-
-    expect(returned).toEqual(entry);
-    expect(database.isClosed()).toBe(false);
-    await expect(repo.findById(entry.object_id)).resolves.toEqual(entry);
-    databases.delete(database);
-    removeTempDirectorySync(tempDir, [database]);
   });
 
   it("createWithinTransaction rolls back the EventLog row and memory row when the co-write throws", async () => {
@@ -174,29 +153,6 @@ describe("SqliteMemoryEntryRepo", () => {
 
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.object_id).sort()).toEqual([first.object_id, second.object_id].sort());
-  });
-
-  it("reuses stable bulk-read statements across input cardinalities", async () => {
-    const { repo, database } = await createRepo();
-    const first = createMemoryEntry({ object_id: "7ab81ca8-9425-4e18-ad4a-81ab6406db55" });
-    const second = createMemoryEntry({ object_id: "ca648194-c03c-4932-b103-3ec4d318732a" });
-    await repo.create(first);
-    await repo.create(second);
-    let prepareCount = 0;
-    const originalPrepare = database.connection.prepare.bind(database.connection);
-    database.connection.prepare = ((sql: string) => {
-      prepareCount += 1;
-      return originalPrepare(sql);
-    }) as typeof database.connection.prepare;
-
-    await repo.findByIds("workspace-1", [first.object_id]);
-    await repo.findByIds("workspace-1", [first.object_id, second.object_id]);
-    await repo.findBySharedDomainTags("workspace-1", ["tag-a"]);
-    await repo.findBySharedDomainTags("workspace-1", ["tag-a", "tag-b"]);
-    await repo.findByEvidenceRefs("workspace-1", ["evidence-a"]);
-    await repo.findByEvidenceRefs("workspace-1", ["evidence-a", "evidence-b"]);
-
-    expect(prepareCount).toBe(3);
   });
 
   it("returns hot-tier records by default in findByWorkspaceId", async () => {
@@ -538,45 +494,6 @@ describe("SqliteMemoryEntryRepo", () => {
       "5b32be7d-dfc7-4746-9c7d-d70c6d8f8193",
       "89debe8f-cf95-4304-8a04-77f44e40be8e"
     ]);
-  });
-
-  it("findByIds reprepares dynamic SQL after the database connection is closed and reopened", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-memory-entry-"));
-    const { repo, database } = await createRepo({
-      filename: path.join(tempDir, "memory-entry.db")
-    });
-    const entry = createMemoryEntry();
-    await repo.create(entry);
-
-    database.close();
-    const rows = await repo.findByIds(entry.workspace_id, [entry.object_id]);
-
-    expect(rows).toEqual([entry]);
-    expect(database.isClosed()).toBe(false);
-    databases.delete(database);
-    removeTempDirectorySync(tempDir, [database]);
-  });
-
-  it("transitionLifecycle reopens a closed file database before starting the transaction", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-memory-entry-"));
-    const { repo, database } = await createRepo({
-      filename: path.join(tempDir, "memory-entry.db")
-    });
-    const entry = createMemoryEntry();
-    await repo.create(entry);
-
-    database.close();
-    const transitioned = await repo.transitionLifecycle(
-      entry.object_id,
-      "dormant",
-      "2026-03-22T00:00:00.000Z"
-    );
-
-    expect(transitioned.lifecycle_state).toBe("dormant");
-    expect(transitioned.updated_at).toBe("2026-03-22T00:00:00.000Z");
-    expect(database.isClosed()).toBe(false);
-    databases.delete(database);
-    removeTempDirectorySync(tempDir, [database]);
   });
 
 });

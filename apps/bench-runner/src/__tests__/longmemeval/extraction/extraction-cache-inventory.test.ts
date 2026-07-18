@@ -54,6 +54,53 @@ describe("extraction cache inventory", () => {
     expect(hashExtractionCacheInventory(forward)).toBe(hashExtractionCacheInventory(reversed));
   });
 
+  it("marks legacy salvaged-but-malformed raw JSON invalid for repair", () => {
+    const root = cacheRoot();
+    const key = "d".repeat(64);
+    writeShard(root, key,
+      '{"signals":[{"signal_kind":"potential_preference",' +
+      '"object_kind":"user_preference","confidence":0.9,' +
+      '"matched_text":"tea","distilled_fact":"The user likes tea."},' +
+      '{"signal_kind":"potential_preference"}'
+    );
+
+    const inventory = inspectExtractionCacheInventory({
+      cacheRoot: root, cacheKeys: [key], model, requestProfile
+    });
+
+    expect(inventory.counts).toEqual({
+      expected: 1, hit: 0, missing: 0, invalid: 1, orphan: 0
+    });
+    expect(inventory.shards[0]?.reason).toMatch(/strict JSON/u);
+  });
+
+  it("rejects cached length truncation while retaining metadata-less legacy shards", () => {
+    const root = cacheRoot();
+    const truncated = "d".repeat(64);
+    const legacy = "e".repeat(64);
+    writeShard(root, truncated, JSON.stringify({ signals: [] }), {
+      finish_reason: "length",
+      max_output_tokens: 2048
+    });
+    writeShard(root, legacy);
+
+    const inventory = inspectExtractionCacheInventory({
+      cacheRoot: root,
+      cacheKeys: [truncated, legacy],
+      model,
+      requestProfile
+    });
+
+    expect(inventory.shards.map((shard) => [shard.cacheKey, shard.status])).toEqual([
+      [truncated, "invalid"],
+      [legacy, "hit"]
+    ]);
+    expect(inventory.shards[0]?.reason).toMatch(/finish_reason.*length/u);
+    expect(inventory.counts).toEqual({
+      expected: 2, hit: 1, missing: 0, invalid: 1, orphan: 0
+    });
+  });
+
   it("rejects a symlinked cache root rather than following it", () => {
     const root = cacheRoot();
     const link = `${root}-link`;
@@ -93,13 +140,19 @@ function cacheRoot(): string {
   return root;
 }
 
-function writeShard(root: string, cacheKey: string): void {
+function writeShard(
+  root: string,
+  cacheKey: string,
+  rawJson = JSON.stringify({ signals: [] }),
+  responseMetadata?: unknown
+): void {
   const path = cacheFilePath(root, cacheKey);
   mkdirSync(join(path, ".."), { recursive: true });
   writeFileSync(path, JSON.stringify({
     cache_key: cacheKey,
     model,
     request_profile: requestProfile,
-    raw_json: JSON.stringify({ signals: [] })
+    raw_json: rawJson,
+    ...(responseMetadata === undefined ? {} : { response_metadata: responseMetadata })
   }), "utf8");
 }

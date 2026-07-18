@@ -386,7 +386,11 @@ describe("extraction cache write is atomic", () => {
       }))
     });
     const delegate: BenchSignalExtractor = {
-      extract: vi.fn(async () => ({ rawJson: bigRawJson }))
+      extract: vi.fn(async () => ({
+        rawJson: bigRawJson,
+        responseMetadata: { finishReason: "stop", maxOutputTokens: 2048 },
+        usage: { inputTokens: 17, outputTokens: 23, totalTokens: 40 }
+      }))
     };
     const extractor = createCachingSignalExtractor({
       delegate,
@@ -411,8 +415,14 @@ describe("extraction cache write is atomic", () => {
     const shardPath = join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
     const onDisk = JSON.parse(readFileSync(shardPath, "utf8")) as {
       raw_json: string;
+      response_metadata: unknown;
     };
     expect(onDisk.raw_json).toBe(bigRawJson);
+    expect(onDisk.response_metadata).toEqual({
+      finish_reason: "stop",
+      max_output_tokens: 2048,
+      usage: { input_tokens: 17, output_tokens: 23, total_tokens: 40 }
+    });
 
     // The fixture is reused on a second extractor with zero LLM calls — only
     // possible if the shard landed whole.

@@ -53,6 +53,9 @@ export function buildFillManifest(input: {
     ...(input.expansionSourceAnchor === undefined ? {} : {
       expansion_source_anchor: input.expansionSourceAnchor
     }),
+    ...(input.existingManifest?.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_receipt: input.existingManifest.supplemental_source_receipt
+    }),
     ...(contentClosure ?? {}),
     storage: input.existingManifest?.storage ?? "git-tracked",
     built_at: new Date().toISOString(),

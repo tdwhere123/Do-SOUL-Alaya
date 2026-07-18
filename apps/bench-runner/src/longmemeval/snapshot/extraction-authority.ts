@@ -72,6 +72,11 @@ export function buildSnapshotExtractionSummary(
     expected_turns: manifest.expected_turns,
     expected_key_set_sha256: manifest.expected_key_set_sha256,
     content_closure_sha256: manifest.content_closure_sha256,
+    ...(manifest.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_receipt: sanitizeSnapshotProvenanceValue(
+        manifest.supplemental_source_receipt
+      )
+    }),
     ...expansion
   };
 }
@@ -171,17 +176,17 @@ function parseAuthority(value: unknown, label: string): SnapshotExtractionAuthor
 function sanitizedExpansionArtifacts(manifest: ExtractionCacheManifestV3) {
   return {
     ...(manifest.expansion_source_anchor === undefined ? {} : {
-      expansion_source_anchor: sanitizeProviderUrls(manifest.expansion_source_anchor)
+      expansion_source_anchor: sanitizeSnapshotProvenanceValue(manifest.expansion_source_anchor)
     }),
     ...(manifest.expansion_lineage === undefined ? {} : {
-      expansion_lineage: sanitizeProviderUrls(manifest.expansion_lineage)
+      expansion_lineage: sanitizeSnapshotProvenanceValue(manifest.expansion_lineage)
     })
   };
 }
 
-function sanitizeProviderUrls<T>(value: T): T {
+export function sanitizeSnapshotProvenanceValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (key, nested: unknown) =>
-    key === "provider_url" && typeof nested === "string"
+    key.endsWith("provider_url") && typeof nested === "string"
       ? redactProvenanceUrl(nested)
       : nested)) as T;
 }

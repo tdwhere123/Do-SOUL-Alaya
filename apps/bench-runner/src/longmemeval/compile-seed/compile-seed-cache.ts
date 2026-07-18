@@ -12,6 +12,7 @@ import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
 import {
+  computeExtractionRawJsonSha256,
   inspectExtractionRawJson,
   type ExtractionRawJsonInspection
 } from "../extraction/content-closure.js";
@@ -25,6 +26,12 @@ import {
   extractLiveDelegate,
   type ExtractionLiveTransportOutcome
 } from "../extraction/cache/cache-live-delegate.js";
+import {
+  cachedExtractionResult,
+  inspectCachedResponseMetadata,
+  persistedResponseMetadata,
+  type CachedExtractionResponseMetadata
+} from "./cache/cached-response-metadata.js";
 export {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
@@ -34,6 +41,8 @@ export {
   type ExtractionRawJsonInspection
 } from "../extraction/content-closure.js";
 import type {
+  BenchProviderResponseMetadata,
+  BenchProviderUsage,
   BenchSignalExtractor,
   CompileSeedExtractionConfig,
   CompileSeedExtractionStats
@@ -45,6 +54,7 @@ interface CachedExtraction {
   readonly cache_key: string;
   readonly raw_json: string;
   readonly extracted_at: string;
+  readonly response_metadata?: CachedExtractionResponseMetadata;
 }
 
 interface CachingSignalExtractorOptions {
@@ -120,7 +130,7 @@ async function extractWithCache(
   if (cached.status === "hit") {
     recordCacheHit(options.stats, cacheKey, cached);
     options.onExtractionProgress?.();
-    return { rawJson: cached.rawJson };
+    return cachedExtractionResult(cached);
   }
   if (options.allowLiveExtraction === false) {
     throw new Error(
@@ -182,7 +192,7 @@ async function extractLiveWithLease(
   if (recached.status === "hit") {
     recordCacheHit(options.stats, cacheKey, recached);
     options.onExtractionProgress?.();
-    return { rawJson: recached.rawJson };
+    return cachedExtractionResult(recached);
   }
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
@@ -201,7 +211,7 @@ async function extractLiveWithLease(
   });
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
-  const inspection = persistLiveExtraction(options, cacheRoot, cacheKey, result.rawJson);
+  const inspection = persistLiveExtraction(options, cacheRoot, cacheKey, result);
   recordLiveExtractionSuccess(options, cacheKey, stats, inspection);
   return result;
 }
@@ -219,16 +229,17 @@ function persistLiveExtraction(
   options: CachingSignalExtractorOptions,
   cacheRoot: string,
   cacheKey: string,
-  rawJson: string
+  result: Awaited<ReturnType<BenchSignalExtractor["extract"]>>
 ): ExtractionRawJsonInspection {
-  const inspection = inspectExtractionRawJson(rawJson);
+  const inspection = inspectExtractionRawJson(result.rawJson);
   try {
     writeCachedExtraction(cacheRoot, cacheKey, {
       model: options.config.model,
       request_profile: options.config.requestProfile,
       cache_key: cacheKey,
-      raw_json: rawJson,
-      extracted_at: new Date().toISOString()
+      raw_json: result.rawJson,
+      extracted_at: new Date().toISOString(),
+      ...persistedResponseMetadata(result.responseMetadata, result.usage)
     });
   } catch (cause) {
     throw new ExtractionCacheInvariantError(
@@ -383,9 +394,15 @@ export type CachedExtractionInspection =
     readonly rawJsonSha256: string;
     readonly rawSignalCount: number;
     readonly parsedDraftCount: number;
+    readonly responseMetadata?: BenchProviderResponseMetadata;
+    readonly usage?: BenchProviderUsage;
   }
   | { readonly status: "missing"; readonly reason?: undefined }
-  | { readonly status: "invalid"; readonly reason: string };
+  | {
+    readonly status: "invalid";
+    readonly reason: string;
+    readonly rawJsonSha256?: string;
+  };
 
 export function inspectCachedExtraction(
   cacheRoot: string,
@@ -397,33 +414,42 @@ export function inspectCachedExtraction(
   if (!existsSync(filePath)) {
     return { status: "missing" };
   }
+  let parsed: Partial<CachedExtraction>;
   try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedExtraction>;
-    if (typeof parsed.raw_json !== "string") {
-      return { status: "invalid", reason: "raw_json must be a string" };
-    }
-    if (parsed.model !== model) {
-      return { status: "invalid", reason: `model ${String(parsed.model)} != ${model}` };
-    }
-    if (parsed.request_profile !== requestProfile) {
-      return {
-        status: "invalid",
-        reason: `request_profile ${String(parsed.request_profile)} != ${requestProfile}`
-      };
-    }
-    if (parsed.cache_key !== cacheKey) {
-      return { status: "invalid", reason: "cache_key does not match fixture path" };
-    }
-    const inspection = inspectExtractionRawJson(parsed.raw_json);
-    return {
-      status: "hit",
-      rawJson: parsed.raw_json,
-      ...inspection
-    };
+    parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedExtraction>;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return { status: "invalid", reason: `invalid cached extraction: ${reason}` };
+    return { status: "invalid", reason: `invalid cache shard JSON: ${reason}` };
   }
+  const identityError = inspectCachedIdentity(parsed, cacheKey, model, requestProfile);
+  if (identityError !== null) return { status: "invalid", reason: identityError };
+  const rawJson = parsed.raw_json!;
+  const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
+  try {
+    const response = inspectCachedResponseMetadata(parsed.response_metadata);
+    return { status: "hit", rawJson, ...inspectExtractionRawJson(rawJson), ...response };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      status: "invalid",
+      reason: `invalid cached extraction: ${reason}`,
+      rawJsonSha256
+    };
+  }
+}
+
+function inspectCachedIdentity(
+  parsed: Partial<CachedExtraction>,
+  cacheKey: string,
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"]
+): string | null {
+  if (typeof parsed.raw_json !== "string") return "raw_json must be a string";
+  if (parsed.model !== model) return `model ${String(parsed.model)} != ${model}`;
+  if (parsed.request_profile !== requestProfile) {
+    return `request_profile ${String(parsed.request_profile)} != ${requestProfile}`;
+  }
+  return parsed.cache_key === cacheKey ? null : "cache_key does not match fixture path";
 }
 
 function writeCachedExtraction(

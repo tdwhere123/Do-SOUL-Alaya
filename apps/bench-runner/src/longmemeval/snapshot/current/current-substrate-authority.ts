@@ -38,6 +38,7 @@ import { assertSnapshotDatasetSubstrateIdentity } from
 import { assertCurrentSnapshotAttributionClaim } from "./current-attribution.js";
 import {
   assertSnapshotExtractionAuthorityBinding,
+  sanitizeSnapshotProvenanceValue,
   type SnapshotExtractionAuthority
 } from "../extraction-authority.js";
 import {
@@ -321,6 +322,11 @@ function extractionProvenance(
     expected_turns: manifest.expected_turns,
     expected_key_set_sha256: manifest.expected_key_set_sha256,
     content_closure_sha256: manifest.content_closure_sha256,
+    ...(manifest.supplemental_source_receipt === undefined ? {} : {
+      supplemental_source_receipt: sanitizeSnapshotProvenanceValue(
+        manifest.supplemental_source_receipt
+      )
+    }),
     ...(manifest.expansion_source_anchor === undefined ? {} : {
       expansion_source_anchor: manifest.expansion_source_anchor
     }),

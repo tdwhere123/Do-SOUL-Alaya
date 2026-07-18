@@ -163,7 +163,7 @@ export class SqliteMemoryEntryRepo
     return createMemoryEntryWithinTransaction.call(this, entry, callbacks);
   }
 
-  private activeConnection(): StorageDatabase["connection"] {
+  public activeConnection(): StorageDatabase["connection"] {
     this.db.reopenIfClosed();
     return this.db.connection;
   }

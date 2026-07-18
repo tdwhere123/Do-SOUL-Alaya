@@ -16,6 +16,7 @@ import type {
   RecallServiceSynthesisSearchPort
 } from "@do-soul/alaya-core";
 import type { RecallPathProjectionReadOptions } from "./recall-path-readers.js";
+import type { RecallTemporalProjectionEnsurer } from "./recall-path-readers.js";
 import type {
   RecallReadWorkerOperation,
   RecallReadWorkerRequest,
@@ -51,6 +52,7 @@ export function createRecallReadWorkerClient(input: {
   readonly workerUrl?: URL;
   readonly workerCount?: number;
   readonly requestTimeoutMs?: number;
+  readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
   readonly warn?: (message: string, meta: Record<string, unknown>) => void;
 }): RecallReadWorkerClient | null {
   if (input.databaseFilename === ":memory:") {
@@ -77,6 +79,7 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private readonly databaseFilename: string;
   private readonly requestTimeoutMs: number;
   private readonly temporalProjectionSelected: boolean;
+  private readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
   private readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   private readonly workerUrl: URL;
   private nextWorkerIndex = 0;
@@ -253,11 +256,16 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     readonly workerUrl: URL;
     readonly workerCount?: number;
     readonly requestTimeoutMs?: number;
+    readonly prepareTemporalProjection?: RecallTemporalProjectionEnsurer;
     readonly warn?: (message: string, meta: Record<string, unknown>) => void;
   }) {
     this.databaseFilename = input.databaseFilename;
     this.requestTimeoutMs = normalizeRequestTimeoutMs(input.requestTimeoutMs);
     this.temporalProjectionSelected = input.temporalProjectionSelected === true;
+    if (this.temporalProjectionSelected && input.prepareTemporalProjection === undefined) {
+      throw new Error("selected temporal recall worker requires parent projection preparation");
+    }
+    this.prepareTemporalProjection = input.prepareTemporalProjection;
     this.warn = input.warn;
     this.workerUrl = input.workerUrl;
     const workerCount = normalizeWorkerCount(input.workerCount);
@@ -355,6 +363,10 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   ): Promise<T> {
     if (this.closed && operation !== "close") {
       throw new Error("recall read worker is closed");
+    }
+    if (this.temporalProjectionSelected && isPathAffinityOperation(operation)) {
+      const asOf = (payload as { readonly asOf?: string }).asOf;
+      await this.prepareTemporalProjection?.(asOf === undefined ? {} : { asOf });
     }
     const worker = this.requireWorker(operation);
     return await this.dispatchToWorker<T>(worker, operation, payload, consumeSuccess);

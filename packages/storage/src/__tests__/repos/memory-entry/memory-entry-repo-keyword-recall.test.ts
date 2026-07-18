@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   createMemoryEntry,
   createRepo,
   trackedDatabases
 } from "./memory-entry-repo-fixture.js";
+import { removeTempDirectorySync } from "../../temp-directory.js";
 
 const databases = trackedDatabases;
 
@@ -178,6 +182,37 @@ describe("SqliteMemoryEntryRepo keyword search", () => {
     ).resolves.toEqual([
       expect.objectContaining({ object_id: "22222222-2222-4222-8222-222222222222" })
     ]);
+  });
+
+  it("reopens tier-scoped long-token, short-token, and anchor searches", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-tier-search-"));
+    const { database, repo } = await createRepo({
+      filename: path.join(tempDir, "tier-search.db")
+    });
+    const memory = createMemoryEntry({
+      object_id: "11111111-1111-4111-8111-111111111111",
+      content: "Go with Melanie to keep the recall needle in warm memory.",
+      storage_tier: "warm"
+    });
+    await repo.create(memory);
+
+    database.close();
+    await expect(
+      repo.searchByKeywordWithinTier!("workspace-1", "needle", 5, "warm")
+    ).resolves.toEqual([expect.objectContaining({ object_id: memory.object_id })]);
+
+    database.close();
+    await expect(
+      repo.searchByKeywordWithinTier!("workspace-1", "go", 5, "warm")
+    ).resolves.toEqual([expect.objectContaining({ object_id: memory.object_id })]);
+
+    database.close();
+    await expect(
+      repo.searchByAnchorWithinTier!("workspace-1", ["melanie"], ["needle"], 5, "warm")
+    ).resolves.toEqual([expect.objectContaining({ object_id: memory.object_id })]);
+
+    trackedDatabases.delete(database);
+    removeTempDirectorySync(tempDir, [database]);
   });
 
   it("finds short-token keyword matches beyond the first exact-scan batch", async () => {

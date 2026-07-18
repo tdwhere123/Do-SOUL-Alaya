@@ -42,7 +42,14 @@ export interface BenchSignalExtractor {
     readonly extractorMeta?: BenchSignalExtractorMeta;
     /** Exact provider-reported request usage, never locally estimated. */
     readonly usage?: BenchProviderUsage;
+    /** Provider completion metadata bound to the exact successful attempt. */
+    readonly responseMetadata?: BenchProviderResponseMetadata;
   }>;
+}
+
+export interface BenchProviderResponseMetadata {
+  readonly finishReason: string | null;
+  readonly maxOutputTokens?: number;
 }
 
 export interface BenchProviderUsage {

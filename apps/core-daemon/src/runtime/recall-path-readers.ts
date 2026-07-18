@@ -165,6 +165,11 @@ type LegacyPathReader = Readonly<{
 }>;
 
 type PathReaderMode = SelectedPathReader | LegacyPathReader;
+type FindByAnchors = RecallPathReadPorts["pathExpansionPort"]["findByAnchors"];
+type FindByTimeConcernWindowDigests =
+  RecallPathReadPorts["pathExpansionPort"]["findByTimeConcernWindowDigests"];
+type FindActiveByWorkspace = RecallPathReadPorts["findActiveByWorkspace"];
+const projectionAlreadyPrepared: RecallTemporalProjectionEnsurer = async () => undefined;
 
 export function createRecallPathReadPorts(input: {
   readonly temporalProjectionSelected?: boolean;
@@ -173,32 +178,55 @@ export function createRecallPathReadPorts(input: {
   readonly ensureTemporalProjection?: RecallTemporalProjectionEnsurer;
 }): RecallPathReadPorts {
   const mode = selectPathReader(input);
-  const findByAnchors = async (
+  return mode.kind === "selected"
+    ? createSelectedRecallPathReadPorts(mode)
+    : createLegacyRecallPathReadPorts(mode);
+}
+
+function createSelectedRecallPathReadPorts(mode: SelectedPathReader): RecallPathReadPorts {
+  const findByAnchors: FindByAnchors = async (
     workspaceId: string,
     anchorRefs: readonly PathAnchorRef[],
     options: RecallPathProjectionReadOptions = {}
-  ): Promise<readonly Readonly<PathRelation>[]> => {
-    if (mode.kind === "selected") {
-      await mode.ensureTemporalProjection(options);
-      return await mode.reader.findByAnchors(workspaceId, anchorRefs, options);
-    }
-    return await mode.reader.findByAnchors(workspaceId, anchorRefs);
+  ) => {
+    await mode.ensureTemporalProjection(options);
+    return await mode.reader.findByAnchors(workspaceId, anchorRefs, options);
   };
-  const findByTimeConcernWindowDigests = async (
+  const findByTimeConcernWindowDigests: FindByTimeConcernWindowDigests = async (
     workspaceId: string,
     windowDigests: readonly string[],
     options: RecallPathProjectionReadOptions = {}
-  ): Promise<readonly Readonly<PathRelation>[]> => {
+  ) => {
     const normalizedWindowDigests = windowDigests.map(normalizeRecallTimeConcernWindowDigest);
-    if (mode.kind === "selected") {
-      await mode.ensureTemporalProjection(options);
-      const paths = await mode.reader.findByTimeConcernWindowDigests(
-        workspaceId,
-        normalizedWindowDigests,
-        options
-      );
-      return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
-    }
+    await mode.ensureTemporalProjection(options);
+    const paths = await mode.reader.findByTimeConcernWindowDigests(
+      workspaceId,
+      normalizedWindowDigests,
+      options
+    );
+    return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
+  };
+  const findActiveByWorkspace: FindActiveByWorkspace = async (workspaceId, options = {}) => {
+    await mode.ensureTemporalProjection(options);
+    const paths = await mode.reader.findByWorkspace(workspaceId, options);
+    return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
+  };
+  return buildRecallPathReadPorts({
+    findByAnchors,
+    findByTimeConcernWindowDigests,
+    findActiveByWorkspace,
+    ensureTemporalProjection: mode.ensureTemporalProjection
+  });
+}
+
+function createLegacyRecallPathReadPorts(mode: LegacyPathReader): RecallPathReadPorts {
+  const findByAnchors: FindByAnchors = async (workspaceId, anchorRefs) =>
+    await mode.reader.findByAnchors(workspaceId, anchorRefs);
+  const findByTimeConcernWindowDigests: FindByTimeConcernWindowDigests = async (
+    workspaceId,
+    windowDigests
+  ) => {
+    const normalizedWindowDigests = windowDigests.map(normalizeRecallTimeConcernWindowDigest);
     const normalized = new Set(normalizedWindowDigests);
     const paths = await mode.reader.findByWorkspaceAll(workspaceId);
     return paths.filter((path) =>
@@ -209,21 +237,26 @@ export function createRecallPathReadPorts(input: {
       )
     );
   };
-  const findActiveByWorkspace = async (
-    workspaceId: string,
-    options: RecallPathProjectionReadOptions = {}
-  ): Promise<readonly Readonly<PathRelation>[]> => {
-    if (mode.kind === "selected") {
-      await mode.ensureTemporalProjection(options);
-      const paths = await mode.reader.findByWorkspace(workspaceId, options);
-      return paths.filter((path) => isPathActiveForRecall(path.lifecycle.status));
-    }
-    return await mode.reader.findActiveAll(workspaceId);
-  };
+  const findActiveByWorkspace: FindActiveByWorkspace = async (workspaceId) =>
+    await mode.reader.findActiveAll(workspaceId);
+  return buildRecallPathReadPorts({
+    findByAnchors,
+    findByTimeConcernWindowDigests,
+    findActiveByWorkspace,
+    ensureTemporalProjection: projectionAlreadyPrepared
+  });
+}
+
+function buildRecallPathReadPorts(input: Readonly<{
+  readonly findByAnchors: FindByAnchors;
+  readonly findByTimeConcernWindowDigests: FindByTimeConcernWindowDigests;
+  readonly findActiveByWorkspace: FindActiveByWorkspace;
+  readonly ensureTemporalProjection: RecallTemporalProjectionEnsurer;
+}>): RecallPathReadPorts {
   return Object.freeze({
     pathExpansionPort: Object.freeze({
-      findByAnchors,
-      findByTimeConcernWindowDigests
+      findByAnchors: input.findByAnchors,
+      findByTimeConcernWindowDigests: input.findByTimeConcernWindowDigests
     }),
     pathPlasticityPort: Object.freeze({
       getStrengthByMemoryId: async (
@@ -231,11 +264,27 @@ export function createRecallPathReadPorts(input: {
         memoryIds: readonly string[],
         options: RecallPathProjectionReadOptions = {}
       ): Promise<ReadonlyMap<string, number>> =>
-        await findPathPlasticityStrengths({ workspaceId, memoryIds, options, findByAnchors })
+        await findPathPlasticityStrengths({
+          workspaceId,
+          memoryIds,
+          options,
+          findByAnchors: input.findByAnchors
+        })
     }),
-    findActiveByWorkspace,
-    ensureTemporalProjection:
-      mode.kind === "selected" ? mode.ensureTemporalProjection : async () => undefined
+    findActiveByWorkspace: input.findActiveByWorkspace,
+    ensureTemporalProjection: input.ensureTemporalProjection
+  });
+}
+
+export function createPreparedTemporalRecallPathReadPorts(
+  temporalPathProjectionReader: TemporalRecallPathProjectionReader
+): RecallPathReadPorts {
+  // The daemon parent prepares the projection before dispatch, so a worker
+  // connection stays query-only while reusing the canonical read transforms.
+  return createSelectedRecallPathReadPorts({
+    kind: "selected",
+    reader: temporalPathProjectionReader,
+    ensureTemporalProjection: projectionAlreadyPrepared
   });
 }
 

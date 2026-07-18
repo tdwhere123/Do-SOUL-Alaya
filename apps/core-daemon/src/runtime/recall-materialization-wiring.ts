@@ -36,9 +36,13 @@ import type { CreateRecallMaterializationWiringInput } from "./recall-materializ
 
 export async function createRecallMaterializationWiring(input: CreateRecallMaterializationWiringInput) {
   const globalMemoryRuntime = createGlobalMemoryRuntime(input);
+  const directPathReadPorts = createDirectRecallPathReadPorts(input);
   const recallReadWorkerClient = createRecallReadWorkerClient({
     databaseFilename: input.database.filename,
     temporalProjectionSelected: input.temporalProjectionSelected === true,
+    ...(input.temporalProjectionSelected === true
+      ? { prepareTemporalProjection: directPathReadPorts.ensureTemporalProjection }
+      : {}),
     warn: input.warn
   });
   const recallReadWorkerReady = recallReadWorkerClient?.ready() ?? Promise.resolve();
@@ -50,7 +54,8 @@ export async function createRecallMaterializationWiring(input: CreateRecallMater
     const recallReadRuntime = createRecallReadRuntime(
       input,
       globalMemoryRuntime,
-      recallReadWorkerClient
+      recallReadWorkerClient,
+      directPathReadPorts
     );
     const materializationRuntime = await createRecallMaterializationRuntime(
       input,
@@ -99,10 +104,14 @@ function createGlobalMemoryRuntime(input: CreateRecallMaterializationWiringInput
 function createRecallReadRuntime(
   input: CreateRecallMaterializationWiringInput,
   globalMemoryRuntime: ReturnType<typeof createGlobalMemoryRuntime>,
-  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
+  directPathReadPorts: ReturnType<typeof createDirectRecallPathReadPorts>
 ) {
   const embeddingRuntime = createEmbeddingRuntimeWithWarmupObserver(input);
-  const recallPathRuntime = createRecallPathRuntime(input, recallReadWorkerClient);
+  const recallPathRuntime = createRecallPathRuntime(
+    recallReadWorkerClient,
+    directPathReadPorts
+  );
   const manifestationRuntime = createManifestationRuntime(
     input,
     recallPathRuntime.pathActivationCandidateProducer
@@ -241,10 +250,9 @@ function createEmbeddingRuntimeWithWarmupObserver(input: CreateRecallMaterializa
 }
 
 function createRecallPathRuntime(
-  input: CreateRecallMaterializationWiringInput,
-  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>
+  recallReadWorkerClient: ReturnType<typeof createRecallReadWorkerClient>,
+  directPathReadPorts: ReturnType<typeof createDirectRecallPathReadPorts>
 ) {
-  const directPathReadPorts = createDirectRecallPathReadPorts(input);
   const recallPathExpansionPort =
     recallReadWorkerClient?.pathExpansionPort ?? directPathReadPorts.pathExpansionPort;
   const recallPathPlasticityPort =

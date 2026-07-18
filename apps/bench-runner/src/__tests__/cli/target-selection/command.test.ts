@@ -8,6 +8,8 @@ import { runSelectExtractionTargetCommand } from
   "../../../cli/target-selection/command.js";
 import { readExtractionTargetSelectionReceipt } from
   "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+import { emptyExtractionAuthorityShardStatus } from
+  "../extraction-authority-inspection-fixture.js";
 
 const roots: string[] = [];
 
@@ -202,6 +204,7 @@ function inspection() {
       }
     },
     missingKeys: ["1".repeat(64)],
+    ...emptyExtractionAuthorityShardStatus(),
     writerLock: "absent" as const,
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,

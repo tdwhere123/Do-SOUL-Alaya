@@ -57,6 +57,30 @@ describe("snapshot extraction authority", () => {
     })).toThrow(/compact summary differs/u);
   });
 
+  it("carries a redacted supplemental source binding in the snapshot summary", () => {
+    const manifest = {
+      ...extractionManifest(2, "supplemental"),
+      supplemental_source_receipt: {
+        kind: "longmemeval-extraction-supplemental-source" as const,
+        receipt_sha256: "d".repeat(64),
+        shard_count: 34,
+        key_set_sha256: "e".repeat(64),
+        physical_provider_url: "https://user:secret@supplement.example/v1?key=hidden",
+        physical_model: "deepseek-v4-flash"
+      }
+    };
+
+    const compact = buildSnapshotExtractionSummary(manifest, SOURCE_SHA);
+
+    expect(compact.supplemental_source_receipt).toMatchObject({
+      receipt_sha256: "d".repeat(64),
+      shard_count: 34,
+      physical_provider_url: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u)
+    });
+    expect(JSON.stringify(compact)).not.toContain("supplement.example");
+    expect(JSON.stringify(compact)).not.toContain("secret");
+  });
+
   it("rejects inline closure indices and run-summary drift", () => {
     const manifest = extractionManifest(2, "run-binding");
     const authority = buildSnapshotExtractionAuthority(manifest, SOURCE_SHA);

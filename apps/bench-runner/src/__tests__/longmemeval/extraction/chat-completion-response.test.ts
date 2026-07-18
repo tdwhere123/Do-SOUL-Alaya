@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractContentFromChatCompletionBody } from
+import {
+  extractContentFromChatCompletionBody,
+  inspectChatCompletionResponse
+} from
   "../../../longmemeval/extraction/chat-completion-response.js";
 
 describe("extractContentFromChatCompletionBody", () => {
@@ -81,5 +84,24 @@ describe("extractContentFromChatCompletionBody", () => {
     expect(extractContentFromChatCompletionBody(body, "text/event-stream")).toBe(
       "x"
     );
+  });
+
+  it("reports terminal finish metadata from SSE and plain responses", () => {
+    const sse =
+      'data: {"choices":[{"delta":{"content":"x"}}]}\n\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n' +
+      "data: [DONE]\n\n";
+    expect(inspectChatCompletionResponse(sse, "text/event-stream")).toMatchObject({
+      content: "x",
+      finishReason: "length"
+    });
+
+    const plain = JSON.stringify({
+      choices: [{ message: { content: "y" }, finish_reason: "stop" }]
+    });
+    expect(inspectChatCompletionResponse(plain, "application/json")).toMatchObject({
+      content: "y",
+      finishReason: "stop"
+    });
   });
 });

@@ -1,7 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { installCoreConfigFromProcessEnv } from "@do-soul/alaya-core";
-import { initDatabase, isTemporalProjectionSelected } from "@do-soul/alaya-storage";
 import {
   type AlayaDaemonListenOptions,
   type AlayaDaemonRuntime,
@@ -23,17 +22,17 @@ import {
   recordStartupStep,
   resolveDatabasePath
 } from "./runtime/daemon-runtime-support.js";
-import { createDaemonCoreServices } from "./runtime/daemon-service-wiring.js";
 import { createDaemonServiceFoundation } from "./runtime/daemon-service-foundation.js";
 import { resolveCoreDaemonFilesDirectory } from "./runtime/files-data-dir.js";
 import { finalizeDaemonRuntimeFromWiring } from "./runtime/finalize-daemon-runtime-wiring.js";
 import { createGardenRuntimeWiring } from "./runtime/garden-runtime-wiring.js";
-import { createRecallMaterializationWiring } from "./runtime/recall-materialization-wiring.js";
+import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
+import { openDaemonDatabase } from "./runtime/startup/database.js";
+import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
+import type { RecallReadWorkerClient } from "./runtime/recall-read-worker-client.js";
 import { createRuntimeNotifier } from "./runtime/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
-
-const DAEMON_MAIN_THREAD_BUSY_TIMEOUT_MS = 250;
 
 export type {
   AlayaDaemonListenOptions,
@@ -51,10 +50,18 @@ const repoRoot = resolve(__dirname, "..", "..", "..");
 
 export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
   const bootstrap = await createRuntimeBootstrapContext();
+  let recallReadWorkerClient: RecallReadWorkerClient | null = null;
   try {
     const repositories = createDaemonRepositoryWiring(bootstrap);
     const foundation = await createDaemonFoundationWiring(bootstrap, repositories);
-    const recallAndCore = await createRecallAndCoreWiring(bootstrap, repositories, foundation);
+    const recallAndCore = await createRecallAndCoreWiring({
+      bootstrap,
+      repositories,
+      foundation,
+      registerRecallReadWorker: (client) => {
+        recallReadWorkerClient = client;
+      }
+    });
     const runtime = await createGardenAndFinalRuntime(
       bootstrap,
       repositories,
@@ -66,12 +73,13 @@ export async function createAlayaDaemonRuntime(): Promise<AlayaDaemonRuntime> {
     });
     return runtime;
   } catch (error) {
-    try {
-      bootstrap.database.close();
-    } finally {
-      await bootstrap.temporalRuntimeLease.release();
-    }
-    throw error;
+    return await closeDaemonStartupResourcesAfterFailure({
+      recallReadWorkerClient,
+      database: bootstrap.database,
+      temporalRuntimeLease: bootstrap.temporalRuntimeLease,
+      warn: bootstrap.warnLogger.warn,
+      error
+    });
   }
 }
 
@@ -95,12 +103,9 @@ async function createRuntimeBootstrapContext() {
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);
-  let database: ReturnType<typeof initDatabase>;
+  let database: ReturnType<typeof openDaemonDatabase>;
   try {
-    database = initDatabase({
-      filename: dbPath,
-      busyTimeoutMs: DAEMON_MAIN_THREAD_BUSY_TIMEOUT_MS
-    });
+    database = openDaemonDatabase(dbPath);
   } catch (error) {
     await temporalRuntimeLease.release();
     throw error;
@@ -169,79 +174,6 @@ async function createDaemonFoundationWiring(
     surfaceAnchorRepo: repositories.surfaceAnchorRepo,
     projectMappingAnchorRepo: repositories.projectMappingAnchorRepo
   });
-}
-
-async function createRecallAndCoreWiring(
-  bootstrap: Awaited<ReturnType<typeof createRuntimeBootstrapContext>>,
-  repositories: ReturnType<typeof createDaemonRepositoryWiring>,
-  foundation: Awaited<ReturnType<typeof createDaemonFoundationWiring>>
-) {
-  const recallWiring = await createRecallMaterializationWiring({
-    database: bootstrap.database,
-    temporalProjectionSelected: isTemporalProjectionSelected(bootstrap.database),
-    configEnv: bootstrap.configEnv,
-    rawConfigService: foundation.rawConfigService,
-    eventLogRepo: repositories.eventLogRepo,
-    eventPublisher: foundation.eventPublisher,
-    runtimeNotifier: bootstrap.runtimeNotifier,
-    warn: bootstrap.warnLogger.warn,
-    healthJournalService: foundation.healthJournalService,
-    memoryEntryRepo: repositories.memoryEntryRepo,
-    pathRelationRepo: repositories.pathRelationRepo,
-    relationAssertionRepo: repositories.relationAssertionRepo,
-    manifestationBudgetConfigProvider: foundation.manifestationBudgetConfigProvider,
-    projectMappingService: foundation.projectMappingService,
-    claimFormRepo: repositories.claimFormRepo,
-    coUsageCounterRepo: repositories.coUsageCounterRepo,
-    evidenceCapsuleRepo: repositories.evidenceCapsuleRepo,
-    synthesisCapsuleRepo: repositories.synthesisCapsuleRepo,
-    globalMemoryRepo: repositories.globalMemoryRepo,
-    globalMemoryRecallCacheRepo: repositories.globalMemoryRecallCacheRepo,
-    budgetBankruptcyService: foundation.budgetBankruptcyService,
-    budgetNow: foundation.budgetNow,
-    slotRepo: repositories.slotRepo,
-    graphExploreService: foundation.graphExploreService,
-    sessionOverrideService: foundation.sessionOverrideService,
-    taskSurfaceBuilder: foundation.taskSurfaceBuilder,
-    trustStateRecorder: foundation.trustStateRecorder,
-    edgeProposalService: foundation.edgeProposalService,
-    dynamicsService: foundation.dynamicsService,
-    memoryService: foundation.memoryService,
-    proposalRepo: repositories.proposalRepo,
-    runLookup: repositories.runRepo,
-    reconciliationLeaseRepo: repositories.reconciliationLeaseRepo,
-    deferredObligationRepo: repositories.deferredObligationRepo,
-    claimService: foundation.claimService,
-    synthesisService: foundation.synthesisService,
-    enqueueEnrichPending: repositories.enqueueEnrichPending,
-    sqliteHandoffGapRepo: repositories.sqliteHandoffGapRepo,
-    signalRepo: repositories.signalRepo,
-    sourceGroundingDeferQueueRepo: repositories.sourceGroundingDeferQueueRepo,
-    pathFailureHealthInboxPort: foundation.pathFailureHealthInboxPort,
-    recallFailureHealthInboxPort: foundation.recallFailureHealthInboxPort,
-    evidenceService: foundation.evidenceService
-  });
-  foundation.pathRelationProposalServiceRef.current = recallWiring.pathRelationProposalService;
-  const coreWiring = await createDaemonCoreServices({
-    rawConfigService: foundation.rawConfigService,
-    eventLogRepo: repositories.eventLogRepo,
-    runtimeNotifier: bootstrap.runtimeNotifier,
-    workspaceRepo: repositories.workspaceRepo,
-    runRepo: repositories.runRepo,
-    bindingRepo: repositories.bindingRepo,
-    eventPublisher: foundation.eventPublisher,
-    trustStateRepo: repositories.trustStateRepo,
-    pathRelationRepo: repositories.pathRelationRepo,
-    signalService: recallWiring.signalService,
-    contextLensAssembler: recallWiring.conversationContextLensAssembler,
-    governanceLeaseService: foundation.governanceLeaseService,
-    budgetBankruptcyService: foundation.budgetBankruptcyService,
-    healthJournalService: foundation.healthJournalService,
-    warn: bootstrap.warnLogger.warn,
-    isPrincipalCodingEngineAvailable: () => foundation.principalCodingAvailability.available
-  });
-  recordStartupStep(bootstrap.startupSteps, "core-services");
-  return { recallWiring, coreWiring };
 }
 
 async function buildGardenWiring(

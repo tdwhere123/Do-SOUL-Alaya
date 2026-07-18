@@ -11,7 +11,12 @@ it("falls back to the legacy embedding supplement when prepared APIs are unavail
     const memory = createMemoryEntry({ object_id: "memory-legacy-supplement" });
     const querySupplement = vi.fn(async () => ({
       supplementaryEntries: Object.freeze([memory]),
-      similarityHintsByObjectId: Object.freeze({ [memory.object_id]: 0.8 })
+      similarityHintsByObjectId: Object.freeze({
+        [memory.object_id]: Object.freeze({
+          object_id: memory.object_id,
+          normalized_similarity: 0.8
+        })
+      })
     }));
     const policy = buildRecallPolicy({
       runtimeId: "policy-legacy-supplement",

@@ -17,6 +17,7 @@ import { receiptExtractionCacheIdentity } from "../authority/receipt-cache-ident
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import type { ExecutionExtractionAuthority } from "./fill-execution.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
+import { repairScopeKeys } from "../authority/repair/repair-scope.js";
 
 export function createExtractionExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
@@ -62,27 +63,15 @@ function createLedgerExecutionAuthority(
     receipt, cacheRoot, targetSelection, writeLease
   );
   assertTarget();
-  const ledger = openExtractionAttemptLedger({
-    cacheRoot,
-    lineageDigest: receipt.lineage_digest,
-    cacheIdentity: receiptExtractionCacheIdentity(receipt),
-    startingMissing: receipt.limits.starting_missing,
-    maximumAttempts: receipt.limits.maximum_attempts,
-    successfulShardCeiling: receipt.limits.successful_shard_ceiling
-  });
-  const directPacer = receipt.direct_spend === undefined ||
-      !isDirectDeepSeek500Authorization(receipt.direct_spend)
+  const repairKeys = receipt.repair_scope === undefined
     ? undefined
-    : createRequestStartPacer({
-      requestsPerMinute: receipt.direct_spend.requests_per_minute,
-      state: openDirectDeepSeekRequestStartState({
-        cacheRoot,
-        authorization: receipt.direct_spend
-      })
-    });
+    : repairScopeKeys(receipt.repair_scope);
+  const ledger = openReceiptAttemptLedger(receipt, cacheRoot);
+  const directPacer = createDirectRequestPacer(receipt, cacheRoot);
   return {
     receipt,
     reserveAttempt: async (cacheKey, signal) => {
+      assertRepairKeyAllowed(repairKeys, cacheKey);
       assertTarget();
       assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
       await directPacer?.wait(signal);
@@ -98,13 +87,46 @@ function createLedgerExecutionAuthority(
   };
 }
 
+function openReceiptAttemptLedger(receipt: ExtractionAuthorityReceipt, cacheRoot: string) {
+  return openExtractionAttemptLedger({
+    cacheRoot,
+    lineageDigest: receipt.lineage_digest,
+    cacheIdentity: receiptExtractionCacheIdentity(receipt),
+    startingMissing: receipt.limits.starting_missing,
+    maximumAttempts: receipt.limits.maximum_attempts,
+    successfulShardCeiling: receipt.limits.successful_shard_ceiling
+  });
+}
+
+function createDirectRequestPacer(receipt: ExtractionAuthorityReceipt, cacheRoot: string) {
+  return receipt.direct_spend === undefined ||
+      !isDirectDeepSeek500Authorization(receipt.direct_spend)
+    ? undefined
+    : createRequestStartPacer({
+      requestsPerMinute: receipt.direct_spend.requests_per_minute,
+      state: openDirectDeepSeekRequestStartState({
+        cacheRoot,
+        authorization: receipt.direct_spend
+      })
+    });
+}
+
+function assertRepairKeyAllowed(
+  repairKeys: ReadonlySet<string> | undefined,
+  cacheKey: string
+): void {
+  if (repairKeys === undefined || repairKeys.has(cacheKey)) return;
+  throw new ExtractionCacheInvariantError(
+    "extraction repair authority refused an out-of-scope shard"
+  );
+}
+
 function createTargetAssertion(
   receipt: ExtractionAuthorityReceipt,
   cacheRoot: string,
   targetSelection: ExtractionTargetSelectionReceipt | undefined,
   writeLease: ExtractionCacheWriteLease | undefined
 ): () => void {
-  if (receipt.direct_spend === undefined && targetSelection === undefined) return () => undefined;
   return () => {
     writeLease?.assertOwned();
     if (receipt.direct_spend !== undefined) {

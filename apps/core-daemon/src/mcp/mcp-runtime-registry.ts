@@ -13,6 +13,7 @@ import { readNow } from "@do-soul/alaya-core";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServerInfo } from "@do-soul/alaya-protocol";
 import { readRuntimeVersion } from "../runtime/build-info.js";
+import { parseNodeTimerDelayMs } from "../runtime/timing/node-timer-delay.js";
 import { formatMcpToolResult } from "./runtime/tool-result-formatting.js";
 
 type DaemonMcpListedTool = {
@@ -103,6 +104,7 @@ type DaemonMcpRuntimeRegistryState = {
   readonly input: DaemonMcpRuntimeRegistryInput;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
   readonly clientInfo: DaemonMcpRuntimeClientInfo;
+  readonly requestTimeoutMs: number;
   readonly clientHandles: Map<string, Promise<DaemonMcpRuntimeClientHandle>>;
   readonly toolCache: Map<string, readonly DaemonMcpListedTool[]>;
   readonly liveServerNames: Set<string>;
@@ -134,6 +136,10 @@ function createDaemonMcpRuntimeRegistryState(input: DaemonMcpRuntimeRegistryInpu
     input,
     warn: resolveWarn(input.warn),
     clientInfo: createDaemonMcpRuntimeClientInfo(),
+    requestTimeoutMs: parseNodeTimerDelayMs(
+      input.requestTimeoutMs ?? DEFAULT_MCP_RUNTIME_REQUEST_TIMEOUT_MS,
+      "MCP runtime request timeout"
+    ),
     clientHandles: new Map(),
     toolCache: new Map(),
     liveServerNames: new Set(),
@@ -340,11 +346,7 @@ async function refreshServerTools(state: DaemonMcpRuntimeRegistryState, serverNa
 function createRequestOptions(
   state: DaemonMcpRuntimeRegistryState
 ): Readonly<{ readonly timeout: number; readonly maxTotalTimeout: number }> {
-  const configured = state.input.requestTimeoutMs;
-  const timeout =
-    configured !== undefined && Number.isFinite(configured) && configured > 0
-      ? Math.trunc(configured)
-      : DEFAULT_MCP_RUNTIME_REQUEST_TIMEOUT_MS;
+  const timeout = state.requestTimeoutMs;
   return Object.freeze({ timeout, maxTotalTimeout: timeout });
 }
 

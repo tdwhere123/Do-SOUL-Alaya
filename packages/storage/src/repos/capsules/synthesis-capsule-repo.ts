@@ -5,6 +5,7 @@ import {
   type SynthesisStatus
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import {
@@ -16,7 +17,7 @@ import {
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
 import {
   prepareSynthesisCapsuleStatements,
-  type SqliteStatement
+  type SynthesisCapsuleStatements
 } from "./synthesis-capsule-statements.js";
 
 export interface SynthesisCapsuleKeywordHit {
@@ -74,31 +75,14 @@ interface SynthesisCapsuleRow {
 // see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
 // split and ordinal-rank merge shared with evidence-capsule-repo.ts.
 export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
-  private readonly createStatement: SqliteStatement;
-  private readonly findByIdStatement: SqliteStatement;
-  private readonly findByIdsStatement: SqliteStatement;
-  private readonly findByWorkspaceIdStatement: SqliteStatement;
-  private readonly findByTopicKeyStatement: SqliteStatement;
-  private readonly updateEvidenceRefsStatement: SqliteStatement;
-  private readonly updateSourceMemoryRefsStatement: SqliteStatement;
-  private readonly updateStatusStatement: SqliteStatement;
-  // see also: 079-synthesis-capsule-fts-dual.sql — porter unicode61 word lane.
-  private readonly searchByKeywordStatement: SqliteStatement;
-  // see also: 079-synthesis-capsule-fts-dual.sql — trigram CJK/substring lane.
-  private readonly searchByKeywordTrigramStatement: SqliteStatement;
+  private readonly statementHolder: RefreshableStatementHolder<SynthesisCapsuleStatements>;
 
-  public constructor(private readonly db: StorageDatabase) {
-    const statements = prepareSynthesisCapsuleStatements(db);
-    this.createStatement = statements.createStatement;
-    this.findByIdStatement = statements.findByIdStatement;
-    this.findByIdsStatement = statements.findByIdsStatement;
-    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
-    this.findByTopicKeyStatement = statements.findByTopicKeyStatement;
-    this.updateEvidenceRefsStatement = statements.updateEvidenceRefsStatement;
-    this.updateSourceMemoryRefsStatement = statements.updateSourceMemoryRefsStatement;
-    this.updateStatusStatement = statements.updateStatusStatement;
-    this.searchByKeywordStatement = statements.searchByKeywordStatement;
-    this.searchByKeywordTrigramStatement = statements.searchByKeywordTrigramStatement;
+  public constructor(db: StorageDatabase) {
+    this.statementHolder = new RefreshableStatementHolder(db, prepareSynthesisCapsuleStatements);
+  }
+
+  private get statements(): SynthesisCapsuleStatements {
+    return this.statementHolder.active();
   }
 
   public async searchByKeyword(
@@ -123,12 +107,12 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       const porterHits =
         porterTokens.length === 0
           ? []
-          : queryFtsLane(this.searchByKeywordStatement, workspaceId, porterTokens, limit);
+          : queryFtsLane(this.statements.searchByKeywordStatement, workspaceId, porterTokens, limit);
       const trigramHits =
         trigramTokens.length === 0
           ? []
           : queryFtsLane(
-              this.searchByKeywordTrigramStatement,
+              this.statements.searchByKeywordTrigramStatement,
               workspaceId,
               trigramTokens,
               limit
@@ -147,7 +131,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     const parsedCapsule = parseSynthesisCapsule(capsule);
 
     try {
-      this.createStatement.run(
+      this.statements.createStatement.run(
         parsedCapsule.object_id,
         parsedCapsule.object_kind,
         parsedCapsule.schema_version,
@@ -177,7 +161,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
 
   public async findById(objectId: string): Promise<Readonly<SynthesisCapsule> | null> {
     try {
-      const row = this.findByIdStatement.get(objectId) as SynthesisCapsuleRow | undefined;
+      const row = this.statements.findByIdStatement.get(objectId) as SynthesisCapsuleRow | undefined;
       return row === undefined ? null : parseSynthesisCapsuleRow(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load synthesis capsule ${objectId}.`, error);
@@ -199,7 +183,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       const rows: SynthesisCapsuleRow[] = [];
       for (let offset = 0; offset < parsedObjectIds.length; offset += 500) {
         const chunk = parsedObjectIds.slice(offset, offset + 500);
-        rows.push(...this.findByIdsStatement.all(
+        rows.push(...this.statements.findByIdsStatement.all(
           parsedWorkspaceId,
           JSON.stringify(chunk)
         ) as SynthesisCapsuleRow[]);
@@ -215,7 +199,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
 
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     try {
-      const rows = this.findByWorkspaceIdStatement.all(workspaceId) as SynthesisCapsuleRow[];
+      const rows = this.statements.findByWorkspaceIdStatement.all(workspaceId) as SynthesisCapsuleRow[];
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
       throw new StorageError(
@@ -228,7 +212,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
 
   public async findByTopicKey(workspaceId: string, topicKey: string): Promise<readonly Readonly<SynthesisCapsule>[]> {
     try {
-      const rows = this.findByTopicKeyStatement.all(workspaceId, topicKey) as SynthesisCapsuleRow[];
+      const rows = this.statements.findByTopicKeyStatement.all(workspaceId, topicKey) as SynthesisCapsuleRow[];
       return rows.map((row) => parseSynthesisCapsuleRow(row));
     } catch (error) {
       throw new StorageError(
@@ -248,7 +232,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.updateStatusStatement.run(parsedStatus, parsedUpdatedAt, objectId);
+      const result = this.statements.updateStatusStatement.run(parsedStatus, parsedUpdatedAt, objectId);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Synthesis capsule ${objectId} was not found.`);
@@ -284,7 +268,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       objectId,
       nextEvidenceRefs,
       parsedUpdatedAt,
-      this.updateEvidenceRefsStatement,
+      this.statements.updateEvidenceRefsStatement,
       "synthesis evidence refs"
     );
   }
@@ -303,7 +287,7 @@ export class SqliteSynthesisCapsuleRepo implements SynthesisCapsuleRepo {
       objectId,
       nextSourceMemoryRefs,
       parsedUpdatedAt,
-      this.updateSourceMemoryRefsStatement,
+      this.statements.updateSourceMemoryRefsStatement,
       "synthesis source memory refs"
     );
   }

@@ -41,6 +41,26 @@ describe("current post-fill substrate authority", () => {
     expect(authority.expected_turns).toBe(2);
   });
 
+  it("redacts supplemental provider credentials from current provenance", () => {
+    const cacheRoot = fixtureRoot();
+    const manifest = writeComplete(cacheRoot, TURNS, 0, 2);
+    writeExtractionCacheManifest(cacheRoot, {
+      ...manifest,
+      supplemental_source_receipt: {
+        kind: "longmemeval-extraction-supplemental-source",
+        receipt_sha256: "a".repeat(64),
+        shard_count: 1,
+        key_set_sha256: "b".repeat(64),
+        physical_provider_url: "https://user:secret@supplement.invalid/v1?key=hidden",
+        physical_model: MODEL
+      }
+    });
+
+    const authority = assertAuthority(cacheRoot, TURNS, 0, 2);
+    expect(authority.supplemental_source_receipt?.physical_provider_url)
+      .toMatch(/^sha256:[a-f0-9]{64}$/u);
+  });
+
   it("accepts a fully cached contained subwindow", () => {
     const cacheRoot = fixtureRoot();
     writeComplete(cacheRoot, TURNS, 0, 2);
@@ -120,8 +140,8 @@ function writeComplete(
   turns: readonly string[],
   windowOffset: number,
   windowLimit: number
-): void {
-  writeCompletedExtractionCacheFixture({
+): ExtractionCacheManifest {
+  return writeCompletedExtractionCacheFixture({
     cacheRoot,
     turnContents: turns,
     datasetRevision: DATASET_SHA,

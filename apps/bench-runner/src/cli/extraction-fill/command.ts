@@ -27,13 +27,6 @@ export async function runExtractionFillCommand(
   } = { runExtractionFill, signalSource: process }
 ): Promise<number> {
   try {
-    if (opts.extractionAuthority === undefined) {
-      process.stderr.write(
-        "alaya-bench-runner extraction-fill: live extraction is blocked without " +
-        "a digest-bound --extraction-authority receipt\n"
-      );
-      return 2;
-    }
     const expansionCapability = opts.promotionContract === undefined
       ? undefined
       : await (deps.verifyExpansionContract ??
@@ -56,7 +49,9 @@ export async function runExtractionFillCommand(
         ...(opts.extractionCacheRoot === undefined ? {} : {
           cacheRoot: opts.extractionCacheRoot
         }),
-        authorityReceiptPath: opts.extractionAuthority,
+        ...(opts.extractionAuthority === undefined ? {} : {
+          authorityReceiptPath: opts.extractionAuthority
+        }),
         ...(opts.extractionTargetSelection === undefined ? {} : {
           targetSelectionReceiptPath: opts.extractionTargetSelection
         }),

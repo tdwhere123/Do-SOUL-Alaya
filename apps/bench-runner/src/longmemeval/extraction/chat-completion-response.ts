@@ -4,31 +4,38 @@ import type { BenchProviderUsage } from "../compile-seed/compile-seed-types.js";
 const ChatCompletionPayloadSchema = z.object({
   choices: z.array(z.object({
     delta: z.object({ content: z.unknown().optional() }).loose().optional(),
-    message: z.object({ content: z.unknown().optional() }).loose().optional()
+    message: z.object({ content: z.unknown().optional() }).loose().optional(),
+    finish_reason: z.unknown().optional()
   }).loose()).optional()
 }).loose().readonly();
+
+export interface ChatCompletionResponseInspection {
+  readonly content: string;
+  readonly finishReason: string | null;
+  readonly usage?: BenchProviderUsage;
+}
+
+export function inspectChatCompletionResponse(
+  bodyText: string,
+  contentType: string | null
+): ChatCompletionResponseInspection {
+  return isSseChatCompletionBody(bodyText, contentType)
+    ? inspectSseChatCompletionBody(bodyText)
+    : inspectPlainChatCompletionBody(bodyText);
+}
 
 export function extractContentFromChatCompletionBody(
   bodyText: string,
   contentType: string | null
 ): string {
-  return isSseChatCompletionBody(bodyText, contentType)
-    ? extractContentFromSseChatCompletionBody(bodyText)
-    : extractContentFromPlainChatCompletionBody(bodyText);
+  return inspectChatCompletionResponse(bodyText, contentType).content;
 }
 
 export function extractUsageFromChatCompletionBody(
   bodyText: string,
   contentType: string | null
 ): BenchProviderUsage | undefined {
-  if (!isSseChatCompletionBody(bodyText, contentType)) return usageFromJson(bodyText);
-  let usage: BenchProviderUsage | undefined;
-  for (const rawLine of bodyText.split("\n")) {
-    const chunkText = readSseDataLine(rawLine);
-    if (chunkText === null || chunkText === "[DONE]") continue;
-    usage = usageFromJson(chunkText) ?? usage;
-  }
-  return usage;
+  return inspectChatCompletionResponse(bodyText, contentType).usage;
 }
 
 function isSseChatCompletionBody(
@@ -40,21 +47,40 @@ function isSseChatCompletionBody(
     trimmedBody.startsWith("data:");
 }
 
-function extractContentFromPlainChatCompletionBody(bodyText: string): string {
+function inspectPlainChatCompletionBody(
+  bodyText: string
+): ChatCompletionResponseInspection {
   const payload = parseChatCompletionPayload(bodyText);
-  const content = payload.choices?.[0]?.message?.content;
-  return typeof content === "string" ? content : "";
+  const choice = payload.choices?.[0];
+  const content = choice?.message?.content;
+  const usage = usageFromJson(bodyText);
+  return {
+    content: typeof content === "string" ? content : "",
+    finishReason: normalizeFinishReason(choice?.finish_reason),
+    ...(usage === undefined ? {} : { usage })
+  };
 }
 
-function extractContentFromSseChatCompletionBody(bodyText: string): string {
+function inspectSseChatCompletionBody(
+  bodyText: string
+): ChatCompletionResponseInspection {
   let accumulated = "";
+  let finishReason: string | null = null;
+  let usage: BenchProviderUsage | undefined;
   for (const rawLine of bodyText.split("\n")) {
     const chunkText = readSseDataLine(rawLine);
     if (chunkText === null) continue;
     if (chunkText === "[DONE]") break;
-    accumulated += extractContentFromSseChunk(chunkText);
+    const chunk = tryParseChatCompletionSseChunk(chunkText);
+    accumulated += extractContentFromChunk(chunk);
+    finishReason = normalizeFinishReason(chunk.choices?.[0]?.finish_reason) ?? finishReason;
+    usage = usageFromParsedPayload(chunk) ?? usage;
   }
-  return accumulated;
+  return {
+    content: accumulated,
+    finishReason,
+    ...(usage === undefined ? {} : { usage })
+  };
 }
 
 function readSseDataLine(rawLine: string): string | null {
@@ -65,8 +91,9 @@ function readSseDataLine(rawLine: string): string | null {
   return line.slice("data:".length).trim();
 }
 
-function extractContentFromSseChunk(chunkText: string): string {
-  const chunk = tryParseChatCompletionSseChunk(chunkText);
+function extractContentFromChunk(
+  chunk: z.infer<typeof ChatCompletionPayloadSchema>
+): string {
   const choice = chunk.choices?.[0];
   const deltaContent = choice?.delta?.content;
   if (typeof deltaContent === "string") return deltaContent;
@@ -116,11 +143,19 @@ function tryParseChatCompletionSseChunk(
 
 function usageFromJson(text: string): BenchProviderUsage | undefined {
   try {
-    const parsed = JSON.parse(text) as { readonly usage?: unknown };
-    return toUsage(parsed.usage);
+    return usageFromParsedPayload(JSON.parse(text));
   } catch {
     return undefined;
   }
+}
+
+function usageFromParsedPayload(value: unknown): BenchProviderUsage | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  return toUsage((value as { readonly usage?: unknown }).usage);
+}
+
+function normalizeFinishReason(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function toUsage(value: unknown): BenchProviderUsage | undefined {

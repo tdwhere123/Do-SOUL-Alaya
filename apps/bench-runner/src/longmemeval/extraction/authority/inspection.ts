@@ -17,6 +17,12 @@ import type {
   ExtractionAuthorityObservation,
   ExtractionAuthorityReceipt
 } from "./receipt.js";
+import type { ExtractionRepairShard } from "./repair/repair-scope.js";
+import {
+  createExtractionPreservedValidClosure,
+  type ExtractionPreservedValidClosure
+} from "./repair/preserved-valid-closure.js";
+import type { ExtractionContentClosureEntry } from "../content-closure.js";
 
 const WRITE_LOCK_DIRECTORY = ".extraction-fill.lock";
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
@@ -24,6 +30,8 @@ const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
 export interface ExtractionAuthorityInspection {
   readonly observation: ExtractionAuthorityObservation;
   readonly missingKeys: readonly string[];
+  readonly invalidShards: readonly ExtractionRepairShard[];
+  readonly preservedValidClosure: ExtractionPreservedValidClosure;
   readonly writerLock: "absent" | "present";
   readonly disk: { readonly status: "available"; readonly freeBytes: number } |
     { readonly status: "unavailable" };
@@ -43,33 +51,44 @@ export async function inspectExtractionAuthority(input: {
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
+  readonly questionBatchLimit?: number;
   readonly cacheRoot: string;
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
   readonly revision: string;
   readonly action: ExtractionAuthorityReceipt["action"];
+  readonly repairInvalidShards?: boolean;
   readonly excludeContentClosureKeys?: readonly string[];
+  readonly preservedValidExclusionKeys?: readonly string[];
 }): Promise<ExtractionAuthorityInspection> {
   const manifestIdentity = readExtractionCacheManifestIdentity(input.cacheRoot);
   const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest);
   const window = await prepareExtractionFillWindow(input, undefined);
-  const completion = inspectAuthorityCompletion(input, config, window);
-  const missingKeys = collectMissingKeys(input.cacheRoot, config, window.distinctTurns);
+  const authorizedTurns = input.repairInvalidShards === true
+    ? window.executionTurns
+    : window.distinctTurns;
+  const completion = inspectAuthorityCompletion(input, config, authorizedTurns);
+  const shardStatus = collectShardStatus(
+    input.cacheRoot,
+    config,
+    authorizedTurns,
+    new Set(input.preservedValidExclusionKeys ?? [])
+  );
   const observation = buildAuthorityObservation(input, manifestIdentity, config, window, completion);
-  return buildExtractionAuthorityInspection(input, config, missingKeys, observation);
+  return buildExtractionAuthorityInspection(input, config, shardStatus, observation);
 }
 
 function inspectAuthorityCompletion(
   input: ExtractionAuthorityInspectionInput,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  window: ExtractionAuthorityWindow
+  authorizedTurns: readonly string[]
 ): ExtractionAuthorityCompletion {
   return inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents: window.distinctTurns,
+    turnContents: authorizedTurns,
     ...(input.excludeContentClosureKeys === undefined ? {} : {
       excludeContentClosureKeys: input.excludeContentClosureKeys
     })
@@ -87,14 +106,16 @@ function buildAuthorityObservation(
     revision: input.revision,
     commandDigest: digest({
       operation: AUTHORIZED_EXTRACTION_OPERATION,
-      action: input.action
+      action: input.action,
+      repairInvalidShards: input.repairInvalidShards === true
     }),
     selectionDigest: digest({
       variant: input.variant,
       datasetRevision: window.datasetRevision,
       offset: window.windowOffset,
       limit: window.questionCount,
-      requestedTurns: window.requestedTurns
+      windowUniqueCacheKeys: window.requestedTurns,
+      authorizedUniqueCacheKeys: completion.expectedTurns
     }),
     keyDigest: completion.expectedKeySetSha256,
     dataset: buildAuthorityDatasetObservation(input, window, completion),
@@ -113,6 +134,13 @@ function buildAuthorityDatasetObservation(
     revisionSha256: window.datasetRevision,
     windowOffset: window.windowOffset,
     windowLimit: window.questionCount,
+    windowTurnOccurrences: window.windowTurnOccurrences,
+    windowUniqueCacheKeys: window.requestedTurns,
+    authorizedQuestionCount: window.questionBatchLimit ?? window.questionCount,
+    authorizedTurnOccurrences: input.repairInvalidShards === true
+      ? window.executionTurnOccurrences
+      : window.windowTurnOccurrences,
+    authorizedUniqueCacheKeys: completion.expectedTurns,
     expectedKeySetSha256: completion.expectedKeySetSha256
   });
 }
@@ -147,12 +175,14 @@ function buildAuthorityInventoryObservation(completion: ExtractionAuthorityCompl
 function buildExtractionAuthorityInspection(
   input: ExtractionAuthorityInspectionInput,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  missingKeys: readonly string[],
+  shardStatus: ReturnType<typeof collectShardStatus>,
   observation: ExtractionAuthorityObservation
 ): ExtractionAuthorityInspection {
   return Object.freeze({
     observation,
-    missingKeys: Object.freeze(missingKeys),
+    missingKeys: Object.freeze(shardStatus.missingKeys),
+    invalidShards: Object.freeze(shardStatus.invalidShards),
+    preservedValidClosure: createExtractionPreservedValidClosure(shardStatus.validEntries),
     writerLock: existsSync(join(input.cacheRoot, WRITE_LOCK_DIRECTORY)) ? "present" : "absent",
     disk: inspectExtractionAuthorityDisk(input.cacheRoot),
     credentialStatus: config.apiKey === null ? "absent" : "present",
@@ -160,17 +190,48 @@ function buildExtractionAuthorityInspection(
   });
 }
 
-function collectMissingKeys(
+function collectShardStatus(
   cacheRoot: string,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  turns: readonly string[]
-): readonly string[] {
-  const missing = turns.map((turn) => computeCacheKey(
-    config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
-  )).filter((key) => inspectCachedExtraction(
-    cacheRoot, key, config.model, config.requestProfile
-  ).status === "missing");
-  return missing.sort();
+  turns: readonly string[],
+  preservedValidExclusionKeys: ReadonlySet<string>
+): {
+  readonly missingKeys: readonly string[];
+  readonly invalidShards: readonly ExtractionRepairShard[];
+  readonly validEntries: readonly ExtractionContentClosureEntry[];
+} {
+  const missingKeys: string[] = [];
+  const invalidShards: ExtractionRepairShard[] = [];
+  const validEntries: ExtractionContentClosureEntry[] = [];
+  for (const turn of turns) {
+    const key = computeCacheKey(
+      config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
+    );
+    const shard = inspectCachedExtraction(
+      cacheRoot, key, config.model, config.requestProfile
+    );
+    if (shard.status === "missing") missingKeys.push(key);
+    if (shard.status === "hit" && !preservedValidExclusionKeys.has(key)) {
+      validEntries.push({
+        cacheKey: key,
+        model: config.model,
+        requestProfile: config.requestProfile,
+        rawJsonSha256: shard.rawJsonSha256,
+        rawSignalCount: shard.rawSignalCount,
+        parsedDraftCount: shard.parsedDraftCount
+      });
+    }
+    if (shard.status === "invalid" && shard.rawJsonSha256 !== undefined) {
+      invalidShards.push({ cache_key: key, raw_json_sha256: shard.rawJsonSha256 });
+    }
+  }
+  return {
+    missingKeys: missingKeys.sort(),
+    validEntries,
+    invalidShards: invalidShards.sort((left, right) =>
+      left.cache_key.localeCompare(right.cache_key)
+    )
+  };
 }
 
 export function inspectExtractionAuthorityDisk(

@@ -3,6 +3,7 @@ import {
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import {
   mergeFtsLanes,
@@ -19,7 +20,10 @@ import {
   parseUpdatedAt,
   type EvidenceCapsuleRow
 } from "./evidence-capsule-mappers.js";
-import { prepareEvidenceCapsuleStatements, type SqliteStatement } from "./evidence-capsule-statements.js";
+import {
+  prepareEvidenceCapsuleStatements,
+  type EvidenceCapsuleStatements
+} from "./evidence-capsule-statements.js";
 
 export interface EvidenceCapsuleKeywordHit {
   readonly object_id: string;
@@ -84,37 +88,19 @@ export interface EvidenceCapsuleListPageOptions {
 // see also: packages/protocol/src/soul/fts-search-policy.ts — porter/trigram
 // split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
-  private readonly createStatement: SqliteStatement;
-  private readonly findByIdStatement: SqliteStatement;
-  private readonly findByIdsStatement: SqliteStatement;
-  private readonly findSourceAnchorsByIdsStatement: SqliteStatement;
-  private readonly findByRunIdStatement: SqliteStatement;
-  private readonly findByRunIdPagedStatement: SqliteStatement;
-  private readonly findByWorkspaceIdStatement: SqliteStatement;
-  private readonly findByWorkspaceIdPagedStatement: SqliteStatement;
-  private readonly findByHealthStatement: SqliteStatement;
-  private readonly findByHealthPagedStatement: SqliteStatement;
-  private readonly updateHealthStatement: SqliteStatement;
-  // see also: 078-evidence-capsule-fts-dual.sql — porter unicode61 word lane.
-  private readonly searchByKeywordStatement: SqliteStatement;
-  // see also: 078-evidence-capsule-fts-dual.sql — trigram CJK/substring lane.
-  private readonly searchByKeywordTrigramStatement: SqliteStatement;
+  private readonly statementHolder: RefreshableStatementHolder<EvidenceCapsuleStatements>;
 
   public constructor(private readonly db: StorageDatabase) {
-    const statements = prepareEvidenceCapsuleStatements(db);
-    this.createStatement = statements.createStatement;
-    this.findByIdStatement = statements.findByIdStatement;
-    this.findByIdsStatement = statements.findByIdsStatement;
-    this.findSourceAnchorsByIdsStatement = statements.findSourceAnchorsByIdsStatement;
-    this.findByRunIdStatement = statements.findByRunIdStatement;
-    this.findByRunIdPagedStatement = statements.findByRunIdPagedStatement;
-    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
-    this.findByWorkspaceIdPagedStatement = statements.findByWorkspaceIdPagedStatement;
-    this.findByHealthStatement = statements.findByHealthStatement;
-    this.findByHealthPagedStatement = statements.findByHealthPagedStatement;
-    this.updateHealthStatement = statements.updateHealthStatement;
-    this.searchByKeywordStatement = statements.searchByKeywordStatement;
-    this.searchByKeywordTrigramStatement = statements.searchByKeywordTrigramStatement;
+    this.statementHolder = new RefreshableStatementHolder(db, prepareEvidenceCapsuleStatements);
+  }
+
+  private get statements(): EvidenceCapsuleStatements {
+    return this.statementHolder.active();
+  }
+
+  private activeConnection(): StorageDatabase["connection"] {
+    this.statementHolder.active();
+    return this.db.connection;
   }
 
   public async searchByKeyword(
@@ -138,12 +124,12 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       const porterHits =
         porterTokens.length === 0
           ? []
-          : queryFtsLane(this.searchByKeywordStatement, workspaceId, porterTokens, limit);
+          : queryFtsLane(this.statements.searchByKeywordStatement, workspaceId, porterTokens, limit);
       const trigramHits =
         trigramTokens.length === 0
           ? []
           : queryFtsLane(
-              this.searchByKeywordTrigramStatement,
+              this.statements.searchByKeywordTrigramStatement,
               workspaceId,
               trigramTokens,
               limit
@@ -162,7 +148,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const parsedCapsule = parseEvidenceCapsule(capsule);
 
     try {
-      this.createStatement.run(
+      this.statements.createStatement.run(
         parsedCapsule.object_id,
         parsedCapsule.object_kind,
         parsedCapsule.schema_version,
@@ -195,7 +181,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
 
   public async deleteById(objectId: string): Promise<void> {
     try {
-      this.db.connection.prepare("DELETE FROM evidence_capsules WHERE object_id = ?").run(objectId);
+      this.activeConnection().prepare("DELETE FROM evidence_capsules WHERE object_id = ?").run(objectId);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to delete evidence capsule ${objectId}.`, error);
     }
@@ -203,7 +189,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
 
   public async findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null> {
     try {
-      const row = this.findByIdStatement.get(objectId) as EvidenceCapsuleRow | undefined;
+      const row = this.statements.findByIdStatement.get(objectId) as EvidenceCapsuleRow | undefined;
       return row === undefined ? null : parseEvidenceCapsuleRow(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load evidence capsule ${objectId}.`, error);
@@ -223,7 +209,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       const rows: EvidenceCapsuleRow[] = [];
       for (let offset = 0; offset < uniqueIds.length; offset += 500) {
         const chunk = uniqueIds.slice(offset, offset + 500);
-        rows.push(...this.findByIdsStatement.all(
+        rows.push(...this.statements.findByIdsStatement.all(
           workspaceId,
           JSON.stringify(chunk)
         ) as EvidenceCapsuleRow[]);
@@ -247,7 +233,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       const rows: EvidenceSourceAnchorRow[] = [];
       for (let offset = 0; offset < ids.length; offset += 500) {
         const chunk = ids.slice(offset, offset + 500);
-        rows.push(...this.findSourceAnchorsByIdsStatement.all(
+        rows.push(...this.statements.findSourceAnchorsByIdsStatement.all(
           workspaceId,
           JSON.stringify(chunk)
         ) as EvidenceSourceAnchorRow[]);
@@ -266,7 +252,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
 
   public async findByRunIdAll(runId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
     try {
-      const rows = this.findByRunIdStatement.all(runId) as EvidenceCapsuleRow[];
+      const rows = this.statements.findByRunIdStatement.all(runId) as EvidenceCapsuleRow[];
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list all evidence capsules for run ${runId}.`, error);
@@ -280,7 +266,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const parsedPage = parseEvidenceCapsulePage(page);
 
     try {
-      const rows = this.findByRunIdPagedStatement.all(runId, parsedPage.limit, parsedPage.offset) as EvidenceCapsuleRow[];
+      const rows = this.statements.findByRunIdPagedStatement.all(runId, parsedPage.limit, parsedPage.offset) as EvidenceCapsuleRow[];
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list paged evidence capsules for run ${runId}.`, error);
@@ -293,7 +279,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
 
   public async findByWorkspaceIdAll(workspaceId: string): Promise<readonly Readonly<EvidenceCapsule>[]> {
     try {
-      const rows = this.findByWorkspaceIdStatement.all(workspaceId) as EvidenceCapsuleRow[];
+      const rows = this.statements.findByWorkspaceIdStatement.all(workspaceId) as EvidenceCapsuleRow[];
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError(
@@ -311,7 +297,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const parsedPage = parseEvidenceCapsulePage(page);
 
     try {
-      const rows = this.findByWorkspaceIdPagedStatement.all(
+      const rows = this.statements.findByWorkspaceIdPagedStatement.all(
         workspaceId,
         parsedPage.limit,
         parsedPage.offset
@@ -334,7 +320,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const parsedHealth = parseEvidenceHealthState(health);
 
     try {
-      const rows = this.findByHealthStatement.all(parsedHealth) as EvidenceCapsuleRow[];
+      const rows = this.statements.findByHealthStatement.all(parsedHealth) as EvidenceCapsuleRow[];
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError(
@@ -353,7 +339,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const parsedPage = parseEvidenceCapsulePage(page);
 
     try {
-      const rows = this.findByHealthPagedStatement.all(
+      const rows = this.statements.findByHealthPagedStatement.all(
         parsedHealth,
         parsedPage.limit,
         parsedPage.offset
@@ -377,7 +363,7 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.updateHealthStatement.run(parsedHealth, parsedUpdatedAt, objectId);
+      const result = this.statements.updateHealthStatement.run(parsedHealth, parsedUpdatedAt, objectId);
 
       if (result.changes === 0) {
         throw new StorageError("NOT_FOUND", `Evidence capsule ${objectId} was not found.`);

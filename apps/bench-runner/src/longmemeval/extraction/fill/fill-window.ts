@@ -1,32 +1,61 @@
 import type { LongMemEvalVariant } from "../../ingestion/dataset.js";
 import { loadDatasetWithIdentity } from "../../ingestion/fetch.js";
 import type { PreparedExpansionFillAuthority } from "../expansion-fill-authority.js";
-import { collectDistinctTurnContents } from "../turn-contents.js";
+import { inspectTurnContentKeySpace } from "../turn-contents.js";
+
+interface ExtractionFillWindowOptions {
+  readonly variant: LongMemEvalVariant;
+  readonly limit?: number;
+  readonly offset?: number;
+  readonly questionBatchLimit?: number;
+  readonly dataDir?: string;
+  readonly pinnedMetaRoot?: string;
+}
+
+interface ExtractionFillWindow {
+  readonly distinctTurns: readonly string[];
+  readonly executionTurns: readonly string[];
+  readonly requestedTurns: number;
+  readonly windowTurnOccurrences: number;
+  readonly executionTurnOccurrences: number;
+  readonly questionCount: number;
+  readonly datasetRevision: string;
+  readonly windowOffset: number;
+  readonly questionBatchLimit?: number;
+}
 
 export async function prepareExtractionFillWindow(
-  options: {
-    readonly variant: LongMemEvalVariant;
-    readonly limit?: number;
-    readonly offset?: number;
-    readonly questionBatchLimit?: number;
-    readonly dataDir?: string;
-    readonly pinnedMetaRoot?: string;
-  },
+  options: ExtractionFillWindowOptions,
   expansion: PreparedExpansionFillAuthority | undefined
-) {
+): Promise<ExtractionFillWindow> {
   if (expansion !== undefined) {
-    if (options.questionBatchLimit !== undefined) {
-      throw new Error("question-bounded extraction cannot mix an expansion capability");
-    }
-    return {
-      distinctTurns: expansion.nextTurns,
-      executionTurns: expansion.nextTurns,
-      requestedTurns: expansion.nextTurns.length,
-      questionCount: expansion.nextQuestions.length,
-      datasetRevision: expansion.datasetRevision,
-      windowOffset: 0
-    };
+    return prepareExpansionWindow(options, expansion);
   }
+  return await prepareDatasetWindow(options);
+}
+
+function prepareExpansionWindow(
+  options: ExtractionFillWindowOptions,
+  expansion: PreparedExpansionFillAuthority
+): ExtractionFillWindow {
+  if (options.questionBatchLimit !== undefined) {
+    throw new Error("question-bounded extraction cannot mix an expansion capability");
+  }
+  return {
+    distinctTurns: expansion.nextTurns,
+    executionTurns: expansion.nextTurns,
+    requestedTurns: expansion.nextTurns.length,
+    windowTurnOccurrences: expansion.nextTurns.length,
+    executionTurnOccurrences: expansion.nextTurns.length,
+    questionCount: expansion.nextQuestions.length,
+    datasetRevision: expansion.datasetRevision,
+    windowOffset: 0
+  };
+}
+
+async function prepareDatasetWindow(
+  options: ExtractionFillWindowOptions
+): Promise<ExtractionFillWindow> {
   const dataset = await loadDatasetWithIdentity(options.variant, {
     dataDir: options.dataDir,
     pinnedMetaRoot: options.pinnedMetaRoot
@@ -37,12 +66,16 @@ export async function prepareExtractionFillWindow(
     : offset + options.limit;
   const questions = dataset.questions.slice(offset, sliceEnd);
   const batchLimit = resolveQuestionBatchLimit(options.questionBatchLimit, questions.length);
-  const distinctTurns = collectDistinctTurnContents(questions);
-  const executionTurns = collectDistinctTurnContents(questions.slice(0, batchLimit));
+  const windowKeySpace = inspectTurnContentKeySpace(questions);
+  const executionKeySpace = inspectTurnContentKeySpace(questions.slice(0, batchLimit));
+  const distinctTurns = windowKeySpace.distinctTurnContents;
+  const executionTurns = executionKeySpace.distinctTurnContents;
   return {
     distinctTurns,
     executionTurns,
     requestedTurns: distinctTurns.length,
+    windowTurnOccurrences: windowKeySpace.turnOccurrences,
+    executionTurnOccurrences: executionKeySpace.turnOccurrences,
     questionCount: questions.length,
     datasetRevision: dataset.sha256,
     windowOffset: offset,

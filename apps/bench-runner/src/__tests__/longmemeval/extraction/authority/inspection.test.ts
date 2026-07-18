@@ -60,6 +60,13 @@ describe("no-network extraction authority inspection", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(inspected.observation).toMatchObject({
       revision: "a".repeat(40),
+      dataset: {
+        windowTurnOccurrences: 4,
+        windowUniqueCacheKeys: 4,
+        authorizedQuestionCount: 2,
+        authorizedTurnOccurrences: 4,
+        authorizedUniqueCacheKeys: 4
+      },
       extraction: { manifestSha256: null, rawContentClosureSha256: null },
       inventory: { expectedTurns: 4, validTurns: 0, missingTurns: 4, invalidTurns: 0, orphanTurns: 0 }
     });
@@ -67,6 +74,40 @@ describe("no-network extraction authority inspection", () => {
     expect(inspected.writerLock).toBe("absent");
     expect(inspected.disk.status).toBe("available");
     expect(inspected.modelReadiness).toBe("not_probed");
+  });
+
+  it("separates the full window from a question-bounded repair key space", async () => {
+    await writeFixtureDataset([
+      buildExtractionFillQuestion("q001", "User: alpha", "User: decoy"),
+      buildExtractionFillQuestion("q002", "User: beta", "User: distraction")
+    ]);
+
+    const inspected = await inspectExtractionAuthority({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      revision: "a".repeat(40),
+      action: "fill",
+      repairInvalidShards: true,
+      questionBatchLimit: 1
+    });
+
+    expect(inspected.observation.dataset).toMatchObject({
+      windowLimit: 2,
+      windowTurnOccurrences: 4,
+      windowUniqueCacheKeys: 4,
+      authorizedQuestionCount: 1,
+      authorizedTurnOccurrences: 2,
+      authorizedUniqueCacheKeys: 2
+    });
+    expect(inspected.observation.inventory).toMatchObject({
+      expectedTurns: 2,
+      validTurns: 0,
+      missingTurns: 2,
+      invalidTurns: 0
+    });
+    expect(inspected.missingKeys).toHaveLength(2);
   });
 
   it("permits only the inspected canonical operation and selection", async () => {

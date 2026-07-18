@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   RunMode,
   RunState,
@@ -11,6 +14,7 @@ import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
 import { SqliteSynthesisCapsuleRepo } from "../../../repos/capsules/synthesis-capsule-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { removeTempDirectorySync } from "../../temp-directory.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -105,6 +109,21 @@ describe("SqliteSynthesisCapsuleRepo", () => {
       "6f2c53a4-0c4a-41aa-a2b0-c26fd862aa75",
       "420b0a6f-c74e-459b-947f-61353f82e0a3"
     ]);
+  });
+
+  it("findByIds reprepares after the database connection is closed and reopened", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-synthesis-capsule-"));
+    const { database, repo } = await createRepo(path.join(tempDir, "synthesis.db"));
+    const capsule = createSynthesisCapsule();
+    await repo.create(capsule);
+
+    database.close();
+    await expect(repo.findByIds(capsule.workspace_id, [capsule.object_id])).resolves.toEqual([
+      capsule
+    ]);
+
+    databases.delete(database);
+    removeTempDirectorySync(tempDir, [database]);
   });
 
   it("does not prepare a new findByIds statement for each input cardinality", async () => {
@@ -345,11 +364,11 @@ describe("SqliteSynthesisCapsuleRepo", () => {
   });
 });
 
-async function createRepo(): Promise<{
+async function createRepo(filename = ":memory:"): Promise<{
   readonly repo: SqliteSynthesisCapsuleRepo;
   readonly database: ReturnType<typeof initDatabase>;
 }> {
-  const database = initDatabase({ filename: ":memory:" });
+  const database = initDatabase({ filename });
   databases.add(database);
 
   const workspaceRepo = new SqliteWorkspaceRepo(database);

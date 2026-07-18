@@ -5,12 +5,10 @@ import {
   ScopeClassSchema,
   StorageTierSchema
 } from "@do-soul/alaya-protocol";
-import { EventPublisher, RelationAssertionService } from "@do-soul/alaya-core";
 import {
   initDatabase,
   SqliteClaimFormRepo,
   SqliteEvidenceCapsuleRepo,
-  SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
   SqlitePathRelationRepo,
   SqliteRelationAssertionRepo,
@@ -22,8 +20,8 @@ import type {
   RecallReadWorkerResponse
 } from "./recall-read-worker/protocol.js";
 import {
+  createPreparedTemporalRecallPathReadPorts,
   createRecallPathReadPorts,
-  createRecallTemporalProjectionEnsurer,
   type RecallPathProjectionReadOptions
 } from "./recall-path-readers.js";
 import { runWorkerActiveConstraints } from "./recall-read-worker/active-constraints.js";
@@ -40,29 +38,15 @@ if (parentPort === null) {
 const databaseFilename = readDatabaseFilename(workerData);
 const temporalProjectionSelected = readTemporalProjectionSelected(workerData);
 const database = initDatabase({ filename: databaseFilename });
+database.connection.pragma("query_only = ON");
 const memoryEntryRepo = new SqliteMemoryEntryRepo(database);
 const evidenceCapsuleRepo = new SqliteEvidenceCapsuleRepo(database);
 const synthesisCapsuleRepo = new SqliteSynthesisCapsuleRepo(database);
 const claimFormRepo = new SqliteClaimFormRepo(database);
-const eventLogRepo = new SqliteEventLogRepo(database);
 const recallPathReadPorts = temporalProjectionSelected
-  ? createRecallPathReadPorts({
-      temporalProjectionSelected,
-      temporalPathProjectionReader: new SqliteTemporalPathProjectionReader(
-        new SqliteRelationAssertionRepo(database)
-      ),
-      ensureTemporalProjection: createRecallTemporalProjectionEnsurer(
-        new RelationAssertionService({
-          repo: new SqliteRelationAssertionRepo(database),
-          eventPublisher: new EventPublisher({
-            eventLogRepo,
-            runHotStateService: { apply: () => undefined },
-            runtimeNotifier: { notify: () => undefined, notifyEntry: () => undefined }
-          }),
-          eventHistory: eventLogRepo
-        })
-      )
-    })
+  ? createPreparedTemporalRecallPathReadPorts(
+      new SqliteTemporalPathProjectionReader(new SqliteRelationAssertionRepo(database))
+    )
   : createRecallPathReadPorts({
       legacyPathReader: new SqlitePathRelationRepo(database)
     });

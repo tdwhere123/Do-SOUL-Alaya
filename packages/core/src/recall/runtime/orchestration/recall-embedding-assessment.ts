@@ -1,4 +1,3 @@
-import type { EmbeddingRecallSupplementResult } from "../../../embedding-recall/embedding-recall-service.js";
 import { collectPoolEmbeddingRescore } from "../../rerank/recall-pool-embedding-rescore.js";
 import {
   collectEmbeddingSupplement,

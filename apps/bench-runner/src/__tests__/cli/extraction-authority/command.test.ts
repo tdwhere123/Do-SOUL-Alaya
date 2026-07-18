@@ -4,6 +4,8 @@ import {
 } from "../../../cli/extraction-authority/command.js";
 import type { ExtractionTargetSelectionReceipt } from
   "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+import { emptyExtractionAuthorityShardStatus } from
+  "../extraction-authority-inspection-fixture.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -42,6 +44,7 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
       }
     },
     missingKeys: ["1".repeat(64), "2".repeat(64)],
+    ...emptyExtractionAuthorityShardStatus(),
     writerLock: "absent" as const,
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,
@@ -393,6 +396,7 @@ function authorityInspection(rawContentClosureSha256: string) {
       }
     },
     missingKeys: ["2".repeat(64)],
+    ...emptyExtractionAuthorityShardStatus(),
     writerLock: "absent" as const,
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,
@@ -433,6 +437,7 @@ function directAuthorityInspection() {
       }
     },
     missingKeys: Array.from({ length: 500 }, (_, index) => index.toString(16).padStart(64, "0")),
+    ...emptyExtractionAuthorityShardStatus(),
     writerLock: "absent" as const,
     disk: { status: "available" as const, freeBytes: 10_000 },
     credentialStatus: "present" as const,

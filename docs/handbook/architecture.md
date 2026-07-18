@@ -279,7 +279,7 @@ review finding:
    to all other protected routes (see `registerRateLimitMiddleware`).
 2. **Protocol-level types**: ready by virtue of import; no runtime init.
 3. **Core services** (in dependency order, leaf services first):
-   - HealthJournalService, EventPublisher, RuntimeEventNormalizer
+   - HealthJournalService, EventPublisher
    - EvidenceService, MemoryService, SignalService
    - GreenService, GovernanceLeaseService, SessionOverrideService
    - RecallService (needs Memory + Embedding repos; fusion, delivery, graph-expansion, path-relation, and diagnostics helpers live under `packages/core/src/recall/`)
@@ -293,6 +293,12 @@ review finding:
    external agents may attach. Tool calls fail-closed if any prior
    step did not complete.
 7. **CLI bridge**: bin/alaya.mjs subcommands wired.
+
+File-backed recall reads may run on worker threads. In temporal mode, the
+daemon parent process prepares the current or exact as-of projection before
+dispatch; worker SQLite connections are query-only and never append EventLog
+entries or materialize projections. This preserves the daemon's single-writer
+boundary while the main database connection remains open.
 
 Each step records an audit row `daemon.startup.<step>.completed`. Tool
 calls that arrive before step 6 receive a fail-closed response.

@@ -7,10 +7,20 @@ import {
   type RelationAssertionResolution
 } from "@do-soul/alaya-protocol";
 import { stableStringify } from "../../shared/stable-stringify.js";
+import type { EventPublisherDecision } from "../../runtime/event-publisher.js";
+import { buildRelationProjection } from "./relation-projection-builder.js";
 import {
-  buildRelationProjection,
-  sha256RelationAssertionValue as sha256
-} from "./relation-projection-builder.js";
+  createAdmissionEventInput,
+  createResolutionEventInput,
+  deriveResolutionId,
+  prepareAdmission,
+  prepareResolution,
+  projectionAdmissionResult,
+  projectionResolutionResult,
+  RELATION_ASSERTION_ENTITY_TYPE,
+  type PreparedAdmission,
+  type PreparedResolution
+} from "./relation-assertion-transition-contract.js";
 import type {
   RelationAssertionAdmissionRequest,
   RelationAssertionAdmissionResult,
@@ -21,8 +31,6 @@ import type {
   RelationAssertionResolutionResult,
   RelationAssertionServiceDependencies
 } from "./relation-assertion-service-types.js";
-
-const ASSERTION_ENTITY_TYPE = "relation_assertion";
 
 /**
  * The sole core transition that admits immutable temporal relation truth. It
@@ -42,159 +50,149 @@ export class RelationAssertionService {
   public async admit(
     request: RelationAssertionAdmissionRequest
   ): Promise<RelationAssertionAdmissionResult> {
-    const admittedAt = request.admittedAt ?? this.now();
-    const assertionId = request.assertionId ?? deriveAssertionId(request);
-    const admission = RelationAssertionAdmissionSchema.parse({
-      assertion_id: assertionId,
-      workspace_id: request.workspaceId,
-      evidence_ids: request.evidenceIds,
-      anchors: request.anchors,
-      relation_kind: request.relationKind,
-      validity: request.validity,
-      admitted_at: admittedAt
-    });
-    const identityKey = deriveIdentityKey(request);
-
-    return await this.dependencies.eventPublisher.decideAppendThenApply<RelationAssertionAdmissionResult>(() => {
-      const byId = this.dependencies.repo.getByIdInCurrentTransaction(assertionId);
-      const byIdentity = this.dependencies.repo.findByIdentityKeyInCurrentTransaction(identityKey);
-      assertReplayIdentity(byId, byIdentity);
-      const existing = byId ?? byIdentity;
-      if (existing !== null) {
-        assertSameAdmission(existing, admission);
-        const projection = this.buildProjectionInCurrentTransaction(this.now());
-        return {
-          eventInputs: [],
-          apply: () => {
-            this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
-              projection.generation,
-              { activate: true }
-            );
-            return {
-              status: "already_admitted" as const,
-              assertion: existing,
-              activeProjectionCount: projection.activeProjectionCount,
-              projectionGeneration: projection.generation.generation
-            };
-          }
-        };
-      }
-
-      this.dependencies.repo.assertEvidenceAnchorsInCurrentTransaction({
-        workspaceId: admission.workspace_id,
-        evidenceIds: admission.evidence_ids,
-        sourceAnchor: request.sourceEventAnchor
-      });
-      return {
-        eventInputs: [{
-          event_type: RuntimeGovernanceEventType.RELATION_ASSERTION_ADMITTED,
-          entity_type: ASSERTION_ENTITY_TYPE,
-          entity_id: assertionId,
-          workspace_id: admission.workspace_id,
-          run_id: request.runId,
-          caused_by: request.causedBy,
-          payload_json: RelationAssertionAdmittedPayloadSchema.parse(admission)
-        }],
-        apply: (entries) => {
-          const entry = entries[0];
-          if (entry === undefined) throw new Error("Relation assertion admission requires an EventLog entry.");
-          const assertion = this.dependencies.repo.createInCurrentTransaction({
-            assertion: {
-              ...admission,
-              admission_event_id: entry.event_id
-            },
-            identityKey
-          });
-          const projection = this.buildProjectionInCurrentTransaction(admission.admitted_at);
-          this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
-            projection.generation,
-            { activate: true }
-          );
-          return {
-            status: "admitted" as const,
-            assertion,
-            activeProjectionCount: projection.activeProjectionCount,
-            projectionGeneration: projection.generation.generation
-          };
-        }
-      };
-    });
+    const prepared = prepareAdmission(request, request.admittedAt ?? this.now());
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
+      this.decideAdmission(request, prepared)
+    );
   }
 
   public async resolve(
     request: RelationAssertionResolutionRequest
   ): Promise<RelationAssertionResolutionResult> {
-    const resolvedAt = request.resolvedAt ?? this.now();
     const resolutionId = request.resolutionId ?? deriveResolutionId(request);
+    return await this.dependencies.eventPublisher.decideAppendThenApply(() =>
+      this.decideResolution(request, resolutionId, request.resolvedAt ?? this.now())
+    );
+  }
 
-    return await this.dependencies.eventPublisher.decideAppendThenApply<RelationAssertionResolutionResult>(() => {
-      const assertion = this.dependencies.repo.getByIdInCurrentTransaction(request.assertionId);
-      if (assertion === null) {
-        throw new Error(`Relation assertion ${request.assertionId} does not exist.`);
-      }
-      if (assertion.workspace_id !== request.workspaceId) {
-        throw new Error(`Relation assertion ${request.assertionId} belongs to another workspace.`);
-      }
-      const existing = this.dependencies.repo.getCurrentResolutionInCurrentTransaction(request.assertionId);
-      if (existing !== null) {
-        assertSameResolution(existing, request, resolutionId);
-        const projection = this.buildProjectionInCurrentTransaction(existing.resolved_at);
-        return {
-          eventInputs: [],
-          apply: () => {
-            this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
-              projection.generation,
-              { activate: true }
-            );
-            return {
-              status: "already_resolved" as const,
-              resolution: existing,
-              activeProjectionCount: projection.activeProjectionCount,
-              projectionGeneration: projection.generation.generation
-            };
-          }
-        };
-      }
+  private decideAdmission(
+    request: RelationAssertionAdmissionRequest,
+    prepared: PreparedAdmission
+  ): EventPublisherDecision<RelationAssertionAdmissionResult> {
+    const byId = this.dependencies.repo.getByIdInCurrentTransaction(
+      prepared.admission.assertion_id
+    );
+    const byIdentity = this.dependencies.repo.findByIdentityKeyInCurrentTransaction(
+      prepared.identityKey
+    );
+    assertReplayIdentity(byId, byIdentity);
+    const existing = byId ?? byIdentity;
+    return existing === null
+      ? this.decideNewAdmission(request, prepared)
+      : this.decideExistingAdmission(existing, prepared.admission);
+  }
 
-      const payload = RelationAssertionResolvedPayloadSchema.parse({
-        resolution_id: resolutionId,
-        assertion_id: assertion.assertion_id,
-        workspace_id: assertion.workspace_id,
-        resolution_kind: request.resolutionKind,
-        resolved_at: resolvedAt,
-        reason: request.reason
-      });
-      return {
-        eventInputs: [{
-          event_type: RuntimeGovernanceEventType.RELATION_ASSERTION_RESOLVED,
-          entity_type: ASSERTION_ENTITY_TYPE,
-          entity_id: assertion.assertion_id,
-          workspace_id: assertion.workspace_id,
-          run_id: request.runId,
-          caused_by: request.causedBy,
-          payload_json: payload
-        }],
-        apply: (entries) => {
-          const entry = entries[0];
-          if (entry === undefined) throw new Error("Relation assertion resolution requires an EventLog entry.");
-          const resolution = this.dependencies.repo.createCurrentResolutionInCurrentTransaction({
-            ...payload,
-            event_id: entry.event_id
-          });
-          const projection = this.buildProjectionInCurrentTransaction(payload.resolved_at);
-          this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
-            projection.generation,
-            { activate: true }
-          );
-          return {
-            status: "resolved" as const,
-            resolution,
-            activeProjectionCount: projection.activeProjectionCount,
-            projectionGeneration: projection.generation.generation
-          };
-        }
-      };
+  private decideExistingAdmission(
+    existing: Readonly<RelationAssertion>,
+    admission: PreparedAdmission["admission"]
+  ): EventPublisherDecision<RelationAssertionAdmissionResult> {
+    assertSameAdmission(existing, admission);
+    const projection = this.buildProjectionInCurrentTransaction(this.now());
+    return {
+      eventInputs: [],
+      apply: () => {
+        this.activateProjection(projection);
+        return projectionAdmissionResult("already_admitted", existing, projection);
+      }
+    };
+  }
+
+  private decideNewAdmission(
+    request: RelationAssertionAdmissionRequest,
+    prepared: PreparedAdmission
+  ): EventPublisherDecision<RelationAssertionAdmissionResult> {
+    const { admission, identityKey } = prepared;
+    this.dependencies.repo.assertEvidenceAnchorsInCurrentTransaction({
+      workspaceId: admission.workspace_id,
+      evidenceIds: admission.evidence_ids,
+      sourceAnchor: request.sourceEventAnchor
     });
+    return {
+      eventInputs: [createAdmissionEventInput(request, admission)],
+      apply: (entries) => {
+        const entry = entries[0];
+        if (entry === undefined) throw new Error("Relation assertion admission requires an EventLog entry.");
+        const assertion = this.dependencies.repo.createInCurrentTransaction({
+          assertion: { ...admission, admission_event_id: entry.event_id },
+          identityKey
+        });
+        const projection = this.buildProjectionInCurrentTransaction(admission.admitted_at);
+        this.activateProjection(projection);
+        return projectionAdmissionResult("admitted", assertion, projection);
+      }
+    };
+  }
+
+  private decideResolution(
+    request: RelationAssertionResolutionRequest,
+    resolutionId: string,
+    resolvedAt: string
+  ): EventPublisherDecision<RelationAssertionResolutionResult> {
+    const assertion = this.requireResolutionAssertion(request);
+    const existing = this.dependencies.repo.getCurrentResolutionInCurrentTransaction(
+      request.assertionId
+    );
+    if (existing !== null) {
+      return this.decideExistingResolution(existing, request, resolutionId);
+    }
+    const payload = prepareResolution(request, assertion, resolutionId, resolvedAt);
+    return this.decideNewResolution(request, payload);
+  }
+
+  private decideExistingResolution(
+    existing: Readonly<RelationAssertionResolution>,
+    request: RelationAssertionResolutionRequest,
+    resolutionId: string
+  ): EventPublisherDecision<RelationAssertionResolutionResult> {
+    assertSameResolution(existing, request, resolutionId);
+    const projection = this.buildProjectionInCurrentTransaction(existing.resolved_at);
+    return {
+      eventInputs: [],
+      apply: () => {
+        this.activateProjection(projection);
+        return projectionResolutionResult("already_resolved", existing, projection);
+      }
+    };
+  }
+
+  private decideNewResolution(
+    request: RelationAssertionResolutionRequest,
+    payload: PreparedResolution
+  ): EventPublisherDecision<RelationAssertionResolutionResult> {
+    return {
+      eventInputs: [createResolutionEventInput(request, payload)],
+      apply: (entries) => {
+        const entry = entries[0];
+        if (entry === undefined) throw new Error("Relation assertion resolution requires an EventLog entry.");
+        const resolution = this.dependencies.repo.createCurrentResolutionInCurrentTransaction({
+          ...payload,
+          event_id: entry.event_id
+        });
+        const projection = this.buildProjectionInCurrentTransaction(payload.resolved_at);
+        this.activateProjection(projection);
+        return projectionResolutionResult("resolved", resolution, projection);
+      }
+    };
+  }
+
+  private requireResolutionAssertion(
+    request: RelationAssertionResolutionRequest
+  ): Readonly<RelationAssertion> {
+    const assertion = this.dependencies.repo.getByIdInCurrentTransaction(request.assertionId);
+    if (assertion === null) {
+      throw new Error(`Relation assertion ${request.assertionId} does not exist.`);
+    }
+    if (assertion.workspace_id !== request.workspaceId) {
+      throw new Error(`Relation assertion ${request.assertionId} belongs to another workspace.`);
+    }
+    return assertion;
+  }
+
+  private activateProjection(projection: RelationAssertionProjectionResult): void {
+    this.dependencies.repo.writeProjectionGenerationInCurrentTransaction(
+      projection.generation,
+      { activate: true }
+    );
   }
 
   public async verifyAndRebuild(asOf?: string): Promise<RelationAssertionReplayResult> {
@@ -246,7 +244,7 @@ export class RelationAssertionService {
     ]));
     for (const assertion of assertions) {
       const events = await this.dependencies.eventHistory.queryByEntity(
-        ASSERTION_ENTITY_TYPE,
+        RELATION_ASSERTION_ENTITY_TYPE,
         assertion.assertion_id
       );
       verifyAdmissionEvent(events, assertion);
@@ -265,29 +263,6 @@ function assertSharedStorageBoundary(dependencies: RelationAssertionServiceDepen
       "Relation assertion EventLog and projection repositories must share one SQLite transaction boundary."
     );
   }
-}
-
-function deriveAssertionId(request: RelationAssertionAdmissionRequest): string {
-  return `relation_assertion_${deriveIdentityKey(request).slice(0, 48)}`;
-}
-
-function deriveIdentityKey(request: RelationAssertionAdmissionRequest): string {
-  return sha256(stableStringify({
-    workspace_id: request.workspaceId,
-    source_event_anchor: request.sourceEventAnchor,
-    evidence_ids: [...request.evidenceIds].sort(),
-    anchors: request.anchors,
-    relation_kind: request.relationKind,
-    validity: request.validity
-  }));
-}
-
-function deriveResolutionId(request: RelationAssertionResolutionRequest): string {
-  return `relation_resolution_${sha256(stableStringify({
-    assertion_id: request.assertionId,
-    resolution_kind: request.resolutionKind,
-    reason: request.reason
-  })).slice(0, 48)}`;
 }
 
 function assertSameAdmission(
@@ -358,7 +333,7 @@ function verifyAdmissionEvent(
   });
   if (
     event.event_id !== assertion.admission_event_id ||
-    event.entity_type !== ASSERTION_ENTITY_TYPE ||
+    event.entity_type !== RELATION_ASSERTION_ENTITY_TYPE ||
     event.entity_id !== assertion.assertion_id ||
     event.workspace_id !== assertion.workspace_id ||
     stableStringify(payload) !== stableStringify(expected)
@@ -389,7 +364,7 @@ function verifyResolutionEvent(
   });
   if (
     event.event_id !== resolution.event_id ||
-    event.entity_type !== ASSERTION_ENTITY_TYPE ||
+    event.entity_type !== RELATION_ASSERTION_ENTITY_TYPE ||
     event.entity_id !== resolution.assertion_id ||
     event.workspace_id !== resolution.workspace_id ||
     stableStringify(payload) !== stableStringify(expected)

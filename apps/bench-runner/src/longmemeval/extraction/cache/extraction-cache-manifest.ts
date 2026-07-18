@@ -25,6 +25,15 @@ import {
   computeExtractionContentClosureSha256,
   extractionContentClosureEntriesFromIndex
 } from "../content-closure.js";
+import {
+  parseSupplementalSourceBinding,
+  type SupplementalSourceManifestBinding
+} from
+  "./supplemental-source-receipt.js";
+export {
+  BENCH_EXTRACTION_MODEL_ENV,
+  resolveBenchExtractionModel
+} from "./manifest-model-resolution.js";
 export {
   EXTRACTION_REQUEST_PROFILES,
   type ExtractionRequestProfile
@@ -56,34 +65,7 @@ export {
 
 export const EXTRACTION_CACHE_MANIFEST_VERSION = 3;
 export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
-export const BENCH_EXTRACTION_MODEL_ENV = "OFFICIAL_API_GARDEN_MODEL";
-
-/**
- * Resolve the bench extraction model from operator env or the cache manifest.
- * Refuses the old silent fallback to the production constant `gpt-4.1-mini`,
- * which produced 100% cache misses when the cache was built with another model.
- */
-export function resolveBenchExtractionModel(
-  env: NodeJS.ProcessEnv = process.env,
-  manifest?: ExtractionCacheManifest | undefined
-): string {
-  const model =
-    readNonEmptyEnv(env[BENCH_EXTRACTION_MODEL_ENV]) ?? manifest?.extraction_model;
-  if (model === undefined || model.trim().length === 0) {
-    throw new Error(
-      "bench extraction model is unresolved: neither env " +
-        `${BENCH_EXTRACTION_MODEL_ENV} is set nor does the extraction cache manifest ` +
-        "declare extraction_model. Export the extraction model env var " +
-        "in the bench environment or build the cache manifest first. Refusing to " +
-        "fall back to a default model — a wrong default silently misses every " +
-        "cache key and degrades to a full live extraction."
-    );
-  }
-  return model;
-}
-
-/**
- * Documented cache-key formula. Pinned in the manifest so a future change to
+/** Documented cache-key formula. Pinned in the manifest so a future change to
  * the key derivation (which would silently invalidate every shard) is a
  * detectable mismatch rather than a silent full miss.
  */
@@ -91,7 +73,6 @@ export const EXTRACTION_CACHE_KEY_ALGO =
   "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)";
 
 export type ExtractionCacheStorage = "git-tracked" | "archive";
-
 /**
  * The persisted manifest shape. `coverage` fields may be populated later by an
  * extraction-fill pass; a freshly-written manifest that only records the build
@@ -128,6 +109,8 @@ interface ExtractionCacheManifestBase extends ExtractionFillManifestContract {
   readonly builder: string;
   readonly expansion_source_anchor?: LongMemEvalExpansionSourceAnchor;
   readonly expansion_lineage?: LongMemEvalExpansionLineage;
+  /** Hash-only reference to an operator-attested transport-alias supplement. */
+  readonly supplemental_source_receipt?: SupplementalSourceManifestBinding;
 }
 
 export interface ExtractionCacheManifestV1 extends ExtractionCacheManifestBase {
@@ -312,14 +295,7 @@ function readVersionedManifest(
     record, schemaVersion, fill: common, filePath
   });
   if (schemaVersion === 1) {
-    if (hasFamily) {
-      throw new Error(
-        `extraction cache manifest at ${filePath} schema_version 1 must not define model_family`
-      );
-    }
-    assertLegacyProfileAbsent(hasProfile, schemaVersion, filePath);
-    assertLegacyClosureIndexAbsent(common, schemaVersion, filePath);
-    return { ...common, schema_version: 1 };
+    return readV1Manifest(common, hasFamily, hasProfile, filePath);
   }
   if (!hasFamily) {
     throw new Error(
@@ -336,14 +312,47 @@ function readVersionedManifest(
     assertLegacyClosureIndexAbsent(common, schemaVersion, filePath);
     return { ...common, schema_version: 2, model_family: modelFamily };
   }
+  return readCurrentManifest(record, common, modelFamily, expansion, filePath);
+}
+
+function readV1Manifest(
+  common: ExtractionCacheManifestBase,
+  hasFamily: boolean,
+  hasProfile: boolean,
+  filePath: string
+): ExtractionCacheManifestV1 {
+  if (hasFamily) {
+    throw new Error(
+      `extraction cache manifest at ${filePath} schema_version 1 must not define model_family`
+    );
+  }
+  assertLegacyProfileAbsent(hasProfile, 1, filePath);
+  assertLegacyClosureIndexAbsent(common, 1, filePath);
+  return { ...common, schema_version: 1 };
+}
+
+function readCurrentManifest(
+  record: Readonly<Record<string, unknown>>,
+  common: ExtractionCacheManifestBase,
+  modelFamily: string,
+  expansion: ReturnType<typeof parseExpansionManifestArtifacts>,
+  filePath: string
+): ExtractionCacheManifestV3 {
   const requestProfile = requireRequestProfile(record.request_profile, filePath);
   assertContentClosureIndex(common, requestProfile, filePath);
+  const supplementalSource = parseSupplementalSourceBinding(
+    record.supplemental_source_receipt,
+    filePath
+  );
   return {
     ...common,
-    schema_version: schemaVersion,
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
     model_family: modelFamily,
     request_profile: requestProfile,
-    ...expansion
+    ...expansion,
+    ...(supplementalSource === undefined ? {} : {
+      supplemental_source_receipt: supplementalSource
+    })
   };
 }
 
@@ -487,12 +496,4 @@ function describeCause(cause: unknown): string {
     return cause.message;
   }
   return String(cause);
-}
-
-function readNonEmptyEnv(value: string | undefined): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? undefined : trimmed;
 }

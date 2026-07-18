@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   ClaimLifecycleState,
   WorkspaceKind,
@@ -9,6 +12,7 @@ import {
 import { initDatabase } from "../../../sqlite/db.js";
 import { SqliteClaimFormRepo } from "../../../repos/governance/claim-form-repo.js";
 import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
+import { removeTempDirectorySync } from "../../temp-directory.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 
@@ -91,6 +95,21 @@ describe("SqliteClaimFormRepo", () => {
       "8af6288f-f460-423f-babc-c9f7c90d733f",
       "4de58de9-8ec7-45f4-a593-fde6ec67865c"
     ]);
+  });
+
+  it("findByIds reprepares after the database connection is closed and reopened", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alaya-claim-form-"));
+    const { database, repo } = await createRepo(path.join(tempDir, "claims.db"));
+    const claim = createClaimForm();
+    repo.create(claim);
+
+    database.close();
+    await expect(repo.findByIds(claim.workspace_id, [claim.object_id])).resolves.toEqual([
+      claim
+    ]);
+
+    databases.delete(database);
+    removeTempDirectorySync(tempDir, [database]);
   });
 
   it("does not prepare a new findByIds statement for each input cardinality", async () => {
@@ -234,11 +253,11 @@ describe("SqliteClaimFormRepo", () => {
   });
 });
 
-async function createRepo(): Promise<{
+async function createRepo(filename = ":memory:"): Promise<{
   readonly database: ReturnType<typeof initDatabase>;
   readonly repo: SqliteClaimFormRepo;
 }> {
-  const database = initDatabase({ filename: ":memory:" });
+  const database = initDatabase({ filename });
   databases.add(database);
 
   const workspaceRepo = new SqliteWorkspaceRepo(database);

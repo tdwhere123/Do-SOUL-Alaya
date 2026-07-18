@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  parseOfficialApiSignals,
-  salvageRawSignalElements
+  parseOfficialApiSignals
 } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from "../compile-seed/compile-seed-types.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
@@ -34,10 +33,16 @@ export function computeExtractionRawJsonSha256(rawJson: string): string {
 }
 
 export function inspectExtractionRawJson(rawJson: string): ExtractionRawJsonInspection {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson) as unknown;
+  } catch (cause) {
+    throw new Error("extraction raw_json is not strict JSON", { cause });
+  }
   const parsedDraftCount = parseOfficialApiSignals(rawJson).length;
   return {
     rawJsonSha256: computeExtractionRawJsonSha256(rawJson),
-    rawSignalCount: countRawEnvelopeSignals(rawJson),
+    rawSignalCount: countRawEnvelopeSignals(parsed),
     parsedDraftCount
   };
 }
@@ -104,13 +109,8 @@ function uniqueEntriesByKey(
   );
 }
 
-function countRawEnvelopeSignals(rawJson: string): number {
-  try {
-    const parsed = JSON.parse(rawJson) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return 0;
-    const signals = (parsed as { readonly signals?: unknown }).signals;
-    return Array.isArray(signals) ? signals.length : 0;
-  } catch {
-    return salvageRawSignalElements(rawJson).length;
-  }
+function countRawEnvelopeSignals(parsed: unknown): number {
+  if (typeof parsed !== "object" || parsed === null) return 0;
+  const signals = (parsed as { readonly signals?: unknown }).signals;
+  return Array.isArray(signals) ? signals.length : 0;
 }

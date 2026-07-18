@@ -23,7 +23,7 @@ import type { MemoryEntryKeywordSearchResult } from "./types.js";
 import { freezeKeywordSearchResults } from "./search/freeze-keyword-results.js";
 
 export interface MemoryEntrySearchWorkflowHost {
-  readonly db: StorageDatabase;
+  activeConnection(): StorageDatabase["connection"];
   readonly searchByKeywordStatement: SqliteAllStatement;
   readonly searchByKeywordPorterStatement: SqliteAllStatement;
 }
@@ -146,7 +146,7 @@ function searchAnchorFtsLane(
   candidateObjectIds: readonly string[]
 ): readonly FtsKeywordSearchRow[] {
   const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, objectIdFilterColumnForFtsTable(table));
-  return this.db.connection.prepare(`
+  return this.activeConnection().prepare(`
     SELECT
       ${table}.object_id,
       bm25(${table}) AS raw_rank
@@ -282,7 +282,7 @@ function readExactKeywordCandidateBatch(
 ): readonly ExactKeywordCandidateRow[] {
   const keysetPredicate = lastObjectId === null ? "" : "AND object_id > ?";
   const tierPredicate = tier === undefined ? "" : "AND storage_tier = ?";
-  return this.db.connection.prepare(`
+  return this.activeConnection().prepare(`
     SELECT object_id, content
     FROM memory_entries
     WHERE workspace_id = ?
@@ -333,7 +333,7 @@ function searchTrigramKeywordRowsWithinObjectIds(
 ): readonly FtsKeywordSearchRow[] {
   const objectIdFilter = buildObjectIdFilterSql(candidateObjectIds, "memory_content_fts.object_id");
 
-  return this.db.connection.prepare(`
+  return this.activeConnection().prepare(`
     SELECT
       memory_content_fts.object_id,
       bm25(memory_content_fts) AS raw_rank
@@ -401,7 +401,7 @@ function searchPorterKeywordRowsWithinObjectIds(
     "memory_content_fts_porter.object_id"
   );
 
-  return this.db.connection.prepare(`
+  return this.activeConnection().prepare(`
     SELECT
       memory_content_fts_porter.object_id,
       bm25(memory_content_fts_porter) AS raw_rank
@@ -465,7 +465,7 @@ function searchFtsKeywordRowsWithinTier(
   limit: number,
   tier: StorageTier
 ): readonly FtsKeywordSearchRow[] {
-  return this.db.connection.prepare(`
+  return this.activeConnection().prepare(`
     SELECT ${table}.object_id, bm25(${table}) AS raw_rank
     FROM ${table}
     JOIN memory_entries ON memory_entries.object_id = ${table}.object_id

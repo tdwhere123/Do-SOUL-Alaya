@@ -70,6 +70,7 @@ describe("semantic supplement concurrency", () => {
       ]),
       addCandidate: (entry) => {
         admitted.push(entry.object_id);
+        return true;
       },
       ftsRanks: new Map(),
       trigramFtsRanks: new Map(),
@@ -142,6 +143,7 @@ describe("semantic supplement concurrency", () => {
       ]),
       addCandidate: (entry) => {
         admitted.push(entry.object_id);
+        return true;
       },
       ftsRanks: new Map(),
       trigramFtsRanks: new Map(),

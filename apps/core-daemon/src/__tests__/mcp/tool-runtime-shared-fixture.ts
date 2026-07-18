@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ConversationRuntimeContext, ToolSpec } from "@do-soul/alaya-protocol";
 import { builtinConversationToolRequiresConfirmation } from "../../mcp/builtin-conversation-tool-specs.js";
 import { executeConversationToolOrThrow } from "../../mcp/tool-runtime.js";
+export { createDeferred } from "../support/deferred.js";
 
 const tempDirs = new Set<string>();
 
@@ -101,15 +102,4 @@ export function createAutoConfirmingBuiltinToolExecutor(toolIds: readonly string
       });
     }
   };
-}
-
-export function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-
-  return { promise, resolve, reject };
 }

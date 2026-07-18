@@ -1,10 +1,11 @@
-﻿import {
+import {
   ClaimFormSchema,
   ClaimLifecycleStateSchema,
   type ClaimForm,
   type ClaimLifecycleState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import { deepFreeze } from "../shared/deep-freeze.js";
 import { parseNonEmptyString, parseTimestamp } from "../shared/validators.js";
@@ -79,34 +80,23 @@ interface ClaimFormRow {
 }
 
 export class SqliteClaimFormRepo implements ClaimFormRepo {
-  private readonly createStatement;
-  private readonly findByIdStatement;
-  private readonly findByIdsStatement;
-  private readonly findByWorkspaceIdStatement;
-  private readonly findByStatusStatement;
-  private readonly findByCanonicalKeyStatement;
-  private readonly updateEvidenceRefsStatement;
-  private readonly updateSourceObjectRefsStatement;
-  private readonly updateStatusStatement;
+  private readonly statementHolder: RefreshableStatementHolder<
+    ReturnType<typeof prepareClaimFormStatements>
+  >;
 
-  public constructor(private readonly db: StorageDatabase) {
-    const statements = prepareClaimFormStatements(db);
-    this.createStatement = statements.createStatement;
-    this.findByIdStatement = statements.findByIdStatement;
-    this.findByIdsStatement = statements.findByIdsStatement;
-    this.findByWorkspaceIdStatement = statements.findByWorkspaceIdStatement;
-    this.findByStatusStatement = statements.findByStatusStatement;
-    this.findByCanonicalKeyStatement = statements.findByCanonicalKeyStatement;
-    this.updateEvidenceRefsStatement = statements.updateEvidenceRefsStatement;
-    this.updateSourceObjectRefsStatement = statements.updateSourceObjectRefsStatement;
-    this.updateStatusStatement = statements.updateStatusStatement;
+  public constructor(db: StorageDatabase) {
+    this.statementHolder = new RefreshableStatementHolder(db, prepareClaimFormStatements);
+  }
+
+  private get statements(): ReturnType<typeof prepareClaimFormStatements> {
+    return this.statementHolder.active();
   }
 
   public create(claim: ClaimForm): Readonly<ClaimForm> {
     const parsedClaim = parseClaimForm(claim);
 
     try {
-      this.createStatement.run(
+      this.statements.createStatement.run(
         parsedClaim.object_id,
         parsedClaim.object_kind,
         parsedClaim.schema_version,
@@ -139,7 +129,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
 
   public findByIdSync(objectId: string): Readonly<ClaimForm> | null {
     try {
-      const row = this.findByIdStatement.get(objectId) as ClaimFormRow | undefined;
+      const row = this.statements.findByIdStatement.get(objectId) as ClaimFormRow | undefined;
       return row === undefined ? null : parseClaimFormRow(row);
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to load claim form ${objectId}.`, error);
@@ -160,7 +150,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     }
 
     try {
-      const rows = this.findByIdsStatement.all(
+      const rows = this.statements.findByIdsStatement.all(
         parsedWorkspaceId,
         JSON.stringify(parsedObjectIds)
       ) as ClaimFormRow[];
@@ -172,7 +162,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
 
   public async findByWorkspaceId(workspaceId: string): Promise<readonly Readonly<ClaimForm>[]> {
     try {
-      const rows = this.findByWorkspaceIdStatement.all(workspaceId) as ClaimFormRow[];
+      const rows = this.statements.findByWorkspaceIdStatement.all(workspaceId) as ClaimFormRow[];
       return rows.map((row) => parseClaimFormRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to list claim forms for workspace ${workspaceId}.`, error);
@@ -183,7 +173,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     const parsedStatus = parseClaimLifecycleState(status);
 
     try {
-      const rows = this.findByStatusStatement.all(workspaceId, parsedStatus) as ClaimFormRow[];
+      const rows = this.statements.findByStatusStatement.all(workspaceId, parsedStatus) as ClaimFormRow[];
       return rows.map((row) => parseClaimFormRow(row));
     } catch (error) {
       throw new StorageError(
@@ -196,7 +186,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
 
   public async findByCanonicalKey(workspaceId: string, canonicalKey: string): Promise<readonly Readonly<ClaimForm>[]> {
     try {
-      const rows = this.findByCanonicalKeyStatement.all(workspaceId, canonicalKey) as ClaimFormRow[];
+      const rows = this.statements.findByCanonicalKeyStatement.all(workspaceId, canonicalKey) as ClaimFormRow[];
       return rows.map((row) => parseClaimFormRow(row));
     } catch (error) {
       throw new StorageError(
@@ -227,7 +217,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
     const parsedUpdatedAt = parseUpdatedAt(updatedAt);
 
     try {
-      const result = this.updateStatusStatement.run(
+      const result = this.statements.updateStatusStatement.run(
         parsedStatus,
         parsedUpdatedAt,
         objectId,
@@ -279,7 +269,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
       objectId,
       nextEvidenceRefs,
       parsedUpdatedAt,
-      this.updateEvidenceRefsStatement,
+      this.statements.updateEvidenceRefsStatement,
       "claim evidence refs"
     );
   }
@@ -298,7 +288,7 @@ export class SqliteClaimFormRepo implements ClaimFormRepo {
       objectId,
       nextSourceObjectRefs,
       parsedUpdatedAt,
-      this.updateSourceObjectRefsStatement,
+      this.statements.updateSourceObjectRefsStatement,
       "claim source object refs"
     );
   }

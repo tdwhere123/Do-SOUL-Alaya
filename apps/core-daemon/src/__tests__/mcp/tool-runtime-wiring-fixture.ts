@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import "./tool-runtime-wiring-fixture-mocks.js";
 import { getToolRuntimeWiringHoisted } from "./tool-runtime-wiring-fixture-state.js";
+export { createDeferred } from "../support/deferred.js";
 import {
   ORIGINAL_ALAYA_ALLOWED_MCP_SERVERS,
   ORIGINAL_ALAYA_CONFIG_DIR,
@@ -133,15 +134,4 @@ export function resetToolRuntimeWiringState(): void {
 
 export function getToolRuntimeWiringFixture() {
   return hoisted;
-}
-
-export function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve;
-    reject = innerReject;
-  });
-
-  return { promise, resolve, reject };
 }

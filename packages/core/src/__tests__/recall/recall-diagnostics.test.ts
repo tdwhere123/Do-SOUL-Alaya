@@ -120,6 +120,7 @@ describe("recall diagnostics", () => {
       preBudgetCount: 1,
       deliveredCount: 1,
       embeddingProviderStatus: "provider_not_requested",
+      embeddingSupplementStatus: "disabled",
       providerDegradationReason: null,
       answerRerankDiagnostics: {
         status: "not_requested",

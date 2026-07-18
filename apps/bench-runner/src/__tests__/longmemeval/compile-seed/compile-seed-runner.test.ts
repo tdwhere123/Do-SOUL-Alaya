@@ -130,13 +130,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
-  it("salvages valid signals when one envelope entry is corrupt — recovered, not a fallback", async () => {
-    // Two clean entries straddle one corrupt entry (bad `\'` escape) so the
-    // whole-envelope JSON.parse throws. Element-wise salvage recovers the
-    // two clean siblings; the corrupt entry is dropped to parseDropped, and
-    // NEITHER the cached/live failure counters NOR offline_fallbacks bump —
-    // the turn is a successful extraction, so the release blocker still sees
-    // a clean offline_fallbacks / failure count.
+  it("rejects a malformed envelope even when individual entries are salvageable", async () => {
     const corruptEnvelope =
       `{"signals":[` +
       `{"signal_kind":"potential_preference","object_kind":"user_preference",` +
@@ -164,43 +158,27 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       })
     });
 
-    const result = await runner.seedTurn({
+    await expect(runner.seedTurn({
       daemon,
       turnContent: "I moved to Berlin. I started my job.",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       ...SEED_CONTEXT
-    });
+    })).rejects.toThrow("Official garden provider returned an invalid response.");
 
-    // Two salvaged facts seeded — NOT one degraded full-turn fact.
-    expect(result.seeds.map((seed) => seed.memoryId)).toEqual([
-      "memory-1",
-      "memory-2"
-    ]);
-    expect(seeded.map((input) => input.distilledFact)).toEqual([
-      "I moved to Berlin.",
-      "I started my job."
-    ]);
-    expect(
-      seeded.every((input) => input.extractionProvider === "official_api_compile")
-    ).toBe(true);
-    // Recovered turn is a success: no failure-bucket increments.
+    expect(seeded).toHaveLength(0);
     expect(runner.stats.cachedExtractionFailures).toBe(0);
-    expect(runner.stats.liveExtractionFailures).toBe(0);
+    expect(runner.stats.liveExtractionFailures).toBe(1);
     expect(runner.stats.offlineFallbacks).toBe(0);
-    expect(runner.stats.factsProduced).toBe(2);
-    // The one dropped corrupt entry is attributed to parseDropped (raw=3,
-    // parsed=2), so nothing is silently lost.
-    expect(runner.stats.parseDropped).toBe(1);
-    expect(runner.stats.signalsDropped).toBe(1);
-    // The release blocker reads these stats; a recovered run is releasable on
-    // the seed-extraction dimension (path stays official_api_compile, zero
-    // offline fallbacks / failures).
+    expect(runner.stats.factsProduced).toBe(0);
+    expect(runner.stats.parseDropped).toBe(0);
+    expect(runner.stats.signalsDropped).toBe(0);
     const kpi = toSeedExtractionPathKpi(runner.stats);
     expect(kpi.path).toBe("official_api_compile");
     expect(kpi.offline_fallbacks).toBe(0);
     expect(kpi.cached_extraction_failures).toBe(0);
-    expect(kpi.parse_dropped).toBe(1);
+    expect(kpi.live_extraction_failures).toBe(1);
+    expect(kpi.parse_dropped).toBe(0);
   });
 
   it("fails loudly when the credentialed extraction envelope is degenerate", async () => {

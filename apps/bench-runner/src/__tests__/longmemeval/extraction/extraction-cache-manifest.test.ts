@@ -79,6 +79,29 @@ describe("extraction-cache-manifest", () => {
     expect(readExtractionCacheManifest(cacheRoot)).toEqual(manifest);
   });
 
+  it("parses and preserves a v3 supplemental source binding", () => {
+    const manifest: ExtractionCacheManifest = {
+      ...BASE_MANIFEST,
+      schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+      extraction_model: "deepseek-v4-flash-free",
+      model_family: "deepseek-v4-flash",
+      cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+      request_profile: "deepseek-v4-nonthinking-v1",
+      supplemental_source_receipt: {
+        kind: "longmemeval-extraction-supplemental-source",
+        receipt_sha256: "d".repeat(64),
+        shard_count: 34,
+        key_set_sha256: "e".repeat(64),
+        physical_provider_url: "https://supplement.example/v1",
+        physical_model: "deepseek-v4-flash"
+      }
+    };
+
+    writeExtractionCacheManifest(cacheRoot, manifest);
+
+    expect(readExtractionCacheManifest(cacheRoot)).toEqual(manifest);
+  });
+
   it("keeps a digest-only finalized v3 closure readable but gate-ineligible", () => {
     const manifest = scopedManifest({ content_closure_sha256: "c".repeat(64) });
     writeExtractionCacheManifest(cacheRoot, manifest);

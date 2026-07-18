@@ -98,7 +98,16 @@ function inspectShard(
       parsedDraftCount: result.parsedDraftCount
     });
   }
-  return Object.freeze({ cacheKey, status: result.status, ...(result.status === "invalid" ? { reason: result.reason } : {}) });
+  return Object.freeze({
+    cacheKey,
+    status: result.status,
+    ...(result.status === "invalid" ? {
+      reason: result.reason,
+      ...(result.rawJsonSha256 === undefined ? {} : {
+        rawJsonSha256: result.rawJsonSha256
+      })
+    } : {})
+  });
 }
 
 function discoverCacheShardFiles(cacheRoot: string): {

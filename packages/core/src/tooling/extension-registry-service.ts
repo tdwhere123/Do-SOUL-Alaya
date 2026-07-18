@@ -35,6 +35,12 @@ export type {
   ToolSpecRollbackSnapshot
 } from "./extension-registry-service-types.js";
 
+interface ProviderRegistrationState {
+  storedProvider: Readonly<ToolProvider> | null;
+  previousProvider: Readonly<ToolProvider> | null;
+  readonly touchedToolSpecs: ToolSpecRollbackSnapshot[];
+}
+
 export class ExtensionRegistryService {
   private providerCacheSnapshot: Readonly<ProviderCacheSnapshot> | null = null;
   private providerCacheLoadPromise: Promise<Readonly<ProviderCacheSnapshot>> | null = null;
@@ -46,9 +52,11 @@ export class ExtensionRegistryService {
 
   public async registerProvider(provider: ToolProvider): Promise<Readonly<ToolProvider>> {
     const parsedProvider = parseExtensionToolProvider(provider);
-    let storedProvider: Readonly<ToolProvider> | null = null;
-    let previousProvider: Readonly<ToolProvider> | null = null;
-    const touchedToolSpecs: ToolSpecRollbackSnapshot[] = [];
+    const state: ProviderRegistrationState = {
+      storedProvider: null,
+      previousProvider: null,
+      touchedToolSpecs: []
+    };
     return await this.publishDescriptorRegisteredWithMutation(
       {
         descriptor_type: "tool_provider",
@@ -56,65 +64,63 @@ export class ExtensionRegistryService {
         name: parsedProvider.name,
         source: parsedProvider.source
       },
+      async () => await this.applyProviderRegistration(parsedProvider, state),
       async () => {
-        previousProvider = await this.findStoredProvider(parsedProvider.provider_id);
-        storedProvider = normalizeProvider(
-          await this.deps.extensionStore.registerToolProvider(parsedProvider)
-        );
-
-        for (const tool of storedProvider.tool_specs) {
-          const existing = await this.findToolSpec(tool.tool_id);
-          this.assertToolOwnershipAvailable(
-            storedProvider,
-            previousProvider,
-            tool.tool_id,
-            existing
-          );
-          const resolvedSpec = parseToolSpec(
-            this.deps.buildToolSpecForProviderTool?.(storedProvider, tool, existing) ??
-              buildDefaultToolSpec(storedProvider, tool, existing)
-          );
-
-          if (existing === null) {
-            await this.deps.toolSpecService.register(resolvedSpec);
-          } else {
-            await this.deps.toolSpecService.update(resolvedSpec);
-          }
-
-          touchedToolSpecs.push({
-            toolId: tool.tool_id,
-            previous: existing
-          });
-        }
-
-        for (const toolId of listRemovedToolIds(previousProvider, storedProvider)) {
-          const existing = await this.findToolSpec(toolId);
-          if (existing === null) {
-            continue;
-          }
-
-          touchedToolSpecs.push({
-            toolId,
-            previous: existing
-          });
-          await this.deleteToolSpec(toolId);
-        }
-
-        await this.cacheProvider(storedProvider);
-        return storedProvider;
-      },
-      async () => {
-        if (storedProvider === null) {
-          return;
-        }
-
+        if (state.storedProvider === null) return;
         await this.rollbackProviderRegistration(
           parsedProvider.provider_id,
-          previousProvider,
-          touchedToolSpecs
+          state.previousProvider,
+          state.touchedToolSpecs
         );
       }
     );
+  }
+
+  private async applyProviderRegistration(
+    provider: Readonly<ToolProvider>,
+    state: ProviderRegistrationState
+  ): Promise<Readonly<ToolProvider>> {
+    state.previousProvider = await this.findStoredProvider(provider.provider_id);
+    const storedProvider = normalizeProvider(
+      await this.deps.extensionStore.registerToolProvider(provider)
+    );
+    state.storedProvider = storedProvider;
+    await this.syncRegisteredToolSpecs(storedProvider, state);
+    await this.removeRetiredToolSpecs(storedProvider, state);
+    await this.cacheProvider(storedProvider);
+    return storedProvider;
+  }
+
+  private async syncRegisteredToolSpecs(
+    provider: Readonly<ToolProvider>,
+    state: ProviderRegistrationState
+  ): Promise<void> {
+    for (const tool of provider.tool_specs) {
+      const existing = await this.findToolSpec(tool.tool_id);
+      this.assertToolOwnershipAvailable(provider, state.previousProvider, tool.tool_id, existing);
+      const resolvedSpec = parseToolSpec(
+        this.deps.buildToolSpecForProviderTool?.(provider, tool, existing) ??
+          buildDefaultToolSpec(provider, tool, existing)
+      );
+      if (existing === null) {
+        await this.deps.toolSpecService.register(resolvedSpec);
+      } else {
+        await this.deps.toolSpecService.update(resolvedSpec);
+      }
+      state.touchedToolSpecs.push({ toolId: tool.tool_id, previous: existing });
+    }
+  }
+
+  private async removeRetiredToolSpecs(
+    provider: Readonly<ToolProvider>,
+    state: ProviderRegistrationState
+  ): Promise<void> {
+    for (const toolId of listRemovedToolIds(state.previousProvider, provider)) {
+      const existing = await this.findToolSpec(toolId);
+      if (existing === null) continue;
+      state.touchedToolSpecs.push({ toolId, previous: existing });
+      await this.deleteToolSpec(toolId);
+    }
   }
 
   public async registerSkillPackage(pkg: SkillPackage): Promise<Readonly<SkillPackage>> {
@@ -379,50 +385,19 @@ export class ExtensionRegistryService {
       return;
     }
 
+    await this.mergeProviderIntoPendingCache(normalizedProvider);
+  }
+
+  private async mergeProviderIntoPendingCache(
+    provider: Readonly<ToolProvider>
+  ): Promise<void> {
     const existingLoadPromise = this.providerCacheLoadPromise;
     const baselinePromise = existingLoadPromise ?? this.loadProviderCache();
-    const mergedPromise = baselinePromise
-      .then((baselineSnapshot) => {
-        const mergedSnapshot = mergeProviderIntoCacheSnapshot(
-          this.providerCacheSnapshot ?? baselineSnapshot,
-          normalizedProvider
-        );
-        this.publishProviderCache(mergedSnapshot);
-        return mergedSnapshot;
-      })
-      .catch(async (error) => {
-        // Degrade to last-good (or empty) cache so a failed provider merge
-        // cannot wedge the cache load for later callers.
-        await reportAsyncSideEffectFailure(
-          {
-            source: "ExtensionRegistryService",
-            operation: "provider_cache_merge",
-            subjectType: "extension_descriptor",
-            subjectId: normalizedProvider.provider_id,
-            workspaceId: this.systemWorkspaceId,
-            runId: null,
-            causedBy: "system",
-            warningCode: "ALAYA_EXTENSION_CACHE_MERGE_DEGRADED",
-            warningMessage: "[ExtensionRegistryService] provider cache merge failed; degrading to last-good",
-            eventLogRepo: this.deps.eventLogWriter,
-            runtimeNotifier: this.deps.runtimeNotifier,
-            now: this.deps.now
-          },
-          error
-        );
-        return this.providerCacheSnapshot ?? createProviderCacheSnapshot([]);
-      });
+    const mergedPromise = this.createProviderCacheMerge(baselinePromise, provider);
     this.providerCacheLoadPromise = mergedPromise;
 
     if (existingLoadPromise !== null) {
-      void mergedPromise.then((snapshot) => {
-        if (this.providerCacheLoadPromise === mergedPromise) {
-          this.providerCacheLoadPromise = null;
-        }
-        if (this.providerCacheSnapshot === null) {
-          this.publishProviderCache(snapshot);
-        }
-      }).catch(() => undefined);
+      this.observePendingProviderCacheMerge(mergedPromise);
       return;
     }
 
@@ -433,6 +408,54 @@ export class ExtensionRegistryService {
         this.providerCacheLoadPromise = null;
       }
     }
+  }
+
+  private createProviderCacheMerge(
+    baselinePromise: Promise<Readonly<ProviderCacheSnapshot>>,
+    provider: Readonly<ToolProvider>
+  ): Promise<Readonly<ProviderCacheSnapshot>> {
+    return baselinePromise
+      .then((baselineSnapshot) => {
+        const mergedSnapshot = mergeProviderIntoCacheSnapshot(
+          this.providerCacheSnapshot ?? baselineSnapshot,
+          provider
+        );
+        this.publishProviderCache(mergedSnapshot);
+        return mergedSnapshot;
+      })
+      .catch(async (error) => await this.degradeProviderCacheMerge(provider, error));
+  }
+
+  private async degradeProviderCacheMerge(
+    provider: Readonly<ToolProvider>,
+    error: unknown
+  ): Promise<Readonly<ProviderCacheSnapshot>> {
+    await reportAsyncSideEffectFailure({
+      source: "ExtensionRegistryService",
+      operation: "provider_cache_merge",
+      subjectType: "extension_descriptor",
+      subjectId: provider.provider_id,
+      workspaceId: this.systemWorkspaceId,
+      runId: null,
+      causedBy: "system",
+      warningCode: "ALAYA_EXTENSION_CACHE_MERGE_DEGRADED",
+      warningMessage: "[ExtensionRegistryService] provider cache merge failed; degrading to last-good",
+      eventLogRepo: this.deps.eventLogWriter,
+      runtimeNotifier: this.deps.runtimeNotifier,
+      now: this.deps.now
+    }, error);
+    return this.providerCacheSnapshot ?? createProviderCacheSnapshot([]);
+  }
+
+  private observePendingProviderCacheMerge(
+    mergedPromise: Promise<Readonly<ProviderCacheSnapshot>>
+  ): void {
+    void mergedPromise.then((snapshot) => {
+      if (this.providerCacheLoadPromise === mergedPromise) {
+        this.providerCacheLoadPromise = null;
+      }
+      if (this.providerCacheSnapshot === null) this.publishProviderCache(snapshot);
+    }).catch(() => undefined);
   }
 
   private publishProviderCache(snapshot: Readonly<ProviderCacheSnapshot>): void {

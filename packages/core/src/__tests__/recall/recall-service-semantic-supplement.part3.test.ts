@@ -10,6 +10,24 @@ import {
 } from "./recall-service-test-fixtures.js";
 
 describe("RecallService semantic supplement", () => {
+  it("keeps the keyword supplement enabled for chat and analyze", () => {
+    const service = new RecallService(createDependencies([]).dependencies);
+    const expected = {
+      enabled: true,
+      max_supplement: 5,
+      embedding_enabled: false
+    };
+
+    expect(
+      service.buildDefaultPolicy("chat", createTaskSurface().runtime_id)
+        .coarse_filter.semantic_supplement
+    ).toEqual(expected);
+    expect(
+      service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id)
+        .coarse_filter.semantic_supplement
+    ).toEqual(expected);
+  });
+
   it("merges supplement candidates without duplicating existing matches", async () => {
     const memories = [
       createMemoryEntry({
@@ -159,7 +177,10 @@ describe("RecallService semantic supplement", () => {
           ...dependencies.memoryRepo,
           findRecallTierWindow: vi.fn(async () => ({
             memories: [valid],
-            next_cursor: "next-window",
+            next_cursor: {
+              created_at: valid.created_at,
+              object_id: valid.object_id
+            },
             truncated: true
           })),
           searchByKeywordWithinTier,

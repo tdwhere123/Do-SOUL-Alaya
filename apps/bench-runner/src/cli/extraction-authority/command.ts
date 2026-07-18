@@ -26,6 +26,8 @@ import {
 } from "../../longmemeval/extraction/authority/target-selection/receipt.js";
 import { readExtractionAttemptLedger } from
   "../../longmemeval/extraction/authority/attempt-ledger.js";
+import { createExtractionRepairScope } from
+  "../../longmemeval/extraction/authority/repair/repair-scope.js";
 
 interface AuthorizeExtractionArgs {
   readonly action: "probe" | "fill";
@@ -40,6 +42,7 @@ interface AuthorizeExtractionArgs {
   readonly directDeepSeek500Operator?: string;
   readonly directNewApiDeepSeek500Operator?: string;
   readonly targetSelectionPath?: string;
+  readonly repairInvalidShards: boolean;
 }
 
 interface AuthorizeExtractionDependencies {
@@ -150,7 +153,7 @@ function readTargetSelection(
     }
     return undefined;
   }
-  if (!requiresExtractionTargetSelection(observation)) {
+  if (authority.repairInvalidShards || !requiresExtractionTargetSelection(observation)) {
     if (authority.targetSelectionPath !== undefined) {
       throw new Error(
         "extraction target selection only applies to canonical longmemeval_s 0..100 or 0..500"
@@ -203,11 +206,15 @@ async function inspectAuthorityForReceipt(
     variant: flags.variant,
     ...(flags.limit === undefined ? {} : { limit: flags.limit }),
     ...(flags.offset === undefined ? {} : { offset: flags.offset }),
+    ...(flags.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: flags.questionBatchLimit
+    }),
     cacheRoot,
     ...(flags.dataDir === undefined ? {} : { dataDir: flags.dataDir }),
     ...(flags.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: flags.pinnedMetaRoot }),
     revision: (deps.readRevision ?? readCurrentExtractionAuthorityRevision)(),
-    action: authority.action
+    action: authority.action,
+    ...(authority.repairInvalidShards ? { repairInvalidShards: true } : {})
   } as const;
   const inspect = deps.inspect ?? inspectExtractionAuthority;
   const initial = await inspect(inspectInput);
@@ -242,6 +249,23 @@ function createReceipt(
   directSpend: DirectExtractionSpendAuthorization | undefined,
   targetSelection: ExtractionTargetSelectionReceipt | undefined
 ) {
+  const repairScope = authority.repairInvalidShards
+    ? createExtractionRepairScope(
+      inspection.invalidShards,
+      inspection.preservedValidClosure
+    )
+    : undefined;
+  const carriedLimits = ledger === undefined
+    ? repairScope === undefined ? undefined : {
+      startingMissing: repairScope.shard_count,
+      maximumAttempts: Math.ceil(repairScope.shard_count * 1.1),
+      successfulShardCeiling: repairScope.shard_count
+    }
+    : {
+      startingMissing: ledger.startingMissing,
+      maximumAttempts: ledger.maximumAttempts,
+      successfulShardCeiling: ledger.successfulShardCeiling
+    };
   return createExtractionAuthorityReceipt({
     action: authority.action,
     observation: inspection.observation,
@@ -254,18 +278,13 @@ function createReceipt(
     diskFloorBytes: authority.diskFloorBytes,
     ...(maxConcurrency === undefined ? {} : { maxConcurrency }),
     ...(authority.probeKey === undefined ? {} : { probeKey: authority.probeKey }),
-    ...(ledger === undefined ? {} : {
-      cumulativeLimits: {
-        startingMissing: ledger.startingMissing,
-        maximumAttempts: ledger.maximumAttempts,
-        successfulShardCeiling: ledger.successfulShardCeiling
-      }
-    }),
+    ...(carriedLimits === undefined ? {} : { cumulativeLimits: carriedLimits }),
     inspection: inspectionSummary(inspection),
     ...(targetSelection === undefined ? {} : {
       targetSelectionDigest: targetSelection.receipt_digest
     }),
-    ...(directSpend === undefined ? {} : { directSpend })
+    ...(directSpend === undefined ? {} : { directSpend }),
+    ...(repairScope === undefined ? {} : { repairScope })
   });
 }
 
@@ -295,8 +314,14 @@ function assertInspectableAuthority(
   authority: AuthorizeExtractionArgs
 ): void {
   const inventory = inspection.observation.inventory;
-  if (inventory.invalidTurns !== 0 || inventory.orphanTurns !== 0) {
+  if (inventory.orphanTurns !== 0 ||
+      (!authority.repairInvalidShards && inventory.invalidTurns !== 0)) {
     throw new Error("cannot authorize extraction with invalid or orphan cache shards");
+  }
+  if (authority.repairInvalidShards &&
+      (authority.action !== "fill" || inventory.invalidTurns === 0 ||
+       inspection.invalidShards.length !== inventory.invalidTurns)) {
+    throw new Error("repair authority requires hashable strict-JSON-invalid shards");
   }
   if (authority.action === "probe") {
     if (authority.probeKey === undefined || !inspection.missingKeys.includes(authority.probeKey)) {
@@ -306,13 +331,19 @@ function assertInspectableAuthority(
 }
 
 function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtractionArgs {
+  const parsed = readAuthorizeExtractionArgs(args);
+  assertAuthorizeExtractionArgs(parsed);
+  return parsed;
+}
+
+function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtractionArgs {
   const action = requiredEnum(args, "--extraction-action", ["probe", "fill"] as const);
   const outputTokenField = requiredEnum(
     args,
     "--extraction-output-token-field",
     ["max_tokens", "max_completion_tokens"] as const
   );
-  const parsed = {
+  return {
     action,
     outputPath: requiredString(args, "--extraction-receipt-out"),
     outputTokenCap: requiredPositiveInt(args, "--extraction-output-token-cap"),
@@ -332,8 +363,12 @@ function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExt
     directNewApiDeepSeek500Operator: optionalRequiredString(
       args, "--direct-newapi-deepseek-500-operator"
     ),
-    targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection")
+    targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection"),
+    repairInvalidShards: args.includes("--repair-invalid-shards")
   };
+}
+
+function assertAuthorizeExtractionArgs(parsed: AuthorizeExtractionArgs): void {
   if (parsed.action === "probe" && parsed.probeKey === undefined) {
     throw new Error("--extraction-probe-key is required when --extraction-action=probe");
   }
@@ -351,7 +386,10 @@ function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExt
   if (directOperator !== undefined && parsed.targetSelectionPath !== undefined) {
     throw new Error("--extraction-target-selection cannot mix with a direct DeepSeek 500 operator flag");
   }
-  return parsed;
+  if (parsed.repairInvalidShards && (parsed.action !== "fill" || directOperator !== undefined ||
+      parsed.targetSelectionPath !== undefined)) {
+    throw new Error("--repair-invalid-shards is a standalone fill authority mode");
+  }
 }
 
 function requiredString(args: ReadonlyArray<string>, flag: string): string {

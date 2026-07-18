@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`semver-surface > snapshots the v0.2 public MCP, EventLog, and runtime config surface 1`] = `
+exports[`semver-surface > snapshots the public MCP, EventLog, and runtime config surface 1`] = `
 "[mcp.reachableModules]
 protocol:shared/schema-primitives.ts
 protocol:signals/candidate-memory-signal.ts
@@ -268,9 +268,15 @@ evt:workspace-run.ts#WorkspaceDefaultEngineClassUpdatedPayloadSchema(default_eng
 evt:workspace-run.ts#WorkspaceDeletedPayloadSchema(workspace_id)#58272ba
 evt:workspace-run.ts#WorkspaceEngineBindingUpdatedPayloadSchema(base_url,binding_id,model,provider_type,workspace_id)#c45d3c5
 [runtimeConfigKeys]
+protocol:config/app-config.ts#AlayaStatusSchema(checked_at,daemon,mcp)#6a72f17
 protocol:config/app-config.ts#EnvironmentConfigSchema(config_version,env_vars,worktree_enabled)#f8a0b45
+protocol:config/app-config.ts#EnvironmentVariablesSchema()#5393c62
+protocol:config/app-config.ts#RuntimeEmbeddingConfigPatchSchema(config_version,embedding_enabled,model_id,provider_url,secret_ref)#5433de5
 protocol:config/app-config.ts#RuntimeEmbeddingConfigSchema(config_version,embedding_enabled,model_id,provider_url,secret_ref)#888f7ae
+protocol:config/app-config.ts#RuntimeGardenComputeConfigPatchSchema(config_version,enabled,model_id,provider_kind,provider_url,secret_ref)#d318ec5
 protocol:config/app-config.ts#RuntimeGardenComputeConfigSchema(config_version,enabled,model_id,provider_kind,provider_url,secret_ref)#3bbf178
+protocol:config/app-config.ts#RuntimeGardenProviderKindSchema()#ce1decc|enum=host_worker|local_heuristics|official_api
 protocol:config/app-config.ts#SoulConfigSchema(auto_checkpoint,config_version,garden_backlog_soft_limit,local_heuristics_enabled,memory_consolidation_enabled,memory_hard_cap)#77c2ccc
-protocol:config/app-config.ts#StrategyConfigSchema(auto_approve_readonly,config_version,require_bash_approval,require_network_approval,require_write_approval)#f550c91"
+protocol:config/app-config.ts#StrategyConfigSchema(auto_approve_readonly,config_version,require_bash_approval,require_network_approval,require_write_approval)#f550c91
+protocol:config/app-config.ts#ToolchainStatusSchema(active_worktrees,active_worktrees_known,db_path,files_dir,tools)#a45d64d"
 `;

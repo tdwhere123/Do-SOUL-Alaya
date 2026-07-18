@@ -64,7 +64,7 @@ function searchAnchorFtsLaneWithinTier(
   limit: number,
   tier: StorageTier
 ): readonly FtsKeywordSearchRow[] {
-  return this.db.connection.prepare(`
+  return this.activeConnection().prepare(`
     SELECT ${table}.object_id, bm25(${table}) AS raw_rank
     FROM ${table}
     JOIN memory_entries ON memory_entries.object_id = ${table}.object_id

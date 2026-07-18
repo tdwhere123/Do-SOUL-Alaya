@@ -1,19 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { expectFrozenPropertyWriteThrows } from "../../support/frozen-mutation.js";
+import { EvidenceHealthState } from "@do-soul/alaya-protocol";
 import {
-  EvidenceHealthState,
-  RunMode,
-  RunState,
-  WorkspaceKind,
-  WorkspaceState,
-  type EvidenceCapsule
-} from "@do-soul/alaya-protocol";
-import { initDatabase } from "../../../sqlite/db.js";
-import { SqliteEvidenceCapsuleRepo } from "../../../repos/capsules/evidence-capsule-repo.js";
-import { SqliteRunRepo } from "../../../repos/runtime/run-repo.js";
-import { SqliteWorkspaceRepo } from "../../../repos/runtime/workspace-repo.js";
-
-const databases = new Set<ReturnType<typeof initDatabase>>();
+  createEvidenceCapsule,
+  createEvidenceCapsuleRepo as createRepo,
+  evidenceCapsuleDatabases as databases
+} from "./evidence-capsule-repo-fixture.js";
 
 afterEach(() => {
   for (const database of databases) {
@@ -22,43 +14,6 @@ afterEach(() => {
 
   databases.clear();
 });
-
-function createEvidenceCapsule(overrides: Partial<EvidenceCapsule> = {}): EvidenceCapsule {
-  return {
-    object_id: "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-    object_kind: "evidence_capsule",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-03-20T00:00:00.000Z",
-    updated_at: "2026-03-20T00:00:00.000Z",
-    created_by: "user",
-    evidence_kind: "tool_output",
-    semantic_anchor: {
-      topic: "build output",
-      keywords: ["pnpm", "build"],
-      summary: "Build output from CI"
-    },
-    event_anchor: {
-      event_type: "engine.response.received",
-      event_id: "evt_1",
-      occurred_at: "2026-03-20T00:00:00.000Z"
-    },
-    physical_anchor: {
-      file_path: "packages/core/src/memory/evidence-service.ts",
-      line_range: { start: 1, end: 120 },
-      symbol_name: "EvidenceService",
-      artifact_ref: "artifact://evidence/1"
-    },
-    evidence_health_state: "verified",
-    gist: "Evidence gist",
-    excerpt: "Detailed evidence excerpt",
-    source_hash: "sha256:abc",
-    run_id: "run-1",
-    workspace_id: "workspace-1",
-    surface_id: null,
-    ...overrides
-  };
-}
 
 describe("SqliteEvidenceCapsuleRepo", () => {
   it("creates and loads an evidence capsule by id with anchor JSON round-trip", async () => {
@@ -87,44 +42,6 @@ describe("SqliteEvidenceCapsuleRepo", () => {
       "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
       "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab"
     ]);
-  });
-
-  it("does not prepare new bulk-read statements for each input cardinality", async () => {
-    const { database, repo } = await createRepo();
-    const capsule = createEvidenceCapsule();
-    await repo.create(capsule);
-    let prepareCount = 0;
-    const originalPrepare = database.connection.prepare.bind(database.connection);
-    database.connection.prepare = ((sql: string) => {
-      prepareCount += 1;
-      return originalPrepare(sql);
-    }) as typeof database.connection.prepare;
-
-    await repo.findByIds("workspace-1", [capsule.object_id]);
-    await repo.findByIds("workspace-1", [capsule.object_id, "missing-id"]);
-    await repo.findSourceAnchorsByIds("workspace-1", [capsule.object_id]);
-    await repo.findSourceAnchorsByIds("workspace-1", [capsule.object_id, "missing-id"]);
-
-    expect(prepareCount).toBe(0);
-  });
-
-  it("preserves deterministic ordering across findByIds chunks", async () => {
-    const { repo } = await createRepo();
-    const earlier = createEvidenceCapsule({
-      object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4",
-      created_at: "2026-03-20T00:00:00.000Z"
-    });
-    const later = createEvidenceCapsule({
-      object_id: "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab",
-      created_at: "2026-03-20T00:00:01.000Z"
-    });
-    await repo.create(earlier);
-    await repo.create(later);
-    const missingIds = Array.from({ length: 500 }, (_, index) => `missing-${index}`);
-
-    const rows = await repo.findByIds("workspace-1", [later.object_id, ...missingIds, earlier.object_id]);
-
-    expect(rows.map((row) => row.object_id)).toEqual([earlier.object_id, later.object_id]);
   });
 
   it("loads evidence capsules by ids only inside the requested workspace", async () => {
@@ -455,70 +372,3 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(hits[0]?.normalized_rank).toBe(1);
   });
 });
-
-async function createRepo(): Promise<{
-  readonly database: ReturnType<typeof initDatabase>;
-  readonly repo: SqliteEvidenceCapsuleRepo;
-}> {
-  const database = initDatabase({ filename: ":memory:" });
-  databases.add(database);
-
-  const workspaceRepo = new SqliteWorkspaceRepo(database);
-  const runRepo = new SqliteRunRepo(database);
-
-  await workspaceRepo.create({
-    workspace_id: "workspace-1",
-    name: "workspace one",
-    root_path: "/tmp/ws1",
-    workspace_kind: WorkspaceKind.LOCAL_REPO,
-    default_engine_binding: null,
-    workspace_state: WorkspaceState.ACTIVE
-  });
-  await workspaceRepo.create({
-    workspace_id: "workspace-2",
-    name: "workspace two",
-    root_path: "/tmp/ws2",
-    workspace_kind: WorkspaceKind.LOCAL_REPO,
-    default_engine_binding: null,
-    workspace_state: WorkspaceState.ACTIVE
-  });
-
-  await runRepo.create({
-    run_id: "run-1",
-    workspace_id: "workspace-1",
-    title: "run one",
-    goal: null,
-    run_mode: RunMode.CHAT,
-    engine_binding_id: null,
-    engine_class: null,
-    run_state: RunState.IDLE,
-    current_surface_id: null
-  });
-  await runRepo.create({
-    run_id: "run-2",
-    workspace_id: "workspace-1",
-    title: "run two",
-    goal: null,
-    run_mode: RunMode.CHAT,
-    engine_binding_id: null,
-    engine_class: null,
-    run_state: RunState.IDLE,
-    current_surface_id: null
-  });
-  await runRepo.create({
-    run_id: "run-3",
-    workspace_id: "workspace-2",
-    title: "run three",
-    goal: null,
-    run_mode: RunMode.CHAT,
-    engine_binding_id: null,
-    engine_class: null,
-    run_state: RunState.IDLE,
-    current_surface_id: null
-  });
-
-  return {
-    database,
-    repo: new SqliteEvidenceCapsuleRepo(database)
-  };
-}

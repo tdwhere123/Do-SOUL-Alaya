@@ -5,22 +5,6 @@ import { prepareEmbeddingSupplementQuery } from "../../recall/supplements/supple
 import { createDependencies, createMemoryEntry, createPreparedQueryHandle, createTaskSurface, overridePolicy } from "./recall-service-test-fixtures.js";
 
 describe("RecallService", () => {
-it("buildDefaultPolicy keeps the keyword supplement enabled for chat and analyze", () => {
-    const { dependencies } = createDependencies([]);
-    const service = new RecallService(dependencies);
-
-    expect(service.buildDefaultPolicy("chat", createTaskSurface().runtime_id).coarse_filter.semantic_supplement).toEqual({
-      enabled: true,
-      max_supplement: 5,
-      embedding_enabled: false
-    });
-    expect(service.buildDefaultPolicy("analyze", createTaskSurface().runtime_id).coarse_filter.semantic_supplement).toEqual({
-      enabled: true,
-      max_supplement: 5,
-      embedding_enabled: false
-    });
-  });
-
 it("does not invoke embedding supplement work under the default policy", async () => {
     const memories = [
       createMemoryEntry({

@@ -57,6 +57,10 @@ import {
 } from "./fill/fill-execution.js";
 import { newFillStats, type FillRetryTelemetry } from "./fill/fill-stats.js";
 import { createExtractionExecutionAuthority } from "./fill/execution-authority.js";
+import { assertRemainingRepairShards } from
+  "./authority/repair/repair-scope.js";
+import { assertPreservedValidClosureUnchanged } from
+  "./authority/repair/preserved-valid-closure.js";
 
 export { collectDistinctTurnContents } from "./turn-contents.js";
 
@@ -229,12 +233,17 @@ function finishPreparedExtractionFill(
   authority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined
 ): ExtractionFillResult {
   const telemetry = authority?.snapshot();
+  const repairScopeTurns = authority?.receipt.repair_scope?.shard_count;
   if (authority?.receipt.action === "probe") {
     return finishExtractionProbe(prepared, cacheRoot, stats, log, writeLease, telemetry);
   }
   return prepared.questionBatchLimit === undefined
-    ? finishExtractionFill(prepared, cacheRoot, stats, log, writeLease, telemetry)
-    : finishExtractionQuestionBatch(prepared, cacheRoot, stats, log, writeLease, telemetry);
+    ? finishExtractionFill(
+      prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns
+    )
+    : finishExtractionQuestionBatch(
+      prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns
+    );
 }
 
 async function prepareReceiptBoundExtractionFill(
@@ -302,7 +311,8 @@ function loadTargetSelection(
   receipt: ExtractionAuthorityReceipt,
 ): ExtractionTargetSelectionReceipt | undefined {
   const targetSelectionRequired = receipt.direct_spend === undefined &&
-    options.extractorFactory === undefined && requiresExtractionTargetSelection(receipt.observation);
+    receipt.repair_scope === undefined && options.extractorFactory === undefined &&
+    requiresExtractionTargetSelection(receipt.observation);
   if (receipt.target_selection_digest === undefined) {
     if (options.targetSelectionReceiptPath !== undefined) {
       throw new ExtractionCacheInvariantError(
@@ -391,16 +401,23 @@ async function inspectReceiptAuthority(
     variant: options.variant,
     ...(options.limit === undefined ? {} : { limit: options.limit }),
     ...(options.offset === undefined ? {} : { offset: options.offset }),
+    ...(receipt.repair_scope === undefined || options.questionBatchLimit === undefined ? {} : {
+      questionBatchLimit: options.questionBatchLimit
+    }),
     cacheRoot,
     ...(options.dataDir === undefined ? {} : { dataDir: options.dataDir }),
     ...(options.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: options.pinnedMetaRoot }),
-    // The direct NewAPI receipt already binds the data and request semantics.
-    // Its worktree revision is an authorization snapshot, not a cache identity,
-    // so a local implementation fix must not strand its honest partial cache.
+    // The direct NewAPI receipt binds a separately authorized rebuild root.
     revision: receipt.direct_spend?.kind === "deepseek_newapi_direct_500"
       ? receipt.observation.revision
       : readCurrentExtractionAuthorityRevision(),
     action: receipt.action,
+    ...(receipt.repair_scope === undefined ? {} : { repairInvalidShards: true }),
+    ...(receipt.repair_scope === undefined ? {} : {
+      preservedValidExclusionKeys: receipt.repair_scope.shards.map(
+        (shard) => shard.cache_key
+      )
+    }),
     ...(ledger === undefined ? {} : { excludeContentClosureKeys: ledger.successfulKeys })
   });
 }
@@ -413,6 +430,13 @@ function assertAuthorityInspection(
   targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined
 ): void {
   assertExtractionAuthorityReceipt(receipt, inspection.observation);
+  if (receipt.repair_scope !== undefined) {
+    assertRemainingRepairShards(receipt.repair_scope, inspection.invalidShards);
+    assertPreservedValidClosureUnchanged(
+      receipt.repair_scope.preserved_valid_closure,
+      inspection.preservedValidClosure
+    );
+  }
   writeLease?.assertOwned();
   if (receipt.direct_spend !== undefined) {
     assertDirectExtractionSpendRootBinding({

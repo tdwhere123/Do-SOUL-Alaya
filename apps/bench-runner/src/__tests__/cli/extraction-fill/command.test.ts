@@ -42,9 +42,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("blocks a bare extraction-fill command before it can reach live extraction", async () => {
+it("routes a bare extraction-fill command through the cache-only runtime", async () => {
   const signalSource = new FakeSignalSource();
-  const run = vi.fn(async () => ({ requestedTurns: 0 }));
+  const run = vi.fn(async () => completedFillResult());
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
   const command = runExtractionFillCommand as unknown as (
     opts: ParsedFlags,
@@ -56,11 +56,11 @@ it("blocks a bare extraction-fill command before it can reach live extraction", 
     { runExtractionFill: run, signalSource }
   );
 
-  expect(exitCode).toBe(2);
-  expect(run).not.toHaveBeenCalled();
-  expect(stderr).toHaveBeenCalledWith(
-    expect.stringContaining("--extraction-authority")
-  );
+  expect(exitCode).toBe(0);
+  expect(run).toHaveBeenCalledWith(expect.not.objectContaining({
+    authorityReceiptPath: expect.anything()
+  }));
+  expect(stderr).not.toHaveBeenCalled();
 });
 
 it("loads the R3 approval file before handing the fill to the runtime gate", async () => {

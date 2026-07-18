@@ -6,7 +6,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { SignalEventType, type PathRelation } from "@do-soul/alaya-protocol";
 import { EventPublisher, RelationAssertionService } from "@do-soul/alaya-core";
 import {
-  initDatabase,
   SqliteEvidenceCapsuleRepo,
   SqliteEventLogRepo,
   SqliteMemoryEntryRepo,
@@ -16,6 +15,8 @@ import {
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../runtime/recall-read-worker-client.js";
+import { createRecallTemporalProjectionEnsurer } from "../../runtime/recall-path-readers.js";
+import { openDaemonDatabase } from "../../runtime/startup/database.js";
 
 const builtWorkerUrl = new URL("../../../dist/runtime/recall-read-worker.js", import.meta.url);
 const sourceMemoryId = "11111111-1111-4111-8111-111111111111";
@@ -32,7 +33,7 @@ describe("selected temporal recall read worker", () => {
   it("uses only the selected temporal projection for worker path reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-test-"));
     const databasePath = join(directory, "alaya.db");
-    const database = initDatabase({ filename: databasePath });
+    const database = openDaemonDatabase(databasePath);
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const memoryRepo = new SqliteMemoryEntryRepo(database);
     const pathRelationRepo = new SqlitePathRelationRepo(database);
@@ -67,9 +68,16 @@ describe("selected temporal recall read worker", () => {
         await legacyClient.close();
       }
 
+      expect(() => createRecallReadWorkerClient({
+        databaseFilename: databasePath,
+        temporalProjectionSelected: true,
+        workerUrl: builtWorkerUrl
+      })).toThrow("selected temporal recall worker requires parent projection preparation");
+
       const selectedClient = createRecallReadWorkerClient({
         databaseFilename: databasePath,
         temporalProjectionSelected: true,
+        prepareTemporalProjection: async () => undefined,
         workerUrl: builtWorkerUrl
       });
       expect(selectedClient).not.toBeNull();
@@ -92,7 +100,7 @@ describe("selected temporal recall read worker", () => {
   it("rebuilds selected current and exact as-of projections before worker reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-rebuild-test-"));
     const databasePath = join(directory, "alaya.db");
-    const database = initDatabase({ filename: databasePath });
+    const database = openDaemonDatabase(databasePath);
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const eventLogRepo = new SqliteEventLogRepo(database);
     const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
@@ -107,6 +115,10 @@ describe("selected temporal recall read worker", () => {
       eventHistory: eventLogRepo,
       now: () => "2026-07-17T02:00:00.000Z"
     });
+    const prepareTemporalProjection = createRecallTemporalProjectionEnsurer(
+      relationAssertionService
+    );
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
     const historicalAsOf = "2026-07-17T01:30:00.000Z";
 
     try {
@@ -191,12 +203,10 @@ describe("selected temporal recall read worker", () => {
         reason: "historical worker test resolution",
         resolvedAt: "2026-07-17T01:45:00.000Z"
       });
-      // Keep the verified current generation intact; only the historical as-of projection is rebuilt by the worker.
-      database.close();
-
       const selectedClient = createRecallReadWorkerClient({
         databaseFilename: databasePath,
         temporalProjectionSelected: true,
+        prepareTemporalProjection,
         workerUrl: builtWorkerUrl
       });
       expect(selectedClient).not.toBeNull();
@@ -205,11 +215,21 @@ describe("selected temporal recall read worker", () => {
         await expect(selectedClient.pathExpansionPort.findByAnchors(workspaceId, [
           { kind: "object", object_id: sourceMemoryId }
         ])).resolves.toEqual([]);
-        await expect(selectedClient.pathExpansionPort.findByAnchors(
+        const historicalRead = selectedClient.pathExpansionPort.findByAnchors(
           workspaceId,
           [{ kind: "object", object_id: sourceMemoryId }],
           { asOf: historicalAsOf }
-        )).resolves.toMatchObject([{ path_id: "assertion-selected-worker" }]);
+        );
+        const parentWrite = memoryRepo.create(createMemoryEntry(
+          "33333333-3333-4333-8333-333333333333",
+          "Parent write while worker reads"
+        ));
+        const [historicalPaths, writtenMemory] = await Promise.all([
+          historicalRead,
+          parentWrite
+        ]);
+        expect(historicalPaths).toMatchObject([{ path_id: "assertion-selected-worker" }]);
+        expect(writtenMemory.object_id).toBe("33333333-3333-4333-8333-333333333333");
       } finally {
         await selectedClient.close();
       }

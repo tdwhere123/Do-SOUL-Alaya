@@ -102,7 +102,7 @@ const wrapperTypeNames = new Set([
 ]);
 
 describe("semver-surface", () => {
-  it("snapshots the v0.2 public MCP, EventLog, and runtime config surface", () => {
+  it("snapshots the public MCP, EventLog, and runtime config surface", () => {
     const mcpSurface = computeMcpSurface();
 
     expect(mcpSurface.reachableModules).toEqual(
@@ -117,6 +117,10 @@ describe("semver-surface", () => {
         "packages/protocol/src/soul/proposal.ts",
         "packages/protocol/src/soul/recall-candidate.ts"
       ])
+    );
+
+    expect(collectRuntimeConfigKeys().map(({ schema }) => schema)).toContain(
+      "ToolchainStatusSchema"
     );
 
     expect(computeSurfaceSource()).toMatchSnapshot();
@@ -218,7 +222,7 @@ function collectPayloadSchemaKeys(
 function collectRuntimeConfigKeys(): readonly Readonly<{ readonly schema: string } & SchemaDescriptor>[] {
   return Object.freeze(
     Object.entries(AppConfig)
-      .filter(([name, value]) => name.endsWith("ConfigSchema") && isZodSchema(value))
+      .filter(([name, value]) => name.endsWith("Schema") && isZodSchema(value))
       // isZodSchema narrows in the filter predicate but the guard does not flow
       // through tuple destructuring into the mapped element type.
       .map(([schema, value]) => Object.freeze({ schema, ...describeSchema(value as z.ZodTypeAny) }))
