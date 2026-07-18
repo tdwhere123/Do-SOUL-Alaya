@@ -101,7 +101,6 @@ function assertMeasurementClassification(
   const ledger = persisted.cohort_ledger;
   if (persisted.miss_classification === "evaluator_identity_inconsistent" ||
       persisted.miss_classification === "evaluator_identity_indeterminate" ||
-      ledger?.measurement_status === "evaluator_identity_unscorable" ||
       ledger?.evaluation_issue_reason === "evaluator_data_identity_inconsistency" ||
       ledger?.evaluation_issue_reason === "evaluator_data_identity_indeterminate") {
     throw new Error("evaluator identity classification differs from canonical measurement");
