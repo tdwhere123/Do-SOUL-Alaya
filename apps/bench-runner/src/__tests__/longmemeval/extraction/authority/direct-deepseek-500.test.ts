@@ -65,6 +65,7 @@ it("creates and binds an empty, DeepSeek-only 500Q target root", () => {
     authorization,
     observation: directObservation()
   })).not.toThrow();
+  expect(authorization.requests_per_minute).toBe(30);
   expect(() => assertDirectDeepSeek500RootBinding({ authorization, cacheRoot })).not.toThrow();
   rmSync(cacheRoot, { force: true, recursive: true });
   mkdirSync(cacheRoot);
@@ -99,7 +100,7 @@ it("rejects every non-fresh or non-DeepSeek direct scope", () => {
   })).toThrow(/wrong extraction scope/u);
 });
 
-it("accepts the compatible profile and rejects the retired DeepSeek-specific payload profile", () => {
+it("accepts the non-thinking profile and rejects the compatible payload profile", () => {
   const parent = createTemporaryRoot();
   const authorization = createFreshDirectDeepSeek500Authorization({
     cacheRoot: join(parent, "cache"),
@@ -114,11 +115,11 @@ it("accepts the compatible profile and rejects the retired DeepSeek-specific pay
   expect(() => assertDirectDeepSeek500Authorization({
     action: "fill",
     authorization,
-    observation: retiredDeepSeekSpecificObservation()
+    observation: compatibleObservation()
   })).toThrow(/wrong extraction scope/u);
 });
 
-it("limits the 64-way authority envelope to the direct DeepSeek scope", () => {
+it("keeps the direct authority within the standard concurrency envelope", () => {
   const parent = createTemporaryRoot();
   const authorization = createFreshDirectDeepSeek500Authorization({
     cacheRoot: join(parent, "cache"),
@@ -136,11 +137,25 @@ it("limits the 64-way authority envelope to the direct DeepSeek scope", () => {
     diskFloorBytes: 1_024,
     inspection: availableInspection(),
     directSpend: authorization,
-    maxConcurrency: 64
+    maxConcurrency: 32
   });
 
-  expect(receipt.limits.max_concurrency).toBe(64);
+  expect(receipt.limits.max_concurrency).toBe(32);
   expect(receipt.direct_spend).toEqual(authorization);
+  expect(() => createExtractionAuthorityReceipt({
+    action: "fill",
+    observation: directObservation(),
+    outputTokenCap: { field: "max_tokens", value: 512 },
+    priceEstimate: {
+      inputUsdPerMillion: 1,
+      outputUsdPerMillion: 2,
+      maximumInputTokensPerAttempt: 300
+    },
+    diskFloorBytes: 1_024,
+    inspection: availableInspection(),
+    directSpend: authorization,
+    maxConcurrency: 33
+  })).toThrow(/1-32/u);
   expect(() => createExtractionAuthorityReceipt({
     action: "fill",
     observation: standardObservation(),
@@ -236,9 +251,9 @@ function directObservation(): ExtractionAuthorityObservation {
     },
     extraction: {
       model: "deepseek-v4-flash",
-      modelFamily: "deepseek-v4-flash-compatible",
-      requestProfile: "provider-default-v1",
-      providerUrl: "https://ai.loli.sh.cn/v1",
+      modelFamily: "deepseek-v4-flash-nonthinking",
+      requestProfile: "deepseek-v4-nonthinking-v1",
+      providerUrl: "https://example.test/v1",
       systemPromptSha256: "f".repeat(64),
       cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
       manifestSha256: null,
@@ -254,13 +269,13 @@ function directObservation(): ExtractionAuthorityObservation {
   };
 }
 
-function retiredDeepSeekSpecificObservation(): ExtractionAuthorityObservation {
+function compatibleObservation(): ExtractionAuthorityObservation {
   return {
     ...directObservation(),
     extraction: {
       ...directObservation().extraction,
-      modelFamily: "deepseek-v4-flash-nonthinking",
-      requestProfile: "deepseek-v4-nonthinking-v1"
+      modelFamily: "deepseek-v4-flash-compatible",
+      requestProfile: "provider-default-v1"
     }
   };
 }

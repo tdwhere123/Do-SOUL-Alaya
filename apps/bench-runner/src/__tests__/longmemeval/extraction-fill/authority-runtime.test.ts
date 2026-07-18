@@ -78,7 +78,7 @@ describe("extraction authority runtime", () => {
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
     const receiptPath = await writeAuthorityReceipt({});
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      input.onTransportAttempt?.();
+      await input.onTransportAttempt?.();
       return {
         rawJson: '{"signals":[]}',
         usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 }
@@ -130,7 +130,7 @@ describe("extraction authority runtime", () => {
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
     const probePath = await writeAuthorityReceipt({ action: "probe" });
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      input.onTransportAttempt?.();
+      await input.onTransportAttempt?.();
       return { rawJson: '{"signals":[]}' };
     });
 
@@ -171,7 +171,7 @@ describe("extraction authority runtime", () => {
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);
     const receiptPath = await writeAuthorityReceipt({});
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      input.onTransportAttempt?.();
+      await input.onTransportAttempt?.();
       return { rawJson: '{"signals":[]}' };
     });
     await runExtractionFill({

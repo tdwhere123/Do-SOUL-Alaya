@@ -192,6 +192,8 @@ async function runGardenHttpAttempt(
   input: GardenHttpExtractInput,
   attempt: number
 ): Promise<{ readonly rawJson: string; readonly usage?: BenchProviderUsage }> {
+  await input.onTransportAttempt?.(input.abortSignal);
+  input.abortSignal?.throwIfAborted();
   const controller = new AbortController();
   const settlement = startGardenHttpAttemptSettlement(input, controller);
   let attemptSettled = false;
@@ -336,7 +338,6 @@ type GardenHttpFetchInput = { readonly config: CompileSeedExtractionConfig; read
 async function fetchGardenHttpResponse(
   input: GardenHttpFetchInput
 ): Promise<Response> {
-  input.input.onTransportAttempt?.();
   const fetchPromise = input.deps.fetch(
     `${input.config.providerUrl}/chat/completions`,
     buildGardenHttpRequestInit(

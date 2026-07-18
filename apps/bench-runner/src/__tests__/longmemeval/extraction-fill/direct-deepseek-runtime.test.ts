@@ -59,14 +59,14 @@ describe("direct DeepSeek runtime extraction", () => {
   it("fills the exact direct 500Q receipt without R3 and ignores its root marker", async () => {
     const fixture = await createDirectRuntimeFixture();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
-      input.onTransportAttempt?.();
+      await input.onTransportAttempt?.();
       return { rawJson: '{"signals":[]}' };
     });
 
     const result = await runExtractionFill({
       variant: DIRECT_VARIANT,
       limit: 500,
-      concurrency: 64,
+      concurrency: 32,
       cacheRoot: fixture.cacheRoot,
       authorityReceiptPath: fixture.receiptPath,
       extractorFactory: () => ({ extract }),
@@ -82,13 +82,43 @@ describe("direct DeepSeek runtime extraction", () => {
     )).toBe(true);
   });
 
+  it("preserves an operator abort while a second direct request is paced", async () => {
+    const fixture = await createDirectRuntimeFixture();
+    const controller = new AbortController();
+    const interrupted = new Error("operator stopped during direct pacing");
+    const firstTransportStarted = deferred();
+    const permittedTransports = vi.fn();
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.(input.abortSignal);
+      permittedTransports();
+      firstTransportStarted.resolve();
+      return waitForAbort(input.abortSignal);
+    });
+    const running = runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      concurrency: 2,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract }),
+      signal: controller.signal,
+      log: () => undefined
+    });
+
+    await firstTransportStarted.promise;
+    controller.abort(interrupted);
+
+    await expect(running).rejects.toBe(interrupted);
+    expect(permittedTransports).toHaveBeenCalledOnce();
+  });
+
   it("rejects a replaced direct root marker before the simulated transport continues", async () => {
     const fixture = await createDirectRuntimeFixture();
     let transportStarted = false;
     let transportFailure: unknown;
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       try {
-        input.onTransportAttempt?.();
+        await input.onTransportAttempt?.();
       } catch (cause) {
         transportFailure = cause;
         throw cause;
@@ -100,7 +130,7 @@ describe("direct DeepSeek runtime extraction", () => {
     await expect(runExtractionFill({
       variant: DIRECT_VARIANT,
       limit: 500,
-      concurrency: 64,
+      concurrency: 32,
       cacheRoot: fixture.cacheRoot,
       authorityReceiptPath: fixture.receiptPath,
       extractorFactory: () => {
@@ -163,7 +193,7 @@ async function createDirectRuntimeFixture(): Promise<DirectRuntimeFixture> {
     diskFloorBytes: 0,
     inspection: inspectionSummary(inspection),
     directSpend,
-    maxConcurrency: 64
+    maxConcurrency: 32
   });
   const receiptPath = join(root, "direct-authority.json");
   writeExtractionAuthorityReceipt(receiptPath, receipt);
@@ -174,9 +204,9 @@ function configureDirectDeepSeekEnvironment(): void {
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:DIRECT_RUNTIME_GARDEN_KEY");
   vi.stubEnv("DIRECT_RUNTIME_GARDEN_KEY", "test-key");
   vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "deepseek-v4-flash");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash-compatible");
-  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
-  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://ai.loli.sh.cn/v1");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "deepseek-v4-flash-nonthinking");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "deepseek-v4-nonthinking-v1");
+  vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://example.test/v1");
 }
 
 function configureCanonicalDataset(): void {
@@ -221,4 +251,22 @@ function inspectionSummary(inspection: Awaited<ReturnType<typeof inspectExtracti
 function errorMessage(cause: unknown): string {
   if (!(cause instanceof Error)) throw new Error("expected an Error transport failure");
   return cause.message;
+}
+
+function waitForAbort(signal: AbortSignal | undefined): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(signal.reason);
+      return;
+    }
+    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }

@@ -168,6 +168,7 @@ it("writes a direct DeepSeek 500 receipt only after explicit operator authorizat
   const createDirectSpend = vi.fn(() => ({
     kind: "deepseek_direct_500" as const,
     operator: "local-operator",
+    requests_per_minute: 30 as const,
     cache_root_sha256: "a".repeat(64),
     cache_root_device: "1",
     cache_root_inode: "2",
@@ -181,7 +182,7 @@ it("writes a direct DeepSeek 500 receipt only after explicit operator authorizat
     "--extraction-cache-root", "/tmp/direct-deepseek-cache",
     "--extraction-action", "fill",
     "--direct-deepseek-500-operator", "local-operator",
-    "--concurrency", "64",
+    "--concurrency", "32",
     "--extraction-receipt-out", "/tmp/authority.json",
     "--extraction-output-token-cap", "512",
     "--extraction-output-token-field", "max_tokens",
@@ -204,7 +205,7 @@ it("writes a direct DeepSeek 500 receipt only after explicit operator authorizat
   });
   expect(write.mock.calls[0]?.[1]).toMatchObject({
     direct_spend: { kind: "deepseek_direct_500" },
-    limits: { max_concurrency: 64 }
+    limits: { max_concurrency: 32 }
   });
 });
 
@@ -212,6 +213,7 @@ it("retires a newly created direct target when its offline inspection fails", as
   const directSpend = {
     kind: "deepseek_direct_500" as const,
     operator: "local-operator",
+    requests_per_minute: 30 as const,
     cache_root_sha256: "a".repeat(64),
     cache_root_device: "1",
     cache_root_inode: "2",
@@ -289,7 +291,7 @@ function directAuthorizeArgs(): string[] {
     "--extraction-cache-root", "/tmp/direct-deepseek-cache",
     "--extraction-action", "fill",
     "--direct-deepseek-500-operator", "local-operator",
-    "--concurrency", "64",
+    "--concurrency", "32",
     "--extraction-receipt-out", "/tmp/authority.json",
     "--extraction-output-token-cap", "512",
     "--extraction-output-token-field", "max_tokens",
@@ -356,9 +358,9 @@ function directAuthorityInspection() {
       },
       extraction: {
         model: "deepseek-v4-flash",
-        modelFamily: "deepseek-v4-flash-compatible",
-        requestProfile: "provider-default-v1" as const,
-        providerUrl: "https://ai.loli.sh.cn/v1",
+        modelFamily: "deepseek-v4-flash-nonthinking",
+        requestProfile: "deepseek-v4-nonthinking-v1" as const,
+        providerUrl: "https://example.test/v1",
         systemPromptSha256: "f".repeat(64),
         cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent)",
         manifestSha256: null,

@@ -173,6 +173,40 @@ describe("extraction cache key — load-bearing inputs only", () => {
     });
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
+
+  it("does not settle a provider outcome when authorization stopped before transport", async () => {
+    writeExtractionCacheTestManifest({ cacheRoot, model: "test-model", systemPrompt: "sys" });
+    const stopped = new Error("operator stopped before provider transport");
+    const onLiveExtractionOutcome = vi.fn();
+    const onLiveExtractionFailed = vi.fn();
+    const extractor = createCachingSignalExtractor({
+      delegate: {
+        extract: async (input) => {
+          await input.onTransportAttempt?.(input.abortSignal);
+          return { rawJson: '{"signals":[]}' };
+        }
+      },
+      config: {
+        model: "test-model", modelFamily: "test-model",
+        providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+        requestProfile: "provider-default-v1"
+      },
+      cacheRoot,
+      onTransportAttempt: async () => {
+        throw stopped;
+      },
+      onLiveExtractionOutcome,
+      onLiveExtractionFailed
+    });
+
+    await expect(extractor.extract({
+      systemPrompt: "sys",
+      userPrompt: userPromptFor("Stopped before a request.", "run-abort")
+    })).rejects.toBe(stopped);
+
+    expect(onLiveExtractionOutcome).not.toHaveBeenCalled();
+    expect(onLiveExtractionFailed).toHaveBeenCalledOnce();
+  });
 });
 
 describe("bench evidence capsule — production-faithful span", () => {

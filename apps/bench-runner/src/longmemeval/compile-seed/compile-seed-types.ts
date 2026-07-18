@@ -32,7 +32,7 @@ export interface BenchSignalExtractor {
     /** A probe uses one transport attempt and never enters the retry loop. */
     readonly retryMode?: "default" | "disabled";
     /** Called immediately before each provider HTTP attempt. */
-    readonly onTransportAttempt?: () => void;
+    readonly onTransportAttempt?: (signal?: AbortSignal) => void | Promise<void>;
     /** Provider output-token ceiling when the selected profile supports it. */
     readonly maxOutputTokens?: number;
     /** Exact provider request field pre-registered in the authority receipt. */

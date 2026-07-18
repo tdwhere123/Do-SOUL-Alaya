@@ -37,7 +37,7 @@ import type { ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledge
 
 export interface ExecutionExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
-  readonly reserveAttempt: (cacheKey: string) => void;
+  readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<void>;
   readonly abandonPendingShard: (cacheKey: string) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
   readonly recordTransportOutcome: (cacheKey: string, outcome: {

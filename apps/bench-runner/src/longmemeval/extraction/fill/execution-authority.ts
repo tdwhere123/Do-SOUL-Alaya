@@ -1,7 +1,13 @@
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { inspectExtractionAuthorityDisk } from "../authority/inspection.js";
 import { openExtractionAttemptLedger } from "../authority/attempt-ledger.js";
-import { assertDirectDeepSeek500RootBinding } from "../authority/direct-deepseek-500.js";
+import {
+  assertDirectDeepSeek500RootBinding
+} from "../authority/direct-deepseek-500.js";
+import { createRequestStartPacer } from
+  "../authority/direct-deepseek-500/request-pacer.js";
+import { openDirectDeepSeekRequestStartState } from
+  "../authority/direct-deepseek-500/request-start-state.js";
 import {
   assertExtractionTargetSelectionRootBinding,
   type ExtractionTargetSelectionReceipt
@@ -25,7 +31,7 @@ function createExhaustedExecutionAuthority(
 ): ExecutionExtractionAuthority {
   return {
     receipt,
-    reserveAttempt: () => {
+    reserveAttempt: async () => {
       throw new ExtractionCacheInvariantError(
         "extraction authority has no remaining provider attempt capacity"
       );
@@ -56,9 +62,22 @@ function createLedgerExecutionAuthority(
     maximumAttempts: receipt.limits.maximum_attempts,
     successfulShardCeiling: receipt.limits.successful_shard_ceiling
   });
+  const directPacer = receipt.direct_spend === undefined
+    ? undefined
+    : createRequestStartPacer({
+      requestsPerMinute: receipt.direct_spend.requests_per_minute,
+      state: openDirectDeepSeekRequestStartState({
+        cacheRoot,
+        authorization: receipt.direct_spend
+      })
+    });
   return {
     receipt,
-    reserveAttempt: (cacheKey) => {
+    reserveAttempt: async (cacheKey, signal) => {
+      assertTarget();
+      assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
+      await directPacer?.wait(signal);
+      signal?.throwIfAborted();
       assertTarget();
       assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
       ledger.reserveAttempt(cacheKey);

@@ -58,7 +58,7 @@ interface CachingSignalExtractorOptions {
   readonly allowLiveExtraction?: boolean;
   readonly writeLease?: ExtractionCacheWriteLease;
   /** Called before each actual provider HTTP attempt for an uncached shard. */
-  readonly onTransportAttempt?: (cacheKey: string) => void;
+  readonly onTransportAttempt?: (cacheKey: string, signal?: AbortSignal) => void | Promise<void>;
   /** Called only after an atomic raw shard write succeeds. */
   readonly onLiveExtractionSucceeded?: (cacheKey: string) => void;
   /** Releases a reserved shard slot after its live delegate fails. */
@@ -187,12 +187,17 @@ async function extractLiveWithLease(
   const manifestSha = assertWriteIdentity(options, cacheRoot, input.systemPrompt);
   const stats = options.stats;
   markLiveExtractionStarted(stats, cacheKey);
+  let providerAttemptAuthorized = options.onTransportAttempt === undefined;
   const result = await extractLiveDelegate({
     delegate: options.delegate,
-    request: withAuthorityAttemptHook(input, options, cacheKey),
+    request: withAuthorityAttemptHook(input, options, cacheKey, () => {
+      providerAttemptAuthorized = true;
+    }),
     stats,
     onFailure: () => options.onLiveExtractionFailed?.(cacheKey),
-    onOutcome: (outcome) => options.onLiveExtractionOutcome?.(cacheKey, outcome)
+    onOutcome: (outcome) => {
+      if (providerAttemptAuthorized) options.onLiveExtractionOutcome?.(cacheKey, outcome);
+    }
   });
   lease.assertOwned();
   assertWriteIdentity(options, cacheRoot, input.systemPrompt, manifestSha);
@@ -251,14 +256,16 @@ function recordLiveExtractionSuccess(
 function withAuthorityAttemptHook(
   input: Parameters<BenchSignalExtractor["extract"]>[0],
   options: CachingSignalExtractorOptions,
-  cacheKey: string
+  cacheKey: string,
+  markProviderAttemptAuthorized: () => void
 ): Parameters<BenchSignalExtractor["extract"]>[0] {
   if (options.onTransportAttempt === undefined) return input;
   return {
     ...input,
-    onTransportAttempt: () => {
-      options.onTransportAttempt?.(cacheKey);
-      input.onTransportAttempt?.();
+    onTransportAttempt: async (signal) => {
+      await options.onTransportAttempt?.(cacheKey, signal);
+      markProviderAttemptAuthorized();
+      await input.onTransportAttempt?.(signal);
     }
   };
 }

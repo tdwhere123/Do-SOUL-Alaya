@@ -69,6 +69,30 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(body).not.toHaveProperty("thinking");
   });
 
+  it("awaits asynchronous transport authorization before starting HTTP", async () => {
+    let release: (() => void) | undefined;
+    const permit = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      makeJsonResponse({ choices: [{ message: { content: '{"signals":[]}' } }] })
+    );
+    const extractor = createGardenHttpExtractor(HTTP_CONFIG, { fetch: fetchMock });
+
+    const pending = extractor.extract({
+      systemPrompt: "system",
+      userPrompt: "turn",
+      onTransportAttempt: async () => await permit
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    release?.();
+    await expect(pending).resolves.toMatchObject({ rawJson: '{"signals":[]}' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("requests and retains exact provider usage for a plain completion", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       makeJsonResponse({
@@ -166,14 +190,17 @@ describe("createGardenHttpExtractor retry policy", () => {
       sleep,
       random: () => 0.5
     });
+    const onTransportAttempt = vi.fn(async () => undefined);
     const result = await extractor.extract({
       systemPrompt: "s",
-      userPrompt: "t"
+      userPrompt: "t",
+      onTransportAttempt
     });
     expect(result.extractorMeta?.retryClassification).toBe("success_after_retry");
     expect(result.extractorMeta?.retryCount).toBe(1);
     expect(result.extractorMeta?.rateLimitRetries).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(onTransportAttempt).toHaveBeenCalledTimes(2);
   });
 
   it("caps the 5xx retry budget at MAX_RETRIES extra attempts (failure_max_retries)", async () => {

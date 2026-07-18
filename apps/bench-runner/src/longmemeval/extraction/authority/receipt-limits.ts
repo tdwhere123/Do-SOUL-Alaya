@@ -1,5 +1,4 @@
 import { computeExtractionAttemptCeiling } from "./attempt-ledger.js";
-import { DIRECT_DEEPSEEK_500_MAX_CONCURRENCY } from "./direct-deepseek-500.js";
 
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
 const DEFAULT_MAX_CONCURRENCY = 32;
@@ -37,7 +36,6 @@ export interface ExtractionAuthorityReceiptLimitInput {
     readonly maximumAttempts: number;
     readonly successfulShardCeiling: number;
   };
-  readonly directSpend?: unknown;
 }
 
 export interface ExtractionAuthorityPriceEstimate {
@@ -56,7 +54,7 @@ export function resolveExtractionAuthorityReceiptLimits(
       carried.successfulShardCeiling !== expected.successfulShardCeiling)) {
     throw new Error("extraction authority cumulative limits are not derivable from its starting inventory");
   }
-  assertConcurrency(input.maxConcurrency, input.directSpend !== undefined);
+  assertConcurrency(input.maxConcurrency);
   assertOutputTokenCap(input.outputTokenCap.value);
   assertDiskFloor(input.diskFloorBytes);
   return Object.freeze({
@@ -107,13 +105,10 @@ export function expectedExtractionAuthorityLimits(
   };
 }
 
-function assertConcurrency(raw: number | undefined, hasDirectSpend: boolean): void {
+function assertConcurrency(raw: number | undefined): void {
   const value = raw ?? DEFAULT_MAX_CONCURRENCY;
-  const maximum = hasDirectSpend
-    ? DIRECT_DEEPSEEK_500_MAX_CONCURRENCY
-    : DEFAULT_MAX_CONCURRENCY;
-  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
-    throw new Error(`extraction authority max concurrency must be 1-${maximum}`);
+  if (!Number.isSafeInteger(value) || value < 1 || value > DEFAULT_MAX_CONCURRENCY) {
+    throw new Error(`extraction authority max concurrency must be 1-${DEFAULT_MAX_CONCURRENCY}`);
   }
 }
 

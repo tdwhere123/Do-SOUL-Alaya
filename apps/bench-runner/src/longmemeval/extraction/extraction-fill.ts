@@ -34,10 +34,7 @@ import { receiptExtractionCacheIdentity } from "./authority/receipt-cache-identi
 import { readExtractionAttemptLedger } from "./authority/attempt-ledger.js";
 import { createExtractionNoProgressWatchdog } from
   "./authority/no-progress-watchdog.js";
-import {
-  assertDirectDeepSeek500RootBinding,
-  DIRECT_DEEPSEEK_500_MAX_CONCURRENCY
-} from "./authority/direct-deepseek-500.js";
+import { assertDirectDeepSeek500RootBinding } from "./authority/direct-deepseek-500.js";
 import {
   assertExtractionTargetSelectionReceipt,
   assertExtractionTargetSelectionWindow,
@@ -100,10 +97,7 @@ export async function runExtractionFill(
   const authority = options.authorityReceiptPath === undefined
     ? undefined
     : await loadExtractionAuthority(options, cacheRoot);
-  const concurrency = resolveExtractionFillConcurrency(
-    options.concurrency,
-    authority?.receipt.direct_spend !== undefined
-  );
+  const concurrency = resolveExtractionFillConcurrency(options.concurrency);
   if (authority !== undefined && concurrency > authority.receipt.limits.max_concurrency) {
     throw new Error(
       `extraction-fill concurrency ${concurrency} exceeds authority maximum ` +
@@ -263,17 +257,11 @@ async function prepareReceiptBoundExtractionFill(
   return prepared;
 }
 
-function resolveExtractionFillConcurrency(
-  raw: number | undefined,
-  allowDirectDeepSeekMaximum: boolean
-): number {
+function resolveExtractionFillConcurrency(raw: number | undefined): number {
   const value = raw ?? EXTRACTION_FILL_DEFAULT_CONCURRENCY;
-  const maximum = allowDirectDeepSeekMaximum
-    ? DIRECT_DEEPSEEK_500_MAX_CONCURRENCY
-    : EXTRACTION_FILL_MAX_CONCURRENCY;
-  if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > EXTRACTION_FILL_MAX_CONCURRENCY) {
     throw new Error(
-      `extraction-fill concurrency must be an integer from 1 to ${maximum}`
+      `extraction-fill concurrency must be an integer from 1 to ${EXTRACTION_FILL_MAX_CONCURRENCY}`
     );
   }
   return value;
