@@ -61,6 +61,8 @@ import { assertRemainingRepairShards } from
   "./authority/repair/repair-scope.js";
 import { assertPreservedValidClosureUnchanged } from
   "./authority/repair/preserved-valid-closure.js";
+import { isBoundedExistingCacheRepair } from
+  "./authority/repair/bounded-existing-cache-repair.js";
 
 export { collectDistinctTurnContents } from "./turn-contents.js";
 
@@ -123,7 +125,8 @@ export async function runExtractionFill(
       "direct DeepSeek 500 extraction cannot mix R3 expansion evidence"
     );
   }
-  const expansion = directSpend === undefined
+  const boundedRepair = isBoundedExistingCacheRepair(options, authority?.receipt);
+  const expansion = directSpend === undefined && !boundedRepair
     ? await prepareExpansionFillAuthority(options, cacheRoot)
     : undefined;
   if (expansion !== undefined && authority === undefined) {

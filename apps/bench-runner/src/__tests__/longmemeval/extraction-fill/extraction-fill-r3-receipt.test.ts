@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   readLedger: vi.fn(),
   readTargetSelection: vi.fn(),
   assertTargetSelection: vi.fn(),
-  assertTargetSelectionWindow: vi.fn()
+  assertTargetSelectionWindow: vi.fn(),
+  acquireWriteLease: vi.fn()
 }));
 
 vi.mock("../../../longmemeval/extraction/expansion-fill-authority.js", async (importOriginal) => ({
@@ -41,11 +42,24 @@ vi.mock("../../../longmemeval/extraction/authority/target-selection/receipt.js",
   assertExtractionTargetSelectionReceipt: mocks.assertTargetSelection,
   assertExtractionTargetSelectionWindow: mocks.assertTargetSelectionWindow
 }));
+vi.mock("../../../longmemeval/extraction/authority/repair/repair-scope.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../longmemeval/extraction/authority/repair/repair-scope.js")>(),
+  assertRemainingRepairShards: vi.fn()
+}));
+vi.mock("../../../longmemeval/extraction/authority/repair/preserved-valid-closure.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../longmemeval/extraction/authority/repair/preserved-valid-closure.js")>(),
+  assertPreservedValidClosureUnchanged: vi.fn()
+}));
+vi.mock("../../../longmemeval/extraction/fill/manifest/fill-root-guard.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../longmemeval/extraction/fill/manifest/fill-root-guard.js")>(),
+  acquireExtractionCacheWriteLease: mocks.acquireWriteLease
+}));
 
 import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
 
 describe("500Q R3 receipt binding", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.prepareExpansion.mockResolvedValue(expansionFixture());
     mocks.readReceipt.mockReturnValue(receiptFixture());
     mocks.inspectAuthority.mockResolvedValue({
@@ -59,6 +73,9 @@ describe("500Q R3 receipt binding", () => {
     mocks.readTargetSelection.mockReturnValue({ receipt_digest: "b".repeat(64) });
     mocks.assertTargetSelection.mockReturnValue(undefined);
     mocks.assertTargetSelectionWindow.mockReturnValue(undefined);
+    mocks.acquireWriteLease.mockImplementation(() => {
+      throw new Error("write lease reached");
+    });
   });
 
   it("refuses canonical 500Q before the cache write lease without a receipt-bound authority", async () => {
@@ -94,6 +111,47 @@ describe("500Q R3 receipt binding", () => {
       authorityReceiptPath: "/fixture/extraction-authority.json",
       targetSelectionReceiptPath: "/fixture/target-selection.json"
     })).rejects.toThrow(/approved R3 spend envelope/u);
+  });
+
+  it("admits a receipt-bound repair limited to the existing first 100Q cache", async () => {
+    mocks.readReceipt.mockReturnValue(repairReceiptFixture());
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      limit: 500,
+      questionBatchLimit: 100,
+      cacheRoot: "/must-not-lock",
+      authorityReceiptPath: "/fixture/extraction-authority.json"
+    })).rejects.toThrow(/write lease reached/u);
+    expect(mocks.prepareExpansion).not.toHaveBeenCalled();
+  });
+
+  it("keeps the expansion gate for an unbounded 500Q repair request", async () => {
+    mocks.readReceipt.mockReturnValue(repairReceiptFixture());
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      limit: 500,
+      cacheRoot: "/must-not-lock",
+      authorityReceiptPath: "/fixture/extraction-authority.json"
+    })).rejects.toThrow(/approved R3 spend envelope/u);
+    expect(mocks.prepareExpansion).toHaveBeenCalledOnce();
+    expect(mocks.acquireWriteLease).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a question-bounded normal fill as an existing-cache repair", async () => {
+    mocks.prepareExpansion.mockRejectedValueOnce(new Error("promotion gate reached"));
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      limit: 500,
+      questionBatchLimit: 100,
+      cacheRoot: "/must-not-lock",
+      authorityReceiptPath: "/fixture/extraction-authority.json",
+      targetSelectionReceiptPath: "/fixture/target-selection.json"
+    })).rejects.toThrow(/promotion gate reached/u);
+    expect(mocks.prepareExpansion).toHaveBeenCalledOnce();
+    expect(mocks.acquireWriteLease).not.toHaveBeenCalled();
   });
 });
 
@@ -134,5 +192,32 @@ function receiptFixture() {
     },
     price: { estimated_upper_usd: 5 },
     target_selection_digest: "b".repeat(64)
+  };
+}
+
+function repairReceiptFixture() {
+  const receipt = receiptFixture();
+  return {
+    ...receipt,
+    target_selection_digest: undefined,
+    observation: {
+      ...receipt.observation,
+      dataset: {
+        ...receipt.observation.dataset,
+        authorizedQuestionCount: 100
+      },
+      inventory: {
+        expectedTurns: 23_807,
+        validTurns: 14_272,
+        missingTurns: 0,
+        invalidTurns: 9_535,
+        orphanTurns: 0
+      }
+    },
+    repair_scope: {
+      shard_count: 9_535,
+      shards: [],
+      preserved_valid_closure: { shard_count: 14_272 }
+    }
   };
 }
