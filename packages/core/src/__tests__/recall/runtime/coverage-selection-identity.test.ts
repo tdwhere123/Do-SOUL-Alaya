@@ -2,10 +2,9 @@ import { describe, expect, it } from "vitest";
 import { resolveCoverageIdentity } from "../../../recall/delivery/coverage-selection.js";
 
 describe("coverage logical identity", () => {
-  it("does not project memory gist or cohort onto same-id synthesis and global candidates", () => {
+  it("does not project memory gist onto same-id synthesis and global candidates", () => {
     const supplementary = {
-      evidenceGistsByMemoryId: { shared: "memory gist" },
-      sourceCohortKeys: { shared: "memory cohort" }
+      evidenceGistsByMemoryId: { shared: "memory gist" }
     };
     const local = candidate("workspace_local:memory_entry:shared");
     const synthesis = candidate(
@@ -17,18 +16,15 @@ describe("coverage logical identity", () => {
 
     expect(resolveCoverageIdentity(local, supplementary)).toEqual({
       objectKey: "memory_entry:shared",
-      gistKey: "gist:memory gist",
-      cohortKey: "memory cohort"
+      gistKey: "gist:memory gist"
     });
     expect(resolveCoverageIdentity(synthesis, supplementary)).toEqual({
       objectKey: "synthesis_capsule:shared",
-      gistKey: "object:workspace_local:synthesis_capsule:shared",
-      cohortKey: null
+      gistKey: "object:workspace_local:synthesis_capsule:shared"
     });
     expect(resolveCoverageIdentity(global, supplementary)).toEqual({
       objectKey: "memory_entry:shared",
-      gistKey: "object:global:memory_entry:shared",
-      cohortKey: null
+      gistKey: "object:global:memory_entry:shared"
     });
   });
 });

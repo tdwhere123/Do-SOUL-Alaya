@@ -3,7 +3,7 @@ import { LongMemEvalMatrixPromotionContractSchema } from
 
 export function expansionPromotionContractFixture() {
   return LongMemEvalMatrixPromotionContractSchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     kind: "longmemeval_matrix_promotion_contract",
     policy_version: "longmemeval-product-default-v1",
     code: {
@@ -38,8 +38,20 @@ export function expansionPromotionContractFixture() {
       treatment: { embedding_supplement: true, answer_rerank: false },
       evidence_root: "cell-b2"
     },
+    absolute_quality_policy: expansionAbsoluteQualityPolicyFixture(),
     material_effect_policy: expansionMaterialEffectPolicyFixture()
   });
+}
+
+export function expansionAbsoluteQualityPolicyFixture() {
+  return {
+    product_cell: "B" as const,
+    replication_cell: "B2" as const,
+    metric: "r_at_5" as const,
+    cohort: "answerable" as const,
+    expected_denominator: 94 as const,
+    minimum_hits: 85 as const
+  };
 }
 
 export function expansionMaterialEffectPolicyFixture() {

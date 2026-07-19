@@ -27,6 +27,7 @@ import {
 const NOW = "2026-07-12T00:00:00.000Z";
 const FUSION_WINNER_ID = "11111111-1111-4111-8111-111111111111";
 const ACTIVATION_WINNER_ID = "22222222-2222-4222-8222-222222222222";
+const COVERAGE_NOVEL_ID = "44444444-4444-4444-8444-444444444444";
 
 afterEach(() => {
   resetCoreConfigForTests();
@@ -79,6 +80,59 @@ describe("final recall relevance ownership", () => {
     expect(answerWinner?.score_factors.content_relevance).toBe(
       baselineFactors.get(ACTIVATION_WINNER_ID)?.content_relevance
     );
+  });
+
+  it("restores public relevance order after lightweight-head coverage admission", () => {
+    const primary = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
+    const redundant = createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]);
+    const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
+    const basePolicy = buildPolicy();
+    const assessed = fineAssess({
+      candidates: [primary, redundant, novel].map(createCoarseCandidate),
+      policy: {
+        ...basePolicy,
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_entries: 2, max_total_tokens: 100, per_dimension_limits: null }
+        }
+      },
+      winnerMemoryIds: new Set(),
+      supplementaryData: {
+        ...createSupplementaryData(),
+        embeddingSimilarityScores: {
+          [FUSION_WINNER_ID]: 0.2,
+          [ACTIVATION_WINNER_ID]: 0.15,
+          [COVERAGE_NOVEL_ID]: 1
+        },
+        evidenceGistsByMemoryId: {
+          [FUSION_WINNER_ID]: "shared gist",
+          [ACTIVATION_WINNER_ID]: "shared gist",
+          [COVERAGE_NOVEL_ID]: "novel gist"
+        }
+      },
+      tokenEstimator: { estimate: () => 4 },
+      now: () => NOW,
+      warn: vi.fn()
+    });
+
+    expect(assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID]);
+    expect(assessed.candidates.map((candidate) => candidate.relevance_score))
+      .toEqual([...assessed.candidates].map((candidate) => candidate.relevance_score)
+        .sort((left, right) => right - left));
+    expect(assessed.candidates.map((candidate) => candidate.budget_state.remaining_entries))
+      .toEqual([1, 0]);
+    const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
+    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({
+      rank_after_coverage_selector: 1,
+      final_rank: 2,
+      post_rank: 2
+    });
+    expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({
+      rank_after_coverage_selector: 2,
+      final_rank: 1,
+      post_rank: 1
+    });
   });
 
   it("uses only the injected clock when a retired benchmark env is present", () => {

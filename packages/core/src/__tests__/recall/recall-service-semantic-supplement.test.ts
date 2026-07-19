@@ -161,7 +161,7 @@ it("keeps the lexical baseline when a non-decisive semantic supplement joins the
 
 // Decisive embedding match out-ranks strong lexical with near-zero embedding similarity
 // via the lightweight deep head (family vote is weight-1; emb is not a fitted ×12 ballot).
-it("rebuilds budget state after a decisive embedding boost re-ranks above a strong lexical candidate", async () => {
+  it("rebuilds budget state after the embedding head chooses the delivered set", async () => {
     const memories = [
       createMemoryEntry({
         object_id: "memory-first-lexical",
@@ -233,8 +233,8 @@ it("rebuilds budget state after a decisive embedding boost re-ranks above a stro
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "memory-second-semantic",
-      "memory-first-lexical"
+      "memory-first-lexical",
+      "memory-second-semantic"
     ]);
     expect(result.candidates[0]?.budget_state).toMatchObject({
       token_estimate: result.candidates[0]?.token_estimate,

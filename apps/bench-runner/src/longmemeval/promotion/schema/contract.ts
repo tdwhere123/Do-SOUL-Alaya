@@ -6,6 +6,7 @@ import {
 } from "@do-soul/alaya-eval/internal";
 import { z } from "zod";
 import { LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY } from "./material-effect.js";
+import { LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY } from "./absolute-quality.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -21,6 +22,19 @@ const ProductDefaultReplicationSchema = z.object({
   cell: z.literal("B2"),
   treatment: LongMemEvalMatrixTreatmentSchema,
   evidence_root: z.string().min(1)
+}).strict().readonly();
+
+const AbsoluteQualityPolicySchema = z.object({
+  product_cell: z.literal("B"),
+  replication_cell: z.literal("B2"),
+  metric: z.literal("r_at_5"),
+  cohort: z.literal("answerable"),
+  expected_denominator: z.literal(
+    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.answerableCount
+  ),
+  minimum_hits: z.literal(
+    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.minimumR5Hits
+  )
 }).strict().readonly();
 
 const MaterialEffectPolicySchema = z.object({
@@ -52,7 +66,7 @@ export const LongMemEvalMatrixPromotionCodeSchema =
   LongMemEvalPromotionCodeWireSchema;
 
 const LongMemEvalMatrixPromotionContractBaseSchema = z.object({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   kind: z.literal("longmemeval_matrix_promotion_contract"),
   policy_version: z.literal("longmemeval-product-default-v1"),
   code: LongMemEvalMatrixPromotionCodeSchema,
@@ -79,6 +93,7 @@ const LongMemEvalMatrixPromotionContractBaseSchema = z.object({
     entries: z.array(MatrixEntrySchema).length(4).readonly()
   }).strict(),
   product_default_replication: ProductDefaultReplicationSchema,
+  absolute_quality_policy: AbsoluteQualityPolicySchema,
   material_effect_policy: MaterialEffectPolicySchema
 }).strict();
 

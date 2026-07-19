@@ -9,7 +9,7 @@ describe("LongMemEval promotion capability boundary", () => {
     const sourceSelection = selection(100);
     const nextSelection = selection(500);
     const contract = LongMemEvalMatrixPromotionContractSchema.parse({
-      schema_version: 1,
+      schema_version: 2,
       kind: "longmemeval_matrix_promotion_contract",
       policy_version: "longmemeval-product-default-v1",
       code: {
@@ -44,6 +44,7 @@ describe("LongMemEval promotion capability boundary", () => {
         treatment: { embedding_supplement: true, answer_rerank: false },
         evidence_root: "cell-b2"
       },
+      absolute_quality_policy: absoluteQualityPolicy(),
       material_effect_policy: materialEffectPolicy()
     });
     const raw = {} as VerifiedRecallEvalPromotionEntry;
@@ -90,6 +91,17 @@ function materialEffectPolicy() {
       method: "exact_two_sided" as const,
       p_value_max_exclusive: 0.05 as const
     }
+  };
+}
+
+function absoluteQualityPolicy() {
+  return {
+    product_cell: "B" as const,
+    replication_cell: "B2" as const,
+    metric: "r_at_5" as const,
+    cohort: "answerable" as const,
+    expected_denominator: 94 as const,
+    minimum_hits: 85 as const
   };
 }
 

@@ -17,6 +17,7 @@ import {
   type LongMemEvalSourceSnapshotAuthority
 } from "../../../longmemeval/promotion/expansion/expansion-capability.js";
 import {
+  expansionAbsoluteQualityPolicyFixture,
   expansionMaterialEffectFixture,
   expansionMaterialEffectPolicyFixture
 } from "../expansion/expansion-promotion-contract-fixture.js";
@@ -144,7 +145,7 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
     entry(true, true, "cell-d")
   ];
   const contract = LongMemEvalMatrixPromotionContractSchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     kind: "longmemeval_matrix_promotion_contract",
     policy_version: "longmemeval-product-default-v1",
     code: {
@@ -174,6 +175,7 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
       treatment: { embedding_supplement: true, answer_rerank: false },
       evidence_root: "cell-b2"
     },
+    absolute_quality_policy: expansionAbsoluteQualityPolicyFixture(),
     material_effect_policy: expansionMaterialEffectPolicyFixture()
   });
   const contractContents = Buffer.from(JSON.stringify(contract), "utf8");

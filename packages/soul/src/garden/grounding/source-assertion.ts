@@ -34,6 +34,8 @@ export function resolveSourceAssertion(
   if (source.length === 0 || matched.length === 0) {
     return { status: "rejected", reason: "matched_text_absent" };
   }
+  const boundedPrefix = resolveBoundedVerbatimPrefix(source, matched);
+  if (boundedPrefix !== null) return boundedPrefix;
   const spans = sentenceSpans(source);
   const resolutions: SourceAssertionResolution[] = [];
   let offset = source.indexOf(matched);
@@ -47,6 +49,47 @@ export function resolveSourceAssertion(
   if (resolutions.length === 0) return { status: "rejected", reason: "matched_text_absent" };
   if (resolutions.length > 1) return { status: "rejected", reason: "matched_text_ambiguous" };
   return resolutions[0]!;
+}
+
+function resolveBoundedVerbatimPrefix(
+  source: string,
+  matched: string
+): SourceAssertionResolution | null {
+  const offset = source.indexOf(matched);
+  if (offset < 0) return null;
+  if (source.indexOf(matched, offset + 1) >= 0) {
+    return { status: "rejected", reason: "matched_text_ambiguous" };
+  }
+  const assertion = stripSourceRoleLabel(matched);
+  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+    return { status: "rejected", reason: "source_assertion_too_long" };
+  }
+  const suffix = source.slice(offset + matched.length);
+  const isBoundedFastPath = hasSafeVerbatimSuffix(assertion, suffix) &&
+    hasFirstPersonAssertionAnchor(assertion);
+  if (!isBoundedFastPath) return null;
+  if (!hasMatchedTextStartBoundary(source, offset)) {
+    return { status: "rejected", reason: "matched_text_absent" };
+  }
+  if (!hasUnresolvedReference(assertion) && hasCompleteClause(assertion, false)) {
+    return { status: "grounded", assertion };
+  }
+  return null;
+}
+
+function hasMatchedTextStartBoundary(source: string, offset: number): boolean {
+  return !isWordCharacter(source[offset - 1]);
+}
+
+function hasSafeVerbatimSuffix(assertion: string, suffix: string): boolean {
+  if (/^\s*,\s*(?:which|who)\b/iu.test(suffix)) return true;
+  return /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(assertion) &&
+    /^\s*,\s*but\s+it\s+(?:was|is|will\s+be)\s+worth\b/iu.test(suffix);
+}
+
+function hasFirstPersonAssertionAnchor(assertion: string): boolean {
+  return /^(?:i\b|i['’](?:m|d|ll|ve)\b)/iu.test(assertion) ||
+    /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(assertion);
 }
 
 export function filterSourceAssertionEntities(
@@ -313,6 +356,8 @@ function coordinateSpan(
 
 function hasCompleteClause(assertion: string, coordinated: boolean): boolean {
   const value = assertion.trim().replace(/[.!?。！？]+$/u, "").trim();
+  const dummySubject = /^it\s+(?:took|takes|will\s+take)\s+me\b\s*(.*)$/iu.exec(value);
+  if (dummySubject !== null) return hasContent(dummySubject[1]);
   const englishSubject = /^(?:i|we|you)\b\s*(.*)$/iu.exec(value);
   if (englishSubject !== null) return hasContent(englishSubject[1]);
   const chineseSubject = /^(?:我(?:们)?|你(?:们)?|您|他(?:们)?|她(?:们)?|它(?:们)?|用户|团队|项目|系统)(.*)$/u.exec(value);
@@ -327,10 +372,14 @@ function hasContent(value: string | undefined): boolean {
 }
 
 function hasUnresolvedReference(assertion: string): boolean {
-  return /\b(?:he|she|it|they|him|her|them|his|hers|their|there|here|this|that|these|those|aforementioned|such)\b/iu.test(assertion) ||
-    /\bthe\s+(?:former|latter|same|above|below)\b/iu.test(assertion) ||
-    /^(?:他|她|它|他们|她们|它们)/u.test(assertion) ||
-    /(?:这里|那里|这个|那个|这些|那些|前者|后者|上述|下述|同上|同下|该(?:项|对象|方案|内容|规则|设置|问题)|此(?:项|对象|方案|内容|规则|设置|问题))/u.test(assertion);
+  const referenceProbe = assertion.replace(
+    /^it\s+(?=(?:took|takes|will\s+take)\s+me\b)/iu,
+    ""
+  );
+  return /\b(?:he|she|it|they|him|her|them|his|hers|their|there|here|this|that|these|those|aforementioned|such)\b/iu.test(referenceProbe) ||
+    /\bthe\s+(?:former|latter|same|above|below)\b/iu.test(referenceProbe) ||
+    /^(?:他|她|它|他们|她们|它们)/u.test(referenceProbe) ||
+    /(?:这里|那里|这个|那个|这些|那些|前者|后者|上述|下述|同上|同下|该(?:项|对象|方案|内容|规则|设置|问题)|此(?:项|对象|方案|内容|规则|设置|问题))/u.test(referenceProbe);
 }
 
 function trimmedSpan(source: string, rawStart: number, rawEnd: number): { start: number; end: number } {

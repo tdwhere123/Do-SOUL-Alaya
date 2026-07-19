@@ -12,7 +12,6 @@ import type { RecallSupplementaryData } from "../runtime/recall-service-types.js
 export type CoverageIdentity = Readonly<{
   readonly objectKey: string;
   readonly gistKey: string;
-  readonly cohortKey: string | null;
 }>;
 
 export type CoverageSelectableCandidate = Readonly<{
@@ -27,7 +26,7 @@ export type CoverageSelectableCandidate = Readonly<{
 
 type CoverageSupplementary = Readonly<Pick<
   RecallSupplementaryData,
-  "evidenceGistsByMemoryId" | "sourceCohortKeys"
+  "evidenceGistsByMemoryId"
 >>;
 
 export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidate>(
@@ -45,7 +44,6 @@ export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidat
   const selected: T[] = [];
   const objectCounts = new Map<string, number>();
   const gistCounts = new Map<string, number>();
-  const cohortCounts = new Map<string, number>();
 
   while (remaining.length > 0) {
     const bestIndex = selectBestCoverageIndex({
@@ -53,8 +51,7 @@ export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidat
       relevanceByCandidateKey: params.relevanceByCandidateKey,
       supplementaryData: params.supplementaryData,
       objectCounts,
-      gistCounts,
-      cohortCounts
+      gistCounts
     });
     const picked = remaining.splice(bestIndex, 1)[0]!;
     selected.push(picked);
@@ -62,8 +59,7 @@ export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidat
       incrementCoverageCounts(
         resolveCoverageIdentity(picked, params.supplementaryData),
         objectCounts,
-        gistCounts,
-        cohortCounts
+        gistCounts
       );
     }
   }
@@ -88,10 +84,7 @@ export function resolveCoverageIdentity(
       : `object:${candidate.fusion.candidate_key}`;
   return Object.freeze({
     objectKey: buildRecallLogicalObjectKey(candidate),
-    gistKey,
-    cohortKey: canUseMemorySignals
-      ? supplementaryData.sourceCohortKeys[objectId] ?? null
-      : null
+    gistKey
   });
 }
 
@@ -101,15 +94,11 @@ function marginalCoverageGain(params: Readonly<{
   readonly supplementaryData: CoverageSupplementary;
   readonly objectCounts: ReadonlyMap<string, number>;
   readonly gistCounts: ReadonlyMap<string, number>;
-  readonly cohortCounts: ReadonlyMap<string, number>;
 }>): number {
   const identity = resolveCoverageIdentity(params.candidate, params.supplementaryData);
   const sameObjectCount = params.objectCounts.get(identity.objectKey) ?? 0;
   const sameGistCount = params.gistCounts.get(identity.gistKey) ?? 0;
-  const sameCohortCount = identity.cohortKey === null
-    ? 0
-    : params.cohortCounts.get(identity.cohortKey) ?? 0;
-  return params.relevance / (1 + sameObjectCount + sameGistCount + sameCohortCount);
+  return params.relevance / (1 + sameObjectCount + sameGistCount);
 }
 
 function selectBestCoverageIndex<T extends CoverageSelectableCandidate>(params: Readonly<{
@@ -118,7 +107,6 @@ function selectBestCoverageIndex<T extends CoverageSelectableCandidate>(params: 
   readonly supplementaryData: CoverageSupplementary;
   readonly objectCounts: ReadonlyMap<string, number>;
   readonly gistCounts: ReadonlyMap<string, number>;
-  readonly cohortCounts: ReadonlyMap<string, number>;
 }>): number {
   let bestIndex = 0;
   let bestGain = Number.NEGATIVE_INFINITY;
@@ -129,8 +117,7 @@ function selectBestCoverageIndex<T extends CoverageSelectableCandidate>(params: 
       relevance: resolveRelevance(candidate, params.relevanceByCandidateKey),
       supplementaryData: params.supplementaryData,
       objectCounts: params.objectCounts,
-      gistCounts: params.gistCounts,
-      cohortCounts: params.cohortCounts
+      gistCounts: params.gistCounts
     });
     if (gain > bestGain) {
       bestGain = gain;
@@ -143,14 +130,10 @@ function selectBestCoverageIndex<T extends CoverageSelectableCandidate>(params: 
 function incrementCoverageCounts(
   identity: CoverageIdentity,
   objectCounts: Map<string, number>,
-  gistCounts: Map<string, number>,
-  cohortCounts: Map<string, number>
+  gistCounts: Map<string, number>
 ): void {
   objectCounts.set(identity.objectKey, (objectCounts.get(identity.objectKey) ?? 0) + 1);
   gistCounts.set(identity.gistKey, (gistCounts.get(identity.gistKey) ?? 0) + 1);
-  if (identity.cohortKey !== null) {
-    cohortCounts.set(identity.cohortKey, (cohortCounts.get(identity.cohortKey) ?? 0) + 1);
-  }
 }
 
 function resolveRelevance(

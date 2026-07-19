@@ -22,6 +22,7 @@ import {
 import { assertPromotionProductDefaultPolicy } from
   "../verifiers/product-policy-verifier.js";
 import { verifyLongMemEvalMaterialEffect } from "./material-effect.js";
+import { assertLongMemEvalAbsoluteQuality } from "./absolute-quality.js";
 
 export interface VerifiedPromotionMatrixCell {
   readonly evidenceRoot: string;
@@ -65,6 +66,7 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
   const { productCell, productTreatment } = product;
   assertPromotionProductDefaultPolicy(productCell.data);
   assertPromotionProductDefaultPolicy(replication.data);
+  assertAbsoluteProductQuality(input.contract, productCell, replication);
   const hardGates = collectReleaseHardGates(productCell.data.payload);
   const replicationHardGates = collectReleaseHardGates(replication.data.payload);
   assertMandatoryProductGates(hardGates, "B product-default cell");
@@ -82,6 +84,23 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
     replicationHardGates,
     materialEffect
   );
+}
+
+function assertAbsoluteProductQuality(
+  contract: LongMemEvalMatrixPromotionContract,
+  product: ResolvedPromotionMatrixCell,
+  replication: ResolvedPromotionMatrixCell
+): void {
+  assertLongMemEvalAbsoluteQuality({
+    payload: product.data.payload,
+    policy: contract.absolute_quality_policy,
+    label: "B product-default cell"
+  });
+  assertLongMemEvalAbsoluteQuality({
+    payload: replication.data.payload,
+    policy: contract.absolute_quality_policy,
+    label: "B2 product-default replication"
+  });
 }
 
 function resolveProductDefaultCell(

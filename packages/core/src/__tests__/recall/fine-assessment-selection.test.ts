@@ -245,7 +245,7 @@ describe("selectFineAssessmentCandidates", () => {
     ]);
   });
 
-  it("attributes joint gist and cohort coverage movement to the coverage selector", () => {
+  it("attributes gist coverage movement to the coverage selector", () => {
     const primary = createRankedCandidate("primary", 1, 1);
     const redundant = createRankedCandidate("redundant", 2, 0.9);
     const diverse = createRankedCandidate("diverse", 3, 0.8);
@@ -257,11 +257,6 @@ describe("selectFineAssessmentCandidates", () => {
           primary: "shared gist",
           redundant: "shared gist",
           diverse: "different gist"
-        },
-        sourceCohortKeys: {
-          primary: "session-a",
-          redundant: "session-a",
-          diverse: "session-b"
         }
       }),
       tokenEstimator: { estimate: vi.fn(() => 6) },

@@ -257,7 +257,7 @@ describe("coverage-aware delivery", () => {
     ]);
   });
 
-  it("applies a soft cohort penalty when another cohort adds more utility", () => {
+  it("does not treat distinct facts from one source session as duplicates", () => {
     const anchor = createCandidate("cohort-anchor", 0.9);
     const sameCohort = createCandidate("same-cohort", 0.8);
     const otherCohort = createCandidate("other-cohort", 0.5);
@@ -283,8 +283,8 @@ describe("coverage-aware delivery", () => {
     });
     expect(ordered.map((candidate) => candidate.entry.object_id)).toEqual([
       "cohort-anchor",
-      "other-cohort",
-      "same-cohort"
+      "same-cohort",
+      "other-cohort"
     ]);
   });
 
@@ -297,7 +297,7 @@ describe("coverage-aware delivery", () => {
       config: {
         conflict_awareness: false,
         budgets: {
-          max_entries: 3,
+          max_entries: 2,
           max_total_tokens: 100,
           per_dimension_limits: null
         }
@@ -320,17 +320,33 @@ describe("coverage-aware delivery", () => {
         [highFusedDupA.fusion.candidate_key, 0.2],
         [highFusedDupB.fusion.candidate_key, 0.15],
         [lowFusedNovel.fusion.candidate_key, 0.95]
-      ])
+      ]),
+      restorePublicRelevanceOrderAfterCoverage: true
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "novel",
       "dup-a",
-      "dup-b"
+      "novel"
     ]);
-    // Public relevance scalar remains the fused values passed as finalRelevance.
+    expect(result.candidates.map((candidate) => candidate.relevance_score)).toEqual([
+      0.99,
+      0.4
+    ]);
+    // Coverage chooses the admitted set; public delivery remains relevance-ordered.
     expect(result.candidates[0]).toMatchObject({
-      score_factors: { relevance: 0.4 }
+      score_factors: { relevance: 0.99 },
+      budget_state: { remaining_entries: 1, remaining_tokens: 94 }
+    });
+    const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
+    expect(diagnostics.get("novel")).toMatchObject({
+      rank_after_coverage_selector: 1,
+      final_rank: 2,
+      post_rank: 2
+    });
+    expect(diagnostics.get("dup-a")).toMatchObject({
+      rank_after_coverage_selector: 2,
+      final_rank: 1,
+      post_rank: 1
     });
   });
 

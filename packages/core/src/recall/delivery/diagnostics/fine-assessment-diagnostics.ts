@@ -197,7 +197,7 @@ function buildCompatibilityStageDiagnosticAliases(
     rank_after_synthesis_reserve: selectionOrder,
     rank_after_structural_reserve: selectionOrder,
     coverage_selector_action: resolveCoverageSelectorAction(deliveryRank, selectionOrder),
-    // Gist and cohort are scored in one selector; a second action would double-attribute the move.
+    // Logical-object and gist coverage share one selector; this alias must not double-attribute it.
     session_coverage_action: "noop" as const,
     reserved_by: "none" as const
   };

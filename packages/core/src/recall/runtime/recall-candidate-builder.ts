@@ -187,7 +187,9 @@ export function selectCandidatesWithinBudgets(
   return Object.freeze(selected);
 }
 
-function buildRecallCandidateSelectionKey(candidate: Readonly<RecallCandidate>): string {
+export function buildRecallCandidateSelectionKey(
+  candidate: Readonly<RecallCandidate>
+): string {
   return `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`;
 }
 

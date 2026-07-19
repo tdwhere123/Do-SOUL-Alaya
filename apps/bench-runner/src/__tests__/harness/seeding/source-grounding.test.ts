@@ -3,6 +3,25 @@ import type { BenchSignalSeedInput } from "../../../harness/daemon.js";
 import { attachCompileSourceGrounding } from "../../../harness/seeding/source-grounding.js";
 
 describe("compile source grounding revalidation", () => {
+  it("preserves the same unique verbatim assertion accepted by the provider", () => {
+    const turnContent =
+      "User: I redeemed a coupon last Sunday, which surprised me because I had forgotten it.\n" +
+      "Assistant: Nice find.";
+    const matchedText = "I redeemed a coupon last Sunday";
+    const payload = attachCompileSourceGrounding(
+      { matched_text: matchedText, distilled_fact: "User redeemed a coupon." },
+      signalInput(turnContent, matchedText),
+      turnContent
+    );
+
+    expect(payload.source_grounding).toMatchObject({
+      status: "grounded",
+      content_basis: "source_assertion",
+      source_assertion: matchedText
+    });
+    expect(payload.distilled_fact).toBe(matchedText);
+  });
+
   it.each([
     ["I moved to Berlin, e.g. for work.", "for work"],
     ["Alice chose Berlin over Paris. The former is cheaper.", "The former is cheaper."]

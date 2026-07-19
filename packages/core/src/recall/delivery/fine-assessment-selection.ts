@@ -4,7 +4,11 @@ import type {
   RecallPolicy,
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
+import {
+  buildRecallBudgetState,
+  buildRecallCandidate,
+  buildRecallCandidateSelectionKey
+} from "../runtime/recall-candidate-builder.js";
 import {
   buildRecallCandidateDedupeKey,
   buildRecallLogicalObjectKey,
@@ -70,6 +74,7 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly finalRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   /** Packing relevance; defaults to finalRelevance. Deep-head scores when public scalar stays fused. */
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
+  readonly restorePublicRelevanceOrderAfterCoverage?: boolean;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
 }>;
@@ -95,9 +100,59 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
     evictions
   );
   const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
+  const delivered = params.restorePublicRelevanceOrderAfterCoverage
+    ? orderDeliveredPacketByRelevance(finalAccumulator, context.config)
+    : freezeSelectedPacket(finalAccumulator);
   return Object.freeze({
-    candidates: Object.freeze([...finalAccumulator.selected]),
-    diagnostics: Object.freeze([...finalAccumulator.diagnostics])
+    candidates: delivered.candidates,
+    diagnostics: delivered.diagnostics
+  });
+}
+
+function freezeSelectedPacket(
+  accumulator: FineAssessmentAccumulator
+): Readonly<{
+  candidates: readonly Readonly<RecallCandidate>[];
+  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+}> {
+  return Object.freeze({
+    candidates: Object.freeze([...accumulator.selected]),
+    diagnostics: Object.freeze([...accumulator.diagnostics])
+  });
+}
+
+function orderDeliveredPacketByRelevance(
+  accumulator: FineAssessmentAccumulator,
+  config: FineAssessmentSelectionContext["config"]
+): Readonly<{
+  candidates: readonly Readonly<RecallCandidate>[];
+  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+}> {
+  const candidates = [...accumulator.selected]
+    .sort((left, right) => right.relevance_score - left.relevance_score);
+  let usedTokens = 0;
+  const finalRankByKey = new Map<string, number>();
+  const ranked = candidates.map((candidate, index) => {
+    finalRankByKey.set(buildRecallCandidateSelectionKey(candidate), index + 1);
+    const budgetState = buildRecallBudgetState({
+      tokenEstimate: candidate.token_estimate,
+      maxEntries: config.budgets.max_entries,
+      maxTotalTokens: config.budgets.max_total_tokens,
+      index,
+      usedTokensBeforeCandidate: usedTokens
+    });
+    usedTokens += candidate.token_estimate;
+    return Object.freeze({ ...candidate, budget_state: budgetState });
+  });
+  const diagnostics = accumulator.diagnostics.map((row) => {
+    const finalRank = finalRankByKey.get(row.candidate_key);
+    return finalRank === undefined
+      ? row
+      : Object.freeze({ ...row, final_rank: finalRank, post_rank: finalRank });
+  });
+  return Object.freeze({
+    candidates: Object.freeze(ranked),
+    diagnostics: Object.freeze(diagnostics)
   });
 }
 

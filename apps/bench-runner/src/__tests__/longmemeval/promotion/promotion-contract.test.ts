@@ -20,6 +20,14 @@ describe("LongMemEval matrix promotion contract", () => {
     });
     expect(parsed.contract.execution_order).toEqual(["A", "B", "C", "D", "B2"]);
     expect(parsed.contract.product_default_replication.cell).toBe("B2");
+    expect(parsed.contract.absolute_quality_policy).toEqual({
+      product_cell: "B",
+      replication_cell: "B2",
+      metric: "r_at_5",
+      cohort: "answerable",
+      expected_denominator: 94,
+      minimum_hits: 85
+    });
   });
 
   it("rejects duplicate treatment cells even when four entries are present", () => {
@@ -89,6 +97,20 @@ describe("LongMemEval matrix promotion contract", () => {
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(reordered)).toThrow();
   });
 
+  it("rejects a weakened absolute product-quality policy", () => {
+    const raw = contractFixture();
+    raw.absolute_quality_policy.minimum_hits = 84;
+
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(raw)).toThrow();
+  });
+
+  it("rejects a legacy v1 contract even when it carries v2 policy fields", () => {
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse({
+      ...contractFixture(),
+      schema_version: 1
+    })).toThrow();
+  });
+
   it("rejects a snapshot substrate outside the contract root", () => {
     const raw = contractFixture();
     raw.snapshot.db_path = "../snapshot.db";
@@ -100,7 +122,7 @@ describe("LongMemEval matrix promotion contract", () => {
 
 function contractFixture() {
   return {
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     kind: "longmemeval_matrix_promotion_contract" as const,
     policy_version: "longmemeval-product-default-v1" as const,
     code: {
@@ -137,6 +159,7 @@ function contractFixture() {
       treatment: { embedding_supplement: true, answer_rerank: false },
       evidence_root: "cell-b2"
     },
+    absolute_quality_policy: absoluteQualityPolicy(),
     material_effect_policy: {
       control_cell: "A" as const,
       product_cell: "B" as const,
@@ -147,6 +170,17 @@ function contractFixture() {
       minimum_net_r_at_5_wins: 5,
       mcnemar: { method: "exact_two_sided" as const, p_value_max_exclusive: 0.05 }
     }
+  };
+}
+
+function absoluteQualityPolicy() {
+  return {
+    product_cell: "B" as const,
+    replication_cell: "B2" as const,
+    metric: "r_at_5" as const,
+    cohort: "answerable" as const,
+    expected_denominator: 94,
+    minimum_hits: 85
   };
 }
 

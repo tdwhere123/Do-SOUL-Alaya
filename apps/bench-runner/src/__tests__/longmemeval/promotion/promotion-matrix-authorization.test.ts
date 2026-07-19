@@ -221,36 +221,70 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     const fixture = matrixFixture();
     const baseline = authorizeVerifiedLongMemEvalMatrix(fixture).material_effect;
     const b2 = fixture.productDefaultReplication;
-    const rows = b2.data.payload.kpi.per_scenario.map((row, index) => ({
-      ...row,
-      hit_at_5: row.measurement_cohort === "answerable" && index < 88
-    }));
-    const quality = b2.data.payload.kpi.quality_metrics!;
-    const changedPayload = {
-      ...b2.data.payload,
-      kpi: {
-        ...b2.data.payload.kpi,
-        r_at_5: 88 / 94,
-        per_scenario: rows,
-        quality_metrics: {
-          ...quality,
-          measurement_cohort_counts: {
-            ...quality.measurement_cohort_counts!,
-            hit_at_5: 88,
-            miss_at_5: 6
-          }
-        }
-      }
-    } as VerifiedRecallEvalPromotionEntryData["payload"];
     const authorization = authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
       productDefaultReplication: testCell(
         b2.evidenceRoot,
-        { ...b2.data, payload: changedPayload }
+        withAbsoluteQualityHits(b2.data, 88)
       )
     });
 
     expect(authorization.material_effect).toEqual(baseline);
+  });
+
+  it.each(["B", "B2"] as const)(
+    "requires %s to reach 85/94 on the frozen answerable cohort",
+    (cell) => {
+      const fixture = matrixFixture();
+      const input = cell === "B"
+        ? {
+            ...fixture,
+            cells: fixture.cells.map((entry, index) => index === 1
+              ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 84))
+              : entry)
+          }
+        : {
+            ...fixture,
+            productDefaultReplication: testCell(
+              fixture.productDefaultReplication.evidenceRoot,
+              withAbsoluteQualityHits(fixture.productDefaultReplication.data, 84)
+            )
+          };
+
+      expect(() => authorizeVerifiedLongMemEvalMatrix(input))
+        .toThrow(/at least 85\/94 hits/u);
+    }
+  );
+
+  it("rejects answerable-denominator drift before promotion", () => {
+    const fixture = matrixFixture();
+    const product = fixture.cells[1]!;
+
+    expect(() => authorizeVerifiedLongMemEvalMatrix({
+      ...fixture,
+      cells: fixture.cells.map((entry, index) => index === 1
+        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(product.data, 85, 93))
+        : entry)
+    })).toThrow(/differs from its answerable rows/u);
+  });
+
+  it("authorizes the exact 85/94 boundary independently for B and B2", () => {
+    const fixture = matrixFixture();
+    const cells = fixture.cells.map((entry, index) => {
+      if (index === 0) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 76));
+      if (index === 1) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 85));
+      return entry;
+    });
+    const replication = fixture.productDefaultReplication;
+
+    expect(authorizeVerifiedLongMemEvalMatrix({
+      ...fixture,
+      cells,
+      productDefaultReplication: testCell(
+        replication.evidenceRoot,
+        withAbsoluteQualityHits(replication.data, 85)
+      )
+    }).status).toBe("authorized");
   });
 
   it("rejects a machine authorization changed after signing", () => {
@@ -342,3 +376,37 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     })).toThrow(/contingency table is impossible/u);
   });
 });
+
+function withAbsoluteQualityHits(
+  data: VerifiedRecallEvalPromotionEntryData,
+  hitCount: number,
+  answerableCount = 94
+): VerifiedRecallEvalPromotionEntryData {
+  const quality = data.payload.kpi.quality_metrics!;
+  const rows = data.payload.kpi.per_scenario.map((row, index) => {
+    const scorable = row.measurement_cohort === "answerable" && index < answerableCount;
+    return { ...row, scorable, hit_at_5: scorable && index < hitCount };
+  });
+  return {
+    ...data,
+    payload: {
+      ...data.payload,
+      answerable_evaluated_count: answerableCount,
+      kpi: {
+        ...data.payload.kpi,
+        r_at_5: hitCount / answerableCount,
+        per_scenario: rows,
+        quality_metrics: {
+          ...quality,
+          measurement_cohort_counts: {
+            ...quality.measurement_cohort_counts!,
+            scorable_answerable: answerableCount,
+            unscorable_answerable: 94 - answerableCount,
+            hit_at_5: hitCount,
+            miss_at_5: answerableCount - hitCount
+          }
+        }
+      }
+    }
+  };
+}
