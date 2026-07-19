@@ -8,14 +8,22 @@ import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
-const FrozenContractSchema = z.object({
-  schema_version: z.literal(1),
-  code: z.object({
-    commit_sha: z.string().regex(/^[a-f0-9]{40}$/u),
-    commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u),
-    worktree_state_sha256: Sha256Schema
-  }).passthrough()
+const FrozenCodeSchema = z.object({
+  commit_sha: z.string().regex(/^[a-f0-9]{40}$/u),
+  commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u),
+  worktree_state_sha256: Sha256Schema
 }).passthrough();
+const FrozenContractSchema = z.union([
+  z.object({
+    schema_version: z.literal(1),
+    code: FrozenCodeSchema
+  }).passthrough(),
+  z.object({
+    schema_version: z.literal(2),
+    kind: z.literal("longmemeval_matrix_promotion_contract"),
+    code: FrozenCodeSchema
+  }).passthrough()
+]);
 
 export interface FrozenCodeIdentity {
   readonly commitSha: string;
