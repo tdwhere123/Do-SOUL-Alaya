@@ -160,7 +160,7 @@ describe("query evidence in fusion-only path delivery", () => {
     expect(diagnostic.lexicalRank).toBeNull();
     expect(diagnostic.delivered).toBe(false);
     expect(diagnostic.finalRank).toBeNull();
-    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.rankAfterStructuralStage).toBeUndefined();
   });
 
   it("records direct lexical evidence without bypassing the fused budget", async () => {
@@ -174,7 +174,7 @@ describe("query evidence in fusion-only path delivery", () => {
     expect(diagnostic.lexicalContribution).toBeGreaterThan(0);
     expect(diagnostic.delivered).toBe(false);
     expect(diagnostic.finalRank).toBeNull();
-    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.rankAfterStructuralStage).toBeUndefined();
   });
 });
 
@@ -188,7 +188,7 @@ describe("path diagnostics preserve sign-aware suppression", () => {
     expect(diagnostic.suppressionScore).toBeGreaterThan(0);
     expect(diagnostic.delivered).toBe(false);
     expect(diagnostic.finalRank).toBeNull();
-    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.rankAfterStructuralStage).toBeUndefined();
   });
 
   it("reports zero suppression when the negative path is absent", async () => {
@@ -198,7 +198,7 @@ describe("path diagnostics preserve sign-aware suppression", () => {
     expect(diagnostic.pathContribution).toBeGreaterThan(0);
     expect(diagnostic.delivered).toBe(false);
     expect(diagnostic.finalRank).toBeNull();
-    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.rankAfterStructuralStage).toBeUndefined();
   });
 });
 

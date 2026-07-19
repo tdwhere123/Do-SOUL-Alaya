@@ -10,7 +10,8 @@
 #
 # Usage:
 #   apps/bench-runner/scripts/run-full-public-bench.sh \
-#     [--variant s|oracle] [--embedding disabled|env] [--shards N] [--limit M] [--policy-shape stress|chat] \
+#     [--variant s|oracle] [--embedding disabled|env] [--embedding-provider openai|local_onnx] \
+#     [--shards N] [--limit M] [--policy-shape stress|chat] \
 #     [--simulate-report none|always-used|gold-only|mixed] [--weights '<json>'] [--data-dir path] [--history-root path]
 #
 # Defaults: variant=s, embedding=disabled+env sequentially,
@@ -24,6 +25,7 @@ cd "$REPO_ROOT"
 VARIANT="s"
 EMBEDDING=""
 EMBEDDING_SPECIFIED=0
+EMBEDDING_PROVIDER="local_onnx"
 POLICY_SHAPE=""
 POLICY_SHAPE_SPECIFIED=0
 SIMULATE_REPORT="none"
@@ -129,6 +131,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --variant) VARIANT="$2"; shift 2;;
     --embedding) EMBEDDING="$2"; EMBEDDING_SPECIFIED=1; shift 2;;
+    --embedding-provider) EMBEDDING_PROVIDER="$2"; shift 2;;
     --policy-shape) POLICY_SHAPE="$2"; POLICY_SHAPE_SPECIFIED=1; shift 2;;
     --simulate-report) SIMULATE_REPORT="$2"; shift 2;;
     --weights) WEIGHTS="$2"; shift 2;;
@@ -150,6 +153,11 @@ else
   POLICY_SHAPES=("stress" "chat")
 fi
 
+case "$EMBEDDING_PROVIDER" in
+  openai|local_onnx) ;;
+  *) echo "unknown embedding provider: $EMBEDDING_PROVIDER" >&2; exit 2;;
+esac
+
 if (( EMBEDDING_SPECIFIED == 1 )); then
   case "$EMBEDDING" in
     disabled|env) ;;
@@ -168,29 +176,29 @@ for embedding in "${EMBEDDINGS[@]}"; do
 done
 
 if (( requires_env_embedding == 1 )); then
-  secret_ref="${ALAYA_OPENAI_SECRET_REF:-env:OPENAI_API_KEY}"
-  case "$secret_ref" in
-    env:*)
-      secret_var="${secret_ref#env:}"
-      if [[ -z "$secret_var" || -z "${!secret_var:-}" ]]; then
-        echo "--embedding env requires ALAYA_OPENAI_SECRET_REF or a non-empty OPENAI_API_KEY; missing env:${secret_var:-OPENAI_API_KEY}" >&2
-        exit 2
-      fi
-      ;;
-    file:*)
-      secret_file="${secret_ref#file:}"
-      if [[ -z "$secret_file" || ! -r "$secret_file" || ! -s "$secret_file" ]]; then
-        echo "--embedding env requires a readable non-empty secret file from ALAYA_OPENAI_SECRET_REF" >&2
-        exit 2
-      fi
-      ;;
-    keychain:*) ;;
-    *)
-      echo "--embedding env requires ALAYA_OPENAI_SECRET_REF to use env:, file:, or keychain:" >&2
-      exit 2
-      ;;
-  esac
+  if [[ "$EMBEDDING_PROVIDER" == "openai" ]]; then
+    secret_ref="${ALAYA_OPENAI_SECRET_REF:-env:OPENAI_API_KEY}"
+    case "$secret_ref" in
+      env:*)
+        secret_var="${secret_ref#env:}"
+        if [[ -z "$secret_var" || -z "${!secret_var:-}" ]]; then
+          echo "--embedding env with provider=openai requires a non-empty secret; missing env:${secret_var:-OPENAI_API_KEY}" >&2
+          exit 2
+        fi
+        ;;
+      file:*)
+        secret_file="${secret_ref#file:}"
+        if [[ -z "$secret_file" || ! -r "$secret_file" || ! -s "$secret_file" ]]; then
+          echo "--embedding env with provider=openai requires a readable non-empty secret file" >&2
+          exit 2
+        fi
+        ;;
+      keychain:*) ;;
+      *) echo "provider=openai requires ALAYA_OPENAI_SECRET_REF to use env:, file:, or keychain:" >&2; exit 2;;
+    esac
+  fi
 
+  export ALAYA_EMBEDDING_PROVIDER="$EMBEDDING_PROVIDER"
   "${NODE_RUNNER[@]}" apps/bench-runner/bin/embedding-provider-preflight.mjs
 fi
 
@@ -308,6 +316,7 @@ run_one() {
         --offset "$offset" \
         --limit "$slice" \
         --embedding "$embedding" \
+        --embedding-provider "$EMBEDDING_PROVIDER" \
         --policy-shape "$policy_shape" \
         --simulate-report "$SIMULATE_REPORT" \
         "${weights_args[@]}" \

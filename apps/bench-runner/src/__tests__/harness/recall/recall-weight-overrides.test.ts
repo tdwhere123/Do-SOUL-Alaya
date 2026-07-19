@@ -209,12 +209,15 @@ describe("bench recall weight overrides", () => {
     );
 
     expect(script).toContain("--weights) WEIGHTS=\"$2\"; shift 2;;");
+    expect(script).toContain("--embedding-provider) EMBEDDING_PROVIDER=\"$2\"; shift 2;;");
+    expect(script).toContain("EMBEDDING_PROVIDER=\"local_onnx\"");
     expect(script).toContain("--data-dir) DATA_DIR=\"$2\"; shift 2;;");
     expect(script).toContain("weights_args=(--weights \"$WEIGHTS\")");
     expect(script).toContain("\"${weights_args[@]}\"");
     expect(script).toContain("--data-dir \"$DATA_DIR\"");
     expect(script).toContain("BENCH_NODE_USE_ENV_PROXY");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
+    expect(script).toContain("--embedding-provider \"$EMBEDDING_PROVIDER\"");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/alaya-bench-runner.mjs longmemeval");
     expect(script).toContain("BENCH_RUNNER_CLI=\"apps/bench-runner/dist/cli/index.js\"");
     expect(script).toContain("! -path '*/__tests__/*'");
@@ -230,6 +233,8 @@ describe("bench recall weight overrides", () => {
     );
 
     expect(script).toContain("--data-dir) DATA_DIR=\"$2\"; shift 2;;");
+    expect(script).toContain("--embedding-provider) EMBEDDING_PROVIDER=\"$2\"; shift 2;;");
+    expect(script).toContain("EMBEDDING_PROVIDER=\"local_onnx\"");
     expect(script).toContain("docs/bench-history/datasets/locomo10.meta.json");
     expect(script).toContain("apps/bench-runner/bin/alaya-bench-runner.mjs fetch-locomo --data-dir %q");
     expect(script).toContain("dataset cache missing: $DATASET_JSON");
@@ -243,6 +248,7 @@ describe("bench recall weight overrides", () => {
     expect(script).toContain("! -path '*/__tests__/*'");
     expect(script).toContain("! -name '*.test.ts'");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/embedding-provider-preflight.mjs");
+    expect(script).toContain("--embedding-provider \"$EMBEDDING_PROVIDER\"");
     expect(script).toContain("\"${NODE_RUNNER[@]}\" apps/bench-runner/bin/alaya-bench-runner.mjs locomo");
   });
 
@@ -250,6 +256,7 @@ describe("bench recall weight overrides", () => {
     let fetchCalls = 0;
     const result = await preflightEmbeddingProvider({
       env: {
+        ALAYA_EMBEDDING_PROVIDER: "openai",
         ALAYA_OPENAI_SECRET_REF: "file:relative-token",
         OPENAI_EMBEDDING_PROVIDER_URL: "https://embedding.example.test/v1"
       },
@@ -268,6 +275,7 @@ describe("bench recall weight overrides", () => {
 
   it("does not include the resolved embedding secret in preflight failures", async () => {
     const env = {
+      ALAYA_EMBEDDING_PROVIDER: "openai",
       ALAYA_OPENAI_SECRET_REF: "env:ALAYA_TEST_OPENAI_KEY",
       ALAYA_TEST_OPENAI_KEY: "sk-test-secret",
       OPENAI_EMBEDDING_PROVIDER_URL: "https://embedding.example.test/v1"

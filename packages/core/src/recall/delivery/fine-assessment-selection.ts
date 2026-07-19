@@ -74,7 +74,7 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly finalRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   /** Packing relevance; defaults to finalRelevance. Deep-head scores when public scalar stays fused. */
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
-  readonly restorePublicRelevanceOrderAfterCoverage?: boolean;
+  readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
 }>;
@@ -100,9 +100,10 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
     evictions
   );
   const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
-  const delivered = params.restorePublicRelevanceOrderAfterCoverage
-    ? orderDeliveredPacketByRelevance(finalAccumulator, context.config)
-    : freezeSelectedPacket(finalAccumulator);
+  const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
+  const delivered = finalOrder === "coverage"
+    ? freezeSelectedPacket(finalAccumulator)
+    : orderDeliveredPacket(finalAccumulator, context, finalOrder);
   return Object.freeze({
     candidates: delivered.candidates,
     diagnostics: delivered.diagnostics
@@ -121,23 +122,25 @@ function freezeSelectedPacket(
   });
 }
 
-function orderDeliveredPacketByRelevance(
+function orderDeliveredPacket(
   accumulator: FineAssessmentAccumulator,
-  config: FineAssessmentSelectionContext["config"]
+  context: FineAssessmentSelectionContext,
+  finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>
 ): Readonly<{
   candidates: readonly Readonly<RecallCandidate>[];
   diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
 }> {
-  const candidates = [...accumulator.selected]
-    .sort((left, right) => right.relevance_score - left.relevance_score);
+  const candidates = [...accumulator.selected].sort((left, right) =>
+    compareFinalDeliveryOrder(left, right, finalOrder, context.rankByCandidateKey)
+  );
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
   const ranked = candidates.map((candidate, index) => {
     finalRankByKey.set(buildRecallCandidateSelectionKey(candidate), index + 1);
     const budgetState = buildRecallBudgetState({
       tokenEstimate: candidate.token_estimate,
-      maxEntries: config.budgets.max_entries,
-      maxTotalTokens: config.budgets.max_total_tokens,
+      maxEntries: context.config.budgets.max_entries,
+      maxTotalTokens: context.config.budgets.max_total_tokens,
       index,
       usedTokensBeforeCandidate: usedTokens
     });
@@ -154,6 +157,22 @@ function orderDeliveredPacketByRelevance(
     candidates: Object.freeze(ranked),
     diagnostics: Object.freeze(diagnostics)
   });
+}
+
+function compareFinalDeliveryOrder(
+  left: Readonly<RecallCandidate>,
+  right: Readonly<RecallCandidate>,
+  finalOrder: "public_relevance" | "delivery_rank",
+  deliveryRankByCandidateKey: ReadonlyMap<string, number>
+): number {
+  const leftKey = buildRecallCandidateSelectionKey(left);
+  const rightKey = buildRecallCandidateSelectionKey(right);
+  if (finalOrder === "delivery_rank") {
+    return (deliveryRankByCandidateKey.get(leftKey) ?? Number.MAX_SAFE_INTEGER) -
+      (deliveryRankByCandidateKey.get(rightKey) ?? Number.MAX_SAFE_INTEGER) ||
+      leftKey.localeCompare(rightKey);
+  }
+  return right.relevance_score - left.relevance_score || leftKey.localeCompare(rightKey);
 }
 
 function orderFineAssessmentByCoverage(

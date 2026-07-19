@@ -32,6 +32,12 @@ import {
   mergeLongMemEvalSourceRounds,
   type LongMemEvalSourceRound
 } from "../../provenance/source-rounds.js";
+import {
+  isVerifiedEmptyAnswerWipe,
+  recordAnswerSeedDrops,
+  snapshotSeedCounters,
+  type SeedCounterSnapshot
+} from "./seeding/answer-seed-drop-accounting.js";
 
 export interface LongMemEvalQuestionSeedState {
   readonly sidecar: Map<string, LongMemEvalSidecarEntry>;
@@ -162,7 +168,7 @@ async function seedQuestionRound(
     round.hasAnswer,
     beforeDropReasons,
     input.seedRunner.stats.signalsDroppedByReason,
-    isSuccessfulEmptyOfficialExtraction(input.seedRunner.stats, beforeCounters)
+    isVerifiedEmptyAnswerWipe(input.seedRunner.stats, beforeCounters)
   );
   addSeedSidecarEntries(input, state, context, round, seedResult);
   state.seedRounds.push(buildSeedRoundLedger({
@@ -173,24 +179,6 @@ async function seedQuestionRound(
     seeds: seedResult.seeds
   }));
   return { nextTurnSeedMemoryIds: computeNextTurnSeedRefs(seedResult) };
-}
-
-interface SeedCounterSnapshot {
-  readonly factsProduced: number;
-  readonly parseDropped: number;
-  readonly compileOverflowDropped: number;
-  readonly candidateAbsent: number;
-  readonly materializationDrop: number;
-}
-
-function snapshotSeedCounters(stats: CompileSeedExtractionStats): SeedCounterSnapshot {
-  return {
-    factsProduced: stats.factsProduced,
-    parseDropped: stats.parseDropped,
-    compileOverflowDropped: stats.compileOverflowDropped,
-    candidateAbsent: stats.signalsDroppedByReason.candidate_absent,
-    materializationDrop: stats.signalsDroppedByReason.materialization_drop
-  };
 }
 
 function buildSeedRoundLedger(input: {
@@ -243,42 +231,6 @@ function delta(after: number, before: number): number {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function recordAnswerSeedDrops(
-  state: LongMemEvalQuestionSeedState,
-  roundHasAnswer: boolean,
-  before: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>,
-  after: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>,
-  successfulEmptyOfficialExtraction: boolean
-): void {
-  if (!roundHasAnswer) {
-    return;
-  }
-  const candidateAbsent = Math.max(0, after.candidate_absent - before.candidate_absent);
-  state.answerSeedDropReasons = {
-    candidate_absent:
-      state.answerSeedDropReasons.candidate_absent +
-      candidateAbsent +
-      (successfulEmptyOfficialExtraction && candidateAbsent === 0 ? 1 : 0),
-    materialization_drop:
-      state.answerSeedDropReasons.materialization_drop +
-      Math.max(0, after.materialization_drop - before.materialization_drop)
-  };
-}
-
-function isSuccessfulEmptyOfficialExtraction(
-  stats: CompileSeedExtractionStats,
-  before: SeedCounterSnapshot
-): boolean {
-  return stats.lastExtractionSource !== null &&
-    stats.lastTurnRawSignalCount === 0 &&
-    stats.lastTurnDraftCount === 0 &&
-    stats.factsProduced === before.factsProduced &&
-    stats.parseDropped === before.parseDropped &&
-    stats.compileOverflowDropped === before.compileOverflowDropped &&
-    stats.signalsDroppedByReason.candidate_absent === before.candidateAbsent &&
-    stats.signalsDroppedByReason.materialization_drop === before.materializationDrop;
 }
 
 function recordTruncation(

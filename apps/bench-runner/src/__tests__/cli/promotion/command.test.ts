@@ -41,6 +41,8 @@ describe("LongMemEval matrix promotion command", () => {
     expect(LongMemEvalMatrixPromotionAuthorizationSchema.parse(written))
       .toEqual(promotionAuthorizationFixture());
     expect(authorize).toHaveBeenCalledWith({
+      checkoutRoot: "/repo",
+      contractPath,
       contractRoot: root,
       contractContents: Buffer.from("contract-bytes", "utf8")
     });
@@ -120,7 +122,12 @@ function captureIo(
 } {
   const stdout = vi.fn();
   const stderr = vi.fn();
-  return { authorize, stdout, stderr };
+  return {
+    authorize,
+    checkoutRoot: "/repo",
+    stdout,
+    stderr
+  };
 }
 
 async function tempArtifacts(root: string): Promise<string[]> {

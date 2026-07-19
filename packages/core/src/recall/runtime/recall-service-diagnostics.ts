@@ -202,19 +202,20 @@ export interface RecallCandidateDiagnostic {
   readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
   readonly answer_features?: Readonly<RecallCandidateAnswerFeatures>;
   readonly path_suppression_score: number;
-  // Per-stage delivery rank trajectory through fineAssess (1-based): shows where a candidate fell out of the top-k window; reserved_by names the stage that pulled it in. Provenance only, never feeds ranking.
+  // Live delivery-stage ranks (1-based). Provenance only — never feeds ranking.
   readonly rank_after_fusion?: number;
   readonly rank_after_feature_rerank?: number;
+  readonly rank_after_coverage_selector?: number;
+  readonly coverage_selector_action?: "noop" | "kept" | "promoted" | "displaced";
+  // Retired stages: producers omit these. Optional only for old diagnostic dumps.
   readonly rank_after_lexical_priority?: number;
   readonly rank_after_synthesis_reserve?: number;
   readonly rank_after_structural_reserve?: number;
-  readonly rank_after_coverage_selector?: number;
   readonly rank_after_session_coverage?: number;
-  readonly coverage_selector_action?: "noop" | "kept" | "promoted" | "displaced";
   readonly session_coverage_action?: "noop" | "kept" | "promoted" | "displaced";
+  readonly reserved_by?: "none" | "synthesis" | "structural";
   readonly session_key?: string;
   readonly source_cohort_key?: string | null;
-  readonly reserved_by?: "none" | "synthesis" | "structural";
 }
 
 export interface FineAssessmentPrunedCandidateDiagnostic {

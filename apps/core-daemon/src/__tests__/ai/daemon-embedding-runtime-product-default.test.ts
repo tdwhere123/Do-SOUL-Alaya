@@ -35,6 +35,16 @@ function createRuntime(
   return { database, runtime };
 }
 
+function optedInLocalConfig(
+  extra: ReadonlyArray<readonly [string, string]> = []
+): Map<string, string> {
+  return new Map([
+    ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"],
+    ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+    ...extra
+  ]);
+}
+
 function sharedProductPolicy() {
   return buildMemorySearchRecallPolicy({
     runtimeId: "runtime-product",
@@ -77,6 +87,22 @@ describe("daemon local embedding product default", () => {
       }
     }
   );
+
+  it("keeps the local provider on when ALAYA_ENABLE_EMBEDDING_SUPPLEMENT is unset", async () => {
+    const embedTexts = vi.fn(async () => [new Float32Array([1])]);
+    const { database, runtime } = createRuntime(
+      new Map([["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]]),
+      embedTexts
+    );
+    try {
+      await expect(runtime.providerWarmup).resolves.toBe("ready");
+      expect(isPolicyEnabled(runtime)).toBe(true);
+      expect(runtime.defaultPolicyDecorator).toBeDefined();
+      expect(embedTexts).toHaveBeenCalled();
+    } finally {
+      database.close();
+    }
+  });
 
   it.each(["false", "  FaLsE  ", "0", " 0 "])(
     "honors the explicit local opt-out %s",
@@ -185,7 +211,7 @@ describe("daemon local embedding product default", () => {
   });
 
   it("keeps policy and status degraded when the local warmup cannot load its artifact", async () => {
-    const { database, runtime } = createRuntime(new Map(), async () => {
+    const { database, runtime } = createRuntime(optedInLocalConfig(), async () => {
       throw new Error("model artifact missing");
     });
     try {
@@ -204,7 +230,7 @@ describe("daemon local embedding product default", () => {
     ["zero", new Float32Array([0])],
     ["NaN", new Float32Array([Number.NaN])]
   ])("keeps policy degraded when warmup returns a %s vector", async (_label, vector) => {
-    const { database, runtime } = createRuntime(new Map(), async () => [vector]);
+    const { database, runtime } = createRuntime(optedInLocalConfig(), async () => [vector]);
     try {
       await expect(runtime.providerWarmup).resolves.toBe("failed");
       expect(isPolicyEnabled(runtime)).toBe(false);
@@ -215,7 +241,7 @@ describe("daemon local embedding product default", () => {
 
   it("recovers policy and status after a later provider use succeeds", async () => {
     let attempts = 0;
-    const { database, runtime } = createRuntime(new Map(), async () => {
+    const { database, runtime } = createRuntime(optedInLocalConfig(), async () => {
       attempts += 1;
       if (attempts === 1) throw new Error("transient startup failure");
       return [new Float32Array([1])];
@@ -245,7 +271,7 @@ describe("daemon local embedding product default", () => {
     let rejectWarmup: (error: Error) => void = () => undefined;
     let markWarmupStarted: () => void = () => undefined;
     const warmupStarted = new Promise<void>((resolve) => { markWarmupStarted = resolve; });
-    const { database, runtime } = createRuntime(new Map(), async () => {
+    const { database, runtime } = createRuntime(optedInLocalConfig(), async () => {
       attempts += 1;
       if (attempts > 1) return [new Float32Array([1])];
       markWarmupStarted();
@@ -276,7 +302,7 @@ describe("daemon local embedding product default", () => {
   it("does not enable policy before the startup probe has verified the provider", async () => {
     let resolveWarmup: (value: readonly Float32Array[]) => void = () => undefined;
     const { database, runtime } = createRuntime(
-      new Map(),
+      optedInLocalConfig(),
       () => new Promise((resolve) => { resolveWarmup = resolve; })
     );
     try {
@@ -298,7 +324,7 @@ describe("daemon local embedding product default", () => {
 
   it("keeps the shared product policy lexical-only when provider and service are absent", async () => {
     const embedTexts = vi.fn(async () => [new Float32Array([1])]);
-    const { database, runtime } = createRuntime(new Map(), embedTexts, null);
+    const { database, runtime } = createRuntime(optedInLocalConfig(), embedTexts, null);
     try {
       await expect(runtime.providerWarmup).resolves.toBe("not_requested");
       expect(runtime.defaultPolicyDecorator).toBeUndefined();
@@ -315,7 +341,7 @@ describe("daemon local embedding product default", () => {
     let markWarmupStarted: () => void = () => undefined;
     const warmupStarted = new Promise<void>((resolve) => { markWarmupStarted = resolve; });
     const { database, runtime } = createRuntime(
-      new Map(),
+      optedInLocalConfig(),
       () => new Promise((resolve) => {
         resolveWarmup = resolve;
         markWarmupStarted();
@@ -335,7 +361,7 @@ describe("daemon local embedding product default", () => {
   });
 
   it("forces the shared product policy to lexical-only after warmup fails", async () => {
-    const { database, runtime } = createRuntime(new Map(), async () => {
+    const { database, runtime } = createRuntime(optedInLocalConfig(), async () => {
       throw new Error("warmup failed");
     });
     try {
@@ -349,7 +375,7 @@ describe("daemon local embedding product default", () => {
   });
 
   it("atomically adds the default injection budget only after warmup is ready", async () => {
-    const { database, runtime } = createRuntime(new Map());
+    const { database, runtime } = createRuntime(optedInLocalConfig());
     try {
       await expect(runtime.providerWarmup).resolves.toBe("ready");
       const ready = effectiveSharedProductPolicy(runtime);

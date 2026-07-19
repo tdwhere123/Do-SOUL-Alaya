@@ -362,9 +362,9 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       expect(candidate.coverage_selector_action).toBe("kept");
-      expect(candidate.session_coverage_action).toBe("noop");
+      expect(candidate.session_coverage_action).toBeUndefined();
       expect(candidate.rank_after_coverage_selector).toBe(candidate.selection_order);
-      expect(candidate.rank_after_session_coverage).toBe(candidate.selection_order);
+      expect(candidate.rank_after_session_coverage).toBeUndefined();
       expect(candidate.session_key).toBeDefined();
     }
   });
@@ -381,17 +381,17 @@ describe("RecallService fusion-only delivery diagnostics", () => {
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
       expect(candidate.coverage_selector_action).toBe("kept");
-      expect(candidate.session_coverage_action).toBe("noop");
+      expect(candidate.session_coverage_action).toBeUndefined();
       expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
-      expect(candidate.rank_after_lexical_priority).toBe(candidate.fused_rank);
+      expect(candidate.rank_after_lexical_priority).toBeUndefined();
       expect(candidate.rank_after_coverage_selector).toBe(candidate.selection_order);
-      expect(candidate.rank_after_session_coverage).toBe(candidate.selection_order);
-      expect(candidate.rank_after_structural_reserve).toBe(candidate.selection_order);
+      expect(candidate.rank_after_session_coverage).toBeUndefined();
+      expect(candidate.rank_after_structural_reserve).toBeUndefined();
       expect(candidate.session_key).toBeDefined();
     }
     const secondSession = candidates.find((candidate) => candidate.object_id === "77777777-7777-4777-8777-777777777777");
     expect(secondSession?.coverage_selector_action).toBe("kept");
-    expect(secondSession?.session_coverage_action).toBe("noop");
+    expect(secondSession?.session_coverage_action).toBeUndefined();
     expect(secondSession?.session_key).toBe("sB");
     expect(secondSession?.rank_after_coverage_selector).toBe(secondSession?.selection_order);
   });

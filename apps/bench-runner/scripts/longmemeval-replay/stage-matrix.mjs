@@ -133,7 +133,7 @@ function buildQuestionRow(question, cohort) {
 function bestGoldRank(candidates, goldIds, field) {
   const gold = new Set(goldIds);
   const ranks = candidates
-    .filter((candidate) => gold.has(candidate.object_id) && candidate[field] !== null)
+    .filter((candidate) => gold.has(candidate.object_id) && typeof candidate[field] === "number")
     .map((candidate) => candidate[field]);
   return ranks.length === 0 ? null : Math.min(...ranks);
 }

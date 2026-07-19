@@ -7,6 +7,12 @@ import {
   selectionContractIdentity
 } from "../selection/contract.js";
 import {
+  assertCurrentPromotionCodeIdentity,
+  DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES,
+  type PromotionCodeIdentityDependencies,
+  type PromotionCodeIdentityInput
+} from "./assert-current-code-identity.js";
+import {
   parseLongMemEvalMatrixPromotionContract,
   type LongMemEvalMatrixPromotionContract
 } from "./schema/contract.js";
@@ -28,11 +34,22 @@ export {
   type LongMemEvalMatrixPromotionContract
 } from "./schema/contract.js";
 
-export async function authorizeLongMemEvalMatrixPromotion(input: {
+export interface LongMemEvalMatrixPromotionAuthorizeInput
+  extends PromotionCodeIdentityInput {
   readonly contractRoot: string;
   readonly contractContents: string | Uint8Array;
-}): Promise<LongMemEvalMatrixPromotionAuthorization> {
+}
+
+export type LongMemEvalMatrixPromotionAuthorizeDependencies =
+  PromotionCodeIdentityDependencies;
+
+export async function authorizeLongMemEvalMatrixPromotion(
+  input: LongMemEvalMatrixPromotionAuthorizeInput,
+  dependencies: LongMemEvalMatrixPromotionAuthorizeDependencies =
+    DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES
+): Promise<LongMemEvalMatrixPromotionAuthorization> {
   const parsed = parseLongMemEvalMatrixPromotionContract(input.contractContents);
+  await assertCurrentPromotionCodeIdentity(input, parsed, dependencies);
   const selections = await loadPromotionSelections(parsed.contract);
   const snapshot = await verifyPromotionSnapshot({
     contractRoot: input.contractRoot,
@@ -44,6 +61,7 @@ export async function authorizeLongMemEvalMatrixPromotion(input: {
   });
   const roots = await resolveEntryRoots(input.contractRoot, parsed.contract);
   const evidence = await verifyPromotionEntries(parsed, roots, selections.source, snapshot);
+  await assertCurrentPromotionCodeIdentity(input, parsed, dependencies);
   return authorizeVerifiedLongMemEvalMatrix({
     contract: parsed.contract,
     contractSha256: parsed.sha256,

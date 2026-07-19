@@ -14,15 +14,13 @@ import {
   type LongMemEvalMatrixPromotionContract
 } from "../schema/contract.js";
 import { authorizeLongMemEvalMatrixPromotion } from "../index.js";
+import {
+  assertCurrentPromotionCodeIdentity,
+  DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES
+} from "../assert-current-code-identity.js";
 import { immutableJsonClone } from "../schema/immutable-json.js";
-import {
-  resolveFrozenCodeIdentity,
-  type FrozenCodeIdentity
-} from "../../provenance/contract/frozen-code-contract.js";
-import {
-  computeExecutedDistIdentityFresh,
-  isLongMemEvalRunProvenanceGateEligible
-} from "../../provenance/run.js";
+import { resolveFrozenCodeIdentity } from "../../provenance/contract/frozen-code-contract.js";
+import { isLongMemEvalRunProvenanceGateEligible } from "../../provenance/run.js";
 import { openContainedArtifact } from "../../../cli/merge/contained-artifact-path.js";
 import { validateSnapshotManifest } from "../../snapshot/manifest-validation.js";
 import {
@@ -106,8 +104,7 @@ export interface LongMemEvalExpansionCapabilityDependencies {
 const DEFAULT_DEPENDENCIES: LongMemEvalExpansionCapabilityDependencies = {
   authorize: authorizeLongMemEvalMatrixPromotion,
   readSourceSnapshotAuthority: readLongMemEvalSourceSnapshotAuthority,
-  resolveFrozenCodeIdentity,
-  computeExecutedDistIdentity: computeExecutedDistIdentityFresh
+  ...DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES
 };
 
 const verifiedCapabilities = new WeakMap<object, LongMemEvalExpansionCapabilityData>();
@@ -120,8 +117,13 @@ export async function verifyLongMemEvalExpansionCapability(
   const parsed = parseLongMemEvalMatrixPromotionContract(input.contractContents);
   const authorization = LongMemEvalMatrixPromotionAuthorizationSchema.parse(
     await dependencies.authorize({
+      checkoutRoot: input.checkoutRoot,
+      contractPath: input.contractPath,
       contractRoot: input.contractRoot,
       contractContents: input.contractContents
+    }, {
+      resolveFrozenCodeIdentity: dependencies.resolveFrozenCodeIdentity,
+      computeExecutedDistIdentity: dependencies.computeExecutedDistIdentity
     })
   );
   assertAuthorizationBinding(parsed, authorization);
@@ -130,7 +132,10 @@ export async function verifyLongMemEvalExpansionCapability(
     contract: parsed.contract,
     sourceSelection: authorization.source_selection
   });
-  await assertCurrentCodeIdentity(input, parsed, dependencies);
+  await assertCurrentPromotionCodeIdentity(input, parsed, {
+    resolveFrozenCodeIdentity: dependencies.resolveFrozenCodeIdentity,
+    computeExecutedDistIdentity: dependencies.computeExecutedDistIdentity
+  });
   return sealExpansionCapability({
     contractSha256: parsed.sha256,
     matrixAuthorizationSha256: authorization.authorization_sha256,
@@ -208,42 +213,6 @@ function assertSourceExtractionAuthority(
         bindSnapshotRunProvenanceAuthority(manifest.run_provenance, authority)
       )) {
     throw new Error("source snapshot run authority is incomplete");
-  }
-}
-
-async function assertCurrentCodeIdentity(
-  input: LongMemEvalExpansionCapabilityInput,
-  parsed: ReturnType<typeof parseLongMemEvalMatrixPromotionContract>,
-  dependencies: LongMemEvalExpansionCapabilityDependencies
-): Promise<void> {
-  const frozen = await dependencies.resolveFrozenCodeIdentity({
-    checkoutRoot: input.checkoutRoot,
-    expectedCommitSha7: parsed.contract.code.commit_sha7,
-    env: {
-      ALAYA_BENCH_GATE_CONTRACT_PATH: input.contractPath,
-      ALAYA_BENCH_GATE_SHA256: parsed.sha256,
-      ALAYA_BENCH_WORKTREE_STATE_SHA256: parsed.contract.code.worktree_state_sha256
-    }
-  });
-  assertFrozenCodeIdentity(frozen, parsed.contract.code, parsed.sha256);
-  const executedDist = await dependencies.computeExecutedDistIdentity();
-  if (!isDeepStrictEqual(executedDist, parsed.contract.code.executed_dist)) {
-    throw new Error("current executed dist differs from promotion contract");
-  }
-}
-
-function assertFrozenCodeIdentity(
-  frozen: FrozenCodeIdentity | null,
-  code: LongMemEvalMatrixPromotionContract["code"],
-  contractSha256: string
-): void {
-  if (frozen === null) throw new Error("promotion contract did not verify current code");
-  if (frozen.gateSha256 !== contractSha256) {
-    throw new Error("live promotion contract digest differs from descriptor input");
-  }
-  if (frozen.commitSha !== code.commit_sha || frozen.commitSha7 !== code.commit_sha7 ||
-      frozen.worktreeStateSha256 !== code.worktree_state_sha256) {
-    throw new Error("current git identity differs from promotion contract");
   }
 }
 

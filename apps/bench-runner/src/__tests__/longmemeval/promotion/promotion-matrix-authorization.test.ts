@@ -102,6 +102,7 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
       exitCode: 0
     };
 
+    // @ts-expect-error Negative contract test deliberately omits the required B2 entry.
     expect(() => authorizeVerifiedLongMemEvalMatrix(diagnosticOnly))
       .toThrow(/four verified cells/u);
   });
@@ -110,6 +111,7 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     const fixture = matrixFixture();
     expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
+      // @ts-expect-error Negative contract test deliberately omits the required B2 entry.
       productDefaultReplication: undefined
     })).toThrow(/B2.*verified replication/u);
 

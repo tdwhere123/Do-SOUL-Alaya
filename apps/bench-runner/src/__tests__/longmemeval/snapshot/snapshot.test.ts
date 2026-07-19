@@ -19,7 +19,8 @@ import {
   snapshotSidecarPath,
   writeSnapshotManifest,
   writeSnapshotSidecar,
-  type LongMemEvalSnapshotManifest
+  type LongMemEvalSnapshotManifest,
+  type SnapshotExtractionProvenanceV3
 } from "../../../longmemeval/snapshot/materialize.js";
 import { EXTRACTION_CACHE_MANIFEST_VERSION } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 
@@ -59,7 +60,9 @@ function manifestFor(
   };
 }
 
-function supplementalExtractionProvenance(physicalProviderUrl: string) {
+function supplementalExtractionProvenance(
+  physicalProviderUrl: string
+): SnapshotExtractionProvenanceV3 {
   return {
     manifest_sha256: "a".repeat(64),
     schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,

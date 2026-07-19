@@ -50,12 +50,12 @@ describe("LongMemEval stage matrix replay", () => {
     expect(matrix.questions[0]).toMatchObject({
       classification: "ranked_miss",
       first_failure: "feature",
-      terminal_loss: "structural"
+      terminal_loss: "selection_order"
     });
     expect(matrix.summary.transitions).toMatchObject({
       feature: { gains: 0, losses: 1 },
-      lexical: { gains: 1, losses: 0 },
-      structural: { gains: 0, losses: 1 }
+      coverage: { gains: 1, losses: 0 },
+      selection_order: { gains: 0, losses: 1 }
     });
   });
 

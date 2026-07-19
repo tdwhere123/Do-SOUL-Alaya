@@ -321,7 +321,7 @@ describe("coverage-aware delivery", () => {
         [highFusedDupB.fusion.candidate_key, 0.15],
         [lowFusedNovel.fusion.candidate_key, 0.95]
       ]),
-      restorePublicRelevanceOrderAfterCoverage: true
+      finalOrderAfterCoverage: "public_relevance"
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([

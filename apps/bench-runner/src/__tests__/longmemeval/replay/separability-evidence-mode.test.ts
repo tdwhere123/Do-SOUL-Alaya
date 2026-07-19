@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { resolveSeparabilityEvidenceMode } from
   "../../../../scripts/longmemeval-replay/separability-evidence-mode.mjs";
@@ -15,12 +15,25 @@ describe("separability evidence mode", () => {
       .toThrow(/diagnostics must cover every current cohort row/u);
   });
 
-  it("accepts complete current coverage and the explicit cohort-less legacy mode", () => {
+  it("accepts complete current coverage and the explicit pairwise-only legacy mode", () => {
     const rows = Array.from({ length: 7 }, (_, index) => cohortRow(`q-${index}`, true));
     const diagnostics = { questions: rows.map(diagnostic) };
 
-    expect(resolveSeparabilityEvidenceMode(diagnostics, { cohort: { rows } }).size).toBe(7);
-    expect(resolveSeparabilityEvidenceMode(diagnostics, { legacyDiagnostic: true })).toBeNull();
+    const current = resolveSeparabilityEvidenceMode(diagnostics, { cohort: { rows } });
+    const legacy = resolveSeparabilityEvidenceMode(diagnostics, {
+      legacyPairwiseDiagnostic: true
+    });
+    expect(current.size).toBe(7);
+    expect(legacy).toBeNull();
+    expectTypeOf(current).toMatchTypeOf<ReadonlyMap<string, unknown>>();
+    expectTypeOf(legacy).toEqualTypeOf<null>();
+  });
+
+  it("refuses legacyDiagnostic as silent e2e authorization", () => {
+    expect(() => resolveSeparabilityEvidenceMode(
+      { questions: [] },
+      { legacyDiagnostic: true }
+    )).toThrow(/legacyDiagnostic cannot authorize separability e2e metrics/u);
   });
 
   it("rejects a marked legacy row from the current cohort path", () => {

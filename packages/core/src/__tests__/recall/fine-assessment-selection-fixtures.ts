@@ -42,8 +42,7 @@ export function stageRanks(
   return [
     diagnostic?.rank_after_feature_rerank,
     diagnostic?.rank_after_coverage_selector,
-    diagnostic?.coverage_selector_action,
-    diagnostic?.session_coverage_action
+    diagnostic?.coverage_selector_action
   ];
 }
 

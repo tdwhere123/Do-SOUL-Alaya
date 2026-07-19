@@ -2,11 +2,20 @@ import { validateEvidenceBundle } from "./contract.mjs";
 
 export function resolveSeparabilityEvidenceMode(diagnostics, options) {
   if (options === null || typeof options !== "object") {
-    throw new Error("separability requires a current cohort or legacyDiagnostic=true");
+    throw new Error(
+      "separability requires a current cohort or legacyPairwiseDiagnostic=true"
+    );
+  }
+  if (options.legacyDiagnostic === true) {
+    throw new Error(
+      "legacyDiagnostic cannot authorize separability e2e metrics; use a current cohort, or legacyPairwiseDiagnostic=true for pairwise-only unit diagnostics"
+    );
   }
   if (options.cohort !== undefined) {
-    if (options.legacyDiagnostic === true) {
-      throw new Error("separability current cohort and legacyDiagnostic=true are mutually exclusive");
+    if (options.legacyPairwiseDiagnostic === true) {
+      throw new Error(
+        "separability current cohort and legacyPairwiseDiagnostic=true are mutually exclusive"
+      );
     }
     const contract = validateEvidenceBundle({
       manifest: null,
@@ -18,8 +27,10 @@ export function resolveSeparabilityEvidenceMode(diagnostics, options) {
     }
     return indexCohort(options.cohort);
   }
-  if (options.legacyDiagnostic !== true) {
-    throw new Error("separability requires a current cohort or legacyDiagnostic=true");
+  if (options.legacyPairwiseDiagnostic !== true) {
+    throw new Error(
+      "separability requires a current cohort or legacyPairwiseDiagnostic=true"
+    );
   }
   return null;
 }

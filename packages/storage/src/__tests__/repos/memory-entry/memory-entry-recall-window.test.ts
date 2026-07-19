@@ -55,6 +55,36 @@ describe("SqliteMemoryEntryRepo recall tier window", () => {
     expect(second.next_cursor).toBeNull();
   }, 30_000);
 
+  it("consumes every row across multiple window pages", async () => {
+    const { repo } = await createRepo();
+    await seedRows(repo, 1_250);
+
+    const memories = [];
+    let cursor: { readonly created_at: string; readonly object_id: string } | undefined;
+    let pages = 0;
+    for (;;) {
+      const page = await repo.findRecallTierWindow!({
+        workspaceId: "workspace-1",
+        tier: StorageTier.HOT,
+        limit: 500,
+        ...(cursor === undefined ? {} : { cursor })
+      });
+      pages += 1;
+      memories.push(...page.memories);
+      if (!page.truncated) break;
+      expect(page.next_cursor).not.toBeNull();
+      cursor = page.next_cursor ?? undefined;
+    }
+
+    expect(pages).toBe(3);
+    expect(memories).toHaveLength(1_250);
+    expect(memories.map((entry) => entry.object_id)).toEqual(
+      Array.from({ length: 1_250 }, (_, index) =>
+        `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`
+      )
+    );
+  }, 30_000);
+
   it("preserves tier and lifecycle filtering plus chronological ordering", async () => {
     const { repo } = await createRepo();
     await repo.create(createMemoryEntry({

@@ -82,11 +82,11 @@ describe("selectFineAssessmentCandidates", () => {
       dropped_reason: "max_total_tokens",
       rank_after_feature_rerank: 2,
       rank_after_coverage_selector: 2,
-      rank_after_session_coverage: 2,
-      coverage_selector_action: "kept",
-      session_coverage_action: "noop"
+      coverage_selector_action: "kept"
     });
-    expect(stageRanks(result, "shared-after-skip")).toEqual([4, 3, "promoted", "noop"]);
-    expect(stageRanks(result, "unrelated")).toEqual([3, 4, "displaced", "noop"]);
+    expect(oversizedDiagnostic?.rank_after_session_coverage).toBeUndefined();
+    expect(oversizedDiagnostic?.session_coverage_action).toBeUndefined();
+    expect(stageRanks(result, "shared-after-skip")).toEqual([4, 3, "promoted"]);
+    expect(stageRanks(result, "unrelated")).toEqual([3, 4, "displaced"]);
   });
 });

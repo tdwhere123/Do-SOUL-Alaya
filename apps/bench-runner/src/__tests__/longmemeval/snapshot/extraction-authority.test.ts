@@ -81,7 +81,9 @@ describe("snapshot extraction authority", () => {
     expect(JSON.stringify(compact)).not.toContain("secret");
 
     const run = compactSnapshotRunProvenance(runProvenance(manifest));
-    expect(run.extraction_cache?.supplemental_source_receipt).toEqual(
+    const runCache = run.extraction_cache;
+    if (runCache?.schema_version !== 3) throw new Error("expected current cache");
+    expect(runCache.supplemental_source_receipt).toEqual(
       compact.supplemental_source_receipt
     );
   });

@@ -20,10 +20,18 @@ export async function preflightEmbeddingProvider(
   options: EmbeddingProviderPreflightOptions = {}
 ): Promise<EmbeddingProviderPreflightResult> {
   const env = options.env ?? process.env;
-  if (env.ALAYA_EMBEDDING_PROVIDER?.trim() === "local_onnx") {
-    return preflightLocalOnnxProvider(env, options.timeoutMs);
+  const provider = env.ALAYA_EMBEDDING_PROVIDER?.trim() || "local_onnx";
+  switch (provider) {
+    case "local_onnx":
+      return preflightLocalOnnxProvider(env, options.timeoutMs);
+    case "openai":
+      return preflightOpenAiProvider(env, options);
+    default:
+      return {
+        ok: false,
+        message: `embedding provider preflight failed: unsupported provider ${provider}`
+      };
   }
-  return preflightOpenAiProvider(env, options);
 }
 
 async function preflightLocalOnnxProvider(

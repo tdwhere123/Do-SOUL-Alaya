@@ -343,6 +343,7 @@ export const BenchRecallDiagnosticsSchema = z
       "provider_missing",
       "query_missing",
       "empty_candidate_pool",
+      "not_attempted",
       "requested"
     ]).optional(),
     provider_degradation_reason: z.string().nullable(),

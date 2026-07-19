@@ -159,7 +159,7 @@ describe("production path provenance under fusion-only delivery", () => {
     expect(diagnostic.fusedRank).toBeGreaterThan(MAX_ENTRIES);
     expect(diagnostic.delivered).toBe(false);
     expect(diagnostic.finalRank).toBeNull();
-    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.rankAfterStructuralStage).toBeUndefined();
     expect(diagnostic.totalDelivered).toBe(MAX_ENTRIES);
     expect(diagnostic.naturalWindowSize).toBe(MAX_ENTRIES);
   });
@@ -172,7 +172,7 @@ describe("production path provenance under fusion-only delivery", () => {
     expect(diagnostic.pathContribution).toBeGreaterThan(0);
     expect(diagnostic.delivered).toBe(false);
     expect(diagnostic.finalRank).toBeNull();
-    expect(diagnostic.rankAfterStructuralStage).toBe(diagnostic.fusedRank);
+    expect(diagnostic.rankAfterStructuralStage).toBeUndefined();
   });
 });
 

@@ -341,7 +341,7 @@ function assertAnswerDropReasons(
 ): void {
   const expected = ledger.reduce((sum, round) => round.hasAnswer ? {
     candidate_absent: sum.candidate_absent + round.candidateAbsent +
-      (isSuccessfulEmptyExtraction(round) ? 1 : 0),
+      (isVerifiedEmptyAnswerWipeRound(round) ? 1 : 0),
     materialization_drop: sum.materialization_drop + round.materializationDrop
   } : sum, { candidate_absent: 0, materialization_drop: 0 });
   const actual = question.answerSeedDropReasons ?? {
@@ -353,16 +353,22 @@ function assertAnswerDropReasons(
   }
 }
 
-function isSuccessfulEmptyExtraction(round: LongMemEvalSnapshotSeedRound): boolean {
-  return round.extractionSource !== "fallback" &&
+function isVerifiedEmptyAnswerWipeRound(round: LongMemEvalSnapshotSeedRound): boolean {
+  if (round.memoryObjectIds.length > 0 || round.factsProduced > 0) return false;
+  if (round.candidateAbsent > 0 || round.materializationDrop > 0) return false;
+  // Successful empty official extraction.
+  if (
+    round.extractionSource !== "fallback" &&
     round.rawSignalCount === 0 &&
     round.draftCount === 0 &&
-    round.factsProduced === 0 &&
     round.parseDropped === 0 &&
-    round.compileOverflowDropped === 0 &&
-    round.candidateAbsent === 0 &&
-    round.materializationDrop === 0 &&
-    round.memoryObjectIds.length === 0;
+    round.compileOverflowDropped === 0
+  ) {
+    return true;
+  }
+  if (round.parseDropped > 0) return true;
+  if (round.compileOverflowDropped > 0) return true;
+  return round.extractionSource === "fallback";
 }
 
 function addTotals(totals: LedgerTotals, round: LongMemEvalSnapshotSeedRound): void {

@@ -82,8 +82,8 @@ it("keeps lexical evidence in fusion without overriding fused order", async () =
     );
     expect(diagnostic?.per_stream_rank.lexical_fts).not.toBeNull();
     expect(diagnostic?.fused_rank_contribution_per_stream.lexical_fts).toBeGreaterThan(0);
-    // Legacy lexical-priority stage stays retired (still tracks fused rank).
-    expect(diagnostic?.rank_after_lexical_priority).toBe(diagnostic?.fused_rank);
+    // Legacy lexical-priority stage is retired — not aliased to fused rank.
+    expect(diagnostic?.rank_after_lexical_priority).toBeUndefined();
     // Delivery order may diverge from fused_rank (deep-head reorder and coverage
     // packing); lexical must still land in the delivered set, not a separate stage.
     expect(diagnostic?.final_rank).not.toBeNull();
@@ -154,8 +154,8 @@ it("preserves fused order across legacy delivery stages", async () => {
     expect(gold?.final_rank).toBe(gold?.fused_rank);
     expect(peer?.final_rank).toBe(peer?.fused_rank);
     expect(gold?.rank_after_feature_rerank).toBe(gold?.fused_rank);
-    expect(gold?.rank_after_lexical_priority).toBe(gold?.fused_rank);
-    expect(gold?.rank_after_structural_reserve).toBe(gold?.fused_rank);
+    expect(gold?.rank_after_lexical_priority).toBeUndefined();
+    expect(gold?.rank_after_structural_reserve).toBeUndefined();
     expect(gold?.final_rank).toBeLessThan(peer?.final_rank ?? Number.MAX_SAFE_INTEGER);
   });
 

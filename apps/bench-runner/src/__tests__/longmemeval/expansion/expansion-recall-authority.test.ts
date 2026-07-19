@@ -123,7 +123,22 @@ describe("500Q expansion fill authority", () => {
         runCache.supplemental_source_receipt === undefined) {
       throw new Error("fixture requires current supplemental source provenance");
     }
-    runCache.supplemental_source_receipt.receipt_sha256 = "0".repeat(64);
+    const tamperedBundle = {
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        run_provenance: {
+          ...bundle.manifest.run_provenance!,
+          extraction_cache: {
+            ...runCache,
+            supplemental_source_receipt: {
+              ...runCache.supplemental_source_receipt,
+              receipt_sha256: "0".repeat(64)
+            }
+          }
+        }
+      }
+    };
 
     await expect(assertExpansionRecallAuthority({
       options: {
@@ -134,7 +149,7 @@ describe("500Q expansion fill authority", () => {
         simulateReport: "none",
         expansionCapability: fixture.capability
       },
-      bundle,
+      bundle: tamperedBundle,
       recallWeightOverrides: undefined,
       env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
     })).rejects.toThrow(/lineage|target cache authority/u);

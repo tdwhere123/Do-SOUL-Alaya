@@ -190,9 +190,9 @@ it("keeps buried path evidence without overriding the fused budget", async () =>
       expect(delivered.map((candidate) => candidate.object_id)).not.toContain("memory-gold");
       expect(goldDiagnostic?.final_rank).toBeNull();
       expect(goldDiagnostic?.rank_after_feature_rerank).toBe(goldDiagnostic?.fused_rank);
-      expect(goldDiagnostic?.rank_after_lexical_priority).toBe(goldDiagnostic?.fused_rank);
-      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
-      expect(goldDiagnostic?.reserved_by).toBe("none");
+      expect(goldDiagnostic?.rank_after_lexical_priority).toBeUndefined();
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
+      expect(goldDiagnostic?.reserved_by).toBeUndefined();
       expect(delivered.length).toBeLessThanOrEqual(5);
       const headDiagnostic = result.diagnostics?.candidates.find(
         (candidate) => candidate.object_id === delivered[0]?.object_id
@@ -230,8 +230,8 @@ it("delivers a structural candidate when fusion ranks it inside the budget", asy
 
       expect(delivered).toContain("memory-gold");
       expect(goldDiagnostic?.final_rank).toBe(goldDiagnostic?.pre_budget_rank);
-      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
-      expect(goldDiagnostic?.reserved_by).toBe("none");
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
+      expect(goldDiagnostic?.reserved_by).toBeUndefined();
       expect(goldDiagnostic?.pre_budget_rank ?? 99).toBeLessThanOrEqual(5);
     });
 
@@ -268,8 +268,8 @@ it("keeps fusion delivery within maxEntries when source-less synthesis rows matc
       const headDiagnostic = head ? diagnosticsById.get(head.object_id) : undefined;
       expect(headDiagnostic?.admission_planes).toContain("lexical");
       expect(headDiagnostic?.pre_budget_rank).toBe(1);
-      expect(headDiagnostic?.rank_after_structural_reserve).toBe(1);
-      expect(headDiagnostic?.reserved_by).toBe("none");
+      expect(headDiagnostic?.rank_after_structural_reserve).toBeUndefined();
+      expect(headDiagnostic?.reserved_by).toBeUndefined();
       expect(kinds.every((kind) => kind === "memory_entry")).toBe(true);
     });
 

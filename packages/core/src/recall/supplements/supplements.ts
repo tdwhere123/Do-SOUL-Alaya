@@ -25,6 +25,7 @@ export type EmbeddingSupplementCollectionStatus =
   | "provider_missing"
   | "query_missing"
   | "empty_candidate_pool"
+  | "not_attempted"
   | "requested";
 
 export type CollectedEmbeddingSupplementResult = EmbeddingRecallSupplementResult & Readonly<{
@@ -85,8 +86,9 @@ export async function collectEmbeddingSupplement(
 
   const preparedEmbeddingQuery = params.preparedEmbeddingQuery;
   if (preparedEmbeddingQuery === null) {
+    // Prepared path is supported but no handle was produced — do not label as requested.
     return params.preparedSupplementSupported
-      ? emptyRequestedEmbeddingSupplementResult()
+      ? emptyEmbeddingSupplementResult("not_attempted")
       : collectLegacyEmbeddingSupplement(params, embeddingRecallService, queryText);
   }
 
@@ -135,13 +137,6 @@ async function collectPreparedEmbeddingSupplement(
   });
 
   return withEmbeddingSupplementStatus(supplement);
-}
-
-function emptyRequestedEmbeddingSupplementResult(): CollectedEmbeddingSupplementResult {
-  return withEmbeddingSupplementStatus({
-    supplementaryEntries: Object.freeze([]),
-    similarityHintsByObjectId: Object.freeze({})
-  });
 }
 
 function withEmbeddingSupplementStatus(

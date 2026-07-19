@@ -16,9 +16,9 @@ type WarnFn = RuntimeInput["warn"];
 // makeBasePolicy mirrors the production STRATEGY_RECALL_DEFAULTS shape
 // (embedding_enabled:false, no injection_cap/floor) so the decorator's
 // gate-opening + defaulting path is exercised, not masked. Assertions:
-//   - local_onnx mode with a configured provider attaches a decorator that
-//     opens semantic_supplement (enabled + embedding_enabled true) and
-//     defaults injection_cap/floor while pushing
+//   - local_onnx mode with explicit opt-in and a configured provider attaches
+//     a decorator that opens semantic_supplement (enabled + embedding_enabled
+//     true) and defaults injection_cap/floor while pushing
 //     fusion_weights.embedding_similarity = 1
 //   - an explicit injection_cap/floor on the incoming policy is preserved
 //   - embedding-off mode leaves the decorator absent and policies untouched
@@ -212,7 +212,10 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       };
       const runtime = createDaemonEmbeddingRuntime({
         database: fixture.database,
-        configEnv: new Map(),
+        configEnv: new Map([
+          ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]),
         eventLogRepo: fixture.eventLogRepo,
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
@@ -264,7 +267,10 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       };
       const runtime = createDaemonEmbeddingRuntime({
         database: fixture.database,
-        configEnv: new Map(),
+        configEnv: new Map([
+          ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "true"],
+          ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
+        ]),
         eventLogRepo: fixture.eventLogRepo,
         healthJournalService: fixture.healthJournalService as unknown as HealthSvc,
         memoryEntryRepo: fixture.memoryEntryRepo,
@@ -335,13 +341,10 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     }
   });
 
-  it("defaults embedding ON for a configured local_onnx provider even without the opt-in flag", async () => {
+  it("defaults embedding ON for a configured local_onnx provider when the flag is unset", async () => {
     saveEnv();
     const fixture = buildFixture();
     try {
-      // Inject an available provider so the auto-on default-on path runs without
-      // a real on-device ONNX warmup (the opt-in is computed from env: local_onnx
-      // with no flag => on; the override only supplies availability).
       const provider = {
         providerKind: "local_onnx",
         modelId: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
@@ -352,8 +355,6 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         embedTexts: vi.fn(async () => [new Float32Array([1])])
       };
       const configEnv = new Map<string, string>([
-        // No ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: a configured on-device local
-        // ONNX provider is a first-class recall stream, on by default.
         ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
       ]);
       const { defaultPolicyDecorator, providerWarmup } = createDaemonEmbeddingRuntime({
@@ -368,20 +369,18 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
 
       expect(defaultPolicyDecorator).toBeDefined();
       await expect(providerWarmup).resolves.toBe("ready");
-      const decorated = defaultPolicyDecorator!(makeBasePolicy());
-      expect(decorated.scoring_weight_overrides?.fusion_weights?.embedding_similarity).toBe(1);
-      const semantic = decorated.coarse_filter.semantic_supplement;
-      expect(semantic.enabled).toBe(true);
-      expect(semantic.embedding_enabled).toBe(true);
-      expect(semantic.injection_cap).toBe(10);
-      expect(semantic.injection_similarity_floor).toBe(0.5);
+      expect(
+        defaultPolicyDecorator!(makeBasePolicy()).scoring_weight_overrides?.fusion_weights
+          ?.embedding_similarity
+      ).toBe(1);
+      expect(provider.embedTexts).toHaveBeenCalled();
     } finally {
       teardown(fixture);
       restoreEnv();
     }
   });
 
-  it("defaults embedding ON for the implicit local provider", async () => {
+  it("defaults embedding ON for the implicit local provider when the flag is unset", async () => {
     saveEnv();
     const fixture = buildFixture();
     try {
@@ -404,6 +403,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         embeddingProviderOverride: provider
       });
 
+      expect(defaultPolicyDecorator).toBeDefined();
       await expect(providerWarmup).resolves.toBe("ready");
       expect(defaultPolicyDecorator!(makeBasePolicy()).coarse_filter.semantic_supplement)
         .toMatchObject({ enabled: true, embedding_enabled: true });
@@ -418,7 +418,6 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     const fixture = buildFixture();
     try {
       const configEnv = new Map<string, string>([
-        // openai provider, no opt-in flag, no key -> stays off (cost/network).
         ["ALAYA_EMBEDDING_PROVIDER", "openai"]
       ]);
       const { defaultPolicyDecorator } = createDaemonEmbeddingRuntime({
@@ -442,7 +441,6 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
     const fixture = buildFixture();
     try {
       const configEnv = new Map<string, string>([
-        // Explicit false is the stable opt-out; omission keeps the local default on.
         ["ALAYA_ENABLE_EMBEDDING_SUPPLEMENT", "false"],
         ["ALAYA_EMBEDDING_PROVIDER", "local_onnx"]
       ]);

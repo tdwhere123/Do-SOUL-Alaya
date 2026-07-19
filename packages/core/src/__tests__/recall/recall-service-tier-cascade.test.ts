@@ -1,207 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  ControlPlaneObjectKind,
   MemoryDimension,
-  ObjectLifecycleState,
   ProjectMappingState,
-  RetentionPolicy,
   ScopeClass,
-  StorageTier,
-  type EventLogEntry,
-  type MemoryEntry,
-  type ProjectMappingAnchor,
-  type RecallPolicy,
-  type Slot,
-  type TaskObjectSurface
+  StorageTier
 } from "@do-soul/alaya-protocol";
 import {
   COLD_CASCADE_DECAY,
   MIN_RECALL_RESULTS,
   WARM_CASCADE_DECAY
 } from "../../recall/runtime/recall-service-helpers.js";
-import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
-
-function createTaskSurface(): TaskObjectSurface {
-  return {
-    runtime_id: "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
-    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
-    task_surface_ref: null,
-    expires_at: "2026-05-07T00:30:00.000Z",
-    derived_from: null,
-    retention_policy: RetentionPolicy.SESSION_ONLY,
-    surface_kind: "chat",
-    display_name: "deployment rules",
-    context_refs: []
-  };
-}
-
-function createMemoryEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
-  return {
-    object_id: "memory-1",
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: ObjectLifecycleState.ACTIVE,
-    created_at: "2026-05-07T00:00:00.000Z",
-    updated_at: "2026-05-07T00:00:00.000Z",
-    created_by: "system",
-    dimension: MemoryDimension.PROCEDURE,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: "Remember deployment rules for this repository.",
-    domain_tags: ["deployment"],
-    evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: StorageTier.HOT,
-    activation_score: 0.8,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null,
-    ...overrides
-  };
-}
-
-function createAnchor(overrides: Partial<ProjectMappingAnchor> = {}): ProjectMappingAnchor {
-  return {
-    object_id: "mapping-1",
-    object_kind: "project_mapping_anchor",
-    schema_version: 1,
-    lifecycle_state: ObjectLifecycleState.ACTIVE,
-    created_at: "2026-05-07T00:00:00.000Z",
-    updated_at: "2026-05-07T00:00:00.000Z",
-    created_by: "user_action",
-    global_object_id: "memory-1",
-    project_id: "workspace-1",
-    workspace_id: "workspace-1",
-    mapping_state: ProjectMappingState.SUGGESTED,
-    accepted_by: null,
-    last_transition_at: "2026-05-07T00:00:00.000Z",
-    ...overrides
-  };
-}
-
-function createDependencies(params: {
-  readonly hot?: readonly MemoryEntry[];
-  readonly warm?: readonly MemoryEntry[];
-  readonly cold?: readonly MemoryEntry[];
-  readonly slots?: readonly Slot[];
-  readonly projectMappings?: readonly ProjectMappingAnchor[];
-  readonly graphSupportPort?: RecallServiceDependencies["graphSupportPort"];
-  readonly findByWorkspaceId?: RecallServiceDependencies["memoryRepo"]["findByWorkspaceId"];
-  readonly findRecallTierWindow?: NonNullable<
-    RecallServiceDependencies["memoryRepo"]["findRecallTierWindow"]
-  >;
-  readonly warn?: RecallServiceDependencies["warn"];
-} = {}): {
-  readonly dependencies: RecallServiceDependencies;
-  readonly findByWorkspaceIdSpy: ReturnType<typeof vi.fn>;
-  readonly warnSpy: ReturnType<typeof vi.fn>;
-} {
-  const byTier = new Map<StorageTier, readonly MemoryEntry[]>([
-    [StorageTier.HOT, params.hot ?? []],
-    [StorageTier.WARM, params.warm ?? []],
-    [StorageTier.COLD, params.cold ?? []]
-  ]);
-  const defaultFindByWorkspaceId = async (
-      _workspaceId: string,
-      tier?: StorageTier,
-      page?: { readonly limit: number; readonly offset: number }
-    ) => {
-      const entries = byTier.get(tier ?? StorageTier.HOT) ?? [];
-      if (page === undefined) {
-        return entries;
-      }
-      return entries.slice(page.offset, page.offset + page.limit);
-    };
-  const findByWorkspaceIdSpy = vi.fn(params.findByWorkspaceId ?? defaultFindByWorkspaceId);
-  const warnSpy = vi.fn(params.warn ?? (() => undefined));
-
-  return {
-    dependencies: {
-      now: () => "2026-05-07T00:00:00.000Z",
-      generateRuntimeId: () => "85b3671a-d8d8-4848-9e5c-07d0a89f5ae9",
-      memoryRepo: {
-        findByWorkspaceId: findByWorkspaceIdSpy,
-        ...(params.findRecallTierWindow === undefined
-          ? {}
-          : { findRecallTierWindow: vi.fn(params.findRecallTierWindow) }),
-        findByDimension: vi.fn(async () => []),
-        findByScopeClass: vi.fn(async () => [])
-      },
-      warn: warnSpy,
-      slotRepo: {
-        findByWorkspace: vi.fn(async () => params.slots ?? [])
-      },
-      eventLogRepo: {
-        append: vi.fn(async (event: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
-          event_id: `event-${event.event_type}`,
-          created_at: "2026-05-07T00:00:00.000Z",
-          revision: 0,
-          ...event
-        })),
-        queryByEntity: vi.fn(async () => [])
-      },
-      graphSupportPort: params.graphSupportPort,
-      projectMappingPort: {
-        findByWorkspace: vi.fn(async () => params.projectMappings ?? [])
-      }
-    },
-    findByWorkspaceIdSpy,
-    warnSpy
-  };
-}
-
-function buildPolicy(service: RecallService, maxEntries = 10): RecallPolicy {
-  const basePolicy = service.buildDefaultPolicy("chat", createTaskSurface().runtime_id);
-  return {
-    ...basePolicy,
-    coarse_filter: {
-      ...basePolicy.coarse_filter,
-      deterministic_match: {
-        scope_filter: null,
-        dimension_filter: null,
-        domain_tag_filter: null
-      },
-      precomputed_rank: {
-        max_candidates: 50,
-        min_activation_score: null
-      },
-      semantic_supplement: {
-        enabled: false,
-        max_supplement: 0
-      }
-    },
-    fine_assessment: {
-      conflict_awareness: false,
-      budgets: {
-        max_entries: maxEntries,
-        max_total_tokens: 10_000,
-        per_dimension_limits: null
-      }
-    }
-  };
-}
-
-async function recallWith(params: Parameters<typeof createDependencies>[0], maxEntries = 10) {
-  const { dependencies, findByWorkspaceIdSpy, warnSpy } = createDependencies(params);
-  const service = new RecallService(dependencies);
-  const result = await service.recall({
-    taskSurface: createTaskSurface(),
-    workspaceId: "workspace-1",
-    strategy: "chat",
-    policyOverride: buildPolicy(service, maxEntries)
-  });
-  return { result, findByWorkspaceIdSpy, warnSpy };
-}
+import {
+  createAnchor,
+  createMemoryEntry,
+  recallWith
+} from "./coarse-filter/recall-tier-cascade-fixtures.js";
 
 describe("RecallService tier cascade", () => {
   it("keeps the HOT-only fast path output identical when HOT reaches threshold", async () => {
@@ -267,18 +80,37 @@ describe("RecallService tier cascade", () => {
     expect(hotCalls[1]?.[2]).toEqual({ limit: 512, offset: 512 });
   }, 30_000);
 
-  it("loads the bounded recall tier window in one repo call when supported", async () => {
+  it("loads the recall tier window through cursor pages when supported", async () => {
     const hot = Array.from({ length: 600 }, (_, index) =>
       createMemoryEntry({
         object_id: `hot-${String(index).padStart(3, "0")}`,
+        created_at: `2026-05-07T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
         activation_score: 0.9 - index * 0.001
       })
     );
-    const findRecallTierWindow = vi.fn(async () => ({
-      memories: hot,
-      next_cursor: null,
-      truncated: false
-    }));
+    const findRecallTierWindow = vi.fn(async (query: {
+      readonly workspaceId: string;
+      readonly tier: StorageTier;
+      readonly limit: number;
+      readonly cursor?: { readonly created_at: string; readonly object_id: string };
+    }) => {
+      const start = query.cursor === undefined
+        ? 0
+        : hot.findIndex((entry) =>
+          entry.created_at === query.cursor?.created_at
+          && entry.object_id === query.cursor.object_id
+        ) + 1;
+      const page = hot.slice(start, start + query.limit);
+      const truncated = start + page.length < hot.length;
+      const last = page.at(-1);
+      return {
+        memories: page,
+        next_cursor: truncated && last !== undefined
+          ? { created_at: last.created_at, object_id: last.object_id }
+          : null,
+        truncated
+      };
+    });
 
     const { result, findByWorkspaceIdSpy } = await recallWith({
       hot,
@@ -286,11 +118,20 @@ describe("RecallService tier cascade", () => {
     });
 
     expect(result.candidates.length).toBeGreaterThan(0);
-    expect(findRecallTierWindow).toHaveBeenCalledTimes(1);
-    expect(findRecallTierWindow).toHaveBeenCalledWith({
+    expect(findRecallTierWindow).toHaveBeenCalledTimes(2);
+    expect(findRecallTierWindow).toHaveBeenNthCalledWith(1, {
       workspaceId: "workspace-1",
       tier: StorageTier.HOT,
-      limit: 102_400
+      limit: 500
+    });
+    expect(findRecallTierWindow).toHaveBeenNthCalledWith(2, {
+      workspaceId: "workspace-1",
+      tier: StorageTier.HOT,
+      limit: 500,
+      cursor: {
+        created_at: hot[499]!.created_at,
+        object_id: hot[499]!.object_id
+      }
     });
     expect(findByWorkspaceIdSpy).not.toHaveBeenCalled();
   }, 30_000);

@@ -3,7 +3,8 @@
 #
 # Usage:
 #   apps/bench-runner/scripts/run-full-locomo-bench.sh \
-#     [--embedding disabled|env] [--limit M] [--offset N] [--data-dir path] [--history-root path]
+#     [--embedding disabled|env] [--embedding-provider openai|local_onnx] \
+#     [--limit M] [--offset N] [--data-dir path] [--history-root path]
 
 set -euo pipefail
 
@@ -14,6 +15,7 @@ export BENCH_COMMIT_SHA7
 
 EMBEDDING=""
 EMBEDDING_SPECIFIED=0
+EMBEDDING_PROVIDER="local_onnx"
 LIMIT=""
 OFFSET=""
 DATA_DIR="${BENCH_LOCOMO_DATA_DIR:-apps/bench-runner/data/locomo}"
@@ -107,6 +109,7 @@ ensure_bench_runner_build_fresh
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --embedding) EMBEDDING="$2"; EMBEDDING_SPECIFIED=1; shift 2;;
+    --embedding-provider) EMBEDDING_PROVIDER="$2"; shift 2;;
     --limit) LIMIT="$2"; shift 2;;
     --offset) OFFSET="$2"; shift 2;;
     --data-dir) DATA_DIR="$2"; shift 2;;
@@ -125,6 +128,11 @@ else
   EMBEDDINGS=("disabled" "env")
 fi
 
+case "$EMBEDDING_PROVIDER" in
+  openai|local_onnx) ;;
+  *) echo "unknown embedding provider: $EMBEDDING_PROVIDER" >&2; exit 2;;
+esac
+
 requires_env_embedding=0
 for embedding in "${EMBEDDINGS[@]}"; do
   if [[ "$embedding" == "env" ]]; then
@@ -133,29 +141,29 @@ for embedding in "${EMBEDDINGS[@]}"; do
 done
 
 if (( requires_env_embedding == 1 )); then
-  secret_ref="${ALAYA_OPENAI_SECRET_REF:-env:OPENAI_API_KEY}"
-  case "$secret_ref" in
-    env:*)
-      secret_var="${secret_ref#env:}"
-      if [[ -z "$secret_var" || -z "${!secret_var:-}" ]]; then
-        echo "--embedding env requires ALAYA_OPENAI_SECRET_REF or a non-empty OPENAI_API_KEY; missing env:${secret_var:-OPENAI_API_KEY}" >&2
-        exit 2
-      fi
-      ;;
-    file:*)
-      secret_file="${secret_ref#file:}"
-      if [[ -z "$secret_file" || ! -r "$secret_file" || ! -s "$secret_file" ]]; then
-        echo "--embedding env requires a readable non-empty secret file from ALAYA_OPENAI_SECRET_REF" >&2
-        exit 2
-      fi
-      ;;
-    keychain:*) ;;
-    *)
-      echo "--embedding env requires ALAYA_OPENAI_SECRET_REF to use env:, file:, or keychain:" >&2
-      exit 2
-      ;;
-  esac
+  if [[ "$EMBEDDING_PROVIDER" == "openai" ]]; then
+    secret_ref="${ALAYA_OPENAI_SECRET_REF:-env:OPENAI_API_KEY}"
+    case "$secret_ref" in
+      env:*)
+        secret_var="${secret_ref#env:}"
+        if [[ -z "$secret_var" || -z "${!secret_var:-}" ]]; then
+          echo "--embedding env with provider=openai requires a non-empty secret; missing env:${secret_var:-OPENAI_API_KEY}" >&2
+          exit 2
+        fi
+        ;;
+      file:*)
+        secret_file="${secret_ref#file:}"
+        if [[ -z "$secret_file" || ! -r "$secret_file" || ! -s "$secret_file" ]]; then
+          echo "--embedding env with provider=openai requires a readable non-empty secret file" >&2
+          exit 2
+        fi
+        ;;
+      keychain:*) ;;
+      *) echo "provider=openai requires ALAYA_OPENAI_SECRET_REF to use env:, file:, or keychain:" >&2; exit 2;;
+    esac
+  fi
 
+  export ALAYA_EMBEDDING_PROVIDER="$EMBEDDING_PROVIDER"
   "${NODE_RUNNER[@]}" apps/bench-runner/bin/embedding-provider-preflight.mjs
 fi
 
@@ -204,6 +212,7 @@ run_one() {
   echo "[$(date -u -Iseconds)] locomo full embedding=$embedding limit=${LIMIT:-full} offset=${OFFSET:-0} data_dir=$DATA_DIR" | tee "$log"
   "${NODE_RUNNER[@]}" apps/bench-runner/bin/alaya-bench-runner.mjs locomo \
     --embedding "$embedding" \
+    --embedding-provider "$EMBEDDING_PROVIDER" \
     "${optional_args[@]}" \
     --data-dir "$DATA_DIR" \
     --history-root "$HISTORY_ROOT" \

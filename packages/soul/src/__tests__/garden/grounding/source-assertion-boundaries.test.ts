@@ -4,11 +4,6 @@ import { resolveSourceAssertion } from "../../../garden/grounding/source-asserti
 describe("source assertion boundaries", () => {
   it.each([
     [
-      "I redeemed a coupon last Sunday, which surprised me because I had forgotten it.",
-      "I redeemed a coupon last Sunday",
-      "I redeemed a coupon last Sunday"
-    ],
-    [
       "By the way, it took me and my friends around 5 hours to move everything into the " +
         "new apartment, but it was worth it to be closer to work.",
       "it took me and my friends around 5 hours to move everything into the new apartment",
@@ -20,6 +15,117 @@ describe("source assertion boundaries", () => {
     assertion
   ) => {
     expect(resolveSourceAssertion(source, matchedText)).toEqual({ status: "grounded", assertion });
+  });
+
+  it.each([
+    [
+      "I redeemed a coupon last Sunday, which was a nice surprise since I had forgotten it.",
+      "I redeemed a coupon last Sunday",
+      "I redeemed a coupon last Sunday"
+    ],
+    [
+      "User: I redeemed a coupon last Sunday, which surprised me because I had forgotten it.\n" +
+        "Assistant: Nice find.",
+      "I redeemed a coupon last Sunday",
+      "I redeemed a coupon last Sunday"
+    ],
+    [
+      "For my sister's birthday, I got her a yellow dress and matching earrings.",
+      "I got her a yellow dress and matching earrings",
+      "For my sister's birthday, I got her a yellow dress and matching earrings."
+    ],
+    [
+      "I'm thinking of going back to Hawaii, I loved it when I went with my family.",
+      "I loved it when I went with my family",
+      "I'm thinking of going back to Hawaii, I loved it when I went with my family."
+    ],
+    [
+      "I made a lemon blueberry cake for my niece and it was a huge hit.",
+      "I made a lemon blueberry cake for my niece and it was a huge hit.",
+      "I made a lemon blueberry cake for my niece and it was a huge hit."
+    ],
+    [
+      "I finally beat that last boss in the Dark Souls 3 DLC last weekend.",
+      "I finally beat that last boss in the Dark Souls 3 DLC last weekend.",
+      "I finally beat that last boss in the Dark Souls 3 DLC last weekend."
+    ],
+    [
+      "I've been listening to this playlist on Spotify that I created, called Summer Vibes.",
+      "I've been listening to this playlist on Spotify that I created, called Summer Vibes.",
+      "I've been listening to this playlist on Spotify that I created, called Summer Vibes."
+    ]
+  ])("grounds source-verbatim assertions with a local antecedent: %s", (
+    source,
+    matchedText,
+    assertion
+  ) => {
+    expect(resolveSourceAssertion(source, matchedText)).toEqual({ status: "grounded", assertion });
+  });
+
+  it.each([
+    [
+      "The play I attended was actually a production of The Glass Menagerie, have you heard of it?",
+      "The play I attended was actually a production of The Glass Menagerie",
+      "The play I attended was actually a production of The Glass Menagerie"
+    ],
+    [
+      "I have fished in Lake Michigan. I caught 12 largemouth bass on my last trip there.",
+      "I caught 12 largemouth bass on my last trip there",
+      "I have fished in Lake Michigan. I caught 12 largemouth bass on my last trip there."
+    ],
+    [
+      "I made a lemon blueberry cake for my niece's birthday party and it was a huge hit.",
+      "I made a lemon blueberry cake for my niece's birthday party and it was a huge hit.",
+      "I made a lemon blueberry cake for my niece's birthday party and it was a huge hit."
+    ],
+    [
+      "I got my new stand mixer as a birthday gift from my sister, and it's been a game-changer.",
+      "I got my new stand mixer as a birthday gift from my sister, and it's been a game-changer.",
+      "I got my new stand mixer as a birthday gift from my sister, and it's been a game-changer."
+    ],
+    [
+      "I've been using a lavender shampoo that I picked up at Trader Joe's, and it's doing wonders.",
+      "I've been using a lavender shampoo that I picked up at Trader Joe's, and it's doing wonders.",
+      "I've been using a lavender shampoo that I picked up at Trader Joe's, and it's doing wonders."
+    ],
+    [
+      "My recent trip was to Outer Banks in North Carolina - it took four hours to drive there.",
+      "My recent trip was to Outer Banks in North Carolina - it took four hours to drive there.",
+      "My recent trip was to Outer Banks in North Carolina - it took four hours to drive there."
+    ],
+    [
+      "I've used my GPS, like when I drove for six hours to Washington D.C. recently, " +
+        "but I'm not sure about my next route.",
+      "I drove for six hours to Washington D.C. recently",
+      "I've used my GPS, like when I drove for six hours to Washington D.C. recently"
+    ],
+    [
+      "I stayed in a hostel in Tokyo that cost around $30 per night, so it's possible to find deals.",
+      "I stayed in a hostel in Tokyo that cost around $30 per night",
+      "I stayed in a hostel in Tokyo that cost around $30 per night, so it's possible to find deals."
+    ],
+    [
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, " +
+        "and it's got all these chill tracks that are perfect for relaxing.",
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, " +
+        "and it's got all these chill tracks that are perfect for relaxing.",
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, " +
+        "and it's got all these chill tracks that are perfect for relaxing."
+    ],
+    [
+      "I've fished in Lake Michigan, and I've found that spinner lures work well. " +
+        "I caught 12 largemouth bass on my last trip there, so you could target those as well.",
+      "I caught 12 largemouth bass on my last trip there",
+      "I've fished in Lake Michigan, and I've found that spinner lures work well. " +
+        "I caught 12 largemouth bass on my last trip there, so you could target those as well."
+    ]
+  ])("closes compound assertions without rewriting their source: %s", (
+    source,
+    matchedText,
+    assertion
+  ) => {
+    expect(resolveSourceAssertion(source, matchedText)).toEqual({ status: "grounded", assertion });
+    expect(source.includes(assertion)).toBe(true);
   });
 
   it.each([
@@ -48,6 +154,99 @@ describe("source assertion boundaries", () => {
     expect(resolveSourceAssertion(source, matchedText)).toEqual({
       status: "rejected",
       reason: "matched_text_absent"
+    });
+  });
+
+  it.each([
+    ["I told Bob, who already knew, the secret.", "I told Bob"],
+    ["I am, which is true.", "I am"],
+    ["I think, which is fine.", "I think"],
+    ["I almost quit, which I didn't.", "I almost quit"],
+    ["I quit my job, which she later said wasn't what happened.", "I quit my job"],
+    ["I quit my job, which was a lie.", "I quit my job"],
+    ["I quit my job, which turned out to be a misunderstanding.", "I quit my job"],
+    ["I almost quit; which I didn't.", "I almost quit"],
+    ["I almost quit — which I didn't.", "I almost quit"],
+    ["I almost quit (which I didn't).", "I almost quit"]
+  ])("rejects relative-clause prefixes without classifying their semantics: %s", (
+    source,
+    matchedText
+  ) => {
+    expect(resolveSourceAssertion(source, matchedText)).toMatchObject({ status: "rejected" });
+  });
+
+  it.each([
+    ["I quit my job, which I didn't regret.", "I quit my job"],
+    ["I quit my job, which I never did regret.", "I quit my job"],
+    ["I chose the blue dress, which was wrong for the occasion.", "I chose the blue dress"],
+    [
+      "I redeemed a coupon last Sunday, which surprised me because I had forgotten it was fake.",
+      "I redeemed a coupon last Sunday"
+    ]
+  ])("does not guess whether a relative suffix retracts its prefix: %s", (source, matchedText) => {
+    expect(resolveSourceAssertion(source, matchedText)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects the safe surprise wording when the proposed assertion is ambiguous", () => {
+    const source =
+      "I redeemed a coupon last Sunday. Later, I redeemed a coupon last Sunday, " +
+      "which surprised me because I had forgotten it.";
+    expect(resolveSourceAssertion(source, "I redeemed a coupon last Sunday")).toEqual({
+      status: "rejected",
+      reason: "matched_text_ambiguous"
+    });
+  });
+
+  it.each([
+    ["I think so", "I think so"],
+    ["I am sure", "I am sure"],
+    ["I'm sure", "I'm sure"],
+    ["I’m sure", "I’m sure"],
+    ["I guess so", "I guess so"],
+    ["I want", "I want"],
+    ["I need", "I need"],
+    ["I hope", "I hope"],
+    ["I believe", "I believe"],
+    ["I was", "I was"],
+    ["I can", "I can"],
+    ["I should", "I should"],
+    ["I will", "I will"],
+    ["I do", "I do"],
+    ["I'd say", "I'd say"]
+  ])("rejects vacuous first-person stubs: %s", (source, matchedText) => {
+    expect(resolveSourceAssertion(source, matchedText)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects a duration prefix whose object is still an unresolved reference", () => {
+    const source = "it took me 5 hours to finish it, but it was worth it";
+    const matchedText = "it took me 5 hours to finish it";
+    expect(resolveSourceAssertion(source, matchedText)).toMatchObject({
+      status: "rejected",
+      reason: "source_assertion_not_self_contained"
+    });
+  });
+
+  it("keeps non-verbatim reporting paraphrases deferred", () => {
+    const source = "I remember Alex telling me he marinated the BBQ ribs for 24 hours.";
+    const matchedText = "Alex told me he marinated the BBQ ribs for 24 hours";
+    expect(resolveSourceAssertion(source, matchedText)).toEqual({
+      status: "rejected",
+      reason: "matched_text_absent"
+    });
+  });
+
+  it("keeps cross-sentence template-slot anaphora deferred", () => {
+    const source = "I'll include the location where I met them. For Sophia, it was a cafe.";
+    expect(resolveSourceAssertion(source, source)).toMatchObject({ status: "rejected" });
+  });
+
+  it.each([
+    ["My sister met my mother, and I gave her a gift.", "My sister met my mother, and I gave her a gift."],
+    ["I traveled from Paris to Rome. I enjoyed it there.", "I enjoyed it there."]
+  ])("rejects a local pronoun with competing antecedents: %s", (source, matchedText) => {
+    expect(resolveSourceAssertion(source, matchedText)).toMatchObject({
+      status: "rejected",
+      reason: "source_assertion_not_self_contained"
     });
   });
 });

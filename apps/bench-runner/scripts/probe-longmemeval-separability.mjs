@@ -14,6 +14,10 @@ import {
 import { assignGroupedStratifiedFolds } from "./longmemeval-replay/separability-folds.mjs";
 import { runBoundaryObjectiveLane } from "./longmemeval-replay/separability-boundary-objective.mjs";
 import { resolveSeparabilityEvidenceMode } from "./longmemeval-replay/separability-evidence-mode.mjs";
+import {
+  compareSeparabilityTracks,
+  renderSeparabilityTrackReport
+} from "./longmemeval-replay/separability-report.mjs";
 import { isScorableMeasurementCohort, measurementUnscorableReason } from "./longmemeval-replay/measurement-status.mjs";
 
 const ITERATIONS = 300;
@@ -23,6 +27,9 @@ const TRACKS = ["baseline", "typed_path"];
 
 export function runSeparabilityProbe(diagnostics, options) {
   const cohortById = resolveSeparabilityEvidenceMode(diagnostics, options);
+  const evidenceMode = cohortById === null
+    ? "legacy_pairwise_diagnostic"
+    : "current_cohort";
   const emit = createProgressEmitter(options.on_progress);
   emit({ stage: "probe_start" });
   const questions = answerableQuestions(diagnostics, cohortById);
@@ -31,7 +38,7 @@ export function runSeparabilityProbe(diagnostics, options) {
   const assignments = assignGroupedStratifiedFolds(questions, options.fold_count ?? 5);
   const foldCount = new Set(assignments.values()).size;
   const tracks = Object.fromEntries(TRACKS.map((track) => [
-    track, runTrack(questions, assignments, foldCount, track, cohortById, emit)
+    track, runTrack(questions, assignments, foldCount, track, cohortById, evidenceMode, emit)
   ]));
   assertIdenticalQuestionSets(tracks.baseline.rows, tracks.typed_path.rows);
   const objectiveLane = runBoundaryObjectiveLane(questions, assignments, foldCount, {
@@ -43,6 +50,7 @@ export function runSeparabilityProbe(diagnostics, options) {
   emit({ stage: "probe_complete" });
   return Object.freeze({
     schema_version: "longmemeval-separability.v1",
+    evidence_mode: evidenceMode,
     score_semantics: "ordinal_pairwise_linear_score",
     optimizer: Object.freeze({
       initialization: "zeros", iterations: ITERATIONS,
@@ -61,11 +69,11 @@ export function runSeparabilityProbe(diagnostics, options) {
     feature_availability: summarizeFeatureAvailability(questions),
     tracks: Object.freeze(tracks),
     objective_lane: objectiveLane,
-    comparison: compareTracks(tracks.baseline, tracks.typed_path)
+    comparison: compareSeparabilityTracks(tracks.baseline, tracks.typed_path)
   });
 }
 
-function runTrack(questions, assignments, foldCount, track, cohortById, emit) {
+function runTrack(questions, assignments, foldCount, track, cohortById, evidenceMode, emit) {
   const predictions = new Map();
   const foldModels = [];
   emit({ stage: "track_start", track });
@@ -94,24 +102,7 @@ function runTrack(questions, assignments, foldCount, track, cohortById, emit) {
   }
   const rows = questions.map((question) =>
     renderQuestionRow(question, predictions.get(question.question_id), cohortById));
-  const measurementRows = rows.filter((row) => row.status !== "unscorable");
-  const anyAt5 = rows.filter((row) => row.any_at_5 === true).length;
-  const currentHits = measurementRows.filter((row) => row.current_any_at_5).length;
-  const currentPairwiseHits = rows.filter((row) => row.status === "scored" && row.current_any_at_5).length;
-  return Object.freeze({
-    track,
-    rows: Object.freeze(rows),
-    fold_models: Object.freeze(foldModels),
-    any_at_5_count: anyAt5,
-    runtime_scorable_any_at_5: ratio(anyAt5, measurementRows.length),
-    end_to_end_projection_any_at_5: ratio(anyAt5, measurementRows.length),
-    current_any_at_5_count: currentHits,
-    current_end_to_end_any_at_5: ratio(currentHits, measurementRows.length),
-    gain_count: rows.filter((row) => row.any_at_5 === true && !row.current_any_at_5).length,
-    loss_count: rows.filter((row) => row.any_at_5 === false && row.current_any_at_5).length,
-    retrieval_conditional_net_gain_count: anyAt5 - currentPairwiseHits,
-    question_type_metrics: summarizeQuestionTypes(rows)
-  });
+  return renderSeparabilityTrackReport({ track, rows, foldModels, evidenceMode });
 }
 
 function trainPairwiseRanker(questions, track, pipeline, onProgress) {
@@ -180,6 +171,7 @@ function renderQuestionRow(question, prediction, cohortById) {
       question_id: question.question_id,
       question_type: question.question_type ?? null,
       status: measurementScorable ? "pairwise_ineligible" : "unscorable",
+      measurement_scorable: measurementScorable,
       unscorable_reason: measurementScorable ? null
         : unscorableReason(question, cohortById?.get(question.question_id)),
       current_any_at_5: question.hit_at_5 === true,
@@ -192,46 +184,11 @@ function renderQuestionRow(question, prediction, cohortById) {
     question_id: question.question_id,
     question_type: question.question_type ?? null,
     status: "scored",
+    measurement_scorable: measurementScorable,
     unscorable_reason: null,
     current_any_at_5: question.hit_at_5 === true,
     ...prediction
   });
-}
-
-function compareTracks(baseline, typedPath) {
-  const baselineById = new Map(baseline.rows.map((row) => [row.question_id, row]));
-  const uniqueGains = typedPath.rows.filter((row) =>
-    row.any_at_5 === true && baselineById.get(row.question_id)?.any_at_5 === false
-  );
-  const uniqueLosses = typedPath.rows.filter((row) =>
-    row.any_at_5 === false && baselineById.get(row.question_id)?.any_at_5 === true
-  );
-  return Object.freeze({
-    baseline_gain_count: baseline.gain_count,
-    baseline_loss_count: baseline.loss_count,
-    typed_path_unique_gain_count: uniqueGains.length,
-    typed_path_unique_loss_count: uniqueLosses.length,
-    typed_path_unique_gain_question_ids: Object.freeze(uniqueGains.map((row) => row.question_id)),
-    typed_path_unique_loss_question_ids: Object.freeze(uniqueLosses.map((row) => row.question_id))
-  });
-}
-
-function summarizeQuestionTypes(rows) {
-  const types = [...new Set(rows.map((row) => row.question_type ?? "unknown"))].sort();
-  return Object.freeze(types.map((type) => {
-    const members = rows.filter((row) => (row.question_type ?? "unknown") === type);
-    const scored = members.filter((row) => row.status === "scored");
-    const measurementScorable = members.filter((row) => row.status !== "unscorable");
-    return Object.freeze({
-      question_type: type,
-      dataset_answerable_count: members.length,
-      runtime_scorable_count: measurementScorable.length,
-      pairwise_eligible_count: scored.length,
-      any_at_5_count: scored.filter((row) => row.any_at_5 === true).length,
-      gain_count: scored.filter((row) => row.any_at_5 === true && !row.current_any_at_5).length,
-      loss_count: scored.filter((row) => row.any_at_5 === false && row.current_any_at_5).length
-    });
-  }));
 }
 
 function answerableQuestions(diagnostics, cohortById) {
@@ -259,14 +216,19 @@ function isLegacyDiagnosticAnswerable(question) {
 
 function isMeasurementScorable(question, cohortById = null) {
   if (question.candidate_pool_complete !== true) return false;
-  if (cohortById === null) return hasGoldDistractorPair(question);
+  // Pairwise-only legacy mode must never claim e2e measurement scorable.
+  if (cohortById === null) return false;
   const row = cohortById.get(question.question_id);
   if (row?.candidate_pool_complete !== true || !isScorableMeasurementCohort(row)) return false;
   assertCompleteReplayQuestion(question, row);
   return true;
 }
 function isPairwiseEligible(question, cohortById = null) {
-  return isMeasurementScorable(question, cohortById) && hasGoldDistractorPair(question);
+  if (question.candidate_pool_complete !== true || !hasGoldDistractorPair(question)) {
+    return false;
+  }
+  if (cohortById === null) return true;
+  return isMeasurementScorable(question, cohortById);
 }
 function hasGoldDistractorPair(question) {
   const gold = goldObjectIds(question);

@@ -1,3 +1,16 @@
+import {
+  canExpandAcrossSentenceBoundary,
+  coordinateSpan,
+  hasDirectQuestionBoundary,
+  isIncompleteTerminalAbbreviation,
+  sentenceSpans,
+  type AssertionSpan
+} from "./source-assertion/clause-spans.js";
+import {
+  hasUnresolvedReference,
+  startsWithChineseThirdPersonSubject
+} from "./source-assertion/reference-closure.js";
+
 export type SourceAssertionResolution =
   | { readonly status: "grounded"; readonly assertion: string }
   | { readonly status: "rejected"; readonly reason: SourceAssertionRejectionReason };
@@ -40,10 +53,13 @@ export function resolveSourceAssertion(
   const resolutions: SourceAssertionResolution[] = [];
   let offset = source.indexOf(matched);
   while (offset >= 0) {
-    const span = spans.find((candidate) =>
+    const spanIndex = spans.findIndex((candidate) =>
       offset >= candidate.start && offset + matched.length <= candidate.end
     );
-    if (span !== undefined) resolutions.push(resolveAssertionAt(source, matched, offset, span));
+    const span = spans[spanIndex];
+    if (span !== undefined) {
+      resolutions.push(resolveAssertionAt(source, matched, offset, span, spans[spanIndex - 1]));
+    }
     offset = source.indexOf(matched, offset + 1);
   }
   if (resolutions.length === 0) return { status: "rejected", reason: "matched_text_absent" };
@@ -57,19 +73,25 @@ function resolveBoundedVerbatimPrefix(
 ): SourceAssertionResolution | null {
   const offset = source.indexOf(matched);
   if (offset < 0) return null;
-  if (source.indexOf(matched, offset + 1) >= 0) {
-    return { status: "rejected", reason: "matched_text_ambiguous" };
-  }
   const assertion = stripSourceRoleLabel(matched);
   if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   const suffix = source.slice(offset + matched.length);
-  const isBoundedFastPath = hasSafeVerbatimSuffix(assertion, suffix) &&
-    hasFirstPersonAssertionAnchor(assertion);
-  if (!isBoundedFastPath) return null;
+  const worthSuffix = hasWorthItSuffix(assertion, suffix);
+  const relativeSuffix = hasRelativeClauseSuffix(suffix);
+  if (!(relativeSuffix || worthSuffix) || !hasFirstPersonAssertionAnchor(assertion)) return null;
+  if (source.indexOf(matched, offset + 1) >= 0) {
+    return { status: "rejected", reason: "matched_text_ambiguous" };
+  }
   if (!hasMatchedTextStartBoundary(source, offset)) {
     return { status: "rejected", reason: "matched_text_absent" };
+  }
+  if (relativeSuffix && !hasSafeSurpriseSuffix(suffix)) {
+    return { status: "rejected", reason: "source_assertion_not_self_contained" };
+  }
+  if (isVacuousFirstPersonStub(assertion)) {
+    return { status: "rejected", reason: "source_assertion_incomplete" };
   }
   if (!hasUnresolvedReference(assertion) && hasCompleteClause(assertion, false)) {
     return { status: "grounded", assertion };
@@ -81,8 +103,22 @@ function hasMatchedTextStartBoundary(source: string, offset: number): boolean {
   return !isWordCharacter(source[offset - 1]);
 }
 
-function hasSafeVerbatimSuffix(assertion: string, suffix: string): boolean {
-  if (/^\s*,\s*(?:which|who)\b/iu.test(suffix)) return true;
+const RELATIVE_CLAUSE_OPEN =
+  /^(?:\s*[,;:]\s*|\s*[—–‒-]\s*|\s*\(\s*|\s+)(?:which|who)\b/iu;
+
+function hasRelativeClauseSuffix(suffix: string): boolean {
+  return RELATIVE_CLAUSE_OPEN.test(suffix);
+}
+
+function hasSafeSurpriseSuffix(suffix: string): boolean {
+  return /^\s*,\s*which\s+(?:was|is)\s+(?:a\s+)?(?:nice|pleasant|welcome|great)\s+surprise\b/iu.test(
+    suffix
+  ) || /^\s*,\s*which surprised me because I had forgotten it\.\s*(?:\r?\n(?:Assistant|助手)\s*:[\s\S]*)?$/iu.test(
+    suffix
+  );
+}
+
+function hasWorthItSuffix(assertion: string, suffix: string): boolean {
   return /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(assertion) &&
     /^\s*,\s*but\s+it\s+(?:was|is|will\s+be)\s+worth\b/iu.test(suffix);
 }
@@ -90,6 +126,17 @@ function hasSafeVerbatimSuffix(assertion: string, suffix: string): boolean {
 function hasFirstPersonAssertionAnchor(assertion: string): boolean {
   return /^(?:i\b|i['’](?:m|d|ll|ve)\b)/iu.test(assertion) ||
     /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(assertion);
+}
+
+function isVacuousFirstPersonStub(assertion: string): boolean {
+  const value = assertion.trim()
+    .replace(/^i[’']m\b/iu, "I am")
+    .replace(/[.!?。！？]+$/u, "")
+    .trim();
+  return /^(?:i|i['’](?:m|d|ll|ve))\s*$/iu.test(value) ||
+    /^(?:i|i['’](?:m|d|ll|ve))\s+(?:am|think|know|mean|see|guess|feel|agree|did|never|want|need|hope|believe|was|can|should|will|do|say)\s*$/iu.test(value) ||
+    /^(?:i|i['’](?:m|d|ll|ve))\s+(?:think|guess|believe|hope|am|was)\s+(?:so|sure)\s*$/iu.test(value) ||
+    /^i['’]d\s+say\s*$/iu.test(value);
 }
 
 export function filterSourceAssertionEntities(
@@ -142,95 +189,27 @@ function isWordCharacter(value: string | undefined): boolean {
   return value !== undefined && /[\p{L}\p{N}]/u.test(value);
 }
 
-interface AssertionSpan {
-  readonly start: number;
-  readonly end: number;
-  readonly ambiguous?: boolean;
-}
-
-function sentenceSpans(source: string): readonly AssertionSpan[] {
-  const spans: AssertionSpan[] = [];
-  let start = 0;
-  let ambiguous = false;
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index]!;
-    if (character === "\n" || character === "\r") {
-      appendSentenceSpan(spans, source, start, index, ambiguous);
-      start = index + 1;
-      ambiguous = false;
-      continue;
-    }
-    if (!/[.!?。！？]/u.test(character)) continue;
-    if (character === ".") {
-      const dot = classifyDotBoundary(source, index);
-      if (dot !== "boundary") {
-        ambiguous ||= dot === "ambiguous";
-        continue;
-      }
-    }
-    appendSentenceSpan(spans, source, start, index + 1, ambiguous);
-    start = index + 1;
-    ambiguous = false;
-  }
-  appendSentenceSpan(spans, source, start, source.length, ambiguous);
-  return spans;
-}
-
-function appendSentenceSpan(
-  spans: AssertionSpan[], source: string, start: number, end: number, ambiguous: boolean
-): void {
-  if (source.slice(start, end).trim().length === 0) return;
-  spans.push({ ...trimmedSpan(source, start, end), ...(ambiguous ? { ambiguous: true } : {}) });
-}
-
-type DotBoundary = "boundary" | "continuation" | "ambiguous";
-
-const INLINE_BOUNDARY_ABBREVIATIONS = new Set([
-  "approx", "capt", "dr", "e.g", "etc", "gov", "i.e", "mr", "mrs", "ms", "prof", "rev", "sen"
-]);
-
-const INCOMPLETE_TERMINAL_ABBREVIATIONS = new Set([
-  "approx", "capt", "dr", "e.g", "i.e", "mr", "mrs", "ms", "prof", "rev", "sen"
-]);
-
-function classifyDotBoundary(source: string, index: number): DotBoundary {
-  const before = source[index - 1] ?? "";
-  const after = source[index + 1] ?? "";
-  if (/\d/u.test(before) && /\d/u.test(after)) return "continuation";
-  if (/\p{L}/u.test(before) && /[\p{L}\p{N}]/u.test(after)) {
-    const token = tokenBefore(source, index);
-    return /\p{Ll}/u.test(after) || /^\p{Lu}$/u.test(token) ? "ambiguous" : "boundary";
-  }
-  const next = nextNonWhitespace(source, index + 1);
-  if (next >= source.length) return "boundary";
-  const token = tokenBefore(source, index);
-  if (token.includes(".") && !/^\d+(?:\.\d+)+$/u.test(token)) return "ambiguous";
-  if (/^\p{Lu}$/u.test(token) || isInlineBoundaryAbbreviation(token)) return "ambiguous";
-  if (/\p{Ll}/u.test(source[next] ?? "")) return "ambiguous";
-  return "boundary";
-}
-
-function tokenBefore(source: string, index: number): string {
-  let start = index;
-  while (start > 0 && /[\p{L}\p{N}.]/u.test(source[start - 1]!)) start -= 1;
-  return source.slice(start, index);
-}
-
-function nextNonWhitespace(source: string, start: number): number {
-  let index = start;
-  while (index < source.length && /\s/u.test(source[index]!)) index += 1;
-  return index;
-}
-
 function resolveAssertionAt(
   source: string,
   matched: string,
   offset: number,
-  sentence: AssertionSpan
+  sentence: AssertionSpan,
+  previousSentence: AssertionSpan | undefined
 ): SourceAssertionResolution {
+  if (hasCrossSentenceChineseReference(source, sentence, previousSentence)) {
+    return { status: "rejected", reason: "source_assertion_not_self_contained" };
+  }
   const coordinate = coordinateSpan(source, sentence, offset, matched.length);
-  const candidates = assertionCandidates(offset, matched.length, sentence, coordinate);
+  const candidates = assertionCandidates(
+    source,
+    offset,
+    matched.length,
+    sentence,
+    previousSentence,
+    coordinate
+  );
   const exactHasDanglingTerminal = hasDanglingExactTerminal(source, candidates[0]!);
+  const matchedDisambiguatesInitialism = /(?:\p{Lu}\.){2,}\s+\p{Ll}/u.test(matched);
   if (exactHasDanglingTerminal && candidates[0]!.span.end === sentence.end) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
@@ -240,9 +219,20 @@ function resolveAssertionAt(
     const resolution = evaluateAssertionCandidate(source, candidate);
     if (resolution.status === "grounded") return resolution;
     rejectionReason = strongerRejectionReason(rejectionReason, resolution.reason);
-    if (index === 0 && sentence.ambiguous === true) break;
+    if (index === 0 && sentence.ambiguous === true && !matchedDisambiguatesInitialism) break;
   }
   return { status: "rejected", reason: rejectionReason };
+}
+
+function hasCrossSentenceChineseReference(
+  source: string,
+  sentence: AssertionSpan,
+  previousSentence: AssertionSpan | undefined
+): boolean {
+  if (previousSentence === undefined) return false;
+  return startsWithChineseThirdPersonSubject(
+    stripSourceRoleLabel(source.slice(sentence.start, sentence.end))
+  );
 }
 
 interface AssertionCandidate {
@@ -252,9 +242,11 @@ interface AssertionCandidate {
 }
 
 function assertionCandidates(
+  source: string,
   offset: number,
   matchedLength: number,
   sentence: AssertionSpan,
+  previousSentence: AssertionSpan | undefined,
   coordinate: ReturnType<typeof coordinateSpan>
 ): readonly AssertionCandidate[] {
   const candidates: AssertionCandidate[] = [
@@ -264,7 +256,8 @@ function assertionCandidates(
       exact: true
     }
   ];
-  if (coordinate.span !== null) {
+  if (coordinate.span !== null &&
+      (coordinate.span.start !== sentence.start || coordinate.span.end !== sentence.end)) {
     candidates.push({
       span: coordinate.span,
       coordinated: coordinate.coordinated,
@@ -272,6 +265,13 @@ function assertionCandidates(
     });
   }
   candidates.push({ span: sentence, coordinated: false, exact: false });
+  if (canExpandAcrossSentenceBoundary(source, previousSentence, sentence)) {
+    candidates.push({
+      span: { start: previousSentence.start, end: sentence.end },
+      coordinated: false,
+      exact: false
+    });
+  }
   return candidates;
 }
 
@@ -280,11 +280,15 @@ function evaluateAssertionCandidate(
   candidate: AssertionCandidate
 ): SourceAssertionResolution {
   const assertion = stripSourceRoleLabel(source.slice(candidate.span.start, candidate.span.end));
-  if (candidate.exact && !/[.!?。！？]$/u.test(assertion)) {
+  if (candidate.exact && !/[.!?。！？]$/u.test(assertion) &&
+      !hasDirectQuestionBoundary(source, candidate.span.end)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
   if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
     return { status: "rejected", reason: "source_assertion_too_long" };
+  }
+  if (isVacuousFirstPersonStub(assertion)) {
+    return { status: "rejected", reason: "source_assertion_incomplete" };
   }
   if (hasUnresolvedReference(assertion)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
@@ -304,16 +308,8 @@ function hasDanglingExactTerminal(
   return token !== undefined && isIncompleteTerminalAbbreviation(token);
 }
 
-function isInlineBoundaryAbbreviation(token: string): boolean {
-  return INLINE_BOUNDARY_ABBREVIATIONS.has(token.toLocaleLowerCase("en-US"));
-}
-
-function isIncompleteTerminalAbbreviation(token: string): boolean {
-  return INCOMPLETE_TERMINAL_ABBREVIATIONS.has(token.toLocaleLowerCase("en-US"));
-}
-
 function stripSourceRoleLabel(assertion: string): string {
-  return assertion.trim().replace(/^(?:User|Assistant)\s*:\s*/iu, "").trim();
+  return assertion.trim().replace(/^(?:User|Assistant|用户|助手|团队)\s*:\s*/iu, "").trim();
 }
 
 function strongerRejectionReason(
@@ -330,62 +326,25 @@ function strongerRejectionReason(
   return priority[candidate] > priority[current] ? candidate : current;
 }
 
-function coordinateSpan(
-  source: string,
-  sentence: AssertionSpan,
-  offset: number,
-  matchedLength: number
-): { readonly span: AssertionSpan | null; readonly coordinated: boolean } {
-  const text = source.slice(sentence.start, sentence.end);
-  const separator = /[;；]\s*|,\s*(?:and|but|or)\s+|\s+(?:and|but|or)\s+|，\s*(?:而且|但是|但|并且|并|然后)\s*/giu;
-  const spans: AssertionSpan[] = [];
-  let start = sentence.start;
-  for (const match of text.matchAll(separator)) {
-    const end = sentence.start + match.index;
-    if (source.slice(start, end).trim().length > 0) spans.push(trimmedSpan(source, start, end));
-    start = end + match[0].length;
-  }
-  if (source.slice(start, sentence.end).trim().length > 0) {
-    spans.push(trimmedSpan(source, start, sentence.end));
-  }
-  const span = spans.find((candidate) =>
-    offset >= candidate.start && offset + matchedLength <= candidate.end
-  ) ?? null;
-  return { span, coordinated: spans.length > 1 };
-}
-
 function hasCompleteClause(assertion: string, coordinated: boolean): boolean {
   const value = assertion.trim().replace(/[.!?。！？]+$/u, "").trim();
   const dummySubject = /^it\s+(?:took|takes|will\s+take)\s+me\b\s*(.*)$/iu.exec(value);
   if (dummySubject !== null) return hasContent(dummySubject[1]);
   const englishSubject = /^(?:i|we|you)\b\s*(.*)$/iu.exec(value);
   if (englishSubject !== null) return hasContent(englishSubject[1]);
-  const chineseSubject = /^(?:我(?:们)?|你(?:们)?|您|他(?:们)?|她(?:们)?|它(?:们)?|用户|团队|项目|系统)(.*)$/u.exec(value);
+  const chineseSubject = /^(?:我(?:们)?|你(?:们)?|您|他(?:们)?|她(?:们)?|它(?:们)?|用户|助手|团队|项目|系统)(.*)$/u.exec(value);
   if (chineseSubject !== null) return hasContent(chineseSubject[1]);
   const namedSubject = /^\p{Lu}[\p{L}\p{N}'’-]*\s+(.*)$/u.exec(value);
   if (namedSubject !== null) return hasContent(namedSubject[1]);
-  return !coordinated && /^[\p{Script=Han}]{4,}$/u.test(value);
+  return !coordinated && hasCompleteChineseClause(value);
+}
+
+function hasCompleteChineseClause(value: string): boolean {
+  if (!/^\p{Script=Han}/u.test(value)) return false;
+  const contentLength = value.match(/[\p{L}\p{N}]/gu)?.length ?? 0;
+  return contentLength >= 4;
 }
 
 function hasContent(value: string | undefined): boolean {
   return value !== undefined && /[\p{L}\p{N}]/u.test(value);
-}
-
-function hasUnresolvedReference(assertion: string): boolean {
-  const referenceProbe = assertion.replace(
-    /^it\s+(?=(?:took|takes|will\s+take)\s+me\b)/iu,
-    ""
-  );
-  return /\b(?:he|she|it|they|him|her|them|his|hers|their|there|here|this|that|these|those|aforementioned|such)\b/iu.test(referenceProbe) ||
-    /\bthe\s+(?:former|latter|same|above|below)\b/iu.test(referenceProbe) ||
-    /^(?:他|她|它|他们|她们|它们)/u.test(referenceProbe) ||
-    /(?:这里|那里|这个|那个|这些|那些|前者|后者|上述|下述|同上|同下|该(?:项|对象|方案|内容|规则|设置|问题)|此(?:项|对象|方案|内容|规则|设置|问题))/u.test(referenceProbe);
-}
-
-function trimmedSpan(source: string, rawStart: number, rawEnd: number): { start: number; end: number } {
-  let start = rawStart;
-  let end = rawEnd;
-  while (start < end && /\s/u.test(source[start]!)) start += 1;
-  while (end > start && /\s/u.test(source[end - 1]!)) end -= 1;
-  return { start, end };
 }

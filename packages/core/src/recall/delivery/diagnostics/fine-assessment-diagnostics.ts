@@ -188,18 +188,14 @@ function buildCompatibilityStageDiagnosticAliases(
   deliveryRank: number | undefined,
   selectionOrder: number
 ) {
+  // Live stages only. Retired delivery stages (lexical priority, session coverage,
+  // synthesis/structural reserve) are omitted — aliasing them to delivery/selection
+  // ranks would invent independent stage losses for stage-matrix replay.
   return {
     rank_after_fusion: fusionRank,
     rank_after_feature_rerank: deliveryRank,
-    rank_after_lexical_priority: deliveryRank,
     rank_after_coverage_selector: selectionOrder,
-    rank_after_session_coverage: selectionOrder,
-    rank_after_synthesis_reserve: selectionOrder,
-    rank_after_structural_reserve: selectionOrder,
-    coverage_selector_action: resolveCoverageSelectorAction(deliveryRank, selectionOrder),
-    // Logical-object and gist coverage share one selector; this alias must not double-attribute it.
-    session_coverage_action: "noop" as const,
-    reserved_by: "none" as const
+    coverage_selector_action: resolveCoverageSelectorAction(deliveryRank, selectionOrder)
   };
 }
 

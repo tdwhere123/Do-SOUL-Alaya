@@ -38,9 +38,8 @@ describe("LongMemEval stage matrix replay", () => {
     const row = cohortRow({ id: "q-stream", goldIds: ["gold-a"] });
     const bundle = await writeBundle(contract([
       question("q-stream", [candidate("gold-a", {
-        fused_rank: 1, rank_after_fusion: 1, feature: 1, lexical: 1,
-        coverage: 1, session: 1, synthesis: 1, structural: 1,
-        selection_order: 1, final_rank: 1
+        fused_rank: 1, rank_after_fusion: 1, feature: 1,
+        coverage: 1, selection_order: 1, final_rank: 1
       })], row)
     ], [row]));
     const seen: string[] = [];
@@ -117,35 +116,33 @@ describe("LongMemEval stage matrix replay", () => {
     const row = cohortRow({ id: "q-multi", goldIds: ["gold-a", "gold-b"], retrieval: "hit_at_5" });
     const candidates = [
       candidate("gold-a", {
-        fused_rank: 60, rank_after_fusion: 40, feature: 20, lexical: 10,
-        coverage: 6, session: 5, synthesis: 4, structural: 3,
-        selection_order: 2, final_rank: 2
+        fused_rank: 60, rank_after_fusion: 40, feature: 20,
+        coverage: 6, selection_order: 2, final_rank: 2
       }),
       candidate("gold-b", {
-        fused_rank: 100, rank_after_fusion: 80, feature: 50, lexical: 25,
-        coverage: 10, session: 8, synthesis: 7, structural: 6,
-        selection_order: 5, final_rank: 5
+        fused_rank: 100, rank_after_fusion: 80, feature: 50,
+        coverage: 10, selection_order: 5, final_rank: 5
       }),
       candidate("rank-five", {
-        fused_rank: 5, rank_after_fusion: 5, feature: 5, lexical: 5,
-        coverage: 5, session: 4, synthesis: 5, structural: 5,
-        selection_order: 4, final_rank: 4
+        fused_rank: 5, rank_after_fusion: 5, feature: 5,
+        coverage: 5, selection_order: 4, final_rank: 4
       })
     ];
     const matrix = buildStageMatrix(contract([question("q-multi", candidates, row)], [row]));
     expect(matrix.stage_order).toEqual([
-      "candidate_pool", "rank_after_fusion", "feature", "lexical", "coverage",
-      "session", "synthesis", "structural", "selection_order", "final_rank"
+      "candidate_pool", "rank_after_fusion", "feature", "coverage",
+      "selection_order", "final_rank"
     ]);
     expect(matrix.stage_rank_fields).toMatchObject({
       candidate_pool: "fused_rank",
-      synthesis: "rank_after_synthesis_reserve",
+      coverage: "rank_after_coverage_selector",
       final_rank: "final_rank"
     });
     expect(matrix.questions[0].any_gold_at_k.candidate_pool).toEqual({
       "5": false, "10": false, "25": false, "50": false, "100": true
     });
-    expect(matrix.questions[0].any_gold_at_k.session["5"]).toBe(true);
+    expect(matrix.questions[0].any_gold_at_k.coverage["5"]).toBe(false);
+    expect(matrix.questions[0].any_gold_at_k.selection_order["5"]).toBe(true);
     expect(matrix.summary.by_stage.final_rank.at_5).toMatchObject({ count: 1, denominator: 1, rate: 1 });
     expect(matrix.summary.quality_axes).toMatchObject({
       answerable: {
@@ -181,9 +178,8 @@ describe("LongMemEval stage matrix replay", () => {
     });
     const matrix = buildStageMatrix(contract([
       question("q-answerable", [candidate("gold-a", {
-        fused_rank: 1, rank_after_fusion: 1, feature: 1, lexical: 1,
-        coverage: 1, session: 1, synthesis: 1, structural: 1,
-        selection_order: 1, final_rank: 1
+        fused_rank: 1, rank_after_fusion: 1, feature: 1,
+        coverage: 1, selection_order: 1, final_rank: 1
       })], answerable),
       question("q-abstention", [], abstention)
     ], [answerable, abstention]));

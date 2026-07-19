@@ -49,6 +49,7 @@ describe("LongMemEval recall diagnostics", () => {
       pre_budget_count: 0,
       delivered_count: 0,
       embedding_provider_status: "provider_not_requested",
+      embedding_supplement_status: "not_attempted",
       provider_degradation_reason: null,
       answer_rerank_status: "not_requested",
       answer_rerank_expected_count: 0,
@@ -97,6 +98,7 @@ describe("LongMemEval recall diagnostics", () => {
     expect(parsed.degradation_reasons).toEqual(["evidence_fts_failed", "path_expansion_failed"]);
     expect(parsed.embedding_workspace_truncated).toBe(true);
     expect(parsed.embedding_workspace_scanned_count).toBe(10001);
+    expect(parsed.embedding_supplement_status).toBe("not_attempted");
   });
 
   it("round-trips per-candidate coverage/session actions through gold diagnostics", () => {

@@ -170,6 +170,68 @@ describe("seedLongMemEvalQuestion formation order", () => {
     expect(stats.signalsDropped).toBe(0);
   });
 
+  it.each([
+    ["parse drop", { parseDropped: 1 }],
+    ["compile overflow", { compileOverflowDropped: 1 }],
+    ["fallback extraction", { lastExtractionSource: null as string | null }]
+  ] as const)(
+    "records one candidate-absent answer drop for a %s wipe with no memory",
+    async (_label, wipe) => {
+      const question = buildQuestion({
+        haystack_sessions: [
+          [{ role: "user", content: "Answer source.", has_answer: true }]
+        ],
+        haystack_session_ids: ["session-a"],
+        haystack_dates: ["2025-12-01"]
+      });
+      const stats = seedStats();
+      const seedTurn = vi.fn(async () => {
+        if ("parseDropped" in wipe) {
+          stats.lastExtractionSource = "cache";
+          stats.lastCacheKey = "1".padStart(64, "0");
+          stats.lastRawJsonSha256 = "2".padStart(64, "0");
+          stats.lastTurnRawSignalCount = 1;
+          stats.lastTurnDraftCount = 0;
+          stats.parseDropped += wipe.parseDropped;
+          stats.signalsDropped += wipe.parseDropped;
+        } else if ("compileOverflowDropped" in wipe) {
+          stats.lastExtractionSource = "live";
+          stats.lastCacheKey = "1".padStart(64, "0");
+          stats.lastRawJsonSha256 = "2".padStart(64, "0");
+          stats.lastTurnRawSignalCount = 1;
+          stats.lastTurnDraftCount = 1;
+          stats.compileOverflowDropped += wipe.compileOverflowDropped;
+          stats.signalsDropped += wipe.compileOverflowDropped;
+        } else {
+          stats.lastExtractionSource = null;
+          stats.lastCacheKey = null;
+          stats.lastRawJsonSha256 = null;
+          stats.lastTurnRawSignalCount = 0;
+          stats.lastTurnDraftCount = 0;
+          stats.offlineFallbacks += 1;
+        }
+        return { seeds: [], turnTruncated: false, charsClipped: 0 };
+      });
+
+      const state = await seedLongMemEvalQuestion({
+        workspace: buildWorkspace(`wipe-${_label}`),
+        question,
+        seedRunner: { seedTurn, stats },
+        seedFormationMode: "treatment_neutral"
+      });
+
+      expect(state.answerSeedDropReasons).toEqual({
+        candidate_absent: 1,
+        materialization_drop: 0
+      });
+      expect(state.seedRounds[0]).toMatchObject({
+        hasAnswer: true,
+        factsProduced: 0,
+        memoryObjectIds: []
+      });
+    }
+  );
+
   it("does not double-count an already-recorded candidate-absent answer drop", async () => {
     const question = buildQuestion({
       haystack_sessions: [[{ role: "user", content: "Answer source.", has_answer: true }]],

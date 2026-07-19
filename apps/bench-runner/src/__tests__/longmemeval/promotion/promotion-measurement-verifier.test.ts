@@ -11,20 +11,33 @@ import type { SnapshotQuestionMeasurementOracle } from
   "../../../longmemeval/snapshot/measurement-oracle.js";
 import { promotionMeasurementDiagnostic } from
   "../recall-eval/specialized-answerable-recall-fixture.js";
-import type { MutableQuestion } from "./promotion-diagnostics-fixture.js";
+
+type DiagnosticOverrides = Partial<Pick<LongMemEvalQuestionDiagnostic,
+  "is_abstention" | "miss_classification" | "miss_taxonomy" |
+  "premise_invalid" | "seed_drop_reasons"
+>>;
+type CohortLedger = NonNullable<LongMemEvalQuestionDiagnostic["cohort_ledger"]>;
+type CohortLedgerOverrides = Partial<Pick<CohortLedger,
+  "evaluation_issue_reason" | "evaluator_gold_identity" |
+  "extraction_materialization" | "final_verdict" | "measurement_status" |
+  "retrieval_status"
+>>;
 
 describe("promotion measurement verifier", () => {
   it("accepts an answerable valid-negative with no evaluator gold", () => {
-    const mutable = structuredClone(
-      promotionMeasurementDiagnostic("q-no-gold", "identity_unscorable", false)
-    ) as unknown as MutableQuestion["diagnostics"];
-    mutable.miss_classification = "no_gold";
-    mutable.miss_taxonomy = "evaluation_or_gold_issue";
-    mutable.cohort_ledger.evaluation_issue_reason = "empty_gold_identity";
-    mutable.cohort_ledger.final_verdict = "evaluation_unscorable";
     const measurement = measurementPrimitives();
     const diagnostic = applyQuestionMeasurementAxes(
-      mutable as unknown as LongMemEvalQuestionDiagnostic,
+      withDiagnosticOverrides(
+        promotionMeasurementDiagnostic("q-no-gold", "identity_unscorable", false),
+        {
+          miss_classification: "no_gold",
+          miss_taxonomy: "evaluation_or_gold_issue"
+        },
+        {
+          evaluation_issue_reason: "empty_gold_identity",
+          final_verdict: "evaluation_unscorable"
+        }
+      ),
       buildQuestionMeasurementAxes(measurement)
     );
 
@@ -44,24 +57,27 @@ describe("promotion measurement verifier", () => {
     seedDropReasons,
     reason
   ) => {
-    const mutable = structuredClone(
-      promotionMeasurementDiagnostic("q-seed-drop", "identity_unscorable", false)
-    ) as unknown as MutableQuestion["diagnostics"];
-    mutable.miss_classification = "candidate_absent";
-    mutable.miss_taxonomy = reason === "materialization_drop"
-      ? "materialization_drop"
-      : "candidate_absent";
-    mutable.seed_drop_reasons = seedDropReasons;
-    mutable.cohort_ledger.extraction_materialization = {
-      status: "drop", emitted_memory_count: 0, reason
-    };
-    mutable.cohort_ledger.evaluation_issue_reason = "extraction_materialization_drop";
-    mutable.cohort_ledger.measurement_status = "scorable";
-    mutable.cohort_ledger.retrieval_status = "miss_at_5";
-    mutable.cohort_ledger.final_verdict = "miss_at_5";
     const measurement = measurementPrimitives();
     const diagnostic = applyQuestionMeasurementAxes(
-      mutable as unknown as LongMemEvalQuestionDiagnostic,
+      withDiagnosticOverrides(
+        promotionMeasurementDiagnostic("q-seed-drop", "identity_unscorable", false),
+        {
+          miss_classification: "candidate_absent",
+          miss_taxonomy: reason === "materialization_drop"
+            ? "materialization_drop"
+            : "candidate_absent",
+          seed_drop_reasons: seedDropReasons
+        },
+        {
+          extraction_materialization: {
+            status: "drop", emitted_memory_count: 0, reason
+          },
+          evaluation_issue_reason: "extraction_materialization_drop",
+          measurement_status: "scorable",
+          retrieval_status: "miss_at_5",
+          final_verdict: "miss_at_5"
+        }
+      ),
       buildQuestionMeasurementAxes(measurement)
     );
 
@@ -88,10 +104,11 @@ describe("promotion measurement verifier", () => {
   });
 
   it("rejects a ledger extraction tuple that differs from seed primitives", () => {
-    const diagnostic = seedDropDiagnostic();
-    diagnostic.cohort_ledger!.extraction_materialization = {
-      status: "drop", emitted_memory_count: 0, reason: "materialization_drop"
-    };
+    const diagnostic = withDiagnosticOverrides(seedDropDiagnostic(), {}, {
+      extraction_materialization: {
+        status: "drop", emitted_memory_count: 0, reason: "materialization_drop"
+      }
+    });
     const measurement = measurementPrimitives();
 
     expect(() => verifyPromotionQuestionMeasurement({
@@ -102,8 +119,9 @@ describe("promotion measurement verifier", () => {
   });
 
   it("rejects an abstention identity that differs from the snapshot", () => {
-    const diagnostic = structuredClone(seedDropDiagnostic());
-    diagnostic.is_abstention = true;
+    const diagnostic = withDiagnosticOverrides(seedDropDiagnostic(), {
+      is_abstention: true
+    });
     const measurement = measurementPrimitives();
 
     expect(() => verifyPromotionQuestionMeasurement({
@@ -114,8 +132,9 @@ describe("promotion measurement verifier", () => {
   });
 
   it("rejects premise-invalid rows from promotion evidence", () => {
-    const diagnostic = structuredClone(seedDropDiagnostic());
-    diagnostic.premise_invalid = true;
+    const diagnostic = withDiagnosticOverrides(seedDropDiagnostic(), {
+      premise_invalid: true
+    });
     const measurement = measurementPrimitives();
 
     expect(() => verifyPromotionQuestionMeasurement({
@@ -126,9 +145,15 @@ describe("promotion measurement verifier", () => {
   });
 
   it("rejects ambiguous evaluator identity from promotion evidence", () => {
-    const diagnostic = structuredClone(seedDropDiagnostic());
-    diagnostic.cohort_ledger!.evaluator_gold_identity.status = "ambiguous";
-    diagnostic.cohort_ledger!.measurement_status = "evaluator_identity_unscorable";
+    const base = seedDropDiagnostic();
+    const ledger = requireCohortLedger(base);
+    const diagnostic = withDiagnosticOverrides(base, {}, {
+      evaluator_gold_identity: {
+        ...ledger.evaluator_gold_identity,
+        status: "ambiguous"
+      },
+      measurement_status: "evaluator_identity_unscorable"
+    });
     const measurement = measurementPrimitives();
 
     expect(() => verifyPromotionQuestionMeasurement({
@@ -140,23 +165,51 @@ describe("promotion measurement verifier", () => {
 });
 
 function seedDropDiagnostic(): LongMemEvalQuestionDiagnostic {
-  const mutable = structuredClone(
-    promotionMeasurementDiagnostic("q-seed-drop", "identity_unscorable", false)
-  ) as unknown as MutableQuestion["diagnostics"];
-  mutable.miss_classification = "candidate_absent";
-  mutable.miss_taxonomy = "candidate_absent";
-  mutable.seed_drop_reasons = { candidate_absent: 2, materialization_drop: 0 };
-  mutable.cohort_ledger.extraction_materialization = {
-    status: "drop", emitted_memory_count: 0, reason: "candidate_absent"
-  };
-  mutable.cohort_ledger.evaluation_issue_reason = "extraction_materialization_drop";
-  mutable.cohort_ledger.measurement_status = "scorable";
-  mutable.cohort_ledger.retrieval_status = "miss_at_5";
-  mutable.cohort_ledger.final_verdict = "miss_at_5";
+  const diagnostic = withDiagnosticOverrides(
+    promotionMeasurementDiagnostic("q-seed-drop", "identity_unscorable", false),
+    {
+      miss_classification: "candidate_absent",
+      miss_taxonomy: "candidate_absent",
+      seed_drop_reasons: { candidate_absent: 2, materialization_drop: 0 }
+    },
+    {
+      extraction_materialization: {
+        status: "drop", emitted_memory_count: 0, reason: "candidate_absent"
+      },
+      evaluation_issue_reason: "extraction_materialization_drop",
+      measurement_status: "scorable",
+      retrieval_status: "miss_at_5",
+      final_verdict: "miss_at_5"
+    }
+  );
   return applyQuestionMeasurementAxes(
-    mutable as unknown as LongMemEvalQuestionDiagnostic,
+    diagnostic,
     buildQuestionMeasurementAxes(measurementPrimitives())
   );
+}
+
+function withDiagnosticOverrides(
+  diagnostic: LongMemEvalQuestionDiagnostic,
+  overrides: DiagnosticOverrides = {},
+  cohortLedgerOverrides: CohortLedgerOverrides = {}
+): LongMemEvalQuestionDiagnostic {
+  return {
+    ...diagnostic,
+    ...overrides,
+    cohort_ledger: {
+      ...requireCohortLedger(diagnostic),
+      ...cohortLedgerOverrides
+    }
+  };
+}
+
+function requireCohortLedger(
+  diagnostic: LongMemEvalQuestionDiagnostic
+): CohortLedger {
+  if (diagnostic.cohort_ledger === undefined) {
+    throw new Error("promotion measurement fixture requires a cohort ledger");
+  }
+  return diagnostic.cohort_ledger;
 }
 
 function oracle(
@@ -167,7 +220,7 @@ function oracle(
     ...measurement,
     goldMemoryIds: [],
     seedDropReasons
-  } as SnapshotQuestionMeasurementOracle;
+  };
 }
 
 function measurementPrimitives() {

@@ -92,8 +92,10 @@ describe("LongMemEval matrix promotion contract", () => {
     fitted.material_effect_policy.minimum_net_r_at_5_wins = 4;
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(fitted)).toThrow();
 
-    const reordered = contractFixture();
-    reordered.execution_order = ["B", "A", "C", "D", "B2"];
+    const reordered = {
+      ...contractFixture(),
+      execution_order: ["B", "A", "C", "D", "B2"] as const
+    };
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(reordered)).toThrow();
   });
 

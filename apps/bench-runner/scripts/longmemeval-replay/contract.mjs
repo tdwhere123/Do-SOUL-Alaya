@@ -11,15 +11,13 @@ const gunzipAsync = promisify(gunzip);
 const RECALL_ORIGIN_PLANES = new Set(["workspace_local", "global"]);
 const RECALL_OBJECT_KINDS = new Set(["memory_entry", "synthesis_capsule"]);
 
+// Live delivery stages only. Retired stages (lexical / session / synthesis /
+// structural reserve) must not appear here — missing ranks would look like losses.
 export const STAGE_FIELDS = Object.freeze({
   candidate_pool: "fused_rank",
   rank_after_fusion: "rank_after_fusion",
   feature: "rank_after_feature_rerank",
-  lexical: "rank_after_lexical_priority",
   coverage: "rank_after_coverage_selector",
-  session: "rank_after_session_coverage",
-  synthesis: "rank_after_synthesis_reserve",
-  structural: "rank_after_structural_reserve",
   selection_order: "selection_order",
   final_rank: "final_rank"
 });

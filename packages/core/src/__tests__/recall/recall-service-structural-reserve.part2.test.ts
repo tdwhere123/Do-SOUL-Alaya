@@ -216,8 +216,8 @@ it("keeps the fusion head and cuts buried path evidence at maxEntries=1", async 
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
       expect(structuralContribution(goldDiagnostic)).toBeGreaterThan(0);
       expect(goldDiagnostic?.final_rank).toBeNull();
-      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
-      expect(goldDiagnostic?.reserved_by).toBe("none");
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
+      expect(goldDiagnostic?.reserved_by).toBeUndefined();
     });
 
 it("respects maxEntries=2 and 3 without post-fusion displacement", async () => {
@@ -234,9 +234,9 @@ it("respects maxEntries=2 and 3 without post-fusion displacement", async () => {
         expect(delivered.length).toBeLessThanOrEqual(maxEntries);
         for (const candidate of diagnostics) {
           expect(candidate.rank_after_feature_rerank).toBe(candidate.fused_rank);
-          expect(candidate.rank_after_lexical_priority).toBe(candidate.fused_rank);
-          expect(candidate.rank_after_structural_reserve).toBe(candidate.fused_rank);
-          expect(candidate.reserved_by).toBe("none");
+          expect(candidate.rank_after_lexical_priority).toBeUndefined();
+          expect(candidate.rank_after_structural_reserve).toBeUndefined();
+          expect(candidate.reserved_by).toBeUndefined();
           if (candidate.fused_rank <= maxEntries) {
             expect(deliveredIds).toContain(candidate.object_id);
             expect(candidate.final_rank).toBe(candidate.fused_rank);
@@ -281,8 +281,8 @@ it("keeps structural contribution visible without granting tail slots", async ()
         expect(structuralContribution(diagnostic)).toBeGreaterThan(0);
         expect(diagnostic?.pre_budget_rank ?? 0).toBeGreaterThan(5);
         expect(diagnostic?.final_rank).toBeNull();
-        expect(diagnostic?.rank_after_structural_reserve).toBe(diagnostic?.fused_rank);
-        expect(diagnostic?.reserved_by).toBe("none");
+        expect(diagnostic?.rank_after_structural_reserve).toBeUndefined();
+        expect(diagnostic?.reserved_by).toBeUndefined();
         expect(delivered).not.toContain(id);
       }
       expect(delivered.length).toBeLessThanOrEqual(5);
@@ -344,7 +344,7 @@ it("distinguishes path-plus-lexical evidence from lexical-only evidence", async 
       expect(structuralContribution(fillerDiagnostic)).toBe(0);
       expect(isStructuralDominant(fillerDiagnostic)).toBe(false);
 
-      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
       expect(goldDiagnostic?.final_rank).toBeNull();
       expect(delivered).not.toContain("gold-weak-lexical");
       expect(delivered).not.toContain("filler-strong-lexical");
@@ -372,8 +372,8 @@ it("keeps lexical and structural legacy stages aligned to fusion", async () => {
       expect(deliveredIds).not.toContain("memory-gold");
       const goldDiagnostic = goldDiag(result, "memory-gold");
       expect(goldDiagnostic?.admission_planes).toContain("path_expansion");
-      expect(goldDiagnostic?.rank_after_lexical_priority).toBe(goldDiagnostic?.fused_rank);
-      expect(goldDiagnostic?.rank_after_structural_reserve).toBe(goldDiagnostic?.fused_rank);
+      expect(goldDiagnostic?.rank_after_lexical_priority).toBeUndefined();
+      expect(goldDiagnostic?.rank_after_structural_reserve).toBeUndefined();
       expect(goldDiagnostic?.final_rank).toBeNull();
       expect(goldDiag(result, delivered[0]!.object_id)?.pre_budget_rank).toBe(1);
       expect(

@@ -177,10 +177,7 @@ describe("RecallService semantic supplement", () => {
           ...dependencies.memoryRepo,
           findRecallTierWindow: vi.fn(async () => ({
             memories: [valid],
-            next_cursor: {
-              created_at: valid.created_at,
-              object_id: valid.object_id
-            },
+            next_cursor: null,
             truncated: true
           })),
           searchByKeywordWithinTier,

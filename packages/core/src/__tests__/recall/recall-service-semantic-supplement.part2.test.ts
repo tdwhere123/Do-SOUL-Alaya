@@ -62,7 +62,7 @@ it("falls back to the legacy embedding supplement when prepared APIs are unavail
     expect(result.collectionStatus).toBe("requested");
   });
 
-  it("distinguishes disabled, missing-provider, and empty-pool supplement exits", async () => {
+  it("distinguishes disabled, missing-provider, empty-pool, and not-attempted supplement exits", async () => {
     const memory = createMemoryEntry({ object_id: "memory-supplement-status" });
     const querySupplement = vi.fn(async () => ({
       supplementaryEntries: Object.freeze([]),
@@ -112,10 +112,17 @@ it("falls back to the legacy embedding supplement when prepared APIs are unavail
       dependencies: { embeddingRecallService: { querySupplement } },
       localEligibleCandidates: Object.freeze([])
     });
+    const notAttempted = await collectEmbeddingSupplement({
+      ...base,
+      dependencies: { embeddingRecallService: { querySupplement } },
+      preparedSupplementSupported: true
+    });
 
     expect(providerMissing.collectionStatus).toBe("provider_missing");
     expect(disabled.collectionStatus).toBe("disabled");
     expect(emptyPool.collectionStatus).toBe("empty_candidate_pool");
+    expect(notAttempted.collectionStatus).toBe("not_attempted");
+    expect(notAttempted.supplementaryEntries).toEqual([]);
     expect(querySupplement).not.toHaveBeenCalled();
   });
 

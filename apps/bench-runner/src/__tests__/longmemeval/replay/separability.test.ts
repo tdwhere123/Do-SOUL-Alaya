@@ -6,158 +6,13 @@ import { deriveCandidateFeatures, fitFeaturePipeline, FORBIDDEN_FEATURE_FIELDS, 
 import { assignGroupedStratifiedFolds } from "../../../../scripts/longmemeval-replay/separability-folds.mjs";
 // @ts-expect-error The executable MJS probe is intentionally outside the package declaration surface.
 import { optimizePairwiseDifferences, parseArgs, runSeparabilityProbe } from "../../../../scripts/probe-longmemeval-separability.mjs";
-
-function candidate(id: string, gold: boolean, typed = true) {
-  return {
-    object_id: id,
-    object_kind: "memory_entry",
-    origin_plane: "workspace_local",
-    candidate_key: `workspace_local:memory_entry:${id}`,
-    fused_rank: gold ? 2 : 1,
-    pre_budget_rank: gold ? 2 : 1,
-    selection_order: gold ? 2 : 1,
-    final_rank: null,
-    rank_after_fusion: gold ? 2 : 1,
-    rank_after_feature_rerank: gold ? 2 : 1,
-    rank_after_lexical_priority: gold ? 2 : 1,
-    rank_after_synthesis_reserve: gold ? 2 : 1,
-    rank_after_structural_reserve: gold ? 2 : 1,
-    rank_after_coverage_selector: gold ? 2 : 1,
-    rank_after_session_coverage: gold ? 2 : 1,
-    per_stream_rank: { lexical_fts: 1, embedding: 2 },
-    fused_rank_contribution_per_stream: { lexical_fts: 0.2, embedding: 0.1 },
-    per_axis_contribution: { R_obj: 0.4, A_path: 0.2 },
-    flood_potential: { Slice: 0.2, A_path: 0.3, B_evidence: 0.4, Flood: 0.1 },
-    score_factors: { activation: 0.5, answer_features: { answer_role: "value" } },
-    answer_features: { canonical_entities: ["shared"], typed_values: ["value"] },
-    path_features: {
-      direction_match: typed && gold ? 1 : 0,
-      relation_kind: "supports",
-      query_trigger_match: typed && gold ? 1 : 0,
-      answer_role_match: typed && gold ? 1 : 0,
-      provenance_present: 1
-    }
-  };
-}
-
-function question(
-  index: number,
-  options: { scorable?: boolean; session?: string; goldIds?: readonly string[] } = {}
-) {
-  const goldId = `gold-${index}`;
-  const goldIds = options.goldIds ?? [goldId];
-  return {
-    question_id: `q-${index}`,
-    question_type: index % 2 === 0 ? "single-session-user" : "multi-session",
-    is_abstention: false,
-    premise_invalid: false,
-    answer_session_ids: [options.session ?? `session-${index}`],
-    gold: goldIds.map((object_id) => ({ object_id })),
-    hit_at_5: false,
-    candidate_pool_complete: options.scorable !== false,
-    candidate_pool_count: options.scorable === false ? 0 : 7,
-    fine_pruned_count: 0,
-    fine_assessment_pruned_candidates: [],
-    query_probes: { lexical_terms: ["shared"], dimensions: ["fact"] },
-    query_sought_facets: ["fact"],
-    candidates: options.scorable === false
-      ? []
-      : [
-        ...Array.from({ length: 6 }, (_, distractorIndex) => ({
-          ...candidate(`distractor-${index}-${distractorIndex}`, false),
-          fused_rank: distractorIndex + 1
-        })),
-        { ...candidate(goldId, true), fused_rank: 7 }
-      ]
-  };
-}
-
-type ProbeCandidate = Omit<
-  ReturnType<typeof candidate>,
-  "answer_features" | "path_features" | "score_factors"
-> & {
-  answer_features: Record<string, unknown>;
-  path_features: Record<string, unknown>;
-  score_factors: Record<string, unknown>;
-};
-
-type ProbeQuestion = Omit<
-  ReturnType<typeof question>,
-  "query_probes" | "candidates"
-> & {
-  query_probes: Record<string, unknown>;
-  candidates: ProbeCandidate[];
-};
-
-function highCardinalityQuestion(index: number) {
-  const row = question(index);
-  const goldId = `gold-${index}`;
-  return {
-    ...row,
-    candidates: Array.from({ length: 12 }, (_, candidateIndex) => {
-      const id = candidateIndex === 11 ? goldId : `distractor-${index}-${candidateIndex}`;
-      return {
-        ...candidate(id, candidateIndex === 11),
-        fused_rank: candidateIndex + 1,
-        answer_features: {
-          canonical_entities: Array.from(
-            { length: 8 },
-            (_, featureIndex) => `entity-${index}-${candidateIndex}-${featureIndex}`
-          )
-        }
-      };
-    })
-  };
-}
-
-type CohortFixtureOverride = {
-  readonly evaluatorStatus: "present" | "absent" | "ambiguous";
-  readonly extractionStatus: "memory_emitted" | "drop" | "unknown";
-  readonly issue: string | null;
-  readonly measurementStatus: "scorable" | "evaluator_identity_unscorable";
-};
-
-const VALID_COHORT_FIXTURE: CohortFixtureOverride = {
-  evaluatorStatus: "present",
-  extractionStatus: "memory_emitted",
-  issue: null,
-  measurementStatus: "scorable"
-};
-
-function withCohort(
-  questions: readonly ReturnType<typeof question>[],
-  overrides: Readonly<Record<string, CohortFixtureOverride>> = {}
-) {
-  const rows = questions.map((row) => {
-    const primitive = overrides[row.question_id] ?? VALID_COHORT_FIXTURE;
-    const objectIds = row.gold.map((gold) => gold.object_id);
-    return {
-      question_id: row.question_id,
-      dataset_cohort: "answerable",
-      candidate_pool_complete: row.candidate_pool_complete,
-      evaluator_gold_identity: {
-        status: primitive.evaluatorStatus,
-        object_ids: objectIds
-      },
-      extraction_materialization: {
-        status: primitive.extractionStatus,
-        emitted_memory_count: primitive.extractionStatus === "memory_emitted"
-          ? objectIds.length
-          : 0,
-        reason: primitive.extractionStatus === "drop" ? "materialization_drop" : null
-      },
-      evaluation_issue_reason: primitive.issue,
-      measurement_status: primitive.measurementStatus
-    };
-  });
-  return {
-    questions: questions.map((row, index) => {
-      const { question_id: _questionId, ...cohortLedger } = rows[index]!;
-      return { ...row, cohort_ledger: cohortLedger };
-    }),
-    cohort: { rows }
-  };
-}
+import {
+  candidate,
+  highCardinalityQuestion,
+  question,
+  withCohort,
+  type ProbeQuestion
+} from "./separability/separability-fixture.js";
 
 function denseReference(pairs: number[][], featureCount: number) {
   const weights = Array(featureCount).fill(0) as number[];
@@ -265,34 +120,70 @@ describe("held-out separability probe", () => {
   });
 
   it("is byte deterministic and evaluates identical OOF question sets", () => {
-    const diagnostics = { schema_version: 1, questions: Array.from({ length: 10 }, (_, i) => question(i)) };
-    const first = runSeparabilityProbe(diagnostics, { legacyDiagnostic: true });
-    const second = runSeparabilityProbe(structuredClone(diagnostics), {
-      legacyDiagnostic: true
-    });
+    const fixture = withCohort(Array.from({ length: 10 }, (_, i) => question(i)));
+    const first = runSeparabilityProbe(
+      { schema_version: 1, questions: fixture.questions },
+      { cohort: fixture.cohort }
+    );
+    const second = runSeparabilityProbe(
+      { schema_version: 1, questions: structuredClone(fixture.questions) },
+      { cohort: structuredClone(fixture.cohort) }
+    );
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
     expect(first.tracks.baseline.rows.map((row: { question_id: string }) => row.question_id))
       .toEqual(first.tracks.typed_path.rows.map((row: { question_id: string }) => row.question_id));
   });
 
-  it("requires a current cohort or explicit legacy diagnostic mode", () => {
+  it("requires a current cohort and refuses legacyDiagnostic as e2e authorization", () => {
     const diagnostics = {
       schema_version: 1,
       questions: Array.from({ length: 6 }, (_, index) => question(index))
     };
 
     expect(() => runSeparabilityProbe(diagnostics)).toThrow(
-      /current cohort or legacyDiagnostic=true/u
+      /current cohort or legacyPairwiseDiagnostic=true/u
     );
-    expect(runSeparabilityProbe(diagnostics, { legacyDiagnostic: true }))
-      .toMatchObject({ dataset_answerable_count: 6, runtime_scorable_count: 6 });
+    expect(() => runSeparabilityProbe(diagnostics, { legacyDiagnostic: true })).toThrow(
+      /legacyDiagnostic cannot authorize separability e2e metrics/u
+    );
+    const fixture = withCohort(diagnostics.questions);
+    expect(runSeparabilityProbe(
+      { schema_version: 1, questions: fixture.questions },
+      { cohort: fixture.cohort }
+    )).toMatchObject({
+      evidence_mode: "current_cohort",
+      dataset_answerable_count: 6,
+      runtime_scorable_count: 6
+    });
+  });
+
+  it("keeps legacyPairwiseDiagnostic pairwise-only without e2e measurement denominators", () => {
+    const diagnostics = {
+      schema_version: 1,
+      questions: Array.from({ length: 6 }, (_, index) => question(index))
+    };
+    const report = runSeparabilityProbe(diagnostics, { legacyPairwiseDiagnostic: true });
+    expect(report).toMatchObject({
+      evidence_mode: "legacy_pairwise_diagnostic",
+      dataset_answerable_count: 6,
+      runtime_scorable_count: 0,
+      pairwise_eligible_count: 6
+    });
+    expect(report.tracks.baseline).toMatchObject({
+      runtime_scorable_any_at_5: null,
+      end_to_end_projection_any_at_5: null,
+      current_any_at_5_count: null,
+      current_end_to_end_any_at_5: null,
+      retrieval_conditional_net_gain_count: null
+    });
   });
 
   it("reports a typed-Path-unique held-out gain without calling scores probabilities", () => {
-    const report = runSeparabilityProbe({
-      schema_version: 1,
-      questions: Array.from({ length: 10 }, (_, i) => question(i))
-    }, { legacyDiagnostic: true });
+    const fixture = withCohort(Array.from({ length: 10 }, (_, i) => question(i)));
+    const report = runSeparabilityProbe(
+      { schema_version: 1, questions: fixture.questions },
+      { cohort: fixture.cohort }
+    );
     expect(report.tracks.baseline.any_at_5_count).toBe(0);
     expect(report.comparison.typed_path_unique_gain_count).toBe(10);
     expect(report.objective_lane).toMatchObject({
@@ -318,10 +209,11 @@ describe("held-out separability probe", () => {
       path_features: {},
       score_factors: { activation: row.score_factors.activation }
     }));
+    const fixture = withCohort(questions);
 
     const report = runSeparabilityProbe(
-      { schema_version: 1, questions },
-      { legacyDiagnostic: true }
+      { schema_version: 1, questions: fixture.questions },
+      { cohort: fixture.cohort }
     );
 
     expect(report.feature_availability).toEqual({
@@ -352,7 +244,8 @@ describe("held-out separability probe", () => {
         questions: Array.from({ length: 6 }, (_, index) => highCardinalityQuestion(index))
       },
       {
-        legacyDiagnostic: true,
+        // Pairwise optimizer work only — not an e2e measurement denominator claim.
+        legacyPairwiseDiagnostic: true,
         on_progress: (event: { stage: string; iteration?: number }) => progress.push(event)
       }
     );
@@ -366,6 +259,8 @@ describe("held-out separability probe", () => {
     expect(progress.some((event) =>
       event.stage === "optimizer_progress" && event.iteration === 300
     )).toBe(true);
+    expect(report.runtime_scorable_count).toBe(0);
+    expect(report.tracks.baseline.end_to_end_projection_any_at_5).toBeNull();
   });
 
   it("keeps sparse optimizer results numerically identical to the dense update", () => {
@@ -381,13 +276,14 @@ describe("held-out separability probe", () => {
   });
 
   it("retains answerable unscorable rows outside the measurement denominator", () => {
-    const report = runSeparabilityProbe({
-      schema_version: 1,
-      questions: [
-        ...Array.from({ length: 6 }, (_, i) => question(i)),
-        { ...question(9, { scorable: false }), hit_at_5: true }
-      ]
-    }, { legacyDiagnostic: true });
+    const fixture = withCohort([
+      ...Array.from({ length: 6 }, (_, i) => question(i)),
+      { ...question(9, { scorable: false }), hit_at_5: true }
+    ]);
+    const report = runSeparabilityProbe(
+      { schema_version: 1, questions: fixture.questions },
+      { cohort: fixture.cohort }
+    );
     expect(report.dataset_answerable_count).toBe(7);
     expect(report.runtime_scorable_count).toBe(6);
     expect(report.tracks.baseline).toMatchObject({
@@ -396,7 +292,7 @@ describe("held-out separability probe", () => {
       end_to_end_projection_any_at_5: 0
     });
     expect(report.tracks.baseline.rows.find((row: { question_id: string }) => row.question_id === "q-9"))
-      .toMatchObject({ status: "unscorable", any_at_5: null });
+      .toMatchObject({ status: "unscorable", any_at_5: null, measurement_scorable: false });
   });
 
   it("uses the shared complete-question assertion for cohort-scored rows", () => {

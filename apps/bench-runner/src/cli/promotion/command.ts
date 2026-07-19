@@ -1,5 +1,6 @@
 import process from "node:process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   authorizeLongMemEvalMatrixPromotion,
   LongMemEvalMatrixPromotionAuthorizationSchema,
@@ -11,12 +12,17 @@ import { parseLongMemEvalMatrixPromotionCommandOptions } from "./options.js";
 
 export interface LongMemEvalMatrixPromotionCommandDependencies {
   readonly authorize: typeof authorizeLongMemEvalMatrixPromotion;
+  readonly checkoutRoot: string;
   readonly stdout: (message: string) => unknown;
   readonly stderr: (message: string) => unknown;
 }
 
 const DEFAULT_DEPENDENCIES: LongMemEvalMatrixPromotionCommandDependencies = {
   authorize: authorizeLongMemEvalMatrixPromotion,
+  checkoutRoot: path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../.."
+  ),
   stdout: (message) => process.stdout.write(message),
   stderr: (message) => process.stderr.write(message)
 };
@@ -29,7 +35,11 @@ export async function runAuthorizeLongMemEvalMatrixCommand(
     const options = parseLongMemEvalMatrixPromotionCommandOptions(args);
     const input = await readLongMemEvalMatrixPromotionContract(options.contractPath);
     const authorization = LongMemEvalMatrixPromotionAuthorizationSchema.parse(
-      await dependencies.authorize(input)
+      await dependencies.authorize({
+        checkoutRoot: dependencies.checkoutRoot,
+        contractPath: path.resolve(options.contractPath),
+        ...input
+      })
     );
     const output = await publishExclusiveAuthorization(
       options.outputPath,

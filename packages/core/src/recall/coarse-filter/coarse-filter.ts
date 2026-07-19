@@ -17,11 +17,20 @@ import type {
   RecallMemoryListPageOptions,
   RecallDegradationReason,
   RecallServiceDependencies,
-  RecallServiceWarnPort
+  RecallServiceWarnPort,
+  RecallTierWindowCursor
 } from "../runtime/recall-service-types.js";
 import {
   type CoarseFilterRunResult
 } from "./coarse-filter-result.js";
+import {
+  MAX_RECALL_TIER_MEMORIES,
+  MAX_OFFSET_RECALL_TIER_PAGES,
+  OFFSET_RECALL_TIER_PAGE_SIZE,
+  resolveRecallTierWindowPageLimit,
+  resolveRecallTierWindowStep,
+  STORAGE_RECALL_TIER_PAGE_SIZE
+} from "./pagination/recall-tier-window-pagination.js";
 import { selectBoundedTopK } from "./selection/bounded-top-k.js";
 import {
   admitDynamicCoarseCandidates,
@@ -34,12 +43,6 @@ import {
   sessionRouteEnabled,
   withRoutedSurfaceIds
 } from "./session-route.js";
-
-const RECALL_TIER_MEMORY_PAGE_SIZE = 512;
-const STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE = 500;
-const MAX_RECALL_TIER_MEMORY_PAGES = 200;
-const MAX_RECALL_TIER_MEMORIES =
-  RECALL_TIER_MEMORY_PAGE_SIZE * MAX_RECALL_TIER_MEMORY_PAGES;
 
 export interface RunCoarseFilterContext {
   readonly dependencies: RecallServiceDependencies;
@@ -107,21 +110,45 @@ async function loadRecallTierWindow(
     context.dependencies.memoryRepo
   );
   if (loadWindow === undefined) return null;
-  const window = await loadWindow({ workspaceId, tier, limit: MAX_RECALL_TIER_MEMORIES });
-  if (window.truncated) {
-    warnMaxRecallMemoryPagesReached(
-      context,
+
+  const memories: Readonly<MemoryEntry>[] = [];
+  let cursor: Readonly<RecallTierWindowCursor> | undefined;
+  let pagesLoaded = 0;
+  let complete = true;
+  const pageLimit = STORAGE_RECALL_TIER_PAGE_SIZE;
+
+  for (;;) {
+    const requestLimit = resolveRecallTierWindowPageLimit(memories.length);
+    if (requestLimit === null) {
+      warnMaxRecallMemoryPagesReached(
+        context, workspaceId, tier, pageLimit, pagesLoaded, memories.length
+      );
+      complete = false;
+      break;
+    }
+    const window = await loadWindow({
       workspaceId,
       tier,
-      STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE,
-      MAX_RECALL_TIER_MEMORY_PAGES,
-      window.memories.length
-    );
+      limit: requestLimit,
+      ...(cursor === undefined ? {} : { cursor })
+    });
+    pagesLoaded += 1;
+    memories.push(...window.memories);
+    const step = resolveRecallTierWindowStep(window, pagesLoaded, memories.length);
+    if (step.kind === "continue") {
+      cursor = step.cursor;
+      continue;
+    }
+    if (step.kind === "capped") {
+      warnMaxRecallMemoryPagesReached(
+        context, workspaceId, tier, pageLimit, pagesLoaded, memories.length
+      );
+      complete = false;
+    }
+    break;
   }
-  return Object.freeze({
-    memories: Object.freeze([...window.memories]),
-    complete: !window.truncated
-  });
+
+  return Object.freeze({ memories: Object.freeze(memories), complete });
 }
 
 async function loadRecallTierPages(
@@ -131,7 +158,7 @@ async function loadRecallTierPages(
 ): Promise<TierMemoryLoadResult> {
   const memories: Readonly<MemoryEntry>[] = [];
   let offset = 0;
-  let pageLimit = RECALL_TIER_MEMORY_PAGE_SIZE;
+  let pageLimit = OFFSET_RECALL_TIER_PAGE_SIZE;
   let previousPageSignature: string | null = null;
   let pagesLoaded = 0;
   let complete = true;
@@ -157,7 +184,7 @@ async function loadRecallTierPages(
     if (pageMemories.length < pageLimit) {
       break;
     }
-    if (pagesLoaded >= MAX_RECALL_TIER_MEMORY_PAGES) {
+    if (pagesLoaded >= MAX_OFFSET_RECALL_TIER_PAGES) {
       warnMaxRecallMemoryPagesReached(context, workspaceId, tier, pageLimit, pagesLoaded, memories.length);
       complete = false;
       break;
@@ -272,13 +299,13 @@ async function loadTierMemoryPage(
     };
   } catch (error) {
     if (
-      page.limit !== RECALL_TIER_MEMORY_PAGE_SIZE ||
+      page.limit !== OFFSET_RECALL_TIER_PAGE_SIZE ||
       !isRepoPageLimitValidationError(error)
     ) {
       throw error;
     }
     const cappedPage = {
-      limit: STORAGE_RECALL_TIER_MEMORY_PAGE_SIZE,
+      limit: STORAGE_RECALL_TIER_PAGE_SIZE,
       offset: page.offset
     };
     context.warn("recall memory repo rejected recall page size; retrying with storage page cap", {

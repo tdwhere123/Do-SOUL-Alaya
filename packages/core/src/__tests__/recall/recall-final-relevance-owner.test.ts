@@ -28,6 +28,18 @@ const NOW = "2026-07-12T00:00:00.000Z";
 const FUSION_WINNER_ID = "11111111-1111-4111-8111-111111111111";
 const ACTIVATION_WINNER_ID = "22222222-2222-4222-8222-222222222222";
 const COVERAGE_NOVEL_ID = "44444444-4444-4444-8444-444444444444";
+const CE_TOP_ID = "55555555-5555-4555-8555-555555555555";
+const CE_HIGH_DUP_ID = "66666666-6666-4666-8666-666666666666";
+const CE_TIE_FUSION_TOP_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const CE_TIE_FUSION_LOW_ID = "00000000-0000-4000-8000-000000000000";
+const CE_FILLER_IDS = [
+  "77777777-7777-4777-8777-777777777777",
+  "88888888-8888-4888-8888-888888888888",
+  "99999999-9999-4999-8999-999999999999",
+  "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+] as const;
 
 afterEach(() => {
   resetCoreConfigForTests();
@@ -80,6 +92,37 @@ describe("final recall relevance ownership", () => {
     expect(answerWinner?.score_factors.content_relevance).toBe(
       baselineFactors.get(ACTIVATION_WINNER_ID)?.content_relevance
     );
+  });
+
+  it("keeps a CE-scored candidate ahead of an unscored fused fallback", () => {
+    const answerScores = new Map([
+      [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.01]
+    ]);
+    const fixture = buildRelevanceFixture(answerScores);
+
+    expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
+    expect(fixture.assessed.diagnostics.find(
+      (candidate) => candidate.object_id === ACTIVATION_WINNER_ID
+    )).toMatchObject({ answer_relevance_rank: 1, final_rank: 1, post_rank: 1 });
+  });
+
+  it("preserves the delivery authority's fused tie-break for equal CE scores", () => {
+    const memories = [
+      createMemory(CE_TIE_FUSION_LOW_ID, 0.1, [{ facet: "occupation_work" }]),
+      createMemory(CE_TIE_FUSION_TOP_ID, 0.95, [{ facet: "occupation_work" }])
+    ];
+    const baseline = assessMemories(memories);
+    const tied = assessMemories(memories, new Map(memories.map((memory) => [
+      `workspace_local:memory_entry:${memory.object_id}`,
+      0.5
+    ])));
+
+    expect(baseline.candidates[0]?.object_id).toBe(CE_TIE_FUSION_TOP_ID);
+    expect(tied.candidates.map((candidate) => candidate.object_id))
+      .toEqual(baseline.candidates.map((candidate) => candidate.object_id));
+    expect(tied.diagnostics.find((row) => row.object_id === CE_TIE_FUSION_TOP_ID))
+      .toMatchObject({ answer_relevance_rank: 1, final_rank: 1, post_rank: 1 });
   });
 
   it("restores public relevance order after lightweight-head coverage admission", () => {
@@ -135,6 +178,25 @@ describe("final recall relevance ownership", () => {
     });
   });
 
+  it("restores CE relevance order after coverage admits a high-score duplicate late", () => {
+    const assessed = buildCoverageReorderedCeAssessment();
+
+    expect(assessed.candidates.length).toBeGreaterThan(5);
+    const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
+    const highDup = diagnostics.get(CE_HIGH_DUP_ID);
+    expect(highDup?.rank_after_coverage_selector).toBeGreaterThan(5);
+    expect(highDup?.final_rank).toBeLessThanOrEqual(5);
+    expect(highDup?.final_rank).toBe(2);
+    expect(highDup?.post_rank).toBe(2);
+    expect(assessed.candidates.map((candidate) => candidate.relevance_score)).toEqual(
+      [...assessed.candidates]
+        .map((candidate) => candidate.relevance_score)
+        .sort((left, right) => right - left)
+    );
+    expect(assessed.candidates[0]?.object_id).toBe(CE_TOP_ID);
+    expect(assessed.candidates[1]?.object_id).toBe(CE_HIGH_DUP_ID);
+  });
+
   it("uses only the injected clock when a retired benchmark env is present", () => {
     installCoreConfigFromProcessEnv({
       ALAYA_RECALL_NOW_ISO: "2030-01-01T00:00:00.000Z"
@@ -167,6 +229,49 @@ function buildRelevanceFixture(
     now: () => NOW, warn: vi.fn()
   });
   return { fusionWinner, activationWinner, assessed };
+}
+
+function assessMemories(
+  memories: readonly MemoryEntry[],
+  answerScores?: ReadonlyMap<string, number>
+): ReturnType<typeof fineAssess> {
+  return fineAssess({
+    candidates: memories.map(createCoarseCandidate),
+    policy: buildPolicy(),
+    winnerMemoryIds: new Set(),
+    supplementaryData: createSupplementaryData(answerScores),
+    tokenEstimator: { estimate: () => 4 },
+    now: () => NOW,
+    warn: vi.fn()
+  });
+}
+
+function buildCoverageReorderedCeAssessment(): ReturnType<typeof fineAssess> {
+  const memories = [
+    createMemory(CE_TOP_ID, 0.5, [{ facet: "occupation_work" }]),
+    createMemory(CE_HIGH_DUP_ID, 0.4, [{ facet: "occupation_work" }]),
+    ...CE_FILLER_IDS.map((id, index) =>
+      createMemory(id, 0.3 - index * 0.01, [{ facet: "location_place" }])
+    )
+  ];
+  const answerScores = new Map([
+    [`workspace_local:memory_entry:${CE_TOP_ID}`, 0.99],
+    [`workspace_local:memory_entry:${CE_HIGH_DUP_ID}`, 0.95],
+    ...CE_FILLER_IDS.map((id, index) =>
+      [`workspace_local:memory_entry:${id}`, 0.55 - index * 0.01] as const
+    )
+  ]);
+  const basePolicy = buildPolicy();
+  return fineAssess({
+    candidates: memories.map(createCoarseCandidate),
+    policy: { ...basePolicy, fine_assessment: { ...basePolicy.fine_assessment,
+      budgets: { max_entries: 10, max_total_tokens: 200, per_dimension_limits: null } } },
+    winnerMemoryIds: new Set(),
+    supplementaryData: { ...createSupplementaryData(answerScores),
+      evidenceGistsByMemoryId: { [CE_TOP_ID]: "shared gist", [CE_HIGH_DUP_ID]: "shared gist",
+        ...Object.fromEntries(CE_FILLER_IDS.map((id, index) => [id, `novel-gist-${index}`])) } },
+    tokenEstimator: { estimate: () => 4 }, now: () => NOW, warn: vi.fn()
+  });
 }
 
 function assertFusionOwnedCandidates(assessed: ReturnType<typeof fineAssess>): void {

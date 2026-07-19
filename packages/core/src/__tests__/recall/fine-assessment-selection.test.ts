@@ -268,9 +268,9 @@ describe("selectFineAssessmentCandidates", () => {
       ])
     });
 
-    expect(stageRanks(result, "primary")).toEqual([1, 1, "kept", "noop"]);
-    expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted", "noop"]);
-    expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced", "noop"]);
+    expect(stageRanks(result, "primary")).toEqual([1, 1, "kept"]);
+    expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted"]);
+    expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced"]);
   });
 
 });
