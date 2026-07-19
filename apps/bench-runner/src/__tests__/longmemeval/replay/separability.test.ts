@@ -380,7 +380,7 @@ describe("held-out separability probe", () => {
     expect(optimizePairwiseDifferences(sparsePairs, 5)).toEqual(denseReference(densePairs, 5));
   });
 
-  it("retains answerable unscorable rows in the end-to-end projection", () => {
+  it("retains answerable unscorable rows outside the measurement denominator", () => {
     const report = runSeparabilityProbe({
       schema_version: 1,
       questions: [
@@ -391,7 +391,7 @@ describe("held-out separability probe", () => {
     expect(report.dataset_answerable_count).toBe(7);
     expect(report.runtime_scorable_count).toBe(6);
     expect(report.tracks.baseline).toMatchObject({
-      current_any_at_5_count: 1,
+      current_any_at_5_count: 0,
       retrieval_conditional_net_gain_count: 0,
       end_to_end_projection_any_at_5: 0
     });
@@ -429,13 +429,14 @@ describe("held-out separability probe", () => {
     ).dataset_answerable_count).toBe(6);
   });
 
-  it("reports primitive measurement failures before candidate symptoms", () => {
+  it("separates primitive failures from verified extraction misses", () => {
     const rows = [
       ...Array.from({ length: 6 }, (_, i) => question(i)),
       question(6, { goldIds: [] }),
       question(7, { goldIds: ["gold-7", "alternate-gold-7"] }),
-      question(8)
+      question(8, { goldIds: [] })
     ];
+    rows[0]!.candidates.at(-1)!.fused_rank = 4;
     const fixture = withCohort(rows, {
       "q-6": {
         evaluatorStatus: "absent", extractionStatus: "unknown",
@@ -446,16 +447,20 @@ describe("held-out separability probe", () => {
         issue: "identity_join_error", measurementStatus: "evaluator_identity_unscorable"
       },
       "q-8": {
-        evaluatorStatus: "present", extractionStatus: "drop",
-        issue: "extraction_materialization_drop", measurementStatus: "evaluator_identity_unscorable"
+        evaluatorStatus: "absent", extractionStatus: "drop",
+        issue: "extraction_materialization_drop", measurementStatus: "scorable"
       }
     });
-
     const report = runSeparabilityProbe(
       { schema_version: 1, questions: fixture.questions },
       { cohort: fixture.cohort }
     );
-    expect(report.runtime_scorable_count).toBe(6);
+    expect(report).toMatchObject({
+      runtime_scorable_count: 7,
+      pairwise_eligible_count: 6
+    });
+    expect(report.tracks.typed_path).toMatchObject({ runtime_scorable_any_at_5: 6 / 7, end_to_end_projection_any_at_5: 6 / 7 });
+    expect(report.objective_lane.guards[0]).toMatchObject({ end_to_end_any_at_5: 1 / 7 });
     const byId = new Map<string, {
       question_id: string;
       unscorable_reason: string | null;
@@ -465,9 +470,10 @@ describe("held-out separability probe", () => {
     }) => [row.question_id, row] as const));
     expect(byId.get("q-6")?.unscorable_reason).toBe("empty_gold_identity");
     expect(byId.get("q-7")?.unscorable_reason).toBe("identity_join_error");
-    expect(byId.get("q-8")?.unscorable_reason).toBe("extraction_materialization_drop");
+    const dropRow = report.tracks.baseline.rows.find((row: { question_id: string }) => row.question_id === "q-8");
+    expect(dropRow).toMatchObject({ status: "pairwise_ineligible", unscorable_reason: null });
+    expect(report.objective_lane.guards[0].rows.find((row: { question_id: string }) => row.question_id === "q-8")).toMatchObject({ status: "pairwise_ineligible", any_at_5: null });
   });
-
   it("keeps evaluator identity independent from candidate-pool completeness", () => {
     const rows = [
       ...Array.from({ length: 6 }, (_, i) => question(i)),

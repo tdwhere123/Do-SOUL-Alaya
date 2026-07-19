@@ -372,7 +372,13 @@ function classifyMiss(
     return "evaluator_identity_inconsistent";
   }
   if (question.is_abstention) return "abstention_uncalibrated";
-  if (question.gold.length === 0) return "no_gold";
+  if (question.gold.length === 0) {
+    return question.seed_drop_reasons !== undefined &&
+      (question.seed_drop_reasons.candidate_absent > 0 ||
+        question.seed_drop_reasons.materialization_drop > 0)
+      ? "candidate_absent"
+      : "no_gold";
+  }
   if (hitAt5) return "hit_at_5";
   if (question.gold.some(isDeliveryBudgetLoss)) return "budget_dropped";
   if (question.gold.some((gold) => gold.final_rank !== null ||

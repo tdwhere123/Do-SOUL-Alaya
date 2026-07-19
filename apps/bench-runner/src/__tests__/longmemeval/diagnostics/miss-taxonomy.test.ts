@@ -259,8 +259,8 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
     ];
     const summary = summarizeLongMemEvalRecallEvidence(questions);
     expect(summary.miss_taxonomy_distribution).toEqual({
-      candidate_absent: 1,
-      materialization_drop: 1,
+      candidate_absent: 2,
+      materialization_drop: 2,
       fine_assessment_drop: 0,
       budget_drop: 1,
       delivery_order_drop: 1,
@@ -271,18 +271,17 @@ describe("LongMemEval recall diagnostics (legacy/order/pool)", () => {
     expect(metrics.miss_taxonomy_distribution).toEqual(summary.miss_taxonomy_distribution);
     expect(metrics.unscorable_reason_distribution).toEqual({
       abstention_uncalibrated: 1,
-      empty_gold_identity: 1,
-      extraction_materialization_drop: 2
+      empty_gold_identity: 1
     });
     const cohorts = metrics.measurement_cohort_counts!;
     expect(cohorts).toEqual({
       evaluated: 9,
       non_abstention: 8,
       abstention: 1,
-      scorable_answerable: 5,
-      unscorable_answerable: 3,
+      scorable_answerable: 7,
+      unscorable_answerable: 1,
       hit_at_5: 1,
-      miss_at_5: 4
+      miss_at_5: 6
     });
     expect(cohorts.evaluated).toBe(cohorts.non_abstention + cohorts.abstention);
     expect(cohorts.non_abstention).toBe(

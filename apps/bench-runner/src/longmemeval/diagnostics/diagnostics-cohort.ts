@@ -81,16 +81,16 @@ export function buildQuestionCohortLedger(input: {
   const ambiguousIdentity = input.goldMemoryIds.some((id) =>
     input.identityConflictObjectKeys?.includes(`memory_entry:${id}`) === true
   );
-  const identityPresent = input.goldMemoryIds.length > 0 && !ambiguousIdentity;
   const primitives = buildMeasurementPrimitives(input, ambiguousIdentity);
+  const measurementStatus = deriveQuestionMeasurementStatus({
+    isAbstention: input.isAbstention,
+    cohortLedger: { dataset_cohort: datasetCohort, ...primitives }
+  });
   return {
-    measurement_status: deriveQuestionMeasurementStatus({
-      isAbstention: input.isAbstention,
-      cohortLedger: { dataset_cohort: datasetCohort, ...primitives }
-    }),
+    measurement_status: measurementStatus,
     dataset_cohort: datasetCohort,
     ...primitives,
-    retrieval_status: datasetCohort === "answerable" && identityPresent
+    retrieval_status: measurementStatus === "scorable"
       ? input.hitAt5 ? "hit_at_5" : "miss_at_5"
       : "not_applicable",
     evidence_status: !input.diagnosticsAvailable
@@ -98,7 +98,7 @@ export function buildQuestionCohortLedger(input: {
       : input.candidatePoolComplete ? "complete" : "partial",
     candidate_pool_complete: input.candidatePoolComplete,
     stage_ranks: input.gold.map(toStageRanks),
-    final_verdict: finalVerdict(input, datasetCohort, identityPresent)
+    final_verdict: finalVerdict(input, datasetCohort, measurementStatus)
   };
 }
 
@@ -168,14 +168,14 @@ export function deriveQuestionEvaluationIssueReason(input: {
 function finalVerdict(
   input: Parameters<typeof buildQuestionCohortLedger>[0],
   cohort: LongMemEvalQuestionCohortLedger["dataset_cohort"],
-  identityPresent: boolean
+  measurementStatus: LongMemEvalQuestionCohortLedger["measurement_status"]
 ): LongMemEvalQuestionCohortLedger["final_verdict"] {
   if (hasAbstentionIdentityConflict(input)) {
     return "evaluator_data_identity_inconsistency";
   }
   if (cohort === "adjudicated_invalid") return "adjudicated_invalid";
   if (cohort === "abstention") return "abstention_uncalibrated";
-  if (!identityPresent) return "evaluation_unscorable";
+  if (measurementStatus !== "scorable") return "evaluation_unscorable";
   return input.hitAt5 ? "hit_at_5" : "miss_at_5";
 }
 

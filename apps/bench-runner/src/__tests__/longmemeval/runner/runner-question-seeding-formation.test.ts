@@ -135,6 +135,68 @@ describe("seedLongMemEvalQuestion formation order", () => {
     ]);
   });
 
+  it("records one candidate-absent answer drop for a successful empty official extraction", async () => {
+    const question = buildQuestion({
+      haystack_sessions: [
+        [{ role: "user", content: "Answer source.", has_answer: true }],
+        [{ role: "user", content: "Distractor." }]
+      ]
+    });
+    const stats = seedStats();
+    const seedTurn = vi.fn(async () => {
+      stats.lastExtractionSource = seedTurn.mock.calls.length === 1 ? "cache" : "live";
+      stats.lastCacheKey = String(seedTurn.mock.calls.length).padStart(64, "0");
+      stats.lastRawJsonSha256 = String(seedTurn.mock.calls.length + 2).padStart(64, "0");
+      stats.lastTurnRawSignalCount = 0;
+      stats.lastTurnDraftCount = 0;
+      return { seeds: [], turnTruncated: false, charsClipped: 0 };
+    });
+
+    const state = await seedLongMemEvalQuestion({
+      workspace: buildWorkspace("empty-official"),
+      question,
+      seedRunner: { seedTurn, stats },
+      seedFormationMode: "treatment_neutral"
+    });
+
+    expect(state.answerSeedDropReasons).toEqual({
+      candidate_absent: 1,
+      materialization_drop: 0
+    });
+    expect(stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 0,
+      materialization_drop: 0
+    });
+    expect(stats.signalsDropped).toBe(0);
+  });
+
+  it("does not double-count an already-recorded candidate-absent answer drop", async () => {
+    const question = buildQuestion({
+      haystack_sessions: [[{ role: "user", content: "Answer source.", has_answer: true }]],
+      haystack_session_ids: ["session-a"],
+      haystack_dates: ["2025-12-01"]
+    });
+    const stats = seedStats();
+    const seedTurn = vi.fn(async () => {
+      stats.lastExtractionSource = "cache";
+      stats.lastCacheKey = "1".padStart(64, "0");
+      stats.lastRawJsonSha256 = "2".padStart(64, "0");
+      stats.lastTurnRawSignalCount = 0;
+      stats.lastTurnDraftCount = 0;
+      stats.signalsDroppedByReason.candidate_absent += 1;
+      return { seeds: [], turnTruncated: false, charsClipped: 0 };
+    });
+
+    const state = await seedLongMemEvalQuestion({
+      workspace: buildWorkspace("existing-drop"),
+      question,
+      seedRunner: { seedTurn, stats },
+      seedFormationMode: "treatment_neutral"
+    });
+
+    expect(state.answerSeedDropReasons.candidate_absent).toBe(1);
+  });
+
   it("rejects extraction counters that move backwards between rounds", async () => {
     const stats = seedStats();
     const seedTurn = vi.fn(async () => {
@@ -261,6 +323,17 @@ function buildSeed(memoryId: string) {
     truncated: false,
     charsClipped: 0
   };
+}
+
+function buildWorkspace(label: string): BenchWorkspaceHandle {
+  return {
+    workspaceId: `workspace-${label}`,
+    runId: `run-${label}`,
+    accrueSessionCoRecall: vi.fn(async () => ({
+      pairsObserved: 0, minted: 0, belowThreshold: 0
+    })),
+    proposeSynthesis: vi.fn(async () => ({ synthesisId: null }))
+  } as unknown as BenchWorkspaceHandle;
 }
 
 function seedStats(): CompileSeedExtractionStats {

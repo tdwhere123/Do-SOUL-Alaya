@@ -26,6 +26,8 @@ export function runSeparabilityProbe(diagnostics, options) {
   const emit = createProgressEmitter(options.on_progress);
   emit({ stage: "probe_start" });
   const questions = answerableQuestions(diagnostics, cohortById);
+  const measurementCount = questions.filter((q) => isMeasurementScorable(q, cohortById)).length;
+  const pairwiseCount = questions.filter((q) => isPairwiseEligible(q, cohortById)).length;
   const assignments = assignGroupedStratifiedFolds(questions, options.fold_count ?? 5);
   const foldCount = new Set(assignments.values()).size;
   const tracks = Object.fromEntries(TRACKS.map((track) => [
@@ -35,7 +37,8 @@ export function runSeparabilityProbe(diagnostics, options) {
   const objectiveLane = runBoundaryObjectiveLane(questions, assignments, foldCount, {
     candidates: top50Candidates,
     goldIds: goldObjectIds,
-    isScorable: (question) => isScorable(question, cohortById)
+    isMeasurementScorable: (question) => isMeasurementScorable(question, cohortById),
+    isPairwiseEligible: (question) => isPairwiseEligible(question, cohortById)
   }, emit);
   emit({ stage: "probe_complete" });
   return Object.freeze({
@@ -52,11 +55,9 @@ export function runSeparabilityProbe(diagnostics, options) {
       fold: assignments.get(question.question_id)
     }))),
     dataset_answerable_count: questions.length,
-    runtime_scorable_count: questions.filter((question) => isScorable(question, cohortById)).length,
-    runtime_scorable_coverage: ratio(
-      questions.filter((question) => isScorable(question, cohortById)).length,
-      questions.length
-    ),
+    runtime_scorable_count: measurementCount,
+    runtime_scorable_coverage: ratio(measurementCount, questions.length),
+    pairwise_eligible_count: pairwiseCount,
     feature_availability: summarizeFeatureAvailability(questions),
     tracks: Object.freeze(tracks),
     objective_lane: objectiveLane,
@@ -71,13 +72,13 @@ function runTrack(questions, assignments, foldCount, track, cohortById, emit) {
   for (let fold = 0; fold < foldCount; fold += 1) {
     emit({ stage: "fold_start", track, fold });
     const train = questions.filter((question) =>
-      assignments.get(question.question_id) !== fold && isScorable(question, cohortById)
+      assignments.get(question.question_id) !== fold && isPairwiseEligible(question, cohortById)
     );
     const heldOut = questions.filter((question) =>
-      assignments.get(question.question_id) === fold && isScorable(question, cohortById)
+      assignments.get(question.question_id) === fold && isPairwiseEligible(question, cohortById)
     );
     const rawRows = train.flatMap((question) => rawCandidateRows(question, track));
-    if (rawRows.length === 0) throw new Error(`fold ${fold} has no scorable training candidates`);
+    if (rawRows.length === 0) throw new Error(`fold ${fold} has no pairwise-eligible candidates`);
     const pipeline = fitFeaturePipeline(rawRows.map((row) => row.features));
     const optimizer = trainPairwiseRanker(train, track, pipeline, (iteration) =>
       emit({ stage: "optimizer_progress", track, fold, iteration })
@@ -91,24 +92,24 @@ function runTrack(questions, assignments, foldCount, track, cohortById, emit) {
     }));
     emit({ stage: "fold_complete", track, fold, ...optimizer.work });
   }
-  const rows = questions.map((question) => renderQuestionRow(
-    question, predictions.get(question.question_id), cohortById
-  ));
+  const rows = questions.map((question) =>
+    renderQuestionRow(question, predictions.get(question.question_id), cohortById));
+  const measurementRows = rows.filter((row) => row.status !== "unscorable");
   const anyAt5 = rows.filter((row) => row.any_at_5 === true).length;
-  const currentHits = rows.filter((row) => row.current_any_at_5).length;
-  const currentScorableHits = rows.filter((row) => row.status === "scored" && row.current_any_at_5).length;
+  const currentHits = measurementRows.filter((row) => row.current_any_at_5).length;
+  const currentPairwiseHits = rows.filter((row) => row.status === "scored" && row.current_any_at_5).length;
   return Object.freeze({
     track,
     rows: Object.freeze(rows),
     fold_models: Object.freeze(foldModels),
     any_at_5_count: anyAt5,
-    runtime_scorable_any_at_5: ratio(anyAt5, rows.filter((row) => row.status === "scored").length),
-    end_to_end_projection_any_at_5: ratio(anyAt5, rows.length),
+    runtime_scorable_any_at_5: ratio(anyAt5, measurementRows.length),
+    end_to_end_projection_any_at_5: ratio(anyAt5, measurementRows.length),
     current_any_at_5_count: currentHits,
-    current_end_to_end_any_at_5: ratio(currentHits, rows.length),
+    current_end_to_end_any_at_5: ratio(currentHits, measurementRows.length),
     gain_count: rows.filter((row) => row.any_at_5 === true && !row.current_any_at_5).length,
     loss_count: rows.filter((row) => row.any_at_5 === false && row.current_any_at_5).length,
-    retrieval_conditional_net_gain_count: anyAt5 - currentScorableHits,
+    retrieval_conditional_net_gain_count: anyAt5 - currentPairwiseHits,
     question_type_metrics: summarizeQuestionTypes(rows)
   });
 }
@@ -173,12 +174,14 @@ function rawCandidateRows(question, track) {
 }
 
 function renderQuestionRow(question, prediction, cohortById) {
-  if (!isScorable(question, cohortById)) {
+  const measurementScorable = isMeasurementScorable(question, cohortById);
+  if (!isPairwiseEligible(question, cohortById)) {
     return Object.freeze({
       question_id: question.question_id,
       question_type: question.question_type ?? null,
-      status: "unscorable",
-      unscorable_reason: unscorableReason(question, cohortById?.get(question.question_id)),
+      status: measurementScorable ? "pairwise_ineligible" : "unscorable",
+      unscorable_reason: measurementScorable ? null
+        : unscorableReason(question, cohortById?.get(question.question_id)),
       current_any_at_5: question.hit_at_5 === true,
       any_at_5: null,
       top_5_candidate_keys: Object.freeze([])
@@ -218,10 +221,12 @@ function summarizeQuestionTypes(rows) {
   return Object.freeze(types.map((type) => {
     const members = rows.filter((row) => (row.question_type ?? "unknown") === type);
     const scored = members.filter((row) => row.status === "scored");
+    const measurementScorable = members.filter((row) => row.status !== "unscorable");
     return Object.freeze({
       question_type: type,
       dataset_answerable_count: members.length,
-      runtime_scorable_count: scored.length,
+      runtime_scorable_count: measurementScorable.length,
+      pairwise_eligible_count: scored.length,
       any_at_5_count: scored.filter((row) => row.any_at_5 === true).length,
       gain_count: scored.filter((row) => row.any_at_5 === true && !row.current_any_at_5).length,
       loss_count: scored.filter((row) => row.any_at_5 === false && row.current_any_at_5).length
@@ -252,19 +257,24 @@ function isLegacyDiagnosticAnswerable(question) {
     && !String(question.question_id ?? "").includes("_abs");
 }
 
-function isScorable(question, cohortById = null) {
+function isMeasurementScorable(question, cohortById = null) {
   if (question.candidate_pool_complete !== true) return false;
-  if (cohortById !== null) {
-    const row = cohortById.get(question.question_id);
-    if (row?.candidate_pool_complete !== true) return false;
-    if (!isScorableMeasurementCohort(row)) return false;
-    assertCompleteReplayQuestion(question, row);
-  }
-  return goldObjectIds(question).size > 0 && top50Candidates(question).length > 1 &&
-    top50Candidates(question).some((candidate) => goldObjectIds(question).has(candidate.object_id)) &&
-    top50Candidates(question).some((candidate) => !goldObjectIds(question).has(candidate.object_id));
+  if (cohortById === null) return hasGoldDistractorPair(question);
+  const row = cohortById.get(question.question_id);
+  if (row?.candidate_pool_complete !== true || !isScorableMeasurementCohort(row)) return false;
+  assertCompleteReplayQuestion(question, row);
+  return true;
 }
-
+function isPairwiseEligible(question, cohortById = null) {
+  return isMeasurementScorable(question, cohortById) && hasGoldDistractorPair(question);
+}
+function hasGoldDistractorPair(question) {
+  const gold = goldObjectIds(question);
+  const candidates = top50Candidates(question);
+  return gold.size > 0 && candidates.length > 1 &&
+    candidates.some((row) => gold.has(row.object_id)) &&
+    candidates.some((row) => !gold.has(row.object_id));
+}
 function unscorableReason(question, cohort) {
   if (cohort !== undefined && !isScorableMeasurementCohort(cohort)) {
     return measurementUnscorableReason(cohort);

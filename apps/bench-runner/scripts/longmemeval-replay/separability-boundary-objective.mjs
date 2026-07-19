@@ -43,10 +43,10 @@ export function runBoundaryObjectiveLane(questions, assignments, foldCount, adap
   for (let fold = 0; fold < foldCount; fold += 1) {
     emit({ stage: "objective_fold_start", track: "typed_path_lexical_a", fold });
     const train = questions.filter((question) =>
-      assignments.get(question.question_id) !== fold && adapters.isScorable(question)
+      assignments.get(question.question_id) !== fold && adapters.isPairwiseEligible(question)
     );
     const heldOut = questions.filter((question) =>
-      assignments.get(question.question_id) === fold && adapters.isScorable(question)
+      assignments.get(question.question_id) === fold && adapters.isPairwiseEligible(question)
     );
     const lexicalModel = fitFoldLexicalModel(train.flatMap(adapters.candidates));
     const trainRows = new Map(train.map((question) => [
@@ -240,6 +240,7 @@ function evaluateGuard(guard, questions, predictions, adapters) {
     question, predictions.get(question.question_id), guard, adapters
   ));
   const scored = rows.filter((row) => row.status === "scored");
+  const measurementScorable = rows.filter((row) => row.status !== "unscorable");
   const hits = scored.filter((row) => row.any_at_5).length;
   const gains = scored.filter((row) => row.any_at_5 && !row.current_any_at_5).length;
   const losses = scored.filter((row) => !row.any_at_5 && row.current_any_at_5).length;
@@ -248,7 +249,7 @@ function evaluateGuard(guard, questions, predictions, adapters) {
     conditional_any_at_5_count: hits,
     conditional_any_at_5: ratio(hits, scored.length),
     end_to_end_any_at_5_count: hits,
-    end_to_end_any_at_5: ratio(hits, rows.length),
+    end_to_end_any_at_5: ratio(hits, measurementScorable.length),
     gain_count: gains, loss_count: losses, net_gain_count: gains - losses,
     question_type_metrics: summarizeQuestionTypes(rows),
     rows: Object.freeze(rows)
@@ -261,8 +262,13 @@ function renderGuardQuestion(question, prediction, guard, adapters) {
     question_type: question.question_type ?? null,
     current_any_at_5: question.hit_at_5 === true
   };
-  if (!adapters.isScorable(question)) {
+  if (!adapters.isMeasurementScorable(question)) {
     return Object.freeze({ ...common, status: "unscorable", any_at_5: null,
+      top_5_candidate_keys: Object.freeze([]), promoted_candidate_keys: Object.freeze([]),
+      displaced_candidate_keys: Object.freeze([]), promotion_decisions: Object.freeze([]) });
+  }
+  if (!adapters.isPairwiseEligible(question)) {
+    return Object.freeze({ ...common, status: "pairwise_ineligible", any_at_5: null,
       top_5_candidate_keys: Object.freeze([]), promoted_candidate_keys: Object.freeze([]),
       displaced_candidate_keys: Object.freeze([]), promotion_decisions: Object.freeze([]) });
   }
@@ -316,10 +322,12 @@ function summarizeQuestionTypes(rows) {
   return Object.freeze(types.map((type) => {
     const members = rows.filter((row) => (row.question_type ?? "unknown") === type);
     const scored = members.filter((row) => row.status === "scored");
+    const measurementScorable = members.filter((row) => row.status !== "unscorable");
     return Object.freeze({
       question_type: type, dataset_answerable_count: members.length,
-      runtime_scorable_count: scored.length,
-      current_hit_count: scored.filter((row) => row.current_any_at_5).length,
+      runtime_scorable_count: measurementScorable.length,
+      pairwise_eligible_count: scored.length,
+      current_hit_count: measurementScorable.filter((row) => row.current_any_at_5).length,
       oof_hit_count: scored.filter((row) => row.any_at_5).length,
       gain_count: scored.filter((row) => row.any_at_5 && !row.current_any_at_5).length,
       loss_count: scored.filter((row) => !row.any_at_5 && row.current_any_at_5).length

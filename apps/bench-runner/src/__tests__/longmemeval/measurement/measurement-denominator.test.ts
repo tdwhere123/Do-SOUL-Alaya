@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
+import { buildLongMemEvalQualityMetrics } from
+  "../../../longmemeval/diagnostics/quality/diagnostics-quality.js";
 import { aggregateLongMemEvalRunResults } from "../../../longmemeval/runner/archive/runner-archive-aggregate.js";
 import type { LongMemEvalWorkerResult } from "../../../longmemeval/runner/question/runner-question.js";
 import { accumulateRecallEvalRows } from "../../../longmemeval/kpi/recall-eval-accumulator.js";
@@ -12,6 +14,7 @@ interface ResultInput {
   hitAt5: boolean;
   hitAt10: boolean;
   evaluatorInvalid?: boolean;
+  extractionFailure?: "candidate_absent" | "materialization_drop";
 }
 
 function result(input: ResultInput): LongMemEvalWorkerResult {
@@ -43,13 +46,14 @@ function result(input: ResultInput): LongMemEvalWorkerResult {
 }
 
 function diagnostic(input: ResultInput) {
+  const extractionFailure = input.extractionFailure;
   return LongMemEvalQuestionDiagnosticSchema.parse({
     question_id: input.id,
     question_type: "single-session-user",
     is_abstention: input.abstention,
     premise_invalid: false,
     round_index: null,
-    gold_memory_ids: ["gold"],
+    gold_memory_ids: extractionFailure === undefined ? ["gold"] : [],
     answer_session_ids: [],
     delivered_results: [],
     active_constraint_results: [],
@@ -58,8 +62,9 @@ function diagnostic(input: ResultInput) {
     hit_at_10: input.hitAt10,
     miss_classification: input.abstention
       ? "abstained_correctly"
+      : extractionFailure !== undefined ? "candidate_absent"
       : input.hitAt5 ? "hit_at_5" : "candidate_absent",
-    miss_taxonomy: null,
+    miss_taxonomy: extractionFailure ?? null,
     degradation_reason: null,
     recall_diagnostics_present: true,
     recall_diagnostics_keys: [],
@@ -91,6 +96,24 @@ function cohortLedger(input: ResultInput) {
       candidate_pool_complete: true,
       stage_ranks: [],
       final_verdict: "evaluator_data_identity_inconsistency"
+    };
+  }
+  if (input.extractionFailure !== undefined) {
+    return {
+      measurement_status: "scorable",
+      dataset_cohort: "answerable",
+      extraction_materialization: {
+        status: "drop",
+        emitted_memory_count: 0,
+        reason: input.extractionFailure
+      },
+      evaluator_gold_identity: { status: "absent", object_ids: [] },
+      retrieval_status: "miss_at_5",
+      evidence_status: "complete",
+      evaluation_issue_reason: "extraction_materialization_drop",
+      candidate_pool_complete: true,
+      stage_ranks: [],
+      final_verdict: "miss_at_5"
     };
   }
   return {
@@ -148,4 +171,39 @@ describe("LongMemEval answerable metric denominator", () => {
     expect(recallEval.perScenario[0]).toMatchObject({ scorable: false, hit_at_5: false });
     expect(recallEval.answerableCount).toBe(0);
   });
+
+  it.each(["candidate_absent", "materialization_drop"] as const)(
+    "counts a verified %s extraction failure in the denominator as a miss",
+    (extractionFailure) => {
+      const failed = result({
+        id: `q-${extractionFailure}`,
+        abstention: false,
+        extractionFailure,
+        hitAt1: false,
+        hitAt5: false,
+        hitAt10: false
+      });
+      const archive = aggregateLongMemEvalRunResults([failed]);
+      const recallEval = accumulateRecallEvalRows([
+        failed as unknown as RecallEvalQuestionResult
+      ]);
+      const quality = buildLongMemEvalQualityMetrics([failed.diagnostics]);
+
+      expect(archive.perScenario[0]).toMatchObject({ scorable: true, hit_at_5: false });
+      expect(archive.answerableCount).toBe(1);
+      expect(recallEval.perScenario[0]).toMatchObject({ scorable: true, hit_at_5: false });
+      expect(recallEval.answerableCount).toBe(1);
+      expect(quality).toMatchObject({
+        candidate_absent_count: 1,
+        no_gold_count: 0,
+        evaluator_identity_unscorable_count: 0,
+        measurement_cohort_counts: {
+          scorable_answerable: 1,
+          unscorable_answerable: 0,
+          hit_at_5: 0,
+          miss_at_5: 1
+        }
+      });
+    }
+  );
 });

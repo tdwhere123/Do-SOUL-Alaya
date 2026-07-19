@@ -39,11 +39,15 @@ describe("promotion measurement verifier", () => {
     ["candidate absence", { candidate_absent: 2, materialization_drop: 0 }, "candidate_absent"],
     ["materialization drop", { candidate_absent: 0, materialization_drop: 1 }, "materialization_drop"],
     ["both drop reasons", { candidate_absent: 2, materialization_drop: 1 }, "materialization_drop"]
-  ] as const)("accepts an answer seed with %s", (_label, seedDropReasons, reason) => {
+  ] as const)("scores an answer seed with %s as a verified miss", (
+    _label,
+    seedDropReasons,
+    reason
+  ) => {
     const mutable = structuredClone(
       promotionMeasurementDiagnostic("q-seed-drop", "identity_unscorable", false)
     ) as unknown as MutableQuestion["diagnostics"];
-    mutable.miss_classification = "no_gold";
+    mutable.miss_classification = "candidate_absent";
     mutable.miss_taxonomy = reason === "materialization_drop"
       ? "materialization_drop"
       : "candidate_absent";
@@ -52,7 +56,9 @@ describe("promotion measurement verifier", () => {
       status: "drop", emitted_memory_count: 0, reason
     };
     mutable.cohort_ledger.evaluation_issue_reason = "extraction_materialization_drop";
-    mutable.cohort_ledger.final_verdict = "evaluation_unscorable";
+    mutable.cohort_ledger.measurement_status = "scorable";
+    mutable.cohort_ledger.retrieval_status = "miss_at_5";
+    mutable.cohort_ledger.final_verdict = "miss_at_5";
     const measurement = measurementPrimitives();
     const diagnostic = applyQuestionMeasurementAxes(
       mutable as unknown as LongMemEvalQuestionDiagnostic,
@@ -63,7 +69,11 @@ describe("promotion measurement verifier", () => {
       diagnostic,
       expectedGold: [],
       oracle: oracle(measurement, seedDropReasons)
-    }).status).toBe("evaluator_identity_unscorable");
+    })).toMatchObject({ status: "scorable", scorable: true, hits: {
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false
+    } });
   });
 
   it("rejects answer seed drop reasons that differ from the snapshot", () => {
@@ -118,6 +128,7 @@ describe("promotion measurement verifier", () => {
   it("rejects ambiguous evaluator identity from promotion evidence", () => {
     const diagnostic = structuredClone(seedDropDiagnostic());
     diagnostic.cohort_ledger!.evaluator_gold_identity.status = "ambiguous";
+    diagnostic.cohort_ledger!.measurement_status = "evaluator_identity_unscorable";
     const measurement = measurementPrimitives();
 
     expect(() => verifyPromotionQuestionMeasurement({
@@ -132,14 +143,16 @@ function seedDropDiagnostic(): LongMemEvalQuestionDiagnostic {
   const mutable = structuredClone(
     promotionMeasurementDiagnostic("q-seed-drop", "identity_unscorable", false)
   ) as unknown as MutableQuestion["diagnostics"];
-  mutable.miss_classification = "no_gold";
+  mutable.miss_classification = "candidate_absent";
   mutable.miss_taxonomy = "candidate_absent";
   mutable.seed_drop_reasons = { candidate_absent: 2, materialization_drop: 0 };
   mutable.cohort_ledger.extraction_materialization = {
     status: "drop", emitted_memory_count: 0, reason: "candidate_absent"
   };
   mutable.cohort_ledger.evaluation_issue_reason = "extraction_materialization_drop";
-  mutable.cohort_ledger.final_verdict = "evaluation_unscorable";
+  mutable.cohort_ledger.measurement_status = "scorable";
+  mutable.cohort_ledger.retrieval_status = "miss_at_5";
+  mutable.cohort_ledger.final_verdict = "miss_at_5";
   return applyQuestionMeasurementAxes(
     mutable as unknown as LongMemEvalQuestionDiagnostic,
     buildQuestionMeasurementAxes(measurementPrimitives())

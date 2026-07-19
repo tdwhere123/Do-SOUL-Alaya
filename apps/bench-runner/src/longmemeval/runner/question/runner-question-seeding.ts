@@ -161,7 +161,8 @@ async function seedQuestionRound(
     state,
     round.hasAnswer,
     beforeDropReasons,
-    input.seedRunner.stats.signalsDroppedByReason
+    input.seedRunner.stats.signalsDroppedByReason,
+    isSuccessfulEmptyOfficialExtraction(input.seedRunner.stats, beforeCounters)
   );
   addSeedSidecarEntries(input, state, context, round, seedResult);
   state.seedRounds.push(buildSeedRoundLedger({
@@ -248,19 +249,36 @@ function recordAnswerSeedDrops(
   state: LongMemEvalQuestionSeedState,
   roundHasAnswer: boolean,
   before: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>,
-  after: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>
+  after: Readonly<Record<keyof LongMemEvalSeedDropReasons, number>>,
+  successfulEmptyOfficialExtraction: boolean
 ): void {
   if (!roundHasAnswer) {
     return;
   }
+  const candidateAbsent = Math.max(0, after.candidate_absent - before.candidate_absent);
   state.answerSeedDropReasons = {
     candidate_absent:
       state.answerSeedDropReasons.candidate_absent +
-      Math.max(0, after.candidate_absent - before.candidate_absent),
+      candidateAbsent +
+      (successfulEmptyOfficialExtraction && candidateAbsent === 0 ? 1 : 0),
     materialization_drop:
       state.answerSeedDropReasons.materialization_drop +
       Math.max(0, after.materialization_drop - before.materialization_drop)
   };
+}
+
+function isSuccessfulEmptyOfficialExtraction(
+  stats: CompileSeedExtractionStats,
+  before: SeedCounterSnapshot
+): boolean {
+  return stats.lastExtractionSource !== null &&
+    stats.lastTurnRawSignalCount === 0 &&
+    stats.lastTurnDraftCount === 0 &&
+    stats.factsProduced === before.factsProduced &&
+    stats.parseDropped === before.parseDropped &&
+    stats.compileOverflowDropped === before.compileOverflowDropped &&
+    stats.signalsDroppedByReason.candidate_absent === before.candidateAbsent &&
+    stats.signalsDroppedByReason.materialization_drop === before.materializationDrop;
 }
 
 function recordTruncation(

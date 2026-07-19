@@ -142,6 +142,14 @@ function appendSentenceSpan(
 
 type DotBoundary = "boundary" | "continuation" | "ambiguous";
 
+const INLINE_BOUNDARY_ABBREVIATIONS = new Set([
+  "approx", "capt", "dr", "e.g", "etc", "gov", "i.e", "mr", "mrs", "ms", "prof", "rev", "sen"
+]);
+
+const INCOMPLETE_TERMINAL_ABBREVIATIONS = new Set([
+  "approx", "capt", "dr", "e.g", "i.e", "mr", "mrs", "ms", "prof", "rev", "sen"
+]);
+
 function classifyDotBoundary(source: string, index: number): DotBoundary {
   const before = source[index - 1] ?? "";
   const after = source[index + 1] ?? "";
@@ -154,7 +162,7 @@ function classifyDotBoundary(source: string, index: number): DotBoundary {
   if (next >= source.length) return "boundary";
   const token = tokenBefore(source, index);
   if (token.includes(".") && !/^\d+(?:\.\d+)+$/u.test(token)) return "ambiguous";
-  if (/^\p{Lu}[\p{L}]{0,2}$/u.test(token)) return "ambiguous";
+  if (/^\p{Lu}$/u.test(token) || isInlineBoundaryAbbreviation(token)) return "ambiguous";
   if (/\p{Ll}/u.test(source[next] ?? "")) return "ambiguous";
   return "boundary";
 }
@@ -178,20 +186,105 @@ function resolveAssertionAt(
   sentence: AssertionSpan
 ): SourceAssertionResolution {
   const coordinate = coordinateSpan(source, sentence, offset, matched.length);
-  if (sentence.ambiguous === true || coordinate.span === null) {
+  const candidates = assertionCandidates(offset, matched.length, sentence, coordinate);
+  const exactHasDanglingTerminal = hasDanglingExactTerminal(source, candidates[0]!);
+  if (exactHasDanglingTerminal && candidates[0]!.span.end === sentence.end) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
-  const assertion = source.slice(coordinate.span.start, coordinate.span.end).trim();
+  let rejectionReason: SourceAssertionRejectionReason = "source_assertion_incomplete";
+  for (const [index, candidate] of candidates.entries()) {
+    if (index === 0 && exactHasDanglingTerminal) continue;
+    const resolution = evaluateAssertionCandidate(source, candidate);
+    if (resolution.status === "grounded") return resolution;
+    rejectionReason = strongerRejectionReason(rejectionReason, resolution.reason);
+    if (index === 0 && sentence.ambiguous === true) break;
+  }
+  return { status: "rejected", reason: rejectionReason };
+}
+
+interface AssertionCandidate {
+  readonly span: AssertionSpan;
+  readonly coordinated: boolean;
+  readonly exact: boolean;
+}
+
+function assertionCandidates(
+  offset: number,
+  matchedLength: number,
+  sentence: AssertionSpan,
+  coordinate: ReturnType<typeof coordinateSpan>
+): readonly AssertionCandidate[] {
+  const candidates: AssertionCandidate[] = [
+    {
+      span: { start: offset, end: offset + matchedLength },
+      coordinated: true,
+      exact: true
+    }
+  ];
+  if (coordinate.span !== null) {
+    candidates.push({
+      span: coordinate.span,
+      coordinated: coordinate.coordinated,
+      exact: false
+    });
+  }
+  candidates.push({ span: sentence, coordinated: false, exact: false });
+  return candidates;
+}
+
+function evaluateAssertionCandidate(
+  source: string,
+  candidate: AssertionCandidate
+): SourceAssertionResolution {
+  const assertion = stripSourceRoleLabel(source.slice(candidate.span.start, candidate.span.end));
+  if (candidate.exact && !/[.!?。！？]$/u.test(assertion)) {
+    return { status: "rejected", reason: "source_assertion_incomplete" };
+  }
   if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   if (hasUnresolvedReference(assertion)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
   }
-  if (!hasCompleteClause(assertion, coordinate.coordinated)) {
+  if (!hasCompleteClause(assertion, candidate.coordinated)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
   return { status: "grounded", assertion };
+}
+
+function hasDanglingExactTerminal(
+  source: string,
+  exact: AssertionCandidate
+): boolean {
+  const assertion = stripSourceRoleLabel(source.slice(exact.span.start, exact.span.end));
+  const token = /([\p{L}.]+)\.$/u.exec(assertion)?.[1];
+  return token !== undefined && isIncompleteTerminalAbbreviation(token);
+}
+
+function isInlineBoundaryAbbreviation(token: string): boolean {
+  return INLINE_BOUNDARY_ABBREVIATIONS.has(token.toLocaleLowerCase("en-US"));
+}
+
+function isIncompleteTerminalAbbreviation(token: string): boolean {
+  return INCOMPLETE_TERMINAL_ABBREVIATIONS.has(token.toLocaleLowerCase("en-US"));
+}
+
+function stripSourceRoleLabel(assertion: string): string {
+  return assertion.trim().replace(/^(?:User|Assistant)\s*:\s*/iu, "").trim();
+}
+
+function strongerRejectionReason(
+  current: SourceAssertionRejectionReason,
+  candidate: SourceAssertionRejectionReason
+): SourceAssertionRejectionReason {
+  const priority: Readonly<Record<SourceAssertionRejectionReason, number>> = {
+    matched_text_absent: 0,
+    matched_text_ambiguous: 0,
+    source_assertion_incomplete: 1,
+    source_assertion_not_self_contained: 2,
+    source_assertion_too_long: 3
+  };
+  return priority[candidate] > priority[current] ? candidate : current;
 }
 
 function coordinateSpan(

@@ -17,7 +17,7 @@ export function deriveQuestionMeasurementStatus(input) {
     input?.legacyDiagnostic === true
   );
   if (ledger.dataset_cohort === "abstention") return "abstention_unscorable";
-  return hasValidEvaluatorIdentity(ledger)
+  return hasScorableAnswerableEvidence(ledger)
     ? "scorable"
     : "evaluator_identity_unscorable";
 }
@@ -48,12 +48,26 @@ export function measurementUnscorableReason(cohort, isAbstention = false) {
   return status;
 }
 
-function hasValidEvaluatorIdentity(ledger) {
-  return ledger.dataset_cohort === "answerable" &&
-    ledger.evaluator_gold_identity?.status === "present" &&
+function hasScorableAnswerableEvidence(ledger) {
+  if (ledger.dataset_cohort !== "answerable") return false;
+  return hasEmittedGoldIdentity(ledger) || hasVerifiedExtractionFailure(ledger);
+}
+
+function hasEmittedGoldIdentity(ledger) {
+  return ledger.evaluator_gold_identity?.status === "present" &&
     ledger.evaluator_gold_identity.object_ids?.length > 0 &&
     ledger.extraction_materialization?.status === "memory_emitted" &&
     ledger.evaluation_issue_reason === null;
+}
+
+function hasVerifiedExtractionFailure(ledger) {
+  return ledger.evaluator_gold_identity?.status === "absent" &&
+    ledger.evaluator_gold_identity.object_ids?.length === 0 &&
+    ledger.extraction_materialization?.status === "drop" &&
+    ["candidate_absent", "materialization_drop"].includes(
+      ledger.extraction_materialization.reason
+    ) &&
+    ledger.evaluation_issue_reason === "extraction_materialization_drop";
 }
 
 function validateQuestionMeasurementPrimitives(ledger, legacyDiagnostic) {

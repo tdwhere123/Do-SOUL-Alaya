@@ -340,7 +340,8 @@ function assertAnswerDropReasons(
   ledger: readonly LongMemEvalSnapshotSeedRound[]
 ): void {
   const expected = ledger.reduce((sum, round) => round.hasAnswer ? {
-    candidate_absent: sum.candidate_absent + round.candidateAbsent,
+    candidate_absent: sum.candidate_absent + round.candidateAbsent +
+      (isSuccessfulEmptyExtraction(round) ? 1 : 0),
     materialization_drop: sum.materialization_drop + round.materializationDrop
   } : sum, { candidate_absent: 0, materialization_drop: 0 });
   const actual = question.answerSeedDropReasons ?? {
@@ -350,6 +351,18 @@ function assertAnswerDropReasons(
   if (!isDeepStrictEqual(actual, expected)) {
     throw new Error(`snapshot answer seed drops differ for ${question.questionId}`);
   }
+}
+
+function isSuccessfulEmptyExtraction(round: LongMemEvalSnapshotSeedRound): boolean {
+  return round.extractionSource !== "fallback" &&
+    round.rawSignalCount === 0 &&
+    round.draftCount === 0 &&
+    round.factsProduced === 0 &&
+    round.parseDropped === 0 &&
+    round.compileOverflowDropped === 0 &&
+    round.candidateAbsent === 0 &&
+    round.materializationDrop === 0 &&
+    round.memoryObjectIds.length === 0;
 }
 
 function addTotals(totals: LedgerTotals, round: LongMemEvalSnapshotSeedRound): void {

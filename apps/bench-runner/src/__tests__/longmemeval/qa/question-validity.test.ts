@@ -92,6 +92,31 @@ describe("question measurement validity", () => {
     })).toBe("evaluator_identity_unscorable");
   });
 
+  it.each(["candidate_absent", "materialization_drop"] as const)(
+    "counts a snapshot-proven %s extraction failure as a scorable miss",
+    (reason) => {
+      const cohortLedger: QuestionMeasurementPrimitiveLedger = {
+        dataset_cohort: "answerable",
+        evaluator_gold_identity: { status: "absent", object_ids: [] },
+        extraction_materialization: {
+          status: "drop",
+          emitted_memory_count: 0,
+          reason
+        },
+        evaluation_issue_reason: "extraction_materialization_drop"
+      };
+
+      expect(deriveTsQuestionMeasurementStatus({
+        isAbstention: false,
+        cohortLedger
+      })).toBe("scorable");
+      expect(deriveReplayQuestionMeasurementStatus({
+        isAbstention: false,
+        cohortLedger
+      })).toBe("scorable");
+    }
+  );
+
   it.each([
     ["zero emitted count", { status: "memory_emitted", emitted_memory_count: 0, reason: null }],
     ["emitted reason", {
@@ -302,6 +327,22 @@ const MEASUREMENT_STATUS_CASES: readonly {
       status: "drop", emitted_memory_count: 0, reason: "materialization_drop"
     }
   }, "evaluator_identity_unscorable"),
+  statusCase("verified candidate absence", false, {
+    ...validAnswerableLedger(),
+    evaluator_gold_identity: { status: "absent", object_ids: [] },
+    extraction_materialization: {
+      status: "drop", emitted_memory_count: 0, reason: "candidate_absent"
+    },
+    evaluation_issue_reason: "extraction_materialization_drop"
+  }, "scorable"),
+  statusCase("verified materialization failure", false, {
+    ...validAnswerableLedger(),
+    evaluator_gold_identity: { status: "absent", object_ids: [] },
+    extraction_materialization: {
+      status: "drop", emitted_memory_count: 0, reason: "materialization_drop"
+    },
+    evaluation_issue_reason: "extraction_materialization_drop"
+  }, "scorable"),
   statusCase("explicit evaluator issue", false, {
     ...validAnswerableLedger(), evaluation_issue_reason: "identity_join_error"
   }, "evaluator_identity_unscorable"),

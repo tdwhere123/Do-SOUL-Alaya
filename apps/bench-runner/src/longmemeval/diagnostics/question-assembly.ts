@@ -117,7 +117,8 @@ function buildQuestionMissFields(
       parts.gold,
       parts.diagnostics !== null,
       input.isAbstention === true,
-      input.goldMemoryIds
+      input.goldMemoryIds,
+      input.seedDropReasons
     ),
     miss_taxonomy: classifyQuestionMissTaxonomy({
       hitAt5: input.hitAt5,
@@ -268,13 +269,18 @@ function classifyMiss(
   gold: readonly LongMemEvalGoldDiagnostic[],
   diagnosticsAvailable: boolean,
   isAbstention: boolean,
-  goldMemoryIds: readonly string[]
+  goldMemoryIds: readonly string[],
+  seedDropReasons: LongMemEvalSeedDropReasons | undefined
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
   if (hasAbstentionIdentityConflict({ isAbstention, goldMemoryIds })) {
     return "evaluator_identity_inconsistent";
   }
   if (isAbstention) return "abstention_uncalibrated";
-  if (gold.length === 0) return "no_gold";
+  if (gold.length === 0) {
+    return hasLongMemEvalSeedDropReasons(seedDropReasons)
+      ? "candidate_absent"
+      : "no_gold";
+  }
   if (hitAt5) return "hit_at_5";
   if (!diagnosticsAvailable) return "diagnostics_unavailable";
   if (gold.some(isDeliveryBudgetLoss)) return "budget_dropped";

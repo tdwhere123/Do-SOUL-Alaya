@@ -55,8 +55,8 @@ afterEach(async () => {
 });
 
 describe("contained snapshot seed-ledger closure", () => {
-  it("accepts a canonical zero-signal subwindow bound to the full cache closure", () => {
-    expect(() => verifyRounds(canonicalRounds())).not.toThrow();
+  it("accepts a canonical zero-signal answer round as candidate absence", () => {
+    expect(() => verifyRounds(canonicalAnswerRounds(), true)).not.toThrow();
   });
 
   it("rejects raw digest drift even when the contained ledger is self-consistent", () => {
@@ -90,7 +90,10 @@ describe("contained snapshot seed-ledger closure", () => {
   });
 });
 
-function verifyRounds(rounds: LongMemEvalSnapshotSeedRound[]): void {
+function verifyRounds(
+  rounds: LongMemEvalSnapshotSeedRound[],
+  answerRound = false
+): void {
   const root = mkdtempSync(join(tmpdir(), "contained-seed-ledger-"));
   roots.push(root);
   const dbPath = join(root, "snapshot.db");
@@ -98,8 +101,8 @@ function verifyRounds(rounds: LongMemEvalSnapshotSeedRound[]): void {
   const extractionFixture = extraction();
   assertSnapshotSeedLedgerBinding({
     dbPath,
-    sidecar: sidecar(rounds),
-    questions: [question()],
+    sidecar: sidecar(rounds, answerRound),
+    questions: [question(answerRound)],
     extraction: extractionFixture.compact,
     extractionAuthority: extractionFixture.authority,
     seedExtractionPath: {
@@ -235,8 +238,15 @@ function canonicalRounds(): LongMemEvalSnapshotSeedRound[] {
   }];
 }
 
+function canonicalAnswerRounds(): LongMemEvalSnapshotSeedRound[] {
+  const rounds = canonicalRounds();
+  rounds[0] = { ...rounds[0]!, hasAnswer: true };
+  return rounds;
+}
+
 function sidecar(
-  rounds: readonly LongMemEvalSnapshotSeedRound[]
+  rounds: readonly LongMemEvalSnapshotSeedRound[],
+  answerRound: boolean
 ): LongMemEvalSnapshotSidecarFile {
   return {
     schema_version: 2,
@@ -245,7 +255,10 @@ function sidecar(
       questionId: "q-contained",
       question: "What durable fact was stated?",
       questionDate: "2026-07-17T00:00:00.000Z",
-      answerSessionIds: [],
+      answerSessionIds: answerRound ? ["session-1"] : [],
+      ...(answerRound
+        ? { answerSeedDropReasons: { candidate_absent: 1, materialization_drop: 0 } }
+        : {}),
       sidecar: [],
       seedRounds: rounds,
       workspaceId: "longmemeval-q-contained",
@@ -254,7 +267,7 @@ function sidecar(
   };
 }
 
-function question(): LongMemEvalQuestion {
+function question(answerRound: boolean): LongMemEvalQuestion {
   return {
     question_id: "q-contained",
     question_type: "single-session-user",
@@ -264,12 +277,16 @@ function question(): LongMemEvalQuestion {
     haystack_session_ids: ["session-1"],
     haystack_dates: ["2026-07-16T00:00:00.000Z"],
     haystack_sessions: [[
-      { role: "user", content: "no durable fact" },
+      {
+        role: "user",
+        content: "no durable fact",
+        ...(answerRound ? { has_answer: true } : {})
+      },
       { role: "assistant", content: "acknowledged" },
       { role: "user", content: "durable fact" },
       { role: "assistant", content: "remembered" }
     ]],
-    answer_session_ids: []
+    answer_session_ids: answerRound ? ["session-1"] : []
   };
 }
 

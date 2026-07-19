@@ -66,6 +66,152 @@ describe("official Garden source grounding", () => {
     });
   });
 
+  it.each(["User", "Assistant"])(
+    "removes the %s role label from a grounded source assertion",
+    async (role) => {
+      const provider = providerFor({
+        matched_text: "moved to Berlin",
+        distilled_fact: "moved to Berlin"
+      });
+
+      const [signal] = await provider.compile(`${role}: I moved to Berlin.`, CONTEXT);
+
+      expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+      expect(signal?.raw_payload.distilled_fact).toBe("I moved to Berlin.");
+    }
+  );
+
+  it("treats an explicit role-line break as a boundary after an acronym", async () => {
+    const assertion = "I'm a recent graduate specializing in AI.";
+    const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+
+    const [signal] = await provider.compile(
+      `User: ${assertion}\nAssistant: Congratulations!`,
+      CONTEXT
+    );
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+    expect(signal?.raw_payload.distilled_fact).toBe(assertion);
+  });
+
+  it("does not treat a dangling abbreviation as a complete role line", async () => {
+    const provider = providerFor({
+      matched_text: "I met Dr.",
+      distilled_fact: "I met Dr."
+    });
+
+    const [signal] = await provider.compile(
+      "User: I met Dr.\nAssistant: Smith arrived.",
+      CONTEXT
+    );
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "rejected",
+      reasons: ["source_assertion_incomplete"]
+    });
+  });
+
+  it.each(["Rev", "Capt", "Sen"])(
+    "does not treat dangling %s as a complete role line",
+    async (title) => {
+      const assertion = `I met ${title}.`;
+      const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+      const [signal] = await provider.compile(
+        `User: ${assertion}\nAssistant: Hello.`,
+        CONTEXT
+      );
+      expect(signal?.raw_payload.source_grounding).toMatchObject({
+        status: "rejected",
+        reasons: ["source_assertion_incomplete"]
+      });
+    }
+  );
+
+  it("does not bypass a dangling title at the end of the source", async () => {
+    const assertion = "I met Capt.";
+    const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+
+    const [signal] = await provider.compile(`User: ${assertion}`, CONTEXT);
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "rejected",
+      reasons: ["source_assertion_incomplete"]
+    });
+  });
+
+  it.each([
+    ["I met Capt. Smith yesterday.", "I met Capt."],
+    ["I moved to Berlin, e.g. for work.", "I moved to Berlin, e.g."]
+  ])("expands an internal dangling abbreviation in %s", async (source, matchedText) => {
+    const provider = providerFor({ matched_text: matchedText, distilled_fact: matchedText });
+
+    const [signal] = await provider.compile(`User: ${source}`, CONTEXT);
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+    expect(signal?.raw_payload.distilled_fact).toBe(source);
+  });
+
+  it.each(["I met Bob.", "I moved to Rome.", "I use Java."])(
+    "accepts the complete short proper noun assertion: %s",
+    async (assertion) => {
+      const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+      const [signal] = await provider.compile(
+        `User: ${assertion}\nAssistant: Acknowledged.`,
+        CONTEXT
+      );
+      expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+      expect(signal?.raw_payload.distilled_fact).toBe(assertion);
+    }
+  );
+
+  it.each(["I bought apples, etc.", "I work for the Gov."])(
+    "accepts the complete terminal abbreviation assertion: %s",
+    async (assertion) => {
+      const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+      const [signal] = await provider.compile(`User: ${assertion}`, CONTEXT);
+      expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+      expect(signal?.raw_payload.distilled_fact).toBe(assertion);
+    }
+  );
+
+  it("accepts an exact complete assertion containing an internal abbreviation", async () => {
+    const assertion = "I met Dr. Smith yesterday.";
+    const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+
+    const [signal] = await provider.compile(assertion, CONTEXT);
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+    expect(signal?.raw_payload.distilled_fact).toBe(assertion);
+  });
+
+  it("accepts an exact self-contained match that crosses coordinate clauses", async () => {
+    const assertion = "I moved to Berlin and I started a job.";
+    const provider = providerFor({ matched_text: assertion, distilled_fact: assertion });
+
+    const [signal] = await provider.compile(`User: ${assertion}`, CONTEXT);
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+    expect(signal?.raw_payload.distilled_fact).toBe(assertion);
+  });
+
+  it("expands a relative fragment to the complete role-labelled source assertion", async () => {
+    const provider = providerFor({
+      matched_text: "which takes 45 minutes each way",
+      distilled_fact: "The commute takes 45 minutes each way."
+    });
+
+    const [signal] = await provider.compile(
+      "User: I've been listening to audiobooks during my daily commute, which takes 45 minutes each way.\n" +
+        "Assistant: That sounds like a good use of the time.",
+      CONTEXT
+    );
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+    expect(signal?.raw_payload.distilled_fact).toBe(
+      "I've been listening to audiobooks during my daily commute, which takes 45 minutes each way."
+    );
+  });
+
   it.each([
     ["I moved to Berlin.I started a job.", "moved to Berlin", "I moved to Berlin."],
     ["我搬到柏林。我开始工作。", "搬到柏林", "我搬到柏林。"],
@@ -80,7 +226,6 @@ describe("official Garden source grounding", () => {
   });
 
   it.each([
-    ["I moved to Berlin and started a job.", "started a job"],
     ["I met Dr. Smith yesterday.", "Smith"],
     ["I met Dr. smith yesterday.", "smith"]
   ])("fails closed when the clause around %s is not provably complete", async (source, matchedText) => {
@@ -144,13 +289,42 @@ describe("official Garden source grounding", () => {
 
   it.each([
     ["I bought apples, and oranges, and bananas.", "oranges"],
-    ["I moved to Berlin, and started a new job.", "started a new job"]
-  ])("rejects a non-assertion coordinate fragment from %s", async (source, matchedText) => {
+    ["I moved to Berlin, and started a new job.", "started a new job"],
+    ["I moved to Berlin and started a job.", "started a job"]
+  ])("expands a non-assertion coordinate fragment from %s", async (source, matchedText) => {
+    const provider = providerFor({ matched_text: matchedText, distilled_fact: matchedText });
+    const [signal] = await provider.compile(source, CONTEXT);
+    expect(signal?.raw_payload.source_grounding).toMatchObject({ status: "grounded" });
+    expect(signal?.raw_payload.distilled_fact).toBe(source);
+  });
+
+  it("rejects a cross-sentence pronoun hidden behind a temporal modifier", async () => {
+    const provider = providerFor({
+      matched_text: "Yesterday she moved.",
+      distilled_fact: "Alice moved yesterday."
+    });
+
+    const [signal] = await provider.compile(
+      "Alice discussed Berlin. Yesterday she moved.",
+      CONTEXT
+    );
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "rejected",
+      reasons: ["source_assertion_not_self_contained"]
+    });
+  });
+
+  it.each([
+    ["The report was ready and she approved it.", "she approved it"],
+    ["Alice called Bob and she waited there.", "she waited there"],
+    ["The team deployed v2. In production it failed.", "In production it failed."]
+  ])("rejects an unprovable typed reference in %s", async (source, matchedText) => {
     const provider = providerFor({ matched_text: matchedText, distilled_fact: matchedText });
     const [signal] = await provider.compile(source, CONTEXT);
     expect(signal?.raw_payload.source_grounding).toMatchObject({
       status: "rejected",
-      reasons: ["source_assertion_incomplete"]
+      reasons: ["source_assertion_not_self_contained"]
     });
   });
 
