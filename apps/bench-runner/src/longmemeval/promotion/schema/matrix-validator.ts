@@ -6,7 +6,8 @@ import {
 import {
   buildLongMemEvalMatrixPromotionAuthorization,
   hashPromotionMatrix,
-  type LongMemEvalMatrixPromotionAuthorization
+  type LongMemEvalMatrixPromotionAuthorization,
+  type PromotionValidatorIdentity
 } from "./authorization.js";
 import {
   matrixCellForTreatment,
@@ -50,27 +51,22 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
   readonly sourceSelection: LongMemEvalSelectionContractIdentity;
   readonly nextSelection: LongMemEvalSelectionContractIdentity;
   readonly cells: readonly VerifiedPromotionMatrixCell[];
-  readonly productDefaultReplication: VerifiedPromotionMatrixCell;
+  readonly validator: PromotionValidatorIdentity;
 }): LongMemEvalMatrixPromotionAuthorization {
   const cells = indexCells(input);
-  const replication = resolveProductDefaultReplication(input);
   assertSelectionProgression(input.sourceSelection, input.nextSelection);
-  assertCommonIdentity([...cells.values(), replication]);
-  assertPairedTreatmentIdentity(cells, replication);
-  assertIndependentReplication(cells.get("B")!, replication);
-  assertExecutionOrder(cells, replication);
+  assertCommonIdentity([...cells.values()]);
+  assertPairedTreatmentIdentity(cells);
+  assertExecutionOrder(cells);
   const product = resolveProductDefaultCell(
     cells,
     input.contract.policy_version
   );
   const { productCell, productTreatment } = product;
   assertPromotionProductDefaultPolicy(productCell.data);
-  assertPromotionProductDefaultPolicy(replication.data);
-  assertAbsoluteProductQuality(input.contract, productCell, replication);
+  assertAbsoluteProductQuality(input.contract, productCell);
   const hardGates = collectReleaseHardGates(productCell.data.payload);
-  const replicationHardGates = collectReleaseHardGates(replication.data.payload);
   assertMandatoryProductGates(hardGates, "B product-default cell");
-  assertMandatoryProductGates(replicationHardGates, "B2 product-default replication");
   const materialEffect = verifyLongMemEvalMaterialEffect({
     control: cells.get("A")!.data.payload,
     product: productCell.data.payload
@@ -79,27 +75,19 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
     input,
     cells,
     product,
-    replication,
     hardGates,
-    replicationHardGates,
     materialEffect
   );
 }
 
 function assertAbsoluteProductQuality(
   contract: LongMemEvalMatrixPromotionContract,
-  product: ResolvedPromotionMatrixCell,
-  replication: ResolvedPromotionMatrixCell
+  product: ResolvedPromotionMatrixCell
 ): void {
   assertLongMemEvalAbsoluteQuality({
     payload: product.data.payload,
     policy: contract.absolute_quality_policy,
     label: "B product-default cell"
-  });
-  assertLongMemEvalAbsoluteQuality({
-    payload: replication.data.payload,
-    policy: contract.absolute_quality_policy,
-    label: "B2 product-default replication"
   });
 }
 
@@ -119,9 +107,7 @@ function renderMatrixAuthorization(
   input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>[0],
   cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
   product: ReturnType<typeof resolveProductDefaultCell>,
-  replication: ResolvedPromotionMatrixCell,
   hardGates: ReturnType<typeof collectReleaseHardGates>,
-  replicationHardGates: ReturnType<typeof collectReleaseHardGates>,
   materialEffect: ReturnType<typeof verifyLongMemEvalMaterialEffect>
 ): LongMemEvalMatrixPromotionAuthorization {
   const renderedCells = CELL_ORDER.map((cell) => renderMatrixCell(cells, cell));
@@ -147,18 +133,8 @@ function renderMatrixAuthorization(
       passed: true as const,
       missing: false as const
     })),
-    product_default_replication: {
-      cell: "B2",
-      treatment: replication.data.treatment,
-      evidence_root: replication.evidenceRoot,
-      bundle_sha256: replication.data.manifest.bundle_sha256,
-      hard_gates: replicationHardGates.map((gate) => ({
-        ...gate,
-        passed: true as const,
-        missing: false as const
-      }))
-    },
-    material_effect: materialEffect
+    material_effect: materialEffect,
+    validator: input.validator
   });
 }
 
@@ -200,24 +176,6 @@ function indexCells(input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>
     throw new Error("promotion matrix is not the exact treatment Cartesian product");
   }
   return byCell;
-}
-
-function resolveProductDefaultReplication(
-  input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>[0]
-): ResolvedPromotionMatrixCell {
-  const replication = input.productDefaultReplication;
-  if (replication === undefined) {
-    throw new Error("B2 requires a verified replication entry");
-  }
-  const data = verifiedRecallEvalPromotionEntryData(replication.entry);
-  const declared = input.contract.product_default_replication;
-  if (replication.evidenceRoot !== declared.evidence_root ||
-      treatmentKey(data.treatment) !== treatmentKey(declared.treatment) ||
-      matrixCellForTreatment(data.treatment) !== "B") {
-    throw new Error("verified B2 replication differs from promotion contract");
-  }
-  assertEqual(data.payload.selection_contract, input.sourceSelection, "B2 source selection");
-  return { evidenceRoot: replication.evidenceRoot, entry: replication.entry, data };
 }
 
 function assertSelectionProgression(
@@ -302,8 +260,7 @@ function nonTreatmentEnvironment(
 }
 
 function assertPairedTreatmentIdentity(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
-  replication: ResolvedPromotionMatrixCell
+  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>
 ): void {
   const a = cells.get("A")!.data.diagnosticsRuntime;
   const b = cells.get("B")!.data.diagnosticsRuntime;
@@ -319,38 +276,16 @@ function assertPairedTreatmentIdentity(
     "B/D bi-encoder model identity");
   assertEqual(c.answer_rerank, d.answer_rerank,
     "C/D cross-encoder model identity");
-  assertEqual(b.embedding_supplement, replication.data.diagnosticsRuntime.embedding_supplement,
-    "B/B2 bi-encoder model identity");
-  assertEqual(b.answer_rerank, replication.data.diagnosticsRuntime.answer_rerank,
-    "B/B2 answer-rerank identity");
-}
-
-function assertIndependentReplication(
-  product: ResolvedPromotionMatrixCell,
-  replication: ResolvedPromotionMatrixCell
-): void {
-  if (product.entry === replication.entry ||
-      product.data.manifest.bundle_sha256 === replication.data.manifest.bundle_sha256) {
-    throw new Error("B2 requires an independent evidence bundle");
-  }
-  if (product.data.manifest.run.slug === replication.data.manifest.run.slug ||
-      product.data.manifest.run.run_at === replication.data.manifest.run.run_at) {
-    throw new Error("B2 requires an independent run identity");
-  }
 }
 
 function assertExecutionOrder(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
-  replication: ResolvedPromotionMatrixCell
+  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>
 ): void {
-  const ordered = [
-    ...CELL_ORDER.map((cell) => cells.get(cell)!),
-    replication
-  ];
+  const ordered = CELL_ORDER.map((cell) => cells.get(cell)!);
   const timestamps = ordered.map((cell) => Date.parse(cell.data.manifest.run.run_at));
   if (timestamps.some((value) => !Number.isFinite(value)) ||
       timestamps.some((value, index) => index > 0 && value <= timestamps[index - 1]!)) {
-    throw new Error("promotion evidence does not follow pre-registered A/B/C/D/B2 order");
+    throw new Error("promotion evidence does not follow pre-registered A/B/C/D order");
   }
 }
 

@@ -32,18 +32,13 @@ describe("LongMemEval promotion capability boundary", () => {
         db_path: "snapshot/source-100.db",
         manifest_sha256: "f".repeat(64)
       },
-      execution_order: ["A", "B", "C", "D", "B2"],
+      execution_order: ["A", "B", "C", "D"],
       matrix: { entries: [
         entry(false, false, "cell-a"),
         entry(true, false, "cell-b"),
         entry(false, true, "cell-c"),
         entry(true, true, "cell-d")
       ] },
-      product_default_replication: {
-        cell: "B2",
-        treatment: { embedding_supplement: true, answer_rerank: false },
-        evidence_root: "cell-b2"
-      },
       absolute_quality_policy: absoluteQualityPolicy(),
       material_effect_policy: materialEffectPolicy()
     });
@@ -58,9 +53,12 @@ describe("LongMemEval promotion capability boundary", () => {
         evidenceRoot: cell.evidence_root,
         entry: raw
       })),
-      productDefaultReplication: {
-        evidenceRoot: contract.product_default_replication.evidence_root,
-        entry: raw
+      validator: {
+        commit_sha: contract.code.commit_sha,
+        commit_sha7: contract.code.commit_sha7,
+        worktree_clean: true,
+        worktree_state_sha256: contract.code.worktree_state_sha256,
+        executed_dist: contract.code.executed_dist
       }
     })).toThrow(/not verified/u);
   });
@@ -97,7 +95,6 @@ function materialEffectPolicy() {
 function absoluteQualityPolicy() {
   return {
     product_cell: "B" as const,
-    replication_cell: "B2" as const,
     metric: "r_at_5" as const,
     cohort: "answerable" as const,
     expected_denominator: 94 as const,

@@ -18,11 +18,9 @@ describe("LongMemEval matrix promotion contract", () => {
       embedding_supplement: true,
       answer_rerank: false
     });
-    expect(parsed.contract.execution_order).toEqual(["A", "B", "C", "D", "B2"]);
-    expect(parsed.contract.product_default_replication.cell).toBe("B2");
+    expect(parsed.contract.execution_order).toEqual(["A", "B", "C", "D"]);
     expect(parsed.contract.absolute_quality_policy).toEqual({
       product_cell: "B",
-      replication_cell: "B2",
       metric: "r_at_5",
       cohort: "answerable",
       expected_denominator: 94,
@@ -67,24 +65,11 @@ describe("LongMemEval matrix promotion contract", () => {
       .toThrow(/contained relative path/u);
   });
 
-  it("rejects a replication that is not an independent product-default B run", () => {
-    const wrongTreatment = contractFixture();
-    wrongTreatment.product_default_replication.treatment = {
-      embedding_supplement: false,
-      answer_rerank: false
-    };
-    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(wrongTreatment))
-      .toThrow(/product-default treatment/u);
-
-    const duplicateRoot = contractFixture();
-    duplicateRoot.product_default_replication.evidence_root = "cell-b";
-    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(duplicateRoot))
+  it("rejects duplicate matrix evidence roots", () => {
+    const raw = contractFixture();
+    raw.matrix.entries[3]!.evidence_root = raw.matrix.entries[0]!.evidence_root;
+    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(raw))
       .toThrow(/evidence roots must be unique/u);
-
-    const escapedRoot = contractFixture();
-    escapedRoot.product_default_replication.evidence_root = "../forged";
-    expect(() => LongMemEvalMatrixPromotionContractSchema.parse(escapedRoot))
-      .toThrow(/contained relative path/u);
   });
 
   it("rejects result-fitted material-effect policy or run order", () => {
@@ -94,7 +79,7 @@ describe("LongMemEval matrix promotion contract", () => {
 
     const reordered = {
       ...contractFixture(),
-      execution_order: ["B", "A", "C", "D", "B2"] as const
+      execution_order: ["B", "A", "C", "D"] as const
     };
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(reordered)).toThrow();
   });
@@ -147,7 +132,7 @@ function contractFixture() {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
-    execution_order: ["A", "B", "C", "D", "B2"] as ["A", "B", "C", "D", "B2"],
+    execution_order: ["A", "B", "C", "D"] as ["A", "B", "C", "D"],
     matrix: {
       entries: [
         entry(false, false, "cell-a"),
@@ -155,11 +140,6 @@ function contractFixture() {
         entry(false, true, "cell-c"),
         entry(true, true, "cell-d")
       ]
-    },
-    product_default_replication: {
-      cell: "B2" as const,
-      treatment: { embedding_supplement: true, answer_rerank: false },
-      evidence_root: "cell-b2"
     },
     absolute_quality_policy: absoluteQualityPolicy(),
     material_effect_policy: {
@@ -178,7 +158,6 @@ function contractFixture() {
 function absoluteQualityPolicy() {
   return {
     product_cell: "B" as const,
-    replication_cell: "B2" as const,
     metric: "r_at_5" as const,
     cohort: "answerable" as const,
     expected_denominator: 94,

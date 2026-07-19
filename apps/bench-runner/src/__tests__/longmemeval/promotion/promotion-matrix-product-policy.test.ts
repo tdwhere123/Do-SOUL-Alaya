@@ -9,7 +9,7 @@ import {
   withOpenAiEmbeddingProvider
 } from "./promotion-matrix-fixture.js";
 
-describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
+describe("verified LongMemEval A/B/C/D promotion", () => {
   it("authorizes the product-default B cell only after all mandatory gates pass", () => {
     const fixture = matrixFixture();
     const authorization = authorizeVerifiedLongMemEvalMatrix(fixture);
@@ -25,27 +25,7 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     });
     expect(authorization.hard_gates.length).toBeGreaterThan(0);
     expect(authorization.hard_gates.every((gate) => gate.passed)).toBe(true);
-    expect(authorization.product_default_replication.hard_gates.every(
-      (gate) => gate.passed
-    )).toBe(true);
     expect(authorization.authorization_sha256).toMatch(/^[a-f0-9]{64}$/u);
-  });
-
-  it("rejects a B2 latency hard-gate failure independently from B", () => {
-    const fixture = matrixFixture();
-    const b2 = fixture.productDefaultReplication;
-    const failedPayload = {
-      ...b2.data.payload,
-      kpi: { ...b2.data.payload.kpi, latency_ms_p95: 1_101 }
-    } as KpiPayload;
-
-    expect(() => authorizeVerifiedLongMemEvalMatrix({
-      ...fixture,
-      productDefaultReplication: testCell(
-        b2.evidenceRoot,
-        { ...b2.data, payload: failedPayload }
-      )
-    })).toThrow(/B2.*failed hard gates.*recall_p95_embedding_on/u);
   });
 
   it("rejects shared snapshot drift even when every KPI remains passing", () => {
@@ -126,15 +106,10 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((cell) =>
       testCell(cell.evidenceRoot, withOpenAiEmbeddingProvider(cell.data)));
-    const productDefaultReplication = testCell(
-      fixture.productDefaultReplication.evidenceRoot,
-      withOpenAiEmbeddingProvider(fixture.productDefaultReplication.data)
-    );
 
     expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
-      cells,
-      productDefaultReplication
+      cells
     }))
       .toThrow(/product-default.*embedding/u);
   });
@@ -145,15 +120,10 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
       const fixture = matrixFixture();
       const cells = fixture.cells.map((cell) =>
         testCell(cell.evidenceRoot, withNonProductLocalBi(cell.data, variant)));
-      const productDefaultReplication = testCell(
-        fixture.productDefaultReplication.evidenceRoot,
-        withNonProductLocalBi(fixture.productDefaultReplication.data, variant)
-      );
 
       expect(() => authorizeVerifiedLongMemEvalMatrix({
         ...fixture,
-        cells,
-        productDefaultReplication
+        cells
       }))
         .toThrow(/product-default.*embedding/u);
     }
@@ -163,15 +133,10 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((cell) =>
       testCell(cell.evidenceRoot, withOnnxThreads(cell.data, 64)));
-    const productDefaultReplication = testCell(
-      fixture.productDefaultReplication.evidenceRoot,
-      withOnnxThreads(fixture.productDefaultReplication.data, 64)
-    );
 
     expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
-      cells,
-      productDefaultReplication
+      cells
     }))
       .toThrow(/product-default.*embedding/u);
   });

@@ -7,8 +7,9 @@ import {
   selectionContractIdentity
 } from "../selection/contract.js";
 import {
-  assertCurrentPromotionCodeIdentity,
+  assertStablePromotionValidatorIdentity,
   DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES,
+  resolveCurrentPromotionValidatorIdentity,
   type PromotionCodeIdentityDependencies,
   type PromotionCodeIdentityInput
 } from "./assert-current-code-identity.js";
@@ -25,14 +26,22 @@ import { verifyPromotionSnapshot } from "./verifiers/snapshot-verifier.js";
 
 export {
   LongMemEvalMatrixPromotionAuthorizationSchema,
+  LongMemEvalMatrixPromotionRejectionSchema,
   renderLongMemEvalMatrixPromotionAuthorization,
-  type LongMemEvalMatrixPromotionAuthorization
+  renderLongMemEvalMatrixPromotionRejection,
+  type LongMemEvalMatrixPromotionAuthorization,
+  type LongMemEvalMatrixPromotionRejection,
+  type PromotionValidatorIdentity
 } from "./schema/authorization.js";
 export {
   LongMemEvalMatrixPromotionContractSchema,
   parseLongMemEvalMatrixPromotionContract,
   type LongMemEvalMatrixPromotionContract
 } from "./schema/contract.js";
+export {
+  resolveCurrentPromotionValidatorIdentity,
+  type PromotionCodeIdentityDependencies
+} from "./assert-current-code-identity.js";
 
 export interface LongMemEvalMatrixPromotionAuthorizeInput
   extends PromotionCodeIdentityInput {
@@ -49,7 +58,11 @@ export async function authorizeLongMemEvalMatrixPromotion(
     DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES
 ): Promise<LongMemEvalMatrixPromotionAuthorization> {
   const parsed = parseLongMemEvalMatrixPromotionContract(input.contractContents);
-  await assertCurrentPromotionCodeIdentity(input, parsed, dependencies);
+  const validatorBefore = await resolveCurrentPromotionValidatorIdentity(
+    input,
+    parsed,
+    dependencies
+  );
   const selections = await loadPromotionSelections(parsed.contract);
   const snapshot = await verifyPromotionSnapshot({
     contractRoot: input.contractRoot,
@@ -60,15 +73,20 @@ export async function authorizeLongMemEvalMatrixPromotion(
     code: parsed.contract.code
   });
   const roots = await resolveEntryRoots(input.contractRoot, parsed.contract);
-  const evidence = await verifyPromotionEntries(parsed, roots, selections.source, snapshot);
-  await assertCurrentPromotionCodeIdentity(input, parsed, dependencies);
+  const cells = await verifyPromotionEntries(parsed, roots, selections.source, snapshot);
+  const validator = await resolveCurrentPromotionValidatorIdentity(
+    input,
+    parsed,
+    dependencies
+  );
+  assertStablePromotionValidatorIdentity(validatorBefore, validator);
   return authorizeVerifiedLongMemEvalMatrix({
     contract: parsed.contract,
     contractSha256: parsed.sha256,
     sourceSelection: selections.source,
     nextSelection: selections.next,
-    cells: evidence.cells,
-    productDefaultReplication: evidence.productDefaultReplication
+    cells,
+    validator
   });
 }
 
@@ -106,19 +124,8 @@ async function verifyPromotionEntries(
   sourceSelection: ReturnType<typeof selectionContractIdentity>,
   snapshot: Parameters<typeof verifyRecallEvalPromotionEntry>[0]["snapshot"]
 ) {
-  const cells = await Promise.all(parsed.contract.matrix.entries.map((entry) =>
+  return Promise.all(parsed.contract.matrix.entries.map((entry) =>
     verifyDeclaredPromotionEntry(parsed, roots, sourceSelection, snapshot, entry)));
-  const replication = parsed.contract.product_default_replication;
-  return {
-    cells,
-    productDefaultReplication: await verifyDeclaredPromotionEntry(
-      parsed,
-      roots,
-      sourceSelection,
-      snapshot,
-      replication
-    )
-  };
 }
 
 async function verifyDeclaredPromotionEntry(
@@ -144,11 +151,7 @@ async function resolveEntryRoots(
   contract: LongMemEvalMatrixPromotionContract
 ): Promise<ReadonlyMap<string, string>> {
   const root = await realpath(contractRoot);
-  const declarations = [
-    ...contract.matrix.entries,
-    contract.product_default_replication
-  ];
-  const entries = await Promise.all(declarations.map(async (entry) => {
+  const entries = await Promise.all(contract.matrix.entries.map(async (entry) => {
     const resolved = await realpath(path.resolve(root, entry.evidence_root));
     const relative = path.relative(root, resolved);
     if (relative.length === 0 || relative.startsWith("..") || path.isAbsolute(relative)) {

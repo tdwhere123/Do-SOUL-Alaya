@@ -13,7 +13,7 @@ import {
   testCell
 } from "./promotion-matrix-fixture.js";
 
-describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
+describe("verified LongMemEval A/B/C/D promotion", () => {
   it.each([
     ["policy shape", (data: VerifiedRecallEvalPromotionEntryData) => ({
       ...data,
@@ -80,15 +80,10 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((cell) =>
       testCell(cell.evidenceRoot, mutate(cell.data) as VerifiedRecallEvalPromotionEntryData));
-    const productDefaultReplication = testCell(
-      fixture.productDefaultReplication.evidenceRoot,
-      mutate(fixture.productDefaultReplication.data) as VerifiedRecallEvalPromotionEntryData
-    );
 
     expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
-      cells,
-      productDefaultReplication
+      cells
     }))
       .toThrow(/product-default/u);
   });
@@ -98,68 +93,15 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     const diagnosticOnly = {
       ...fixture,
       cells: [],
-      productDefaultReplication: undefined,
       exitCode: 0
     };
 
-    // @ts-expect-error Negative contract test deliberately omits the required B2 entry.
+    // @ts-expect-error Negative contract test deliberately omits required cells.
     expect(() => authorizeVerifiedLongMemEvalMatrix(diagnosticOnly))
       .toThrow(/four verified cells/u);
   });
 
-  it("requires an independently verified B2 product-default replication", () => {
-    const fixture = matrixFixture();
-    expect(() => authorizeVerifiedLongMemEvalMatrix({
-      ...fixture,
-      // @ts-expect-error Negative contract test deliberately omits the required B2 entry.
-      productDefaultReplication: undefined
-    })).toThrow(/B2.*verified replication/u);
-
-    const reusedBundle = {
-      ...fixture.productDefaultReplication.data,
-      manifest: {
-        ...fixture.productDefaultReplication.data.manifest,
-        bundle_sha256: fixture.cells[1]!.data.manifest.bundle_sha256
-      }
-    };
-    expect(() => authorizeVerifiedLongMemEvalMatrix({
-      ...fixture,
-      productDefaultReplication: testCell("cell-b2", reusedBundle)
-    })).toThrow(/independent.*bundle/u);
-  });
-
-  it("rejects B2 common-identity drift or reused run identity", () => {
-    const fixture = matrixFixture();
-    const drifted = {
-      ...fixture.productDefaultReplication.data,
-      provenance: {
-        ...fixture.productDefaultReplication.data.provenance,
-        dataset_sha256: "9".repeat(64)
-      }
-    } as VerifiedRecallEvalPromotionEntryData;
-    expect(() => authorizeVerifiedLongMemEvalMatrix({
-      ...fixture,
-      productDefaultReplication: testCell("cell-b2", drifted)
-    })).toThrow(/common evidence identity/u);
-
-    const reusedRun = {
-      ...fixture.productDefaultReplication.data,
-      manifest: {
-        ...fixture.productDefaultReplication.data.manifest,
-        run: {
-          ...fixture.productDefaultReplication.data.manifest.run,
-          slug: fixture.cells[1]!.data.manifest.run.slug,
-          run_at: fixture.cells[1]!.data.manifest.run.run_at
-        }
-      }
-    };
-    expect(() => authorizeVerifiedLongMemEvalMatrix({
-      ...fixture,
-      productDefaultReplication: testCell("cell-b2", reusedRun)
-    })).toThrow(/independent.*run/u);
-  });
-
-  it("rejects evidence whose persisted run times violate A/B/C/D/B2 order", () => {
+  it("rejects evidence whose persisted run times violate A/B/C/D order", () => {
     const fixture = matrixFixture();
     const product = fixture.cells[1]!;
     const outOfOrder = {
@@ -177,7 +119,7 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
       ...fixture,
       cells: fixture.cells.map((cell, index) =>
         index === 1 ? testCell(cell.evidenceRoot, outOfOrder) : cell)
-    })).toThrow(/pre-registered A\/B\/C\/D\/B2 order/u);
+    })).toThrow(/pre-registered A\/B\/C\/D order/u);
   });
 
   it("rejects directional or statistically nonmaterial A-to-B results", () => {
@@ -197,17 +139,13 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     })).toThrow(/regress/u);
   });
 
-  it("signs independent B2 gates and the unpooled A-to-B material effect", () => {
+  it("signs A-to-B material effect and records validator identity", () => {
     const authorization = authorizeVerifiedLongMemEvalMatrix(matrixFixture());
 
-    expect(authorization.product_default_replication).toMatchObject({
-      cell: "B2",
-      evidence_root: "cell-b2",
-      bundle_sha256: "5".repeat(64)
+    expect(authorization.validator).toMatchObject({
+      commit_sha7: "abc1234",
+      worktree_clean: true
     });
-    expect(authorization.product_default_replication.hard_gates.every(
-      (gate) => gate.passed
-    )).toBe(true);
     expect(authorization.material_effect.paired_r_at_5).toMatchObject({
       answerable_count: 94,
       control_hits: 80,
@@ -219,44 +157,15 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     });
   });
 
-  it("does not pool a different passing B2 outcome into the A-to-B effect", () => {
+  it("requires B to reach 85/94 on the frozen answerable cohort", () => {
     const fixture = matrixFixture();
-    const baseline = authorizeVerifiedLongMemEvalMatrix(fixture).material_effect;
-    const b2 = fixture.productDefaultReplication;
-    const authorization = authorizeVerifiedLongMemEvalMatrix({
+    expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
-      productDefaultReplication: testCell(
-        b2.evidenceRoot,
-        withAbsoluteQualityHits(b2.data, 88)
-      )
-    });
-
-    expect(authorization.material_effect).toEqual(baseline);
+      cells: fixture.cells.map((entry, index) => index === 1
+        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 84))
+        : entry)
+    })).toThrow(/at least 85\/94 hits/u);
   });
-
-  it.each(["B", "B2"] as const)(
-    "requires %s to reach 85/94 on the frozen answerable cohort",
-    (cell) => {
-      const fixture = matrixFixture();
-      const input = cell === "B"
-        ? {
-            ...fixture,
-            cells: fixture.cells.map((entry, index) => index === 1
-              ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 84))
-              : entry)
-          }
-        : {
-            ...fixture,
-            productDefaultReplication: testCell(
-              fixture.productDefaultReplication.evidenceRoot,
-              withAbsoluteQualityHits(fixture.productDefaultReplication.data, 84)
-            )
-          };
-
-      expect(() => authorizeVerifiedLongMemEvalMatrix(input))
-        .toThrow(/at least 85\/94 hits/u);
-    }
-  );
 
   it("rejects answerable-denominator drift before promotion", () => {
     const fixture = matrixFixture();
@@ -270,22 +179,17 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
     })).toThrow(/differs from its answerable rows/u);
   });
 
-  it("authorizes the exact 85/94 boundary independently for B and B2", () => {
+  it("authorizes the exact 85/94 boundary for product cell B", () => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((entry, index) => {
       if (index === 0) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 76));
       if (index === 1) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 85));
       return entry;
     });
-    const replication = fixture.productDefaultReplication;
 
     expect(authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
-      cells,
-      productDefaultReplication: testCell(
-        replication.evidenceRoot,
-        withAbsoluteQualityHits(replication.data, 85)
-      )
+      cells
     }).status).toBe("authorized");
   });
 
@@ -410,5 +314,5 @@ function withAbsoluteQualityHits(
         }
       }
     }
-  };
+  } as VerifiedRecallEvalPromotionEntryData;
 }

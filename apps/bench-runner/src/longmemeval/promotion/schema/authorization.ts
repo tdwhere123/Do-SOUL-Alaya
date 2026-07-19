@@ -3,7 +3,9 @@ import { z } from "zod";
 import {
   LongMemEvalSelectionContractIdentitySchema
 } from "@do-soul/alaya-eval";
-import { LongMemEvalMatrixTreatmentSchema } from "./contract.js";
+import {
+  LongMemEvalMatrixTreatmentSchema
+} from "./contract.js";
 import {
   exactTwoSidedMcNemarPValue,
   LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY,
@@ -60,6 +62,18 @@ const MaterialEffectSchema = z.object({
   validateMaterialEffect(effect, context);
 });
 
+export const PromotionValidatorIdentitySchema = z.object({
+  commit_sha: z.string().regex(/^[a-f0-9]{40}$/u),
+  commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u),
+  worktree_clean: z.boolean(),
+  worktree_state_sha256: Sha256Schema,
+  executed_dist: z.object({
+    algorithm: z.literal("sha256-reachable-path-file-sha256-v1"),
+    sha256: Sha256Schema,
+    file_count: z.number().int().positive()
+  }).strict().readonly()
+}).strict().readonly();
+
 const UnsignedLongMemEvalMatrixPromotionAuthorizationSchema = z.object({
   schema_version: z.literal(1),
   kind: z.literal("longmemeval_matrix_promotion_authorization"),
@@ -83,14 +97,8 @@ const UnsignedLongMemEvalMatrixPromotionAuthorizationSchema = z.object({
     bundle_sha256: Sha256Schema
   }).strict(),
   hard_gates: z.array(HardGateSchema).min(1),
-  product_default_replication: z.object({
-    cell: z.literal("B2"),
-    treatment: LongMemEvalMatrixTreatmentSchema,
-    evidence_root: z.string().min(1),
-    bundle_sha256: Sha256Schema,
-    hard_gates: z.array(HardGateSchema).min(1)
-  }).strict(),
-  material_effect: MaterialEffectSchema
+  material_effect: MaterialEffectSchema,
+  validator: PromotionValidatorIdentitySchema
 }).strict();
 
 export const LongMemEvalMatrixPromotionAuthorizationSchema =
@@ -107,6 +115,9 @@ export const LongMemEvalMatrixPromotionAuthorizationSchema =
     }
   });
 
+export type PromotionValidatorIdentity = z.infer<
+  typeof PromotionValidatorIdentitySchema
+>;
 export type LongMemEvalMatrixPromotionAuthorization = z.infer<
   typeof LongMemEvalMatrixPromotionAuthorizationSchema
 >;
@@ -131,6 +142,34 @@ export function renderLongMemEvalMatrixPromotionAuthorization(
 ): string {
   return `${JSON.stringify(
     LongMemEvalMatrixPromotionAuthorizationSchema.parse(authorization),
+    null,
+    2
+  )}\n`;
+}
+
+export const LongMemEvalMatrixPromotionRejectionSchema = z.object({
+  schema_version: z.literal(1),
+  kind: z.literal("longmemeval_matrix_promotion_rejection"),
+  status: z.literal("rejected"),
+  error: z.object({
+    message: z.string().min(1)
+  }).strict(),
+  contract_path: z.string().min(1).nullable(),
+  contract_sha256: Sha256Schema.nullable(),
+  validator: PromotionValidatorIdentitySchema.nullable(),
+  // Present when identity measurement failed before authorize — not silent null.
+  validator_resolve_error: z.string().min(1).nullable()
+}).strict();
+
+export type LongMemEvalMatrixPromotionRejection = z.infer<
+  typeof LongMemEvalMatrixPromotionRejectionSchema
+>;
+
+export function renderLongMemEvalMatrixPromotionRejection(
+  rejection: LongMemEvalMatrixPromotionRejection
+): string {
+  return `${JSON.stringify(
+    LongMemEvalMatrixPromotionRejectionSchema.parse(rejection),
     null,
     2
   )}\n`;

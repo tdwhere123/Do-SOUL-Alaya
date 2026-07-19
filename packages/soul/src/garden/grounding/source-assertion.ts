@@ -53,18 +53,35 @@ export function resolveSourceAssertion(
   const resolutions: SourceAssertionResolution[] = [];
   let offset = source.indexOf(matched);
   while (offset >= 0) {
-    const spanIndex = spans.findIndex((candidate) =>
-      offset >= candidate.start && offset + matched.length <= candidate.end
-    );
-    const span = spans[spanIndex];
-    if (span !== undefined) {
-      resolutions.push(resolveAssertionAt(source, matched, offset, span, spans[spanIndex - 1]));
+    const span = enclosingSentenceSpan(spans, offset, matched.length);
+    if (span !== null) {
+      resolutions.push(resolveAssertionAt(source, matched, offset, span.sentence, spans[span.startIndex - 1]));
     }
     offset = source.indexOf(matched, offset + 1);
   }
   if (resolutions.length === 0) return { status: "rejected", reason: "matched_text_absent" };
   if (resolutions.length > 1) return { status: "rejected", reason: "matched_text_ambiguous" };
   return resolutions[0]!;
+}
+
+function enclosingSentenceSpan(
+  spans: readonly AssertionSpan[],
+  offset: number,
+  matchedLength: number
+): { readonly sentence: AssertionSpan; readonly startIndex: number } | null {
+  const endOffset = offset + matchedLength;
+  const startIndex = spans.findIndex((candidate) =>
+    offset >= candidate.start && offset < candidate.end
+  );
+  const endIndex = spans.findIndex((candidate) =>
+    endOffset > candidate.start && endOffset <= candidate.end
+  );
+  if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) return null;
+  const first = spans[startIndex]!;
+  const last = spans[endIndex]!;
+  if (startIndex === endIndex) return { sentence: first, startIndex };
+  // Verbatim match may span sentence boundaries; evaluate the enclosed range.
+  return { sentence: { start: first.start, end: last.end }, startIndex };
 }
 
 function resolveBoundedVerbatimPrefix(

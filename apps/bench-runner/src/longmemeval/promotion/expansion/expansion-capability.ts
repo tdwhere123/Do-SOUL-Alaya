@@ -15,11 +15,12 @@ import {
 } from "../schema/contract.js";
 import { authorizeLongMemEvalMatrixPromotion } from "../index.js";
 import {
-  assertCurrentPromotionCodeIdentity,
-  DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES
+  assertStablePromotionValidatorIdentity,
+  DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES,
+  resolveCurrentPromotionValidatorIdentity,
+  type PromotionCodeIdentityDependencies
 } from "../assert-current-code-identity.js";
 import { immutableJsonClone } from "../schema/immutable-json.js";
-import { resolveFrozenCodeIdentity } from "../../provenance/contract/frozen-code-contract.js";
 import { isLongMemEvalRunProvenanceGateEligible } from "../../provenance/run.js";
 import { openContainedArtifact } from "../../../cli/merge/contained-artifact-path.js";
 import { validateSnapshotManifest } from "../../snapshot/manifest-validation.js";
@@ -81,9 +82,8 @@ export interface LongMemEvalExpansionCapabilityData {
   readonly nextSelection: LongMemEvalMatrixPromotionAuthorization["next_selection"];
   readonly matrix: LongMemEvalMatrixPromotionAuthorization["matrix"];
   readonly productDefault: LongMemEvalMatrixPromotionAuthorization["product_default"];
-  readonly productDefaultReplication:
-    LongMemEvalMatrixPromotionAuthorization["product_default_replication"];
   readonly materialEffect: LongMemEvalMatrixPromotionAuthorization["material_effect"];
+  readonly validator: LongMemEvalMatrixPromotionAuthorization["validator"];
   readonly sourceSnapshot: LongMemEvalSourceSnapshotAuthority;
 }
 
@@ -94,11 +94,10 @@ export interface LongMemEvalExpansionCapabilityInput {
   readonly contractContents: string | Uint8Array;
 }
 
-export interface LongMemEvalExpansionCapabilityDependencies {
+export interface LongMemEvalExpansionCapabilityDependencies
+  extends PromotionCodeIdentityDependencies {
   readonly authorize: typeof authorizeLongMemEvalMatrixPromotion;
   readonly readSourceSnapshotAuthority: typeof readLongMemEvalSourceSnapshotAuthority;
-  readonly resolveFrozenCodeIdentity: typeof resolveFrozenCodeIdentity;
-  readonly computeExecutedDistIdentity: () => Promise<unknown>;
 }
 
 const DEFAULT_DEPENDENCIES: LongMemEvalExpansionCapabilityDependencies = {
@@ -115,16 +114,18 @@ export async function verifyLongMemEvalExpansionCapability(
 ): Promise<LongMemEvalExpansionCapability> {
   assertContractLocation(input);
   const parsed = parseLongMemEvalMatrixPromotionContract(input.contractContents);
+  const identityDeps = {
+    measureValidatorGitState: dependencies.measureValidatorGitState,
+    readContractSha256: dependencies.readContractSha256,
+    computeExecutedDistIdentity: dependencies.computeExecutedDistIdentity
+  };
   const authorization = LongMemEvalMatrixPromotionAuthorizationSchema.parse(
     await dependencies.authorize({
       checkoutRoot: input.checkoutRoot,
       contractPath: input.contractPath,
       contractRoot: input.contractRoot,
       contractContents: input.contractContents
-    }, {
-      resolveFrozenCodeIdentity: dependencies.resolveFrozenCodeIdentity,
-      computeExecutedDistIdentity: dependencies.computeExecutedDistIdentity
-    })
+    }, identityDeps)
   );
   assertAuthorizationBinding(parsed, authorization);
   const sourceSnapshot = await dependencies.readSourceSnapshotAuthority({
@@ -132,10 +133,12 @@ export async function verifyLongMemEvalExpansionCapability(
     contract: parsed.contract,
     sourceSelection: authorization.source_selection
   });
-  await assertCurrentPromotionCodeIdentity(input, parsed, {
-    resolveFrozenCodeIdentity: dependencies.resolveFrozenCodeIdentity,
-    computeExecutedDistIdentity: dependencies.computeExecutedDistIdentity
-  });
+  const validator = await resolveCurrentPromotionValidatorIdentity(
+    input,
+    parsed,
+    identityDeps
+  );
+  assertStablePromotionValidatorIdentity(authorization.validator, validator);
   return sealExpansionCapability({
     contractSha256: parsed.sha256,
     matrixAuthorizationSha256: authorization.authorization_sha256,
@@ -145,8 +148,8 @@ export async function verifyLongMemEvalExpansionCapability(
     nextSelection: authorization.next_selection,
     matrix: authorization.matrix,
     productDefault: authorization.product_default,
-    productDefaultReplication: authorization.product_default_replication,
     materialEffect: authorization.material_effect,
+    validator: authorization.validator,
     sourceSnapshot
   });
 }
@@ -249,19 +252,10 @@ function assertMatrixReceiptMatchesContract(
     evidence_root: cell.evidence_root
   })), true);
   const productCell = authorization.matrix.cells.find((cell) => cell.cell === "B");
-  const replication = authorization.product_default_replication;
-  const contractedReplication = contract.product_default_replication;
-  const matrixBundleDigests = new Set(
-    authorization.matrix.cells.map((cell) => cell.bundle_sha256)
-  );
   if (!isDeepStrictEqual(actual, expected) || productCell === undefined ||
       authorization.product_default.cell !== "B" ||
       !isDeepStrictEqual(authorization.product_default.treatment, productCell.treatment) ||
-      authorization.product_default.bundle_sha256 !== productCell.bundle_sha256 ||
-      replication.cell !== contractedReplication.cell ||
-      replication.evidence_root !== contractedReplication.evidence_root ||
-      !isDeepStrictEqual(replication.treatment, contractedReplication.treatment) ||
-      matrixBundleDigests.has(replication.bundle_sha256)) {
+      authorization.product_default.bundle_sha256 !== productCell.bundle_sha256) {
     throw new Error("live matrix authorization differs from frozen matrix contract");
   }
 }

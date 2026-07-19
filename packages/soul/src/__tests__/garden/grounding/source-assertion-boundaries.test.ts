@@ -226,6 +226,15 @@ describe("source assertion boundaries", () => {
     });
   });
 
+  it("grounds a self-contained cross-sentence verbatim match", () => {
+    const source = "I bought a red bike yesterday. I paid two hundred dollars.";
+    const matchedText = "I bought a red bike yesterday. I paid two hundred dollars.";
+    expect(resolveSourceAssertion(source, matchedText)).toEqual({
+      status: "grounded",
+      assertion: matchedText
+    });
+  });
+
   it("keeps non-verbatim reporting paraphrases deferred", () => {
     const source = "I remember Alex telling me he marinated the BBQ ribs for 24 hours.";
     const matchedText = "Alex told me he marinated the BBQ ribs for 24 hours";

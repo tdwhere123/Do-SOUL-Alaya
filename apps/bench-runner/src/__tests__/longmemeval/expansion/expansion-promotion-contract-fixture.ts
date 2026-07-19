@@ -26,18 +26,13 @@ export function expansionPromotionContractFixture() {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
-    execution_order: ["A", "B", "C", "D", "B2"],
+    execution_order: ["A", "B", "C", "D"],
     matrix: { entries: [
       entry(false, false, "cell-a"),
       entry(true, false, "cell-b"),
       entry(false, true, "cell-c"),
       entry(true, true, "cell-d")
     ] },
-    product_default_replication: {
-      cell: "B2",
-      treatment: { embedding_supplement: true, answer_rerank: false },
-      evidence_root: "cell-b2"
-    },
     absolute_quality_policy: expansionAbsoluteQualityPolicyFixture(),
     material_effect_policy: expansionMaterialEffectPolicyFixture()
   });
@@ -46,7 +41,6 @@ export function expansionPromotionContractFixture() {
 export function expansionAbsoluteQualityPolicyFixture() {
   return {
     product_cell: "B" as const,
-    replication_cell: "B2" as const,
     metric: "r_at_5" as const,
     cohort: "answerable" as const,
     expected_denominator: 94 as const,
@@ -107,6 +101,18 @@ export function expansionHardGateFixture() {
     unit: "ratio" as const,
     passed: true as const,
     missing: false as const
+  };
+}
+
+export function expansionValidatorFixture(
+  code: ReturnType<typeof expansionPromotionContractFixture>["code"]
+) {
+  return {
+    commit_sha: code.commit_sha,
+    commit_sha7: code.commit_sha7,
+    worktree_clean: true as const,
+    worktree_state_sha256: code.worktree_state_sha256,
+    executed_dist: code.executed_dist
   };
 }
 

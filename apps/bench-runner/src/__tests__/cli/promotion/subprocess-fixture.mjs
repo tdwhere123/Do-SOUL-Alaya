@@ -40,6 +40,10 @@ try {
       if (mode === "failure") throw new Error("fixture authorization failure");
       return JSON.parse(authorizationJson);
     },
+    resolveValidatorIdentity: async () => {
+      throw new Error("subprocess fixture skips live validator resolution");
+    },
+    checkoutRoot: repoRoot,
     stdout: (message) => process.stdout.write(message),
     stderr: (message) => process.stderr.write(message)
   });

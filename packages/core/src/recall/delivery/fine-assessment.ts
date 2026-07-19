@@ -144,9 +144,11 @@ export function deliverFineAssessment(
     // Pack by deep-head scores even when public relevance stays fused — otherwise
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
-    // Coverage admits the set; the active delivery authority owns final order.
+    // Empty deep-head: fused public order (not coverage scramble). CE owns
+    // final order via delivery_rank; lightweight CE-off keeps public_relevance
+    // (100Q probe: delivery_rank cost B −4 hits vs fused final order).
     finalOrderAfterCoverage: deepHeadScores.size === 0
-      ? "coverage"
+      ? "public_relevance"
       : replacePublicRelevance ? "delivery_rank" : "public_relevance",
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures

@@ -79,12 +79,14 @@ export async function mintCapability(
       bundle_sha256: cells[1]!.bundle_sha256
     },
     hard_gates: [expansionHardGateFixture()],
-    product_default_replication: {
-      ...contract.product_default_replication,
-      bundle_sha256: "5".repeat(64),
-      hard_gates: [expansionHardGateFixture()]
-    },
-    material_effect: expansionMaterialEffectFixture()
+    material_effect: expansionMaterialEffectFixture(),
+    validator: {
+      commit_sha: contract.code.commit_sha,
+      commit_sha7: contract.code.commit_sha7,
+      worktree_clean: true,
+      worktree_state_sha256: contract.code.worktree_state_sha256,
+      executed_dist: contract.code.executed_dist
+    }
   });
   return verifyLongMemEvalExpansionCapability({
     checkoutRoot: "/repo",
@@ -94,14 +96,13 @@ export async function mintCapability(
   }, {
     authorize: async () => authorization,
     readSourceSnapshotAuthority: async () => sourceAuthority(sourceManifestSha),
-    resolveFrozenCodeIdentity: async () => ({
+    measureValidatorGitState: async () => ({
       commitSha: contract.code.commit_sha,
       commitSha7: contract.code.commit_sha7,
-      gateContractPath: "/evidence/contract.json",
-      gateSha256: parsed.sha256,
       worktreeStateSha256: contract.code.worktree_state_sha256,
       worktreeClean: true
     }),
+    readContractSha256: async () => parsed.sha256,
     computeExecutedDistIdentity: async () => contract.code.executed_dist
   });
 }

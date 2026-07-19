@@ -18,15 +18,8 @@ const MatrixEntrySchema = z.object({
   evidence_root: z.string().min(1)
 }).strict().readonly();
 
-const ProductDefaultReplicationSchema = z.object({
-  cell: z.literal("B2"),
-  treatment: LongMemEvalMatrixTreatmentSchema,
-  evidence_root: z.string().min(1)
-}).strict().readonly();
-
 const AbsoluteQualityPolicySchema = z.object({
   product_cell: z.literal("B"),
-  replication_cell: z.literal("B2"),
   metric: z.literal("r_at_5"),
   cohort: z.literal("answerable"),
   expected_denominator: z.literal(
@@ -86,13 +79,11 @@ const LongMemEvalMatrixPromotionContractBaseSchema = z.object({
     z.literal("A"),
     z.literal("B"),
     z.literal("C"),
-    z.literal("D"),
-    z.literal("B2")
+    z.literal("D")
   ]).readonly(),
   matrix: z.object({
     entries: z.array(MatrixEntrySchema).length(4).readonly()
   }).strict(),
-  product_default_replication: ProductDefaultReplicationSchema,
   absolute_quality_policy: AbsoluteQualityPolicySchema,
   material_effect_policy: MaterialEffectPolicySchema
 }).strict();
@@ -110,7 +101,6 @@ function validatePromotionContract(
 ): void {
   validateCodeIdentity(contract, context);
   validateMatrixTreatments(contract, context);
-  validateReplicationTreatment(contract, context);
   validateEvidenceRoots(contract, context);
   validateSnapshotPath(contract, context);
 }
@@ -143,35 +133,16 @@ function validateMatrixTreatments(
   }
 }
 
-function validateReplicationTreatment(
-  contract: PromotionContractCandidate,
-  context: z.RefinementCtx
-): void {
-  const replication = contract.product_default_replication;
-  const productTreatment = productDefaultTreatment(contract.policy_version);
-  if (treatmentKey(replication.treatment) !== treatmentKey(productTreatment)) {
-    context.addIssue({
-      code: "custom",
-      path: ["product_default_replication", "treatment"],
-      message: "B2 replication must use the product-default treatment"
-    });
-  }
-}
-
 function validateEvidenceRoots(
   contract: PromotionContractCandidate,
   context: z.RefinementCtx
 ): void {
-  const replication = contract.product_default_replication;
-  const roots = [
-    ...contract.matrix.entries.map((entry) => entry.evidence_root),
-    replication.evidence_root
-  ];
+  const roots = contract.matrix.entries.map((entry) => entry.evidence_root);
   if (new Set(roots).size !== roots.length) {
     context.addIssue({
       code: "custom",
-      path: ["product_default_replication", "evidence_root"],
-      message: "matrix and replication evidence roots must be unique"
+      path: ["matrix", "entries"],
+      message: "matrix evidence roots must be unique"
     });
   }
   contract.matrix.entries.forEach((entry, index) => {
@@ -183,13 +154,6 @@ function validateEvidenceRoots(
       });
     }
   });
-  if (!isSafeRelativeRoot(replication.evidence_root)) {
-    context.addIssue({
-      code: "custom",
-      path: ["product_default_replication", "evidence_root"],
-      message: "replication evidence root must be a contained relative path"
-    });
-  }
 }
 
 function validateSnapshotPath(

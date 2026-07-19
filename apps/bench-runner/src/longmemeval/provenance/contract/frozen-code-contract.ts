@@ -25,6 +25,13 @@ const FrozenContractSchema = z.union([
   }).passthrough()
 ]);
 
+export interface MeasuredGitState {
+  readonly commitSha: string;
+  readonly commitSha7: string;
+  readonly worktreeStateSha256: string;
+  readonly worktreeClean: boolean;
+}
+
 export interface FrozenCodeIdentity {
   readonly commitSha: string;
   readonly commitSha7: string;
@@ -57,7 +64,9 @@ export async function resolveFrozenCodeIdentity(input: {
     "worktree"
   );
   return {
-    ...measured,
+    commitSha: measured.commitSha,
+    commitSha7: measured.commitSha7,
+    worktreeStateSha256: measured.worktreeStateSha256,
     gateContractPath: contractPath,
     gateSha256,
     worktreeClean: true
@@ -99,11 +108,10 @@ function parseContract(raw: Buffer, path: string): z.infer<typeof FrozenContract
   }
 }
 
-async function measureGitState(checkoutRoot: string): Promise<{
-  readonly commitSha: string;
-  readonly commitSha7: string;
-  readonly worktreeStateSha256: string;
-}> {
+export async function measureGitState(
+  checkoutRoot: string,
+  options: { readonly allowDirty?: boolean } = {}
+): Promise<MeasuredGitState> {
   const [rootResult, headResult, statusResult] = await Promise.all([
     execFileAsync("git", ["-C", checkoutRoot, "rev-parse", "--show-toplevel"]),
     execFileAsync("git", ["-C", checkoutRoot, "rev-parse", "HEAD"]),
@@ -116,19 +124,26 @@ async function measureGitState(checkoutRoot: string): Promise<{
   }
   const commitSha = headResult.stdout.trim();
   if (!/^[a-f0-9]{40}$/u.test(commitSha)) throw new Error("git HEAD is not a commit SHA");
-  if (statusResult.stdout.length > 0) throw new Error("benchmark worktree is not clean");
+  const worktreeClean = statusResult.stdout.length === 0;
+  if (!worktreeClean && options.allowDirty !== true) {
+    throw new Error("benchmark worktree is not clean");
+  }
   return {
     commitSha,
     commitSha7: commitSha.slice(0, 7),
-    worktreeStateSha256: sha256(headResult.stdout + statusResult.stdout)
+    worktreeStateSha256: sha256(headResult.stdout + statusResult.stdout),
+    worktreeClean
   };
 }
 
 function assertContractMatches(
   code: z.infer<typeof FrozenContractSchema>["code"],
-  measured: Awaited<ReturnType<typeof measureGitState>>,
+  measured: MeasuredGitState,
   expectedCommitSha7: string
 ): void {
+  if (!measured.worktreeClean) {
+    throw new Error("benchmark worktree is not clean");
+  }
   if (code.commit_sha !== measured.commitSha || code.commit_sha7 !== measured.commitSha7) {
     throw new Error("frozen gate contract does not match measured git HEAD");
   }

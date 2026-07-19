@@ -9,20 +9,27 @@ import {
   runAuthorizeLongMemEvalMatrixCommand,
   type LongMemEvalMatrixPromotionCommandDependencies
 } from "../../../cli/promotion/command.js";
-import { LongMemEvalMatrixPromotionAuthorizationSchema } from
+import {
+  LongMemEvalMatrixPromotionAuthorizationSchema,
+  LongMemEvalMatrixPromotionRejectionSchema
+} from
   "../../../longmemeval/promotion/schema/authorization.js";
 import { promotionAuthorizationFixture } from "./authorization-fixture.js";
+import { expansionPromotionContractFixture } from
+  "../../longmemeval/expansion/expansion-promotion-contract-fixture.js";
 
 describe("LongMemEval matrix promotion command", () => {
   let root: string;
   let contractPath: string;
   let outputPath: string;
+  let contractBytes: string;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "matrix-promotion-command-"));
     contractPath = join(root, "matrix.json");
     outputPath = join(root, "authorization.json");
-    await writeFile(contractPath, "contract-bytes", "utf8");
+    contractBytes = `${JSON.stringify(expansionPromotionContractFixture())}\n`;
+    await writeFile(contractPath, contractBytes, "utf8");
   });
 
   afterEach(async () => {
@@ -44,7 +51,7 @@ describe("LongMemEval matrix promotion command", () => {
       checkoutRoot: "/repo",
       contractPath,
       contractRoot: root,
-      contractContents: Buffer.from("contract-bytes", "utf8")
+      contractContents: Buffer.from(contractBytes, "utf8")
     });
     expect(io.stdout).toHaveBeenCalledWith(
       expect.stringContaining(`Authorization: ${outputPath}`)
@@ -53,7 +60,7 @@ describe("LongMemEval matrix promotion command", () => {
     expect(await tempArtifacts(root)).toEqual([]);
   });
 
-  it("returns 2 and leaves no partial output when authorization fails", async () => {
+  it("returns 2, leaves no auth output, and writes a rejection receipt", async () => {
     const io = captureIo(async () => { throw new Error("matrix gate failed"); });
 
     expect(await runAuthorizeLongMemEvalMatrixCommand([
@@ -61,8 +68,40 @@ describe("LongMemEval matrix promotion command", () => {
     ], io)).toBe(2);
 
     expect(lstatSync(outputPath, { throwIfNoEntry: false })).toBeUndefined();
+    const rejectionPath = `${outputPath}.rejected.json`;
+    const rejection = LongMemEvalMatrixPromotionRejectionSchema.parse(
+      JSON.parse(await readFile(rejectionPath, "utf8")) as unknown
+    );
+    expect(rejection).toMatchObject({
+      status: "rejected",
+      error: { message: "matrix gate failed" },
+      contract_path: contractPath,
+      validator: null,
+      validator_resolve_error: "fixture skips live validator resolution"
+    });
     expect(await tempArtifacts(root)).toEqual([]);
     expect(io.stderr).toHaveBeenCalledWith(expect.stringContaining("matrix gate failed"));
+  });
+
+  it("keeps a resolved dirty validator on the rejection receipt when authorize fails", async () => {
+    const dirtyValidator = {
+      ...promotionAuthorizationFixture().validator,
+      worktree_clean: false
+    };
+    const io = captureIo(
+      async () => { throw new Error("matrix gate failed"); },
+      async () => dirtyValidator
+    );
+
+    expect(await runAuthorizeLongMemEvalMatrixCommand([
+      "--contract", contractPath, "--out", outputPath
+    ], io)).toBe(2);
+
+    const rejection = LongMemEvalMatrixPromotionRejectionSchema.parse(
+      JSON.parse(await readFile(`${outputPath}.rejected.json`, "utf8")) as unknown
+    );
+    expect(rejection.validator).toEqual(dirtyValidator);
+    expect(rejection.validator_resolve_error).toBeNull();
   });
 
   it("rejects an invalid authorization before creating the target", async () => {
@@ -115,7 +154,8 @@ describe("LongMemEval matrix promotion command", () => {
 });
 
 function captureIo(
-  authorize: LongMemEvalMatrixPromotionCommandDependencies["authorize"]
+  authorize: LongMemEvalMatrixPromotionCommandDependencies["authorize"],
+  resolveValidatorIdentity?: LongMemEvalMatrixPromotionCommandDependencies["resolveValidatorIdentity"]
 ): LongMemEvalMatrixPromotionCommandDependencies & {
   readonly stdout: ReturnType<typeof vi.fn>;
   readonly stderr: ReturnType<typeof vi.fn>;
@@ -124,6 +164,9 @@ function captureIo(
   const stderr = vi.fn();
   return {
     authorize,
+    resolveValidatorIdentity: resolveValidatorIdentity ?? (async () => {
+      throw new Error("fixture skips live validator resolution");
+    }),
     checkoutRoot: "/repo",
     stdout,
     stderr

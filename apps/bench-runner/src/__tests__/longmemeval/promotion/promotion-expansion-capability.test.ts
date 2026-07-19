@@ -19,7 +19,8 @@ import {
 import {
   expansionAbsoluteQualityPolicyFixture,
   expansionMaterialEffectFixture,
-  expansionMaterialEffectPolicyFixture
+  expansionMaterialEffectPolicyFixture,
+  expansionValidatorFixture
 } from "../expansion/expansion-promotion-contract-fixture.js";
 
 describe("LongMemEval 100Q to 500Q expansion capability", () => {
@@ -37,8 +38,8 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
       sourceSelection: { selected_count: 100 },
       nextSelection: { selected_count: 500 },
       productDefault: { cell: "B" },
-      productDefaultReplication: { cell: "B2", evidence_root: "cell-b2" },
       materialEffect: { paired_r_at_5: { net: 9 } },
+      validator: { commit_sha7: "abcdef0", worktree_clean: true },
       sourceSnapshot: {
         dbPath: "snapshot/source-100.db",
         extractionCache: {
@@ -71,14 +72,14 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
     )).toThrow(/not live-verified/u);
   });
 
-  it("rejects a self-hashed B2 receipt that differs from the frozen contract", async () => {
+  it("rejects a self-hashed receipt whose product-default bundle differs", async () => {
     const fixture = expansionFixture();
     const { authorization_sha256: _digest, ...unsigned } = fixture.authorization;
     const modified = buildLongMemEvalMatrixPromotionAuthorization({
       ...unsigned,
-      product_default_replication: {
-        ...unsigned.product_default_replication,
-        evidence_root: "different-b2"
+      product_default: {
+        ...unsigned.product_default,
+        bundle_sha256: "9".repeat(64)
       }
     });
 
@@ -88,7 +89,7 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
     })).rejects.toThrow(/authorization differs from frozen matrix contract/u);
   });
 
-  it("rejects current executed-dist drift after matrix verification", async () => {
+  it("rejects validator identity drift after matrix verification", async () => {
     const fixture = expansionFixture();
     const dependencies: LongMemEvalExpansionCapabilityDependencies = {
       ...fixture.dependencies,
@@ -101,21 +102,14 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
     await expect(verifyLongMemEvalExpansionCapability(
       fixture.input,
       dependencies
-    )).rejects.toThrow(/executed dist/u);
+    )).rejects.toThrow(/validator identity drifted/u);
   });
 
   it("rejects a contract path whose live digest changed after descriptor read", async () => {
     const fixture = expansionFixture();
     const dependencies: LongMemEvalExpansionCapabilityDependencies = {
       ...fixture.dependencies,
-      resolveFrozenCodeIdentity: async () => ({
-        commitSha: fixture.contract.code.commit_sha,
-        commitSha7: fixture.contract.code.commit_sha7,
-        gateContractPath: fixture.input.contractPath,
-        gateSha256: "0".repeat(64),
-        worktreeStateSha256: fixture.contract.code.worktree_state_sha256,
-        worktreeClean: true
-      })
+      readContractSha256: async () => "0".repeat(64)
     };
 
     await expect(verifyLongMemEvalExpansionCapability(
@@ -168,13 +162,8 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
-    execution_order: ["A", "B", "C", "D", "B2"],
+    execution_order: ["A", "B", "C", "D"],
     matrix: { entries: order.map((index) => entries[index]!) },
-    product_default_replication: {
-      cell: "B2",
-      treatment: { embedding_supplement: true, answer_rerank: false },
-      evidence_root: "cell-b2"
-    },
     absolute_quality_policy: expansionAbsoluteQualityPolicyFixture(),
     material_effect_policy: expansionMaterialEffectPolicyFixture()
   });
@@ -189,6 +178,7 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
     bundle_sha256: String(index + 1).repeat(64)
   })).sort((left, right) => left.cell.localeCompare(right.cell));
   const productCell = cells.find((cell) => cell.cell === "B")!;
+  const validator = expansionValidatorFixture(contract.code);
   const authorization = buildLongMemEvalMatrixPromotionAuthorization({
     schema_version: 1,
     kind: "longmemeval_matrix_promotion_authorization",
@@ -204,14 +194,8 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
       bundle_sha256: productCell.bundle_sha256
     },
     hard_gates: [hardGate()],
-    product_default_replication: {
-      cell: "B2",
-      treatment: contract.product_default_replication.treatment,
-      evidence_root: contract.product_default_replication.evidence_root,
-      bundle_sha256: "5".repeat(64),
-      hard_gates: [hardGate()]
-    },
-    material_effect: expansionMaterialEffectFixture()
+    material_effect: expansionMaterialEffectFixture(),
+    validator
   });
   const sourceSnapshot = snapshotAuthority();
   const input = {
@@ -223,14 +207,13 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
   const dependencies: LongMemEvalExpansionCapabilityDependencies = {
     authorize: async () => authorization,
     readSourceSnapshotAuthority: async () => sourceSnapshot,
-    resolveFrozenCodeIdentity: async () => ({
+    measureValidatorGitState: async () => ({
       commitSha: contract.code.commit_sha,
       commitSha7: contract.code.commit_sha7,
-      gateContractPath: input.contractPath,
-      gateSha256: parsed.sha256,
       worktreeStateSha256: contract.code.worktree_state_sha256,
       worktreeClean: true
     }),
+    readContractSha256: async () => parsed.sha256,
     computeExecutedDistIdentity: async () => contract.code.executed_dist
   };
   return {

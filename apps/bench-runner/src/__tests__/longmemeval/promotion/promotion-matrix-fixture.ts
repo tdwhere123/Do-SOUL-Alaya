@@ -70,18 +70,13 @@ function matrixFixture() {
       db_path: "snapshot/source-100.db",
       manifest_sha256: "f".repeat(64)
     },
-    execution_order: ["A", "B", "C", "D", "B2"],
+    execution_order: ["A", "B", "C", "D"],
     matrix: { entries: [
       contractEntry(false, false, "cell-a"),
       contractEntry(true, false, "cell-b"),
       contractEntry(false, true, "cell-c"),
       contractEntry(true, true, "cell-d")
     ] },
-    product_default_replication: {
-      cell: "B2",
-      treatment: { embedding_supplement: true, answer_rerank: false },
-      evidence_root: "cell-b2"
-    },
     absolute_quality_policy: absoluteQualityPolicy(),
     material_effect_policy: materialEffectPolicy()
   });
@@ -96,20 +91,19 @@ function matrixFixture() {
     contractSha256: "a".repeat(64),
     sourceSelection,
     nextSelection,
+    validator: {
+      commit_sha: contract.code.commit_sha,
+      commit_sha7: contract.code.commit_sha7,
+      worktree_clean: true,
+      worktree_state_sha256: contract.code.worktree_state_sha256,
+      executed_dist: contract.code.executed_dist
+    },
     cells: contract.matrix.entries.map((entry, index) => ({
       ...testCell(
         entry.evidence_root,
         entryData(payloads[index]!, entry.treatment, String(index + 1))
       )
-    })),
-    productDefaultReplication: testCell(
-      contract.product_default_replication.evidence_root,
-      entryData(
-        { ...productPayloadValue, run_at: "2026-07-16T00:00:05.000Z" },
-        contract.product_default_replication.treatment,
-        "5"
-      )
-    )
+    }))
   };
 }
 
@@ -142,7 +136,6 @@ function materialEffectPolicy() {
 function absoluteQualityPolicy() {
   return {
     product_cell: "B" as const,
-    replication_cell: "B2" as const,
     metric: "r_at_5" as const,
     cohort: "answerable" as const,
     expected_denominator: 94 as const,

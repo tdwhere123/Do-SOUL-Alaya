@@ -125,7 +125,7 @@ describe("final recall relevance ownership", () => {
       .toMatchObject({ answer_relevance_rank: 1, final_rank: 1, post_rank: 1 });
   });
 
-  it("restores public relevance order after lightweight-head coverage admission", () => {
+  it("keeps fused public_relevance final order after lightweight coverage packing when CE is off", () => {
     const primary = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
     const redundant = createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]);
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
@@ -158,11 +158,14 @@ describe("final recall relevance ownership", () => {
       warn: vi.fn()
     });
 
+    // Coverage may admit via deep-head; CE-off final packet restores fused order.
     expect(assessed.candidates.map((candidate) => candidate.object_id))
       .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID]);
     expect(assessed.candidates.map((candidate) => candidate.relevance_score))
-      .toEqual([...assessed.candidates].map((candidate) => candidate.relevance_score)
-        .sort((left, right) => right - left));
+      .toEqual([
+        assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score,
+        assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score
+      ]);
     expect(assessed.candidates.map((candidate) => candidate.budget_state.remaining_entries))
       .toEqual([1, 0]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
@@ -176,6 +179,47 @@ describe("final recall relevance ownership", () => {
       final_rank: 1,
       post_rank: 1
     });
+  });
+
+  it("uses public relevance final order when deep-head is a no-op", () => {
+    // Emb+agreement cold → empty deep-head. Coverage packing can place a
+    // medium-fused novel ahead of a high-fused duplicate; fused public order
+    // must still bind the delivered packet (not coverage scramble).
+    const primary = createMemory(FUSION_WINNER_ID, 0.9, [{ facet: "occupation_work" }]);
+    const redundant = createMemory(ACTIVATION_WINNER_ID, 0.85, [{ facet: "occupation_work" }]);
+    const novel = createMemory(COVERAGE_NOVEL_ID, 0.5, [{ facet: "location_place" }]);
+    const basePolicy = buildPolicy();
+    const assessed = fineAssess({
+      candidates: [primary, redundant, novel].map(createCoarseCandidate),
+      policy: {
+        ...basePolicy,
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_entries: 3, max_total_tokens: 100, per_dimension_limits: null }
+        }
+      },
+      winnerMemoryIds: new Set(),
+      supplementaryData: {
+        ...createSupplementaryData(),
+        evidenceGistsByMemoryId: {
+          [FUSION_WINNER_ID]: "shared gist",
+          [ACTIVATION_WINNER_ID]: "shared gist",
+          [COVERAGE_NOVEL_ID]: "novel gist"
+        }
+      },
+      tokenEstimator: { estimate: () => 4 },
+      now: () => NOW,
+      warn: vi.fn()
+    });
+
+    expect(assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([FUSION_WINNER_ID, ACTIVATION_WINNER_ID, COVERAGE_NOVEL_ID]);
+    const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
+    expect(diagnostics.get(COVERAGE_NOVEL_ID)?.rank_after_coverage_selector)
+      .toBeLessThan(diagnostics.get(ACTIVATION_WINNER_ID)?.rank_after_coverage_selector ?? 0);
+    expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({ final_rank: 1, post_rank: 1 });
+    expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
+    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
   });
 
   it("restores CE relevance order after coverage admits a high-score duplicate late", () => {

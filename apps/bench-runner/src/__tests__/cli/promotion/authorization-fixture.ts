@@ -1,7 +1,10 @@
 import { createLongMemEvalSelectionContractIdentity } from "@do-soul/alaya-eval";
 import { buildLongMemEvalMatrixPromotionAuthorization } from
   "../../../longmemeval/promotion/schema/authorization.js";
-import { expansionMaterialEffectFixture } from
+import {
+  expansionMaterialEffectFixture,
+  expansionValidatorFixture
+} from
   "../../longmemeval/expansion/expansion-promotion-contract-fixture.js";
 
 export function promotionAuthorizationFixture() {
@@ -33,6 +36,16 @@ export function promotionAuthorizationFixture() {
     passed: true as const,
     missing: false as const
   };
+  const code = {
+    commit_sha: "abcdef0" + "1".repeat(33),
+    commit_sha7: "abcdef0",
+    worktree_state_sha256: "b".repeat(64),
+    executed_dist: {
+      algorithm: "sha256-reachable-path-file-sha256-v1" as const,
+      sha256: "8".repeat(64),
+      file_count: 42
+    }
+  };
   return buildLongMemEvalMatrixPromotionAuthorization({
     schema_version: 1,
     kind: "longmemeval_matrix_promotion_authorization",
@@ -48,14 +61,8 @@ export function promotionAuthorizationFixture() {
       bundle_sha256: cells[1].bundle_sha256
     },
     hard_gates: [gate],
-    product_default_replication: {
-      cell: "B2",
-      treatment: cells[1].treatment,
-      evidence_root: "cell-b2",
-      bundle_sha256: "5".repeat(64),
-      hard_gates: [gate]
-    },
-    material_effect: expansionMaterialEffectFixture()
+    material_effect: expansionMaterialEffectFixture(),
+    validator: expansionValidatorFixture(code)
   });
 }
 

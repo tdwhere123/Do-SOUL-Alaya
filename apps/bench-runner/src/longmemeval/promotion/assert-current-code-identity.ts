@@ -1,10 +1,16 @@
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import {
-  resolveFrozenCodeIdentity,
-  type FrozenCodeIdentity
+  measureGitState,
+  type MeasuredGitState
 } from "../provenance/contract/frozen-code-contract.js";
 import { computeExecutedDistIdentityFresh } from "../provenance/run.js";
-import type { LongMemEvalMatrixPromotionContract } from "./schema/contract.js";
+import {
+  PromotionValidatorIdentitySchema,
+  type PromotionValidatorIdentity
+} from "./schema/authorization.js";
 
 export interface PromotionCodeIdentityInput {
   readonly checkoutRoot: string;
@@ -12,55 +18,61 @@ export interface PromotionCodeIdentityInput {
 }
 
 export interface PromotionCodeIdentityDependencies {
-  readonly resolveFrozenCodeIdentity: typeof resolveFrozenCodeIdentity;
+  readonly measureValidatorGitState: (
+    checkoutRoot: string
+  ) => Promise<MeasuredGitState>;
+  readonly readContractSha256: (contractPath: string) => Promise<string>;
   readonly computeExecutedDistIdentity: () => Promise<unknown>;
 }
 
 export const DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES:
   PromotionCodeIdentityDependencies = {
-    resolveFrozenCodeIdentity,
+    measureValidatorGitState: (checkoutRoot) =>
+      measureGitState(checkoutRoot, { allowDirty: true }),
+    readContractSha256,
     computeExecutedDistIdentity: computeExecutedDistIdentityFresh
   };
 
-/** Live HEAD + executed_dist must match contract.code — not receipt-only. */
-export async function assertCurrentPromotionCodeIdentity(
+/** Record live validator checkout; do not require equality with producer code. */
+export async function resolveCurrentPromotionValidatorIdentity(
   input: PromotionCodeIdentityInput,
-  parsed: {
-    readonly sha256: string;
-    readonly contract: {
-      readonly code: LongMemEvalMatrixPromotionContract["code"];
-    };
-  },
+  parsed: { readonly sha256: string },
   dependencies: PromotionCodeIdentityDependencies =
     DEFAULT_PROMOTION_CODE_IDENTITY_DEPENDENCIES
-): Promise<void> {
-  const frozen = await dependencies.resolveFrozenCodeIdentity({
-    checkoutRoot: input.checkoutRoot,
-    expectedCommitSha7: parsed.contract.code.commit_sha7,
-    env: {
-      ALAYA_BENCH_GATE_CONTRACT_PATH: input.contractPath,
-      ALAYA_BENCH_GATE_SHA256: parsed.sha256,
-      ALAYA_BENCH_WORKTREE_STATE_SHA256: parsed.contract.code.worktree_state_sha256
-    }
-  });
-  assertFrozenCodeIdentity(frozen, parsed.contract.code, parsed.sha256);
+): Promise<PromotionValidatorIdentity> {
+  const gateSha256 = await dependencies.readContractSha256(input.contractPath);
+  if (gateSha256 !== parsed.sha256) {
+    throw new Error("live promotion contract digest differs from descriptor input");
+  }
+  const git = await dependencies.measureValidatorGitState(input.checkoutRoot);
   const executedDist = await dependencies.computeExecutedDistIdentity();
-  if (!isDeepStrictEqual(executedDist, parsed.contract.code.executed_dist)) {
-    throw new Error("current executed dist differs from promotion contract");
+  return PromotionValidatorIdentitySchema.parse({
+    commit_sha: git.commitSha,
+    commit_sha7: git.commitSha7,
+    worktree_clean: git.worktreeClean,
+    worktree_state_sha256: git.worktreeStateSha256,
+    executed_dist: executedDist
+  });
+}
+
+export function assertStablePromotionValidatorIdentity(
+  before: PromotionValidatorIdentity,
+  after: PromotionValidatorIdentity
+): void {
+  if (!isDeepStrictEqual(before, after)) {
+    throw new Error("promotion validator identity drifted during authorization");
   }
 }
 
-function assertFrozenCodeIdentity(
-  frozen: FrozenCodeIdentity | null,
-  code: LongMemEvalMatrixPromotionContract["code"],
-  contractSha256: string
-): void {
-  if (frozen === null) throw new Error("promotion contract did not verify current code");
-  if (frozen.gateSha256 !== contractSha256) {
-    throw new Error("live promotion contract digest differs from descriptor input");
+async function readContractSha256(contractPath: string): Promise<string> {
+  if (typeof constants.O_NOFOLLOW !== "number") {
+    throw new Error("promotion contract no-follow validation is unavailable");
   }
-  if (frozen.commitSha !== code.commit_sha || frozen.commitSha7 !== code.commit_sha7 ||
-      frozen.worktreeStateSha256 !== code.worktree_state_sha256) {
-    throw new Error("current git identity differs from promotion contract");
+  const handle = await open(contractPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const raw = await handle.readFile();
+    return createHash("sha256").update(raw).digest("hex");
+  } finally {
+    await handle.close();
   }
 }
