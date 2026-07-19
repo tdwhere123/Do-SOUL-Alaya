@@ -71,6 +71,41 @@ describe("verified LongMemEval A/B/C/D plus B2 promotion", () => {
       .toThrow(/common evidence identity/u);
   });
 
+  it("rejects non-treatment environment drift", () => {
+    const fixture = matrixFixture();
+    const d = fixture.cells[3]!;
+    const drifted = {
+      ...d.data,
+      provenance: {
+        ...d.data.provenance,
+        runtime: {
+          ...d.data.provenance.runtime,
+          paired_env: {
+            ...d.data.provenance.runtime.paired_env,
+            ALAYA_RECALL_CONF_RHO_PATH: "0.99"
+          }
+        }
+      }
+    };
+    const cells = fixture.cells.map((cell, index) =>
+      index === 3 ? testCell(cell.evidenceRoot, drifted) : cell);
+
+    expect(() => authorizeVerifiedLongMemEvalMatrix({ ...fixture, cells }))
+      .toThrow(/common evidence identity/u);
+  });
+
+  it("rejects B/D bi-encoder model drift", () => {
+    const fixture = matrixFixture();
+    const d = fixture.cells[3]!;
+    const cells = fixture.cells.map((cell, index) =>
+      index === 3
+        ? testCell(cell.evidenceRoot, withNonProductLocalBi(d.data, "custom_model"))
+        : cell);
+
+    expect(() => authorizeVerifiedLongMemEvalMatrix({ ...fixture, cells }))
+      .toThrow(/B\/D bi-encoder model identity/u);
+  });
+
   it("rejects a B latency hard-gate failure after successful evidence verification", () => {
     const fixture = matrixFixture();
     const b = fixture.cells[1]!;

@@ -293,6 +293,7 @@ function nonTreatmentEnvironment(
   const treatmentKeys = new Set([
     "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT",
     "ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK",
+    "ALAYA_LOCAL_EMBEDDING_MODEL",
     "ALAYA_RECALL_EVAL_EMBEDDING"
   ]);
   return Object.fromEntries(
