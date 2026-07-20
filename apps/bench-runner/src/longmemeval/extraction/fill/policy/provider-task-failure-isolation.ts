@@ -9,6 +9,7 @@ import type { PreparedExpansionFillAuthority } from
 
 interface ProviderTaskFailureIsolationScope {
   readonly requested: boolean;
+  readonly questionBatchLimit: number | undefined;
   readonly authority: {
     readonly receipt: ExtractionAuthorityReceipt;
     readonly targetSelection?: ExtractionTargetSelectionReceipt;
@@ -20,6 +21,11 @@ export function assertProviderTaskFailureIsolationScope(
   input: ProviderTaskFailureIsolationScope
 ): void {
   if (!input.requested) return;
+  if (input.questionBatchLimit !== undefined) {
+    throw new ExtractionCacheInvariantError(
+      "provider task failure isolation is full-window only and rejects question batch execution"
+    );
+  }
   const receipt = input.authority?.receipt;
   const targetSelection = input.authority?.targetSelection;
   if (receipt?.action !== "fill" || targetSelection === undefined ||

@@ -135,6 +135,7 @@ export async function runExtractionFill(
     : undefined;
   assertProviderTaskFailureIsolationScope({
     requested: options.tolerateProviderTaskFailures === true,
+    questionBatchLimit: options.questionBatchLimit,
     authority,
     expansion
   });

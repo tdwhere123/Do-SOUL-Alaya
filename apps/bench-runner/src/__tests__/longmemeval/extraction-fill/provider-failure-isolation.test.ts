@@ -79,6 +79,34 @@ describe("authority-bound provider failure isolation", () => {
     expect(extract).not.toHaveBeenCalled();
   });
 
+  it("rejects question-batch execution even with a matching target selection", async () => {
+    setCredentialFixture();
+    const questions = Array.from(
+      { length: 100 },
+      (_, index) => question(`q${index + 1}`, "alpha", "decoy")
+    );
+    await writeCanonicalDataset(questions);
+    const authority = await writeTargetBoundAuthority();
+    const extract = vi.fn<BenchSignalExtractor["extract"]>();
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      offset: 0,
+      limit: 100,
+      questionBatchLimit: 1,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: authority.authorityPath,
+      targetSelectionReceiptPath: authority.targetSelectionPath,
+      tolerateProviderTaskFailures: true,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    })).rejects.toThrow(/failure isolation.*full-window.*question batch/u);
+
+    expect(extract).not.toHaveBeenCalled();
+  });
+
   it("continues siblings after a 4xx, then fails with an honest incomplete state", async () => {
     setCredentialFixture();
     const questions = Array.from(
