@@ -63,6 +63,8 @@ import { assertPreservedValidClosureUnchanged } from
   "./authority/repair/preserved-valid-closure.js";
 import { isBoundedExistingCacheRepair } from
   "./authority/repair/bounded-existing-cache-repair.js";
+import { assertProviderTaskFailureIsolationScope } from
+  "./fill/policy/provider-task-failure-isolation.js";
 
 export { collectDistinctTurnContents } from "./turn-contents.js";
 
@@ -85,6 +87,8 @@ export interface ExtractionFillOptions {
   readonly signal?: AbortSignal;
   readonly authorityReceiptPath?: string;
   readonly targetSelectionReceiptPath?: string;
+  /** Continue normal target-bound fills after isolated provider task failures. */
+  readonly tolerateProviderTaskFailures?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly r3SpendApproval?: R3SpendApproval;
 }
@@ -129,6 +133,11 @@ export async function runExtractionFill(
   const expansion = directSpend === undefined && !boundedRepair
     ? await prepareExpansionFillAuthority(options, cacheRoot)
     : undefined;
+  assertProviderTaskFailureIsolationScope({
+    requested: options.tolerateProviderTaskFailures === true,
+    authority,
+    expansion
+  });
   if (expansion !== undefined && authority === undefined) {
     throw new ExtractionCacheInvariantError(
       "canonical 500Q extraction-fill requires a receipt-bound extraction authority"

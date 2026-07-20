@@ -69,7 +69,8 @@ export async function executeExtractionFill(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress
   );
   const distinctTurns = resolveFillTurns(prepared, cacheRoot, authority);
-  const newApiDirect = isNewApiDirectFill(authority);
+  const tolerateProviderTaskFailures = options.tolerateProviderTaskFailures === true ||
+    isNewApiDirectFill(authority);
   await runExtractionPool({
     extractor,
     distinctTurns,
@@ -83,7 +84,7 @@ export async function executeExtractionFill(
       maxOutputTokens: authority.receipt.limits.max_output_tokens,
       outputTokenField: authority.receipt.limits.output_token_field
     } }),
-    ...(newApiDirect ? { tolerateProviderTaskFailures: true } : {})
+    ...(tolerateProviderTaskFailures ? { tolerateProviderTaskFailures: true } : {})
   });
 }
 
