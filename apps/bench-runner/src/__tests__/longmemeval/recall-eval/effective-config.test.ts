@@ -107,6 +107,21 @@ describe("effective recall config identity", () => {
     expect(weighted.effective_config_sha256).not.toBe(base.effective_config_sha256);
   });
 
+  it("allows attributed diagnostic weight overrides before reading recall inputs", async () => {
+    const rawOverrides = JSON.stringify({
+      fusion_weights: { evidence_fts: 3, evidence_structural_agreement: 6 }
+    });
+    const overrides = resolveBenchRecallWeightOverrides({ envJson: rawOverrides });
+
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, overrides, {
+      ALAYA_RECALL_WEIGHT_OVERRIDES: rawOverrides
+    })).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
+  });
+
   it.each([
     "ALAYA_BENCH_EMBEDDING_INJECTION_CAP",
     "ALAYA_BENCH_EMBEDDING_INJECTION_FLOOR",

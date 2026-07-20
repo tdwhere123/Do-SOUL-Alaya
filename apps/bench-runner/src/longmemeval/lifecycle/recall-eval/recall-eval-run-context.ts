@@ -77,7 +77,9 @@ export async function prepareRecallEvalRunContext(
       ),
       conflictAwareness: (options.policyShape ?? "stress") !== "chat"
     },
-    recallWeightOverrides,
+    // Diagnostic overrides stay attributable below; 500Q and promotion
+    // separately require the effective policy to remain product-default.
+    undefined,
     "recall-eval invocation"
   );
   assertCacheOnlyEnvironment(ambientEnv);
