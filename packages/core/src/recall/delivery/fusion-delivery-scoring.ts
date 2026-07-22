@@ -160,7 +160,26 @@ function buildFusionRanksForStream(
         ? compareMemoryEntries(left.entry, right.entry)
         : right.score - left.score
     );
-  return Object.freeze(new Map(scored.map((candidate, index) => [candidate.candidateKey, index + 1] as const)));
+  return buildFusionCompetitionRanks(scored);
+}
+
+function buildFusionCompetitionRanks(
+  scored: readonly Readonly<{
+    readonly candidateKey: string;
+    readonly score: number;
+  }>[]
+): ReadonlyMap<string, number> {
+  const ranks = new Map<string, number>();
+  let previousScore: number | undefined;
+  let rank = 0;
+  for (const [index, candidate] of scored.entries()) {
+    if (candidate.score !== previousScore) {
+      rank = index + 1;
+      previousScore = candidate.score;
+    }
+    ranks.set(candidate.candidateKey, rank);
+  }
+  return Object.freeze(ranks);
 }
 
 function buildPreliminaryFusionCandidates(

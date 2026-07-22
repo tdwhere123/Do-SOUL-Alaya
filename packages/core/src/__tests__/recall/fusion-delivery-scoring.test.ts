@@ -214,7 +214,7 @@ describe("buildRecallFusionDetails temporal lane", () => {
 });
 
 describe("buildRecallFusionDetails query-adaptive fusion", () => {
-  it("clamps evidence-structural agreement before stream ranking", () => {
+  it("shares a competition rank for clamped equal agreement scores", () => {
     const strongerRaw = createMemoryEntry({
       object_id: "99999999-9999-4999-8999-999999999999",
       content: "MaterializationRouter evidence and structure match.",
@@ -224,6 +224,11 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
       object_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       content: "MaterializationRouter evidence and structure mostly match.",
       created_at: "2026-03-20T00:00:00.000Z"
+    });
+    const weakerRaw = createMemoryEntry({
+      object_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      content: "MaterializationRouter evidence and structure partially match.",
+      created_at: "2026-03-19T00:00:00.000Z"
     });
 
     const fusion = buildRecallFusionDetails({
@@ -245,6 +250,15 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
             relevance: 0
           },
           structuralScore: 0.9
+        },
+        {
+          entry: weakerRaw,
+          effectiveScore: 0,
+          effectiveFactors: {
+            activation: 0,
+            relevance: 0
+          },
+          structuralScore: 0.25
         }
       ],
       policy: {} as RecallPolicy,
@@ -252,11 +266,13 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
         ...emptySupplementaryData("how does MaterializationRouter create memory?"),
         evidenceFtsRanks: {
           [strongerRaw.object_id]: 1,
-          [earlierTieBreak.object_id]: 1
+          [earlierTieBreak.object_id]: 1,
+          [weakerRaw.object_id]: 1
         },
         structuralScores: {
           [strongerRaw.object_id]: 1,
-          [earlierTieBreak.object_id]: 0.9
+          [earlierTieBreak.object_id]: 0.9,
+          [weakerRaw.object_id]: 0.25
         }
       },
       nowIso: "2026-03-20T10:20:30.000Z"
@@ -269,7 +285,11 @@ describe("buildRecallFusionDetails query-adaptive fusion", () => {
     expect(
       fusion.get(`workspace_local:memory_entry:${strongerRaw.object_id}`)
         ?.per_stream_rank.evidence_structural_agreement
-    ).toBe(2);
+    ).toBe(1);
+    expect(
+      fusion.get(`workspace_local:memory_entry:${weakerRaw.object_id}`)
+        ?.per_stream_rank.evidence_structural_agreement
+    ).toBe(3);
   });
 
   it("family-decorrelates repeated lexical hits without damping individual lane contributions", () => {

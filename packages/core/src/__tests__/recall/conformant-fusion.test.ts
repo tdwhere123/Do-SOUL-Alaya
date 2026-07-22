@@ -361,7 +361,8 @@ describe("conformant compositional combine (real SQLite)", () => {
     const stronger = Math.max(supportA, supportB);
     const weaker = Math.min(supportA, supportB);
     const expectedNor = 1 - (1 - stronger) * (1 - 0.5 * weaker);
-    expect(foldedPath).toBeCloseTo(expectedNor, 9);
+    // Each observable path axis is quantized to 1e-9 before this reconstruction.
+    expect(foldedPath).toBeCloseTo(expectedNor, 8);
     expect(foldedPath).not.toBeCloseTo(supportA + supportB, 9);
     expect(foldedPath).not.toBeCloseTo(stronger, 9);
 
