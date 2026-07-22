@@ -115,6 +115,21 @@ export interface LongMemEvalRunResult {
   readonly evidenceContext: VerifiedLongMemEvalEvidenceContext | null;
 }
 
+export interface LongMemEvalSnapshotMaterializationResult {
+  readonly snapshotPath: string;
+  readonly questionCount: number;
+}
+
+export type LongMemEvalRunOutcome =
+  | LongMemEvalRunResult
+  | LongMemEvalSnapshotMaterializationResult;
+
+export function isLongMemEvalSnapshotMaterializationResult(
+  result: LongMemEvalRunOutcome
+): result is LongMemEvalSnapshotMaterializationResult {
+  return "snapshotPath" in result;
+}
+
 /**
  * @anchor longmemeval-runner — per-question workspace, seed-then-recall
  *
@@ -152,9 +167,18 @@ export interface LongMemEvalRunResult {
  *   section; its LongMemEval-S text must mirror this measurement-basis
  *   note (the report.md prose lives there, not in this package).
  */
+export function runLongMemEval(
+  opts: LongMemEvalRunOptions & { readonly snapshotOut: string }
+): Promise<LongMemEvalSnapshotMaterializationResult>;
+export function runLongMemEval(
+  opts: LongMemEvalRunOptions & { readonly snapshotOut?: undefined }
+): Promise<LongMemEvalRunResult>;
+export function runLongMemEval(
+  opts: LongMemEvalRunOptions
+): Promise<LongMemEvalRunOutcome>;
 export async function runLongMemEval(
   opts: LongMemEvalRunOptions
-): Promise<LongMemEvalRunResult> {
+): Promise<LongMemEvalRunOutcome> {
   await assertExpansionRunAuthority(opts);
   if (shouldFanOutLongMemEvalWorkers(opts)) {
     return runLongMemEvalConcurrent(opts);
@@ -167,7 +191,7 @@ export async function runLongMemEval(
 async function runSingleLongMemEval(
   opts: LongMemEvalRunOptions,
   diagnosticsSpool: LongMemEvalDiagnosticsSpool
-): Promise<LongMemEvalRunResult> {
+): Promise<LongMemEvalRunOutcome> {
   const recallWeightOverrides = resolveBenchRecallWeightOverrides({
     cliJson: opts.weightOverridesJson,
     envJson: process.env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV]
@@ -184,6 +208,12 @@ async function runSingleLongMemEval(
     diagnosticsSpool
   );
   const execution = await executeLongMemEvalRun(context);
+  if (opts.snapshotOut !== undefined) {
+    return {
+      snapshotPath: opts.snapshotOut,
+      questionCount: context.window.length
+    };
+  }
   return finalizeLongMemEvalRun({
     opts,
     questionsLength: context.questions.length,

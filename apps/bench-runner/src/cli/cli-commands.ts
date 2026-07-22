@@ -10,9 +10,12 @@ import { runLongMemEvalMultiturn } from "../longmemeval/multiturn.js";
 import { runLongMemEvalCrossQuestion } from "../longmemeval/crossquestion.js";
 import { runLiveBench } from "../live/runner.js";
 import {
+  isLongMemEvalSnapshotMaterializationResult,
   runLongMemEval,
   type LongMemEvalQaRunOption,
-  type LongMemEvalRunResult
+  type LongMemEvalRunOptions,
+  type LongMemEvalRunResult,
+  type LongMemEvalSnapshotMaterializationResult
 } from "../longmemeval/runner.js";
 import {
   createGardenChatFn,
@@ -68,9 +71,11 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
     const result = await runLongMemEval(buildLongMemEvalRunOptions(
       opts, qaOption, expansionCapability
     ));
-    process.stdout.write(renderLongMemEvalResult(result, opts));
-    // Snapshot producer success is a sealed DB, not producer-side recall KPI.
-    if (opts.snapshotOut !== undefined) return 0;
+    if (isLongMemEvalSnapshotMaterializationResult(result)) {
+      process.stdout.write(renderLongMemEvalSnapshotMaterializationResult(result));
+      return 0;
+    }
+    process.stdout.write(renderLongMemEvalResult(result));
     return exitCodeForBenchmarkResult(
       result.payload,
       result.evidenceContext ?? undefined
@@ -121,7 +126,7 @@ function buildLongMemEvalRunOptions(
   expansionCapability?: Awaited<ReturnType<
     typeof verifyLongMemEvalExpansionContractInput
   >>
-): Parameters<typeof runLongMemEval>[0] {
+): LongMemEvalRunOptions {
   return {
     variant: opts.variant,
     limit: opts.limit,
@@ -148,15 +153,8 @@ function buildLongMemEvalRunOptions(
 }
 
 function renderLongMemEvalResult(
-  result: LongMemEvalRunResult,
-  opts: ParsedFlags
+  result: LongMemEvalRunResult
 ): string {
-  if (opts.snapshotOut !== undefined) {
-    return `Done. Snapshot materialize only (scores come from native A/B).\n` +
-      `  Snapshot: ${opts.snapshotOut}\n` +
-      `  Producer history slug: ${result.slug}\n` +
-      `  KPI: ${result.kpiPath}\n`;
-  }
   const kpi = result.payload.kpi;
   return `Done. Slug: ${result.slug}\n` +
     `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
@@ -166,6 +164,14 @@ function renderLongMemEvalResult(
     renderLongMemEvalQaMetrics(kpi.qa_metrics) +
     `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
     `  KPI: ${result.kpiPath}\n`;
+}
+
+function renderLongMemEvalSnapshotMaterializationResult(
+  result: LongMemEvalSnapshotMaterializationResult
+): string {
+  return `Done. Snapshot materialize only (scores come from native A/B).\n` +
+    `  Snapshot: ${result.snapshotPath}\n` +
+    `  Materialized questions: ${result.questionCount}\n`;
 }
 
 function renderFullGoldCoverage(
