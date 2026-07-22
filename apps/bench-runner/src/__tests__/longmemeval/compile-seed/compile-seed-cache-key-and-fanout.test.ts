@@ -31,6 +31,13 @@ import {
   TEST_EXTRACTION_PROVIDER_URL,
   writeExtractionCacheTestManifest
 } from "../extraction/extraction-cache-test-fixture.js";
+import {
+  computeCacheKey,
+  computeExtractionTurnCacheKey,
+  computeSourceTurnCacheKey
+} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { writeCachedExtraction } from "../../../longmemeval/compile-seed/cache/cache-shard.js";
+import { computeTrustedRoleCorpusDigest } from "../../../longmemeval/extraction/turn-contents.js";
 
 describe("userPrompt shape contract — cache key turn_content dependency", () => {
   let cacheRoot: string;
@@ -176,7 +183,239 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
 
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
+
+  it("does not reuse a legacy empty shard when an atomic catalog changes", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox.";
+    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
+    writeLegacyEmptyShard(cacheRoot, source, messages);
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
+      })
+    });
+
+    await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-catalog-delta", surface_id: null,
+      turn_messages: messages
+    });
+
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues to reuse a legacy shard when the catalog is unchanged", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "I moved to Berlin last spring.";
+    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
+    writeLegacyEmptyShard(cacheRoot, source, messages);
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
+      })
+    });
+
+    await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-catalog-unchanged", surface_id: null,
+      turn_messages: messages
+    });
+
+    expect(delegate.extract).not.toHaveBeenCalled();
+  });
+
+  it("replays a non-empty legacy shard against its original assertion id", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "I use TypeScript, but I avoid any.";
+    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
+    const legacyKey = computeCacheKey(
+      "test-model",
+      "provider-default-v1",
+      OFFICIAL_API_SYSTEM_PROMPT,
+      source,
+      computeTrustedRoleCorpusDigest(messages)
+    );
+    expect(computeSourceTurnCacheKey(
+      "test-model", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source, turnMessages: messages }
+    )).toBe(legacyKey);
+    writeCachedExtraction(cacheRoot, legacyKey, {
+      model: "test-model",
+      request_profile: "provider-default-v1",
+      cache_key: legacyKey,
+      raw_json: JSON.stringify({ signals: [{
+        signal_kind: "potential_claim",
+        object_kind: "activity",
+        confidence: 0.9,
+        source_locator: {
+          contract_version: 2,
+          kind: "assertion_catalog",
+          assertion_id: 3
+        },
+        matched_text: "I avoid any.",
+        distilled_fact: "I avoid any."
+      }] }),
+      extracted_at: "2026-07-22T00:00:00.000Z"
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({ delegate, config: testCacheConfig(), cacheRoot })
+    });
+
+    const [signal] = await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-legacy-id", surface_id: null,
+      turn_messages: messages
+    });
+
+    expect(delegate.extract).not.toHaveBeenCalled();
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: "I avoid any."
+    });
+  });
+
+  it("uses the same changed-catalog key in preflight and the live provider", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
+    const messages = [{ message_id: "m1", role: "user" as const, content: source }];
+    const cacheKey = computeExtractionTurnCacheKey(
+      "test-model",
+      "provider-default-v1",
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source, turnMessages: messages }
+    );
+    writeCachedExtraction(cacheRoot, cacheKey, {
+      model: "test-model",
+      request_profile: "provider-default-v1",
+      cache_key: cacheKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-07-22T00:00:00.000Z"
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
+      })
+    });
+
+    await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-catalog-preflight", surface_id: null,
+      turn_messages: messages
+    });
+
+    expect(delegate.extract).not.toHaveBeenCalled();
+  });
+
+  it("uses the same changed-catalog key without trusted turn messages", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise.";
+    const cacheKey = computeSourceTurnCacheKey(
+      "test-model",
+      "provider-default-v1",
+      OFFICIAL_API_SYSTEM_PROMPT,
+      { turnContent: source }
+    );
+    writeCachedExtraction(cacheRoot, cacheKey, {
+      model: "test-model",
+      request_profile: "provider-default-v1",
+      cache_key: cacheKey,
+      raw_json: '{"signals":[]}',
+      extracted_at: "2026-07-22T00:00:00.000Z"
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
+      })
+    });
+
+    await provider.compile(source, {
+      workspace_id: "ws-1", run_id: "run-catalog-text-only", surface_id: null,
+      turn_messages: []
+    });
+
+    expect(delegate.extract).not.toHaveBeenCalled();
+  });
 });
+
+function testCacheConfig(): CompileSeedExtractionConfig {
+  return {
+    model: "test-model",
+    modelFamily: "test-model",
+    providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+    requestProfile: "provider-default-v1",
+    apiKey: "test-key"
+  };
+}
+
+function writeLegacyEmptyShard(
+  cacheRoot: string,
+  turnContent: string,
+  messages: readonly { readonly role: "user" | "assistant"; readonly content: string }[]
+): void {
+  const cacheKey = computeCacheKey(
+    "test-model",
+    "provider-default-v1",
+    OFFICIAL_API_SYSTEM_PROMPT,
+    turnContent,
+    computeTrustedRoleCorpusDigest(messages)
+  );
+  writeCachedExtraction(cacheRoot, cacheKey, {
+    model: "test-model",
+    request_profile: "provider-default-v1",
+    cache_key: cacheKey,
+    raw_json: '{"signals":[]}',
+    extracted_at: "2026-07-22T00:00:00.000Z"
+  });
+}
 
 describe("computeNextTurnSeedRefs — D-1 single-id fan-out invariant", () => {
   // invariant: every assertion in this block guards the N x M edge-blowup

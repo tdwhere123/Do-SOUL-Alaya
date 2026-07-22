@@ -28,6 +28,11 @@ import { readExtractionAttemptLedger } from
   "../../longmemeval/extraction/authority/attempt-ledger.js";
 import { createExtractionRepairScope } from
   "../../longmemeval/extraction/authority/repair/repair-scope.js";
+import {
+  createExtractionCatalogRefillScope,
+  readExtractionCatalogRefillAllowlist,
+  type ExtractionCatalogRefillScope
+} from "../../longmemeval/extraction/authority/catalog-refill/scope.js";
 import { computeExtractionFillAttemptCeiling } from
   "../../longmemeval/extraction/authority/receipt-limits.js";
 import {
@@ -118,6 +123,7 @@ async function buildAuthorizedReceipt(
 ) {
   const flags = parseFlags(args);
   const authority = parseAuthorizeExtractionArgs(args);
+  assertCatalogRefillFlagScope(authority, flags);
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
   const directSpend = createDirectSpend(authority, flags, cacheRoot, deps);
   onFreshDirectSpend(directSpend, cacheRoot);
@@ -125,19 +131,31 @@ async function buildAuthorizedReceipt(
     flags, authority, cacheRoot, deps
   );
   assertInspectableAuthority(inspection, authority);
+  const catalogRefillScope = flags.catalogRefillAllowlist === undefined
+    ? undefined
+    : createExtractionCatalogRefillScope({
+      cacheRoot,
+      inspection,
+      allowlist: readExtractionCatalogRefillAllowlist(flags.catalogRefillAllowlist)
+    });
+  if (catalogRefillScope !== undefined && ledger !== undefined) {
+    throw new Error("catalog refill requires an unused existing cache root");
+  }
   const targetSelection = readTargetSelection(
-    authority, directSpend, inspection.observation, deps
+    authority, directSpend, catalogRefillScope, inspection.observation, deps
   );
   assertTargetSelection(
     targetSelection, cacheRoot, inspection.observation, deps
   );
-  const continuation = prepareAuthorityContinuation({
-    predecessorAuthorityPath: authority.predecessorAuthorityPath,
-    cacheRoot,
-    inspection,
-    targetSelection,
-    dependencies: deps
-  });
+  const continuation = catalogRefillScope === undefined
+    ? prepareAuthorityContinuation({
+      predecessorAuthorityPath: authority.predecessorAuthorityPath,
+      cacheRoot,
+      inspection,
+      targetSelection,
+      dependencies: deps
+    })
+    : undefined;
   if (continuation !== undefined && ledger !== undefined) {
     throw new Error("same-root continuation successor lineage already exists");
   }
@@ -147,7 +165,8 @@ async function buildAuthorizedReceipt(
     inspection,
     inspectionInput: inspectInput,
     receipt: createReceipt(
-      authority, flags.concurrency, inspection, ledger, directSpend, targetSelection, continuation
+      authority, flags.concurrency, inspection, ledger, directSpend, targetSelection,
+      catalogRefillScope, continuation
     ),
     ...(continuation === undefined ? {} : { continuation })
   });
@@ -177,6 +196,7 @@ function createDirectSpend(
 function readTargetSelection(
   authority: AuthorizeExtractionArgs,
   directSpend: DirectExtractionSpendAuthorization | undefined,
+  catalogRefillScope: ExtractionCatalogRefillScope | undefined,
   observation: Awaited<ReturnType<typeof inspectExtractionAuthority>>["observation"],
   deps: AuthorizeExtractionDependencies
 ): ExtractionTargetSelectionReceipt | undefined {
@@ -186,7 +206,8 @@ function readTargetSelection(
     }
     return undefined;
   }
-  if (authority.repairInvalidShards || !requiresExtractionTargetSelection(observation)) {
+  if (catalogRefillScope !== undefined || authority.repairInvalidShards ||
+      !requiresExtractionTargetSelection(observation)) {
     if (authority.targetSelectionPath !== undefined) {
       throw new Error(
         "extraction target selection only applies to canonical longmemeval_s 0..100 or 0..500"
@@ -281,6 +302,7 @@ function createReceipt(
   ledger: ReturnType<typeof readExtractionAttemptLedger>,
   directSpend: DirectExtractionSpendAuthorization | undefined,
   targetSelection: ExtractionTargetSelectionReceipt | undefined,
+  catalogRefillScope: ExtractionCatalogRefillScope | undefined,
   continuation: PreparedAuthorityContinuation | undefined
 ) {
   const repairScope = authority.repairInvalidShards
@@ -320,6 +342,7 @@ function createReceipt(
     }),
     ...(directSpend === undefined ? {} : { directSpend }),
     ...(repairScope === undefined ? {} : { repairScope }),
+    ...(catalogRefillScope === undefined ? {} : { catalogRefillScope }),
     ...(continuation === undefined ? {} : { continuation: continuation.evidence }),
     ...(continuation === undefined || targetSelection === undefined ? {} : {
       now: new Date(targetSelection.created_at)
@@ -345,7 +368,24 @@ function renderAuthorizedReceipt(
     `receipt=${receipt.receipt_digest} missing=${receipt.limits.starting_missing} ` +
     `attempt_cap=${receipt.limits.maximum_attempts}` +
     (receipt.direct_spend === undefined ? "" : ` spend=${receipt.direct_spend.kind}`) +
+    (receipt.catalog_refill === undefined ? "" : " scope=catalog-refill") +
     "\n";
+}
+
+function assertCatalogRefillFlagScope(
+  authority: AuthorizeExtractionArgs,
+  flags: ReturnType<typeof parseFlags>
+): void {
+  if (flags.catalogRefillAllowlist === undefined) return;
+  if (authority.action !== "fill" || authority.repairInvalidShards ||
+      authority.targetSelectionPath !== undefined || authority.predecessorAuthorityPath !== undefined ||
+      authority.directDeepSeek500Operator !== undefined ||
+      authority.directNewApiDeepSeek500Operator !== undefined ||
+      flags.questionBatchLimit !== undefined) {
+    throw new Error(
+      "catalog refill requires a normal fill without target selection, repair, direct spend, or batching"
+    );
+  }
 }
 
 function assertInspectableAuthority(

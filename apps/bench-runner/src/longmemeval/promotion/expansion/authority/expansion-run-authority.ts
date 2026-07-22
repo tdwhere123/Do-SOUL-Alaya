@@ -10,7 +10,7 @@ import { readExtractionCacheManifestIdentity } from
   "../../../extraction/cache/extraction-cache-manifest.js";
 import { inspectExtractionFillCompletion } from
   "../../../extraction/fill/fill-completion.js";
-import { collectDistinctTurnContents } from
+import { inspectTurnContentKeySpace } from
   "../../../extraction/turn-contents.js";
 import { assertProductDefaultBiEncoderEnvironment } from
   "../../product/product-bi-encoder-policy.js";
@@ -116,7 +116,7 @@ async function captureVerifiedExpansionCache(
     model: identity.manifest.extraction_model,
     requestProfile: identity.manifest.request_profile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents: collectDistinctTurnContents(selection.nextQuestions)
+    extractionTurns: inspectTurnContentKeySpace(selection.nextQuestions).distinctExtractionTurns
   });
   assertCompleteLongMemEvalExpansionCache({
     capability,

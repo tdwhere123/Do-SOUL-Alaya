@@ -1,9 +1,12 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
 import { computeExtractionTurnCacheKey } from
   "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { extractionCacheManifestPath } from
+  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
@@ -12,8 +15,8 @@ import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
 } from "../../../longmemeval/extraction/authority/receipt.js";
-import { readExtractionCacheManifestIdentity } from
-  "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { createExtractionCatalogRefillScope } from
+  "../../../longmemeval/extraction/authority/catalog-refill/scope.js";
 import { runExtractionFill } from
   "../../../longmemeval/extraction/extraction-fill.js";
 import { inspectTurnContentKeySpace } from
@@ -46,7 +49,8 @@ describe("cache-key allowlist runtime", () => {
     ];
     await writeFixtureDataset(questions);
     await prefillFirstQuestion();
-    const authorityReceiptPath = await writeFillAuthority();
+    const remainingKeys = [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)].sort();
+    const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       return { rawJson: '{"signals":[]}' };
@@ -59,7 +63,6 @@ describe("cache-key allowlist runtime", () => {
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath,
-      cacheKeyAllowlist: [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)],
       extractorFactory: () => ({ extract }),
       log: (message) => logs.push(message)
     });
@@ -75,7 +78,7 @@ describe("cache-key allowlist runtime", () => {
     });
   });
 
-  it("limits the pool exactly while incomplete completion still scans the full window", async () => {
+  it("rejects a programmatic runtime allowlist even with a catalog refill receipt", async () => {
     setCredentialFixture();
     const questions = [
       question("q001", "alpha", "decoy"),
@@ -83,36 +86,98 @@ describe("cache-key allowlist runtime", () => {
     ];
     await writeFixtureDataset(questions);
     await prefillFirstQuestion();
-    const authorityReceiptPath = await writeFillAuthority();
+    const remainingKeys = [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)].sort();
+    const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       return { rawJson: '{"signals":[]}' };
     });
     const logs: string[] = [];
-    const cacheKeyAllowlist = [cacheKey(questions[1]!, 0)];
     const options = {
       variant: EXTRACTION_FILL_VARIANT,
       cacheRoot,
       dataDir,
       pinnedMetaRoot,
       authorityReceiptPath,
-      cacheKeyAllowlist,
+      cacheKeyAllowlist: [remainingKeys[0]!],
       extractorFactory: () => ({ extract }),
       log: (message: string) => logs.push(message)
     };
 
-    const result = await runExtractionFill(options);
+    await expect(runExtractionFill(options)).rejects.toThrow(/runtime cache-key allowlists/u);
+    expect(extract).not.toHaveBeenCalled();
+    expect(logs).toContainEqual(expect.stringContaining("variant="));
+  });
 
-    expect(extract).toHaveBeenCalledOnce();
-    expect(logs).toContainEqual(expect.stringContaining("1/1"));
-    expect(logs).toContainEqual(expect.stringContaining("intentional_skips=1"));
-    expect(result.manifest).toMatchObject({
-      fill_status: "in_progress",
-      expected_turns: 4,
-      cached_turns: 3,
-      coverage: 0.75
+  it("resumes only the remaining receipt-bound keys after a partial provider failure", async () => {
+    setCredentialFixture();
+    const questions = [
+      question("q001", "alpha", "decoy"),
+      question("q002", "beta", "distraction")
+    ];
+    await writeFixtureDataset(questions);
+    await prefillFirstQuestion();
+    const remainingKeys = [cacheKey(questions[1]!, 1), cacheKey(questions[1]!, 0)].sort();
+    const authorityReceiptPath = await writeCatalogRefillAuthority(remainingKeys);
+    let calls = 0;
+    const failedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      calls += 1;
+      if (calls === 1) return { rawJson: '{"signals":[]}' };
+      throw providerTimeoutFailure();
     });
-    expect(readExtractionCacheManifestIdentity(cacheRoot)?.manifest).toEqual(result.manifest);
+
+    await expect(runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      concurrency: 1,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath,
+      extractorFactory: () => ({ extract: failedExtract }),
+      log: () => undefined
+    })).rejects.toThrow(/terminal task failure.*failure_timeout/u);
+    expect(failedExtract).toHaveBeenCalledTimes(2);
+
+    const manifestPath = extractionCacheManifestPath(cacheRoot);
+    const partialManifest = readFileSync(manifestPath, "utf8");
+    writeFileSync(manifestPath, `${partialManifest}\n`, "utf8");
+    const driftedExtract = vi.fn<BenchSignalExtractor["extract"]>();
+    await expect(runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      concurrency: 1,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath,
+      extractorFactory: () => ({ extract: driftedExtract }),
+      log: () => undefined
+    })).rejects.toThrow(/cache manifest drifted/u);
+    expect(driftedExtract).not.toHaveBeenCalled();
+    writeFileSync(manifestPath, partialManifest, "utf8");
+
+    const resumedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      return { rawJson: '{"signals":[]}' };
+    });
+    const result = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      concurrency: 1,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath,
+      extractorFactory: () => ({ extract: resumedExtract }),
+      log: () => undefined
+    });
+
+    expect(resumedExtract).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      cacheHits: 3,
+      newlyExtracted: 1,
+      authorityTelemetry: { attempts: 3, successfulShards: 2 },
+      manifest: { fill_status: "complete", expected_turns: 4, cached_turns: 4 }
+    });
   });
 });
 
@@ -132,7 +197,7 @@ async function prefillFirstQuestion(): Promise<void> {
   expect(extract).toHaveBeenCalledTimes(2);
 }
 
-async function writeFillAuthority(): Promise<string> {
+async function writeCatalogRefillAuthority(keys: readonly string[]): Promise<string> {
   const inspection = await inspectExtractionAuthority({
     variant: EXTRACTION_FILL_VARIANT,
     cacheRoot,
@@ -140,6 +205,18 @@ async function writeFillAuthority(): Promise<string> {
     pinnedMetaRoot,
     revision: readCurrentExtractionAuthorityRevision(),
     action: "fill"
+  });
+  const catalogRefillScope = createExtractionCatalogRefillScope({
+    cacheRoot,
+    inspection,
+    allowlist: {
+      kind: "test-catalog-refill",
+      expected_turns: inspection.observation.inventory.expectedTurns,
+      cached_turns: inspection.observation.inventory.validTurns,
+      missing_turns: inspection.observation.inventory.missingTurns,
+      expected_key_set_sha256: inspection.observation.dataset.expectedKeySetSha256,
+      cache_keys: keys
+    }
   });
   const receipt = createExtractionAuthorityReceipt({
     action: "fill",
@@ -156,7 +233,8 @@ async function writeFillAuthority(): Promise<string> {
       disk: inspection.disk,
       credentialStatus: inspection.credentialStatus,
       modelReadiness: inspection.modelReadiness
-    }
+    },
+    catalogRefillScope
   });
   const path = join(cacheRoot, "authority-receipt-fill.json");
   writeExtractionAuthorityReceipt(path, receipt);
@@ -181,4 +259,21 @@ function question(id: string, fact: string, decoy: string): LongMemEvalQuestion 
 function setCredentialFixture(): void {
   vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:E0_TEST_GARDEN_KEY");
   vi.stubEnv("E0_TEST_GARDEN_KEY", "test-key");
+}
+
+function providerTimeoutFailure(): Error {
+  return Object.assign(new Error("provider timed out for this fixture"), {
+    benchRetry: {
+      retryCount: 0,
+      rateLimitRetries: 0,
+      retryClassification: "failure_timeout" as const,
+      transportFailures: [{
+        kind: "timeout" as const,
+        phase: "request" as const,
+        httpStatus: null,
+        fingerprint: "f".repeat(64),
+        attempt: 1
+      }]
+    }
+  });
 }

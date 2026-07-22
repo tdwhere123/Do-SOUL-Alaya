@@ -42,7 +42,7 @@ import {
 } from "./fill/fill-completion.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import { computeExtractionFillAttemptCeiling } from "./authority/receipt-limits.js";
-import { collectDistinctTurnContents } from "./turn-contents.js";
+import { inspectTurnContentKeySpace, type LongMemEvalExtractionTurn } from "./turn-contents.js";
 import { computeSupplementalSourceBindingSha256 } from
   "./cache/supplemental-source-receipt.js";
 
@@ -63,8 +63,8 @@ export interface PreparedExpansionFillAuthority {
   readonly datasetRevision: string;
   readonly sourceAnchor: LongMemEvalExpansionSourceAnchor;
   readonly r3SpendApproval: VerifiedR3SpendApproval;
-  readonly sourceTurns: readonly string[];
-  readonly nextTurns: readonly string[];
+  readonly sourceTurns: readonly LongMemEvalExtractionTurn[];
+  readonly nextTurns: readonly LongMemEvalExtractionTurn[];
   readonly nextQuestions: readonly LongMemEvalQuestion[];
 }
 
@@ -133,8 +133,8 @@ function prepareCanonicalExpansionFillAuthority(
   });
   const identity = requireStartingIdentity(cacheRoot);
   const config = resolveCompileSeedExtractionConfig(process.env, identity.manifest);
-  const sourceTurns = collectDistinctTurnContents(selection.sourceQuestions);
-  const nextTurns = collectDistinctTurnContents(selection.nextQuestions);
+  const sourceTurns = inspectTurnContentKeySpace(selection.sourceQuestions).distinctExtractionTurns;
+  const nextTurns = inspectTurnContentKeySpace(selection.nextQuestions).distinctExtractionTurns;
   const current = authorizeCurrentCacheState({
     capability, identity, config, cacheRoot, sourceTurns, nextTurns
   });
@@ -193,7 +193,7 @@ export function finalizeExpansionFillAuthority(
     model: authority.config.model,
     requestProfile: authority.config.requestProfile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents: authority.sourceTurns
+    extractionTurns: authority.sourceTurns
   }), false);
   const anchor = assertLongMemEvalExpansionSourceAnchor(
     manifest.expansion_source_anchor,
@@ -216,8 +216,8 @@ function authorizeCurrentCacheState(input: {
   readonly identity: NonNullable<ReturnType<typeof readExtractionCacheManifestIdentity>>;
   readonly config: CompileSeedExtractionConfig;
   readonly cacheRoot: string;
-  readonly sourceTurns: readonly string[];
-  readonly nextTurns: readonly string[];
+  readonly sourceTurns: readonly LongMemEvalExtractionTurn[];
+  readonly nextTurns: readonly LongMemEvalExtractionTurn[];
 }): {
   readonly sourceAnchor: LongMemEvalExpansionSourceAnchor;
   readonly targetCompletion: ExtractionFillCompletion;
@@ -311,14 +311,14 @@ function inspectCompletion(
     readonly cacheRoot: string;
     readonly config: CompileSeedExtractionConfig;
   },
-  turnContents: readonly string[]
+  extractionTurns: readonly LongMemEvalExtractionTurn[]
 ): ExtractionFillCompletion {
   return inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
     model: input.config.model,
     requestProfile: input.config.requestProfile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents
+    extractionTurns
   });
 }
 

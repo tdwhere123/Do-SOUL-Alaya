@@ -125,6 +125,7 @@ export function pinInspectedExtractionFill(
     cacheRoot,
     config: inspected.config,
     distinctTurns: inspected.distinctTurns,
+    distinctExtractionTurns: inspected.distinctExtractionTurns,
     log,
     variant: inspected.variant,
     datasetRevision: inspected.datasetRevision,
@@ -221,6 +222,7 @@ function preflightAndPinExtractionIdentity(input: {
   readonly cacheRoot: string;
   readonly config: CompileSeedExtractionConfig;
   readonly distinctTurns: readonly string[];
+  readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly log: (message: string) => void;
   readonly variant: LongMemEvalVariant;
   readonly datasetRevision: string;
@@ -238,6 +240,7 @@ function preflightAndPinExtractionIdentity(input: {
     config: input.config,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     requiredTurnContents: input.distinctTurns,
+    requiredExtractionTurns: input.distinctExtractionTurns,
     requiredQuestionWindow: {
       offset: input.windowOffset,
       limit: input.windowLimit

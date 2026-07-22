@@ -23,6 +23,35 @@ describe("official API source locator direct-question boundary", () => {
     ]);
   });
 
+  it("publishes a self-contained declaration before a bounded conversational tail question", () => {
+    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "The play I attended was actually a production of The Glass Menagerie"
+    ]);
+  });
+
+  it.each([
+    "Can I reserve a hotel, have you heard of it?",
+    "What movie should I watch, have you heard of it?",
+    "I was wondering whether I should reserve a hotel, have you heard of it?",
+    "I am curious whether I should reserve a hotel, have you heard of it?",
+    "I need to know whether I should reserve a hotel, have you heard of it?",
+    "I would like to know whether I should reserve a hotel, have you heard of it?",
+    "Tell me a hotel, have you heard of it?",
+    "Please tell me a hotel, have you heard of it?",
+    "The best hotel, have you heard of it?",
+    "My hotel, have you heard of it?",
+    "The book I read, have you heard of it?",
+    "The place I went, have you heard of it?",
+    "The hotel you recommend is good, have you heard of it?",
+    "The book you suggest is interesting, have you heard of it?",
+    "The book was any good, have you heard of it?",
+    "The book was good at all, have you heard of it?",
+    "The book was a good read or not, have you heard of it?"
+  ])("does not mistake a direct question for a conversational tail declaration: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+  });
+
   it("does not publish a typed prefix when a bare comma would expand it back to the question", () => {
     const source = "I am thinking of visiting our cousin Alex in New York City soon, I was wondering whether you knew any museums there?";
     expect(buildOfficialApiSourceAssertions(source)).toEqual([]);

@@ -27,6 +27,12 @@ export async function runExtractionFillCommand(
   } = { runExtractionFill, signalSource: process }
 ): Promise<number> {
   try {
+    if (opts.catalogRefillAllowlist !== undefined) {
+      throw new Error(
+        "--catalog-refill-allowlist is accepted only by authorize-extraction; " +
+          "extraction-fill uses the receipt-bound key set"
+      );
+    }
     if (opts.extractionPredecessorAuthority !== undefined &&
         opts.extractionAuthority === undefined) {
       throw new Error(

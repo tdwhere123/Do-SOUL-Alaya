@@ -18,10 +18,15 @@ import {
 } from "./receipt-limits.js";
 import {
   assertExtractionRepairScope,
-  assertRepairInventoryProgress,
   isExtractionRepairScope,
   type ExtractionRepairScope
 } from "./repair/repair-scope.js";
+import {
+  assertCatalogRefillScopeMatchesReceipt,
+  assertExtractionCatalogRefillScope,
+  isExtractionCatalogRefillScope,
+  type ExtractionCatalogRefillScope
+} from "./catalog-refill/scope.js";
 import {
   isExtractionAuthorityKeySpaceEvidence,
   type ExtractionAuthorityKeySpaceEvidence
@@ -36,10 +41,11 @@ import {
   freezeAuthorityInspection,
   freezeAuthorityObservation
 } from "./receipt/canonical.js";
+import { assertExtractionAuthorityInventoryProgress } from "./receipt/inventory.js";
 
 const LEGACY_RECEIPT_VERSION = 2;
-const CURRENT_RECEIPT_VERSION = 3;
-
+const PREVIOUS_RECEIPT_VERSION = 3;
+const CURRENT_RECEIPT_VERSION = 4;
 export interface ExtractionAuthorityObservation {
   readonly revision: string;
   readonly commandDigest: string;
@@ -70,9 +76,9 @@ export interface ExtractionAuthorityObservation {
     readonly orphanTurns: number;
   };
 }
-
 export interface ExtractionAuthorityReceipt {
-  readonly schema_version: typeof LEGACY_RECEIPT_VERSION | typeof CURRENT_RECEIPT_VERSION;
+  readonly schema_version: typeof LEGACY_RECEIPT_VERSION |
+    typeof PREVIOUS_RECEIPT_VERSION | typeof CURRENT_RECEIPT_VERSION;
   readonly kind: "longmemeval-extraction-authority";
   readonly action: "probe" | "fill";
   readonly generated_at: string;
@@ -84,14 +90,12 @@ export interface ExtractionAuthorityReceipt {
   readonly limits: ExtractionAuthorityReceiptLimits;
   readonly price: ExtractionAuthorityReceiptPrice;
   readonly probe_key?: string;
-  /** Immutable target-selection receipt that binds the cache root for a new rebuild. */
   readonly target_selection_digest?: string;
   readonly direct_spend?: DirectExtractionSpendAuthorization;
-  /** Exact legacy strict-JSON failures this authority may overwrite in place. */
   readonly repair_scope?: ExtractionRepairScope;
+  readonly catalog_refill?: ExtractionCatalogRefillScope;
   readonly continuation?: SameRootExtractionContinuation;
 }
-
 export interface ExtractionAuthorityInspection {
   readonly writerLock: "absent" | "present";
   readonly disk: { readonly status: "available"; readonly freeBytes: number } |
@@ -99,7 +103,6 @@ export interface ExtractionAuthorityInspection {
   readonly credentialStatus: "present" | "absent";
   readonly modelReadiness: "not_probed";
 }
-
 export interface ExtractionAuthorityReceiptInput {
   readonly action: ExtractionAuthorityReceipt["action"];
   readonly observation: ExtractionAuthorityObservation;
@@ -120,6 +123,7 @@ export interface ExtractionAuthorityReceiptInput {
   };
   readonly directSpend?: DirectExtractionSpendAuthorization;
   readonly repairScope?: ExtractionRepairScope;
+  readonly catalogRefillScope?: ExtractionCatalogRefillScope;
   readonly continuation?: SameRootExtractionContinuation;
   readonly now?: Date;
 }
@@ -141,13 +145,15 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
       observation: input.observation
     });
   }
-  if (input.directSpend !== undefined && input.targetSelectionDigest !== undefined) {
-    throw new Error("direct extraction authorization cannot mix target selection evidence");
+  if (input.directSpend !== undefined &&
+      (input.targetSelectionDigest !== undefined || input.catalogRefillScope !== undefined)) {
+    throw new Error("direct extraction authorization cannot mix a bounded cache scope");
   }
   if (input.continuation !== undefined) {
     assertSameRootExtractionContinuation(input.continuation);
     if (input.action !== "fill" || input.targetSelectionDigest === undefined ||
-        input.directSpend !== undefined || input.repairScope !== undefined) {
+        input.directSpend !== undefined || input.repairScope !== undefined ||
+        input.catalogRefillScope !== undefined) {
       throw new Error("same-root continuation is a target-selected fill authority mode");
     }
   }
@@ -159,6 +165,15 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
         input.observation.inventory.validTurns !==
           input.repairScope.preserved_valid_closure.shard_count) {
       throw new Error("extraction repair authority scope does not match invalid inventory");
+    }
+  }
+  if (input.catalogRefillScope !== undefined) {
+    assertExtractionCatalogRefillScope(input.catalogRefillScope);
+    assertCatalogRefillScopeMatchesReceipt(input.catalogRefillScope, input.observation);
+    if (input.action !== "fill" || input.directSpend !== undefined ||
+        input.targetSelectionDigest !== undefined || input.repairScope !== undefined ||
+        input.continuation !== undefined) {
+      throw new Error("catalog refill is an existing-root fill authority mode");
     }
   }
   if (input.targetSelectionDigest !== undefined && !isDigest(input.targetSelectionDigest)) {
@@ -194,6 +209,9 @@ function buildUnsignedReceipt(
       direct_spend: Object.freeze({ ...input.directSpend })
     }),
     ...(input.repairScope === undefined ? {} : { repair_scope: input.repairScope }),
+    ...(input.catalogRefillScope === undefined ? {} : {
+      catalog_refill: input.catalogRefillScope
+    }),
     ...(input.continuation === undefined ? {} : { continuation: input.continuation })
   };
 }
@@ -217,7 +235,7 @@ export function assertExtractionAuthorityReceipt(
   )) {
     throw new Error("extraction authority receipt does not match the current identity drift");
   }
-  assertMonotonicInventory(receipt.observation.inventory, observation.inventory);
+  assertExtractionAuthorityInventoryProgress(receipt.observation.inventory, observation.inventory);
   if (receipt.repair_scope === undefined &&
       receipt.observation.extraction.rawContentClosureSha256 !==
       observation.extraction.rawContentClosureSha256) {
@@ -306,6 +324,7 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
   }
   const receipt = value as Partial<ExtractionAuthorityReceipt>;
   if ((receipt.schema_version !== LEGACY_RECEIPT_VERSION &&
+       receipt.schema_version !== PREVIOUS_RECEIPT_VERSION &&
        receipt.schema_version !== CURRENT_RECEIPT_VERSION) ||
       receipt.kind !== "longmemeval-extraction-authority" ||
       (receipt.action !== "probe" && receipt.action !== "fill") ||
@@ -320,6 +339,8 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       (receipt.direct_spend !== undefined &&
         !isDirectExtractionSpendAuthorization(receipt.direct_spend)) ||
       (receipt.repair_scope !== undefined && !isExtractionRepairScope(receipt.repair_scope)) ||
+      (receipt.catalog_refill !== undefined &&
+        !isExtractionCatalogRefillScope(receipt.catalog_refill)) ||
       (receipt.continuation !== undefined && !isContinuation(receipt.continuation))) {
     throw new Error("extraction authority receipt is invalid");
   }
@@ -329,8 +350,17 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
   const verified = receipt as ExtractionAuthorityReceipt;
   if (verified.continuation !== undefined &&
       (verified.action !== "fill" || verified.target_selection_digest === undefined ||
-       verified.direct_spend !== undefined || verified.repair_scope !== undefined)) {
+       verified.direct_spend !== undefined || verified.repair_scope !== undefined ||
+       verified.catalog_refill !== undefined)) {
     throw new Error("same-root continuation authority scope is inconsistent");
+  }
+  if (verified.catalog_refill !== undefined) {
+    assertCatalogRefillScopeMatchesReceipt(verified.catalog_refill, verified.observation);
+    if (verified.action !== "fill" || verified.target_selection_digest !== undefined ||
+        verified.direct_spend !== undefined || verified.repair_scope !== undefined ||
+        verified.continuation !== undefined) {
+      throw new Error("catalog refill authority scope is inconsistent");
+    }
   }
   if ((verified.repair_scope === undefined) !==
         (verified.observation.inventory.invalidTurns === 0) ||
@@ -420,27 +450,6 @@ function assertReceiptIdentity(receipt: ExtractionAuthorityReceipt): void {
         receipt.observation, receipt.continuation
       )) {
     throw new Error("extraction authority receipt identity digest is invalid");
-  }
-}
-
-function assertMonotonicInventory(
-  authorized: ExtractionAuthorityObservation["inventory"],
-  current: ExtractionAuthorityObservation["inventory"]
-): void {
-  if (authorized.invalidTurns > 0 &&
-      authorized.expectedTurns === authorized.validTurns + authorized.missingTurns +
-        authorized.invalidTurns) {
-    assertRepairInventoryProgress(authorized, current);
-    return;
-  }
-  if (authorized.invalidTurns !== 0 || authorized.orphanTurns !== 0 ||
-      current.invalidTurns !== 0 || current.orphanTurns !== 0) {
-    throw new Error("extraction authority receipt cannot authorize invalid or orphan shards");
-  }
-  if (authorized.expectedTurns !== current.expectedTurns ||
-      current.validTurns < authorized.validTurns ||
-      current.missingTurns > authorized.missingTurns) {
-    throw new Error("extraction authority receipt inventory regressed after inspection");
   }
 }
 

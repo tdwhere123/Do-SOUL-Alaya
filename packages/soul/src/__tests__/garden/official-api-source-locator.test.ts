@@ -6,7 +6,10 @@ import {
   type GardenCompileContext
 } from "../../garden/compute-provider.js";
 import { resolveGardenSignalGrounding } from "../../garden/grounding/signal-source-grounding.js";
-import { buildOfficialApiSourceAssertions } from "../../garden/grounding/source-locator.js";
+import {
+  buildOfficialApiSourceAssertions,
+  computeOfficialApiSourceCatalogRequestIdentity
+} from "../../garden/grounding/source-locator.js";
 import { createSignal } from "./materialization-router-fixture.js";
 
 const EMPTY_CONTEXT: GardenCompileContext = {
@@ -332,6 +335,123 @@ describe("official API assertion catalog locator", () => {
     expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
       "I actually recently had a bad case of bronchitis that I initially thought was just a cold"
     ]);
+  });
+
+  it("enumerates exact resolver-grounded atoms beneath conversational wrappers", () => {
+    const coupon = "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox.";
+    const discoursePreface = "Also, by the way, I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out.";
+
+    expect(buildOfficialApiSourceAssertions(coupon).map(({ text }) => text)).toEqual([
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday"
+    ]);
+    expect(buildOfficialApiSourceAssertions(discoursePreface).map(({ text }) => text)).toEqual([
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out."
+    ]);
+  });
+
+  it.each([
+    ["I almost quit, which I didn't.", "I almost quit"],
+    ["I quit my job, which she later said wasn't what happened.", "I quit my job"],
+    ["I quit my job, which was a lie.", "I quit my job"],
+    ["I quit my job, which turned out to be a misunderstanding.", "I quit my job"],
+    ["I quit my job, which I didn't regret.", "I quit my job"],
+    [
+      "I redeemed a coupon last Sunday, which surprised me because I had forgotten it was fake.",
+      "I redeemed a coupon last Sunday"
+    ]
+  ])("does not turn a retracting or ambiguous relative suffix into a catalog atom: %s", (
+    source,
+    atom
+  ) => {
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).not.toContain(atom);
+    expect(computeOfficialApiSourceCatalogRequestIdentity(source)).toBeUndefined();
+  });
+
+  it.each([
+    "Anyway, I'll let you know how the party goes!",
+    "Anyway, I'm looking forward to hearing about your party and how the games and activities turn out.",
+    "Actually, I was wondering if you could help me with something else.",
+    "Actually, I wanted to ask you something, which has been bothering me."
+  ])("does not turn a conversational wrapper into a standalone assertion: %s", (source) => {
+    expect(buildOfficialApiSourceAssertions(source)).toEqual([]);
+  });
+
+  it("requires a local identity for contextual noun phrases in a wrapper atom", () => {
+    expect(buildOfficialApiSourceAssertions("Anyway, I really enjoyed the party.")).toEqual([]);
+    expect(buildOfficialApiSourceAssertions("Anyway, I enjoyed your party called Summer Games.")
+      .map(({ text }) => text)).toEqual([
+      "I enjoyed your party called Summer Games."
+    ]);
+    expect(buildOfficialApiSourceAssertions("Anyway, I joined the recreational volleyball league.")
+      .map(({ text }) => text)).toEqual([
+      "I joined the recreational volleyball league."
+    ]);
+  });
+
+  it("does not append an atom when the legacy catalog already grounds the sentence", () => {
+    const source = "I won the race, which was a nice surprise.";
+
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "I won the race, which was a nice surprise."
+    ]);
+    expect(computeOfficialApiSourceCatalogRequestIdentity(source)).toBeUndefined();
+  });
+
+  it("appends a closed wrapper atom after preserving a legacy assertion from the same sentence", () => {
+    const source = "I moved to Berlin, and I redeemed a $5 coupon last Sunday, which was a nice surprise to them.";
+
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      "I moved to Berlin",
+      "I moved to Berlin, and I redeemed a $5 coupon last Sunday"
+    ]);
+    expect(computeOfficialApiSourceCatalogRequestIdentity(source)).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("grounds an atom without inheriting an unresolved wrapper tail", async () => {
+    const source = "I moved to Berlin, and I redeemed a $5 coupon last Sunday, which was a nice surprise to them.";
+    const assertion = "I moved to Berlin, and I redeemed a $5 coupon last Sunday";
+    const provider = providerSelectingAssertion((text) => text === assertion);
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: assertion
+    });
+  });
+
+  it("grounds a catalog atom from before a bounded conversational tail question", async () => {
+    const source = "The play I attended was actually a production of The Glass Menagerie, have you heard of it?";
+    const provider = providerSelectingAssertion((text) => text.includes("The Glass Menagerie"));
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: "The play I attended was actually a production of The Glass Menagerie"
+    });
+  });
+
+  it.each([
+    [
+      "a relative-clause shell",
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday, which was a nice surprise since I didn't know I had it in my email inbox.",
+      "I actually redeemed a $5 coupon on coffee creamer last Sunday"
+    ],
+    [
+      "a discourse-preface shell",
+      "Also, by the way, I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out.",
+      "I've been listening to this one playlist on Spotify that I created, called Summer Vibes, and it's got all these chill tracks that are perfect for relaxing or working out."
+    ]
+  ])("grounds a catalog atom from %s", async (_label, source, expectedAssertion) => {
+    const provider = providerSelectingAssertion((text) => text === expectedAssertion);
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: expectedAssertion
+    });
   });
 
   it("builds a bounded deterministic User-only catalog and prefers v2 in the prompt", async () => {

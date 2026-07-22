@@ -8,9 +8,14 @@ import {
 } from "./source-assertion/clause-spans.js";
 import {
   hasUnresolvedReference,
+  isLocallyClosedAtomicAssertion,
   isBoundedTemplateSlotAssertion,
   startsWithChineseThirdPersonSubject
 } from "./source-assertion/reference-closure.js";
+import {
+  hasAssertionPreservingRelativeClauseSuffix,
+  hasRelativeClauseSuffix
+} from "./source-assertion/relative-clause.js";
 
 export type SourceAssertionResolution =
   | { readonly status: "grounded"; readonly assertion: string }
@@ -65,6 +70,21 @@ export function resolveSourceAssertion(
   return resolutions[0]!;
 }
 
+export function resolveAtomicSourceAssertion(assertionText: string): SourceAssertionResolution {
+  const assertion = stripSourceRoleLabel(assertionText);
+  if (assertion.length === 0) return { status: "rejected", reason: "matched_text_absent" };
+  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+    return { status: "rejected", reason: "source_assertion_too_long" };
+  }
+  if (!isLocallyClosedAtomicAssertion(assertion)) {
+    return { status: "rejected", reason: "source_assertion_not_self_contained" };
+  }
+  if (isVacuousFirstPersonStub(assertion) || !hasCompleteClause(assertion, false)) {
+    return { status: "rejected", reason: "source_assertion_incomplete" };
+  }
+  return { status: "grounded", assertion };
+}
+
 function enclosingSentenceSpan(
   spans: readonly AssertionSpan[],
   offset: number,
@@ -105,7 +125,7 @@ function resolveBoundedVerbatimPrefix(
   if (!hasMatchedTextStartBoundary(source, offset)) {
     return { status: "rejected", reason: "matched_text_absent" };
   }
-  if (relativeSuffix && !hasSafeSurpriseSuffix(suffix)) {
+  if (relativeSuffix && !hasAssertionPreservingRelativeClauseSuffix(suffix)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
   }
   if (isVacuousFirstPersonStub(assertion)) {
@@ -119,21 +139,6 @@ function resolveBoundedVerbatimPrefix(
 
 function hasMatchedTextStartBoundary(source: string, offset: number): boolean {
   return !isWordCharacter(source[offset - 1]);
-}
-
-const RELATIVE_CLAUSE_OPEN =
-  /^(?:\s*[,;:]\s*|\s*[—–‒-]\s*|\s*\(\s*|\s+)(?:which|who)\b/iu;
-
-function hasRelativeClauseSuffix(suffix: string): boolean {
-  return RELATIVE_CLAUSE_OPEN.test(suffix);
-}
-
-function hasSafeSurpriseSuffix(suffix: string): boolean {
-  return /^\s*,\s*which\s+(?:was|is)\s+(?:a\s+)?(?:nice|pleasant|welcome|great)\s+surprise\b/iu.test(
-    suffix
-  ) || /^\s*,\s*which surprised me because I had forgotten it\.\s*(?:\r?\n(?:Assistant|助手)\s*:[\s\S]*)?$/iu.test(
-    suffix
-  );
 }
 
 function hasWorthItSuffix(assertion: string, suffix: string): boolean {

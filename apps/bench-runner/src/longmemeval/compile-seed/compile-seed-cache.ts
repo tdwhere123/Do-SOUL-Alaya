@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import {
+  buildOfficialApiSourceAssertions,
+  buildOfficialApiSourceCorpus,
+  computeOfficialApiSourceCatalogRequestIdentity,
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+} from "@do-soul/alaya-soul";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
@@ -73,16 +79,13 @@ interface CachingSignalExtractorOptions {
 /**
  * Build an on-disk-cached `SignalExtractor`.
  *
- * It wraps a delegate extractor (the live LLM transport) and caches the raw
- * LLM response keyed by a SHA-256 hash of the load-bearing extraction
- * inputs (model + requestProfile + systemPrompt + turn_content) — never the volatile routing
- * context (run_id / workspace_id / surface_id) the userPrompt also carries.
- * On a cache hit it returns the stored `rawJson` with zero LLM calls; on a
- * miss it calls the delegate and writes the fixture only when live extraction
- * is allowed. Cache-only callers fail closed before the delegate boundary.
+ * It wraps a live delegate and keys raw responses by model, request profile,
+ * system prompt, turn content, trusted role corpus, and changed source catalog
+ * — never volatile routing context in the user prompt.
+ * A hit returns stored `rawJson` without LLM calls; a cache-only miss fails
+ * closed before the delegate boundary.
  *
- * `OfficialApiGardenProvider` then parses that `rawJson` with the production
- * `parseOfficialApiSignals` — so caching never alters extraction semantics.
+ * `OfficialApiGardenProvider` parses `rawJson` with production semantics.
  */
 export function createCachingSignalExtractor(
   options: CachingSignalExtractorOptions
@@ -104,7 +107,8 @@ async function extractWithCache(
     options.config.requestProfile,
     input.systemPrompt,
     extractionInput.turnContent,
-    extractionInput.trustedRoleCorpusDigest
+    extractionInput.trustedRoleCorpusDigest,
+    extractionInput.sourceCatalogRequestIdentity
   );
   if (options.stats !== undefined) {
     options.stats.lastExtractionSource = null;
@@ -319,6 +323,7 @@ function assertWriteIdentity(
 function extractCacheInputIdentity(userPrompt: string): {
   readonly turnContent: string;
   readonly trustedRoleCorpusDigest?: string;
+  readonly sourceCatalogRequestIdentity?: string;
 } {
   try {
     const parsed = JSON.parse(userPrompt) as unknown;
@@ -327,11 +332,18 @@ function extractCacheInputIdentity(userPrompt: string): {
       const turnContent = record.turn_content;
       if (typeof turnContent === "string" && turnContent.length > 0) {
         const messages = readRoleCorpus(record.turn_messages);
+        const sourceCatalogRequestIdentity = readSourceCatalogRequestIdentity(
+          record,
+          turnContent,
+          messages
+        );
+        if (sourceCatalogRequestIdentity === null) return { turnContent: userPrompt };
         return {
           turnContent,
           ...(messages === undefined
             ? {}
-            : { trustedRoleCorpusDigest: computeTrustedRoleCorpusDigest(messages) })
+            : { trustedRoleCorpusDigest: computeTrustedRoleCorpusDigest(messages) }),
+          ...(sourceCatalogRequestIdentity === undefined ? {} : { sourceCatalogRequestIdentity })
         };
       }
     }
@@ -343,16 +355,62 @@ function extractCacheInputIdentity(userPrompt: string): {
 
 function readRoleCorpus(
   value: unknown
-): readonly { readonly role: string; readonly content: string }[] | undefined {
+): readonly { readonly role: "user" | "assistant"; readonly content: string }[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
-  const messages: { role: string; content: string }[] = [];
+  const messages: { role: "user" | "assistant"; content: string }[] = [];
   for (const item of value) {
     if (typeof item !== "object" || item === null) return undefined;
     const { role, content } = item as Record<string, unknown>;
-    if (typeof role !== "string" || typeof content !== "string") return undefined;
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") {
+      return undefined;
+    }
     messages.push({ role, content });
   }
   return messages;
+}
+
+function readSourceCatalogRequestIdentity(
+  record: Readonly<Record<string, unknown>>,
+  turnContent: string,
+  messages: readonly { readonly role: "user" | "assistant"; readonly content: string }[] | undefined
+): string | undefined | null {
+  if (record.source_assertions === undefined && record.source_locator_contract_version === undefined) {
+    return undefined;
+  }
+  if (record.source_locator_contract_version !== OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION) {
+    return null;
+  }
+  const assertions = readSourceAssertions(record.source_assertions);
+  if (assertions === undefined) return null;
+  const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, messages ?? []);
+  if (!sameSourceAssertions(assertions, buildOfficialApiSourceAssertions(sourceCorpus))) return null;
+  return computeOfficialApiSourceCatalogRequestIdentity(sourceCorpus);
+}
+
+function readSourceAssertions(
+  value: unknown
+): readonly { readonly assertion_id: number; readonly text: string }[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const assertions: { assertion_id: number; text: string }[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const { assertion_id, text } = item as Record<string, unknown>;
+    if (typeof assertion_id !== "number" || !Number.isInteger(assertion_id) ||
+        assertion_id <= 0 || typeof text !== "string") {
+      return undefined;
+    }
+    assertions.push({ assertion_id, text });
+  }
+  return assertions;
+}
+
+function sameSourceAssertions(
+  left: readonly { readonly assertion_id: number; readonly text: string }[],
+  right: readonly { readonly assertion_id: number; readonly text: string }[]
+): boolean {
+  return left.length === right.length && left.every((assertion, index) =>
+    assertion.assertion_id === right[index]?.assertion_id && assertion.text === right[index]?.text
+  );
 }
 
 /**
@@ -385,7 +443,8 @@ export function computeCacheKey(
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
   turnContent: string,
-  trustedRoleCorpusDigest?: string
+  trustedRoleCorpusDigest?: string,
+  sourceCatalogRequestIdentity?: string
 ): string {
   const hash = createHash("sha256")
     .update(model, "utf8")
@@ -402,6 +461,13 @@ export function computeCacheKey(
     hash.update("\u0000trusted-role-corpus-v1\u0000", "utf8")
       .update(trustedRoleCorpusDigest, "utf8");
   }
+  if (sourceCatalogRequestIdentity !== undefined) {
+    if (!/^[a-f0-9]{64}$/u.test(sourceCatalogRequestIdentity)) {
+      throw new Error("source catalog request identity must be a lowercase sha256");
+    }
+    hash.update("\u0000source-assertion-catalog-v1\u0000", "utf8")
+      .update(sourceCatalogRequestIdentity, "utf8");
+  }
   return hash.digest("hex");
 }
 
@@ -411,11 +477,23 @@ export function computeExtractionTurnCacheKey(
   systemPrompt: string,
   turn: LongMemEvalExtractionTurn
 ): string {
+  return computeSourceTurnCacheKey(model, requestProfile, systemPrompt, turn);
+}
+
+export function computeSourceTurnCacheKey(
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  systemPrompt: string,
+  input: Pick<LongMemEvalExtractionTurn, "turnContent"> & Partial<Pick<LongMemEvalExtractionTurn, "turnMessages">>
+): string {
+  const messages = input.turnMessages ?? [];
+  const sourceCorpus = buildOfficialApiSourceCorpus(input.turnContent, messages);
   return computeCacheKey(
     model,
     requestProfile,
     systemPrompt,
-    turn.turnContent,
-    computeTrustedRoleCorpusDigest(turn.turnMessages)
+    input.turnContent,
+    messages.length === 0 ? undefined : computeTrustedRoleCorpusDigest(messages),
+    computeOfficialApiSourceCatalogRequestIdentity(sourceCorpus)
   );
 }

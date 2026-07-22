@@ -47,12 +47,13 @@ function prepareExpansionWindow(
     throw new Error("question-bounded extraction cannot mix an expansion capability");
   }
   const keySpace = inspectTurnContentKeySpace(expansion.nextQuestions);
-  assertSameTurnWindow(keySpace.distinctTurnContents, expansion.nextTurns);
+  assertSameTurnWindow(keySpace.distinctExtractionTurns, expansion.nextTurns);
+  const turnContents = expansion.nextTurns.map(({ turnContent }) => turnContent);
   return {
-    distinctTurns: expansion.nextTurns,
-    executionTurns: expansion.nextTurns,
-    distinctExtractionTurns: keySpace.distinctExtractionTurns,
-    executionExtractionTurns: keySpace.distinctExtractionTurns,
+    distinctTurns: turnContents,
+    executionTurns: turnContents,
+    distinctExtractionTurns: expansion.nextTurns,
+    executionExtractionTurns: expansion.nextTurns,
     requestedTurns: expansion.nextTurns.length,
     windowTurnOccurrences: expansion.nextTurns.length,
     executionTurnOccurrences: expansion.nextTurns.length,
@@ -97,13 +98,27 @@ async function prepareDatasetWindow(
 }
 
 function assertSameTurnWindow(
-  actual: readonly string[],
-  expected: readonly string[]
+  actual: readonly LongMemEvalExtractionTurn[],
+  expected: readonly LongMemEvalExtractionTurn[]
 ): void {
-  if (actual.length === expected.length && actual.every((turn, index) => turn === expected[index])) {
+  if (actual.length === expected.length && actual.every((turn, index) =>
+    sameExtractionTurn(turn, expected[index])
+  )) {
     return;
   }
   throw new Error("expansion extraction turns disagree with the trusted message window");
+}
+
+function sameExtractionTurn(
+  left: LongMemEvalExtractionTurn,
+  right: LongMemEvalExtractionTurn | undefined
+): boolean {
+  return right !== undefined && left.turnContent === right.turnContent &&
+    left.turnMessages.length === right.turnMessages.length &&
+    left.turnMessages.every((message, index) =>
+      message.role === right.turnMessages[index]?.role &&
+      message.content === right.turnMessages[index]?.content
+    );
 }
 
 function resolveQuestionBatchLimit(raw: number | undefined, questionCount: number): number {

@@ -69,7 +69,8 @@ describe("no-network extraction authority inspection", () => {
       },
       extraction: {
         cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent" +
-          "\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest)",
+          "[\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest]" +
+          "[\\0source-assertion-catalog-v1\\0sourceCatalogRequestIdentity])",
         manifestSha256: null,
         rawContentClosureSha256: null
       },

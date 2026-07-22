@@ -59,6 +59,12 @@ export {
   type SourceAssertionResolution
 } from "./grounding/source-assertion.js";
 export {
+  buildOfficialApiSourceAssertions,
+  buildOfficialApiSourceCorpus,
+  computeOfficialApiSourceCatalogRequestIdentity,
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+} from "./grounding/source-locator.js";
+export {
   resolveGardenRawPayloadGrounding,
   resolveGardenSignalGrounding,
   type GardenSignalGrounding

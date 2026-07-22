@@ -2,8 +2,8 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import {
-  computeCacheKey,
   computeExtractionTurnCacheKey,
+  computeSourceTurnCacheKey,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
 import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
@@ -85,7 +85,9 @@ function expectedCacheKeys(input: Parameters<typeof inspectExtractionFillComplet
     )));
   }
   return new Set((input.turnContents ?? []).map((turnContent) =>
-    computeCacheKey(input.model, input.requestProfile, input.systemPrompt, turnContent)
+    computeSourceTurnCacheKey(
+      input.model, input.requestProfile, input.systemPrompt, { turnContent }
+    )
   ));
 }
 

@@ -5,7 +5,7 @@ import {
   type LongMemEvalRoundMessage,
   type LongMemEvalQuestion
 } from "../../ingestion/dataset.js";
-import { computeCacheKey } from "../../compile-seed/compile-seed-cache.js";
+import { computeExtractionTurnCacheKey } from "../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
 import { computeTrustedRoleCorpusDigest } from "../turn-contents.js";
@@ -91,12 +91,11 @@ function buildOccurrence(input: {
     turnContent: input.turnContent.trim(),
     turnMessages: input.turnMessages,
     trustedRoleCorpusDigest,
-    cacheKey: computeCacheKey(
+    cacheKey: computeExtractionTurnCacheKey(
       input.model,
       input.requestProfile,
       input.systemPrompt,
-      input.turnContent.trim(),
-      trustedRoleCorpusDigest
+      { turnContent: input.turnContent.trim(), turnMessages: input.turnMessages }
     )
   });
 }

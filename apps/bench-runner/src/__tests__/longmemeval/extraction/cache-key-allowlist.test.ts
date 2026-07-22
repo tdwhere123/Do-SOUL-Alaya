@@ -26,21 +26,25 @@ afterEach(() => {
 });
 
 describe("extraction cache-key allowlist", () => {
-  it("selects exactly the ordered full-window keys that are currently missing", () => {
+  it("selects exactly the receipt-bound full-window keys that are currently missing", () => {
     const cacheRoot = temporaryRoot();
     const writeLease = { assertOwned: vi.fn() };
     const firstKey = cacheKey(first);
     const secondKey = cacheKey(second);
 
+    const keys = [secondKey, firstKey].sort();
     const selected = resolveCacheKeyAllowlistedTurns({
-      allowlist: [secondKey, firstKey],
+      allowlist: keys,
       cacheRoot,
       prepared: prepared(),
-      authority: { action: "fill" },
+      authority: catalogAuthority(keys),
       writeLease
     });
 
-    expect(selected).toEqual({ turns: [second, first], skippedCacheHits: 0 });
+    expect(selected).toEqual({
+      turns: keys.map((key) => key === firstKey ? first : second),
+      skippedCacheHits: 0
+    });
     expect(writeLease.assertOwned).toHaveBeenCalledOnce();
   });
 
@@ -56,11 +60,15 @@ describe("extraction cache-key allowlist", () => {
 
   it.each([
     ["without authority", undefined, prepared()],
-    ["for a probe", { action: "probe" as const }, prepared()],
-    ["for repair", { action: "fill" as const, repair_scope: {} as never }, prepared()],
-    ["for direct spend", { action: "fill" as const, direct_spend: {} as never }, prepared()],
-    ["for expansion", { action: "fill" as const }, prepared({ expansion: {} })],
-    ["for a question batch", { action: "fill" as const }, prepared({ questionBatchLimit: 1 })]
+    ["for a probe", { ...catalogAuthority([cacheKey(first)]), action: "probe" as const }, prepared()],
+    ["for repair", {
+      ...catalogAuthority([cacheKey(first)]), repair_scope: {} as never
+    }, prepared()],
+    ["for direct spend", {
+      ...catalogAuthority([cacheKey(first)]), direct_spend: {} as never
+    }, prepared()],
+    ["for expansion", catalogAuthority([cacheKey(first)]), prepared({ expansion: {} })],
+    ["for a question batch", catalogAuthority([cacheKey(first)]), prepared({ questionBatchLimit: 1 })]
   ])("rejects the allowlist %s", (_label, authority, scopedPrepared) => {
     expect(() => resolveCacheKeyAllowlistedTurns({
       allowlist: [cacheKey(first)],
@@ -68,7 +76,7 @@ describe("extraction cache-key allowlist", () => {
       prepared: scopedPrepared,
       authority,
       writeLease: { assertOwned: vi.fn() }
-    })).toThrow(/authority-bound normal fill/u);
+    })).toThrow(/authority-bound catalog refill/u);
   });
 
   it.each([
@@ -81,7 +89,7 @@ describe("extraction cache-key allowlist", () => {
       allowlist,
       cacheRoot: temporaryRoot(),
       prepared: prepared(),
-      authority: { action: "fill" },
+      authority: catalogAuthority([cacheKey(first)]),
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/non-empty|lowercase SHA-256|duplicate/u);
   });
@@ -91,7 +99,7 @@ describe("extraction cache-key allowlist", () => {
       allowlist: [cacheKey(first)],
       cacheRoot: temporaryRoot(),
       prepared: { ...prepared(), pinnedCachedTurns: undefined },
-      authority: { action: "fill" },
+      authority: catalogAuthority([cacheKey(first)]),
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/pinned manifest cached-turn count/u);
   });
@@ -101,7 +109,7 @@ describe("extraction cache-key allowlist", () => {
       allowlist: ["f".repeat(64)],
       cacheRoot: temporaryRoot(),
       prepared: prepared(),
-      authority: { action: "fill" },
+      authority: catalogAuthority(["f".repeat(64)]),
       writeLease: { assertOwned: vi.fn() }
     })).toThrow(/outside the production full window/u);
   });
@@ -123,12 +131,19 @@ describe("extraction cache-key allowlist", () => {
         allowlist: [key],
         cacheRoot,
         prepared: prepared(),
-        authority: { action: "fill" },
+        authority: catalogAuthority([key]),
         writeLease: { assertOwned: vi.fn() }
       })).toThrow(new RegExp(`status is ${status}`, "u"));
     }
   );
 });
+
+function catalogAuthority(keys: readonly string[]) {
+  return {
+    action: "fill" as const,
+    catalog_refill: { keys } as never
+  };
+}
 
 function prepared(overrides: {
   readonly expansion?: object;

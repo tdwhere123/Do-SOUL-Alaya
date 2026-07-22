@@ -82,6 +82,25 @@ it("rejects a predecessor receipt without its child extraction authority", async
   expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/requires --extraction-authority/u));
 });
 
+it("rejects a catalog refill allowlist at runtime", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => completedFillResult());
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_s",
+    catalogRefillAllowlist: "/fixture/allowlist.json"
+  } as ParsedFlags, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(2);
+  expect(run).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/authorize-extraction/u));
+});
+
 it("loads the R3 approval file before handing the fill to the runtime gate", async () => {
   const signalSource = new FakeSignalSource();
   const approval = { kind: "r3" };

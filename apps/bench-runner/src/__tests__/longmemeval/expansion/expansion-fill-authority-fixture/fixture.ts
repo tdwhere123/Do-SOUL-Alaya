@@ -68,8 +68,8 @@ vi.mock("../../../../longmemeval/compile-seed/compile-seed-config.js", async (im
 }));
 vi.mock("../../../../longmemeval/extraction/fill/fill-completion.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../../longmemeval/extraction/fill/fill-completion.js")>(),
-  inspectExtractionFillCompletion: vi.fn((input: { turnContents: readonly string[] }) =>
-    input.turnContents.length === 100 ? state.sourceCompletion : state.targetCompletion)
+  inspectExtractionFillCompletion: vi.fn((input: { extractionTurns: readonly unknown[] }) =>
+    input.extractionTurns.length === 100 ? state.sourceCompletion : state.targetCompletion)
 }));
 vi.mock("../../../../longmemeval/snapshot/integrity.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../../longmemeval/snapshot/integrity.js")>(),

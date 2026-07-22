@@ -71,7 +71,8 @@ export const EXTRACTION_CACHE_MANIFEST_FILENAME = "manifest.json";
  */
 export const EXTRACTION_CACHE_KEY_ALGO =
   "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent" +
-  "\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest)";
+  "[\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest]" +
+  "[\\0source-assertion-catalog-v1\\0sourceCatalogRequestIdentity])";
 
 export type ExtractionCacheStorage = "git-tracked" | "archive";
 /**

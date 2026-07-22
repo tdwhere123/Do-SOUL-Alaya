@@ -18,6 +18,10 @@ import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import type { ExecutionExtractionAuthority } from "./fill-execution.js";
 import type { ExtractionCacheWriteLease } from "./manifest/fill-root-guard.js";
 import { repairScopeKeys } from "../authority/repair/repair-scope.js";
+import {
+  assertCatalogRefillRootBinding,
+  catalogRefillScopeKeys
+} from "../authority/catalog-refill/scope.js";
 
 export function createExtractionExecutionAuthority(
   receipt: ExtractionAuthorityReceipt,
@@ -66,12 +70,15 @@ function createLedgerExecutionAuthority(
   const repairKeys = receipt.repair_scope === undefined
     ? undefined
     : repairScopeKeys(receipt.repair_scope);
+  const catalogRefillKeys = receipt.catalog_refill === undefined
+    ? undefined
+    : catalogRefillScopeKeys(receipt.catalog_refill);
   const ledger = openReceiptAttemptLedger(receipt, cacheRoot);
   const directPacer = createDirectRequestPacer(receipt, cacheRoot);
   return {
     receipt,
     reserveAttempt: async (cacheKey, signal) => {
-      assertRepairKeyAllowed(repairKeys, cacheKey);
+      assertScopeKeyAllowed(repairKeys, catalogRefillKeys, cacheKey);
       assertTarget();
       assertAuthorityDiskFloor(cacheRoot, receipt.limits.disk_floor_bytes);
       await directPacer?.wait(signal);
@@ -111,13 +118,19 @@ function createDirectRequestPacer(receipt: ExtractionAuthorityReceipt, cacheRoot
     });
 }
 
-function assertRepairKeyAllowed(
+function assertScopeKeyAllowed(
   repairKeys: ReadonlySet<string> | undefined,
+  catalogRefillKeys: ReadonlySet<string> | undefined,
   cacheKey: string
 ): void {
-  if (repairKeys === undefined || repairKeys.has(cacheKey)) return;
+  if (repairKeys !== undefined && !repairKeys.has(cacheKey)) {
+    throw new ExtractionCacheInvariantError(
+      "extraction repair authority refused an out-of-scope shard"
+    );
+  }
+  if (catalogRefillKeys === undefined || catalogRefillKeys.has(cacheKey)) return;
   throw new ExtractionCacheInvariantError(
-    "extraction repair authority refused an out-of-scope shard"
+    "catalog refill authority refused an out-of-scope shard"
   );
 }
 
@@ -138,6 +151,9 @@ function createTargetAssertion(
     }
     if (targetSelection !== undefined) {
       assertExtractionTargetSelectionRootBinding(targetSelection, cacheRoot, writeLease);
+    }
+    if (receipt.catalog_refill !== undefined) {
+      assertCatalogRefillRootBinding(receipt.catalog_refill.root_binding, cacheRoot);
     }
   };
 }

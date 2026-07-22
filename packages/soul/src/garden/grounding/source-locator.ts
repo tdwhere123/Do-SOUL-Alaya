@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
+  resolveAtomicSourceAssertion,
   resolveSourceAssertion,
   SOURCE_ASSERTION_MAX_CHARS,
   type SourceAssertionResolution
@@ -11,6 +13,7 @@ import {
   sentenceSpans,
   type AssertionSpan
 } from "./source-assertion/clause-spans.js";
+import { atomicAssertionSpans } from "./source-assertion/atomic-spans.js";
 
 export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = 2;
 const LEGACY_SENTENCE_RANGE_CONTRACT_VERSION = 1;
@@ -60,6 +63,7 @@ interface IndexedSourceAssertion extends OfficialApiSourceAssertion {
   readonly start: number;
   readonly end: number;
   readonly sentence: AssertionSpan;
+  readonly atomic: boolean;
 }
 
 export function parseOfficialApiSourceLocator(value: unknown): OfficialApiSourceLocator | null {
@@ -69,7 +73,7 @@ export function parseOfficialApiSourceLocator(value: unknown): OfficialApiSource
 
 export function buildOfficialApiSourceCorpus(
   turnContent: string,
-  messages: readonly ConversationMessage[]
+  messages: readonly Pick<ConversationMessage, "role" | "content">[]
 ): string {
   const source = messages.length === 0
     ? `User: ${canonicalMessageContent(turnContent)}`
@@ -91,6 +95,21 @@ export function buildOfficialApiSourceAssertions(
   return Object.freeze(indexSourceAssertions(sourceText).map(({ assertion_id, text }) =>
     Object.freeze({ assertion_id, text })
   ));
+}
+
+/**
+ * Carries only a semantic catalog delta into an extraction request identity.
+ * Existing v2 catalogs retain their old cache identity so a source change can
+ * be refilled narrowly instead of invalidating every historical shard.
+ */
+export function computeOfficialApiSourceCatalogRequestIdentity(sourceText: string): string | undefined {
+  const legacy = selectBoundedAssertions(indexLegacySourceAssertions(sourceText));
+  const current = indexSourceAssertions(sourceText);
+  if (sameAssertionCatalog(legacy, current)) return undefined;
+  return createHash("sha256").update(JSON.stringify({
+    contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+    source_assertions: current.map(({ assertion_id, text }) => ({ assertion_id, text }))
+  }), "utf8").digest("hex");
 }
 
 export function resolveOfficialApiSourceLocator(
@@ -152,11 +171,10 @@ function resolveAssertionCatalogLocator(
   const selected = indexSourceAssertions(sourceText)[assertionId - 1];
   if (selected === undefined) return rejectedRange();
   const sentenceText = sourceText.slice(selected.sentence.start, selected.sentence.end);
-  if (isDirectQuestionSourceText(sentenceText)) {
-    return { status: "rejected", reason: "source_assertion_incomplete" };
-  }
   const assertionText = sourceText.slice(selected.start, selected.end);
-  return resolveSourceAssertion(sentenceText, assertionText);
+  return selected.atomic
+    ? resolveAtomicSourceAssertion(assertionText)
+    : resolveSourceAssertion(sentenceText, assertionText);
 }
 
 function resolveCatalogVerbatimQuote(
@@ -240,6 +258,25 @@ function boundedIndirectQuestionPrefix(content: string): string | null {
 }
 
 function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssertion[] {
+  const legacy = indexLegacySourceAssertions(sourceText);
+  const output = [...selectBoundedAssertions(legacy)];
+  if (output.length >= MAX_SOURCE_ASSERTIONS) return output;
+
+  const roleMarkers = collectRoleMarkers(sourceText);
+  const seen = new Set(legacy.map((assertion) => `${assertion.start}:${assertion.end}`));
+  for (const sentence of sentenceSpans(sourceText)) {
+    if (roleAt(roleMarkers, sentence.start) !== "user") continue;
+    for (const atom of atomicAssertionSpans(sourceText, sentence)) {
+      if (output.length >= MAX_SOURCE_ASSERTIONS) return output;
+      if (isCoveredByCatalogAssertion(output, atom)) continue;
+      appendAssertion(output, seen, sourceText, atom, sentence, true);
+    }
+    if (output.length >= MAX_SOURCE_ASSERTIONS) break;
+  }
+  return output;
+}
+
+function indexLegacySourceAssertions(sourceText: string): readonly IndexedSourceAssertion[] {
   const roleMarkers = collectRoleMarkers(sourceText);
   const sentences = sentenceSpans(sourceText);
   const output: IndexedSourceAssertion[] = [];
@@ -257,7 +294,7 @@ function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssert
     }
     appendBoundedTemplateSlotPair(output, seen, sourceText, roleMarkers, sentence, sentences[index + 1]);
   }
-  return selectBoundedAssertions(output);
+  return output;
 }
 
 function appendBoundedIndirectQuestionPrefix(
@@ -299,14 +336,17 @@ function appendAssertion(
   seen: Set<string>,
   sourceText: string,
   span: AssertionSpan,
-  sentence: AssertionSpan
+  sentence: AssertionSpan,
+  atomic = false
 ): void {
   const key = `${span.start}:${span.end}`;
   if (seen.has(key)) return;
   seen.add(key);
   const assertionText = sourceText.slice(span.start, span.end);
   const sentenceText = sourceText.slice(sentence.start, sentence.end);
-  const resolution = resolveSourceAssertion(sentenceText, assertionText);
+  const resolution = atomic
+    ? resolveAtomicSourceAssertion(assertionText)
+    : resolveSourceAssertion(sentenceText, assertionText);
   if (resolution.status !== "grounded" ||
       stripRoleLabel(resolution.assertion) !== stripRoleLabel(assertionText)) return;
   output.push({
@@ -314,8 +354,16 @@ function appendAssertion(
     text: assertionText,
     start: span.start,
     end: span.end,
-    sentence
+    sentence,
+    atomic
   });
+}
+
+function isCoveredByCatalogAssertion(
+  assertions: readonly IndexedSourceAssertion[],
+  span: AssertionSpan
+): boolean {
+  return assertions.some((assertion) => assertion.start <= span.start && assertion.end >= span.end);
 }
 
 function selectBoundedAssertions(
@@ -328,6 +376,15 @@ function selectBoundedAssertions(
     const selected = assertions[sourceIndex]!;
     return { ...selected, assertion_id: outputIndex + 1 };
   });
+}
+
+function sameAssertionCatalog(
+  left: readonly IndexedSourceAssertion[],
+  right: readonly IndexedSourceAssertion[]
+): boolean {
+  return left.length === right.length && left.every((assertion, index) =>
+    assertion.assertion_id === right[index]?.assertion_id && assertion.text === right[index]?.text
+  );
 }
 
 function indexSourceSpans(sourceText: string): readonly IndexedSourceSpan[] {

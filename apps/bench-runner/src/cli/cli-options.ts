@@ -45,6 +45,8 @@ export interface ParsedFlags {
   readonly extractionCacheRoot?: string;
   /** Digest-bound extraction authority receipt required for live cache fills. */
   readonly extractionAuthority?: string;
+  /** Audited missing-key allowlist accepted only by authorize-extraction. */
+  readonly catalogRefillAllowlist?: string;
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
   readonly extractionTargetSelection?: string;
   readonly extractionPredecessorAuthority?: string;
@@ -84,6 +86,7 @@ export interface ParsedFlagsState {
   questionManifest?: string;
   extractionCacheRoot?: string;
   extractionAuthority?: string;
+  catalogRefillAllowlist?: string;
   extractionTargetSelection?: string;
   extractionPredecessorAuthority?: string;
   promotionContract?: string;
@@ -102,6 +105,7 @@ export interface ParsedFlagsState {
 
 export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
+  assertFlagAtMostOnce(args, "--catalog-refill-allowlist");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -295,6 +299,16 @@ function consumeOtherPathFlags(
     );
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--catalog-refill-allowlist")) {
+    state.catalogRefillAllowlist = readRequiredFlagValue(
+      args,
+      index,
+      token,
+      "--catalog-refill-allowlist",
+      "--catalog-refill-allowlist requires an allowlist path"
+    );
+    return nextIndex(index, token);
+  }
   if (matchFlagToken(token, "--extraction-target-selection")) {
     state.extractionTargetSelection = readRequiredFlagValue(
       args,
@@ -460,6 +474,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     questionManifest: state.questionManifest,
     extractionCacheRoot: state.extractionCacheRoot,
     extractionAuthority: state.extractionAuthority,
+    catalogRefillAllowlist: state.catalogRefillAllowlist,
     extractionTargetSelection: state.extractionTargetSelection,
     extractionPredecessorAuthority: state.extractionPredecessorAuthority,
     promotionContract: state.promotionContract,

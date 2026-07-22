@@ -9,7 +9,7 @@ import {
   readExtractionCacheManifestIdentity
 } from "../../../extraction/cache/extraction-cache-manifest.js";
 import { inspectExtractionFillCompletion } from "../../../extraction/fill/fill-completion.js";
-import { collectDistinctTurnContents } from "../../../extraction/turn-contents.js";
+import { inspectTurnContentKeySpace } from "../../../extraction/turn-contents.js";
 import { loadDatasetWithIdentity } from "../../../ingestion/fetch.js";
 import type { LongMemEvalQaRunOption } from "../../../runner.js";
 import { assertCompleteLongMemEvalExpansionCache } from
@@ -80,7 +80,7 @@ export async function assertExpansionSnapshotAuthority(
       model: manifest.extraction_model,
       requestProfile: manifest.request_profile,
       systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-      turnContents: collectDistinctTurnContents(selection.nextQuestions)
+      extractionTurns: inspectTurnContentKeySpace(selection.nextQuestions).distinctExtractionTurns
     })
   });
 }

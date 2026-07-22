@@ -144,6 +144,15 @@ describe("bench-runner CLI", () => {
     expect(stderrBuf).toMatch(/only valid for continuation extraction commands/u);
   });
 
+  it("rejects a catalog refill allowlist on unrelated commands", async () => {
+    const exitCode = await runCli([
+      "longmemeval", "--catalog-refill-allowlist", "/tmp/allowlist.json"
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/only valid for authorize-extraction/u);
+  });
+
   it("rejects invalid LongMemEval weight overrides before loading data", async () => {
     const exitCode = await runCli([
       "longmemeval",

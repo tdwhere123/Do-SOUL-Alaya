@@ -133,8 +133,13 @@ function resolveFillTurns(
   authority: ExecutionExtractionAuthority | undefined,
   writeLease: ExtractionCacheWriteLease
 ): CacheKeyAllowlistResolution {
+  if (cacheKeyAllowlist !== undefined) {
+    throw new ExtractionCacheInvariantError(
+      "runtime cache-key allowlists are unsupported; use a catalog refill authority"
+    );
+  }
   const allowlisted = resolveCacheKeyAllowlistedTurns({
-    allowlist: cacheKeyAllowlist,
+    allowlist: authority?.receipt.catalog_refill?.keys,
     cacheRoot,
     prepared: {
       config: prepared.config,
@@ -145,7 +150,10 @@ function resolveFillTurns(
       expansion: prepared.expansion
     },
     authority: authority?.receipt,
-    writeLease
+    writeLease,
+    ...(authority?.receipt.catalog_refill === undefined ? {} : {
+      completedKeys: authority.snapshot()?.successfulKeys
+    })
   });
   if (allowlisted !== undefined) return allowlisted;
   const turns = authority?.receipt.action === "probe"
@@ -329,13 +337,20 @@ export function refreshIncompleteFill(
   prepared: PreparedExtractionFill,
   cacheRoot: string,
   writeLease: ExtractionCacheWriteLease
-): void {
-  if (!canRefreshIncompleteFill(prepared, cacheRoot, writeLease)) return;
+): string | undefined {
+  if (!canRefreshIncompleteFill(prepared, cacheRoot, writeLease)) return undefined;
   const completion = inspectFillWindow(
     cacheRoot, prepared.config, prepared.distinctExtractionTurns
   );
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
   persistFillManifest(prepared, cacheRoot, "in_progress", completion);
+  const identity = readExtractionCacheManifestIdentity(cacheRoot);
+  if (identity === undefined) {
+    throw new ExtractionCacheInvariantError(
+      "incomplete extraction-fill manifest was not persisted"
+    );
+  }
+  return identity.manifestSha256;
 }
 
 function selectProbeTurn(

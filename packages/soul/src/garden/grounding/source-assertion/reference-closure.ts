@@ -12,6 +12,39 @@ export function hasUnresolvedReference(assertion: string): boolean {
   return false;
 }
 
+/**
+ * A span created by removing conversational wrapper text cannot borrow the
+ * omitted turn context to close a request or interlocutor reference.
+ */
+export function isLocallyClosedAtomicAssertion(assertion: string): boolean {
+  const value = stripRoleLabel(assertion);
+  return !hasUnresolvedReference(value) && !hasAtomicConversationDependency(value);
+}
+
+function hasAtomicConversationDependency(assertion: string): boolean {
+  return /^(?:I\s+was|I\s+am|I['’]m)\s+(?:just\s+)?wondering\s+(?:if|whether)\b/iu.test(assertion) ||
+    /^I(?:['’]ll|\s+will)\s+(?:let\s+you\s+know|keep\s+you\s+posted|tell\s+you)\b/iu.test(assertion) ||
+    hasUnclosedAtomicInterlocutorReference(assertion) ||
+    hasUnanchoredAtomicEvaluation(assertion) ||
+    /\b(?:someone|something|anyone|anything|nothing|everything)\s+else\b/iu.test(assertion);
+}
+
+function hasUnclosedAtomicInterlocutorReference(assertion: string): boolean {
+  if (/\byou\b/iu.test(assertion)) return true;
+  if (/\byours\b/iu.test(assertion)) return true;
+  for (const match of assertion.matchAll(/\byour\s+([^,.!?;\n]{0,120})/giu)) {
+    const phrase = match[1]!.split(/\b(?:and|but|or|so)\b/iu, 1)[0] ?? "";
+    if (!/\b(?:called|named|titled|known\s+as)\s+(?:["“][^"”]{1,80}["”]|\p{Lu}[\p{L}\p{N}'’-]*(?:\s+\p{Lu}[\p{L}\p{N}'’-]*){0,5})/u.test(phrase)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasUnanchoredAtomicEvaluation(assertion: string): boolean {
+  return /\b(?:I|we)\s+(?:(?:really|just|quite|so)\s+)?(?:enjoyed|liked|loved|hated|appreciated)\s+the\s+\p{Ll}[\p{L}\p{N}'’-]*\s*[.!]?$/iu.test(assertion);
+}
+
 function isLocallyClosedReference(assertion: string, reference: string, index: number): boolean {
   const before = assertion.slice(0, index);
   const after = assertion.slice(index + reference.length);
