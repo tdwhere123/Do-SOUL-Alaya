@@ -271,6 +271,27 @@ describe("official API exact sentence-range locator", () => {
 });
 
 describe("official API assertion catalog locator", () => {
+  it("recovers an exact user quote when a valid catalog assertion is narrower", async () => {
+    const quote = "I just recently changed my last name, and I'm still getting used to it - it's funny, my old name was Johnson, but now it's Winters.";
+    const source = "I need to update my address with my health insurance provider. Can you walk me through the process or give me a phone number to call? By the way, " + quote;
+    const provider = providerFor({
+      source_locator: assertionLocator(2),
+      matched_text: quote
+    });
+
+    const [signal] = await provider.compile(source, contextForUser(source));
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: quote
+    });
+    expect(signal?.raw_payload.source_assertion).toBe(quote);
+    expect(resolveGardenSignalGrounding(signal!)).toEqual({
+      status: "grounded",
+      assertion: quote
+    });
+  });
+
   it("grounds the complete pre-but bronchitis clause selected by assertion_id", async () => {
     const source = "I actually recently had a bad case of bronchitis that I initially thought was just a cold, but it turned out to be bronchitis.";
     const provider = providerSelectingAssertion((text) =>
@@ -401,6 +422,51 @@ describe("official API assertion catalog locator", () => {
       status: "grounded",
       assertion: "I moved to Berlin."
     });
+  });
+
+  it("rejects a recovered quote from a different User message", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "I work remotely.",
+        proposed_matched_text: "I work remotely.",
+        source_assertion: "I work remotely.",
+        full_turn_content: "User: I moved to Berlin.\nAssistant: That sounds exciting.\nUser: I work remotely."
+      }
+    });
+
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects a recovered quote from Assistant context", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "I work remotely.",
+        proposed_matched_text: "I work remotely.",
+        source_assertion: "I work remotely.",
+        full_turn_content: "User: I moved to Berlin.\nAssistant: I work remotely."
+      }
+    });
+
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
+  });
+
+  it("rejects a recovered direct question from the selected User message", () => {
+    const signal = createSignal({
+      source: "garden_compile",
+      raw_payload: {
+        source_locator: assertionLocator(1),
+        matched_text: "Can I move to Paris?",
+        proposed_matched_text: "Can I move to Paris?",
+        source_assertion: "Can I move to Paris?",
+        full_turn_content: "User: I moved to Berlin. Can I move to Paris?"
+      }
+    });
+
+    expect(resolveGardenSignalGrounding(signal)).toMatchObject({ status: "rejected" });
   });
 
   it("rejects replay when live full_turn_content no longer has the selected assertion", () => {

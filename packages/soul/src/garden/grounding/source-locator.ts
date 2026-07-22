@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
-import { resolveSourceAssertion, type SourceAssertionResolution } from "./source-assertion.js";
+import {
+  resolveSourceAssertion,
+  SOURCE_ASSERTION_MAX_CHARS,
+  type SourceAssertionResolution
+} from "./source-assertion.js";
 import { isBoundedTemplateSlotAssertion } from "./source-assertion/reference-closure.js";
 import {
   coordinateSpans,
@@ -116,6 +120,20 @@ export function resolveOfficialApiSourceLocator(
   return resolveSourceAssertion(sourceText, selectedText);
 }
 
+export function resolveOfficialApiSourceLocatorQuote(
+  sourceText: string,
+  locator: OfficialApiSourceLocator,
+  proposedText: string
+): SourceAssertionResolution {
+  const located = resolveOfficialApiSourceLocator(sourceText, locator);
+  if (located.status === "rejected") return located;
+  if (locatorAssertionUniquelyCommitsToQuote(sourceText, located.assertion, proposedText)) {
+    return located;
+  }
+  if (locator.kind !== "assertion_catalog") return rejectedQuote();
+  return resolveCatalogVerbatimQuote(sourceText, locator.assertion_id, proposedText);
+}
+
 export function locatorAssertionUniquelyCommitsToQuote(
   sourceText: string,
   assertion: string,
@@ -139,6 +157,65 @@ function resolveAssertionCatalogLocator(
   }
   const assertionText = sourceText.slice(selected.start, selected.end);
   return resolveSourceAssertion(sentenceText, assertionText);
+}
+
+function resolveCatalogVerbatimQuote(
+  sourceText: string,
+  assertionId: number,
+  proposedText: string
+): SourceAssertionResolution {
+  const quote = proposedText.trim();
+  if (quote.length === 0 || quote.length > SOURCE_ASSERTION_MAX_CHARS) {
+    return resolveSourceAssertion(sourceText, quote);
+  }
+  if (hasDirectQuestionText(quote)) {
+    return { status: "rejected", reason: "source_assertion_incomplete" };
+  }
+  const offset = sourceText.indexOf(quote);
+  if (offset < 0) return rejectedQuote();
+  if (sourceText.indexOf(quote, offset + 1) >= 0) {
+    return { status: "rejected", reason: "matched_text_ambiguous" };
+  }
+  const selected = indexSourceAssertions(sourceText)[assertionId - 1];
+  const markers = collectRoleMarkers(sourceText);
+  const selectedBlock = selected === undefined ? null : sourceMessageBlockAt(markers, selected.start, sourceText.length);
+  const quoteBlock = sourceMessageBlockAt(markers, offset, sourceText.length);
+  if (selectedBlock === null || quoteBlock === null || selectedBlock.role !== "user" ||
+      quoteBlock.role !== "user" || selectedBlock.start !== quoteBlock.start) {
+    return rejectedQuote();
+  }
+  const resolution = resolveSourceAssertion(sourceText.slice(quoteBlock.start, quoteBlock.end), quote);
+  if (resolution.status === "grounded" || resolution.reason !== "source_assertion_not_self_contained") {
+    return resolution;
+  }
+  if (!isRecoverableVerbatimUserQuote(quote)) return resolution;
+  return { status: "grounded", assertion: stripRoleLabel(quote) };
+}
+
+function sourceMessageBlockAt(
+  markers: readonly { readonly start: number; readonly role: "user" | "assistant" }[],
+  offset: number,
+  sourceLength: number
+): { readonly start: number; readonly end: number; readonly role: "user" | "assistant" } | null {
+  let index = -1;
+  for (const [candidateIndex, marker] of markers.entries()) {
+    if (marker.start > offset) break;
+    index = candidateIndex;
+  }
+  if (index < 0) return null;
+  const marker = markers[index]!;
+  return { start: marker.start, end: markers[index + 1]?.start ?? sourceLength, role: marker.role };
+}
+
+function isRecoverableVerbatimUserQuote(value: string): boolean {
+  const quote = stripRoleLabel(value);
+  if (quote.length === 0 || quote.length > SOURCE_ASSERTION_MAX_CHARS || /[?？]/u.test(quote)) {
+    return false;
+  }
+  if (/^(?:(?:by the way|anyway|actually|well|speaking of)\s*,?\s*)?(?:i|we)\b/iu.test(quote)) {
+    return true;
+  }
+  return /^it\s+(?:took|takes|will\s+take)\s+me\b/iu.test(quote);
 }
 
 function hasDirectQuestion(selected: readonly IndexedSourceSpan[]): boolean {
@@ -301,4 +378,8 @@ function canonicalMessageContent(content: string): string {
 
 function rejectedRange(): SourceAssertionResolution {
   return { status: "rejected", reason: "source_assertion_not_self_contained" };
+}
+
+function rejectedQuote(): SourceAssertionResolution {
+  return { status: "rejected", reason: "matched_text_absent" };
 }

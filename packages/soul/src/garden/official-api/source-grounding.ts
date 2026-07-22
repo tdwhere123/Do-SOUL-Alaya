@@ -8,8 +8,7 @@ import {
   type SourceAssertionRejectionReason
 } from "../grounding/source-assertion.js";
 import {
-  locatorAssertionUniquelyCommitsToQuote,
-  resolveOfficialApiSourceLocator
+  resolveOfficialApiSourceLocatorQuote
 } from "../grounding/source-locator.js";
 import type { OfficialApiSourceTrustRejection } from "./source-trust.js";
 
@@ -48,16 +47,9 @@ export function groundOfficialApiDraft(
 ): OfficialApiGroundingResult {
   const resolution = draft.source_locator === undefined
     ? resolveSourceAssertion(sourceText, draft.matched_text)
-    : resolveOfficialApiSourceLocator(sourceText, draft.source_locator);
+    : resolveOfficialApiSourceLocatorQuote(sourceText, draft.source_locator, draft.matched_text);
   if (resolution.status === "rejected") return rejectedGrounding(draft, resolution.reason);
   const assertion = resolution.assertion;
-  if (draft.source_locator !== undefined && !locatorAssertionUniquelyCommitsToQuote(
-    sourceText,
-    assertion,
-    draft.matched_text
-  )) {
-    return rejectedGrounding(draft, "matched_text_absent");
-  }
   const canonicalEntities = groundCanonicalEntities(draft.canonical_entities, assertion);
   const reasons = groundingReasons(draft, assertion, canonicalEntities);
   const {

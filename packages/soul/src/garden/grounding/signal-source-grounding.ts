@@ -1,9 +1,8 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { resolveSourceAssertion, type SourceAssertionResolution } from "./source-assertion.js";
 import {
-  locatorAssertionUniquelyCommitsToQuote,
   parseOfficialApiSourceLocator,
-  resolveOfficialApiSourceLocator
+  resolveOfficialApiSourceLocatorQuote
 } from "./source-locator.js";
 
 export type GardenSignalGrounding = SourceAssertionResolution | {
@@ -33,11 +32,10 @@ export function resolveGardenRawPayloadGrounding(
     if (fullTurn === null || locator === null || proposedMatch === null) {
       return { status: "rejected", reason: "source_grounding_rejected" };
     }
-    const resolution = resolveOfficialApiSourceLocator(fullTurn, locator);
+    const resolution = resolveOfficialApiSourceLocatorQuote(fullTurn, locator, proposedMatch);
     const storedAssertion = readString(rawPayload.source_assertion) ??
       readString(rawPayload.matched_text);
-    if (resolution.status === "rejected" || storedAssertion !== resolution.assertion ||
-        !locatorAssertionUniquelyCommitsToQuote(fullTurn, resolution.assertion, proposedMatch)) {
+    if (resolution.status === "rejected" || storedAssertion !== resolution.assertion) {
       return { status: "rejected", reason: "source_grounding_rejected" };
     }
     return resolution;
