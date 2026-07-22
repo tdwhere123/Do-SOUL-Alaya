@@ -81,11 +81,11 @@ export interface LongMemEvalRunOptions {
   // see also: apps/bench-runner/src/harness/daemon.ts startBenchDaemon
   //   (dataDirRoot)
   readonly dataDirRoot?: string;
-  // @anchor longmemeval-snapshot-out: when set, after the run completes the
-  // seeded DB is WAL-checkpointed + copied to this path, and the per-question
-  // scoring sidecar + a version-binding manifest are written beside it, so a
-  // later recall-eval --snapshot run skips both extraction and
-  // materialization. see also: apps/bench-runner/src/longmemeval/snapshot.ts
+  // @anchor longmemeval-snapshot-out: when set, seed the full window then
+  // WAL-checkpoint + copy the DB to this path with sidecar + version-binding
+  // manifest. No producer-side recall pass — scores come from recall-eval /
+  // matrix cells against the sealed snapshot.
+  // see also: apps/bench-runner/src/longmemeval/snapshot.ts
   readonly snapshotOut?: string;
   // Override the extraction-cache root the run-start preflight validates and
   // the snapshot sidecar records provenance from (test-only). Production

@@ -11,7 +11,6 @@ import { writeRecallEvalSnapshot } from "./runner-helpers.js";
 import {
   prepareLongMemEvalQuestion,
   runLongMemEvalQuestion,
-  runPreparedLongMemEvalQuestion,
   type LongMemEvalPreparedQuestion,
   type LongMemEvalQuestionRunInput,
   type LongMemEvalWorkerResult
@@ -102,6 +101,8 @@ async function runSnapshotCompatiblePhases(
   daemon: BenchDaemonHandle,
   execution: ReturnType<typeof createExecutionState>
 ): Promise<LongMemEvalExecutionResult> {
+  // Snapshot producer is materialize-only: scores come from recall-eval /
+  // matrix cells on the sealed DB, not a stress/embedding-off A-like pass.
   const prepared = await prepareSnapshotWindow(context, daemon);
   await awaitLongMemEvalSnapshotQuiescence();
   const seedFuelInventory = await collectBenchSeedFuelInventory(daemon.dataDir);
@@ -109,7 +110,6 @@ async function runSnapshotCompatiblePhases(
     context,
     prepared.map((row) => row.prepared.snapshotQuestion)
   );
-  await runPreparedSnapshotWindow(context, daemon, execution, prepared);
   return buildExecutionResult(execution, seedFuelInventory);
 }
 
@@ -222,32 +222,17 @@ async function prepareSnapshotWindow(
   daemon: BenchDaemonHandle
 ): Promise<readonly PreparedSnapshotQuestion[]> {
   const prepared: PreparedSnapshotQuestion[] = [];
-  for (let i = 0; i < context.window.length; i += 1) {
+  const totalQuestions = context.window.length;
+  for (let i = 0; i < totalQuestions; i += 1) {
     const question = context.window[i];
     if (question === undefined) continue;
     const value = await prepareLongMemEvalQuestion(
       buildQuestionRunInput(context, daemon, i, question)
     );
     prepared.push({ questionIndex: i, question, prepared: value });
+    writeLongMemEvalSeedProgress(i, totalQuestions, question.question_id);
   }
   return prepared;
-}
-
-async function runPreparedSnapshotWindow(
-  context: LongMemEvalRunContext,
-  daemon: BenchDaemonHandle,
-  execution: ReturnType<typeof createExecutionState>,
-  prepared: readonly PreparedSnapshotQuestion[]
-): Promise<void> {
-  for (const row of prepared) {
-    await runPreparedLongMemEvalQuestionSafely(context, daemon, execution, row);
-  }
-  if (execution.questionFailures > 0) {
-    process.stdout.write(
-      `[longmemeval] ${execution.questionFailures}/${context.window.length} question(s) failed ` +
-        `and were skipped; KPIs cover the ${execution.collected.length} completed.\n`
-    );
-  }
 }
 
 async function runLongMemEvalQuestionSafely(
@@ -264,24 +249,6 @@ async function runLongMemEvalQuestionSafely(
     question,
     () => runLongMemEvalQuestion(
       buildQuestionRunInput(context, daemon, questionIndex, question)
-    )
-  );
-}
-
-async function runPreparedLongMemEvalQuestionSafely(
-  context: LongMemEvalRunContext,
-  daemon: BenchDaemonHandle,
-  execution: ReturnType<typeof createExecutionState>,
-  row: PreparedSnapshotQuestion
-): Promise<boolean> {
-  return collectLongMemEvalQuestionSafely(
-    context,
-    execution,
-    row.questionIndex,
-    row.question,
-    () => runPreparedLongMemEvalQuestion(
-      buildQuestionRunInput(context, daemon, row.questionIndex, row.question),
-      row.prepared
     )
   );
 }
@@ -368,6 +335,16 @@ function assertSnapshotProducerExecutionPolicy(context: LongMemEvalRunContext): 
     },
     env: process.env
   });
+}
+
+function writeLongMemEvalSeedProgress(
+  questionIndex: number,
+  totalQuestions: number,
+  questionId: string
+): void {
+  process.stdout.write(
+    `[${questionIndex + 1}/${totalQuestions}] ${questionId.slice(0, 8)} seeded\n`
+  );
 }
 
 function writeLongMemEvalQuestionProgress(

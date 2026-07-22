@@ -93,7 +93,7 @@ afterEach(() => {
 });
 
 describe("LongMemEval snapshot execution ordering", () => {
-  it("freezes the full seed window before the first recall or report phase", async () => {
+  it("freezes the full seed window and writes the snapshot without a recall pass", async () => {
     const result = await executeLongMemEvalRun(snapshotContext());
 
     expect(mocks.events).toEqual([
@@ -103,11 +103,10 @@ describe("LongMemEval snapshot execution ordering", () => {
       "inventory",
       "provenance",
       "snapshot",
-      "recall:first",
-      "recall:second",
       "shutdown"
     ]);
-    expect(result.collected.map((row) => row.questionId)).toEqual(["first", "second"]);
+    expect(result.collected).toEqual([]);
+    expect(mocks.recall).not.toHaveBeenCalled();
     expect(mocks.runQuestion).not.toHaveBeenCalled();
   });
 

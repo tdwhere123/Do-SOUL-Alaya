@@ -68,7 +68,9 @@ export async function runLongMemEvalCommand(opts: ParsedFlags): Promise<number> 
     const result = await runLongMemEval(buildLongMemEvalRunOptions(
       opts, qaOption, expansionCapability
     ));
-    process.stdout.write(renderLongMemEvalResult(result));
+    process.stdout.write(renderLongMemEvalResult(result, opts));
+    // Snapshot producer success is a sealed DB, not producer-side recall KPI.
+    if (opts.snapshotOut !== undefined) return 0;
     return exitCodeForBenchmarkResult(
       result.payload,
       result.evidenceContext ?? undefined
@@ -109,6 +111,7 @@ function renderLongMemEvalStart(
     (opts.weightOverridesJson !== undefined ? " weights=cli" : "") +
     (qaOption !== undefined ? " qa=on" : "") +
     (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+    (opts.snapshotOut !== undefined ? " mode=snapshot-materialize" : "") +
     "...\n";
 }
 
@@ -144,7 +147,16 @@ function buildLongMemEvalRunOptions(
   };
 }
 
-function renderLongMemEvalResult(result: LongMemEvalRunResult): string {
+function renderLongMemEvalResult(
+  result: LongMemEvalRunResult,
+  opts: ParsedFlags
+): string {
+  if (opts.snapshotOut !== undefined) {
+    return `Done. Snapshot materialize only (scores come from native A/B).\n` +
+      `  Snapshot: ${opts.snapshotOut}\n` +
+      `  Producer history slug: ${result.slug}\n` +
+      `  KPI: ${result.kpiPath}\n`;
+  }
   const kpi = result.payload.kpi;
   return `Done. Slug: ${result.slug}\n` +
     `  Policy shape: ${result.payload.policy_shape ?? "stress"}\n` +
