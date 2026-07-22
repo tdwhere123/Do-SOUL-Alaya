@@ -9,7 +9,10 @@ import {
 } from "../../../longmemeval/extraction/extraction-fill.js";
 import { readExtractionCacheManifest } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import type { BenchSignalExtractor } from "../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { cacheFilePath, computeExtractionTurnCacheKey } from
+  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { inspectTurnContentKeySpace } from
+  "../../../longmemeval/extraction/turn-contents.js";
 import {
   inspectExtractionAuthority,
   readCurrentExtractionAuthorityRevision
@@ -150,17 +153,17 @@ describe("runExtractionFill", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name);
     expectFirstShardModel(cacheRoot, shardDirs, "deepseek-v4-flash-free");
-    const answerTurn = collectDistinctTurnContents([
+    const answerTurn = inspectTurnContentKeySpace([
       buildQuestion("key", "User: alpha\nAssistant: ok.", "User: decoy")
-    ]).find((turn) => turn.includes("alpha"));
+    ]).distinctExtractionTurns.find((turn) => turn.turnContent.includes("alpha"));
     expect(answerTurn).toBeDefined();
-    const exactKey = computeCacheKey(
+    const exactKey = computeExtractionTurnCacheKey(
       "deepseek-v4-flash-free",
       "deepseek-v4-nonthinking-v1",
       OFFICIAL_API_SYSTEM_PROMPT,
       answerTurn!
     );
-    const familyKey = computeCacheKey(
+    const familyKey = computeExtractionTurnCacheKey(
       "deepseek-v4-flash",
       "deepseek-v4-nonthinking-v1",
       OFFICIAL_API_SYSTEM_PROMPT,

@@ -41,6 +41,7 @@ import {
   type ExtractionFillCompletion
 } from "./fill/fill-completion.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
+import { computeExtractionFillAttemptCeiling } from "./authority/receipt-limits.js";
 import { collectDistinctTurnContents } from "./turn-contents.js";
 import { computeSupplementalSourceBindingSha256 } from
   "./cache/supplemental-source-receipt.js";
@@ -447,7 +448,7 @@ function verifyCurrentR3SpendApproval(input: {
       targetSelectionSha256: selectionIdentitySha256(data.nextSelection),
       targetSelectedCount: data.nextSelection.selected_count,
       startingMissing,
-      maximumAttempts: Math.ceil(startingMissing * 1.1),
+      maximumAttempts: computeExtractionFillAttemptCeiling(startingMissing),
       successfulShardCeiling: startingMissing,
       materialEffect: data.materialEffect
     });

@@ -82,7 +82,7 @@ it("writes an inspect-only, digest-bound authority receipt without invoking extr
     receipt_digest: expect.stringMatching(/^[a-f0-9]{64}$/u),
     target_selection_digest: "9".repeat(64)
   });
-  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("attempt_cap=3"));
+  expect(stdout).toHaveBeenCalledWith(expect.stringContaining("attempt_cap=10"));
 });
 
 it("does not require target selection outside the canonical longmemeval_s windows", async () => {
@@ -115,7 +115,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   const ledger = {
     lineageDigest: "f".repeat(64),
     startingMissing: 2,
-    maximumAttempts: 3,
+    maximumAttempts: 10,
     successfulShardCeiling: 2,
     attempts: 1,
     successfulShards: 1,
@@ -156,7 +156,7 @@ it("carries an existing fill lineage cap while inspecting its completed shards o
   expect(write.mock.calls[0]?.[1]).toMatchObject({
     limits: {
       starting_missing: 2,
-      maximum_attempts: 3,
+      maximum_attempts: 10,
       successful_shard_ceiling: 2
     },
     observation: {
@@ -305,6 +305,20 @@ it("rejects custom pinned metadata before creating a direct target root", async 
   expect(createDirectSpend).not.toHaveBeenCalled();
   expect(inspect).not.toHaveBeenCalled();
   expect(stderr).toHaveBeenCalledWith(expect.stringContaining("canonical longmemeval_s"));
+});
+
+it("rejects a duplicate continuation predecessor before inspection", async () => {
+  const inspect = vi.fn();
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runAuthorizeExtractionCommand([
+    ...authorizeArgs(),
+    "--extraction-predecessor-authority", "/tmp/parent-a.json",
+    "--extraction-predecessor-authority=/tmp/parent-b.json"
+  ], { inspect });
+
+  expect(exitCode).toBe(2);
+  expect(inspect).not.toHaveBeenCalled();
 });
 
 function authorizeArgs(input: {

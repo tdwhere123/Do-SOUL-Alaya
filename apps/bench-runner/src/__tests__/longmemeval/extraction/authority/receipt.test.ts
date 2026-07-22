@@ -66,13 +66,38 @@ describe("extraction authority receipt", () => {
     expect(receipt.receipt_digest).toMatch(/^[a-f0-9]{64}$/u);
     expect(receipt.limits).toMatchObject({
       starting_missing: 9,
-      maximum_attempts: 10,
+      maximum_attempts: 45,
       successful_shard_ceiling: 9,
       max_output_tokens: 512,
       no_progress_timeout_ms: 1_800_000
     });
     expect(receipt.price.estimated_upper_usd).toBeGreaterThan(0);
     expect(() => assertExtractionAuthorityReceipt(receipt, observation)).not.toThrow();
+  });
+
+  it("rejects a legacy fresh fill cap that omits retry and strict-empty attempts", () => {
+    expect(() => createExtractionAuthorityReceipt({
+      action: "fill",
+      observation,
+      cumulativeLimits: {
+        startingMissing: 9,
+        maximumAttempts: 10,
+        successfulShardCeiling: 9
+      },
+      outputTokenCap: { field: "max_tokens", value: 512 },
+      priceEstimate: {
+        inputUsdPerMillion: 1,
+        outputUsdPerMillion: 2,
+        maximumInputTokensPerAttempt: 300
+      },
+      diskFloorBytes: 1_024,
+      inspection: {
+        writerLock: "absent",
+        disk: { status: "available", freeBytes: 2_048 },
+        credentialStatus: "present",
+        modelReadiness: "not_probed"
+      }
+    })).toThrow(/cumulative limits are not derivable/u);
   });
 
   it("allows only monotonic in-lineage inventory progress after receipt creation", () => {
@@ -163,7 +188,7 @@ describe("extraction authority receipt", () => {
       repairScope,
       cumulativeLimits: {
         startingMissing: 2,
-        maximumAttempts: 3,
+        maximumAttempts: 10,
         successfulShardCeiling: 2
       },
       outputTokenCap: { field: "max_tokens", value: 4096 },
@@ -191,7 +216,7 @@ describe("extraction authority receipt", () => {
     });
     expect(receipt.limits).toMatchObject({
       starting_missing: 2,
-      maximum_attempts: 3,
+      maximum_attempts: 10,
       successful_shard_ceiling: 2,
       max_output_tokens: 4096
     });
@@ -216,7 +241,7 @@ describe("extraction authority receipt", () => {
       repairScope,
       cumulativeLimits: {
         startingMissing: 2,
-        maximumAttempts: 3,
+        maximumAttempts: 10,
         successfulShardCeiling: 2
       },
       outputTokenCap: { field: "max_tokens", value: 4096 },

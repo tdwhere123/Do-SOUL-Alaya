@@ -28,6 +28,7 @@ import {
   buildFinalScoreFactors,
   createFineAssessmentDiagnostic
 } from "./diagnostics/fine-assessment-diagnostics.js";
+import { orderWithBoundedHeadDisplacement } from "./final-order/bounded-head-displacement.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -75,6 +76,7 @@ type FineAssessmentSelectionParams = Readonly<{
   /** Packing relevance; defaults to finalRelevance. Deep-head scores when public scalar stays fused. */
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
+  readonly maxHeadDropAfterCoverage?: number;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
 }>;
@@ -103,7 +105,12 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"
     ? freezeSelectedPacket(finalAccumulator)
-    : orderDeliveredPacket(finalAccumulator, context, finalOrder);
+    : orderDeliveredPacket(
+        finalAccumulator,
+        context,
+        finalOrder,
+        params.maxHeadDropAfterCoverage
+      );
   return Object.freeze({
     candidates: delivered.candidates,
     diagnostics: delivered.diagnostics
@@ -125,14 +132,24 @@ function freezeSelectedPacket(
 function orderDeliveredPacket(
   accumulator: FineAssessmentAccumulator,
   context: FineAssessmentSelectionContext,
-  finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>
+  finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
+  maxHeadDrop: number | undefined
 ): Readonly<{
   candidates: readonly Readonly<RecallCandidate>[];
   diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
 }> {
-  const candidates = [...accumulator.selected].sort((left, right) =>
+  const publicOrder = [...accumulator.selected].sort((left, right) =>
     compareFinalDeliveryOrder(left, right, finalOrder, context.rankByCandidateKey)
   );
+  const candidates = finalOrder === "public_relevance" && maxHeadDrop !== undefined
+    ? orderWithBoundedHeadDisplacement({
+        publicOrder,
+        headRankByKey: context.rankByCandidateKey,
+        keyOf: buildRecallCandidateSelectionKey,
+        maxDownwardDisplacement: maxHeadDrop,
+        protectedRankLimit: context.config.budgets.max_entries
+      })
+    : publicOrder;
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
   const ranked = candidates.map((candidate, index) => {

@@ -30,8 +30,13 @@ import {
   readExtractionAuthorityReceipt,
   type ExtractionAuthorityReceipt
 } from "./authority/receipt.js";
-import { receiptExtractionCacheIdentity } from "./authority/receipt-cache-identity.js";
-import { readExtractionAttemptLedger } from "./authority/attempt-ledger.js";
+import type { ExtractionAttemptLedgerSnapshot } from "./authority/attempt-ledger.js";
+import {
+  assertLoadedSameRootContinuation,
+  inspectContinuationLedgerState,
+  loadSameRootExtractionContinuation,
+  type LoadedSameRootContinuation
+} from "./authority/continuation/runtime.js";
 import { createExtractionNoProgressWatchdog } from
   "./authority/no-progress-watchdog.js";
 import { assertDirectExtractionSpendRootBinding } from "./authority/direct-deepseek-500.js";
@@ -63,19 +68,30 @@ import { assertPreservedValidClosureUnchanged } from
   "./authority/repair/preserved-valid-closure.js";
 import { isBoundedExistingCacheRepair } from
   "./authority/repair/bounded-existing-cache-repair.js";
-import { assertProviderTaskFailureIsolationScope } from
-  "./fill/policy/provider-task-failure-isolation.js";
+import {
+  assertProviderTaskFailureIsolationScope,
+  resolveProviderTaskFailureTolerance
+} from "./fill/policy/provider-task-failure-isolation.js";
+import {
+  resolveExtractionFillConcurrency,
+  resolveExtractionFillInitialConcurrency
+} from "./fill/policy/fill-concurrency.js";
+import {
+  assertDirectExtractionMetadataScope,
+  assertReceiptBoundExpansionSpend
+} from "./authority/runtime/scope.js";
 
 export { collectDistinctTurnContents } from "./turn-contents.js";
-
-export const EXTRACTION_FILL_DEFAULT_CONCURRENCY = 32;
-export const EXTRACTION_FILL_MAX_CONCURRENCY = 32;
-
+export {
+  EXTRACTION_FILL_DEFAULT_CONCURRENCY,
+  EXTRACTION_FILL_MAX_CONCURRENCY
+} from "./fill/policy/fill-concurrency.js";
 export interface ExtractionFillOptions {
   readonly variant: LongMemEvalVariant;
   readonly limit?: number;
   readonly offset?: number;
   readonly concurrency?: number;
+  readonly initialConcurrency?: number;
   readonly questionBatchLimit?: number;
   readonly cacheRoot?: string;
   readonly dataDir?: string;
@@ -87,12 +103,13 @@ export interface ExtractionFillOptions {
   readonly signal?: AbortSignal;
   readonly authorityReceiptPath?: string;
   readonly targetSelectionReceiptPath?: string;
+  readonly predecessorAuthorityReceiptPath?: string;
+  readonly cacheKeyAllowlist?: readonly string[];
   /** Continue normal target-bound fills after isolated provider task failures. */
   readonly tolerateProviderTaskFailures?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly r3SpendApproval?: R3SpendApproval;
 }
-
 export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly requestedTurns: number;
   readonly cacheHits: number;
@@ -101,7 +118,6 @@ export interface ExtractionFillResult extends FillRetryTelemetry {
   readonly manifest: ExtractionCacheManifest;
   readonly authorityTelemetry?: import("./authority/attempt-ledger.js").ExtractionAttemptLedgerSnapshot;
 }
-
 export async function runExtractionFill(
   options: ExtractionFillOptions
 ): Promise<ExtractionFillResult> {
@@ -121,6 +137,10 @@ export async function runExtractionFill(
       `${authority.receipt.limits.max_concurrency}`
     );
   }
+  const initialConcurrency = resolveExtractionFillInitialConcurrency(
+    options.initialConcurrency,
+    authority?.receipt.action === "probe" ? 1 : concurrency
+  );
   const initialIdentity = readExtractionCacheManifestIdentity(cacheRoot);
   const directSpend = authority?.receipt.direct_spend;
   if (directSpend !== undefined &&
@@ -156,7 +176,9 @@ export async function runExtractionFill(
   const lease = acquireExtractionCacheWriteLease(cacheRoot);
   return withExtractionCacheWriteLease(
     lease,
-    () => runLockedExtractionFill(options, cacheRoot, lease, expansion, concurrency, authority)
+    () => runLockedExtractionFill(
+      options, cacheRoot, lease, expansion, concurrency, initialConcurrency, authority
+    )
   );
 }
 
@@ -166,6 +188,7 @@ async function runLockedExtractionFill(
   writeLease: ExtractionCacheWriteLease,
   expansion: PreparedExpansionFillAuthority | undefined,
   concurrency: number,
+  initialConcurrency: number,
   authority: ReceiptBoundExtractionAuthority | undefined
 ): Promise<ExtractionFillResult> {
   const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
@@ -175,6 +198,10 @@ async function runLockedExtractionFill(
       options, cacheRoot, concurrency, log, expansion, authority, writeLease
     );
   const stats = newFillStats();
+  const tolerateProviderTaskFailures = resolveProviderTaskFailureTolerance({
+    requested: options.tolerateProviderTaskFailures === true,
+    questionBatchLimit: prepared.questionBatchLimit, receipt: authority?.receipt
+  });
   const executionAuthority = authority === undefined
     ? undefined
     : createExtractionExecutionAuthority(
@@ -188,12 +215,15 @@ async function runLockedExtractionFill(
     });
   try {
     await executePreparedExtractionFill({
-      options, prepared, cacheRoot, concurrency, stats, log, writeLease, executionAuthority,
+      options, prepared, cacheRoot, concurrency, initialConcurrency, stats, log, writeLease,
+      executionAuthority,
+      tolerateProviderTaskFailures,
       signal: watchdog?.signal ?? options.signal,
       markProgress: watchdog?.markProgress
     });
     return finishPreparedExtractionFill(
-      prepared, cacheRoot, stats, log, writeLease, executionAuthority
+      prepared, cacheRoot, stats, log, writeLease, executionAuthority,
+      tolerateProviderTaskFailures, options.cacheKeyAllowlist?.length
     );
   } catch (cause) {
     try {
@@ -215,10 +245,12 @@ async function executePreparedExtractionFill(input: {
   readonly prepared: Awaited<ReturnType<typeof prepareExtractionFill>>;
   readonly cacheRoot: string;
   readonly concurrency: number;
+  readonly initialConcurrency: number;
   readonly stats: ReturnType<typeof newFillStats>;
   readonly log: (message: string) => void;
   readonly writeLease: ExtractionCacheWriteLease;
   readonly executionAuthority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined;
+  readonly tolerateProviderTaskFailures: boolean;
   readonly signal: AbortSignal | undefined;
   readonly markProgress: (() => void) | undefined;
 }): Promise<void> {
@@ -227,6 +259,8 @@ async function executePreparedExtractionFill(input: {
     input.prepared,
     input.cacheRoot,
     input.executionAuthority?.receipt.action === "probe" ? 1 : input.concurrency,
+    input.initialConcurrency,
+    input.tolerateProviderTaskFailures,
     input.stats,
     input.log,
     input.writeLease,
@@ -243,7 +277,9 @@ function finishPreparedExtractionFill(
   stats: ReturnType<typeof newFillStats>,
   log: (message: string) => void,
   writeLease: ExtractionCacheWriteLease,
-  authority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined
+  authority: import("./fill/fill-execution.js").ExecutionExtractionAuthority | undefined,
+  allowProviderTaskFailures: boolean,
+  cacheKeyAllowlistSize: number | undefined
 ): ExtractionFillResult {
   const telemetry = authority?.snapshot();
   const repairScopeTurns = authority?.receipt.repair_scope?.shard_count;
@@ -252,7 +288,8 @@ function finishPreparedExtractionFill(
   }
   return prepared.questionBatchLimit === undefined
     ? finishExtractionFill(
-      prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns
+      prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns,
+      allowProviderTaskFailures, cacheKeyAllowlistSize
     )
     : finishExtractionQuestionBatch(
       prepared, cacheRoot, stats, log, writeLease, telemetry, repairScopeTurns
@@ -273,7 +310,9 @@ async function prepareReceiptBoundExtractionFill(
   if (expansion !== undefined) assertReceiptBoundExpansionSpend(authority.receipt, expansion);
   const prepared = pinInspectedExtractionFill(inspected, cacheRoot, concurrency, log);
   try {
-    await revalidateExtractionAuthority(options, cacheRoot, authority, writeLease);
+    await revalidateExtractionAuthority(
+      options, cacheRoot, authority, writeLease, prepared.pinnedManifestSha256
+    );
     if (expansion !== undefined) assertReceiptBoundExpansionSpend(authority.receipt, expansion);
   } catch (cause) {
     try {
@@ -289,19 +328,10 @@ async function prepareReceiptBoundExtractionFill(
   return prepared;
 }
 
-function resolveExtractionFillConcurrency(raw: number | undefined): number {
-  const value = raw ?? EXTRACTION_FILL_DEFAULT_CONCURRENCY;
-  if (!Number.isSafeInteger(value) || value < 1 || value > EXTRACTION_FILL_MAX_CONCURRENCY) {
-    throw new Error(
-      `extraction-fill concurrency must be an integer from 1 to ${EXTRACTION_FILL_MAX_CONCURRENCY}`
-    );
-  }
-  return value;
-}
-
 interface ReceiptBoundExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
   readonly targetSelection?: ExtractionTargetSelectionReceipt;
+  readonly continuation?: LoadedSameRootContinuation;
 }
 
 async function loadExtractionAuthority(
@@ -311,11 +341,20 @@ async function loadExtractionAuthority(
   const receipt = readExtractionAuthorityReceipt(options.authorityReceiptPath!);
   assertDirectExtractionMetadataScope(options, receipt);
   const targetSelection = loadTargetSelection(options, receipt);
-  const inspection = await inspectReceiptAuthority(options, cacheRoot, receipt);
-  assertAuthorityInspection(receipt, inspection, cacheRoot, undefined, targetSelection);
+  const continuation = loadSameRootExtractionContinuation({
+    predecessorAuthorityReceiptPath: options.predecessorAuthorityReceiptPath,
+    cacheRoot,
+    receipt
+  });
+  const inspected = await inspectReceiptAuthority(options, cacheRoot, receipt, continuation);
+  assertAuthorityInspection(
+    receipt, inspected.inspection, cacheRoot, undefined, targetSelection,
+    continuation, inspected.successorLedger
+  );
   return Object.freeze({
     receipt,
-    ...(targetSelection === undefined ? {} : { targetSelection })
+    ...(targetSelection === undefined ? {} : { targetSelection }),
+    ...(continuation === undefined ? {} : { continuation })
   });
 }
 
@@ -353,64 +392,31 @@ function loadTargetSelection(
   return targetSelection;
 }
 
-function assertDirectExtractionMetadataScope(
-  options: ExtractionFillOptions,
-  receipt: ExtractionAuthorityReceipt
-): void {
-  if (receipt.direct_spend !== undefined && options.pinnedMetaRoot !== undefined) {
-    throw new ExtractionCacheInvariantError(
-      "direct extraction cannot use pinnedMetaRoot (--pinned-meta-root)"
-    );
-  }
-}
-
 async function revalidateExtractionAuthority(
   options: ExtractionFillOptions,
   cacheRoot: string,
   authority: ReceiptBoundExtractionAuthority,
-  writeLease: ExtractionCacheWriteLease
+  writeLease: ExtractionCacheWriteLease,
+  postPinManifestSha256: string | undefined = undefined
 ): Promise<void> {
   writeLease.assertOwned();
-  const inspection = await inspectReceiptAuthority(options, cacheRoot, authority.receipt);
-  assertAuthorityInspection(
-    authority.receipt, inspection, cacheRoot, writeLease, authority.targetSelection
+  const inspected = await inspectReceiptAuthority(
+    options, cacheRoot, authority.receipt, authority.continuation
   );
-}
-
-function assertReceiptBoundExpansionSpend(
-  receipt: ExtractionAuthorityReceipt,
-  expansion: PreparedExpansionFillAuthority
-): void {
-  const approval = expansion.r3SpendApproval.approval;
-  const limits = receipt.limits;
-  if (receipt.action !== "fill" ||
-      receipt.observation.dataset.variant !== "longmemeval_s" ||
-      receipt.observation.dataset.windowOffset !== 0 ||
-      receipt.observation.dataset.windowLimit !== 500 ||
-      receipt.observation.extraction.manifestSha256 !== approval.r2.final_cache_identity_sha256 ||
-      receipt.observation.inventory.missingTurns !== approval.spend.starting_missing ||
-      limits.starting_missing !== approval.spend.starting_missing ||
-      limits.maximum_attempts !== approval.spend.maximum_attempts ||
-      limits.successful_shard_ceiling !== approval.spend.successful_shard_ceiling ||
-      limits.disk_floor_bytes < approval.spend.disk_floor_bytes ||
-      receipt.price.estimated_upper_usd > approval.spend.estimated_cost_usd) {
-    throw new ExtractionCacheInvariantError(
-      "500Q extraction authority receipt does not match the approved R3 spend envelope"
-    );
-  }
+  assertAuthorityInspection(
+    authority.receipt, inspected.inspection, cacheRoot, writeLease, authority.targetSelection,
+    authority.continuation, inspected.successorLedger, postPinManifestSha256
+  );
 }
 
 async function inspectReceiptAuthority(
   options: ExtractionFillOptions,
   cacheRoot: string,
-  receipt: ExtractionAuthorityReceipt
+  receipt: ExtractionAuthorityReceipt,
+  continuation: LoadedSameRootContinuation | undefined
 ) {
-  const ledger = readExtractionAttemptLedger({
-    cacheRoot,
-    lineageDigest: receipt.lineage_digest,
-    cacheIdentity: receiptExtractionCacheIdentity(receipt)
-  });
-  return await inspectExtractionAuthority({
+  const ledgerState = inspectContinuationLedgerState({ cacheRoot, receipt, continuation });
+  const inspection = await inspectExtractionAuthority({
     variant: options.variant,
     ...(options.limit === undefined ? {} : { limit: options.limit }),
     ...(options.offset === undefined ? {} : { offset: options.offset }),
@@ -431,8 +437,14 @@ async function inspectReceiptAuthority(
         (shard) => shard.cache_key
       )
     }),
-    ...(ledger === undefined ? {} : { excludeContentClosureKeys: ledger.successfulKeys })
+    ...(ledgerState.newSuccessfulKeys.length === 0 ? {} : {
+      excludeContentClosureKeys: ledgerState.newSuccessfulKeys
+    }),
+    ...(receipt.continuation === undefined || ledgerState.newSuccessfulKeys.length === 0 ? {} : {
+      preservedValidExclusionKeys: ledgerState.newSuccessfulKeys
+    })
   });
+  return { inspection, successorLedger: ledgerState.successorLedger };
 }
 
 function assertAuthorityInspection(
@@ -440,7 +452,10 @@ function assertAuthorityInspection(
   inspection: Awaited<ReturnType<typeof inspectExtractionAuthority>>,
   cacheRoot: string,
   writeLease: ExtractionCacheWriteLease | undefined = undefined,
-  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined
+  targetSelection: ExtractionTargetSelectionReceipt | undefined = undefined,
+  continuation: LoadedSameRootContinuation | undefined = undefined,
+  successorLedger: ExtractionAttemptLedgerSnapshot | undefined = undefined,
+  postPinManifestSha256: string | undefined = undefined
 ): void {
   assertExtractionAuthorityReceipt(receipt, inspection.observation);
   if (receipt.repair_scope !== undefined) {
@@ -467,6 +482,10 @@ function assertAuthorityInspection(
     });
     assertExtractionTargetSelectionWindow(targetSelection, inspection.observation);
   }
+  assertLoadedSameRootContinuation({
+    cacheRoot, receipt, continuation, successorLedger, targetSelection, inspection,
+    ...(postPinManifestSha256 === undefined ? {} : { postPinManifestSha256 })
+  });
   assertExtractionAuthorityRuntimeReadiness(receipt, {
     writerLock: inspection.writerLock,
     disk: inspection.disk,

@@ -7,6 +7,7 @@ import {
   createGardenClaimReclaimer,
   createHostWorkerTaskExpirer
 } from "./host-worker-task-maintenance.js";
+import type { PostTurnSignalReceiver } from "./post-turn-extract/signal-receiver.js";
 
 export interface HostWorkerTaskRuntimeSupport {
   processPostTurnExtractTask(): Promise<void>;
@@ -22,11 +23,7 @@ export function createHostWorkerTaskRuntimeSupport(input: Readonly<{
   readonly eventPublisher: EventPublisher;
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
-  readonly signalReceiver?: {
-    receiveSignal(
-      signal: import("@do-soul/alaya-protocol").CandidateMemorySignal
-    ): Promise<Readonly<{ readonly signal: Readonly<{ readonly signal_id: string }> }>>;
-  };
+  readonly signalReceiver?: PostTurnSignalReceiver;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>): HostWorkerTaskRuntimeSupport {
   const processPostTurnExtractTask = createPostTurnExtractTaskProcessor(input);

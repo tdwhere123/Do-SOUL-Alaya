@@ -153,6 +153,63 @@ describe("MaterializationRouter routing and grounding", () => {
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });
 
+  it("archives a Garden evidence anchor without treating it as a durable fact", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
+    const signal = createSignal({
+      source: "garden_compile",
+      signal_kind: "potential_evidence_anchor",
+      object_kind: "source_turn",
+      evidence_refs: [],
+      raw_payload: {
+        full_turn_content: "User: ok thanks",
+        evidence_preservation: {
+          version: 1,
+          reason: "empty_extraction",
+          truncated: false,
+          chars_clipped: 0
+        }
+      }
+    });
+
+    const result = await router.materializeSignal(signal);
+
+    expect(result).toMatchObject({
+      target_kind: "evidence_only",
+      route_target: "evidence_only",
+      success: true,
+      created_objects: [{ object_kind: "evidence_capsule", object_id: "evidence-1" }]
+    });
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(expect.objectContaining({
+      excerpt: "User: ok thanks",
+      evidence_health_state: "questionable",
+      physical_anchor: expect.objectContaining({
+        artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
+      })
+    }));
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
+  it("does not let a provider-selected evidence kind bypass source grounding", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
+    const signal = createSignal({
+      source: "garden_compile",
+      signal_kind: "potential_evidence_anchor",
+      object_kind: "source_turn",
+      evidence_refs: [],
+      raw_payload: { full_turn_content: "Model-selected archival text." }
+    });
+
+    expect(router.route(signal)).toMatchObject({
+      kind: "deferred",
+      defer_class: "source_grounding"
+    });
+    await router.materializeSignal(signal);
+    expect(deps.evidenceService.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a self-asserted fallback that is absent from the available full turn", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter(deps);

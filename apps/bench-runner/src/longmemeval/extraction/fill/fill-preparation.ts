@@ -34,6 +34,7 @@ import {
   revalidateExpansionFillAuthority,
   type PreparedExpansionFillAuthority
 } from "../expansion-fill-authority.js";
+import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 
 export interface PreparedExtractionFill {
   readonly config: CompileSeedExtractionConfig;
@@ -41,6 +42,8 @@ export interface PreparedExtractionFill {
   readonly pinnedManifestSha256: string;
   readonly distinctTurns: readonly string[];
   readonly executionTurns: readonly string[];
+  readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
@@ -55,6 +58,8 @@ export interface InspectedExtractionFill {
   readonly config: CompileSeedExtractionConfig;
   readonly distinctTurns: readonly string[];
   readonly executionTurns: readonly string[];
+  readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
   readonly datasetRevision: string;
   readonly variant: LongMemEvalVariant;
@@ -94,6 +99,8 @@ export async function inspectExtractionFillPreparation(
     config,
     distinctTurns: window.distinctTurns,
     executionTurns: window.executionTurns,
+    distinctExtractionTurns: window.distinctExtractionTurns,
+    executionExtractionTurns: window.executionExtractionTurns,
     requestedTurns: window.requestedTurns,
     datasetRevision: window.datasetRevision,
     variant: options.variant,
@@ -137,6 +144,8 @@ export function pinInspectedExtractionFill(
     pinnedManifestSha256: pinned.manifestSha256,
     distinctTurns: inspected.distinctTurns,
     executionTurns: inspected.executionTurns,
+    distinctExtractionTurns: inspected.distinctExtractionTurns,
+    executionExtractionTurns: inspected.executionExtractionTurns,
     requestedTurns: inspected.requestedTurns,
     datasetRevision: inspected.datasetRevision,
     variant: inspected.variant,
@@ -162,14 +171,14 @@ export function restoreInspectedExtractionFill(
 export function inspectFillWindow(
   cacheRoot: string,
   config: CompileSeedExtractionConfig,
-  distinctTurns: readonly string[]
+  extractionTurns: readonly LongMemEvalExtractionTurn[]
 ): ExtractionFillCompletion {
   return inspectExtractionFillCompletion({
     cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents: distinctTurns
+    extractionTurns
   });
 }
 
@@ -199,7 +208,9 @@ async function inspectPreparedFillWindow(input: {
     input.startingIdentity,
     readExtractionCacheManifestIdentity(input.cacheRoot)
   );
-  const completion = inspectFillWindow(input.cacheRoot, input.config, window.distinctTurns);
+  const completion = inspectFillWindow(
+    input.cacheRoot, input.config, window.distinctExtractionTurns
+  );
   if (input.expansion !== undefined) revalidateExpansionFillAuthority(input.expansion);
   assertNoOrphanFillSubstrate(completion);
   return { window, completion };

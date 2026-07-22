@@ -245,9 +245,20 @@ describe("bench evidence capsule — production-faithful span", () => {
       allowLiveExtraction: true,
       extractorFactory: () => ({
         extract: async () => ({
-          rawJson: signalsEnvelope([
-            { distilled: "Alice lives in Berlin.", matched: "I moved to Berlin" }
-          ])
+          rawJson: JSON.stringify({
+            signals: [{
+              signal_kind: "potential_preference",
+              object_kind: "user_preference",
+              confidence: 0.9,
+              matched_text: "I moved to Berlin",
+              distilled_fact: "Alice lives in Berlin.",
+              source_locator: {
+                contract_version: 2,
+                kind: "assertion_catalog",
+                assertion_id: 1
+              }
+            }]
+          })
         })
       })
     });
@@ -257,6 +268,7 @@ describe("bench evidence capsule — production-faithful span", () => {
     await runner.seedTurn({
       daemon,
       turnContent: fullTurn,
+      turnMessages: [{ message_id: "u1", role: "user", content: fullTurn }],
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
       workspaceId: "ws-test",
@@ -272,6 +284,15 @@ describe("bench evidence capsule — production-faithful span", () => {
     // The complete source assertion survives and is narrower than the turn.
     expect(raw?.matched_text).toBe("Yesterday I moved to Berlin.");
     expect(raw?.matched_text).not.toBe(fullTurn);
+    expect(raw).toMatchObject({
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: 1
+      },
+      source_assertion: "Yesterday I moved to Berlin.",
+      proposed_matched_text: "I moved to Berlin"
+    });
     // The pre-strip schema-grounding keys are gone; the original
     // LLM-extracted object_kind is preserved for audit fidelity.
     expect(raw?.schema_grounding).toBeUndefined();

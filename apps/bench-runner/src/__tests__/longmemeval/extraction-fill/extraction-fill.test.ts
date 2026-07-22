@@ -42,6 +42,21 @@ const writeFixtureDataset = registerExtractionFillHooks((roots) => {
 
 describe("runExtractionFill", () => {
 
+  it("rejects an initial concurrency above the extraction maximum", async () => {
+    await expect(runExtractionFill({
+      variant: VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      concurrency: 8,
+      initialConcurrency: 9,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: '{"signals":[]}' })
+      }),
+      log: () => undefined
+    })).rejects.toThrow(/initial concurrency must be an integer from 1 to 8/u);
+  });
+
   it("pins identity before the first shard and rejects cross-provider resume", async () => {
     vi.stubEnv("OFFICIAL_API_GARDEN_PROVIDER_URL", "https://provider-a.invalid/v1");
     vi.stubEnv("ALAYA_BENCH_EXTRACTION_MODEL_FAMILY", "family-a");

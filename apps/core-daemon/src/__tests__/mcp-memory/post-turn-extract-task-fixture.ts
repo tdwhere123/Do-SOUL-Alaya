@@ -29,6 +29,7 @@ import {
 } from "@do-soul/alaya-storage";
 import type { BackgroundServiceConfig } from "../../background/bootstrap.js";
 import { createGardenRuntime } from "../../garden/runtime.js";
+import type { PostTurnSignalReceiver } from "../../garden/post-turn-extract/signal-receiver.js";
 import {
   createMcpMemoryToolHandler,
   type McpMemoryToolCallContext,
@@ -139,6 +140,7 @@ export async function createRoutingHarness(options: {
   readonly provider_kind: RuntimeGardenComputeConfig["provider_kind"];
   readonly officialCompile?: GardenComputeProvider["compile"];
   readonly localCompile?: GardenComputeProvider["compile"];
+  readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
 }): Promise<RoutingHarness> {
   const base = await createSqliteHarnessBase();
   const signalService = new SignalService({
@@ -182,7 +184,13 @@ export async function createRoutingHarness(options: {
     },
     officialApiGardenProvider: officialProvider,
     localHeuristicsProvider: localProvider,
-    signalReceiver: signalService,
+    // The routing fixture isolates task dispatch from materialization. Its
+    // receiver models a successful evidence postcondition; production wiring
+    // verifies that postcondition against materialization events.
+    signalReceiver: {
+      receiveSignal: (signal) => signalService.receiveSignal(signal),
+      hasCreatedEvidence: options.hasCreatedEvidence ?? (async () => true)
+    } satisfies PostTurnSignalReceiver,
     strongRefService: {
       isProtected: vi.fn(async () => false)
     } as unknown as Parameters<typeof createGardenRuntime>[0]["strongRefService"],
@@ -309,6 +317,10 @@ export function createMcpDeps(base: {
     },
     signalService: {
       receiveSignal: async (signal) => await signalService.receiveSignal(signal)
+    },
+    postTurnSignalReceiver: {
+      receiveSignal: async (signal) => await signalService.receiveSignal(signal),
+      hasCreatedEvidence: async () => true
     },
     graphExploreService: {
       exploreOneHop: async () => []
@@ -457,7 +469,18 @@ export function createSignal(overrides: Partial<CandidateMemorySignal> = {}): Ca
     exception_to_refs: [],
     contradicts_refs: [],
     incompatible_with_refs: [],
-    raw_payload: { observation: "post-turn extraction test" },
+    raw_payload: {
+      observation: "post-turn extraction test",
+      matched_text: "Post-turn extraction test.",
+      full_turn_content: "Post-turn extraction test.",
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "matched_text",
+        proposed_matched_text: "Post-turn extraction test.",
+        reasons: []
+      }
+    },
     created_at: "2026-05-07T00:11:00.000Z",
     ...signalOverrides,
     source_observation

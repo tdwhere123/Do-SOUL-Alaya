@@ -1,6 +1,5 @@
-import { computeExtractionAttemptCeiling } from "./attempt-ledger.js";
-
 export const EXTRACTION_AUTHORITY_NO_PROGRESS_TIMEOUT_MS: 1_800_000 = 1_800_000;
+export const EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD = 5;
 const DEFAULT_MAX_CONCURRENCY = 32;
 const MILLION = 1_000_000;
 
@@ -100,9 +99,21 @@ export function expectedExtractionAuthorityLimits(
     return { maximumAttempts: 1, successfulShardCeiling: 1 };
   }
   return {
-    maximumAttempts: computeExtractionAttemptCeiling(missing),
+    maximumAttempts: computeExtractionFillAttemptCeiling(missing),
     successfulShardCeiling: missing
   };
+}
+
+export function computeExtractionFillAttemptCeiling(missing: number): number {
+  if (!Number.isSafeInteger(missing) || missing < 0) {
+    throw new Error("extraction fill starting missing must be a non-negative safe integer");
+  }
+  // Normal transport can spend three retries and one strict-empty recheck after its first attempt.
+  const ceiling = missing * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD;
+  if (!Number.isSafeInteger(ceiling)) {
+    throw new Error("extraction fill attempt ceiling exceeds the safe integer range");
+  }
+  return ceiling;
 }
 
 function assertConcurrency(raw: number | undefined): void {

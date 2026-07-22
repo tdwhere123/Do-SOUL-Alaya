@@ -1,6 +1,7 @@
 import type {
   BenchRetryClassification,
   BenchSignalExtractor,
+  BenchTransportFailureAttempt,
   BenchProviderUsage,
   BenchProviderResponseMetadata,
   CompileSeedExtractionConfig
@@ -10,20 +11,29 @@ import {
   inspectChatCompletionResponse,
   type ChatCompletionResponseInspection
 } from "../extraction/chat-completion-response.js";
-import { inspectExtractionRawJson } from "../extraction/content-closure.js";
 import {
   runGardenHttpRetryLoop,
   type GardenHttpRetryDecision
 } from "./http/garden-http-retry-loop.js";
 import {
   isOutputTokenTruncation,
-  markOutputTokenTruncation,
   withAttemptOutputTokenLimit
 } from "./http/output-token-retry.js";
 import {
   classifyBenchHttpError,
   readStatusFromBenchError
 } from "./http/garden-http-error.js";
+import {
+  classifyResponseFailureKind,
+  markGardenHttpFailure,
+  readGardenHttpAttemptTimedOut,
+  settleGardenHttpAttemptFailure,
+  toBenchTransportFailureAttempt
+} from "./http/garden-http-failure-attempt.js";
+import {
+  extractValidGardenHttpContent
+} from "./http/garden-http-response-validation.js";
+import { readBoundedGardenHttpErrorBody } from "./http/garden-http-error-body.js";
 export { extractContentFromChatCompletionBody } from "../extraction/chat-completion-response.js";
 
 export const EXTRACTION_REQUEST_TIMEOUT_MS = 60_000;
@@ -36,14 +46,26 @@ const BENCH_HTTP_MAX_TIMEOUT_RETRIES = 1;
 const BENCH_HTTP_JITTER_BASE_MS = 250;
 const BENCH_HTTP_JITTER_MAX_MS = 1500;
 
+export const EXTRACTION_HTTP_MAX_RETRY_JITTER_MS = Array.from(
+  { length: BENCH_HTTP_MAX_RETRIES },
+  (_, attempt) => benchJitterUpperBoundMs(attempt)
+).reduce((total, delay) => total + delay, 0);
+
 function computeBenchJitterMs(attempt: number, random: () => number): number {
   const baseMs = Math.min(
     BENCH_HTTP_JITTER_BASE_MS * Math.max(1, 2 ** Math.max(0, attempt)),
     BENCH_HTTP_JITTER_MAX_MS
   );
-  const upper = Math.min(baseMs * 2, BENCH_HTTP_JITTER_MAX_MS);
+  const upper = benchJitterUpperBoundMs(attempt);
   const span = upper - baseMs;
   return baseMs + Math.floor(random() * (span + 1));
+}
+
+function benchJitterUpperBoundMs(attempt: number): number {
+  return Math.min(
+    BENCH_HTTP_JITTER_BASE_MS * Math.max(1, 2 ** Math.max(0, attempt + 1)),
+    BENCH_HTTP_JITTER_MAX_MS
+  );
 }
 
 // OpenAI-compatible live garden LLM delegate with bench-visible retry metadata.
@@ -91,6 +113,10 @@ async function extractGardenHttpSignals(
   let useOutputTokenCeiling = false;
   const retry = await runGardenHttpRetryLoop({
     maxRetries: input.retryMode === "disabled" ? 0 : BENCH_HTTP_MAX_RETRIES,
+    beforeAttempt: async () => {
+      await input.onTransportAttempt?.(input.abortSignal);
+      input.abortSignal?.throwIfAborted();
+    },
     runAttempt: (attempt) => runGardenHttpAttempt(
       config,
       apiKey,
@@ -98,8 +124,6 @@ async function extractGardenHttpSignals(
       withAttemptOutputTokenLimit(input, useOutputTokenCeiling),
       attempt
     ),
-    throwIfAborted: (attempt, rateLimitRetries) =>
-      throwIfGardenHttpAborted(input, attempt, rateLimitRetries),
     isRateLimited: (error) => readStatusFromBenchError(error) === 429,
     decideRetry: (error, attempt, timeoutRetries, maxRetries) => {
       if (isOutputTokenTruncation(error)) useOutputTokenCeiling = true;
@@ -107,9 +131,12 @@ async function extractGardenHttpSignals(
     },
     waitForRetry: (attempt, rateLimitRetries) =>
       waitForGardenHttpRetry(deps, input, attempt, rateLimitRetries),
+    describeFailure: toBenchTransportFailureAttempt,
     wrapFailure: wrapBenchTransportError
   });
-  return buildGardenHttpSuccess(retry.response, retry.attempt, retry.rateLimitRetries);
+  return buildGardenHttpSuccess(
+    retry.response, retry.attempt, retry.rateLimitRetries, retry.transportFailures
+  );
 }
 
 function requireGardenApiKey(config: CompileSeedExtractionConfig): string {
@@ -123,11 +150,9 @@ function throwIfGardenHttpAborted(
   rateLimitRetries: number
 ): void {
   if (input.abortSignal?.aborted !== true) return;
-  throw wrapBenchTransportError(
+  throw markGardenHttpFailure(
     input.abortSignal.reason ?? new Error("garden extraction operator aborted"),
-    "failure_aborted",
-    attempt,
-    rateLimitRetries
+    { kind: "aborted", phase: "request" }
   );
 }
 
@@ -185,8 +210,6 @@ async function runGardenHttpAttempt(
   readonly usage?: BenchProviderUsage;
   readonly responseMetadata: BenchProviderResponseMetadata;
 }> {
-  await input.onTransportAttempt?.(input.abortSignal);
-  input.abortSignal?.throwIfAborted();
   const controller = new AbortController();
   const settlement = startGardenHttpAttemptSettlement(input, controller);
   let attemptSettled = false;
@@ -210,7 +233,9 @@ async function runGardenHttpAttempt(
     );
     return buildGardenHttpAttemptResponse(responseInspection, input.maxOutputTokens);
   } catch (error) {
-    throw markGardenHttpAttemptTimeout(error, settlement.hasTimedOut());
+    throw settleGardenHttpAttemptFailure(
+      error, settlement.hasTimedOut(), input.abortSignal?.aborted === true
+    );
   } finally {
     attemptSettled = true;
     settlement.dispose();
@@ -227,10 +252,16 @@ async function inspectGardenHttpAttemptResponse(
   const bodyText = await readGardenHttpBodyText(
     response, settlement, controller, isAttemptSettled, attempt
   );
-  return inspectChatCompletionResponse(
-    bodyText,
-    response.headers.get("content-type")
-  );
+  try {
+    return inspectChatCompletionResponse(bodyText, response.headers.get("content-type"));
+  } catch (error) {
+    const kind = classifyResponseFailureKind(error);
+    throw markGardenHttpFailure(error, {
+      kind,
+      phase: kind === "response_schema_error" ? "response_schema" : "response_parse",
+      rawBody: bodyText
+    });
+  }
 }
 
 function buildGardenHttpAttemptResponse(
@@ -250,7 +281,8 @@ function buildGardenHttpAttemptResponse(
 function buildGardenHttpSuccess(
   response: Awaited<ReturnType<typeof runGardenHttpAttempt>>,
   attempt: number,
-  rateLimitRetries: number
+  rateLimitRetries: number,
+  transportFailures: readonly BenchTransportFailureAttempt[]
 ): GardenHttpExtractResult {
   return {
     rawJson: response.rawJson,
@@ -260,7 +292,8 @@ function buildGardenHttpSuccess(
       recoveryKind: "none",
       retryCount: attempt,
       retryClassification: attempt === 0 ? "success_first_try" : "success_after_retry",
-      rateLimitRetries
+      rateLimitRetries,
+      transportFailures
     }
   };
 }
@@ -367,13 +400,26 @@ async function fetchGardenHttpResponse(
     )
   );
   observeLateGardenHttpRejection(input, fetchPromise, "fetch");
-  const response = await Promise.race([fetchPromise, input.settlement.promise]);
+  let response: Response;
+  try {
+    response = await Promise.race([fetchPromise, input.settlement.promise]);
+  } catch (error) {
+    throw markGardenHttpFailure(error, { kind: "network_error", phase: "request" });
+  }
   if (!response.ok) {
+    const rawBody = await readBoundedGardenHttpErrorBody(
+      response, input.settlement.promise
+    );
     const err = new Error(
       `garden extraction HTTP ${response.status} ${response.statusText}`
     );
     (err as { status?: number }).status = response.status;
-    throw err;
+    throw markGardenHttpFailure(err, {
+      kind: "http_error",
+      phase: "response_status",
+      httpStatus: response.status,
+      ...(rawBody === undefined ? {} : { rawBody })
+    });
   }
   return response;
 }
@@ -391,7 +437,14 @@ async function readGardenHttpBodyText(
     bodyTextPromise,
     "body read"
   );
-  return await Promise.race([bodyTextPromise, settlement.promise]);
+  try {
+    return await Promise.race([bodyTextPromise, settlement.promise]);
+  } catch (error) {
+    throw markGardenHttpFailure(error, {
+      kind: "body_read_error",
+      phase: "response_body"
+    });
+  }
 }
 
 function observeLateGardenHttpRejection<T>(
@@ -414,49 +467,12 @@ function observeLateGardenHttpRejection<T>(
   });
 }
 
-function extractValidGardenHttpContent(
-  response: ChatCompletionResponseInspection
-): string {
-  if (response.finishReason === "length") {
-    throw markOutputTokenTruncation(
-      new Error("garden extraction stopped at the provider output-token limit")
-    );
-  }
-  const content = response.content;
-  if (content.trim().length === 0) {
-    throw new Error("garden extraction returned no content");
-  }
-  try {
-    inspectExtractionRawJson(content);
-  } catch (parseError) {
-    throw new Error(
-      `garden extraction returned unparseable content: ${
-        parseError instanceof Error ? parseError.message : String(parseError)
-      }`
-    );
-  }
-  return content;
-}
-
-function markGardenHttpAttemptTimeout(error: unknown, timedOut: boolean): Error {
-  const wrapped = error instanceof Error ? error : new Error(String(error));
-  (wrapped as { benchAttemptTimedOut?: boolean }).benchAttemptTimedOut = timedOut;
-  return wrapped;
-}
-
-function readGardenHttpAttemptTimedOut(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { benchAttemptTimedOut?: unknown }).benchAttemptTimedOut === true
-  );
-}
-
 function wrapBenchTransportError(
   cause: unknown,
   classification: BenchRetryClassification,
   retryCount: number,
-  rateLimitRetries: number
+  rateLimitRetries: number,
+  transportFailures: readonly BenchTransportFailureAttempt[]
 ): Error {
   const message =
     cause instanceof Error
@@ -467,7 +483,8 @@ function wrapBenchTransportError(
   (wrapped as { benchRetry?: unknown }).benchRetry = {
     retryCount,
     retryClassification: classification,
-    rateLimitRetries
+    rateLimitRetries,
+    transportFailures: Object.freeze([...transportFailures])
   };
   return wrapped;
 }

@@ -4,7 +4,18 @@ import {
   parseOfficialApiSignals,
   type GardenCompileContext
 } from "../../garden/compute-provider.js";
-import { createContext, createExtractor } from "./compute-provider-fixtures.js";
+import {
+  createContext as createBaseContext,
+  createExtractor
+} from "./compute-provider-fixtures.js";
+
+function createContext() {
+  return {
+    ...createBaseContext(),
+    turn_messages: [],
+    allow_legacy_single_user_source: true
+  };
+}
 
 function temporalEnvelope(
   projection: Readonly<Record<string, unknown>>,

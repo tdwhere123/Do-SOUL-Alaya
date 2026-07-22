@@ -21,6 +21,8 @@ import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION
 } from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
+import { inspectTurnContentKeySpace } from
+  "../../../longmemeval/extraction/turn-contents.js";
 import { buildLongMemEvalFixtureQuestion } from "../longmemeval-fixture.js";
 import { writeExtractionCacheTestManifest } from "./extraction-cache-test-fixture.js";
 
@@ -186,24 +188,26 @@ describe("extraction window-containment preflight", () => {
       const manifest = readExtractionCacheManifest(cacheRoot);
       expect(manifest?.coverage).toBe(1);
 
-      const turnsA = collectDistinctTurnContents(windowAB.slice(0, 1));
+      const windowAKeySpace = inspectTurnContentKeySpace(windowAB.slice(0, 1));
       expect(() => preflightExtractionCache({
         cacheRoot,
         config: CONFIG,
         systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-        requiredTurnContents: turnsA,
+        requiredTurnContents: windowAKeySpace.distinctTurnContents,
+        requiredExtractionTurns: windowAKeySpace.distinctExtractionTurns,
         requiredQuestionWindow: { offset: 0, limit: 1 }
       })).not.toThrow();
 
       // The full window A+B still fails preflight despite coverage=1.0 — the
       // scalar is relative to the fill window, containment catches the gap.
-      const turnsAB = collectDistinctTurnContents(windowAB);
+      const windowABKeySpace = inspectTurnContentKeySpace(windowAB);
       expect(() =>
         preflightExtractionCache({
           cacheRoot,
           config: CONFIG,
           systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-          requiredTurnContents: turnsAB,
+          requiredTurnContents: windowABKeySpace.distinctTurnContents,
+          requiredExtractionTurns: windowABKeySpace.distinctExtractionTurns,
           requiredQuestionWindow: { offset: 0, limit: 2 }
         })
       ).toThrow(/complete fill question window.*contain.*offset\/limit/su);

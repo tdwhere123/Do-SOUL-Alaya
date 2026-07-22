@@ -4,7 +4,11 @@ import type {
   BenchWorkspaceHandle
 } from "../../../harness/daemon.js";
 import { benchSessionSurfacesEnabled } from "../../../harness/daemon/daemon-support.js";
-import { pairSessionIntoRounds, type LongMemEvalQuestion } from "../../ingestion/dataset.js";
+import {
+  buildLongMemEvalRoundMessages,
+  pairSessionIntoRounds,
+  type LongMemEvalQuestion
+} from "../../ingestion/dataset.js";
 import {
   buildSessionSynthesisInput,
   computeNextTurnSeedRefs,
@@ -144,16 +148,18 @@ async function seedQuestionRound(
     context.sessionIndex,
     context.roundIndex
   );
-  const beforeDropReasons = {
-    ...input.seedRunner.stats.signalsDroppedByReason
-  };
+  const beforeDropReasons = { ...input.seedRunner.stats.signalsDroppedByReason };
   const beforeCounters = snapshotSeedCounters(input.seedRunner.stats);
   const sourceObservedAt = requireLongMemEvalTimestamp(
-    input.question.haystack_dates[context.sessionIndex]
-  );
+    input.question.haystack_dates[context.sessionIndex]);
   const seedResult = await input.seedRunner.seedTurn({
     daemon: input.workspace,
     turnContent: round.content,
+    turnMessages: buildLongMemEvalRoundMessages(
+      input.question.haystack_sessions[context.sessionIndex]!,
+      round,
+      `${input.question.question_id}-s${context.sessionIndex}-r${context.roundIndex}`
+    ),
     evidenceRefBase: evidenceRef,
     seedIndex: context.seedIndex,
     workspaceId: input.workspace.workspaceId,

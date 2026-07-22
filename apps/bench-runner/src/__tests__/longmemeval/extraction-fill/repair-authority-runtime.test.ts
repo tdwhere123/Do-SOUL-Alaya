@@ -7,6 +7,8 @@ import { inspectExtractionAuthority, readCurrentExtractionAuthorityRevision } fr
   "../../../longmemeval/extraction/authority/inspection.js";
 import { createExtractionRepairScope } from
   "../../../longmemeval/extraction/authority/repair/repair-scope.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../longmemeval/extraction/authority/receipt-limits.js";
 import {
   createExtractionAuthorityReceipt,
   writeExtractionAuthorityReceipt
@@ -125,6 +127,84 @@ describe("strict JSON repair authority runtime", () => {
     expect(extract).not.toHaveBeenCalled();
   });
 
+  it("resolves a provider-failed repair as an honest partial result", async () => {
+    vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:REPAIR_TEST_KEY");
+    vi.stubEnv("REPAIR_TEST_KEY", "test-key");
+    await writeFixtureDataset([
+      buildExtractionFillQuestion("q001", "User: alpha", "User: decoy")
+    ]);
+    await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      log: () => undefined
+    });
+    const [invalidPath] = shardPaths();
+    mutateRawJson(invalidPath!, '{"signals":[{"signal_kind":"potential_preference"}');
+    const receiptPath = await writeRepairReceipt();
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      throw providerTimeoutFailure();
+    });
+
+    const result = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      newlyExtracted: 0,
+      coverage: 0.5,
+      terminalRetryClassifications: { failure_timeout: 1 },
+      manifest: { fill_status: "in_progress", expected_turns: 2, cached_turns: 1 }
+    });
+  });
+
+  it("fails a repair question batch closed on a provider failure", async () => {
+    vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:REPAIR_TEST_KEY");
+    vi.stubEnv("REPAIR_TEST_KEY", "test-key");
+    await writeFixtureDataset([
+      buildExtractionFillQuestion("q001", "User: alpha", "User: decoy")
+    ]);
+    await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      extractorFactory: () => ({ extract: async () => ({ rawJson: '{"signals":[]}' }) }),
+      log: () => undefined
+    });
+    const [invalidPath] = shardPaths();
+    mutateRawJson(invalidPath!, '{"signals":[{"signal_kind":"potential_preference"}');
+    const receiptPath = await writeRepairReceipt();
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      throw providerTimeoutFailure();
+    });
+
+    await expect(runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      questionBatchLimit: 1,
+      concurrency: 1,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    })).rejects.toMatchObject({ name: "ExtractionFillTaskError" });
+
+    expect(extract).toHaveBeenCalledOnce();
+  });
+
   it("rejects a lost repair write lease before calling the extraction delegate", async () => {
     vi.stubEnv("ALAYA_OFFICIAL_GARDEN_SECRET_REF", "env:REPAIR_TEST_KEY");
     vi.stubEnv("REPAIR_TEST_KEY", "test-key");
@@ -180,7 +260,7 @@ async function writeRepairReceipt(): Promise<string> {
     repairScope,
     cumulativeLimits: {
       startingMissing: repairScope.shard_count,
-      maximumAttempts: 2,
+      maximumAttempts: computeExtractionFillAttemptCeiling(repairScope.shard_count),
       successfulShardCeiling: repairScope.shard_count
     },
     outputTokenCap: { field: "max_tokens", value: 4096 },
@@ -213,4 +293,21 @@ function shardPaths(): readonly string[] {
 function mutateRawJson(path: string, rawJson: string): void {
   const shard = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   writeFileSync(path, JSON.stringify({ ...shard, raw_json: rawJson }), "utf8");
+}
+
+function providerTimeoutFailure(): Error {
+  return Object.assign(new Error("provider timed out for this fixture"), {
+    benchRetry: {
+      retryCount: 0,
+      rateLimitRetries: 0,
+      retryClassification: "failure_timeout" as const,
+      transportFailures: [{
+        kind: "timeout" as const,
+        phase: "request" as const,
+        httpStatus: null,
+        fingerprint: "f".repeat(64),
+        attempt: 1
+      }]
+    }
+  });
 }

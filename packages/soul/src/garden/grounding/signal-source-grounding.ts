@@ -1,7 +1,12 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { resolveSourceAssertion, type SourceAssertionResolution } from "./source-assertion.js";
+import {
+  locatorAssertionUniquelyCommitsToQuote,
+  parseOfficialApiSourceLocator,
+  resolveOfficialApiSourceLocator
+} from "./source-locator.js";
 
-type GardenSignalGrounding = SourceAssertionResolution | {
+export type GardenSignalGrounding = SourceAssertionResolution | {
   readonly status: "rejected";
   readonly reason: "source_grounding_missing" | "source_grounding_rejected";
 };
@@ -9,14 +14,34 @@ type GardenSignalGrounding = SourceAssertionResolution | {
 export function resolveGardenSignalGrounding(
   signal: CandidateMemorySignal
 ): GardenSignalGrounding {
-  const grounding = readRecord(signal.raw_payload.source_grounding);
+  return resolveGardenRawPayloadGrounding(signal.raw_payload);
+}
+
+export function resolveGardenRawPayloadGrounding(
+  rawPayload: CandidateMemorySignal["raw_payload"]
+): GardenSignalGrounding {
+  const grounding = readRecord(rawPayload.source_grounding);
   if (grounding?.status === "rejected") {
     return { status: "rejected", reason: "source_grounding_rejected" };
   }
-  const proposedMatch = readString(signal.raw_payload.proposed_matched_text) ??
-    readString(signal.raw_payload.matched_text);
+  const proposedMatch = readString(rawPayload.proposed_matched_text) ??
+    readString(rawPayload.matched_text);
   // Product trusts only full_turn_content; bench must project into that key at seed.
-  const fullTurn = readString(signal.raw_payload.full_turn_content);
+  const fullTurn = readString(rawPayload.full_turn_content);
+  if (Object.hasOwn(rawPayload, "source_locator")) {
+    const locator = parseOfficialApiSourceLocator(rawPayload.source_locator);
+    if (fullTurn === null || locator === null || proposedMatch === null) {
+      return { status: "rejected", reason: "source_grounding_rejected" };
+    }
+    const resolution = resolveOfficialApiSourceLocator(fullTurn, locator);
+    const storedAssertion = readString(rawPayload.source_assertion) ??
+      readString(rawPayload.matched_text);
+    if (resolution.status === "rejected" || storedAssertion !== resolution.assertion ||
+        !locatorAssertionUniquelyCommitsToQuote(fullTurn, resolution.assertion, proposedMatch)) {
+      return { status: "rejected", reason: "source_grounding_rejected" };
+    }
+    return resolution;
+  }
   if (fullTurn !== null && proposedMatch !== null) {
     return resolveSourceAssertion(fullTurn, proposedMatch);
   }

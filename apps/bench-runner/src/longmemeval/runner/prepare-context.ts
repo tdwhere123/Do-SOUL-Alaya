@@ -8,7 +8,7 @@ import {
   EXTRACTION_CACHE_ROOT
 } from "../compile-seed.js";
 import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
-import { collectDistinctTurnContents } from "../extraction/extraction-fill.js";
+import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
 import {
   deriveLongMemEvalReleaseEvidenceAuthority,
   loadDatasetWithIdentity
@@ -153,9 +153,10 @@ function createLongMemEvalSeedRunner(
   extractionCacheRoot: string,
   offset: number
 ) {
-  const requiredTurnContents = collectDistinctTurnContents(window);
+  const requiredTurns = inspectTurnContentKeySpace(window);
   return createCompileSeedRunner({
-    requiredTurnContents,
+    requiredTurnContents: requiredTurns.distinctTurnContents,
+    requiredExtractionTurns: requiredTurns.distinctExtractionTurns,
     requiredQuestionWindow: { offset, limit: window.length },
     cacheRoot: extractionCacheRoot,
     allowLiveExtraction: false

@@ -350,6 +350,43 @@ describe("coverage-aware delivery", () => {
     });
   });
 
+  it("optionally bounds final public-order displacement without changing membership", () => {
+    const publicA = createCandidate("public-a", 0.99);
+    const publicB = createCandidate("public-b", 0.98);
+    const headA = createCandidate("head-a", 0.4);
+    const candidates = [publicA, publicB, headA];
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: {
+        conflict_awareness: false,
+        budgets: { max_entries: 3, max_total_tokens: 100, per_dimension_limits: null }
+      },
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: new Map([
+        [headA.fusion.candidate_key, 1],
+        [publicA.fusion.candidate_key, 2],
+        [publicB.fusion.candidate_key, 3]
+      ]),
+      finalOrderAfterCoverage: "public_relevance",
+      maxHeadDropAfterCoverage: 1
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "public-a",
+      "head-a",
+      "public-b"
+    ]);
+    expect(new Set(result.candidates.map((candidate) => candidate.object_id)))
+      .toEqual(new Set(candidates.map((candidate) => candidate.entry.object_id)));
+    const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
+    expect(diagnostics.get("head-a")).toMatchObject({ final_rank: 2, post_rank: 2 });
+    expect(result.candidates[1]?.budget_state).toMatchObject({
+      remaining_entries: 1,
+      remaining_tokens: 88
+    });
+  });
+
   it("still deduplicates object_id across provenance projections", () => {
     const local = createCandidate("shared", 0.9);
     const globalBase = createCandidate("shared", 0.8);

@@ -95,6 +95,31 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     ]);
   });
 
+  it("finds a workspace-scoped evidence capsule by artifact reference", async () => {
+    const { repo } = await createRepo();
+    const target = createEvidenceCapsule({
+      object_id: "f6c1b587-be07-4410-b2ca-8bfbc4d82db4",
+      physical_anchor: {
+        file_path: null,
+        line_range: null,
+        symbol_name: null,
+        artifact_ref: "alaya:garden-turn-evidence:signal-1"
+      }
+    });
+    await repo.create(target);
+    await repo.create(createEvidenceCapsule({
+      object_id: "256a7ff5-6150-4a82-9a53-99dbfd08cb77",
+      workspace_id: "workspace-2",
+      run_id: "run-2",
+      physical_anchor: target.physical_anchor
+    }));
+
+    await expect(repo.findByArtifactRef("workspace-1", "alaya:garden-turn-evidence:signal-1"))
+      .resolves.toEqual(target);
+    await expect(repo.findByArtifactRef("workspace-3", "alaya:garden-turn-evidence:signal-1"))
+      .resolves.toBeNull();
+  });
+
   it("chunks source-anchor id batches above SQLite's variable limit", async () => {
     const { repo } = await createRepo();
     const ids = Array.from({ length: 1_005 }, (_, index) =>

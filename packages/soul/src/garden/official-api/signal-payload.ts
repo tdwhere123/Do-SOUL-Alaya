@@ -17,6 +17,7 @@ export function buildOfficialCandidateSignal(input: {
   readonly runId: string;
   readonly surfaceId: string | null;
   readonly normalizedTurnContent: string;
+  readonly groundingSourceText: string;
   readonly confidence: number;
   readonly temporalProjection: OfficialApiSignalDraft["temporal_projection"];
   readonly distilledFact: string | undefined;
@@ -56,6 +57,7 @@ function buildOfficialRawPayload(
   const { draft } = input;
   return {
     matched_text: draft.matched_text,
+    ...(draft.source_locator === undefined ? {} : { source_locator: draft.source_locator }),
     ...(input.distilledFact === undefined ? {} : { distilled_fact: input.distilledFact }),
     ...(input.temporalProjection === undefined ? {} : { temporal_projection: input.temporalProjection }),
     ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
@@ -72,9 +74,11 @@ function buildOfficialRawPayload(
       : { proposed_distilled_fact: input.sourceGrounding.proposed_distilled_fact }),
     provider_kind: input.providerKind,
     extraction_reason: draft.reason ?? "official_api",
-    turn_content_excerpt: buildTurnExcerpt(input.normalizedTurnContent, draft.matched_text),
-    full_turn_content: input.sourceGrounding.status === "grounded"
-      ? buildSourceVerificationText(input.normalizedTurnContent, input.sourceGrounding.source_assertion)
-      : clampFullTurnContent(input.normalizedTurnContent)
+    turn_content_excerpt: buildTurnExcerpt(input.groundingSourceText, draft.matched_text),
+    full_turn_content: draft.source_locator !== undefined
+      ? input.groundingSourceText
+      : input.sourceGrounding.status === "grounded"
+        ? buildSourceVerificationText(input.normalizedTurnContent, input.sourceGrounding.source_assertion)
+        : clampFullTurnContent(input.normalizedTurnContent)
   };
 }

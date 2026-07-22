@@ -41,6 +41,7 @@ export interface DaemonMcpMemoryToolHandlerInput {
   // see also: apps/core-daemon/src/mcp-memory/proposal-workflow.ts synthesisMemberResolver
   readonly synthesisMemberResolver?: McpMemoryProposalWorkflowDependencies["synthesisMemberResolver"];
   readonly signalService: McpMemoryToolHandlerDependencies["signalService"];
+  readonly postTurnSignalReceiver?: McpMemoryToolHandlerDependencies["postTurnSignalReceiver"];
   readonly graphExploreService: McpMemoryToolHandlerDependencies["graphExploreService"];
   readonly edgeProposalService?: McpMemoryToolHandlerDependencies["edgeProposalService"];
   readonly graphEdgePort?: McpMemoryToolHandlerDependencies["graphEdgePort"];
@@ -170,6 +171,9 @@ export function createDaemonMcpMemoryToolHandler(input: DaemonMcpMemoryToolHandl
       ? {}
       : { coRecallCoherenceGate: input.coRecallCoherenceGate }),
     signalService: input.signalService,
+    ...(input.postTurnSignalReceiver === undefined
+      ? {}
+      : { postTurnSignalReceiver: input.postTurnSignalReceiver }),
     graphExploreService: input.graphExploreService,
     ...(input.edgeProposalService === undefined ? {} : { edgeProposalService: input.edgeProposalService }),
     ...(reviewerIdentityBinding === undefined ? {} : { reviewerIdentityBinding }),

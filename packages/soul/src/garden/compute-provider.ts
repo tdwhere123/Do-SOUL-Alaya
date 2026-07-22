@@ -30,11 +30,21 @@ import {
   selectObservedTemporalProjection
 } from "./temporal/observed-projection.js";
 import { buildOfficialCandidateSignal } from "./official-api/signal-payload.js";
-import { groundOfficialApiDraft } from "./official-api/source-grounding.js";
+import {
+  groundOfficialApiDraft,
+  rejectOfficialApiDraftGrounding
+} from "./official-api/source-grounding.js";
+import {
+  buildOfficialApiSourceCorpus,
+  buildOfficialApiSourceAssertions,
+  buildOfficialApiSourceSpans,
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+} from "./grounding/source-locator.js";
 import {
   dumpOfficialApiRequestDiagnostic,
   type OfficialApiExtractorMeta
 } from "./official-api/request-diagnostic.js";
+import { assessOfficialApiSourceTrust } from "./official-api/source-trust.js";
 
 export {
   OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION,
@@ -60,6 +70,7 @@ export interface GardenCompileContext {
   readonly run_id: string;
   readonly surface_id: string | null;
   readonly turn_messages: readonly ConversationMessage[];
+  readonly allow_legacy_single_user_source?: boolean;
   readonly source_observed_at?: string;
 }
 
@@ -132,13 +143,17 @@ export const OFFICIAL_API_GARDEN_MODEL = "gpt-4.1-mini";
 export const OFFICIAL_API_SYSTEM_PROMPT = [
   "You extract candidate durable memory signals from a single operator turn.",
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
-  'Each signal must include "signal_kind", "object_kind", "confidence", "matched_text", and "distilled_fact".',
+  'Each signal must include "signal_kind", "object_kind", "confidence", "matched_text", "distilled_fact", and "source_locator".',
   'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
+  'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
+  "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",
+  "Only User source spans may support durable memory; server-derived source_assertions contain only User content, and source_assertions contain only assertions the runtime can ground without unresolved references. Assistant spans are context only and never appear in source_assertions.",
   "For each signal, work quote-first, then distill.",
   "First copy the shortest contiguous exact substring that contains the complete atomic assertion and every explicit local antecedent needed to resolve its references into matched_text; preserve capitalization, punctuation, spacing, and wording.",
   "Then write distilled_fact using only what that quote entails.",
   "Do not use surrounding text to add facts or guess unresolved references.",
   "Do not return an empty signals array merely because a durable assertion uses narrative, list, template, or conversational wording.",
+  "Before returning an empty signals array for a non-empty source_assertions catalog, inspect every catalog entry once more and emit any durable personal fact, preference, relationship, possession, past event, or ongoing condition that satisfies the same grounding and durability rules.",
   "Do not lower the durability threshold: transient tasks, procedures, and formatting instructions are not durable assertions unless they explicitly state a lasting preference or policy.",
   '"matched_text" is an exact verbatim substring containing the complete atomic assertion, not isolated keywords.',
   '"distilled_fact" must be a self-contained declarative sentence carrying exactly one assertion.',
@@ -218,7 +233,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
     }
 
-    const drafts = await this.requestSignals(normalizedTurnContent, context);
+    const sourceCorpus = buildOfficialApiSourceCorpus(normalizedTurnContent, context.turn_messages);
+    const drafts = await this.requestSignals(normalizedTurnContent, context, sourceCorpus);
     const createdAt = normalizeSourceObservedAt(context.source_observed_at) ?? this.now();
 
     const signals: CandidateMemorySignal[] = [];
@@ -227,7 +243,13 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       if (draft.distilled_fact === undefined) {
         distilledFactOmittedCount += 1;
       }
-      const signal = this.buildSignalFromDraft(draft, context, normalizedTurnContent, createdAt);
+      const signal = this.buildSignalFromDraft(
+        draft,
+        context,
+        normalizedTurnContent,
+        sourceCorpus,
+        createdAt
+      );
       if (signal !== null) {
         signals.push(signal);
       }
@@ -248,15 +270,12 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
     draft: OfficialApiSignalDraft,
     context: GardenCompileContext,
     normalizedTurnContent: string,
+    sourceCorpus: string,
     createdAt: string
   ): CandidateMemorySignal | null {
-    const grounding = groundOfficialApiDraft(draft, normalizedTurnContent);
-    if (grounding.status === "rejected") {
-      console.warn("garden/compute-provider: rejected ungrounded official-API signal", {
-        runId: context.run_id,
-        reasons: grounding.audit.reasons
-      });
-    }
+    const { groundingSourceText, grounding } = groundDraftForContext(
+      draft, context, normalizedTurnContent, sourceCorpus
+    );
     const groundedDraft = grounding.draft;
     const confidence = clampConfidence(groundedDraft.confidence);
     const temporalProjection = grounding.status === "grounded"
@@ -273,6 +292,7 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
         runId: context.run_id,
         surfaceId: context.surface_id,
         normalizedTurnContent,
+        groundingSourceText,
         confidence,
         temporalProjection,
         distilledFact: groundedDraft.distilled_fact,
@@ -295,7 +315,8 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
 
   private async requestSignals(
     turnContent: string,
-    context: GardenCompileContext
+    context: GardenCompileContext,
+    sourceCorpus: string
   ): Promise<readonly OfficialApiSignalDraft[]> {
     if (this.extractor === null) {
       throw new GardenProviderError("Official garden provider credentials are missing.", "auth");
@@ -306,7 +327,11 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       run_id: context.run_id,
       surface_id: context.surface_id,
       turn_content: turnContent,
-      turn_messages: context.turn_messages
+      turn_messages: context.turn_messages,
+      source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+      preferred_source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+      source_assertions: buildOfficialApiSourceAssertions(sourceCorpus),
+      source_spans: buildOfficialApiSourceSpans(sourceCorpus)
     });
     let rawJson: string | null = null;
     let extractorMeta: OfficialApiExtractorMeta | null = null;
@@ -363,4 +388,36 @@ export class OfficialApiGardenProvider implements GardenComputeProvider {
       cause: error
     });
   }
+}
+
+function groundDraftForContext(
+  draft: OfficialApiSignalDraft,
+  context: GardenCompileContext,
+  normalizedTurnContent: string,
+  sourceCorpus: string
+): Readonly<{
+  groundingSourceText: string;
+  grounding: ReturnType<typeof groundOfficialApiDraft>;
+}> {
+  const groundingSourceText = draft.source_locator === undefined
+    ? normalizedTurnContent
+    : sourceCorpus;
+  const trustRejection = assessOfficialApiSourceTrust({
+    hasSourceLocator: draft.source_locator !== undefined,
+    turnContent: normalizedTurnContent,
+    turnMessages: context.turn_messages,
+    ...(context.allow_legacy_single_user_source === undefined ? {} : {
+      allowLegacySingleUserSource: context.allow_legacy_single_user_source
+    })
+  });
+  const grounding = trustRejection === null
+    ? groundOfficialApiDraft(draft, groundingSourceText)
+    : rejectOfficialApiDraftGrounding(draft, trustRejection);
+  if (grounding.status === "rejected") {
+    console.warn("garden/compute-provider: rejected ungrounded official-API signal", {
+      runId: context.run_id,
+      reasons: grounding.audit.reasons
+    });
+  }
+  return { groundingSourceText, grounding };
 }

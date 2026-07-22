@@ -10,7 +10,6 @@ import {
   FormationKind,
   GardenRole,
   GardenTaskKind,
-  GardenTier,
   MemoryDimension,
   MemoryGovernanceEventType,
   ProposalResolutionState,
@@ -23,7 +22,6 @@ import {
   StorageTier,
   WorkspaceKind,
   WorkspaceState,
-  type GardenTaskDescriptor,
   type MemoryEntry,
   type SoulEmitCandidateSignalResponse,
   type SoulMemorySearchResponse,
@@ -216,6 +214,10 @@ async function createTrustworthyLoopHarness(
     },
     memoryService,
     signalService,
+    postTurnSignalReceiver: {
+      receiveSignal: async (signal) => await signalService.receiveSignal(signal),
+      hasCreatedEvidence: async () => true
+    },
     graphExploreService: { exploreOneHop: async () => [] },
     sessionOverrideService: { apply: async () => ({ runtime_id: "override-1" }) },
     trustStateRecorder,
@@ -261,7 +263,7 @@ async function createTrustworthyLoopHarness(
         workspace_id: "workspace-1",
         role: GardenRole.LIBRARIAN,
         kind: GardenTaskKind.POST_TURN_EXTRACT,
-        payload: createGardenTaskDescriptor(taskId),
+        payload: createPostTurnExtractPayload(),
         created_at: "2026-05-11T00:00:00.000Z"
       });
     }
@@ -361,16 +363,21 @@ function createRecallCandidate() {
   } as const;
 }
 
-function createGardenTaskDescriptor(taskId: string): GardenTaskDescriptor {
+function createPostTurnExtractPayload(): Readonly<Record<string, unknown>> {
   return {
-    task_id: taskId,
-    task_kind: GardenTaskKind.POST_TURN_EXTRACT,
-    required_tier: GardenTier.TIER_2,
     workspace_id: "workspace-1",
     run_id: "run-1",
-    target_object_refs: [PRIMARY_MEMORY_ID],
-    priority: 20,
-    created_at: "2026-05-11T00:00:00.000Z"
+    created_at: "2026-05-11T00:00:00.000Z",
+    source_observation: null,
+    turn_index: 1,
+    turn_digest: {
+      last_messages: [
+        {
+          role: "user",
+          content_excerpt: "Garden extracted an unanchored signal."
+        }
+      ]
+    }
   };
 }
 

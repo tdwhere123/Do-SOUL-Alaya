@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { cacheFilePath } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import {
   hashExtractionReplay,
@@ -92,6 +93,35 @@ describe("extraction cache replay", () => {
 
     expect(hashExtractionReplay(forward)).toBe(hashExtractionReplay(reversed));
   });
+
+  it("commits the final grounded assertion and formed content", () => {
+    const root = cacheRoot();
+    const key = "d".repeat(64);
+    writeShard(root, key, validRaw());
+    const replay = (assertion: string, fullTurnContent: string) => replayExtractionOccurrences({
+      cacheRoot: root,
+      model,
+      requestProfile,
+      occurrences: [occurrence("q-s0-r0", key, "2025-01-01T00:00:00.000Z")],
+      audit: auditor(() => resultFor([{
+        index: 0,
+        disposition: "admitted",
+        stage: "formation",
+        reason: "formed",
+        signal: formedSignal(assertion, fullTurnContent)
+      }]))
+    });
+    const first = replay("I live in Berlin.", "User: I live in Berlin.");
+    const changedAssertion = replay("I live in Paris.", "User: I live in Berlin.");
+    const changedContent = replay("I live in Berlin.", "User: I live in Berlin.\nAssistant: noted");
+
+    expect(first.occurrences[0]?.entries[0]).toMatchObject({
+      sourceAssertion: "I live in Berlin.",
+      formedContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+    });
+    expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedAssertion));
+    expect(hashExtractionReplay(first)).not.toBe(hashExtractionReplay(changedContent));
+  });
 });
 
 function cacheRoot(): string {
@@ -125,7 +155,10 @@ function validRaw(): string {
 function occurrence(id: string, cacheKey: string, sourceObservedAt: string) {
   return {
     id, evidenceRef: id, questionId: id.split("-")[0]!, sessionIndex: 0, roundIndex: 0,
-    sourceObservedAt, turnContent: "User: source fact", cacheKey
+    sourceObservedAt,
+    turnContent: "User: source fact",
+    turnMessages: [{ message_id: `${id}-m0`, role: "user" as const, content: "source fact" }],
+    cacheKey
   };
 }
 
@@ -133,10 +166,41 @@ function auditor(implementation: ExtractionReplayAuditor): ExtractionReplayAudit
   return implementation;
 }
 
-function resultFor(entries: readonly { index: number; disposition: "admitted" | "deferred" | "rejected" | "invalid"; stage: string; reason: string }[]) {
+function resultFor(entries: readonly { index: number; disposition: "admitted" | "deferred" | "rejected" | "invalid"; stage: string; reason: string; signal?: CandidateMemorySignal }[]) {
   return {
     mode: "strict" as const,
     envelope: { disposition: "admitted" as const, reason: "strict_envelope_parsed" as const },
     entries
+  };
+}
+
+function formedSignal(assertion: string, fullTurnContent: string): CandidateMemorySignal {
+  return {
+    signal_id: "signal-formed",
+    workspace_id: "workspace-replay",
+    run_id: "run-replay",
+    surface_id: null,
+    source: "garden_compile",
+    signal_kind: "potential_claim",
+    signal_state: "emitted",
+    object_kind: "fact",
+    scope_hint: null,
+    domain_tags: [],
+    confidence: 0.8,
+    evidence_refs: [],
+    canonical_entities: [],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
+    source_observation: null,
+    raw_payload: {
+      source_assertion: assertion,
+      matched_text: assertion,
+      distilled_fact: assertion,
+      full_turn_content: fullTurnContent
+    },
+    created_at: "2025-01-01T00:00:00.000Z"
   };
 }

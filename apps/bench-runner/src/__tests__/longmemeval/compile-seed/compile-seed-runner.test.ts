@@ -130,6 +130,64 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
+  it("preserves trusted User and Assistant roles for source-locator extraction", async () => {
+    let userPrompt: Record<string, unknown> | null = null;
+    const seeded: BenchSignalSeedInput[] = [];
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      allowLiveExtraction: true,
+      extractorFactory: () => ({
+        extract: async (input) => {
+          userPrompt = JSON.parse(input.userPrompt) as Record<string, unknown>;
+          return { rawJson: JSON.stringify({ signals: [{
+            signal_kind: "potential_claim",
+            object_kind: "memory_entry",
+            confidence: 0.9,
+            matched_text: "I moved to Berlin.",
+            distilled_fact: "I moved to Berlin.",
+            source_locator: {
+              contract_version: 2,
+              kind: "assertion_catalog",
+              assertion_id: 1
+            }
+          }] }) };
+        }
+      })
+    });
+
+    const result = await runner.seedTurn({
+      daemon: buildCompileSeedDaemon((input) => {
+        seeded.push(input);
+        return buildSeed("memory-role-bound");
+      }),
+      turnContent: "User: I moved to Berlin.\nAssistant: You moved to Berlin.",
+      turnMessages: [
+        { message_id: "u1", role: "user", content: "I moved to Berlin." },
+        { message_id: "a1", role: "assistant", content: "You moved to Berlin." }
+      ],
+      evidenceRefBase: "q-role-s0-r0",
+      seedIndex: 0,
+      ...SEED_CONTEXT
+    });
+
+    expect(userPrompt?.source_spans).toEqual([
+      { span_id: 1, role: "user", text: "User: I moved to Berlin." },
+      { span_id: 2, role: "assistant", text: "Assistant: You moved to Berlin." }
+    ]);
+    expect(result.seeds).toHaveLength(1);
+    expect(seeded[0]?.distilledFact).toBe("I moved to Berlin.");
+    expect(seeded[0]?.productionRawPayload).toMatchObject({
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: 1
+      },
+      source_assertion: "I moved to Berlin.",
+      proposed_matched_text: "I moved to Berlin."
+    });
+  });
+
   it("rejects a malformed envelope even when individual entries are salvageable", async () => {
     const corruptEnvelope =
       `{"signals":[` +
@@ -368,7 +426,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     });
 
     expect(seeded).toHaveLength(0);
-    expect(delegate).toHaveBeenCalledOnce();
+    expect(delegate).toHaveBeenCalledTimes(2);
     expect(secondRunner.stats.cacheHits).toBe(0);
     expect(secondRunner.stats.llmCalls).toBe(1);
     expect(secondRunner.stats.offlineFallbacks).toBe(0);

@@ -27,6 +27,12 @@ export async function runExtractionFillCommand(
   } = { runExtractionFill, signalSource: process }
 ): Promise<number> {
   try {
+    if (opts.extractionPredecessorAuthority !== undefined &&
+        opts.extractionAuthority === undefined) {
+      throw new Error(
+        "--extraction-predecessor-authority requires --extraction-authority"
+      );
+    }
     const expansionCapability = opts.promotionContract === undefined
       ? undefined
       : await (deps.verifyExpansionContract ??
@@ -42,6 +48,9 @@ export async function runExtractionFillCommand(
         ...(opts.limit === undefined ? {} : { limit: opts.limit }),
         ...(opts.offset === undefined ? {} : { offset: opts.offset }),
         ...(opts.concurrency === undefined ? {} : { concurrency: opts.concurrency }),
+        ...(opts.extractionInitialConcurrency === undefined ? {} : {
+          initialConcurrency: opts.extractionInitialConcurrency
+        }),
         ...(opts.questionBatchLimit === undefined ? {} : {
           questionBatchLimit: opts.questionBatchLimit
         }),
@@ -54,6 +63,9 @@ export async function runExtractionFillCommand(
         }),
         ...(opts.extractionTargetSelection === undefined ? {} : {
           targetSelectionReceiptPath: opts.extractionTargetSelection
+        }),
+        ...(opts.extractionPredecessorAuthority === undefined ? {} : {
+          predecessorAuthorityReceiptPath: opts.extractionPredecessorAuthority
         }),
         ...(opts.pinnedMetaRoot === undefined ? {} : {
           pinnedMetaRoot: opts.pinnedMetaRoot
@@ -75,6 +87,9 @@ function renderStart(opts: ParsedFlags): string {
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
     (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
     (opts.concurrency !== undefined ? ` concurrency=${opts.concurrency}` : "") +
+    (opts.extractionInitialConcurrency !== undefined
+      ? ` initial_concurrency=${opts.extractionInitialConcurrency}`
+      : "") +
     (opts.questionBatchLimit !== undefined
       ? ` question_batch_limit=${opts.questionBatchLimit}`
       : "") +

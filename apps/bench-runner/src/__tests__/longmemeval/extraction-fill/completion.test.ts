@@ -17,7 +17,10 @@ import {
   collectDistinctTurnContents,
   runExtractionFill
 } from "../../../longmemeval/extraction/extraction-fill.js";
-import { computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { computeExtractionTurnCacheKey } from
+  "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import { inspectTurnContentKeySpace, type LongMemEvalExtractionTurn } from
+  "../../../longmemeval/extraction/turn-contents.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
 import {
   inspectExtractionFillCompletion
@@ -201,7 +204,7 @@ it("refuses completion when an expected shard becomes invalid", async () => {
 });
 
 it("exposes a reusable read-only exact-set completion inspection", async () => {
-  const turnContents = collectDistinctTurnContents(questions.slice(0, 1));
+  const turns = inspectTurnContentKeySpace(questions.slice(0, 1)).distinctExtractionTurns;
   const completed = await runExtractionFill({
     variant: VARIANT,
     cacheRoot,
@@ -211,10 +214,10 @@ it("exposes a reusable read-only exact-set completion inspection", async () => {
     extractorFactory: emptyExtractor,
     log: () => undefined
   });
-  const inspection = inspect(turnContents);
+  const inspection = inspect(turns);
   expect(inspection).toMatchObject({
-    expectedTurns: turnContents.length,
-    validTurns: turnContents.length,
+    expectedTurns: turns.length,
+    validTurns: turns.length,
     missingTurns: 0,
     invalidTurns: 0,
     orphanTurns: 0,
@@ -222,14 +225,14 @@ it("exposes a reusable read-only exact-set completion inspection", async () => {
     expectedKeySetSha256: completed.manifest.expected_key_set_sha256,
     contentClosureSha256: completed.manifest.content_closure_sha256
   });
-  expect(inspect([...turnContents].reverse()).expectedKeySetSha256)
+  expect(inspect([...turns].reverse()).expectedKeySetSha256)
     .toBe(inspection.expectedKeySetSha256);
-  expect(inspect([...turnContents].reverse()).contentClosureSha256)
+  expect(inspect([...turns].reverse()).contentClosureSha256)
     .toBe(inspection.contentClosureSha256);
 });
 
 it("uses no partial closure when ledger exclusions leave no valid raw entries", async () => {
-  const turnContents = collectDistinctTurnContents(questions.slice(0, 1));
+  const turns = inspectTurnContentKeySpace(questions.slice(0, 1)).distinctExtractionTurns;
   await runExtractionFill({
     variant: VARIANT,
     cacheRoot,
@@ -239,19 +242,19 @@ it("uses no partial closure when ledger exclusions leave no valid raw entries", 
     extractorFactory: emptyExtractor,
     log: () => undefined
   });
-  const excludedKeys = turnContents.map((turnContent) => computeCacheKey(
-    "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turnContent
+  const excludedKeys = turns.map((turn) => computeExtractionTurnCacheKey(
+    "gpt-5.4-mini", "provider-default-v1", OFFICIAL_API_SYSTEM_PROMPT, turn
   ));
   const inspection = inspectExtractionFillCompletion({
     cacheRoot,
     model: "gpt-5.4-mini",
     requestProfile: "provider-default-v1",
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents,
+    extractionTurns: turns,
     excludeContentClosureKeys: excludedKeys
   });
 
-  expect(inspect(turnContents).partialContentClosureSha256).toMatch(/^[0-9a-f]{64}$/u);
+  expect(inspect(turns).partialContentClosureSha256).toMatch(/^[0-9a-f]{64}$/u);
   expect(inspection.partialContentClosureSha256).toBeNull();
 });
 
@@ -340,12 +343,12 @@ function writeOrphanShard(cacheKey: string): void {
   }), "utf8");
 }
 
-function inspect(turnContents: readonly string[]) {
+function inspect(extractionTurns: readonly LongMemEvalExtractionTurn[]) {
   return inspectExtractionFillCompletion({
     cacheRoot,
     model: "gpt-5.4-mini",
     requestProfile: "provider-default-v1",
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents
+    extractionTurns
   });
 }

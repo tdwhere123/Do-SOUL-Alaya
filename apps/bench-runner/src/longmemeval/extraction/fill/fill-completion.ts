@@ -3,8 +3,10 @@ import { join } from "node:path";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import {
   computeCacheKey,
+  computeExtractionTurnCacheKey,
   inspectCachedExtraction
 } from "../../compile-seed/compile-seed-cache.js";
+import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import {
   buildExtractionContentClosureIndex,
   computeExtractionContentClosureSha256,
@@ -47,12 +49,11 @@ export function inspectExtractionFillCompletion(input: {
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
-  readonly turnContents: readonly string[];
+  readonly turnContents?: readonly string[];
+  readonly extractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly excludeContentClosureKeys?: readonly string[];
 }): ExtractionFillCompletion {
-  const expectedKeys = new Set(input.turnContents.map((turnContent) =>
-    computeCacheKey(input.model, input.requestProfile, input.systemPrompt, turnContent)
-  ));
+  const expectedKeys = expectedCacheKeys(input);
   const counts = inspectExpectedShards(input, expectedKeys);
   const inventory = inspectShardInventory(input.cacheRoot);
   const orphanTurns = inventory.invalidEntries + [...inventory.keys]
@@ -75,6 +76,17 @@ export function inspectExtractionFillCompletion(input: {
     contentClosureSha256: closure?.sha256 ?? null,
     contentClosureIndex: closure?.index ?? null
   };
+}
+
+function expectedCacheKeys(input: Parameters<typeof inspectExtractionFillCompletion>[0]): Set<string> {
+  if (input.extractionTurns !== undefined) {
+    return new Set(input.extractionTurns.map((turn) => computeExtractionTurnCacheKey(
+      input.model, input.requestProfile, input.systemPrompt, turn
+    )));
+  }
+  return new Set((input.turnContents ?? []).map((turnContent) =>
+    computeCacheKey(input.model, input.requestProfile, input.systemPrompt, turnContent)
+  ));
 }
 
 export function inspectExtractionCacheContentClosure(input: {

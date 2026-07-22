@@ -14,6 +14,31 @@ describe("adaptive extraction concurrency", () => {
     controller.dispose();
   });
 
+  it("never backs off below an explicit minimum while the default remains one", async () => {
+    const signal = new AbortController().signal;
+    const bounded = createAdaptiveConcurrencyController({
+      maximum: 32,
+      initial: 8,
+      minimumConcurrency: 8
+    });
+    await bounded.acquire(signal);
+    expect(bounded.release(true)).toMatchObject({ minimum: 8, current: 8 });
+    bounded.dispose();
+
+    const defaulted = createAdaptiveConcurrencyController({ maximum: 2, initial: 2 });
+    await defaulted.acquire(signal);
+    expect(defaulted.release(true)).toMatchObject({ minimum: 1, current: 1 });
+    defaulted.dispose();
+  });
+
+  it("rejects a minimum above the initial concurrency", () => {
+    expect(() => createAdaptiveConcurrencyController({
+      maximum: 32,
+      initial: 4,
+      minimumConcurrency: 8
+    })).toThrow(/minimum.*initial/u);
+  });
+
   it("halves concurrency and holds new work through exponential rate-limit backoff", async () => {
     let now = 0;
     let wake: (() => void) | undefined;

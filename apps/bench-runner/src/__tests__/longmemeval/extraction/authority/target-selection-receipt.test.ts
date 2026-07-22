@@ -8,6 +8,7 @@ import {
   assertExtractionTargetSelectionReceipt,
   createFreshExtractionTargetSelection,
   createFreshRetiredSourceRebuildTargetSelection,
+  createSameRootContinuationTargetSelectionReceipt,
   readExtractionTargetSelectionReceipt,
   requiresExtractionTargetSelection
 } from "../../../../longmemeval/extraction/authority/target-selection/receipt.js";
@@ -115,6 +116,57 @@ it("limits target selection to the canonical LongMemEval-S 100Q and 500Q windows
     ...observation,
     dataset: { ...observation.dataset, windowLimit: 1 }
   })).toBe(false);
+});
+
+it("carries the selected root forward only across a revision-only continuation", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const predecessor = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot,
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+  const successorObservation = {
+    ...initialObservation(),
+    revision: `git-worktree-v1:${"9".repeat(40)}:${"8".repeat(64)}`,
+    extraction: {
+      ...initialObservation().extraction,
+      manifestSha256: "7".repeat(64),
+      rawContentClosureSha256: "6".repeat(64)
+    },
+    inventory: {
+      expectedTurns: 10,
+      validTurns: 4,
+      missingTurns: 6,
+      invalidTurns: 0,
+      orphanTurns: 0
+    }
+  };
+  const successor = createSameRootContinuationTargetSelectionReceipt({
+    predecessor,
+    predecessorAuthorityReceiptDigest: "5".repeat(64),
+    observation: successorObservation
+  });
+
+  expect(successor.target_root).toEqual(predecessor.target_root);
+  expect(successor.selection_basis).toEqual({
+    kind: "same_root_continuation",
+    predecessor_target_selection_digest: predecessor.receipt_digest,
+    predecessor_authority_receipt_digest: "5".repeat(64)
+  });
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt: successor,
+    cacheRoot,
+    observation: successorObservation
+  })).not.toThrow();
+  expect(() => createSameRootContinuationTargetSelectionReceipt({
+    predecessor,
+    predecessorAuthorityReceiptDigest: "5".repeat(64),
+    observation: {
+      ...successorObservation,
+      extraction: { ...successorObservation.extraction, model: "semantic-drift" }
+    }
+  })).toThrow(/revision-only successor/u);
 });
 
 function createTemporaryRoot(): string {

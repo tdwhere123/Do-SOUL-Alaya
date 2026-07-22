@@ -29,7 +29,7 @@ it("publishes authorization and exits zero in a real process", async () => {
   expect(JSON.parse(await readFile(join(root, "authorization.json"), "utf8")))
     .toEqual(promotionAuthorizationFixture());
   expect(await tempArtifacts()).toEqual([]);
-}, 20_000);
+}, 40_000);
 
 it("exits nonzero without a target or temp artifact on authorization failure", async () => {
   const result = await runFixture("failure");
@@ -38,7 +38,7 @@ it("exits nonzero without a target or temp artifact on authorization failure", a
   expect(result.stderr).toContain("fixture authorization failure");
   expect(existsSync(join(root, "authorization.json"))).toBe(false);
   expect(await tempArtifacts()).toEqual([]);
-}, 20_000);
+}, 40_000);
 
 async function runFixture(mode: "success" | "failure") {
   const child = spawn(process.execPath, [FIXTURE], {

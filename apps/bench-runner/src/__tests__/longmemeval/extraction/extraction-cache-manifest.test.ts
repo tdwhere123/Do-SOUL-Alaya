@@ -45,6 +45,13 @@ describe("extraction-cache-manifest", () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "extraction-manifest-"));
   });
 
+  it("declares the trusted-role corpus component used by current cache keys", () => {
+    expect(EXTRACTION_CACHE_KEY_ALGO).toBe(
+      "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent" +
+      "\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest)"
+    );
+  });
+
   afterEach(async () => {
     await rm(cacheRoot, { recursive: true, force: true });
   });

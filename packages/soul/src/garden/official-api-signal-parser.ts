@@ -5,11 +5,16 @@ import {
   parseOfficialApiTemporalProjection,
   type OfficialApiTemporalProjectionDraft
 } from "./temporal/observed-projection.js";
+import {
+  OfficialApiSourceLocatorSchema,
+  type OfficialApiSourceLocator
+} from "./grounding/source-locator.js";
 
 export const OFFICIAL_API_SIGNAL_LIMIT = 64;
 // invariant: extraction-cache reuse binds this parser behavior explicitly rather than
-// inferring compatibility from raw cache identity alone.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v1";
+// inferring compatibility from raw cache identity alone. source_locator is additive
+// and independently versioned, so locator absence keeps legacy v1 output unchanged.
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v2";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
@@ -127,6 +132,8 @@ const OfficialApiSignalEntrySchema = z.object({
   canonical_entities: CanonicalEntitiesArraySchema,
   distilled_fact: OptionalTrimmedStringSchema,
   reason: OptionalTrimmedStringSchema,
+  // Optional only for legacy extraction-cache replay; a declared locator must parse strictly.
+  source_locator: OfficialApiSourceLocatorSchema.optional(),
   temporal_projection: OfficialApiTemporalProjectionSchema,
   preference_profile: OfficialApiPreferenceProfileSchema
 }).loose().readonly();
@@ -156,6 +163,7 @@ export interface OfficialApiSignalDraft {
   readonly canonical_entities?: readonly string[];
   readonly distilled_fact?: string;
   readonly reason?: string;
+  readonly source_locator?: OfficialApiSourceLocator;
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
   readonly preference_profile?: OfficialApiPreferenceProfileDraft;
 }
@@ -361,6 +369,7 @@ export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSign
     ...(record.canonical_entities.length === 0 ? {} : { canonical_entities: record.canonical_entities }),
     ...(clampedDistilledFact === null ? {} : { distilled_fact: clampedDistilledFact }),
     ...(clampedReason === null ? {} : { reason: clampedReason }),
+    ...(record.source_locator === undefined ? {} : { source_locator: record.source_locator }),
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
     ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile })
   });

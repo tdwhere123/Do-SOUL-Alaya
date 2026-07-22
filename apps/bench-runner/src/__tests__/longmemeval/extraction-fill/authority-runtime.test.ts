@@ -216,6 +216,39 @@ describe("extraction authority runtime", () => {
     });
   });
 
+  it("persists one strict-empty probe with a non-empty assertion catalog", async () => {
+    setCredentialFixture();
+    await writeFixtureDataset([buildExtractionFillQuestion(
+      "q001", "I moved to Berlin last spring.", "I stayed home last spring."
+    )]);
+    const probePath = await writeAuthorityReceipt({ action: "probe" });
+    const observedRequests: { retryMode: string | undefined; assertionCount: number }[] = [];
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      const prompt = JSON.parse(input.userPrompt) as { source_assertions?: readonly unknown[] };
+      observedRequests.push({
+        retryMode: input.retryMode,
+        assertionCount: prompt.source_assertions?.length ?? 0
+      });
+      return { rawJson: '{"signals":[]}' };
+    });
+
+    const probe = await runExtractionFill({
+      variant: EXTRACTION_FILL_VARIANT,
+      cacheRoot,
+      dataDir,
+      pinnedMetaRoot,
+      authorityReceiptPath: probePath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    });
+
+    expect(extract).toHaveBeenCalledOnce();
+    expect(observedRequests).toEqual([{ retryMode: "disabled", assertionCount: 1 }]);
+    expect(probe).toMatchObject({ requestedTurns: 1, newlyExtracted: 1 });
+    expect(probe.authorityTelemetry).toMatchObject({ attempts: 1, successfulShards: 1 });
+  });
+
   it("rejects a question batch on a one-key probe before delegation", async () => {
     setCredentialFixture();
     await writeFixtureDataset([question("q001", "alpha", "decoy")]);

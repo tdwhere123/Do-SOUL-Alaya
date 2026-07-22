@@ -28,24 +28,25 @@ import { readExtractionAttemptLedger } from
   "../../longmemeval/extraction/authority/attempt-ledger.js";
 import { createExtractionRepairScope } from
   "../../longmemeval/extraction/authority/repair/repair-scope.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../longmemeval/extraction/authority/receipt-limits.js";
+import {
+  parseAuthorizeExtractionArgs,
+  type AuthorizeExtractionArgs
+} from "./args.js";
+import {
+  acquireExtractionCacheWriteLease,
+  withExtractionCacheWriteLease
+} from "../../longmemeval/extraction/fill/manifest/fill-root-guard.js";
+import {
+  assertExactContinuationIssuanceInspection,
+  persistContinuationAuthority,
+  prepareAuthorityContinuation,
+  type AuthorityContinuationDependencies,
+  type PreparedAuthorityContinuation
+} from "./continuation.js";
 
-interface AuthorizeExtractionArgs {
-  readonly action: "probe" | "fill";
-  readonly outputPath: string;
-  readonly outputTokenCap: number;
-  readonly outputTokenField: "max_tokens" | "max_completion_tokens";
-  readonly inputPriceUsdPerMillion: number;
-  readonly outputPriceUsdPerMillion: number;
-  readonly maximumInputTokens: number;
-  readonly diskFloorBytes: number;
-  readonly probeKey?: string;
-  readonly directDeepSeek500Operator?: string;
-  readonly directNewApiDeepSeek500Operator?: string;
-  readonly targetSelectionPath?: string;
-  readonly repairInvalidShards: boolean;
-}
-
-interface AuthorizeExtractionDependencies {
+interface AuthorizeExtractionDependencies extends AuthorityContinuationDependencies {
   readonly inspect?: typeof inspectExtractionAuthority;
   readonly write?: typeof writeExtractionAuthorityReceipt;
   readonly readRevision?: () => string;
@@ -69,7 +70,25 @@ export async function runAuthorizeExtractionCommand(
       freshDirectSpend = spend;
       freshDirectCacheRoot = cacheRoot;
     });
-    (deps.write ?? writeExtractionAuthorityReceipt)(authorized.outputPath, authorized.receipt);
+    if (authorized.continuation === undefined) {
+      (deps.write ?? writeExtractionAuthorityReceipt)(authorized.outputPath, authorized.receipt);
+    } else {
+      const continuation = authorized.continuation;
+      const lease = acquireExtractionCacheWriteLease(authorized.cacheRoot);
+      await withExtractionCacheWriteLease(lease, async () => {
+        const live = await (deps.inspect ?? inspectExtractionAuthority)(
+          authorized.inspectionInput
+        );
+        assertExactContinuationIssuanceInspection(authorized.inspection, live);
+        persistContinuationAuthority({
+          cacheRoot: authorized.cacheRoot,
+          outputPath: authorized.outputPath,
+          receipt: authorized.receipt,
+          prepared: continuation,
+          dependencies: deps
+        });
+      });
+    }
     freshDirectSpend = undefined;
     process.stdout.write(renderAuthorizedReceipt(authorized.outputPath, authorized.receipt));
     return 0;
@@ -102,7 +121,7 @@ async function buildAuthorizedReceipt(
   const cacheRoot = resolveEffectiveExtractionCacheRoot(flags.extractionCacheRoot);
   const directSpend = createDirectSpend(authority, flags, cacheRoot, deps);
   onFreshDirectSpend(directSpend, cacheRoot);
-  const { inspection, ledger } = await inspectAuthorityForReceipt(
+  const { inspection, ledger, inspectInput } = await inspectAuthorityForReceipt(
     flags, authority, cacheRoot, deps
   );
   assertInspectableAuthority(inspection, authority);
@@ -112,11 +131,25 @@ async function buildAuthorizedReceipt(
   assertTargetSelection(
     targetSelection, cacheRoot, inspection.observation, deps
   );
+  const continuation = prepareAuthorityContinuation({
+    predecessorAuthorityPath: authority.predecessorAuthorityPath,
+    cacheRoot,
+    inspection,
+    targetSelection,
+    dependencies: deps
+  });
+  if (continuation !== undefined && ledger !== undefined) {
+    throw new Error("same-root continuation successor lineage already exists");
+  }
   return Object.freeze({
+    cacheRoot,
     outputPath: authority.outputPath,
+    inspection,
+    inspectionInput: inspectInput,
     receipt: createReceipt(
-      authority, flags.concurrency, inspection, ledger, directSpend, targetSelection
-    )
+      authority, flags.concurrency, inspection, ledger, directSpend, targetSelection, continuation
+    ),
+    ...(continuation === undefined ? {} : { continuation })
   });
 }
 
@@ -224,7 +257,7 @@ async function inspectAuthorityForReceipt(
   const inspection = ledger === undefined
     ? initial
     : await inspect({ ...inspectInput, excludeContentClosureKeys: ledger.successfulKeys });
-  return Object.freeze({ inspection, ledger });
+  return Object.freeze({ inspection, ledger, inspectInput });
 }
 
 function ledgerReadInput(
@@ -247,7 +280,8 @@ function createReceipt(
   inspection: ExtractionAuthorityInspection,
   ledger: ReturnType<typeof readExtractionAttemptLedger>,
   directSpend: DirectExtractionSpendAuthorization | undefined,
-  targetSelection: ExtractionTargetSelectionReceipt | undefined
+  targetSelection: ExtractionTargetSelectionReceipt | undefined,
+  continuation: PreparedAuthorityContinuation | undefined
 ) {
   const repairScope = authority.repairInvalidShards
     ? createExtractionRepairScope(
@@ -255,16 +289,17 @@ function createReceipt(
       inspection.preservedValidClosure
     )
     : undefined;
-  const carriedLimits = ledger === undefined
+  const inheritedLedger = continuation?.predecessorLedger ?? ledger;
+  const carriedLimits = inheritedLedger === undefined
     ? repairScope === undefined ? undefined : {
       startingMissing: repairScope.shard_count,
-      maximumAttempts: Math.ceil(repairScope.shard_count * 1.1),
+      maximumAttempts: computeExtractionFillAttemptCeiling(repairScope.shard_count),
       successfulShardCeiling: repairScope.shard_count
     }
     : {
-      startingMissing: ledger.startingMissing,
-      maximumAttempts: ledger.maximumAttempts,
-      successfulShardCeiling: ledger.successfulShardCeiling
+      startingMissing: inheritedLedger.startingMissing,
+      maximumAttempts: inheritedLedger.maximumAttempts,
+      successfulShardCeiling: inheritedLedger.successfulShardCeiling
     };
   return createExtractionAuthorityReceipt({
     action: authority.action,
@@ -284,7 +319,11 @@ function createReceipt(
       targetSelectionDigest: targetSelection.receipt_digest
     }),
     ...(directSpend === undefined ? {} : { directSpend }),
-    ...(repairScope === undefined ? {} : { repairScope })
+    ...(repairScope === undefined ? {} : { repairScope }),
+    ...(continuation === undefined ? {} : { continuation: continuation.evidence }),
+    ...(continuation === undefined || targetSelection === undefined ? {} : {
+      now: new Date(targetSelection.created_at)
+    })
   });
 }
 
@@ -328,132 +367,4 @@ function assertInspectableAuthority(
       throw new Error("probe key must identify exactly one currently missing target key");
     }
   }
-}
-
-function parseAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtractionArgs {
-  const parsed = readAuthorizeExtractionArgs(args);
-  assertAuthorizeExtractionArgs(parsed);
-  return parsed;
-}
-
-function readAuthorizeExtractionArgs(args: ReadonlyArray<string>): AuthorizeExtractionArgs {
-  const action = requiredEnum(args, "--extraction-action", ["probe", "fill"] as const);
-  const outputTokenField = requiredEnum(
-    args,
-    "--extraction-output-token-field",
-    ["max_tokens", "max_completion_tokens"] as const
-  );
-  return {
-    action,
-    outputPath: requiredString(args, "--extraction-receipt-out"),
-    outputTokenCap: requiredPositiveInt(args, "--extraction-output-token-cap"),
-    outputTokenField,
-    inputPriceUsdPerMillion: requiredNonNegativeNumber(
-      args, "--extraction-input-price-usd-per-million"
-    ),
-    outputPriceUsdPerMillion: requiredNonNegativeNumber(
-      args, "--extraction-output-price-usd-per-million"
-    ),
-    maximumInputTokens: requiredNonNegativeInt(args, "--extraction-max-input-tokens"),
-    diskFloorBytes: requiredNonNegativeInt(args, "--extraction-disk-floor-bytes"),
-    probeKey: optionalString(args, "--extraction-probe-key"),
-    directDeepSeek500Operator: optionalRequiredString(
-      args, "--direct-deepseek-500-operator"
-    ),
-    directNewApiDeepSeek500Operator: optionalRequiredString(
-      args, "--direct-newapi-deepseek-500-operator"
-    ),
-    targetSelectionPath: optionalRequiredString(args, "--extraction-target-selection"),
-    repairInvalidShards: args.includes("--repair-invalid-shards")
-  };
-}
-
-function assertAuthorizeExtractionArgs(parsed: AuthorizeExtractionArgs): void {
-  if (parsed.action === "probe" && parsed.probeKey === undefined) {
-    throw new Error("--extraction-probe-key is required when --extraction-action=probe");
-  }
-  if (parsed.action === "fill" && parsed.probeKey !== undefined) {
-    throw new Error("--extraction-probe-key is only valid when --extraction-action=probe");
-  }
-  const directOperator = parsed.directDeepSeek500Operator ?? parsed.directNewApiDeepSeek500Operator;
-  if (parsed.directDeepSeek500Operator !== undefined &&
-      parsed.directNewApiDeepSeek500Operator !== undefined) {
-    throw new Error("only one direct DeepSeek 500 operator flag may be provided");
-  }
-  if (directOperator !== undefined && parsed.action !== "fill") {
-    throw new Error("direct DeepSeek 500 operator flags are only valid when --extraction-action=fill");
-  }
-  if (directOperator !== undefined && parsed.targetSelectionPath !== undefined) {
-    throw new Error("--extraction-target-selection cannot mix with a direct DeepSeek 500 operator flag");
-  }
-  if (parsed.repairInvalidShards && (parsed.action !== "fill" || directOperator !== undefined ||
-      parsed.targetSelectionPath !== undefined)) {
-    throw new Error("--repair-invalid-shards is a standalone fill authority mode");
-  }
-}
-
-function requiredString(args: ReadonlyArray<string>, flag: string): string {
-  const value = optionalString(args, flag);
-  if (value === undefined || value.length === 0 || value.startsWith("--")) {
-    throw new Error(`${flag} requires a value`);
-  }
-  return value;
-}
-
-function optionalString(args: ReadonlyArray<string>, flag: string): string | undefined {
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index];
-    if (token === `${flag}`) return args[index + 1];
-    if (token?.startsWith(`${flag}=`)) return token.slice(flag.length + 1);
-  }
-  return undefined;
-}
-
-function optionalRequiredString(args: ReadonlyArray<string>, flag: string): string | undefined {
-  return args.some((token) => token === flag || token.startsWith(`${flag}=`))
-    ? requiredString(args, flag)
-    : undefined;
-}
-
-function requiredPositiveInt(args: ReadonlyArray<string>, flag: string): number {
-  return requiredInteger(args, flag, (value) => value > 0, "a positive integer");
-}
-
-function requiredNonNegativeInt(args: ReadonlyArray<string>, flag: string): number {
-  return requiredInteger(args, flag, (value) => value >= 0, "a non-negative integer");
-}
-
-function requiredInteger(
-  args: ReadonlyArray<string>,
-  flag: string,
-  predicate: (value: number) => boolean,
-  description: string
-): number {
-  const raw = requiredString(args, flag);
-  if (!/^\d+$/u.test(raw)) throw new Error(`${flag} must be ${description}`);
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || !predicate(value)) {
-    throw new Error(`${flag} must be ${description}`);
-  }
-  return value;
-}
-
-function requiredNonNegativeNumber(args: ReadonlyArray<string>, flag: string): number {
-  const value = Number(requiredString(args, flag));
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`${flag} must be a non-negative finite number`);
-  }
-  return value;
-}
-
-function requiredEnum<T extends string>(
-  args: ReadonlyArray<string>,
-  flag: string,
-  allowed: readonly T[]
-): T {
-  const value = requiredString(args, flag);
-  if (!allowed.includes(value as T)) {
-    throw new Error(`${flag} must be one of: ${allowed.join(", ")}`);
-  }
-  return value as T;
 }

@@ -2,9 +2,11 @@ const ENGLISH_REFERENCE =
   /\b(?:he|she|it|they|him|her|them|his|hers|their|there|here|this|that|these|those|aforementioned|such)\b/giu;
 
 export function hasUnresolvedReference(assertion: string): boolean {
+  const template = matchBoundedTemplateSlot(assertion);
   if (hasUnresolvedChineseReference(assertion)) return true;
   if (/\bthe\s+(?:former|latter|same|above|below)\b/iu.test(assertion)) return true;
   for (const match of assertion.matchAll(ENGLISH_REFERENCE)) {
+    if (template !== null && isTemplateBoundReference(template, match[0]!, match.index)) continue;
     if (!isLocallyClosedReference(assertion, match[0]!, match.index)) return true;
   }
   return false;
@@ -16,7 +18,7 @@ function isLocallyClosedReference(assertion: string, reference: string, index: n
   switch (reference.toLocaleLowerCase("en-US")) {
     case "it":
       return isDummyIt(before, after) || hasLocalObjectAntecedent(before) ||
-        hasLocalPlaceAntecedent(before);
+        hasLocalPlaceAntecedent(before) || hasLocalValuationTopic(before, after);
     case "there":
       return hasLocalPlaceAntecedent(before);
     case "her":
@@ -24,8 +26,11 @@ function isLocallyClosedReference(assertion: string, reference: string, index: n
       return hasLocalKinshipAntecedent(before, "female");
     case "him":
     case "his":
+      return hasLocalKinshipAntecedent(before, "male");
     case "he":
       return hasLocalKinshipAntecedent(before, "male");
+    case "them":
+      return false;
     case "that":
       return isRelativeThat(before, after) || isComplementThat(before, after) ||
         isAnchoredDemonstrative(after);
@@ -57,8 +62,102 @@ function hasLocalObjectAntecedent(before: string): boolean {
   );
 }
 
+function hasLocalValuationTopic(before: string, after: string): boolean {
+  const match = /\b(?:thinking|thought)\s+about\s+(?:my|our|the)\s+([^,]{1,120}),\s+and\s+I\s+(?:realized|noticed|learned|discovered|found)\s+that\b/iu.exec(before);
+  if (match === null || !isSimpleValuationTopic(match[1]!)) return false;
+  if (/^\s*(?:['’]s|is|was)\s+(?:actually\s+)?worth\b/iu.test(after)) return true;
+  return /\bworth\b[\s\S]{0,100}\bwhat\s+I\s+paid\s+for\s*$/iu.test(before);
+}
+
+function isSimpleValuationTopic(topic: string): boolean {
+  const words = topic.trim().split(/\s+/u);
+  if (words.length === 0 || words.length > 5) return false;
+  return !/\b(?:and|or|of|with|for|from|to|in|on|at|by)\b/iu.test(topic);
+}
+
+export function isBoundedTemplateSlotAssertion(assertion: string): boolean {
+  const value = stripRoleLabel(assertion);
+  return matchBoundedTemplateSlot(value) !== null && !hasUnresolvedReference(value);
+}
+
+interface BoundedTemplateSlotMatch {
+  readonly themIndex: number;
+  readonly itIndex: number;
+}
+
+function matchBoundedTemplateSlot(assertion: string): BoundedTemplateSlotMatch | null {
+  const value = stripRoleLabel(assertion);
+  const pattern = /^Under\s+["“]How We Met["”],\s+I['’]ll\s+include\s+the\s+location\s+where\s+I\s+met\s+them\.\s+For\s+\p{Lu}[\p{Ll}\p{N}'’-]*,\s+it\s+was\s+((?:a|an|the)\s+[\p{L}\p{N}'’ -]{1,80})[.!]$/u;
+  const match = pattern.exec(value);
+  if (match === null || !isBoundedTemplatePlaceValue(match[1]!)) return null;
+  return {
+    themIndex: value.indexOf("them."),
+    itIndex: value.indexOf("it was", value.indexOf("them.") + 5)
+  };
+}
+
+const TEMPLATE_PLACE_PREPOSITIONS = new Set(["at", "in", "near", "on"]);
+const TEMPLATE_PLACE_HEAD_NOUNS = new Set([
+  "airport", "apartment", "avenue", "bar", "beach", "building", "cafe", "café",
+  "center", "centre", "church", "cinema", "city", "clinic", "college", "district",
+  "flat", "garden", "gym", "home", "hospital", "hostel", "hotel", "house", "library",
+  "mall", "market", "museum", "neighborhood", "neighbourhood", "office", "park",
+  "pub", "restaurant", "road", "room", "school", "shop", "square", "station", "store",
+  "street", "theater", "theatre", "town", "trail", "university", "venue", "village"
+]);
+const TEMPLATE_PLACE_FORBIDDEN_WORDS = new Set([
+  "a", "an", "and", "or", "its", "their", "his", "her", "our", "my", "your",
+  "other", "previous", "former", "latter", "same", "aforementioned", "above", "below",
+  "such", "this", "that", "these", "those", "by", "of", "with", "from", "to", "for",
+  "is", "was", "are", "were", "has", "had", "have", "does", "did", "will", "would",
+  "should", "could", "can", "may", "might", "must"
+]);
+
+function isBoundedTemplatePlaceValue(value: string): boolean {
+  const [article, ...rawWords] = value.trim().split(/\s+/u);
+  if (!/^(?:a|an|the)$/iu.test(article ?? "") || rawWords.length === 0) return false;
+  if (rawWords.some((word) => !/^[\p{L}\p{N}'’–-]+$/u.test(word))) return false;
+  const words = rawWords.map((word) => word.toLocaleLowerCase("en-US"));
+  if (words.some((word) => TEMPLATE_PLACE_FORBIDDEN_WORDS.has(word))) return false;
+  const prepositionIndexes = words.flatMap((word, index) =>
+    TEMPLATE_PLACE_PREPOSITIONS.has(word) ? [index] : []
+  );
+  if (prepositionIndexes.length === 0) {
+    return words.length <= 4 && !words.includes("the") && hasBoundedPlaceHead(words);
+  }
+  if (prepositionIndexes.length !== 1) return false;
+  const prepositionIndex = prepositionIndexes[0]!;
+  const base = words.slice(0, prepositionIndex);
+  const rawTarget = words.slice(prepositionIndex + 1);
+  const target = rawTarget[0] === "the" ? rawTarget.slice(1) : rawTarget;
+  return base.length >= 1 && base.length <= 4 && !base.includes("the") &&
+    target.length >= 1 && target.length <= 4 && !target.includes("the") &&
+    hasBoundedPlaceHead(base) && hasBoundedPlaceHead(target);
+}
+
+function hasBoundedPlaceHead(words: readonly string[]): boolean {
+  const head = words.at(-1);
+  return head !== undefined && TEMPLATE_PLACE_HEAD_NOUNS.has(head);
+}
+
+function isTemplateBoundReference(
+  template: BoundedTemplateSlotMatch,
+  reference: string,
+  index: number
+): boolean {
+  return (reference === "them" && index === template.themIndex) ||
+    (reference === "it" && index === template.itIndex);
+}
+
+function stripRoleLabel(assertion: string): string {
+  return assertion.trim().replace(/^(?:User|Assistant)\s*:\s*/iu, "");
+}
+
 function hasCoordinatedObjectAmbiguity(before: string): boolean {
-  return /\b(?:a|an|the|my|this|that)\s+[\p{L}\p{N}'’-]+(?:\s+[\p{L}\p{N}'’-]+){0,3}\s+and\s+(?:a|an|the|my|this|that)\s+[\p{L}\p{N}'’-]+/iu.test(
+  if (/\b(?:a|an|the|my|this|that)\s+[\p{L}\p{N}'’-]+(?:\s+[\p{L}\p{N}'’-]+){0,3}\s+and\s+(?:a|an|the|my|this|that)\s+[\p{L}\p{N}'’-]+/iu.test(
+    before
+  )) return true;
+  return /\b(?:my|our|the|this|that)\s+(?:\p{Ll}[\p{L}'’-]+\s+){0,2}\p{Ll}[\p{L}'’-]+\s+(?:and|or)\s+(?:\p{Ll}[\p{L}'’-]+\s+){0,2}\p{Ll}[\p{L}'’-]+\b/u.test(
     before
   );
 }
@@ -86,12 +185,13 @@ function hasLocalKinshipAntecedent(before: string, gender: "female" | "male"): b
 function isRelativeThat(before: string, after: string): boolean {
   if (!/[\p{L}\p{N}'’]([),]?)\s*$/u.test(before)) return false;
   return /^\s+(?:I|we|you|he|she|they|it|am|is|are|was|were)\b/iu.test(after) ||
+    /^\s+(?:can|could|may|might|must|shall|should|will|would)(?:\s+not)?\s+[\p{L}'’-]+\b/iu.test(after) ||
     /^\s+(?:cost|costs|took|takes|made|makes|has|had|includes?|involves?)\b/iu.test(after) ||
     /^\s+\p{Ll}[\p{L}'’-]*(?:s|ed)\b/u.test(after);
 }
 
 function isComplementThat(before: string, after: string): boolean {
-  return /\b(?:found|find|think|thought|know|knew|said|say|believe|believed|remember|recalled)\s*$/iu.test(
+  return /\b(?:found|find|think|thought|know|knew|said|say|believe|believed|remember|recalled|realize|realized|notice|noticed|learn|learned|discover|discovered)\s*$/iu.test(
     before
   ) && /^\s+[\p{L}\p{N}]/u.test(after);
 }

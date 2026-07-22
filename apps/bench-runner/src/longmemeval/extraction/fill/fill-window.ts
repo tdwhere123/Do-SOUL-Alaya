@@ -1,7 +1,10 @@
 import type { LongMemEvalVariant } from "../../ingestion/dataset.js";
 import { loadDatasetWithIdentity } from "../../ingestion/fetch.js";
 import type { PreparedExpansionFillAuthority } from "../expansion-fill-authority.js";
-import { inspectTurnContentKeySpace } from "../turn-contents.js";
+import {
+  inspectTurnContentKeySpace,
+  type LongMemEvalExtractionTurn
+} from "../turn-contents.js";
 
 interface ExtractionFillWindowOptions {
   readonly variant: LongMemEvalVariant;
@@ -15,6 +18,8 @@ interface ExtractionFillWindowOptions {
 interface ExtractionFillWindow {
   readonly distinctTurns: readonly string[];
   readonly executionTurns: readonly string[];
+  readonly distinctExtractionTurns: readonly LongMemEvalExtractionTurn[];
+  readonly executionExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requestedTurns: number;
   readonly windowTurnOccurrences: number;
   readonly executionTurnOccurrences: number;
@@ -41,9 +46,13 @@ function prepareExpansionWindow(
   if (options.questionBatchLimit !== undefined) {
     throw new Error("question-bounded extraction cannot mix an expansion capability");
   }
+  const keySpace = inspectTurnContentKeySpace(expansion.nextQuestions);
+  assertSameTurnWindow(keySpace.distinctTurnContents, expansion.nextTurns);
   return {
     distinctTurns: expansion.nextTurns,
     executionTurns: expansion.nextTurns,
+    distinctExtractionTurns: keySpace.distinctExtractionTurns,
+    executionExtractionTurns: keySpace.distinctExtractionTurns,
     requestedTurns: expansion.nextTurns.length,
     windowTurnOccurrences: expansion.nextTurns.length,
     executionTurnOccurrences: expansion.nextTurns.length,
@@ -73,6 +82,8 @@ async function prepareDatasetWindow(
   return {
     distinctTurns,
     executionTurns,
+    distinctExtractionTurns: windowKeySpace.distinctExtractionTurns,
+    executionExtractionTurns: executionKeySpace.distinctExtractionTurns,
     requestedTurns: distinctTurns.length,
     windowTurnOccurrences: windowKeySpace.turnOccurrences,
     executionTurnOccurrences: executionKeySpace.turnOccurrences,
@@ -83,6 +94,16 @@ async function prepareDatasetWindow(
       questionBatchLimit: options.questionBatchLimit
     })
   };
+}
+
+function assertSameTurnWindow(
+  actual: readonly string[],
+  expected: readonly string[]
+): void {
+  if (actual.length === expected.length && actual.every((turn, index) => turn === expected[index])) {
+    return;
+  }
+  throw new Error("expansion extraction turns disagree with the trusted message window");
 }
 
 function resolveQuestionBatchLimit(raw: number | undefined, questionCount: number): number {

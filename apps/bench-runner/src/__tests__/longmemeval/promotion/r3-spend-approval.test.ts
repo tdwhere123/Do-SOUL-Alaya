@@ -51,8 +51,8 @@ describe("R3 spend approval", () => {
       ...fixture(), target: { ...fixture().target, selected_count: 501 }
     })).toThrow(/selected_count/u);
     expect(() => verifyR3SpendApproval({
-      ...fixture(), spend: { ...fixture().spend, maximum_attempts: 79506 }
-    }, expectation())).toThrow(/110 percent attempt/u);
+      ...fixture(), spend: { ...fixture().spend, maximum_attempts: 361386 }
+    }, expectation())).toThrow(/transport attempt/u);
   });
 });
 
@@ -79,7 +79,7 @@ function fixture() {
     },
     spend: {
       starting_missing: 72277,
-      maximum_attempts: 79505,
+      maximum_attempts: 361385,
       successful_shard_ceiling: 72277,
       estimated_cost_usd: 99.5,
       disk_floor_bytes: 1000000
@@ -96,7 +96,7 @@ function expectation() {
     targetSelectionSha256: "4".repeat(64),
     targetSelectedCount: 500,
     startingMissing: 72277,
-    maximumAttempts: 79505,
+    maximumAttempts: 361385,
     successfulShardCeiling: 72277,
     materialEffect: {
       paired_r_at_5: {

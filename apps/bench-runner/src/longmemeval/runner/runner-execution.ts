@@ -33,7 +33,7 @@ import { awaitLongMemEvalSnapshotQuiescence } from
   "../snapshot/quiescence.js";
 import { assertLongMemEvalTreatmentNeutralEdgeFormation } from
   "./edge-formation-config.js";
-import { collectDistinctTurnContents } from
+import { inspectTurnContentKeySpace } from
   "../extraction/turn-contents.js";
 import { assertCurrentPostFillCacheAuthority } from
   "../snapshot/current/current-substrate-authority.js";
@@ -360,7 +360,8 @@ function assertSnapshotProducerExecutionPolicy(context: LongMemEvalRunContext): 
   assertCurrentPostFillCacheAuthority({
     cacheRoot: context.extractionCacheRoot,
     datasetSha256: context.datasetSha256,
-    requiredTurnContents: collectDistinctTurnContents(context.window),
+    requiredTurnContents: inspectTurnContentKeySpace(context.window).distinctTurnContents,
+    requiredExtractionTurns: inspectTurnContentKeySpace(context.window).distinctExtractionTurns,
     requiredQuestionWindow: {
       offset: Math.max(0, context.opts.offset ?? 0),
       limit: context.window.length

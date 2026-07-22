@@ -5,6 +5,7 @@ import {
   GardenTaskKind,
   parseGardenEventPayload,
   SignalSource,
+  type CandidateMemorySignal,
   type EdgeClassifyVerdict,
   type GardenCompleteTaskRequest
 } from "@do-soul/alaya-protocol";
@@ -17,6 +18,10 @@ import { buildGardenTaskSignalId } from "../garden/index.js";
 import {
   readVerifiedDeliverySourceObservation
 } from "../runtime/recall-materialization-source-receipt.js";
+import {
+  emitTaskCandidateSignals,
+  readExternalPostTurnPayload
+} from "./garden-task-completion/candidate-signal-emission.js";
 import {
   buildGardenCompletionEnvelopeJson,
   GardenTaskNotFoundError,
@@ -159,41 +164,21 @@ async function completeCandidateSignalTask(
 ): Promise<GardenTaskCompletionResult> {
   const repo = params.deps.gardenTaskRepo!;
   const contentOnlySignals = request.result_envelope?.candidate_signals ?? [];
-  const completionEnvelopeJson =
-    contentOnlySignals.length === 0
-      ? null
-      : buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals);
+  const preservesPostTurnEvidence =
+    row.kind === GardenTaskKind.POST_TURN_EXTRACT && request.status === "completed";
+  const completionEnvelopeJson = contentOnlySignals.length > 0 || preservesPostTurnEvidence
+    ? buildGardenCompletionEnvelopeJson(row.id, contentOnlySignals)
+    : null;
   assertCandidateSignalRetryCompatible(row, completionEnvelopeJson);
 
-  const completionClaimedBy =
-    contentOnlySignals.length === 0
-      ? context.agentTarget
-      : `${context.agentTarget}:complete:${params.generateId()}`;
+  const completionClaimedBy = completionEnvelopeJson === null
+    ? context.agentTarget
+    : `${context.agentTarget}:complete:${params.generateId()}`;
   beginCompletionAttemptIfNeeded(repo, row, completionClaimedBy, completionEnvelopeJson, params.now);
 
   try {
-    const sourceObservation = contentOnlySignals.length === 0
-      ? null
-      : resolveGardenTaskSourceObservation(row);
-    const emittedSignalIds = await emitCandidateSignals(
-      params,
-      contentOnlySignals,
-      row.id,
-      context.workspaceId,
-      resolvedRunId,
-      sourceObservation
-    );
-    await repo.completeWithEvents(
-      row.id,
-      {
-        status: request.status,
-        completed_at: params.now(),
-        ...(request.last_error_text === undefined
-          ? {}
-          : { last_error_text: request.last_error_text })
-      },
-      [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now())],
-      completionClaimedBy
+    await commitCandidateSignalCompletion(
+      params, request, context, row, resolvedRunId, contentOnlySignals, completionClaimedBy
     );
   } catch (error) {
     await releaseCompletionClaim(repo, row.id, completionClaimedBy, error, params.warn);
@@ -201,6 +186,39 @@ async function completeCandidateSignalTask(
   }
 
   return { task_id: row.id, status: request.status, events_appended: 1 };
+}
+
+async function commitCandidateSignalCompletion(
+  params: GardenTaskCompletionParams,
+  request: GardenCompleteTaskRequest,
+  context: GardenTaskToolCallContext,
+  row: GardenTaskRow,
+  resolvedRunId: string | null,
+  contentOnlySignals: NonNullable<
+    NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"]
+  >,
+  completionClaimedBy: string
+): Promise<void> {
+  const postTurnPayload = row.kind === GardenTaskKind.POST_TURN_EXTRACT
+    ? readExternalPostTurnPayload(row, context, resolvedRunId)
+    : null;
+  const candidateSignals = buildCandidateSignals(
+    params, contentOnlySignals, row.id, context.workspaceId, resolvedRunId,
+    postTurnPayload?.source_observation ?? resolveGardenTaskSourceObservation(row)
+  );
+  const emittedSignalIds = await emitTaskCandidateSignals(
+    params, request, row, postTurnPayload, candidateSignals, completionClaimedBy
+  );
+  await params.deps.gardenTaskRepo!.completeWithEvents(
+    row.id,
+    {
+      status: request.status,
+      completed_at: params.now(),
+      ...(request.last_error_text === undefined ? {} : { last_error_text: request.last_error_text })
+    },
+    [buildCompletedTaskEvent(row, context, resolvedRunId, request.status, emittedSignalIds, params.now())],
+    completionClaimedBy
+  );
 }
 
 function assertCandidateSignalRetryCompatible(
@@ -240,30 +258,26 @@ function beginCompletionAttemptIfNeeded(
   }
 }
 
-async function emitCandidateSignals(
+function buildCandidateSignals(
   params: GardenTaskCompletionParams,
   contentOnlySignals: NonNullable<GardenCompleteTaskRequest["result_envelope"]>["candidate_signals"],
   taskId: string,
   workspaceId: string,
   resolvedRunId: string | null,
   sourceObservation: ReturnType<typeof readVerifiedDeliverySourceObservation>
-): Promise<string[]> {
-  const emittedSignalIds: string[] = [];
-  for (const [index, signalContent] of (contentOnlySignals ?? []).entries()) {
-    const internalSignal = normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
+): readonly CandidateMemorySignal[] {
+  return (contentOnlySignals ?? []).map((signalContent, index) =>
+    normalizeSchemaGroundedSignal(CandidateMemorySignalSchema.parse({
       signal_id: buildGardenTaskSignalId(taskId, index),
-      ...normalizeCandidateSignalGraphRefs(signalContent!, params.warn),
+      ...normalizeCandidateSignalGraphRefs(signalContent, params.warn),
       workspace_id: workspaceId,
       run_id: resolvedRunId,
       surface_id: null,
       source: SignalSource.GARDEN_COMPILE,
       created_at: params.now(),
       source_observation: sourceObservation
-    }));
-    const received = await params.deps.signalService.receiveSignal(internalSignal);
-    emittedSignalIds.push(received.signal.signal_id);
-  }
-  return emittedSignalIds;
+    }))
+  );
 }
 
 function resolveGardenTaskSourceObservation(

@@ -26,6 +26,8 @@ import {
   type TimedResult,
   type TimedSpan
 } from "./recall-phase-latency.js";
+import { recallFinalAuthorityMaxHeadDrop } from
+  "../../../config/recall-env-access.js";
 
 export type LegacyInitialAssessment = Readonly<{
   readonly assessment: FineAssessmentResult;
@@ -207,7 +209,8 @@ function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
+    captureAnswerFeatures: params.diagnosticCapture === "answer_features",
+    finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop()
   };
 }
 

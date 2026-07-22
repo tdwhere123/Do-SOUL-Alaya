@@ -14,6 +14,8 @@ export interface ExtractionReplayEntry {
   readonly disposition: ExtractionReplayDisposition;
   readonly stage: string;
   readonly reason: string;
+  readonly sourceAssertion?: string;
+  readonly formedContentSha256?: string;
 }
 
 export interface ExtractionReplayOccurrence {
@@ -39,7 +41,9 @@ export interface ExtractionReplayResult {
 
 export type ExtractionReplayAuditor = (
   input: Parameters<typeof auditOfficialApiSignalFormation>[0]
-) => Readonly<{ entries: readonly ExtractionReplayEntry[] }>;
+) => Readonly<{
+  entries: ReturnType<typeof auditOfficialApiSignalFormation>["entries"];
+}>;
 
 export function replayExtractionOccurrences(input: {
   readonly cacheRoot: string;
@@ -84,6 +88,7 @@ function replayOccurrence(input: {
   const result = input.audit({
     raw_json: cached.rawJson,
     turn_content: input.occurrence.turnContent,
+    turn_messages: input.occurrence.turnMessages,
     workspace_id: replayScopedId("workspace", input.occurrence.id),
     run_id: replayScopedId("run", input.occurrence.id),
     surface_id: null,
@@ -99,9 +104,32 @@ function replayOccurrence(input: {
       index: entry.index,
       disposition: entry.disposition,
       stage: entry.stage,
-      reason: entry.reason
+      reason: entry.reason,
+      ...formationCommitment(entry.signal)
     })))
   });
+}
+
+function formationCommitment(
+  signal: ReturnType<typeof auditOfficialApiSignalFormation>["entries"][number]["signal"]
+): Pick<ExtractionReplayEntry, "sourceAssertion" | "formedContentSha256"> {
+  if (signal === undefined) return {};
+  const raw = signal.raw_payload;
+  const sourceAssertion = typeof raw.source_assertion === "string"
+    ? raw.source_assertion
+    : undefined;
+  const content = {
+    source_assertion: sourceAssertion ?? null,
+    matched_text: typeof raw.matched_text === "string" ? raw.matched_text : null,
+    distilled_fact: typeof raw.distilled_fact === "string" ? raw.distilled_fact : null,
+    full_turn_content: typeof raw.full_turn_content === "string" ? raw.full_turn_content : null
+  };
+  return {
+    ...(sourceAssertion === undefined ? {} : { sourceAssertion }),
+    formedContentSha256: createHash("sha256")
+      .update(JSON.stringify(content), "utf8")
+      .digest("hex")
+  };
 }
 
 function cachedExtraction(input: Parameters<typeof replayOccurrence>[0]): CachedExtractionInspection {

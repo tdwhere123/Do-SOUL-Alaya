@@ -3,6 +3,7 @@
 # Required: MATRIX_RUN_ROOT (campaign dir with snapshot/source-100.db).
 # Optional: MATRIX_CACHE_ROOT, MATRIX_MODEL_CACHE, MATRIX_DATASET_DIR,
 #           MATRIX_SNAPSHOT, ALAYA_RECALL_WEIGHT_OVERRIDES,
+#           MATRIX_EXTRACTION_MODEL (must equal cache manifest),
 #           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys).
 set -euo pipefail
 
@@ -39,6 +40,13 @@ file_sha() {
 [[ ! -e "$DATA_ROOT" && ! -e "$HISTORY_ROOT" && ! -e "$EVIDENCE_ROOT" ]] || {
   echo "cell output already exists: $CELL under $RUN_ROOT" >&2; exit 65;
 }
+declare -a MODEL_ARGS=("$CACHE_ROOT/manifest.json")
+if [[ -n "${MATRIX_EXTRACTION_MODEL:-}" ]]; then
+  MODEL_ARGS+=("$MATRIX_EXTRACTION_MODEL")
+fi
+EXTRACTION_MODEL="$(
+  rtk node "$SCRIPT_DIR/longmemeval-matrix-cache-model.mjs" "${MODEL_ARGS[@]}"
+)"
 
 HEAD_SHA="$(git -C "$WORKTREE" rev-parse HEAD)"
 PORCELAIN="$(git -C "$WORKTREE" status --porcelain=v1 --untracked-files=normal || true)"
@@ -58,6 +66,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" \
   DIST_JSON="$DIST_JSON" EMBEDDING_MODE="$EMBEDDING_MODE" CROSS_ENABLED="$CROSS_ENABLED" \
   SNAPSHOT_SHA256="$SNAPSHOT_SHA256" CACHE_MANIFEST_SHA256="$CACHE_MANIFEST_SHA256" \
   DATASET_SHA256="$DATASET_SHA256" \
+  EXTRACTION_MODEL="$EXTRACTION_MODEL" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
   python3 - "$IDENTITY_PATH" <<'PY'
 import hashlib
@@ -84,6 +93,7 @@ payload = {
   "dataset_sha256": os.environ["DATASET_SHA256"],
   "runner": runner,
   "treatment": {
+    "extraction_model": os.environ["EXTRACTION_MODEL"],
     "embedding_mode": os.environ["EMBEDDING_MODE"],
     "cross_encoder_enabled": os.environ["CROSS_ENABLED"] == "true",
   },
@@ -125,7 +135,7 @@ set +e
   ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=0 \
   ALAYA_BENCH_EXTRACTION_CACHE_ROOT="$CACHE_ROOT" \
   ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE=1 \
-  OFFICIAL_API_GARDEN_MODEL=DeepSeek-V4-Flash \
+  OFFICIAL_API_GARDEN_MODEL="$EXTRACTION_MODEL" \
   ALAYA_GARDEN_PROVIDER_KIND=host_worker \
   ALAYA_RECALL_EVAL_EMBEDDING="$EMBEDDING_MODE" \
   ALAYA_EMBEDDING_PROVIDER=local_onnx \

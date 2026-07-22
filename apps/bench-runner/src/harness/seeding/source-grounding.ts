@@ -1,7 +1,7 @@
 import {
   buildSourceVerificationText,
   filterSourceAssertionEntities,
-  resolveSourceAssertion
+  resolveGardenRawPayloadGrounding
 } from "@do-soul/alaya-soul";
 import type { BenchSignalSeedInput } from "../daemon/daemon-types.js";
 
@@ -13,7 +13,11 @@ export function attachCompileSourceGrounding(
   const proposal = readProposal(rawPayload, signalInput);
   const safePayload = stripDerivedGrounding(rawPayload);
   const proposedMatch = proposal.proposed_matched_text;
-  const resolution = resolveSourceAssertion(signalInput.turnContent, proposedMatch);
+  const resolution = resolveGardenRawPayloadGrounding({
+    ...rawPayload,
+    full_turn_content: rawPayload.full_turn_content ?? signalInput.turnContent,
+    proposed_matched_text: rawPayload.proposed_matched_text ?? proposedMatch
+  });
   if (resolution.status === "rejected") {
     return rejectedPayload(safePayload, safeExcerpt, proposal, resolution.reason);
   }

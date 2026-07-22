@@ -135,6 +135,15 @@ describe("bench-runner CLI", () => {
     expect(stderrBuf).toMatch(/--concurrency must be a positive integer/);
   });
 
+  it("rejects a continuation predecessor flag on unrelated commands", async () => {
+    const exitCode = await runCli([
+      "longmemeval", "--extraction-predecessor-authority", "/tmp/parent.json"
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/only valid for continuation extraction commands/u);
+  });
+
   it("rejects invalid LongMemEval weight overrides before loading data", async () => {
     const exitCode = await runCli([
       "longmemeval",

@@ -4,6 +4,8 @@ import {
   LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY,
   type LongMemEvalMaterialEffect
 } from "./schema/material-effect.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../extraction/authority/receipt-limits.js";
 
 export interface R3SpendApproval {
   readonly schema_version: 1;
@@ -149,15 +151,18 @@ function assertApprovalShape(approval: R3SpendApproval): void {
       !isNonnegativeInteger(approval.spend.successful_shard_ceiling)) {
     throw new Error("R3 spend approval has invalid cost, disk, or attempt limits");
   }
-  if (approval.spend.maximum_attempts !== Math.ceil(approval.spend.starting_missing * 1.1) ||
+  if (approval.spend.maximum_attempts !==
+      computeExtractionFillAttemptCeiling(approval.spend.starting_missing) ||
       approval.spend.successful_shard_ceiling !== approval.spend.starting_missing) {
-    throw new Error("R3 spend approval must bind the canonical 110 percent attempt and success caps");
+    throw new Error(
+      "R3 spend approval must bind the canonical transport attempt and success caps"
+    );
   }
 }
 
 function assertExpectedScope(expected: R3SpendApprovalExpectation): void {
   if (expected.sourceSelectedCount !== 100 || expected.targetSelectedCount !== 500 ||
-      expected.maximumAttempts !== Math.ceil(expected.startingMissing * 1.1) ||
+      expected.maximumAttempts !== computeExtractionFillAttemptCeiling(expected.startingMissing) ||
       expected.successfulShardCeiling !== expected.startingMissing) {
     throw new Error("R3 expectation must bind the canonical 100Q to 500Q expansion limits");
   }

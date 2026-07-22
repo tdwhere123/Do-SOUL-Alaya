@@ -1,3 +1,4 @@
+import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import type {
   BenchSignalSeedInput,
   BenchSynthesisSeedInput,
@@ -10,6 +11,7 @@ import type { ExtractionRequestProfile } from "../extraction/cache/extraction-ca
 import type {
   ExtractionFillQuestionWindow
 } from "../extraction/fill/manifest/fill-manifest-contract.js";
+import type { LongMemEvalExtractionTurn } from "../extraction/turn-contents.js";
 
 /**
  * The injectable `SignalExtractor` shape consumed by
@@ -40,6 +42,8 @@ export interface BenchSignalExtractor {
   }): Promise<{
     readonly rawJson: string;
     readonly extractorMeta?: BenchSignalExtractorMeta;
+    /** Keeps adaptive backoff from losing earlier 429s when strict-empty performs a second call. */
+    readonly taskRateLimitRetries?: number;
     /** Exact provider-reported request usage, never locally estimated. */
     readonly usage?: BenchProviderUsage;
     /** Provider completion metadata bound to the exact successful attempt. */
@@ -56,6 +60,33 @@ export interface BenchProviderUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
+}
+
+export type BenchTransportFailureKind =
+  | "network_error"
+  | "http_error"
+  | "body_read_error"
+  | "response_parse_error"
+  | "response_schema_error"
+  | "empty_response"
+  | "timeout"
+  | "aborted";
+
+export type BenchTransportFailurePhase =
+  | "request"
+  | "response_status"
+  | "response_body"
+  | "response_parse"
+  | "response_schema";
+
+/** Redacted, per-extract HTTP attempt evidence safe for durable telemetry. */
+export interface BenchTransportFailureAttempt {
+  readonly kind: BenchTransportFailureKind;
+  readonly phase: BenchTransportFailurePhase;
+  readonly httpStatus: number | null;
+  readonly fingerprint: string;
+  /** One-based HTTP attempt number within the current delegate.extract call. */
+  readonly attempt: number;
 }
 
 // invariant: closed enum mirrored from
@@ -87,6 +118,8 @@ export interface BenchSignalExtractorMeta {
   readonly retryCount: number;
   readonly retryClassification: BenchRetryClassification;
   readonly rateLimitRetries: number;
+  /** Ordered failures preceding the successful response; live HTTP always supplies this. */
+  readonly transportFailures?: readonly BenchTransportFailureAttempt[];
 }
 
 export interface CompileSeedExtractionConfig {
@@ -121,6 +154,7 @@ export interface CompileSeedRunnerOptions {
    * disk.
    */
   readonly requiredTurnContents?: readonly string[];
+  readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   /** Exact question offset and effective count represented by those turns. */
   readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
   /**
@@ -317,6 +351,7 @@ export interface CompileSeedRunner {
 export interface CompileSeedTurnInput {
   readonly daemon: CompileSeedDaemon;
   readonly turnContent: string;
+  readonly turnMessages?: readonly ConversationMessage[];
   readonly evidenceRefBase: string;
   readonly seedIndex: number;
   readonly workspaceId: string;

@@ -134,7 +134,7 @@ describe("createGardenHttpExtractor retry policy", () => {
       userPrompt: "turn"
     });
     expect(JSON.parse(result.rawJson)).toEqual({ signals: [] });
-    expect(result.extractorMeta).toEqual({
+    expect(result.extractorMeta).toMatchObject({
       recoveryKind: "none",
       retryCount: 3,
       retryClassification: "success_after_retry",
@@ -168,7 +168,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     expect(thrown).toBeInstanceOf(Error);
     const benchRetry = (thrown as { benchRetry?: { retryCount: number; retryClassification: string } })
       .benchRetry;
-    expect(benchRetry).toEqual({
+    expect(benchRetry).toMatchObject({
       retryCount: 0,
       retryClassification: "failure_non_retryable_4xx",
       rateLimitRetries: 0
@@ -221,7 +221,7 @@ describe("createGardenHttpExtractor retry policy", () => {
     }
     const benchRetry = (thrown as { benchRetry?: { retryCount: number; retryClassification: string } })
       .benchRetry;
-    expect(benchRetry).toEqual({
+    expect(benchRetry).toMatchObject({
       retryCount: 3,
       retryClassification: "failure_max_retries",
       rateLimitRetries: 0

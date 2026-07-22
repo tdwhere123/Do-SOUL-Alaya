@@ -20,6 +20,7 @@ import {
   type WarnPort
 } from "./garden-task-handler-support.js";
 import { createGardenTaskCompletionHandler } from "./garden-task-completion.js";
+import type { PostTurnSignalReceiver } from "../garden/post-turn-extract/signal-receiver.js";
 
 export interface GardenTaskToolCallContext {
   readonly workspaceId: string;
@@ -54,6 +55,7 @@ export interface GardenTaskHandlerDependencies {
       claimedAt: string,
       completionEnvelopeJson?: string | null
     ): boolean;
+    refreshClaim(taskId: string, claimedBy: string, claimedAt: string): boolean;
     releaseClaim(taskId: string, claimedBy: string): Promise<boolean>;
     countByKind?(
       kind: string,
@@ -66,6 +68,7 @@ export interface GardenTaskHandlerDependencies {
       readonly signal: Readonly<CandidateMemorySignal>;
     }>>;
   };
+  readonly postTurnSignalReceiver?: PostTurnSignalReceiver;
   readonly edgeVerdictApplier?: {
     applyVerdict(input: {
       readonly workspaceId: string;

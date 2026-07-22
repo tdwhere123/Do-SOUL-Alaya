@@ -15,6 +15,7 @@ function auditInput(overrides: Partial<Parameters<typeof auditOfficialApiSignalF
   return {
     raw_json: JSON.stringify({ signals: [validSignal, {}] }),
     turn_content: "We decided to ship on Friday.",
+    allow_legacy_single_user_source: true,
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: "surface-1",

@@ -17,6 +17,7 @@ import {
   createTombstoneDispositionSweepPort
 } from "../garden/forget-disposition-ports.js";
 import { createGardenRuntime } from "../garden/runtime.js";
+import { createPostTurnSignalReceiver } from "../garden/post-turn-extract/signal-receiver.js";
 import type { WarnLogger } from "./daemon-runtime-helpers.js";
 import { createOptionalMemoryHqRepo, recordStartupStep } from "./daemon-runtime-support.js";
 import {
@@ -230,7 +231,11 @@ function createGardenSchedulerRuntime(
     configService: input.configService,
     officialApiGardenProvider: input.officialGardenProvider,
     localHeuristicsProvider: input.localHeuristicsProvider,
-    signalReceiver: input.signalService,
+    signalReceiver: createPostTurnSignalReceiver(
+      input.signalService,
+      input.eventLogRepo,
+      input.evidenceCapsuleRepo
+    ),
     strongRefService: input.strongRefService,
     workspaceRepo: input.workspaceRepo,
     tombstoneDispositionSweepPort: createTombstoneDispositionSweepPort(

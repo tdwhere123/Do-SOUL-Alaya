@@ -15,7 +15,8 @@ export const CORE_CONFIG_ENV_KEYS = Object.freeze({
     lexicalDecorr: "ALAYA_RECALL_LEXICAL_DECORR",
     intentV2: "ALAYA_RECALL_INTENT_V2",
     extraSynonymClusters: "ALAYA_RECALL_EXTRA_SYNONYM_CLUSTERS",
-    sessionRoute: "ALAYA_RECALL_SESSION_ROUTE"
+    sessionRoute: "ALAYA_RECALL_SESSION_ROUTE",
+    finalAuthorityMaxHeadDrop: "ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP"
   }),
   embedding: Object.freeze({
     backfillConcurrency: "ALAYA_EMBEDDING_BACKFILL_CONCURRENCY",

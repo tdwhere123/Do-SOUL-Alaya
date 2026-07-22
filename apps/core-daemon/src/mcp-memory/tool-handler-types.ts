@@ -37,6 +37,7 @@ import type { RecallUsageHandlerDependencies } from "./recall-usage-handlers.js"
 import type { createSoulResolveHandler } from "./resolve-handler.js";
 import type { ReviewerIdentityBinding } from "./proposal-workflow.js";
 import type { AlayaMemoryToolName } from "./tool-catalog.js";
+import type { PostTurnSignalReceiver } from "../garden/post-turn-extract/signal-receiver.js";
 
 // see also: apps/core-daemon/src/mcp-memory/resolve-handler.ts
 type SoulResolveHandler = ReturnType<typeof createSoulResolveHandler>;
@@ -174,6 +175,7 @@ export interface McpMemoryToolHandlerDependencies {
       readonly signal: Readonly<CandidateMemorySignal>;
     }>>;
   };
+  readonly postTurnSignalReceiver?: PostTurnSignalReceiver;
   readonly graphExploreService: {
     exploreOneHop(
       memoryId: string,

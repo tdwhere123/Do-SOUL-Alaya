@@ -88,7 +88,7 @@ describe("500Q R3 receipt binding", () => {
   it("refuses a 500Q receipt whose attempt ceiling exceeds the R3 approval", async () => {
     mocks.readReceipt.mockReturnValue({
       ...receiptFixture(),
-      limits: { ...receiptFixture().limits, maximum_attempts: 442 }
+      limits: { ...receiptFixture().limits, maximum_attempts: 2_001 }
     });
 
     await expect(runExtractionFill({
@@ -162,7 +162,7 @@ function expansionFixture() {
         r2: { final_cache_identity_sha256: "a".repeat(64) },
         spend: {
           starting_missing: 400,
-          maximum_attempts: 441,
+          maximum_attempts: 2_000,
           successful_shard_ceiling: 400,
           estimated_cost_usd: 5,
           disk_floor_bytes: 10
@@ -175,6 +175,7 @@ function expansionFixture() {
 function receiptFixture() {
   return {
     action: "fill",
+    lineage_digest: "c".repeat(64),
     observation: {
       dataset: {
         variant: "longmemeval_s",
@@ -186,7 +187,7 @@ function receiptFixture() {
     },
     limits: {
       starting_missing: 400,
-      maximum_attempts: 441,
+      maximum_attempts: 2_000,
       successful_shard_ceiling: 400,
       disk_floor_bytes: 10
     },

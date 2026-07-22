@@ -4,6 +4,7 @@ import { extractRecallTokenEconomy } from "../qa/recall-token-economy.js";
 import { buildQuestionDiagnostic } from "../diagnostics.js";
 import { isAbstentionQuestionId } from "../diagnostics/abstention.js";
 import {
+  buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
   type LongMemEvalQuestion,
   type LongMemEvalTurn
@@ -107,6 +108,11 @@ async function seedCrossQuestionRound(
   const seedResult = await input.seedRunner.seedTurn({
     daemon: input.daemon,
     turnContent: round.content,
+    turnMessages: buildLongMemEvalRoundMessages(
+      input.question.haystack_sessions[sessionIndex]!,
+      round,
+      `${input.question.question_id}-cq-s${sessionIndex}-r${roundIndex}`
+    ),
     evidenceRefBase: `${input.question.question_id}-cq-s${sessionIndex}-r${roundIndex}`,
     seedIndex: stats.seedIndex,
     workspaceId: input.daemon.workspaceId,

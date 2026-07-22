@@ -283,6 +283,7 @@ function buildFinalizeSurfaceRuntimeInput(
     runtimeNotifier: bootstrap.runtimeNotifier,
     startupSteps: bootstrap.startupSteps,
     eventLogRepo: repositories.eventLogRepo,
+    evidenceCapsuleRepo: repositories.evidenceCapsuleRepo,
     extensionDescriptorRepo: repositories.extensionDescriptorRepo,
     toolSpecService: foundation.toolSpecService,
     zeroDaySecurityLayer: foundation.zeroDaySecurityLayer,

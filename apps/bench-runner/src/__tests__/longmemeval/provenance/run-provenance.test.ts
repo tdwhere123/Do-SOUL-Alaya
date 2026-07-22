@@ -98,6 +98,7 @@ describe("LongMemEval run provenance", () => {
         OFFICIAL_API_GARDEN_MODEL: "cached-model",
         ALAYA_RECALL_ANSWERS_WITH: "1",
         ALAYA_RECALL_FACET_TAGS: "1",
+        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2",
         ALAYA_INGEST_RECONCILIATION_ENABLED: "0",
         ALAYA_CONFLICT_DETECTION_ENABLED: "0",
         ALAYA_GARDEN_PROVIDER_KIND: "local_heuristics"

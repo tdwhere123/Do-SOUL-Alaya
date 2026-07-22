@@ -37,6 +37,8 @@ import { closureFixture, state } from "./fixture.js";
 import { fixtureSupplementalSourceBinding } from "./manifest.js";
 import { computeSupplementalSourceBindingSha256 } from
   "../../../../longmemeval/extraction/cache/supplemental-source-receipt.js";
+import { computeExtractionFillAttemptCeiling } from
+  "../../../../longmemeval/extraction/authority/receipt-limits.js";
 
 export async function prepare(
   capabilityPromise: Promise<LongMemEvalExpansionCapability>
@@ -137,7 +139,7 @@ export function r3SpendApprovalFor(
     },
     spend: {
       starting_missing: startingMissing,
-      maximum_attempts: Math.ceil(startingMissing * 1.1),
+      maximum_attempts: computeExtractionFillAttemptCeiling(startingMissing),
       successful_shard_ceiling: startingMissing,
       estimated_cost_usd: 1,
       disk_floor_bytes: 0

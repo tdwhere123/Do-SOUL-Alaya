@@ -10,7 +10,7 @@ import {
   createCompileSeedRunner,
   resolveEffectiveExtractionCacheRoot
 } from "../compile-seed.js";
-import { collectDistinctTurnContents } from "../extraction/extraction-fill.js";
+import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
 import { runLongMemEvalMultiturnQuestion } from "./multiturn-question.js";
 import { resolveBenchEmbeddingProviderLabel, resolveCommitInfo } from "../runner/runner-helpers.js";
 import {
@@ -148,7 +148,8 @@ function createMultiturnSeedRunner(
 ) {
   return createCompileSeedRunner({
     cacheRoot: extractionCacheRoot,
-    requiredTurnContents: collectDistinctTurnContents(window),
+    requiredTurnContents: inspectTurnContentKeySpace(window).distinctTurnContents,
+    requiredExtractionTurns: inspectTurnContentKeySpace(window).distinctExtractionTurns,
     requiredQuestionWindow: { offset, limit: window.length },
     allowLiveExtraction: false
   });

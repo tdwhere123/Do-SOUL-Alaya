@@ -2,6 +2,7 @@ import type {
   BenchPolicyShape,
   BenchSimulateReportMode
 } from "@do-soul/alaya-eval";
+import { parseRecallRuntimeConfigFromEnv } from "@do-soul/alaya-core";
 import {
   resolveBenchCommitSha7,
   resolveBenchRunnerVersion
@@ -70,7 +71,7 @@ export async function prepareRecallEvalRunContext(
   ambientEnv: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<RecallEvalRunContext> {
   assertProductDefaultRecallEnvironment(
-    ambientEnv,
+    recallEvalInvocationPolicyEnvironment(ambientEnv),
     {
       maxResults: readRecallEvalMaxResults(
         ambientEnv.ALAYA_RECALL_EVAL_MAX_RESULTS
@@ -95,6 +96,17 @@ export async function prepareRecallEvalRunContext(
     ambientEnv,
     bundle
   ));
+}
+
+function recallEvalInvocationPolicyEnvironment(
+  env: Readonly<Record<string, string | undefined>>
+): Readonly<Record<string, string | undefined>> {
+  // Diagnostic treatments bypass the product-default comparison, but malformed
+  // values must still fail before any benchmark artifact is read.
+  parseRecallRuntimeConfigFromEnv(env);
+  const diagnostic = { ...env };
+  delete diagnostic.ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP;
+  return diagnostic;
 }
 
 async function prepareBoundRecallEvalRunContext(

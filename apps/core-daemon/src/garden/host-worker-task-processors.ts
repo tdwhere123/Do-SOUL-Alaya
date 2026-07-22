@@ -6,7 +6,6 @@ import {
   GardenTier,
   parseGardenEventPayload,
   type CandidateMemorySignal,
-  type ConversationMessage,
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import type { EventPublisher } from "@do-soul/alaya-core";
@@ -20,29 +19,18 @@ import type {
   SqliteGardenTaskRepo
 } from "@do-soul/alaya-storage";
 import { buildGardenTaskSignalId } from "./task-signal-id.js";
+import type { VerifiedDeliverySourceObservation } from "../runtime/recall-materialization-source-receipt.js";
+import type { PostTurnSignalReceiver } from "./post-turn-extract/signal-receiver.js";
+import { finalizePostTurnEvidence } from "./post-turn-extract/evidence-finalizer.js";
 import {
-  readVerifiedDeliverySourceObservation,
-  type VerifiedDeliverySourceObservation
-} from "../runtime/recall-materialization-source-receipt.js";
+  buildPostTurnContent,
+  buildPostTurnConversationMessages,
+  parsePostTurnExtractTaskPayload,
+  type PostTurnExtractTaskPayload
+} from "./post-turn-extract/task-payload.js";
 
 const IN_PROCESS_POST_TURN_CLAIMANT = "in-process";
 const HOST_WORKER_EXTRACT_FALLBACK_AFTER_MS = 15 * 60 * 1000;
-const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
-
-export interface PostTurnExtractTaskPayload {
-  readonly run_id: string;
-  readonly workspace_id: string;
-  readonly created_at?: string;
-  readonly source_observation: VerifiedDeliverySourceObservation | null;
-  readonly turn_index: number;
-  readonly turn_digest: Readonly<{
-    readonly last_messages: readonly Readonly<{
-      readonly role: string;
-      readonly content_excerpt: string;
-    }>[];
-  }>;
-}
-
 type PostTurnExtractTaskRow = Readonly<{
   readonly row: GardenTaskRow;
   readonly claimedAt: string;
@@ -57,11 +45,7 @@ type PostTurnExtractRuntimeInput = Readonly<{
   readonly eventPublisher: EventPublisher;
   readonly localHeuristicsProvider?: GardenComputeProvider;
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
-  readonly signalReceiver?: {
-    receiveSignal(
-      signal: CandidateMemorySignal
-    ): Promise<Readonly<{ readonly signal: Readonly<{ readonly signal_id: string }> }>>;
-  };
+  readonly signalReceiver?: PostTurnSignalReceiver;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
 }>;
 
@@ -230,19 +214,24 @@ async function emitPostTurnExtractSignals(
     payload,
     payload.source_observation
   );
-  const emittedSignalIds: string[] = [];
-  for (const [index, signal] of candidateSignals.entries()) {
-    await refreshPostTurnExtractClaim(input.gardenTaskRepo, row.id);
-    const received = await input.signalReceiver.receiveSignal(
-      CandidateMemorySignalSchema.parse({
-        ...signal,
-        signal_id: buildGardenTaskSignalId(row.id, index),
-        source_observation: payload.source_observation
-      })
-    );
-    emittedSignalIds.push(received.signal.signal_id);
-  }
-  return emittedSignalIds;
+  const stableCandidates = candidateSignals.map((signal, index) =>
+    CandidateMemorySignalSchema.parse({
+      ...signal,
+      signal_id: buildGardenTaskSignalId(row.id, index),
+      source_observation: payload.source_observation
+    })
+  );
+  return await finalizePostTurnEvidence({
+    taskId: row.id,
+    workspaceId: payload.workspace_id,
+    runId: payload.run_id,
+    createdAt: payload.created_at ?? row.created_at,
+    turnContent: buildPostTurnContent(payload),
+    sourceObservation: payload.source_observation,
+    candidates: stableCandidates,
+    signalReceiver: input.signalReceiver,
+    beforeReceive: async () => await refreshPostTurnExtractClaim(input.gardenTaskRepo, row.id)
+  });
 }
 
 async function refreshPostTurnExtractClaim(
@@ -360,92 +349,4 @@ async function compilePostTurnExtractTask(
       return normalizeSchemaGroundedSignal(parsed);
     })
   );
-}
-
-function parsePostTurnExtractTaskPayload(payload: unknown): PostTurnExtractTaskPayload {
-  if (!isRecord(payload)) {
-    throw new Error("Invalid post-turn extract task payload.");
-  }
-  const runId = parseStringField(payload, "run_id");
-  const workspaceId = parseStringField(payload, "workspace_id");
-  const createdAt = parseOptionalStringField(payload, "created_at");
-  const sourceObservation = readVerifiedDeliverySourceObservation(payload.source_observation);
-  const turnIndex = parsePostTurnIndex(payload.turn_index);
-  const lastMessages = parsePostTurnMessages(payload.turn_digest);
-  return {
-    run_id: runId,
-    workspace_id: workspaceId,
-    ...(createdAt === undefined ? {} : { created_at: createdAt }),
-    source_observation: sourceObservation,
-    turn_index: turnIndex,
-    turn_digest: { last_messages: lastMessages }
-  };
-}
-
-function parsePostTurnIndex(turnIndex: unknown): number {
-  if (typeof turnIndex !== "number" || !Number.isInteger(turnIndex) || turnIndex < 0) {
-    throw new Error("Invalid post-turn extract task payload.");
-  }
-  return turnIndex;
-}
-
-function parsePostTurnMessages(
-  turnDigest: unknown
-): readonly Readonly<{ readonly role: string; readonly content_excerpt: string }>[] {
-  if (!isRecord(turnDigest) || !Array.isArray(turnDigest.last_messages)) {
-    throw new Error("Invalid post-turn extract task payload.");
-  }
-  return turnDigest.last_messages.map((message) => parsePostTurnDigestMessage(message));
-}
-
-function parsePostTurnDigestMessage(value: unknown): {
-  readonly role: string;
-  readonly content_excerpt: string;
-} {
-  if (!isRecord(value)) {
-    throw new Error("Invalid post-turn extract task payload.");
-  }
-  return {
-    role: parseStringField(value, "role"),
-    content_excerpt: parseStringField(value, "content_excerpt")
-  };
-}
-
-function buildPostTurnContent(payload: PostTurnExtractTaskPayload): string {
-  return payload.turn_digest.last_messages
-    .map((message) => `${message.role}: ${message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)}`)
-    .join("\n");
-}
-
-function buildPostTurnConversationMessages(
-  payload: PostTurnExtractTaskPayload
-): readonly ConversationMessage[] {
-  return Object.freeze(
-    payload.turn_digest.last_messages.map((message, index) => ({
-      message_id: `post-turn-${payload.run_id}-${payload.turn_index}-${index}`,
-      role: message.role as ConversationMessage["role"],
-      content: message.content_excerpt.slice(0, POST_TURN_EXTRACT_EXCERPT_MAX_CHARS)
-    }))
-  );
-}
-
-function parseStringField(record: Readonly<Record<string, unknown>>, field: string): string {
-  const value = record[field];
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error("Invalid post-turn extract task payload.");
-  }
-  return value;
-}
-
-function parseOptionalStringField(
-  record: Readonly<Record<string, unknown>>,
-  field: string
-): string | undefined {
-  const value = record[field];
-  if (value === undefined) return undefined;
-  return parseStringField(record, field);
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

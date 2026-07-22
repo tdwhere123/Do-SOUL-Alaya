@@ -63,6 +63,8 @@ function readRecallDeliveryEnv(recall: RecallConfig, name: string): RecallEnvLoo
       return matched(recall.extraSynonymClusters);
     case "ALAYA_RECALL_SESSION_ROUTE":
       return matched(recall.sessionRoute ? "on" : undefined);
+    case "ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP":
+      return matched(stringify(recall.finalAuthorityMaxHeadDrop));
     default:
       return RECALL_ENV_NOT_MATCHED;
   }
@@ -91,6 +93,10 @@ export function recallIntentV2Enabled(): boolean {
 
 export function recallSessionRouteEnabled(): boolean {
   return getCoreConfig().recall.sessionRoute;
+}
+
+export function recallFinalAuthorityMaxHeadDrop(): number | undefined {
+  return getCoreConfig().recall.finalAuthorityMaxHeadDrop;
 }
 
 /** answers_with / flood path fuel is always on; no closable off-switch. */

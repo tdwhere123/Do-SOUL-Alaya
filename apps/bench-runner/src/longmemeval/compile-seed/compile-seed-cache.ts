@@ -1,18 +1,8 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync
-} from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { EXTRACTION_CACHE_ROOT } from "./compile-seed-config.js";
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import { ExtractionCacheInvariantError } from "../extraction/cache/cache-invariant-error.js";
 import {
-  computeExtractionRawJsonSha256,
   inspectExtractionRawJson,
   type ExtractionRawJsonInspection
 } from "../extraction/content-closure.js";
@@ -28,10 +18,17 @@ import {
 } from "../extraction/cache/cache-live-delegate.js";
 import {
   cachedExtractionResult,
-  inspectCachedResponseMetadata,
-  persistedResponseMetadata,
-  type CachedExtractionResponseMetadata
+  persistedResponseMetadata
 } from "./cache/cached-response-metadata.js";
+import {
+  inspectCachedExtraction,
+  writeCachedExtraction
+} from "./cache/cache-shard.js";
+export {
+  cacheFilePath,
+  inspectCachedExtraction,
+  type CachedExtractionInspection
+} from "./cache/cache-shard.js";
 export {
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
@@ -41,21 +38,12 @@ export {
   type ExtractionRawJsonInspection
 } from "../extraction/content-closure.js";
 import type {
-  BenchProviderResponseMetadata,
-  BenchProviderUsage,
   BenchSignalExtractor,
   CompileSeedExtractionConfig,
   CompileSeedExtractionStats
 } from "./compile-seed-types.js";
-
-interface CachedExtraction {
-  readonly model: string;
-  readonly request_profile: CompileSeedExtractionConfig["requestProfile"];
-  readonly cache_key: string;
-  readonly raw_json: string;
-  readonly extracted_at: string;
-  readonly response_metadata?: CachedExtractionResponseMetadata;
-}
+import { computeTrustedRoleCorpusDigest } from "../extraction/turn-contents.js";
+import type { LongMemEvalExtractionTurn } from "../extraction/turn-contents.js";
 
 interface CachingSignalExtractorOptions {
   readonly delegate: BenchSignalExtractor;
@@ -110,11 +98,13 @@ async function extractWithCache(
   cacheRoot: string,
   input: Parameters<BenchSignalExtractor["extract"]>[0]
 ): ReturnType<BenchSignalExtractor["extract"]> {
+  const extractionInput = extractCacheInputIdentity(input.userPrompt);
   const cacheKey = computeCacheKey(
     options.config.model,
     options.config.requestProfile,
     input.systemPrompt,
-    extractTurnContent(input.userPrompt)
+    extractionInput.turnContent,
+    extractionInput.trustedRoleCorpusDigest
   );
   if (options.stats !== undefined) {
     options.stats.lastExtractionSource = null;
@@ -206,7 +196,9 @@ async function extractLiveWithLease(
     stats,
     onFailure: () => options.onLiveExtractionFailed?.(cacheKey),
     onOutcome: (outcome) => {
-      if (providerAttemptAuthorized) options.onLiveExtractionOutcome?.(cacheKey, outcome);
+      if (!providerAttemptAuthorized) return;
+      providerAttemptAuthorized = options.onTransportAttempt === undefined;
+      options.onLiveExtractionOutcome?.(cacheKey, outcome);
     }
   });
   lease.assertOwned();
@@ -324,19 +316,43 @@ function assertWriteIdentity(
  * extraction. Falls back to the whole userPrompt if the shape is
  * unexpected, never silently keying on a constant.
  */
-function extractTurnContent(userPrompt: string): string {
+function extractCacheInputIdentity(userPrompt: string): {
+  readonly turnContent: string;
+  readonly trustedRoleCorpusDigest?: string;
+} {
   try {
     const parsed = JSON.parse(userPrompt) as unknown;
     if (typeof parsed === "object" && parsed !== null) {
-      const turnContent = (parsed as Record<string, unknown>).turn_content;
+      const record = parsed as Record<string, unknown>;
+      const turnContent = record.turn_content;
       if (typeof turnContent === "string" && turnContent.length > 0) {
-        return turnContent;
+        const messages = readRoleCorpus(record.turn_messages);
+        return {
+          turnContent,
+          ...(messages === undefined
+            ? {}
+            : { trustedRoleCorpusDigest: computeTrustedRoleCorpusDigest(messages) })
+        };
       }
     }
   } catch {
     // Not JSON: fall through to hashing the raw userPrompt.
   }
-  return userPrompt;
+  return { turnContent: userPrompt };
+}
+
+function readRoleCorpus(
+  value: unknown
+): readonly { readonly role: string; readonly content: string }[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const messages: { role: string; content: string }[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) return undefined;
+    const { role, content } = item as Record<string, unknown>;
+    if (typeof role !== "string" || typeof content !== "string") return undefined;
+    messages.push({ role, content });
+  }
+  return messages;
 }
 
 /**
@@ -368,113 +384,38 @@ export function computeCacheKey(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
-  turnContent: string
+  turnContent: string,
+  trustedRoleCorpusDigest?: string
 ): string {
-  return createHash("sha256")
+  const hash = createHash("sha256")
     .update(model, "utf8")
     .update("\u0000", "utf8")
     .update(requestProfile, "utf8")
     .update("\u0000", "utf8")
     .update(systemPrompt, "utf8")
     .update("\u0000", "utf8")
-    .update(turnContent, "utf8")
-    .digest("hex");
-}
-
-export function cacheFilePath(cacheRoot: string, cacheKey: string): string {
-  // Shard by the first two hex chars so a 500-question haystack does not
-  // dump tens of thousands of files into one directory.
-  return join(cacheRoot, cacheKey.slice(0, 2), `${cacheKey}.json`);
-}
-
-export type CachedExtractionInspection =
-  | {
-    readonly status: "hit";
-    readonly rawJson: string;
-    readonly rawJsonSha256: string;
-    readonly rawSignalCount: number;
-    readonly parsedDraftCount: number;
-    readonly responseMetadata?: BenchProviderResponseMetadata;
-    readonly usage?: BenchProviderUsage;
-  }
-  | { readonly status: "missing"; readonly reason?: undefined }
-  | {
-    readonly status: "invalid";
-    readonly reason: string;
-    readonly rawJsonSha256?: string;
-  };
-
-export function inspectCachedExtraction(
-  cacheRoot: string,
-  cacheKey: string,
-  model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"]
-): CachedExtractionInspection {
-  const filePath = cacheFilePath(cacheRoot, cacheKey);
-  if (!existsSync(filePath)) {
-    return { status: "missing" };
-  }
-  let parsed: Partial<CachedExtraction>;
-  try {
-    parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<CachedExtraction>;
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return { status: "invalid", reason: `invalid cache shard JSON: ${reason}` };
-  }
-  const identityError = inspectCachedIdentity(parsed, cacheKey, model, requestProfile);
-  if (identityError !== null) return { status: "invalid", reason: identityError };
-  const rawJson = parsed.raw_json!;
-  const rawJsonSha256 = computeExtractionRawJsonSha256(rawJson);
-  try {
-    const response = inspectCachedResponseMetadata(parsed.response_metadata);
-    return { status: "hit", rawJson, ...inspectExtractionRawJson(rawJson), ...response };
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return {
-      status: "invalid",
-      reason: `invalid cached extraction: ${reason}`,
-      rawJsonSha256
-    };
-  }
-}
-
-function inspectCachedIdentity(
-  parsed: Partial<CachedExtraction>,
-  cacheKey: string,
-  model: string,
-  requestProfile: CompileSeedExtractionConfig["requestProfile"]
-): string | null {
-  if (typeof parsed.raw_json !== "string") return "raw_json must be a string";
-  if (parsed.model !== model) return `model ${String(parsed.model)} != ${model}`;
-  if (parsed.request_profile !== requestProfile) {
-    return `request_profile ${String(parsed.request_profile)} != ${requestProfile}`;
-  }
-  return parsed.cache_key === cacheKey ? null : "cache_key does not match fixture path";
-}
-
-function writeCachedExtraction(
-  cacheRoot: string,
-  cacheKey: string,
-  entry: CachedExtraction
-): void {
-  const filePath = cacheFilePath(cacheRoot, cacheKey);
-  mkdirSync(dirname(filePath), { recursive: true });
-  // invariant: atomic write. WSL2 OOM is a known crash mode in this bench
-  // env; a bare writeFileSync interrupted mid-write leaves a torn shard that
-  // silently degrades that turn to the fallback path forever. Write to a
-  // unique temp file, then rename onto the final path — rename is atomic on
-  // the same filesystem, so a reader sees either the old file or the whole
-  // new one, never a partial.
-  const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(tmpPath, `${JSON.stringify(entry, null, 2)}\n`, "utf8");
-    renameSync(tmpPath, filePath);
-  } catch (cause) {
-    try {
-      rmSync(tmpPath, { force: true });
-    } catch {
-      // Cleanup must not conceal the authoritative persistence failure.
+    .update(turnContent, "utf8");
+  if (trustedRoleCorpusDigest !== undefined) {
+    if (!/^[a-f0-9]{64}$/u.test(trustedRoleCorpusDigest)) {
+      throw new Error("trusted role corpus digest must be a lowercase sha256");
     }
-    throw cause;
+    hash.update("\u0000trusted-role-corpus-v1\u0000", "utf8")
+      .update(trustedRoleCorpusDigest, "utf8");
   }
+  return hash.digest("hex");
+}
+
+export function computeExtractionTurnCacheKey(
+  model: string,
+  requestProfile: CompileSeedExtractionConfig["requestProfile"],
+  systemPrompt: string,
+  turn: LongMemEvalExtractionTurn
+): string {
+  return computeCacheKey(
+    model,
+    requestProfile,
+    systemPrompt,
+    turn.turnContent,
+    computeTrustedRoleCorpusDigest(turn.turnMessages)
+  );
 }

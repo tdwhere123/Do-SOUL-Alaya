@@ -1,7 +1,8 @@
 import {
   CandidateMemorySignalSchema,
   GardenProviderKind,
-  type CandidateMemorySignal
+  type CandidateMemorySignal,
+  type ConversationMessage
 } from "@do-soul/alaya-protocol";
 import {
   OFFICIAL_API_SIGNAL_LIMIT,
@@ -19,9 +20,11 @@ import {
   groundOfficialApiDraft,
   type OfficialApiSourceGroundingAudit
 } from "./source-grounding.js";
+import { buildOfficialApiSourceCorpus } from "../grounding/source-locator.js";
+import { assessOfficialApiSourceTrust } from "./source-trust.js";
 
 // invariant: cache-compatibility decisions pin formation behavior independently of raw JSON.
-export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v1";
+export const OFFICIAL_API_FORMATION_AUDIT_SEMANTICS_VERSION = "official-api-formation-audit-v2";
 
 export type OfficialApiSignalAuditDisposition = "admitted" | "deferred" | "rejected" | "invalid";
 
@@ -35,6 +38,8 @@ export type OfficialApiSignalAuditStage =
 export interface OfficialApiSignalFormationAuditInput {
   readonly raw_json: string;
   readonly turn_content: string;
+  readonly turn_messages?: readonly ConversationMessage[];
+  readonly allow_legacy_single_user_source?: boolean;
   readonly workspace_id: string;
   readonly run_id: string;
   readonly surface_id: string | null;
@@ -166,7 +171,27 @@ function auditDraft(
   const timingEntry = timingFailure(index, input, timing);
   if (timingEntry !== null) return timingEntry;
 
-  const grounding = groundOfficialApiDraft(draft, input.turn_content.trim());
+  const normalizedTurnContent = input.turn_content.trim();
+  const trustRejection = assessOfficialApiSourceTrust({
+    hasSourceLocator: draft.source_locator !== undefined,
+    turnContent: normalizedTurnContent,
+    ...(input.turn_messages === undefined ? {} : { turnMessages: input.turn_messages }),
+    ...(input.allow_legacy_single_user_source === undefined ? {} : {
+      allowLegacySingleUserSource: input.allow_legacy_single_user_source
+    })
+  });
+  if (trustRejection !== null) {
+    return {
+      index,
+      disposition: "rejected",
+      stage: "grounding",
+      reason: trustRejection
+    };
+  }
+  const groundingSourceText = draft.source_locator === undefined
+    ? normalizedTurnContent
+    : buildOfficialApiSourceCorpus(normalizedTurnContent, input.turn_messages!);
+  const grounding = groundOfficialApiDraft(draft, groundingSourceText);
   if (grounding.status === "rejected") {
     return {
       index,
@@ -215,6 +240,9 @@ function formGroundedDraft(
       runId: input.run_id,
       surfaceId: input.surface_id,
       normalizedTurnContent: input.turn_content.trim(),
+      groundingSourceText: draft.source_locator === undefined
+        ? input.turn_content.trim()
+        : buildOfficialApiSourceCorpus(input.turn_content.trim(), input.turn_messages!),
       confidence: clampConfidence(draft.confidence),
       temporalProjection: selectObservedTemporalProjection(
         draft.matched_text,

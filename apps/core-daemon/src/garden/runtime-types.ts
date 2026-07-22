@@ -34,6 +34,7 @@ import type {
   JanitorTombstoneGcPort
 } from "@do-soul/alaya-soul";
 import type { BackgroundServiceManager } from "../background/bootstrap.js";
+import type { PostTurnSignalReceiver } from "./post-turn-extract/signal-receiver.js";
 
 export type RuntimeGardenScheduler = GardenScheduler & {
   dispatchNextMatchingTaskKind(
@@ -201,11 +202,7 @@ export type CreateGardenRuntimeInput = {
   };
   readonly officialApiGardenProvider?: GardenComputeProvider | null;
   readonly localHeuristicsProvider?: GardenComputeProvider;
-  readonly signalReceiver?: {
-    receiveSignal(
-      signal: CandidateMemorySignal
-    ): Promise<Readonly<{ readonly signal: Readonly<{ readonly signal_id: string }> }>>;
-  };
+  readonly signalReceiver?: PostTurnSignalReceiver;
   readonly strongRefService: StrongRefService;
   readonly workspaceRepo: SqliteWorkspaceRepo;
   readonly tombstoneDispositionSweepPort?: JanitorDispositionSweepPort;

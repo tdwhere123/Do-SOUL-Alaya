@@ -5,6 +5,10 @@ import type {
   MaterializationResult,
   MaterializationTarget
 } from "./contracts.js";
+import {
+  buildGardenTurnEvidenceArtifactRef,
+  isGardenTurnEvidenceFallback
+} from "../evidence-preservation/turn-evidence-anchor.js";
 import { buildDistilledFact, buildEvidenceInput, buildSynthesisInput, readStringPayload } from "./inputs.js";
 import { materializationFailure, materializationSuccess } from "./materialization-results.js";
 import { MaterializationRouterMemoryRoutes } from "./memory-routes.js";
@@ -250,7 +254,11 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
   ): Promise<MaterializationResult> {
     try {
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, {
-        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+        fullTurnExcerpt: signal.signal_kind === "potential_evidence_anchor" ||
+          this.dependencies.fullTurnEvidenceExcerpt,
+        artifactRef: isGardenTurnEvidenceFallback(signal)
+          ? buildGardenTurnEvidenceArtifactRef(signal.signal_id)
+          : undefined,
         context
       }));
 

@@ -44,6 +44,7 @@ describe("parseFlags", () => {
       `--legacy-manifest-sha256=${"a".repeat(64)}`,
       `--legacy-dataset-sha256=${"b".repeat(64)}`,
       "--concurrency=4",
+      "--extraction-initial-concurrency=8",
       "--question-batch-limit=100"
     ]);
 
@@ -64,6 +65,7 @@ describe("parseFlags", () => {
     expect(parsed.legacyManifestSha256).toBe("a".repeat(64));
     expect(parsed.legacyDatasetSha256).toBe("b".repeat(64));
     expect(parsed.concurrency).toBe(4);
+    expect(parsed.extractionInitialConcurrency).toBe(8);
     expect(parsed.questionBatchLimit).toBe(100);
   });
 
@@ -86,5 +88,9 @@ describe("parseFlags", () => {
     expect(() => parseFlags(["--r3-spend-approval", "--limit", "500"])).toThrow(
       "--r3-spend-approval requires a path"
     );
+    expect(() => parseFlags([
+      "--extraction-predecessor-authority", "/tmp/a.json",
+      "--extraction-predecessor-authority=/tmp/b.json"
+    ])).toThrow("--extraction-predecessor-authority may be provided only once");
   });
 });

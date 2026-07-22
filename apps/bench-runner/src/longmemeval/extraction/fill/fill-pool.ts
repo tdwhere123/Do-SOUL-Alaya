@@ -1,14 +1,29 @@
-import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import {
+  GardenProviderError,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
 import type {
   BenchSignalExtractor,
   BenchTerminalRetryClassification,
   CompileSeedExtractionStats
 } from "../../compile-seed/compile-seed-types.js";
+import {
+  EXTRACTION_HTTP_MAX_RETRY_JITTER_MS,
+  EXTRACTION_REQUEST_TIMEOUT_MS
+} from "../../compile-seed/compile-seed-http.js";
 import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import { createAdaptiveConcurrencyController } from "../adaptive-concurrency.js";
+import { EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD } from
+  "../authority/receipt-limits.js";
+import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 import { readFillRetryTelemetry } from "./fill-stats.js";
 
 type FillTaskRetryClassification = BenchTerminalRetryClassification | "unknown";
+
+const EXTRACTION_FILL_PROVIDER_WALL_CLOCK_GRACE_MS = 30_000;
+export const EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS =
+  EXTRACTION_REQUEST_TIMEOUT_MS * EXTRACTION_FILL_TRANSPORT_ATTEMPTS_PER_MISSING_SHARD +
+  EXTRACTION_HTTP_MAX_RETRY_JITTER_MS + EXTRACTION_FILL_PROVIDER_WALL_CLOCK_GRACE_MS;
 
 export class ExtractionFillTaskError extends Error {
   readonly exitCode = 1;
@@ -34,8 +49,9 @@ export class ExtractionFillTaskError extends Error {
 
 interface ExtractionPoolInput {
   readonly extractor: BenchSignalExtractor;
-  readonly distinctTurns: readonly string[];
+  readonly turns: readonly LongMemEvalExtractionTurn[];
   readonly concurrency: number;
+  readonly initialConcurrency?: number;
   readonly requestedTurns: number;
   readonly stats: CompileSeedExtractionStats;
   readonly log: (message: string) => void;
@@ -51,21 +67,23 @@ interface ExtractionPoolInput {
 
 export async function runExtractionPool(input: ExtractionPoolInput): Promise<void> {
   const scope = createPoolAbortScope(input.signal);
+  const initialConcurrency = input.initialConcurrency ?? Math.min(input.concurrency, 32);
   const adaptive = createAdaptiveConcurrencyController({
     maximum: input.concurrency,
-    initial: Math.min(input.concurrency, 32)
+    initial: initialConcurrency,
+    minimumConcurrency: Math.min(8, initialConcurrency, input.concurrency)
   });
   let processed = 0;
   let toleratedFailures = 0;
   const progressEvery = Math.max(1, Math.floor(input.requestedTurns / 20));
   try {
-    await runBoundedPool(input.distinctTurns, input.concurrency, async (turnContent) => {
+    await runBoundedPool(input.turns, input.concurrency, async (turn) => {
       scope.signal.throwIfAborted();
       await adaptive.acquire(scope.signal);
       let rateLimited = false;
       try {
         rateLimited = await extractTurn(
-          input.extractor, turnContent, scope.signal, input.transport
+          input.extractor, turn, scope.signal, input.transport
         ) > 0;
       } catch (cause) {
         rateLimited = readRateLimitRetries(cause) > 0;
@@ -129,27 +147,53 @@ async function runBoundedPool<T>(
 
 async function extractTurn(
   extractor: BenchSignalExtractor,
-  turnContent: string,
+  turn: LongMemEvalExtractionTurn,
   signal: AbortSignal,
   transport: ExtractionPoolInput["transport"]
 ): Promise<number> {
-  const result = await extractor.extract({
-    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    userPrompt: JSON.stringify({
+  let rateLimitRetries = 0;
+  const provider = new OfficialApiGardenProvider({
+    apiKey: "extraction-fill-injected",
+    requestTimeoutMs: EXTRACTION_REQUEST_TIMEOUT_MS,
+    wallClockBudgetMs: EXTRACTION_FILL_PROVIDER_WALL_CLOCK_BUDGET_MS,
+    diagnosticDir: null,
+    extractor: {
+      extract: async (request) => {
+        const result = await extractor.extract({
+          ...request,
+          ...(transport === undefined ? {} : transport),
+          abortSignal: request.abortSignal === undefined
+            ? signal
+            : AbortSignal.any([signal, request.abortSignal])
+        });
+        rateLimitRetries = result.taskRateLimitRetries ??
+          result.extractorMeta?.rateLimitRetries ?? 0;
+        return result;
+      }
+    }
+  });
+  try {
+    await provider.compile(turn.turnContent, {
       workspace_id: "extraction-fill",
       run_id: "extraction-fill",
       surface_id: null,
-      turn_content: turnContent,
-      turn_messages: []
-    }),
-    abortSignal: signal,
-    ...(transport === undefined ? {} : transport)
-  });
-  return result.extractorMeta?.rateLimitRetries ?? 0;
+      turn_messages: turn.turnMessages
+    });
+  } catch (error) {
+    if (error instanceof GardenProviderError && error.cause !== undefined) {
+      throw error.cause;
+    }
+    throw error;
+  }
+  return rateLimitRetries;
 }
 
 function readRateLimitRetries(cause: unknown): number {
   if (typeof cause !== "object" || cause === null) return 0;
+  const taskCount = (cause as { readonly taskRateLimitRetries?: unknown }).taskRateLimitRetries;
+  if (typeof taskCount === "number" && Number.isSafeInteger(taskCount) && taskCount >= 0) {
+    return taskCount;
+  }
   const retry = (cause as { readonly benchRetry?: unknown }).benchRetry;
   if (typeof retry !== "object" || retry === null) return 0;
   const count = (retry as { readonly rateLimitRetries?: unknown }).rateLimitRetries;

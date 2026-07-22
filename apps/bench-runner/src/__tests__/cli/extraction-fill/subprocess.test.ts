@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 const VARIANT = "longmemeval_oracle";
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "subprocess-fixture.mjs");
+const SUBPROCESS_STARTUP_TIMEOUT_MS = 30_000;
 let root: string;
 
 beforeEach(async () => {
@@ -37,14 +38,14 @@ it("self-stops on a terminal task failure with a safe exit and no stale lease", 
   );
   expect(result.stderr).not.toMatch(/sk-fixture-secret|PROMPT_BODY/u);
   expect(existsSync(join(root, "cache", ".extraction-fill.lock"))).toBe(false);
-}, 20_000);
+}, 40_000);
 
 it("settles a real SIGINT as exit 130 after releasing the lease", async () => {
   const result = await runFixture("signal", (child) => child.kill("SIGINT"));
 
   expect(result).toMatchObject({ exitCode: 130, signal: null, leaseSeenAtReady: true });
   expect(existsSync(join(root, "cache", ".extraction-fill.lock"))).toBe(false);
-}, 20_000);
+}, 40_000);
 
 async function runFixture(
   mode: "terminal" | "signal",
@@ -70,7 +71,8 @@ async function runFixture(
   let ready = false;
   let readyAt: number | null = null;
   let leaseSeenAtReady = false;
-  const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+  // Source-graph startup is outside the settlement behavior asserted after FIXTURE_READY.
+  const timeout = setTimeout(() => child.kill("SIGKILL"), SUBPROCESS_STARTUP_TIMEOUT_MS);
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {

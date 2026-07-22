@@ -45,7 +45,7 @@ async function buildTurnSignalInputs(
       workspace_id: input.workspaceId,
       run_id: input.runId,
       surface_id: input.surfaceId ?? null,
-      turn_messages: [],
+      turn_messages: input.turnMessages ?? [],
       ...(input.sourceObservedAt === undefined
         ? {}
         : { source_observed_at: input.sourceObservedAt })

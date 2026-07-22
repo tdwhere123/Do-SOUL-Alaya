@@ -122,6 +122,38 @@ describe("effective recall config identity", () => {
     })).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
   });
 
+  it("allows the attributed bounded-final-authority treatment before reading inputs", async () => {
+    const treatment = {
+      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2"
+    };
+    expect(buildEffectiveRecallConfigIdentity(treatment, {
+      maxResults: 10,
+      conflictAwareness: true
+    }).effective_config_sha256).not.toBe(buildEffectiveRecallConfigIdentity({}, {
+      maxResults: 10,
+      conflictAwareness: true
+    }).effective_config_sha256);
+
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, undefined, treatment)).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
+  });
+
+  it.each(["", "-1", "1.5", "9007199254740992"])(
+    "rejects invalid bounded-final-authority treatment %j before reading inputs",
+    async (value) => {
+      await expect(prepareRecallEvalRunContext({
+        snapshotDbPath: "/missing/snapshot.db",
+        variant: "longmemeval_oracle",
+        historyRoot: "/missing/history"
+      }, undefined, {
+        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: value
+      })).rejects.toThrow(/non-negative safe integer/u);
+    }
+  );
+
   it.each([
     "ALAYA_BENCH_EMBEDDING_INJECTION_CAP",
     "ALAYA_BENCH_EMBEDDING_INJECTION_FLOOR",

@@ -99,12 +99,20 @@ function createFixtureExtractor(fixtureMode) {
       calls += 1;
       input.onTransportAttempt?.();
       if (fixtureMode === "terminal" && calls === 1) {
+        for (let retry = 0; retry < 3; retry += 1) input.onTransportAttempt?.();
         await peerStarted;
         const error = new Error("sk-fixture-secret PROMPT_BODY");
         error.benchRetry = {
           retryCount: 3,
           retryClassification: "failure_non_retryable_4xx",
-          rateLimitRetries: 0
+          rateLimitRetries: 0,
+          transportFailures: Array.from({ length: 4 }, (_value, index) => ({
+            kind: "http_error",
+            phase: "response_status",
+            httpStatus: 400,
+            fingerprint: "a".repeat(64),
+            attempt: index + 1
+          }))
         };
         throw error;
       }

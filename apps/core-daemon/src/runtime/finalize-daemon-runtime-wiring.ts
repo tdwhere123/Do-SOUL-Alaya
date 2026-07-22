@@ -3,6 +3,7 @@ import { finalizeAlayaDaemonRuntime } from "./daemon-runtime-finalization.js";
 import { createOptionalMemoryHqRepo } from "./daemon-runtime-support.js";
 import { HqAnswerOverlapPairSource } from "@do-soul/alaya-core";
 import type { FinalizeDaemonRuntimeWiringInput } from "../index.js";
+import { createPostTurnSignalReceiver } from "../garden/post-turn-extract/signal-receiver.js";
 
 export async function finalizeDaemonRuntimeFromWiring(
   input: FinalizeDaemonRuntimeWiringInput
@@ -59,6 +60,11 @@ function createMcpMemoryToolHandlerInput(input: FinalizeDaemonRuntimeWiringInput
     synthesisEvidenceReader: createSynthesisEvidenceReader(input),
     synthesisMemberResolver: createSynthesisMemberResolver(input),
     signalService: input.signalService,
+    postTurnSignalReceiver: createPostTurnSignalReceiver(
+      input.signalService,
+      input.eventLogRepo,
+      input.evidenceCapsuleRepo
+    ),
     graphExploreService: input.graphExploreService,
     edgeProposalService: input.edgeProposalService,
     graphEdgePort: input.graphEdgePort,

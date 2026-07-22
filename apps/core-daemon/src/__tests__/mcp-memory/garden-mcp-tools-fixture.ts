@@ -34,6 +34,10 @@ import {
   type McpMemoryToolCallContext,
   type McpMemoryToolHandlerDependencies
 } from "../../mcp-memory/tool-handler.js";
+import type {
+  PostTurnSignalReceiveResult,
+  PostTurnSignalReceiver
+} from "../../garden/post-turn-extract/signal-receiver.js";
 
 const harnesses = new Set<GardenMcpHarness>();
 
@@ -88,7 +92,9 @@ export interface GardenMcpHarnessOptions {
   readonly receiveSignal?: (
     signal: CandidateMemorySignal,
     context: GardenMcpReceiveSignalContext
-  ) => Promise<Readonly<{ readonly signal: Readonly<CandidateMemorySignal> }>>;
+  ) => Promise<PostTurnSignalReceiveResult>;
+  readonly hasCreatedEvidence?: PostTurnSignalReceiver["hasCreatedEvidence"];
+  readonly omitPostTurnSignalReceiver?: boolean;
   readonly completeWithEvents?: (
     taskId: string,
     result: Parameters<SqliteGardenTaskRepo["completeWithEvents"]>[1],
@@ -202,6 +208,15 @@ export async function createGardenMcpHarness(
           signalService
         })
     },
+    ...(options.omitPostTurnSignalReceiver === true
+      ? {}
+      : {
+          postTurnSignalReceiver: {
+            receiveSignal: async (signal) =>
+              await receiveSignal(signal, { gardenTaskRepo, signalService }),
+            hasCreatedEvidence: options.hasCreatedEvidence ?? (async () => true)
+          }
+        }),
     graphExploreService: {
       exploreOneHop: async () => []
     },

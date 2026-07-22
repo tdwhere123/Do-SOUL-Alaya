@@ -47,9 +47,11 @@ export interface ParsedFlags {
   readonly extractionAuthority?: string;
   /** Immutable target-root selection receipt linked from a normal authority receipt. */
   readonly extractionTargetSelection?: string;
+  readonly extractionPredecessorAuthority?: string;
   readonly promotionContract?: string;
   readonly r3SpendApproval?: string;
   readonly concurrency?: number;
+  readonly extractionInitialConcurrency?: number;
   readonly questionBatchLimit?: number;
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
@@ -83,9 +85,11 @@ export interface ParsedFlagsState {
   extractionCacheRoot?: string;
   extractionAuthority?: string;
   extractionTargetSelection?: string;
+  extractionPredecessorAuthority?: string;
   promotionContract?: string;
   r3SpendApproval?: string;
   concurrency?: number;
+  extractionInitialConcurrency?: number;
   questionBatchLimit?: number;
   legacySnapshot: boolean;
   legacyManifestSha256?: string;
@@ -97,11 +101,17 @@ export interface ParsedFlagsState {
 }
 
 export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
+  assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
   }
   return finalizeParsedFlags(state);
+}
+
+function assertFlagAtMostOnce(args: ReadonlyArray<string>, flag: string): void {
+  const count = args.filter((token) => token === flag || token.startsWith(`${flag}=`)).length;
+  if (count > 1) throw new Error(`${flag} may be provided only once`);
 }
 
 function createParsedFlagsState(): ParsedFlagsState {
@@ -295,6 +305,16 @@ function consumeOtherPathFlags(
     );
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--extraction-predecessor-authority")) {
+    state.extractionPredecessorAuthority = readRequiredFlagValue(
+      args,
+      index,
+      token,
+      "--extraction-predecessor-authority",
+      "--extraction-predecessor-authority requires a receipt path"
+    );
+    return nextIndex(index, token);
+  }
   if (matchFlagToken(token, "--snapshot")) {
     state.snapshot = readFlagValue(args, index, token, "--snapshot");
     return nextIndex(index, token);
@@ -302,6 +322,13 @@ function consumeOtherPathFlags(
   if (matchFlagToken(token, "--concurrency")) {
     state.concurrency = parsePositiveInt(
       readFlagValue(args, index, token, "--concurrency"), "--concurrency"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--extraction-initial-concurrency")) {
+    state.extractionInitialConcurrency = parsePositiveInt(
+      readFlagValue(args, index, token, "--extraction-initial-concurrency"),
+      "--extraction-initial-concurrency"
     );
     return nextIndex(index, token);
   }
@@ -434,9 +461,11 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     extractionCacheRoot: state.extractionCacheRoot,
     extractionAuthority: state.extractionAuthority,
     extractionTargetSelection: state.extractionTargetSelection,
+    extractionPredecessorAuthority: state.extractionPredecessorAuthority,
     promotionContract: state.promotionContract,
     r3SpendApproval: state.r3SpendApproval,
     concurrency: state.concurrency,
+    extractionInitialConcurrency: state.extractionInitialConcurrency,
     questionBatchLimit: state.questionBatchLimit,
     legacySnapshot: state.legacySnapshot,
     legacyManifestSha256: state.legacyManifestSha256,

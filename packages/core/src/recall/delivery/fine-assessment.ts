@@ -41,6 +41,7 @@ export interface FineAssessParams {
   readonly now: () => string;
   readonly warn: RecallServiceWarnPort;
   readonly captureAnswerFeatures?: boolean;
+  readonly finalAuthorityMaxHeadDrop?: number;
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -150,6 +151,9 @@ export function deliverFineAssessment(
     finalOrderAfterCoverage: deepHeadScores.size === 0
       ? "public_relevance"
       : replacePublicRelevance ? "delivery_rank" : "public_relevance",
+    maxHeadDropAfterCoverage: !replacePublicRelevance && deepHeadScores.size > 0
+      ? params.finalAuthorityMaxHeadDrop
+      : undefined,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures
   });

@@ -67,7 +67,12 @@ describe("no-network extraction authority inspection", () => {
         authorizedTurnOccurrences: 4,
         authorizedUniqueCacheKeys: 4
       },
-      extraction: { manifestSha256: null, rawContentClosureSha256: null },
+      extraction: {
+        cacheKeyAlgorithm: "sha256(model\\0requestProfile\\0systemPrompt\\0turnContent" +
+          "\\0trusted-role-corpus-v1\\0trustedRoleCorpusDigest)",
+        manifestSha256: null,
+        rawContentClosureSha256: null
+      },
       inventory: { expectedTurns: 4, validTurns: 0, missingTurns: 4, invalidTurns: 0, orphanTurns: 0 }
     });
     expect(inspected.missingKeys).toHaveLength(4);

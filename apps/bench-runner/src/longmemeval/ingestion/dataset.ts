@@ -52,6 +52,28 @@ export interface LongMemEvalRound {
   readonly hasAnswer: boolean;
 }
 
+export interface LongMemEvalRoundMessage {
+  readonly message_id: string;
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
+export function buildLongMemEvalRoundMessages(
+  session: readonly LongMemEvalTurn[],
+  round: LongMemEvalRound,
+  idPrefix: string
+): readonly LongMemEvalRoundMessage[] {
+  return Object.freeze(round.messageIndices.map((messageIndex) => {
+    const message = session[messageIndex];
+    if (message === undefined) throw new Error(`missing round message ${messageIndex}`);
+    return Object.freeze({
+      message_id: `${idPrefix}-m${messageIndex}`,
+      role: conversationRole(message.role),
+      content: message.content
+    });
+  }));
+}
+
 /**
  * Pair a session's messages into rounds. A round is a consecutive
  * (user message, assistant message) pair. Edge cases handled without ever
@@ -108,4 +130,10 @@ function roleLabel(role: string): string {
   if (normalized === "user") return "User";
   if (normalized === "assistant") return "Assistant";
   return role.trim().length === 0 ? "Message" : role.trim();
+}
+
+function conversationRole(role: string): "user" | "assistant" {
+  const normalized = role.trim().toLowerCase();
+  if (normalized === "user" || normalized === "assistant") return normalized;
+  throw new Error(`unsupported LongMemEval conversation role: ${role}`);
 }

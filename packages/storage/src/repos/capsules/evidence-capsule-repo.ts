@@ -196,6 +196,25 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
+  public async findByArtifactRef(
+    workspaceId: string,
+    artifactRef: string
+  ): Promise<Readonly<EvidenceCapsule> | null> {
+    try {
+      const row = this.statements.findByArtifactRefStatement.get(
+        workspaceId,
+        artifactRef
+      ) as EvidenceCapsuleRow | undefined;
+      return row === undefined ? null : parseEvidenceCapsuleRow(row);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to load evidence capsule by artifact reference in workspace ${workspaceId}.`,
+        error
+      );
+    }
+  }
+
   public async findByIds(
     workspaceId: string,
     objectIds: readonly string[]

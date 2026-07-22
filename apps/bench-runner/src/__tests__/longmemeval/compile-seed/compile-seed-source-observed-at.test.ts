@@ -60,6 +60,15 @@ describe("compile seed source observation", () => {
       "I completed the review today.",
       "I completed the review today."
     ]);
+    expect(seeded[0]?.productionRawPayload).toMatchObject({
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: 1
+      },
+      source_assertion: "I completed the review today.",
+      proposed_matched_text: "I completed the review today."
+    });
   });
 });
 
@@ -77,6 +86,11 @@ function relativeSignalEnvelope(): string {
         event_time_end: "2025-03-27",
         time_precision: "day",
         time_source: "turn_text"
+      },
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: 1
       }
     }]
   });
@@ -109,9 +123,15 @@ async function seedAt(
   sourceObservedAt: string,
   seedIndex: number
 ): Promise<void> {
+  const turnContent = "I completed the review today.";
   await runner.seedTurn({
     daemon,
-    turnContent: "I completed the review today.",
+    turnContent,
+    turnMessages: [{
+      message_id: `trusted-user-${seedIndex}`,
+      role: "user",
+      content: turnContent
+    }],
     evidenceRefBase: `q-s-r-${seedIndex}`,
     seedIndex,
     workspaceId: "workspace-1",

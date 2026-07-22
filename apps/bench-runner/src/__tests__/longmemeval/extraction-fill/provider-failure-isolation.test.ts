@@ -107,7 +107,7 @@ describe("authority-bound provider failure isolation", () => {
     expect(extract).not.toHaveBeenCalled();
   });
 
-  it("continues siblings after a 4xx, then fails with an honest incomplete state", async () => {
+  it("continues siblings after a 4xx and resolves with an honest partial result", async () => {
     setCredentialFixture();
     const questions = Array.from(
       { length: 100 },
@@ -122,7 +122,7 @@ describe("authority-bound provider failure isolation", () => {
       return { rawJson: '{"signals":[]}' };
     });
 
-    await expect(runExtractionFill({
+    const result = await runExtractionFill({
       variant: "longmemeval_s",
       offset: 0,
       limit: 100,
@@ -135,9 +135,22 @@ describe("authority-bound provider failure isolation", () => {
       tolerateProviderTaskFailures: true,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/completion refused.*missing=1/u);
+    });
 
     expect(extract).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      requestedTurns: 2,
+      cacheHits: 0,
+      newlyExtracted: 1,
+      coverage: 1 / 2,
+      terminalRetryClassifications: { failure_non_retryable_4xx: 1 },
+      manifest: {
+        fill_status: "in_progress",
+        expected_turns: 2,
+        cached_turns: 1,
+        coverage: 1 / 2
+      }
+    });
     expect(readExtractionCacheManifestIdentity(cacheRoot)?.manifest).toMatchObject({
       fill_status: "in_progress",
       expected_turns: 2,
@@ -263,7 +276,14 @@ function nonRetryable4xx(): Error {
     benchRetry: {
       retryCount: 0,
       rateLimitRetries: 0,
-      retryClassification: "failure_non_retryable_4xx" as const
+      retryClassification: "failure_non_retryable_4xx" as const,
+      transportFailures: [{
+        kind: "http_error" as const,
+        phase: "response_status" as const,
+        httpStatus: 400,
+        fingerprint: "f".repeat(64),
+        attempt: 1
+      }]
     }
   });
 }

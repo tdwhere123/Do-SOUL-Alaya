@@ -94,6 +94,19 @@ describe("final recall relevance ownership", () => {
     );
   });
 
+  it("keeps CE final authority when bounded lightweight authority is requested", () => {
+    const answerScores = new Map([
+      [`workspace_local:memory_entry:${FUSION_WINNER_ID}`, 0.1],
+      [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.9]
+    ]);
+    const fixture = buildRelevanceFixture(answerScores, 0);
+
+    expect(fixture.assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([ACTIVATION_WINNER_ID, FUSION_WINNER_ID]);
+    expect(fixture.assessed.candidates.map((candidate) => candidate.relevance_score))
+      .toEqual([0.9, 0.1]);
+  });
+
   it("keeps a CE-scored candidate ahead of an unscored fused fallback", () => {
     const answerScores = new Map([
       [`workspace_local:memory_entry:${ACTIVATION_WINNER_ID}`, 0.01]
@@ -258,7 +271,8 @@ describe("final recall relevance ownership", () => {
 });
 
 function buildRelevanceFixture(
-  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>
+  answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>,
+  finalAuthorityMaxHeadDrop?: number
 ) {
   const fusionWinner = createMemory(FUSION_WINNER_ID, 0.1, [
     { facet: "occupation_work" }, { facet: "location_place" }
@@ -270,7 +284,8 @@ function buildRelevanceFixture(
     candidates: [createCoarseCandidate(activationWinner), createCoarseCandidate(fusionWinner)],
     policy: buildPolicy(), winnerMemoryIds: new Set(),
     supplementaryData: createSupplementaryData(answerRelevanceScoresByCandidateKey), tokenEstimator: { estimate: () => 4 },
-    now: () => NOW, warn: vi.fn()
+    now: () => NOW, warn: vi.fn(),
+    finalAuthorityMaxHeadDrop
   });
   return { fusionWinner, activationWinner, assessed };
 }

@@ -7,6 +7,7 @@ export type SqliteStatement = BetterSqlite3.Statement;
 export interface EvidenceCapsuleStatements {
   readonly createStatement: SqliteStatement;
   readonly findByIdStatement: SqliteStatement;
+  readonly findByArtifactRefStatement: SqliteStatement;
   readonly findByIdsStatement: SqliteStatement;
   readonly findSourceAnchorsByIdsStatement: SqliteStatement;
   readonly findByRunIdStatement: SqliteStatement;
@@ -24,6 +25,7 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
   return {
     createStatement: db.connection.prepare(CREATE_EVIDENCE_CAPSULE_SQL),
     findByIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byId", "limitOne")),
+    findByArtifactRefStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL),
     findByIdsStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULES_BY_IDS_SQL),
     findSourceAnchorsByIdsStatement: db.connection.prepare(FIND_EVIDENCE_SOURCE_ANCHORS_BY_IDS_SQL),
     findByRunIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun")),
@@ -102,6 +104,17 @@ const FIND_EVIDENCE_CAPSULES_BY_IDS_SQL = `
       WHERE workspace_id = ?
         AND object_id IN (SELECT value FROM json_each(?))
       ORDER BY created_at ASC, object_id ASC
+`;
+
+const FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL = `
+      SELECT${EVIDENCE_CAPSULE_SELECT_COLUMNS}
+      FROM evidence_capsules
+      WHERE workspace_id = ?
+        AND json_valid(physical_anchor)
+        AND json_type(physical_anchor, '$.artifact_ref') = 'text'
+        AND json_extract(physical_anchor, '$.artifact_ref') = ?
+      ORDER BY created_at ASC, object_id ASC
+      LIMIT 1
 `;
 
 const FIND_EVIDENCE_SOURCE_ANCHORS_BY_IDS_SQL = `

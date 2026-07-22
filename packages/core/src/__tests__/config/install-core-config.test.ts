@@ -110,6 +110,21 @@ describe("core config environment contract", () => {
 });
 
 describe("parseRecallRuntimeConfigFromEnv", () => {
+  it("strictly parses the optional bounded final-authority treatment", () => {
+    expect(parseRecallRuntimeConfigFromEnv({}).finalAuthorityMaxHeadDrop).toBeUndefined();
+    expect(parseRecallRuntimeConfigFromEnv({
+      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "0"
+    }).finalAuthorityMaxHeadDrop).toBe(0);
+    expect(parseRecallRuntimeConfigFromEnv({
+      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2"
+    }).finalAuthorityMaxHeadDrop).toBe(2);
+    for (const value of ["", "-1", "1.5", "NaN", "9007199254740992"]) {
+      expect(() => parseRecallRuntimeConfigFromEnv({
+        ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: value
+      })).toThrow(/non-negative safe integer/);
+    }
+  });
+
   it("does not expose retired per-query embedding controls", () => {
     const config = parseRecallRuntimeConfigFromEnv({
       ALAYA_RECALL_EMBED_POOL_RESCORE: "off",

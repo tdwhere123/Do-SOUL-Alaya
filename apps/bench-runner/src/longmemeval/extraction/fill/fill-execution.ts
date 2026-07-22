@@ -3,17 +3,16 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   createCachingSignalExtractor,
   createGardenHttpExtractor,
-  type BenchProviderUsage,
-  type BenchTerminalRetryClassification,
   type CompileSeedExtractionStats
 } from "../../compile-seed.js";
-import { computeCacheKey, inspectCachedExtraction } from "../../compile-seed/compile-seed-cache.js";
-import type { ExtractionFillOptions, ExtractionFillResult } from "../extraction-fill.js";
-import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
 import {
-  assertExtractionFillComplete,
-  type ExtractionFillCompletion
-} from "./fill-completion.js";
+  computeExtractionTurnCacheKey,
+  inspectCachedExtraction
+} from "../../compile-seed/compile-seed-cache.js";
+import type { ExtractionFillOptions, ExtractionFillResult } from "../extraction-fill.js";
+import type { ExtractionLiveTransportOutcome } from "../cache/cache-live-delegate.js";
+import { ExtractionCacheInvariantError } from "../cache/cache-invariant-error.js";
+import type { ExtractionFillCompletion } from "./fill-completion.js";
 import {
   finalizeExpansionFillAuthority
 } from "../expansion-fill-authority.js";
@@ -38,18 +37,22 @@ import {
 import type { ExtractionAuthorityReceipt } from "../authority/receipt.js";
 import type { ExtractionAttemptLedgerSnapshot } from "../authority/attempt-ledger.js";
 import { repairScopeKeys } from "../authority/repair/repair-scope.js";
+import { resolveFullFillStatus } from "./policy/full-fill-completion.js";
+import {
+  countIntentionalSkippedTurns,
+  resolveCacheKeyAllowlistedTurns,
+  type CacheKeyAllowlistResolution
+} from "./policy/cache-key-allowlist.js";
 
 export interface ExecutionExtractionAuthority {
   readonly receipt: ExtractionAuthorityReceipt;
   readonly reserveAttempt: (cacheKey: string, signal?: AbortSignal) => Promise<void>;
   readonly abandonPendingShard: (cacheKey: string) => void;
   readonly commitSuccessfulShard: (cacheKey: string) => void;
-  readonly recordTransportOutcome: (cacheKey: string, outcome: {
-    readonly retryCount: number;
-    readonly rateLimitRetries: number;
-    readonly terminalRetryClassification?: BenchTerminalRetryClassification;
-    readonly usage?: BenchProviderUsage;
-  }) => void;
+  readonly recordTransportOutcome: (
+    cacheKey: string,
+    outcome: ExtractionLiveTransportOutcome
+  ) => void;
   readonly snapshot: () => ExtractionAttemptLedgerSnapshot | undefined;
 }
 
@@ -58,6 +61,8 @@ export async function executeExtractionFill(
   prepared: PreparedExtractionFill,
   cacheRoot: string,
   concurrency: number,
+  initialConcurrency: number,
+  tolerateProviderTaskFailures: boolean,
   stats: CompileSeedExtractionStats,
   log: (message: string) => void,
   writeLease: ExtractionCacheWriteLease,
@@ -65,17 +70,19 @@ export async function executeExtractionFill(
   signal: AbortSignal | undefined,
   markProgress: (() => void) | undefined
 ): Promise<void> {
+  const resolved = resolveFillTurns(
+    options.cacheKeyAllowlist, prepared, cacheRoot, authority, writeLease
+  );
+  stats.cacheHits += resolved.skippedCacheHits;
   const extractor = createFillCachingExtractor(
     options, prepared, cacheRoot, stats, writeLease, authority, markProgress
   );
-  const distinctTurns = resolveFillTurns(prepared, cacheRoot, authority);
-  const tolerateProviderTaskFailures = options.tolerateProviderTaskFailures === true ||
-    isNewApiDirectFill(authority);
   await runExtractionPool({
     extractor,
-    distinctTurns,
+    turns: resolved.turns,
     concurrency,
-    requestedTurns: distinctTurns.length,
+    initialConcurrency,
+    requestedTurns: resolved.turns.length,
     stats,
     log,
     signal,
@@ -120,37 +127,49 @@ function createFillCachingExtractor(
 }
 
 function resolveFillTurns(
+  cacheKeyAllowlist: readonly string[] | undefined,
   prepared: PreparedExtractionFill,
   cacheRoot: string,
-  authority: ExecutionExtractionAuthority | undefined
-): readonly string[] {
-  const distinctTurns = authority?.receipt.action === "probe"
+  authority: ExecutionExtractionAuthority | undefined,
+  writeLease: ExtractionCacheWriteLease
+): CacheKeyAllowlistResolution {
+  const allowlisted = resolveCacheKeyAllowlistedTurns({
+    allowlist: cacheKeyAllowlist,
+    cacheRoot,
+    prepared: {
+      config: prepared.config,
+      pinnedCachedTurns: prepared.existingManifest?.cached_turns,
+      distinctExtractionTurns: prepared.distinctExtractionTurns,
+      executionExtractionTurns: prepared.executionExtractionTurns,
+      questionBatchLimit: prepared.questionBatchLimit,
+      expansion: prepared.expansion
+    },
+    authority: authority?.receipt,
+    writeLease
+  });
+  if (allowlisted !== undefined) return allowlisted;
+  const turns = authority?.receipt.action === "probe"
     ? selectProbeTurn(prepared, authority.receipt.probe_key!)
     : selectRepairTurns(prepared, authority);
   if (authority?.receipt.action === "probe") {
     assertProbeTargetIsMissing(prepared, cacheRoot, authority.receipt.probe_key!);
   }
-  return distinctTurns;
+  return { turns, skippedCacheHits: 0 };
 }
 
 function selectRepairTurns(
   prepared: PreparedExtractionFill,
   authority: ExecutionExtractionAuthority | undefined
-): readonly string[] {
+): PreparedExtractionFill["executionExtractionTurns"] {
   const scope = authority?.receipt.repair_scope;
-  if (scope === undefined) return prepared.executionTurns;
+  if (scope === undefined) return prepared.executionExtractionTurns;
   const keys = repairScopeKeys(scope);
-  return prepared.executionTurns.filter((turn) => keys.has(computeCacheKey(
+  return prepared.executionExtractionTurns.filter((turn) => keys.has(computeExtractionTurnCacheKey(
     prepared.config.model,
     prepared.config.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
     turn
   )));
-}
-
-function isNewApiDirectFill(authority: ExecutionExtractionAuthority | undefined): boolean {
-  return authority?.receipt.direct_spend?.kind === "deepseek_newapi_direct_500" ||
-    authority?.receipt.repair_scope !== undefined;
 }
 
 export function finishExtractionFill(
@@ -160,22 +179,33 @@ export function finishExtractionFill(
   log: (message: string) => void,
   writeLease: ExtractionCacheWriteLease,
   authorityTelemetry: ExtractionAttemptLedgerSnapshot | undefined,
-  repairScopeTurns: number | undefined
+  repairScopeTurns: number | undefined,
+  allowProviderTaskFailures: boolean,
+  cacheKeyAllowlistSize: number | undefined
 ): ExtractionFillResult {
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
-  const completion = inspectFillWindow(cacheRoot, prepared.config, prepared.distinctTurns);
-  assertExtractionFillComplete(completion);
-  assertTaskConservation(
-    prepared, stats, completion, repairScopeTurns
+  const completion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.distinctExtractionTurns
   );
+  const retryTelemetry = readFillRetryTelemetry(stats);
+  const intentionalSkippedTurns = countIntentionalSkippedTurns(
+    prepared.distinctExtractionTurns.length,
+    prepared.existingManifest?.cached_turns,
+    cacheKeyAllowlistSize
+  );
+  const status = resolveFullFillStatus({
+    prepared, stats, completion, telemetry: retryTelemetry,
+    repairScopeTurns, allowProviderTaskFailures, intentionalSkippedTurns
+  });
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
-  const manifest = persistFillManifest(prepared, cacheRoot, "complete", completion);
+  const manifest = persistFillManifest(prepared, cacheRoot, status, completion);
   const cacheHits = stats.cacheHits;
   const newlyExtracted = stats.llmCalls;
-  const retryTelemetry = readFillRetryTelemetry(stats);
+  const failureCount = countTerminalProviderFailures(retryTelemetry);
   log(
-    `[extraction-fill] done: cache_hits=${cacheHits} ` +
-      `newly_extracted=${newlyExtracted} failures=0 ` +
+    `[extraction-fill] done: status=${status} cache_hits=${cacheHits} ` +
+      `newly_extracted=${newlyExtracted} failures=${failureCount} ` +
+      `intentional_skips=${intentionalSkippedTurns} ` +
       `retry_successes=${retryTelemetry.retrySuccesses} ` +
       `rate_limit_retries=${retryTelemetry.rateLimitRetries} ` +
       `adaptive_backoffs=${retryTelemetry.adaptiveConcurrencyBackoffs} ` +
@@ -208,8 +238,12 @@ export function finishExtractionQuestionBatch(
   repairScopeTurns: number | undefined
 ): ExtractionFillResult {
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
-  const fullCompletion = inspectFillWindow(cacheRoot, prepared.config, prepared.distinctTurns);
-  const batchCompletion = inspectFillWindow(cacheRoot, prepared.config, prepared.executionTurns);
+  const fullCompletion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.distinctExtractionTurns
+  );
+  const batchCompletion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.executionExtractionTurns
+  );
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
   const manifest = persistFillManifest(
     prepared, cacheRoot, "in_progress", fullCompletion
@@ -245,7 +279,7 @@ function assertQuestionBatchTaskConservation(
   repairScopeTurns: number | undefined
 ): void {
   const completed = stats.cacheHits + stats.llmCalls + countTerminalProviderFailures(telemetry);
-  const requested = repairScopeTurns ?? prepared.executionTurns.length;
+  const requested = repairScopeTurns ?? prepared.executionExtractionTurns.length;
   if (completed === requested) return;
   throw new ExtractionCacheInvariantError(
     "question batch task conservation failed: " +
@@ -262,7 +296,9 @@ export function finishExtractionProbe(
   authorityTelemetry: ExtractionAttemptLedgerSnapshot | undefined
 ): ExtractionFillResult {
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
-  const completion = inspectFillWindow(cacheRoot, prepared.config, prepared.distinctTurns);
+  const completion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.distinctExtractionTurns
+  );
   const manifest = persistFillManifest(prepared, cacheRoot, "in_progress", completion);
   const retryTelemetry = readFillRetryTelemetry(stats);
   if (stats.llmCalls !== 1 || stats.cacheHits !== 0) {
@@ -295,7 +331,9 @@ export function refreshIncompleteFill(
   writeLease: ExtractionCacheWriteLease
 ): void {
   if (!canRefreshIncompleteFill(prepared, cacheRoot, writeLease)) return;
-  const completion = inspectFillWindow(cacheRoot, prepared.config, prepared.distinctTurns);
+  const completion = inspectFillWindow(
+    cacheRoot, prepared.config, prepared.distinctExtractionTurns
+  );
   assertPinnedFillIdentity(prepared, cacheRoot, writeLease);
   persistFillManifest(prepared, cacheRoot, "in_progress", completion);
 }
@@ -303,8 +341,8 @@ export function refreshIncompleteFill(
 function selectProbeTurn(
   prepared: PreparedExtractionFill,
   targetKey: string
-): readonly string[] {
-  const target = prepared.distinctTurns.find((turn) => computeCacheKey(
+): PreparedExtractionFill["distinctExtractionTurns"] {
+  const target = prepared.distinctExtractionTurns.find((turn) => computeExtractionTurnCacheKey(
     prepared.config.model,
     prepared.config.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
@@ -322,7 +360,7 @@ function assertProbeTargetIsMissing(
   targetKey: string
 ): void {
   const target = selectProbeTurn(prepared, targetKey)[0]!;
-  const cacheKey = computeCacheKey(
+  const cacheKey = computeExtractionTurnCacheKey(
     prepared.config.model,
     prepared.config.requestProfile,
     OFFICIAL_API_SYSTEM_PROMPT,
@@ -380,23 +418,6 @@ function persistFillManifest(
       };
   writeExtractionCacheManifest(cacheRoot, finalized);
   return finalized;
-}
-
-function assertTaskConservation(
-  prepared: PreparedExtractionFill,
-  stats: CompileSeedExtractionStats,
-  completion: ExtractionFillCompletion,
-  repairScopeTurns: number | undefined
-): void {
-  const completedTasks = stats.cacheHits + stats.llmCalls;
-  const executionTurns = repairScopeTurns ?? prepared.requestedTurns;
-  if (completedTasks === executionTurns &&
-    completion.expectedTurns === prepared.requestedTurns) return;
-  throw new ExtractionCacheInvariantError(
-    "extraction-fill task conservation failed: " +
-      `cache_hits=${stats.cacheHits} newly_extracted=${stats.llmCalls} ` +
-      `requested=${executionTurns} expected=${completion.expectedTurns}`
-  );
 }
 
 function renderAuthorityTelemetry(telemetry: ExtractionAttemptLedgerSnapshot | undefined): string {

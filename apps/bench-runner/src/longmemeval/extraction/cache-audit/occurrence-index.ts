@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import {
+  buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
+  type LongMemEvalRoundMessage,
   type LongMemEvalQuestion
 } from "../../ingestion/dataset.js";
 import { computeCacheKey } from "../../compile-seed/compile-seed-cache.js";
 import type { CompileSeedExtractionConfig } from "../../compile-seed/compile-seed-types.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
+import { computeTrustedRoleCorpusDigest } from "../turn-contents.js";
 
 export interface ExtractionOccurrence {
   readonly id: string;
@@ -15,6 +18,8 @@ export interface ExtractionOccurrence {
   readonly roundIndex: number;
   readonly sourceObservedAt: string;
   readonly turnContent: string;
+  readonly turnMessages: readonly LongMemEvalRoundMessage[];
+  readonly trustedRoleCorpusDigest: string;
   readonly cacheKey: string;
 }
 
@@ -37,6 +42,7 @@ export function hashExtractionOccurrenceIndex(
   const canonical = [...occurrences].sort(compareOccurrences).map((occurrence) => ({
     id: occurrence.id,
     cache_key: occurrence.cacheKey,
+    trusted_role_corpus_digest: occurrence.trustedRoleCorpusDigest,
     source_observed_at: occurrence.sourceObservedAt
   }));
   return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
@@ -52,6 +58,11 @@ function occurrencesForQuestion(
     const sourceObservedAt = requireLongMemEvalTimestamp(question.haystack_dates[sessionIndex]);
     return pairSessionIntoRounds(session).map((round, roundIndex) => buildOccurrence({
       question, sessionIndex, roundIndex, sourceObservedAt, turnContent: round.content,
+      turnMessages: buildLongMemEvalRoundMessages(
+        session,
+        round,
+        `${question.question_id}-s${sessionIndex}-r${roundIndex}`
+      ),
       model, requestProfile, systemPrompt
     }));
   });
@@ -63,11 +74,13 @@ function buildOccurrence(input: {
   readonly roundIndex: number;
   readonly sourceObservedAt: string;
   readonly turnContent: string;
+  readonly turnMessages: readonly LongMemEvalRoundMessage[];
   readonly model: string;
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
 }): ExtractionOccurrence {
   const id = `${input.question.question_id}-s${input.sessionIndex}-r${input.roundIndex}`;
+  const trustedRoleCorpusDigest = computeTrustedRoleCorpusDigest(input.turnMessages);
   return Object.freeze({
     id,
     evidenceRef: id,
@@ -76,7 +89,15 @@ function buildOccurrence(input: {
     roundIndex: input.roundIndex,
     sourceObservedAt: input.sourceObservedAt,
     turnContent: input.turnContent.trim(),
-    cacheKey: computeCacheKey(input.model, input.requestProfile, input.systemPrompt, input.turnContent.trim())
+    turnMessages: input.turnMessages,
+    trustedRoleCorpusDigest,
+    cacheKey: computeCacheKey(
+      input.model,
+      input.requestProfile,
+      input.systemPrompt,
+      input.turnContent.trim(),
+      trustedRoleCorpusDigest
+    )
   });
 }
 

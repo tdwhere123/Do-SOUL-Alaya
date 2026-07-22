@@ -18,6 +18,7 @@ export interface RecallRuntimeConfig {
   readonly intentV2: boolean;
   readonly extraSynonymClusters: string | undefined;
   readonly sessionRoute: boolean;
+  readonly finalAuthorityMaxHeadDrop: number | undefined;
   readonly coarseFilterSemanticFlags: Readonly<Record<string, string | undefined>>;
 }
 
@@ -39,6 +40,19 @@ function readOptionalNumber(raw: string | undefined): number | undefined {
   }
   const value = Number(raw);
   return Number.isFinite(value) ? value : undefined;
+}
+
+function readOptionalNonNegativeSafeInt(
+  raw: string | undefined,
+  key: string
+): number | undefined {
+  if (raw === undefined) return undefined;
+  const normalized = raw.trim();
+  const value = Number(normalized);
+  if (!/^[0-9]+$/u.test(normalized) || !Number.isSafeInteger(value)) {
+    throw new Error(`${key} must be a non-negative safe integer`);
+  }
+  return value;
 }
 
 function collectPrefixedEnv(
@@ -83,6 +97,10 @@ export function parseRecallRuntimeConfigFromEnv(
     intentV2: /^(?:1|true|on|yes)$/iu.test(env[keys.intentV2] ?? ""),
     extraSynonymClusters: env[keys.extraSynonymClusters],
     sessionRoute: yesEnabled(env[keys.sessionRoute]),
+    finalAuthorityMaxHeadDrop: readOptionalNonNegativeSafeInt(
+      env[keys.finalAuthorityMaxHeadDrop],
+      keys.finalAuthorityMaxHeadDrop
+    ),
     coarseFilterSemanticFlags: collectRecallSemanticEnv(env)
   });
 }

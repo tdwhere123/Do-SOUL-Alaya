@@ -16,14 +16,8 @@ function createContext() {
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: "surface-1",
-    turn_messages: [
-      {
-        role: "user" as const,
-        content: "turn",
-        message_id: "message-1",
-        created_at: "2026-04-23T09:00:00.000Z"
-      }
-    ]
+    turn_messages: [],
+    allow_legacy_single_user_source: true
   };
 }
 

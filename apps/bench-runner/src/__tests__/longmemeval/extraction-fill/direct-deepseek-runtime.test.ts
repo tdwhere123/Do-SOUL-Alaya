@@ -64,7 +64,7 @@ describe("direct DeepSeek runtime extraction", () => {
     const fixture = await createDirectRuntimeFixture();
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
 
     const result = await runExtractionFill({
@@ -126,7 +126,7 @@ describe("direct DeepSeek runtime extraction", () => {
       transportStarts += 1;
       if (transportStarts === 2) secondTransportStarted.resolve();
       await release.promise;
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
     const running = runExtractionFill({
       variant: DIRECT_VARIANT,
@@ -154,7 +154,7 @@ describe("direct DeepSeek runtime extraction", () => {
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       extractedTurns.push((JSON.parse(input.userPrompt) as { turn_content: string }).turn_content);
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
 
     const result = await runExtractionFill({
@@ -193,16 +193,45 @@ describe("direct DeepSeek runtime extraction", () => {
     });
   });
 
+  it("fails a NewAPI question batch closed on a provider failure", async () => {
+    const fixture = await createDirectRuntimeFixture(
+      "newapi",
+      readCurrentExtractionAuthorityRevision(),
+      uniqueDirectQuestions()
+    );
+    const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
+      await input.onTransportAttempt?.();
+      throw providerTimeoutFailure();
+    });
+
+    await expect(runExtractionFill({
+      variant: DIRECT_VARIANT,
+      limit: 500,
+      questionBatchLimit: 1,
+      concurrency: 1,
+      cacheRoot: fixture.cacheRoot,
+      authorityReceiptPath: fixture.receiptPath,
+      extractorFactory: () => ({ extract }),
+      log: () => undefined
+    })).rejects.toMatchObject({ name: "ExtractionFillTaskError" });
+
+    expect(extract).toHaveBeenCalledOnce();
+    expect(readExtractionCacheManifest(fixture.cacheRoot)).toMatchObject({
+      fill_status: "in_progress",
+      cached_turns: 0
+    });
+  });
+
   it("leaves a failed NewAPI key missing, finishes siblings, and retries it on resume", async () => {
     const fixture = await createDirectRuntimeFixture("newapi");
     let calls = 0;
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
       if (calls++ === 0) throw providerTimeoutFailure();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
 
-    await expect(runExtractionFill({
+    const partial = await runExtractionFill({
       variant: DIRECT_VARIANT,
       limit: 500,
       concurrency: 1,
@@ -210,15 +239,21 @@ describe("direct DeepSeek runtime extraction", () => {
       authorityReceiptPath: fixture.receiptPath,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/completion refused: valid=1\/2 missing=1/u);
+    });
 
     expect(extract).toHaveBeenCalledTimes(2);
+    expect(partial).toMatchObject({
+      newlyExtracted: 1,
+      coverage: 0.5,
+      terminalRetryClassifications: { failure_timeout: 1 },
+      manifest: { fill_status: "in_progress", cached_turns: 1 }
+    });
     expect(readExtractionCacheManifest(fixture.cacheRoot)).toMatchObject({
       fill_status: "in_progress", expected_turns: 2, cached_turns: 1, coverage: 0.5
     });
     const resumedExtract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
     await expect(runExtractionFill({
       variant: DIRECT_VARIANT,
@@ -242,7 +277,7 @@ describe("direct DeepSeek runtime extraction", () => {
     const authorizedReceipt = readExtractionAuthorityReceipt(fixture.receiptPath);
     const extract = vi.fn<BenchSignalExtractor["extract"]>(async (input) => {
       await input.onTransportAttempt?.();
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
 
     const result = await runExtractionFill({
@@ -294,7 +329,7 @@ describe("direct DeepSeek runtime extraction", () => {
         throw cause;
       }
       transportStarted = true;
-      return { rawJson: '{"signals":[]}' };
+      return { rawJson: firstAssertionEnvelope(input.userPrompt) };
     });
 
     await expect(runExtractionFill({
@@ -333,6 +368,35 @@ describe("direct DeepSeek runtime extraction", () => {
     expect(acquireWriteLease).not.toHaveBeenCalled();
   });
 });
+
+function firstAssertionEnvelope(userPrompt: string): string {
+  const prompt = JSON.parse(userPrompt) as {
+    readonly source_assertions?: readonly {
+      readonly assertion_id?: unknown;
+      readonly text?: unknown;
+    }[];
+  };
+  const assertion = prompt.source_assertions?.[0];
+  if (typeof assertion?.assertion_id !== "number" ||
+      typeof assertion.text !== "string" || assertion.text.length === 0) {
+    throw new Error("direct runtime fixture requires a source assertion");
+  }
+  const matchedText = assertion.text.replace(/^User:\s*/u, "");
+  return JSON.stringify({
+    signals: [{
+      signal_kind: "potential_claim",
+      object_kind: "activity",
+      confidence: 0.9,
+      matched_text: matchedText,
+      distilled_fact: matchedText,
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: assertion.assertion_id
+      }
+    }]
+  });
+}
 
 async function createDirectRuntimeFixture(
   channel: "legacy" | "newapi" = "legacy",
@@ -456,13 +520,21 @@ function providerTimeoutFailure(): Error & {
     readonly retryCount: 0;
     readonly rateLimitRetries: 0;
     readonly retryClassification: "failure_timeout";
+    readonly transportFailures: readonly [unknown];
   };
 } {
   return Object.assign(new Error("provider timed out for this fixture"), {
     benchRetry: {
       retryCount: 0 as const,
       rateLimitRetries: 0 as const,
-      retryClassification: "failure_timeout" as const
+      retryClassification: "failure_timeout" as const,
+      transportFailures: [{
+        kind: "timeout" as const,
+        phase: "request" as const,
+        httpStatus: null,
+        fingerprint: "f".repeat(64),
+        attempt: 1 as const
+      }] as const
     }
   });
 }

@@ -13,6 +13,7 @@ import { hasCompleteExtractionFillAuthority, hasCompleteExtractionFillSummary } 
   "../../extraction/fill/fill-authority.js";
 import type { ExtractionFillQuestionWindow } from
   "../../extraction/fill/manifest/fill-manifest-contract.js";
+import type { LongMemEvalExtractionTurn } from "../../extraction/turn-contents.js";
 import { loadDatasetWithIdentity } from "../../ingestion/fetch.js";
 import {
   isLongMemEvalRunProvenanceGateEligible,
@@ -63,6 +64,7 @@ export function assertCurrentPostFillCacheAuthority(input: {
   readonly cacheRoot: string;
   readonly datasetSha256: string;
   readonly requiredTurnContents: readonly string[];
+  readonly requiredExtractionTurns: readonly LongMemEvalExtractionTurn[];
   readonly requiredQuestionWindow: ExtractionFillQuestionWindow;
   readonly env: Readonly<Record<string, string | undefined>>;
 }): SnapshotExtractionProvenanceV3 {
@@ -87,6 +89,7 @@ export function assertCurrentPostFillCacheAuthority(input: {
     liveExtractionPossible: false,
     manifest: identity.manifest,
     requiredTurnContents: input.requiredTurnContents,
+    requiredExtractionTurns: input.requiredExtractionTurns,
     requiredQuestionWindow: input.requiredQuestionWindow,
     requireManifest: true
   });

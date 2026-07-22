@@ -19,7 +19,7 @@ import {
   type CompileSeedRunner
 } from "../compile-seed.js";
 import { EmbeddingReadinessTracker } from "../provenance/embedding/embedding-readiness.js";
-import { collectDistinctTurnContents } from "../extraction/extraction-fill.js";
+import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
 import { runLongMemEvalCrossQuestionItem } from "./crossquestion-question.js";
 import { resolveBenchEmbeddingProviderLabel } from "../runner.js";
 import { resolveCommitInfo } from "../runner/runner-helpers.js";
@@ -146,7 +146,8 @@ function createCrossQuestionSeedRunner(
 ): CompileSeedRunner {
   return createCompileSeedRunner({
     cacheRoot: extractionCacheRoot,
-    requiredTurnContents: collectDistinctTurnContents(window),
+    requiredTurnContents: inspectTurnContentKeySpace(window).distinctTurnContents,
+    requiredExtractionTurns: inspectTurnContentKeySpace(window).distinctExtractionTurns,
     requiredQuestionWindow: { offset, limit: window.length },
     allowLiveExtraction: false
   });

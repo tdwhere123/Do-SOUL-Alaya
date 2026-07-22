@@ -59,12 +59,22 @@ export {
   type SourceAssertionResolution
 } from "./grounding/source-assertion.js";
 export {
+  resolveGardenRawPayloadGrounding,
+  resolveGardenSignalGrounding,
+  type GardenSignalGrounding
+} from "./grounding/signal-source-grounding.js";
+export {
   SignalExtractorError,
   createPiMonoExtractor,
   type PiMonoExtractorDependencies,
   type SignalExtractor,
   type SignalExtractorErrorKind
 } from "./pi-mono-extractor.js";
+export {
+  buildGardenTurnEvidenceArtifactRef,
+  buildGardenTurnEvidenceFallback,
+  isGardenTurnEvidenceFallback
+} from "./evidence-preservation/turn-evidence-anchor.js";
 export {
   WallClockTimeoutError,
   withWallClockTimeout,

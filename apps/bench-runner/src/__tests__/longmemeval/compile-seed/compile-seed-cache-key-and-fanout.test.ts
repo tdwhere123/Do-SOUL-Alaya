@@ -121,7 +121,9 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       surface_id: null,
       turn_messages: []
     });
-    expect(delegate.extract).toHaveBeenCalledTimes(1);
+    // The first strict-empty live result is rechecked once because the real
+    // provider prompt carries a non-empty source assertion catalog.
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
 
     await provider.compile("I moved to Berlin last spring.", {
       workspace_id: "ws-1",
@@ -129,8 +131,50 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
       surface_id: null,
       turn_messages: []
     });
-    // Still 1 — the second turn was a cache hit despite the new run_id.
-    expect(delegate.extract).toHaveBeenCalledTimes(1);
+    // Still 2 — the second turn was a cache hit despite the new run_id.
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse a shard when the trusted role corpus changes", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: {
+          model: "test-model", modelFamily: "test-model",
+          providerUrl: TEST_EXTRACTION_PROVIDER_URL,
+          requestProfile: "provider-default-v1"
+        },
+        cacheRoot
+      })
+    });
+    const turnContent = "User: A.\nAssistant: B.";
+
+    await provider.compile(turnContent, {
+      workspace_id: "ws-1", run_id: "run-1", surface_id: null,
+      turn_messages: [
+        { message_id: "m1", role: "user", content: "A." },
+        { message_id: "m2", role: "assistant", content: "B." }
+      ]
+    });
+    await provider.compile(turnContent, {
+      workspace_id: "ws-1", run_id: "run-2", surface_id: null,
+      turn_messages: [
+        { message_id: "m3", role: "assistant", content: "A." },
+        { message_id: "m4", role: "user", content: "B." }
+      ]
+    });
+
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 });
 

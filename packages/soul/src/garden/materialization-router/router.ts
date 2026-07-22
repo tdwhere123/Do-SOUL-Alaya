@@ -12,6 +12,7 @@ import type {
   MaterializationRouterDeps,
   MaterializationTarget
 } from "./contracts.js";
+import { isGardenTurnEvidenceFallback } from "../evidence-preservation/turn-evidence-anchor.js";
 import {
   hasMaterializableSignalMemoryRefs,
   routeByObjectKind,
@@ -81,6 +82,10 @@ function guardSignalGrounding(signal: CandidateMemorySignal): MaterializationTar
       };
     }
   }
+  return guardSchemaGrounding(signal);
+}
+
+function guardSchemaGrounding(signal: CandidateMemorySignal): MaterializationTarget | null {
   const schema = validateSchemaGroundingForSignal(signal);
   if (!schema.declared || schema.status === "valid") return null;
   return {
@@ -131,6 +136,17 @@ export class MaterializationRouter extends MaterializationRouterRouteHandlers {
   }
 
   public route(signal: CandidateMemorySignal): MaterializationTarget {
+    // Evidence anchors archive source input; they do not assert a fact and
+    // therefore must not be blocked by the durable-fact grounding guard.
+    if (isGardenTurnEvidenceFallback(signal)) {
+      const schemaGuard = guardSchemaGrounding(signal);
+      if (schemaGuard !== null) return schemaGuard;
+      return {
+        kind: "evidence_only",
+        route_target: "evidence_only",
+        routing_reason: "evidence archival"
+      };
+    }
     const guard = guardSignalGrounding(signal);
     if (guard !== null) return guard;
 

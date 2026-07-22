@@ -5,6 +5,7 @@ import {
 import { assertExtractionCacheIdentity } from "../extraction/cache/cache-identity.js";
 import {
   computeCacheKey,
+  computeExtractionTurnCacheKey,
   inspectCachedExtraction
 } from "./compile-seed-cache.js";
 import {
@@ -20,6 +21,7 @@ import type {
 import type {
   CompileSeedExtractionConfig
 } from "./compile-seed-types.js";
+import type { LongMemEvalExtractionTurn } from "../extraction/turn-contents.js";
 
 // Run-start coverage threshold. A populated cache below this coverage means a
 // run would live-extract a large gap; the operator must pass an explicit
@@ -84,6 +86,7 @@ export interface ExtractionCachePreflightInput {
   // cross-file: apps/bench-runner/src/longmemeval/extraction-fill.ts
   //   collectDistinctTurnContents (the producer side of the same dedup)
   readonly requiredTurnContents?: readonly string[];
+  readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   /** Exact question offset and effective count that produced required turns. */
   readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
   readonly warn?: (message: string) => void;
@@ -109,13 +112,16 @@ export function preflightExtractionCache(input: ExtractionCachePreflightInput): 
     validateProvider: input.allowLiveExtraction === true
   });
   assertConsumableFillContract(manifest, input);
-  if (input.requiredTurnContents !== undefined) {
+  const requiredTurnContents = input.requiredExtractionTurns?.map((turn) => turn.turnContent) ??
+    input.requiredTurnContents;
+  if (requiredTurnContents !== undefined) {
     if (assertScopedWindowBinding({
       cacheRoot: input.cacheRoot,
       model: input.config.model,
       requestProfile: input.config.requestProfile,
       systemPrompt: input.systemPrompt,
-      requiredTurnContents: input.requiredTurnContents,
+      requiredTurnContents,
+      requiredExtractionTurns: input.requiredExtractionTurns,
       requiredQuestionWindow: input.requiredQuestionWindow,
       manifest,
       allowLiveExtraction: input.allowLiveExtraction
@@ -125,7 +131,8 @@ export function preflightExtractionCache(input: ExtractionCachePreflightInput): 
       model: input.config.model,
       requestProfile: input.config.requestProfile,
       systemPrompt: input.systemPrompt,
-      requiredTurnContents: input.requiredTurnContents,
+      requiredTurnContents,
+      requiredExtractionTurns: input.requiredExtractionTurns,
       allowLiveExtraction: input.allowLiveExtraction,
       liveExtractionPossible
     });
@@ -164,6 +171,7 @@ function assertScopedWindowBinding(input: {
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
   readonly requiredTurnContents: readonly string[];
+  readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly requiredQuestionWindow?: ExtractionFillQuestionWindow;
   readonly manifest: ExtractionCacheManifest;
   readonly allowLiveExtraction?: boolean;
@@ -182,7 +190,9 @@ function assertScopedWindowBinding(input: {
     model: input.model,
     requestProfile: input.requestProfile,
     systemPrompt: input.systemPrompt,
-    turnContents: input.requiredTurnContents
+    ...(input.requiredExtractionTurns === undefined
+      ? { turnContents: input.requiredTurnContents }
+      : { extractionTurns: input.requiredExtractionTurns })
   });
   if (completion.expectedTurns !== input.manifest.expected_turns ||
     completion.expectedKeySetSha256 !== input.manifest.expected_key_set_sha256) {
@@ -247,7 +257,8 @@ function assertScopedSubsetFixtures(
     input.model,
     input.requestProfile,
     input.systemPrompt,
-    input.requiredTurnContents
+    input.requiredTurnContents,
+    input.requiredExtractionTurns
   );
   if (unavailable.total === 0) return true;
   throw new Error(
@@ -294,6 +305,7 @@ function assertWindowContainment(input: {
   readonly requestProfile: CompileSeedExtractionConfig["requestProfile"];
   readonly systemPrompt: string;
   readonly requiredTurnContents: readonly string[];
+  readonly requiredExtractionTurns?: readonly LongMemEvalExtractionTurn[];
   readonly allowLiveExtraction?: boolean;
   readonly liveExtractionPossible: boolean;
 }): void {
@@ -302,7 +314,8 @@ function assertWindowContainment(input: {
     input.model,
     input.requestProfile,
     input.systemPrompt,
-    input.requiredTurnContents
+    input.requiredTurnContents,
+    input.requiredExtractionTurns
   );
   if (
     unavailable.total > 0 &&
@@ -369,12 +382,19 @@ function inspectRequiredTurnFixtures(
   model: string,
   requestProfile: CompileSeedExtractionConfig["requestProfile"],
   systemPrompt: string,
-  turnContents: readonly string[]
+  turnContents: readonly string[],
+  extractionTurns?: readonly LongMemEvalExtractionTurn[]
 ): { readonly missing: number; readonly invalid: number; readonly total: number } {
   let missing = 0;
   let invalid = 0;
-  for (const turnContent of turnContents) {
-    const cacheKey = computeCacheKey(model, requestProfile, systemPrompt, turnContent);
+  const keys = extractionTurns === undefined
+    ? turnContents.map((turnContent) => computeCacheKey(
+      model, requestProfile, systemPrompt, turnContent
+    ))
+    : extractionTurns.map((turn) => computeExtractionTurnCacheKey(
+      model, requestProfile, systemPrompt, turn
+    ));
+  for (const cacheKey of keys) {
     const status = inspectCachedExtraction(
       cacheRoot,
       cacheKey,

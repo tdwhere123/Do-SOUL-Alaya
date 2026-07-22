@@ -135,7 +135,7 @@ describe("500Q expansion fill authority", () => {
         ...approval,
         spend: { ...approval.spend, maximum_attempts: approval.spend.maximum_attempts + 1 }
       }
-    }, "/cache")).rejects.toThrow(/110 percent attempt/u);
+    }, "/cache")).rejects.toThrow(/transport attempt/u);
 
     await expect(prepareExpansionFillAuthority({
       variant: "longmemeval_s",

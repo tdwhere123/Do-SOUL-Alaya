@@ -87,6 +87,9 @@ function runExtractionCachePreflight(
     ...(options?.requiredTurnContents === undefined
       ? {}
       : { requiredTurnContents: options.requiredTurnContents }),
+    ...(options?.requiredExtractionTurns === undefined
+      ? {}
+      : { requiredExtractionTurns: options.requiredExtractionTurns }),
     ...(options?.requiredQuestionWindow === undefined
       ? {}
       : { requiredQuestionWindow: options.requiredQuestionWindow }),

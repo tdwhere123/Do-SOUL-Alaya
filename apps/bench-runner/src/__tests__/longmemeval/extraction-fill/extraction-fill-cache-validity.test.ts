@@ -13,6 +13,8 @@ import {
   inspectCachedExtraction
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import { computeTrustedRoleCorpusDigest } from
+  "../../../longmemeval/extraction/turn-contents.js";
 
 const VARIANT = "longmemeval_oracle";
 let root: string;
@@ -107,12 +109,16 @@ describe("extraction-fill cache validity", () => {
       concurrency: 1,
       extractorFactory: () => ({
         extract: async (input) => {
-          const turn = JSON.parse(input.userPrompt) as { turn_content: string };
+          const turn = JSON.parse(input.userPrompt) as {
+            turn_content: string;
+            turn_messages: readonly { role: string; content: string }[];
+          };
           const key = computeCacheKey(
             "fixture-model",
             "provider-default-v1",
             OFFICIAL_API_SYSTEM_PROMPT,
-            turn.turn_content
+            turn.turn_content,
+            computeTrustedRoleCorpusDigest(turn.turn_messages)
           );
           mkdirSync(cacheFilePath(cacheRoot, key), { recursive: true });
           return { rawJson: '{"signals":[]}' };

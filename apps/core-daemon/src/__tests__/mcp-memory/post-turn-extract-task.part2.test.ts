@@ -6,6 +6,7 @@ import {
   GardenTaskKind,
   SignalSource,
 } from "@do-soul/alaya-protocol";
+import { buildGardenTaskEvidenceFallbackSignalId } from "../../garden/index.js";
 
 import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
 
@@ -35,6 +36,66 @@ afterEach(() => {
 });
 
 describe("post-turn extract Garden task", () => {
+
+  it("persists one evidence anchor when in-process extraction returns no candidates", async () => {
+    const compile = vi.fn(async () => []);
+    const harness = await createRoutingHarness({
+      provider_kind: "official_api",
+      officialCompile: compile
+    });
+    harness.enqueuePostTurnTask();
+
+    await harness.runScheduler();
+
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "completed"
+    });
+    const signals = await harness.signalService.listByRun("run-1");
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      signal_id: buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1"),
+      source: "garden_compile",
+      signal_kind: "potential_evidence_anchor",
+      object_kind: "source_turn",
+      raw_payload: {
+        evidence_preservation: { reason: "empty_extraction" }
+      }
+    });
+  });
+
+  it("adds a stable evidence fallback when nonempty extraction creates no evidence", async () => {
+    const fallbackId = buildGardenTaskEvidenceFallbackSignalId("post-turn-task-1");
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      localCompile: vi.fn(async () => [createSignal()]),
+      hasCreatedEvidence: async (result) => result.signal.signal_id === fallbackId
+    });
+    harness.enqueuePostTurnTask();
+
+    await harness.runScheduler();
+
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({ status: "completed" });
+    await expect(harness.signalRepo.getById(fallbackId)).resolves.toMatchObject({
+      signal_id: fallbackId,
+      raw_payload: { evidence_preservation: { reason: "no_evidence_created" } }
+    });
+  });
+
+  it("fails the task when the evidence fallback cannot satisfy the durable postcondition", async () => {
+    const harness = await createRoutingHarness({
+      provider_kind: "local_heuristics",
+      localCompile: vi.fn(async () => []),
+      hasCreatedEvidence: async () => false
+    });
+    harness.enqueuePostTurnTask();
+
+    await harness.runScheduler();
+
+    expect(harness.gardenTaskRepo.findById("post-turn-task-1")).toMatchObject({
+      status: "failed",
+      last_error_text: expect.stringContaining("evidence fallback did not create durable evidence")
+    });
+  });
 
   it("host_worker routing falls back to the zero-cloud local heuristic after the wait window with no claim", async () => {
     const officialCompile = vi.fn(async () => [createSignal()]);

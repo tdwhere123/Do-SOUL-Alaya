@@ -3,6 +3,7 @@ const MAX_BACKOFF_MS = 10_000;
 
 export interface AdaptiveConcurrencySnapshot {
   readonly maximum: number;
+  readonly minimum: number;
   readonly current: number;
   readonly active: number;
   readonly rateLimitBackoffs: number;
@@ -12,6 +13,7 @@ export interface AdaptiveConcurrencySnapshot {
 export function createAdaptiveConcurrencyController(input: {
   readonly maximum: number;
   readonly initial?: number;
+  readonly minimumConcurrency?: number;
   readonly now?: () => number;
   readonly setTimeout?: typeof setTimeout;
   readonly clearTimeout?: typeof clearTimeout;
@@ -24,7 +26,9 @@ export function createAdaptiveConcurrencyController(input: {
   assertMaximum(input.maximum);
   const initial = input.initial ?? input.maximum;
   assertInitial(initial, input.maximum);
-  const state = createState(input.maximum, initial, input.now ?? Date.now);
+  const minimum = input.minimumConcurrency ?? 1;
+  assertMinimum(minimum, initial);
+  const state = createState(input.maximum, minimum, initial, input.now ?? Date.now);
   const schedule = input.setTimeout ?? setTimeout;
   const cancel = input.clearTimeout ?? clearTimeout;
   return {
@@ -37,6 +41,7 @@ export function createAdaptiveConcurrencyController(input: {
 
 interface AdaptiveState {
   readonly maximum: number;
+  readonly minimum: number;
   readonly now: () => number;
   current: number;
   active: number;
@@ -48,9 +53,15 @@ interface AdaptiveState {
   waiters: Set<() => void>;
 }
 
-function createState(maximum: number, initial: number, now: () => number): AdaptiveState {
+function createState(
+  maximum: number,
+  minimum: number,
+  initial: number,
+  now: () => number
+): AdaptiveState {
   return {
     maximum,
+    minimum,
     now,
     current: initial,
     active: 0,
@@ -115,7 +126,7 @@ function releaseSlot(state: AdaptiveState, rateLimited: boolean): AdaptiveConcur
 
 function applyRateLimitBackoff(state: AdaptiveState): void {
   if (state.now() < state.resumeAt) return;
-  state.current = Math.max(1, Math.floor(state.current / 2));
+  state.current = Math.max(state.minimum, Math.floor(state.current / 2));
   state.successfulReleases = 0;
   state.rateLimitStreak += 1;
   const backoffMs = Math.min(
@@ -147,6 +158,7 @@ function wakeWaiters(state: AdaptiveState): void {
 function snapshot(state: AdaptiveState): AdaptiveConcurrencySnapshot {
   return Object.freeze({
     maximum: state.maximum,
+    minimum: state.minimum,
     current: state.current,
     active: state.active,
     rateLimitBackoffs: state.rateLimitBackoffs,
@@ -168,5 +180,11 @@ function assertMaximum(value: number): void {
 function assertInitial(value: number, maximum: number): void {
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
     throw new Error("adaptive extraction concurrency initial value is outside its maximum");
+  }
+}
+
+function assertMinimum(value: number, initial: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > initial) {
+    throw new Error("adaptive extraction concurrency minimum is outside its initial value");
   }
 }

@@ -202,7 +202,10 @@ describe("500Q expansion fill authority", () => {
   it.each([
     ["formation", { ALAYA_CONFLICT_RULE_ENABLED: "0" }],
     ["bi-encoder threads", { ALAYA_LOCAL_ONNX_THREADS: "64" }],
-    ["recall policy", { ALAYA_EMBEDDING_RECALL_TIERS: "cold" }]
+    ["recall policy", { ALAYA_EMBEDDING_RECALL_TIERS: "cold" }],
+    ["bounded final authority", {
+      ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2"
+    }]
   ])("rejects 500Q %s drift before snapshot verification", async (_label, drift) => {
     const fixture = await completeExpansionFixture();
     await expect(assertExpansionRecallAuthority({

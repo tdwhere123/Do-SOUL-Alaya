@@ -8,7 +8,18 @@ import {
   SignalExtractorError} from "../../garden/pi-mono-extractor.js";
 import { DISTILLED_FACT_MAX_CHARS } from "../../garden/materialization-router.js";
 
-import { createContext, createExtractor } from "./compute-provider-fixtures.js";
+import {
+  createContext as createBaseContext,
+  createExtractor
+} from "./compute-provider-fixtures.js";
+
+function createContext() {
+  return {
+    ...createBaseContext(),
+    turn_messages: [],
+    allow_legacy_single_user_source: true
+  };
+}
 
 describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when the model omits distilled_fact", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

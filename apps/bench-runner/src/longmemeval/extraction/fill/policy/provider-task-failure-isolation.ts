@@ -37,3 +37,15 @@ export function assertProviderTaskFailureIsolationScope(
     );
   }
 }
+
+export function resolveProviderTaskFailureTolerance(input: {
+  readonly requested: boolean;
+  readonly questionBatchLimit: number | undefined;
+  readonly receipt: ExtractionAuthorityReceipt | undefined;
+}): boolean {
+  if (input.receipt?.action !== "fill") return false;
+  if (input.questionBatchLimit !== undefined) return false;
+  return input.requested ||
+    input.receipt.direct_spend?.kind === "deepseek_newapi_direct_500" ||
+    input.receipt.repair_scope !== undefined;
+}

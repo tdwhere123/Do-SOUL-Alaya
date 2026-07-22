@@ -83,10 +83,13 @@ describe("compile-seed raw payload projection", () => {
   }, 60_000);
 
   it("projects a near-cap provider payload without losing its semantic fields or identity", async () => {
+    const turnContent = (
+      "The source turn records one durable fact. " + "context ".repeat(256)
+    );
     const productionRawPayload = {
-      matched_text: "one durable fact",
+      matched_text: "The source turn records one durable fact.",
       distilled_fact: "The source turn records one durable fact.",
-      full_turn_content: "context ".repeat(256),
+      full_turn_content: turnContent,
       canonical_entities: ["source turn"],
       provider_diagnostics: "x".repeat(16_000)
     };
@@ -103,7 +106,7 @@ describe("compile-seed raw payload projection", () => {
         objectKind: "fact",
         confidence: 0.9,
         distilledFact: "The source turn records one durable fact.",
-        turnContent: "The source turn records one durable fact.",
+        turnContent,
         evidenceRef: "compile-seed-near-cap-evidence",
         turnSeedIndex: 32,
         extractionProvider: "official_api_compile",

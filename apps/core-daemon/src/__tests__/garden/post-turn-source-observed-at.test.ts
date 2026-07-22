@@ -64,7 +64,7 @@ describe("post-turn Garden source observation", () => {
       provider_kind: "local_heuristics",
       localCompile: compile
     });
-    const enqueuedAt = "2026-07-13T10:00:00.000Z";
+    const enqueuedAt = new Date(Date.now() - 60_000).toISOString();
     harness.enqueuePostTurnTask({
       created_at: enqueuedAt,
       payload: createPostTurnPayload({

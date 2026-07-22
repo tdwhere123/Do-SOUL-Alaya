@@ -26,6 +26,16 @@ import {
   isExtractionAuthorityKeySpaceEvidence,
   type ExtractionAuthorityKeySpaceEvidence
 } from "./observation-key-space.js";
+import {
+  assertSameRootExtractionContinuation,
+  type SameRootExtractionContinuation
+} from "./continuation/contract.js";
+import {
+  canonicalAuthorityLineage,
+  canonicalAuthorityObservation,
+  freezeAuthorityInspection,
+  freezeAuthorityObservation
+} from "./receipt/canonical.js";
 
 const LEGACY_RECEIPT_VERSION = 2;
 const CURRENT_RECEIPT_VERSION = 3;
@@ -79,6 +89,7 @@ export interface ExtractionAuthorityReceipt {
   readonly direct_spend?: DirectExtractionSpendAuthorization;
   /** Exact legacy strict-JSON failures this authority may overwrite in place. */
   readonly repair_scope?: ExtractionRepairScope;
+  readonly continuation?: SameRootExtractionContinuation;
 }
 
 export interface ExtractionAuthorityInspection {
@@ -109,6 +120,7 @@ export interface ExtractionAuthorityReceiptInput {
   };
   readonly directSpend?: DirectExtractionSpendAuthorization;
   readonly repairScope?: ExtractionRepairScope;
+  readonly continuation?: SameRootExtractionContinuation;
   readonly now?: Date;
 }
 
@@ -131,6 +143,13 @@ function assertReceiptCreationInput(input: ExtractionAuthorityReceiptInput): voi
   }
   if (input.directSpend !== undefined && input.targetSelectionDigest !== undefined) {
     throw new Error("direct extraction authorization cannot mix target selection evidence");
+  }
+  if (input.continuation !== undefined) {
+    assertSameRootExtractionContinuation(input.continuation);
+    if (input.action !== "fill" || input.targetSelectionDigest === undefined ||
+        input.directSpend !== undefined || input.repairScope !== undefined) {
+      throw new Error("same-root continuation is a target-selected fill authority mode");
+    }
   }
   if (input.repairScope !== undefined) {
     assertExtractionRepairScope(input.repairScope);
@@ -160,9 +179,11 @@ function buildUnsignedReceipt(
     action: input.action,
     generated_at: (input.now ?? new Date()).toISOString(),
     identity_digest: computeExtractionAuthorityIdentityDigest(input.observation),
-    lineage_digest: computeExtractionAuthorityLineageDigest(input.observation),
-    observation: freezeObservation(input.observation),
-    inspection: freezeInspection(input.inspection),
+    lineage_digest: computeExtractionAuthorityLineageDigest(
+      input.observation, input.continuation
+    ),
+    observation: freezeAuthorityObservation(input.observation),
+    inspection: freezeAuthorityInspection(input.inspection),
     limits,
     price,
     ...(probeKey === undefined ? {} : { probe_key: probeKey }),
@@ -172,7 +193,8 @@ function buildUnsignedReceipt(
     ...(input.directSpend === undefined ? {} : {
       direct_spend: Object.freeze({ ...input.directSpend })
     }),
-    ...(input.repairScope === undefined ? {} : { repair_scope: input.repairScope })
+    ...(input.repairScope === undefined ? {} : { repair_scope: input.repairScope }),
+    ...(input.continuation === undefined ? {} : { continuation: input.continuation })
   };
 }
 
@@ -190,7 +212,9 @@ export function assertExtractionAuthorityReceipt(
     });
   }
   assertReceiptIdentity(receipt);
-  if (receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(observation)) {
+  if (receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(
+    observation, receipt.continuation
+  )) {
     throw new Error("extraction authority receipt does not match the current identity drift");
   }
   assertMonotonicInventory(receipt.observation.inventory, observation.inventory);
@@ -236,16 +260,21 @@ export function computeExtractionAuthorityIdentityDigest(
 ): string {
   assertObservation(observation);
   return createHash("sha256")
-    .update(JSON.stringify(canonicalObservation(observation)), "utf8")
+    .update(JSON.stringify(canonicalAuthorityObservation(observation)), "utf8")
     .digest("hex");
 }
 
 export function computeExtractionAuthorityLineageDigest(
-  observation: ExtractionAuthorityObservation
+  observation: ExtractionAuthorityObservation,
+  continuation?: SameRootExtractionContinuation
 ): string {
   assertObservation(observation);
+  if (continuation !== undefined) assertSameRootExtractionContinuation(continuation);
   return createHash("sha256")
-    .update(JSON.stringify(canonicalLineage(observation)), "utf8")
+    .update(JSON.stringify({
+      ...canonicalAuthorityLineage(observation),
+      ...(continuation === undefined ? {} : { continuation })
+    }), "utf8")
     .digest("hex");
 }
 
@@ -290,13 +319,19 @@ function assertReceiptShape(value: unknown): asserts value is ExtractionAuthorit
       (receipt.target_selection_digest !== undefined && !isDigest(receipt.target_selection_digest)) ||
       (receipt.direct_spend !== undefined &&
         !isDirectExtractionSpendAuthorization(receipt.direct_spend)) ||
-      (receipt.repair_scope !== undefined && !isExtractionRepairScope(receipt.repair_scope))) {
+      (receipt.repair_scope !== undefined && !isExtractionRepairScope(receipt.repair_scope)) ||
+      (receipt.continuation !== undefined && !isContinuation(receipt.continuation))) {
     throw new Error("extraction authority receipt is invalid");
   }
   if (receipt.action === "probe" && !isDigest(receipt.probe_key)) {
     throw new Error("extraction probe authority receipt is missing its target key");
   }
   const verified = receipt as ExtractionAuthorityReceipt;
+  if (verified.continuation !== undefined &&
+      (verified.action !== "fill" || verified.target_selection_digest === undefined ||
+       verified.direct_spend !== undefined || verified.repair_scope !== undefined)) {
+    throw new Error("same-root continuation authority scope is inconsistent");
+  }
   if ((verified.repair_scope === undefined) !==
         (verified.observation.inventory.invalidTurns === 0) ||
       (verified.repair_scope !== undefined &&
@@ -379,40 +414,11 @@ function isReceiptPrice(value: unknown): boolean {
     typeof value.estimated_upper_usd === "number";
 }
 
-function canonicalObservation(observation: ExtractionAuthorityObservation): ExtractionAuthorityObservation {
-  return {
-    revision: observation.revision,
-    commandDigest: observation.commandDigest,
-    selectionDigest: observation.selectionDigest,
-    keyDigest: observation.keyDigest,
-    dataset: { ...observation.dataset },
-    extraction: { ...observation.extraction },
-    inventory: { ...observation.inventory }
-  };
-}
-
-function canonicalLineage(observation: ExtractionAuthorityObservation): object {
-  return {
-    revision: observation.revision,
-    commandDigest: observation.commandDigest,
-    selectionDigest: observation.selectionDigest,
-    keyDigest: observation.keyDigest,
-    dataset: { ...observation.dataset },
-    extraction: {
-      model: observation.extraction.model,
-      modelFamily: observation.extraction.modelFamily,
-      requestProfile: observation.extraction.requestProfile,
-      providerUrl: observation.extraction.providerUrl,
-      systemPromptSha256: observation.extraction.systemPromptSha256,
-      cacheKeyAlgorithm: observation.extraction.cacheKeyAlgorithm
-    },
-    expectedTurns: observation.inventory.expectedTurns
-  };
-}
-
 function assertReceiptIdentity(receipt: ExtractionAuthorityReceipt): void {
   if (receipt.identity_digest !== computeExtractionAuthorityIdentityDigest(receipt.observation) ||
-      receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(receipt.observation)) {
+      receipt.lineage_digest !== computeExtractionAuthorityLineageDigest(
+        receipt.observation, receipt.continuation
+      )) {
     throw new Error("extraction authority receipt identity digest is invalid");
   }
 }
@@ -438,35 +444,21 @@ function assertMonotonicInventory(
   }
 }
 
-function freezeObservation(observation: ExtractionAuthorityObservation): ExtractionAuthorityObservation {
-  return Object.freeze({
-    revision: observation.revision,
-    commandDigest: observation.commandDigest,
-    selectionDigest: observation.selectionDigest,
-    keyDigest: observation.keyDigest,
-    dataset: Object.freeze({ ...observation.dataset }),
-    extraction: Object.freeze({ ...observation.extraction }),
-    inventory: Object.freeze({ ...observation.inventory })
-  });
-}
-
-function freezeInspection(inspection: ExtractionAuthorityInspection): ExtractionAuthorityInspection {
-  return Object.freeze({
-    writerLock: inspection.writerLock,
-    disk: inspection.disk.status === "available"
-      ? Object.freeze({ status: "available" as const, freeBytes: inspection.disk.freeBytes })
-      : Object.freeze({ status: "unavailable" as const }),
-    credentialStatus: inspection.credentialStatus,
-    modelReadiness: inspection.modelReadiness
-  });
-}
-
 function requireProbeKey(value: string | undefined): string {
   if (!isDigest(value)) throw new Error("extraction probe authority requires a SHA-256 target key");
   return value;
 }
 function isDigest(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isContinuation(value: unknown): value is SameRootExtractionContinuation {
+  try {
+    assertSameRootExtractionContinuation(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isDigest40(value: unknown): value is string {

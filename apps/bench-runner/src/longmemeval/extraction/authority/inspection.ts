@@ -4,7 +4,10 @@ import { existsSync, lstatSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import { resolveCompileSeedExtractionConfig } from "../../compile-seed/compile-seed-config.js";
-import { computeCacheKey, inspectCachedExtraction } from "../../compile-seed/compile-seed-cache.js";
+import {
+  computeExtractionTurnCacheKey,
+  inspectCachedExtraction
+} from "../../compile-seed/compile-seed-cache.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   computeSystemPromptSha256,
@@ -23,6 +26,7 @@ import {
   type ExtractionPreservedValidClosure
 } from "./repair/preserved-valid-closure.js";
 import type { ExtractionContentClosureEntry } from "../content-closure.js";
+import type { LongMemEvalExtractionTurn } from "../turn-contents.js";
 
 const WRITE_LOCK_DIRECTORY = ".extraction-fill.lock";
 const AUTHORIZED_EXTRACTION_OPERATION = "longmemeval-extraction-fill-v1";
@@ -65,8 +69,8 @@ export async function inspectExtractionAuthority(input: {
   const config = resolveCompileSeedExtractionConfig(process.env, manifestIdentity?.manifest);
   const window = await prepareExtractionFillWindow(input, undefined);
   const authorizedTurns = input.repairInvalidShards === true
-    ? window.executionTurns
-    : window.distinctTurns;
+    ? window.executionExtractionTurns
+    : window.distinctExtractionTurns;
   const completion = inspectAuthorityCompletion(input, config, authorizedTurns);
   const shardStatus = collectShardStatus(
     input.cacheRoot,
@@ -81,14 +85,14 @@ export async function inspectExtractionAuthority(input: {
 function inspectAuthorityCompletion(
   input: ExtractionAuthorityInspectionInput,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  authorizedTurns: readonly string[]
+  authorizedTurns: readonly LongMemEvalExtractionTurn[]
 ): ExtractionAuthorityCompletion {
   return inspectExtractionFillCompletion({
     cacheRoot: input.cacheRoot,
     model: config.model,
     requestProfile: config.requestProfile,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
-    turnContents: authorizedTurns,
+    extractionTurns: authorizedTurns,
     ...(input.excludeContentClosureKeys === undefined ? {} : {
       excludeContentClosureKeys: input.excludeContentClosureKeys
     })
@@ -193,7 +197,7 @@ function buildExtractionAuthorityInspection(
 function collectShardStatus(
   cacheRoot: string,
   config: ReturnType<typeof resolveCompileSeedExtractionConfig>,
-  turns: readonly string[],
+  turns: readonly LongMemEvalExtractionTurn[],
   preservedValidExclusionKeys: ReadonlySet<string>
 ): {
   readonly missingKeys: readonly string[];
@@ -204,7 +208,7 @@ function collectShardStatus(
   const invalidShards: ExtractionRepairShard[] = [];
   const validEntries: ExtractionContentClosureEntry[] = [];
   for (const turn of turns) {
-    const key = computeCacheKey(
+    const key = computeExtractionTurnCacheKey(
       config.model, config.requestProfile, OFFICIAL_API_SYSTEM_PROMPT, turn
     );
     const shard = inspectCachedExtraction(

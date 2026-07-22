@@ -38,6 +38,17 @@ export function coordinateSpan(
   offset: number,
   matchedLength: number
 ): { readonly span: AssertionSpan | null; readonly coordinated: boolean } {
+  const spans = coordinateSpans(source, sentence);
+  const span = spans.find((candidate) =>
+    offset >= candidate.start && offset + matchedLength <= candidate.end
+  ) ?? null;
+  return { span, coordinated: spans.length > 1 };
+}
+
+export function coordinateSpans(
+  source: string,
+  sentence: AssertionSpan
+): readonly AssertionSpan[] {
   const text = source.slice(sentence.start, sentence.end);
   const separator = /[;；]\s*|,\s*(?:and|but|or)\s+|\s+(?:and|but|or)\s+|，\s*(?:而且|但是|但|并且|并|然后)\s*/giu;
   const spans: AssertionSpan[] = [];
@@ -50,10 +61,7 @@ export function coordinateSpan(
   if (source.slice(start, sentence.end).trim().length > 0) {
     spans.push(trimmedSpan(source, start, sentence.end));
   }
-  const span = spans.find((candidate) =>
-    offset >= candidate.start && offset + matchedLength <= candidate.end
-  ) ?? null;
-  return { span, coordinated: spans.length > 1 };
+  return spans;
 }
 
 export function hasDirectQuestionBoundary(source: string, end: number): boolean {

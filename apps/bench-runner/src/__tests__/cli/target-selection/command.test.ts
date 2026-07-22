@@ -8,6 +8,12 @@ import { runSelectExtractionTargetCommand } from
   "../../../cli/target-selection/command.js";
 import { readExtractionTargetSelectionReceipt } from
   "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+import type { ExtractionTargetSelectionReceipt } from
+  "../../../longmemeval/extraction/authority/target-selection/receipt.js";
+import type { ExtractionAuthorityReceipt } from
+  "../../../longmemeval/extraction/authority/receipt.js";
+import type { ExtractionContinuationChildClaim } from
+  "../../../longmemeval/extraction/authority/continuation/child-claim.js";
 import { emptyExtractionAuthorityShardStatus } from
   "../extraction-authority-inspection-fixture.js";
 
@@ -101,6 +107,74 @@ it("rejects ambiguous target-selection authority inputs before creating a root",
   expect(existsSync(cacheRoot)).toBe(false);
 });
 
+it("rejects duplicate or partial continuation evidence before inspection", async () => {
+  const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-command-"));
+  roots.push(root);
+  const cacheRoot = join(root, "cache");
+  const inspect = vi.fn(async () => inspection());
+  vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const base = [
+    "--variant", "s", "--offset", "0", "--limit", "100",
+    "--extraction-cache-root", cacheRoot,
+    "--predecessor-target-selection", "/selection.json",
+    "--extraction-predecessor-authority", "/parent.json",
+    "--target-selection-out", join(root, "target-selection.json")
+  ];
+
+  for (const [flag, first, second] of [
+    ["--predecessor-target-selection", "/selection.json", "/sibling-selection.json"],
+    ["--extraction-predecessor-authority", "/parent.json", "/sibling.json"],
+    ["--adopt-existing-child-target-selection", "/child-selection.json", "/other-selection.json"],
+    ["--adopt-existing-child-authority", "/child.json", "/other-child.json"]
+  ]) {
+    expect(await runSelectExtractionTargetCommand([
+      ...base, flag, first, flag, second
+    ], { inspect })).toBe(2);
+  }
+  expect(await runSelectExtractionTargetCommand([
+    ...base, "--adopt-existing-child-authority", "/child.json"
+  ], { inspect })).toBe(2);
+  expect(inspect).not.toHaveBeenCalled();
+  expect(existsSync(cacheRoot)).toBe(false);
+});
+
+it("rejects an unrelated explicit adoption before any durable or runtime side effect", async () => {
+  const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-command-"));
+  roots.push(root);
+  const cacheRoot = join(root, "cache");
+  const fixtures = unrelatedContinuationFixtures();
+  const prepareExistingChild = vi.fn(() => preparedClaim());
+  const claimExistingChild = vi.fn();
+  const assertUnclaimed = vi.fn();
+  const assertRootBinding = vi.fn();
+  const inspect = vi.fn(async () => inspection());
+  const write = vi.fn();
+  const readRevision = vi.fn(() => "a".repeat(40));
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+
+  const exitCode = await runSelectExtractionTargetCommand(continuationArgs(cacheRoot, root), {
+    readSelection: (path) => fixtures.selections[path]!,
+    readAuthority: (path) => fixtures.authorities[path]!,
+    prepareExistingChild,
+    claimExistingChild,
+    assertUnclaimed,
+    assertRootBinding,
+    inspect,
+    write,
+    readRevision
+  });
+
+  expect(exitCode).toBe(2);
+  expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/immediate parent/u));
+  for (const effect of [
+    prepareExistingChild, claimExistingChild, assertUnclaimed,
+    assertRootBinding, inspect, write, readRevision
+  ]) {
+    expect(effect).not.toHaveBeenCalled();
+  }
+  expect(existsSync(cacheRoot)).toBe(false);
+});
+
 it("keeps a selected root when reporting fails after its receipt is durable", async () => {
   const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-command-"));
   roots.push(root);
@@ -169,6 +243,66 @@ function commandArgs(cacheRoot: string, outputPath: string): string[] {
     "--cache-audit-receipt", "/audit.json",
     "--target-selection-out", outputPath
   ];
+}
+
+function continuationArgs(cacheRoot: string, root: string): string[] {
+  return [
+    "--variant", "s", "--offset", "0", "--limit", "100",
+    "--extraction-cache-root", cacheRoot,
+    "--predecessor-target-selection", "/actual-selection.json",
+    "--extraction-predecessor-authority", "/actual-authority.json",
+    "--adopt-existing-child-target-selection", "/explicit-selection.json",
+    "--adopt-existing-child-authority", "/explicit-authority.json",
+    "--target-selection-out", join(root, "target-selection.json")
+  ];
+}
+
+function unrelatedContinuationFixtures() {
+  const actualSelection = {
+    receipt_digest: "1".repeat(64),
+    selection_basis: {
+      kind: "same_root_continuation",
+      predecessor_target_selection_digest: "9".repeat(64),
+      predecessor_authority_receipt_digest: "7".repeat(64)
+    }
+  } as unknown as ExtractionTargetSelectionReceipt;
+  const explicitSelection = {
+    receipt_digest: "6".repeat(64)
+  } as ExtractionTargetSelectionReceipt;
+  return {
+    selections: {
+      "/actual-selection.json": actualSelection,
+      "/explicit-selection.json": explicitSelection
+    } as Record<string, ExtractionTargetSelectionReceipt>,
+    authorities: {
+      "/actual-authority.json": fakeAuthority("2", "3", "1", "7", "8"),
+      "/explicit-authority.json": fakeAuthority("4", "5", "6", "a", "b")
+    } as Record<string, ExtractionAuthorityReceipt>
+  };
+}
+
+function fakeAuthority(
+  receipt: string,
+  lineage: string,
+  selection: string,
+  predecessorReceipt: string,
+  predecessorLineage: string
+): ExtractionAuthorityReceipt {
+  return {
+    receipt_digest: receipt.repeat(64),
+    lineage_digest: lineage.repeat(64),
+    target_selection_digest: selection.repeat(64),
+    continuation: {
+      predecessor: {
+        receipt_digest: predecessorReceipt.repeat(64),
+        lineage_digest: predecessorLineage.repeat(64)
+      }
+    }
+  } as unknown as ExtractionAuthorityReceipt;
+}
+
+function preparedClaim(): ExtractionContinuationChildClaim {
+  return { claim_digest: "c".repeat(64) } as ExtractionContinuationChildClaim;
 }
 
 function inspection() {
