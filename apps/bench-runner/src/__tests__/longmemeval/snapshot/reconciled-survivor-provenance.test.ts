@@ -7,11 +7,15 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
-  computeCacheKey,
   computeExtractionContentClosureSha256,
-  computeExtractionKeySetSha256
+  computeExtractionKeySetSha256,
+  computeExtractionTurnCacheKey
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import {
+  buildLongMemEvalRoundMessages,
+  pairSessionIntoRounds,
+  type LongMemEvalQuestion
+} from "../../../longmemeval/ingestion/dataset.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -36,12 +40,8 @@ const CONTENT = "User: Same fact.";
 const DISTILLED_FACT = "Same fact.";
 const MODEL = "fixture-model";
 const PROFILE = "provider-default-v1" as const;
-const CACHE_KEY = computeCacheKey(
-  MODEL,
-  PROFILE,
-  OFFICIAL_API_SYSTEM_PROMPT,
-  CONTENT
-);
+const FIXTURE_QUESTION = buildQuestion();
+const CACHE_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0);
 const RAW_SHA = sha256('{"signals":[{}]}');
 
 afterEach(async () => {
@@ -291,6 +291,28 @@ function buildQuestion(): LongMemEvalQuestion {
     ],
     answer_session_ids: ["session-answer"]
   };
+}
+
+function fixtureRoundCacheKey(
+  source: LongMemEvalQuestion,
+  sessionIndex: number,
+  roundIndex: number
+): string {
+  const session = source.haystack_sessions[sessionIndex]!;
+  const round = pairSessionIntoRounds(session)[roundIndex]!;
+  return computeExtractionTurnCacheKey(
+    MODEL,
+    PROFILE,
+    OFFICIAL_API_SYSTEM_PROMPT,
+    {
+      turnContent: round.content.trim(),
+      turnMessages: buildLongMemEvalRoundMessages(
+        session,
+        round,
+        `${source.question_id}-s${sessionIndex}-r${roundIndex}`
+      )
+    }
+  );
 }
 
 function createDatabase(

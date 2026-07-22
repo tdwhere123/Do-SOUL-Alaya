@@ -7,9 +7,9 @@ import {
 } from "@do-soul/alaya-eval";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
-  computeCacheKey,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256,
+  computeExtractionTurnCacheKey,
   type ExtractionContentClosureEntry
 } from "../../compile-seed/compile-seed-cache.js";
 import { extractionContentClosureEntriesFromIndex } from
@@ -26,7 +26,11 @@ import {
   assertSnapshotExtractionAuthorityBinding,
   type SnapshotExtractionAuthority
 } from "../extraction-authority.js";
-import { pairSessionIntoRounds, type LongMemEvalQuestion } from "../../ingestion/dataset.js";
+import {
+  buildLongMemEvalRoundMessages,
+  pairSessionIntoRounds,
+  type LongMemEvalQuestion
+} from "../../ingestion/dataset.js";
 import {
   hasOrderedUniqueLongMemEvalSourceRounds,
   longMemEvalSourceRoundKey
@@ -121,7 +125,7 @@ function assertQuestionLedger(
   ledger.forEach((round, index) => {
     const canonical = expected[index];
     if (canonical === undefined) throw new Error("snapshot canonical seed round order mismatch");
-    assertRoundIdentity(round, canonical, extraction);
+    assertRoundIdentity(round, canonical, extraction, source);
     assertRoundConservation(round);
     addClosureEntry(closure, round, extraction);
     addTotals(totals, round);
@@ -149,14 +153,23 @@ function canonicalRounds(source: LongMemEvalQuestion) {
 function assertRoundIdentity(
   actual: LongMemEvalSnapshotSeedRound,
   expected: ReturnType<typeof canonicalRounds>[number],
-  extraction: CompleteExtraction
+  extraction: CompleteExtraction,
+  source: LongMemEvalQuestion
 ): void {
   const content = expected.round.content.trim();
-  const cacheKey = computeCacheKey(
+  // invariant: must match fill/seed computeExtractionTurnCacheKey (trusted-role digest)
+  const cacheKey = computeExtractionTurnCacheKey(
     extraction.extraction_model,
     extraction.request_profile,
     OFFICIAL_API_SYSTEM_PROMPT,
-    content
+    {
+      turnContent: content,
+      turnMessages: buildLongMemEvalRoundMessages(
+        source.haystack_sessions[expected.sessionIndex]!,
+        expected.round,
+        `${source.question_id}-s${expected.sessionIndex}-r${expected.roundIndex}`
+      )
+    }
   );
   if (actual.sessionIndex !== expected.sessionIndex ||
       actual.roundIndex !== expected.roundIndex || actual.sessionId !== expected.sessionId ||

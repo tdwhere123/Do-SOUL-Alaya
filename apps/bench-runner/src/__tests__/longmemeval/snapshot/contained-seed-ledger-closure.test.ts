@@ -9,9 +9,14 @@ import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   computeCacheKey,
   computeExtractionContentClosureSha256,
-  computeExtractionKeySetSha256
+  computeExtractionKeySetSha256,
+  computeExtractionTurnCacheKey
 } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
-import type { LongMemEvalQuestion } from
+import {
+  buildLongMemEvalRoundMessages,
+  pairSessionIntoRounds,
+  type LongMemEvalQuestion
+} from
   "../../../longmemeval/ingestion/dataset.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
@@ -34,20 +39,17 @@ const MODEL = "fixture-model";
 const PROFILE = "provider-default-v1" as const;
 const CONTENT = "User: no durable fact\nAssistant: acknowledged";
 const MATERIALIZED_CONTENT = "User: durable fact\nAssistant: remembered";
-const SELECTED_KEY = computeCacheKey(
+const FIXTURE_QUESTION = question(false);
+const SELECTED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0, CONTENT);
+const MATERIALIZED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT);
+const EXTRA_KEY = sha256("extra cache member");
+const SELECTED_RAW_SHA = sha256('{"signals":[]}');
+const CONTENT_ONLY_SELECTED_KEY = computeCacheKey(
   MODEL,
   PROFILE,
   OFFICIAL_API_SYSTEM_PROMPT,
   CONTENT
 );
-const MATERIALIZED_KEY = computeCacheKey(
-  MODEL,
-  PROFILE,
-  OFFICIAL_API_SYSTEM_PROMPT,
-  MATERIALIZED_CONTENT
-);
-const EXTRA_KEY = sha256("extra cache member");
-const SELECTED_RAW_SHA = sha256('{"signals":[]}');
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) =>
@@ -55,6 +57,20 @@ afterEach(async () => {
 });
 
 describe("contained snapshot seed-ledger closure", () => {
+  it("accepts rounds keyed with the trusted-role corpus digest", () => {
+    expect(SELECTED_KEY).not.toBe(CONTENT_ONLY_SELECTED_KEY);
+    expect(() => verifyRounds(canonicalRounds())).not.toThrow();
+  });
+
+  it("rejects a ledger cache key that omits the trusted-role corpus digest", () => {
+    const rounds = canonicalRounds();
+    rounds[0] = {
+      ...rounds[0]!,
+      cacheKey: CONTENT_ONLY_SELECTED_KEY
+    };
+    expect(() => verifyRounds(rounds)).toThrow(/canonical seed round identity mismatch/u);
+  });
+
   it("accepts a canonical zero-signal answer round as candidate absence", () => {
     expect(() => verifyRounds(canonicalAnswerRounds(), true)).not.toThrow();
   });
@@ -288,6 +304,29 @@ function question(answerRound: boolean): LongMemEvalQuestion {
     ]],
     answer_session_ids: answerRound ? ["session-1"] : []
   };
+}
+
+function fixtureRoundCacheKey(
+  source: LongMemEvalQuestion,
+  sessionIndex: number,
+  roundIndex: number,
+  content: string
+): string {
+  const session = source.haystack_sessions[sessionIndex]!;
+  const round = pairSessionIntoRounds(session)[roundIndex]!;
+  return computeExtractionTurnCacheKey(
+    MODEL,
+    PROFILE,
+    OFFICIAL_API_SYSTEM_PROMPT,
+    {
+      turnContent: content,
+      turnMessages: buildLongMemEvalRoundMessages(
+        session,
+        round,
+        `${source.question_id}-s${sessionIndex}-r${roundIndex}`
+      )
+    }
+  );
 }
 
 function sha256(value: string): string {
