@@ -158,7 +158,7 @@ describe("official API exact sentence-range locator", () => {
 
     expect(resolveGardenSignalGrounding(signal)).toEqual({
       status: "rejected",
-      reason: "source_grounding_rejected"
+      reason: "matched_text_absent"
     });
   });
 

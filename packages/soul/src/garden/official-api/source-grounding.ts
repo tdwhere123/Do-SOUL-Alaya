@@ -8,6 +8,7 @@ import {
   type SourceAssertionRejectionReason
 } from "../grounding/source-assertion.js";
 import {
+  isDirectQuestionSourceText,
   resolveOfficialApiSourceLocatorQuote
 } from "../grounding/source-locator.js";
 import type { OfficialApiSourceTrustRejection } from "./source-trust.js";
@@ -49,6 +50,9 @@ export function groundOfficialApiDraft(
     ? resolveSourceAssertion(sourceText, draft.matched_text)
     : resolveOfficialApiSourceLocatorQuote(sourceText, draft.source_locator, draft.matched_text);
   if (resolution.status === "rejected") return rejectedGrounding(draft, resolution.reason);
+  if (isDirectQuestionSourceText(resolution.assertion)) {
+    return rejectedGrounding(draft, "source_assertion_incomplete");
+  }
   const assertion = resolution.assertion;
   const canonicalEntities = groundCanonicalEntities(draft.canonical_entities, assertion);
   const reasons = groundingReasons(draft, assertion, canonicalEntities);

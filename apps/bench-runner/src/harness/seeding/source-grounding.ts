@@ -1,5 +1,4 @@
 import {
-  buildSourceVerificationText,
   filterSourceAssertionEntities,
   resolveGardenRawPayloadGrounding
 } from "@do-soul/alaya-soul";
@@ -7,19 +6,19 @@ import type { BenchSignalSeedInput } from "../daemon/daemon-types.js";
 
 export function attachCompileSourceGrounding(
   rawPayload: Readonly<Record<string, unknown>>,
-  signalInput: BenchSignalSeedInput,
-  safeExcerpt: string
+  signalInput: BenchSignalSeedInput
 ): Record<string, unknown> {
   const proposal = readProposal(rawPayload, signalInput);
   const safePayload = stripDerivedGrounding(rawPayload);
   const proposedMatch = proposal.proposed_matched_text;
+  const sourceCorpus = readString(rawPayload.full_turn_content) ?? signalInput.turnContent;
   const resolution = resolveGardenRawPayloadGrounding({
-    ...rawPayload,
-    full_turn_content: rawPayload.full_turn_content ?? signalInput.turnContent,
-    proposed_matched_text: rawPayload.proposed_matched_text ?? proposedMatch
+    ...safePayload,
+    full_turn_content: sourceCorpus,
+    proposed_matched_text: proposedMatch
   });
   if (resolution.status === "rejected") {
-    return rejectedPayload(safePayload, safeExcerpt, proposal, resolution.reason);
+    return rejectedPayload(safePayload, sourceCorpus, proposal, resolution.reason);
   }
   const groundedCanonicalEntities = Array.isArray(proposal.proposed_canonical_entities)
     ? filterSourceAssertionEntities(
@@ -31,7 +30,7 @@ export function attachCompileSourceGrounding(
     ...safePayload,
     matched_text: resolution.assertion,
     distilled_fact: resolution.assertion,
-    full_turn_content: buildSourceVerificationText(signalInput.turnContent, resolution.assertion),
+    full_turn_content: sourceCorpus,
     source_assertion: resolution.assertion,
     ...(groundedCanonicalEntities.length === 0 ? {} : { canonical_entities: groundedCanonicalEntities }),
     proposed_matched_text: proposedMatch,
@@ -89,13 +88,13 @@ function stripDerivedGrounding(raw: Readonly<Record<string, unknown>>): Record<s
 
 function rejectedPayload(
   safePayload: Readonly<Record<string, unknown>>,
-  safeExcerpt: string,
+  sourceCorpus: string,
   proposal: Readonly<Record<string, unknown>>,
   reason: string
 ): Record<string, unknown> {
   return {
     ...safePayload,
-    full_turn_content: safeExcerpt,
+    full_turn_content: sourceCorpus,
     proposed_matched_text: proposal.proposed_matched_text,
     source_grounding: { ...proposal, status: "rejected", content_basis: "none", reasons: [reason] }
   };

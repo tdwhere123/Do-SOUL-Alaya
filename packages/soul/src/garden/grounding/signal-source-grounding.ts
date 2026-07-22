@@ -1,6 +1,7 @@
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { resolveSourceAssertion, type SourceAssertionResolution } from "./source-assertion.js";
 import {
+  isDirectQuestionSourceText,
   parseOfficialApiSourceLocator,
   resolveOfficialApiSourceLocatorQuote
 } from "./source-locator.js";
@@ -20,10 +21,8 @@ export function resolveGardenRawPayloadGrounding(
   rawPayload: CandidateMemorySignal["raw_payload"]
 ): GardenSignalGrounding {
   const grounding = readRecord(rawPayload.source_grounding);
-  if (grounding?.status === "rejected") {
-    return { status: "rejected", reason: "source_grounding_rejected" };
-  }
   const proposedMatch = readString(rawPayload.proposed_matched_text) ??
+    readString(grounding?.proposed_matched_text) ??
     readString(rawPayload.matched_text);
   // Product trusts only full_turn_content; bench must project into that key at seed.
   const fullTurn = readString(rawPayload.full_turn_content);
@@ -32,16 +31,18 @@ export function resolveGardenRawPayloadGrounding(
     if (fullTurn === null || locator === null || proposedMatch === null) {
       return { status: "rejected", reason: "source_grounding_rejected" };
     }
-    const resolution = resolveOfficialApiSourceLocatorQuote(fullTurn, locator, proposedMatch);
-    const storedAssertion = readString(rawPayload.source_assertion) ??
-      readString(rawPayload.matched_text);
-    if (resolution.status === "rejected" || storedAssertion !== resolution.assertion) {
+    const resolution = validateResolvedAssertion(
+      resolveOfficialApiSourceLocatorQuote(fullTurn, locator, proposedMatch)
+    );
+    if (resolution.status === "rejected") return resolution;
+    const storedAssertion = readString(rawPayload.source_assertion);
+    if (storedAssertion !== null && storedAssertion !== resolution.assertion) {
       return { status: "rejected", reason: "source_grounding_rejected" };
     }
     return resolution;
   }
   if (fullTurn !== null && proposedMatch !== null) {
-    return resolveSourceAssertion(fullTurn, proposedMatch);
+    return validateResolvedAssertion(resolveSourceAssertion(fullTurn, proposedMatch));
   }
   return { status: "rejected", reason: "source_grounding_missing" };
 }
@@ -58,4 +59,11 @@ function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Readonly<Record<string, unknown>>
     : null;
+}
+
+function validateResolvedAssertion(resolution: SourceAssertionResolution): GardenSignalGrounding {
+  if (resolution.status === "rejected") return resolution;
+  return isDirectQuestionSourceText(resolution.assertion)
+    ? { status: "rejected", reason: "source_assertion_incomplete" }
+    : resolution;
 }

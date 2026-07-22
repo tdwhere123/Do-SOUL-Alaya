@@ -10,8 +10,7 @@ describe("compile source grounding revalidation", () => {
     const matchedText = "I redeemed a coupon last Sunday";
     const payload = attachCompileSourceGrounding(
       { matched_text: matchedText, distilled_fact: "User redeemed a coupon." },
-      signalInput(turnContent, matchedText),
-      turnContent
+      signalInput(turnContent, matchedText)
     );
 
     expect(payload.source_grounding).toMatchObject({
@@ -41,8 +40,7 @@ describe("compile source grounding revalidation", () => {
           reasons: ["matched_text_expanded_to_source_assertion"]
         }
       },
-      signalInput(turnContent, assertion),
-      turnContent
+      signalInput(turnContent, assertion)
     );
 
     expect(payload.source_grounding).toMatchObject({
@@ -51,6 +49,32 @@ describe("compile source grounding revalidation", () => {
       proposed_matched_text: assertion
     });
     expect(payload.distilled_fact).toBe(assertion);
+  });
+
+  it("replays a previously rejected locator audit from the authoritative corpus", () => {
+    const assertion = "I graduated with a degree in Business Administration.";
+    const turnContent = `User: ${assertion}\nAssistant: Congratulations.`;
+    const payload = attachCompileSourceGrounding(
+      {
+        proposed_matched_text: assertion,
+        full_turn_content: turnContent,
+        source_locator: assertionLocator(1),
+        source_grounding: {
+          version: 1,
+          status: "rejected",
+          content_basis: "none",
+          proposed_matched_text: assertion,
+          reasons: ["source_grounding_rejected"]
+        }
+      },
+      signalInput(turnContent, assertion)
+    );
+
+    expect(payload.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: assertion
+    });
+    expect(payload.full_turn_content).toBe(turnContent);
   });
 
   it("rejects a locator that selects an Assistant assertion", () => {
@@ -71,8 +95,7 @@ describe("compile source grounding revalidation", () => {
           reasons: []
         }
       },
-      signalInput(turnContent, "You live in Berlin."),
-      turnContent
+      signalInput(turnContent, "You live in Berlin.")
     );
 
     expect(payload.source_grounding).toMatchObject({
@@ -80,6 +103,7 @@ describe("compile source grounding revalidation", () => {
       content_basis: "none",
       proposed_matched_text: "LOCATOR_ONLY"
     });
+    expect(payload.full_turn_content).toBe(turnContent);
   });
 
   it.each([
@@ -88,8 +112,7 @@ describe("compile source grounding revalidation", () => {
   ])("rejects a cached proposal that is not a self-contained assertion: %s", (turnContent, matchedText) => {
     const payload = attachCompileSourceGrounding(
       { matched_text: matchedText, distilled_fact: matchedText },
-      signalInput(turnContent, matchedText),
-      turnContent
+      signalInput(turnContent, matchedText)
     );
 
     expect(payload.source_grounding).toMatchObject({

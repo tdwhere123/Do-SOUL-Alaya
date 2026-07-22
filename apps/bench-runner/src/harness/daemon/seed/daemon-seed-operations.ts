@@ -147,7 +147,7 @@ function buildSignalRawPayload(
     ...proposedPayload,
     extraction_provider: signalInput.extractionProvider,
     ...tokenEconomy
-  }, signalInput, safeExcerpt);
+  }, signalInput);
 }
 
 export async function proposeMemory(

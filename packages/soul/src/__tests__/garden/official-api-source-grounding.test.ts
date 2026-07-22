@@ -68,6 +68,24 @@ describe("official Garden source grounding", () => {
     });
   });
 
+  it("rejects a fragment whose complete User assertion is a direct question", async () => {
+    const source =
+      "I'm thinking of getting a few throw pillows with a geometric pattern. " +
+      "Do you think that would work well with my rug and gray paint?";
+    const provider = providerFor({
+      matched_text: "my rug and gray paint",
+      distilled_fact: "my rug and gray paint"
+    });
+
+    const [signal] = await provider.compile(`User: ${source}`, CONTEXT);
+
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      status: "rejected",
+      reasons: ["source_assertion_incomplete"]
+    });
+    expect(signal?.raw_payload).not.toHaveProperty("distilled_fact");
+  });
+
   it("removes the User role label from a grounded source assertion", async () => {
     const provider = providerFor({
       matched_text: "moved to Berlin",

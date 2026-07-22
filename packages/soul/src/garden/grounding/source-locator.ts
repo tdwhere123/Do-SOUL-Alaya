@@ -152,7 +152,7 @@ function resolveAssertionCatalogLocator(
   const selected = indexSourceAssertions(sourceText)[assertionId - 1];
   if (selected === undefined) return rejectedRange();
   const sentenceText = sourceText.slice(selected.sentence.start, selected.sentence.end);
-  if (hasDirectQuestionText(sentenceText)) {
+  if (isDirectQuestionSourceText(sentenceText)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
   const assertionText = sourceText.slice(selected.start, selected.end);
@@ -168,7 +168,7 @@ function resolveCatalogVerbatimQuote(
   if (quote.length === 0 || quote.length > SOURCE_ASSERTION_MAX_CHARS) {
     return resolveSourceAssertion(sourceText, quote);
   }
-  if (hasDirectQuestionText(quote)) {
+  if (isDirectQuestionSourceText(quote)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
   const offset = sourceText.indexOf(quote);
@@ -219,12 +219,12 @@ function isRecoverableVerbatimUserQuote(value: string): boolean {
 }
 
 function hasDirectQuestion(selected: readonly IndexedSourceSpan[]): boolean {
-  return selected.some((span) => hasDirectQuestionText(span.text));
+  return selected.some((span) => isDirectQuestionSourceText(span.text));
 }
 
-function hasDirectQuestionText(text: string): boolean {
+export function isDirectQuestionSourceText(text: string): boolean {
   const content = stripRoleLabel(text);
-  if (!content.endsWith("?")) return false;
+  if (!/[?？]$/u.test(content)) return false;
   return boundedIndirectQuestionPrefix(content) === null;
 }
 
@@ -247,7 +247,7 @@ function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssert
   for (const [index, sentence] of sentences.entries()) {
     if (roleAt(roleMarkers, sentence.start) !== "user") continue;
     const sentenceText = sourceText.slice(sentence.start, sentence.end);
-    if (hasDirectQuestionText(sentenceText)) continue;
+    if (isDirectQuestionSourceText(sentenceText)) continue;
     if (appendBoundedIndirectQuestionPrefix(output, seen, sourceText, sentence, sentenceText)) {
       continue;
     }
