@@ -55,6 +55,7 @@ export interface FineAssessmentSelectionContext {
   readonly tokenEstimator: TokenEstimator;
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
   readonly finalRelevanceByCandidateKey: ReadonlyMap<string, number>;
+  readonly answerEvidenceCandidateKeys: ReadonlySet<string>;
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
   readonly answerRerankedCandidateKeys: ReadonlySet<string>;
   readonly captureAnswerFeatures: boolean;
@@ -77,6 +78,7 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
   readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
   readonly maxHeadDropAfterCoverage?: number;
+  readonly answerEvidenceCandidateKeys?: ReadonlySet<string>;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
 }>;
@@ -223,6 +225,7 @@ function createSelectionContext(
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: params.rankByCandidateKey,
     finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
+    answerEvidenceCandidateKeys: params.answerEvidenceCandidateKeys ?? new Set(),
     answerRelevanceRankByCandidateKey,
     answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
     captureAnswerFeatures: params.captureAnswerFeatures ?? false,
@@ -307,7 +310,9 @@ function appendFineAssessmentCandidate(
   const finalRelevance = context.finalRelevanceByCandidateKey.get(candidateKey) ?? candidate.fusion.fused_score;
   const finalRelevanceSource = context.answerRelevanceRankByCandidateKey.has(candidateKey)
     ? "answer_rerank" as const
-    : "fusion" as const;
+    : context.answerEvidenceCandidateKeys.has(candidateKey)
+      ? "answer_evidence" as const
+      : "fusion" as const;
   const finalScoreFactors = buildFinalScoreFactors(candidate, finalRelevance);
   const nextCandidate = buildRecallCandidate({
     candidate,

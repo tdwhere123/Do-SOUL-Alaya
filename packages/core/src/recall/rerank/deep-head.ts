@@ -30,6 +30,28 @@ export function resolveDeepHeadScores(params: Readonly<{
   return computeLightweightDeepHeadScores(params.candidates, params.supplementaryData);
 }
 
+/**
+ * CE-off public order keeps fused relevance as its baseline, but must not discard
+ * direct evidence that the lightweight head already established for the same query.
+ */
+export function resolveLightweightPublicRelevance(
+  candidates: readonly DeliverySelectionCandidate[],
+  supplementaryData: DeepHeadSupplementary
+): Readonly<{
+  readonly scores: ReadonlyMap<string, number>;
+  readonly answerEvidenceCandidateKeys: ReadonlySet<string>;
+}> {
+  const scores = new Map<string, number>();
+  const answerEvidenceCandidateKeys = new Set<string>();
+  for (const candidate of candidates) {
+    const answerEvidence = answerEvidenceSignal(candidate, supplementaryData);
+    const key = candidate.fusion.candidate_key;
+    scores.set(key, probabilisticOr(clamp01(candidate.fusion.fused_score), answerEvidence));
+    if (answerEvidence > 0) answerEvidenceCandidateKeys.add(key);
+  }
+  return Object.freeze({ scores, answerEvidenceCandidateKeys });
+}
+
 export function computeLightweightDeepHeadScores(
   candidates: readonly DeliverySelectionCandidate[],
   supplementaryData: DeepHeadSupplementary
