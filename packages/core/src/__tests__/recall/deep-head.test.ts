@@ -215,6 +215,32 @@ describe("deep head", () => {
     expect(scores.get(textCorroborated.fusion.candidate_key)!).toBeGreaterThan(0.8);
   });
 
+  it("adds direct answer evidence to a query-supported embedding-cold baseline", () => {
+    const direct = fusedCandidate({
+      objectId: "direct",
+      fusedScore: 0.4,
+      contributions: { lexical_fts: 0.02 }
+    });
+    const contextual = fusedCandidate({
+      objectId: "contextual",
+      fusedScore: 0.6,
+      contributions: { subject_alignment: 0.02 }
+    });
+
+    const scores = computeLightweightDeepHeadScores(
+      [direct, contextual],
+      emptySupplementary({
+        ftsRanks: { direct: 0.9 },
+        trigramFtsRanks: { direct: 0.81 }
+      })
+    );
+
+    expect(scores.get(direct.fusion.candidate_key)).toBeCloseTo(
+      1 - (1 - 0.4) * (1 - Math.sqrt(0.9 * 0.81))
+    );
+    expect(scores.get(contextual.fusion.candidate_key)).toBeCloseTo(0.6);
+  });
+
   it("preserves query-supported relevance without a usable embedding in a mixed pool", () => {
     const exactLexical = fusedCandidate({
       objectId: "exact-lexical",
@@ -428,8 +454,8 @@ describe("deep head", () => {
         }
       })
     );
-    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.08);
-    expect(scores.get(lexicalPeer.fusion.candidate_key)).toBeCloseTo(0.04);
+    expect(scores.get(lexicalRescue.fusion.candidate_key)).toBeCloseTo(0.264);
+    expect(scores.get(lexicalPeer.fusion.candidate_key)).toBeCloseTo(1);
     expect(scores.get(conflictOnly.fusion.candidate_key)!)
       .toBeLessThan(scores.get(lexicalPeer.fusion.candidate_key)!);
 
@@ -439,7 +465,7 @@ describe("deep head", () => {
       { replacePublicRelevance: false }
     );
     expect(result.orderedCandidates.map((candidate) => candidate.entry.object_id))
-      .toEqual(["path-seed", "lexical-rescue", "lexical-peer", "conflict-only"]);
+      .toEqual(["lexical-peer", "path-seed", "lexical-rescue", "conflict-only"]);
   });
 
   it("is a no-op when emb and agreement are both cold (fused order binds)", () => {

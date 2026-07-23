@@ -70,20 +70,20 @@ function lightweightDeepHeadScore(
   return probabilisticOr(embedding, answerEvidenceSignal(candidate, supplementaryData));
 }
 
-// Emb-cold head: keep post-gate fused mass when an independent query lane
-// supports the candidate. Prior-only path/graph/structural piles stay
-// agreement-gated so content-disjoint co-recall edges cannot lead delivery.
+// Emb-cold head keeps query context as a baseline, then adds corroborated answer
+// evidence so a direct match can outrank a merely contextual neighbour.
 function coldEmbeddingDeepHeadScore(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number {
+  const answerEvidence = answerEvidenceSignal(candidate, supplementaryData);
   if (hasQueryEvidenceContribution(
     candidate.fusion.fused_rank_contribution_per_stream,
     supplementaryData.queryProbes
   )) {
-    return clamp01(candidate.fusion.fused_score);
+    return probabilisticOr(clamp01(candidate.fusion.fused_score), answerEvidence);
   }
-  return answerEvidenceSignal(candidate, supplementaryData);
+  return answerEvidence;
 }
 
 // A direct textual match needs both lexical retrieval lanes. One lexical rank can
