@@ -30,10 +30,7 @@ import {
   resolveFineAssessmentCandidateBudget,
   type FineAssessmentPruneResult
 } from "./fine-assessment-prune.js";
-import {
-  resolveDeepHeadScores,
-  resolveLightweightPublicRelevance
-} from "../rerank/deep-head.js";
+import { resolveDeepHeadScores } from "../rerank/deep-head.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -138,17 +135,13 @@ export function deliverFineAssessment(
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
     replacePublicRelevance
   });
-  const lightweightPublicRelevance = replacePublicRelevance
-    ? undefined
-    : resolveLightweightPublicRelevance(preparation.candidates, params.supplementaryData);
   const selected = selectFineAssessmentCandidates({
     orderedCandidates: delivery.orderedCandidates,
     config: params.policy.fine_assessment,
     supplementaryData: params.supplementaryData,
     tokenEstimator: params.tokenEstimator,
     rankByCandidateKey: delivery.rankByCandidateKey,
-    finalRelevanceByCandidateKey:
-      lightweightPublicRelevance?.scores ?? delivery.finalRelevanceByCandidateKey,
+    finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
     // Pack by deep-head scores even when public relevance stays fused — otherwise
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
@@ -161,7 +154,6 @@ export function deliverFineAssessment(
     maxHeadDropAfterCoverage: !replacePublicRelevance && deepHeadScores.size > 0
       ? params.finalAuthorityMaxHeadDrop
       : undefined,
-    answerEvidenceCandidateKeys: lightweightPublicRelevance?.answerEvidenceCandidateKeys,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures
   });

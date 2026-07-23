@@ -34,7 +34,7 @@ export interface BuildRecallCandidateInput {
   readonly governanceCeiling?: ManifestationState;
 }
 
-export type RecallFinalRelevanceSource = "fusion" | "answer_evidence" | "answer_rerank";
+export type RecallFinalRelevanceSource = "fusion" | "answer_rerank";
 
 export function buildRecallCandidate(input: BuildRecallCandidateInput): Readonly<RecallCandidate> {
   const entry = input.candidate.entry;
@@ -235,9 +235,7 @@ function buildSelectionReason(
 
   const relevanceOwner = source === "answer_rerank"
     ? "query-conditioned answer relevance"
-    : source === "answer_evidence"
-      ? "corroborated answer-evidence"
-      : "fusion evidence";
+    : "fusion evidence";
   return `Selected by ${origin}. Final ${relevanceOwner} score ${finalRelevance.toFixed(6)}; ` +
     `diagnostic supporting signals: ${supports.join(", ")}.`;
 }

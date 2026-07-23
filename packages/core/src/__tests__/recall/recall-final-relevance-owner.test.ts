@@ -194,38 +194,6 @@ describe("final recall relevance ownership", () => {
     });
   });
 
-  it("lets corroborated answer evidence refine CE-off final public relevance", () => {
-    const fusionWinner = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
-    const corroborated = createMemory(COVERAGE_NOVEL_ID, 0.4, [{ facet: "location_place" }]);
-    const basePolicy = buildPolicy();
-    const assessed = fineAssess({
-      candidates: [fusionWinner, corroborated].map(createCoarseCandidate),
-      policy: {
-        ...basePolicy,
-        fine_assessment: {
-          ...basePolicy.fine_assessment,
-          budgets: { max_entries: 2, max_total_tokens: 100, per_dimension_limits: null }
-        }
-      },
-      winnerMemoryIds: new Set(),
-      supplementaryData: {
-        ...createSupplementaryData(),
-        ftsRanks: { [COVERAGE_NOVEL_ID]: 0.9 },
-        trigramFtsRanks: { [COVERAGE_NOVEL_ID]: 0.81 }
-      },
-      tokenEstimator: { estimate: () => 4 },
-      now: () => NOW,
-      warn: vi.fn()
-    });
-
-    expect(assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([COVERAGE_NOVEL_ID, FUSION_WINNER_ID]);
-    expect(assessed.candidates[0]?.relevance_score)
-      .toBeGreaterThan(assessed.candidates[1]?.relevance_score ?? 1);
-    expect(assessed.candidates[0]?.selection_reason)
-      .toContain("Final corroborated answer-evidence score");
-  });
-
   it("uses public relevance final order when deep-head is a no-op", () => {
     // Emb+agreement cold → empty deep-head. Coverage packing can place a
     // medium-fused novel ahead of a high-fused duplicate; fused public order

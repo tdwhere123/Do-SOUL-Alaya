@@ -11,7 +11,6 @@ import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-de
 import type { RecallFusionBreakdown } from "../../recall/runtime/recall-service-types.js";
 import {
   computeLightweightDeepHeadScores,
-  resolveLightweightPublicRelevance,
   resolveDeepHeadScores
 } from "../../recall/rerank/deep-head.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -240,27 +239,6 @@ describe("deep head", () => {
       1 - (1 - 0.4) * (1 - Math.sqrt(0.9 * 0.81))
     );
     expect(scores.get(contextual.fusion.candidate_key)).toBeCloseTo(0.6);
-  });
-
-  it("refines CE-off public relevance only with corroborated answer evidence", () => {
-    const fusionOnly = fusedCandidate({ objectId: "fusion-only", fusedScore: 0.8 });
-    const corroborated = fusedCandidate({ objectId: "corroborated", fusedScore: 0.4 });
-
-    const resolved = resolveLightweightPublicRelevance(
-      [fusionOnly, corroborated],
-      emptySupplementary({
-        ftsRanks: { corroborated: 0.9 },
-        trigramFtsRanks: { corroborated: 0.81 }
-      })
-    );
-
-    expect(resolved.scores.get(fusionOnly.fusion.candidate_key)).toBe(0.8);
-    expect(resolved.scores.get(corroborated.fusion.candidate_key)).toBeCloseTo(
-      1 - (1 - 0.4) * (1 - Math.sqrt(0.9 * 0.81))
-    );
-    expect(resolved.answerEvidenceCandidateKeys).toEqual(
-      new Set([corroborated.fusion.candidate_key])
-    );
   });
 
   it("preserves query-supported relevance without a usable embedding in a mixed pool", () => {
