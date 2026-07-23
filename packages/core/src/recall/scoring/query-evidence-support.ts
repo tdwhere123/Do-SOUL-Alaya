@@ -6,26 +6,31 @@ import type {
   RecallFusionStreamRanks
 } from "../runtime/recall-service-types.js";
 
-const NON_EMBEDDING_QUERY_EVIDENCE_STREAMS: readonly RecallFusionStream[] = Object.freeze([
+const DIRECT_QUERY_EVIDENCE_STREAMS: readonly RecallFusionStream[] = Object.freeze([
   "lexical_fts",
   "trigram_fts",
   "synthesis_fts",
   "evidence_fts",
-  "subject_alignment",
   "entity_seed",
   "facet_overlap"
 ]);
 
+const NON_EMBEDDING_QUERY_EVIDENCE_STREAMS: readonly RecallFusionStream[] = Object.freeze([
+  ...DIRECT_QUERY_EVIDENCE_STREAMS,
+  "subject_alignment"
+]);
+
 export function hasNonEmbeddingQueryEvidenceRank(
   ranks: Readonly<RecallFusionStreamRanks>,
-  queryProbes: Readonly<RecallQueryProbes> | undefined
+  queryProbes: Readonly<RecallQueryProbes> | undefined,
+  maxRank = Number.POSITIVE_INFINITY
 ): boolean {
-  if (NON_EMBEDDING_QUERY_EVIDENCE_STREAMS.some((stream) => ranks[stream] !== null)) {
+  if (DIRECT_QUERY_EVIDENCE_STREAMS.some((stream) => rankIsWithin(ranks[stream], maxRank))) {
     return true;
   }
   return queryProbes !== undefined &&
     hasTemporalQuerySignal(queryProbes) &&
-    ranks.temporal_recency !== null;
+    rankIsWithin(ranks.temporal_recency, maxRank);
 }
 
 export function hasQueryEvidenceContribution(
@@ -40,4 +45,8 @@ export function hasQueryEvidenceContribution(
   }
   return hasTemporalQuerySignal(queryProbes) &&
     (contributions.temporal_recency ?? 0) > 0;
+}
+
+function rankIsWithin(rank: number | null, maxRank: number): boolean {
+  return rank !== null && rank <= maxRank;
 }

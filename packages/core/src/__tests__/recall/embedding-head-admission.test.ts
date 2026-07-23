@@ -270,6 +270,75 @@ describe("embedding-head dominance at the admission boundary", () => {
     }
   );
 
+  it("keeps a delivery-head evidence winner ahead of a stronger embedding head", () => {
+    const anchor = withFusionRanks(createCandidate("anchor", 0.9), 1);
+    const queryWinner = withFusionRanks(
+      createCandidate("query-winner", 0.85),
+      3,
+      { evidence_fts: 2 }
+    );
+    const embeddingHead = withFusionRanks(createCandidate("embedding-head", 0.8), 2);
+
+    const result = runSelection([anchor, queryWinner, embeddingHead], {
+      embeddingSimilarityScores: {
+        anchor: 0.95,
+        "query-winner": 0.2,
+        "embedding-head": 0.9
+      }
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "anchor",
+      "query-winner"
+    ]);
+  });
+
+  it("lets tail evidence yield to a stronger embedding head", () => {
+    const anchor = withFusionRanks(createCandidate("anchor", 0.9), 1);
+    const queryWinner = withFusionRanks(
+      createCandidate("query-winner", 0.85),
+      3,
+      { evidence_fts: 3 }
+    );
+    const embeddingHead = withFusionRanks(createCandidate("embedding-head", 0.8), 2);
+
+    const result = runSelection([anchor, queryWinner, embeddingHead], {
+      embeddingSimilarityScores: {
+        anchor: 0.95,
+        "query-winner": 0.2,
+        "embedding-head": 0.9
+      }
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "anchor",
+      "embedding-head"
+    ]);
+  });
+
+  it("does not treat subject alignment alone as direct query evidence", () => {
+    const anchor = withFusionRanks(createCandidate("anchor", 0.9), 1);
+    const contextualWinner = withFusionRanks(
+      createCandidate("contextual-winner", 0.85),
+      3,
+      { subject_alignment: 1 }
+    );
+    const embeddingHead = withFusionRanks(createCandidate("embedding-head", 0.8), 2);
+
+    const result = runSelection([anchor, contextualWinner, embeddingHead], {
+      embeddingSimilarityScores: {
+        anchor: 0.95,
+        "contextual-winner": 0.2,
+        "embedding-head": 0.9
+      }
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "anchor",
+      "embedding-head"
+    ]);
+  });
+
   it("lets a temporal-query challenger keep its delivery win", () => {
     const anchor = withFusionRanks(createCandidate("anchor", 0.9), 1);
     const temporalWinner = withFusionRanks(

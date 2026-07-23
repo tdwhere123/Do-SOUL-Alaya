@@ -58,7 +58,7 @@ describe("embedding-head evidence order", () => {
     expect(compareEmbeddingEvidenceStrength(global, local, memoryScores)).toBe(-1);
   });
 
-  it("does not evict a candidate with independent non-embedding query evidence", () => {
+  it("does not evict a candidate with direct non-embedding query evidence", () => {
     const incumbentBase = candidate("incumbent", 2);
     const incumbent = {
       ...incumbentBase,
@@ -66,7 +66,7 @@ describe("embedding-head evidence order", () => {
         ...incumbentBase.fusion,
         per_stream_rank: {
           ...incumbentBase.fusion.per_stream_rank,
-          subject_alignment: 1
+          evidence_fts: 1
         }
       }
     };

@@ -128,6 +128,7 @@ function isReplaceable(
   return !isEmbeddingHead(candidate, params.budget)
     && !hasIndependentQueryEvidence(
       candidate,
+      params.budget,
       params.queryProbes,
       params.answerRerankedCandidateKeys
     );
@@ -183,13 +184,15 @@ function embeddingRank(candidate: EmbeddingHeadCandidate): number {
 
 function hasIndependentQueryEvidence(
   candidate: EmbeddingHeadCandidate,
+  budget: number,
   queryProbes: Readonly<RecallQueryProbes> | undefined,
   answerRerankedCandidateKeys: ReadonlySet<string> | undefined
 ): boolean {
   if (answerRerankedCandidateKeys?.has(candidate.fusion.candidate_key) === true) return true;
   return hasNonEmbeddingQueryEvidenceRank(
     candidate.fusion.per_stream_rank,
-    queryProbes
+    queryProbes,
+    budget
   );
 }
 
