@@ -80,6 +80,8 @@ const DIRECT_DURATION_EVENT =
   /^\s*i\s+(?:(?:already|finally|had|have|just|recently)\s+){0,2}wait(?:ed|ing)?\b(?<body>[^,;.!?]*)[.!?]?\s*$/iu;
 const POSSESSIVE_DURATION_CONTEXT =
   /^\s*(?:speaking\s+of\s+waiting\s*,\s*)?my\b(?<body>[^,;.!?]{1,160})[.!?]?\s*$/iu;
+const POSSESSIVE_DURATION_TAKEN_CONTEXT =
+  /^\s*(?:by\s+the\s+way\s*,\s*)?(?:speaking\s+of\s+waiting\s*,\s*)?it(?:['’]s|\s+is)\s+(?:(?:really|so|pretty)\s+)?(?:crazy|hard|wild|surprising)\s+how\s+long\s+it\s+took\s+for\s+my\b(?<body>[^,;.!?]{1,160})[.!?]?\s*$/iu;
 const DURATION_DIRECT_BODY_TERMS = new Set([
   "a", "an", "about", "around", "day", "days", "eight", "five", "for", "four",
   "half", "hour", "hours", "less", "minute", "minutes", "month", "months", "more",
@@ -89,7 +91,10 @@ const DURATION_DIRECT_BODY_TERMS = new Set([
 ]);
 const DURATION_CONTEXT_BODY_TERMS = new Set([
   "accepted", "approved", "been", "decided", "finally", "had", "has", "is",
-  "pending", "processed", "rejected", "resolved", "still", "was"
+  "get", "pending", "processed", "rejected", "resolved", "still", "to", "was"
+]);
+const DURATION_CONTEXT_STATUS_TERMS = new Set([
+  "accepted", "approved", "decided", "pending", "processed", "rejected", "resolved"
 ]);
 const REVERSED_EVENT =
   /\b(?:returned|refunded|cancelled|canceled|retracted|reversed)\b/iu;
@@ -347,14 +352,17 @@ function isClosedDurationEvent(
       DURATION_DIRECT_BODY_TERMS
     );
   }
-  const context = requiresValue ? null : POSSESSIVE_DURATION_CONTEXT.exec(sentence);
+  const context = requiresValue
+    ? null
+    : POSSESSIVE_DURATION_CONTEXT.exec(sentence) ??
+      POSSESSIVE_DURATION_TAKEN_CONTEXT.exec(sentence);
   return context !== null &&
     bodyUsesOnly(
       context.groups?.body ?? "",
       plan.target_terms,
       DURATION_CONTEXT_BODY_TERMS
     ) &&
-    [...DURATION_CONTEXT_BODY_TERMS].some((term) =>
+    [...DURATION_CONTEXT_STATUS_TERMS].some((term) =>
       new RegExp(`\\b${term}\\b`, "iu").test(context.groups?.body ?? "")
     );
 }

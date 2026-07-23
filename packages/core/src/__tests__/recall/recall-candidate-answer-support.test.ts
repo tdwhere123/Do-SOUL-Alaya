@@ -203,6 +203,38 @@ describe("recall candidate answer support", () => {
     });
   });
 
+  it("binds a closed self-owned took-duration context from conversational discourse", () => {
+    expect(verifiedSupport(
+      "How long did I wait for the decision on my asylum application?",
+      "Over a year of uncertainty was really tough.",
+      "User: By the way, speaking of waiting, it's crazy how long it took for my asylum application to get approved. Over a year of uncertainty was really tough.",
+      "evidence-asylum"
+    )?.authority).toMatchObject({
+      provenance_status: "verified_user_assertion",
+      target_status: "bound",
+      relation_status: "bound",
+      event_status: "asserted",
+      binding_status: "unique",
+      behavior_eligible: true
+    });
+  });
+
+  it.each([
+    "Speaking of waiting, my lawyer said it's crazy how long it took for my asylum application to get approved.",
+    "By the way, speaking of waiting, it's crazy how long it took for my uncle's asylum application to get approved.",
+    "By the way, speaking of waiting, it's crazy how long it took for my asylum application to get approved, while my divorce remained pending.",
+    "By the way, speaking of waiting, it's crazy how long it took for my asylum application to get approved, said my lawyer."
+  ])("rejects attributed, third-party, and multi-event took-duration contexts", (prior) => {
+    const content = "Over a year of uncertainty was really tough.";
+    const support = verifiedSupport(
+      "How long did I wait for the decision on my asylum application?",
+      content,
+      `User: ${prior} ${content}`
+    );
+
+    expect(support?.authority?.behavior_eligible).toBe(false);
+  });
+
   it("does not borrow a duration value from a conflicting adjacent event", () => {
     const support = verifiedSupport(
       "How long did I wait for the decision on my asylum application?",

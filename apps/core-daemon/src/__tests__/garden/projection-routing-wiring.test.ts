@@ -90,7 +90,7 @@ describe("projection routing daemon wiring", () => {
     {
       shape: "duration",
       source: [
-        "Speaking of waiting, my asylum application was finally approved.",
+        "By the way, speaking of waiting, it's crazy how long it took for my asylum application to get approved.",
         "Over a year of uncertainty was really tough."
       ].join(" "),
       assertionNeedle: "Over a year",
