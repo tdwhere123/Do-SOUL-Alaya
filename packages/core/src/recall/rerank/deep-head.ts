@@ -11,6 +11,8 @@ type DeepHeadSupplementary = Readonly<Pick<
   RecallSupplementaryData,
   | "queryProbes"
   | "embeddingSimilarityScores"
+  | "ftsRanks"
+  | "trigramFtsRanks"
   | "evidenceFtsRanks"
   | "structuralScores"
   | "sourceProximityScores"
@@ -44,7 +46,7 @@ export function computeLightweightDeepHeadScores(
     );
   }
   const agreementActive = candidates.some(
-    (candidate) => evidenceAgreementSignal(candidate, supplementaryData) > 0
+    (candidate) => answerEvidenceSignal(candidate, supplementaryData) > 0
   );
   if (!agreementActive) {
     return new Map();
@@ -65,8 +67,7 @@ function lightweightDeepHeadScore(
   if (embedding === null) {
     return coldEmbeddingDeepHeadScore(candidate, supplementaryData);
   }
-  const evidenceAgreement = evidenceAgreementSignal(candidate, supplementaryData);
-  return probabilisticOr(embedding, evidenceAgreement);
+  return probabilisticOr(embedding, answerEvidenceSignal(candidate, supplementaryData));
 }
 
 // Emb-cold head: keep post-gate fused mass when an independent query lane
@@ -82,7 +83,19 @@ function coldEmbeddingDeepHeadScore(
   )) {
     return clamp01(candidate.fusion.fused_score);
   }
-  return evidenceAgreementSignal(candidate, supplementaryData);
+  return answerEvidenceSignal(candidate, supplementaryData);
+}
+
+// A direct textual match needs both lexical retrieval lanes. One lexical rank can
+// be a topical neighbour; two-lane concurrence is stronger answer evidence.
+function answerEvidenceSignal(
+  candidate: DeliverySelectionCandidate,
+  supplementaryData: DeepHeadSupplementary
+): number {
+  return probabilisticOr(
+    evidenceAgreementSignal(candidate, supplementaryData),
+    lexicalAgreementSignal(candidate, supplementaryData)
+  );
 }
 
 function embeddingSignal(
@@ -116,6 +129,18 @@ function evidenceAgreementSignal(
   return Math.max(
     geometricAgreement(evidence, structural),
     geometricAgreement(evidence, source)
+  );
+}
+
+function lexicalAgreementSignal(
+  candidate: DeliverySelectionCandidate,
+  supplementaryData: DeepHeadSupplementary
+): number {
+  if (!isWorkspaceMemoryCandidate(candidate)) return 0;
+  const objectId = candidate.entry.object_id;
+  return geometricAgreement(
+    clamp01(supplementaryData.ftsRanks[objectId] ?? 0),
+    clamp01(supplementaryData.trigramFtsRanks[objectId] ?? 0)
   );
 }
 

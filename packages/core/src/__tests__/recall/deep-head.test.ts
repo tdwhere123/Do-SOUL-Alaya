@@ -85,6 +85,8 @@ function fusedCandidate(input: {
 
 function emptySupplementary(overrides: {
   readonly embeddingSimilarityScores?: Record<string, number>;
+  readonly ftsRanks?: Record<string, number>;
+  readonly trigramFtsRanks?: Record<string, number>;
   readonly evidenceFtsRanks?: Record<string, number>;
   readonly structuralScores?: Record<string, number>;
   readonly sourceProximityScores?: Record<string, number>;
@@ -92,6 +94,8 @@ function emptySupplementary(overrides: {
   return {
     queryProbes: compileRecallQueryProbes(null),
     embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
+    ftsRanks: overrides.ftsRanks ?? {},
+    trigramFtsRanks: overrides.trigramFtsRanks ?? {},
     evidenceFtsRanks: overrides.evidenceFtsRanks ?? {},
     structuralScores: overrides.structuralScores ?? {},
     sourceProximityScores: overrides.sourceProximityScores ?? {}
@@ -185,6 +189,30 @@ describe("deep head", () => {
 
     expect(scores.get(semanticOnly.fusion.candidate_key)).toBeCloseTo(0.6);
     expect(scores.get(corroborated.fusion.candidate_key)).toBeCloseTo(0.84);
+  });
+
+  it("treats concurrence between two lexical lanes as answer evidence", () => {
+    const embeddingOnly = fusedCandidate({
+      objectId: "embedding-only",
+      fusedScore: 0.3,
+      embedding: 0.2
+    });
+    const textCorroborated = fusedCandidate({
+      objectId: "text-corroborated",
+      fusedScore: 0.2,
+      embedding: 0.2
+    });
+
+    const scores = computeLightweightDeepHeadScores(
+      [embeddingOnly, textCorroborated],
+      emptySupplementary({
+        ftsRanks: { "text-corroborated": 0.9 },
+        trigramFtsRanks: { "text-corroborated": 0.81 }
+      })
+    );
+
+    expect(scores.get(embeddingOnly.fusion.candidate_key)).toBeCloseTo(0.2);
+    expect(scores.get(textCorroborated.fusion.candidate_key)!).toBeGreaterThan(0.8);
   });
 
   it("preserves query-supported relevance without a usable embedding in a mixed pool", () => {
@@ -343,6 +371,8 @@ describe("deep head", () => {
       [synthesis, global, local],
       emptySupplementary({
         embeddingSimilarityScores: { shared: 0.8 },
+        ftsRanks: { shared: 1 },
+        trigramFtsRanks: { shared: 1 },
         evidenceFtsRanks: { shared: 1 },
         structuralScores: { shared: 1 },
         sourceProximityScores: { shared: 1 }
