@@ -5,6 +5,10 @@ import {
   BenchAnswerRerankStatusSchema,
   RecallCandidateAnswerFeaturesSchema
 } from "../../../harness/recall/recall-diagnostics-schema.js";
+import {
+  RecallAnswerShapePlanSchema,
+  RecallDeepHeadTraceSchema
+} from "../../../harness/recall/answer-trace-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
 import { validateQuestionMeasurementStatus } from
   "../../measurement/question-measurement-status.js";
@@ -250,6 +254,8 @@ const LongMemEvalReplayCandidateSchema = z
     source_cohort_key: z.string().nullable().default(null),
     reserved_by: z.string().nullable().default(null),
     answer_features: DiagnosticCandidateAnswerFeaturesSchema.nullable().default(null),
+    deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
+    coverage_marginal_gain: z.number().min(0).max(1).nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     score_factors: DiagnosticScoreFactorsSchema
   })
@@ -452,6 +458,7 @@ export const LongMemEvalQuestionDiagnosticSchema = z
       .readonly()
       .default([]),
     query_probes: DiagnosticQueryProbesSchema.nullable().optional(),
+    answer_shape_plan: RecallAnswerShapePlanSchema.nullable().default(null),
     query_sought_facets: z.array(z.string()).readonly().nullable().default(null),
     candidates: z.array(LongMemEvalReplayCandidateSchema).readonly().default([]),
     candidate_key_collisions: z

@@ -73,6 +73,8 @@ function buildReplayCandidate(
     ...buildReplayRankingFields(candidate),
     ...buildReplayDeliveryFields(candidate),
     answer_features: candidate.answerFeatures,
+    deep_head_trace: candidate.deepHeadTrace,
+    coverage_marginal_gain: candidate.coverageMarginalGain,
     path_suppression_score: candidate.pathSuppressionScore,
     score_factors: {
       ...(candidate.scoreFactors ?? {}),

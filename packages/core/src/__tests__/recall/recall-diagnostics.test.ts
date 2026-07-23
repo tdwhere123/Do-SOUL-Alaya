@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildRecallDiagnostics } from "../../recall/runtime/diagnostics.js";
+import { compileRecallAnswerShapePlan } from "../../recall/query/recall-answer-shape-plan.js";
 import type {
   FloodFuelCoverageSummary,
   IntegratedFloodCandidateDiagnostics,
@@ -21,7 +22,7 @@ const emptyQueryProbes = Object.freeze({
   dimensions: [],
   scope_classes: [],
   domain_tags: [],
-  lexical_terms: [],
+  lexical_terms: ["alice", "live"],
   expanded_terms: [],
   phrases: [],
   char_ngrams: [],
@@ -114,6 +115,7 @@ describe("recall diagnostics", () => {
 
     const diagnostics = buildRecallDiagnostics({
       queryProbes: emptyQueryProbes,
+      answerShapePlan: compileRecallAnswerShapePlan(emptyQueryProbes),
       querySoughtFacets: ["location_place"],
       totalScanned: 1,
       candidatePoolCount: 1,
@@ -157,6 +159,13 @@ describe("recall diagnostics", () => {
     });
     expect(diagnostics.fine_assessment_pruned_candidates).toEqual([]);
     expect(diagnostics.query_probes.normalized_query).toBe("where did alice live");
+    expect(diagnostics.answer_shape_plan).toEqual({
+      schema_version: 1,
+      status: "high_confidence",
+      shape: "place",
+      target_terms: ["alice"],
+      relation_terms: ["live"]
+    });
     expect(diagnostics.query_sought_facets).toEqual(["location_place"]);
   });
 });

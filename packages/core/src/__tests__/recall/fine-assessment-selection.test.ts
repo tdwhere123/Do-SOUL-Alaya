@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-assessment-selection.js";
 import { RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS } from "../../recall/delivery/fine-assessment-answer-features.js";
+import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   createCandidate,
   createConfig,
@@ -110,6 +111,41 @@ describe("selectFineAssessmentCandidates", () => {
       preference_polarity: null
     });
     expect(result.diagnostics[0]?.path_suppression_score).toBe(0);
+  });
+
+  it("captures candidate-local answer support without trusting the evidence gist", () => {
+    const candidate = createCandidate("bookshelf", {
+      content: "The new bookshelf is from IKEA.",
+      evidence_refs: ["evidence-bookshelf"]
+    });
+    const queryProbes = compileRecallQueryProbes(
+      "Where did I buy my new bookshelf from?"
+    );
+    const select = (evidenceGist: string) => selectFineAssessmentCandidates({
+      orderedCandidates: [candidate],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes,
+        evidenceGistsByMemoryId: { bookshelf: evidenceGist }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: createRanks(),
+      captureAnswerFeatures: true
+    });
+
+    const first = select("Assistant: IKEA is probably a good guess.");
+    const second = select("Assistant: This unrelated text must not affect support.");
+
+    expect(first.diagnostics[0]?.answer_features?.answer_support).toMatchObject({
+      shape: "place",
+      status: "compatible",
+      value_supported: true,
+      target_supported: true,
+      relation_supported: true
+    });
+    expect(second.diagnostics[0]?.answer_features?.answer_support).toEqual(
+      first.diagnostics[0]?.answer_features?.answer_support
+    );
   });
 
   it("keeps memory-keyed diagnostics scoped away from same-id projections", () => {
@@ -271,6 +307,59 @@ describe("selectFineAssessmentCandidates", () => {
     expect(stageRanks(result, "primary")).toEqual([1, 1, "kept"]);
     expect(stageRanks(result, "diverse")).toEqual([3, 2, "promoted"]);
     expect(stageRanks(result, "redundant")).toEqual([2, 3, "displaced"]);
+  });
+
+  it("captures deep-head and coverage traces without changing the delivered packet", () => {
+    const primary = createRankedCandidate("primary", 1, 1);
+    const redundant = createRankedCandidate("redundant", 2, 0.9);
+    const diverse = createRankedCandidate("diverse", 3, 0.8);
+    const candidates = [primary, redundant, diverse];
+    const coverageRelevanceByCandidateKey = new Map([
+      [primary.fusion.candidate_key, 1],
+      [redundant.fusion.candidate_key, 0.9],
+      [diverse.fusion.candidate_key, 0.8]
+    ]);
+    const trace = Object.freeze({
+      lexical_agreement: 0.9,
+      evidence_agreement: 0.5,
+      resolved_evidence: 0.95,
+      embedding_signal: 0.4,
+      fusion_baseline_used: false,
+      resolved_score: 0.97,
+      score_source: "embedding_evidence" as const
+    });
+    const deepHeadTraceByCandidateKey = new Map(
+      candidates.map((candidate) => [candidate.fusion.candidate_key, trace])
+    );
+    const select = (captureAnswerFeatures: boolean) => selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        evidenceGistsByMemoryId: {
+          primary: "shared gist",
+          redundant: "shared gist",
+          diverse: "different gist"
+        }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap(candidates),
+      coverageRelevanceByCandidateKey,
+      deepHeadTraceByCandidateKey,
+      captureAnswerFeatures
+    });
+
+    const withoutTrace = select(false);
+    const withTrace = select(true);
+
+    expect(withTrace.candidates).toEqual(withoutTrace.candidates);
+    expect(withoutTrace.diagnostics[0]).not.toHaveProperty("deep_head_trace");
+    expect(withoutTrace.diagnostics[0]).not.toHaveProperty("coverage_marginal_gain");
+    expect(withTrace.diagnostics[0]).toMatchObject({
+      deep_head_trace: trace,
+      coverage_marginal_gain: 1
+    });
+    expect(withTrace.diagnostics.find((row) => row.object_id === "redundant"))
+      .toMatchObject({ coverage_marginal_gain: 0.45 });
   });
 
 });

@@ -42,6 +42,56 @@ describe("coverage-aware delivery", () => {
     ]);
   });
 
+  it("observes the live marginal gain without changing coverage order", () => {
+    const sharedGistFirst = createCandidate("dup-1", 0.99);
+    const sharedGistSecond = createCandidate("dup-2", 0.98);
+    const novel = createCandidate("novel", 0.5);
+    const candidates = [sharedGistFirst, sharedGistSecond, novel];
+    const relevanceByCandidateKey = relevanceMap(candidates);
+    const supplementaryData = createSupplementaryData({
+      evidenceGistsByMemoryId: {
+        "dup-1": "same-gist",
+        "dup-2": "same-gist",
+        novel: "fresh-gist"
+      }
+    });
+    const observations: Array<Readonly<{
+      candidate_key: string;
+      marginal_gain: number;
+      selection_order: number;
+    }>> = [];
+    const withoutTrace = orderByCoverageMarginalGain({
+      candidates,
+      relevanceByCandidateKey,
+      supplementaryData
+    });
+    const withTrace = orderByCoverageMarginalGain({
+      candidates,
+      relevanceByCandidateKey,
+      supplementaryData,
+      onSelection: (observation) => observations.push(observation)
+    });
+
+    expect(withTrace).toEqual(withoutTrace);
+    expect(observations).toEqual([
+      {
+        candidate_key: sharedGistFirst.fusion.candidate_key,
+        marginal_gain: 0.99,
+        selection_order: 1
+      },
+      {
+        candidate_key: novel.fusion.candidate_key,
+        marginal_gain: 0.5,
+        selection_order: 2
+      },
+      {
+        candidate_key: sharedGistSecond.fusion.candidate_key,
+        marginal_gain: 0.49,
+        selection_order: 3
+      }
+    ]);
+  });
+
   it("fills toward the token budget instead of stopping early with unused tokens", () => {
     const candidates = Array.from({ length: 6 }, (_, index) =>
       createCandidate(`mem-${index + 1}`, 1 - index * 0.05)

@@ -201,6 +201,10 @@ export interface RecallCandidateDiagnostic {
   readonly source_channels: readonly string[];
   readonly path_expansion_sources: readonly RecallPathExpansionSourceDiagnostic[];
   readonly answer_features?: Readonly<RecallCandidateAnswerFeatures>;
+  readonly deep_head_trace?: Readonly<
+    import("../rerank/deep-head.js").RecallDeepHeadTrace
+  >;
+  readonly coverage_marginal_gain?: number;
   readonly path_suppression_score: number;
   // Live delivery-stage ranks (1-based). Provenance only — never feeds ranking.
   readonly rank_after_fusion?: number;
@@ -247,6 +251,9 @@ export interface RecallCandidateAnswerFeatures {
   readonly preference_object: Exclude<MemoryEntry["preference_object"], undefined>;
   readonly preference_category: Exclude<MemoryEntry["preference_category"], undefined>;
   readonly preference_polarity: Exclude<MemoryEntry["preference_polarity"], undefined>;
+  readonly answer_support?: Readonly<
+    import("../query/recall-candidate-answer-support.js").RecallCandidateAnswerSupport
+  >;
 }
 
 export interface RecallPathExpansionSourceDiagnostic {
@@ -345,6 +352,9 @@ export interface RecallDiagnostics {
     readonly char_ngrams: readonly string[];
     readonly date_terms: readonly string[];
   };
+  readonly answer_shape_plan?: Readonly<
+    import("../query/recall-answer-shape-plan.js").RecallAnswerShapePlan
+  >;
   readonly query_sought_facets: readonly string[];
   readonly total_scanned: number;
   readonly candidate_pool_count: number;

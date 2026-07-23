@@ -3,6 +3,7 @@ import type {
   DiagnosticAxisContributions,
   DiagnosticAxisRanks,
   DiagnosticCandidateAnswerFeatures,
+  DiagnosticDeepHeadTrace,
   CandidateIdentityObservation,
   DiagnosticFloodFuelCoverage,
   DiagnosticFloodPotential,
@@ -14,6 +15,8 @@ import {
   DiagnosticFloodPotentialSchema,
   DiagnosticQueryProbesSchema
 } from "../schema/diagnostics-schema.js";
+import { RecallDeepHeadTraceSchema } from
+  "../../../harness/recall/answer-trace-schema.js";
 import { readFineAssessmentPrunedClosure } from "../artifacts/diagnostics-fine-pruned-reader.js";
 import { isPreferredCandidateManifestation } from "../candidate-manifestation-order.js";
 import {
@@ -144,6 +147,12 @@ function readCandidateRow(
   );
   const answerFeatures = readCandidateAnswerFeatures(record.answer_features);
   if (record.answer_features != null && answerFeatures === null) return null;
+  const deepHeadTrace = readDeepHeadTrace(record.deep_head_trace);
+  if (record.deep_head_trace != null && deepHeadTrace === null) return null;
+  const coverageMarginalGain = readNumber(record.coverage_marginal_gain);
+  if (record.coverage_marginal_gain != null && (
+    coverageMarginalGain === null || coverageMarginalGain < 0 || coverageMarginalGain > 1
+  )) return null;
   const pathSuppressionScore = readNumber(record.path_suppression_score);
   if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
   const candidate: CandidateDiagnostic = {
@@ -155,6 +164,8 @@ function readCandidateRow(
     ...readCandidateScoring(record, fusion),
     ...readCandidateProvenance(record),
     answerFeatures,
+    deepHeadTrace,
+    coverageMarginalGain,
     pathSuppressionScore,
     ...readCandidateDelivery(record)
   };
@@ -318,6 +329,12 @@ function readFloodPotential(value: unknown): DiagnosticFloodPotential | null {
 function readCandidateAnswerFeatures(value: unknown): DiagnosticCandidateAnswerFeatures | null {
   if (value == null) return null;
   const parsed = DiagnosticCandidateAnswerFeaturesSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function readDeepHeadTrace(value: unknown): DiagnosticDeepHeadTrace | null {
+  if (value == null) return null;
+  const parsed = RecallDeepHeadTraceSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 

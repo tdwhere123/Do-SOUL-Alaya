@@ -18,6 +18,37 @@ type DeepHeadSupplementary = Readonly<Pick<
   | "sourceProximityScores"
 >>;
 
+export type RecallDeepHeadScoreSource =
+  | "cross_encoder"
+  | "cross_encoder_unscored"
+  | "embedding_evidence"
+  | "fusion_evidence"
+  | "evidence_only"
+  | "inactive";
+
+export type RecallDeepHeadTrace = Readonly<{
+  readonly lexical_agreement: number;
+  readonly evidence_agreement: number;
+  readonly resolved_evidence: number;
+  readonly embedding_signal: number | null;
+  readonly fusion_baseline_used: boolean;
+  readonly resolved_score: number | null;
+  readonly score_source: RecallDeepHeadScoreSource;
+}>;
+
+export type RecallDeepHeadAssessment = Readonly<{
+  readonly scores: ReadonlyMap<string, number>;
+  readonly traceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
+}>;
+
+type LightweightComponents = Readonly<{
+  readonly lexicalAgreement: number;
+  readonly evidenceAgreement: number;
+  readonly resolvedEvidence: number;
+  readonly embedding: number | null;
+  readonly fusionBaselineEligible: boolean;
+}>;
+
 /** Prefer cross-encoder scores when present; otherwise score the pruned waist. */
 export function resolveDeepHeadScores(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
@@ -27,7 +58,24 @@ export function resolveDeepHeadScores(params: Readonly<{
   if (params.answerRelevanceScores.size > 0) {
     return params.answerRelevanceScores;
   }
-  return computeLightweightDeepHeadScores(params.candidates, params.supplementaryData);
+  return computeLightweightDeepHeadScores(
+    params.candidates,
+    params.supplementaryData
+  );
+}
+
+export function resolveDeepHeadAssessment(params: Readonly<{
+  readonly candidates: readonly DeliverySelectionCandidate[];
+  readonly answerRelevanceScores: ReadonlyMap<string, number>;
+  readonly supplementaryData: DeepHeadSupplementary;
+}>): RecallDeepHeadAssessment {
+  if (params.answerRelevanceScores.size > 0) {
+    return buildCrossEncoderAssessment(params);
+  }
+  return computeLightweightDeepHeadAssessment(
+    params.candidates,
+    params.supplementaryData
+  );
 }
 
 export function computeLightweightDeepHeadScores(
@@ -38,24 +86,108 @@ export function computeLightweightDeepHeadScores(
     (candidate) => embeddingSignal(candidate, supplementaryData) !== null
   );
   if (embeddingObserved) {
-    return new Map(
-      candidates.map((candidate) => [
-        candidate.fusion.candidate_key,
-        lightweightDeepHeadScore(candidate, supplementaryData)
-      ])
-    );
+    return new Map(candidates.map((candidate) => [
+      candidate.fusion.candidate_key,
+      lightweightDeepHeadScore(candidate, supplementaryData)
+    ]));
   }
   const agreementActive = candidates.some(
     (candidate) => answerEvidenceSignal(candidate, supplementaryData) > 0
   );
-  if (!agreementActive) {
-    return new Map();
+  if (!agreementActive) return new Map();
+  return new Map(candidates.map((candidate) => [
+    candidate.fusion.candidate_key,
+    coldEmbeddingDeepHeadScore(candidate, supplementaryData)
+  ]));
+}
+
+function buildCrossEncoderAssessment(params: Readonly<{
+  readonly candidates: readonly DeliverySelectionCandidate[];
+  readonly answerRelevanceScores: ReadonlyMap<string, number>;
+  readonly supplementaryData: DeepHeadSupplementary;
+}>): RecallDeepHeadAssessment {
+  return Object.freeze({
+    scores: params.answerRelevanceScores,
+    traceByCandidateKey: new Map(params.candidates.map((candidate) => {
+      const candidateKey = candidate.fusion.candidate_key;
+      const scored = params.answerRelevanceScores.has(candidateKey);
+      const components = buildLightweightComponents(candidate, params.supplementaryData);
+      return [
+        candidateKey,
+        buildDeepHeadTrace(
+          components,
+          scored ? params.answerRelevanceScores.get(candidateKey)! : 0,
+          scored ? "cross_encoder" : "cross_encoder_unscored",
+          false
+        )
+      ];
+    }))
+  });
+}
+
+function computeLightweightDeepHeadAssessment(
+  candidates: readonly DeliverySelectionCandidate[],
+  supplementaryData: DeepHeadSupplementary
+): RecallDeepHeadAssessment {
+  const components = candidates.map((candidate) =>
+    buildLightweightComponents(candidate, supplementaryData)
+  );
+  const active = components.some((item) => item.embedding !== null) ||
+    components.some((item) => item.resolvedEvidence > 0);
+  const traces = candidates.map((candidate, index) => [
+    candidate.fusion.candidate_key,
+    buildLightweightTrace(candidate, components[index]!, active)
+  ] as const);
+  return Object.freeze({
+    scores: active
+      ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
+      : new Map(),
+    traceByCandidateKey: new Map(traces)
+  });
+}
+
+function buildLightweightComponents(
+  candidate: DeliverySelectionCandidate,
+  supplementaryData: DeepHeadSupplementary
+): LightweightComponents {
+  const lexicalAgreement = lexicalAgreementSignal(candidate, supplementaryData);
+  const evidenceAgreement = evidenceAgreementSignal(candidate, supplementaryData);
+  return Object.freeze({
+    lexicalAgreement,
+    evidenceAgreement,
+    resolvedEvidence: probabilisticOr(evidenceAgreement, lexicalAgreement),
+    embedding: embeddingSignal(candidate, supplementaryData),
+    fusionBaselineEligible: hasQueryEvidenceContribution(
+      candidate.fusion.fused_rank_contribution_per_stream,
+      supplementaryData.queryProbes
+    )
+  });
+}
+
+function buildLightweightTrace(
+  candidate: DeliverySelectionCandidate,
+  components: LightweightComponents,
+  active: boolean
+): RecallDeepHeadTrace {
+  if (!active) {
+    return buildDeepHeadTrace(components, null, "inactive", false);
   }
-  return new Map(
-    candidates.map((candidate) => [
-      candidate.fusion.candidate_key,
-      coldEmbeddingDeepHeadScore(candidate, supplementaryData)
-    ])
+  if (components.embedding !== null) {
+    return buildDeepHeadTrace(
+      components,
+      probabilisticOr(components.embedding, components.resolvedEvidence),
+      "embedding_evidence",
+      false
+    );
+  }
+  const fusionBaselineUsed = components.fusionBaselineEligible;
+  return buildDeepHeadTrace(
+    components,
+    fusionBaselineUsed
+      ? probabilisticOr(clamp01(candidate.fusion.fused_score), components.resolvedEvidence)
+      : components.resolvedEvidence,
+    fusionBaselineUsed ? "fusion_evidence" : "evidence_only",
+    fusionBaselineUsed
   );
 }
 
@@ -67,11 +199,12 @@ function lightweightDeepHeadScore(
   if (embedding === null) {
     return coldEmbeddingDeepHeadScore(candidate, supplementaryData);
   }
-  return probabilisticOr(embedding, answerEvidenceSignal(candidate, supplementaryData));
+  return probabilisticOr(
+    embedding,
+    answerEvidenceSignal(candidate, supplementaryData)
+  );
 }
 
-// Emb-cold head keeps query context as a baseline, then adds corroborated answer
-// evidence so a direct match can outrank a merely contextual neighbour.
 function coldEmbeddingDeepHeadScore(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
@@ -86,8 +219,6 @@ function coldEmbeddingDeepHeadScore(
   return answerEvidence;
 }
 
-// A direct textual match needs both lexical retrieval lanes. One lexical rank can
-// be a topical neighbour; two-lane concurrence is stronger answer evidence.
 function answerEvidenceSignal(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
@@ -96,6 +227,23 @@ function answerEvidenceSignal(
     evidenceAgreementSignal(candidate, supplementaryData),
     lexicalAgreementSignal(candidate, supplementaryData)
   );
+}
+
+function buildDeepHeadTrace(
+  components: LightweightComponents,
+  resolvedScore: number | null,
+  scoreSource: RecallDeepHeadScoreSource,
+  fusionBaselineUsed: boolean
+): RecallDeepHeadTrace {
+  return Object.freeze({
+    lexical_agreement: components.lexicalAgreement,
+    evidence_agreement: components.evidenceAgreement,
+    resolved_evidence: components.resolvedEvidence,
+    embedding_signal: components.embedding,
+    fusion_baseline_used: fusionBaselineUsed,
+    resolved_score: resolvedScore,
+    score_source: scoreSource
+  });
 }
 
 function embeddingSignal(

@@ -194,6 +194,47 @@ describe("final recall relevance ownership", () => {
     });
   });
 
+  it("keeps the live packet identical when deep diagnostic capture is enabled", () => {
+    const memories = [
+      createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]),
+      createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]),
+      createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }])
+    ];
+    const supplementaryData = {
+      ...createSupplementaryData(),
+      embeddingSimilarityScores: {
+        [FUSION_WINNER_ID]: 0.2,
+        [ACTIVATION_WINNER_ID]: 0.15,
+        [COVERAGE_NOVEL_ID]: 1
+      },
+      evidenceGistsByMemoryId: {
+        [FUSION_WINNER_ID]: "shared gist",
+        [ACTIVATION_WINNER_ID]: "shared gist",
+        [COVERAGE_NOVEL_ID]: "novel gist"
+      }
+    };
+    const assess = (captureAnswerFeatures: boolean) => fineAssess({
+      candidates: memories.map(createCoarseCandidate),
+      policy: buildPolicy(),
+      winnerMemoryIds: new Set(),
+      supplementaryData,
+      tokenEstimator: { estimate: () => 4 },
+      now: () => NOW,
+      warn: vi.fn(),
+      captureAnswerFeatures
+    });
+
+    const baseline = assess(false);
+    const captured = assess(true);
+
+    expect(captured.candidates).toEqual(baseline.candidates);
+    expect(baseline.diagnostics[0]).not.toHaveProperty("deep_head_trace");
+    expect(captured.diagnostics.every((row) =>
+      row.deep_head_trace !== undefined &&
+      row.coverage_marginal_gain !== undefined
+    )).toBe(true);
+  });
+
   it("uses public relevance final order when deep-head is a no-op", () => {
     // Emb+agreement cold → empty deep-head. Coverage packing can place a
     // medium-fused novel ahead of a high-fused duplicate; fused public order

@@ -23,6 +23,11 @@ import type {
   TokenEstimator
 } from "../runtime/recall-service-types.js";
 import { orderByCoverageMarginalGain } from "./coverage-selection.js";
+import {
+  compileRecallAnswerShapePlan,
+  type RecallAnswerShapePlan
+} from "../query/recall-answer-shape-plan.js";
+import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
 import { selectEmbeddingHeadEvictions } from "./admission/embedding-head-dominance.js";
 import {
   buildFinalScoreFactors,
@@ -58,6 +63,9 @@ export interface FineAssessmentSelectionContext {
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
   readonly answerRerankedCandidateKeys: ReadonlySet<string>;
   readonly captureAnswerFeatures: boolean;
+  readonly answerShapePlan: Readonly<RecallAnswerShapePlan> | null;
+  readonly deepHeadTraceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
+  readonly coverageMarginalGainByCandidateKey: Map<string, number>;
   readonly tokenEstimateByCandidateKey: Map<string, number>;
 }
 
@@ -79,6 +87,7 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly maxHeadDropAfterCoverage?: number;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
+  readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
 }>;
 
 export function selectFineAssessmentCandidates(params: FineAssessmentSelectionParams): Readonly<{
@@ -99,7 +108,8 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
     initialOrder,
     context,
     coverageRelevance,
-    evictions
+    evictions,
+    context.captureAnswerFeatures
   );
   const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
@@ -196,7 +206,8 @@ function orderFineAssessmentByCoverage(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
   relevanceByCandidateKey: ReadonlyMap<string, number>,
-  evictions: ReadonlySet<string>
+  evictions: ReadonlySet<string>,
+  captureMarginalGain = false
 ): readonly FineAssessmentCandidate[] {
   const admission = createAdmissionState();
   return orderByCoverageMarginalGain({
@@ -208,7 +219,13 @@ function orderFineAssessmentByCoverage(
       candidate,
       context,
       evictions
-    )
+    ),
+    onSelection: captureMarginalGain
+      ? (observation) => context.coverageMarginalGainByCandidateKey.set(
+          observation.candidate_key,
+          observation.marginal_gain
+        )
+      : undefined
   });
 }
 
@@ -217,6 +234,7 @@ function createSelectionContext(
 ): FineAssessmentSelectionContext {
   const answerRelevanceRankByCandidateKey =
     params.answerRelevanceRankByCandidateKey ?? new Map();
+  const captureAnswerFeatures = params.captureAnswerFeatures ?? false;
   return Object.freeze({
     config: params.config,
     supplementaryData: params.supplementaryData,
@@ -225,7 +243,14 @@ function createSelectionContext(
     finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
     answerRelevanceRankByCandidateKey,
     answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
-    captureAnswerFeatures: params.captureAnswerFeatures ?? false,
+    captureAnswerFeatures,
+    answerShapePlan: captureAnswerFeatures
+      ? compileRecallAnswerShapePlan(params.supplementaryData.queryProbes)
+      : null,
+    deepHeadTraceByCandidateKey: captureAnswerFeatures
+      ? params.deepHeadTraceByCandidateKey ?? new Map()
+      : new Map(),
+    coverageMarginalGainByCandidateKey: new Map(),
     tokenEstimateByCandidateKey: new Map()
   });
 }

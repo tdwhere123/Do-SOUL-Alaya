@@ -11,6 +11,7 @@ import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-de
 import type { RecallFusionBreakdown } from "../../recall/runtime/recall-service-types.js";
 import {
   computeLightweightDeepHeadScores,
+  resolveDeepHeadAssessment,
   resolveDeepHeadScores
 } from "../../recall/rerank/deep-head.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -103,6 +104,53 @@ function emptySupplementary(overrides: {
 }
 
 describe("deep head", () => {
+  it("traces the exact live lightweight score composition", () => {
+    const candidate = fusedCandidate({
+      objectId: "traced",
+      fusedScore: 0.2,
+      embedding: 0.4
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        ftsRanks: { traced: 0.81 },
+        trigramFtsRanks: { traced: 1 },
+        evidenceFtsRanks: { traced: 0.25 },
+        structuralScores: { traced: 1 }
+      })
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(trace.lexical_agreement).toBeCloseTo(0.9);
+    expect(trace.evidence_agreement).toBeCloseTo(0.5);
+    expect(trace.resolved_evidence).toBeCloseTo(0.95);
+    expect(trace.embedding_signal).toBeCloseTo(0.4);
+    expect(trace.fusion_baseline_used).toBe(false);
+    expect(trace.score_source).toBe("embedding_evidence");
+    expect(trace.resolved_score).toBeCloseTo(0.97);
+    expect(assessment.scores.get(candidate.fusion.candidate_key))
+      .toBe(trace.resolved_score);
+  });
+
+  it("marks an inactive lightweight head without inventing a score", () => {
+    const candidate = fusedCandidate({
+      objectId: "inactive",
+      fusedScore: 0.2,
+      contributions: { path_expansion: 0.01 }
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary()
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(assessment.scores.size).toBe(0);
+    expect(trace.score_source).toBe("inactive");
+    expect(trace.resolved_score).toBeNull();
+  });
+
   it("scores every candidate in the already-pruned waist", () => {
     const candidates = Array.from({ length: 37 }, (_, index) =>
       fusedCandidate({
@@ -143,8 +191,33 @@ describe("deep head", () => {
     });
 
     expect(withCe.get(candidates[0]!.fusion.candidate_key)).toBe(0.95);
+    expect(withCe).toBe(ceScores);
     expect(withoutCe.get(candidates[1]!.fusion.candidate_key)!)
       .toBeGreaterThan(withoutCe.get(candidates[0]!.fusion.candidate_key)!);
+  });
+
+  it("distinguishes a CE-scored head from its zero-relevance unscored tail", () => {
+    const candidates = [
+      fusedCandidate({ objectId: "scored", fusedScore: 0.9 }),
+      fusedCandidate({ objectId: "unscored", fusedScore: 0.8 })
+    ];
+    const scoredKey = candidates[0]!.fusion.candidate_key;
+    const unscoredKey = candidates[1]!.fusion.candidate_key;
+    const assessment = resolveDeepHeadAssessment({
+      candidates,
+      answerRelevanceScores: new Map([[scoredKey, 0.75]]),
+      supplementaryData: emptySupplementary()
+    });
+
+    expect(assessment.traceByCandidateKey.get(scoredKey)).toMatchObject({
+      score_source: "cross_encoder",
+      resolved_score: 0.75
+    });
+    expect(assessment.traceByCandidateKey.get(unscoredKey)).toMatchObject({
+      score_source: "cross_encoder_unscored",
+      resolved_score: 0
+    });
+    expect(assessment.scores.has(unscoredKey)).toBe(false);
   });
 
   it("lets independent semantic support promote a candidate from a distant fused rank", () => {

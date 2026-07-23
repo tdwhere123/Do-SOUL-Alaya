@@ -13,6 +13,10 @@ import {
 } from "./diagnostics-schema.js";
 import type { BenchCommitResolution } from "../../../shared/version.js";
 import type { z } from "zod";
+import {
+  RecallAnswerShapePlanSchema,
+  RecallDeepHeadTraceSchema
+} from "../../../harness/recall/answer-trace-schema.js";
 import type { BenchRecallDiagnostics } from "../../../harness/recall/recall-diagnostics-schema.js";
 import type { DeliveryMissDropReason } from "../miss/delivery-miss-taxonomy.js";
 import type { RecallCandidate, RecallOriginPlane } from "@do-soul/alaya-protocol";
@@ -35,6 +39,8 @@ export type DiagnosticStreamContributions = Readonly<Record<string, number>>;
 export type DiagnosticAxisRanks = Readonly<Record<string, number | null>>;
 export type DiagnosticAxisContributions = Readonly<Record<string, number>>;
 export type DiagnosticQueryProbes = z.infer<typeof DiagnosticQueryProbesSchema>;
+export type DiagnosticAnswerShapePlan = z.infer<typeof RecallAnswerShapePlanSchema>;
+export type DiagnosticDeepHeadTrace = z.infer<typeof RecallDeepHeadTraceSchema>;
 export type DiagnosticCandidateAnswerFeatures = z.infer<
   typeof DiagnosticCandidateAnswerFeaturesSchema
 >;
@@ -88,6 +94,8 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly source_cohort_key: string | null;
   readonly reserved_by: string | null;
   readonly answer_features: DiagnosticCandidateAnswerFeatures | null;
+  readonly deep_head_trace: DiagnosticDeepHeadTrace | null;
+  readonly coverage_marginal_gain: number | null;
   readonly path_suppression_score: number | null;
   readonly score_factors: DiagnosticScoreFactors;
 }>;
@@ -321,6 +329,7 @@ export interface LongMemEvalCompactDiagnosticsSidecar {
 export interface NarrowRecallDiagnostics {
   readonly keys: readonly string[];
   readonly queryProbes: DiagnosticQueryProbes | null;
+  readonly answerShapePlan: DiagnosticAnswerShapePlan | null;
   readonly querySoughtFacets: readonly string[] | null;
   readonly candidatePoolComplete: boolean;
   readonly candidatePoolCount: number | null;
@@ -388,6 +397,8 @@ export interface CandidateDiagnostic {
   readonly rankAfterCoverageSelector: number | null;
   readonly rankAfterSessionCoverage: number | null;
   readonly answerFeatures: DiagnosticCandidateAnswerFeatures | null;
+  readonly deepHeadTrace: DiagnosticDeepHeadTrace | null;
+  readonly coverageMarginalGain: number | null;
   readonly pathSuppressionScore: number | null;
   readonly coverageSelectorAction: DeliveryStageAction | null;
   readonly sessionCoverageAction: DeliveryStageAction | null;

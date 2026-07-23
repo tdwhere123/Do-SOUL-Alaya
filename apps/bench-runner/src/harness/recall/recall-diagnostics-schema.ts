@@ -2,6 +2,11 @@ import { z } from "zod";
 import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
 import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-activation.js";
 import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
+import {
+  RecallAnswerShapePlanSchema,
+  RecallCandidateAnswerSupportSchema,
+  RecallDeepHeadTraceSchema
+} from "./answer-trace-schema.js";
 
 const RecallFusionStreamRankSchema = z
   .object({
@@ -162,7 +167,8 @@ export const RecallCandidateAnswerFeaturesSchema = z
     preference_predicate: z.string().nullable(),
     preference_object: z.string().nullable(),
     preference_category: z.string().nullable(),
-    preference_polarity: z.enum(["positive", "negative", "neutral"]).nullable()
+    preference_polarity: z.enum(["positive", "negative", "neutral"]).nullable(),
+    answer_support: RecallCandidateAnswerSupportSchema.nullable().optional()
   })
   .strict()
   .readonly();
@@ -205,6 +211,8 @@ const RecallCandidateDiagnosticSchema = z
     source_channels: z.array(z.string().min(1)).readonly(),
     path_expansion_sources: z.array(RecallDiagnosticPathExpansionSourceSchema).readonly(),
     answer_features: RecallCandidateAnswerFeaturesSchema.nullable().default(null),
+    deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
+    coverage_marginal_gain: z.number().min(0).max(1).nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
     rank_after_feature_rerank: z.number().int().positive().optional(),
@@ -327,6 +335,7 @@ export const BenchRecallDiagnosticsSchema = z
       })
       .strict()
       .readonly(),
+    answer_shape_plan: RecallAnswerShapePlanSchema.nullable().optional(),
     query_sought_facets: z.array(z.string()).readonly().default([]),
     total_scanned: z.number().int().nonnegative(),
     candidate_pool_count: z.number().int().nonnegative(),

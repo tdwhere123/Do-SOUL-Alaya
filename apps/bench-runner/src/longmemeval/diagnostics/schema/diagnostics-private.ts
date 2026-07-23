@@ -17,6 +17,7 @@ import {
   readString,
   readStringArray
 } from "../artifacts/diagnostics-candidate-readers.js";
+import { RecallAnswerShapePlanSchema } from "../../../harness/recall/answer-trace-schema.js";
 
 export { buildObjectIdentityKey };
 
@@ -36,13 +37,16 @@ export function readRecallDiagnostics(
   if (raw === null || typeof raw !== "object") return null;
   const record = raw as Readonly<Record<string, unknown>>;
   const queryProbes = readDiagnosticQueryProbes(record.query_probes);
+  const answerShapePlan = readAnswerShapePlan(record.answer_shape_plan);
   const querySoughtFacets = readStringArray(record.query_sought_facets);
   if (record.query_probes !== undefined && queryProbes === null) return null;
+  if (record.answer_shape_plan != null && answerShapePlan === null) return null;
   if (record.query_sought_facets !== undefined && querySoughtFacets === null) return null;
   const candidates = readCandidates(record);
   return {
     keys: Object.keys(record).sort(),
     queryProbes,
+    answerShapePlan,
     querySoughtFacets,
     ...buildNarrowCandidateEvidence(candidates),
     providerState: readProviderState(record, embeddingMode),
@@ -68,6 +72,14 @@ export function readRecallDiagnostics(
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
     phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
   };
+}
+
+function readAnswerShapePlan(
+  value: unknown
+): NarrowRecallDiagnostics["answerShapePlan"] {
+  if (value == null) return null;
+  const parsed = RecallAnswerShapePlanSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function buildNarrowCandidateEvidence(

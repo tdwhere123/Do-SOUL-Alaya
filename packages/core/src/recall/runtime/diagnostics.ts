@@ -1,6 +1,7 @@
 import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { PreparedEmbeddingQueryHandle } from "../../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type {
   RecallCandidateDiagnostic,
   RecallAnswerRerankDiagnostics,
@@ -17,6 +18,7 @@ import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplem
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly answerShapePlan?: Readonly<RecallAnswerShapePlan>;
   readonly querySoughtFacets?: readonly string[];
   readonly totalScanned: number;
   readonly candidatePoolCount: number;
@@ -42,6 +44,9 @@ export function buildRecallDiagnostics(
   const embeddingWorkspaceScan = params.embeddingWorkspaceScan ?? null;
   return Object.freeze({
     query_probes: freezeRecallQueryProbes(params.queryProbes),
+    ...(params.answerShapePlan === undefined
+      ? {}
+      : { answer_shape_plan: params.answerShapePlan }),
     query_sought_facets: Object.freeze([...(params.querySoughtFacets ?? [])]),
     total_scanned: params.totalScanned,
     candidate_pool_count: params.candidatePoolCount,

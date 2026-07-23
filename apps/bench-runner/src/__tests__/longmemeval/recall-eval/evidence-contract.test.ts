@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 import {
+  RecallAnswerShapePlanSchema,
+  RecallCandidateAnswerSupportSchema,
+  RecallDeepHeadTraceSchema
+} from "../../../harness/recall/answer-trace-schema.js";
+import {
   buildLongMemEvalQualityMetrics,
   buildQuestionDiagnostic,
   stripReplayCandidatePoolsForGateWrite,
@@ -237,7 +242,36 @@ describe("LongMemEval evidence contract", () => {
   );
 
   it("roundtrips exact query and candidate answer evidence only with full pools", () => {
-    const answerFeatures = completeAnswerFeatures();
+    const answerSupport = {
+      schema_version: 1,
+      shape: "place",
+      status: "compatible",
+      eligible: true,
+      value_supported: true,
+      target_supported: true,
+      relation_supported: true,
+      matched_target_terms: ["alice"],
+      matched_relation_terms: ["work"]
+    };
+    const answerShapePlan = {
+      schema_version: 1,
+      status: "high_confidence",
+      shape: "place",
+      target_terms: ["alice"],
+      relation_terms: ["work"]
+    };
+    const answerFeatures = completeAnswerFeatures({
+      answer_support: answerSupport
+    });
+    const deepHeadTrace = {
+      lexical_agreement: 0.9,
+      evidence_agreement: 0.5,
+      resolved_evidence: 0.95,
+      embedding_signal: 0.4,
+      fusion_baseline_used: false,
+      resolved_score: 0.97,
+      score_source: "embedding_evidence"
+    };
     const row = diagnostic({
       id: "q-features",
       gold: ["gold-a"],
@@ -248,7 +282,15 @@ describe("LongMemEval evidence contract", () => {
             lexical_terms: ["alice", "work"],
             subject_hints: ["alice"]
           },
+          answer_shape_plan: answerShapePlan,
           query_sought_facets: ["occupation_work"],
+          candidate_pool_count: 1,
+          fine_assessment_pruned_candidates: [],
+          token_economy: {
+            fine_pruned_count: 0,
+            fine_evaluated: 1,
+            coarse_pool_size: 1
+          },
           candidates: [{
             object_id: "gold-a",
             object_kind: "memory_entry",
@@ -264,6 +306,8 @@ describe("LongMemEval evidence contract", () => {
             source_channels: ["path_plasticity"],
             path_suppression_score: 0.25,
             answer_features: answerFeatures,
+            deep_head_trace: deepHeadTrace,
+            coverage_marginal_gain: 0.485,
             per_stream_rank: { lexical_fts: 7 },
             fused_rank_contribution_per_stream: { lexical_fts: 0.2 },
             score_factors: { activation: 0.5 }
@@ -276,6 +320,7 @@ describe("LongMemEval evidence contract", () => {
       lexical_terms: ["alice", "work"],
       subject_hints: ["alice"]
     });
+    expect(row.answer_shape_plan).toEqual(answerShapePlan);
     expect(row.query_sought_facets).toEqual(["occupation_work"]);
     expect(row.candidates[0]).toMatchObject({
       origin_plane: "workspace_local",
@@ -286,13 +331,103 @@ describe("LongMemEval evidence contract", () => {
       source_planes: ["path_expansion"],
       source_channels: ["path_plasticity"],
       path_suppression_score: 0.25,
-      answer_features: answerFeatures
+      answer_features: answerFeatures,
+      deep_head_trace: deepHeadTrace,
+      coverage_marginal_gain: 0.485
     });
     expect(row.candidates[0]?.answer_features?.evidence_gist_truncated).toBe(true);
+    expect(row.candidate_pool_complete).toBe(true);
+    expect(row.cohort_ledger?.evidence_status).toBe("complete");
     expect(LongMemEvalQuestionDiagnosticSchema.parse(row)).toMatchObject({
       query_sought_facets: ["occupation_work"],
-      candidates: [{ answer_features: answerFeatures, path_suppression_score: 0.25 }]
+      answer_shape_plan: answerShapePlan,
+      candidates: [{
+        answer_features: answerFeatures,
+        deep_head_trace: deepHeadTrace,
+        coverage_marginal_gain: 0.485,
+        path_suppression_score: 0.25
+      }]
     });
+
+    const incomplete = diagnostic({
+      id: "q-incomplete-trace",
+      gold: ["gold-a"],
+      recallResult: {
+        diagnostics: {
+          query_probes: {
+            normalized_query: "where does alice work?",
+            lexical_terms: ["alice", "work"],
+            subject_hints: ["alice"]
+          },
+          answer_shape_plan: answerShapePlan,
+          candidate_pool_count: 1,
+          fine_assessment_pruned_candidates: [],
+          token_economy: {
+            fine_pruned_count: 0,
+            fine_evaluated: 1,
+            coarse_pool_size: 1
+          },
+          candidates: [{
+            object_id: "gold-a",
+            object_kind: "memory_entry",
+            candidate_key: "workspace_local:memory_entry:gold-a",
+            origin_plane: "workspace_local",
+            created_at: "2026-07-11T00:00:00.000Z",
+            facet_overlap: 1,
+            answer_features: answerFeatures,
+            deep_head_trace: deepHeadTrace,
+            per_stream_rank: { lexical_fts: 7 },
+            fused_rank_contribution_per_stream: { lexical_fts: 0.2 },
+            score_factors: { activation: 0.5 }
+          }]
+        }
+      }
+    });
+    expect(incomplete.candidate_pool_complete).toBe(false);
+    expect(incomplete.cohort_ledger?.evidence_status).toBe("partial");
+
+    const contradictory = diagnostic({
+      id: "q-contradictory-support",
+      gold: ["synthesis-a"],
+      recallResult: {
+        diagnostics: {
+          query_probes: {
+            normalized_query: "where does alice work?",
+            lexical_terms: ["alice", "work"],
+            subject_hints: ["alice"]
+          },
+          answer_shape_plan: answerShapePlan,
+          candidate_pool_count: 1,
+          fine_assessment_pruned_candidates: [],
+          token_economy: {
+            fine_pruned_count: 0,
+            fine_evaluated: 1,
+            coarse_pool_size: 1
+          },
+          candidates: [{
+            object_id: "synthesis-a",
+            object_kind: "synthesis_capsule",
+            candidate_key: "workspace_local:synthesis_capsule:synthesis-a",
+            origin_plane: "workspace_local",
+            created_at: "2026-07-11T00:00:00.000Z",
+            facet_overlap: 1,
+            answer_features: completeAnswerFeatures({
+              answer_support: {
+                ...answerSupport,
+                matched_target_terms: ["mallory"]
+              }
+            }),
+            deep_head_trace: deepHeadTrace,
+            coverage_marginal_gain: 0.485,
+            per_stream_rank: { lexical_fts: 7 },
+            fused_rank_contribution_per_stream: { lexical_fts: 0.2 },
+            score_factors: { activation: 0.5 }
+          }]
+        }
+      }
+    });
+    expect(contradictory.candidate_pool_complete).toBe(false);
+    expect(contradictory.cohort_ledger?.evidence_status).toBe("partial");
 
     const stripped = stripReplayCandidatePoolsForGateWrite({
       schema_version: 1,
@@ -379,6 +514,18 @@ describe("LongMemEval evidence contract", () => {
     const parsed = LongMemEvalQuestionDiagnosticSchema.parse(oldQuestion);
     expect(parsed.query_sought_facets).toBeNull();
 
+    const explicitNull = diagnostic({
+      id: "q-explicit-null",
+      recallResult: {
+        diagnostics: {
+          answer_shape_plan: null,
+          candidates: []
+        }
+      }
+    });
+    expect(explicitNull.recall_diagnostics_present).toBe(true);
+    expect(explicitNull.answer_shape_plan).toBeNull();
+
     const legacyCandidate = {
       object_id: "legacy-a",
       candidate_key: "workspace_local:memory_entry:legacy-a",
@@ -406,6 +553,8 @@ describe("LongMemEval evidence contract", () => {
     }).candidates[0];
     expect(candidate).toMatchObject({
       answer_features: null,
+      deep_head_trace: null,
+      coverage_marginal_gain: null,
       path_suppression_score: null,
       answer_relevance_score: null,
       answer_relevance_rank: null
@@ -423,6 +572,59 @@ describe("LongMemEval evidence contract", () => {
     });
     expect(row.candidates).toEqual([]);
     expect(row.candidate_pool_complete).toBe(false);
+  });
+
+  it("rejects malformed decision traces instead of admitting partial replay evidence", () => {
+    const row = diagnostic({
+      id: "q-malformed-trace",
+      recallResult: { diagnostics: { candidates: [{
+        object_id: "bad-trace",
+        object_kind: "memory_entry",
+        candidate_key: "workspace_local:memory_entry:bad-trace",
+        origin_plane: "workspace_local",
+        deep_head_trace: {
+          lexical_agreement: 2,
+          evidence_agreement: 0,
+          resolved_evidence: 0,
+          embedding_signal: null,
+          fusion_baseline_used: false,
+          resolved_score: null,
+          score_source: "inactive"
+        }
+      }] } }
+    });
+    expect(row.candidates).toEqual([]);
+    expect(row.candidate_pool_complete).toBe(false);
+  });
+
+  it("rejects semantically contradictory answer-trace states", () => {
+    expect(RecallAnswerShapePlanSchema.safeParse({
+      schema_version: 1,
+      status: "high_confidence",
+      shape: null,
+      target_terms: [],
+      relation_terms: []
+    }).success).toBe(false);
+    expect(RecallCandidateAnswerSupportSchema.safeParse({
+      schema_version: 1,
+      shape: "place",
+      status: "compatible",
+      eligible: false,
+      value_supported: false,
+      target_supported: false,
+      relation_supported: false,
+      matched_target_terms: [],
+      matched_relation_terms: []
+    }).success).toBe(false);
+    expect(RecallDeepHeadTraceSchema.safeParse({
+      lexical_agreement: 0.9,
+      evidence_agreement: 0.5,
+      resolved_evidence: 0.2,
+      embedding_signal: null,
+      fusion_baseline_used: false,
+      resolved_score: 0.2,
+      score_source: "inactive"
+    }).success).toBe(false);
   });
 
   it("binds effective ranking switches into paired provenance", () => {

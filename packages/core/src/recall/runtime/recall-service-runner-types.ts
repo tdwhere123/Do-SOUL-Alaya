@@ -6,6 +6,7 @@ import type {
 } from "../delivery/fine-assessment.js";
 import type { loadActiveConstraints } from "./orchestration.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
+import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type { EmbeddingCoarseInjectionResult } from "./recall-service-runner-coarse.js";
 import type { RecallTimeFilter } from "./recall-service-helpers.js";
 import type {
@@ -52,6 +53,7 @@ export interface PreparedRecallRequest {
   readonly tokenEstimator: TokenEstimator;
   readonly queryText: string | null;
   readonly queryProbes: Readonly<RecallQueryProbes>;
+  readonly answerShapePlan: Readonly<RecallAnswerShapePlan> | null;
   readonly referenceTime: string;
   // Only an explicit caller value selects a historical projection. The normal
   // current-recall clock must keep using the active runtime projection.

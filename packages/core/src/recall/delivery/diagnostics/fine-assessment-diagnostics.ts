@@ -53,6 +53,7 @@ export function createFineAssessmentDiagnostic(
     source_channels: buildSourceChannels(candidate, admissionPlanes),
     path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])]),
     ...buildAnswerFeatureDiagnostics(candidate, context),
+    ...buildDecisionTraceDiagnostics(candidate, context),
     ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank, selectionOrder),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>"
   });
@@ -138,8 +139,26 @@ function buildAnswerFeatureDiagnostics(
     answer_features: buildRecallCandidateAnswerFeatures(
       candidate.entry,
       candidate.objectKind ?? "memory_entry",
-      evidenceGist
+      evidenceGist,
+      context.answerShapePlan ?? undefined
     )
+  };
+}
+
+function buildDecisionTraceDiagnostics(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+) {
+  if (!context.captureAnswerFeatures) return {};
+  const candidateKey = candidate.fusion.candidate_key;
+  const deepHeadTrace = context.deepHeadTraceByCandidateKey.get(candidateKey);
+  const coverageMarginalGain =
+    context.coverageMarginalGainByCandidateKey.get(candidateKey);
+  return {
+    ...(deepHeadTrace === undefined ? {} : { deep_head_trace: deepHeadTrace }),
+    ...(coverageMarginalGain === undefined
+      ? {}
+      : { coverage_marginal_gain: coverageMarginalGain })
   };
 }
 

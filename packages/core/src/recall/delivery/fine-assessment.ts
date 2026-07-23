@@ -30,7 +30,11 @@ import {
   resolveFineAssessmentCandidateBudget,
   type FineAssessmentPruneResult
 } from "./fine-assessment-prune.js";
-import { resolveDeepHeadScores } from "../rerank/deep-head.js";
+import {
+  resolveDeepHeadAssessment,
+  resolveDeepHeadScores,
+  type RecallDeepHeadAssessment
+} from "../rerank/deep-head.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -127,11 +131,12 @@ export function deliverFineAssessment(
   // CE present → scores own public relevance. Lightweight head reorders only so
   // fused_score / 8-factor governance stay visible on RecallCandidate.
   const replacePublicRelevance = answerRelevanceScores.size > 0;
-  const deepHeadScores = resolveDeepHeadScores({
-    candidates: preparation.candidates,
-    answerRelevanceScores,
-    supplementaryData: params.supplementaryData
-  });
+  const deepHead = resolveDeliveryDeepHead(
+    params,
+    preparation,
+    answerRelevanceScores
+  );
+  const deepHeadScores = deepHead.scores;
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
     replacePublicRelevance
   });
@@ -155,7 +160,8 @@ export function deliverFineAssessment(
       ? params.finalAuthorityMaxHeadDrop
       : undefined,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
-    captureAnswerFeatures: params.captureAnswerFeatures
+    captureAnswerFeatures: params.captureAnswerFeatures,
+    deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey
   });
   return Object.freeze({
     ...selected,
@@ -165,6 +171,25 @@ export function deliverFineAssessment(
     fineEvaluated: preparation.fineEvaluated,
     finePrunedCount: preparation.finePrunedCount,
     finePriorityOverflowCount: preparation.finePriorityOverflowCount
+  });
+}
+
+function resolveDeliveryDeepHead(
+  params: FineAssessParams,
+  preparation: FineAssessmentPreparation,
+  answerRelevanceScores: ReadonlyMap<string, number>
+): RecallDeepHeadAssessment {
+  const input = {
+    candidates: preparation.candidates,
+    answerRelevanceScores,
+    supplementaryData: params.supplementaryData
+  };
+  if (params.captureAnswerFeatures === true) {
+    return resolveDeepHeadAssessment(input);
+  }
+  return Object.freeze({
+    scores: resolveDeepHeadScores(input),
+    traceByCandidateKey: new Map()
   });
 }
 

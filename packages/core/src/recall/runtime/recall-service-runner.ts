@@ -12,6 +12,7 @@ import {
   resolvePolicy
 } from "./orchestration.js";
 import { compileRecallQueryProbes } from "../query/recall-query-probes.js";
+import { compileRecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import {
   finalizeRecallCandidateDiagnostics,
   resolveEmbeddingProviderDegradationReason,
@@ -103,6 +104,9 @@ async function prepareRecallRequest(
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);
   const queryProbes = compileRecallQueryProbes(queryText);
+  const answerShapePlan = params.diagnosticCapture === "answer_features"
+    ? compileRecallAnswerShapePlan(queryProbes)
+    : null;
   const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
   const [slots, activeConstraints] = await Promise.all([
     context.dependencies.slotRepo.findByWorkspace(params.workspaceId),
@@ -118,6 +122,7 @@ async function prepareRecallRequest(
     tokenEstimator,
     queryText,
     queryProbes,
+    answerShapePlan,
     referenceTime,
     temporalProjectionAsOf: params.referenceTime,
     activeConstraints,
