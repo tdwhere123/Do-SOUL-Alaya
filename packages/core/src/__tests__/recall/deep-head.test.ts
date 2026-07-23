@@ -57,6 +57,7 @@ function fusedCandidate(input: {
   readonly embedding?: number;
   readonly evidenceFts?: number;
   readonly contributions?: Partial<Record<string, number>>;
+  readonly ranks?: Partial<RecallFusionBreakdown["per_stream_rank"]>;
 }): DeliverySelectionCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(input.objectId);
   const fusion: RecallFusionBreakdown = Object.freeze({
@@ -69,6 +70,14 @@ function fusedCandidate(input: {
           fused_rank_contribution_per_stream: Object.freeze({
             ...breakdown.fused_rank_contribution_per_stream,
             ...input.contributions
+          })
+        }),
+    ...(input.ranks === undefined
+      ? {}
+      : {
+          per_stream_rank: Object.freeze({
+            ...breakdown.per_stream_rank,
+            ...input.ranks
           })
         })
   });
@@ -391,7 +400,8 @@ describe("deep head", () => {
       objectId: "lexical-rescue",
       fusedScore: 0.08,
       fusedRank: 2,
-      contributions: { path_expansion: 0.016, lexical_fts: 0.012 }
+      contributions: { path_expansion: 0.016, lexical_fts: 0.012 },
+      ranks: { lexical_fts: 2 }
     });
     const conflictOnly = fusedCandidate({
       objectId: "conflict-only",
@@ -403,13 +413,15 @@ describe("deep head", () => {
       objectId: "lexical-peer",
       fusedScore: 0.04,
       fusedRank: 4,
-      contributions: { lexical_fts: 0.013, existing_score: 0.015 }
+      contributions: { lexical_fts: 0.013, existing_score: 0.015 },
+      ranks: { lexical_fts: 4 }
     });
     const seed = fusedCandidate({
       objectId: "path-seed",
       fusedScore: 0.09,
       fusedRank: 1,
-      contributions: { path_expansion: 0.015, lexical_fts: 0.014 }
+      contributions: { path_expansion: 0.015, lexical_fts: 0.014 },
+      ranks: { lexical_fts: 1 }
     });
     const scores = computeLightweightDeepHeadScores(
       [seed, lexicalRescue, conflictOnly, lexicalPeer],

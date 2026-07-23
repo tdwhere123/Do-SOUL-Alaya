@@ -9,7 +9,8 @@ import { compileRecallQueryProbes } from
 import { computeLightweightDeepHeadScores } from
   "../../../recall/rerank/deep-head.js";
 import type {
-  RecallFusionStreamContributions
+  RecallFusionStreamContributions,
+  RecallFusionStreamRanks
 } from "../../../recall/runtime/recall-service-types.js";
 import { createMemoryEntry } from "../recall-service-test-fixtures.js";
 
@@ -50,6 +51,65 @@ describe("deep-head query-evidence contract", () => {
     expect(ordinaryScores.get(temporal.fusion.candidate_key)).toBe(0);
     expect(temporalScores.get(temporal.fusion.candidate_key)).toBeCloseTo(0.6);
   });
+
+  it("does not let subject alignment preserve fused mass in an embedding-cold pool", () => {
+    const direct = candidate(
+      "direct",
+      0.4,
+      { lexical_fts: 0.02 },
+      undefined,
+      "workspace_local",
+      { lexical_fts: 1 }
+    );
+    const contextual = candidate(
+      "contextual",
+      0.9,
+      { subject_alignment: 0.02 },
+      undefined,
+      "workspace_local",
+      { subject_alignment: 1 }
+    );
+
+    const scores = computeLightweightDeepHeadScores(
+      [direct, contextual],
+      {
+        ...supplementary(null),
+        ftsRanks: { direct: 0.9 },
+        trigramFtsRanks: { direct: 0.81 }
+      }
+    );
+
+    expect(scores.get(direct.fusion.candidate_key)).toBeCloseTo(0.4);
+    expect(scores.get(contextual.fusion.candidate_key)).toBe(0);
+  });
+
+  it("keeps embedding-cold fused mass inside the delivery head", () => {
+    const head = candidate(
+      "head",
+      0.4,
+      { lexical_fts: 0.02 },
+      undefined,
+      "workspace_local",
+      { lexical_fts: 2 }
+    );
+    const tail = candidate(
+      "tail",
+      0.9,
+      { evidence_fts: 0.02 },
+      undefined,
+      "workspace_local",
+      { evidence_fts: 3 }
+    );
+
+    const scores = computeLightweightDeepHeadScores(
+      [head, tail],
+      supplementary(null),
+      2
+    );
+
+    expect(scores.get(head.fusion.candidate_key)).toBeCloseTo(0.4);
+    expect(scores.get(tail.fusion.candidate_key)).toBe(0);
+  });
 });
 
 function candidate(
@@ -57,7 +117,8 @@ function candidate(
   fusedScore: number,
   contributions: Partial<RecallFusionStreamContributions>,
   embedding?: number,
-  originPlane: "workspace_local" | "global" = "workspace_local"
+  originPlane: "workspace_local" | "global" = "workspace_local",
+  ranks: Partial<RecallFusionStreamRanks> = {}
 ): DeliverySelectionCandidate {
   const breakdown = buildEmptyRecallFusionBreakdown(objectId);
   return Object.freeze({
@@ -75,6 +136,10 @@ function candidate(
       fused_rank_contribution_per_stream: Object.freeze({
         ...breakdown.fused_rank_contribution_per_stream,
         ...contributions
+      }),
+      per_stream_rank: Object.freeze({
+        ...breakdown.per_stream_rank,
+        ...ranks
       })
     })
   });

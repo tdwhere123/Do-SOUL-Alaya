@@ -130,7 +130,8 @@ export function deliverFineAssessment(
   const deepHeadScores = resolveDeepHeadScores({
     candidates: preparation.candidates,
     answerRelevanceScores,
-    supplementaryData: params.supplementaryData
+    supplementaryData: params.supplementaryData,
+    maxEntries: params.policy.fine_assessment.budgets.max_entries
   });
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
     replacePublicRelevance
