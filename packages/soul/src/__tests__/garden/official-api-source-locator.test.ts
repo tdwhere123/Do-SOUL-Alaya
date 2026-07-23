@@ -355,6 +355,9 @@ describe("official API assertion catalog locator", () => {
     ["I quit my job, which was a lie.", "I quit my job"],
     ["I quit my job, which turned out to be a misunderstanding.", "I quit my job"],
     ["I quit my job, which I didn't regret.", "I quit my job"],
+    ["I quit my job, which was a nice surprise, but that was a lie.", "I quit my job"],
+    ["I redeemed a coupon, which was a pleasant surprise until I realized I never did.", "I redeemed a coupon"],
+    ["I redeemed a coupon, which was a great surprise because it turned out to be fake.", "I redeemed a coupon"],
     [
       "I redeemed a coupon last Sunday, which surprised me because I had forgotten it was fake.",
       "I redeemed a coupon last Sunday"

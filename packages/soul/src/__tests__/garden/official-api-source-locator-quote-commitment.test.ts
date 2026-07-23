@@ -36,7 +36,7 @@ describe("official API locator quote commitment", () => {
 
     expect(formation.entries[0]).toMatchObject({
       disposition: "rejected",
-      reason: "matched_text_absent"
+      reason: "matched_text_ambiguous"
     });
   });
 
