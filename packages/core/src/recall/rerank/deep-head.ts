@@ -5,10 +5,7 @@ import type {
 } from "../runtime/recall-service-types.js";
 import { isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import { readObservedUnitScore } from "../scoring/signals/observed-unit-score.js";
-import {
-  hasNonEmbeddingQueryEvidenceRank,
-  hasQueryEvidenceContribution
-} from "../scoring/query-evidence-support.js";
+import { hasQueryEvidenceContribution } from "../scoring/query-evidence-support.js";
 
 type DeepHeadSupplementary = Readonly<Pick<
   RecallSupplementaryData,
@@ -26,22 +23,16 @@ export function resolveDeepHeadScores(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
   readonly answerRelevanceScores: ReadonlyMap<string, number>;
   readonly supplementaryData: DeepHeadSupplementary;
-  readonly maxEntries?: number;
 }>): ReadonlyMap<string, number> {
   if (params.answerRelevanceScores.size > 0) {
     return params.answerRelevanceScores;
   }
-  return computeLightweightDeepHeadScores(
-    params.candidates,
-    params.supplementaryData,
-    params.maxEntries ?? params.candidates.length
-  );
+  return computeLightweightDeepHeadScores(params.candidates, params.supplementaryData);
 }
 
 export function computeLightweightDeepHeadScores(
   candidates: readonly DeliverySelectionCandidate[],
-  supplementaryData: DeepHeadSupplementary,
-  maxEntries = candidates.length
+  supplementaryData: DeepHeadSupplementary
 ): ReadonlyMap<string, number> {
   const embeddingObserved = candidates.some(
     (candidate) => embeddingSignal(candidate, supplementaryData) !== null
@@ -55,12 +46,7 @@ export function computeLightweightDeepHeadScores(
     );
   }
   const agreementActive = candidates.some(
-    (candidate) => answerEvidenceSignal(candidate, supplementaryData) > 0 ||
-      hasNonEmbeddingQueryEvidenceRank(
-        candidate.fusion.per_stream_rank,
-        supplementaryData.queryProbes,
-        maxEntries
-      )
+    (candidate) => answerEvidenceSignal(candidate, supplementaryData) > 0
   );
   if (!agreementActive) {
     return new Map();
@@ -68,7 +54,7 @@ export function computeLightweightDeepHeadScores(
   return new Map(
     candidates.map((candidate) => [
       candidate.fusion.candidate_key,
-      coldEmbeddingDeepHeadScore(candidate, supplementaryData, maxEntries)
+      coldEmbeddingDeepHeadScore(candidate, supplementaryData)
     ])
   );
 }
@@ -79,35 +65,21 @@ function lightweightDeepHeadScore(
 ): number {
   const embedding = embeddingSignal(candidate, supplementaryData);
   if (embedding === null) {
-    return missingEmbeddingCandidateScore(candidate, supplementaryData);
+    return coldEmbeddingDeepHeadScore(candidate, supplementaryData);
   }
   return probabilisticOr(embedding, answerEvidenceSignal(candidate, supplementaryData));
 }
 
-function missingEmbeddingCandidateScore(
+// Emb-cold head: keep post-gate fused mass when an independent query lane
+// supports the candidate. Prior-only path/graph/structural piles stay
+// agreement-gated so content-disjoint co-recall edges cannot lead delivery.
+function coldEmbeddingDeepHeadScore(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number {
   if (hasQueryEvidenceContribution(
     candidate.fusion.fused_rank_contribution_per_stream,
     supplementaryData.queryProbes
-  )) {
-    return clamp01(candidate.fusion.fused_score);
-  }
-  return answerEvidenceSignal(candidate, supplementaryData);
-}
-
-// A wholly embedding-cold pool needs answer evidence, not broad scope context.
-// Keep only direct query lanes that can still reach the delivered head.
-function coldEmbeddingDeepHeadScore(
-  candidate: DeliverySelectionCandidate,
-  supplementaryData: DeepHeadSupplementary,
-  maxEntries: number
-): number {
-  if (hasNonEmbeddingQueryEvidenceRank(
-    candidate.fusion.per_stream_rank,
-    supplementaryData.queryProbes,
-    maxEntries
   )) {
     return clamp01(candidate.fusion.fused_score);
   }
