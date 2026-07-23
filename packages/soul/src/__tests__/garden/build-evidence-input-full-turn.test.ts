@@ -60,4 +60,83 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
       occurred_at: "2019-12-31T23:59:59.000Z"
     });
   });
+
+  it("persists a verified User assertion receipt from the production grounding path", () => {
+    const signal = createGroundedGardenSignal();
+    const evidence = buildEvidenceInput(signal, undefined, { fullTurnExcerpt: true });
+
+    expect(evidence).toMatchObject({
+      created_by: "garden_compile",
+      evidence_kind: "conversation_excerpt",
+      evidence_health_state: "verified",
+      gist: signal.raw_payload.full_turn_content
+    });
+    expect(evidence.source_hash)
+      .toMatch(/^sha256:garden-verified-user-assertion-v1:[a-f0-9]{64}$/u);
+  });
+
+  it("does not mint a receipt from a rejected or locator-free Garden payload", () => {
+    const grounded = createGroundedGardenSignal();
+    const { source_locator: _sourceLocator, ...withoutLocator } = grounded.raw_payload;
+    const evidence = buildEvidenceInput(createSignal({
+      ...grounded,
+      raw_payload: withoutLocator
+    }), undefined, { fullTurnExcerpt: true });
+
+    expect(evidence.source_hash).toBeNull();
+    expect(evidence.evidence_health_state).toBe("questionable");
+    expect(evidence.evidence_kind).toBe("inferred");
+  });
+
+  it("does not mint a receipt from contradictory audit fields or a derived gist", () => {
+    const grounded = createGroundedGardenSignal();
+    const contradictory = buildEvidenceInput(createSignal({
+      ...grounded,
+      raw_payload: {
+        ...grounded.raw_payload,
+        source_grounding: {
+          ...grounded.raw_payload.source_grounding as Record<string, unknown>,
+          source_assertion: "I bought my bookshelf from Target."
+        }
+      }
+    }), undefined, { fullTurnExcerpt: true });
+    const derived = buildEvidenceInput(grounded, "derived", { fullTurnExcerpt: true });
+
+    expect(contradictory).toMatchObject({
+      source_hash: null,
+      evidence_health_state: "questionable",
+      evidence_kind: "inferred"
+    });
+    expect(derived.source_hash).toBeNull();
+  });
 });
+
+function createGroundedGardenSignal() {
+  const assertion = "I bought my bookshelf from IKEA.";
+  const sourceCorpus = `User: ${assertion}`;
+  return createSignal({
+    source: "garden_compile",
+    object_kind: "fact",
+    evidence_refs: [],
+    raw_payload: {
+      matched_text: assertion,
+      distilled_fact: assertion,
+      proposed_matched_text: assertion,
+      source_assertion: assertion,
+      source_locator: {
+        contract_version: 2,
+        kind: "assertion_catalog",
+        assertion_id: 1
+      },
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: assertion,
+        proposed_matched_text: assertion,
+        reasons: []
+      },
+      full_turn_content: sourceCorpus
+    }
+  });
+}

@@ -232,6 +232,16 @@ function hasConsistentAnswerSupport(
   if (!support.matched_relation_terms.every((term) => plan.relation_terms.includes(term))) {
     return false;
   }
+  if (
+    support.eligible &&
+    support.status !== "observation_only" &&
+    support.authority === undefined
+  ) return false;
+  const authorityRef = support.authority?.evidence_ref ?? null;
+  if (
+    authorityRef !== null &&
+    !candidate.answer_features!.evidence_refs.includes(authorityRef)
+  ) return false;
   if (!support.eligible || support.status === "observation_only") return true;
   const expectedRelationSupport = plan.relation_terms.length === 0 ||
     support.matched_relation_terms.length > 0;

@@ -54,7 +54,19 @@ const RecallCandidateAnswerSupportFieldsSchema = z
     target_supported: z.boolean(),
     relation_supported: z.boolean(),
     matched_target_terms: z.array(z.string()).readonly(),
-    matched_relation_terms: z.array(z.string()).readonly()
+    matched_relation_terms: z.array(z.string()).readonly(),
+    authority: z.object({
+      schema_version: z.literal(1),
+      provenance_status: z.enum(["verified_user_assertion", "unverified"]),
+      subject_status: z.enum(["bound", "conflicted", "unknown"]),
+      target_status: z.enum(["bound", "partial", "missing"]),
+      relation_status: z.enum(["bound", "conflicted", "missing"]),
+      event_status: z.enum(["asserted", "prospective", "negated", "reversed"]),
+      time_status: z.enum(["not_requested", "compatible", "conflicted", "unknown"]),
+      binding_status: z.enum(["unique", "missing_or_ambiguous"]),
+      behavior_eligible: z.boolean(),
+      evidence_ref: z.string().nullable()
+    }).strict().readonly().optional()
   })
   .strict();
 
@@ -67,6 +79,7 @@ export const RecallCandidateAnswerSupportSchema =
   .superRefine((support, context) => {
     validateSupportFlags(support, context);
     validateSupportStatus(support, context);
+    validateSupportAuthority(support, context);
   })
   .readonly();
 
@@ -140,6 +153,33 @@ function validateSupportStatus(
           ? support.eligible && aggregate && noSupport
           : !support.eligible && noSupport;
   if (!valid) addIssue(context, ["status"], "answer-support state is inconsistent");
+}
+
+function validateSupportAuthority(
+  support: CandidateAnswerSupportTrace,
+  context: z.RefinementCtx
+): void {
+  const authority = support.authority;
+  if (authority === undefined) return;
+  const verified = authority.provenance_status === "verified_user_assertion";
+  if (verified !== (authority.evidence_ref !== null)) {
+    addIssue(context, ["authority", "evidence_ref"], "verified authority needs one evidence ref");
+  }
+  if (AGGREGATE_SHAPES.has(support.shape) || !support.eligible) {
+    addIssue(context, ["authority"], "authority is scalar and eligible-memory only");
+    return;
+  }
+  const behaviorEligible = support.value_supported &&
+    verified &&
+    authority.subject_status === "bound" &&
+    authority.target_status === "bound" &&
+    authority.relation_status === "bound" &&
+    authority.event_status === "asserted" &&
+    authority.binding_status === "unique" &&
+    (authority.time_status === "not_requested" || authority.time_status === "compatible");
+  if (authority.behavior_eligible !== behaviorEligible) {
+    addIssue(context, ["authority", "behavior_eligible"], "authority state is inconsistent");
+  }
 }
 
 function validateDeepHeadSource(

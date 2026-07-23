@@ -1,6 +1,7 @@
 import type { MemoryEntry, RecallCandidate } from "@do-soul/alaya-protocol";
-import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
-import { buildRecallCandidateAnswerSupport } from "../query/recall-candidate-answer-support.js";
+import type {
+  RecallCandidateAnswerSupport
+} from "../query/recall-candidate-answer-support.js";
 import type { RecallCandidateAnswerFeatures } from "../runtime/recall-service-types.js";
 
 export const RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS = 8192;
@@ -9,15 +10,12 @@ export function buildRecallCandidateAnswerFeatures(
   entry: Readonly<MemoryEntry>,
   objectKind: RecallCandidate["object_kind"],
   rawEvidenceGist: string | undefined,
-  answerShapePlan?: Readonly<RecallAnswerShapePlan>
+  answerSupport?: Readonly<RecallCandidateAnswerSupport>
 ): Readonly<RecallCandidateAnswerFeatures> {
   if (objectKind === "synthesis_capsule") {
-    return buildSynthesisAnswerFeatures(entry, answerShapePlan);
+    return buildSynthesisAnswerFeatures(entry, answerSupport);
   }
   const gist = normalizeEvidenceGist(rawEvidenceGist);
-  const answerSupport = answerShapePlan === undefined
-    ? null
-    : buildRecallCandidateAnswerSupport(answerShapePlan, entry, objectKind);
   return Object.freeze({
     content: entry.content,
     evidence_gist: gist.value,
@@ -38,17 +36,14 @@ export function buildRecallCandidateAnswerFeatures(
     preference_object: entry.preference_object ?? null,
     preference_category: entry.preference_category ?? null,
     preference_polarity: entry.preference_polarity ?? null,
-    ...(answerSupport === null ? {} : { answer_support: answerSupport })
+    ...(answerSupport === undefined ? {} : { answer_support: answerSupport })
   });
 }
 
 function buildSynthesisAnswerFeatures(
   entry: Readonly<MemoryEntry>,
-  answerShapePlan: Readonly<RecallAnswerShapePlan> | undefined
+  answerSupport: Readonly<RecallCandidateAnswerSupport> | undefined
 ): Readonly<RecallCandidateAnswerFeatures> {
-  const answerSupport = answerShapePlan === undefined
-    ? null
-    : buildRecallCandidateAnswerSupport(answerShapePlan, entry, "synthesis_capsule");
   return Object.freeze({
     content: entry.content,
     evidence_gist: null,
@@ -69,7 +64,7 @@ function buildSynthesisAnswerFeatures(
     preference_object: null,
     preference_category: null,
     preference_polarity: null,
-    ...(answerSupport === null ? {} : { answer_support: answerSupport })
+    ...(answerSupport === undefined ? {} : { answer_support: answerSupport })
   });
 }
 

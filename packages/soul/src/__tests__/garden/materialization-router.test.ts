@@ -146,7 +146,7 @@ describe("MaterializationRouter routing and grounding", () => {
 
     expect(router.route(signal)).toMatchObject({
       kind: "deferred",
-      routing_reason: "garden source grounding failed: source_grounding_rejected"
+      routing_reason: "garden source grounding failed: matched_text_absent"
     });
     await router.materializeSignal(signal);
     expect(deps.memoryService.create).not.toHaveBeenCalled();

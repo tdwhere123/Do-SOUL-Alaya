@@ -50,4 +50,13 @@ describe("recall answer-shape plan", () => {
       relation_terms: []
     });
   });
+
+  it("does not leak auxiliaries into answer targets", () => {
+    const plan = compileRecallAnswerShapePlan(
+      compileRecallQueryProbes("Where did I buy my new bookshelf from?")
+    );
+
+    expect(plan.target_terms).toContain("bookshelf");
+    expect(plan.target_terms).not.toContain("did");
+  });
 });

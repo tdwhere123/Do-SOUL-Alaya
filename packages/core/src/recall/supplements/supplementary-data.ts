@@ -23,10 +23,15 @@ import { computeMaxWeightTransferAmount } from "../scoring/scoring.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
 import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
+import {
+  collectRecallEvidenceContexts
+} from "./evidence/evidence-contexts.js";
+import type {
+  RecallVerifiedUserAssertionContext
+} from "../query/recall-user-assertion-context.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
-const MAX_REFS_PER_MEMORY = 8;
 
 interface CollectSupplementaryDataParams {
   readonly dependencies: Pick<
@@ -95,6 +100,8 @@ export async function collectSupplementaryData(
     recallsEdgeCount: coldMetrics.recallsEdgeCount,
     weightTransferAmount: coldMetrics.weightTransferAmount,
     evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
+    verifiedUserAssertionContextsByMemoryId:
+      evidenceAndGovernance.verifiedUserAssertionContextsByMemoryId,
     governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
     pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
     querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
@@ -159,12 +166,13 @@ async function collectEvidenceAndGovernanceData(
   candidates: readonly Readonly<MemoryEntry>[]
 ): Promise<Readonly<{
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  readonly verifiedUserAssertionContextsByMemoryId: Readonly<
+    Record<string, Readonly<RecallVerifiedUserAssertionContext>>
+  >;
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
   readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
 }>> {
-  // Coverage-aware delivery selects on gist identity; collect whenever the
-  // evidence port can answer, not only for deep diagnostic capture.
-  const evidenceGistsByMemoryId = await collectEvidenceGistsByMemoryId({
+  const evidenceContexts = await collectRecallEvidenceContexts({
     dependencies: params.dependencies,
     warn: params.warn,
     workspaceId: params.workspaceId,
@@ -180,7 +188,7 @@ async function collectEvidenceAndGovernanceData(
     candidates
   });
   return Object.freeze({
-    evidenceGistsByMemoryId,
+    ...evidenceContexts,
     governanceCeilingByMemoryId: governanceDerivations.governanceCeilingByMemoryId,
     pathInflowByTarget: governanceDerivations.pathInflowByTarget
   });
@@ -312,155 +320,6 @@ function computeColdGraphPathMetrics(
     recallsEdgeCount,
     weightTransferAmount: computeMaxWeightTransferAmount({ candidates: params.candidates, policy: params.policy, graphAndPathColdScore, warn: params.warn })
   });
-}
-
-async function collectEvidenceGistsByMemoryId(params: {
-  readonly dependencies: Pick<RecallServiceDependencies, "evidenceSearchPort">;
-  readonly warn: RecallServiceWarnPort;
-  readonly workspaceId: string;
-  readonly candidates: readonly Readonly<MemoryEntry>[];
-  readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
-  readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
-}): Promise<Readonly<Record<string, string>>> {
-  const evidenceSearchPort = params.dependencies.evidenceSearchPort;
-  if (evidenceSearchPort?.findByIds === undefined) {
-    return Object.freeze({});
-  }
-  const relevantCandidates = collectRelevantEvidenceCandidates(
-    params.candidates,
-    params.coarseEvidenceFtsRanks
-  );
-  if (relevantCandidates.length === 0) {
-    return Object.freeze({});
-  }
-  const evidenceIds = collectRelevantEvidenceIds(
-    relevantCandidates,
-    params.coarseEvidenceFtsRanksPerRef
-  );
-  if (evidenceIds.length === 0) {
-    return Object.freeze({});
-  }
-  try {
-    const evidenceCapsules = await evidenceSearchPort.findByIds(params.workspaceId, evidenceIds);
-    const gistById = buildEvidenceGistById(params.workspaceId, evidenceCapsules);
-    return buildMemoryEvidenceGists(
-      relevantCandidates,
-      params.coarseEvidenceFtsRanksPerRef,
-      gistById
-    );
-  } catch (error) {
-    params.warn("evidence gist lookup for coverage selection failed", {
-      workspace_id: params.workspaceId,
-      operation: "evidence_gist_lookup_for_coverage",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
-    return Object.freeze({});
-  }
-}
-
-function collectRelevantEvidenceCandidates(
-  candidates: readonly Readonly<MemoryEntry>[],
-  coarseEvidenceFtsRanks: Readonly<Record<string, number>>
-): readonly Readonly<MemoryEntry>[] {
-  // Only candidates that landed via an evidence FTS hit; bounds findByIds instead of scanning every memory's full evidence_refs.
-  return candidates.filter(
-    (entry) =>
-      entry.evidence_refs.length > 0 &&
-      (coarseEvidenceFtsRanks[entry.object_id] ?? 0) > 0
-  );
-}
-
-function collectRelevantEvidenceIds(
-  candidates: readonly Readonly<MemoryEntry>[],
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
-): readonly string[] {
-  // invariant: findByIds payload bounded by the evidence-FTS hit set, not the candidate's full evidence_refs cardinality.
-  return uniqueStrings(
-    candidates.flatMap((entry) =>
-      selectRelevantEvidenceRefs(entry, coarseEvidenceFtsRanksPerRef)
-    )
-  );
-}
-
-function selectRelevantEvidenceRefs(
-  entry: Readonly<MemoryEntry>,
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>
-): readonly string[] {
-  // Bound diagnostic enrichment independently of a memory's evidence cardinality.
-  const hitRefs = entry.evidence_refs.filter(
-    (ref) => (coarseEvidenceFtsRanksPerRef[ref] ?? 0) > 0
-  );
-  if (hitRefs.length <= MAX_REFS_PER_MEMORY) {
-    return hitRefs;
-  }
-  return [...hitRefs]
-    .sort(
-      (left, right) =>
-        (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
-        (coarseEvidenceFtsRanksPerRef[left] ?? 0)
-    )
-    .slice(0, MAX_REFS_PER_MEMORY);
-}
-
-function buildEvidenceGistById(
-  workspaceId: string,
-  evidenceCapsules: readonly Readonly<{ readonly workspace_id: string; readonly object_id: string; readonly gist?: string | null }>[]
-): ReadonlyMap<string, string> {
-  const gistById = new Map<string, string>();
-  for (const evidence of evidenceCapsules) {
-    if (evidence.workspace_id !== workspaceId) {
-      continue;
-    }
-    const gist = evidence.gist?.trim() ?? "";
-    if (gist.length > 0) {
-      gistById.set(evidence.object_id, gist);
-    }
-  }
-  return gistById;
-}
-
-function buildMemoryEvidenceGists(
-  candidates: readonly Readonly<MemoryEntry>[],
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
-  gistById: ReadonlyMap<string, string>
-): Readonly<Record<string, string>> {
-  const gistsByMemory: Record<string, string> = {};
-  for (const entry of candidates) {
-    const gist =
-      pickRankedEvidenceGist(entry, coarseEvidenceFtsRanksPerRef, gistById) ??
-      pickFallbackEvidenceGist(entry, gistById);
-    if (gist !== undefined) {
-      gistsByMemory[entry.object_id] = gist;
-    }
-  }
-  return Object.freeze(gistsByMemory);
-}
-
-function pickRankedEvidenceGist(
-  entry: Readonly<MemoryEntry>,
-  coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>,
-  gistById: ReadonlyMap<string, string>
-): string | undefined {
-  // invariant: gist from the highest-ranked ref (per coarseEvidenceFtsRanksPerRef); stable by evidence_refs order on ties.
-  const orderedRefs = [...entry.evidence_refs].sort(
-    (left, right) =>
-      (coarseEvidenceFtsRanksPerRef[right] ?? 0) -
-      (coarseEvidenceFtsRanksPerRef[left] ?? 0)
-  );
-  return orderedRefs
-    .map((ref) => gistById.get(ref))
-    .find((gist) => gist !== undefined && gist.length > 0);
-}
-
-function pickFallbackEvidenceGist(
-  entry: Readonly<MemoryEntry>,
-  gistById: ReadonlyMap<string, string>
-): string | undefined {
-  // fallback: aggregate rank > 0 but no per-ref rank; first-non-empty-gist rule for producers that emit only the aggregate.
-  return entry.evidence_refs
-    .map((ref) => gistById.get(ref))
-    .find((gist) => gist !== undefined && gist.length > 0);
 }
 
 async function mapWithConcurrency<T, R>(

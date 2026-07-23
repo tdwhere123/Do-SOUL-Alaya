@@ -135,12 +135,15 @@ function buildAnswerFeatureDiagnostics(
   const evidenceGist = isWorkspaceMemoryCandidate(candidate)
     ? context.supplementaryData.evidenceGistsByMemoryId[candidate.entry.object_id]
     : undefined;
+  const answerSupport = context.answerSupportByCandidateKey.get(
+    candidate.fusion.candidate_key
+  );
   return {
     answer_features: buildRecallCandidateAnswerFeatures(
       candidate.entry,
       candidate.objectKind ?? "memory_entry",
       evidenceGist,
-      context.answerShapePlan ?? undefined
+      answerSupport
     )
   };
 }

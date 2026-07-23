@@ -1,16 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
   CandidateMemorySignalSchema,
+  ControlPlaneObjectKind,
+  RetentionPolicy,
   RunMode,
   RunState,
   ScopeClass,
   WorkspaceKind,
   WorkspaceState,
   type CandidateMemorySignal,
-  type EventLogEntry
+  type EventLogEntry,
+  type MemoryEntry,
+  type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { EvidenceService, MemoryService } from "@do-soul/alaya-core";
-import { InMemoryHandoffGapHandler, MaterializationRouter } from "@do-soul/alaya-soul";
+import {
+  EvidenceService,
+  MemoryService,
+  RecallService,
+  type RecallServiceDependencies
+} from "@do-soul/alaya-core";
+import {
+  InMemoryHandoffGapHandler,
+  MaterializationRouter,
+  OfficialApiGardenProvider
+} from "@do-soul/alaya-soul";
 import {
   SqliteEnrichPendingRepo,
   SqliteEventLogRepo,
@@ -63,7 +76,156 @@ describe("projection routing daemon wiring", () => {
       database.close();
     }
   });
+
+  it.each([
+    {
+      shape: "place",
+      source: [
+        "I wanted to create more space in my apartment.",
+        "The new bookshelf is from IKEA, and I'm really happy with it."
+      ].join(" "),
+      assertionNeedle: "bookshelf is from IKEA",
+      query: "Where did I buy my new bookshelf from?"
+    },
+    {
+      shape: "duration",
+      source: [
+        "Speaking of waiting, my asylum application was finally approved.",
+        "Over a year of uncertainty was really tough."
+      ].join(" "),
+      assertionNeedle: "Over a year",
+      query: "How long did I wait for the decision on my asylum application?"
+    }
+  ])("carries an official grounded User $shape assertion through SQLite into recall authority", async (
+    scenario
+  ) => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const harness = await createHarness(database, { projectionRoutingEnabled: true });
+      const signal = await compileRecallSignal(scenario.source, scenario.assertionNeedle);
+      const materialized = await harness.router.materializeSignal(signal);
+
+      expect(materialized.success).toBe(true);
+      const [memory] = await harness.memoryRepo.findByWorkspaceId("workspace-1");
+      const [evidence] = await harness.evidenceRepo.findByWorkspaceId("workspace-1");
+      expect(memory?.evidence_refs).toEqual([evidence?.object_id]);
+      expect(evidence).toMatchObject({
+        created_by: "garden_compile",
+        evidence_kind: "conversation_excerpt",
+        evidence_health_state: "verified"
+      });
+
+      const recallService = createRecallService(harness.memoryRepo, harness.evidenceRepo);
+      const result = await recallService.recall({
+        taskSurface: recallSurface(scenario.query),
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strategy: "build",
+        diagnosticCapture: "answer_features"
+      });
+      const diagnostic = result.diagnostics?.candidates.find(
+        (row) => row.object_id === memory?.object_id
+      );
+
+      expect(result.candidates.map((row) => row.object_id)).toContain(memory?.object_id);
+      expect(diagnostic).toMatchObject({
+        final_rank: 1,
+        answer_features: {
+          answer_support: {
+            shape: scenario.shape,
+            authority: {
+              provenance_status: "verified_user_assertion",
+              behavior_eligible: true,
+              evidence_ref: evidence?.object_id
+            }
+          }
+        }
+      });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("moves a persisted verified answer from public rank six into slot five", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const harness = await createHarness(database, { projectionRoutingEnabled: true });
+      const source = [
+        "I wanted to create more space in my apartment.",
+        "The new bookshelf is from IKEA, and I'm really happy with it."
+      ].join(" ");
+      const signal = await compileRecallSignal(source, "bookshelf is from IKEA");
+      const materialized = await harness.router.materializeSignal(signal);
+
+      expect(materialized.success).toBe(true);
+      const [answer] = await harness.memoryRepo.findByWorkspaceId("workspace-1");
+      const [evidence] = await harness.evidenceRepo.findByWorkspaceId("workspace-1");
+      if (answer === undefined || evidence === undefined) {
+        throw new Error("persisted verified answer missing");
+      }
+      await seedHigherRankedFillers(harness.memoryRepo, answer);
+
+      const result = await createRecallService(
+        harness.memoryRepo,
+        harness.evidenceRepo
+      ).recall({
+        taskSurface: recallSurface("Where did I buy my new bookshelf from?"),
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strategy: "build",
+        diagnosticCapture: "answer_features"
+      });
+      const diagnostic = result.diagnostics?.candidates.find(
+        (row) => row.object_id === answer.object_id
+      );
+      const publicHead = [...(result.diagnostics?.candidates ?? [])]
+        .filter((row) => row.final_rank !== null)
+        .sort((left, right) => left.fused_rank - right.fused_rank)
+        .slice(0, 4)
+        .map((row) => row.object_id);
+
+      expect(diagnostic).toMatchObject({
+        fused_rank: 6,
+        final_rank: 5,
+        answer_features: {
+          answer_support: {
+            authority: {
+              behavior_eligible: true,
+              evidence_ref: evidence.object_id
+            }
+          }
+        }
+      });
+      expect(result.candidates.slice(0, 4).map((row) => row.object_id)).toEqual(publicHead);
+      expect(result.candidates[4]?.object_id).toBe(answer.object_id);
+    } finally {
+      database.close();
+    }
+  });
 });
+
+async function seedHigherRankedFillers(
+  memoryRepo: SqliteMemoryEntryRepo,
+  answer: Readonly<MemoryEntry>
+): Promise<void> {
+  const ids = [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+    "33333333-3333-4333-8333-333333333333",
+    "40000000-0000-4000-8000-000000000000",
+    "41111111-1111-4111-8111-111111111111"
+  ];
+  for (const [index, objectId] of ids.entries()) {
+    await memoryRepo.create({
+      ...answer,
+      object_id: objectId,
+      content: `I bought my new bookshelf from Store${index + 1}.`,
+      activation_score: 1,
+      retention_score: 1,
+      confidence: 1
+    });
+  }
+}
 
 async function createHarness(
   database: ReturnType<typeof initDatabase>,
@@ -131,10 +293,104 @@ async function createHarness(
     },
     enrichPendingPort: { enqueue: enqueueEnrichPending },
     handoffGapHandler: new InMemoryHandoffGapHandler(),
-    projectionRoutingEnabled: options.projectionRoutingEnabled
+    projectionRoutingEnabled: options.projectionRoutingEnabled,
+    fullTurnEvidenceExcerpt: true
   });
 
   return { router, memoryRepo, evidenceRepo };
+}
+
+async function compileRecallSignal(
+  source: string,
+  assertionNeedle: string
+): Promise<CandidateMemorySignal> {
+  const provider = new OfficialApiGardenProvider({
+    apiKey: "sk-test",
+    extractor: {
+      extract: async ({ userPrompt }) => {
+        const prompt = JSON.parse(userPrompt) as {
+          source_assertions: readonly { readonly assertion_id: number; readonly text: string }[];
+        };
+        const assertion = prompt.source_assertions.find(({ text }) =>
+          text.includes(assertionNeedle)
+        );
+        if (assertion === undefined) throw new Error("recall assertion missing");
+        const quote = assertion.text.replace(/^User:\s*/u, "");
+        return {
+          rawJson: JSON.stringify({ signals: [{
+            signal_kind: "potential_claim",
+            object_kind: "fact",
+            confidence: 0.9,
+            matched_text: quote,
+            distilled_fact: quote,
+            evidence_refs: [],
+            source_memory_refs: [],
+            source_locator: {
+              contract_version: 2,
+              kind: "assertion_catalog",
+              assertion_id: assertion.assertion_id
+            }
+          }] })
+        };
+      }
+    },
+    generateSignalId: () => "signal-recall"
+  });
+  const [signal] = await provider.compile(source, {
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: null,
+    turn_messages: [{ message_id: "user-1", role: "user", content: source }]
+  });
+  if (signal === undefined) throw new Error("recall signal missing");
+  return signal;
+}
+
+function createRecallService(
+  memoryRepo: SqliteMemoryEntryRepo,
+  evidenceRepo: SqliteEvidenceCapsuleRepo
+): RecallService {
+  const dependencies: RecallServiceDependencies = {
+    now: () => "2026-05-25T00:00:02.000Z",
+    generateRuntimeId: () => "66666666-6666-4666-8666-666666666666",
+    memoryRepo: {
+      findByWorkspaceId: memoryRepo.findByWorkspaceId.bind(memoryRepo),
+      findByDimension: memoryRepo.findByDimension.bind(memoryRepo),
+      findByScopeClass: memoryRepo.findByScopeClass.bind(memoryRepo),
+      searchByKeyword: memoryRepo.searchByKeyword.bind(memoryRepo),
+      searchByKeywordWithinObjectIds: memoryRepo.searchByKeywordWithinObjectIds.bind(memoryRepo),
+      findByEvidenceRefs: memoryRepo.findByEvidenceRefs.bind(memoryRepo)
+    },
+    slotRepo: { findByWorkspace: async () => [] },
+    eventLogRepo: {
+      append: async (entry) => ({
+        ...entry,
+        event_id: "event-recall",
+        created_at: "2026-05-25T00:00:02.000Z",
+        revision: 0
+      }),
+      queryByEntity: async () => []
+    },
+    evidenceSearchPort: {
+      searchByKeyword: evidenceRepo.searchByKeyword.bind(evidenceRepo),
+      findByIds: evidenceRepo.findByIds.bind(evidenceRepo)
+    }
+  };
+  return new RecallService(dependencies);
+}
+
+function recallSurface(displayName: string): TaskObjectSurface {
+  return {
+    runtime_id: "77777777-7777-4777-8777-777777777777",
+    object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+    task_surface_ref: null,
+    expires_at: "2026-05-25T00:30:00.000Z",
+    derived_from: null,
+    retention_policy: RetentionPolicy.SESSION_ONLY,
+    surface_kind: "build",
+    display_name: displayName,
+    context_refs: []
+  };
 }
 
 async function seedWorkspaceRun(

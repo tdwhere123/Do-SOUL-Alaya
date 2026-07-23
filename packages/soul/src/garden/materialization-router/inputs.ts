@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import {
   EvidenceHealthState,
   StorageTier,
+  buildVerifiedUserAssertionReceiptPreimage,
+  formatVerifiedUserAssertionSourceHash,
   type CandidateMemorySignal,
   type EnforcementLevel as EnforcementLevelValue,
   type EvidenceCapsule,
@@ -8,6 +11,7 @@ import {
   type EvidenceKind as EvidenceKindValue
 } from "@do-soul/alaya-protocol";
 import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
+import { resolveGardenSignalGrounding } from "../grounding/signal-source-grounding.js";
 import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,
@@ -151,10 +155,13 @@ export function collectMaterializableSignalMemoryRefs(signal: CandidateMemorySig
   );
 }
 
-function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHealthStateValue {
+function computeEvidenceHealthState(
+  signal: CandidateMemorySignal,
+  hasVerifiedUserAssertionReceipt: boolean
+): EvidenceHealthStateValue {
   // Invariant #16: objects without evidence_refs must default to questionable,
   // not verified. Signals from local heuristics carry no supporting evidence.
-  if (signal.evidence_refs.length === 0) {
+  if (signal.evidence_refs.length === 0 && !hasVerifiedUserAssertionReceipt) {
     return EvidenceHealthState.QUESTIONABLE;
   }
   return EvidenceHealthState.VERIFIED;
@@ -165,9 +172,15 @@ function computeEvidenceHealthState(signal: CandidateMemorySignal): EvidenceHeal
 //   - user_seed / import sources → user_statement (operator-attested origin)
 //   - signals carrying evidence_refs → external_reference (linked anchor)
 //   - everything else (LLM / Garden compile) → inferred (default)
-function pickEvidenceKind(signal: CandidateMemorySignal): EvidenceKindValue {
+function pickEvidenceKind(
+  signal: CandidateMemorySignal,
+  hasVerifiedUserAssertionReceipt: boolean
+): EvidenceKindValue {
   if (signal.source === "user_seed" || signal.source === "import") {
     return "user_statement";
+  }
+  if (hasVerifiedUserAssertionReceipt) {
+    return "conversation_excerpt";
   }
   if (signal.evidence_refs.length > 0) {
     return "external_reference";
@@ -192,10 +205,15 @@ export function buildEvidenceInput(
       ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
          buildSignalSummary(signal))
       : buildSignalSummary(signal);
+  const gist = appendSummarySuffix(excerpt, summarySuffix);
+  const sourceHash = opts?.fullTurnExcerpt === true && summarySuffix === undefined
+    ? buildVerifiedUserAssertionSourceHash(signal, gist)
+    : null;
+  const hasVerifiedUserAssertionReceipt = sourceHash !== null;
 
   return {
     created_by: signal.source,
-    evidence_kind: pickEvidenceKind(signal),
+    evidence_kind: pickEvidenceKind(signal, hasVerifiedUserAssertionReceipt),
     semantic_anchor: {
       topic: buildTopicKey(signal),
       keywords: [...signal.domain_tags],
@@ -205,14 +223,61 @@ export function buildEvidenceInput(
     // supply this through the verified EventLog receipt context.
     event_anchor: opts?.context?.source_event_anchor ?? null,
     physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
-    evidence_health_state: computeEvidenceHealthState(signal),
-    gist: appendSummarySuffix(excerpt, summarySuffix),
+    evidence_health_state: computeEvidenceHealthState(
+      signal,
+      hasVerifiedUserAssertionReceipt
+    ),
+    gist,
     excerpt,
-    source_hash: null,
+    source_hash: sourceHash,
     run_id: signal.run_id,
     workspace_id: signal.workspace_id,
     surface_id: signal.surface_id
   };
+}
+
+function buildVerifiedUserAssertionSourceHash(
+  signal: CandidateMemorySignal,
+  sourceCorpus: string
+): string | null {
+  if (signal.source !== "garden_compile" ||
+      !Object.hasOwn(signal.raw_payload, "source_locator")) return null;
+  const fullTurn = readStringPayload(signal.raw_payload, "full_turn_content");
+  if (fullTurn === null || sourceCorpus !== fullTurn) return null;
+  const sourceGrounding = readRecordPayload(signal.raw_payload, "source_grounding");
+  if (
+    sourceGrounding?.version !== 1 ||
+    sourceGrounding?.status !== "grounded" ||
+    sourceGrounding.content_basis !== "source_assertion"
+  ) return null;
+  const grounding = resolveGardenSignalGrounding(signal);
+  if (grounding.status !== "grounded") return null;
+  const storedAssertion = readStringPayload(signal.raw_payload, "source_assertion");
+  if (
+    storedAssertion !== grounding.assertion ||
+    sourceGrounding.source_assertion !== grounding.assertion ||
+    buildDistilledFact(signal).trim() !== grounding.assertion
+  ) return null;
+  const digest = createHash("sha256")
+    .update(buildVerifiedUserAssertionReceiptPreimage({
+      workspace_id: signal.workspace_id,
+      run_id: signal.run_id,
+      surface_id: signal.surface_id,
+      source_assertion: grounding.assertion,
+      source_corpus: sourceCorpus
+    }), "utf8")
+    .digest("hex");
+  return formatVerifiedUserAssertionSourceHash(digest);
+}
+
+function readRecordPayload(
+  rawPayload: CandidateMemorySignal["raw_payload"],
+  key: string
+): Readonly<Record<string, unknown>> | null {
+  const value = rawPayload[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
 }
 
 function buildSignalPhysicalAnchor(

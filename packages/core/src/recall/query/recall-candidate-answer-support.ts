@@ -3,7 +3,19 @@ import type {
   RecallAnswerShape,
   RecallAnswerShapePlan
 } from "./recall-answer-shape-plan.js";
+import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { splitLexicalTokens } from "./recall-query-probes.js";
+import type {
+  RecallVerifiedUserAssertionContext
+} from "./recall-user-assertion-context.js";
+import {
+  assessRecallScalarBinding,
+  matchRecallRelationTerms,
+  resolveRecallRelationStatus,
+  resolveRecallScalarEventStatus,
+  resolveRecallTargetStatus,
+  supportsRecallScalarValue
+} from "./recall-answer-scalar-binding.js";
 
 export type RecallCandidateAnswerSupportStatus =
   | "compatible"
@@ -11,6 +23,19 @@ export type RecallCandidateAnswerSupportStatus =
   | "unsupported"
   | "observation_only"
   | "ineligible";
+
+export interface RecallCandidateAnswerAuthority {
+  readonly schema_version: 1;
+  readonly provenance_status: "verified_user_assertion" | "unverified";
+  readonly subject_status: "bound" | "conflicted" | "unknown";
+  readonly target_status: "bound" | "partial" | "missing";
+  readonly relation_status: "bound" | "conflicted" | "missing";
+  readonly event_status: "asserted" | "prospective" | "negated" | "reversed";
+  readonly time_status: "not_requested" | "compatible" | "conflicted" | "unknown";
+  readonly binding_status: "unique" | "missing_or_ambiguous";
+  readonly behavior_eligible: boolean;
+  readonly evidence_ref: string | null;
+}
 
 export interface RecallCandidateAnswerSupport {
   readonly schema_version: 1;
@@ -22,27 +47,24 @@ export interface RecallCandidateAnswerSupport {
   readonly relation_supported: boolean;
   readonly matched_target_terms: readonly string[];
   readonly matched_relation_terms: readonly string[];
+  readonly authority?: Readonly<RecallCandidateAnswerAuthority>;
 }
 
-const PLACE_VALUE_CUE =
-  /\b(?:from|at|in|near|by|inside|outside|located\s+in|based\s+in)\s+(?:the\s+)?[\p{L}\p{N}]/iu;
-const DURATION_VALUE_CUE =
-  /\b(?:(?:over|under|about|around|nearly|more\s+than|less\s+than)\s+)?(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|a|an|half)\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b/iu;
+export interface RecallCandidateAnswerSupportContext {
+  readonly queryProbes?: Readonly<RecallQueryProbes>;
+  readonly verifiedUserAssertionContext?: Readonly<RecallVerifiedUserAssertionContext>;
+}
 
-const RELATION_ALIASES: readonly ReadonlySet<string>[] = [
-  new Set(["buy", "bought", "purchase", "purchased", "from"]),
-  new Set(["wait", "waited", "waiting"]),
-  new Set(["attend", "attended", "visit", "visited"]),
-  new Set(["live", "lived", "located", "based"]),
-  new Set(["meet", "met"]),
-  new Set(["redeem", "redeemed"]),
-  new Set(["spend", "spent", "pay", "paid", "cost", "costs"])
-];
+const THIRD_PARTY_SUBJECT =
+  /\bmy\s+(?:friend|sister|brother|mother|father|mom|dad|wife|husband|partner|colleague|coworker|roommate|daughter|son|doctor)\b|\b(?:he|she|they|his|her|their)\b/iu;
+const SELF_SUBJECT =
+  /\b(?:i|me|my|mine|myself)\b|\bi['’](?:m|ve|d|ll)\b/iu;
 
 export function buildRecallCandidateAnswerSupport(
   plan: Readonly<RecallAnswerShapePlan>,
   entry: Readonly<MemoryEntry>,
-  objectKind: RecallCandidate["object_kind"]
+  objectKind: RecallCandidate["object_kind"],
+  context: Readonly<RecallCandidateAnswerSupportContext> = {}
 ): Readonly<RecallCandidateAnswerSupport> | null {
   if (plan.status !== "high_confidence" || plan.shape === null) return null;
   const eligible = objectKind === "memory_entry" && entry.evidence_refs.length > 0;
@@ -50,44 +72,110 @@ export function buildRecallCandidateAnswerSupport(
   if (isAggregateShape(plan.shape)) {
     return emptySupport(plan.shape, "observation_only", true);
   }
-
   const contentTokens = new Set(splitLexicalTokens(entry.content));
   const matchedTargetTerms = plan.target_terms.filter((term) => contentTokens.has(term));
-  const matchedRelationTerms = matchRelationTerms(plan.relation_terms, contentTokens);
-  const valueSupported = supportsScalarValue(plan.shape, entry.content);
+  const matchedRelationTerms = matchRecallRelationTerms(plan.relation_terms, contentTokens);
+  const valueSupported = supportsRecallScalarValue(plan.shape, entry.content);
   const targetSupported = matchedTargetTerms.length > 0;
   const relationSupported =
     plan.relation_terms.length === 0 || matchedRelationTerms.length > 0;
-  const status = valueSupported && targetSupported && relationSupported
-    ? "compatible"
-    : valueSupported ? "value_only" : "unsupported";
   return freezeSupport({
     shape: plan.shape,
-    status,
+    status: valueSupported && targetSupported && relationSupported
+      ? "compatible"
+      : valueSupported ? "value_only" : "unsupported",
     eligible,
     valueSupported,
     targetSupported,
     relationSupported,
     matchedTargetTerms,
-    matchedRelationTerms
+    matchedRelationTerms,
+    authority: buildScalarAuthority(plan, entry, valueSupported, context)
   });
 }
 
-function matchRelationTerms(
-  relationTerms: readonly string[],
-  contentTokens: ReadonlySet<string>
-): readonly string[] {
-  return relationTerms.filter((term) => {
-    if (contentTokens.has(term)) return true;
-    const family = RELATION_ALIASES.find((aliases) => aliases.has(term));
-    return family !== undefined && [...family].some((alias) => contentTokens.has(alias));
+function buildScalarAuthority(
+  plan: Readonly<RecallAnswerShapePlan>,
+  entry: Readonly<MemoryEntry>,
+  valueSupported: boolean,
+  context: Readonly<RecallCandidateAnswerSupportContext>
+): Readonly<RecallCandidateAnswerAuthority> {
+  const verified = isVerifiedContext(entry, context.verifiedUserAssertionContext)
+    ? context.verifiedUserAssertionContext
+    : undefined;
+  const assertionContext = verified?.user_context ?? entry.content;
+  const tokens = new Set(splitLexicalTokens(assertionContext));
+  const binding = assessRecallScalarBinding(
+    plan,
+    context.queryProbes,
+    assertionContext,
+    verified?.assertion_text ?? entry.content
+  );
+  const targetStatus = binding?.target_status ??
+    resolveRecallTargetStatus(plan.target_terms, tokens);
+  const relationStatus = binding?.relation_status ??
+    resolveRecallRelationStatus(plan.relation_terms, tokens);
+  const subjectStatus = binding?.subject_status ??
+    resolveSubjectStatus(context.queryProbes, assertionContext);
+  const eventStatus = binding?.event_status ?? resolveRecallScalarEventStatus(assertionContext);
+  const timeStatus = binding?.time_status ?? resolveTimeStatus(context.queryProbes);
+  const bindingStatus = binding === null ? "missing_or_ambiguous" as const : "unique" as const;
+  const provenanceStatus = verified === undefined
+    ? "unverified" as const
+    : "verified_user_assertion" as const;
+  const behaviorEligible = valueSupported &&
+    provenanceStatus === "verified_user_assertion" &&
+    subjectStatus === "bound" &&
+    targetStatus === "bound" &&
+    relationStatus === "bound" &&
+    eventStatus === "asserted" &&
+    bindingStatus === "unique" &&
+    (timeStatus === "not_requested" || timeStatus === "compatible");
+  return Object.freeze({
+    schema_version: 1,
+    provenance_status: provenanceStatus,
+    subject_status: subjectStatus,
+    target_status: targetStatus,
+    relation_status: relationStatus,
+    event_status: eventStatus,
+    time_status: timeStatus,
+    binding_status: bindingStatus,
+    behavior_eligible: behaviorEligible,
+    evidence_ref: verified?.evidence_ref ?? null
   });
 }
 
-function supportsScalarValue(shape: RecallAnswerShape, content: string): boolean {
-  if (shape === "place") return PLACE_VALUE_CUE.test(content);
-  if (shape === "duration") return DURATION_VALUE_CUE.test(content);
-  return false;
+function isVerifiedContext(
+  entry: Readonly<MemoryEntry>,
+  context: Readonly<RecallVerifiedUserAssertionContext> | undefined
+): context is Readonly<RecallVerifiedUserAssertionContext> {
+  if (
+    context === undefined ||
+    context.schema_version !== 1 ||
+    context.source_role !== "user" ||
+    !entry.evidence_refs.includes(context.evidence_ref) ||
+    context.assertion_text !== entry.content.trim()
+  ) return false;
+  const first = context.user_context.indexOf(context.assertion_text);
+  return first >= 0 &&
+    context.user_context.indexOf(context.assertion_text, first + 1) < 0;
+}
+
+function resolveSubjectStatus(
+  probes: Readonly<RecallQueryProbes> | undefined,
+  text: string
+): RecallCandidateAnswerAuthority["subject_status"] {
+  if (probes?.subject_hints.includes("self_reference") !== true) return "unknown";
+  if (THIRD_PARTY_SUBJECT.test(text)) return "conflicted";
+  return SELF_SUBJECT.test(text) ? "bound" : "unknown";
+}
+
+function resolveTimeStatus(
+  probes: Readonly<RecallQueryProbes> | undefined
+): RecallCandidateAnswerAuthority["time_status"] {
+  const requested = probes?.date_terms ?? [];
+  if (requested.length === 0) return "not_requested";
+  return "unknown";
 }
 
 function isAggregateShape(shape: RecallAnswerShape): boolean {
@@ -120,6 +208,7 @@ function freezeSupport(input: Readonly<{
   relationSupported: boolean;
   matchedTargetTerms: readonly string[];
   matchedRelationTerms: readonly string[];
+  authority?: Readonly<RecallCandidateAnswerAuthority>;
 }>): Readonly<RecallCandidateAnswerSupport> {
   return Object.freeze({
     schema_version: 1,
@@ -130,6 +219,7 @@ function freezeSupport(input: Readonly<{
     target_supported: input.targetSupported,
     relation_supported: input.relationSupported,
     matched_target_terms: Object.freeze([...input.matchedTargetTerms]),
-    matched_relation_terms: Object.freeze([...input.matchedRelationTerms])
+    matched_relation_terms: Object.freeze([...input.matchedRelationTerms]),
+    ...(input.authority === undefined ? {} : { authority: input.authority })
   });
 }

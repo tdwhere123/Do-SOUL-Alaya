@@ -27,6 +27,10 @@ import {
   compileRecallAnswerShapePlan,
   type RecallAnswerShapePlan
 } from "../query/recall-answer-shape-plan.js";
+import {
+  buildRecallCandidateAnswerSupport,
+  type RecallCandidateAnswerSupport
+} from "../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
 import { selectEmbeddingHeadEvictions } from "./admission/embedding-head-dominance.js";
 import {
@@ -34,6 +38,7 @@ import {
   createFineAssessmentDiagnostic
 } from "./diagnostics/fine-assessment-diagnostics.js";
 import { orderWithBoundedHeadDisplacement } from "./final-order/bounded-head-displacement.js";
+import { orderWithVerifiedAnswerSlot } from "./final-order/verified-answer-slot.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -63,7 +68,10 @@ export interface FineAssessmentSelectionContext {
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
   readonly answerRerankedCandidateKeys: ReadonlySet<string>;
   readonly captureAnswerFeatures: boolean;
-  readonly answerShapePlan: Readonly<RecallAnswerShapePlan> | null;
+  readonly answerSupportByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<RecallCandidateAnswerSupport>
+  >;
   readonly deepHeadTraceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly coverageMarginalGainByCandidateKey: Map<string, number>;
   readonly tokenEstimateByCandidateKey: Map<string, number>;
@@ -151,7 +159,7 @@ function orderDeliveredPacket(
   const publicOrder = [...accumulator.selected].sort((left, right) =>
     compareFinalDeliveryOrder(left, right, finalOrder, context.rankByCandidateKey)
   );
-  const candidates = finalOrder === "public_relevance" && maxHeadDrop !== undefined
+  const boundedOrder = finalOrder === "public_relevance" && maxHeadDrop !== undefined
     ? orderWithBoundedHeadDisplacement({
         publicOrder,
         headRankByKey: context.rankByCandidateKey,
@@ -160,6 +168,12 @@ function orderDeliveredPacket(
         protectedRankLimit: context.config.budgets.max_entries
       })
     : publicOrder;
+  const candidates = finalOrder === "public_relevance"
+    ? orderWithVerifiedAnswerSlot({
+        publicOrder: boundedOrder,
+        supportByCandidateKey: context.answerSupportByCandidateKey
+      })
+    : boundedOrder;
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
   const ranked = candidates.map((candidate, index) => {
@@ -235,6 +249,9 @@ function createSelectionContext(
   const answerRelevanceRankByCandidateKey =
     params.answerRelevanceRankByCandidateKey ?? new Map();
   const captureAnswerFeatures = params.captureAnswerFeatures ?? false;
+  const answerShapePlan = compileRecallAnswerShapePlan(
+    params.supplementaryData.queryProbes
+  );
   return Object.freeze({
     config: params.config,
     supplementaryData: params.supplementaryData,
@@ -244,15 +261,41 @@ function createSelectionContext(
     answerRelevanceRankByCandidateKey,
     answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
     captureAnswerFeatures,
-    answerShapePlan: captureAnswerFeatures
-      ? compileRecallAnswerShapePlan(params.supplementaryData.queryProbes)
-      : null,
+    answerSupportByCandidateKey: buildAnswerSupportByCandidateKey(
+      params,
+      answerShapePlan
+    ),
     deepHeadTraceByCandidateKey: captureAnswerFeatures
       ? params.deepHeadTraceByCandidateKey ?? new Map()
       : new Map(),
     coverageMarginalGainByCandidateKey: new Map(),
     tokenEstimateByCandidateKey: new Map()
   });
+}
+
+function buildAnswerSupportByCandidateKey(
+  params: FineAssessmentSelectionParams,
+  plan: Readonly<RecallAnswerShapePlan>
+): ReadonlyMap<string, Readonly<RecallCandidateAnswerSupport>> {
+  const supportByKey = new Map<string, Readonly<RecallCandidateAnswerSupport>>();
+  const contexts =
+    params.supplementaryData.verifiedUserAssertionContextsByMemoryId ?? {};
+  for (const candidate of params.orderedCandidates) {
+    const verifiedUserAssertionContext = isWorkspaceMemoryCandidate(candidate)
+      ? contexts[candidate.entry.object_id]
+      : undefined;
+    const support = buildRecallCandidateAnswerSupport(
+      plan,
+      candidate.entry,
+      candidate.objectKind ?? "memory_entry",
+      {
+        queryProbes: params.supplementaryData.queryProbes,
+        verifiedUserAssertionContext
+      }
+    );
+    if (support !== null) supportByKey.set(candidate.fusion.candidate_key, support);
+  }
+  return supportByKey;
 }
 
 function resolveEmbeddingHeadEvictions(

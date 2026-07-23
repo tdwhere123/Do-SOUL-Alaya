@@ -84,6 +84,14 @@ export interface RecallSupplementaryData {
   readonly weightTransferAmount: number;
   // Evidence capsule gist keyed by memory id — coverage delivery identity + diagnostics.
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  readonly verifiedUserAssertionContextsByMemoryId?: Readonly<
+    Record<
+      string,
+      Readonly<
+        import("../query/recall-user-assertion-context.js").RecallVerifiedUserAssertionContext
+      >
+    >
+  >;
   // invariant: governance ceiling on recall manifestation, keyed by
   // memory_entry.object_id. Derived from each candidate's inbound
   // recall-eligible PathRelations (isPathRecallEligible) via

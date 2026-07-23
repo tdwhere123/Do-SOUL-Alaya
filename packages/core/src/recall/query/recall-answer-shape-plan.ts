@@ -26,6 +26,16 @@ const SUM_CUE =
 const COUNT_CUE = /\bhow many\b/iu;
 
 const ANSWER_OPERATOR_TERMS = new Set([
+  "am",
+  "are",
+  "be",
+  "been",
+  "being",
+  "can",
+  "could",
+  "did",
+  "do",
+  "does",
   "where",
   "how",
   "long",
@@ -59,7 +69,14 @@ const ANSWER_OPERATOR_TERMS = new Set([
   "month",
   "months",
   "year",
-  "years"
+  "years",
+  "may",
+  "might",
+  "should",
+  "was",
+  "were",
+  "will",
+  "would"
 ]);
 
 const RELATION_TERMS = new Set([

@@ -286,7 +286,7 @@ it("uses evidence capsule artifact refs for source proximity when memory refs ar
     expect(diag?.fused_rank_contribution_per_stream.source_proximity).toBeGreaterThan(0);
   });
 
-it("caps per-memory evidence_refs forwarded to findByIds for the gist collector at 8", async () => {
+it("loads every evidence ref needed to fail closed on receipt authority", async () => {
     const { dependencies, findByIds, topRankedRef } = createEvidenceFanoutScenario();
 
     await new RecallService(dependencies).recall({
@@ -297,13 +297,9 @@ it("caps per-memory evidence_refs forwarded to findByIds for the gist collector 
     });
 
     expect(findByIds).toHaveBeenCalled();
-    const callsUnderCap = findByIds.mock.calls
-      .map((call) => call[1] as readonly string[])
-      .filter((ids) => ids.length <= 8);
-    expect(callsUnderCap.length).toBeGreaterThan(0);
-    const cappedCall = callsUnderCap[0]!;
-    expect(cappedCall.length).toBeLessThanOrEqual(8);
-    expect(cappedCall).toContain(topRankedRef);
+    const loadedRefs = findByIds.mock.calls[0]![1] as readonly string[];
+    expect(loadedRefs).toHaveLength(20);
+    expect(loadedRefs).toContain(topRankedRef);
   });
 
 it("keeps final delivery budget filled after source proximity admission", async () => {

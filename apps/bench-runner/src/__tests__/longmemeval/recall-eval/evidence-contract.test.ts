@@ -46,7 +46,7 @@ function completeAnswerFeatures(overrides: Readonly<Record<string, unknown>> = {
     evidence_gist: "Alice said she works as an engineer.",
     evidence_gist_truncated: true,
     domain_tags: ["occupation"],
-    evidence_refs: ["evidence-private-1"],
+    evidence_refs: ["evidence-alice-work"],
     facet_tags: [{ facet: "occupation_work", value: "engineer" }],
     canonical_entities: ["alice", "engineer"],
     projection_schema_version: 1,
@@ -251,7 +251,19 @@ describe("LongMemEval evidence contract", () => {
       target_supported: true,
       relation_supported: true,
       matched_target_terms: ["alice"],
-      matched_relation_terms: ["work"]
+      matched_relation_terms: ["work"],
+      authority: {
+        schema_version: 1,
+        provenance_status: "verified_user_assertion",
+        subject_status: "bound",
+        target_status: "bound",
+        relation_status: "bound",
+        event_status: "asserted",
+        time_status: "not_requested",
+        binding_status: "unique",
+        behavior_eligible: true,
+        evidence_ref: "evidence-alice-work"
+      }
     };
     const answerShapePlan = {
       schema_version: 1,
@@ -386,9 +398,9 @@ describe("LongMemEval evidence contract", () => {
     expect(incomplete.candidate_pool_complete).toBe(false);
     expect(incomplete.cohort_ledger?.evidence_status).toBe("partial");
 
-    const contradictory = diagnostic({
-      id: "q-contradictory-support",
-      gold: ["synthesis-a"],
+    const mismatchedAuthority = diagnostic({
+      id: "q-mismatched-authority",
+      gold: ["gold-a"],
       recallResult: {
         diagnostics: {
           query_probes: {
@@ -405,17 +417,15 @@ describe("LongMemEval evidence contract", () => {
             coarse_pool_size: 1
           },
           candidates: [{
-            object_id: "synthesis-a",
-            object_kind: "synthesis_capsule",
-            candidate_key: "workspace_local:synthesis_capsule:synthesis-a",
+            object_id: "gold-a",
+            object_kind: "memory_entry",
+            candidate_key: "workspace_local:memory_entry:gold-a",
             origin_plane: "workspace_local",
             created_at: "2026-07-11T00:00:00.000Z",
             facet_overlap: 1,
             answer_features: completeAnswerFeatures({
-              answer_support: {
-                ...answerSupport,
-                matched_target_terms: ["mallory"]
-              }
+              evidence_refs: ["evidence-other"],
+              answer_support: answerSupport
             }),
             deep_head_trace: deepHeadTrace,
             coverage_marginal_gain: 0.485,
@@ -426,8 +436,8 @@ describe("LongMemEval evidence contract", () => {
         }
       }
     });
-    expect(contradictory.candidate_pool_complete).toBe(false);
-    expect(contradictory.cohort_ledger?.evidence_status).toBe("partial");
+    expect(mismatchedAuthority.candidate_pool_complete).toBe(false);
+    expect(mismatchedAuthority.cohort_ledger?.evidence_status).toBe("partial");
 
     const stripped = stripReplayCandidatePoolsForGateWrite({
       schema_version: 1,
@@ -463,7 +473,7 @@ describe("LongMemEval evidence contract", () => {
       cohort_ledger: { candidate_pool_complete: false, evidence_status: "partial" }
     });
     expect(JSON.stringify(stripped)).not.toMatch(
-      /where does alice work|Alice works as an engineer|evidence-private-1/u
+      /where does alice work|Alice works as an engineer|evidence-alice-work/u
     );
   });
 
@@ -615,6 +625,49 @@ describe("LongMemEval evidence contract", () => {
       relation_supported: false,
       matched_target_terms: [],
       matched_relation_terms: []
+    }).success).toBe(false);
+    const legacyCompatible = {
+      schema_version: 1,
+      shape: "place",
+      status: "compatible",
+      eligible: true,
+      value_supported: true,
+      target_supported: true,
+      relation_supported: true,
+      matched_target_terms: ["bookshelf"],
+      matched_relation_terms: ["buy"]
+    } as const;
+    expect(RecallCandidateAnswerSupportSchema.safeParse(legacyCompatible).success)
+      .toBe(true);
+    expect(RecallCandidateAnswerSupportSchema.safeParse({
+      ...legacyCompatible,
+      authority: {
+        schema_version: 1,
+        provenance_status: "verified_user_assertion",
+        subject_status: "bound",
+        target_status: "bound",
+        relation_status: "bound",
+        event_status: "asserted",
+        time_status: "not_requested",
+        binding_status: "missing_or_ambiguous",
+        behavior_eligible: false,
+        evidence_ref: "evidence-bookshelf"
+      }
+    }).success).toBe(true);
+    expect(RecallCandidateAnswerSupportSchema.safeParse({
+      ...legacyCompatible,
+      authority: {
+        schema_version: 1,
+        provenance_status: "verified_user_assertion",
+        subject_status: "conflicted",
+        target_status: "bound",
+        relation_status: "bound",
+        event_status: "asserted",
+        time_status: "not_requested",
+        binding_status: "unique",
+        behavior_eligible: true,
+        evidence_ref: "forged-evidence"
+      }
     }).success).toBe(false);
     expect(RecallDeepHeadTraceSchema.safeParse({
       lexical_agreement: 0.9,
