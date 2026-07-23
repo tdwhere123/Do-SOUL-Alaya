@@ -4,10 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildOfficialApiSourceAssertions,
+  buildOfficialApiSourceCorpus,
+  OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION
+} from "@do-soul/alaya-soul";
+import {
   createCachingSignalExtractor,
   type BenchSignalExtractor
 } from "../../../../longmemeval/compile-seed.js";
-import { cacheFilePath, computeCacheKey } from
+import { cacheFilePath, computeSourceTurnCacheKey } from
   "../../../../longmemeval/compile-seed/compile-seed-cache.js";
 import { extractLiveDelegate } from
   "../../../../longmemeval/extraction/cache/cache-live-delegate.js";
@@ -92,15 +97,9 @@ describe("extraction live delegate empty-result recheck", () => {
     expect(onTransportAttempt).toHaveBeenCalledTimes(2);
     expect(result.rawJson).toBe(terminalRaw);
 
-    const cacheKey = computeCacheKey(
-      MODEL,
-      REQUEST_PROFILE,
-      SYSTEM_PROMPT,
-      "I completed the review today."
-    );
-    const shardPath = cacheFilePath(cacheRoot, cacheKey);
-    expect(existsSync(shardPath)).toBe(true);
-    const shard = JSON.parse(readFileSync(shardPath, "utf8")) as {
+    const expectedShardPath = shardPath(cacheRoot);
+    expect(existsSync(expectedShardPath)).toBe(true);
+    const shard = JSON.parse(readFileSync(expectedShardPath, "utf8")) as {
       readonly raw_json: string;
     };
     expect(shard.raw_json).toBe(terminalRaw);
@@ -470,11 +469,11 @@ function extractionConfig() {
 }
 
 function shardPath(cacheRoot: string): string {
-  return cacheFilePath(cacheRoot, computeCacheKey(
+  return cacheFilePath(cacheRoot, computeSourceTurnCacheKey(
     MODEL,
     REQUEST_PROFILE,
     SYSTEM_PROMPT,
-    "I completed the review today."
+    { turnContent: "I completed the review today." }
   ));
 }
 
@@ -492,14 +491,14 @@ function readShard(cacheRoot: string): {
 }
 
 function userPromptWithAssertions(): string {
+  const turnContent = "I completed the review today.";
+  const sourceCorpus = buildOfficialApiSourceCorpus(turnContent, []);
   return JSON.stringify({
     workspace_id: "workspace-1",
     run_id: "run-1",
     surface_id: null,
-    turn_content: "I completed the review today.",
-    source_assertions: [{
-      assertion_id: 1,
-      text: "I completed the review today."
-    }]
+    turn_content: turnContent,
+    source_locator_contract_version: OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION,
+    source_assertions: buildOfficialApiSourceAssertions(sourceCorpus)
   });
 }

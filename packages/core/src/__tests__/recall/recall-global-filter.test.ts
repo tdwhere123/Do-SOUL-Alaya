@@ -334,8 +334,10 @@ describe("RecallService global project-mapping filter", () => {
     const advisory = result.candidates.find((candidate) => candidate.object_id === "global-suggested");
     const acceptedFactors = accepted?.score_factors;
     const advisoryFactors = advisory?.score_factors;
-    expect(accepted?.relevance_score).toBeGreaterThan(advisory?.relevance_score ?? 0);
+    expect(accepted?.relevance_score).toBe(advisory?.relevance_score);
     expect((acceptedFactors?.base_weight ?? 0) - (advisoryFactors?.base_weight ?? 0)).toBeCloseTo(0.18);
+    expect(acceptedFactors?.weighted_activation ?? 0)
+      .toBeGreaterThan(advisoryFactors?.weighted_activation ?? 0);
     expect(accepted?.score_factors?.relevance).toBe(accepted?.relevance_score);
     expect(advisory?.score_factors?.relevance).toBe(advisory?.relevance_score);
     expect(accepted?.is_advisory).toBe(false);

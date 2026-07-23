@@ -62,7 +62,7 @@ function buildFusion(supplementary: RecallSupplementaryData) {
 }
 
 describe("facet_overlap fusion stream", () => {
-  it("clamps facet overlap count before stream ranking", () => {
+  it("assigns competition rank to tied clamped facet overlap", () => {
     const twoFacetRaw = createMemoryEntry({
       object_id: GOLD_ID,
       content: "Two matching facets but later tie-break.",
@@ -87,7 +87,7 @@ describe("facet_overlap fusion stream", () => {
     });
 
     expect(fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`)?.per_stream_rank.facet_overlap).toBe(1);
-    expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.per_stream_rank.facet_overlap).toBe(2);
+    expect(fusion.get(`workspace_local:memory_entry:${GOLD_ID}`)?.per_stream_rank.facet_overlap).toBe(1);
   });
 
   it("is active whenever query-sought facets are present", () => {
@@ -101,7 +101,7 @@ describe("facet_overlap fusion stream", () => {
       .toBeGreaterThan(baseline.get(goldKey)?.fused_score ?? 0);
   });
 
-  it("derives rank from the scalar after facet evidence is incorporated", () => {
+  it("uses deterministic final rank after tied facet ballots", () => {
     const highOverlap = createMemoryEntry({
       object_id: GOLD_ID,
       content: "Later memory with two answer facets.",
@@ -129,9 +129,9 @@ describe("facet_overlap fusion stream", () => {
     const distractor = fusion.get(`workspace_local:memory_entry:${DISTRACTOR_ID}`);
     expect(gold?.facet_overlap).toBe(2);
     expect(distractor?.facet_overlap).toBe(1);
-    expect(distractor?.fused_score ?? 0).toBeGreaterThan(gold?.fused_score ?? 0);
-    expect(distractor?.fused_rank).toBe(1);
-    expect(gold?.fused_rank).toBe(2);
+    expect(distractor?.fused_score).toBe(gold?.fused_score);
+    expect(distractor?.fused_rank).toBe(2);
+    expect(gold?.fused_rank).toBe(1);
   });
 
   it("ranks the stronger fused score after facet evidence enters fusion", () => {

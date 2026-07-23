@@ -3,13 +3,19 @@ import {
   createLongMemEvalSelectionContractIdentity
 } from "@do-soul/alaya-eval";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
-import { computeCacheKey } from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import {
+  computeExtractionTurnCacheKey
+} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
 import {
   buildExtractionContentClosureIndex,
   computeExtractionContentClosureSha256,
   computeExtractionKeySetSha256
 } from "../../../longmemeval/extraction/content-closure.js";
-import type { LongMemEvalQuestion } from "../../../longmemeval/ingestion/dataset.js";
+import {
+  buildLongMemEvalRoundMessages,
+  pairSessionIntoRounds,
+  type LongMemEvalQuestion
+} from "../../../longmemeval/ingestion/dataset.js";
 import {
   EXTRACTION_CACHE_KEY_ALGO,
   EXTRACTION_CACHE_MANIFEST_VERSION,
@@ -315,7 +321,8 @@ function seedExtractionPath() {
 
 function seedRoundsForQuestion(question: LongMemEvalQuestion) {
   return question.haystack_sessions.map((session, sessionIndex) => {
-    const content = `User: ${session[0]!.content}\nAssistant: ${session[1]!.content}`;
+    const round = pairSessionIntoRounds(session)[0]!;
+    const content = round.content;
     const memoryObjectIds = sessionIndex === 0
       ? [promotionGoldId(question.question_id)]
       : [];
@@ -324,13 +331,20 @@ function seedRoundsForQuestion(question: LongMemEvalQuestion) {
       roundIndex: 0,
       sessionId: question.haystack_session_ids[sessionIndex]!,
       contentSha256: sha256(content),
-      hasAnswer: sessionIndex === 0,
+      hasAnswer: round.hasAnswer,
       extractionSource: "cache" as const,
-      cacheKey: computeCacheKey(
+      cacheKey: computeExtractionTurnCacheKey(
         "fixture-model",
         EXTRACTION_REQUEST_PROFILES[0],
         OFFICIAL_API_SYSTEM_PROMPT,
-        content
+        {
+          turnContent: content,
+          turnMessages: buildLongMemEvalRoundMessages(
+            session,
+            round,
+            `${question.question_id}-s${sessionIndex}-r0`
+          )
+        }
       ),
       rawJsonSha256: sha256(`raw:${question.question_id}:${sessionIndex}`),
       rawSignalCount: memoryObjectIds.length,

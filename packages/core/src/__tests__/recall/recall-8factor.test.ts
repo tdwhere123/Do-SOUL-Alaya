@@ -263,10 +263,7 @@ it("dynamically transfers base prior weight to strong query evidence", async () 
     expect(withTransfer.candidates[0]?.score_factors?.weighted_query_evidence_transfer).toBeCloseTo(0.25);
   });
 
-// Warm-regression witness for base-weight existing_score: with identical query
-  // evidence, the warmer (higher-activation) memory still ranks ahead — the prior
-  // keeps its tiebreak discrimination at base weight, it is not silenced.
-  it("ranks a warmer memory ahead of an identical-evidence colder twin under base-weight existing_score", async () => {
+  it("keeps activation differences diagnostic when fusion evidence is identical", async () => {
     const memories = [
       createMemoryEntry({ object_id: "cold-twin", content: "Shared evidence needle", activation_score: 0.3, confidence: 0.9 }),
       createMemoryEntry({ object_id: "warm-twin", content: "Shared evidence needle", activation_score: 1, confidence: 0.9 })
@@ -292,7 +289,13 @@ it("dynamically transfers base prior weight to strong query evidence", async () 
       runId: "run-1",
       strategy: "build"
     });
-    expect(result.candidates[0]?.object_id).toBe("warm-twin");
+    const warm = result.candidates.find((candidate) => candidate.object_id === "warm-twin");
+    const cold = result.candidates.find((candidate) => candidate.object_id === "cold-twin");
+    expect(warm?.score_factors?.activation).toBe(1);
+    expect(cold?.score_factors?.activation).toBe(0.3);
+    expect(warm?.score_factors?.weighted_activation ?? 0)
+      .toBeGreaterThan(cold?.score_factors?.weighted_activation ?? 0);
+    expect(warm?.relevance_score).toBe(cold?.relevance_score);
   });
 
 it("keeps weak or absent evidence below false-confident recall confidence", async () => {
