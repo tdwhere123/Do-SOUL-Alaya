@@ -42,9 +42,11 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
 ): ReadonlySet<string> {
   const budget = normalizeBudget(params.maxEntries, params.candidates.length);
   if (budget === 0) return new Set();
+  const embeddingHead = orderedEmbeddingHead(params.candidates, budget);
+  if (embeddingHead.length === 0) return new Set();
   let evictions: ReadonlySet<string> = new Set();
   let delivered = params.selectDelivered(evictions);
-  for (const head of orderedEmbeddingHead(params.candidates, budget)) {
+  for (const head of embeddingHead) {
     if (containsCandidate(delivered, head)) continue;
     const replacement = findReplacement({
       ...params,

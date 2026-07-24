@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   compareEmbeddingEvidenceStrength,
   selectEmbeddingHeadEvictions
@@ -79,6 +79,22 @@ describe("embedding-head evidence order", () => {
     });
 
     expect(evictions.size).toBe(0);
+  });
+
+  it("does not evaluate delivery when no ranked embedding head exists", () => {
+    const selectDelivered = vi.fn(() => []);
+    const evictions = selectEmbeddingHeadEvictions({
+      candidates: [
+        candidate("left", Number.POSITIVE_INFINITY),
+        candidate("right", Number.POSITIVE_INFINITY, 0.9)
+      ],
+      maxEntries: 1,
+      embeddingScores: { right: 0.9 },
+      selectDelivered
+    });
+
+    expect(evictions.size).toBe(0);
+    expect(selectDelivered).not.toHaveBeenCalled();
   });
 
   it.each([undefined, Number.NaN])(
