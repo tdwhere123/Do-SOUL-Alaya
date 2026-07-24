@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Unified LongMemEval A/B/C/D matrix entry (no B2). Shares longmemeval-matrix-cell.sh.
+# Unified LongMemEval A/B qualification entry. Shares longmemeval-matrix-cell.sh.
 # Required: MATRIX_RUN_ROOT.
-# Optional: MATRIX_CELLS (default "A B C D"), MATRIX_AUTHORIZE=1 to run authorizer,
+# Optional: MATRIX_CELLS (default "A B"), MATRIX_AUTHORIZE=1 to run authorizer,
 #           MATRIX_CONTRACT (default $MATRIX_RUN_ROOT/matrix-promotion-contract.json).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RUN_ROOT="${MATRIX_RUN_ROOT:?MATRIX_RUN_ROOT is required}"
-CELLS="${MATRIX_CELLS:-A B C D}"
+CELLS="${MATRIX_CELLS:-A B}"
 CONTRACT="${MATRIX_CONTRACT:-$RUN_ROOT/matrix-promotion-contract.json}"
 AUTHORIZATION="${MATRIX_AUTHORIZATION:-$RUN_ROOT/matrix-promotion-authorization.json}"
 
@@ -23,7 +23,7 @@ for cell in $CELLS; do
     echo "cell $cell failed before committing valid evidence" >&2
     exit "$status"
   fi
-  evidence_name="cell-$(printf '%s' "$cell" | tr 'ABCD' 'abcd')"
+  evidence_name="cell-$(printf '%s' "$cell" | tr 'AB' 'ab')"
   if [[ -f "$RUN_ROOT/evidence/$evidence_name/kpi.json" ]]; then
     echo "cell $cell kpi: $RUN_ROOT/evidence/$evidence_name/kpi.json" >&2
   fi

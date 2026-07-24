@@ -2,7 +2,7 @@
 # Unified LongMemEval matrix/probe cell entry: record identity, do not freeze it.
 # Required: MATRIX_RUN_ROOT (campaign dir with snapshot/source-100.db).
 # Optional: MATRIX_CACHE_ROOT, MATRIX_MODEL_CACHE, MATRIX_DATASET_DIR,
-#           MATRIX_SNAPSHOT, ALAYA_RECALL_WEIGHT_OVERRIDES,
+#           MATRIX_SNAPSHOT, MATRIX_CONTRACT, ALAYA_RECALL_WEIGHT_OVERRIDES,
 #           MATRIX_EXTRACTION_MODEL (must equal cache manifest),
 #           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys).
 set -euo pipefail
@@ -11,9 +11,7 @@ CELL="${1:-}"
 case "$CELL" in
   A)  EMBEDDING_MODE=disabled; CROSS_ENABLED=false; EVIDENCE_NAME=cell-a ;;
   B)  EMBEDDING_MODE=env;      CROSS_ENABLED=false; EVIDENCE_NAME=cell-b ;;
-  C)  EMBEDDING_MODE=disabled; CROSS_ENABLED=true;  EVIDENCE_NAME=cell-c ;;
-  D)  EMBEDDING_MODE=env;      CROSS_ENABLED=true;  EVIDENCE_NAME=cell-d ;;
-  *) echo "usage: $0 A|B|C|D" >&2; exit 64 ;;
+  *) echo "usage: $0 A|B" >&2; exit 64 ;;
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +22,7 @@ DATASET_DIR="${MATRIX_DATASET_DIR:-$WORKTREE/apps/bench-runner/data/longmemeval}
 DATASET="$DATASET_DIR/longmemeval_s.json"
 MODEL_CACHE="${MATRIX_MODEL_CACHE:-${HOME:-/home/tdwhere}/.cache/do-soul-alaya/models}"
 SNAPSHOT="${MATRIX_SNAPSHOT:-$RUN_ROOT/snapshot/source-100.db}"
+CONTRACT="${MATRIX_CONTRACT:-$RUN_ROOT/matrix-promotion-contract.json}"
 DATA_ROOT="$RUN_ROOT/matrix-data/$CELL"
 HISTORY_ROOT="$RUN_ROOT/staging/$CELL"
 EVIDENCE_ROOT="$RUN_ROOT/evidence/$EVIDENCE_NAME"
@@ -35,6 +34,7 @@ file_sha() {
 
 # Input integrity only — checkout/code identity is recorded, never a hard gate.
 [[ -f "$SNAPSHOT" ]] || { echo "missing snapshot: $SNAPSHOT" >&2; exit 65; }
+[[ -f "$CONTRACT" ]] || { echo "missing promotion contract: $CONTRACT" >&2; exit 65; }
 [[ -f "$CACHE_ROOT/manifest.json" ]] || { echo "missing extraction cache manifest" >&2; exit 65; }
 [[ -f "$DATASET" ]] || { echo "missing dataset: $DATASET" >&2; exit 65; }
 [[ ! -e "$DATA_ROOT" && ! -e "$HISTORY_ROOT" && ! -e "$EVIDENCE_ROOT" ]] || {
@@ -150,6 +150,7 @@ set +e
   ALAYA_RECALL_EVAL_MAX_RESULTS=10 \
   rtk node apps/bench-runner/bin/alaya-bench-runner.mjs recall-eval \
     --snapshot "$SNAPSHOT" \
+    --promotion-contract "$CONTRACT" \
     --variant s \
     --policy-shape stress \
     --simulate-report none \

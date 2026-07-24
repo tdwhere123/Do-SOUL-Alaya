@@ -10,7 +10,6 @@ import {
   type PromotionValidatorIdentity
 } from "./authorization.js";
 import {
-  matrixCellForTreatment,
   promotionCellForTreatment,
   productDefaultTreatment,
   treatmentKey,
