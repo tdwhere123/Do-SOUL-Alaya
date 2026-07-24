@@ -49,6 +49,26 @@ describe("recall-eval promotion entry verifier", () => {
     expect(data.snapshot.measurementForQuestion("q-1")?.sidecar.size).toBe(1);
   });
 
+  it("accepts a recall consumer that differs from the frozen snapshot producer", async () => {
+    const fixture = await writeEntryFixture(SNAPSHOT_GATE_SHA, {
+      distinctProducerCode: true
+    });
+
+    await expect(verifyRecallEvalPromotionEntry({
+      entryRoot: fixture.entryRoot,
+      expectedSelection: fixture.selection,
+      treatment: { embedding_supplement: false, answer_rerank: false },
+      code: {
+        commit_sha: COMMIT_SHA,
+        commit_sha7: COMMIT_SHA7,
+        worktree_state_sha256: WORKTREE_SHA,
+        executed_dist: EXECUTED_DIST
+      },
+      gateSha256: GATE_SHA,
+      snapshot: fixture.snapshot
+    })).resolves.toBeDefined();
+  });
+
   it("rejects artifact bytes changed after the manifest was minted", async () => {
     const fixture = await writeEntryFixture();
     await writeFile(path.join(fixture.entryRoot, "report.md"), "forged\n", "utf8");

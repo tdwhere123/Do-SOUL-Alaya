@@ -267,7 +267,9 @@ function promotionSnapshot(): VerifiedRecallEvalPromotionEntryData["snapshot"] {
     sidecarSha256: "6".repeat(64),
     goldForQuestion: () => undefined,
     measurementForQuestion: () => undefined,
+    producerCommitSha7: "2222222",
     producerGateSha256: "a".repeat(64),
+    producerWorktreeStateSha256: "2".repeat(64),
     producerExtractionCacheJson: JSON.stringify({ manifest_sha256: "c".repeat(64) }),
     recallPipelineVersion: "recall-eval-v1",
     schemaMigrationVersion: 1

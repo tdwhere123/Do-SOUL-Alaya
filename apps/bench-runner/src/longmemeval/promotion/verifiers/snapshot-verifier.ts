@@ -63,7 +63,9 @@ export interface VerifiedPromotionSnapshotData {
   readonly sidecarSha256: string;
   readonly goldForQuestion: (questionId: string) => readonly string[] | undefined;
   readonly measurementForQuestion: SnapshotMeasurementOracleAccessor;
+  readonly producerCommitSha7: string;
   readonly producerGateSha256: string;
+  readonly producerWorktreeStateSha256: string;
   readonly producerExtractionCacheJson: string;
   readonly recallPipelineVersion: string;
   readonly schemaMigrationVersion: number;
@@ -186,7 +188,9 @@ function sealVerifiedSnapshot(
     goldForQuestion: Object.freeze((questionId: string) =>
       measurementForQuestion(questionId)?.goldMemoryIds),
     measurementForQuestion,
+    producerCommitSha7: provenance.code.commit_sha7,
     producerGateSha256: provenance.code.gate_sha256!,
+    producerWorktreeStateSha256: provenance.code.worktree_state_sha256!,
     producerExtractionCacheJson: JSON.stringify(provenance.extraction_cache),
     recallPipelineVersion: manifest.recall_pipeline_version,
     schemaMigrationVersion: database.schemaMigrationVersion

@@ -66,7 +66,7 @@ async function writeEntryFixture(
       dataset_cohort: "answerable" as const
     }))
   });
-  const snapshotProvenance = driftExtractionAuthority(
+  const snapshotProvenance = withOptionalDistinctProducerCode(driftExtractionAuthority(
     runProvenance(
       selection,
       SNAPSHOT_GATE_SHA,
@@ -74,7 +74,7 @@ async function writeEntryFixture(
       snapshotOptions.producerEnvOverride
     ),
     snapshotOptions.extractionAuthorityDrift
-  );
+  ), snapshotOptions.distinctProducerCode === true);
   const snapshotFixture = await writeSnapshotFixture(
     root,
     collected,
@@ -89,7 +89,8 @@ async function writeEntryFixture(
     provenance,
     snapshotFixture.manifestSha256,
     snapshotBindingGate,
-    snapshotFixture.schemaMigrationVersion
+    snapshotFixture.schemaMigrationVersion,
+    snapshotProvenance.code
   );
   const snapshot = snapshotFixture.manifest;
   const payload = KpiPayloadSchema.parse(assembleRecallEvalKpi({
@@ -136,10 +137,10 @@ async function writeEntryFixture(
       db_path: "snapshot.db",
       manifest_sha256: snapshotFixture.manifestSha256,
       producer_code: {
-        commit_sha: COMMIT_SHA,
-        commit_sha7: COMMIT_SHA7,
-        worktree_state_sha256: WORKTREE_SHA,
-        executed_dist: EXECUTED_DIST
+        commit_sha: snapshotProvenance.code.commit_sha,
+        commit_sha7: snapshotProvenance.code.commit_sha7,
+        worktree_state_sha256: snapshotProvenance.code.worktree_state_sha256,
+        executed_dist: snapshotProvenance.code.executed_dist
       }
     },
     expectedSelection: selection,
@@ -147,6 +148,22 @@ async function writeEntryFixture(
     variant: "longmemeval_s"
   });
   return { entryRoot, selection, snapshot: verifiedSnapshot };
+}
+
+function withOptionalDistinctProducerCode(
+  provenance: LongMemEvalRunProvenance,
+  distinct: boolean
+): LongMemEvalRunProvenance {
+  if (!distinct) return provenance;
+  const mutable = structuredClone(provenance);
+  mutable.code = {
+    ...mutable.code,
+    commit_sha7: "7654321",
+    commit_sha: "7654321" + "2".repeat(33),
+    worktree_state_sha256: "7".repeat(64),
+    executed_dist: { ...EXECUTED_DIST, sha256: "7".repeat(64) }
+  };
+  return LongMemEvalRunProvenanceSchema.parse(mutable);
 }
 
 function driftExtractionAuthority(

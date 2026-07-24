@@ -308,9 +308,9 @@ function assertAttributionBinding(
       slice.evaluated_count !== selection.selected_count ||
       slice.question_id_digest !== selection.selected_id_digest ||
       attribution.hydration_binding?.dataset_sha256 !== selection.dataset_sha256 ||
-      snapshot?.commit_sha7 !== provenance.code.commit_sha7 ||
+      snapshot?.commit_sha7 !== verifiedSnapshot.producerCommitSha7 ||
       snapshot.gate_sha256 !== verifiedSnapshot.producerGateSha256 ||
-      snapshot.worktree_state_sha256 !== provenance.code.worktree_state_sha256 ||
+      snapshot.worktree_state_sha256 !== verifiedSnapshot.producerWorktreeStateSha256 ||
       snapshot.dataset_sha256 !== selection.dataset_sha256 ||
       snapshot.question_id_digest !== selection.selected_id_digest ||
       snapshot.snapshot_manifest_sha256 !== verifiedSnapshot.manifestSha256 ||

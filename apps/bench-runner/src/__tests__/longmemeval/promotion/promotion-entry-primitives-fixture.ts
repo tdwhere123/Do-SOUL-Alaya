@@ -64,6 +64,7 @@ interface SnapshotFixtureOptions {
     | "draft_count"
     | "memory_ids";
   readonly seedFactsProducedOffset?: number;
+  readonly distinctProducerCode?: boolean;
   readonly extractionAuthorityDrift?: "expected_turns" | "content_closure" | "window";
   readonly tamperCanonical?:
     | "question"
@@ -186,7 +187,8 @@ function runtimeAttribution(
   provenance: LongMemEvalRunProvenance,
   snapshotManifestSha256: string,
   snapshotGateSha256: string,
-  schemaMigrationVersion: number
+  schemaMigrationVersion: number,
+  producerCode: LongMemEvalRunProvenance["code"] = provenance.code
 ): RecallEvalRuntimeAttribution {
   const cache = requireV3Cache(provenance);
   return {
@@ -211,9 +213,9 @@ function runtimeAttribution(
     },
     hydration_binding: { dataset_sha256: DATASET_SHA, source: "external_expected_sha256" },
     snapshot_binding: {
-      commit_sha7: COMMIT_SHA7,
+      commit_sha7: producerCode.commit_sha7,
       gate_sha256: snapshotGateSha256,
-      worktree_state_sha256: WORKTREE_SHA,
+      worktree_state_sha256: producerCode.worktree_state_sha256,
       extraction_cache_manifest_sha256: cache.manifest_sha256,
       extraction_cache_requested_turns: cache.requested_turns!,
       extraction_cache_cached_turns: cache.cached_turns!,
