@@ -47,7 +47,13 @@ export function assertLongMemEvalExpansionSourceAnchor(
 ): LongMemEvalExpansionSourceAnchor {
   const parsed = LongMemEvalExpansionSourceAnchorSchema.parse(anchor);
   const expected = buildLongMemEvalExpansionSourceAnchor(capability, config, target);
-  if (!isDeepStrictEqual(parsed, expected)) {
+  // R3 binds the live validator authorization; the anchor keeps the matrix and
+  // source contents stable when a validator-only commit changes its receipt digest.
+  const reauthorized = {
+    ...parsed,
+    matrix_authorization_sha256: expected.matrix_authorization_sha256
+  };
+  if (!isDeepStrictEqual(reauthorized, expected)) {
     throw new Error("500Q expansion source anchor differs from live capability");
   }
   return parsed;

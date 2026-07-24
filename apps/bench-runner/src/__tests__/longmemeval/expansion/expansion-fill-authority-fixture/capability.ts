@@ -52,9 +52,18 @@ export async function prepare(
 }
 
 export async function mintCapability(
-  sourceManifestSha = "a".repeat(64)
+  sourceManifestSha = "a".repeat(64),
+  validatorCommitSha?: string
 ): Promise<LongMemEvalExpansionCapability> {
   const contract = expansionPromotionContractFixture();
+  const validatorCommit = validatorCommitSha ?? contract.code.commit_sha;
+  const validatorDiffers = validatorCommit !== contract.code.commit_sha;
+  const validatorStateSha = validatorDiffers
+    ? "9".repeat(64)
+    : contract.code.worktree_state_sha256;
+  const validatorDist = validatorDiffers
+    ? { ...contract.code.executed_dist, sha256: "8".repeat(64) }
+    : contract.code.executed_dist;
   const contents = Buffer.from(JSON.stringify(contract), "utf8");
   const parsed = parseLongMemEvalMatrixPromotionContract(contents);
   const labels = ["A", "B"] as const;
@@ -83,11 +92,11 @@ export async function mintCapability(
     hard_gates: [expansionHardGateFixture()],
     material_effect: expansionMaterialEffectFixture(),
     validator: {
-      commit_sha: contract.code.commit_sha,
-      commit_sha7: contract.code.commit_sha7,
+      commit_sha: validatorCommit,
+      commit_sha7: validatorCommit.slice(0, 7),
       worktree_clean: true,
-      worktree_state_sha256: contract.code.worktree_state_sha256,
-      executed_dist: contract.code.executed_dist
+      worktree_state_sha256: validatorStateSha,
+      executed_dist: validatorDist
     }
   });
   return verifyLongMemEvalExpansionCapability({
@@ -99,13 +108,13 @@ export async function mintCapability(
     authorize: async () => authorization,
     readSourceSnapshotAuthority: async () => sourceAuthority(sourceManifestSha),
     measureValidatorGitState: async () => ({
-      commitSha: contract.code.commit_sha,
-      commitSha7: contract.code.commit_sha7,
-      worktreeStateSha256: contract.code.worktree_state_sha256,
+      commitSha: validatorCommit,
+      commitSha7: validatorCommit.slice(0, 7),
+      worktreeStateSha256: validatorStateSha,
       worktreeClean: true
     }),
     readContractSha256: async () => parsed.sha256,
-    computeExecutedDistIdentity: async () => contract.code.executed_dist
+    computeExecutedDistIdentity: async () => validatorDist
   });
 }
 

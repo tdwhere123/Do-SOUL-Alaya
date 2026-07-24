@@ -298,6 +298,17 @@ describe("500Q expansion fill authority", () => {
     );
   });
 
+  it("accepts a reauthorized identical matrix while resuming an anchored fill", async () => {
+    const first = await prepare(mintCapability());
+    state.identity = {
+      manifestSha256: "b".repeat(64),
+      manifest: targetManifest(first.sourceAnchor)
+    };
+
+    const resumed = await prepare(mintCapability("a".repeat(64), "9".repeat(40)));
+    expect(resumed.sourceAnchor).toEqual(first.sourceAnchor);
+  });
+
   it("rejects target keyset and count drift before provider construction", async () => {
     const first = await prepare(mintCapability());
     state.identity = {
