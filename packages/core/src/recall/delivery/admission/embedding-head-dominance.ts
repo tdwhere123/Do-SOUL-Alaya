@@ -30,6 +30,14 @@ type EvaluatedDominanceReplacement<T> = Readonly<{
   readonly replacement: DominanceReplacement<T>;
 }>;
 
+export function hasRankedEmbeddingHead<T extends EmbeddingHeadCandidate>(
+  candidates: readonly T[],
+  maxEntries: number
+): boolean {
+  const budget = normalizeBudget(maxEntries, candidates.length);
+  return budget > 0 && candidates.some((candidate) => isEmbeddingHead(candidate, budget));
+}
+
 export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
   params: Readonly<{
     readonly candidates: readonly T[];

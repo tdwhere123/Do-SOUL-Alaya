@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   compareEmbeddingEvidenceStrength,
+  hasRankedEmbeddingHead,
   selectEmbeddingHeadEvictions
 } from "../../recall/delivery/admission/embedding-head-dominance.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
@@ -95,6 +96,15 @@ describe("embedding-head evidence order", () => {
 
     expect(evictions.size).toBe(0);
     expect(selectDelivered).not.toHaveBeenCalled();
+  });
+
+  it("identifies embedding heads by finite rank rather than score presence", () => {
+    const scoreOnly = candidate("score-only", Number.POSITIVE_INFINITY, 0.9);
+    const ranked = candidate("ranked", 1);
+
+    expect(hasRankedEmbeddingHead([scoreOnly], 1)).toBe(false);
+    expect(hasRankedEmbeddingHead([scoreOnly, ranked], 1)).toBe(true);
+    expect(hasRankedEmbeddingHead([ranked], 0)).toBe(false);
   });
 
   it.each([undefined, Number.NaN])(

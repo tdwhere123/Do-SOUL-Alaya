@@ -32,7 +32,10 @@ import {
   type RecallCandidateAnswerSupport
 } from "../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
-import { selectEmbeddingHeadEvictions } from "./admission/embedding-head-dominance.js";
+import {
+  hasRankedEmbeddingHead,
+  selectEmbeddingHeadEvictions
+} from "./admission/embedding-head-dominance.js";
 import {
   buildFinalScoreFactors,
   createFineAssessmentDiagnostic
@@ -105,20 +108,29 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   const context = createSelectionContext(params);
   const coverageRelevance =
     params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
+  const hasEmbeddingHead = hasRankedEmbeddingHead(
+    params.orderedCandidates,
+    context.config.budgets.max_entries
+  );
   const initialOrder = orderFineAssessmentByCoverage(
     params.orderedCandidates,
     context,
     coverageRelevance,
-    new Set()
+    new Set(),
+    !hasEmbeddingHead && context.captureAnswerFeatures
   );
-  const evictions = resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance);
-  const coverageOrdered = orderFineAssessmentByCoverage(
-    initialOrder,
-    context,
-    coverageRelevance,
-    evictions,
-    context.captureAnswerFeatures
-  );
+  const evictions = hasEmbeddingHead
+    ? resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance)
+    : new Set<string>();
+  const coverageOrdered = hasEmbeddingHead
+    ? orderFineAssessmentByCoverage(
+        initialOrder,
+        context,
+        coverageRelevance,
+        evictions,
+        context.captureAnswerFeatures
+      )
+    : initialOrder;
   const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"

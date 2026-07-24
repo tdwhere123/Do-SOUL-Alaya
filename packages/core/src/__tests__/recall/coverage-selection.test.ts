@@ -92,6 +92,50 @@ describe("coverage-aware delivery", () => {
     ]);
   });
 
+  it("keeps coverage order and observations at a fixed point", () => {
+    const rejected = createCandidate("rejected", 1);
+    const sharedFirst = createCandidate("shared-first", 1);
+    const sharedSecond = createCandidate("shared-second", 1);
+    const novel = createCandidate("novel", 1);
+    const candidates = [rejected, sharedFirst, sharedSecond, novel];
+    const relevanceByCandidateKey = relevanceMap(candidates);
+    const supplementaryData = createSupplementaryData({
+      evidenceGistsByMemoryId: {
+        rejected: "shared-gist",
+        "shared-first": "shared-gist",
+        "shared-second": "shared-gist",
+        novel: "novel-gist"
+      }
+    });
+    const runPass = (input: readonly FineAssessmentCandidate[]) => {
+      const observations: Array<Readonly<{
+        candidate_key: string;
+        marginal_gain: number;
+        selection_order: number;
+      }>> = [];
+      const ordered = orderByCoverageMarginalGain({
+        candidates: input,
+        relevanceByCandidateKey,
+        supplementaryData,
+        advancesCoverage: (candidate) => candidate !== rejected,
+        onSelection: (observation) => observations.push(observation)
+      });
+      return { ordered, observations };
+    };
+
+    const first = runPass(candidates);
+    const second = runPass(first.ordered);
+
+    expect(first.ordered.map((candidate) => candidate.entry.object_id)).toEqual([
+      "rejected",
+      "shared-first",
+      "novel",
+      "shared-second"
+    ]);
+    expect(second.ordered).toEqual(first.ordered);
+    expect(second.observations).toEqual(first.observations);
+  });
+
   it("fills toward the token budget instead of stopping early with unused tokens", () => {
     const candidates = Array.from({ length: 6 }, (_, index) =>
       createCandidate(`mem-${index + 1}`, 1 - index * 0.05)
