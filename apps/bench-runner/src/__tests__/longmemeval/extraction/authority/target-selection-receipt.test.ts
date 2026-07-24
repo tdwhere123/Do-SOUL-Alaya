@@ -118,6 +118,36 @@ it("limits target selection to the canonical LongMemEval-S 100Q and 500Q windows
   })).toBe(false);
 });
 
+it("allows a revision-only successor while resuming the canonical 500Q expansion", () => {
+  const parent = createTemporaryRoot();
+  const cacheRoot = join(parent, "cache");
+  const receipt = createFreshRetiredSourceRebuildTargetSelection({
+    cacheRoot,
+    operator: "local-operator",
+    observation: initialObservation()
+  });
+  const expanded = expansionObservation();
+
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: expanded
+  })).not.toThrow();
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: {
+      ...expanded,
+      extraction: { ...expanded.extraction, model: "semantic-drift" }
+    }
+  })).toThrow(/identity.*revision-only successor/u);
+  expect(() => assertExtractionTargetSelectionReceipt({
+    receipt,
+    cacheRoot,
+    observation: { ...expanded, dataset: { ...expanded.dataset, windowLimit: 100 } }
+  })).toThrow(/identity drifted/u);
+});
+
 it("carries the selected root forward only across a revision-only continuation", () => {
   const parent = createTemporaryRoot();
   const cacheRoot = join(parent, "cache");
@@ -168,6 +198,27 @@ it("carries the selected root forward only across a revision-only continuation",
     }
   })).toThrow(/revision-only successor/u);
 });
+
+function expansionObservation(): ExtractionAuthorityObservation {
+  const initial = initialObservation();
+  return {
+    ...initial,
+    revision: `git-worktree-v1:${"9".repeat(40)}:${"8".repeat(64)}`,
+    dataset: { ...initial.dataset, windowLimit: 500 },
+    extraction: {
+      ...initial.extraction,
+      manifestSha256: "7".repeat(64),
+      rawContentClosureSha256: "6".repeat(64)
+    },
+    inventory: {
+      expectedTurns: 50,
+      validTurns: 13,
+      missingTurns: 37,
+      invalidTurns: 0,
+      orphanTurns: 0
+    }
+  };
+}
 
 function createTemporaryRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "alaya-target-selection-"));

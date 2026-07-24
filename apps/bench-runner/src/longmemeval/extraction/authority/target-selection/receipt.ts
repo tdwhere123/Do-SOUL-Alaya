@@ -397,6 +397,15 @@ function assertFinalIdentity(
   observation: ExtractionAuthorityObservation
 ): void {
   const current = finalIdentity(observation);
+  // A partially populated expansion cannot re-enter the 100Q continuation path
+  // because its already-authorized expansion shards are orphans in that window.
+  if (expected.revision !== current.revision &&
+      observation.dataset.variant === "longmemeval_s" &&
+      observation.dataset.windowOffset === 0 &&
+      observation.dataset.windowLimit === 500) {
+    assertContinuationFinalIdentity(expected, observation);
+    return;
+  }
   if (expected.revision !== current.revision ||
       expected.dataset_variant !== current.dataset_variant ||
       expected.dataset_revision_sha256 !== current.dataset_revision_sha256 ||
