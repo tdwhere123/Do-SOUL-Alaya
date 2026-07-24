@@ -316,7 +316,7 @@ function buildFanout(
 function promotionIdentity(datasetSha256: string) {
   return {
     contract_sha256: "5".repeat(64),
-    policy_version: "longmemeval-product-default-v1" as const,
+    policy_version: "longmemeval-product-default-v2" as const,
     code: {
       commit_sha: "8".repeat(40),
       commit_sha7: "8".repeat(7),

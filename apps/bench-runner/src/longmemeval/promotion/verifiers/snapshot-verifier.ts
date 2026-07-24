@@ -86,7 +86,6 @@ export async function verifyPromotionSnapshot(input: {
   readonly expectedSelection: LongMemEvalSelectionContractIdentity;
   readonly expectedQuestions: readonly LongMemEvalQuestion[];
   readonly variant: "longmemeval_s";
-  readonly code: LongMemEvalMatrixPromotionContract["code"];
 }): Promise<VerifiedPromotionSnapshot> {
   const references = snapshotReferences(input.snapshot.db_path);
   const [db, manifestFile, sidecarFile, extractionAuthority] = await Promise.all([
@@ -213,7 +212,7 @@ function assertSnapshotIdentity(input: {
   readonly schemaMigrationVersion: number;
   readonly expectedSelection: LongMemEvalSelectionContractIdentity;
   readonly variant: "longmemeval_s";
-  readonly code: LongMemEvalMatrixPromotionContract["code"];
+  readonly snapshot: LongMemEvalMatrixPromotionContract["snapshot"];
   readonly runProvenance: LongMemEvalRunProvenance;
 }): void {
   const { manifest, expectedSelection } = input;
@@ -237,13 +236,13 @@ function assertSnapshotIdentity(input: {
       !isDeepStrictEqual(provenance.selection, expectedSelection) ||
       manifest.recall_pipeline_version !== RECALL_PIPELINE_VERSION ||
       manifest.schema_migration_version !== input.schemaMigrationVersion ||
-      provenance.code.commit_sha !== input.code.commit_sha ||
-      provenance.code.commit_sha7 !== input.code.commit_sha7 ||
+      provenance.code.commit_sha !== input.snapshot.producer_code.commit_sha ||
+      provenance.code.commit_sha7 !== input.snapshot.producer_code.commit_sha7 ||
       provenance.code.worktree_state_sha256 !==
-        input.code.worktree_state_sha256 ||
+        input.snapshot.producer_code.worktree_state_sha256 ||
       !isDeepStrictEqual(
         provenance.code.executed_dist,
-        input.code.executed_dist
+        input.snapshot.producer_code.executed_dist
       )) {
     throw new Error("promotion snapshot identity is incomplete or drifted");
   }

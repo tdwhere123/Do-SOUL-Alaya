@@ -69,7 +69,7 @@ const ProductDefaultSchema = z.object({
 
 const PromotionIdentityBaseSchema = z.object({
   contract_sha256: Sha256Schema,
-  policy_version: z.literal("longmemeval-product-default-v1"),
+  policy_version: z.literal("longmemeval-product-default-v2"),
   code: LongMemEvalPromotionCodeWireSchema,
   source_selection: LongMemEvalSelectionContractIdentitySchema,
   next_selection: LongMemEvalSelectionContractIdentitySchema,

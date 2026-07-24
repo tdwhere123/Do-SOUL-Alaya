@@ -155,7 +155,13 @@ describe("500Q expansion fill authority", () => {
     })).rejects.toThrow(/lineage|target cache authority/u);
   });
 
-  it("allows an unsliced full 500Q recall run", async () => {
+  it.each([
+    ["A", "disabled"],
+    ["B", "env"]
+  ] as const)("allows an unsliced full 500Q recall run for cell %s", async (
+    _cell,
+    embedding
+  ) => {
     const fixture = await completeExpansionFixture();
     await assertExpansionRecallAuthority({
       options: {
@@ -168,7 +174,7 @@ describe("500Q expansion fill authority", () => {
       },
       bundle: recallBundle(fixture),
       recallWeightOverrides: undefined,
-      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+      env: { ALAYA_RECALL_EVAL_EMBEDDING: embedding }
     });
 
     expect(state.verifyIntegrity).toHaveBeenCalledOnce();

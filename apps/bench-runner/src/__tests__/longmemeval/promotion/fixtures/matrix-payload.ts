@@ -10,6 +10,8 @@ import {
 } from "../../../../../../../packages/eval/src/__tests__/gates/release-gates-fixture.js";
 import { buildEffectiveRecallConfigIdentity } from
   "../../../../longmemeval/provenance/effective-recall-config.js";
+import { buildBenchmarkMeasurementAttribution } from
+  "../../../../longmemeval/measurement/attribution.js";
 
 export function productPayloadFixture(
   effect: "control" | "product",
@@ -39,7 +41,7 @@ export function productPayloadFixture(
     }
   });
   const answerableCount = 94;
-  const hitCount = effect === "control" ? 80 : 89;
+  const hitCount = effect === "control" ? 87 : 90;
   const assignments = Array.from({ length: 100 }, (_, index) => ({
     question_id: `question-${index + 1}`,
     dataset_cohort: index < answerableCount
@@ -55,6 +57,22 @@ export function productPayloadFixture(
     run_at: runAt,
     answerable_evaluated_count: answerableCount,
     selection_contract: selection,
+    measurement_attribution: buildBenchmarkMeasurementAttribution({
+      candidatePoolComplete: true,
+      provenanceComplete: false,
+      abstention: {
+        schema_version: "bench-abstention.v2",
+        total: 6,
+        scored: 0,
+        unscorable: 6,
+        method: "fused_margin_diagnostic_only",
+        calibration_status: "uncalibrated",
+        gate_eligible: false
+      },
+      noGoldCount: 0,
+      evaluatorIdentityIssueCount: 0,
+      evaluatorIdentityUnscorableCount: 0
+    }),
     recall_eval_attribution: recallAttribution(selection),
     kpi: {
       ...eligible.kpi,
@@ -101,7 +119,7 @@ export function productPayloadFixture(
       per_scenario: assignments.map((assignment, index) => ({
         id: assignment.question_id,
         version: 1,
-        hit_at_5: index < hitCount,
+        hit_at_5: effect === "control" ? index < hitCount : index > 0 && index <= hitCount,
         scorable: assignment.dataset_cohort === "answerable",
         measurement_cohort: assignment.dataset_cohort === "answerable"
           ? "answerable" as const

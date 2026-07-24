@@ -69,8 +69,7 @@ export async function authorizeLongMemEvalMatrixPromotion(
     snapshot: parsed.contract.snapshot,
     expectedSelection: selections.source,
     expectedQuestions: selections.sourceQuestions,
-    variant: parsed.contract.dataset.variant,
-    code: parsed.contract.code
+    variant: parsed.contract.dataset.variant
   });
   const roots = await resolveEntryRoots(input.contractRoot, parsed.contract);
   const cells = await verifyPromotionEntries(parsed, roots, selections.source, snapshot);

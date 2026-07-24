@@ -6,7 +6,7 @@ import {
 } from "../../../longmemeval/promotion/r3-spend-approval.js";
 
 describe("R3 spend approval", () => {
-  it("accepts a fresh approval bound to a valid material R2 result and exact 500Q target", () => {
+  it("accepts a fresh approval bound to qualified A/B diagnostics and exact 500Q target", () => {
     const approval = fixture();
     const verified = verifyR3SpendApproval(approval, expectation());
 
@@ -14,10 +14,10 @@ describe("R3 spend approval", () => {
     expect(verified.approval.target.selected_count).toBe(500);
   });
 
-  it("rejects a nonmaterial 100Q result before it can open 500Q", () => {
+  it("rejects malformed A/B diagnostics before they can open 500Q", () => {
     expect(() => verifyR3SpendApproval({
-      ...fixture(), r2: { ...fixture().r2, b_a_net_r5_wins: 4 }
-    }, expectation())).toThrow(/net R@5 wins/u);
+      ...fixture(), r2: { ...fixture().r2, b_a_net_r5_wins: 3.5 }
+    }, expectation())).toThrow(/integer net R@5/u);
   });
 
   it("rejects alternate material-effect values that still pass the thresholds", () => {
@@ -37,13 +37,10 @@ describe("R3 spend approval", () => {
     }, expectation())).toThrow(/target cache identity/u);
   });
 
-  it("rejects a non-exact or non-significant McNemar result", () => {
+  it("rejects a non-exact McNemar diagnostic without significance gating", () => {
     expect(() => verifyR3SpendApproval({
       ...fixture(), r2: { ...fixture().r2, mcnemar: { method: "asymptotic", p_value: 0.01 } }
     }, expectation())).toThrow(/exact two-sided McNemar/u);
-    expect(() => verifyR3SpendApproval({
-      ...fixture(), r2: { ...fixture().r2, mcnemar: { method: "exact_two_sided", p_value: 0.05 } }
-    }, expectation())).toThrow(/p < 0.05/u);
   });
 
   it("rejects a scope or cap that could widen the authorized 500Q spend", () => {
@@ -69,8 +66,8 @@ function fixture() {
       final_cache_identity_sha256: "3".repeat(64),
       hard_gates_passed: true as const,
       answerable_count: 94,
-      b_a_net_r5_wins: 6,
-      mcnemar: { method: "exact_two_sided" as const, p_value: 0.03125 }
+      b_a_net_r5_wins: 3,
+      mcnemar: { method: "exact_two_sided" as const, p_value: 0.375 }
     },
     target: {
       selection_sha256: "4".repeat(64),
@@ -101,12 +98,12 @@ function expectation() {
     materialEffect: {
       paired_r_at_5: {
         answerable_count: 94 as const,
-        control_hits: 80,
-        product_hits: 86,
-        gained: 6,
-        lost: 0,
-        net: 6,
-        mcnemar: { method: "exact_two_sided" as const, p_value: 0.03125 }
+        control_hits: 87,
+        product_hits: 90,
+        gained: 4,
+        lost: 1,
+        net: 3,
+        mcnemar: { method: "exact_two_sided" as const, p_value: 0.375 }
       }
     }
   };

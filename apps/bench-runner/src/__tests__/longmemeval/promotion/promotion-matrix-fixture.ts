@@ -47,9 +47,9 @@ function matrixFixture() {
     }))
   });
   const contract = LongMemEvalMatrixPromotionContractSchema.parse({
-    schema_version: 2,
+    schema_version: 3,
     kind: "longmemeval_matrix_promotion_contract",
-    policy_version: "longmemeval-product-default-v1",
+    policy_version: "longmemeval-product-default-v2",
     code: {
       commit_sha: "abc1234" + "0".repeat(33),
       commit_sha7: "abc1234",
@@ -68,14 +68,22 @@ function matrixFixture() {
     },
     snapshot: {
       db_path: "snapshot/source-100.db",
-      manifest_sha256: "f".repeat(64)
+      manifest_sha256: "f".repeat(64),
+      producer_code: {
+        commit_sha: "def5678" + "1".repeat(33),
+        commit_sha7: "def5678",
+        worktree_state_sha256: "2".repeat(64),
+        executed_dist: {
+          algorithm: "sha256-reachable-path-file-sha256-v1",
+          sha256: "3".repeat(64),
+          file_count: 1
+        }
+      }
     },
-    execution_order: ["A", "B", "C", "D"],
+    execution_order: ["A", "B"],
     matrix: { entries: [
       contractEntry(false, false, "cell-a"),
-      contractEntry(true, false, "cell-b"),
-      contractEntry(false, true, "cell-c"),
-      contractEntry(true, true, "cell-d")
+      contractEntry(true, false, "cell-b")
     ] },
     absolute_quality_policy: absoluteQualityPolicy(),
     material_effect_policy: materialEffectPolicy()
@@ -83,8 +91,6 @@ function matrixFixture() {
   const payloads = [
     controlPayload,
     productPayloadValue,
-    { ...controlPayload, run_at: "2026-07-16T00:00:03.000Z" },
-    { ...productPayloadValue, run_at: "2026-07-16T00:00:04.000Z" }
   ];
   return {
     contract,
@@ -124,22 +130,22 @@ function materialEffectPolicy() {
     directional_metrics: [
       "r_at_1", "r_at_5", "r_at_10", "full_gold_at_5"
     ] as const,
-    token_non_regression_metric: "token_saved_ratio_vs_full_prompt" as const,
-    minimum_net_r_at_5_wins: 5 as const,
-    mcnemar: {
-      method: "exact_two_sided" as const,
-      p_value_max_exclusive: 0.05 as const
+    token_diagnostic_metric: "token_saved_ratio_vs_full_prompt" as const,
+    paired_r_at_5_diagnostic: {
+      mcnemar_method: "exact_two_sided" as const
     }
   };
 }
 
 function absoluteQualityPolicy() {
   return {
+    control_cell: "A" as const,
     product_cell: "B" as const,
     metric: "r_at_5" as const,
     cohort: "answerable" as const,
     expected_denominator: 94 as const,
-    minimum_hits: 85 as const
+    control_minimum_hits: 76 as const,
+    product_minimum_hits: 90 as const
   };
 }
 

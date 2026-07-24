@@ -123,19 +123,23 @@ function assertRecallInvocation(
   capability: LongMemEvalExpansionCapability
 ): void {
   const { options, env } = input;
-  const product = longMemEvalExpansionCapabilityData(capability).productDefault;
+  const data = longMemEvalExpansionCapabilityData(capability);
+  const cell = recallCell(env);
+  const treatment = data.matrix.cells.find((entry) => entry.cell === cell)?.treatment;
   if (options.legacySnapshot === true ||
       options.weightOverridesJson !== undefined ||
       input.recallWeightOverrides !== undefined ||
       env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV] !== undefined ||
       (options.policyShape ?? "stress") !== "stress" ||
       (options.simulateReport ?? "none") !== "none" ||
-      product.cell !== "B" || !product.treatment.embedding_supplement ||
-      product.treatment.answer_rerank) {
-    throw new Error("500Q recall invocation differs from the promoted product-B contract");
+      data.productDefault.cell !== "B" ||
+      treatment === undefined ||
+      treatment.embedding_supplement !== (cell === "B") ||
+      treatment.answer_rerank) {
+    throw new Error("500Q recall invocation differs from the promoted A/B contract");
   }
   assertFullRecallWindow(options);
-  assertRecallEnvironment(env, input.recallWeightOverrides);
+  assertRecallEnvironment(env, input.recallWeightOverrides, cell);
 }
 
 function assertFullRecallWindow(options: RecallEvalOptions): void {
@@ -146,11 +150,13 @@ function assertFullRecallWindow(options: RecallEvalOptions): void {
 
 function assertRecallEnvironment(
   env: Readonly<Record<string, string | undefined>>,
-  recallWeightOverrides: BenchRecallWeightOverrides | undefined
+  recallWeightOverrides: BenchRecallWeightOverrides | undefined,
+  cell: "A" | "B"
 ): void {
+  const context = `500Q cell-${cell} recall`;
   assertCacheOnlyEnvironment(env);
-  assertProductFormationEnvironment(env, "500Q product-B recall formation");
-  assertProductDefaultBiEncoderEnvironment(env, "500Q product-B recall");
+  assertProductFormationEnvironment(env, `${context} formation`);
+  assertProductDefaultBiEncoderEnvironment(env, context);
   assertProductDefaultRecallEnvironment(
     env,
     {
@@ -158,17 +164,26 @@ function assertRecallEnvironment(
       conflictAwareness: true
     },
     recallWeightOverrides,
-    "500Q product-B recall"
+    context
   );
   const embedding = env.ALAYA_RECALL_EVAL_EMBEDDING?.trim().toLowerCase();
   const cross = env.ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK?.trim().toLowerCase();
   const facets = env.ALAYA_RECALL_FACET_TAGS?.trim().toLowerCase();
-  if (embedding !== "env" || (cross !== undefined &&
+  if (embedding !== (cell === "B" ? "env" : "disabled") || (cross !== undefined &&
       !["0", "false", "off", "no"].includes(cross)) ||
       ["1", "true", "on", "yes"].includes(facets ?? "") ||
       readRecallEvalMaxResults(env.ALAYA_RECALL_EVAL_MAX_RESULTS) !== 10) {
-    throw new Error("500Q recall environment differs from product-B defaults");
+    throw new Error("500Q recall environment differs from promoted A/B defaults");
   }
+}
+
+function recallCell(
+  env: Readonly<Record<string, string | undefined>>
+): "A" | "B" {
+  const embedding = env.ALAYA_RECALL_EVAL_EMBEDDING?.trim().toLowerCase();
+  if (embedding === "disabled") return "A";
+  if (embedding === "env") return "B";
+  throw new Error("500Q recall requires an explicit promoted A/B embedding mode");
 }
 
 function assertSnapshotExpansionManifest(

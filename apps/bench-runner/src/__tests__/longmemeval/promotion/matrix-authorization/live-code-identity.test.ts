@@ -135,7 +135,7 @@ describe("matrix authorize live code identity", () => {
     })).rejects.toThrow(/validator identity drifted/u);
 
     expect(collaborators.verifySnapshot).toHaveBeenCalledOnce();
-    expect(collaborators.verifyEntry).toHaveBeenCalledTimes(4);
+    expect(collaborators.verifyEntry).toHaveBeenCalledTimes(2);
     expect(measure).toHaveBeenCalledTimes(2);
     expect(collaborators.authorizeVerified).not.toHaveBeenCalled();
   });

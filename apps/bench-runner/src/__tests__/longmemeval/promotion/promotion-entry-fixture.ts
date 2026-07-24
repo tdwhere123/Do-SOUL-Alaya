@@ -134,17 +134,17 @@ async function writeEntryFixture(
     contractRoot: root,
     snapshot: {
       db_path: "snapshot.db",
-      manifest_sha256: snapshotFixture.manifestSha256
+      manifest_sha256: snapshotFixture.manifestSha256,
+      producer_code: {
+        commit_sha: COMMIT_SHA,
+        commit_sha7: COMMIT_SHA7,
+        worktree_state_sha256: WORKTREE_SHA,
+        executed_dist: EXECUTED_DIST
+      }
     },
     expectedSelection: selection,
     expectedQuestions: questions,
-    variant: "longmemeval_s",
-    code: {
-      commit_sha: COMMIT_SHA,
-      commit_sha7: COMMIT_SHA7,
-      worktree_state_sha256: WORKTREE_SHA,
-      executed_dist: EXECUTED_DIST
-    }
+    variant: "longmemeval_s"
   });
   return { entryRoot, selection, snapshot: verifiedSnapshot };
 }

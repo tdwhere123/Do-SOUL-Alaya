@@ -7,33 +7,35 @@ import {
 } from "../../../longmemeval/promotion/schema/contract.js";
 
 describe("LongMemEval matrix promotion contract", () => {
-  it("accepts only the exact treatment Cartesian product and derives B from policy", () => {
+  it("accepts only the A/B treatment pair and derives B from policy", () => {
     const raw = contractFixture();
     const parsed = parseLongMemEvalMatrixPromotionContract(JSON.stringify(raw));
 
     expect(parsed.sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(parsed.contract.matrix.entries.map((entry) =>
-      matrixCellForTreatment(entry.treatment))).toEqual(["A", "B", "C", "D"]);
+      matrixCellForTreatment(entry.treatment))).toEqual(["A", "B"]);
     expect(productDefaultTreatment(parsed.contract.policy_version)).toEqual({
       embedding_supplement: true,
       answer_rerank: false
     });
-    expect(parsed.contract.execution_order).toEqual(["A", "B", "C", "D"]);
+    expect(parsed.contract.execution_order).toEqual(["A", "B"]);
     expect(parsed.contract.absolute_quality_policy).toEqual({
+      control_cell: "A",
       product_cell: "B",
       metric: "r_at_5",
       cohort: "answerable",
       expected_denominator: 94,
-      minimum_hits: 85
+      control_minimum_hits: 76,
+      product_minimum_hits: 90
     });
   });
 
-  it("rejects duplicate treatment cells even when four entries are present", () => {
+  it("rejects duplicate treatment cells even when two entries are present", () => {
     const raw = contractFixture();
-    raw.matrix.entries[3]!.treatment = { ...raw.matrix.entries[0]!.treatment };
+    raw.matrix.entries[1]!.treatment = { ...raw.matrix.entries[0]!.treatment };
 
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(raw))
-      .toThrow(/Cartesian product/u);
+      .toThrow(/A\/B treatment pair/u);
   });
 
   it.each([
@@ -67,34 +69,34 @@ describe("LongMemEval matrix promotion contract", () => {
 
   it("rejects duplicate matrix evidence roots", () => {
     const raw = contractFixture();
-    raw.matrix.entries[3]!.evidence_root = raw.matrix.entries[0]!.evidence_root;
+    raw.matrix.entries[1]!.evidence_root = raw.matrix.entries[0]!.evidence_root;
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(raw))
       .toThrow(/evidence roots must be unique/u);
   });
 
   it("rejects result-fitted material-effect policy or run order", () => {
     const fitted = contractFixture();
-    fitted.material_effect_policy.minimum_net_r_at_5_wins = 4;
+    fitted.material_effect_policy.paired_r_at_5_diagnostic.mcnemar_method = "asymptotic";
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(fitted)).toThrow();
 
     const reordered = {
       ...contractFixture(),
-      execution_order: ["B", "A", "C", "D"] as const
+      execution_order: ["B", "A"] as const
     };
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(reordered)).toThrow();
   });
 
   it("rejects a weakened absolute product-quality policy", () => {
     const raw = contractFixture();
-    raw.absolute_quality_policy.minimum_hits = 84;
+    raw.absolute_quality_policy.product_minimum_hits = 89;
 
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse(raw)).toThrow();
   });
 
-  it("rejects a legacy v1 contract even when it carries v2 policy fields", () => {
+  it("rejects a legacy v2 contract even when it carries v3 policy fields", () => {
     expect(() => LongMemEvalMatrixPromotionContractSchema.parse({
       ...contractFixture(),
-      schema_version: 1
+      schema_version: 2
     })).toThrow();
   });
 
@@ -109,9 +111,9 @@ describe("LongMemEval matrix promotion contract", () => {
 
 function contractFixture() {
   return {
-    schema_version: 2 as const,
+    schema_version: 3 as const,
     kind: "longmemeval_matrix_promotion_contract" as const,
-    policy_version: "longmemeval-product-default-v1" as const,
+    policy_version: "longmemeval-product-default-v2" as const,
     code: {
       commit_sha: "abcdef0" + "1".repeat(33),
       commit_sha7: "abcdef0",
@@ -130,15 +132,23 @@ function contractFixture() {
     },
     snapshot: {
       db_path: "snapshot/source-100.db",
-      manifest_sha256: "f".repeat(64)
+      manifest_sha256: "f".repeat(64),
+      producer_code: {
+        commit_sha: "1234567" + "2".repeat(33),
+        commit_sha7: "1234567",
+        worktree_state_sha256: "3".repeat(64),
+        executed_dist: {
+          algorithm: "sha256-reachable-path-file-sha256-v1" as const,
+          sha256: "4".repeat(64),
+          file_count: 2
+        }
+      }
     },
-    execution_order: ["A", "B", "C", "D"] as ["A", "B", "C", "D"],
+    execution_order: ["A", "B"] as ["A", "B"],
     matrix: {
       entries: [
         entry(false, false, "cell-a"),
-        entry(true, false, "cell-b"),
-        entry(false, true, "cell-c"),
-        entry(true, true, "cell-d")
+        entry(true, false, "cell-b")
       ]
     },
     absolute_quality_policy: absoluteQualityPolicy(),
@@ -148,20 +158,23 @@ function contractFixture() {
       answerable_count: 94,
       declared_abstention_count: 6,
       directional_metrics: ["r_at_1", "r_at_5", "r_at_10", "full_gold_at_5"] as const,
-      token_non_regression_metric: "token_saved_ratio_vs_full_prompt" as const,
-      minimum_net_r_at_5_wins: 5,
-      mcnemar: { method: "exact_two_sided" as const, p_value_max_exclusive: 0.05 }
+      token_diagnostic_metric: "token_saved_ratio_vs_full_prompt" as const,
+      paired_r_at_5_diagnostic: {
+        mcnemar_method: "exact_two_sided" as const
+      }
     }
   };
 }
 
 function absoluteQualityPolicy() {
   return {
+    control_cell: "A" as const,
     product_cell: "B" as const,
     metric: "r_at_5" as const,
     cohort: "answerable" as const,
     expected_denominator: 94,
-    minimum_hits: 85
+    control_minimum_hits: 76,
+    product_minimum_hits: 90
   };
 }
 

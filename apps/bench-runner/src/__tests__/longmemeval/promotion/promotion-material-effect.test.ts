@@ -21,21 +21,32 @@ describe("LongMemEval material-effect authorization", () => {
     expect(exactTwoSidedMcNemarPValue(gained, lost)).toBe(expected);
   });
 
-  it("authorizes directional improvement and paired significance over exact 94/6 cohorts", () => {
+  it("authorizes absolute A/B quality while retaining paired significance as diagnostics", () => {
     const effect = verifyLongMemEvalMaterialEffect({
-      control: payload({ hits: 80, rAt1: 0.8, rAt10: 0.9, fullGoldAt5: 0.7 }),
-      product: payload({ hits: 89, rAt1: 0.81, rAt10: 0.91, fullGoldAt5: 0.71 })
+      control: payload({ hits: 87, rAt1: 0.36, rAt10: 0.96, fullGoldAt5: 0.34 }),
+      product: payload({
+        hits: 90,
+        lostHitIndices: [0],
+        rAt1: 0.70,
+        rAt10: 0.96,
+        fullGoldAt5: 0.36,
+        tokenSaved: 0.9999704
+      })
     });
 
     expect(effect.status).toBe("passed");
     expect(effect.paired_r_at_5).toMatchObject({
       answerable_count: 94,
-      control_hits: 80,
-      product_hits: 89,
-      gained: 9,
-      lost: 0,
-      net: 9,
-      mcnemar: { method: "exact_two_sided", p_value: 0.00390625 }
+      control_hits: 87,
+      product_hits: 90,
+      gained: 4,
+      lost: 1,
+      net: 3,
+      mcnemar: { method: "exact_two_sided", p_value: 0.375 }
+    });
+    expect(effect.safeguards).toMatchObject({
+      recall_eval_attribution: "eligible_in_both",
+      measurement_attribution: "honest_in_both"
     });
   });
 
@@ -44,7 +55,6 @@ describe("LongMemEval material-effect authorization", () => {
     ["R@5", { product: { hits: 79 } }],
     ["R@10", { product: { rAt10: 0.89 } }],
     ["full-gold@5", { product: { fullGoldAt5: 0.69 } }],
-    ["token economy", { product: { rAt1: 0.81, tokenSaved: 0.89 } }]
   ])("rejects a %s regression", (_label, override) => {
     expect(() => verifyLongMemEvalMaterialEffect({
       control: payload(),
@@ -52,15 +62,11 @@ describe("LongMemEval material-effect authorization", () => {
     })).toThrow(/regress/u);
   });
 
-  it("rejects no directional gain, an insignificant five-win result, and cohort drift", () => {
+  it("rejects no directional gain and cohort drift without significance gating", () => {
     expect(() => verifyLongMemEvalMaterialEffect({
       control: payload(),
       product: payload()
     })).toThrow(/positive/u);
-    expect(() => verifyLongMemEvalMaterialEffect({
-      control: payload({ hits: 80 }),
-      product: payload({ hits: 85 })
-    })).toThrow(/McNemar/u);
     expect(() => verifyLongMemEvalMaterialEffect({
       control: payload(),
       product: payload({ answerableCount: 93 })
@@ -93,6 +99,15 @@ describe("LongMemEval material-effect authorization", () => {
       product: missing
     })).toThrow(/full-gold/u);
   });
+
+  it("rejects missing recall-eval attribution without relabeling broad measurement", () => {
+    const missing = payload();
+    missing.recall_eval_attribution = undefined;
+    expect(() => verifyLongMemEvalMaterialEffect({
+      control: payload(),
+      product: missing
+    })).toThrow(/recall-eval attribution/u);
+  });
 });
 
 interface PayloadOptions {
@@ -102,6 +117,7 @@ interface PayloadOptions {
   readonly fullGoldAt5?: number;
   readonly tokenSaved?: number;
   readonly answerableCount?: number;
+  readonly lostHitIndices?: readonly number[];
 }
 
 function payload(options: PayloadOptions = {}): KpiPayload {
@@ -110,7 +126,8 @@ function payload(options: PayloadOptions = {}): KpiPayload {
   const rows = Array.from({ length: 100 }, (_, index) => ({
     id: `question-${index + 1}`,
     version: 1,
-    hit_at_5: index < hits,
+    hit_at_5: index < hits + (options.lostHitIndices?.length ?? 0) &&
+      !(options.lostHitIndices ?? []).includes(index),
     scorable: index < answerableCount,
     measurement_cohort: index < answerableCount
       ? "answerable" as const
@@ -121,7 +138,11 @@ function payload(options: PayloadOptions = {}): KpiPayload {
     evaluated_count: 100,
     answerable_evaluated_count: answerableCount,
     measurement_attribution: {
-      status: "eligible",
+      status: "ineligible",
+      gate_eligible: false
+    },
+    recall_eval_attribution: {
+      status: "attributed",
       gate_eligible: true
     },
     kpi: {

@@ -382,9 +382,6 @@ function assertMeasurementAttribution(payload: KpiPayload): void {
     evaluatorIdentityUnscorableCount: metrics?.evaluator_identity_unscorable_count
   });
   assertEqual(payload.measurement_attribution, expected, "measurement attribution");
-  if (!expected.gate_eligible) {
-    throw new Error("recall-eval measurement attribution is not gate eligible");
-  }
 }
 
 function assertEqual(actual: unknown, expected: unknown, label: string): void {

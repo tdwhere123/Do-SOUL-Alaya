@@ -13,7 +13,7 @@ import {
   testCell
 } from "./promotion-matrix-fixture.js";
 
-describe("verified LongMemEval A/B/C/D promotion", () => {
+describe("verified LongMemEval A/B promotion", () => {
   it.each([
     ["policy shape", (data: VerifiedRecallEvalPromotionEntryData) => ({
       ...data,
@@ -76,7 +76,7 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
         seed_capabilities: { facet_tags_enabled: true }
       }
     })]
-  ] as const)("rejects a unified custom %s across all four cells", (_label, mutate) => {
+  ] as const)("rejects a unified custom %s across both cells", (_label, mutate) => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((cell) =>
       testCell(cell.evidenceRoot, mutate(cell.data) as VerifiedRecallEvalPromotionEntryData));
@@ -98,10 +98,10 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
 
     // @ts-expect-error Negative contract test deliberately omits required cells.
     expect(() => authorizeVerifiedLongMemEvalMatrix(diagnosticOnly))
-      .toThrow(/four verified cells/u);
+      .toThrow(/two verified cells/u);
   });
 
-  it("rejects evidence whose persisted run times violate A/B/C/D order", () => {
+  it("rejects evidence whose persisted run times violate A/B order", () => {
     const fixture = matrixFixture();
     const product = fixture.cells[1]!;
     const outOfOrder = {
@@ -119,7 +119,7 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
       ...fixture,
       cells: fixture.cells.map((cell, index) =>
         index === 1 ? testCell(cell.evidenceRoot, outOfOrder) : cell)
-    })).toThrow(/pre-registered A\/B\/C\/D order/u);
+    })).toThrow(/pre-registered A\/B order/u);
   });
 
   it("rejects directional or statistically nonmaterial A-to-B results", () => {
@@ -148,23 +148,33 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
     });
     expect(authorization.material_effect.paired_r_at_5).toMatchObject({
       answerable_count: 94,
-      control_hits: 80,
-      product_hits: 89,
-      gained: 9,
-      lost: 0,
-      net: 9,
-      mcnemar: { method: "exact_two_sided", p_value: 0.00390625 }
+      control_hits: 87,
+      product_hits: 90,
+      gained: 4,
+      lost: 1,
+      net: 3,
+      mcnemar: { method: "exact_two_sided", p_value: 0.375 }
     });
   });
 
-  it("requires B to reach 85/94 on the frozen answerable cohort", () => {
+  it("requires B to reach 90/94 on the frozen answerable cohort", () => {
     const fixture = matrixFixture();
     expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
       cells: fixture.cells.map((entry, index) => index === 1
-        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 84))
+        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 89))
         : entry)
-    })).toThrow(/at least 85\/94 hits/u);
+    })).toThrow(/at least 90\/94 hits/u);
+  });
+
+  it("requires A to reach 76/94 on the frozen answerable cohort", () => {
+    const fixture = matrixFixture();
+    expect(() => authorizeVerifiedLongMemEvalMatrix({
+      ...fixture,
+      cells: fixture.cells.map((entry, index) => index === 0
+        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 75))
+        : entry)
+    })).toThrow(/at least 76\/94 hits/u);
   });
 
   it("rejects answerable-denominator drift before promotion", () => {
@@ -174,16 +184,16 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
     expect(() => authorizeVerifiedLongMemEvalMatrix({
       ...fixture,
       cells: fixture.cells.map((entry, index) => index === 1
-        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(product.data, 85, 93))
+        ? testCell(entry.evidenceRoot, withAbsoluteQualityHits(product.data, 90, 93))
         : entry)
     })).toThrow(/differs from its answerable rows/u);
   });
 
-  it("authorizes the exact 85/94 boundary for product cell B", () => {
+  it("authorizes the exact A=76/94 and B=90/94 boundaries", () => {
     const fixture = matrixFixture();
     const cells = fixture.cells.map((entry, index) => {
       if (index === 0) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 76));
-      if (index === 1) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 85));
+      if (index === 1) return testCell(entry.evidenceRoot, withAbsoluteQualityHits(entry.data, 90));
       return entry;
     });
 

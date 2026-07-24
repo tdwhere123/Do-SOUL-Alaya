@@ -22,9 +22,7 @@ export function promotionAuthorizationFixture() {
   });
   const cells = [
     cell("A", false, false, "1"),
-    cell("B", true, false, "2"),
-    cell("C", false, true, "3"),
-    cell("D", true, true, "4")
+    cell("B", true, false, "2")
   ] as const;
   const gate = {
     id: "longmemeval_s_r_at_5",
@@ -51,7 +49,7 @@ export function promotionAuthorizationFixture() {
     kind: "longmemeval_matrix_promotion_authorization",
     status: "authorized",
     contract_sha256: "a".repeat(64),
-    policy_version: "longmemeval-product-default-v1",
+    policy_version: "longmemeval-product-default-v2",
     source_selection: sourceSelection,
     next_selection: nextSelection,
     matrix: { sha256: "b".repeat(64), cells: [...cells] },
@@ -67,7 +65,7 @@ export function promotionAuthorizationFixture() {
 }
 
 function cell(
-  label: "A" | "B" | "C" | "D",
+  label: "A" | "B",
   embeddingSupplement: boolean,
   answerRerank: boolean,
   digestPrefix: string

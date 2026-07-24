@@ -57,7 +57,7 @@ export async function mintCapability(
   const contract = expansionPromotionContractFixture();
   const contents = Buffer.from(JSON.stringify(contract), "utf8");
   const parsed = parseLongMemEvalMatrixPromotionContract(contents);
-  const labels = ["A", "B", "C", "D"] as const;
+  const labels = ["A", "B"] as const;
   const cells = contract.matrix.entries.map((entry, index) => ({
     cell: labels[index]!,
     treatment: entry.treatment,

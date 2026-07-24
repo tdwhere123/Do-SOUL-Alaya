@@ -34,11 +34,11 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
     const data = longMemEvalExpansionCapabilityData(capability);
     expect(data).toMatchObject({
       contractSha256: fixture.parsed.sha256,
-      policyVersion: "longmemeval-product-default-v1",
+      policyVersion: "longmemeval-product-default-v2",
       sourceSelection: { selected_count: 100 },
       nextSelection: { selected_count: 500 },
       productDefault: { cell: "B" },
-      materialEffect: { paired_r_at_5: { net: 9 } },
+      materialEffect: { paired_r_at_5: { net: 3 } },
       validator: { commit_sha7: "abcdef0", worktree_clean: true },
       sourceSnapshot: {
         dbPath: "snapshot/source-100.db",
@@ -119,29 +119,27 @@ describe("LongMemEval 100Q to 500Q expansion capability", () => {
   });
 
   it("accepts a contract whose observational matrix entries are permuted", async () => {
-    const fixture = expansionFixture([2, 0, 3, 1]);
+    const fixture = expansionFixture([1, 0]);
     await expect(verifyLongMemEvalExpansionCapability(
       fixture.input,
       fixture.dependencies
     )).resolves.toBeDefined();
   });
 
-  it("rejects a four-entry contract with a duplicate and missing treatment cell", () => {
-    expect(() => expansionFixture([0, 1, 1, 3])).toThrow(/Cartesian product|unique/u);
+  it("rejects a two-entry contract with a duplicate and missing treatment cell", () => {
+    expect(() => expansionFixture([0, 0])).toThrow(/A\/B treatment pair|unique/u);
   });
 });
 
-function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
+function expansionFixture(order: readonly number[] = [0, 1]) {
   const entries = [
     entry(false, false, "cell-a"),
-    entry(true, false, "cell-b"),
-    entry(false, true, "cell-c"),
-    entry(true, true, "cell-d")
+    entry(true, false, "cell-b")
   ];
   const contract = LongMemEvalMatrixPromotionContractSchema.parse({
-    schema_version: 2,
+    schema_version: 3,
     kind: "longmemeval_matrix_promotion_contract",
-    policy_version: "longmemeval-product-default-v1",
+    policy_version: "longmemeval-product-default-v2",
     code: {
       commit_sha: "abcdef0" + "1".repeat(33),
       commit_sha7: "abcdef0",
@@ -160,9 +158,19 @@ function expansionFixture(order: readonly number[] = [0, 1, 2, 3]) {
     },
     snapshot: {
       db_path: "snapshot/source-100.db",
-      manifest_sha256: "f".repeat(64)
+      manifest_sha256: "f".repeat(64),
+      producer_code: {
+        commit_sha: "1234567" + "2".repeat(33),
+        commit_sha7: "1234567",
+        worktree_state_sha256: "3".repeat(64),
+        executed_dist: {
+          algorithm: "sha256-reachable-path-file-sha256-v1",
+          sha256: "4".repeat(64),
+          file_count: 41
+        }
+      }
     },
-    execution_order: ["A", "B", "C", "D"],
+    execution_order: ["A", "B"],
     matrix: { entries: order.map((index) => entries[index]!) },
     absolute_quality_policy: expansionAbsoluteQualityPolicyFixture(),
     material_effect_policy: expansionMaterialEffectPolicyFixture()

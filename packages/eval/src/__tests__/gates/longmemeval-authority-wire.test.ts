@@ -243,7 +243,7 @@ function expansionLineage() {
 function promotionIdentity() {
   return {
     contract_sha256: "5".repeat(64),
-    policy_version: "longmemeval-product-default-v1" as const,
+    policy_version: "longmemeval-product-default-v2" as const,
     code: codeIdentity(),
     source_selection: selection(100),
     next_selection: selection(500),

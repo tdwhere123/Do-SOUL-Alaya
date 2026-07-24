@@ -12,6 +12,8 @@ const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 export const LongMemEvalMatrixTreatmentSchema =
   LongMemEvalMatrixTreatmentWireSchema;
+export const LongMemEvalMatrixPromotionCodeSchema =
+  LongMemEvalPromotionCodeWireSchema;
 
 const MatrixEntrySchema = z.object({
   treatment: LongMemEvalMatrixTreatmentSchema,
@@ -19,14 +21,18 @@ const MatrixEntrySchema = z.object({
 }).strict().readonly();
 
 const AbsoluteQualityPolicySchema = z.object({
+  control_cell: z.literal("A"),
   product_cell: z.literal("B"),
   metric: z.literal("r_at_5"),
   cohort: z.literal("answerable"),
   expected_denominator: z.literal(
     LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.answerableCount
   ),
-  minimum_hits: z.literal(
-    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.minimumR5Hits
+  control_minimum_hits: z.literal(
+    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.controlMinimumR5Hits
+  ),
+  product_minimum_hits: z.literal(
+    LONGMEMEVAL_R2_ABSOLUTE_QUALITY_POLICY.productMinimumR5Hits
   )
 }).strict().readonly();
 
@@ -43,25 +49,16 @@ const MaterialEffectPolicySchema = z.object({
     z.literal("r_at_10"),
     z.literal("full_gold_at_5")
   ]).readonly(),
-  token_non_regression_metric: z.literal("token_saved_ratio_vs_full_prompt"),
-  minimum_net_r_at_5_wins: z.literal(
-    LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.minimumNetR5Wins
-  ),
-  mcnemar: z.object({
-    method: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod),
-    p_value_max_exclusive: z.literal(
-      LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarPValueMaxExclusive
-    )
+  token_diagnostic_metric: z.literal("token_saved_ratio_vs_full_prompt"),
+  paired_r_at_5_diagnostic: z.object({
+    mcnemar_method: z.literal(LONGMEMEVAL_R2_MATERIAL_EFFECT_POLICY.mcnemarMethod)
   }).strict().readonly()
 }).strict().readonly();
 
-export const LongMemEvalMatrixPromotionCodeSchema =
-  LongMemEvalPromotionCodeWireSchema;
-
 const LongMemEvalMatrixPromotionContractBaseSchema = z.object({
-  schema_version: z.literal(2),
+  schema_version: z.literal(3),
   kind: z.literal("longmemeval_matrix_promotion_contract"),
-  policy_version: z.literal("longmemeval-product-default-v1"),
+  policy_version: z.literal("longmemeval-product-default-v2"),
   code: LongMemEvalMatrixPromotionCodeSchema,
   dataset: z.object({
     variant: z.literal("longmemeval_s")
@@ -73,16 +70,15 @@ const LongMemEvalMatrixPromotionContractBaseSchema = z.object({
   }).strict(),
   snapshot: z.object({
     db_path: z.string().min(1),
-    manifest_sha256: Sha256Schema
+    manifest_sha256: Sha256Schema,
+    producer_code: LongMemEvalMatrixPromotionCodeSchema
   }).strict(),
   execution_order: z.tuple([
     z.literal("A"),
-    z.literal("B"),
-    z.literal("C"),
-    z.literal("D")
+    z.literal("B")
   ]).readonly(),
   matrix: z.object({
-    entries: z.array(MatrixEntrySchema).length(4).readonly()
+    entries: z.array(MatrixEntrySchema).length(2).readonly()
   }).strict(),
   absolute_quality_policy: AbsoluteQualityPolicySchema,
   material_effect_policy: MaterialEffectPolicySchema
@@ -100,6 +96,7 @@ function validatePromotionContract(
   context: z.RefinementCtx
 ): void {
   validateCodeIdentity(contract, context);
+  validateSnapshotProducerCodeIdentity(contract, context);
   validateMatrixTreatments(contract, context);
   validateEvidenceRoots(contract, context);
   validateSnapshotPath(contract, context);
@@ -118,6 +115,20 @@ function validateCodeIdentity(
   }
 }
 
+function validateSnapshotProducerCodeIdentity(
+  contract: PromotionContractCandidate,
+  context: z.RefinementCtx
+): void {
+  const code = contract.snapshot.producer_code;
+  if (!code.commit_sha.startsWith(code.commit_sha7)) {
+    context.addIssue({
+      code: "custom",
+      path: ["snapshot", "producer_code", "commit_sha7"],
+      message: "snapshot producer commit_sha7 must prefix commit_sha"
+    });
+  }
+}
+
 function validateMatrixTreatments(
   contract: PromotionContractCandidate,
   context: z.RefinementCtx
@@ -128,7 +139,7 @@ function validateMatrixTreatments(
     context.addIssue({
       code: "custom",
       path: ["matrix", "entries"],
-      message: "matrix entries must be the exact four-cell treatment Cartesian product"
+      message: "matrix entries must be the exact A/B treatment pair"
     });
   }
 }
@@ -183,9 +194,7 @@ export interface ParsedLongMemEvalMatrixPromotionContract {
 
 const MATRIX_TREATMENTS: readonly LongMemEvalMatrixTreatment[] = Object.freeze([
   Object.freeze({ embedding_supplement: false, answer_rerank: false }),
-  Object.freeze({ embedding_supplement: true, answer_rerank: false }),
-  Object.freeze({ embedding_supplement: false, answer_rerank: true }),
-  Object.freeze({ embedding_supplement: true, answer_rerank: true })
+  Object.freeze({ embedding_supplement: true, answer_rerank: false })
 ]);
 
 export function parseLongMemEvalMatrixPromotionContract(
@@ -209,10 +218,20 @@ export function matrixCellForTreatment(
   return "D";
 }
 
+export function promotionCellForTreatment(
+  treatment: LongMemEvalMatrixTreatment
+): "A" | "B" {
+  const cell = matrixCellForTreatment(treatment);
+  if (cell !== "A" && cell !== "B") {
+    throw new Error("promotion treatment is outside the canonical A/B pair");
+  }
+  return cell;
+}
+
 export function productDefaultTreatment(
   policyVersion: LongMemEvalMatrixPromotionContract["policy_version"]
 ): LongMemEvalMatrixTreatment {
-  if (policyVersion !== "longmemeval-product-default-v1") {
+  if (policyVersion !== "longmemeval-product-default-v2") {
     throw new Error(`unsupported product-default policy: ${policyVersion}`);
   }
   return MATRIX_TREATMENTS[1]!;

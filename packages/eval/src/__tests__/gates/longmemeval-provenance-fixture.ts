@@ -258,7 +258,7 @@ function renderReference(
 function expansionIdentity() {
   return {
     contract_sha256: "d".repeat(64),
-    policy_version: "longmemeval-product-default-v1" as const,
+    policy_version: "longmemeval-product-default-v2" as const,
     code: promotionCode(),
     source_selection: selectionIdentity(
       Array.from({ length: 100 }, (_, index) => `source-${index}`)

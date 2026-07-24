@@ -110,7 +110,7 @@ describe("500Q expansion fill authority", () => {
         ...approval,
         r2: { ...approval.r2, b_a_net_r5_wins: 4 }
       }
-    }, "/cache")).rejects.toThrow(/net R@5 wins/u);
+    }, "/cache")).rejects.toThrow(/material effect net r@5 wins/u);
 
     await expect(prepareExpansionFillAuthority({
       variant: "longmemeval_s",

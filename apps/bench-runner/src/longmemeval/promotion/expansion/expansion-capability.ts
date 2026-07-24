@@ -11,6 +11,7 @@ import {
 import {
   matrixCellForTreatment,
   parseLongMemEvalMatrixPromotionContract,
+  promotionCellForTreatment,
   type LongMemEvalMatrixPromotionContract
 } from "../schema/contract.js";
 import { authorizeLongMemEvalMatrixPromotion } from "../index.js";
@@ -242,7 +243,7 @@ function assertMatrixReceiptMatchesContract(
   authorization: LongMemEvalMatrixPromotionAuthorization
 ): void {
   const expected = canonicalMatrixCells(contract.matrix.entries.map((entry) => ({
-    cell: matrixCellForTreatment(entry.treatment),
+    cell: promotionCellForTreatment(entry.treatment),
     treatment: entry.treatment,
     evidence_root: entry.evidence_root
   })));
@@ -261,7 +262,7 @@ function assertMatrixReceiptMatchesContract(
 }
 
 function canonicalMatrixCells<T extends {
-  readonly cell: "A" | "B" | "C" | "D";
+  readonly cell: "A" | "B";
   readonly treatment: LongMemEvalMatrixPromotionContract["matrix"]["entries"][number]["treatment"];
 }>(cells: readonly T[], verifyLabels = false): readonly T[] {
   const byCell = new Map<T["cell"], T>();
@@ -272,7 +273,7 @@ function canonicalMatrixCells<T extends {
     }
     byCell.set(cell.cell, cell);
   }
-  const canonical = (["A", "B", "C", "D"] as const).map((cell) => byCell.get(cell));
+  const canonical = (["A", "B"] as const).map((cell) => byCell.get(cell));
   if (canonical.some((cell) => cell === undefined)) {
     throw new Error("promotion matrix is missing a treatment cell");
   }
@@ -291,8 +292,14 @@ function assertSourceSnapshotManifest(
       manifest.attribution?.gate_eligible !== true ||
       manifest.artifact_integrity === undefined || provenance === undefined ||
       !isDeepStrictEqual(provenance.selection, input.sourceSelection) ||
-      provenance.code.commit_sha !== input.contract.code.commit_sha ||
-      provenance.code.worktree_state_sha256 !== input.contract.code.worktree_state_sha256 ||
+      provenance.code.commit_sha !== input.contract.snapshot.producer_code.commit_sha ||
+      provenance.code.commit_sha7 !== input.contract.snapshot.producer_code.commit_sha7 ||
+      provenance.code.worktree_state_sha256 !==
+        input.contract.snapshot.producer_code.worktree_state_sha256 ||
+      !isDeepStrictEqual(
+        provenance.code.executed_dist,
+        input.contract.snapshot.producer_code.executed_dist
+      ) ||
       extraction === null || extraction.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
       !hasCompleteExtractionFillSummary(extraction) ||
       extraction.window_offset !== 0 || extraction.window_limit !== 100 ||

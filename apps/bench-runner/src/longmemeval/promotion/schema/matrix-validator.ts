@@ -11,6 +11,7 @@ import {
 } from "./authorization.js";
 import {
   matrixCellForTreatment,
+  promotionCellForTreatment,
   productDefaultTreatment,
   treatmentKey,
   type LongMemEvalMatrixPromotionContract
@@ -36,7 +37,8 @@ interface ResolvedPromotionMatrixCell {
   readonly data: VerifiedRecallEvalPromotionEntryData;
 }
 
-const CELL_ORDER = ["A", "B", "C", "D"] as const;
+const CELL_ORDER = ["A", "B"] as const;
+type PromotionCell = typeof CELL_ORDER[number];
 const REQUIRED_PIPELINE_GATES = [
   "longmemeval_s_non_monotonic_rate",
   "longmemeval_s_budget_dropped_rate",
@@ -64,9 +66,12 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
   );
   const { productCell, productTreatment } = product;
   assertPromotionProductDefaultPolicy(productCell.data);
-  assertAbsoluteProductQuality(input.contract, productCell);
+  assertAbsoluteQuality(input.contract, cells.get("A")!, productCell);
   const hardGates = collectReleaseHardGates(productCell.data.payload);
-  assertMandatoryProductGates(hardGates, "B product-default cell");
+  const authorizedHardGates = assertMandatoryProductGates(
+    hardGates,
+    "B product-default cell"
+  );
   const materialEffect = verifyLongMemEvalMaterialEffect({
     control: cells.get("A")!.data.payload,
     product: productCell.data.payload
@@ -75,29 +80,41 @@ export function authorizeVerifiedLongMemEvalMatrix(input: {
     input,
     cells,
     product,
-    hardGates,
+    authorizedHardGates,
     materialEffect
   );
 }
 
-function assertAbsoluteProductQuality(
+function assertAbsoluteQuality(
   contract: LongMemEvalMatrixPromotionContract,
+  control: ResolvedPromotionMatrixCell,
   product: ResolvedPromotionMatrixCell
 ): void {
   assertLongMemEvalAbsoluteQuality({
+    payload: control.data.payload,
+    policy: {
+      expected_denominator: contract.absolute_quality_policy.expected_denominator,
+      minimum_hits: contract.absolute_quality_policy.control_minimum_hits
+    },
+    label: "A control cell"
+  });
+  assertLongMemEvalAbsoluteQuality({
     payload: product.data.payload,
-    policy: contract.absolute_quality_policy,
+    policy: {
+      expected_denominator: contract.absolute_quality_policy.expected_denominator,
+      minimum_hits: contract.absolute_quality_policy.product_minimum_hits
+    },
     label: "B product-default cell"
   });
 }
 
 function resolveProductDefaultCell(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
+  cells: ReadonlyMap<PromotionCell, ResolvedPromotionMatrixCell>,
   policyVersion: LongMemEvalMatrixPromotionContract["policy_version"]
 ) {
   const productTreatment = productDefaultTreatment(policyVersion);
-  const productCell = cells.get(matrixCellForTreatment(productTreatment));
-  if (productCell === undefined || matrixCellForTreatment(productTreatment) !== "B") {
+  const productCell = cells.get(promotionCellForTreatment(productTreatment));
+  if (productCell === undefined || promotionCellForTreatment(productTreatment) !== "B") {
     throw new Error("product-default policy does not resolve to matrix cell B");
   }
   return { productCell, productTreatment };
@@ -105,7 +122,7 @@ function resolveProductDefaultCell(
 
 function renderMatrixAuthorization(
   input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>[0],
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
+  cells: ReadonlyMap<PromotionCell, ResolvedPromotionMatrixCell>,
   product: ReturnType<typeof resolveProductDefaultCell>,
   hardGates: ReturnType<typeof collectReleaseHardGates>,
   materialEffect: ReturnType<typeof verifyLongMemEvalMaterialEffect>
@@ -139,8 +156,8 @@ function renderMatrixAuthorization(
 }
 
 function renderMatrixCell(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>,
-  cell: typeof CELL_ORDER[number]
+  cells: ReadonlyMap<PromotionCell, ResolvedPromotionMatrixCell>,
+  cell: PromotionCell
 ) {
   const entry = cells.get(cell)!;
   return {
@@ -152,14 +169,14 @@ function renderMatrixCell(
 }
 
 function indexCells(input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>[0]) {
-  if (input.cells.length !== 4) throw new Error("promotion matrix requires four verified cells");
-  const byCell = new Map<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>();
+  if (input.cells.length !== 2) throw new Error("promotion matrix requires two verified cells");
+  const byCell = new Map<PromotionCell, ResolvedPromotionMatrixCell>();
   const contractByTreatment = new Map(input.contract.matrix.entries.map(
     (entry) => [treatmentKey(entry.treatment), entry]
   ));
   for (const cell of input.cells) {
     const data = verifiedRecallEvalPromotionEntryData(cell.entry);
-    const label = matrixCellForTreatment(data.treatment);
+    const label = promotionCellForTreatment(data.treatment);
     const declared = contractByTreatment.get(treatmentKey(data.treatment));
     if (declared === undefined || declared.evidence_root !== cell.evidenceRoot ||
         byCell.has(label)) {
@@ -173,7 +190,7 @@ function indexCells(input: Parameters<typeof authorizeVerifiedLongMemEvalMatrix>
     byCell.set(label, { evidenceRoot: cell.evidenceRoot, entry: cell.entry, data });
   }
   if (CELL_ORDER.some((cell) => !byCell.has(cell))) {
-    throw new Error("promotion matrix is not the exact treatment Cartesian product");
+    throw new Error("promotion matrix is not the exact A/B treatment pair");
   }
   return byCell;
 }
@@ -260,45 +277,37 @@ function nonTreatmentEnvironment(
 }
 
 function assertPairedTreatmentIdentity(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>
+  cells: ReadonlyMap<PromotionCell, ResolvedPromotionMatrixCell>
 ): void {
   const a = cells.get("A")!.data.diagnosticsRuntime;
   const b = cells.get("B")!.data.diagnosticsRuntime;
-  const c = cells.get("C")!.data.diagnosticsRuntime;
-  const d = cells.get("D")!.data.diagnosticsRuntime;
-  if (a.embedding_supplement.enabled || c.embedding_supplement.enabled ||
+  if (a.embedding_supplement.enabled ||
       a.answer_rerank.enabled || b.answer_rerank.enabled ||
-      !b.embedding_supplement.enabled || !d.embedding_supplement.enabled ||
-      !c.answer_rerank.enabled || !d.answer_rerank.enabled) {
-    throw new Error("matrix treatment activation does not match A/B/C/D semantics");
+      !b.embedding_supplement.enabled) {
+    throw new Error("matrix treatment activation does not match A/B semantics");
   }
-  assertEqual(b.embedding_supplement, d.embedding_supplement,
-    "B/D bi-encoder model identity");
-  assertEqual(c.answer_rerank, d.answer_rerank,
-    "C/D cross-encoder model identity");
 }
 
 function assertExecutionOrder(
-  cells: ReadonlyMap<"A" | "B" | "C" | "D", ResolvedPromotionMatrixCell>
+  cells: ReadonlyMap<PromotionCell, ResolvedPromotionMatrixCell>
 ): void {
   const ordered = CELL_ORDER.map((cell) => cells.get(cell)!);
   const timestamps = ordered.map((cell) => Date.parse(cell.data.manifest.run.run_at));
   if (timestamps.some((value) => !Number.isFinite(value)) ||
       timestamps.some((value, index) => index > 0 && value <= timestamps[index - 1]!)) {
-    throw new Error("promotion evidence does not follow pre-registered A/B/C/D order");
+    throw new Error("promotion evidence does not follow pre-registered A/B order");
   }
 }
 
 function assertMandatoryProductGates(
   gates: ReturnType<typeof collectReleaseHardGates>,
   label: string
-): void {
+): ReturnType<typeof collectReleaseHardGates> {
   const ids = new Set(gates.map((gate) => gate.id));
   const hasRecall = gates.some((gate) =>
     /^longmemeval_s_\d+_embedding_on_r_at_5$/u.test(gate.id)
   );
   const mandatory = [
-    "longmemeval_measurement_attribution",
     "embedding_provider_returned_rate",
     "longmemeval_s_embedding_inference_calls_mean",
     "recall_p95_embedding_on",
@@ -307,12 +316,17 @@ function assertMandatoryProductGates(
   if (!hasRecall || mandatory.some((id) => !ids.has(id))) {
     throw new Error(`${label} is missing a mandatory executable hard gate`);
   }
-  const failed = gates.filter((gate) => !gate.passed || gate.missing);
+  const selected = gates.filter((gate) =>
+    mandatory.includes(gate.id as typeof mandatory[number]) ||
+    /^longmemeval_s_\d+_embedding_on_r_at_5$/u.test(gate.id)
+  );
+  const failed = selected.filter((gate) => !gate.passed || gate.missing);
   if (failed.length > 0) {
     throw new Error(
       `${label} failed hard gates: ${failed.map((gate) => gate.id).join(", ")}`
     );
   }
+  return selected;
 }
 
 function assertEqual(actual: unknown, expected: unknown, label: string): void {

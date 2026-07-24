@@ -9,7 +9,7 @@ import {
   withOpenAiEmbeddingProvider
 } from "./promotion-matrix-fixture.js";
 
-describe("verified LongMemEval A/B/C/D promotion", () => {
+describe("verified LongMemEval A/B promotion", () => {
   it("authorizes the product-default B cell only after all mandatory gates pass", () => {
     const fixture = matrixFixture();
     const authorization = authorizeVerifiedLongMemEvalMatrix(fixture);
@@ -30,10 +30,10 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
 
   it("rejects shared snapshot drift even when every KPI remains passing", () => {
     const fixture = matrixFixture();
-    const d = fixture.cells[3]!;
-    const attribution = d.data.payload.recall_eval_attribution!;
+    const b = fixture.cells[1]!;
+    const attribution = b.data.payload.recall_eval_attribution!;
     const driftedPayload = {
-      ...d.data.payload,
+      ...b.data.payload,
       recall_eval_attribution: {
         ...attribution,
         snapshot_binding: {
@@ -43,7 +43,7 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
       }
     } as KpiPayload;
     const cells = fixture.cells.map((cell, index) =>
-      index === 3
+      index === 1
         ? testCell(cell.evidenceRoot, { ...cell.data, payload: driftedPayload })
         : cell);
 
@@ -53,37 +53,37 @@ describe("verified LongMemEval A/B/C/D promotion", () => {
 
   it("rejects non-treatment environment drift", () => {
     const fixture = matrixFixture();
-    const d = fixture.cells[3]!;
+    const b = fixture.cells[1]!;
     const drifted = {
-      ...d.data,
+      ...b.data,
       provenance: {
-        ...d.data.provenance,
+        ...b.data.provenance,
         runtime: {
-          ...d.data.provenance.runtime,
+          ...b.data.provenance.runtime,
           paired_env: {
-            ...d.data.provenance.runtime.paired_env,
+            ...b.data.provenance.runtime.paired_env,
             ALAYA_RECALL_CONF_RHO_PATH: "0.99"
           }
         }
       }
     };
     const cells = fixture.cells.map((cell, index) =>
-      index === 3 ? testCell(cell.evidenceRoot, drifted) : cell);
+      index === 1 ? testCell(cell.evidenceRoot, drifted) : cell);
 
     expect(() => authorizeVerifiedLongMemEvalMatrix({ ...fixture, cells }))
       .toThrow(/common evidence identity/u);
   });
 
-  it("rejects B/D bi-encoder model drift", () => {
+  it("rejects a non-product B bi-encoder model", () => {
     const fixture = matrixFixture();
-    const d = fixture.cells[3]!;
+    const b = fixture.cells[1]!;
     const cells = fixture.cells.map((cell, index) =>
-      index === 3
-        ? testCell(cell.evidenceRoot, withNonProductLocalBi(d.data, "custom_model"))
+      index === 1
+        ? testCell(cell.evidenceRoot, withNonProductLocalBi(b.data, "custom_model"))
         : cell);
 
     expect(() => authorizeVerifiedLongMemEvalMatrix({ ...fixture, cells }))
-      .toThrow(/B\/D bi-encoder model identity/u);
+      .toThrow(/product-default.*embedding/u);
   });
 
   it("rejects a B latency hard-gate failure after successful evidence verification", () => {
