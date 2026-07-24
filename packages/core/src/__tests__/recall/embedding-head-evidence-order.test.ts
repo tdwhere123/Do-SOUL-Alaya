@@ -98,6 +98,34 @@ describe("embedding-head evidence order", () => {
     expect(selectDelivered).not.toHaveBeenCalled();
   });
 
+  it("evaluates each eviction set once across multiple missing heads", () => {
+    const incumbentA = candidate("incumbent-a", Number.POSITIVE_INFINITY);
+    const incumbentB = candidate("incumbent-b", Number.POSITIVE_INFINITY);
+    const headA = candidate("head-a", 1);
+    const headB = candidate("head-b", 2);
+    const selectDelivered = vi.fn(() => [incumbentA, incumbentB]);
+
+    const evictions = selectEmbeddingHeadEvictions({
+      candidates: [incumbentA, incumbentB, headA, headB],
+      maxEntries: 2,
+      embeddingScores: {
+        "incumbent-a": 0.1,
+        "incumbent-b": 0.2,
+        "head-a": 0.9,
+        "head-b": 0.8
+      },
+      selectDelivered
+    });
+
+    expect(evictions.size).toBe(0);
+    expect(selectDelivered).toHaveBeenCalledTimes(3);
+    expect(selectDelivered.mock.calls.map(([excluded]) => [...excluded])).toEqual([
+      [],
+      ["incumbent-a"],
+      ["incumbent-b"]
+    ]);
+  });
+
   it("identifies embedding heads by finite rank rather than score presence", () => {
     const scoreOnly = candidate("score-only", Number.POSITIVE_INFINITY, 0.9);
     const ranked = candidate("ranked", 1);

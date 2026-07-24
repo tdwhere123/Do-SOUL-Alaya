@@ -30,6 +30,12 @@ export type CoverageMarginalObservation = Readonly<{
   readonly selection_order: number;
 }>;
 
+type CoverageCandidateState<T> = Readonly<{
+  readonly candidate: T;
+  readonly identity: CoverageIdentity;
+  readonly relevance: number;
+}>;
+
 type CoverageSupplementary = Readonly<Pick<
   RecallSupplementaryData,
   "evidenceGistsByMemoryId"
@@ -44,7 +50,11 @@ export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidat
     readonly onSelection?: (observation: CoverageMarginalObservation) => void;
   }>
 ): readonly T[] {
-  const remaining = [...params.candidates];
+  const remaining = params.candidates.map((candidate) => ({
+    candidate,
+    identity: resolveCoverageIdentity(candidate, params.supplementaryData),
+    relevance: resolveRelevance(candidate, params.relevanceByCandidateKey)
+  }));
   const selected: T[] = [];
   const objectCounts = new Map<string, number>();
   const gistCounts = new Map<string, number>();
@@ -52,24 +62,19 @@ export function orderByCoverageMarginalGain<T extends CoverageSelectableCandidat
   while (remaining.length > 0) {
     const best = selectBestCoverageCandidate({
       candidates: remaining,
-      relevanceByCandidateKey: params.relevanceByCandidateKey,
-      supplementaryData: params.supplementaryData,
       objectCounts,
       gistCounts
     });
     const picked = remaining.splice(best.index, 1)[0]!;
-    selected.push(picked);
+    const candidate = picked.candidate;
+    selected.push(candidate);
     params.onSelection?.(Object.freeze({
-      candidate_key: picked.fusion.candidate_key,
+      candidate_key: candidate.fusion.candidate_key,
       marginal_gain: best.gain,
       selection_order: selected.length
     }));
-    if (params.advancesCoverage?.(picked) ?? true) {
-      incrementCoverageCounts(
-        resolveCoverageIdentity(picked, params.supplementaryData),
-        objectCounts,
-        gistCounts
-      );
+    if (params.advancesCoverage?.(candidate) ?? true) {
+      incrementCoverageCounts(picked.identity, objectCounts, gistCounts);
     }
   }
 
@@ -98,33 +103,28 @@ export function resolveCoverageIdentity(
 }
 
 function marginalCoverageGain(params: Readonly<{
-  readonly candidate: CoverageSelectableCandidate;
+  readonly identity: CoverageIdentity;
   readonly relevance: number;
-  readonly supplementaryData: CoverageSupplementary;
   readonly objectCounts: ReadonlyMap<string, number>;
   readonly gistCounts: ReadonlyMap<string, number>;
 }>): number {
-  const identity = resolveCoverageIdentity(params.candidate, params.supplementaryData);
-  const sameObjectCount = params.objectCounts.get(identity.objectKey) ?? 0;
-  const sameGistCount = params.gistCounts.get(identity.gistKey) ?? 0;
+  const sameObjectCount = params.objectCounts.get(params.identity.objectKey) ?? 0;
+  const sameGistCount = params.gistCounts.get(params.identity.gistKey) ?? 0;
   return params.relevance / (1 + sameObjectCount + sameGistCount);
 }
 
 function selectBestCoverageCandidate<T extends CoverageSelectableCandidate>(params: Readonly<{
-  readonly candidates: readonly T[];
-  readonly relevanceByCandidateKey: ReadonlyMap<string, number>;
-  readonly supplementaryData: CoverageSupplementary;
+  readonly candidates: readonly CoverageCandidateState<T>[];
   readonly objectCounts: ReadonlyMap<string, number>;
   readonly gistCounts: ReadonlyMap<string, number>;
 }>): Readonly<{ readonly index: number; readonly gain: number }> {
   let bestIndex = 0;
   let bestGain = Number.NEGATIVE_INFINITY;
   for (let index = 0; index < params.candidates.length; index += 1) {
-    const candidate = params.candidates[index]!;
+    const state = params.candidates[index]!;
     const gain = marginalCoverageGain({
-      candidate,
-      relevance: resolveRelevance(candidate, params.relevanceByCandidateKey),
-      supplementaryData: params.supplementaryData,
+      identity: state.identity,
+      relevance: state.relevance,
       objectCounts: params.objectCounts,
       gistCounts: params.gistCounts
     });

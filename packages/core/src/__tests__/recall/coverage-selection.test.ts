@@ -5,7 +5,11 @@ import {
   type MemoryEntry,
   type RecallScoreFactors
 } from "@do-soul/alaya-protocol";
-import { orderByCoverageMarginalGain } from "../../recall/delivery/coverage-selection.js";
+import {
+  orderByCoverageMarginalGain,
+  resolveCoverageIdentity,
+  type CoverageMarginalObservation
+} from "../../recall/delivery/coverage-selection.js";
 import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
@@ -134,6 +138,73 @@ describe("coverage-aware delivery", () => {
     ]);
     expect(second.ordered).toEqual(first.ordered);
     expect(second.observations).toEqual(first.observations);
+  });
+
+  it("resolves each candidate coverage identity only once per pass", () => {
+    let objectIdReads = 0;
+    const candidates = Array.from({ length: 40 }, (_, index) => {
+      const objectId = `memory-${index}`;
+      const candidate = createCandidate(objectId, 1 - index / 100);
+      return {
+        ...candidate,
+        entry: {
+          ...candidate.entry,
+          get object_id() {
+            objectIdReads += 1;
+            return objectId;
+          }
+        }
+      };
+    });
+
+    orderByCoverageMarginalGain({
+      candidates,
+      relevanceByCandidateKey: relevanceMap(candidates),
+      supplementaryData: createSupplementaryData()
+    });
+
+    expect(objectIdReads).toBeLessThanOrEqual(candidates.length * 3);
+  });
+
+  it("matches the legacy pass across generated permutations and rejections", () => {
+    for (let seed = 0; seed < 128; seed += 1) {
+      const generated = Array.from({ length: 9 }, (_, index) =>
+        createCandidate(`memory-${seed}-${index}`, ((index * 7 + seed) % 4 + 1) / 10)
+      );
+      const pivot = seed % generated.length;
+      const candidates = [
+        ...generated.slice(pivot),
+        ...generated.slice(0, pivot)
+      ];
+      if (seed % 2 === 1) candidates.reverse();
+      const supplementaryData = createSupplementaryData({
+        evidenceGistsByMemoryId: Object.fromEntries(candidates.map((candidate, index) => [
+          candidate.entry.object_id,
+          `gist-${(index + seed) % 3}`
+        ]))
+      });
+      const relevanceByCandidateKey = relevanceMap(candidates);
+      const rejected = new Set(candidates
+        .filter((_candidate, index) => (index + seed) % 5 === 0)
+        .map((candidate) => candidate.fusion.candidate_key));
+      const expected = legacyCoveragePass(
+        candidates,
+        relevanceByCandidateKey,
+        supplementaryData,
+        rejected
+      );
+      const observations: CoverageMarginalObservation[] = [];
+      const actual = orderByCoverageMarginalGain({
+        candidates,
+        relevanceByCandidateKey,
+        supplementaryData,
+        advancesCoverage: (candidate) => !rejected.has(candidate.fusion.candidate_key),
+        onSelection: (observation) => observations.push(observation)
+      });
+
+      expect(actual).toEqual(expected.ordered);
+      expect(observations).toEqual(expected.observations);
+    }
   });
 
   it("fills toward the token budget instead of stopping early with unused tokens", () => {
@@ -613,6 +684,47 @@ function relevanceMap(candidates: readonly FineAssessmentCandidate[]): ReadonlyM
     candidate.fusion.candidate_key,
     candidate.fusion.fused_score
   ]));
+}
+
+function legacyCoveragePass(
+  candidates: readonly FineAssessmentCandidate[],
+  relevanceByCandidateKey: ReadonlyMap<string, number>,
+  supplementaryData: RecallSupplementaryData,
+  rejected: ReadonlySet<string>
+): Readonly<{
+  readonly ordered: readonly FineAssessmentCandidate[];
+  readonly observations: readonly CoverageMarginalObservation[];
+}> {
+  const remaining = [...candidates];
+  const ordered: FineAssessmentCandidate[] = [];
+  const observations: CoverageMarginalObservation[] = [];
+  const objectCounts = new Map<string, number>();
+  const gistCounts = new Map<string, number>();
+  while (remaining.length > 0) {
+    let bestIndex = 0;
+    let bestGain = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const candidate = remaining[index]!;
+      const identity = resolveCoverageIdentity(candidate, supplementaryData);
+      const relevance = relevanceByCandidateKey.get(candidate.fusion.candidate_key) ?? 0;
+      const gain = relevance / (
+        1 + (objectCounts.get(identity.objectKey) ?? 0) + (gistCounts.get(identity.gistKey) ?? 0)
+      );
+      if (gain > bestGain) [bestIndex, bestGain] = [index, gain];
+    }
+    const picked = remaining.splice(bestIndex, 1)[0]!;
+    const identity = resolveCoverageIdentity(picked, supplementaryData);
+    ordered.push(picked);
+    observations.push(Object.freeze({
+      candidate_key: picked.fusion.candidate_key,
+      marginal_gain: bestGain,
+      selection_order: ordered.length
+    }));
+    if (rejected.has(picked.fusion.candidate_key)) continue;
+    objectCounts.set(identity.objectKey, (objectCounts.get(identity.objectKey) ?? 0) + 1);
+    gistCounts.set(identity.gistKey, (gistCounts.get(identity.gistKey) ?? 0) + 1);
+  }
+  return { ordered, observations };
 }
 
 function createSupplementaryData(

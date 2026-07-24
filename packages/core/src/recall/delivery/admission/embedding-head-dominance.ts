@@ -52,12 +52,14 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
   if (budget === 0) return new Set();
   const embeddingHead = orderedEmbeddingHead(params.candidates, budget);
   if (embeddingHead.length === 0) return new Set();
+  const selectDelivered = memoizeDeliveredSelection(params.selectDelivered);
   let evictions: ReadonlySet<string> = new Set();
-  let delivered = params.selectDelivered(evictions);
+  let delivered = selectDelivered(evictions);
   for (const head of embeddingHead) {
     if (containsCandidate(delivered, head)) continue;
     const replacement = findReplacement({
       ...params,
+      selectDelivered,
       head,
       budget,
       evictions,
@@ -68,6 +70,20 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
     delivered = replacement.delivered;
   }
   return evictions;
+}
+
+function memoizeDeliveredSelection<T>(
+  selectDelivered: (evictions: ReadonlySet<string>) => readonly T[]
+): (evictions: ReadonlySet<string>) => readonly T[] {
+  const deliveredByEvictionSet = new Map<string, readonly T[]>();
+  return (evictions) => {
+    const key = JSON.stringify([...evictions].sort(compareCandidateKeysBytewise));
+    const cached = deliveredByEvictionSet.get(key);
+    if (cached !== undefined) return cached;
+    const delivered = selectDelivered(evictions);
+    deliveredByEvictionSet.set(key, delivered);
+    return delivered;
+  };
 }
 
 function findReplacement<T extends EmbeddingHeadCandidate>(params: Readonly<{
