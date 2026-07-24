@@ -97,7 +97,7 @@ describe("frozen code contract", () => {
     expect(((error as Error).cause as NodeJS.ErrnoException).code).toBe("ELOOP");
 
     await writeFile(fixture.contractPath, `${JSON.stringify({
-      schema_version: 3,
+      schema_version: 4,
       code: {
         commit_sha: fixture.head,
         commit_sha7: fixture.head.slice(0, 7),
@@ -107,24 +107,27 @@ describe("frozen code contract", () => {
     await expect(resolve(fixture)).rejects.toThrow(/invalid frozen gate contract/iu);
   });
 
-  it("accepts a matrix promotion contract as the frozen gate", async () => {
-    const fixture = await cleanRepository();
-    await writeFile(fixture.contractPath, `${JSON.stringify({
-      schema_version: 2,
-      kind: "longmemeval_matrix_promotion_contract",
-      code: {
-        commit_sha: fixture.head,
-        commit_sha7: fixture.head.slice(0, 7),
-        worktree_state_sha256: fixture.worktreeSha
-      }
-    })}\n`, "utf8");
+  it.each([2, 3] as const)(
+    "accepts a schema-v%s matrix promotion contract as the frozen gate",
+    async (schemaVersion) => {
+      const fixture = await cleanRepository();
+      await writeFile(fixture.contractPath, `${JSON.stringify({
+        schema_version: schemaVersion,
+        kind: "longmemeval_matrix_promotion_contract",
+        code: {
+          commit_sha: fixture.head,
+          commit_sha7: fixture.head.slice(0, 7),
+          worktree_state_sha256: fixture.worktreeSha
+        }
+      })}\n`, "utf8");
 
-    await expect(resolve(fixture)).resolves.toMatchObject({
-      commitSha: fixture.head,
-      gateContractPath: fixture.contractPath,
-      worktreeClean: true
-    });
-  });
+      await expect(resolve(fixture)).resolves.toMatchObject({
+        commitSha: fixture.head,
+        gateContractPath: fixture.contractPath,
+        worktreeClean: true
+      });
+    }
+  );
 
   it("rejects an unrelated schema-v2 contract", async () => {
     const fixture = await cleanRepository();

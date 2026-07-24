@@ -56,6 +56,7 @@ WORKTREE_STATE_SHA256="$({
   printf '%s' "$PORCELAIN"
 } | sha256sum | cut -d ' ' -f 1)"
 DIST_JSON="$(node "$WORKTREE/apps/bench-runner/scripts/executed-dist-closure.mjs" --root "$WORKTREE")"
+GATE_SHA256="$(file_sha "$CONTRACT")"
 SNAPSHOT_SHA256="$(file_sha "$SNAPSHOT")"
 CACHE_MANIFEST_SHA256="$(file_sha "$CACHE_ROOT/manifest.json")"
 DATASET_SHA256="$(file_sha "$DATASET")"
@@ -133,6 +134,9 @@ set +e
 /usr/bin/env -i \
   "${PASSTHROUGH_ARGS[@]}" \
   ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=0 \
+  ALAYA_BENCH_GATE_CONTRACT_PATH="$CONTRACT" \
+  ALAYA_BENCH_GATE_SHA256="$GATE_SHA256" \
+  ALAYA_BENCH_WORKTREE_STATE_SHA256="$WORKTREE_STATE_SHA256" \
   ALAYA_BENCH_EXTRACTION_CACHE_ROOT="$CACHE_ROOT" \
   ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE=1 \
   OFFICIAL_API_GARDEN_MODEL="$EXTRACTION_MODEL" \
@@ -150,7 +154,6 @@ set +e
   ALAYA_RECALL_EVAL_MAX_RESULTS=10 \
   rtk node apps/bench-runner/bin/alaya-bench-runner.mjs recall-eval \
     --snapshot "$SNAPSHOT" \
-    --promotion-contract "$CONTRACT" \
     --variant s \
     --policy-shape stress \
     --simulate-report none \

@@ -19,7 +19,7 @@ const FrozenContractSchema = z.union([
     code: FrozenCodeSchema
   }).passthrough(),
   z.object({
-    schema_version: z.literal(2),
+    schema_version: z.union([z.literal(2), z.literal(3)]),
     kind: z.literal("longmemeval_matrix_promotion_contract"),
     code: FrozenCodeSchema
   }).passthrough()
