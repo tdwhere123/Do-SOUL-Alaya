@@ -438,7 +438,8 @@ function verifyCurrentR3SpendApproval(input: {
   readonly targetCompletion: ExtractionFillCompletion;
 }): VerifiedR3SpendApproval {
   const data = longMemEvalExpansionCapabilityData(input.capability);
-  const startingMissing = input.targetCompletion.missingTurns;
+  const startingMissing = input.targetCompletion.expectedTurns -
+    sourceCacheAuthority(input.capability).expectedTurns;
   try {
     return verifyR3SpendApproval(input.approval, {
       matrixAuthorizationSha256: data.matrixAuthorizationSha256,

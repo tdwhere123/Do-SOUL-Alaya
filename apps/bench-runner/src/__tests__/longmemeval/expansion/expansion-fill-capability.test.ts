@@ -28,14 +28,34 @@ describe("500Q expansion fill authority", () => {
 
   it("resumes an interrupted anchored fill only with a fresh live capability", async () => {
     const first = await prepare(mintCapability());
+    state.targetCompletion = completion(500, 103, "8", null);
+    const partialManifest = targetManifest(first.sourceAnchor);
     state.identity = {
       manifestSha256: "b".repeat(64),
-      manifest: targetManifest(first.sourceAnchor)
+      manifest: {
+        ...partialManifest,
+        cached_turns: 103,
+        coverage: 103 / 500
+      }
     };
 
-    const resumed = await prepare(mintCapability());
-    expect(resumed.sourceAnchor).toEqual(first.sourceAnchor);
-    expect(resumed.nextTurns).toHaveLength(500);
+    const capability = await mintCapability();
+    const currentApproval = r3SpendApprovalFor(capability);
+    const resumed = await prepareExpansionFillAuthority({
+      variant: "longmemeval_s",
+      expansionCapability: capability,
+      r3SpendApproval: {
+        ...currentApproval,
+        spend: {
+          ...currentApproval.spend,
+          starting_missing: 400,
+          maximum_attempts: 2_000,
+          successful_shard_ceiling: 400
+        }
+      }
+    }, "/cache");
+    expect(resumed!.sourceAnchor).toEqual(first.sourceAnchor);
+    expect(resumed!.nextTurns).toHaveLength(500);
   });
 
   it("rejects supplemental source drift while resuming a target fill", async () => {
