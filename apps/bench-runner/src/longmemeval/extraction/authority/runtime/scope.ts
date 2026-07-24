@@ -21,11 +21,11 @@ export function assertReceiptBoundExpansionSpend(
   const approval = expansion.r3SpendApproval.approval;
   const limits = receipt.limits;
   if (receipt.action !== "fill" ||
+      receipt.target_selection_digest === undefined ||
       receipt.observation.dataset.variant !== "longmemeval_s" ||
       receipt.observation.dataset.windowOffset !== 0 ||
       receipt.observation.dataset.windowLimit !== 500 ||
-      receipt.observation.extraction.manifestSha256 !== approval.r2.final_cache_identity_sha256 ||
-      receipt.observation.inventory.missingTurns !== approval.spend.starting_missing ||
+      receipt.observation.inventory.missingTurns > approval.spend.starting_missing ||
       limits.starting_missing !== approval.spend.starting_missing ||
       limits.maximum_attempts !== approval.spend.maximum_attempts ||
       limits.successful_shard_ceiling !== approval.spend.successful_shard_ceiling ||

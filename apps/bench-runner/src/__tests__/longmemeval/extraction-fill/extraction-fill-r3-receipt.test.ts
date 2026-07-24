@@ -113,6 +113,43 @@ describe("500Q R3 receipt binding", () => {
     })).rejects.toThrow(/approved R3 spend envelope/u);
   });
 
+  it("admits monotonic partial-cache progress under the original R3 envelope", async () => {
+    const receipt = receiptFixture();
+    mocks.readReceipt.mockReturnValue({
+      ...receipt,
+      observation: {
+        ...receipt.observation,
+        extraction: { manifestSha256: "d".repeat(64) },
+        inventory: { missingTurns: 397 }
+      }
+    });
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      cacheRoot: "/must-not-lock",
+      authorityReceiptPath: "/fixture/extraction-authority.json",
+      targetSelectionReceiptPath: "/fixture/target-selection.json"
+    })).rejects.toThrow(/write lease reached/u);
+  });
+
+  it("refuses a resumed receipt whose missing inventory exceeds the R3 envelope", async () => {
+    const receipt = receiptFixture();
+    mocks.readReceipt.mockReturnValue({
+      ...receipt,
+      observation: {
+        ...receipt.observation,
+        inventory: { missingTurns: 401 }
+      }
+    });
+
+    await expect(runExtractionFill({
+      variant: "longmemeval_s",
+      cacheRoot: "/must-not-lock",
+      authorityReceiptPath: "/fixture/extraction-authority.json",
+      targetSelectionReceiptPath: "/fixture/target-selection.json"
+    })).rejects.toThrow(/approved R3 spend envelope/u);
+  });
+
   it("admits a receipt-bound repair limited to the existing first 100Q cache", async () => {
     mocks.readReceipt.mockReturnValue(repairReceiptFixture());
 
