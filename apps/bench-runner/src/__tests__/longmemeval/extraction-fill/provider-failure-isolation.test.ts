@@ -74,7 +74,7 @@ describe("authority-bound provider failure isolation", () => {
       tolerateProviderTaskFailures: true,
       extractorFactory: () => ({ extract }),
       log: () => undefined
-    })).rejects.toThrow(/normal target-selection-bound fill authority/u);
+    })).rejects.toThrow(/target-selection-bound fill authority/u);
 
     expect(extract).not.toHaveBeenCalled();
   });

@@ -87,7 +87,6 @@ import {
   assertDirectExtractionMetadataScope,
   assertReceiptBoundExpansionSpend
 } from "./authority/runtime/scope.js";
-
 export { collectDistinctTurnContents } from "./turn-contents.js";
 export {
   EXTRACTION_FILL_DEFAULT_CONCURRENCY,
@@ -113,7 +112,6 @@ export interface ExtractionFillOptions {
   readonly predecessorAuthorityReceiptPath?: string;
   /** Any caller-supplied list is rejected; catalog refill keys live in the receipt. */
   readonly cacheKeyAllowlist?: readonly string[];
-  /** Continue normal target-bound fills after isolated provider task failures. */
   readonly tolerateProviderTaskFailures?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
   readonly r3SpendApproval?: R3SpendApproval;
@@ -164,8 +162,7 @@ export async function runExtractionFill(
   assertProviderTaskFailureIsolationScope({
     requested: options.tolerateProviderTaskFailures === true,
     questionBatchLimit: options.questionBatchLimit,
-    authority,
-    expansion
+    authority
   });
   if (expansion !== undefined && authority === undefined) {
     throw new ExtractionCacheInvariantError(
@@ -208,7 +205,9 @@ async function runLockedExtractionFill(
   const stats = newFillStats();
   const tolerateProviderTaskFailures = resolveProviderTaskFailureTolerance({
     requested: options.tolerateProviderTaskFailures === true,
-    questionBatchLimit: prepared.questionBatchLimit, receipt: authority?.receipt
+    questionBatchLimit: prepared.questionBatchLimit,
+    receipt: authority?.receipt,
+    expansion: expansion !== undefined
   });
   const executionAuthority = authority === undefined
     ? undefined

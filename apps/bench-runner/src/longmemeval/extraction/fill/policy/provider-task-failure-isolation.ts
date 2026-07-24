@@ -4,17 +4,24 @@ import type { ExtractionAuthorityReceipt } from
   "../../authority/receipt.js";
 import type { ExtractionTargetSelectionReceipt } from
   "../../authority/target-selection/receipt.js";
-import type { PreparedExpansionFillAuthority } from
-  "../../expansion-fill-authority.js";
+
+type FailureIsolationReceipt = Pick<
+  ExtractionAuthorityReceipt,
+  "action" | "target_selection_digest" | "probe_key" | "repair_scope" | "direct_spend"
+>;
+
+type FailureIsolationTargetSelection = Pick<
+  ExtractionTargetSelectionReceipt,
+  "receipt_digest"
+>;
 
 interface ProviderTaskFailureIsolationScope {
   readonly requested: boolean;
   readonly questionBatchLimit: number | undefined;
   readonly authority: {
-    readonly receipt: ExtractionAuthorityReceipt;
-    readonly targetSelection?: ExtractionTargetSelectionReceipt;
+    readonly receipt: FailureIsolationReceipt;
+    readonly targetSelection?: FailureIsolationTargetSelection;
   } | undefined;
-  readonly expansion: PreparedExpansionFillAuthority | undefined;
 }
 
 export function assertProviderTaskFailureIsolationScope(
@@ -31,9 +38,9 @@ export function assertProviderTaskFailureIsolationScope(
   if (receipt?.action !== "fill" || targetSelection === undefined ||
       receipt.target_selection_digest !== targetSelection.receipt_digest ||
       receipt.probe_key !== undefined || receipt.repair_scope !== undefined ||
-      receipt.direct_spend !== undefined || input.expansion !== undefined) {
+      receipt.direct_spend !== undefined) {
     throw new ExtractionCacheInvariantError(
-      "provider task failure isolation requires a normal target-selection-bound fill authority"
+      "provider task failure isolation requires a target-selection-bound fill authority"
     );
   }
 }
@@ -41,11 +48,12 @@ export function assertProviderTaskFailureIsolationScope(
 export function resolveProviderTaskFailureTolerance(input: {
   readonly requested: boolean;
   readonly questionBatchLimit: number | undefined;
-  readonly receipt: ExtractionAuthorityReceipt | undefined;
+  readonly receipt: FailureIsolationReceipt | undefined;
+  readonly expansion: boolean;
 }): boolean {
   if (input.receipt?.action !== "fill") return false;
   if (input.questionBatchLimit !== undefined) return false;
-  return input.requested ||
+  return input.requested || input.expansion ||
     input.receipt.direct_spend?.kind === "deepseek_newapi_direct_500" ||
     input.receipt.repair_scope !== undefined;
 }
