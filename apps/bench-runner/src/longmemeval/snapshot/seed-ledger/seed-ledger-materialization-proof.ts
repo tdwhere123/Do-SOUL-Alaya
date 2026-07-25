@@ -46,6 +46,21 @@ interface StoredEventRow {
   readonly payload_json: string;
 }
 
+export const SNAPSHOT_SIGNAL_MATERIALIZATION_EVENT_SQL = `
+  SELECT event_type, entity_type, entity_id, workspace_id, run_id, caused_by, payload_json
+    FROM event_log
+   WHERE entity_type = 'candidate_memory_signal'
+     AND entity_id = ?
+     AND event_type = ?
+`;
+
+export const SNAPSHOT_RECONCILIATION_NOOP_EVENT_SQL = `
+  SELECT event_type, entity_type, entity_id, workspace_id, run_id, caused_by, payload_json
+    FROM event_log
+   WHERE entity_type = 'candidate_memory_signal'
+     AND entity_id = ?
+`;
+
 export function assertSeedLedgerMaterializationProof(input: {
   readonly db: DatabaseSync;
   readonly question: LongMemEvalSnapshotQuestion;
@@ -148,10 +163,8 @@ function assertSignalMaterializationEvent(
   binding: LongMemEvalSnapshotSeedBinding,
   question: LongMemEvalSnapshotQuestion
 ): void {
-  const rows = db.prepare(`
-    SELECT event_type, entity_type, entity_id, workspace_id, run_id, caused_by, payload_json
-      FROM event_log WHERE entity_id = ? AND event_type = ?
-  `).all(binding.signalId, SignalEventType.SOUL_SIGNAL_MATERIALIZED) as unknown as
+  const rows = db.prepare(SNAPSHOT_SIGNAL_MATERIALIZATION_EVENT_SQL)
+    .all(binding.signalId, SignalEventType.SOUL_SIGNAL_MATERIALIZED) as unknown as
     readonly StoredEventRow[];
   const row = rows[0];
   const payload = parseMaterializedPayload(row?.payload_json, binding.signalId);
@@ -190,10 +203,8 @@ function assertReconciliationNoop(
   question: LongMemEvalSnapshotQuestion,
   signal: StoredSignalRow
 ): void {
-  const rows = db.prepare(`
-    SELECT event_type, entity_type, entity_id, workspace_id, run_id, caused_by, payload_json
-      FROM event_log WHERE entity_id = ?
-  `).all(`${binding.signalId}:noop_audit`) as unknown as readonly StoredEventRow[];
+  const rows = db.prepare(SNAPSHOT_RECONCILIATION_NOOP_EVENT_SQL)
+    .all(`${binding.signalId}:noop_audit`) as unknown as readonly StoredEventRow[];
   const row = rows[0];
   if (rows.length !== 1 || row === undefined) {
     throw new Error(`snapshot reconciliation NOOP proof mismatch for ${binding.signalId}`);
