@@ -7,6 +7,8 @@ import {
   completeExpansionFixture,
   recallBundle
 } from "./expansion-fill-authority-fixture/recall-bundle.js";
+import { longMemEvalExpansionCapabilityData } from
+  "../../../longmemeval/promotion/expansion/expansion-capability.js";
 import { assertExpansionSnapshotAuthority } from
   "../../../longmemeval/promotion/expansion/authority/expansion-snapshot-authority.js";
 import { assertExpansionRecallAuthority } from
@@ -113,6 +115,60 @@ describe("500Q expansion fill authority", () => {
     expect(state.seedLedgerBinding.mock.calls[0]?.[0]).toMatchObject({
       dbPath: "/bound/target.db"
     });
+  });
+
+  it("accepts re-materialized run code that matches the live validator", async () => {
+    const fixture = await completeExpansionFixture("4e16327" + "4".repeat(33));
+    const data = longMemEvalExpansionCapabilityData(fixture.capability);
+    const bundle = recallBundle(fixture);
+    const provenance = bundle.manifest.run_provenance!;
+    const validatorBundle = {
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        alaya_commit: data.validator.commit_sha7,
+        run_provenance: {
+          ...provenance,
+          code: { ...provenance.code, ...data.validator }
+        }
+      }
+    };
+
+    expect(data.validator.commit_sha).not.toBe(data.code.commit_sha);
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle: validatorBundle,
+      recallWeightOverrides: undefined,
+      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+    })).resolves.toBeUndefined();
+  });
+
+  it("rejects the original contract code when the live validator differs", async () => {
+    const fixture = await completeExpansionFixture("4e16327" + "4".repeat(33));
+    const data = longMemEvalExpansionCapabilityData(fixture.capability);
+    const bundle = recallBundle(fixture);
+
+    expect(data.validator.commit_sha).not.toBe(data.code.commit_sha);
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle,
+      recallWeightOverrides: undefined,
+      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+    })).rejects.toThrow(/snapshot manifest differs from live expansion authority/u);
   });
 
   it("rejects supplemental receipt drift in persisted 500Q run provenance", async () => {

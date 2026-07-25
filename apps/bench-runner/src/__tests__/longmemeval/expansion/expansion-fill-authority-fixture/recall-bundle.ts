@@ -22,8 +22,10 @@ interface CompleteExpansionFixture {
   readonly manifest: ExtractionCacheManifestV3;
 }
 
-export async function completeExpansionFixture(): Promise<CompleteExpansionFixture> {
-  const capability = await mintCapability();
+export async function completeExpansionFixture(
+  validatorCommitSha?: string
+): Promise<CompleteExpansionFixture> {
+  const capability = await mintCapability(undefined, validatorCommitSha);
   const prepared = await prepare(Promise.resolve(capability));
   state.targetCompletion = completion(500, 500, "8", "6");
   const base = targetManifest(prepared.sourceAnchor, "complete");

@@ -200,7 +200,7 @@ function assertSnapshotExpansionManifest(
       manifest.attribution?.gate_eligible !== true ||
       manifest.artifact_integrity === undefined ||
       !isDeepStrictEqual(manifest.run_provenance?.selection, data.nextSelection) ||
-      !matchingCode(manifest.run_provenance?.code, data.code) ||
+      !matchingCode(manifest.run_provenance?.code, data.validator) ||
       !isCacheOnlySeedExtractionPath(manifest.seed_extraction_path) ||
       runProvenance === undefined || extraction?.schema_version !== 3 ||
       runCache?.schema_version !== 3) {
