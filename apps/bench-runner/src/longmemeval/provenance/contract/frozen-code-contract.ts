@@ -24,6 +24,23 @@ const FrozenContractSchema = z.union([
     code: FrozenCodeSchema
   }).passthrough()
 ]);
+const SnapshotReuseProducerSchema = z.object({
+  commit_sha: z.string().regex(/^[a-f0-9]{40}$/u),
+  commit_sha7: z.string().regex(/^[a-f0-9]{7}$/u),
+  gate_sha256: Sha256Schema,
+  gate_contract_path: z.string().min(1),
+  worktree_state_sha256: Sha256Schema,
+  worktree_clean: z.literal(true),
+  executed_dist: z.object({
+    algorithm: z.literal("sha256-reachable-path-file-sha256-v1"),
+    sha256: Sha256Schema,
+    file_count: z.number().int().positive()
+  }).strict()
+}).strict();
+const SnapshotReuseBindingSchema = z.object({
+  manifest_sha256: Sha256Schema,
+  producer: SnapshotReuseProducerSchema
+}).strict();
 
 export interface MeasuredGitState {
   readonly commitSha: string;
@@ -40,6 +57,8 @@ export interface FrozenCodeIdentity {
   readonly worktreeStateSha256: string;
   readonly worktreeClean: true;
 }
+
+export type SnapshotReuseBinding = z.infer<typeof SnapshotReuseBindingSchema>;
 
 export async function resolveFrozenCodeIdentity(input: {
   readonly checkoutRoot: string;
@@ -71,6 +90,26 @@ export async function resolveFrozenCodeIdentity(input: {
     gateSha256,
     worktreeClean: true
   };
+}
+
+export async function readFrozenSnapshotReuseBinding(
+  env: Readonly<Record<string, string | undefined>>
+): Promise<SnapshotReuseBinding> {
+  const rawPath = env.ALAYA_BENCH_GATE_CONTRACT_PATH?.trim();
+  const expectedSha = env.ALAYA_BENCH_GATE_SHA256?.trim();
+  if (!rawPath || !expectedSha) {
+    throw new Error("snapshot reuse requires a digest-pinned frozen consumer gate");
+  }
+  const contractPath = resolve(rawPath);
+  const raw = await readContractFile(contractPath);
+  assertExpectedSha(expectedSha, sha256(raw), "contract");
+  const contract = parseContract(raw, contractPath);
+  const binding = (contract as unknown as Record<string, unknown>).snapshot_reuse;
+  try {
+    return SnapshotReuseBindingSchema.parse(binding);
+  } catch (cause) {
+    throw new Error("frozen consumer gate lacks a valid snapshot reuse binding", { cause });
+  }
 }
 
 async function readContractFile(path: string): Promise<Buffer> {

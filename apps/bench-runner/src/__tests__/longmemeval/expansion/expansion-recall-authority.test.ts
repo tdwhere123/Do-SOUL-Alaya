@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resetExpansionFillAuthorityFixture,
   state
@@ -16,6 +20,11 @@ import { assertExpansionRecallAuthority } from
 
 describe("500Q expansion fill authority", () => {
   beforeEach(resetExpansionFillAuthorityFixture);
+  afterEach(async () => {
+    await Promise.all(reuseRoots.splice(0).map((root) =>
+      rm(root, { recursive: true, force: true })
+    ));
+  });
 
   it("admits only a complete cache-authorized neutral 500Q snapshot producer", async () => {
     const fixture = await completeExpansionFixture();
@@ -66,7 +75,7 @@ describe("500Q expansion fill authority", () => {
       policyShape: "stress" as const,
       simulateReport: "none" as const
     };
-    const env = { ALAYA_RECALL_EVAL_EMBEDDING: "env" };
+    const env = await frozenReuseEnvironment(bundle);
 
     await expect(assertExpansionRecallAuthority({
       options,
@@ -91,6 +100,7 @@ describe("500Q expansion fill authority", () => {
 
   it("validates full snapshot substrate before recall restore can begin", async () => {
     const fixture = await completeExpansionFixture();
+    const bundle = recallBundle(fixture);
     await assertExpansionRecallAuthority({
       options: {
         snapshotDbPath: "/snapshot/target.db",
@@ -100,9 +110,9 @@ describe("500Q expansion fill authority", () => {
         simulateReport: "none",
         expansionCapability: fixture.capability
       },
-      bundle: recallBundle(fixture),
+      bundle,
       recallWeightOverrides: undefined,
-      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+      env: await frozenReuseEnvironment(bundle)
     });
 
     expect(state.verifyIntegrity).toHaveBeenCalledOnce();
@@ -135,6 +145,7 @@ describe("500Q expansion fill authority", () => {
     };
 
     expect(data.validator.commit_sha).not.toBe(data.code.commit_sha);
+    const env = await frozenReuseEnvironment(validatorBundle);
     await expect(assertExpansionRecallAuthority({
       options: {
         snapshotDbPath: "/snapshot/target.db",
@@ -146,16 +157,41 @@ describe("500Q expansion fill authority", () => {
       },
       bundle: validatorBundle,
       recallWeightOverrides: undefined,
-      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+      env
     })).resolves.toBeUndefined();
   });
 
-  it("rejects the original contract code when the live validator differs", async () => {
+  it("accepts frozen producer code when the live consumer validator differs", async () => {
     const fixture = await completeExpansionFixture("4e16327" + "4".repeat(33));
     const data = longMemEvalExpansionCapabilityData(fixture.capability);
     const bundle = recallBundle(fixture);
+    const provenance = bundle.manifest.run_provenance!;
+    const producerCommit = "3".repeat(40);
+    const producerBundle = {
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        alaya_commit: producerCommit.slice(0, 7),
+        run_provenance: {
+          ...provenance,
+          code: {
+            ...provenance.code,
+            commit_sha: producerCommit,
+            commit_sha7: producerCommit.slice(0, 7),
+            worktree_state_sha256: "4".repeat(64),
+            executed_dist: {
+              ...provenance.code.executed_dist!,
+              sha256: "5".repeat(64)
+            }
+          }
+        }
+      }
+    };
 
     expect(data.validator.commit_sha).not.toBe(data.code.commit_sha);
+    expect(producerCommit).not.toBe(data.validator.commit_sha);
+    expect(producerCommit).not.toBe(data.code.commit_sha);
+    const env = await frozenReuseEnvironment(producerBundle);
     await expect(assertExpansionRecallAuthority({
       options: {
         snapshotDbPath: "/snapshot/target.db",
@@ -165,10 +201,112 @@ describe("500Q expansion fill authority", () => {
         simulateReport: "none",
         expansionCapability: fixture.capability
       },
-      bundle,
+      bundle: producerBundle,
+      recallWeightOverrides: undefined,
+      env
+    })).resolves.toBeUndefined();
+  });
+
+  it("requires a digest-pinned frozen snapshot binding", async () => {
+    const fixture = await completeExpansionFixture();
+
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle: recallBundle(fixture),
+      recallWeightOverrides: undefined,
+      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+    })).rejects.toThrow(/digest-pinned frozen consumer gate/u);
+  });
+
+  it("rejects a snapshot manifest not bound by the frozen consumer gate", async () => {
+    const fixture = await completeExpansionFixture();
+    const bundle = recallBundle(fixture);
+    const env = await frozenReuseEnvironment(bundle);
+
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle: { ...bundle, snapshotManifestSha256: "0".repeat(64) },
+      recallWeightOverrides: undefined,
+      env
+    })).rejects.toThrow(/snapshot differs from frozen reuse authority/u);
+  });
+
+  it("rejects a snapshot whose release commit does not match its producer provenance", async () => {
+    const fixture = await completeExpansionFixture();
+    const bundle = recallBundle(fixture);
+    const driftedBundle = {
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        alaya_commit: "0".repeat(7)
+      }
+    };
+
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle: driftedBundle,
       recallWeightOverrides: undefined,
       env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
     })).rejects.toThrow(/snapshot manifest differs from live expansion authority/u);
+  });
+
+  it("rejects an exact live validator that differs from the frozen reuse producer", async () => {
+    const fixture = await completeExpansionFixture("4e16327" + "4".repeat(33));
+    const data = longMemEvalExpansionCapabilityData(fixture.capability);
+    const bundle = recallBundle(fixture);
+    const env = await frozenReuseEnvironment(bundle);
+    const provenance = bundle.manifest.run_provenance!;
+    const driftedBundle = {
+      ...bundle,
+      manifest: {
+        ...bundle.manifest,
+        alaya_commit: data.validator.commit_sha7,
+        run_provenance: {
+          ...provenance,
+          code: {
+            ...provenance.code,
+            ...data.validator
+          }
+        }
+      }
+    };
+
+    expect(data.validator.commit_sha).not.toBe(provenance.code.commit_sha);
+
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        snapshotDbPath: "/snapshot/target.db",
+        variant: "longmemeval_s",
+        historyRoot: "/history",
+        policyShape: "stress",
+        simulateReport: "none",
+        expansionCapability: fixture.capability
+      },
+      bundle: driftedBundle,
+      recallWeightOverrides: undefined,
+      env
+    })).rejects.toThrow(/snapshot differs from frozen reuse authority/u);
   });
 
   it("rejects supplemental receipt drift in persisted 500Q run provenance", async () => {
@@ -195,6 +333,7 @@ describe("500Q expansion fill authority", () => {
         }
       }
     };
+    const env = await frozenReuseEnvironment(tamperedBundle);
 
     await expect(assertExpansionRecallAuthority({
       options: {
@@ -207,7 +346,7 @@ describe("500Q expansion fill authority", () => {
       },
       bundle: tamperedBundle,
       recallWeightOverrides: undefined,
-      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+      env
     })).rejects.toThrow(/lineage|target cache authority/u);
   });
 
@@ -219,6 +358,8 @@ describe("500Q expansion fill authority", () => {
     embedding
   ) => {
     const fixture = await completeExpansionFixture();
+    const bundle = recallBundle(fixture);
+    const env = await frozenReuseEnvironment(bundle);
     await assertExpansionRecallAuthority({
       options: {
         snapshotDbPath: "/snapshot/target.db",
@@ -228,9 +369,9 @@ describe("500Q expansion fill authority", () => {
         simulateReport: "none",
         expansionCapability: fixture.capability
       },
-      bundle: recallBundle(fixture),
+      bundle,
       recallWeightOverrides: undefined,
-      env: { ALAYA_RECALL_EVAL_EMBEDDING: embedding }
+      env: { ...env, ALAYA_RECALL_EVAL_EMBEDDING: embedding }
     });
 
     expect(state.verifyIntegrity).toHaveBeenCalledOnce();
@@ -291,6 +432,7 @@ describe("500Q expansion fill authority", () => {
     const bundle = structuredClone(recallBundle(fixture));
     bundle.manifest.run_provenance!.runtime.paired_env
       .ALAYA_CONFLICT_RULE_ENABLED = "0";
+    const env = await frozenReuseEnvironment(bundle);
 
     await expect(assertExpansionRecallAuthority({
       options: {
@@ -303,8 +445,37 @@ describe("500Q expansion fill authority", () => {
       },
       bundle,
       recallWeightOverrides: undefined,
-      env: { ALAYA_RECALL_EVAL_EMBEDDING: "env" }
+      env
     })).rejects.toThrow(/product formation/u);
     expect(state.verifyIntegrity).not.toHaveBeenCalled();
   });
 });
+
+const reuseRoots: string[] = [];
+
+async function frozenReuseEnvironment(
+  bundle: ReturnType<typeof recallBundle>
+): Promise<Record<string, string>> {
+  const root = await mkdtemp(join(tmpdir(), "snapshot-reuse-authority-"));
+  reuseRoots.push(root);
+  const path = join(root, "consumer-gate.json");
+  const producer = bundle.manifest.run_provenance!.code;
+  const raw = `${JSON.stringify({
+    schema_version: 1,
+    code: {
+      commit_sha: "7".repeat(40),
+      commit_sha7: "7".repeat(7),
+      worktree_state_sha256: "8".repeat(64)
+    },
+    snapshot_reuse: {
+      manifest_sha256: bundle.snapshotManifestSha256,
+      producer
+    }
+  })}\n`;
+  await writeFile(path, raw, "utf8");
+  return {
+    ALAYA_RECALL_EVAL_EMBEDDING: "env",
+    ALAYA_BENCH_GATE_CONTRACT_PATH: path,
+    ALAYA_BENCH_GATE_SHA256: createHash("sha256").update(raw).digest("hex")
+  };
+}

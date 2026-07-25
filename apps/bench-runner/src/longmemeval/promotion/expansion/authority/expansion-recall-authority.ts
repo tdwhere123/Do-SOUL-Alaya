@@ -23,6 +23,8 @@ import { bindSnapshotRunProvenanceAuthority } from
   "../../../snapshot/run-provenance.js";
 import { isLongMemEvalRunProvenanceGateEligible } from
   "../../../provenance/run.js";
+import { readFrozenSnapshotReuseBinding } from
+  "../../../provenance/contract/frozen-code-contract.js";
 import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability
@@ -76,9 +78,10 @@ async function verifyExpansionSnapshotAuthority(
     typeof loadCanonicalLongMemEvalExpansionSelection
   >>
 ): Promise<void> {
-  const extraction = assertSnapshotExpansionManifest(
+  const extraction = await assertSnapshotExpansionManifest(
     input.bundle,
-    capability
+    capability,
+    input.env
   );
   const extractionAuthority = input.bundle.extractionAuthority;
   if (extractionAuthority === null) {
@@ -186,10 +189,11 @@ function recallCell(
   throw new Error("500Q recall requires an explicit promoted A/B embedding mode");
 }
 
-function assertSnapshotExpansionManifest(
+async function assertSnapshotExpansionManifest(
   bundle: RecallEvalSnapshotBundle,
-  capability: LongMemEvalExpansionCapability
-): SnapshotExtractionProvenanceV3 {
+  capability: LongMemEvalExpansionCapability,
+  env: Readonly<Record<string, string | undefined>>
+): Promise<SnapshotExtractionProvenanceV3> {
   const manifest = bundle.manifest;
   const data = longMemEvalExpansionCapabilityData(capability);
   const extraction = manifest.extraction_provenance;
@@ -200,27 +204,28 @@ function assertSnapshotExpansionManifest(
       manifest.attribution?.gate_eligible !== true ||
       manifest.artifact_integrity === undefined ||
       !isDeepStrictEqual(manifest.run_provenance?.selection, data.nextSelection) ||
-      !matchingCode(manifest.run_provenance?.code, data.validator) ||
+      manifest.alaya_commit !== runProvenance?.code.commit_sha7 ||
       !isCacheOnlySeedExtractionPath(manifest.seed_extraction_path) ||
       runProvenance === undefined || extraction?.schema_version !== 3 ||
       runCache?.schema_version !== 3) {
     throw new Error("500Q snapshot manifest differs from live expansion authority");
   }
+  await assertSnapshotProducerAuthority(bundle, env);
   assertPromotionSnapshotProducerPolicy(runProvenance);
   assertSnapshotExtractionAuthority(extraction, runCache, capability);
   return extraction;
 }
 
-function matchingCode(
-  actual: NonNullable<
-    RecallEvalSnapshotBundle["manifest"]["run_provenance"]
-  >["code"] | undefined,
-  expected: ReturnType<typeof longMemEvalExpansionCapabilityData>["code"]
-): boolean {
-  return actual?.commit_sha === expected.commit_sha &&
-    actual.commit_sha7 === expected.commit_sha7 &&
-    actual.worktree_state_sha256 === expected.worktree_state_sha256 &&
-    isDeepStrictEqual(actual.executed_dist, expected.executed_dist);
+async function assertSnapshotProducerAuthority(
+  bundle: RecallEvalSnapshotBundle,
+  env: Readonly<Record<string, string | undefined>>
+): Promise<void> {
+  const producer = bundle.manifest.run_provenance!.code;
+  const binding = await readFrozenSnapshotReuseBinding(env);
+  if (bundle.snapshotManifestSha256 !== binding.manifest_sha256 ||
+      !isDeepStrictEqual(producer, binding.producer)) {
+    throw new Error("500Q snapshot differs from frozen reuse authority");
+  }
 }
 
 function assertSnapshotExtractionAuthority(
