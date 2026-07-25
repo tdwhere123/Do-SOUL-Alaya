@@ -7,9 +7,15 @@ import type {
 import { embeddingInputIdentityForSchemaVersion } from "../../../harness/strict-treatment-config.js";
 import { assertBiEncoderTreatmentActive } from "../../../harness/embedding/embedding-treatment-activation.js";
 import { RecallTokenEconomySchema } from "../../../harness/recall/recall-diagnostics-schema.js";
+import {
+  writeGzipChunks,
+  type StreamedArtifactIdentity
+} from "../../diagnostics/artifacts/artifact-gzip-stream.js";
 
 export const RECALL_EVAL_DIAGNOSTICS_FILENAME =
   "recall-eval-diagnostics.json";
+export const RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME =
+  `${RECALL_EVAL_DIAGNOSTICS_FILENAME}.gz`;
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const DocumentWarmupSchema = z.object({
@@ -170,6 +176,29 @@ export function renderRecallEvalDiagnosticsEvidence(
   evidence: RecallEvalDiagnosticsEvidence
 ): string {
   return `${JSON.stringify(RecallEvalDiagnosticsEvidenceSchema.parse(evidence), null, 2)}\n`;
+}
+
+export async function writeRecallEvalDiagnosticsGzipStream(
+  artifactPath: string,
+  evidence: RecallEvalDiagnosticsEvidence
+): Promise<StreamedArtifactIdentity> {
+  const parsed = RecallEvalDiagnosticsEvidenceSchema.parse(evidence);
+  return writeGzipChunks(artifactPath, renderRecallEvalDiagnosticsChunks(parsed));
+}
+
+async function* renderRecallEvalDiagnosticsChunks(
+  evidence: RecallEvalDiagnosticsEvidence
+): AsyncGenerator<string> {
+  yield `{"schema_version":${evidence.schema_version}`;
+  yield `,"kind":${JSON.stringify(evidence.kind)}`;
+  yield `,"runtime":${JSON.stringify(evidence.runtime)}`;
+  yield `,"summary":${JSON.stringify(evidence.summary)}`;
+  yield `,"questions":[`;
+  for (let index = 0; index < evidence.questions.length; index += 1) {
+    yield index === 0 ? "" : ",";
+    yield JSON.stringify(evidence.questions[index]);
+  }
+  yield "]}\n";
 }
 
 function normalizeQuestion(question: EvidenceQuestionInput) {

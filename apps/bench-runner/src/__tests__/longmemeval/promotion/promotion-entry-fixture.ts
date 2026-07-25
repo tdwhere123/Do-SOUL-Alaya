@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -111,8 +111,9 @@ async function writeEntryFixture(
     provenanceComplete: true
   }));
   const report = "# report\n";
-  const sidecars = buildRecallEvalArchiveBundle({
+  const archive = await buildRecallEvalArchiveBundle({
     slug: "promotion-entry",
+    historyRoot: root,
     payload,
     report,
     findings: null,
@@ -128,8 +129,12 @@ async function writeEntryFixture(
   await Promise.all([
     writeFile(path.join(entryRoot, "kpi.json"), `${JSON.stringify(payload, null, 2)}\n`),
     writeFile(path.join(entryRoot, "report.md"), report),
-    ...sidecars.map((sidecar) =>
-      writeFile(path.join(entryRoot, sidecar.filename), sidecar.contents))
+    ...archive.sidecars.map((sidecar) =>
+      writeFile(path.join(entryRoot, sidecar.filename), sidecar.contents)),
+    copyFile(
+      archive.diagnosticsArtifact.stagedPath,
+      path.join(entryRoot, archive.diagnosticsFilename)
+    )
   ]);
   const verifiedSnapshot = await verifyPromotionSnapshot({
     contractRoot: root,
@@ -147,7 +152,15 @@ async function writeEntryFixture(
     expectedQuestions: questions,
     variant: "longmemeval_s"
   });
-  return { entryRoot, selection, snapshot: verifiedSnapshot };
+  return {
+    entryRoot,
+    selection,
+    snapshot: verifiedSnapshot,
+    archive: {
+      diagnosticsFilename: archive.diagnosticsFilename,
+      sidecarFilenames: archive.sidecars.map((sidecar) => sidecar.filename)
+    }
+  };
 }
 
 function withOptionalDistinctProducerCode(

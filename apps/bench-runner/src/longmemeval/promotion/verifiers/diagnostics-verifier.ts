@@ -3,8 +3,6 @@ import type { FileHandle } from "node:fs/promises";
 import type { KpiPayload, QualityMetrics } from "@do-soul/alaya-eval";
 import { DiagnosticsJsonStreamReader } from
   "../../diagnostics/artifacts/artifact-json-reader.js";
-import { createArtifactReadStream, decodeArtifactUtf8 } from
-  "../../diagnostics/artifacts/artifact-utf8.js";
 import { createQualityMetricsState, recordQualityQuestion } from
   "../../diagnostics/quality/diagnostics-quality-state.js";
 import { buildQualityMetricsFromState } from
@@ -43,9 +41,11 @@ import {
 import { verifyPromotionCandidatePoolClosure } from
   "./candidate-pool-verifier.js";
 import {
+  MAX_RECALL_EVAL_PROMOTION_DIAGNOSTICS_BYTES,
   MAX_RECALL_EVAL_PROMOTION_QUESTIONS,
   MAX_RECALL_EVAL_PROMOTION_QUESTION_BYTES
 } from "../artifacts/artifact-limits.js";
+import { createRecallEvalDiagnosticsSource } from "./diagnostics-artifact-source.js";
 
 type DiagnosticsRow = RecallEvalDiagnosticsEvidenceV2["questions"][number];
 
@@ -90,6 +90,7 @@ export async function verifyRecallEvalDiagnostics(input: {
   readonly goldForQuestion: (questionId: string) => readonly string[] | undefined;
   readonly measurementForQuestion: SnapshotMeasurementOracleAccessor;
   readonly observeChunk: (chunk: Uint8Array) => void;
+  readonly gzip?: boolean;
 }): Promise<VerifiedRecallEvalDiagnostics> {
   const state = createStreamState();
   const expectedQuestionCount = resolveExpectedQuestionCount(input);
@@ -102,9 +103,14 @@ export async function verifyRecallEvalDiagnostics(input: {
     (value, index) => parseDiagnosticsRow(value, index, expectedQuestionCount),
     2
   );
-  const source = createArtifactReadStream(input.handle);
+  const source = createRecallEvalDiagnosticsSource({
+    handle: input.handle,
+    gzip: input.gzip === true,
+    maxDecodedBytes: MAX_RECALL_EVAL_PROMOTION_DIAGNOSTICS_BYTES,
+    observeArtifactChunk: input.observeChunk
+  });
   try {
-    for await (const chunk of decodeArtifactUtf8(source, input.observeChunk)) {
+    for await (const chunk of source.chunks) {
       reader.consume(chunk);
       processRows(reader.takeQuestions(), input, state);
     }

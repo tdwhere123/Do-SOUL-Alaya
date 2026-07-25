@@ -1,6 +1,7 @@
 import {
   buildDiffVsPrevious,
   diffKpis,
+  isHistoryEntryCommittedError,
   renderFindings,
   writeEntry,
   type BenchSimulateReportMode,
@@ -53,6 +54,8 @@ import {
   isRecallEvalRunEvidenceEligible
 } from "../../provenance/recall-eval/recall-eval-run.js";
 import { writeRecallEvalPoolDump } from "../../provenance/recall-eval/recall-eval-pool-dump.js";
+import { withPublishedDiagnosticsArtifact } from
+  "../../measurement/artifact-transaction.js";
 import { requireLongMemEvalTimestamp } from "../../ingestion/source-time.js";
 import {
   prepareRecallEvalRunContext,
@@ -210,8 +213,8 @@ async function persistRecallEvalArtifacts(
   const slug = buildRecallEvalArchiveSlug(context);
   const report = renderRecallEvalReport(payload, previous, diff);
   const findings = renderFindings(payload, diff);
-  const sidecars = await buildRecallEvalArchiveBundle({
-    slug, payload, report, findings, collected,
+  const bundle = await buildRecallEvalArchiveBundle({
+    slug, historyRoot: layout.historyRoot, payload, report, findings, collected,
     manifest: context.manifest,
     runtimeAttribution: context.runtimeAttribution,
     offset: context.options.offset ?? 0,
@@ -220,14 +223,18 @@ async function persistRecallEvalArtifacts(
     expectedQuestionIdDigest: evidence.expectedQuestionIdDigest,
     provenanceComplete: evidence.provenanceComplete
   });
-  const entry = await writeEntry(
-    layout,
-    "public",
-    slug,
-    payload,
-    report,
-    findings,
-    { sidecars }
+  const entry = await withPublishedDiagnosticsArtifact(
+    bundle.diagnosticsArtifact,
+    () => writeEntry(
+      layout, "public", slug, payload, report, findings, {
+        sidecars: bundle.sidecars,
+        fileSidecars: [{
+          filename: bundle.diagnosticsFilename,
+          sourcePath: bundle.diagnosticsArtifact.finalPath
+        }]
+      }
+    ),
+    isHistoryEntryCommittedError
   );
   return {
     slug,

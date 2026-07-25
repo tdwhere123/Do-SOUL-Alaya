@@ -1,4 +1,6 @@
 import type { KpiPayload } from "@do-soul/alaya-eval";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import {
   buildLongMemEvalEvidenceManifest,
   LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
@@ -11,8 +13,8 @@ import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js"
 import { snapshotQuestionIdDigest } from "../../snapshot/materialize.js";
 import {
   buildRecallEvalDiagnosticsEvidence,
-  RECALL_EVAL_DIAGNOSTICS_FILENAME,
-  renderRecallEvalDiagnosticsEvidence
+  RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
+  writeRecallEvalDiagnosticsGzipStream
 } from "./recall-eval-diagnostics.js";
 import {
   RECALL_EVAL_RANK_IDENTITY_FILENAME,
@@ -23,9 +25,23 @@ import {
   renderLongMemEvalRunProvenance,
   type LongMemEvalRunProvenance
 } from "../run.js";
+import {
+  resolveBenchDiagnosticsArtifactRoot
+} from "../../diagnostics/artifacts/diagnostics-artifacts.js";
+import {
+  prepareDiagnosticsArtifactStagingPath,
+  type StagedDiagnosticsArtifact
+} from "../../measurement/artifact-transaction.js";
 
-export function buildRecallEvalArchiveBundle(input: {
+export interface RecallEvalArchiveBundle {
+  readonly sidecars: readonly { readonly filename: string; readonly contents: string }[];
+  readonly diagnosticsFilename: string;
+  readonly diagnosticsArtifact: StagedDiagnosticsArtifact;
+}
+
+export async function buildRecallEvalArchiveBundle(input: {
   readonly slug: string;
+  readonly historyRoot: string;
   readonly payload: KpiPayload;
   readonly report: string;
   readonly findings: string | null;
@@ -37,31 +53,52 @@ export function buildRecallEvalArchiveBundle(input: {
   readonly runProvenance: LongMemEvalRunProvenance;
   readonly expectedQuestionIdDigest: string;
   readonly provenanceComplete: boolean;
-}): readonly { readonly filename: string; readonly contents: string }[] {
+}): Promise<RecallEvalArchiveBundle> {
   const rankIdentity = renderRankIdentity(input);
   const runProvenance = renderRunProvenance(input);
-  const diagnostics = renderRecallEvalDiagnosticsEvidence(
-    buildRecallEvalDiagnosticsEvidence({
-      questions: input.collected,
-      embeddingSupplement: input.runtimeAttribution.embedding_supplement,
-      answerRerank: input.runtimeAttribution.answer_rerank
-    })
+  const diagnostics = await stageRecallEvalDiagnostics(input);
+  try {
+    const artifacts = buildArtifactInputs(
+      input, rankIdentity, runProvenance, diagnostics.identity
+    );
+    const evidence = buildLongMemEvalEvidenceManifest({
+      profile: "recall_eval", run: buildRunBinding(input), artifacts
+    });
+    return {
+      sidecars: [
+        { filename: RECALL_EVAL_RANK_IDENTITY_FILENAME, contents: rankIdentity },
+        { filename: LONGMEMEVAL_RUN_PROVENANCE_FILENAME, contents: runProvenance },
+        {
+          filename: LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
+          contents: renderLongMemEvalEvidenceManifest(evidence)
+        }
+      ],
+      diagnosticsFilename: RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
+      diagnosticsArtifact: diagnostics.artifact
+    };
+  } catch (error) {
+    await rm(diagnostics.artifact.stagedPath, { force: true });
+    throw error;
+  }
+}
+
+async function stageRecallEvalDiagnostics(
+  input: Parameters<typeof buildRecallEvalArchiveBundle>[0]
+) {
+  const artifactRoot = resolveBenchDiagnosticsArtifactRoot(input.historyRoot);
+  const stagedPath = await prepareDiagnosticsArtifactStagingPath(
+    artifactRoot, `${input.slug}-recall-eval`
   );
-  const artifacts = buildArtifactInputs(input, rankIdentity, runProvenance, diagnostics);
-  const evidence = buildLongMemEvalEvidenceManifest({
-    profile: "recall_eval",
-    run: buildRunBinding(input),
-    artifacts
+  const finalPath = path.join(
+    artifactRoot, "public", input.slug, RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME
+  );
+  const evidence = buildRecallEvalDiagnosticsEvidence({
+    questions: input.collected,
+    embeddingSupplement: input.runtimeAttribution.embedding_supplement,
+    answerRerank: input.runtimeAttribution.answer_rerank
   });
-  return [
-    { filename: RECALL_EVAL_RANK_IDENTITY_FILENAME, contents: rankIdentity },
-    { filename: LONGMEMEVAL_RUN_PROVENANCE_FILENAME, contents: runProvenance },
-    { filename: RECALL_EVAL_DIAGNOSTICS_FILENAME, contents: diagnostics },
-    {
-      filename: LONGMEMEVAL_EVIDENCE_MANIFEST_FILENAME,
-      contents: renderLongMemEvalEvidenceManifest(evidence)
-    }
-  ];
+  const identity = await writeRecallEvalDiagnosticsGzipStream(stagedPath, evidence);
+  return { identity, artifact: { stagedPath, finalPath } };
 }
 
 function renderRankIdentity(
@@ -92,7 +129,7 @@ function buildArtifactInputs(
   input: Parameters<typeof buildRecallEvalArchiveBundle>[0],
   rankIdentity: string,
   runProvenance: string,
-  diagnostics: string
+  diagnosticsIdentity: { readonly sha256: string; readonly bytes: number }
 ): readonly LongMemEvalEvidenceArtifactInput[] {
   return [
     { role: "kpi", path: "kpi.json", contents: `${JSON.stringify(input.payload, null, 2)}\n` },
@@ -102,7 +139,11 @@ function buildArtifactInputs(
     ]),
     { role: "rank_identity", path: RECALL_EVAL_RANK_IDENTITY_FILENAME, contents: rankIdentity },
     { role: "run_provenance", path: LONGMEMEVAL_RUN_PROVENANCE_FILENAME, contents: runProvenance },
-    { role: "recall_eval_diagnostics", path: RECALL_EVAL_DIAGNOSTICS_FILENAME, contents: diagnostics }
+    {
+      role: "recall_eval_diagnostics",
+      path: RECALL_EVAL_DIAGNOSTICS_GZIP_FILENAME,
+      identity: diagnosticsIdentity
+    }
   ];
 }
 

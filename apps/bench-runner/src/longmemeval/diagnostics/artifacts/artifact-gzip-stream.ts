@@ -23,11 +23,18 @@ export async function writeDiagnosticsGzipStream(
   sidecar: LongMemEvalDiagnosticsSidecar,
   questions: AsyncIterable<LongMemEvalQuestionDiagnostic> = fromArray(sidecar.questions)
 ): Promise<StreamedArtifactIdentity> {
+  return writeGzipChunks(artifactPath, renderSidecarChunks(sidecar, questions));
+}
+
+export async function writeGzipChunks(
+  artifactPath: string,
+  chunks: AsyncIterable<string>
+): Promise<StreamedArtifactIdentity> {
   const temporaryPath = `${artifactPath}.${process.pid}.${randomUUID()}.tmp`;
   const meter = new ArtifactIdentityMeter();
   try {
     await pipeline(
-      Readable.from(renderSidecarChunks(sidecar, questions)),
+      Readable.from(chunks),
       createGzip(),
       meter,
       createWriteStream(temporaryPath, { flags: "wx" })

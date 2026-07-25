@@ -147,7 +147,8 @@ async function inspectEntryDiagnostics(
     observeChunk: (chunk) => {
       observedBytes += chunk.byteLength;
       hash.update(chunk);
-    }
+    },
+    gzip: diagnosticsArtifact.artifact.path.endsWith(".gz")
   });
   assertExpectedIdentity(
     diagnosticsArtifact.artifact,

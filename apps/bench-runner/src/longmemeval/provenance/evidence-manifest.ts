@@ -177,7 +177,13 @@ export function verifyLongMemEvalEvidenceManifest(
 }
 
 function renderArtifactIdentity(artifact: LongMemEvalEvidenceArtifactInput) {
-  return { role: artifact.role, path: artifact.path, ...artifactIdentity(artifact) };
+  const identity = artifactIdentity(artifact);
+  return {
+    role: artifact.role,
+    path: artifact.path,
+    sha256: identity.sha256,
+    bytes: identity.bytes
+  };
 }
 
 function artifactIdentity(

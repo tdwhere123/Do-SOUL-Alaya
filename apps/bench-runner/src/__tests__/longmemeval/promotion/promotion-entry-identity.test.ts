@@ -1,4 +1,5 @@
-import { writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -47,6 +48,55 @@ describe("recall-eval promotion entry verifier", () => {
     expect(() => (gold as string[]).push("forged")).toThrow();
     (measurement.sidecar as Map<string, unknown>).clear();
     expect(data.snapshot.measurementForQuestion("q-1")?.sidecar.size).toBe(1);
+  });
+
+  it("archives multi-question diagnostics as a gzip file sidecar bound by compressed bytes", async () => {
+    const fixture = await writeEntryFixture();
+    const manifest = JSON.parse(await readFile(
+      path.join(fixture.entryRoot, "longmemeval-evidence-manifest.json"),
+      "utf8"
+    )) as {
+      artifacts: Array<{
+        role: string;
+        path: string;
+        sha256: string;
+        bytes: number;
+      }>;
+    };
+    const diagnostics = manifest.artifacts.find((artifact) =>
+      artifact.role === "recall_eval_diagnostics"
+    );
+    if (diagnostics === undefined) throw new Error("diagnostics artifact missing");
+    const compressed = await readFile(path.join(fixture.entryRoot, diagnostics.path));
+
+    expect(fixture.archive).toEqual({
+      diagnosticsFilename: "recall-eval-diagnostics.json.gz",
+      sidecarFilenames: [
+        "recall-eval-rank-identity.json",
+        "longmemeval-run-provenance.json",
+        "longmemeval-evidence-manifest.json"
+      ]
+    });
+    expect(diagnostics.path).toBe(fixture.archive.diagnosticsFilename);
+    expect(compressed.subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
+    expect({
+      sha256: createHash("sha256").update(compressed).digest("hex"),
+      bytes: compressed.byteLength
+    }).toEqual({ sha256: diagnostics.sha256, bytes: diagnostics.bytes });
+
+    await expect(verifyRecallEvalPromotionEntry({
+      entryRoot: fixture.entryRoot,
+      expectedSelection: fixture.selection,
+      treatment: { embedding_supplement: false, answer_rerank: false },
+      code: {
+        commit_sha: COMMIT_SHA,
+        commit_sha7: COMMIT_SHA7,
+        worktree_state_sha256: WORKTREE_SHA,
+        executed_dist: EXECUTED_DIST
+      },
+      gateSha256: GATE_SHA,
+      snapshot: fixture.snapshot
+    })).resolves.toBeDefined();
   });
 
   it("accepts a recall consumer that differs from the frozen snapshot producer", async () => {
