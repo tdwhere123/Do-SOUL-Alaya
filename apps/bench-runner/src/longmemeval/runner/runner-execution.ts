@@ -105,12 +105,11 @@ async function runSnapshotCompatiblePhases(
   // matrix cells on the sealed DB, not a stress/embedding-off A-like pass.
   const prepared = await prepareSnapshotWindow(context, daemon);
   await awaitLongMemEvalSnapshotQuiescence();
-  const seedFuelInventory = await collectBenchSeedFuelInventory(daemon.dataDir);
   await writeLongMemEvalSnapshotIfRequested(
     context,
     prepared.map((row) => row.prepared.snapshotQuestion)
   );
-  return buildExecutionResult(execution, seedFuelInventory);
+  return buildExecutionResult(execution, emptySeedFuelInventory());
 }
 
 async function executeQuestionIsolatedLongMemEvalRun(

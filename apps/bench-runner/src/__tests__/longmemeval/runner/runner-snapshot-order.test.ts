@@ -8,6 +8,8 @@ import { executeLongMemEvalRun } from "../../../longmemeval/runner/runner-execut
 import type { LongMemEvalRunContext } from "../../../longmemeval/runner/prepare-context.js";
 import type { LongMemEvalRunOptions } from "../../../longmemeval/runner.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
+import { emptySeedFuelInventory } from
+  "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
 
 const mocks = vi.hoisted(() => ({
   events: [] as string[],
@@ -100,12 +102,13 @@ describe("LongMemEval snapshot execution ordering", () => {
       "prepare:first",
       "prepare:second",
       "quiescence",
-      "inventory",
       "provenance",
       "snapshot",
       "shutdown"
     ]);
     expect(result.collected).toEqual([]);
+    expect(result.seedFuelInventory).toEqual(emptySeedFuelInventory());
+    expect(mocks.collectInventory).not.toHaveBeenCalled();
     expect(mocks.recall).not.toHaveBeenCalled();
     expect(mocks.runQuestion).not.toHaveBeenCalled();
   });
