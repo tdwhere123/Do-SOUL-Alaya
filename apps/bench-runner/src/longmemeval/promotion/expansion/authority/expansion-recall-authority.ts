@@ -29,7 +29,7 @@ import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability
 } from "../expansion-capability.js";
-import { assertLongMemEvalExpansionLineageMatchesCapability } from
+import { assertLongMemEvalExpansionLineageCompatibleWithCapability } from
   "../lineage/expansion-lineage.js";
 import { assertLongMemEvalExpansionSourceAnchor } from
   "../lineage/expansion-source-anchor.js";
@@ -241,17 +241,19 @@ function assertSnapshotExtractionAuthority(
     requestProfile: extraction.request_profile,
     apiKey: null
   };
-  assertLongMemEvalExpansionSourceAnchor(
+  const anchor = assertLongMemEvalExpansionSourceAnchor(
     extraction.expansion_source_anchor,
     capability,
     config,
     completion
   );
-  const lineage = assertLongMemEvalExpansionLineageMatchesCapability(
+  const lineage = assertLongMemEvalExpansionLineageCompatibleWithCapability(
     extraction.expansion_lineage,
     capability
   );
-  if (!isDeepStrictEqual(lineage.target_cache, snapshotTarget(extraction)) ||
+  if (lineage.matrix_authorization_sha256 !==
+        anchor.matrix_authorization_sha256 ||
+      !isDeepStrictEqual(lineage.target_cache, snapshotTarget(extraction)) ||
       !matchingRunCache(extraction, runCache)) {
     throw new Error("500Q snapshot extraction lineage differs from target cache authority");
   }
