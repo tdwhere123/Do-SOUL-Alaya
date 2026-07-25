@@ -157,6 +157,7 @@ describe("Garden production temporal clean break", () => {
         runtimeNotifier
       });
       const autonomousHardDeleteTombstoned = vi.fn(async () => true);
+      const coherentPairKeys = vi.fn(async () => new Set<string>());
       const warn = vi.fn();
       const input = {
         database,
@@ -188,7 +189,12 @@ describe("Garden production temporal clean break", () => {
         pathGraphSnapshotRepo: new SqlitePathGraphSnapshotRepo(database),
         pathRelationRepo: new SqlitePathRelationRepo(database),
         pathPlasticityWatermarkRepo: new SqlitePathPlasticityWatermarkRepo(database),
-        embeddingBackfillHandler: undefined,
+        embeddingBackfillHandler: {
+          handle: vi.fn(async () => ({
+            objectsAffected: ["memory-1", "memory-2"],
+            auditEntries: ["embedding_backfill:2"]
+          }))
+        },
         configService: undefined,
         officialGardenProvider: undefined,
         localHeuristicsProvider: undefined,
@@ -199,7 +205,7 @@ describe("Garden production temporal clean break", () => {
         signalRepo: new SqliteSignalRepo(database),
         materializationRouter: undefined,
         edgeAutoProducerService: undefined,
-        embeddingRecallService: undefined,
+        embeddingRecallService: { coherentPairKeys },
         conflictDetectionService: null,
         edgeProposalService: { sweepExpired: vi.fn(async () => ({ scanned: 0, expired: 0, skipped: 0 })) },
         edgeClassifyQueueRepoHolder: { current: null },
@@ -241,6 +247,21 @@ describe("Garden production temporal clean break", () => {
           audit_entries: expect.arrayContaining([
             "[DEFERRED] tombstone_gc: temporal_assertion_provenance_required"
           ])
+        })
+      );
+
+      await wiring.gardenRuntime.runEmbeddingBackfillPass("workspace-1");
+
+      expect(coherentPairKeys).not.toHaveBeenCalled();
+      expect(scheduler.completions).toContainEqual(
+        expect.objectContaining({
+          task_kind: GardenTaskKind.EMBEDDING_BACKFILL,
+          success: true,
+          objects_affected: ["memory-1", "memory-2"],
+          audit_entries: [
+            "embedding_backfill:2",
+            "embedding_backfill_path_follow_up_deferred:temporal_assertion_provenance_required"
+          ]
         })
       );
 

@@ -418,7 +418,6 @@ describe("garden runtime targeted embedding backfill pass", () => {
     const completion = currentScheduler().completions.at(-1);
     expect(completion?.error_message).not.toMatch(/alice|private\.db|super-secret/u);
   });
-
   it("identifies coherence, answers_with, and completion warning phases", async () => {
     const warn = vi.fn();
     const runtime = createGardenRuntime({
@@ -436,6 +435,7 @@ describe("garden runtime targeted embedding backfill pass", () => {
           }))
         }
       }),
+      legacyTopologyMutationsEnabled: true,
       coherenceEdgeProducerPort: {
         crystallizeForBackfill: vi.fn(async () => { throw new Error("coherence failed"); })
       },

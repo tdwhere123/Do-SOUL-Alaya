@@ -14,6 +14,8 @@ import type {
 const EMBEDDING_BACKFILL_DRAIN_CAP_PER_PASS = 8;
 const ERROR_MESSAGE_MAX_LENGTH = 240;
 const ERROR_CAUSE_MAX_DEPTH = 3;
+const PATH_FOLLOW_UP_DEFERRED_AUDIT =
+  "embedding_backfill_path_follow_up_deferred:temporal_assertion_provenance_required";
 
 interface SafeCausalError {
   readonly name: string;
@@ -108,12 +110,18 @@ async function runEmbeddingBackfillTask(
   let outcome: EmbeddingBackfillTaskOutcome;
   try {
     const result = await resolveEmbeddingBackfillResult(input, task);
-    await runEmbeddingCoherenceFollowUp(input, task, result.objectsAffected);
-    await runEmbeddingAnswersWithFollowUp(input, task, result.objectsAffected);
+    const followUpAuditEntries = await runEmbeddingPathFollowUps(
+      input,
+      task,
+      result.objectsAffected
+    );
     outcome = Object.freeze({
       success: true,
       objectsAffected: Object.freeze([...result.objectsAffected]),
-      auditEntries: Object.freeze([...result.auditEntries]),
+      auditEntries: Object.freeze(appendUniqueAuditEntries(
+        result.auditEntries,
+        followUpAuditEntries
+      )),
       errorMessage: null
     });
   } catch (error) {
@@ -130,6 +138,37 @@ async function runEmbeddingBackfillTask(
   } finally {
     pendingWorkspaces.delete(task.workspace_id);
   }
+}
+
+async function runEmbeddingPathFollowUps(
+  input: CreateGardenSchedulerRuntimeSupportInput,
+  task: Readonly<GardenTaskDescriptor>,
+  objectsAffected: readonly string[]
+): Promise<readonly string[]> {
+  if (objectsAffected.length < 2) {
+    return [];
+  }
+  if (input.legacyTopologyMutationsEnabled !== true) {
+    return [PATH_FOLLOW_UP_DEFERRED_AUDIT];
+  }
+  await runEmbeddingCoherenceFollowUp(input, task, objectsAffected);
+  await runEmbeddingAnswersWithFollowUp(input, task, objectsAffected);
+  return [];
+}
+
+function appendUniqueAuditEntries(
+  existing: readonly string[],
+  additions: readonly string[]
+): string[] {
+  const seen = new Set(existing);
+  const combined = [...existing];
+  for (const entry of additions) {
+    if (!seen.has(entry)) {
+      seen.add(entry);
+      combined.push(entry);
+    }
+  }
+  return combined;
 }
 
 async function persistEmbeddingBackfillCompletion(
