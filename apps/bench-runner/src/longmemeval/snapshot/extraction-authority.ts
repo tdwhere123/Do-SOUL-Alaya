@@ -1,6 +1,7 @@
 import {
   MAX_LONGMEMEVAL_EXTRACTION_AUTHORITY_BYTES,
   LongMemEvalExtractionAuthoritySchema,
+  assertLongMemEvalFullExtractionClosure,
   assertLongMemEvalExtractionAuthorityBinding,
   assertLongMemEvalExtractionAuthorityIntegrity,
   hashLongMemEvalExpansionArtifact,
@@ -93,6 +94,10 @@ export function buildSnapshotExtractionAuthority(
   if (!hasCompleteExtractionFillAuthority(manifest)) {
     throw new Error("snapshot extraction authority requires a complete source manifest");
   }
+  assertLongMemEvalFullExtractionClosure({
+    ...compact,
+    content_closure_index: manifest.content_closure_index
+  });
   const candidate = {
     schema_version: 1,
     source_manifest_schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,

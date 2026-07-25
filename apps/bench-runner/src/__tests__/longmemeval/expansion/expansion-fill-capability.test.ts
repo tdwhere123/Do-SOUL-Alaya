@@ -22,6 +22,12 @@ import {
 import { runExtractionFill } from "../../../longmemeval/extraction/extraction-fill.js";
 import { parseExpansionManifestArtifacts } from
   "../../../longmemeval/extraction/expansion-manifest-artifacts.js";
+import {
+  fixtureSupplementalExtension,
+  fixtureSupplementalTargetBinding
+} from "./expansion-fill-authority-fixture/manifest.js";
+import { assertCompleteLongMemEvalExpansionCache } from
+  "../../../longmemeval/promotion/expansion/authority/expansion-cache-authority.js";
 
 describe("500Q expansion fill authority", () => {
   beforeEach(resetExpansionFillAuthorityFixture);
@@ -349,6 +355,57 @@ describe("500Q expansion fill authority", () => {
     };
 
     await expect(prepare(mintCapability())).rejects.toThrow(/lineage|closure/u);
+  });
+
+  it("accepts a completed target only with an exact supplemental receipt extension", async () => {
+    const first = await prepare(mintCapability());
+    const capability = await mintCapability();
+    state.targetCompletion = completion(500, 500, "8", "6");
+    const base = {
+      ...targetManifest(first.sourceAnchor, "complete"),
+      supplemental_source_receipt: fixtureSupplementalTargetBinding(state.config)
+    };
+    const extension = fixtureSupplementalExtension(state.config);
+    const lineage = buildLongMemEvalExpansionLineage(
+      capability,
+      state.targetCompletion,
+      base,
+      extension
+    );
+    const manifest = { ...base, expansion_lineage: lineage };
+
+    expect(() => assertCompleteLongMemEvalExpansionCache({
+      capability,
+      manifest,
+      completion: state.targetCompletion
+    })).not.toThrow();
+    for (const shard of [
+      extension.source_shards[0]!,
+      extension.added_shards[0]!
+    ]) {
+      expect(() => assertCompleteLongMemEvalExpansionCache({
+        capability,
+        manifest: {
+          ...manifest,
+          content_closure_index: {
+            ...manifest.content_closure_index,
+            [shard.cache_key]: ["f".repeat(64), 1, 1]
+          }
+        },
+        completion: state.targetCompletion
+      })).toThrow(/target cache|source extraction identity/u);
+    }
+    expect(() => assertCompleteLongMemEvalExpansionCache({
+      capability,
+      manifest: {
+        ...manifest,
+        supplemental_source_receipt: {
+          ...manifest.supplemental_source_receipt,
+          receipt_sha256: "0".repeat(64)
+        }
+      },
+      completion: state.targetCompletion
+    })).toThrow(/target cache|lineage/u);
   });
 
   it("rejects statusless and complete-without-lineage expansion downgrades", async () => {

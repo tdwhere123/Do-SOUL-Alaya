@@ -34,7 +34,8 @@ import type { ExtractionRequestProfile } from "../../extraction/request-profile.
 import {
   MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES,
   assertSnapshotExtractionAuthorityBinding,
-  parseSnapshotExtractionAuthorityBytes
+  parseSnapshotExtractionAuthorityBytes,
+  type SnapshotExtractionAuthority
 } from "../../snapshot/extraction-authority.js";
 import { bindSnapshotRunProvenanceAuthority } from
   "../../snapshot/run-provenance.js";
@@ -62,6 +63,7 @@ export interface LongMemEvalSourceCacheAuthority {
   readonly expectedTurns: number;
   readonly expectedKeySetSha256: string;
   readonly contentClosureSha256: string;
+  readonly contentClosureIndex: SnapshotExtractionAuthority["content_closure_index"];
   readonly supplementalSourceBindingSha256?: string;
 }
 
@@ -189,9 +191,13 @@ export async function readLongMemEvalSourceSnapshotAuthority(input: {
     const authorityBytes = await authorityFile.readBytes(
       MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES
     );
-    assertSourceExtractionAuthority(manifest, authorityReference, authorityBytes);
+    const extractionAuthority = assertSourceExtractionAuthority(
+      manifest,
+      authorityReference,
+      authorityBytes
+    );
     assertSourceSnapshotManifest(manifest, input);
-    return buildSourceSnapshotAuthority(input.contract, manifest);
+    return buildSourceSnapshotAuthority(input.contract, manifest, extractionAuthority);
   } finally {
     await Promise.all([file.close(), authorityFile.close()]);
   }
@@ -201,7 +207,7 @@ function assertSourceExtractionAuthority(
   manifest: ReturnType<typeof validateSnapshotManifest>,
   reference: string,
   bytes: Uint8Array
-): void {
+): SnapshotExtractionAuthority {
   const integrity = manifest.artifact_integrity;
   const extraction = manifest.extraction_provenance;
   if (integrity?.extraction_authority_filename !== path.basename(reference) ||
@@ -218,6 +224,7 @@ function assertSourceExtractionAuthority(
       )) {
     throw new Error("source snapshot run authority is incomplete");
   }
+  return authority;
 }
 
 function assertAuthorizationBinding(
@@ -310,7 +317,8 @@ function assertSourceSnapshotManifest(
 
 function buildSourceSnapshotAuthority(
   contract: LongMemEvalMatrixPromotionContract,
-  manifest: ReturnType<typeof validateSnapshotManifest>
+  manifest: ReturnType<typeof validateSnapshotManifest>,
+  authority: SnapshotExtractionAuthority
 ): LongMemEvalSourceSnapshotAuthority {
   const extraction = manifest.extraction_provenance!;
   const integrity = manifest.artifact_integrity!;
@@ -338,6 +346,7 @@ function buildSourceSnapshotAuthority(
       expectedTurns: extraction.expected_turns,
       expectedKeySetSha256: extraction.expected_key_set_sha256,
       contentClosureSha256: extraction.content_closure_sha256,
+      contentClosureIndex: authority.content_closure_index,
       ...(extraction.supplemental_source_receipt === undefined ? {} : {
         supplementalSourceBindingSha256: hashLongMemEvalSupplementalSourceBinding(
           extraction.supplemental_source_receipt

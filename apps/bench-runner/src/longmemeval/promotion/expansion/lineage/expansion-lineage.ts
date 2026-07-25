@@ -1,5 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  assertLongMemEvalSupplementalSourceReceiptExtension,
+  hashLongMemEvalSupplementalSourceBinding,
+  type LongMemEvalSupplementalSourceReceiptExtensionWire
+} from "@do-soul/alaya-eval/internal";
+import {
   longMemEvalExpansionCapabilityData,
   type LongMemEvalExpansionCapability
 } from "../expansion-capability.js";
@@ -20,7 +25,8 @@ export {
 export function buildLongMemEvalExpansionLineage(
   capability: LongMemEvalExpansionCapability,
   completion: ExtractionFillCompletion,
-  targetManifest: ExtractionCacheManifest
+  targetManifest: ExtractionCacheManifest,
+  extensionValue?: LongMemEvalSupplementalSourceReceiptExtensionWire
 ): LongMemEvalExpansionLineage {
   if (completion.validTurns !== completion.expectedTurns ||
       completion.missingTurns !== 0 || completion.invalidTurns !== 0 ||
@@ -28,7 +34,9 @@ export function buildLongMemEvalExpansionLineage(
     throw new Error("500Q expansion lineage requires an exact completed target cache");
   }
   const data = longMemEvalExpansionCapabilityData(capability);
-  assertTargetCacheContinuity(data, completion, targetManifest);
+  const extension = extensionValue === undefined ? undefined :
+    assertLongMemEvalSupplementalSourceReceiptExtension(extensionValue);
+  assertTargetCacheContinuity(data, completion, targetManifest, extension);
   return LongMemEvalExpansionLineageSchema.parse({
     schema_version: 1,
     kind: "longmemeval_100_to_500_expansion",
@@ -42,7 +50,10 @@ export function buildLongMemEvalExpansionLineage(
     product_default: data.productDefault,
     source_snapshot: expansionSourceSnapshotRecord(data.sourceSnapshot),
     source_cache: expansionSourceCacheRecord(data.sourceSnapshot.extractionCache),
-    target_cache: targetCacheLineage(targetManifest, completion)
+    target_cache: targetCacheLineage(targetManifest, completion),
+    ...(extension === undefined ? {} : {
+      supplemental_source_receipt_extension: extension
+    })
   });
 }
 
@@ -64,9 +75,20 @@ export function assertLongMemEvalExpansionLineageMatchesCapability(
     source_snapshot: expansionSourceSnapshotRecord(data.sourceSnapshot),
     source_cache: expansionSourceCacheRecord(data.sourceSnapshot.extractionCache)
   };
-  const { target_cache: _target, schema_version: _schema, kind: _kind, ...actual } = parsed;
+  const {
+    target_cache: _target,
+    supplemental_source_receipt_extension: extension,
+    schema_version: _schema,
+    kind: _kind,
+    ...actual
+  } = parsed;
   if (!isDeepStrictEqual(actual, expected)) {
     throw new Error("500Q expansion lineage differs from live promotion capability");
+  }
+  if (extension !== undefined &&
+      hashLongMemEvalSupplementalSourceBinding(extension.source_binding) !==
+        data.sourceSnapshot.extractionCache.supplementalSourceBindingSha256) {
+    throw new Error("500Q expansion receipt extension differs from source capability");
   }
   return parsed;
 }
@@ -109,9 +131,14 @@ export function expansionSourceCacheRecord(
 function assertTargetCacheContinuity(
   data: ReturnType<typeof longMemEvalExpansionCapabilityData>,
   completion: ExtractionFillCompletion,
-  manifest: ExtractionCacheManifest
+  manifest: ExtractionCacheManifest,
+  extension: LongMemEvalSupplementalSourceReceiptExtensionWire | undefined
 ): asserts manifest is Extract<ExtractionCacheManifest, { readonly schema_version: 3 }> {
   const source = data.sourceSnapshot.extractionCache;
+  const targetBindingSha256 = computeSupplementalSourceBindingSha256(
+    manifest.supplemental_source_receipt,
+    redactProvenanceUrl
+  );
   if (manifest.schema_version !== 3 || manifest.fill_status !== "complete" ||
       manifest.extraction_model !== source.extractionModel ||
       manifest.model_family !== source.modelFamily ||
@@ -124,13 +151,52 @@ function assertTargetCacheContinuity(
       manifest.window_offset !== 0 || manifest.window_limit !== 500 ||
       manifest.expected_turns !== completion.expectedTurns ||
       manifest.expected_key_set_sha256 !== completion.expectedKeySetSha256 ||
-      computeSupplementalSourceBindingSha256(
-        manifest.supplemental_source_receipt,
-        redactProvenanceUrl
-      ) !== source.supplementalSourceBindingSha256 ||
+      !preservesSupplementalSource(
+        source.supplementalSourceBindingSha256,
+        targetBindingSha256,
+        extension,
+        source.contentClosureIndex,
+        manifest.content_closure_index
+      ) ||
+      !containsSourceClosure(
+        source.contentClosureIndex,
+        manifest.content_closure_index
+      ) ||
       manifest.content_closure_sha256 !== completion.contentClosureSha256) {
     throw new Error("500Q target cache does not preserve source extraction identity");
   }
+}
+
+function preservesSupplementalSource(
+  sourceBindingSha256: string | undefined,
+  targetBindingSha256: string | undefined,
+  extension: LongMemEvalSupplementalSourceReceiptExtensionWire | undefined,
+  sourceClosure: Readonly<Record<string, readonly [string, number, number]>>,
+  targetClosure: Readonly<Record<string, readonly [string, number, number]>> | undefined
+): boolean {
+  if (extension === undefined) return targetBindingSha256 === sourceBindingSha256;
+  if (targetClosure === undefined) return false;
+  return hashLongMemEvalSupplementalSourceBinding(extension.source_binding) ===
+      sourceBindingSha256 &&
+    hashLongMemEvalSupplementalSourceBinding(extension.target_binding) ===
+      targetBindingSha256 &&
+    extension.source_shards.every((shard) =>
+      sourceClosure[shard.cache_key]?.[0] === shard.raw_json_sha256 &&
+      targetClosure[shard.cache_key]?.[0] === shard.raw_json_sha256
+    ) &&
+    extension.added_shards.every((shard) =>
+      targetClosure[shard.cache_key]?.[0] === shard.raw_json_sha256
+    );
+}
+
+function containsSourceClosure(
+  source: Readonly<Record<string, readonly [string, number, number]>>,
+  target: Readonly<Record<string, readonly [string, number, number]>> | undefined
+): boolean {
+  if (target === undefined) return false;
+  return Object.entries(source).every(([key, tuple]) =>
+    isDeepStrictEqual(target[key], tuple)
+  );
 }
 
 function targetCacheLineage(

@@ -178,8 +178,9 @@ function sourceAuthority(manifestSha256: string): LongMemEvalSourceSnapshotAutho
       expectedTurns: closure.expected_turns,
       expectedKeySetSha256: closure.expected_key_set_sha256,
       contentClosureSha256: closure.content_closure_sha256,
+      contentClosureIndex: closure.content_closure_index,
       supplementalSourceBindingSha256: computeSupplementalSourceBindingSha256(
-        fixtureSupplementalSourceBinding(),
+        fixtureSupplementalSourceBinding(state.config),
         redactProvenanceUrl
       )
     }

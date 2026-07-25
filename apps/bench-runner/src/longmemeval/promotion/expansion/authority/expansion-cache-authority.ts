@@ -42,7 +42,12 @@ export function assertCompleteLongMemEvalExpansionCache(input: {
     manifest.expansion_lineage,
     capability
   );
-  const expected = buildLongMemEvalExpansionLineage(capability, completion, manifest);
+  const expected = buildLongMemEvalExpansionLineage(
+    capability,
+    completion,
+    manifest,
+    actual.supplemental_source_receipt_extension
+  );
   if (!isDeepStrictEqual(actual, expected)) {
     throw new Error("500Q expansion lineage differs from live target cache closure");
   }

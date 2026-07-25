@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import { createLongMemEvalSelectionContractIdentity } from
   "../../schema/longmemeval-selection-contract.js";
 import {
+  LongMemEvalSupplementalSourceReceiptExtensionWireSchema,
   LongMemEvalExtractionSummarySchema,
   LongMemEvalFanoutAuthoritySchema,
   LongMemEvalShardAuthorityReferenceSchema,
+  assertLongMemEvalExpansionAuthorityPair,
   assertLongMemEvalExpansionBinding,
   assertLongMemEvalFanoutReferenceBinding,
   assertLongMemEvalFullExtractionClosure,
+  buildLongMemEvalSupplementalSourceReceiptExtension,
   hashLongMemEvalSupplementalSourceBinding
 } from "../../gates/longmemeval-authority-wire.js";
+import { canonicalJson } from "../../gates/canonical-json.js";
 
 describe("LongMemEval authority wire contract", () => {
   it("keeps request profiles strict and recomputes full closure", () => {
@@ -87,6 +91,115 @@ describe("LongMemEval authority wire contract", () => {
         compact.expansion_lineage!, digest
       )
     })).not.toThrow();
+  });
+
+  it("bridges an exact supplemental receipt extension without weakening history", () => {
+    const compact = extractionSummary();
+    const sourceShards = [supplementalShard("1", "a")];
+    const addedShards = [supplementalShard("2", "b")];
+    const sourceBinding = supplementalBinding(sourceShards, "1");
+    const targetBinding = supplementalBinding([...sourceShards, ...addedShards], "2");
+    const extension = buildLongMemEvalSupplementalSourceReceiptExtension({
+      source_binding: sourceBinding,
+      target_binding: targetBinding,
+      source_shards: sourceShards,
+      added_shards: addedShards
+    });
+    const sourceDigest = hashLongMemEvalSupplementalSourceBinding(sourceBinding);
+    const targetDigest = hashLongMemEvalSupplementalSourceBinding(targetBinding);
+    const anchor = addSupplementalBinding(
+      compact.expansion_source_anchor!, sourceDigest
+    );
+    const lineage = {
+      ...addSupplementalBinding(compact.expansion_lineage!, sourceDigest),
+      target_cache: {
+        ...compact.expansion_lineage!.target_cache,
+        supplemental_source_binding_sha256: targetDigest
+      },
+      supplemental_source_receipt_extension: extension
+    };
+
+    expect(() => assertLongMemEvalExpansionAuthorityPair(anchor, {
+      ...lineage,
+      supplemental_source_receipt_extension: undefined
+    })).toThrow(/not bound/u);
+    expect(() => assertLongMemEvalExpansionAuthorityPair(anchor, lineage)).not.toThrow();
+    expect(() => assertLongMemEvalExpansionBinding({
+      ...compact,
+      supplemental_source_receipt: targetBinding,
+      expansion_source_anchor: anchor,
+      expansion_lineage: lineage
+    })).not.toThrow();
+  });
+
+  it("rejects invalid supplemental receipt extension certificates", () => {
+    const sourceShards = [supplementalShard("1", "a")];
+    const addedShards = [supplementalShard("2", "b")];
+    const sourceBinding = supplementalBinding(sourceShards, "1");
+    const targetBinding = supplementalBinding([...sourceShards, ...addedShards], "2");
+    const input = {
+      source_binding: sourceBinding,
+      target_binding: targetBinding,
+      source_shards: sourceShards,
+      added_shards: addedShards
+    };
+    const extension = buildLongMemEvalSupplementalSourceReceiptExtension(input);
+
+    expect(() => buildLongMemEvalSupplementalSourceReceiptExtension({
+      ...input,
+      added_shards: sourceShards
+    })).toThrow();
+    expect(() => buildLongMemEvalSupplementalSourceReceiptExtension({
+      ...input,
+      target_binding: { ...targetBinding, physical_model: "other-model" }
+    })).toThrow();
+    expect(() => buildLongMemEvalSupplementalSourceReceiptExtension({
+      ...input,
+      target_binding: { ...targetBinding, shard_count: 1 }
+    })).toThrow();
+    expect(() => LongMemEvalSupplementalSourceReceiptExtensionWireSchema.parse({
+      ...extension,
+      extension_sha256: "f".repeat(64)
+    })).toThrow();
+    expect(() => LongMemEvalSupplementalSourceReceiptExtensionWireSchema.parse(
+      resignExtension({ ...extension, target_content_sha256: "e".repeat(64) })
+    )).toThrow();
+  });
+
+  it("grounds every extension witness shard in the full raw closure", () => {
+    const compact = extractionSummary();
+    const sourceShards = [{
+      cache_key: cacheKey(),
+      raw_json_sha256: "3".repeat(64)
+    }];
+    const addedShards = [supplementalShard("4", "5")];
+    const sourceBinding = supplementalBinding(sourceShards, "1");
+    const targetBinding = supplementalBinding([...sourceShards, ...addedShards], "2");
+    const extension = buildLongMemEvalSupplementalSourceReceiptExtension({
+      source_binding: sourceBinding,
+      target_binding: targetBinding,
+      source_shards: sourceShards,
+      added_shards: addedShards
+    });
+    const sourceDigest = hashLongMemEvalSupplementalSourceBinding(sourceBinding);
+    const targetDigest = hashLongMemEvalSupplementalSourceBinding(targetBinding);
+    const anchor = addSupplementalBinding(compact.expansion_source_anchor!, sourceDigest);
+    const lineage = {
+      ...addSupplementalBinding(compact.expansion_lineage!, sourceDigest),
+      target_cache: {
+        ...compact.expansion_lineage!.target_cache,
+        supplemental_source_binding_sha256: targetDigest
+      },
+      supplemental_source_receipt_extension: extension
+    };
+
+    expect(() => assertLongMemEvalFullExtractionClosure({
+      ...compact,
+      supplemental_source_receipt: targetBinding,
+      expansion_source_anchor: anchor,
+      expansion_lineage: lineage,
+      content_closure_index: closureIndex()
+    })).toThrow(/closure/u);
   });
 
   it("requires exact [0,500) plans and rejects cross-run refs", () => {
@@ -216,6 +329,37 @@ function addSupplementalBinding<T extends {
       supplemental_source_binding_sha256: digest
     }
   };
+}
+
+function supplementalBinding(
+  shards: readonly ReturnType<typeof supplementalShard>[],
+  receipt: string
+) {
+  const sorted = [...shards].sort((left, right) =>
+    left.cache_key.localeCompare(right.cache_key)
+  );
+  return {
+    kind: "longmemeval-extraction-supplemental-source" as const,
+    receipt_sha256: receipt.repeat(64),
+    shard_count: sorted.length,
+    key_set_sha256: sha256(sorted.map((shard) => shard.cache_key).join("\n")),
+    physical_provider_url: `sha256:${"3".repeat(64)}`,
+    physical_model: "deepseek-v4-flash"
+  };
+}
+
+function supplementalShard(key: string, raw: string) {
+  return {
+    cache_key: key.repeat(64),
+    raw_json_sha256: raw.repeat(64)
+  };
+}
+
+function resignExtension<T extends { readonly extension_sha256: string }>(
+  extension: T
+): T {
+  const { extension_sha256: _digest, ...unsigned } = extension;
+  return { ...extension, extension_sha256: sha256(canonicalJson(unsigned)) };
 }
 
 function sourceAnchor() {

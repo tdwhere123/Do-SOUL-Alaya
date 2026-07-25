@@ -1,4 +1,5 @@
-import { isDeepStrictEqual } from "node:util";
+import { assertLongMemEvalExpansionAuthorityPair } from
+  "@do-soul/alaya-eval/internal";
 import type { ExtractionFillManifestContract } from "./fill/manifest/fill-manifest-contract.js";
 import {
   LongMemEvalExpansionLineageSchema,
@@ -85,12 +86,14 @@ function assertAnchorLineageBinding(
   lineage: LongMemEvalExpansionLineage,
   filePath: string
 ): void {
-  const { schema_version: _as, kind: _ak, target_cache: anchorTarget, ...anchorBase } = anchor;
-  const { schema_version: _ls, kind: _lk, target_cache: lineageTarget, ...lineageBase } = lineage;
-  const { content_closure_sha256: _closure, ...lineageExpectation } = lineageTarget;
-  if (isDeepStrictEqual(anchorBase, lineageBase) &&
-      isDeepStrictEqual(anchorTarget, lineageExpectation)) return;
-  throw new Error(`extraction cache manifest at ${filePath} has divergent expansion authority`);
+  try {
+    assertLongMemEvalExpansionAuthorityPair(anchor, lineage);
+  } catch (cause) {
+    throw new Error(
+      `extraction cache manifest at ${filePath} has divergent expansion authority`,
+      { cause }
+    );
+  }
 }
 
 function assertLegacyArtifactsAbsent(

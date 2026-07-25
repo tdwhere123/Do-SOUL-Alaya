@@ -153,7 +153,7 @@ export function closureFixture(expected: number) {
     count: expected,
     model: state.config.model,
     requestProfile: state.config.requestProfile,
-    seed: expected === 100 ? "expansion-source" : "expansion-target"
+    seed: "expansion-source"
   });
 }
 

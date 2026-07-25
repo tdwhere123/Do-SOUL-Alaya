@@ -8,6 +8,11 @@ import type { LongMemEvalExpansionSourceAnchor } from
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import type { CompileSeedExtractionConfig } from
   "../../../../longmemeval/compile-seed/compile-seed-types.js";
+import {
+  buildSupplementalSourceReceiptExtension,
+  createSupplementalSourceReceipt,
+  supplementalSourceManifestBinding
+} from "../../../../longmemeval/extraction/cache/supplemental-source-receipt.js";
 import { syntheticExtractionClosure } from "../../extraction/extraction-closure-fixture.js";
 
 type FixtureExtractionConfig = CompileSeedExtractionConfig & {
@@ -64,21 +69,63 @@ export function buildFixtureSourceManifest(
     window_offset: 0,
     window_limit: 100,
     ...closure,
-    supplemental_source_receipt: fixtureSupplementalSourceBinding(),
+    supplemental_source_receipt: fixtureSupplementalSourceBinding(config),
     storage: "git-tracked",
     built_at: "2026-07-16T00:00:00.000Z",
     builder: "extraction-fill"
   };
 }
 
-export function fixtureSupplementalSourceBinding() {
+export function fixtureSupplementalSourceBinding(config: FixtureExtractionConfig) {
+  return supplementalSourceManifestBinding(fixtureSupplementalReceipts(config).source);
+}
+
+export function fixtureSupplementalTargetBinding(config: FixtureExtractionConfig) {
+  return supplementalSourceManifestBinding(fixtureSupplementalReceipts(config).target);
+}
+
+export function fixtureSupplementalExtension(config: FixtureExtractionConfig) {
+  const { source, target } = fixtureSupplementalReceipts(config);
+  return buildSupplementalSourceReceiptExtension(
+    source,
+    target,
+    source.logical_cache_identity
+  );
+}
+
+function fixtureSupplementalReceipts(config: FixtureExtractionConfig) {
+  const base = {
+    physicalProviderUrl: "https://supplement.example/v1",
+    physicalModel: "deepseek-v4-flash",
+    logicalProviderUrl: config.providerUrl,
+    logicalModel: config.model,
+    requestProfile: config.requestProfile,
+    systemPromptSha256: computeSystemPromptSha256(OFFICIAL_API_SYSTEM_PROMPT)
+  };
+  const sourceEntries = Object.entries(buildFixtureClosure(config, 100).content_closure_index);
+  const sourceShards = sourceEntries.slice(0, 2).map(([cacheKey, [rawSha]]) => ({
+    cache_key: cacheKey,
+    raw_json_sha256: rawSha
+  }));
+  const sourceKeys = new Set(sourceShards.map((shard) => shard.cache_key));
+  const addedEntry = Object.entries(buildFixtureClosure(config, 500).content_closure_index)
+    .find(([cacheKey]) => !sourceKeys.has(cacheKey));
+  if (addedEntry === undefined) throw new Error("fixture target has no supplemental shard");
+  const addedShard = {
+    cache_key: addedEntry[0],
+    raw_json_sha256: addedEntry[1][0]
+  };
   return {
-    kind: "longmemeval-extraction-supplemental-source" as const,
-    receipt_sha256: "1".repeat(64),
-    shard_count: 2,
-    key_set_sha256: "2".repeat(64),
-    physical_provider_url: "https://supplement.example/v1",
-    physical_model: "deepseek-v4-flash"
+    source: createSupplementalSourceReceipt({
+      ...base,
+      createdAt: "2026-07-16T00:00:00.000Z",
+      shards: sourceShards
+    }),
+    target: createSupplementalSourceReceipt({
+      ...base,
+      createdAt: "2026-07-17T00:00:00.000Z",
+      shards: [...sourceShards, addedShard]
+    })
   };
 }
 
@@ -87,6 +134,6 @@ function buildFixtureClosure(config: FixtureExtractionConfig, expected: number) 
     count: expected,
     model: config.model,
     requestProfile: config.requestProfile,
-    seed: expected === 100 ? "expansion-source" : "expansion-target"
+    seed: "expansion-source"
   });
 }

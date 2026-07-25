@@ -21,7 +21,6 @@ import {
   type VerifiedR3SpendApproval
 } from "../promotion/r3-spend-approval.js";
 import {
-  assertLongMemEvalExpansionLineageMatchesCapability,
   buildLongMemEvalExpansionLineage
 } from "../promotion/expansion/lineage/expansion-lineage.js";
 import type { LongMemEvalExpansionLineage } from
@@ -42,6 +41,8 @@ import {
 } from "./fill/fill-completion.js";
 import { ExtractionCacheInvariantError } from "./cache/cache-invariant-error.js";
 import { computeExtractionFillAttemptCeiling } from "./authority/receipt-limits.js";
+import { assertExpansionTargetManifestState } from
+  "./authority/expansion/target-manifest.js";
 import { inspectTurnContentKeySpace, type LongMemEvalExtractionTurn } from "./turn-contents.js";
 import { computeSupplementalSourceBindingSha256 } from
   "./cache/supplemental-source-receipt.js";
@@ -243,7 +244,7 @@ function authorizeCurrentCacheState(input: {
     targetCompletion
   );
   assertSourceCompletion(source, sourceCompletion, false);
-  assertTargetManifestState(
+  assertExpansionTargetManifestState(
     input.identity.manifest, anchor, targetCompletion, input.capability
   );
   return { sourceAnchor: anchor, targetCompletion };
@@ -320,64 +321,6 @@ function inspectCompletion(
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT,
     extractionTurns
   });
-}
-
-function assertTargetManifestState(
-  manifest: ExtractionCacheManifest,
-  anchor: LongMemEvalExpansionSourceAnchor,
-  completion: ExtractionFillCompletion,
-  capability: LongMemEvalExpansionCapability
-): void {
-  if (manifest.schema_version !== 3 || manifest.fill_status === undefined ||
-      manifest.expansion_source_anchor === undefined) {
-    throw invariant("resumed target lacks its live-verifiable source anchor");
-  }
-  assertTargetManifestIdentity(manifest, anchor, completion);
-  if (manifest.fill_status === "in_progress") {
-    if (manifest.expansion_lineage === undefined) return;
-    throw invariant("in-progress target cannot claim completed expansion lineage");
-  }
-  const lineage = assertLongMemEvalExpansionLineageMatchesCapability(
-    manifest.expansion_lineage,
-    capability
-  );
-  const expected = buildLongMemEvalExpansionLineage(
-    capability,
-    completion,
-    manifest
-  );
-  if (!isDeepStrictEqual(lineage, expected)) {
-    throw invariant("completed target lineage differs from live cache closure");
-  }
-}
-
-function assertTargetManifestIdentity(
-  manifest: Extract<ExtractionCacheManifest, { readonly schema_version: 3 }>,
-  anchor: LongMemEvalExpansionSourceAnchor,
-  completion: ExtractionFillCompletion
-): void {
-  const target = anchor.target_cache;
-  if (manifest.extraction_model !== target.extraction_model ||
-      manifest.model_family !== target.model_family ||
-      manifest.request_profile !== target.request_profile ||
-      redactProvenanceUrl(manifest.provider_url) !== target.provider_url ||
-      manifest.system_prompt_sha256 !== target.system_prompt_sha256 ||
-      manifest.cache_key_algo !== target.cache_key_algo ||
-      manifest.dataset !== target.dataset ||
-      manifest.dataset_revision !== target.dataset_revision ||
-      manifest.window_offset !== 0 || manifest.window_limit !== 500 ||
-      manifest.expected_turns !== completion.expectedTurns ||
-      manifest.expected_key_set_sha256 !== completion.expectedKeySetSha256 ||
-      computeSupplementalSourceBindingSha256(
-        manifest.supplemental_source_receipt,
-        redactProvenanceUrl
-      ) !== target.supplemental_source_binding_sha256 ||
-      manifest.requested_turns !== completion.expectedTurns ||
-      manifest.cached_turns !== completion.validTurns ||
-      manifest.coverage !== completion.coverage ||
-      completion.invalidTurns !== 0 || completion.orphanTurns !== 0) {
-    throw invariant("resumed target manifest differs from live partial cache state");
-  }
 }
 
 function sourceCacheAuthority(capability: LongMemEvalExpansionCapability) {
