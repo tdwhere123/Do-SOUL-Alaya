@@ -102,11 +102,18 @@ async function verifyFixture(
 
 function fixtureEvidence(
   mixedCohort = false,
-  degradationReason: "warm_cascade_engaged" | null = null
+  degradationReason: "warm_cascade_engaged" | null = null,
+  evidenceOnly = false
 ) {
   const datasetSha = "d".repeat(64);
   const collected = [
-    question("q-1", 10, "scorable", degradationReason),
+    question(
+      "q-1",
+      10,
+      "scorable",
+      degradationReason,
+      evidenceOnly ? "evidence_capsule" : "memory_entry"
+    ),
     mixedCohort
       ? question("q-2-abstention", 20, "abstention")
       : question("q-2", 20)
@@ -186,7 +193,15 @@ function fixtureEvidence(
     row.questionId,
     row.diagnostics.gold_memory_ids
   ]));
-  const measurementByQuestion = defaultMeasurementOracles(goldByQuestion);
+  const measurementByQuestion = new Map(collected.map((row) => [
+    row.questionId,
+    measurementOracle(
+      row.questionId,
+      row.diagnostics.gold_memory_ids,
+      row.diagnostics.is_abstention,
+      row.diagnostics.gold_evidence_ids
+    )
+  ]));
   return { payload, diagnostics, rank, goldByQuestion, measurementByQuestion };
 }
 
@@ -194,14 +209,25 @@ function question(
   id: string,
   latencyMs: number,
   status: "scorable" | "abstention" = "scorable",
-  degradationReason: "warm_cascade_engaged" | null = null
+  degradationReason: "warm_cascade_engaged" | null = null,
+  goldKind: "memory_entry" | "evidence_capsule" = "memory_entry"
 ): RecallEvalQuestionResult {
   const hit = status === "scorable";
-  const base = promotionMeasurementDiagnostic(id, status, hit);
-  const oracle = measurementOracle(id, base.gold_memory_ids, status === "abstention");
+  const original = promotionMeasurementDiagnostic(id, status, hit);
+  const base = goldKind === "evidence_capsule" && status === "scorable"
+    ? asEvidenceGold(original)
+    : original;
+  const oracle = measurementOracle(
+    id,
+    base.gold_memory_ids,
+    status === "abstention",
+    base.gold_evidence_ids
+  );
   const axes = buildQuestionMeasurementAxes({
     ...measurementInput(oracle, base),
     evaluatorGoldMemoryIds: oracle.goldMemoryIds,
+    evaluatorGoldEvidenceIds: oracle.goldEvidenceIds,
+    evaluatorGoldObjectIds: oracle.goldObjectIds,
     evaluatorHitAt5: hit
   });
   const diagnostic = {
@@ -244,18 +270,64 @@ function question(
   };
 }
 
+function asEvidenceGold(
+  diagnostic: LongMemEvalQuestionDiagnostic
+): LongMemEvalQuestionDiagnostic {
+  const objectId = diagnostic.gold_memory_ids[0]!;
+  const gold = diagnostic.gold.map((row) => ({
+    ...row,
+    object_kind: "evidence_capsule" as const
+  }));
+  return {
+    ...diagnostic,
+    gold_memory_ids: [],
+    gold_evidence_ids: [objectId],
+    gold_object_ids: [objectId],
+    delivered_results: diagnostic.delivered_results.map((row) => ({
+      ...row,
+      object_kind: "evidence_capsule"
+    })),
+    candidates: diagnostic.candidates.map((row) => ({
+      ...row,
+      object_kind: "evidence_capsule",
+      candidate_key: `workspace_local:evidence_capsule:${row.object_id}`
+    })),
+    gold,
+    cohort_ledger: {
+      ...diagnostic.cohort_ledger!,
+      extraction_materialization: {
+        status: "evidence_preserved",
+        emitted_memory_count: 0,
+        reason: null
+      },
+      evaluator_gold_identity: { status: "present", object_ids: [objectId] },
+      stage_ranks: gold.map((row) => ({
+        ...diagnostic.cohort_ledger!.stage_ranks[0]!,
+        object_id: row.object_id,
+        object_kind: row.object_kind
+      }))
+    }
+  };
+}
+
 interface MeasurementOracle {
   readonly answer: string;
   readonly answerSessionIds: readonly string[];
   readonly sourceDatesBySession: readonly (readonly [string, string])[];
   readonly sidecar: readonly Readonly<{
     objectId: string;
-    objectKind: "memory_entry" | "synthesis_capsule";
+    objectKind: "memory_entry" | "synthesis_capsule" | "evidence_capsule";
     sessionId: string;
     hasAnswer: boolean;
   }>[];
   readonly isAbstention: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds: readonly string[];
+  readonly goldObjectIds: readonly string[];
+  readonly goldObjectIdentities: readonly Readonly<{
+    objectId: string;
+    objectKind: "memory_entry" | "evidence_capsule";
+  }>[];
   readonly seedDropReasons: Readonly<{
     candidate_absent: number;
     materialization_drop: number;
@@ -274,21 +346,37 @@ function defaultMeasurementOracles(
 function measurementOracle(
   questionId: string,
   goldMemoryIds: readonly string[],
-  isAbstention: boolean
+  isAbstention: boolean,
+  goldEvidenceIds: readonly string[] = []
 ): MeasurementOracle {
   const sessionId = `${questionId}-answer-session`;
-  return {
-    answer: isAbstention ? "" : `Answer ${questionId}`,
-    answerSessionIds: isAbstention ? [] : [sessionId],
-    sourceDatesBySession: [[sessionId, "2026-07-15T00:00:00.000Z"]],
-    sidecar: goldMemoryIds.map((objectId) => ({
+  const sidecar = [
+    ...goldMemoryIds.map((objectId) => ({
       objectId,
       objectKind: "memory_entry" as const,
       sessionId,
       hasAnswer: true
     })),
+    ...goldEvidenceIds.map((objectId) => ({
+      objectId,
+      objectKind: "evidence_capsule" as const,
+      sessionId,
+      hasAnswer: true
+    }))
+  ];
+  return {
+    answer: isAbstention ? "" : `Answer ${questionId}`,
+    answerSessionIds: isAbstention ? [] : [sessionId],
+    sourceDatesBySession: [[sessionId, "2026-07-15T00:00:00.000Z"]],
+    sidecar,
     isAbstention,
     goldMemoryIds,
+    goldEvidenceIds,
+    goldObjectIds: [...goldMemoryIds, ...goldEvidenceIds],
+    goldObjectIdentities: sidecar.map(({ objectId, objectKind }) => ({
+      objectId,
+      objectKind
+    })),
     seedDropReasons: { candidate_absent: 0, materialization_drop: 0 }
   };
 }

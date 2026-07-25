@@ -115,6 +115,7 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "memory.searchByAnchorWithinObjectIds":
     case "memory.searchByAnchorWithinTier":
     case "memory.findByEvidenceRefs":
+    case "memory.findBoundEvidenceRefs":
     case "memory.findByIds":
       return await runMemoryOperation(request.operation, payload);
     case "evidence.searchByKeyword":
@@ -174,6 +175,11 @@ async function runMemoryOperation(
       );
     case "memory.findByEvidenceRefs":
       return await memoryEntryRepo.findByEvidenceRefs(
+        readString(payload.workspaceId, "workspaceId"),
+        readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
+      );
+    case "memory.findBoundEvidenceRefs":
+      return await memoryEntryRepo.findBoundEvidenceRefs(
         readString(payload.workspaceId, "workspaceId"),
         readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
       );

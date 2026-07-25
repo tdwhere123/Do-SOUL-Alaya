@@ -99,13 +99,15 @@ describe("RecallReadWorkerClient", () => {
         object_id: workspaceMemoryId,
         workspace_id: "workspace-1",
         content: "Worker recall workspace one memory",
-        activation_score: 1
+        activation_score: 1,
+        evidence_refs: [workspaceEvidenceId]
       }));
       await memoryRepo.create(createMemoryEntry({
         object_id: otherWorkspaceMemoryId,
         workspace_id: "workspace-2",
         content: "Worker recall workspace two memory",
-        activation_score: 1
+        activation_score: 1,
+        evidence_refs: [otherWorkspaceEvidenceId]
       }));
       await synthesisRepo.create(createSynthesisCapsule({
         object_id: workspaceSynthesisId,
@@ -147,6 +149,12 @@ describe("RecallReadWorkerClient", () => {
             otherWorkspaceMemoryId
           ])
         ).resolves.toMatchObject([{ object_id: workspaceMemoryId }]);
+        await expect(
+          client.memoryRepo.findBoundEvidenceRefs!("workspace-1", [
+            workspaceEvidenceId,
+            otherWorkspaceEvidenceId
+          ])
+        ).resolves.toEqual([workspaceEvidenceId]);
         await expect(
           client.memoryRepo.searchManyByKeywordWithinObjectIds!(
             "workspace-1",
@@ -361,6 +369,7 @@ function createMemoryEntry(overrides: {
   readonly workspace_id: string;
   readonly content: string;
   readonly activation_score: number;
+  readonly evidence_refs?: readonly string[];
 }) {
   return {
     object_id: overrides.object_id,
@@ -376,7 +385,7 @@ function createMemoryEntry(overrides: {
     scope_class: "project" as const,
     content: overrides.content,
     domain_tags: ["recall"],
-    evidence_refs: [],
+    evidence_refs: overrides.evidence_refs ?? [],
     workspace_id: overrides.workspace_id,
     run_id: "run-1",
     surface_id: null,

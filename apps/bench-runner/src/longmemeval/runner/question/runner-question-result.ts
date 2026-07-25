@@ -25,6 +25,8 @@ import {
   buildLongMemEvalSourceDatesBySession,
   requireLongMemEvalTimestamp
 } from "../../ingestion/source-time.js";
+import { buildGoldObjectIdentities } from
+  "../../diagnostics/gold-object-identities.js";
 
 export async function buildLongMemEvalQuestionResult(input: {
   readonly daemon: BenchDaemonHandle;
@@ -32,6 +34,8 @@ export async function buildLongMemEvalQuestionResult(input: {
   readonly question: LongMemEvalQuestion;
   readonly seedState: LongMemEvalQuestionSeedState;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds: readonly string[];
+  readonly goldObjectIds: readonly string[];
   readonly recallCycle: LongMemEvalRecallCycleResult;
   readonly embeddingWarmup: LongMemEvalWorkerResult["embeddingWarmup"];
   readonly queryEmbeddingWarmup: LongMemEvalWorkerResult["queryEmbeddingWarmup"];
@@ -42,7 +46,7 @@ export async function buildLongMemEvalQuestionResult(input: {
 }): Promise<LongMemEvalWorkerResult> {
   writeQuestionDiagnosticDumps({
     question: input.question,
-    goldMemoryIds: input.goldMemoryIds,
+    goldObjectIdentities: buildGoldObjectIdentities(input),
     sidecar: input.seedState.sidecar,
     recallResult: input.recallCycle.scoredRecallResult
   });
@@ -54,6 +58,7 @@ export async function buildLongMemEvalQuestionResult(input: {
 async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionResult>[0]) {
   const recallResult = input.recallCycle.scoredRecallResult;
   const isAbstention = isAbstentionQuestionId(input.question.question_id);
+  const goldObjectIdentities = buildGoldObjectIdentities(input);
   const qaVerdict = await scoreLongMemEvalQaIfRequested({
     question: input.question,
     qaChat: input.qaChat,
@@ -61,6 +66,7 @@ async function scoreQuestion(input: Parameters<typeof buildLongMemEvalQuestionRe
     isAbstention,
     results: recallResult.results,
     goldMemoryIds: input.goldMemoryIds,
+    goldObjectIdentities,
     sidecar: input.seedState.sidecar
   });
   const hits = resolveLongMemEvalHitVerdict({
@@ -84,6 +90,8 @@ function buildDiagnostics(
     questionId: input.question.question_id,
     questionType: input.question.question_type,
     goldMemoryIds: input.goldMemoryIds,
+    goldEvidenceIds: input.goldEvidenceIds,
+    goldObjectIds: input.goldObjectIds,
     answerSessionIds: input.question.answer_session_ids,
     deliveredResults: deliveredResults(recallResult),
     activeConstraintResults: activeConstraintResults(recallResult),

@@ -190,6 +190,10 @@ export interface MemoryEntryRepo {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findBoundEvidenceRefs?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]>;
   findLowActivityActiveMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   findTombstonedMemories(workspaceId: string): Promise<readonly Readonly<MemoryEntry>[]>;
   update(objectId: string, fields: MemoryEntryRepoUpdateFields): Promise<Readonly<MemoryEntry>>;

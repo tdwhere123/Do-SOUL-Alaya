@@ -10,17 +10,13 @@ import {
   RecallDeepHeadTraceSchema
 } from "../../../harness/recall/answer-trace-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
-import { validateQuestionMeasurementStatus } from
-  "../../measurement/question-measurement-status.js";
 import { DELIVERY_MISS_DROP_REASONS } from "../miss/delivery-miss-taxonomy.js";
+import {
+  DiagnosticRecallObjectKindSchema,
+  LongMemEvalGoldObjectKindSchema,
+  validatePersistedQuestionMeasurement
+} from "./gold-identity-schema.js";
 export { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
-
-// Explicit zod schema for the bench-side diagnostic records produced by
-// buildQuestionDiagnostic. The raw recall-pipeline diagnostics input has its
-// own schema (harness/recall/recall-diagnostics-schema.ts); this one covers the
-// post-classification records that land in the longmemeval/locomo sidecars.
-// The diagnostic record types in diagnostics.ts are z.infer aliases of these
-// schemas so the persisted shape has a single source of truth.
 
 export const BenchEmbeddingProviderStateSchema = z.enum([
   "provider_returned",
@@ -216,7 +212,7 @@ export const DiagnosticRecallResultSchema = z
 const LongMemEvalReplayCandidateSchema = z
   .object({
     object_id: z.string(),
-    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_kind: DiagnosticRecallObjectKindSchema,
     candidate_key: z.string(),
     origin_plane: RecallOriginPlaneSchema,
     dimension: z.string().nullable().default(null),
@@ -265,7 +261,7 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
     origin_plane: RecallOriginPlaneSchema,
-    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_kind: DiagnosticRecallObjectKindSchema,
     object_id: z.string().min(1),
     coarse_index: z.number().int().nonnegative(),
     drop_reason: z.literal("fine_assessment_cap")
@@ -283,7 +279,12 @@ const LongMemEvalQuestionCohortLedgerSchema = z
     ]).optional(),
     dataset_cohort: z.enum(["answerable", "abstention", "adjudicated_invalid"]),
     extraction_materialization: z.object({
-      status: z.enum(["memory_emitted", "drop", "unknown"]),
+      status: z.enum([
+        "memory_emitted",
+        "evidence_preserved",
+        "drop",
+        "unknown"
+      ]),
       emitted_memory_count: z.number().int().nonnegative(),
       reason: z.enum(["candidate_absent", "materialization_drop"]).nullable()
     }).strict().readonly(),
@@ -307,6 +308,7 @@ const LongMemEvalQuestionCohortLedgerSchema = z
     quality_axes: LongMemEvalQuestionMeasurementAxesSchema.optional(),
     stage_ranks: z.array(z.object({
       object_id: z.string(),
+      object_kind: LongMemEvalGoldObjectKindSchema.default("memory_entry"),
       fused_rank: z.number().nullable(),
       rank_after_feature_rerank: z.number().nullable(),
       rank_after_lexical_priority: z.number().nullable(),
@@ -345,6 +347,7 @@ export const DiagnosticActiveConstraintResultSchema = z
 export const LongMemEvalGoldDiagnosticSchema = z
   .object({
     object_id: z.string(),
+    object_kind: LongMemEvalGoldObjectKindSchema.default("memory_entry"),
     candidate_status: z.enum([
       "delivered",
       "active_constraint_delivered",
@@ -419,6 +422,8 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     premise_invalid: z.boolean().default(false),
     round_index: z.number().nullable(),
     gold_memory_ids: z.array(z.string()).readonly(),
+    gold_evidence_ids: z.array(z.string()).readonly().default([]),
+    gold_object_ids: z.array(z.string()).readonly().optional(),
     answer_session_ids: z.array(z.string()).readonly(),
     delivered_results: z.array(DiagnosticRecallResultSchema).readonly(),
     active_constraint_results: z
@@ -476,20 +481,6 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     gold: z.array(LongMemEvalGoldDiagnosticSchema).readonly()
   })
   .superRefine((diagnostic, context) => {
-    if (diagnostic.cohort_ledger === undefined) return;
-    try {
-      validateQuestionMeasurementStatus({
-        isAbstention: diagnostic.is_abstention,
-        legacyDiagnostic:
-          diagnostic.cohort_ledger.measurement_evidence_mode === "legacy_synthesized",
-        cohortLedger: diagnostic.cohort_ledger
-      });
-    } catch {
-      context.addIssue({
-        code: "custom",
-        message: "persisted measurement status contradicts primitive axes",
-        path: ["cohort_ledger", "measurement_status"]
-      });
-    }
+    validatePersistedQuestionMeasurement(diagnostic, context);
   })
   .readonly();

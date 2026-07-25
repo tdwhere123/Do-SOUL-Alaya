@@ -44,6 +44,8 @@ import type {
 } from "../materialize.js";
 import { assertSeedLedgerMaterializationProof } from
   "./seed-ledger-materialization-proof.js";
+import { assertDirectSourceEvidenceClosure } from
+  "./direct-source-evidence-proof.js";
 
 interface LedgerTotals {
   attempts: number;
@@ -136,6 +138,7 @@ function assertQuestionLedger(
     source,
     ledger
   });
+  assertDirectSourceEvidenceClosure({ db, question, source, ledger });
   assertSidecarSourceClosure(question, ledger, ledgerMemorySources);
   assertAnswerDropReasons(question, ledger);
 }

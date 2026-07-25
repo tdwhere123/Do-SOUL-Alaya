@@ -13,6 +13,9 @@ import {
 import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import { resolveGardenSignalGrounding } from "../grounding/signal-source-grounding.js";
 import {
+  resolveVerifiedGardenTurnEvidenceSourceHash
+} from "../evidence-preservation/turn-evidence-anchor.js";
+import {
   type ClaimMaterializationInput,
   type EvidenceMaterializationInput,
   type MaterializationContext,
@@ -157,11 +160,11 @@ export function collectMaterializableSignalMemoryRefs(signal: CandidateMemorySig
 
 function computeEvidenceHealthState(
   signal: CandidateMemorySignal,
-  hasVerifiedUserAssertionReceipt: boolean
+  hasVerifiedSourceReceipt: boolean
 ): EvidenceHealthStateValue {
   // Invariant #16: objects without evidence_refs must default to questionable,
   // not verified. Signals from local heuristics carry no supporting evidence.
-  if (signal.evidence_refs.length === 0 && !hasVerifiedUserAssertionReceipt) {
+  if (signal.evidence_refs.length === 0 && !hasVerifiedSourceReceipt) {
     return EvidenceHealthState.QUESTIONABLE;
   }
   return EvidenceHealthState.VERIFIED;
@@ -170,16 +173,17 @@ function computeEvidenceHealthState(
 // invariant: evidence_kind diversifies producer-side so the live ontology
 // no longer collapses to 100% `inferred`. Mapping rules:
 //   - user_seed / import sources → user_statement (operator-attested origin)
+//   - digest-bound source receipts → conversation_excerpt
 //   - signals carrying evidence_refs → external_reference (linked anchor)
-//   - everything else (LLM / Garden compile) → inferred (default)
+//   - everything else → inferred (default)
 function pickEvidenceKind(
   signal: CandidateMemorySignal,
-  hasVerifiedUserAssertionReceipt: boolean
+  hasVerifiedSourceReceipt: boolean
 ): EvidenceKindValue {
   if (signal.source === "user_seed" || signal.source === "import") {
     return "user_statement";
   }
-  if (hasVerifiedUserAssertionReceipt) {
+  if (hasVerifiedSourceReceipt) {
     return "conversation_excerpt";
   }
   if (signal.evidence_refs.length > 0) {
@@ -207,13 +211,14 @@ export function buildEvidenceInput(
       : buildSignalSummary(signal);
   const gist = appendSummarySuffix(excerpt, summarySuffix);
   const sourceHash = opts?.fullTurnExcerpt === true && summarySuffix === undefined
-    ? buildVerifiedUserAssertionSourceHash(signal, gist)
+    ? resolveVerifiedGardenTurnEvidenceSourceHash(signal, gist) ??
+      buildVerifiedUserAssertionSourceHash(signal, gist)
     : null;
-  const hasVerifiedUserAssertionReceipt = sourceHash !== null;
+  const hasVerifiedSourceReceipt = sourceHash !== null;
 
   return {
     created_by: signal.source,
-    evidence_kind: pickEvidenceKind(signal, hasVerifiedUserAssertionReceipt),
+    evidence_kind: pickEvidenceKind(signal, hasVerifiedSourceReceipt),
     semantic_anchor: {
       topic: buildTopicKey(signal),
       keywords: [...signal.domain_tags],
@@ -225,7 +230,7 @@ export function buildEvidenceInput(
     physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
     evidence_health_state: computeEvidenceHealthState(
       signal,
-      hasVerifiedUserAssertionReceipt
+      hasVerifiedSourceReceipt
     ),
     gist,
     excerpt,

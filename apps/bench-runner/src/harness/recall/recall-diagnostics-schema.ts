@@ -8,6 +8,7 @@ import {
   RecallDeepHeadTraceSchema
 } from "./answer-trace-schema.js";
 
+const RecallDiagnosticObjectKindSchema = z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]);
 const RecallFusionStreamRankSchema = z
   .object({
     lexical_fts: z.number().int().positive().nullable(),
@@ -177,7 +178,7 @@ const RecallCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
     object_id: z.string().min(1),
-    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_kind: RecallDiagnosticObjectKindSchema,
     created_at: z.string().min(1).optional(),
     facet_overlap: z.number().int().nonnegative().optional(),
     dimension: z.string().min(1).optional(),
@@ -234,7 +235,7 @@ const FineAssessmentPrunedCandidateDiagnosticSchema = z
   .object({
     candidate_key: z.string().min(1),
     origin_plane: RecallOriginPlaneSchema,
-    object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+    object_kind: RecallDiagnosticObjectKindSchema,
     object_id: z.string().min(1),
     coarse_index: z.number().int().nonnegative(),
     drop_reason: z.literal("fine_assessment_cap")
@@ -382,7 +383,7 @@ export const BenchRecallDiagnosticsSchema = z
           .object({
             candidate_key: z.string().min(1),
             object_id: z.string().min(1),
-            object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+            object_kind: RecallDiagnosticObjectKindSchema,
             origin_plane: RecallOriginPlaneSchema,
             // Mirrors RecallFusionBreakdown.facet_overlap from core diagnostics.
             facet_overlap: z.number().int().nonnegative(),

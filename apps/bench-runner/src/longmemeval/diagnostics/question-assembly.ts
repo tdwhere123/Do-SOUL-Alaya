@@ -26,11 +26,14 @@ import {
   hasStructuralPlane,
   isDeliveryBudgetLoss
 } from "./schema/diagnostics-private.js";
+import { buildGoldObjectIds } from "./gold-object-identities.js";
 
 export interface QuestionDiagnosticInput {
   readonly questionId: string;
   readonly questionType?: string | null;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds?: readonly string[];
+  readonly goldObjectIds?: readonly string[];
   readonly answerSessionIds: readonly string[];
   readonly deliveredResults: readonly DiagnosticRecallResultInput[];
   readonly activeConstraintResults?: readonly DiagnosticActiveConstraintResult[];
@@ -59,6 +62,8 @@ export function assembleQuestionDiagnostic(
   parts: QuestionDiagnosticParts
 ): LongMemEvalQuestionDiagnostic {
   const scoringInput = failClosedAbstentionHits(input);
+  const goldEvidenceIds = input.goldEvidenceIds ?? [];
+  const goldObjectIds = buildGoldObjectIds(input);
   const missFields = buildQuestionMissFields(scoringInput, parts);
   const candidateCollisions = classifyCandidateCollisions(parts.diagnostics);
   const candidatePoolComplete = isCandidatePoolComplete(parts);
@@ -70,6 +75,8 @@ export function assembleQuestionDiagnostic(
     premise_invalid: premiseInvalid,
     round_index: input.roundIndex ?? null,
     gold_memory_ids: input.goldMemoryIds,
+    gold_evidence_ids: goldEvidenceIds,
+    gold_object_ids: goldObjectIds,
     answer_session_ids: input.answerSessionIds,
     delivered_results: parts.deliveredResults,
     active_constraint_results: parts.activeConstraintResults,
@@ -93,6 +100,8 @@ export function assembleQuestionDiagnostic(
       premiseInvalid,
       hitAt5: scoringInput.hitAt5,
       goldMemoryIds: input.goldMemoryIds,
+      goldEvidenceIds,
+      goldObjectIds,
       gold: parts.gold,
       diagnosticsAvailable: parts.diagnostics !== null,
       candidatePoolComplete,
@@ -113,18 +122,20 @@ function buildQuestionMissFields(
   input: QuestionDiagnosticInput,
   parts: QuestionDiagnosticParts
 ) {
+  const goldObjectIds = buildGoldObjectIds(input);
   return {
     miss_classification: classifyMiss(
       input.hitAt5,
       parts.gold,
       parts.diagnostics !== null,
       input.isAbstention === true,
-      input.goldMemoryIds,
+      goldObjectIds,
       input.seedDropReasons
     ),
     miss_taxonomy: classifyQuestionMissTaxonomy({
       hitAt5: input.hitAt5,
       goldMemoryIds: input.goldMemoryIds,
+      goldObjectIds,
       gold: parts.gold,
       diagnosticsAvailable: parts.diagnostics !== null,
       isAbstention: input.isAbstention === true,
@@ -356,10 +367,10 @@ function classifyMiss(
   gold: readonly LongMemEvalGoldDiagnostic[],
   diagnosticsAvailable: boolean,
   isAbstention: boolean,
-  goldMemoryIds: readonly string[],
+  goldObjectIds: readonly string[],
   seedDropReasons: LongMemEvalSeedDropReasons | undefined
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
-  if (hasAbstentionIdentityConflict({ isAbstention, goldMemoryIds })) {
+  if (hasAbstentionIdentityConflict({ isAbstention, goldObjectIds })) {
     return "evaluator_identity_inconsistent";
   }
   if (isAbstention) return "abstention_uncalibrated";

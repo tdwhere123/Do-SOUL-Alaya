@@ -10,6 +10,7 @@ import {
   selectExpansionSeedDrafts,
   type CoarseCandidateDraft
 } from "../coarse-filter/coarse-candidates.js";
+import type { AddCoarseCandidate } from "../coarse-filter/coarse-filter-admission.js";
 import {
   PATH_SUPPRESSION_MAX_PER_TARGET,
   directionEligiblePathExpansionTargets,
@@ -28,28 +29,17 @@ import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import type {
-  RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
-
-type CoarseCandidateAdder = (
-  entry: Readonly<MemoryEntry>,
-  plane: RecallAdmissionPlane,
-  structuralScore?: number,
-  sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-  entityConfidence?: number,
-  pathFlowScore?: number
-) => boolean;
 
 export async function addPathExpansionCandidates(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
   readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly addCandidate: CoarseCandidateAdder;
+  readonly addCandidate: AddCoarseCandidate;
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
@@ -104,7 +94,7 @@ export async function addTimeConcernPathExpansionCandidates(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly queryProbes: Readonly<RecallQueryProbes>;
-  readonly addCandidate: CoarseCandidateAdder;
+  readonly addCandidate: AddCoarseCandidate;
   readonly dynamicRecallPlaneCap: number;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
@@ -234,9 +224,14 @@ function admitPathExpansionTargets(
       "path_expansion",
       edgeStrength,
       "path_expansion",
-      buildMemoryPathExpansionSource(path, target.seedId, target.targetId),
-      undefined,
-      pathFlow
+      {
+        pathExpansionSource: buildMemoryPathExpansionSource(
+          path,
+          target.seedId,
+          target.targetId
+        ),
+        pathFlowScore: pathFlow
+      }
     );
     added += 1;
     if (added >= params.dynamicRecallPlaneCap) {
@@ -332,15 +327,17 @@ function admitTimeConcernPathTargets(
       "path_expansion",
       scorePathRelationExpansion(path),
       "time_concern",
-      Object.freeze({
-        path_id: path.path_id,
-        seed_id: firstTimeConcernSeedId(path, windowDigests),
-        seed_kind: "time_concern",
-        target_object_id: targetId,
-        source_channel: "time_concern",
-        relation_kind: path.constitution.relation_kind,
-        facet_key: pathAnchorFacetKey(path)
-      })
+      {
+        pathExpansionSource: Object.freeze({
+          path_id: path.path_id,
+          seed_id: firstTimeConcernSeedId(path, windowDigests),
+          seed_kind: "time_concern",
+          target_object_id: targetId,
+          source_channel: "time_concern",
+          relation_kind: path.constitution.relation_kind,
+          facet_key: pathAnchorFacetKey(path)
+        })
+      }
     );
     added += 1;
     if (added >= params.dynamicRecallPlaneCap) {

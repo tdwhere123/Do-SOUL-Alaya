@@ -34,7 +34,9 @@ import type { LongMemEvalExpansionCapability } from
 export {
   buildLongMemEvalReportContextUsage,
   buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
+  deriveLongMemEvalGoldObjectIds,
   resolveBenchEmbeddingProviderLabel,
   resolveLongMemEvalHitVerdict,
   runLongMemEvalRecallCycle,

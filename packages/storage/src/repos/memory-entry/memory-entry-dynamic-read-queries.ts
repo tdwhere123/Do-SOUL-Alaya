@@ -105,6 +105,51 @@ export class MemoryEntryDynamicReadQueries {
       );
     }
   }
+
+  public async findBoundEvidenceRefs(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]> {
+    const parsedWorkspaceId = parseNonEmptyString(workspaceId, "workspace_id");
+    const parsedEvidenceIds = Array.from(new Set(
+      evidenceObjectIds.map((id) => parseNonEmptyString(id, "evidence_ref"))
+    ));
+    if (parsedEvidenceIds.length === 0) {
+      return Object.freeze([]);
+    }
+    try {
+      return Object.freeze(queryBoundEvidenceRefs(
+        this.statementCache,
+        parsedWorkspaceId,
+        parsedEvidenceIds
+      ));
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to find bound evidence refs in workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+}
+
+interface BoundEvidenceRefRow {
+  readonly evidence_ref: string;
+}
+
+function queryBoundEvidenceRefs(
+  statementCache: DynamicPreparedStatementCache,
+  workspaceId: string,
+  evidenceObjectIds: readonly string[]
+): readonly string[] {
+  const rows = statementCache.prepare(`
+    SELECT DISTINCT evidence_ref
+    FROM memory_entry_evidence_refs
+    WHERE workspace_id = ?
+      AND evidence_ref IN (SELECT value FROM json_each(?))
+    ORDER BY evidence_ref ASC
+  `).all(workspaceId, JSON.stringify(evidenceObjectIds)) as BoundEvidenceRefRow[];
+  return rows.map((row) => parseNonEmptyString(row.evidence_ref, "evidence_ref"));
 }
 
 function capEvidenceRefLookupIds(

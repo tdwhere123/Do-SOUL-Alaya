@@ -151,7 +151,8 @@ function readBoolean(value: unknown): boolean | null {
 export function isLongMemEvalGoldEligibleDiagnosticResult(
   result: Readonly<{ readonly object_kind?: string | null }>
 ): boolean {
-  return (result.object_kind ?? "memory_entry") === "memory_entry";
+  const objectKind = result.object_kind ?? "memory_entry";
+  return objectKind === "memory_entry" || objectKind === "evidence_capsule";
 }
 
 export function readGraphExpansionPlaneCountPerHop(

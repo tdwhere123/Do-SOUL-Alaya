@@ -3,7 +3,10 @@ import {
   type RecallOriginPlane
 } from "@do-soul/alaya-protocol";
 
-export type DiagnosticObjectKind = "memory_entry" | "synthesis_capsule";
+export type DiagnosticObjectKind =
+  | "memory_entry"
+  | "synthesis_capsule"
+  | "evidence_capsule";
 export type DiagnosticCandidateIdentityMode = "strict" | "legacy";
 
 export interface DiagnosticCandidateIdentity {
@@ -21,7 +24,11 @@ export function readRecallOriginPlane(value: unknown): RecallOriginPlane | null 
 }
 
 export function readDiagnosticObjectKind(value: unknown): DiagnosticObjectKind | null {
-  return value === "memory_entry" || value === "synthesis_capsule" ? value : null;
+  return value === "memory_entry" ||
+    value === "synthesis_capsule" ||
+    value === "evidence_capsule"
+    ? value
+    : null;
 }
 
 export function buildDiagnosticCandidateKey(

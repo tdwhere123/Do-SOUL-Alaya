@@ -16,6 +16,12 @@ import type { SnapshotQuestionMeasurementOracle } from
 import { createEmptyLongMemEvalSeedDropReasons } from
   "../../extraction/seed-fuel/seed-drop-reasons.js";
 import { verifyPromotionGoldEvidence } from "./gold-verifier.js";
+import {
+  buildLongMemEvalSidecarKey,
+  resolveLongMemEvalGoldObjectKind
+} from "../../runner/runner-scoring.js";
+import type { LongMemEvalGoldObjectIdentity } from
+  "../../diagnostics/gold-object-identities.js";
 
 export interface VerifiedPromotionQuestionMeasurement {
   readonly diagnostic: LongMemEvalQuestionDiagnostic;
@@ -27,7 +33,8 @@ export interface VerifiedPromotionQuestionMeasurement {
 
 export function verifyPromotionQuestionMeasurement(input: {
   readonly diagnostic: LongMemEvalQuestionDiagnostic;
-  readonly expectedGold: readonly string[];
+  readonly expectedGold?: readonly string[];
+  readonly expectedGoldIdentities?: readonly LongMemEvalGoldObjectIdentity[];
   readonly oracle: SnapshotQuestionMeasurementOracle;
 }): VerifiedPromotionQuestionMeasurement {
   if (input.diagnostic.is_abstention !== input.oracle.isAbstention) {
@@ -42,6 +49,7 @@ export function verifyPromotionQuestionMeasurement(input: {
   const hits = verifyPromotionGoldEvidence({
     question: input.diagnostic,
     expectedGold: input.expectedGold,
+    expectedGoldIdentities: input.expectedGoldIdentities,
     scorable: persistedStatus === "scorable"
   });
   const axes = buildCanonicalAxes(input);
@@ -79,19 +87,26 @@ function buildCanonicalAxes(
     sidecar: oracle.sidecar,
     isAbstention: oracle.isAbstention,
     evaluatorGoldMemoryIds: oracle.goldMemoryIds,
-    evaluatorHitAt5: independentHitAt5(diagnostic, oracle.goldMemoryIds)
+    evaluatorGoldEvidenceIds: oracle.goldEvidenceIds,
+    evaluatorGoldObjectIds: oracle.goldObjectIds,
+    evaluatorHitAt5: independentHitAt5(
+      diagnostic,
+      oracle.goldObjectIdentities
+    )
   });
 }
 
 function independentHitAt5(
   diagnostic: LongMemEvalQuestionDiagnostic,
-  goldMemoryIds: readonly string[]
+  goldIdentities: readonly LongMemEvalGoldObjectIdentity[]
 ): boolean {
-  const gold = new Set(goldMemoryIds);
-  return diagnostic.delivered_results.some((result) =>
-    result.rank <= 5 && (result.object_kind ?? "memory_entry") === "memory_entry" &&
-    gold.has(result.object_id)
-  );
+  const gold = new Set(goldIdentities.map((identity) =>
+    buildLongMemEvalSidecarKey(identity.objectKind, identity.objectId)));
+  return diagnostic.delivered_results.some((result) => {
+    const objectKind = resolveLongMemEvalGoldObjectKind(result.object_kind);
+    return result.rank <= 5 && objectKind !== null &&
+      gold.has(buildLongMemEvalSidecarKey(objectKind, result.object_id));
+  });
 }
 
 function assertMeasurementClassification(

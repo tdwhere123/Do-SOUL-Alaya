@@ -219,6 +219,9 @@ function oracle(
   return {
     ...measurement,
     goldMemoryIds: [],
+    goldEvidenceIds: [],
+    goldObjectIds: [],
+    goldObjectIdentities: [],
     seedDropReasons
   };
 }

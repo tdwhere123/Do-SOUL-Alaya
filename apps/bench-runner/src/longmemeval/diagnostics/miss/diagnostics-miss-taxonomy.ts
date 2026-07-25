@@ -8,6 +8,7 @@ import type {
 } from "../schema/diagnostics-types.js";
 import type { LongMemEvalSeedDropReasons } from "../../extraction/seed-fuel/seed-drop-reasons.js";
 import { classifyQuestionMeasurementStatus } from "../../measurement/question-validity.js";
+import { readGoldObjectIds } from "../gold-object-identities.js";
 
 type MutableMissTaxonomySummary = Record<LongMemEvalMissTaxonomy, number>;
 
@@ -99,6 +100,7 @@ export function classifyGoldMissTaxonomy(input: {
 export function classifyQuestionMissTaxonomy(input: {
   readonly hitAt5: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly goldObjectIds?: readonly string[];
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
   readonly diagnosticsAvailable: boolean;
   readonly isAbstention: boolean;
@@ -111,7 +113,7 @@ export function classifyQuestionMissTaxonomy(input: {
   if (!input.diagnosticsAvailable) {
     return "evaluation_or_gold_issue";
   }
-  if (input.goldMemoryIds.length === 0) {
+  if ((input.goldObjectIds ?? input.goldMemoryIds).length === 0) {
     if ((input.seedDropReasons?.materialization_drop ?? 0) > 0) {
       return "materialization_drop";
     }
@@ -143,6 +145,7 @@ export function readQuestionMissTaxonomy(
   return classifyQuestionMissTaxonomy({
     hitAt5: question.hit_at_5,
     goldMemoryIds: question.gold_memory_ids,
+    goldObjectIds: readGoldObjectIds(question),
     gold: question.gold,
     diagnosticsAvailable: question.recall_diagnostics_present,
     isAbstention: question.question_id.endsWith("_abs"),

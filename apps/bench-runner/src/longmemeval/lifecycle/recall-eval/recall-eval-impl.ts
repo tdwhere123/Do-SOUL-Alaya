@@ -28,6 +28,8 @@ import {
 import { isAbstentionQuestionId } from "../../diagnostics/abstention.js";
 import { assembleRecallEvalKpi } from "../../recall-eval-kpi.js";
 import { attachQuestionMeasurementAxes } from "../../diagnostics/diagnostics-measurement-axes.js";
+import { buildGoldObjectIdentities } from
+  "../../diagnostics/gold-object-identities.js";
 import {
   buildPerQuestionDelivered,
   buildRecallEvalArchiveSlug
@@ -37,10 +39,14 @@ import { extractRecallTokenEconomy } from "../../qa/recall-token-economy.js";
 import { runLongMemEvalRecallCycle } from "../../runner.js";
 import {
   buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
+  deriveLongMemEvalGoldObjectIds,
   resolveLongMemEvalHitVerdict,
   type LongMemEvalSidecarEntry
 } from "../../runner.js";
+import type { LongMemEvalGoldObjectIdentity } from
+  "../../diagnostics/gold-object-identities.js";
 import {
   snapshotQuestionIdDigest,
   type LongMemEvalSnapshotQuestion
@@ -271,15 +277,18 @@ async function recallEvalOneQuestion(input: {
     const answerSessionSet = new Set(
       input.measurement?.answerSessionIds ?? input.question.answerSessionIds
     );
-    const goldMemoryIds = input.measurement?.goldMemoryIds ??
-      deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
-    const recallCycle = await runRecallEvalQuestionCycle(input, workspace, goldMemoryIds);
+    const gold = resolveRecallEvalGold(input.measurement, sidecar, answerSessionSet);
+    const recallCycle = await runRecallEvalQuestionCycle(
+      input,
+      workspace,
+      gold.goldObjectIdentities
+    );
     return await buildRecallEvalQuestionResult(
       input,
       workspace,
       sidecar,
       answerSessionSet,
-      goldMemoryIds,
+      gold,
       recallCycle,
       readiness
     );
@@ -309,7 +318,7 @@ function buildSnapshotSidecar(
 async function runRecallEvalQuestionCycle(
   input: Parameters<typeof recallEvalOneQuestion>[0],
   workspace: BenchWorkspaceHandle,
-  goldMemoryIds: readonly string[]
+  goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[]
 ) {
   return runLongMemEvalRecallCycle({
     daemon: workspace,
@@ -317,7 +326,7 @@ async function runRecallEvalQuestionCycle(
     recallOptions: input.recallOptions,
     referenceTime: requireLongMemEvalTimestamp(input.question.questionDate),
     simulateReport: input.simulateReport,
-    goldMemoryIds,
+    goldObjectIdentities,
     turnIndex: input.turnIndex,
     questionText: input.question.question
   });
@@ -330,13 +339,17 @@ async function buildRecallEvalQuestionResult(
   workspace: BenchWorkspaceHandle,
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
   answerSessionSet: ReadonlySet<string>,
-  goldMemoryIds: readonly string[],
+  gold: RecallEvalGold,
   recallCycle: Awaited<ReturnType<typeof runRecallEvalQuestionCycle>>,
   readiness: Awaited<ReturnType<typeof warmLongMemEvalEmbeddingCaches>>
 ): Promise<RecallEvalQuestionResult> {
   const recallResult = recallCycle.scoredRecallResult;
   const results = recallResult.results;
-  writeRecallEvalPoolDump(input.question.questionId, goldMemoryIds, results);
+  writeRecallEvalPoolDump(
+    input.question.questionId,
+    gold.goldObjectIdentities,
+    results
+  );
   const scoredHits = resolveLongMemEvalHitVerdict({
     isAbstention: input.measurement?.isAbstention ??
       isAbstentionQuestionId(input.question.questionId),
@@ -355,7 +368,7 @@ async function buildRecallEvalQuestionResult(
     latencyMs: recallCycle.scoredRecallLatencyMs,
     degradationReason: recallResult.degradation_reason ?? null,
     diagnostics: buildRecallEvalDiagnostics(
-      input, recallResult, sidecar, goldMemoryIds, scoredHits
+      input, recallResult, sidecar, gold, scoredHits
     ),
     tokenMetrics: await workspace.queryTokenMetrics(),
     recallTokenEconomy: extractRecallTokenEconomy(recallResult),
@@ -370,7 +383,7 @@ function buildRecallEvalDiagnostics(
   input: Parameters<typeof recallEvalOneQuestion>[0],
   recallResult: Awaited<ReturnType<typeof runLongMemEvalRecallCycle>>["scoredRecallResult"],
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
-  goldMemoryIds: readonly string[],
+  gold: RecallEvalGold,
   scoredHits: Pick<
     RecallEvalQuestionResult,
     "hitAt1" | "hitAt5" | "hitAt10"
@@ -378,7 +391,9 @@ function buildRecallEvalDiagnostics(
 ): LongMemEvalQuestionDiagnostic {
   const diagnostic = buildQuestionDiagnostic({
     questionId: input.question.questionId,
-    goldMemoryIds,
+    goldMemoryIds: gold.goldMemoryIds,
+    goldEvidenceIds: gold.goldEvidenceIds,
+    goldObjectIds: gold.goldObjectIds,
     answerSessionIds: input.measurement?.answerSessionIds ??
       input.question.answerSessionIds,
     deliveredResults: buildDeliveredResults(recallResult),
@@ -403,6 +418,39 @@ function buildRecallEvalDiagnostics(
     sidecar: input.measurement?.sidecar ?? sidecar,
     isAbstention: input.measurement?.isAbstention ?? diagnostic.is_abstention
   });
+}
+
+interface RecallEvalGold {
+  readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds: readonly string[];
+  readonly goldObjectIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
+}
+
+function resolveRecallEvalGold(
+  measurement: SnapshotQuestionMeasurementOracle | undefined,
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  answerSessionSet: ReadonlySet<string>
+): RecallEvalGold {
+  if (measurement !== undefined) {
+    return {
+      goldMemoryIds: measurement.goldMemoryIds,
+      goldEvidenceIds: measurement.goldEvidenceIds,
+      goldObjectIds: measurement.goldObjectIds,
+      goldObjectIdentities: measurement.goldObjectIdentities
+    };
+  }
+  const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionSet);
+  const goldEvidenceIds = deriveLongMemEvalGoldEvidenceIds(sidecar, answerSessionSet);
+  return {
+    goldMemoryIds,
+    goldEvidenceIds,
+    goldObjectIds: deriveLongMemEvalGoldObjectIds(sidecar, answerSessionSet),
+    goldObjectIdentities: buildGoldObjectIdentities({
+      goldMemoryIds,
+      goldEvidenceIds
+    })
+  };
 }
 
 function buildDeliveredResults(

@@ -32,6 +32,8 @@ import {
 import type {
   LongMemEvalSnapshotSeedRound
 } from "../../snapshot/materialize.js";
+import { isSeededMemoryResult } from
+  "../../../harness/daemon/seed/daemon-seed-results.js";
 import {
   mergeLongMemEvalSourceRounds,
   type LongMemEvalSourceRound
@@ -165,6 +167,7 @@ async function seedQuestionRound(
     workspaceId: input.workspace.workspaceId,
     runId: input.workspace.runId,
     sourceObservedAt,
+    sourceEvidenceFallback: "trusted_source_turn",
     ...(benchSessionSurfacesEnabled() ? { surfaceId: context.sessionId } : {}),
     ...(context.previousTurnSeedMemoryIds.length === 0 ? {} : { sourceMemoryRefs: context.previousTurnSeedMemoryIds })
   });
@@ -174,7 +177,8 @@ async function seedQuestionRound(
     round.hasAnswer,
     beforeDropReasons,
     input.seedRunner.stats.signalsDroppedByReason,
-    isVerifiedEmptyAnswerWipe(input.seedRunner.stats, beforeCounters)
+    !seedResult.seeds.some((seed) => seed.kind === "evidence_capsule") &&
+      isVerifiedEmptyAnswerWipe(input.seedRunner.stats, beforeCounters)
   );
   addSeedSidecarEntries(input, state, context, round, seedResult);
   state.seedRounds.push(buildSeedRoundLedger({
@@ -219,12 +223,21 @@ function buildSeedRoundLedger(input: {
       input.stats.signalsDroppedByReason.materialization_drop,
       input.before.materializationDrop
     ),
-    memoryObjectIds: uniqueSurvivorSeeds(input.seeds).map(({ seed }) => seed.memoryId),
-    memoryBindings: input.seeds.map((seed) => ({
-      objectId: seed.memoryId,
-      signalId: seed.signalId,
-      evidenceId: seed.evidenceId
-    }))
+    memoryObjectIds: uniqueSurvivorMemorySeeds(input.seeds)
+      .map(({ seed }) => seed.memoryId),
+    memoryBindings: input.seeds
+      .filter(isSeededMemoryResult)
+      .map((seed) => ({
+        objectId: seed.memoryId,
+        signalId: seed.signalId,
+        evidenceId: seed.evidenceId
+      })),
+    directEvidenceBindings: input.seeds
+      .filter((seed) => seed.kind === "evidence_capsule")
+      .map((seed) => ({
+        signalId: seed.signalId,
+        evidenceId: seed.evidenceId
+      }))
   };
 }
 
@@ -257,7 +270,22 @@ function addSeedSidecarEntries(
   round: ReturnType<typeof pairSessionIntoRounds>[number],
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
-  for (const { seed, seedOrdinal } of uniqueSurvivorSeeds(seedResult.seeds)) {
+  for (const seed of seedResult.seeds) {
+    if (seed.kind !== "evidence_capsule") continue;
+    addSidecarEntry(state, {
+      objectId: seed.evidenceId,
+      objectKind: "evidence_capsule",
+      sessionId: context.sessionId,
+      hasAnswer: round.hasAnswer,
+      sourceRounds: [sourceRound(context, round)],
+      ...optionalSeedContent(input, context.sessionIndex, round.content)
+    });
+    context.sessionTurns.push({
+      turnContent: round.content,
+      evidenceId: seed.evidenceId
+    });
+  }
+  for (const { seed, seedOrdinal } of uniqueSurvivorMemorySeeds(seedResult.seeds)) {
     addSidecarEntry(state, {
       objectId: seed.memoryId,
       objectKind: "memory_entry",
@@ -280,13 +308,19 @@ function addSeedSidecarEntries(
   }
 }
 
-type SeededTurnMemory = Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"][number];
+type SeededTurnObject =
+  Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>["seeds"][number];
+type SeededTurnMemory = Exclude<
+  SeededTurnObject,
+  { readonly kind: "evidence_capsule" }
+>;
 
-function uniqueSurvivorSeeds(
-  seeds: readonly SeededTurnMemory[]
+function uniqueSurvivorMemorySeeds(
+  seeds: readonly SeededTurnObject[]
 ): readonly { readonly seed: SeededTurnMemory; readonly seedOrdinal: number }[] {
   const survivors = new Map<string, { seed: SeededTurnMemory; seedOrdinal: number }>();
   for (const [seedOrdinal, seed] of seeds.entries()) {
+    if (!isSeededMemoryResult(seed)) continue;
     const prior = survivors.get(seed.memoryId);
     if (prior === undefined || (prior.seed.evidenceId === null && seed.evidenceId !== null)) {
       survivors.set(seed.memoryId, { seed, seedOrdinal: prior?.seedOrdinal ?? seedOrdinal });

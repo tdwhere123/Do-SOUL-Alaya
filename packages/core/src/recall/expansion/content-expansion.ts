@@ -10,18 +10,13 @@ import {
 import { compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
-import type { RecallAdmissionPlane } from "../runtime/recall-service-types.js";
+import type { AddCoarseCandidate } from "../coarse-filter/coarse-filter-admission.js";
 import {
   scoreEvidenceAnchorMatch,
   scoreQueryEvidenceMatch
 } from "../scoring/query-evidence-scoring.js";
 
-export type CoarseCandidateAdder = (
-  entry: Readonly<MemoryEntry>,
-  plane: RecallAdmissionPlane,
-  structuralScore?: number,
-  sourceChannel?: string
-) => boolean;
+export type CoarseCandidateAdder = AddCoarseCandidate;
 
 export function addContentDerivedExpansionCandidates(params: Readonly<{
   readonly tierMemories: readonly Readonly<MemoryEntry>[];

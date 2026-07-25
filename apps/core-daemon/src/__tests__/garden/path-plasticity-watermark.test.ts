@@ -398,6 +398,9 @@ describe("usage-proof reader", () => {
         delivery_id: "delivery-1",
         usage_state: "used",
         used_object_ids: ["memory-1"],
+        used_objects: [
+          { object_id: "memory-1", object_kind: "memory_entry" }
+        ],
         per_anchor_usage: [{ object_id: "memory-1", anchor_role: "target" }],
         reason: null,
         reported_at: "2026-05-05T12:01:00.000Z"
@@ -426,6 +429,9 @@ describe("usage-proof reader", () => {
       "2026-05-05T12:30:00.000Z"
     );
     expect(records.map((record) => record.audit_event_id)).toEqual(["usage-event-1"]);
+    expect(records[0]?.used_objects).toEqual([
+      { object_id: "memory-1", object_kind: "memory_entry" }
+    ]);
     expect(records[0]?.per_anchor_usage).toEqual([{ object_id: "memory-1", anchor_role: "target" }]);
   });
 });

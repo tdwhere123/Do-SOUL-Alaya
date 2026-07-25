@@ -15,6 +15,7 @@ interface ResultInput {
   hitAt10: boolean;
   evaluatorInvalid?: boolean;
   extractionFailure?: "candidate_absent" | "materialization_drop";
+  evidenceGold?: boolean;
 }
 
 function result(input: ResultInput): LongMemEvalWorkerResult {
@@ -53,7 +54,10 @@ function diagnostic(input: ResultInput) {
     is_abstention: input.abstention,
     premise_invalid: false,
     round_index: null,
-    gold_memory_ids: extractionFailure === undefined ? ["gold"] : [],
+    gold_memory_ids:
+      extractionFailure === undefined && input.evidenceGold !== true ? ["gold"] : [],
+    gold_evidence_ids: input.evidenceGold === true ? ["gold"] : [],
+    ...(input.evidenceGold === true ? { gold_object_ids: ["gold"] } : {}),
     answer_session_ids: [],
     delivered_results: [],
     active_constraint_results: [],
@@ -116,6 +120,24 @@ function cohortLedger(input: ResultInput) {
       final_verdict: "miss_at_5"
     };
   }
+  if (input.evidenceGold === true) {
+    return {
+      measurement_status: "scorable",
+      dataset_cohort: "answerable",
+      extraction_materialization: {
+        status: "evidence_preserved",
+        emitted_memory_count: 0,
+        reason: null
+      },
+      evaluator_gold_identity: { status: "present", object_ids: ["gold"] },
+      retrieval_status: input.hitAt5 ? "hit_at_5" : "miss_at_5",
+      evidence_status: "complete",
+      evaluation_issue_reason: null,
+      candidate_pool_complete: true,
+      stage_ranks: [],
+      final_verdict: input.hitAt5 ? "hit_at_5" : "miss_at_5"
+    };
+  }
   return {
     measurement_status: input.abstention ? "abstention_unscorable" : "scorable",
     dataset_cohort: input.abstention ? "abstention" : "answerable",
@@ -170,6 +192,28 @@ describe("LongMemEval answerable metric denominator", () => {
     expect(archive.answerableCount).toBe(0);
     expect(recallEval.perScenario[0]).toMatchObject({ scorable: false, hit_at_5: false });
     expect(recallEval.answerableCount).toBe(0);
+  });
+
+  it("counts a verified evidence-only hit in the recall KPI denominator and numerator", () => {
+    const evidence = result({
+      id: "q-evidence",
+      abstention: false,
+      evidenceGold: true,
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true
+    });
+    const recallEval = accumulateRecallEvalRows([
+      evidence as unknown as RecallEvalQuestionResult
+    ]);
+
+    expect(recallEval.answerableCount).toBe(1);
+    expect(recallEval.totalHitAt1).toBe(1);
+    expect(recallEval.totalHitAt10).toBe(1);
+    expect(recallEval.perScenario[0]).toMatchObject({
+      scorable: true,
+      hit_at_5: true
+    });
   });
 
   it.each(["candidate_absent", "materialization_drop"] as const)(

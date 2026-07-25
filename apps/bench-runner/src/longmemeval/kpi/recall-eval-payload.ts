@@ -8,11 +8,12 @@ import {
 import { RECALL_PIPELINE_VERSION } from "../../shared/version.js";
 import type { BenchRecallWeightOverrides } from "../../harness/recall/recall-weight-overrides.js";
 import {
-  buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeProviderStates
 } from "../diagnostics.js";
+import { buildLongMemEvalDetailedGoldCoverage } from
+  "../diagnostics/diagnostics-full-gold-coverage.js";
 import type { LongMemEvalVariant } from "../ingestion/dataset.js";
 import { RECALL_EVAL_ARCHIVE_MARKER } from "../lifecycle/recall-eval/recall-eval-archive-impl.js";
 import type { RecallEvalQuestionResult } from "../lifecycle/recall-eval/recall-eval-impl.js";
@@ -192,7 +193,9 @@ function buildKpiCore(
 ): KpiPayload["kpi"] {
   return {
     r_at_1: aggregates.rAt1, r_at_5: aggregates.rAt5, r_at_10: aggregates.rAt10,
-    full_gold_coverage: buildLongMemEvalFullGoldCoverage(accumulator.questionDiagnostics),
+    full_gold_coverage: buildLongMemEvalDetailedGoldCoverage(
+      accumulator.questionDiagnostics
+    ),
     latency_ms_p50: aggregates.latencyP50, latency_ms_p95: aggregates.latencyP95,
     latency_source: "exact", token_saved_ratio_vs_full_prompt: aggregates.tokenSavedRatio,
     token_economy: aggregates.tokenEconomy,

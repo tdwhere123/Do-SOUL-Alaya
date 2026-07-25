@@ -7,6 +7,8 @@ import type {
   SeededMemoryResult,
   SeededSynthesisResult
 } from "../../harness/daemon.js";
+import type { SeededObjectResult } from
+  "../../harness/daemon/seed/daemon-seed-types.js";
 import type { ExtractionRequestProfile } from "../extraction/cache/extraction-cache-manifest.js";
 import type {
   ExtractionFillQuestionWindow
@@ -340,10 +342,9 @@ export interface CompileSeedRunner {
   readonly stats: CompileSeedExtractionStats;
   /**
    * Seed one haystack turn. Runs the turn through production garden
-   * extraction (or the no-credentials fallback), then seeds each resulting
-   * candidate signal as a durable memory_entry. Returns every
-   * SeededMemoryResult so the caller maps ALL N object_ids back to the
-   * source answer turn — a partial map silently undercounts recall.
+   * extraction (or the no-credentials fallback), then returns every durable
+   * memory plus any explicitly enabled trusted source-turn evidence fallback.
+   * Callers must map all returned kind+id identities to the source turn.
    */
   seedTurn(input: CompileSeedTurnInput): Promise<CompileSeedResult>;
 }
@@ -360,11 +361,15 @@ export interface CompileSeedTurnInput {
   readonly sourceObservedAt?: string;
   // see also: apps/bench-runner/src/harness/daemon.ts BenchSignalSeedInput.sourceMemoryRefs
   readonly sourceMemoryRefs?: readonly string[];
+  /**
+   * Source-only objects are fail-closed unless a kind-aware caller opts in.
+   */
+  readonly sourceEvidenceFallback?: "trusted_source_turn" | "disabled";
 }
 
 export interface CompileSeedResult {
-  /** One SeededMemoryResult per extracted candidate signal (N per turn). */
-  readonly seeds: readonly SeededMemoryResult[];
+  /** One materialized memory or source-evidence object per received signal. */
+  readonly seeds: readonly SeededObjectResult[];
   /**
    * Whether THIS turn's source content exceeded the seed content cap.
    * Truncation is a property of the turn, not of each extracted fact:

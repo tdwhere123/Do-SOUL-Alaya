@@ -114,6 +114,7 @@ describe("recall-eval archive discriminator + baseline isolation", () => {
     expect(payload.dataset.checksum_source).toBe(
       `${RECALL_EVAL_ARCHIVE_MARKER} external evaluator dataset binding`
     );
+    expect(payload.kpi.full_gold_coverage?.memory_only).toBeDefined();
   });
 
   it("marks a recall-eval archive and leaves a full run unmarked", () => {

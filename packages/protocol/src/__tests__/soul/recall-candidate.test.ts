@@ -6,6 +6,22 @@ import {
 } from "../../soul/recall-candidate.js";
 
 describe("Recall candidate protocol schema", () => {
+  it("accepts a direct evidence capsule candidate", () => {
+    const candidate = RecallCandidateSchema.parse({
+      object_id: "evidence-1",
+      object_kind: "evidence_capsule",
+      activation_score: 0.8,
+      relevance_score: 0.9,
+      content_preview: "The assistant recommended the blue option.",
+      token_estimate: 10,
+      manifestation: "full_eligible",
+      dimension: MemoryDimension.EPISODE,
+      scope_class: ScopeClass.PROJECT
+    });
+
+    expect(candidate.object_kind).toBe("evidence_capsule");
+  });
+
   it("defaults origin_plane to workspace_local for landed callers", () => {
     expect(
       RecallCandidateSchema.parse({

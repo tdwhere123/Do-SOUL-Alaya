@@ -29,6 +29,26 @@ describe("selectSourceProximitySeedDrafts", () => {
       })
     );
   });
+
+  it("does not let direct evidence consume the bounded memory seed slots", () => {
+    const memoryDraft = createDraft("memory-seed", ["session_surface_cohort"]);
+    const directEvidenceDrafts = Array.from({ length: 12 }, (_, index) => ({
+      ...createDraft(`evidence-${index}`, ["evidence_anchor"]),
+      objectKind: "evidence_capsule" as const
+    }));
+    const drafts = new Map(
+      [...directEvidenceDrafts, memoryDraft].map((draft) => [draft.entry.object_id, draft])
+    );
+
+    const seeds = selectSourceProximitySeedDrafts(drafts);
+
+    expect(seeds).toEqual([
+      {
+        draft: memoryDraft,
+        strength: 0.75
+      }
+    ]);
+  });
 });
 
 function createDraft(

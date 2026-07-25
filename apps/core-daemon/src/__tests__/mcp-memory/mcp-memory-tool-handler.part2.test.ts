@@ -107,6 +107,9 @@ describe("mcp memory tool handler", () => {
       object_id: objectId,
       object_kind: "evidence_capsule",
       schema_version: 1,
+      workspace_id: context.workspaceId,
+      lifecycle_state: "active",
+      evidence_health_state: "verified",
       gist: "distilled fact gist",
       excerpt: "raw turn excerpt material the agent should see when opening a pointer"
     }));
@@ -290,8 +293,14 @@ describe("mcp memory tool handler", () => {
     );
   });
 
-  it("does not promote memory usage from a used synthesis_capsule with the same object_id", async () => {
+  it("records used synthesis capsules without memory side effects", async () => {
     const deps = createDeps();
+    deps.trustStateRecorder.findDeliveryById = vi.fn(async () => ({
+      ...createDeliveryRecord("delivery_1"),
+      delivered_objects: [
+        { object_id: "mem1", object_kind: "synthesis_capsule" }
+      ]
+    }));
     const handler = createMcpMemoryToolHandler(deps);
 
     const result = await handler.call({
@@ -310,9 +319,10 @@ describe("mcp memory tool handler", () => {
     expect(result.ok).toBe(true);
     expect(deps.trustStateRecorder.recordUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        delivery_id: "delivery_1",
-        usage_state: "used",
-        used_object_ids: []
+        used_object_ids: ["mem1"],
+        used_objects: [
+          { object_id: "mem1", object_kind: "synthesis_capsule" }
+        ]
       }),
       { expectedWorkspaceId: context.workspaceId }
     );

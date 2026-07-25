@@ -25,6 +25,11 @@ export function scoreRecallFusionStream(
   if (candidate.objectKind === "synthesis_capsule") {
     return scoreSynthesisCapsuleFusionStream(candidate, stream, supplementaryData);
   }
+  if (candidate.objectKind === "evidence_capsule") {
+    return stream === "evidence_fts"
+      ? clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0)
+      : 0;
+  }
   if (candidate.originPlane === "global") {
     return scoreGlobalFusionStream(candidate, stream, supplementaryData, nowIso);
   }

@@ -278,7 +278,7 @@ describe("createCompileSeedRunner — compile-based seed", () => {
     expect(runner.stats.cachedExtractionFailures).toBe(0);
   });
 
-  it("does not synthesize a memory when official extraction finds no candidates", async () => {
+  it("preserves source evidence without synthesizing memory when extraction is empty", async () => {
     const seeded: BenchSignalSeedInput[] = [];
     const daemon = buildCompileSeedDaemon((input) => {
       seeded.push(input);
@@ -298,10 +298,13 @@ describe("createCompileSeedRunner — compile-based seed", () => {
       turnContent: "ok thanks",
       evidenceRefBase: "q1-s0-t0",
       seedIndex: 0,
+      sourceEvidenceFallback: "trusted_source_turn",
       ...SEED_CONTEXT
     });
 
-    expect(result.seeds).toHaveLength(0);
+    expect(result.seeds).toEqual([
+      expect.objectContaining({ kind: "evidence_capsule" })
+    ]);
     expect(seeded).toHaveLength(0);
     expect(runner.stats.factsProduced).toBe(0);
     expect(runner.stats.offlineFallbacks).toBe(0);

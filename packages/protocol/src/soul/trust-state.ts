@@ -57,6 +57,7 @@ export const UsageProofRecordSchema = z
     delivery_id: BoundedIdSchema,
     usage_state: SoulContextUsageStateSchema,
     used_object_ids: z.array(BoundedIdSchema).readonly(),
+    used_objects: z.array(SoulContextObjectIdentitySchema).readonly().optional(),
     per_anchor_usage: z.array(SoulContextPerAnchorUsageSchema).readonly().optional(),
     trust_mode: SoulContextUsageTrustModeSchema.optional(),
     reason: BoundedReasonSchema.nullable(),

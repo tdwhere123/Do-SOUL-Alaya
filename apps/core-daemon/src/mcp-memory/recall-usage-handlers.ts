@@ -42,6 +42,8 @@ import {
   crossLinkRecalledMemories,
   promoteRecallHitMemories,
   resolveUsageState,
+  resolveUsedMemoryObjectIds,
+  resolveUsedObjectIdentities,
   resolveUsedObjectIds,
   validateReportedRecallHits,
   validateUsageStateConsistency
@@ -125,6 +127,18 @@ export interface RecallUsageHandlerDependencies {
       fields: MemoryUsageRefreshFields,
       reason: string
     ): Promise<Readonly<MemoryEntry>>;
+  };
+  readonly evidenceService?: {
+    findByIdScoped?(
+      objectId: string,
+      workspaceId: string
+    ): Promise<Readonly<{
+      readonly object_id: string;
+      readonly object_kind: string;
+      readonly workspace_id: string;
+      readonly lifecycle_state: string;
+      readonly evidence_health_state: string;
+    }> | null>;
   };
   readonly eventPublisher?: {
     appendManyWithMutation<T>(
@@ -257,9 +271,13 @@ function buildRecallDelivery(
     }))
   ]);
   const deliveredObjectIds = uniqueObjectIds(deliveredObjects);
+  const deliveredMemoryObjectIds = uniqueObjectIds(
+    deliveredObjects.filter((object) => object.object_kind === "memory_entry")
+  );
   return {
     deliveryId,
     deliveredObjectIds,
+    deliveredMemoryObjectIds,
     record: {
       delivery_id: deliveryId,
       agent_target: context.agentTarget,
@@ -279,10 +297,10 @@ function runRecallAsyncSideEffects(
   delivery: ReturnType<typeof buildRecallDelivery>
 ): void {
   scheduleAuditedAsyncSideEffect(
-    accrueCoRecallPlasticity(params, delivery.deliveredObjectIds, context.workspaceId),
+    accrueCoRecallPlasticity(params, delivery.deliveredMemoryObjectIds, context.workspaceId),
     recallPlasticityAuditOptions(params, context, delivery.deliveryId)
   );
-  enqueueRecallExtractTask(params, request, context, delivery.deliveredObjectIds);
+  enqueueRecallExtractTask(params, request, context, delivery.deliveredMemoryObjectIds);
 }
 
 function recallPlasticityAuditOptions(
@@ -342,11 +360,16 @@ export function createReportContextUsageHandler(params: Readonly<{
     await validateReportedRecallHits(deps, request, context.workspaceId, linkedDelivery);
     const usageState = resolveUsageState(request);
     const usedObjectIds = resolveUsedObjectIds(request);
+    const usedObjects = resolveUsedObjectIdentities(request);
+    const usedMemoryObjectIds = resolveUsedMemoryObjectIds(request);
     await deps.trustStateRecorder.recordUsage(
       {
         delivery_id: request.delivery_id,
         usage_state: usageState,
         used_object_ids: usedObjectIds,
+        ...(request.delivered_objects === undefined || request.delivered_objects.length === 0
+          ? {}
+          : { used_objects: usedObjects }),
         trust_mode: "automatic",
         ...(request.per_anchor_usage === undefined
           ? {}
@@ -357,7 +380,7 @@ export function createReportContextUsageHandler(params: Readonly<{
       { expectedWorkspaceId: context.workspaceId }
     );
     await promoteRecallHitMemories(params, request, context, linkedDelivery, reportedAt);
-    await maybeEmitCoUsage(params, linkedDelivery, usedObjectIds, request, context);
+    await maybeEmitCoUsage(params, linkedDelivery, usedMemoryObjectIds, request, context);
     enqueuePostTurnExtractTask(params, request, context, linkedDelivery);
     await emitContextUsageReportedTelemetry(params, {
       deliveryId: request.delivery_id,

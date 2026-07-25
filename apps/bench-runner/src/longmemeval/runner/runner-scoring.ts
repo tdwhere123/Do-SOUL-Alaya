@@ -11,7 +11,10 @@ import {
 
 export interface LongMemEvalSidecarEntry {
   readonly objectId: string;
-  readonly objectKind: "memory_entry" | "synthesis_capsule";
+  readonly objectKind:
+    | "memory_entry"
+    | "evidence_capsule"
+    | "synthesis_capsule";
   readonly sessionId: string;
   readonly hasAnswer: boolean;
   readonly sourceRounds?: readonly LongMemEvalSourceRound[];
@@ -123,11 +126,12 @@ export function scoreLongMemEvalRecallHits(
     if (rank === 0) {
       firstTier = inferTier(pointer.relevance_score);
     }
-    if (!isLongMemEvalGoldEligibleResult(pointer)) {
+    const objectKind = resolveLongMemEvalGoldObjectKind(pointer.object_kind);
+    if (objectKind === null) {
       continue;
     }
     const meta = input.sidecar.get(
-      buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
+      buildLongMemEvalSidecarKey(objectKind, pointer.object_id)
     );
     const isHit = meta !== undefined &&
       isLongMemEvalGoldSource(meta, input.answerSessionIds);
@@ -145,7 +149,7 @@ export function isLongMemEvalGoldEligibleResult(result: Readonly<{
   readonly object_id?: string;
   readonly object_kind?: string | null;
 }>): boolean {
-  return (result.object_kind ?? "memory_entry") === "memory_entry";
+  return resolveLongMemEvalGoldObjectKind(result.object_kind) !== null;
 }
 
 export function buildLongMemEvalSidecarKey(
@@ -170,6 +174,25 @@ export function deriveLongMemEvalGoldMemoryIds(
   );
 }
 
+export function deriveLongMemEvalGoldEvidenceIds(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  answerSessionIds: ReadonlySet<string>
+): readonly string[] {
+  return deriveGoldIds(sidecar, answerSessionIds, "evidence_capsule");
+}
+
+export function deriveLongMemEvalGoldObjectIds(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  answerSessionIds: ReadonlySet<string>
+): readonly string[] {
+  return Object.freeze([
+    ...new Set([
+      ...deriveLongMemEvalGoldMemoryIds(sidecar, answerSessionIds),
+      ...deriveLongMemEvalGoldEvidenceIds(sidecar, answerSessionIds)
+    ])
+  ]);
+}
+
 export function deriveLongMemEvalMemoryObjectIds(
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>
 ): readonly string[] {
@@ -178,6 +201,29 @@ export function deriveLongMemEvalMemoryObjectIds(
       .filter((entry) => entry.objectKind === "memory_entry")
       .map((entry) => entry.objectId)
   );
+}
+
+function deriveGoldIds(
+  sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
+  answerSessionIds: ReadonlySet<string>,
+  objectKind: "memory_entry" | "evidence_capsule"
+): readonly string[] {
+  return Object.freeze(
+    [...sidecar.values()]
+      .filter((entry) =>
+        entry.objectKind === objectKind &&
+        isLongMemEvalGoldSource(entry, answerSessionIds))
+      .map((entry) => entry.objectId)
+  );
+}
+
+export function resolveLongMemEvalGoldObjectKind(
+  objectKind: string | null | undefined
+): "memory_entry" | "evidence_capsule" | null {
+  const resolved = objectKind ?? "memory_entry";
+  return resolved === "memory_entry" || resolved === "evidence_capsule"
+    ? resolved
+    : null;
 }
 
 function inferTier(relevanceScore: number): "hot" | "warm" | "cold" {

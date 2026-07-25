@@ -3,6 +3,8 @@ import type {
   CompileSeedBatchResult,
   SeededMemoryResult
 } from "../../harness/daemon.js";
+import type { SeededObjectResult } from
+  "../../harness/daemon/seed/daemon-seed-types.js";
 import { isUnscoredMaterializedSeedError } from "../../harness/seeding/seed-errors.js";
 import {
   extractSeedInputs,
@@ -54,6 +56,13 @@ async function buildTurnSignalInputs(
     modelId: context.config.model,
     providerKind: "official_api"
   });
+  if (
+    seedInputs.length === 0 &&
+    context.stats.path === "official_api_compile" &&
+    sourceEvidenceFallbackEnabled(input)
+  ) {
+    return [buildEvidenceFallbackInput(input, normalized, "empty_extraction")];
+  }
   return seedInputs.map((seedInput, index) => ({
     ...seedInput,
     evidenceRef:
@@ -72,16 +81,46 @@ async function buildTurnSignalInputs(
   }));
 }
 
+function buildEvidenceFallbackInput(
+  input: CompileSeedTurnInput,
+  turnContent: string,
+  reason: NonNullable<BenchSignalSeedInput["evidenceFallbackReason"]>
+): BenchSignalSeedInput {
+  return {
+    signalKind: "potential_evidence_anchor",
+    objectKind: "source_turn",
+    confidence: 1,
+    distilledFact: turnContent,
+    turnContent,
+    evidenceRef: input.evidenceRefBase,
+    turnSeedIndex: input.seedIndex,
+    extractionProvider: "official_api_compile",
+    evidenceFallbackReason: reason,
+    ...(input.surfaceId === undefined ? {} : { surfaceId: input.surfaceId }),
+    ...(input.sourceObservedAt === undefined
+      ? {}
+      : { sourceObservedAt: input.sourceObservedAt })
+  };
+}
+
 async function seedOfficialCompileSignals(
   context: CompileSeedRunnerContext,
   input: CompileSeedTurnInput,
   signalInputs: readonly BenchSignalSeedInput[]
-): Promise<readonly SeededMemoryResult[]> {
+): Promise<readonly SeededObjectResult[]> {
   try {
     const batch: CompileSeedBatchResult =
       await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
     recordCompileSignalDrops(context, batch, signalInputs.length);
-    return batch.seeds;
+    if (
+      batchCreatedEvidence(batch) ||
+      !sourceEvidenceFallbackEnabled(input) ||
+      signalInputs.some((signal) => signal.evidenceFallbackReason !== undefined)
+    ) {
+      return batch.seeds;
+    }
+    const fallbackSeeds = await seedNoEvidenceCreatedFallback(context, input);
+    return [...batch.seeds, ...fallbackSeeds];
   } catch (error) {
     if (isUnscoredMaterializedSeedError(error)) throw error;
     context.stats.signalsDropped += signalInputs.length;
@@ -93,6 +132,41 @@ async function seedOfficialCompileSignals(
     );
     return [];
   }
+}
+
+async function seedNoEvidenceCreatedFallback(
+  context: CompileSeedRunnerContext,
+  input: CompileSeedTurnInput
+): Promise<readonly SeededObjectResult[]> {
+  const fallbackInput = buildEvidenceFallbackInput(
+    input,
+    input.turnContent.trim(),
+    "no_evidence_created"
+  );
+  try {
+    const batch = await input.daemon.proposeMemoriesFromCompileSignals([
+      fallbackInput
+    ]);
+    recordCompileSignalDrops(context, batch, 1);
+    return batch.seeds;
+  } catch (error) {
+    if (isUnscoredMaterializedSeedError(error)) throw error;
+    context.stats.signalsDropped += 1;
+    context.stats.signalsDroppedByReason.materialization_drop += 1;
+    process.stderr.write(
+      `[longmemeval compile-seed] source evidence fallback dropped: ` +
+        `${stringifyError(error)}\n`
+    );
+    return [];
+  }
+}
+
+function sourceEvidenceFallbackEnabled(input: CompileSeedTurnInput): boolean {
+  return input.sourceEvidenceFallback === "trusted_source_turn";
+}
+
+function batchCreatedEvidence(batch: CompileSeedBatchResult): boolean {
+  return batch.createdEvidence;
 }
 
 function recordCompileSignalDrops(
@@ -143,7 +217,7 @@ async function seedFallbackSignals(
   return seeds;
 }
 
-function summarizeSeedTurn(seeds: readonly SeededMemoryResult[]): CompileSeedResult {
+function summarizeSeedTurn(seeds: readonly SeededObjectResult[]): CompileSeedResult {
   let turnTruncated = false;
   let charsClipped = 0;
   for (const seed of seeds) {

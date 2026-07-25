@@ -26,8 +26,10 @@ import {
 import {
   buildDeliveredResults,
   buildGoldUsageReport,
-  collectDeliveredGoldObjectIds
+  collectDeliveredGoldObjectIdentities
 } from "../qa/question-recall-support.js";
+import { isSeededMemoryResult } from
+  "../../harness/daemon/seed/daemon-seed-results.js";
 import type {
   LongMemEvalMultiturnRunOptions,
   QuestionResult,
@@ -156,6 +158,7 @@ async function seedMultiturnRound(
     seedIndex: state.seedIndex,
     workspaceId: daemon.workspaceId,
     runId: daemon.runId,
+    sourceEvidenceFallback: "disabled",
     ...(previousTurnSeedMemoryIds.length === 0
       ? {}
       : { sourceMemoryRefs: previousTurnSeedMemoryIds })
@@ -188,6 +191,7 @@ function addMultiturnSeedEntries(
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
   for (const seed of seedResult.seeds) {
+    if (!isSeededMemoryResult(seed)) continue;
     sidecar.set(buildLongMemEvalSidecarKey("memory_entry", seed.memoryId), {
       objectId: seed.memoryId,
       objectKind: "memory_entry",
@@ -299,7 +303,7 @@ function resolveMultiturnRecallOutcome(
   sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
   answerSessionSet: ReadonlySet<string>
 ) {
-  const usedGoldObjectIds = collectDeliveredGoldObjectIds({
+  const usedGoldObjectIdentities = collectDeliveredGoldObjectIdentities({
     results: recallResult.results,
     sidecar,
     answerSessionIds: answerSessionSet
@@ -315,7 +319,7 @@ function resolveMultiturnRecallOutcome(
     reportInput: buildGoldUsageReport({
       deliveryId: recallResult.delivery_id,
       results: recallResult.results,
-      usedGoldObjectIds,
+      usedGoldObjectIdentities,
       turnIndex: roundIndex,
       questionText: question.question,
       successReason: `LongMemEval multi-turn round ${roundIndex}: gold pointer delivered.`,

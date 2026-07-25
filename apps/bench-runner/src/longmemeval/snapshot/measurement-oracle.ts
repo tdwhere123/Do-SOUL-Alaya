@@ -2,9 +2,15 @@ import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
 import type { LongMemEvalSnapshotSidecarFile } from "./materialize.js";
 import {
   buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
+  deriveLongMemEvalGoldObjectIds,
   type LongMemEvalSidecarEntry
 } from "../runner/runner-scoring.js";
+import {
+  buildGoldObjectIdentities,
+  type LongMemEvalGoldObjectIdentity
+} from "../diagnostics/gold-object-identities.js";
 import { classifyLongMemEvalDatasetCohort } from
   "../selection/dataset-cohort.js";
 import { buildLongMemEvalSourceDatesBySession } from
@@ -21,6 +27,9 @@ export interface SnapshotQuestionMeasurementOracle {
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
   readonly isAbstention: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds: readonly string[];
+  readonly goldObjectIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly seedDropReasons: LongMemEvalSeedDropReasons;
 }
 
@@ -64,12 +73,25 @@ function buildQuestionOracleFactory(
     sidecar.set(key, Object.freeze({ ...entry }));
   }
   const answerSessionIds = Object.freeze([...question.answer_session_ids]);
+  const answerSessionSet = new Set(answerSessionIds);
   const sourceDates = [...buildLongMemEvalSourceDatesBySession(question)];
   const sidecarEntries = [...sidecar];
   const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
     sidecar,
-    new Set(answerSessionIds)
+    answerSessionSet
   );
+  const goldEvidenceIds = deriveLongMemEvalGoldEvidenceIds(
+    sidecar,
+    answerSessionSet
+  );
+  const goldObjectIds = deriveLongMemEvalGoldObjectIds(
+    sidecar,
+    answerSessionSet
+  );
+  const goldObjectIdentities = Object.freeze(buildGoldObjectIdentities({
+    goldMemoryIds,
+    goldEvidenceIds
+  }));
   const isAbstention = classifyLongMemEvalDatasetCohort(question) === "abstention";
   const seedDropReasons = Object.freeze({
     ...(snapshotQuestion.answerSeedDropReasons ?? createEmptyLongMemEvalSeedDropReasons())
@@ -81,6 +103,9 @@ function buildQuestionOracleFactory(
     sidecar: new Map(sidecarEntries),
     isAbstention,
     goldMemoryIds,
+    goldEvidenceIds,
+    goldObjectIds,
+    goldObjectIdentities,
     seedDropReasons
   });
 }

@@ -13,27 +13,21 @@ import type {
   RecallUsageToolCallContext,
   WarnPort
 } from "./recall-usage-handlers.js";
+import { resolveUsedMemoryObjectIds } from "./usage/recall-usage-object-validation.js";
+
+export {
+  ContextUsageNotFoundError,
+  ContextUsageValidationError,
+  resolveUsageState,
+  resolveUsedMemoryObjectIds,
+  resolveUsedObjectIdentities,
+  resolveUsedObjectIds,
+  validateReportedRecallHits,
+  validateUsageStateConsistency
+} from "./usage/recall-usage-object-validation.js";
 
 const RECALL_HIT_ACTIVATION_BUMP = 0.05;
 const MAX_CROSS_LINK_FANOUT = 8;
-
-export class ContextUsageValidationError extends Error {
-  public readonly code = "VALIDATION" as const;
-
-  public constructor(message: string) {
-    super(message);
-    this.name = "ContextUsageValidationError";
-  }
-}
-
-export class ContextUsageNotFoundError extends Error {
-  public readonly code = "NOT_FOUND" as const;
-
-  public constructor(message: string) {
-    super(message);
-    this.name = "ContextUsageNotFoundError";
-  }
-}
 
 export class RecallHitTierPromotionCasMiss extends Error {}
 
@@ -57,39 +51,6 @@ export async function accrueCoRecallPlasticity(
     deliveredObjectIds,
     workspaceId,
     allowedPairKeys
-  );
-}
-
-export async function validateReportedRecallHits(
-  deps: RecallUsageHandlerDependencies,
-  request: SoulReportContextUsageRequest,
-  workspaceId: string,
-  linkedDelivery: Readonly<ContextDeliveryRecord> | null
-): Promise<void> {
-  const usedObjectIds = resolveUsedObjectIds(request);
-  if (usedObjectIds.length === 0) {
-    return;
-  }
-  validateUsedObjectsBelongToDelivery(request, linkedDelivery, usedObjectIds);
-
-  if (deps.memoryService.findByIdsScoped !== undefined) {
-    const memories = await deps.memoryService.findByIdsScoped(usedObjectIds, workspaceId);
-    const foundIds = new Set(memories.map((memory) => memory.object_id));
-    for (const objectId of usedObjectIds) {
-      if (!foundIds.has(objectId)) {
-        throw new ContextUsageNotFoundError(`Memory entry ${objectId} was not found.`);
-      }
-    }
-    return;
-  }
-
-  await Promise.all(
-    usedObjectIds.map(async (objectId) => {
-      const memory = await deps.memoryService.findByIdScoped(objectId, workspaceId);
-      if (memory === null) {
-        throw new ContextUsageNotFoundError(`Memory entry ${objectId} was not found.`);
-      }
-    })
   );
 }
 
@@ -156,7 +117,7 @@ export async function promoteRecallHitMemories(
     return;
   }
 
-  const usedObjectIds = resolveUsedObjectIds(request);
+  const usedObjectIds = resolveUsedMemoryObjectIds(request);
   const currentByObjectId = await resolveCurrentUsedMemories(
     params.deps,
     usedObjectIds,
@@ -181,56 +142,13 @@ export async function promoteRecallHitMemories(
   }
 }
 
-export function resolveUsedObjectIds(request: SoulReportContextUsageRequest): readonly string[] {
-  if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
-    const usedIds = request.delivered_objects
-      .filter(
-        (object) =>
-          object.usage_status === "used" &&
-          resolveReportObjectKind(object) === "memory_entry"
-      )
-      .map((object) => object.object_id);
-    return Object.freeze(Array.from(new Set(usedIds)));
-  }
-  if (request.usage_state === "used") {
-    return Object.freeze(Array.from(new Set(request.used_object_ids ?? [])));
-  }
-  return Object.freeze([]);
-}
-
-export function resolveUsageState(
-  request: SoulReportContextUsageRequest
-): SoulReportContextUsageRequest["usage_state"] {
-  if (request.delivered_objects !== undefined && request.delivered_objects.length > 0) {
-    return deriveDeliveredObjectsUsageState(request.delivered_objects);
-  }
-  return request.usage_state;
-}
-
-export function validateUsageStateConsistency(request: SoulReportContextUsageRequest): void {
-  const deliveredObjects = request.delivered_objects;
-  if (deliveredObjects !== undefined && deliveredObjects.length > 0) {
-    const derivedUsageState = deriveDeliveredObjectsUsageState(deliveredObjects);
-    if (request.usage_state !== derivedUsageState) {
-      throw new ContextUsageValidationError(
-        `usage_state ${request.usage_state} contradicts delivered_objects aggregate usage_state ${derivedUsageState}.`
-      );
-    }
-    validateUsedIdsMatchDeliveredObjects(request, deliveredObjects);
-    return;
-  }
-  if (request.usage_state !== "used" && (request.used_object_ids?.length ?? 0) > 0) {
-    throw new ContextUsageValidationError("used_object_ids can only be supplied when usage_state is used.");
-  }
-}
-
 async function refreshReportedRecallHits(
   deps: RecallUsageHandlerDependencies,
   request: SoulReportContextUsageRequest,
   workspaceId: string,
   reportedAt: string
 ): Promise<void> {
-  const usedObjectIds = resolveUsedObjectIds(request);
+  const usedObjectIds = resolveUsedMemoryObjectIds(request);
   if (usedObjectIds.length === 0) {
     return;
   }
@@ -389,62 +307,4 @@ async function maybeEmitReuseGainKarma(
       error: error instanceof Error ? error.message : String(error)
     });
   }
-}
-
-function validateUsedObjectsBelongToDelivery(
-  request: SoulReportContextUsageRequest,
-  linkedDelivery: Readonly<ContextDeliveryRecord> | null,
-  usedObjectIds: readonly string[]
-): void {
-  if (linkedDelivery === null) {
-    return;
-  }
-  const deliveredIds = new Set(linkedDelivery.delivered_object_ids);
-  for (const objectId of usedObjectIds) {
-    if (!deliveredIds.has(objectId)) {
-      throw new ContextUsageValidationError(
-        `used_object_ids include ${objectId}, which was not part of delivery ${request.delivery_id}.`
-      );
-    }
-  }
-}
-
-function validateUsedIdsMatchDeliveredObjects(
-  request: SoulReportContextUsageRequest,
-  deliveredObjects: NonNullable<SoulReportContextUsageRequest["delivered_objects"]>
-): void {
-  if (request.used_object_ids === undefined) {
-    return;
-  }
-  const reportedIds = [...new Set(request.used_object_ids)].sort();
-  const deliveredUsedIds = [...new Set(
-    deliveredObjects
-      .filter(
-        (object) =>
-          object.usage_status === "used" &&
-          resolveReportObjectKind(object) === "memory_entry"
-      )
-      .map((object) => object.object_id)
-  )].sort();
-  if (reportedIds.join("\0") !== deliveredUsedIds.join("\0")) {
-    throw new ContextUsageValidationError("used_object_ids contradict delivered_objects usage_status values.");
-  }
-}
-
-function deriveDeliveredObjectsUsageState(
-  deliveredObjects: NonNullable<SoulReportContextUsageRequest["delivered_objects"]>
-): SoulReportContextUsageRequest["usage_state"] {
-  if (deliveredObjects.some((object) => object.usage_status === "used")) {
-    return "used";
-  }
-  if (deliveredObjects.some((object) => object.usage_status === "skipped")) {
-    return "skipped";
-  }
-  return "not_applicable";
-}
-
-function resolveReportObjectKind(
-  object: NonNullable<SoulReportContextUsageRequest["delivered_objects"]>[number]
-): string {
-  return object.object_kind ?? "memory_entry";
 }

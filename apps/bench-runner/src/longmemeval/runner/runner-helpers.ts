@@ -31,11 +31,14 @@ export {
 } from "./runner-reporting.js";
 export {
   buildLongMemEvalSidecarKey,
+  deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
+  deriveLongMemEvalGoldObjectIds,
   deriveLongMemEvalMemoryObjectIds,
   enrichAbstentionConfidence,
   isLongMemEvalGoldEligibleResult,
   joinFusedScoresOntoResults,
+  resolveLongMemEvalGoldObjectKind,
   resolveLongMemEvalHitVerdict,
   scoreLongMemEvalRecallHits,
   type LongMemEvalHitScoringInput,

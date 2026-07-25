@@ -42,8 +42,8 @@ export function runSeparabilityProbe(diagnostics, options) {
   ]));
   assertIdenticalQuestionSets(tracks.baseline.rows, tracks.typed_path.rows);
   const objectiveLane = runBoundaryObjectiveLane(questions, assignments, foldCount, {
-    candidates: top50Candidates,
-    goldIds: goldObjectIds,
+    candidates: boundaryCandidates,
+    goldIds: goldObjectIdentityKeys,
     isMeasurementScorable: (question) => isMeasurementScorable(question, cohortById),
     isPairwiseEligible: (question) => isPairwiseEligible(question, cohortById)
   }, emit);
@@ -133,9 +133,9 @@ export function optimizePairwiseDifferences(pairs, featureCount, onProgress = ()
 }
 
 function vectorPairs(question, track, pipeline) {
-  const goldIds = goldObjectIds(question);
+  const goldIds = goldObjectIdentityKeys(question);
   const rows = rawCandidateRows(question, track).map((row) => ({
-    label: goldIds.has(row.candidate.object_id),
+    label: goldIds.has(candidateObjectIdentityKey(row.candidate)),
     vector: vectorizeSparseFeatures(row.features, pipeline)
   }));
   const positives = rows.filter((row) => row.label);
@@ -146,13 +146,15 @@ function vectorPairs(question, track, pipeline) {
 }
 
 function rankQuestion(question, track, pipeline, weights) {
-  const goldIds = goldObjectIds(question);
+  const goldIds = goldObjectIdentityKeys(question);
   const ranked = rawCandidateRows(question, track).map((row) => ({
     candidate: row.candidate,
     score: sparseDot(weights, vectorizeSparseFeatures(row.features, pipeline))
   })).sort(compareScoredCandidates);
   return Object.freeze({
-    any_at_5: ranked.slice(0, 5).some((row) => goldIds.has(row.candidate.object_id)),
+    any_at_5: ranked.slice(0, 5).some((row) =>
+      goldIds.has(candidateObjectIdentityKey(row.candidate))
+    ),
     top_5_candidate_keys: Object.freeze(ranked.slice(0, 5).map((row) => stableCandidateKey(row.candidate)))
   });
 }
@@ -231,11 +233,11 @@ function isPairwiseEligible(question, cohortById = null) {
   return isMeasurementScorable(question, cohortById);
 }
 function hasGoldDistractorPair(question) {
-  const gold = goldObjectIds(question);
+  const gold = goldObjectIdentityKeys(question);
   const candidates = top50Candidates(question);
   return gold.size > 0 && candidates.length > 1 &&
-    candidates.some((row) => gold.has(row.object_id)) &&
-    candidates.some((row) => !gold.has(row.object_id));
+    candidates.some((row) => gold.has(candidateObjectIdentityKey(row))) &&
+    candidates.some((row) => !gold.has(candidateObjectIdentityKey(row)));
 }
 function unscorableReason(question, cohort) {
   if (cohort !== undefined && !isScorableMeasurementCohort(cohort)) {
@@ -244,9 +246,11 @@ function unscorableReason(question, cohort) {
   if (cohort !== undefined && cohort.candidate_pool_complete !== true)
     return "candidate_pool_incomplete";
   if (question.candidate_pool_complete !== true) return "candidate_pool_incomplete";
-  if (goldObjectIds(question).size === 0) return "runtime_gold_absent";
+  if (goldObjectIdentityKeys(question).size === 0) return "runtime_gold_absent";
   if (top50Candidates(question).length <= 1) return "insufficient_candidate_pool";
-  if (!top50Candidates(question).some((candidate) => goldObjectIds(question).has(candidate.object_id))) return "gold_outside_top_50";
+  if (!top50Candidates(question).some((candidate) =>
+    goldObjectIdentityKeys(question).has(candidateObjectIdentityKey(candidate))
+  )) return "gold_outside_top_50";
   return "no_distractor_in_top_50";
 }
 
@@ -315,11 +319,32 @@ function object(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-function goldObjectIds(question) {
+function goldObjectIdentityKeys(question) {
   const gold = Array.isArray(question.gold) ? question.gold : [];
-  return new Set(gold.flatMap((row) =>
-    row !== null && typeof row === "object" && typeof row.object_id === "string" ? [row.object_id] : []
-  ));
+  return new Set(gold.flatMap((row) => {
+    const key = goldObjectIdentityKey(row);
+    return key === null ? [] : [key];
+  }));
+}
+
+function goldObjectIdentityKey(row) {
+  if (row === null || typeof row !== "object" || typeof row.object_id !== "string") return null;
+  const objectKind = row.object_kind ?? "memory_entry";
+  return objectKind === "memory_entry" || objectKind === "evidence_capsule"
+    ? `${objectKind}:${row.object_id}`
+    : null;
+}
+
+function candidateObjectIdentityKey(candidate) {
+  const objectKind = candidate.object_kind ?? "memory_entry";
+  return `${objectKind}:${candidate.object_id}`;
+}
+
+function boundaryCandidates(question) {
+  return top50Candidates(question).map((candidate) => Object.freeze({
+    ...candidate,
+    object_id: candidateObjectIdentityKey(candidate)
+  }));
 }
 
 function compareScoredCandidates(left, right) {
@@ -333,7 +358,8 @@ function compareScoredCandidates(left, right) {
 
 function stableCandidateKey(candidate) {
   if (typeof candidate.candidate_key === "string" && candidate.candidate_key.length > 0) return candidate.candidate_key;
-  if (typeof candidate.object_id === "string" && candidate.object_id.length > 0) return candidate.object_id;
+  if (typeof candidate.object_id === "string" && candidate.object_id.length > 0)
+    return candidateObjectIdentityKey(candidate);
   throw new Error("candidate_key or object_id is required for deterministic ties");
 }
 

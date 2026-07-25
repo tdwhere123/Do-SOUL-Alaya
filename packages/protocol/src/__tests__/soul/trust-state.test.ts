@@ -103,6 +103,24 @@ describe("trust state schemas", () => {
     }
   });
 
+  it("preserves kind-qualified used object identities", () => {
+    const record = UsageProofRecordSchema.parse({
+      delivery_id: "delivery-1",
+      usage_state: "used",
+      used_object_ids: ["shared-object"],
+      used_objects: [
+        { object_id: "shared-object", object_kind: "synthesis_capsule" }
+      ],
+      reason: null,
+      reported_at: REPORTED_AT,
+      audit_event_id: "event-usage-1"
+    });
+
+    expect(record.used_objects).toEqual([
+      { object_id: "shared-object", object_kind: "synthesis_capsule" }
+    ]);
+  });
+
   it("rejects invalid usage-state values", () => {
     expect(() =>
       UsageProofRecordSchema.parse({

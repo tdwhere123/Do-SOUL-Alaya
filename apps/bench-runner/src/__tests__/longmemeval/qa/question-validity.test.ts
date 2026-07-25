@@ -92,6 +92,26 @@ describe("question measurement validity", () => {
     })).toBe("evaluator_identity_unscorable");
   });
 
+  it("treats a verified direct-evidence identity as scorable", () => {
+    const ledger: QuestionMeasurementPrimitiveLedger = {
+      ...validAnswerableLedger(),
+      extraction_materialization: {
+        status: "evidence_preserved",
+        emitted_memory_count: 0,
+        reason: null
+      }
+    };
+
+    expect(deriveTsQuestionMeasurementStatus({
+      isAbstention: false,
+      cohortLedger: ledger
+    })).toBe("scorable");
+    expect(deriveReplayQuestionMeasurementStatus({
+      isAbstention: false,
+      cohortLedger: ledger
+    })).toBe("scorable");
+  });
+
   it.each(["candidate_absent", "materialization_drop"] as const)(
     "counts a snapshot-proven %s extraction failure as a scorable miss",
     (reason) => {
@@ -124,6 +144,12 @@ describe("question measurement validity", () => {
     }],
     ["emitted count mismatch", {
       status: "memory_emitted", emitted_memory_count: 2, reason: null
+    }],
+    ["evidence emitted count", {
+      status: "evidence_preserved", emitted_memory_count: 1, reason: null
+    }],
+    ["evidence reason", {
+      status: "evidence_preserved", emitted_memory_count: 0, reason: "candidate_absent"
     }],
     ["unknown emitted count", { status: "unknown", emitted_memory_count: 1, reason: null }],
     ["unknown reason", {
@@ -309,6 +335,12 @@ const MEASUREMENT_STATUS_CASES: readonly {
   statusCase("valid answerable", false, validAnswerableLedger(), "scorable"),
   statusCase("cohort overrides stale abstention flag", true,
     validAnswerableLedger(), "scorable"),
+  statusCase("verified direct evidence", false, {
+    ...validAnswerableLedger(),
+    extraction_materialization: {
+      status: "evidence_preserved", emitted_memory_count: 0, reason: null
+    }
+  }, "scorable"),
   statusCase("absent evaluator identity", false, {
     ...validAnswerableLedger(),
     evaluator_gold_identity: { status: "absent", object_ids: [] },

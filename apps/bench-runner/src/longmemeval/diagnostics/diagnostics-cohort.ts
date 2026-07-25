@@ -15,7 +15,7 @@ export interface LongMemEvalQuestionCohortLedger {
     | "evaluator_identity_unscorable";
   readonly dataset_cohort: "answerable" | "abstention" | "adjudicated_invalid";
   readonly extraction_materialization: {
-    readonly status: "memory_emitted" | "drop" | "unknown";
+    readonly status: "memory_emitted" | "evidence_preserved" | "drop" | "unknown";
     readonly emitted_memory_count: number;
     readonly reason: "candidate_absent" | "materialization_drop" | null;
   };
@@ -52,6 +52,7 @@ export interface LongMemEvalQuestionCohortLedger {
 
 interface LongMemEvalGoldStageRanks {
   readonly object_id: string;
+  readonly object_kind: "memory_entry" | "evidence_capsule";
   readonly fused_rank: number | null;
   readonly rank_after_feature_rerank: number | null;
   readonly rank_after_lexical_priority: number | null;
@@ -68,6 +69,8 @@ export function buildQuestionCohortLedger(input: {
   readonly premiseInvalid: boolean;
   readonly hitAt5: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds?: readonly string[];
+  readonly goldObjectIds?: readonly string[];
   readonly gold: readonly LongMemEvalGoldDiagnostic[];
   readonly diagnosticsAvailable: boolean;
   readonly candidatePoolComplete: boolean;
@@ -78,8 +81,9 @@ export function buildQuestionCohortLedger(input: {
   const datasetCohort = input.premiseInvalid || hasAbstentionIdentityConflict(input)
     ? "adjudicated_invalid"
     : input.isAbstention ? "abstention" : "answerable";
-  const ambiguousIdentity = input.goldMemoryIds.some((id) =>
-    input.identityConflictObjectKeys?.includes(`memory_entry:${id}`) === true
+  const ambiguousIdentity = input.gold.some((gold) =>
+    input.identityConflictObjectKeys
+      ?.includes(`${gold.object_kind}:${gold.object_id}`) === true
   );
   const primitives = buildMeasurementPrimitives(input, ambiguousIdentity);
   const measurementStatus = deriveQuestionMeasurementStatus({
@@ -106,14 +110,15 @@ function buildMeasurementPrimitives(
   input: Parameters<typeof buildQuestionCohortLedger>[0],
   ambiguousIdentity: boolean
 ) {
-  const identityPresent = input.goldMemoryIds.length > 0 && !ambiguousIdentity;
+  const goldObjectIds = input.goldObjectIds ?? input.goldMemoryIds;
+  const identityPresent = goldObjectIds.length > 0 && !ambiguousIdentity;
   return {
     extraction_materialization: deriveQuestionExtractionMaterialization(input),
     evaluator_gold_identity: {
       status: ambiguousIdentity
         ? "ambiguous" as const
         : identityPresent ? "present" as const : "absent" as const,
-      object_ids: input.goldMemoryIds
+      object_ids: goldObjectIds
     },
     evaluation_issue_reason: deriveQuestionEvaluationIssueReason({
       ...input,
@@ -125,11 +130,14 @@ function buildMeasurementPrimitives(
 export function deriveQuestionExtractionMaterialization(
   input: Pick<
     Parameters<typeof buildQuestionCohortLedger>[0],
-    "goldMemoryIds" | "seedDropReasons"
+    "goldMemoryIds" | "goldEvidenceIds" | "goldObjectIds" | "seedDropReasons"
   >
 ): LongMemEvalQuestionCohortLedger["extraction_materialization"] {
   if (input.goldMemoryIds.length > 0) {
     return { status: "memory_emitted", emitted_memory_count: input.goldMemoryIds.length, reason: null };
+  }
+  if ((input.goldEvidenceIds?.length ?? 0) > 0) {
+    return { status: "evidence_preserved", emitted_memory_count: 0, reason: null };
   }
   if ((input.seedDropReasons?.materialization_drop ?? 0) > 0) {
     return { status: "drop", emitted_memory_count: 0, reason: "materialization_drop" };
@@ -144,6 +152,8 @@ export function deriveQuestionEvaluationIssueReason(input: {
   readonly isAbstention: boolean;
   readonly premiseInvalid: boolean;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds?: readonly string[];
+  readonly goldObjectIds?: readonly string[];
   readonly diagnosticsAvailable: boolean;
   readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
   readonly seedDropReasons?: LongMemEvalSeedDropReasons;
@@ -158,7 +168,9 @@ export function deriveQuestionEvaluationIssueReason(input: {
   if (deriveQuestionExtractionMaterialization(input).status === "drop") {
     return "extraction_materialization_drop";
   }
-  if (input.goldMemoryIds.length === 0) return "empty_gold_identity";
+  if ((input.goldObjectIds ?? input.goldMemoryIds).length === 0) {
+    return "empty_gold_identity";
+  }
   if (input.ambiguousIdentity) return "identity_join_error";
   return input.missTaxonomy === "evaluation_or_gold_issue"
     ? "gold_taxonomy_fallthrough"
@@ -182,15 +194,18 @@ function finalVerdict(
 export function hasAbstentionIdentityConflict(
   input: {
     readonly isAbstention: boolean;
-    readonly goldMemoryIds: readonly string[];
+    readonly goldMemoryIds?: readonly string[];
+    readonly goldObjectIds?: readonly string[];
   }
 ): boolean {
-  return input.isAbstention && input.goldMemoryIds.length > 0;
+  return input.isAbstention &&
+    (input.goldObjectIds ?? input.goldMemoryIds ?? []).length > 0;
 }
 
 function toStageRanks(gold: LongMemEvalGoldDiagnostic): LongMemEvalGoldStageRanks {
   return {
     object_id: gold.object_id,
+    object_kind: gold.object_kind,
     fused_rank: gold.fused_rank,
     rank_after_feature_rerank: gold.rank_after_feature_rerank,
     rank_after_lexical_priority: gold.rank_after_lexical_priority,

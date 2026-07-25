@@ -1,4 +1,5 @@
 import {
+  SoulContextObjectIdentitySchema,
   TrustStateEventType,
   type EventLogEntry,
   type SoulContextObjectIdentity,
@@ -21,6 +22,7 @@ interface MemoryUsageReportedPayload {
   readonly usage_state: UsageProofRecord["usage_state"];
   readonly trust_mode?: NonNullable<UsageProofRecord["trust_mode"]>;
   readonly used_object_ids: readonly string[];
+  readonly used_objects?: NonNullable<UsageProofRecord["used_objects"]>;
   readonly per_anchor_usage?: NonNullable<UsageProofRecord["per_anchor_usage"]>;
   readonly reason: string | null;
   readonly reported_at: string;
@@ -100,6 +102,9 @@ function toUsageProofRecord(
     usage_state: payload.usage_state,
     ...(payload.trust_mode === undefined ? {} : { trust_mode: payload.trust_mode }),
     used_object_ids: [...payload.used_object_ids],
+    ...(payload.used_objects === undefined
+      ? {}
+      : { used_objects: [...payload.used_objects] }),
     ...(payload.per_anchor_usage === undefined
       ? {}
       : { per_anchor_usage: [...payload.per_anchor_usage] }),
@@ -125,6 +130,7 @@ function parseMemoryUsageReportedPayload(
     return null;
   }
   const perAnchorUsage = parsePerAnchorUsage(candidate.per_anchor_usage);
+  const usedObjects = parseUsedObjects(candidate.used_objects);
   const trustMode =
     candidate.trust_mode === "automatic" || candidate.trust_mode === "manual"
       ? candidate.trust_mode
@@ -134,6 +140,7 @@ function parseMemoryUsageReportedPayload(
     usage_state: candidate.usage_state as UsageProofRecord["usage_state"],
     ...(trustMode === undefined ? {} : { trust_mode: trustMode }),
     used_object_ids: parseUsedObjectIds(candidate.used_object_ids),
+    ...(usedObjects === undefined ? {} : { used_objects: usedObjects }),
     ...(perAnchorUsage === undefined ? {} : { per_anchor_usage: perAnchorUsage }),
     reason:
       typeof candidate.reason === "string" || candidate.reason === null
@@ -141,6 +148,17 @@ function parseMemoryUsageReportedPayload(
         : null,
     reported_at: candidate.reported_at
   };
+}
+
+function parseUsedObjects(
+  value: unknown
+): NonNullable<UsageProofRecord["used_objects"]> | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const parsed = SoulContextObjectIdentitySchema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
 }
 
 function parseUsedObjectIds(value: unknown): readonly string[] {

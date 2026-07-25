@@ -139,6 +139,20 @@ function withLegacyPartialCohort(
 ): LongMemEvalQuestionDiagnostic {
   const abstention = question.is_abstention || question.question_id.endsWith("_abs");
   const hit = question.hit_at_5;
+  const goldEvidenceIds = question.gold_evidence_ids ?? [];
+  const goldObjectIds = question.gold_object_ids ?? [
+    ...question.gold_memory_ids,
+    ...goldEvidenceIds
+  ];
+  const extractionMaterialization = question.gold_memory_ids.length > 0
+    ? {
+        status: "memory_emitted" as const,
+        emitted_memory_count: question.gold_memory_ids.length,
+        reason: null
+      }
+    : goldEvidenceIds.length > 0
+      ? { status: "evidence_preserved" as const, emitted_memory_count: 0, reason: null }
+      : { status: "unknown" as const, emitted_memory_count: 0, reason: null };
   return {
     ...question,
     candidate_pool_complete: false,
@@ -149,12 +163,10 @@ function withLegacyPartialCohort(
         ? "abstention_unscorable"
         : "evaluator_identity_unscorable",
       dataset_cohort: abstention ? "abstention" : "answerable",
-      extraction_materialization: question.gold_memory_ids.length > 0
-        ? { status: "memory_emitted", emitted_memory_count: question.gold_memory_ids.length, reason: null }
-        : { status: "unknown", emitted_memory_count: 0, reason: null },
+      extraction_materialization: extractionMaterialization,
       evaluator_gold_identity: {
-        status: question.gold_memory_ids.length > 0 ? "present" : "absent",
-        object_ids: question.gold_memory_ids
+        status: goldObjectIds.length > 0 ? "present" : "absent",
+        object_ids: goldObjectIds
       },
       retrieval_status: abstention ? "not_applicable" : hit ? "hit_at_5" : "miss_at_5",
       evidence_status: "partial",

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGardenTurnEvidenceFallback,
   LocalHeuristics,
   MaterializationRouter,
   normalizeSchemaGroundedSignal
@@ -156,21 +157,16 @@ describe("MaterializationRouter routing and grounding", () => {
   it("archives a Garden evidence anchor without treating it as a durable fact", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
-    const signal = createSignal({
-      source: "garden_compile",
-      signal_kind: "potential_evidence_anchor",
-      object_kind: "source_turn",
-      evidence_refs: [],
-      raw_payload: {
-        full_turn_content: "User: ok thanks",
-        evidence_preservation: {
-          version: 1,
-          reason: "empty_extraction",
-          truncated: false,
-          chars_clipped: 0
-        }
-      }
-    });
+    const signal = buildGardenTurnEvidenceFallback({
+      turnContent: "Assistant: the requested script is attached.",
+      reason: "empty_extraction",
+      signalId: "fallback-1",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      surfaceId: null,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      sourceObservation: null
+    })!;
 
     const result = await router.materializeSignal(signal);
 
@@ -181,8 +177,12 @@ describe("MaterializationRouter routing and grounding", () => {
       created_objects: [{ object_kind: "evidence_capsule", object_id: "evidence-1" }]
     });
     expect(deps.evidenceService.create).toHaveBeenCalledWith(expect.objectContaining({
-      excerpt: "User: ok thanks",
-      evidence_health_state: "questionable",
+      excerpt: "Assistant: the requested script is attached.",
+      evidence_kind: "conversation_excerpt",
+      evidence_health_state: "verified",
+      source_hash: expect.stringMatching(
+        /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
+      ),
       physical_anchor: expect.objectContaining({
         artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
       })

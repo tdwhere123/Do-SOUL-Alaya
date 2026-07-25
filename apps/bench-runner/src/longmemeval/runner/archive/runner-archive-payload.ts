@@ -13,11 +13,12 @@ import { aggregateBenchTokenMetrics, assertBenchTokenEconomyContract } from "../
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
 import { aggregateRecallTokenEconomy } from "../../qa/recall-token-economy.js";
 import {
-  buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeProviderStates
 } from "../../diagnostics.js";
+import { buildLongMemEvalDetailedGoldCoverage } from
+  "../../diagnostics/diagnostics-full-gold-coverage.js";
 import {
   aggregateQaVerdicts,
   buildQaDeliverySettings
@@ -223,7 +224,9 @@ function buildKpi(
     },
     seed_extraction_path: toSeedExtractionPathKpi(input.extractionStats),
     seed_fuel_inventory: toSeedFuelInventoryKpi(input.seedFuelInventory),
-    full_gold_coverage: buildLongMemEvalFullGoldCoverage(input.aggregate.questionDiagnostics),
+    full_gold_coverage: buildLongMemEvalDetailedGoldCoverage(
+      input.aggregate.questionDiagnostics
+    ),
     quality_metrics: buildLongMemEvalQualityMetrics(input.aggregate.questionDiagnostics),
     ...(edgeProposalRate === undefined ? {} : { edge_proposal_rate: edgeProposalRate }),
     ...(edgeProposalAutoAccept === undefined ? {} : { edge_proposal_auto_accept: edgeProposalAutoAccept }),

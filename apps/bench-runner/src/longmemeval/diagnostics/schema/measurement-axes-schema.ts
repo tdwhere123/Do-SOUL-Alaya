@@ -46,7 +46,11 @@ function literalWitnessSchema() {
     witnessed: z.boolean(),
     witnesses: z.array(z.object({
       object_id: z.string(),
-      object_kind: z.enum(["memory_entry", "synthesis_capsule"]),
+      object_kind: z.enum([
+        "memory_entry",
+        "synthesis_capsule",
+        "evidence_capsule"
+      ]),
       rank: z.number().int().positive(),
       field: z.enum(["content", "evidence_gist"])
     }).strict().readonly()).readonly()
@@ -68,6 +72,8 @@ function evaluatorIdentitySchema() {
     applicable: z.boolean(),
     status: z.enum(["not_applicable", "consistent", "inconsistent", "indeterminate"]),
     exact_gold_count: z.number().int().nonnegative(),
+    exact_memory_gold_count: z.number().int().nonnegative().optional(),
+    exact_evidence_gold_count: z.number().int().nonnegative().optional(),
     answer_session_supported_count: z.number().int().nonnegative(),
     literal_supported_count: z.number().int().nonnegative(),
     top_five_answer_session_supported_count: z.number().int().nonnegative(),
@@ -161,9 +167,20 @@ function validateEvaluatorIdentity(
   const statusApplicable = value.status !== "not_applicable";
   if (value.applicable !== statusApplicable ||
       value.answer_session_supported_count > value.exact_gold_count ||
-      value.literal_supported_count > value.exact_gold_count) {
+      value.literal_supported_count > value.exact_gold_count ||
+      !hasConsistentGoldKindCounts(value)) {
     addIssue(context, ["evaluator_identity_integrity_at_5"], "evaluator identity integrity is inconsistent");
   }
+}
+
+function hasConsistentGoldKindCounts(
+  value: MeasurementAxesValue["evaluator_identity_integrity_at_5"]
+): boolean {
+  const memory = value.exact_memory_gold_count;
+  const evidence = value.exact_evidence_gold_count;
+  if (memory === undefined && evidence === undefined) return true;
+  return memory !== undefined && evidence !== undefined &&
+    memory + evidence === value.exact_gold_count;
 }
 
 function addIssue(

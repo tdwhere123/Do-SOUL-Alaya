@@ -1,4 +1,5 @@
 export interface SeededMemoryResult {
+  readonly kind?: "memory_entry";
   readonly memoryId: string;
   readonly signalId: string;
   readonly proposalId: string;
@@ -6,6 +7,16 @@ export interface SeededMemoryResult {
   readonly truncated: boolean;
   readonly charsClipped: number;
 }
+
+export interface SeededEvidenceResult {
+  readonly kind: "evidence_capsule";
+  readonly evidenceId: string;
+  readonly signalId: string;
+  readonly truncated: boolean;
+  readonly charsClipped: number;
+}
+
+export type SeededObjectResult = SeededMemoryResult | SeededEvidenceResult;
 
 export interface BenchSynthesisSeedInput {
   readonly evidenceRefs: readonly string[];
@@ -25,9 +36,15 @@ export interface CompileSeedSignalDrop {
 }
 
 export interface CompileSeedBatchResult {
-  readonly seeds: readonly SeededMemoryResult[];
+  readonly seeds: readonly SeededObjectResult[];
   readonly dropped: readonly CompileSeedSignalDrop[];
+  /** Runtime observation, including evidence created by a dropped candidate. */
+  readonly createdEvidence: boolean;
 }
+
+export type BenchEvidenceFallbackReason =
+  | "empty_extraction"
+  | "no_evidence_created";
 
 export interface BenchSignalSeedInput {
   readonly signalKind: string;
@@ -43,6 +60,7 @@ export interface BenchSignalSeedInput {
   readonly extractionProvider: "official_api_compile" | "no_credentials_fallback";
   readonly sourceObservedAt?: string;
   readonly sourceMemoryRefs?: readonly string[];
+  readonly evidenceFallbackReason?: BenchEvidenceFallbackReason;
 }
 
 export interface BenchContextUsageObject {

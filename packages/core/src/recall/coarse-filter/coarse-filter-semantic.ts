@@ -1,4 +1,8 @@
-import { type MemoryEntry, type RecallPolicy } from "@do-soul/alaya-protocol";
+import {
+  type EvidenceCapsule,
+  type MemoryEntry,
+  type RecallPolicy
+} from "@do-soul/alaya-protocol";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
@@ -15,6 +19,11 @@ import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
 import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
+import {
+  buildDirectEvidencePseudoMemoryEntry,
+  isDirectRecallEvidence,
+  resolveDirectEvidenceRecallText
+} from "./evidence/direct-evidence-candidate.js";
 
 export interface SemanticSupplementParams {
   readonly context: RunCoarseFilterContext;
@@ -263,7 +272,6 @@ async function addExpandedKeywordCandidates(
 async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promise<void> {
   if (
     params.context.dependencies.evidenceSearchPort === undefined ||
-    params.context.dependencies.memoryRepo.findByEvidenceRefs === undefined ||
     params.queryText === null
   ) {
     return;
@@ -302,6 +310,38 @@ async function admitEvidenceMatches(
   params: SemanticSupplementParams,
   evidenceMatchById: ReadonlyMap<string, number>
 ): Promise<void> {
+  const evidenceRankById = buildEvidenceRanks(params, evidenceMatchById);
+  if (evidenceRankById.size === 0) {
+    return;
+  }
+  const capsules = await loadEvidenceCapsulesOrFallback(params, evidenceRankById);
+  if (capsules === null) return;
+  const directEvidence = capsules.filter((capsule) =>
+    isDirectRecallEvidence(capsule, params.workspaceId)
+  );
+  const boundEvidenceRefs = await loadBoundEvidenceRefsOrFallback(
+    params,
+    evidenceRankById,
+    directEvidence
+  );
+  if (boundEvidenceRefs === null) return;
+  const unboundDirectEvidence = directEvidence.filter(
+    (capsule) => !boundEvidenceRefs.has(capsule.object_id)
+  );
+  const unboundDirectIds = new Set(
+    unboundDirectEvidence.map((capsule) => capsule.object_id)
+  );
+  const ordinaryEvidenceRanks = new Map(
+    [...evidenceRankById].filter(([objectId]) => !unboundDirectIds.has(objectId))
+  );
+  await admitMemoryEvidenceMatches(params, ordinaryEvidenceRanks);
+  await admitDirectEvidenceMatches(params, evidenceRankById, unboundDirectEvidence);
+}
+
+function buildEvidenceRanks(
+  params: SemanticSupplementParams,
+  evidenceMatchById: ReadonlyMap<string, number>
+): ReadonlyMap<string, number> {
   const evidenceRankById = new Map<string, number>();
   for (const [objectId, normalizedRank] of evidenceMatchById.entries()) {
     const ranked = clamp01(normalizedRank);
@@ -311,10 +351,64 @@ async function admitEvidenceMatches(
       Math.max(params.evidenceFtsRanksPerRef.get(objectId) ?? 0, ranked)
     );
   }
-  if (evidenceRankById.size === 0 || params.context.dependencies.memoryRepo.findByEvidenceRefs === undefined) {
+  return evidenceRankById;
+}
+
+async function loadEvidenceCapsulesOrFallback(
+  params: SemanticSupplementParams,
+  evidenceRankById: ReadonlyMap<string, number>
+): Promise<readonly Readonly<EvidenceCapsule>[] | null> {
+  const findByIds = params.context.dependencies.evidenceSearchPort?.findByIds;
+  if (findByIds === undefined) {
+    await admitMemoryEvidenceMatches(params, evidenceRankById);
+    return null;
+  }
+  try {
+    return await findByIds.call(
+      params.context.dependencies.evidenceSearchPort,
+      params.workspaceId,
+      [...evidenceRankById.keys()]
+    );
+  } catch (error) {
+    await admitMemoryEvidenceMatches(params, evidenceRankById);
+    throw error;
+  }
+}
+
+async function loadBoundEvidenceRefsOrFallback(
+  params: SemanticSupplementParams,
+  evidenceRankById: ReadonlyMap<string, number>,
+  directEvidence: readonly Readonly<EvidenceCapsule>[]
+): Promise<ReadonlySet<string> | null> {
+  const findBoundEvidenceRefs =
+    params.context.dependencies.memoryRepo.findBoundEvidenceRefs;
+  if (findBoundEvidenceRefs === undefined) {
+    await admitMemoryEvidenceMatches(params, evidenceRankById);
+    return null;
+  }
+  try {
+    return new Set(await findBoundEvidenceRefs.call(
+      params.context.dependencies.memoryRepo,
+      params.workspaceId,
+      directEvidence.map((capsule) => capsule.object_id)
+    ));
+  } catch (error) {
+    await admitMemoryEvidenceMatches(params, evidenceRankById);
+    throw error;
+  }
+}
+
+async function admitMemoryEvidenceMatches(
+  params: SemanticSupplementParams,
+  evidenceRankById: ReadonlyMap<string, number>
+): Promise<void> {
+  const findByEvidenceRefs =
+    params.context.dependencies.memoryRepo.findByEvidenceRefs;
+  if (evidenceRankById.size === 0 || findByEvidenceRefs === undefined) {
     return;
   }
-  const memoriesByEvidence = await params.context.dependencies.memoryRepo.findByEvidenceRefs(
+  const memoriesByEvidence = await findByEvidenceRefs.call(
+    params.context.dependencies.memoryRepo,
     params.workspaceId,
     [...evidenceRankById.keys()]
   );
@@ -337,5 +431,42 @@ async function admitEvidenceMatches(
       Math.max(params.evidenceFtsRanks.get(memory.object_id) ?? 0, bestRank)
     );
     params.addCandidate(memory, "lexical", bestRank, "evidence_fts");
+  }
+}
+
+async function admitDirectEvidenceMatches(
+  params: SemanticSupplementParams,
+  evidenceRankById: ReadonlyMap<string, number>,
+  capsules: readonly Readonly<EvidenceCapsule>[]
+): Promise<void> {
+  const findMemoryByIds = params.context.dependencies.memoryRepo.findByIds;
+  if (capsules.length === 0 || findMemoryByIds === undefined) {
+    return;
+  }
+  const collidingMemoryIds = new Set((await findMemoryByIds.call(
+    params.context.dependencies.memoryRepo,
+    params.workspaceId,
+    capsules.map((capsule) => capsule.object_id)
+  )).map((memory) => memory.object_id));
+  for (const evidence of capsules) {
+    const rank = evidenceRankById.get(evidence.object_id);
+    if (
+      rank === undefined ||
+      collidingMemoryIds.has(evidence.object_id) ||
+      params.byId.has(evidence.object_id)
+    ) {
+      continue;
+    }
+    params.evidenceFtsRanks.set(evidence.object_id, rank);
+    params.addCandidate(
+      buildDirectEvidencePseudoMemoryEntry(evidence, rank),
+      "lexical",
+      rank,
+      "evidence_fts_direct",
+      {
+        objectKind: "evidence_capsule",
+        answerRerankText: resolveDirectEvidenceRecallText(evidence)
+      }
+    );
   }
 }

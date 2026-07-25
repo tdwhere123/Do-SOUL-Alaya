@@ -30,12 +30,14 @@ export interface QuestionMeasurementInput {
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
   readonly isAbstention: boolean;
   readonly evaluatorGoldMemoryIds?: readonly string[];
+  readonly evaluatorGoldEvidenceIds?: readonly string[];
+  readonly evaluatorGoldObjectIds?: readonly string[];
   readonly evaluatorHitAt5?: boolean;
 }
 
 type TopFiveCandidate = Readonly<{
   objectId: string;
-  objectKind: "memory_entry" | "synthesis_capsule";
+  objectKind: "memory_entry" | "synthesis_capsule" | "evidence_capsule";
   rank: number;
   sidecar: LongMemEvalSidecarEntry | undefined;
   replay: QuestionMeasurementInput["candidates"][number] | undefined;
@@ -64,6 +66,8 @@ export function attachQuestionMeasurementAxes(
   const qualityAxes = buildQuestionMeasurementAxes({
     ...input,
     evaluatorGoldMemoryIds: diagnostic.gold_memory_ids,
+    evaluatorGoldEvidenceIds: diagnostic.gold_evidence_ids,
+    evaluatorGoldObjectIds: diagnostic.gold_object_ids,
     evaluatorHitAt5: diagnostic.hit_at_5
   });
   return applyQuestionMeasurementAxes(diagnostic, qualityAxes);
@@ -228,11 +232,14 @@ function buildTimestampAvailability(
 function buildMemoryTemporalProjectionIntegrity(
   topFive: readonly TopFiveCandidate[]
 ): LongMemEvalQuestionMeasurementAxes["memory_temporal_projection_integrity_at_5"] {
-  const projected = topFive.filter(hasTemporalProjection);
+  const memoryCandidates = topFive.filter(
+    (candidate) => candidate.objectKind === "memory_entry"
+  );
+  const projected = memoryCandidates.filter(hasTemporalProjection);
   const complete = projected.filter(hasCompleteTemporalProvenance).length;
   return {
     source: "runtime_candidate_answer_features",
-    candidate_count: topFive.length,
+    candidate_count: memoryCandidates.length,
     projected_count: projected.length,
     provenance_complete_count: complete,
     integrity_ratio: projected.length === 0 ? null : complete / projected.length
@@ -257,12 +264,17 @@ function buildEvaluatorIdentityIntegrity(
   input: QuestionMeasurementInput,
   topFive: readonly TopFiveCandidate[]
 ): LongMemEvalQuestionMeasurementAxes["evaluator_identity_integrity_at_5"] {
-  const goldIds = new Set(input.evaluatorGoldMemoryIds ?? []);
-  if (input.isAbstention || goldIds.size === 0) {
-    return identityIntegrityResult(false, "not_applicable", 0, 0, 0, 0, 0);
+  const memoryGold = new Set(input.evaluatorGoldMemoryIds ?? []);
+  const evidenceGold = new Set(input.evaluatorGoldEvidenceIds ?? []);
+  const goldIdentities = new Set([
+    ...[...memoryGold].map((id) => candidateIdentity("memory_entry", id)),
+    ...[...evidenceGold].map((id) => candidateIdentity("evidence_capsule", id))
+  ]);
+  if (input.isAbstention || goldIdentities.size === 0) {
+    return identityIntegrityResult(false, "not_applicable", 0, 0, 0, 0, 0, 0);
   }
   const exactGold = topFive.filter((candidate) =>
-    candidate.objectKind === "memory_entry" && goldIds.has(candidate.objectId)
+    goldIdentities.has(candidateIdentity(candidate.objectKind, candidate.objectId))
   );
   const answerSessionIds = new Set(input.answerSessionIds);
   const sessionSupport = exactGold.filter((candidate) =>
@@ -280,8 +292,12 @@ function buildEvaluatorIdentityIntegrity(
     input, exactGold, sessionSupport, literalSupport,
     topSessionSupport
   );
+  const exactEvidenceGoldCount = exactGold.filter(
+    (candidate) => candidate.objectKind === "evidence_capsule"
+  ).length;
   return identityIntegrityResult(
-    true, status, exactGold.length, sessionSupport, literalSupport,
+    true, status, exactGold.length, exactEvidenceGoldCount,
+    sessionSupport, literalSupport,
     topSessionSupport, topLiteralSupport
   );
 }
@@ -320,15 +336,19 @@ function identityIntegrityResult(
   applicable: boolean,
   status: "not_applicable" | "consistent" | "inconsistent" | "indeterminate",
   exactGoldCount: number,
+  evidenceGoldCount: number,
   sessionSupport: number,
   literalSupport: number,
   topSessionSupport: number,
   topLiteralSupport: number
 ): LongMemEvalQuestionMeasurementAxes["evaluator_identity_integrity_at_5"] {
+  const memoryGoldCount = exactGoldCount - evidenceGoldCount;
   return {
     applicable,
     status,
     exact_gold_count: exactGoldCount,
+    exact_memory_gold_count: memoryGoldCount,
+    exact_evidence_gold_count: evidenceGoldCount,
     answer_session_supported_count: sessionSupport,
     literal_supported_count: literalSupport,
     top_five_answer_session_supported_count: topSessionSupport,
@@ -348,7 +368,9 @@ function candidateIdentity(objectKind: string | null | undefined, objectId: stri
 }
 
 function normalizeObjectKind(value: string | null | undefined) {
-  return value === "synthesis_capsule" ? "synthesis_capsule" as const : "memory_entry" as const;
+  if (value === "synthesis_capsule") return "synthesis_capsule" as const;
+  if (value === "evidence_capsule") return "evidence_capsule" as const;
+  return "memory_entry" as const;
 }
 
 function normalizeLiteral(value: string): string {

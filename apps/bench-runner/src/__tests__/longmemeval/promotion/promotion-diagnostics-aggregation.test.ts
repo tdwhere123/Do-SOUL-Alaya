@@ -19,6 +19,22 @@ describe("promotion-grade recall-eval diagnostics verification", () => {
       .resolves.toMatchObject({ runtime: { embedding_supplement: { enabled: false } } });
   });
 
+  it("promotes a scorable evidence-only hit through KPI and diagnostics verification", async () => {
+    const fixture = fixtureEvidence(false, null, true);
+
+    expect(fixture.payload).toMatchObject({
+      answerable_evaluated_count: 2,
+      kpi: { r_at_5: 1 }
+    });
+    await expect(verifyFixture(
+      fixture.payload,
+      fixture.diagnostics,
+      fixture.rank,
+      fixture.goldByQuestion,
+      fixture.measurementByQuestion
+    )).resolves.toBeDefined();
+  });
+
   it("rejects a question beyond the bound evidence count before row parsing", async () => {
     const fixture = fixtureEvidence();
     const document = JSON.parse(fixture.diagnostics) as { questions: unknown[] };

@@ -15,13 +15,14 @@ import {
 import type { CompileSeedExtractionStats } from "../longmemeval/compile-seed.js";
 import { toSeedExtractionPathKpi } from "../longmemeval/compile-seed.js";
 import {
-  buildLongMemEvalFullGoldCoverage,
   buildLongMemEvalQualityMetrics,
   rAt5WithProviderReturned,
   summarizeLongMemEvalRecallEvidence,
   summarizeProviderStates,
   type LongMemEvalDiagnosticsSidecar
 } from "../longmemeval/diagnostics.js";
+import { buildLongMemEvalDetailedGoldCoverage } from
+  "../longmemeval/diagnostics/diagnostics-full-gold-coverage.js";
 import { aggregateRecallTokenEconomy } from "../longmemeval/qa/recall-token-economy.js";
 import { RECALL_PIPELINE_VERSION } from "../shared/version.js";
 import type { LocomoSample } from "./dataset.js";
@@ -230,7 +231,9 @@ function buildLocomoKpi(
       answer_turns_truncated: 0,
       seed_chars_clipped: 0
     },
-    full_gold_coverage: buildLongMemEvalFullGoldCoverage(input.aggregate.questionDiagnostics),
+    full_gold_coverage: buildLongMemEvalDetailedGoldCoverage(
+      input.aggregate.questionDiagnostics
+    ),
     quality_metrics: buildLongMemEvalQualityMetrics(input.aggregate.questionDiagnostics),
     per_scenario: input.aggregate.perScenario
   };

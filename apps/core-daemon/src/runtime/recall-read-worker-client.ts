@@ -184,6 +184,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
     }),
     findByEvidenceRefs: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
       await this.request("memory.findByEvidenceRefs", { workspaceId, evidenceObjectIds }),
+    findBoundEvidenceRefs: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
+      await this.request("memory.findBoundEvidenceRefs", { workspaceId, evidenceObjectIds }),
     findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
       await this.request("memory.findByIds", { workspaceId, objectIds })
   };

@@ -1,8 +1,7 @@
 import type { KpiPayload, PerScenarioRow } from "@do-soul/alaya-eval";
-import {
-  buildLongMemEvalFullGoldCoverage,
-  type LongMemEvalQuestionDiagnostic
-} from "../../longmemeval/diagnostics.js";
+import type { LongMemEvalQuestionDiagnostic } from "../../longmemeval/diagnostics.js";
+import { buildLongMemEvalDetailedGoldCoverage } from
+  "../../longmemeval/diagnostics/diagnostics-full-gold-coverage.js";
 
 export function buildMergedFullGoldCoverage(
   questionDiagnostics: readonly LongMemEvalQuestionDiagnostic[],
@@ -11,7 +10,7 @@ export function buildMergedFullGoldCoverage(
   if (!hasModernFullGoldDiagnosticsSet(questionDiagnostics, perScenario)) {
     return undefined;
   }
-  return buildLongMemEvalFullGoldCoverage(questionDiagnostics);
+  return buildLongMemEvalDetailedGoldCoverage(questionDiagnostics);
 }
 
 function hasModernFullGoldDiagnosticsSet(

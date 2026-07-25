@@ -19,7 +19,7 @@ import {
 import {
   buildDeliveredResults,
   buildGoldUsageReport,
-  collectDeliveredGoldObjectIds
+  collectDeliveredGoldObjectIdentities
 } from "../qa/question-recall-support.js";
 import type {
   LongMemEvalCrossQuestionRunOptions,
@@ -27,6 +27,8 @@ import type {
   SidecarEntry
 } from "../crossquestion.js";
 import { requireLongMemEvalTimestamp } from "../ingestion/source-time.js";
+import { isSeededMemoryResult } from
+  "../../harness/daemon/seed/daemon-seed-results.js";
 
 interface CrossQuestionSeedStats {
   seedTurnsTruncated: number;
@@ -117,6 +119,7 @@ async function seedCrossQuestionRound(
     seedIndex: stats.seedIndex,
     workspaceId: input.daemon.workspaceId,
     runId: input.daemon.runId,
+    sourceEvidenceFallback: "disabled",
     ...(previousTurnSeedMemoryIds.length === 0
       ? {}
       : { sourceMemoryRefs: previousTurnSeedMemoryIds })
@@ -148,6 +151,7 @@ function addCrossQuestionSeedEntries(
   seedResult: Awaited<ReturnType<CompileSeedRunner["seedTurn"]>>
 ): void {
   for (const seed of seedResult.seeds) {
+    if (!isSeededMemoryResult(seed)) continue;
     sidecar.set(seed.memoryId, { questionId, sessionId, hasAnswer });
   }
 }
@@ -207,7 +211,7 @@ function resolveCrossQuestionRecallOutcome(
   scoreSidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>,
   answerSessionSet: ReadonlySet<string>
 ) {
-  const usedGoldObjectIds = collectDeliveredGoldObjectIds({
+  const usedGoldObjectIdentities = collectDeliveredGoldObjectIdentities({
     results: recallResult.results,
     sidecar: scoreSidecar,
     answerSessionIds: answerSessionSet
@@ -223,7 +227,7 @@ function resolveCrossQuestionRecallOutcome(
     reportInput: buildGoldUsageReport({
       deliveryId: recallResult.delivery_id,
       results: recallResult.results,
-      usedGoldObjectIds,
+      usedGoldObjectIdentities,
       turnIndex: input.questionIndex + 1,
       questionText: input.question.question,
       successReason: `LongMemEval cross-question #${input.questionIndex + 1}: gold pointer delivered.`,

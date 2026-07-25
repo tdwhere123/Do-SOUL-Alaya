@@ -19,7 +19,9 @@ import type {
   BenchSignalSeedInput,
   BenchSynthesisSeedInput,
   CompileSeedBatchResult,
+  SeededEvidenceResult,
   SeededMemoryResult,
+  SeededObjectResult,
   SeededSynthesisResult
 } from "./seed/daemon-seed-types.js";
 import type { BenchTokenMetrics } from "../token/token-metrics.js";
@@ -31,7 +33,9 @@ export type {
   CompileSeedBatchResult,
   CompileSeedDropReason,
   CompileSeedSignalDrop,
+  SeededEvidenceResult,
   SeededMemoryResult,
+  SeededObjectResult,
   SeededSynthesisResult
 } from "./seed/daemon-seed-types.js";
 export type {

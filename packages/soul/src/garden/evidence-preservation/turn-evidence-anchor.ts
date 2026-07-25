@@ -1,19 +1,23 @@
+import { createHash } from "node:crypto";
 import {
   CandidateMemorySignalSchema,
   SignalKind,
   SignalSource,
   SignalState,
-  type CandidateMemorySignal
+  buildGardenSourceTurnFallbackReceiptPreimage,
+  formatGardenSourceTurnFallbackArtifactRef,
+  formatGardenSourceTurnFallbackSourceHash,
+  verifyGardenSourceTurnFallbackReceipt,
+  type CandidateMemorySignal,
+  type GardenSourceTurnFallbackReason,
+  type GardenSourceTurnFallbackReceiptInput
 } from "@do-soul/alaya-protocol";
 
 const RAW_PAYLOAD_MAX_SERIALIZED_CHARS = 16_384;
-const GARDEN_TURN_EVIDENCE_ARTIFACT_PREFIX = "alaya:garden-turn-evidence:";
-
-type EvidenceFallbackReason = "empty_extraction" | "no_evidence_created";
 
 type EvidenceFallbackInput = Readonly<{
   turnContent: string;
-  reason: EvidenceFallbackReason;
+  reason: GardenSourceTurnFallbackReason;
   signalId: string;
   workspaceId: string;
   runId: string;
@@ -28,7 +32,7 @@ export function buildGardenTurnEvidenceFallback(
 ): CandidateMemorySignal | null {
   const normalized = input.turnContent.trim();
   if (normalized.length === 0) return null;
-  const rawPayload = buildBoundedRawPayload(normalized, input.reason);
+  const rawPayload = buildBoundedRawPayload(normalized, input);
   return CandidateMemorySignalSchema.parse({
     signal_id: input.signalId,
     workspace_id: input.workspaceId,
@@ -56,34 +60,35 @@ export function buildGardenTurnEvidenceFallback(
 export function isGardenTurnEvidenceFallback(
   signal: CandidateMemorySignal
 ): boolean {
-  if (
-    signal.source !== SignalSource.GARDEN_COMPILE ||
-    signal.signal_kind !== SignalKind.POTENTIAL_EVIDENCE_ANCHOR ||
-    signal.object_kind !== "source_turn" ||
-    signal.evidence_refs.length !== 0
-  ) return false;
-  const preservation = readRecord(signal.raw_payload.evidence_preservation);
-  return readString(signal.raw_payload.full_turn_content) !== null &&
-    preservation?.version === 1 &&
-    (preservation.reason === "empty_extraction" || preservation.reason === "no_evidence_created") &&
-    typeof preservation.truncated === "boolean" &&
-    typeof preservation.chars_clipped === "number";
+  if (!hasMaterializableFallbackState(signal.signal_state)) return false;
+  return verifyGardenSourceTurnFallbackReceipt(signal, digest) !== null;
 }
 
 export function buildGardenTurnEvidenceArtifactRef(signalId: string): string {
-  return `${GARDEN_TURN_EVIDENCE_ARTIFACT_PREFIX}${signalId}`;
+  return formatGardenSourceTurnFallbackArtifactRef(signalId);
+}
+
+export function resolveVerifiedGardenTurnEvidenceSourceHash(
+  signal: CandidateMemorySignal,
+  sourceCorpus: string
+): string | null {
+  if (!isGardenTurnEvidenceFallback(signal)) return null;
+  const receipt = verifyGardenSourceTurnFallbackReceipt(signal, digest);
+  return receipt !== null && sourceCorpus === receipt.source_corpus
+    ? formatGardenSourceTurnFallbackSourceHash(receipt.digest)
+    : null;
 }
 
 function buildBoundedRawPayload(
   content: string,
-  reason: EvidenceFallbackReason
+  input: EvidenceFallbackInput
 ): CandidateMemorySignal["raw_payload"] {
   let low = 1;
   let high = content.length;
-  let best = buildRawPayload(content.slice(0, 1), content.length, reason);
+  let best = buildRawPayload(content.slice(0, 1), content.length, input);
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
-    const candidate = buildRawPayload(content.slice(0, middle), content.length, reason);
+    const candidate = buildRawPayload(content.slice(0, middle), content.length, input);
     if (JSON.stringify(candidate).length <= RAW_PAYLOAD_MAX_SERIALIZED_CHARS) {
       best = candidate;
       low = middle + 1;
@@ -97,25 +102,60 @@ function buildBoundedRawPayload(
 function buildRawPayload(
   source: string,
   originalLength: number,
-  reason: EvidenceFallbackReason
+  input: EvidenceFallbackInput
 ) {
+  const preservation = {
+    version: 1,
+    reason: input.reason,
+    truncated: source.length < originalLength,
+    chars_clipped: originalLength - source.length
+  } as const;
   return {
     full_turn_content: source,
     evidence_preservation: {
-      version: 1,
-      reason,
-      truncated: source.length < originalLength,
-      chars_clipped: originalLength - source.length
+      ...preservation,
+      source_receipt_sha256: digest(buildGardenSourceTurnFallbackReceiptPreimage(
+        buildReceiptInput(input, source, preservation)
+      ))
     }
   };
 }
 
-function readRecord(value: unknown): Readonly<Record<string, unknown>> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : null;
+function buildReceiptInput(
+  input: EvidenceFallbackInput,
+  source: string,
+  preservation: FallbackPreservation
+): GardenSourceTurnFallbackReceiptInput {
+  return {
+    signal_id: input.signalId,
+    workspace_id: input.workspaceId,
+    run_id: input.runId,
+    surface_id: input.surfaceId,
+    created_at: input.createdAt,
+    source_observation: input.sourceObservation,
+    source_corpus: source,
+    reason: preservation.reason,
+    truncated: preservation.truncated,
+    chars_clipped: preservation.chars_clipped
+  };
 }
 
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+type FallbackPreservation = Readonly<{
+  version: 1;
+  reason: GardenSourceTurnFallbackReason;
+  truncated: boolean;
+  chars_clipped: number;
+}>;
+
+function hasMaterializableFallbackState(
+  state: CandidateMemorySignal["signal_state"]
+): boolean {
+  return state === SignalState.EMITTED ||
+    state === SignalState.NORMALIZED ||
+    state === SignalState.TRIAGED ||
+    state === SignalState.COMPILED;
+}
+
+function digest(preimage: string): string {
+  return createHash("sha256").update(preimage, "utf8").digest("hex");
 }

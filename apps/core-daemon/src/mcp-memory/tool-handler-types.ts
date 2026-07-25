@@ -135,6 +135,9 @@ export interface McpMemoryToolHandlerDependencies {
       readonly object_id: string;
       readonly object_kind: string;
       readonly schema_version: number;
+      readonly workspace_id: string;
+      readonly lifecycle_state: string;
+      readonly evidence_health_state: string;
       readonly gist: string | null;
       readonly excerpt: string | null;
     }> | null>;

@@ -35,9 +35,30 @@ export interface LongMemEvalFullGoldCoverageAccumulator {
   readonly delivery: FullGoldDeliveryAccumulator;
 }
 
+type LongMemEvalGoldCoverageSlice = Omit<FullGoldCoverage, "memory_only">;
+export type LongMemEvalDetailedGoldCoverage =
+  LongMemEvalGoldCoverageSlice & Readonly<{
+    memory_only: LongMemEvalGoldCoverageSlice;
+  }>;
+
+export function buildLongMemEvalDetailedGoldCoverage(
+  diagnostics: readonly LongMemEvalQuestionDiagnostic[]
+): LongMemEvalDetailedGoldCoverage {
+  const allObjects = buildLongMemEvalFullGoldCoverage(diagnostics);
+  return {
+    ...allObjects,
+    memory_only: buildLongMemEvalFullGoldCoverage(
+      diagnostics.map((question) => ({
+        ...question,
+        gold: question.gold.filter((gold) => gold.object_kind === "memory_entry")
+      }))
+    )
+  };
+}
+
 export function buildLongMemEvalFullGoldCoverage(
   diagnostics: readonly LongMemEvalQuestionDiagnostic[]
-): FullGoldCoverage {
+): LongMemEvalGoldCoverageSlice {
   const accumulator = createLongMemEvalFullGoldCoverageAccumulator();
   for (const question of diagnostics) {
     recordLongMemEvalFullGoldCoverage(accumulator, question);
@@ -84,7 +105,7 @@ export function recordLongMemEvalFullGoldCoverage(
 
 export function renderLongMemEvalFullGoldCoverage(
   accumulator: LongMemEvalFullGoldCoverageAccumulator
-): FullGoldCoverage {
+): LongMemEvalGoldCoverageSlice {
   const questions = accumulator.goldBearingQuestions;
   const gold = accumulator.goldTotal;
 

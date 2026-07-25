@@ -11,6 +11,7 @@ export type RecallReadWorkerOperation =
   | "memory.searchByAnchorWithinObjectIds"
   | "memory.searchByAnchorWithinTier"
   | "memory.findByEvidenceRefs"
+  | "memory.findBoundEvidenceRefs"
   | "memory.findByIds"
   | "evidence.searchByKeyword"
   | "evidence.searchManyByKeyword"

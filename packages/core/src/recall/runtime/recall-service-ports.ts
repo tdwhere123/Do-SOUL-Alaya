@@ -117,6 +117,10 @@ export interface RecallServiceMemoryRepoPort {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEntry>[]>;
+  findBoundEvidenceRefs?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]>;
   // Optional id-batch lookup; the embedding coarse-injection path resolves cosine neighbors into MemoryEntry candidates.
   findByIds?(
     workspaceId: string,

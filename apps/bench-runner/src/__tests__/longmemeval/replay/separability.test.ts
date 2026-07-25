@@ -178,6 +178,71 @@ describe("held-out separability probe", () => {
     });
   });
 
+  it("does not score a synthesis candidate as memory gold when raw ids collide", () => {
+    const questions = Array.from({ length: 6 }, (_, index) => {
+      const goldId = `shared-${index}`;
+      const template = candidate(`template-${index}`, false);
+      const rankedCandidate = (
+        objectId: string,
+        objectKind: "memory_entry" | "synthesis_capsule",
+        fusedRank: number
+      ) => ({
+        ...template,
+        object_id: objectId,
+        object_kind: objectKind,
+        candidate_key: `workspace_local:${objectKind}:${objectId}`,
+        fused_rank: fusedRank
+      });
+      return {
+        ...question(index),
+        gold: [{ object_id: goldId, object_kind: "memory_entry" }],
+        candidates: [
+          rankedCandidate(goldId, "synthesis_capsule", 1),
+          ...Array.from({ length: 5 }, (_, offset) =>
+            rankedCandidate(`distractor-${index}-${offset}`, "memory_entry", offset + 2)
+          ),
+          rankedCandidate(goldId, "memory_entry", 7)
+        ]
+      };
+    });
+    const fixture = withCohort(questions);
+
+    const report = runSeparabilityProbe(
+      { schema_version: 1, questions: fixture.questions },
+      { cohort: fixture.cohort }
+    );
+
+    expect(report.tracks.baseline.any_at_5_count).toBe(0);
+    expect(report.tracks.typed_path.any_at_5_count).toBe(0);
+    expect(report.objective_lane.guards.every(
+      (guard: { end_to_end_any_at_5_count: number }) =>
+        guard.end_to_end_any_at_5_count === 0
+    )).toBe(true);
+  });
+
+  it("defaults legacy kindless candidate and gold identities to memory_entry", () => {
+    const questions = Array.from({ length: 6 }, (_, index) => {
+      const row = question(index);
+      return {
+        ...row,
+        candidates: row.candidates.map((entry, candidateIndex) => {
+          const copy = { ...entry, fused_rank: candidateIndex + 2 };
+          if (entry.object_id !== `gold-${index}`) return copy;
+          const { object_kind: _legacyKind, ...legacyGold } = copy;
+          return { ...legacyGold, fused_rank: 1 };
+        })
+      };
+    });
+
+    const report = runSeparabilityProbe(
+      { schema_version: 1, questions },
+      { legacyPairwiseDiagnostic: true }
+    );
+
+    expect(report.tracks.baseline.any_at_5_count).toBe(6);
+    expect(report.tracks.typed_path.any_at_5_count).toBe(6);
+  });
+
   it("reports a typed-Path-unique held-out gain without calling scores probabilities", () => {
     const fixture = withCohort(Array.from({ length: 10 }, (_, i) => question(i)));
     const report = runSeparabilityProbe(

@@ -30,6 +30,7 @@ export * from "./soul/base-types.js";
 export * from "./soul/governance-subject.js";
 export * from "./soul/evidence-capsule.js";
 export * from "./soul/verified-user-assertion-receipt.js";
+export * from "./soul/garden-source-turn-fallback-receipt.js";
 export * from "./soul/memory-entry.js";
 export * from "./soul/global-memory-entry.js";
 export * from "./soul/synthesis-capsule.js";

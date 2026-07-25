@@ -7,8 +7,11 @@ import { requireLongMemEvalTimestamp } from "../ingestion/source-time.js";
 import {
   resolveLongMemEvalSeedRoundIdentity,
   resolveLongMemEvalSeedSessionIndex,
+  buildLongMemEvalRoundEvidenceRef,
   type LongMemEvalSeedRoundIdentity
 } from "../runner/question/runner-question-seeding.js";
+import { readGardenSourceTurnFallbackArtifactSignalId } from
+  "@do-soul/alaya-protocol";
 import { buildLongMemEvalQuestionRuntimeIdentity } from
   "../selection/question-runtime-identity.js";
 import {
@@ -21,6 +24,8 @@ import type {
   LongMemEvalSnapshotSidecarEntry,
   LongMemEvalSnapshotSidecarFile
 } from "./materialize.js";
+import { assertDirectSourceEvidenceClosure } from
+  "./seed-ledger/direct-source-evidence-proof.js";
 
 interface StoredObjectRow {
   readonly object_id: string;
@@ -63,6 +68,12 @@ export function assertSnapshotDatasetSubstrateIdentity(input: {
         source,
         input.duplicateObjectLabel ?? "snapshot sidecar object"
       );
+      assertDirectSourceEvidenceClosure({
+        db,
+        question: sidecar,
+        source,
+        ledger: sidecar.seedRounds ?? []
+      });
     });
   } finally {
     db.close();
@@ -101,14 +112,64 @@ function assertQuestionObjectIdentity(
 ): void {
   const expected = indexSidecarObjects(sidecar.sidecar, duplicateObjectLabel);
   const stored = readStoredObjects(db, sidecar.workspaceId);
-  if (stored.size !== expected.size) {
+  const expectedStoredCount = [...expected.values()]
+    .filter((entry) => entry.objectKind !== "evidence_capsule").length;
+  if (stored.size !== expectedStoredCount) {
     throw new Error(`snapshot sidecar DB object count mismatch for ${sidecar.questionId}`);
   }
   const evidence = readStoredEvidence(db, sidecar.workspaceId);
+  assertNoMemoryEvidenceIdCollision(stored, evidence, sidecar.questionId);
   for (const entry of expected.values()) {
+    if (entry.objectKind === "evidence_capsule") {
+      assertEvidenceAnswerIdentity(evidence.get(entry.objectId), entry, sidecar, source);
+      continue;
+    }
     const row = stored.get(objectIdentity(entry.objectKind, entry.objectId));
     if (row === undefined) throw new Error(`snapshot sidecar DB object missing ${entry.objectId}`);
     assertStoredObjectIdentity(row, entry, sidecar, source, evidence);
+  }
+}
+
+function assertNoMemoryEvidenceIdCollision(
+  stored: ReadonlyMap<string, StoredObjectRow>,
+  evidence: ReadonlyMap<string, StoredEvidenceRow>,
+  questionId: string
+): void {
+  for (const row of stored.values()) {
+    if (row.object_kind === "memory_entry" && evidence.has(row.object_id)) {
+      throw new Error(
+        `snapshot DB cross-kind object id collision for ${questionId}: ${row.object_id}`
+      );
+    }
+  }
+}
+
+function assertEvidenceAnswerIdentity(
+  row: StoredEvidenceRow | undefined,
+  entry: LongMemEvalSnapshotSidecarEntry,
+  question: LongMemEvalSnapshotQuestion,
+  source: LongMemEvalQuestion
+): void {
+  const rounds = entry.sourceRounds;
+  const round = rounds?.[0];
+  if (row === undefined || row.object_kind !== "evidence_capsule" ||
+      row.workspace_id !== question.workspaceId || row.run_id !== question.runId ||
+      rounds === undefined || rounds.length !== 1 || round === undefined ||
+      !matchesCanonicalSource(round, source) ||
+      entry.sessionId !== round.sessionId || entry.hasAnswer !== round.hasAnswer ||
+      (row.surface_id !== null && row.surface_id !== round.sessionId)) {
+    throw new Error(`evidence_capsule answer marker mismatch for ${entry.objectId}`);
+  }
+  const anchor = parseRecord(row.physical_anchor, `physical anchor ${entry.objectId}`);
+  const evidenceRef = buildLongMemEvalRoundEvidenceRef(
+    source.question_id,
+    round.sessionIndex,
+    round.roundIndex
+  );
+  if (readGardenSourceTurnFallbackArtifactSignalId(
+    typeof anchor.artifact_ref === "string" ? anchor.artifact_ref : null
+  ) !== evidenceRef) {
+    throw new Error(`evidence_capsule source round mismatch for ${entry.objectId}`);
   }
 }
 

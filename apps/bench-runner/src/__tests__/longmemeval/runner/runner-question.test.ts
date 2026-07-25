@@ -236,6 +236,54 @@ describe("buildQaDeliveredCandidates sourceRank honesty", () => {
     });
     expect(goldOnly[0]?.sourceRank).toBeUndefined();
   });
+
+  it("delivers source evidence content without borrowing a same-id memory rank", () => {
+    const results = [
+      { object_id: "shared-object", object_kind: "memory_entry" },
+      { object_id: "shared-object", object_kind: "evidence_capsule" }
+    ];
+    const byIdentity = new Map([
+      ["memory_entry:shared-object", {
+        content: "memory distractor",
+        sessionId: "other-session"
+      }],
+      ["evidence_capsule:shared-object", {
+        content: "assistant source answer",
+        sessionId: "answer-session"
+      }]
+    ]);
+
+    const { deliveryCandidates, goldOnly } = buildQaDeliveredCandidates({
+      results,
+      goldObjectIdentities: [{
+        objectId: "shared-object",
+        objectKind: "evidence_capsule"
+      }],
+      lookupMemoryEntry: (objectId) =>
+        byIdentity.get(`memory_entry:${objectId}`),
+      lookupCandidate: (objectKind, objectId) =>
+        byIdentity.get(`${objectKind}:${objectId}`)
+    });
+
+    expect(deliveryCandidates).toEqual([
+      expect.objectContaining({
+        objectKind: "memory_entry",
+        content: "memory distractor",
+        sourceRank: 1
+      }),
+      expect.objectContaining({
+        objectKind: "evidence_capsule",
+        content: "assistant source answer",
+        sourceRank: 2
+      })
+    ]);
+    expect(goldOnly).toEqual([expect.objectContaining({
+      objectId: "shared-object",
+      objectKind: "evidence_capsule",
+      content: "assistant source answer",
+      sourceRank: 2
+    })]);
+  });
 });
 
 function buildSeed(memoryId: string) {

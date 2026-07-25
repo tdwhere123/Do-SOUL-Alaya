@@ -22,7 +22,8 @@ describe("Garden turn evidence fallback", () => {
         evidence_preservation: {
           reason: "empty_extraction",
           truncated: false,
-          chars_clipped: 0
+          chars_clipped: 0,
+          source_receipt_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
         }
       }
     });
@@ -37,6 +38,7 @@ describe("Garden turn evidence fallback", () => {
     const preservation = signal?.raw_payload.evidence_preservation as Record<string, unknown>;
 
     expect(JSON.stringify(signal?.raw_payload).length).toBeLessThanOrEqual(16_384);
+    expect(isGardenTurnEvidenceFallback(signal!)).toBe(true);
     expect(preservation.truncated).toBe(true);
     expect(preservation.chars_clipped).toBeGreaterThan(0);
   });
@@ -49,6 +51,35 @@ describe("Garden turn evidence fallback", () => {
     expect(isGardenTurnEvidenceFallback({
       ...signal,
       raw_payload: { full_turn_content: "User: source turn" }
+    })).toBe(false);
+  });
+
+  it("rejects a copied receipt after source or identity mutation", () => {
+    const signal = buildFallback("Assistant: exact prior answer", "empty_extraction")!;
+
+    expect(isGardenTurnEvidenceFallback({
+      ...signal,
+      raw_payload: {
+        ...signal.raw_payload,
+        full_turn_content: "Assistant: invented replacement"
+      }
+    })).toBe(false);
+    expect(isGardenTurnEvidenceFallback({
+      ...signal,
+      workspace_id: "other-workspace"
+    })).toBe(false);
+  });
+
+  it("survives legitimate triage state transitions but not deferred ones", () => {
+    const signal = buildFallback("User: exact source turn", "empty_extraction")!;
+
+    expect(isGardenTurnEvidenceFallback({
+      ...signal,
+      signal_state: "compiled"
+    })).toBe(true);
+    expect(isGardenTurnEvidenceFallback({
+      ...signal,
+      signal_state: "deferred"
     })).toBe(false);
   });
 });

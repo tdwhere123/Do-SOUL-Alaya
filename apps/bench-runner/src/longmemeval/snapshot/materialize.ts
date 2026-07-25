@@ -69,6 +69,7 @@ export const BENCH_DAEMON_DB_FILENAME = "alaya.db";
 
 export type LongMemEvalSnapshotSidecarObjectKind =
   | "memory_entry"
+  | "evidence_capsule"
   | "synthesis_capsule";
 
 /**
@@ -90,6 +91,11 @@ export interface LongMemEvalSnapshotSeedBinding {
   readonly evidenceId: string | null;
 }
 
+export interface LongMemEvalSnapshotDirectEvidenceBinding {
+  readonly signalId: string;
+  readonly evidenceId: string;
+}
+
 export interface LongMemEvalSnapshotSeedRound {
   readonly sessionIndex: number;
   readonly roundIndex: number;
@@ -108,6 +114,7 @@ export interface LongMemEvalSnapshotSeedRound {
   readonly materializationDrop: number;
   readonly memoryObjectIds: readonly string[];
   readonly memoryBindings?: readonly LongMemEvalSnapshotSeedBinding[];
+  readonly directEvidenceBindings?: readonly LongMemEvalSnapshotDirectEvidenceBinding[];
 }
 
 /** Per-question persisted recall-scoring inputs. */
@@ -117,7 +124,7 @@ export interface LongMemEvalSnapshotQuestion {
   readonly questionDate: string;
   /** answer_session_ids from the dataset — the recall@k session filter. */
   readonly answerSessionIds: readonly string[];
-  /** Sidecar entries seeded for this question (memory_entry + synthesis). */
+  /** Sidecar entries seeded for this question across memory and capsule kinds. */
   readonly sidecar: readonly LongMemEvalSnapshotSidecarEntry[];
   /** Ordered extraction and materialization outcome for every canonical round. */
   readonly seedRounds?: readonly LongMemEvalSnapshotSeedRound[];

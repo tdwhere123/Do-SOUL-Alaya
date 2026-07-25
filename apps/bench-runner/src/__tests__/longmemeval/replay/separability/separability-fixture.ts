@@ -103,7 +103,7 @@ export function highCardinalityQuestion(index: number) {
 
 interface CohortFixtureOverride {
   readonly evaluatorStatus: "present" | "absent" | "ambiguous";
-  readonly extractionStatus: "memory_emitted" | "drop" | "unknown";
+  readonly extractionStatus: "memory_emitted" | "evidence_preserved" | "drop" | "unknown";
   readonly issue: string | null;
   readonly measurementStatus: "scorable" | "evaluator_identity_unscorable";
 }

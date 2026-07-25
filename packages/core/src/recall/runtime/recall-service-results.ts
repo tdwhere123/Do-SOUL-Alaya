@@ -108,6 +108,7 @@ export interface RecallSupplementaryData {
 
 export interface CoarseRecallCandidate {
   readonly entry: Readonly<MemoryEntry>;
+  readonly answerRerankText?: string;
   readonly isAdvisory?: boolean;
   readonly originPlane?: RecallOriginPlane;
   readonly sourceChannel?: string;

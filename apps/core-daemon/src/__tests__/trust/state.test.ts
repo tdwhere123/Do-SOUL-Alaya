@@ -304,7 +304,7 @@ describe("trust state recorder", () => {
     });
   });
 
-  it("rejects memory usage when the linked delivery only carried a same-id synthesis capsule", async () => {
+  it("records kind-qualified synthesis usage from the linked delivery", async () => {
     const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
     await recorder.recordDelivery(
       buildDeliveryInput("delivery-synthesis-only", {
@@ -316,20 +316,116 @@ describe("trust state recorder", () => {
     );
     appendManyWithMutation.mockClear();
 
+    const usage = await recorder.recordUsage(
+      buildUsageInput("delivery-synthesis-only", "used", {
+        used_object_ids: ["shared-object"],
+        used_objects: [
+          { object_id: "shared-object", object_kind: "synthesis_capsule" }
+        ]
+      }),
+      { expectedWorkspaceId: "workspace-1" }
+    );
+
+    expect(usage.used_objects).toEqual([
+      { object_id: "shared-object", object_kind: "synthesis_capsule" }
+    ]);
+    expect(appendManyWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
+      expect.objectContaining({
+        payload_json: expect.objectContaining({
+          used_objects: [
+            { object_id: "shared-object", object_kind: "synthesis_capsule" }
+          ]
+        })
+      })
+    );
+  });
+
+  it("accepts kind-qualified usage when raw ids collide across delivered kinds", async () => {
+    const { recorder } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-qualified-kind", {
+        delivered_object_ids: ["shared-object"],
+        delivered_objects: [
+          { object_id: "shared-object", object_kind: "memory_entry" },
+          { object_id: "shared-object", object_kind: "evidence_capsule" }
+        ]
+      })
+    );
+
     await expect(
       recorder.recordUsage(
-        buildUsageInput("delivery-synthesis-only", "used", {
+        buildUsageInput("delivery-qualified-kind", "used", {
+          used_object_ids: ["shared-object"],
+          used_objects: [
+            { object_id: "shared-object", object_kind: "evidence_capsule" }
+          ]
+        })
+      )
+    ).resolves.toMatchObject({
+      used_objects: [
+        { object_id: "shared-object", object_kind: "evidence_capsule" }
+      ]
+    });
+  });
+
+  it("records usage for memory and evidence identities from the linked delivery", async () => {
+    const { recorder, appendManyWithMutation } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-mixed-objects", {
+        delivered_object_ids: ["memory-a", "evidence-a"],
+        delivered_objects: [
+          { object_id: "memory-a", object_kind: "memory_entry" },
+          { object_id: "evidence-a", object_kind: "evidence_capsule" }
+        ]
+      })
+    );
+    appendManyWithMutation.mockClear();
+
+    const usage = await recorder.recordUsage(
+      buildUsageInput("delivery-mixed-objects", "used", {
+        used_object_ids: ["memory-a", "evidence-a"],
+        used_objects: [
+          { object_id: "memory-a", object_kind: "memory_entry" },
+          { object_id: "evidence-a", object_kind: "evidence_capsule" }
+        ]
+      }),
+      { expectedWorkspaceId: "workspace-1" }
+    );
+
+    expect(usage.used_object_ids).toEqual(["memory-a", "evidence-a"]);
+    expect(appendManyWithMutation.mock.calls[0]?.[0]?.[0]).toEqual(
+      expect.objectContaining({
+        event_type: TrustStateEventType.MEMORY_USAGE_REPORTED,
+        payload_json: expect.objectContaining({
+          used_object_ids: ["memory-a", "evidence-a"],
+          used_objects: [
+            { object_id: "memory-a", object_kind: "memory_entry" },
+            { object_id: "evidence-a", object_kind: "evidence_capsule" }
+          ]
+        })
+      })
+    );
+  });
+
+  it("rejects ambiguous same-id delivered object kinds", async () => {
+    const { recorder } = createRecorder({ ready: true });
+    await recorder.recordDelivery(
+      buildDeliveryInput("delivery-ambiguous-kind", {
+        delivered_object_ids: ["shared-object"],
+        delivered_objects: [
+          { object_id: "shared-object", object_kind: "memory_entry" },
+          { object_id: "shared-object", object_kind: "evidence_capsule" }
+        ]
+      })
+    );
+
+    await expect(
+      recorder.recordUsage(
+        buildUsageInput("delivery-ambiguous-kind", "used", {
           used_object_ids: ["shared-object"]
-        }),
-        { expectedWorkspaceId: "workspace-1" }
+        })
       )
     ).rejects.toBeInstanceOf(TrustStateInvalidUsageProofError);
-
-    expect(appendManyWithMutation).not.toHaveBeenCalled();
-    await expect(recorder.summarize("codex")).resolves.toMatchObject({
-      delivered_count: 1,
-      used_count: 0
-    });
   });
 
   it("B3 delivered_count accumulates across calls", async () => {

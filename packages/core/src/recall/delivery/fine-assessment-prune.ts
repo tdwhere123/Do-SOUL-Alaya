@@ -274,6 +274,9 @@ function readCheapFtsScore(
   if (candidate.originPlane !== "global" && candidate.objectKind === "synthesis_capsule") {
     return clamp01(supplementaryData.synthesisFtsRanks[objectId] ?? 0);
   }
+  if (candidate.originPlane !== "global" && candidate.objectKind === "evidence_capsule") {
+    return clamp01(supplementaryData.evidenceFtsRanks[objectId] ?? 0);
+  }
   if (!isWorkspaceMemoryCandidate(candidate)) return 0;
   return Math.max(
     clamp01(supplementaryData.ftsRanks[objectId] ?? 0),

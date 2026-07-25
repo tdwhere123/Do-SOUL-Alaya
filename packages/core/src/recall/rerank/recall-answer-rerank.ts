@@ -23,7 +23,9 @@ export async function collectAnswerRelevanceScores(params: Readonly<{
   try {
     const scores = await params.service.score(
       params.queryText,
-      candidates.map((candidate) => candidate.entry.content)
+      candidates.map((candidate) =>
+        candidate.answerRerankText ?? candidate.entry.content
+      )
     );
     const failureClass = validateScores(scores, candidates.length);
     if (failureClass !== null) {

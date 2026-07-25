@@ -87,7 +87,10 @@ export function renderStageMatrix(matrix) {
 }
 
 function buildQuestionRow(question, cohort) {
-  const goldIds = cohort.evaluator_gold_identity?.object_ids ?? [];
+  const goldIdentities = goldObjectIdentityKeys(
+    question,
+    cohort.evaluator_gold_identity?.object_ids ?? []
+  );
   const poolComplete = question.candidate_pool_complete === true &&
     cohort.candidate_pool_complete === true;
   if (poolComplete) assertCompleteReplayQuestion(question, cohort);
@@ -95,7 +98,7 @@ function buildQuestionRow(question, cohort) {
   const scorable = poolComplete && primitiveScorable;
   const bestRanks = Object.fromEntries(STAGE_ORDER.map((stage) => [
     stage,
-    scorable ? bestGoldRank(question.candidates, goldIds, STAGE_FIELDS[stage]) : null
+    scorable ? bestGoldRank(question.candidates, goldIdentities, STAGE_FIELDS[stage]) : null
   ]));
   const anyGoldAtK = Object.fromEntries(STAGE_ORDER.map((stage) => [
     stage,
@@ -126,14 +129,16 @@ function buildQuestionRow(question, cohort) {
     terminal_loss: failure?.terminalLoss ?? null,
     best_gold_rank: bestRanks,
     any_gold_at_k: anyGoldAtK,
-    fused_margin: scorable ? buildFusedMargin(question.candidates, goldIds) : null
+    fused_margin: scorable ? buildFusedMargin(question.candidates, goldIdentities) : null
   };
 }
 
-function bestGoldRank(candidates, goldIds, field) {
-  const gold = new Set(goldIds);
+function bestGoldRank(candidates, goldIdentities, field) {
   const ranks = candidates
-    .filter((candidate) => gold.has(candidate.object_id) && typeof candidate[field] === "number")
+    .filter((candidate) =>
+      goldIdentities.has(candidateObjectIdentityKey(candidate)) &&
+      typeof candidate[field] === "number"
+    )
     .map((candidate) => candidate[field]);
   return ranks.length === 0 ? null : Math.min(...ranks);
 }
@@ -151,14 +156,18 @@ function classifyFailures(anyGoldAtK) {
   return { firstFailure: firstFailure ?? "final_rank", terminalLoss };
 }
 
-function buildFusedMargin(candidates, goldIds) {
-  const gold = new Set(goldIds);
+function buildFusedMargin(candidates, goldIdentities) {
   const bestGold = [...candidates]
-    .filter((candidate) => gold.has(candidate.object_id) && candidate.rank_after_fusion !== null)
+    .filter((candidate) =>
+      goldIdentities.has(candidateObjectIdentityKey(candidate)) &&
+      candidate.rank_after_fusion !== null
+    )
     .sort(compareFusionContext)[0] ?? null;
   const rankFive = [...candidates]
     .filter((candidate) => candidate.rank_after_fusion === 5)
-    .sort((left, right) => left.object_id.localeCompare(right.object_id))[0] ?? null;
+    .sort((left, right) =>
+      candidateObjectIdentityKey(left).localeCompare(candidateObjectIdentityKey(right))
+    )[0] ?? null;
   if (bestGold === null || rankFive === null) return null;
   const goldContext = fusionContext(bestGold);
   const fifthContext = fusionContext(rankFive);
@@ -170,7 +179,31 @@ function buildFusedMargin(candidates, goldIds) {
 
 function compareFusionContext(left, right) {
   return left.rank_after_fusion - right.rank_after_fusion ||
-    left.object_id.localeCompare(right.object_id);
+    candidateObjectIdentityKey(left).localeCompare(candidateObjectIdentityKey(right));
+}
+
+function goldObjectIdentityKeys(question, legacyGoldIds) {
+  const rows = Array.isArray(question.gold) ? question.gold : [];
+  if (rows.length === 0) {
+    return new Set(legacyGoldIds.map((objectId) => `memory_entry:${objectId}`));
+  }
+  return new Set(rows.flatMap((row) => {
+    const key = goldObjectIdentityKey(row);
+    return key === null ? [] : [key];
+  }));
+}
+
+function goldObjectIdentityKey(row) {
+  if (row === null || typeof row !== "object" || typeof row.object_id !== "string") return null;
+  const objectKind = row.object_kind ?? "memory_entry";
+  return objectKind === "memory_entry" || objectKind === "evidence_capsule"
+    ? `${objectKind}:${row.object_id}`
+    : null;
+}
+
+function candidateObjectIdentityKey(candidate) {
+  const objectKind = candidate.object_kind ?? "memory_entry";
+  return `${objectKind}:${candidate.object_id}`;
 }
 
 function fusionContext(candidate) {

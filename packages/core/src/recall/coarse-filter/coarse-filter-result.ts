@@ -108,6 +108,10 @@ function buildSupplementedCandidate(
 ): Readonly<CoarseRecallCandidate> {
   return Object.freeze({
     entry: draft.entry,
+    ...(draft.objectKind === undefined ? {} : { objectKind: draft.objectKind }),
+    ...(draft.answerRerankText === undefined
+      ? {}
+      : { answerRerankText: draft.answerRerankText }),
     isAdvisory,
     admissionPlanes: Object.freeze([...draft.admissionPlanes]),
     firstAdmissionPlane: draft.firstAdmissionPlane,

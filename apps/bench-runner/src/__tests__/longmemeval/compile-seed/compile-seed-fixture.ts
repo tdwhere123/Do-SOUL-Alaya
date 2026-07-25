@@ -1,4 +1,9 @@
-import type { BenchSignalSeedInput, SeededMemoryResult } from "../../../harness/daemon.js";
+import type {
+  BenchSignalSeedInput,
+  SeededMemoryResult
+} from "../../../harness/daemon.js";
+import type { SeededObjectResult } from
+  "../../../harness/daemon/seed/daemon-seed-types.js";
 import {
   type CompileSeedDaemon,
   type CompileSeedExtractionConfig
@@ -16,11 +21,33 @@ export function buildCompileSeedDaemon(
 ): CompileSeedDaemon {
   return {
     proposeMemoryFromSignal: async (input) => onSignal(input),
-    proposeMemoriesFromCompileSignals: async (inputs) => ({
-      seeds: inputs.map(onSignal),
-      dropped: []
-    }),
+    proposeMemoriesFromCompileSignals: async (inputs) => {
+      const seeds = inputs.map((input) => seedCompileInput(input, onSignal));
+      return {
+        seeds,
+        dropped: [],
+        createdEvidence: seeds.some(seedCreatedEvidence)
+      };
+    },
     proposeSynthesis: async () => ({ synthesisId: null })
+  };
+}
+
+function seedCreatedEvidence(seed: SeededObjectResult): boolean {
+  return seed.kind === "evidence_capsule" || seed.evidenceId !== null;
+}
+
+function seedCompileInput(
+  input: BenchSignalSeedInput,
+  onSignal: (input: BenchSignalSeedInput) => SeededMemoryResult
+): SeededObjectResult {
+  if (input.evidenceFallbackReason === undefined) return onSignal(input);
+  return {
+    kind: "evidence_capsule",
+    evidenceId: `evidence-${input.evidenceRef}`,
+    signalId: `signal-${input.evidenceRef}`,
+    truncated: false,
+    charsClipped: 0
   };
 }
 

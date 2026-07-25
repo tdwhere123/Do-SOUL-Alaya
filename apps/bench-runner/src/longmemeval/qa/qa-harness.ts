@@ -120,7 +120,7 @@ const JUDGE_SYSTEM =
 /** One delivered recall result with its full memory content, in rank order. */
 export interface QaDeliveredCandidate {
   readonly objectId: string;
-  readonly objectKind?: "memory_entry" | "synthesis_capsule";
+  readonly objectKind?: "memory_entry" | "synthesis_capsule" | "evidence_capsule";
   /** Full seeded content for this object_id (empty when unmapped). */
   readonly content: string;
   /**

@@ -58,6 +58,7 @@ export interface VerifiedRecallEvalDiagnostics {
 interface StreamState {
   readonly quality: ReturnType<typeof createQualityMetricsState>;
   readonly fullGold: LongMemEvalFullGoldCoverageAccumulator;
+  readonly memoryOnlyFullGold: LongMemEvalFullGoldCoverageAccumulator;
   readonly latencies: number[];
   readonly recallTokenEconomy: NonNullable<DiagnosticsRow["recall_token_economy"]>[];
   readonly tiers: Record<"hot" | "warm" | "cold", number>;
@@ -142,6 +143,7 @@ function createStreamState(): StreamState {
   return {
     quality: createQualityMetricsState(),
     fullGold: createLongMemEvalFullGoldCoverageAccumulator(),
+    memoryOnlyFullGold: createLongMemEvalFullGoldCoverageAccumulator(),
     latencies: [],
     recallTokenEconomy: [],
     tiers: { hot: 0, warm: 0, cold: 0 },
@@ -252,14 +254,14 @@ function verifyRowMeasurement(
   input: Parameters<typeof verifyRecallEvalDiagnostics>[0]
 ): VerifiedPromotionQuestionMeasurement {
   const oracle = input.measurementForQuestion(row.question_id);
-  const expectedGold = input.goldForQuestion(row.question_id);
-  if (oracle === undefined || expectedGold === undefined ||
-      !isDeepStrictEqual(oracle.goldMemoryIds, expectedGold)) {
+  const legacyMemoryGold = input.goldForQuestion(row.question_id);
+  if (oracle === undefined || legacyMemoryGold === undefined ||
+      !isDeepStrictEqual(oracle.goldMemoryIds, legacyMemoryGold)) {
     throw new Error(`snapshot measurement oracle missing for ${row.question_id}`);
   }
   return verifyPromotionQuestionMeasurement({
     diagnostic: row.diagnostics,
-    expectedGold,
+    expectedGoldIdentities: oracle.goldObjectIdentities,
     oracle
   });
 }
@@ -312,6 +314,12 @@ function recordVerifiedRow(
 ): void {
   recordQualityQuestion(state.quality, measurement.diagnostic);
   recordLongMemEvalFullGoldCoverage(state.fullGold, measurement.diagnostic);
+  recordLongMemEvalFullGoldCoverage(state.memoryOnlyFullGold, {
+    ...measurement.diagnostic,
+    gold: measurement.diagnostic.gold.filter(
+      (gold) => gold.object_kind === "memory_entry"
+    )
+  });
   state.latencies.push(row.latency_ms);
   state.recallTokenEconomy.push(row.recall_token_economy!);
   state.tiers[row.first_tier] += 1;
@@ -420,7 +428,10 @@ function assertKpiReaggregation(
     degradation_reasons: state.degradation,
     recall_token_economy: tokenEconomy,
     quality_metrics: qualityMetrics,
-    full_gold_coverage: renderLongMemEvalFullGoldCoverage(state.fullGold)
+    full_gold_coverage: {
+      ...renderLongMemEvalFullGoldCoverage(state.fullGold),
+      memory_only: renderLongMemEvalFullGoldCoverage(state.memoryOnlyFullGold)
+    }
   };
   for (const [key, value] of Object.entries(expected)) {
     assertDeepEqual(payload.kpi[key as keyof KpiPayload["kpi"]], value, `kpi.${key}`);

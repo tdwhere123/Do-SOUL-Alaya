@@ -370,6 +370,13 @@ export class MemoryEntryReadQueries {
     return await this.dynamicQueries.findByEvidenceRefs(workspaceId, evidenceObjectIds);
   }
 
+  public async findBoundEvidenceRefs(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly string[]> {
+    return await this.dynamicQueries.findBoundEvidenceRefs(workspaceId, evidenceObjectIds);
+  }
+
   public async findLowActivityActiveMemories(
     workspaceId: string
   ): Promise<readonly Readonly<MemoryEntry>[]> {

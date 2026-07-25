@@ -2,6 +2,8 @@ import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnos
 import { DiagnosticRecallResultSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 import { buildGoldDiagnostics } from "../../../longmemeval/diagnostics/gold-diagnostics.js";
+import { buildObjectIdentityKey } from
+  "../../../longmemeval/diagnostics/candidate-identity.js";
 import { cohort, streamedQuestion } from "../../cli/merge/cli-merge-evidence-fixture.js";
 
 export type MeasurementStatus =
@@ -48,8 +50,11 @@ export function promotionMeasurementDiagnostic(
     : [];
   const gold = buildGoldDiagnostics({
     goldMemoryIds: goldIds,
-    deliveredRankById: new Map(delivered.map((row) => [row.object_id, row.rank])),
-    activeConstraintRankById: new Map(),
+    deliveredRankByIdentity: new Map(delivered.map((row) => [
+      buildObjectIdentityKey(row.object_kind ?? "memory_entry", row.object_id),
+      row.rank
+    ])),
+    activeConstraintRankByIdentity: new Map(),
     diagnostics: null
   });
   const candidates = delivered.length === 0 ? [] : [promotionReplayCandidate(goldIds[0]!)];
@@ -75,6 +80,7 @@ export function promotionMeasurementDiagnostic(
       candidate_pool_complete: true,
       stage_ranks: projectedGold.map((row) => ({
         object_id: row.object_id,
+        object_kind: row.object_kind,
         fused_rank: row.fused_rank,
         rank_after_feature_rerank: row.rank_after_feature_rerank,
         rank_after_lexical_priority: row.rank_after_lexical_priority,

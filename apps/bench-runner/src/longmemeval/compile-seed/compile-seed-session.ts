@@ -1,4 +1,10 @@
-import type { BenchSynthesisSeedInput } from "../../harness/daemon.js";
+import type {
+  BenchSynthesisSeedInput
+} from "../../harness/daemon.js";
+import type { SeededObjectResult } from
+  "../../harness/daemon/seed/daemon-seed-types.js";
+import { isSeededMemoryResult } from
+  "../../harness/daemon/seed/daemon-seed-results.js";
 
 /** One seeded turn's content plus the real evidence_capsule id it materialized. */
 export interface SessionSeededTurn {
@@ -91,9 +97,11 @@ export function buildSessionSynthesisInput(input: {
  */
 export function computeNextTurnSeedRefs(
   seedResult: Readonly<{
-    readonly seeds: readonly { readonly memoryId: string }[];
+    readonly seeds: readonly SeededObjectResult[];
   }>
 ): readonly string[] {
-  const first = seedResult.seeds.length > 0 ? seedResult.seeds[0] : undefined;
-  return first !== undefined ? [first.memoryId] : [];
+  const firstMemory = seedResult.seeds.find(
+    isSeededMemoryResult
+  );
+  return firstMemory === undefined ? [] : [firstMemory.memoryId];
 }

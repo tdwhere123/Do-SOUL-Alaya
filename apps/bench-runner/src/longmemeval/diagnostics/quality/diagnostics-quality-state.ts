@@ -25,12 +25,18 @@ import {
   isDeliveredOrderNonMonotonic,
   type TopDistractorBucket
 } from "../quality/diagnostics-quality-helpers.js";
+import { readGoldObjectIds } from "../gold-object-identities.js";
 
 type GoldRankBuckets = NonNullable<QualityMetrics["gold_rank_buckets"]>;
 type GoldFacetSeparation = Omit<
   NonNullable<QualityMetrics["gold_facet_separation"]>,
   "gold_dimension_counts"
 >;
+type ObjectKindDeliveryState = NonNullable<
+  QualityMetrics["object_kind_delivery"]
+> & {
+  evidence_capsule: number;
+};
 
 export interface QualityMetricsState {
   readonly missDistribution: Record<string, number>;
@@ -45,7 +51,7 @@ export interface QualityMetricsState {
   readonly planeHitAt5Counts: Map<string, number>;
   readonly goldRankBuckets: GoldRankBuckets;
   readonly topDistractorBreakdown: Record<TopDistractorBucket, number>;
-  readonly objectKindDelivery: NonNullable<QualityMetrics["object_kind_delivery"]>;
+  readonly objectKindDelivery: ObjectKindDeliveryState;
   readonly goldFacetSeparation: GoldFacetSeparation;
   readonly goldDimensionCounts: Record<string, number>;
   readonly perGoldRankBuckets: NonNullable<QualityMetrics["per_gold_rank_buckets"]>;
@@ -97,7 +103,12 @@ export function createQualityMetricsState(): QualityMetricsState {
     planeHitAt5Counts: new Map(),
     goldRankBuckets: emptyGoldRankBucketTally(),
     topDistractorBreakdown: zeroTopDistractorBuckets(),
-    objectKindDelivery: { memory_entry: 0, synthesis_capsule: 0, total_delivered: 0 },
+    objectKindDelivery: {
+      memory_entry: 0,
+      synthesis_capsule: 0,
+      evidence_capsule: 0,
+      total_delivered: 0
+    },
     goldFacetSeparation: { separable: 0, overlapping: 0, indeterminate: 0 },
     goldDimensionCounts: {},
     perGoldRankBuckets: {
@@ -177,7 +188,12 @@ function recordQuestionBasics(
   recordMeasurementCohort(state, question, measurementStatus);
   if (measurementStatus === "scorable") recordScorableMissTaxonomy(state, question);
   else recordUnscorableReason(state, question, measurementStatus);
-  if (question.miss_classification === "candidate_absent") state.candidateAbsentCount++;
+  if (
+    question.miss_classification === "candidate_absent" &&
+    readGoldObjectIds(question).length === 0
+  ) {
+    state.candidateAbsentCount++;
+  }
   if (question.miss_classification === "no_gold") state.noGoldCount++;
   if (question.cohort_ledger?.evaluation_issue_reason === "identity_join_error" ||
       question.cohort_ledger?.evaluation_issue_reason === "evaluator_data_identity_inconsistency" ||
@@ -258,6 +274,8 @@ function recordDeliveredResults(
     state.objectKindDelivery.total_delivered++;
     if (delivered.object_kind === "synthesis_capsule") {
       state.objectKindDelivery.synthesis_capsule++;
+    } else if (delivered.object_kind === "evidence_capsule") {
+      state.objectKindDelivery.evidence_capsule++;
     } else {
       state.objectKindDelivery.memory_entry++;
     }

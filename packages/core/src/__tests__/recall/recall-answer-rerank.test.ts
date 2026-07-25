@@ -73,6 +73,20 @@ describe("collectAnswerRelevanceScores", () => {
     ]);
   });
 
+  it("sends the independent full answer text to the scorer", async () => {
+    const score = vi.fn(async () => [0.9]);
+    const fullText = `${"bounded preview filler ".repeat(40)}tail answer`;
+    await collectAnswerRelevanceScores({
+      service: { score },
+      queryText: "what is the tail answer",
+      candidates: [{ ...candidate("source", 1), answerRerankText: fullText }],
+      maxEntries: 1,
+      warn: vi.fn()
+    });
+
+    expect(score.mock.calls[0]?.[1]).toEqual([fullText]);
+  });
+
   it("reports bounded failure classes and fails closed to fusion order", async () => {
     const warn = vi.fn();
     const candidates = [candidate("a", 1), candidate("b", 2)];

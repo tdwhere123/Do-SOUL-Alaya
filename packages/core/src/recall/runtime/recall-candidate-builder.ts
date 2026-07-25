@@ -17,6 +17,7 @@ import {
   normalizeActivationScore
 } from "./recall-service-helpers.js";
 import { clampManifestationByGovernance } from "../../path-graph/path-relations/path-manifestation-policy.js";
+import { createBoundedNonMemoryPreview } from "../coarse-filter/non-memory-preview.js";
 import type { CoarseRecallCandidate, TokenEstimator } from "./recall-service-types.js";
 
 export interface BuildRecallCandidateInput {
@@ -82,16 +83,6 @@ export interface SynthesisCoarseRecallCandidateInput {
   readonly normalizedRank: number;
 }
 
-/** Delivered-content cap for a synthesis_capsule candidate: bounds the long L2 summary to a memory-entry-comparable budget share. FTS still indexes the full summary (migration 079); only the delivered excerpt is clipped. */
-const SYNTHESIS_RECALL_PREVIEW_CHARS = 600;
-
-function clipSynthesisSummary(summary: string): string {
-  const trimmed = summary.trim();
-  return trimmed.length > SYNTHESIS_RECALL_PREVIEW_CHARS
-    ? `${trimmed.slice(0, SYNTHESIS_RECALL_PREVIEW_CHARS).trimEnd()}…`
-    : trimmed;
-}
-
 export function buildSynthesisCoarseRecallCandidate(
   input: SynthesisCoarseRecallCandidateInput
 ): Readonly<CoarseRecallCandidate> {
@@ -99,6 +90,7 @@ export function buildSynthesisCoarseRecallCandidate(
   const entry = buildSynthesisPseudoMemoryEntry(input.synthesis, relevance);
   return Object.freeze({
     entry,
+    answerRerankText: input.synthesis.summary,
     objectKind: "synthesis_capsule" as const,
     originPlane: "workspace_local" as const,
     sourceChannel: "synthesis_fts",
@@ -126,7 +118,7 @@ function buildSynthesisPseudoMemoryEntry(
     source_kind: "compiler" as const,
     formation_kind: "derived" as const,
     scope_class: "project" as const,
-    content: clipSynthesisSummary(synthesis.summary),
+    content: createBoundedNonMemoryPreview(synthesis.summary),
     domain_tags: Object.freeze(["synthesis", synthesis.topic_key]),
     evidence_refs: Object.freeze([...synthesis.evidence_refs]),
     workspace_id: synthesis.workspace_id,

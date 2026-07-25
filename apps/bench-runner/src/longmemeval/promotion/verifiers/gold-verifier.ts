@@ -19,6 +19,10 @@ import {
   deriveQuestionEvaluationIssueReason,
   deriveQuestionExtractionMaterialization
 } from "../../diagnostics/diagnostics-cohort.js";
+import {
+  buildGoldObjectIds,
+  type LongMemEvalGoldObjectIdentity
+} from "../../diagnostics/gold-object-identities.js";
 
 export interface VerifiedPromotionHits {
   readonly hitAt1: boolean;
@@ -28,38 +32,44 @@ export interface VerifiedPromotionHits {
 
 export function verifyPromotionGoldEvidence(input: {
   readonly question: LongMemEvalQuestionDiagnostic;
-  readonly expectedGold: readonly string[];
+  readonly expectedGold?: readonly string[];
+  readonly expectedGoldIdentities?: readonly LongMemEvalGoldObjectIdentity[];
   readonly scorable: boolean;
 }): VerifiedPromotionHits {
+  const expectedGold = resolveExpectedGoldIdentities(input);
   const question = input.question;
   const candidatePool = verifyPromotionCandidatePoolClosure(question);
   const candidateByIdentity = candidatePool.scoredByIdentity;
   assertDeliveredCandidateBinding(question, candidateByIdentity);
-  const deliveredRank = indexDeliveredMemoryEntries(question);
+  const deliveredRank = indexDeliveredObjects(question);
   const activeRank = indexActiveConstraints(question);
-  const expectedRows = input.expectedGold.map((objectId) => {
-    const identity = `memory_entry:${objectId}`;
-    const candidate = candidateByIdentity.get(identity);
+  const expectedRows = expectedGold.map((gold) => {
+    const key = identityKey(gold);
+    const candidate = candidateByIdentity.get(key);
     return expectedGoldProjection(
-      objectId,
+      gold,
       candidate,
-      candidate === undefined && candidatePool.finePrunedByIdentity.has(identity),
-      deliveredRank.get(objectId) ?? null,
-      activeRank.get(objectId) ?? null
+      candidate === undefined && candidatePool.finePrunedByIdentity.has(key),
+      deliveredRank.get(key) ?? null,
+      gold.objectKind === "memory_entry"
+        ? activeRank.get(gold.objectId) ?? null
+        : null
     );
   });
-  assertGoldIdentity(question, input.expectedGold);
+  assertGoldIdentity(question, expectedGold);
   assertGoldProjection(question.gold, expectedRows);
   assertGoldMissTaxonomy(question, candidatePool);
   assertStageRankProjection(question);
-  const hits = computeHits(question, new Set(input.expectedGold), input.scorable);
+  const hits = computeHits(question, new Set(
+    expectedGold.map(identityKey)
+  ), input.scorable);
   assertPersistedHits(question, hits);
   assertQuestionMissTaxonomy(question, hits.hitAt5);
   assertMissClassification(question, hits.hitAt5);
   return hits;
 }
 
-function indexDeliveredMemoryEntries(
+function indexDeliveredObjects(
   question: LongMemEvalQuestionDiagnostic
 ): ReadonlyMap<string, number> {
   const result = new Map<string, number>();
@@ -71,9 +81,7 @@ function indexDeliveredMemoryEntries(
     if (question.delivered_results.some((other, otherIndex) =>
       otherIndex < index && `${other.object_kind ?? "memory_entry"}:${other.object_id}` === key
     )) throw new Error(`recall-eval repeats delivered object ${key}`);
-    if ((row.object_kind ?? "memory_entry") === "memory_entry") {
-      result.set(row.object_id, index + 1);
-    }
+    result.set(key, index + 1);
   });
   return result;
 }
@@ -115,14 +123,15 @@ function indexActiveConstraints(
 }
 
 function expectedGoldProjection(
-  objectId: string,
+  gold: LongMemEvalGoldObjectIdentity,
   candidate: LongMemEvalReplayCandidate | undefined,
   fineAssessmentPruned: boolean,
   finalRank: number | null,
   activeRank: number | null
 ) {
   return {
-    object_id: objectId,
+    object_id: gold.objectId,
+    object_kind: gold.objectKind,
     candidate_status: finalRank !== null ? "delivered"
       : activeRank !== null ? "active_constraint_delivered"
         : candidate === undefined && !fineAssessmentPruned
@@ -205,31 +214,49 @@ function goldProjection(gold: LongMemEvalGoldDiagnostic) {
 
 function assertGoldIdentity(
   question: LongMemEvalQuestionDiagnostic,
-  expectedGold: readonly string[]
+  expectedGold: readonly LongMemEvalGoldObjectIdentity[]
 ): void {
   const ledger = question.cohort_ledger;
   assertPromotionEligibleEvaluationIdentity(question);
+  const expectedMemoryIds = idsForKind(expectedGold, "memory_entry");
+  const expectedEvidenceIds = idsForKind(expectedGold, "evidence_capsule");
+  const expectedObjectIds = buildGoldObjectIds({
+    goldMemoryIds: expectedMemoryIds,
+    goldEvidenceIds: expectedEvidenceIds
+  });
   const expectedStatus = expectedGold.length === 0 ? "absent" : "present";
   const expectedExtraction = deriveQuestionExtractionMaterialization({
-    goldMemoryIds: expectedGold,
+    goldMemoryIds: expectedMemoryIds,
+    goldEvidenceIds: expectedEvidenceIds,
+    goldObjectIds: expectedObjectIds,
     seedDropReasons: question.seed_drop_reasons
   });
   const expectedIssue = deriveQuestionEvaluationIssueReason({
     isAbstention: question.is_abstention,
     premiseInvalid: false,
-    goldMemoryIds: expectedGold,
+    goldMemoryIds: expectedMemoryIds,
+    goldEvidenceIds: expectedEvidenceIds,
+    goldObjectIds: expectedObjectIds,
     diagnosticsAvailable: question.recall_diagnostics_present,
     missTaxonomy: question.miss_taxonomy,
     seedDropReasons: question.seed_drop_reasons,
     ambiguousIdentity: false
   });
   if (ledger === undefined ||
-      !isDeepStrictEqual(question.gold_memory_ids, expectedGold) ||
-      !isDeepStrictEqual(ledger.evaluator_gold_identity.object_ids, expectedGold) ||
+      !isDeepStrictEqual(question.gold_memory_ids, expectedMemoryIds) ||
+      !isDeepStrictEqual(question.gold_evidence_ids ?? [], expectedEvidenceIds) ||
+      !isDeepStrictEqual(
+        question.gold_object_ids ?? question.gold_memory_ids,
+        expectedObjectIds
+      ) ||
+      !isDeepStrictEqual(ledger.evaluator_gold_identity.object_ids, expectedObjectIds) ||
       ledger.evaluator_gold_identity.status !== expectedStatus ||
       !isDeepStrictEqual(ledger.extraction_materialization, expectedExtraction) ||
       ledger.evaluation_issue_reason !== expectedIssue ||
-      !isDeepStrictEqual(question.gold.map((row) => row.object_id), expectedGold)) {
+      !isDeepStrictEqual(
+        question.gold.map((row) => `${row.object_kind}:${row.object_id}`),
+        expectedGold.map(identityKey)
+      )) {
     throw new Error(`recall-eval gold identity differs from snapshot for ${question.question_id}`);
   }
 }
@@ -261,7 +288,7 @@ function assertGoldMissTaxonomy(
   candidatePool: VerifiedPromotionCandidatePool
 ): void {
   for (const gold of question.gold) {
-    const identity = `memory_entry:${gold.object_id}`;
+    const identity = `${gold.object_kind}:${gold.object_id}`;
     const candidate = candidatePool.scoredByIdentity.get(identity);
     const anyObjectCandidate = findCandidateByObjectId(
       candidatePool.scoredByIdentity,
@@ -301,6 +328,7 @@ function assertQuestionMissTaxonomy(
   const expected = classifyQuestionMissTaxonomy({
     hitAt5,
     goldMemoryIds: question.gold_memory_ids,
+    goldObjectIds: question.gold_object_ids ?? question.gold_memory_ids,
     gold: question.gold,
     diagnosticsAvailable: question.recall_diagnostics_present,
     isAbstention: question.is_abstention,
@@ -314,6 +342,7 @@ function assertQuestionMissTaxonomy(
 function assertStageRankProjection(question: LongMemEvalQuestionDiagnostic): void {
   const expected = question.gold.map((gold) => ({
     object_id: gold.object_id,
+    object_kind: gold.object_kind,
     fused_rank: gold.fused_rank,
     rank_after_feature_rerank: gold.rank_after_feature_rerank,
     rank_after_lexical_priority: gold.rank_after_lexical_priority,
@@ -335,7 +364,7 @@ function computeHits(
   scorable: boolean
 ): VerifiedPromotionHits {
   const eligible = question.delivered_results.map((row) =>
-    (row.object_kind ?? "memory_entry") === "memory_entry" && gold.has(row.object_id)
+    gold.has(`${row.object_kind ?? "memory_entry"}:${row.object_id}`)
   );
   return {
     hitAt1: scorable && eligible.slice(0, 1).some(Boolean),
@@ -368,7 +397,8 @@ function classifyMiss(
   question: LongMemEvalQuestionDiagnostic,
   hitAt5: boolean
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
-  if (question.is_abstention && question.gold_memory_ids.length > 0) {
+  if (question.is_abstention &&
+      (question.gold_object_ids ?? question.gold_memory_ids).length > 0) {
     return "evaluator_identity_inconsistent";
   }
   if (question.is_abstention) return "abstention_uncalibrated";
@@ -394,4 +424,30 @@ function classifyMiss(
     return "structural_gap";
   }
   return "candidate_absent";
+}
+
+function identityKey(identity: LongMemEvalGoldObjectIdentity): string {
+  return `${identity.objectKind}:${identity.objectId}`;
+}
+
+function idsForKind(
+  identities: readonly LongMemEvalGoldObjectIdentity[],
+  objectKind: LongMemEvalGoldObjectIdentity["objectKind"]
+): readonly string[] {
+  return identities
+    .filter((identity) => identity.objectKind === objectKind)
+    .map((identity) => identity.objectId);
+}
+
+function resolveExpectedGoldIdentities(input: Readonly<{
+  readonly expectedGold?: readonly string[];
+  readonly expectedGoldIdentities?: readonly LongMemEvalGoldObjectIdentity[];
+}>): readonly LongMemEvalGoldObjectIdentity[] {
+  if (input.expectedGoldIdentities !== undefined) {
+    return input.expectedGoldIdentities;
+  }
+  return (input.expectedGold ?? []).map((objectId) => ({
+    objectId,
+    objectKind: "memory_entry"
+  }));
 }

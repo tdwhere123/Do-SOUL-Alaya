@@ -1,4 +1,4 @@
-import type { MemoryEntry } from "@do-soul/alaya-protocol";
+import type { MemoryEntry, RecallCandidate } from "@do-soul/alaya-protocol";
 import type { EmbeddingRecallSupplementResult } from "../../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01, compareMemoryEntries } from "../runtime/recall-service-helpers.js";
@@ -34,6 +34,8 @@ export const EXPANDED_QUERY_RANK_DISCOUNT = 0.6;
 
 export interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
+  readonly objectKind?: RecallCandidate["object_kind"];
+  readonly answerRerankText?: string;
   readonly admissionPlanes: readonly RecallAdmissionPlane[];
   readonly firstAdmissionPlane: RecallAdmissionPlane;
   readonly sourceChannels: readonly string[];
@@ -320,6 +322,7 @@ export function selectPreferredExpansionSeedEntries(
   // see also: packages/core/src/recall/coarse-candidates.ts:isWeakEntityOnlyDraft,
   // packages/core/src/recall/coarse-candidates.ts:selectExpansionSeedDrafts.
   return rankCoarseCandidateDrafts([...drafts.values()])
+    .filter(isMemoryDraft)
     .filter((draft) => !isWeakEntityOnlyDraft(draft))
     // semantic_supplement candidates carry no structural anchor and must not
     // seed graph_expansion; they would expand from an unrelated neighbor.
@@ -335,7 +338,8 @@ export function selectPreferredExpansionSeedEntries(
 export function selectExpansionSeedDrafts(
   drafts: ReadonlyMap<string, CoarseCandidateDraft>
 ): readonly Readonly<CoarseCandidateDraft>[] {
-  const ranked = rankCoarseCandidateDrafts([...drafts.values()]);
+  const ranked = rankCoarseCandidateDrafts([...drafts.values()])
+    .filter(isMemoryDraft);
   // invariant: a draft whose ONLY non-activation admission is entity_seed,
   // and whose strongest observed entity confidence is below the floor, must
   // not seed graph_expansion. Mirrors the confidence gate in
@@ -359,6 +363,10 @@ export function selectExpansionSeedDrafts(
     ...preferred,
     ...survivors.filter((draft) => !preferredIds.has(draft.entry.object_id))
   ].slice(0, DYNAMIC_RECALL_SEED_CAP);
+}
+
+function isMemoryDraft(draft: Readonly<CoarseCandidateDraft>): boolean {
+  return (draft.objectKind ?? "memory_entry") === "memory_entry";
 }
 
 // anchor: entity-only graph_expansion floor. A draft is "weak entity-only"
@@ -392,6 +400,7 @@ export function selectSourceProximitySeedDrafts(
     session_surface_cohort: 0
   };
   const seeds = rankCoarseCandidateDrafts([...drafts.values()])
+    .filter(isMemoryDraft)
     .map((draft) => {
       const diagnostic = scoreSourceProximitySeedDraftWithDiagnostics(draft);
       if (diagnostic.floorApplied !== "none") {

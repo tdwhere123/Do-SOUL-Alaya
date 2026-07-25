@@ -2,13 +2,15 @@ import { appendFileSync } from "node:fs";
 import type { LongMemEvalQuestion } from "../../../ingestion/dataset.js";
 import type { QaDeliveredCandidate, QaQuestionVerdict } from "../../../qa/qa-harness.js";
 import { normalizeQaDeliveryContent } from "./qa-delivery-content.js";
+import type { LongMemEvalGoldObjectIdentity } from
+  "../../../diagnostics/gold-object-identities.js";
 
 export interface QaDeliveryDiagnosticInput {
   readonly dumpPath: string;
   readonly question: LongMemEvalQuestion;
   readonly qaVerdict: QaQuestionVerdict;
-  readonly goldMemoryIds: readonly string[];
-  readonly memoryEntryCandidates: readonly QaDeliveredCandidate[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
+  readonly goldEligibleCandidates: readonly QaDeliveredCandidate[];
   readonly delivered: readonly QaDeliveredCandidate[];
 }
 
@@ -33,6 +35,7 @@ function buildQaDeliveryDiagnosticRecord(input: QaDeliveryDiagnosticInput) {
     deliveredGoldOnly: process.env.ALAYA_BENCH_DELIVER_GOLD_ONLY !== undefined,
     delivered: input.delivered.map((candidate) => ({
       objectId: candidate.objectId,
+      objectKind: candidate.objectKind ?? "memory_entry",
       ...(candidate.eventDate === undefined ? {} : { eventDate: candidate.eventDate }),
       ...(candidate.sessionId == null ? {} : { sessionId: candidate.sessionId }),
       ...(candidate.sourceRank === undefined ? {} : { sourceRank: candidate.sourceRank }),
@@ -42,14 +45,16 @@ function buildQaDeliveryDiagnosticRecord(input: QaDeliveryDiagnosticInput) {
 }
 
 function inspectQaDeliveryFailure(input: QaDeliveryDiagnosticInput) {
-  const goldIdSet = new Set(input.goldMemoryIds);
-  const widePoolGoldRanks = input.memoryEntryCandidates
+  const goldIdentities = new Set(input.goldObjectIdentities.map(identityKey));
+  const widePoolGoldRanks = input.goldEligibleCandidates
     .filter((candidate) =>
-      goldIdSet.has(candidate.objectId) && normalizeQaDeliveryContent(candidate.content).length > 0
+      goldIdentities.has(candidateIdentity(candidate)) &&
+      normalizeQaDeliveryContent(candidate.content).length > 0
     )
     .map((candidate) => candidate.sourceRank);
   const goldInWidePool = widePoolGoldRanks.length > 0;
-  const goldInDelivered = input.delivered.some((candidate) => goldIdSet.has(candidate.objectId));
+  const goldInDelivered = input.delivered.some((candidate) =>
+    goldIdentities.has(candidateIdentity(candidate)));
   const failureClass = input.qaVerdict.correct
     ? null
     : !goldInWidePool
@@ -58,4 +63,12 @@ function inspectQaDeliveryFailure(input: QaDeliveryDiagnosticInput) {
         ? "support_selector_miss"
         : "reader_miss";
   return { goldInWidePool, goldInDelivered, failureClass, widePoolGoldRanks };
+}
+
+function identityKey(identity: LongMemEvalGoldObjectIdentity): string {
+  return `${identity.objectKind}:${identity.objectId}`;
+}
+
+function candidateIdentity(candidate: QaDeliveredCandidate): string {
+  return `${candidate.objectKind ?? "memory_entry"}:${candidate.objectId}`;
 }

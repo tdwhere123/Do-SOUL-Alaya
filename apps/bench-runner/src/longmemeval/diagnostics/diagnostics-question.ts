@@ -29,19 +29,26 @@ export function buildQuestionDiagnostic(
     input.deliveredResults,
     diagnostics
   );
-  const deliveredRankById = new Map(
+  const deliveredRankByIdentity = new Map(
     deliveredResults
       .filter(isLongMemEvalGoldEligibleDiagnosticResult)
-      .map((result) => [result.object_id, result.rank] as const)
+      .map((result) => [
+        buildObjectIdentityKey(result.object_kind ?? "memory_entry", result.object_id),
+        result.rank
+      ] as const)
   );
   const activeConstraintResults = input.activeConstraintResults ?? [];
-  const activeConstraintRankById = new Map(
-    activeConstraintResults.map((result) => [result.object_id, result.rank])
+  const activeConstraintRankByIdentity = new Map(
+    activeConstraintResults.map((result) => [
+      buildObjectIdentityKey("memory_entry", result.object_id),
+      result.rank
+    ])
   );
   const gold = buildGoldDiagnostics({
     goldMemoryIds: input.goldMemoryIds,
-    deliveredRankById,
-    activeConstraintRankById,
+    goldEvidenceIds: input.goldEvidenceIds,
+    deliveredRankByIdentity,
+    activeConstraintRankByIdentity,
     diagnostics
   });
   const candidates = diagnostics === null ? [] : buildReplayCandidates(diagnostics);

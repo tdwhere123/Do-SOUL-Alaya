@@ -6,6 +6,7 @@ import {
   selectExpansionSeedDrafts,
   type CoarseCandidateDraft
 } from "../coarse-filter/coarse-candidates.js";
+import type { AddCoarseCandidate } from "../coarse-filter/coarse-filter-admission.js";
 import {
   compareGraphExpansionCandidateDrafts,
   createMutableGraphExpansionDiagnostics,
@@ -17,8 +18,6 @@ import {
 } from "./graph-expansion.js";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import type {
-  RecallAdmissionPlane,
-  RecallPathExpansionSourceDiagnostic,
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
@@ -28,15 +27,6 @@ import {
 } from "./structural-expansion-graph-frontier.js";
 import { loadEntitySeedHitBatches } from "./entity-seed-bulk-read.js";
 
-
-type CoarseCandidateAdder = (
-  entry: Readonly<MemoryEntry>,
-  plane: RecallAdmissionPlane,
-  structuralScore?: number,
-  sourceChannel?: string,
-  pathExpansionSource?: RecallPathExpansionSourceDiagnostic,
-  entityConfidence?: number
-) => boolean;
 
 type EntitySeedDescriptor = Readonly<{
   readonly surface: string;
@@ -53,7 +43,7 @@ export async function collectEntityDerivedSeeds(params: Readonly<{
   readonly workspaceId: string;
   readonly queryText: string | null;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
-  readonly addCandidate: CoarseCandidateAdder;
+  readonly addCandidate: AddCoarseCandidate;
   readonly lexicalFtsRanks: ReadonlyMap<string, number>;
   readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
   readonly memoryRepo: RecallServiceDependencies["memoryRepo"];
@@ -98,7 +88,7 @@ export async function addGraphExpansionCandidates(params: Readonly<{
   readonly workspaceId: string;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly drafts: ReadonlyMap<string, CoarseCandidateDraft>;
-  readonly addCandidate: CoarseCandidateAdder;
+  readonly addCandidate: AddCoarseCandidate;
   readonly pathExpansionPort?: RecallServiceDependencies["pathExpansionPort"];
   readonly pathProjectionAsOf?: string;
   readonly extraSeedMemoryIds?: readonly string[];
@@ -392,7 +382,9 @@ function admitEntitySeedHits(
     }
     const lexicalWeight = clamp01(params.lexicalFtsRanks.get(hit.object_id) ?? 0);
     const score = lexicalWeight > 0 ? 0 : rawScore;
-    params.addCandidate(entry, "entity_seed", score, "entity_seed", undefined, entityConfidence);
+    params.addCandidate(entry, "entity_seed", score, "entity_seed", {
+      entityConfidence
+    });
     seedConfidenceById.set(
       entry.object_id,
       Math.max(seedConfidenceById.get(entry.object_id) ?? 0, entityConfidence)

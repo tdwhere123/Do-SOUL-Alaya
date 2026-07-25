@@ -16,6 +16,11 @@ import {
   type SummaryCounts,
   type TrustCounterName
 } from "@do-soul/alaya-core";
+import {
+  validateUsageProofAgainstDelivery
+} from "./usage-proof-validation.js";
+
+export { TrustStateInvalidUsageProofError } from "./usage-proof-validation.js";
 
 const DEFAULT_WORKSPACE_ID = "trust-state";
 const DELIVERY_ENTITY_TYPE = "trust_context_delivery";
@@ -74,15 +79,6 @@ export class TrustStateUnverifiableRequiresDeliveryError extends Error {
   public constructor(public readonly agentTarget: string) {
     super(`Cannot record unverifiable trust state without prior delivery for agent ${agentTarget}.`);
     this.name = "TrustStateUnverifiableRequiresDeliveryError";
-  }
-}
-
-export class TrustStateInvalidUsageProofError extends Error {
-  public readonly code = "VALIDATION" as const;
-
-  public constructor(message: string) {
-    super(message);
-    this.name = "TrustStateInvalidUsageProofError";
   }
 }
 
@@ -207,6 +203,9 @@ export class TrustStateRecorder {
             // would fail open and grant unearned reinforcement weight.
             trust_mode: draftRecord.trust_mode ?? "automatic",
             used_object_ids: draftRecord.used_object_ids,
+            ...(draftRecord.used_objects === undefined
+              ? {}
+              : { used_objects: draftRecord.used_objects }),
             ...(draftRecord.per_anchor_usage === undefined
               ? {}
               : { per_anchor_usage: draftRecord.per_anchor_usage }),
@@ -389,58 +388,6 @@ function requireAuditEntry(entries: readonly EventLogEntry[]): EventLogEntry {
 
 function incrementCounter(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
-}
-
-function validateUsageProofAgainstDelivery(
-  record: Readonly<UsageProofRecord>,
-  delivery: Readonly<ContextDeliveryRecord>
-): void {
-  const deliveredObjectIds = new Set(delivery.delivered_object_ids);
-  for (const objectId of record.used_object_ids) {
-    if (!isMemoryEntryDelivered(delivery, objectId)) {
-      throw new TrustStateInvalidUsageProofError(
-        `Usage proof references object_id that was not delivered: ${objectId}`
-      );
-    }
-  }
-
-  const usedObjectIds = new Set(record.used_object_ids);
-  for (const usage of record.per_anchor_usage ?? []) {
-    const usageObjectKind = usage.object_kind ?? "memory_entry";
-    if (
-      delivery.delivered_objects === undefined
-        ? !deliveredObjectIds.has(usage.object_id)
-        : !delivery.delivered_objects.some(
-            (object) =>
-              object.object_id === usage.object_id &&
-              object.object_kind === usageObjectKind
-          )
-    ) {
-      throw new TrustStateInvalidUsageProofError(
-        `Per-anchor usage references object_id that was not delivered: ${usage.object_id}`
-      );
-    }
-
-    if (record.usage_state === "used" && !usedObjectIds.has(usage.object_id)) {
-      throw new TrustStateInvalidUsageProofError(
-        `Per-anchor usage references object_id that was not reported as used: ${usage.object_id}`
-      );
-    }
-  }
-}
-
-function isMemoryEntryDelivered(
-  delivery: Readonly<ContextDeliveryRecord>,
-  objectId: string
-): boolean {
-  if (delivery.delivered_objects === undefined) {
-    return delivery.delivered_object_ids.includes(objectId);
-  }
-  return delivery.delivered_objects.some(
-    (object) =>
-      object.object_id === objectId &&
-      object.object_kind === "memory_entry"
-  );
 }
 
 class InMemoryTrustStateRepo implements TrustStatePersistenceRepoPort {

@@ -103,7 +103,7 @@ export type LongMemEvalReplayCandidate = Readonly<{
 export interface FineAssessmentPrunedCandidateDiagnostic {
   readonly candidate_key: string;
   readonly origin_plane: RecallOriginPlane;
-  readonly object_kind: "memory_entry" | "synthesis_capsule";
+  readonly object_kind: RecallCandidate["object_kind"];
   readonly object_id: string;
   readonly coarse_index: number;
   readonly drop_reason: "fine_assessment_cap";

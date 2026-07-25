@@ -287,6 +287,7 @@ describe("loadDataset checksum verification", () => {
         checksum_sha256: verifiedSha,
         checksum_source: join(pinnedMetaRoot, `${VARIANT}.meta.json`)
       });
+      expect(build.payload.kpi.full_gold_coverage?.memory_only).toBeDefined();
     } finally {
       await spool.dispose();
     }

@@ -26,10 +26,16 @@ import type {
   LongMemEvalQuestionDiagnostic,
   LongMemEvalReportSideEffectSnapshot
 } from "../../diagnostics.js";
+import {
+  buildGoldObjectIdentities,
+  type LongMemEvalGoldObjectIdentity
+} from "../../diagnostics/gold-object-identities.js";
 import type { LongMemEvalQuestion } from "../../ingestion/dataset.js";
 import type { CompileSeedRunner } from "../../compile-seed.js";
 import {
+  deriveLongMemEvalGoldEvidenceIds,
   deriveLongMemEvalGoldMemoryIds,
+  deriveLongMemEvalGoldObjectIds,
   deriveLongMemEvalMemoryObjectIds,
   runLongMemEvalRecallCycle,
   type LongMemEvalReportSimulationStats
@@ -92,6 +98,9 @@ export interface LongMemEvalPreparedQuestion {
   readonly phase: ReturnType<typeof createPhaseTimer>;
   readonly seedState: LongMemEvalQuestionSeedState;
   readonly goldMemoryIds: readonly string[];
+  readonly goldEvidenceIds: readonly string[];
+  readonly goldObjectIds: readonly string[];
+  readonly goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly embeddingWarmup: BenchEmbeddingWarmupSummary | null;
   readonly queryEmbeddingWarmup: BenchQueryEmbeddingWarmupSummary | null;
   readonly snapshotQuestion: LongMemEvalSnapshotQuestion;
@@ -200,11 +209,26 @@ async function prepareLongMemEvalQuestionInWorkspace(
     seedState.sidecar,
     seedState.answerSessionSet
   );
+  const goldEvidenceIds = deriveLongMemEvalGoldEvidenceIds(
+    seedState.sidecar,
+    seedState.answerSessionSet
+  );
+  const goldObjectIds = deriveLongMemEvalGoldObjectIds(
+    seedState.sidecar,
+    seedState.answerSessionSet
+  );
+  const goldObjectIdentities = buildGoldObjectIdentities({
+    goldMemoryIds,
+    goldEvidenceIds
+  });
   return {
     questionId: input.question.question_id,
     phase,
     seedState,
     goldMemoryIds,
+    goldEvidenceIds,
+    goldObjectIds,
+    goldObjectIdentities,
     embeddingWarmup,
     queryEmbeddingWarmup,
     snapshotQuestion: buildLongMemEvalSnapshotQuestion({
@@ -221,7 +245,7 @@ async function completeLongMemEvalQuestionInWorkspace(
   prepared: LongMemEvalPreparedQuestion
 ): Promise<LongMemEvalWorkerResult> {
   const recallCycle = await runQuestionPhase(prepared.phase, "recall", () =>
-    runQuestionRecallCycle(input, workspace, prepared.goldMemoryIds)
+    runQuestionRecallCycle(input, workspace, prepared.goldObjectIdentities)
   );
   return await buildTimedQuestionResult({
     input,
@@ -234,7 +258,7 @@ async function completeLongMemEvalQuestionInWorkspace(
 function runQuestionRecallCycle(
   input: LongMemEvalQuestionRunInput,
   workspace: BenchWorkspaceHandle,
-  goldMemoryIds: readonly string[]
+  goldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[]
 ): ReturnType<typeof runLongMemEvalRecallCycle> {
   return runLongMemEvalRecallCycle({
     daemon: workspace,
@@ -242,7 +266,7 @@ function runQuestionRecallCycle(
     recallOptions: input.recallOptions,
     referenceTime: requireLongMemEvalTimestamp(input.question.question_date),
     simulateReport: input.simulateReport,
-    goldMemoryIds,
+    goldObjectIdentities,
     turnIndex: input.turnIndex,
     questionText: input.question.question
   });
@@ -265,6 +289,8 @@ async function buildTimedQuestionResult(input: {
       question: input.input.question,
       seedState: input.prepared.seedState,
       goldMemoryIds: input.prepared.goldMemoryIds,
+      goldEvidenceIds: input.prepared.goldEvidenceIds,
+      goldObjectIds: input.prepared.goldObjectIds,
       recallCycle: input.recallCycle,
       embeddingWarmup: input.prepared.embeddingWarmup,
       queryEmbeddingWarmup: input.prepared.queryEmbeddingWarmup,

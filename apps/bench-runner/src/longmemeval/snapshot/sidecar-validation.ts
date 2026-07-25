@@ -15,7 +15,7 @@ const SourceRoundSchema = z.object({
 }).strict();
 const SidecarEntrySchema = z.object({
   objectId: NonEmptyStringSchema,
-  objectKind: z.enum(["memory_entry", "synthesis_capsule"]),
+  objectKind: z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]),
   sessionId: NonEmptyStringSchema,
   hasAnswer: z.boolean(),
   sourceRounds: z.array(SourceRoundSchema).optional()
@@ -29,6 +29,10 @@ const SeedBindingSchema = z.object({
   objectId: NonEmptyStringSchema,
   signalId: NonEmptyStringSchema,
   evidenceId: NonEmptyStringSchema.nullable()
+}).strict();
+const DirectEvidenceBindingSchema = z.object({
+  signalId: NonEmptyStringSchema,
+  evidenceId: NonEmptyStringSchema
 }).strict();
 const SeedRoundSchema = z.object({
   sessionIndex: CountSchema,
@@ -47,7 +51,8 @@ const SeedRoundSchema = z.object({
   candidateAbsent: CountSchema,
   materializationDrop: CountSchema,
   memoryObjectIds: z.array(NonEmptyStringSchema),
-  memoryBindings: z.array(SeedBindingSchema).optional()
+  memoryBindings: z.array(SeedBindingSchema).optional(),
+  directEvidenceBindings: z.array(DirectEvidenceBindingSchema).optional()
 }).strict();
 const SnapshotQuestionSchema = z.object({
   questionId: NonEmptyStringSchema,

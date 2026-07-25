@@ -84,7 +84,12 @@ export function createMergeQualityMetricsState(): MergeQualityMetricsState {
     planeHitAt5Counts: new Map(),
     goldRankBuckets: emptyRankTally(),
     topDistractorBreakdown: emptyDistractorTally(),
-    objectKindDelivery: { memory_entry: 0, synthesis_capsule: 0, total_delivered: 0 },
+    objectKindDelivery: {
+      memory_entry: 0,
+      synthesis_capsule: 0,
+      evidence_capsule: 0,
+      total_delivered: 0
+    },
     goldFacetSeparation: { separable: 0, overlapping: 0, indeterminate: 0 },
     goldDimensionCounts: {},
     perGoldRankBuckets: {

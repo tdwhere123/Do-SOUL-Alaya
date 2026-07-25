@@ -154,8 +154,10 @@ export class PathPlasticityService {
     abortSignal?: AbortSignal
   ): Promise<readonly string[]> {
     if (record.usage_state === "used") {
+      const usedMemoryObjectIds = await this.resolveUsedMemoryObjectIds(record);
+      throwIfPathPlasticityAborted(abortSignal);
       return uniqueStrings([
-        ...record.used_object_ids,
+        ...usedMemoryObjectIds,
         ...(record.per_anchor_usage ?? [])
           .filter(isMemoryEntryAnchorUsage)
           .map((usage) => usage.object_id)
@@ -165,10 +167,29 @@ export class PathPlasticityService {
       return [];
     }
     const targetObjectIds = record.used_object_ids.length > 0
-      ? record.used_object_ids
+      ? selectUsedMemoryObjectIds(record)
       : await this.resolveDeliveredMemoryObjectIds(record.delivery_id);
     throwIfPathPlasticityAborted(abortSignal);
     return targetObjectIds;
+  }
+
+  private async resolveUsedMemoryObjectIds(
+    record: Readonly<UsageProofRecord>
+  ): Promise<readonly string[]> {
+    if (record.used_objects !== undefined) {
+      return selectUsedMemoryObjectIds(record);
+    }
+    const deliveredObjects =
+      await this.dependencies.usageProofReader.findDeliveredObjects?.(record.delivery_id);
+    if (deliveredObjects === undefined || deliveredObjects === null) {
+      return record.used_object_ids;
+    }
+    const deliveredMemoryIds = new Set(
+      deliveredObjects
+        .filter((object) => object.object_kind === "memory_entry")
+        .map((object) => object.object_id)
+    );
+    return record.used_object_ids.filter((objectId) => deliveredMemoryIds.has(objectId));
   }
 
   private async collectPathsTouchedByReceipt(
@@ -274,6 +295,19 @@ export class PathPlasticityService {
       }
     );
   }
+}
+
+function selectUsedMemoryObjectIds(
+  record: Readonly<UsageProofRecord>
+): readonly string[] {
+  if (record.used_objects === undefined) {
+    return record.used_object_ids;
+  }
+  return uniqueStrings(
+    record.used_objects
+      .filter((object) => object.object_kind === "memory_entry")
+      .map((object) => object.object_id)
+  );
 }
 
 function emptyPlasticityComputeResult(): PathPlasticityComputeResult {

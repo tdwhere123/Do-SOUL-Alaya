@@ -6,8 +6,11 @@ import type {
 import {
   buildLongMemEvalSidecarKey,
   isLongMemEvalGoldEligibleResult,
+  resolveLongMemEvalGoldObjectKind,
   type LongMemEvalSidecarEntry
 } from "../runner/runner-helpers.js";
+import type { LongMemEvalGoldObjectIdentity } from
+  "../diagnostics/gold-object-identities.js";
 import { isLongMemEvalGoldSource } from "../provenance/source-rounds.js";
 import { truncateExcerpt } from "../multiturn/multiturn-helpers.js";
 
@@ -43,26 +46,28 @@ function isDiagnosticScoreFactorRecord(
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function collectDeliveredGoldObjectIds(input: {
+export function collectDeliveredGoldObjectIdentities(input: {
   readonly results: readonly {
     readonly object_id: string;
     readonly object_kind?: string | null;
   }[];
   readonly sidecar: ReadonlyMap<string, LongMemEvalSidecarEntry>;
   readonly answerSessionIds: ReadonlySet<string>;
-}): readonly string[] {
-  const usedGoldObjectIds: string[] = [];
+}): readonly LongMemEvalGoldObjectIdentity[] {
+  const usedGoldObjectIdentities: LongMemEvalGoldObjectIdentity[] = [];
   for (let rank = 0; rank < input.results.length && rank < 10; rank += 1) {
     const pointer = input.results[rank];
     if (pointer === undefined || !isLongMemEvalGoldEligibleResult(pointer)) continue;
+    const objectKind = resolveLongMemEvalGoldObjectKind(pointer.object_kind);
+    if (objectKind === null) continue;
     const meta = input.sidecar.get(
-      buildLongMemEvalSidecarKey("memory_entry", pointer.object_id)
+      buildLongMemEvalSidecarKey(objectKind, pointer.object_id)
     );
     if (meta !== undefined && isLongMemEvalGoldSource(meta, input.answerSessionIds)) {
-      usedGoldObjectIds.push(pointer.object_id);
+      usedGoldObjectIdentities.push({ objectId: pointer.object_id, objectKind });
     }
   }
-  return usedGoldObjectIds;
+  return usedGoldObjectIdentities;
 }
 
 export function buildGoldUsageReport(input: {
@@ -71,27 +76,32 @@ export function buildGoldUsageReport(input: {
     readonly object_id: string;
     readonly object_kind?: string | null;
   }[];
-  readonly usedGoldObjectIds: readonly string[];
+  readonly usedGoldObjectIdentities: readonly LongMemEvalGoldObjectIdentity[];
   readonly turnIndex: number;
   readonly questionText: string;
   readonly successReason: string;
   readonly failureReason: string;
 }): BenchReportContextUsageInput {
-  const usedSet = new Set(input.usedGoldObjectIds);
-  const usageState = input.usedGoldObjectIds.length > 0 ? "used" : "skipped";
+  const usedIdentityKeys = new Set(
+    input.usedGoldObjectIdentities.map((identity) =>
+      buildLongMemEvalSidecarKey(identity.objectKind, identity.objectId))
+  );
+  const usedObjectIds = input.usedGoldObjectIdentities.map(
+    (identity) => identity.objectId
+  );
+  const usageState = usedObjectIds.length > 0 ? "used" : "skipped";
   return {
     deliveryId: input.deliveryId,
     usageState,
-    ...(input.usedGoldObjectIds.length === 0
+    ...(usedObjectIds.length === 0
       ? {}
-      : { usedObjectIds: [...input.usedGoldObjectIds] }),
+      : { usedObjectIds }),
     deliveredObjects: input.results.slice(0, 10).map((pointer) => ({
       objectId: pointer.object_id,
       objectKind: pointer.object_kind ?? "memory_entry",
-      usageStatus:
-        isLongMemEvalGoldEligibleResult(pointer) && usedSet.has(pointer.object_id)
-          ? "used"
-          : "skipped"
+      usageStatus: isUsedGoldPointer(pointer, usedIdentityKeys)
+        ? "used"
+        : "skipped"
     })),
     turnIndex: input.turnIndex,
     turnDigest: {
@@ -104,4 +114,16 @@ export function buildGoldUsageReport(input: {
     },
     reason: usageState === "used" ? input.successReason : input.failureReason
   };
+}
+
+function isUsedGoldPointer(
+  pointer: Readonly<{
+    readonly object_id: string;
+    readonly object_kind?: string | null;
+  }>,
+  usedIdentityKeys: ReadonlySet<string>
+): boolean {
+  const objectKind = resolveLongMemEvalGoldObjectKind(pointer.object_kind);
+  return objectKind !== null &&
+    usedIdentityKeys.has(buildLongMemEvalSidecarKey(objectKind, pointer.object_id));
 }

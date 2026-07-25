@@ -6,38 +6,48 @@ import type {
 } from "./schema/diagnostics-types.js";
 import { buildObjectIdentityKey } from "./schema/diagnostics-private.js";
 import { requireDeliveryMissDropReason } from "./miss/delivery-miss-taxonomy.js";
+import {
+  buildGoldObjectIdentities,
+  type LongMemEvalGoldObjectIdentity
+} from "./gold-object-identities.js";
 
 interface GoldDiagnosticInput {
   readonly goldMemoryIds: readonly string[];
-  readonly deliveredRankById: ReadonlyMap<string, number>;
-  readonly activeConstraintRankById: ReadonlyMap<string, number>;
+  readonly goldEvidenceIds?: readonly string[];
+  readonly deliveredRankByIdentity: ReadonlyMap<string, number>;
+  readonly activeConstraintRankByIdentity: ReadonlyMap<string, number>;
   readonly diagnostics: NarrowRecallDiagnostics | null;
 }
 
 export function buildGoldDiagnostics(
   input: GoldDiagnosticInput
 ): LongMemEvalGoldDiagnostic[] {
-  return input.goldMemoryIds.map((objectId) => buildGoldDiagnostic(objectId, input));
+  return buildGoldObjectIdentities(input)
+    .map((identity) => buildGoldDiagnostic(identity, input));
 }
 
 function buildGoldDiagnostic(
-  objectId: string,
+  identity: LongMemEvalGoldObjectIdentity,
   input: GoldDiagnosticInput
 ): LongMemEvalGoldDiagnostic {
-  const deliveredRank = input.deliveredRankById.get(objectId) ?? null;
-  const activeConstraintRank = input.activeConstraintRankById.get(objectId) ?? null;
+  const { objectId, objectKind } = identity;
+  const objectIdentity = buildObjectIdentityKey(objectKind, objectId);
+  const deliveredRank = input.deliveredRankByIdentity.get(objectIdentity) ?? null;
+  const activeConstraintRank =
+    input.activeConstraintRankByIdentity.get(objectIdentity) ?? null;
   const candidate = input.diagnostics?.candidatesByObjectIdentity.get(
-    buildObjectIdentityKey("memory_entry", objectId)
+    objectIdentity
   );
   const fineAssessmentPruned = candidate === undefined && input.diagnostics
     ?.fineAssessmentPrunedByObjectIdentity.has(
-      buildObjectIdentityKey("memory_entry", objectId)
+      objectIdentity
     ) === true;
   const anyObjectCandidate = input.diagnostics?.candidatesByObjectId.get(objectId);
   const anyObjectFineAssessmentPruned = anyObjectCandidate === undefined && input.diagnostics
     ?.fineAssessmentPrunedObjectIds.has(objectId) === true;
   return {
     object_id: objectId,
+    object_kind: objectKind,
     candidate_status: resolveCandidateStatus(
       deliveredRank,
       activeConstraintRank,
