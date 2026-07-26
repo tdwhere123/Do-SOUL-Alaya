@@ -203,6 +203,39 @@ describe("abstention miss classification and KPI breakdown", () => {
     expect(row.premise_invalid).toBe(false);
   });
 
+  it("keeps a dataset-declared abstention with partial gold evidence out of the answerable denominator", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "partial_gold_abs",
+      goldMemoryIds: ["partial-memory"],
+      goldEvidenceIds: ["partial-evidence"],
+      answerSessionIds: [],
+      deliveredResults: [deliveredResult(1, 0.99)],
+      hitAt1: false,
+      hitAt5: false,
+      hitAt10: false,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: { diagnostics: { candidate_pool: [] } }
+    });
+
+    expect(row.cohort_ledger).toMatchObject({
+      dataset_cohort: "abstention",
+      measurement_status: "abstention_unscorable",
+      final_verdict: "abstention_uncalibrated",
+      evaluation_issue_reason: null
+    });
+    expect(buildLongMemEvalQualityMetrics([row]).measurement_cohort_counts).toEqual({
+      evaluated: 1,
+      non_abstention: 0,
+      abstention: 1,
+      scorable_answerable: 0,
+      unscorable_answerable: 0,
+      hit_at_5: 0,
+      miss_at_5: 0
+    });
+  });
+
   it("surfaces an auditable abstention breakdown in the quality metrics", () => {
     const first = buildQuestionDiagnostic({
       questionId: "0862e8bf_abs",

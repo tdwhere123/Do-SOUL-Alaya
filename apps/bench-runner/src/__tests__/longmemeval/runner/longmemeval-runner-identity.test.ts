@@ -284,7 +284,7 @@ describe("LongMemEval runner", () => {
     });
   });
 
-  it("invalidates an abstention row that carries evaluator gold identity", () => {
+  it("keeps partial evaluator gold diagnostic-only for an abstention row", () => {
     const row = buildQuestionDiagnostic({
       questionId: "q-conflicted_abs",
       goldMemoryIds: ["memory-gold"],
@@ -300,22 +300,22 @@ describe("LongMemEval runner", () => {
     });
 
     expect(row.cohort_ledger).toMatchObject({
-      dataset_cohort: "adjudicated_invalid",
-      measurement_status: "evaluator_identity_unscorable",
-      evaluation_issue_reason: "evaluator_data_identity_inconsistency",
+      dataset_cohort: "abstention",
+      measurement_status: "abstention_unscorable",
+      evaluation_issue_reason: null,
       retrieval_status: "not_applicable",
-      final_verdict: "evaluator_data_identity_inconsistency"
+      final_verdict: "abstention_uncalibrated"
     });
-    expect(row.miss_classification).toBe("evaluator_identity_inconsistent");
+    expect(row.miss_classification).toBe("abstention_uncalibrated");
 
     const metrics = buildLongMemEvalQualityMetrics([row]);
-    expect(metrics.abstention).toMatchObject({ total: 0, unscorable: 0 });
-    expect(metrics.evaluator_identity_issue_count).toBe(1);
+    expect(metrics.abstention).toMatchObject({ total: 1, unscorable: 1 });
+    expect(metrics.evaluator_identity_issue_count).toBe(0);
     expect(metrics.evaluator_identity_issue_denominator).toBe(1);
-    expect(metrics.evaluator_identity_unscorable_count).toBe(1);
+    expect(metrics.evaluator_identity_unscorable_count).toBe(0);
     expect(metrics.evaluator_identity_unscorable_denominator).toBe(1);
     expect(metrics.miss_distribution).toMatchObject({
-      evaluator_identity_inconsistent: 1
+      abstention_uncalibrated: 1
     });
 
     const base = buildLongMemEvalArchivePayload();
@@ -325,14 +325,18 @@ describe("LongMemEval runner", () => {
       evaluated_count: 1,
       answerable_evaluated_count: 0,
       measurement_attribution: {
-        schema_version: "bench-measurement-attribution.v2",
+        schema_version: "bench-measurement-attribution.v3",
         status: "ineligible",
         gate_eligible: false,
         evidence_status: "partial",
         candidate_pool_complete: false,
         provenance_complete: false,
-        abstention_calibration_status: "not_applicable",
-        evaluator_identity_status: "invalid"
+        measurement_scope: "answerable_recall",
+        abstention_evaluation_status: "excluded_not_evaluated",
+        abstention_calibration_status: "uncalibrated",
+        abstention_gate_eligible: false,
+        abstention_evidence_status: "current_uncalibrated",
+        evaluator_identity_status: "complete"
       },
       kpi: {
         ...base.kpi,
@@ -340,7 +344,14 @@ describe("LongMemEval runner", () => {
         r_at_5: 0,
         r_at_10: 0,
         per_scenario: [
-          { id: row.question_id, version: 1, hit_at_5: false, scorable: false, tier: "hot" }
+          {
+            id: row.question_id,
+            version: 1,
+            hit_at_5: false,
+            scorable: false,
+            tier: "hot",
+            measurement_cohort: "dataset_declared_abstention"
+          }
         ],
         quality_metrics: metrics
       }
@@ -348,5 +359,45 @@ describe("LongMemEval runner", () => {
     expect(() => KpiPayloadSchema.parse(payload)).not.toThrow();
   });
 
+  it("keeps a genuine candidate identity collision auditable for an abstention row", () => {
+    const row = buildQuestionDiagnostic({
+      questionId: "q-conflicted_abs",
+      goldMemoryIds: ["memory-gold"],
+      answerSessionIds: ["session-a"],
+      deliveredResults: [{ object_id: "memory-gold", rank: 1, relevance_score: 0.9 }],
+      hitAt1: true,
+      hitAt5: true,
+      hitAt10: true,
+      isAbstention: true,
+      degradationReason: null,
+      embeddingMode: "disabled",
+      recallResult: {
+        diagnostics: {
+          candidate_pool: [
+            {
+              candidate_key: "lexical:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "lexical",
+              answer_features: answerFeatures("first canonical content")
+            },
+            {
+              candidate_key: "evidence_anchor:memory_entry:memory-gold",
+              object_id: "memory-gold",
+              object_kind: "memory_entry",
+              origin_plane: "evidence_anchor",
+              answer_features: answerFeatures("contradictory canonical content")
+            }
+          ]
+        }
+      }
+    });
 
+    expect(row.cohort_ledger).toMatchObject({
+      dataset_cohort: "abstention",
+      measurement_status: "abstention_unscorable",
+      evaluator_gold_identity: { status: "ambiguous" },
+      evaluation_issue_reason: "identity_join_error"
+    });
+  });
 });

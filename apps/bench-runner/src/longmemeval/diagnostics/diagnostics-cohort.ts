@@ -78,7 +78,7 @@ export function buildQuestionCohortLedger(input: {
   readonly missTaxonomy: LongMemEvalMissTaxonomy | null;
   readonly seedDropReasons?: LongMemEvalSeedDropReasons;
 }): LongMemEvalQuestionCohortLedger {
-  const datasetCohort = input.premiseInvalid || hasAbstentionIdentityConflict(input)
+  const datasetCohort = input.premiseInvalid
     ? "adjudicated_invalid"
     : input.isAbstention ? "abstention" : "answerable";
   const ambiguousIdentity = input.gold.some((gold) =>
@@ -159,10 +159,8 @@ export function deriveQuestionEvaluationIssueReason(input: {
   readonly seedDropReasons?: LongMemEvalSeedDropReasons;
   readonly ambiguousIdentity: boolean;
 }): LongMemEvalQuestionCohortLedger["evaluation_issue_reason"] {
-  if (hasAbstentionIdentityConflict(input)) {
-    return "evaluator_data_identity_inconsistency";
-  }
   if (input.premiseInvalid) return "adjudicated_dataset_issue";
+  if (input.ambiguousIdentity) return "identity_join_error";
   if (input.isAbstention) return null;
   if (!input.diagnosticsAvailable) return "missing_diagnostics";
   if (deriveQuestionExtractionMaterialization(input).status === "drop") {
@@ -171,7 +169,6 @@ export function deriveQuestionEvaluationIssueReason(input: {
   if ((input.goldObjectIds ?? input.goldMemoryIds).length === 0) {
     return "empty_gold_identity";
   }
-  if (input.ambiguousIdentity) return "identity_join_error";
   return input.missTaxonomy === "evaluation_or_gold_issue"
     ? "gold_taxonomy_fallthrough"
     : null;
@@ -182,24 +179,10 @@ function finalVerdict(
   cohort: LongMemEvalQuestionCohortLedger["dataset_cohort"],
   measurementStatus: LongMemEvalQuestionCohortLedger["measurement_status"]
 ): LongMemEvalQuestionCohortLedger["final_verdict"] {
-  if (hasAbstentionIdentityConflict(input)) {
-    return "evaluator_data_identity_inconsistency";
-  }
   if (cohort === "adjudicated_invalid") return "adjudicated_invalid";
   if (cohort === "abstention") return "abstention_uncalibrated";
   if (measurementStatus !== "scorable") return "evaluation_unscorable";
   return input.hitAt5 ? "hit_at_5" : "miss_at_5";
-}
-
-export function hasAbstentionIdentityConflict(
-  input: {
-    readonly isAbstention: boolean;
-    readonly goldMemoryIds?: readonly string[];
-    readonly goldObjectIds?: readonly string[];
-  }
-): boolean {
-  return input.isAbstention &&
-    (input.goldObjectIds ?? input.goldMemoryIds ?? []).length > 0;
 }
 
 function toStageRanks(gold: LongMemEvalGoldDiagnostic): LongMemEvalGoldStageRanks {

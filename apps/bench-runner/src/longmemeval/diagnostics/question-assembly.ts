@@ -1,9 +1,6 @@
 import { resolvePremiseInvalid } from "./abstention.js";
 import { classifyQuestionMissTaxonomy } from "./miss/diagnostics-miss-taxonomy.js";
-import {
-  buildQuestionCohortLedger,
-  hasAbstentionIdentityConflict
-} from "./diagnostics-cohort.js";
+import { buildQuestionCohortLedger } from "./diagnostics-cohort.js";
 import type {
   CandidateIdentityObservation,
   DiagnosticAnswerShapePlan,
@@ -129,7 +126,6 @@ function buildQuestionMissFields(
       parts.gold,
       parts.diagnostics !== null,
       input.isAbstention === true,
-      goldObjectIds,
       input.seedDropReasons
     ),
     miss_taxonomy: classifyQuestionMissTaxonomy({
@@ -367,12 +363,8 @@ function classifyMiss(
   gold: readonly LongMemEvalGoldDiagnostic[],
   diagnosticsAvailable: boolean,
   isAbstention: boolean,
-  goldObjectIds: readonly string[],
   seedDropReasons: LongMemEvalSeedDropReasons | undefined
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
-  if (hasAbstentionIdentityConflict({ isAbstention, goldObjectIds })) {
-    return "evaluator_identity_inconsistent";
-  }
   if (isAbstention) return "abstention_uncalibrated";
   if (gold.length === 0) {
     return hasLongMemEvalSeedDropReasons(seedDropReasons)

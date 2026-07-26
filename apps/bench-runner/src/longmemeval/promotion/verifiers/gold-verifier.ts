@@ -397,10 +397,6 @@ function classifyMiss(
   question: LongMemEvalQuestionDiagnostic,
   hitAt5: boolean
 ): LongMemEvalQuestionDiagnostic["miss_classification"] {
-  if (question.is_abstention &&
-      (question.gold_object_ids ?? question.gold_memory_ids).length > 0) {
-    return "evaluator_identity_inconsistent";
-  }
   if (question.is_abstention) return "abstention_uncalibrated";
   if (question.gold.length === 0) {
     return question.seed_drop_reasons !== undefined &&
