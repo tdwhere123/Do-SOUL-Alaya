@@ -109,6 +109,7 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   const { coverageOrdered, evictions } = prepareCoverageSelection(params, context);
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
+    context.supplementaryData.evidenceSemanticScoresByCandidateKey,
     context.config.budgets.max_entries, evictions,
     (candidates) => collectAdmittedCandidates(candidates, context, evictions),
     (candidate) => context.answerSupportByCandidateKey.get(
@@ -124,6 +125,7 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
         finalOrder,
         params.maxHeadDropAfterCoverage,
         evidenceHead.protectedCandidateKey,
+        evidenceHead.protectedRankLimit,
         evidenceHead.candidates
       );
   return Object.freeze({
@@ -148,6 +150,7 @@ function orderDeliveredPacket(
   accumulator: FineAssessmentAccumulator, context: FineAssessmentSelectionContext,
   finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
   maxHeadDrop: number | undefined, protectedEvidenceKey: string | null,
+  protectedEvidenceRankLimit: number | null,
   sourceCandidates: readonly FineAssessmentCandidate[]
 ): ReturnType<typeof freezeSelectedPacket> {
   const verifiedOrder = orderByFinalAuthority({
@@ -159,7 +162,8 @@ function orderDeliveredPacket(
     answerSupportByCandidateKey: context.answerSupportByCandidateKey
   });
   const candidates = retainBoundedDirectEvidenceHead(
-    verifiedOrder, protectedEvidenceKey, buildRecallCandidateSelectionKey,
+    verifiedOrder, protectedEvidenceKey, protectedEvidenceRankLimit,
+    buildRecallCandidateSelectionKey,
     context.supplementaryData.queryProbes, sourceCandidates
   );
   let usedTokens = 0;

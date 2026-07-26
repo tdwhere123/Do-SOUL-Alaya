@@ -56,6 +56,19 @@ function peerCandidates(): readonly FineAssessmentCandidate[] {
   ];
 }
 
+function withEmbeddingScore(
+  candidate: FineAssessmentCandidate,
+  embeddingSimilarity: number
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    effectiveFactors: {
+      ...candidate.effectiveFactors,
+      embedding_similarity: embeddingSimilarity
+    }
+  };
+}
+
 function select(
   candidates: readonly FineAssessmentCandidate[],
   options: Readonly<{
@@ -68,6 +81,7 @@ function select(
     readonly verifiedContexts?: NonNullable<
       ReturnType<typeof createSupplementaryData>["verifiedUserAssertionContextsByMemoryId"]
     >;
+    readonly evidenceSemanticScoresByCandidateKey?: ReadonlyMap<string, number>;
     readonly captureAnswerFeatures?: boolean;
   }> = {}
 ) {
@@ -84,7 +98,9 @@ function select(
     },
     supplementaryData: createSupplementaryData({
       queryProbes: compileRecallQueryProbes(options.query === undefined ? QUERY : options.query),
-      verifiedUserAssertionContextsByMemoryId: options.verifiedContexts
+      verifiedUserAssertionContextsByMemoryId: options.verifiedContexts,
+      evidenceSemanticScoresByCandidateKey:
+        options.evidenceSemanticScoresByCandidateKey ?? new Map()
     }),
     tokenEstimator: { estimate: vi.fn(options.estimate ?? (() => 4)) },
     rankByCandidateKey: rankMap(candidates),
@@ -149,6 +165,76 @@ describe("bounded direct-evidence answer head", () => {
         remaining_tokens: 80
       }
     });
+  });
+
+  it("uses one semantic-leading capsule for one protected head admission", () => {
+    const peers = peerCandidates().map((candidate) => withEmbeddingScore(candidate, 0.4));
+    peers[4] = {
+      ...peers[4]!,
+      entry: { ...peers[4]!.entry, content: STRONG_EVIDENCE }
+    };
+    const evidence = directEvidence("semantic-head", STRONG_EVIDENCE, 6, 0.2);
+    const result = select([...peers, evidence], {
+      evidenceSemanticScoresByCandidateKey: new Map([[evidence.fusion.candidate_key, 0.99]])
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "semantic-head",
+      "peer-1",
+      "peer-2",
+      "peer-3",
+      "peer-4"
+    ]);
+    expect(result.candidates[0]).toMatchObject({
+      object_id: "semantic-head",
+      relevance_score: 0.2
+    });
+  });
+
+  it.each([
+    {
+      name: "has no semantic score",
+      evidenceSemanticScore: undefined,
+      memoryLeaderScore: 0.4
+    },
+    {
+      name: "ties the memory semantic leader",
+      evidenceSemanticScore: 0.91,
+      memoryLeaderScore: 0.91
+    },
+    {
+      name: "trails the memory semantic leader",
+      evidenceSemanticScore: 0.9,
+      memoryLeaderScore: 0.91
+    }
+  ])("keeps the lexical path for a capsule that $name", ({
+    evidenceSemanticScore,
+    memoryLeaderScore
+  }) => {
+    const peers = peerCandidates().map((candidate, index) => withEmbeddingScore(
+      candidate,
+      index === 0 ? memoryLeaderScore : 0.4
+    ));
+    peers[4] = {
+      ...peers[4]!,
+      entry: { ...peers[4]!.entry, content: STRONG_EVIDENCE }
+    };
+    const evidence = directEvidence("semantic-fallback", STRONG_EVIDENCE, 6, 0.2);
+    const semanticScores = evidenceSemanticScore === undefined
+      ? new Map<string, number>()
+      : new Map([[evidence.fusion.candidate_key, evidenceSemanticScore]]);
+
+    const result = select([...peers, evidence], {
+      evidenceSemanticScoresByCandidateKey: semanticScores
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "peer-1",
+      "peer-2",
+      "peer-3",
+      "peer-4",
+      "peer-5"
+    ]);
   });
 
   it("does not restore a coverage-head capsule over an equally strong public fifth", () => {
@@ -235,15 +321,17 @@ describe("bounded direct-evidence answer head", () => {
   });
 
   it("preserves verified-slot authority when baseline admission has behavior support", () => {
-    const peers = peerCandidates().slice(0, 4);
+    const peers = peerCandidates().slice(0, 4).map((candidate) =>
+      withEmbeddingScore(candidate, 0.4)
+    );
     const verifiedBase = createCandidate("verified", {
       content: "I bought the bookshelf from IKEA.",
       evidence_refs: ["evidence-verified"]
     });
-    const verified = {
+    const verified = withEmbeddingScore({
       ...verifiedBase,
       fusion: { ...verifiedBase.fusion, fused_rank: 5, fused_score: 0.5 }
-    };
+    }, 0.4);
     const context = projectVerifiedUserAssertionContext({
       evidenceRef: "evidence-verified",
       entryContent: verified.entry.content,
@@ -254,7 +342,8 @@ describe("bounded direct-evidence answer head", () => {
 
     const result = select([...peers, verified, evidence], {
       verifiedContexts: { verified: context },
-      captureAnswerFeatures: true
+      captureAnswerFeatures: true,
+      evidenceSemanticScoresByCandidateKey: new Map([[evidence.fusion.candidate_key, 0.99]])
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([

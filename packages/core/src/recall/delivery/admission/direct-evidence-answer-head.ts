@@ -14,6 +14,7 @@ const DIRECT_EVIDENCE_SCORE_FLOOR = 0.2;
 const DIRECT_EVIDENCE_SCORE_MARGIN = 0.15;
 
 type DirectEvidenceHeadCandidate = Readonly<CoarseRecallCandidate & {
+  readonly effectiveFactors: Readonly<{ readonly embedding_similarity?: number }>;
   readonly fusion: RecallFusionBreakdown;
 }>;
 
@@ -28,6 +29,7 @@ type ScoredDirectEvidence<T> = Readonly<{
 export type DirectEvidenceHeadSelection<T> = Readonly<{
   readonly candidates: readonly T[];
   readonly protectedCandidateKey: string | null;
+  readonly protectedRankLimit: number | null;
 }>;
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
@@ -36,6 +38,7 @@ type BlocksEvidenceHead<T> = (candidate: T) => boolean;
 export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   queryProbes: Readonly<RecallQueryProbes>,
+  evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>,
   maxEntries: number,
   excludedCandidateKeys: ReadonlySet<string>,
   selectDelivered: SelectDelivered<T>,
@@ -45,7 +48,14 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   if (baseline.some(blocksEvidenceHead)) return unchangedSelection(candidates);
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
   if (headLimit <= 0) return unchangedSelection(candidates);
-  const scored = collectEligibleEvidence(candidates, queryProbes, excludedCandidateKeys);
+  const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
+  const semanticLeader = selectUniqueSemanticLeader(
+    candidates, evidence, evidenceSemanticScoresByCandidateKey
+  );
+  if (semanticLeader !== undefined) {
+    return selectSemanticHead(candidates, baseline, semanticLeader, selectDelivered);
+  }
+  const scored = evidence.filter((row) => row.queryScore >= DIRECT_EVIDENCE_SCORE_FLOOR);
   const headKeys = candidateKeys(baseline.slice(0, headLimit));
   const baselineKeys = candidateKeys(baseline);
   const existingHead = bestEvidence(scored.filter((row) => headKeys.has(row.candidateKey)));
@@ -61,17 +71,21 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
 export function retainBoundedDirectEvidenceHead<T>(
   candidates: readonly T[],
   protectedCandidateKey: string | null,
+  protectedRankLimit: number | null,
   keyOf: (candidate: T) => string,
   queryProbes: Readonly<RecallQueryProbes>,
   sourceCandidates: readonly DirectEvidenceHeadCandidate[]
 ): readonly T[] {
-  if (protectedCandidateKey === null) return candidates;
+  if (protectedCandidateKey === null || protectedRankLimit === null) return candidates;
   const index = candidates.findIndex((candidate) => keyOf(candidate) === protectedCandidateKey);
-  if (index < DIRECT_EVIDENCE_HEAD_LIMIT) return candidates;
+  if (index < protectedRankLimit) return candidates;
+  if (protectedRankLimit === 1) {
+    return moveToRank(candidates, index, protectedRankLimit);
+  }
   const protectedSource = findSourceCandidate(sourceCandidates, protectedCandidateKey);
   const victimSource = findSourceCandidate(
     sourceCandidates,
-    keyOf(candidates[DIRECT_EVIDENCE_HEAD_LIMIT - 1]!)
+    keyOf(candidates[protectedRankLimit - 1]!)
   );
   if (
     protectedSource === undefined ||
@@ -82,9 +96,17 @@ export function retainBoundedDirectEvidenceHead<T>(
       queryProbes
     )
   ) return candidates;
+  return moveToRank(candidates, index, protectedRankLimit);
+}
+
+function moveToRank<T>(
+  candidates: readonly T[],
+  index: number,
+  rankLimit: number
+): readonly T[] {
   const reordered = [...candidates];
   const [candidate] = reordered.splice(index, 1);
-  reordered.splice(DIRECT_EVIDENCE_HEAD_LIMIT - 1, 0, candidate!);
+  reordered.splice(rankLimit - 1, 0, candidate!);
   return Object.freeze(reordered);
 }
 
@@ -118,6 +140,24 @@ function selectAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
     ) return protectedSelection(trialOrder, promoted);
   }
   return unchangedSelection(candidates);
+}
+
+function selectSemanticHead<T extends DirectEvidenceHeadCandidate>(
+  candidates: readonly T[],
+  baseline: readonly T[],
+  leader: ScoredDirectEvidence<T>,
+  selectDelivered: SelectDelivered<T>
+): DirectEvidenceHeadSelection<T> {
+  if (candidateKeys(baseline).has(leader.candidateKey)) {
+    return protectedSelection(candidates, leader, 1);
+  }
+  const trialOrder = moveBefore(candidates, leader.candidate, baseline[0]!);
+  const replacement = resolveSingleReplacement(
+    baseline, selectDelivered(trialOrder), leader.candidateKey
+  );
+  return replacement === undefined
+    ? unchangedSelection(candidates)
+    : protectedSelection(trialOrder, leader, 1);
 }
 
 function resolveSingleReplacement<T extends DirectEvidenceHeadCandidate>(
@@ -178,7 +218,7 @@ function hasRequiredQueryMargin(
       DIRECT_EVIDENCE_SCORE_MARGIN;
 }
 
-function collectEligibleEvidence<T extends DirectEvidenceHeadCandidate>(
+function collectEvidenceCandidates<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   queryProbes: Readonly<RecallQueryProbes>,
   excludedCandidateKeys: ReadonlySet<string>
@@ -196,7 +236,6 @@ function collectEligibleEvidence<T extends DirectEvidenceHeadCandidate>(
       evidenceFtsRank > DIRECT_EVIDENCE_FTS_RANK_LIMIT
     ) return;
     const queryScore = scoreQueryEvidenceMatch(candidate.entry, queryProbes);
-    if (queryScore < DIRECT_EVIDENCE_SCORE_FLOOR) return;
     eligible.push(Object.freeze({
       candidate,
       candidateKey,
@@ -206,6 +245,24 @@ function collectEligibleEvidence<T extends DirectEvidenceHeadCandidate>(
     }));
   });
   return eligible;
+}
+
+function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
+  candidates: readonly T[],
+  evidence: readonly ScoredDirectEvidence<T>[],
+  evidenceScores: ReadonlyMap<string, number>
+): ScoredDirectEvidence<T> | undefined {
+  const ranked = candidates.flatMap((candidate) => {
+    const candidateKey = buildRecallCandidateDedupeKey(candidate);
+    const score = candidate.objectKind === "evidence_capsule"
+      ? evidenceScores.get(candidateKey)
+      : candidate.effectiveFactors.embedding_similarity;
+    return score !== undefined && Number.isFinite(score) && score > 0
+      ? [{ candidateKey, score }]
+      : [];
+  }).sort((left, right) => right.score - left.score);
+  if (ranked.length === 0 || ranked[1]?.score === ranked[0]!.score) return undefined;
+  return evidence.find((row) => row.candidateKey === ranked[0]!.candidateKey);
 }
 
 function compareScoredEvidence<T>(
@@ -218,15 +275,21 @@ function compareScoredEvidence<T>(
 }
 
 function unchangedSelection<T>(candidates: readonly T[]): DirectEvidenceHeadSelection<T> {
-  return Object.freeze({ candidates, protectedCandidateKey: null });
+  return Object.freeze({
+    candidates,
+    protectedCandidateKey: null,
+    protectedRankLimit: null
+  });
 }
 
 function protectedSelection<T>(
   candidates: readonly T[],
-  protectedEvidence: ScoredDirectEvidence<T>
+  protectedEvidence: ScoredDirectEvidence<T>,
+  protectedRankLimit = DIRECT_EVIDENCE_HEAD_LIMIT
 ): DirectEvidenceHeadSelection<T> {
   return Object.freeze({
     candidates,
-    protectedCandidateKey: protectedEvidence.candidateKey
+    protectedCandidateKey: protectedEvidence.candidateKey,
+    protectedRankLimit
   });
 }
