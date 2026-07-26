@@ -33,6 +33,28 @@ export function hasNonEmbeddingQueryEvidenceRank(
     rankIsWithin(ranks.temporal_recency, maxRank);
 }
 
+export function strictlyDominatesNonEmbeddingQueryEvidenceRanks(
+  leaderRanks: Readonly<RecallFusionStreamRanks>,
+  predecessorRanks: Readonly<RecallFusionStreamRanks>,
+  queryProbes: Readonly<RecallQueryProbes> | undefined
+): boolean {
+  const streams = queryProbes !== undefined && hasTemporalQuerySignal(queryProbes)
+    ? [...DIRECT_QUERY_EVIDENCE_STREAMS, "temporal_recency"] as const
+    : DIRECT_QUERY_EVIDENCE_STREAMS;
+  let strictlyBetter = false;
+  for (const stream of streams) {
+    const leaderRank = leaderRanks[stream];
+    const predecessorRank = predecessorRanks[stream];
+    if (predecessorRank === null) {
+      strictlyBetter ||= leaderRank !== null;
+      continue;
+    }
+    if (leaderRank === null || leaderRank > predecessorRank) return false;
+    strictlyBetter ||= leaderRank < predecessorRank;
+  }
+  return strictlyBetter;
+}
+
 export function hasQueryEvidenceContribution(
   contributions: Readonly<RecallFusionStreamContributions>,
   queryProbes: Readonly<RecallQueryProbes>

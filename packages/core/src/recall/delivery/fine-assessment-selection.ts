@@ -42,6 +42,8 @@ import {
   createFineAssessmentDiagnostic
 } from "./diagnostics/fine-assessment-diagnostics.js";
 import { orderByFinalAuthority } from "./final-order/final-authority-order.js";
+import { orderWithEmbeddingEvidenceDominance } from
+  "./final-order/embedding-evidence-dominance-order.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -161,11 +163,20 @@ function orderDeliveredPacket(
     protectedRankLimit: context.config.budgets.max_entries,
     answerSupportByCandidateKey: context.answerSupportByCandidateKey
   });
-  const candidates = retainBoundedDirectEvidenceHead(
+  const evidenceRetained = retainBoundedDirectEvidenceHead(
     verifiedOrder, protectedEvidenceKey, protectedEvidenceRankLimit,
     buildRecallCandidateSelectionKey,
     context.supplementaryData.queryProbes, sourceCandidates
   );
+  const candidates = finalOrder === "public_relevance" && maxHeadDrop === undefined
+    ? orderWithEmbeddingEvidenceDominance({
+        candidates: evidenceRetained,
+        sourceCandidates,
+        queryProbes: context.supplementaryData.queryProbes,
+        answerSupportByCandidateKey: context.answerSupportByCandidateKey,
+        keyOf: buildRecallCandidateSelectionKey
+      })
+    : evidenceRetained;
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
   const ranked = candidates.map((candidate, index) => {
