@@ -1,6 +1,9 @@
 import type { RecallPolicy, SoulRecallHostContext, TaskObjectSurface } from "@do-soul/alaya-protocol";
 import type { NodeStrategy } from "../../conversation/task-surface-builder.js";
 import type {
+  EvidenceCandidateScoringResult
+} from "../../embedding-recall/embedding-recall-service.js";
+import type {
   fineAssess,
   prepareFineAssessment
 } from "../delivery/fine-assessment.js";
@@ -71,6 +74,7 @@ export interface RecallAssessmentStageResult {
   readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
+  readonly evidenceEmbeddingScoring: Readonly<EvidenceCandidateScoringResult>;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly phaseLatencyMs: Readonly<{

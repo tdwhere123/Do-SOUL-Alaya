@@ -1,5 +1,8 @@
 import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
 import type { PreparedEmbeddingQueryHandle } from "../../embedding-recall/embedding-recall-service.js";
+import type {
+  EvidenceCandidateScoringResult
+} from "../../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import type { RecallAnswerShapePlan } from "../query/recall-answer-shape-plan.js";
 import type {
@@ -26,6 +29,7 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly deliveredCount: number;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
+  readonly evidenceEmbeddingScoring?: Readonly<EvidenceCandidateScoringResult>;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
   readonly degradationReasons?: readonly RecallDegradationReason[];
@@ -54,6 +58,7 @@ export function buildRecallDiagnostics(
     delivered_count: params.deliveredCount,
     embedding_provider_status: params.embeddingProviderStatus,
     embedding_supplement_status: params.embeddingSupplementStatus,
+    ...buildEvidenceEmbeddingDiagnostics(params.evidenceEmbeddingScoring),
     provider_degradation_reason: params.providerDegradationReason,
     ...buildAnswerRerankDiagnostics(params.answerRerankDiagnostics),
     ...buildDegradationDiagnostics(params.degradationReasons),
@@ -74,6 +79,27 @@ export function buildRecallDiagnostics(
       ? {}
       : { phase_latency_ms: Object.freeze({ ...params.phaseLatencyMs }) })
   });
+}
+
+function buildEvidenceEmbeddingDiagnostics(
+  scoring: Readonly<EvidenceCandidateScoringResult> | undefined
+): Pick<
+  RecallDiagnostics,
+  | "evidence_embedding_status"
+  | "evidence_embedding_expected_count"
+  | "evidence_embedding_scored_count"
+  | "evidence_embedding_inference_calls"
+  | "evidence_embedding_latency_ms"
+  | "evidence_embedding_failure_class"
+> {
+  return {
+    evidence_embedding_status: scoring?.status ?? "not_requested",
+    evidence_embedding_expected_count: scoring?.expectedCount ?? 0,
+    evidence_embedding_scored_count: scoring?.scoredCount ?? 0,
+    evidence_embedding_inference_calls: scoring?.inferenceCalls ?? 0,
+    evidence_embedding_latency_ms: scoring?.latencyMs ?? 0,
+    evidence_embedding_failure_class: scoring?.failureClass ?? null
+  };
 }
 
 function buildDegradationDiagnostics(

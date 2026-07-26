@@ -14,7 +14,7 @@ import {
   type Slot,
   type TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import { RecallService, type RecallServiceDependencies } from
+import { RecallService, type RecallResult, type RecallServiceDependencies } from
   "../../../recall/recall-service.js";
 
 type TierCascadeFixtureParams = Readonly<{
@@ -29,6 +29,12 @@ type TierCascadeFixtureParams = Readonly<{
     RecallServiceDependencies["memoryRepo"]["findRecallTierWindow"]
   >;
   readonly warn?: RecallServiceDependencies["warn"];
+}>;
+
+type TierCascadeRecallFixtureResult = Readonly<{
+  readonly result: RecallResult;
+  readonly findByWorkspaceIdSpy: ReturnType<typeof vi.fn>;
+  readonly warnSpy: ReturnType<typeof vi.fn>;
 }>;
 
 function createTaskSurface(): TaskObjectSurface {
@@ -210,7 +216,7 @@ function buildPolicy(service: RecallService, maxEntries: number): RecallPolicy {
 export async function recallWith(
   params: TierCascadeFixtureParams,
   maxEntries = 10
-) {
+): Promise<TierCascadeRecallFixtureResult> {
   const { dependencies, findByWorkspaceIdSpy, warnSpy } = createDependencies(params);
   const service = new RecallService(dependencies);
   const result = await service.recall({

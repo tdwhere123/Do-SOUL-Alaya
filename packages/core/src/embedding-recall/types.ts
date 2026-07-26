@@ -171,6 +171,28 @@ export interface EvidenceEmbeddingCandidate {
   readonly content: string;
 }
 
+export type EvidenceCandidateScoringStatus =
+  | "not_requested"
+  | "not_applicable"
+  | "returned"
+  | "failed";
+
+export type EvidenceCandidateScoringFailureClass =
+  | "provider_unavailable"
+  | "query_embedding_failed"
+  | "candidate_embedding_failed"
+  | "service_error";
+
+export interface EvidenceCandidateScoringResult {
+  readonly scores: ReadonlyMap<string, number>;
+  readonly status: EvidenceCandidateScoringStatus;
+  readonly expectedCount: number;
+  readonly scoredCount: number;
+  readonly inferenceCalls: number;
+  readonly latencyMs: number;
+  readonly failureClass: EvidenceCandidateScoringFailureClass | null;
+}
+
 export interface ScoreEvidenceCandidatesParams {
   readonly workspaceId: string;
   readonly runId: string | null;

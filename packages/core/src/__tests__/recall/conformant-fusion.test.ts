@@ -156,6 +156,7 @@ function buildSupplementaryData(
     pathExpansionScores: record((s) => s.path),
     pathSuppressionScores: {},
     embeddingSimilarityScores: record((s) => s.embedding),
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: record((s) => s.graphSupport),
     evidenceSupportVectorsByMemoryId: buildEvidenceSupportVectors(entries),
     budgetPenaltyFactor: 0,

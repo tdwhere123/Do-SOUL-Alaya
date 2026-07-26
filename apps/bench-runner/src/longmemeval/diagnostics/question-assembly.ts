@@ -177,6 +177,17 @@ function buildRecallTelemetryFields(
     answer_rerank_expected_count: diagnostics?.answerRerankExpectedCount ?? null,
     answer_rerank_scored_count: diagnostics?.answerRerankScoredCount ?? null,
     answer_rerank_failure_class: diagnostics?.answerRerankFailureClass ?? null,
+    evidence_embedding_status: diagnostics?.evidenceEmbeddingStatus ?? null,
+    evidence_embedding_expected_count:
+      diagnostics?.evidenceEmbeddingExpectedCount ?? null,
+    evidence_embedding_scored_count:
+      diagnostics?.evidenceEmbeddingScoredCount ?? null,
+    evidence_embedding_inference_calls:
+      diagnostics?.evidenceEmbeddingInferenceCalls ?? null,
+    evidence_embedding_latency_ms:
+      diagnostics?.evidenceEmbeddingLatencyMs ?? null,
+    evidence_embedding_failure_class:
+      diagnostics?.evidenceEmbeddingFailureClass ?? null,
     graph_expansion_plane_count_per_hop: diagnostics?.graphExpansionPlaneCountPerHop ??
       createEmptyGraphExpansionPlaneCountPerHop(),
     graph_expansion_plane_count_per_edge_type:

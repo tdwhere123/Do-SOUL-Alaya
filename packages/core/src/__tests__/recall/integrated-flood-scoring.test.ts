@@ -36,6 +36,7 @@ function supplementary(overrides: Partial<RecallSupplementaryData> = {}): Recall
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

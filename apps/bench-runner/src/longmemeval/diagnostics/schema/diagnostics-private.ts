@@ -64,6 +64,19 @@ export function readRecallDiagnostics(
     answerRerankFailureClass: readAnswerRerankFailureClass(
       record.answer_rerank_failure_class
     ),
+    evidenceEmbeddingStatus: readEvidenceEmbeddingStatus(
+      record.evidence_embedding_status
+    ),
+    evidenceEmbeddingExpectedCount:
+      readNonnegativeInteger(record.evidence_embedding_expected_count),
+    evidenceEmbeddingScoredCount:
+      readNonnegativeInteger(record.evidence_embedding_scored_count),
+    evidenceEmbeddingInferenceCalls:
+      readNonnegativeInteger(record.evidence_embedding_inference_calls),
+    evidenceEmbeddingLatencyMs: readNumber(record.evidence_embedding_latency_ms),
+    evidenceEmbeddingFailureClass: readEvidenceEmbeddingFailureClass(
+      record.evidence_embedding_failure_class
+    ),
     graphExpansionPlaneCountPerHop:
       readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
       createEmptyGraphExpansionPlaneCountPerHop(),
@@ -132,6 +145,28 @@ function readAnswerRerankFailureClass(
     failure === "service_error"
   ) return failure;
   return null;
+}
+
+function readEvidenceEmbeddingStatus(
+  value: unknown
+): NarrowRecallDiagnostics["evidenceEmbeddingStatus"] {
+  return value === "not_requested" ||
+    value === "not_applicable" ||
+    value === "returned" ||
+    value === "failed"
+    ? value
+    : null;
+}
+
+function readEvidenceEmbeddingFailureClass(
+  value: unknown
+): NarrowRecallDiagnostics["evidenceEmbeddingFailureClass"] {
+  return value === "provider_unavailable" ||
+    value === "query_embedding_failed" ||
+    value === "candidate_embedding_failed" ||
+    value === "service_error"
+    ? value
+    : null;
 }
 
 function readNonnegativeInteger(value: unknown): number | null {

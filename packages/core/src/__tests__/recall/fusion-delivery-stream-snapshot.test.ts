@@ -42,6 +42,7 @@ function supplementaryData(ids: readonly string[]): RecallSupplementaryData {
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: { [ids[0]!]: 0.8, [ids[1]!]: 0.4 },
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

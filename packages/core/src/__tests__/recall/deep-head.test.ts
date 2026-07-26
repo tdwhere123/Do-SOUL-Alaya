@@ -95,6 +95,7 @@ function emptySupplementary(overrides: {
   return {
     queryProbes: compileRecallQueryProbes(null),
     embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
+    evidenceSemanticScoresByCandidateKey: new Map<string, number>(),
     ftsRanks: overrides.ftsRanks ?? {},
     trigramFtsRanks: overrides.trigramFtsRanks ?? {},
     evidenceFtsRanks: overrides.evidenceFtsRanks ?? {},
@@ -354,8 +355,7 @@ describe("deep head", () => {
       candidates,
       relevanceByCandidateKey: scores,
       supplementaryData: {
-        evidenceGistsByMemoryId: {},
-        sourceCohortKeys: {}
+        evidenceGistsByMemoryId: {}
       }
     });
 
@@ -418,7 +418,7 @@ describe("deep head", () => {
     const packed = orderByCoverageMarginalGain({
       candidates,
       relevanceByCandidateKey: scores,
-      supplementaryData: { evidenceGistsByMemoryId: {}, sourceCohortKeys: {} }
+      supplementaryData: { evidenceGistsByMemoryId: {} }
     });
 
     expect(scores.get(observedZero.fusion.candidate_key)).toBe(0);

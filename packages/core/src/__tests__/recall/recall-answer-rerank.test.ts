@@ -74,7 +74,9 @@ describe("collectAnswerRelevanceScores", () => {
   });
 
   it("sends the independent full answer text to the scorer", async () => {
-    const score = vi.fn(async () => [0.9]);
+    const score = vi.fn(
+      async (_query: string, _passages: readonly string[]) => [0.9]
+    );
     const fullText = `${"bounded preview filler ".repeat(40)}tail answer`;
     await collectAnswerRelevanceScores({
       service: { score },

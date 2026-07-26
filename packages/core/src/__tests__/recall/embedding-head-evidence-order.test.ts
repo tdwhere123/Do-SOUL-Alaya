@@ -103,7 +103,9 @@ describe("embedding-head evidence order", () => {
     const incumbentB = candidate("incumbent-b", Number.POSITIVE_INFINITY);
     const headA = candidate("head-a", 1);
     const headB = candidate("head-b", 2);
-    const selectDelivered = vi.fn(() => [incumbentA, incumbentB]);
+    const selectDelivered = vi.fn(
+      (_excluded: ReadonlySet<string>) => [incumbentA, incumbentB]
+    );
 
     const evictions = selectEmbeddingHeadEvictions({
       candidates: [incumbentA, incumbentB, headA, headB],

@@ -744,6 +744,7 @@ function createSupplementaryData(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

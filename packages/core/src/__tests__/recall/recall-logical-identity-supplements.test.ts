@@ -270,6 +270,7 @@ function supplementary(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     evidenceSupportVectorsByMemoryId: {},
     budgetPenaltyFactor: 0,

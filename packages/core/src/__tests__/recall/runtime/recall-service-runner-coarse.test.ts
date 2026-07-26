@@ -238,6 +238,7 @@ function createStageSetup(memory: Readonly<MemoryEntry>): Readonly<{
       tokenEstimator: Object.freeze({ estimate: () => 1 }),
       queryText: "recall",
       queryProbes: compileRecallQueryProbes("recall"),
+      answerShapePlan: null,
       referenceTime: "2026-03-23T00:00:00.000Z",
       activeConstraints: Object.freeze({ constraints: Object.freeze([]), total_count: 0 }),
       winnerMemoryIds: new Set<string>()

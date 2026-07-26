@@ -355,6 +355,14 @@ export interface NarrowRecallDiagnostics {
   readonly answerRerankScoredCount: number | null;
   readonly answerRerankFailureClass:
     BenchRecallDiagnostics["answer_rerank_failure_class"] | null;
+  readonly evidenceEmbeddingStatus:
+    BenchRecallDiagnostics["evidence_embedding_status"] | null;
+  readonly evidenceEmbeddingExpectedCount: number | null;
+  readonly evidenceEmbeddingScoredCount: number | null;
+  readonly evidenceEmbeddingInferenceCalls: number | null;
+  readonly evidenceEmbeddingLatencyMs: number | null;
+  readonly evidenceEmbeddingFailureClass:
+    BenchRecallDiagnostics["evidence_embedding_failure_class"] | null;
   readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
   readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
   readonly phaseLatencyMs: LongMemEvalPhaseLatencyMs | null;

@@ -1,4 +1,9 @@
 import { collectPoolEmbeddingRescore } from "../../rerank/recall-pool-embedding-rescore.js";
+import type {
+  EmbeddingRecallRequestScoreSnapshot,
+  EmbeddingRecallSupplementResult,
+  EvidenceCandidateScoringResult
+} from "../../../embedding-recall/embedding-recall-service.js";
 import {
   collectEmbeddingSupplement,
   prepareEmbeddingSupplementQuery,
@@ -30,7 +35,7 @@ export interface EmbeddingAssessmentData {
   readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
   readonly supplement: CollectedEmbeddingSupplementResult;
   readonly poolRescoreScores: Readonly<Record<string, number>>;
-  readonly evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>;
+  readonly evidenceScoring: Readonly<EvidenceCandidateScoringResult>;
 }
 
 export function startEmbeddingAssessmentPreparation(
@@ -70,7 +75,7 @@ export async function collectLegacyEmbeddingAssessmentData(
   const preparedEmbeddingQuery = unwrapSettled(preparedQueryResult);
   const localFineCandidates = selectLocalFineCandidates(coarse, fineCandidates);
   const fineCandidateObjectIds = localFineCandidates.map((candidate) => candidate.entry.object_id);
-  const [supplementResult, poolResult, evidenceScores] = await Promise.all([
+  const [supplementResult, poolResult, evidenceScoring] = await Promise.all([
     settle(collectLegacySupplement(
       context, params, prepared, initialAssessment, preparedEmbeddingQuery, localFineCandidates
     )),
@@ -89,7 +94,7 @@ export async function collectLegacyEmbeddingAssessmentData(
     preparedEmbeddingQuery,
     supplement: unwrapSettled(supplementResult),
     poolRescoreScores: unwrapSettled(poolResult),
-    evidenceSemanticScoresByCandidateKey: evidenceScores
+    evidenceScoring
   });
 }
 
@@ -122,13 +127,37 @@ export async function collectSnapshotEmbeddingAssessmentData(
     throw new Error("embedding request score snapshot materializer is unavailable");
   }
   const localFineCandidates = selectLocalFineCandidates(coarse, fineCandidates);
-  const supplement = await service.materializeEmbeddingSupplementFromSnapshot({
+  const [supplement, evidenceScoring] = await Promise.all([
+    service.materializeEmbeddingSupplementFromSnapshot({
+      snapshot,
+      eligibleMemories: localFineCandidates.map((candidate) => candidate.entry),
+      // invariant: injected neighbors have their own admission path and do not redefine the pre-embedding supplement base.
+      baseCandidateIds: localFineCandidates.map((candidate) => candidate.entry.object_id),
+      maxSupplement: prepared.policy.coarse_filter.semantic_supplement.max_supplement
+    }),
+    collectEvidenceSemanticScores({
+      context,
+      workspaceId: snapshot.workspaceId,
+      runId: snapshot.runId,
+      queryText: prepared.queryText,
+      preparedQuery: null,
+      fineCandidates
+    })
+  ]);
+  return buildSnapshotEmbeddingAssessment({
     snapshot,
-    eligibleMemories: localFineCandidates.map((candidate) => candidate.entry),
-    // invariant: injected neighbors have their own admission path and do not redefine the pre-embedding supplement base.
-    baseCandidateIds: localFineCandidates.map((candidate) => candidate.entry.object_id),
-    maxSupplement: prepared.policy.coarse_filter.semantic_supplement.max_supplement
+    localFineCandidates,
+    supplement,
+    evidenceScoring
   });
+}
+
+function buildSnapshotEmbeddingAssessment(params: Readonly<{
+  readonly snapshot: Readonly<EmbeddingRecallRequestScoreSnapshot>;
+  readonly localFineCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly supplement: Readonly<EmbeddingRecallSupplementResult>;
+  readonly evidenceScoring: Readonly<EvidenceCandidateScoringResult>;
+}>): EmbeddingAssessmentData {
   return Object.freeze({
     preparedEmbeddingQuery: Object.freeze({
       handle: null,
@@ -137,23 +166,16 @@ export async function collectSnapshotEmbeddingAssessmentData(
       preparedSupplementSupported: true
     }),
     supplement: Object.freeze({
-      ...supplement,
-      collectionStatus: localFineCandidates.length === 0
+      ...params.supplement,
+      collectionStatus: params.localFineCandidates.length === 0
         ? "empty_candidate_pool" as const
         : "requested" as const
     }),
     poolRescoreScores: selectLocalPoolScores(
-      snapshot.poolScoresByObjectId,
-      localFineCandidates
+      params.snapshot.poolScoresByObjectId,
+      params.localFineCandidates
     ),
-    evidenceSemanticScoresByCandidateKey: await collectEvidenceSemanticScores({
-      context,
-      workspaceId: snapshot.workspaceId,
-      runId: snapshot.runId,
-      queryText: prepared.queryText,
-      preparedQuery: null,
-      fineCandidates
-    })
+    evidenceScoring: params.evidenceScoring
   });
 }
 
@@ -164,7 +186,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly queryText: string | null;
   readonly preparedQuery: PreparedEmbeddingQuery["handle"];
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
-}>): Promise<ReadonlyMap<string, number>> {
+}>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   const score = params.context.dependencies.embeddingRecallService?.scoreEvidenceCandidates;
   const candidates = params.fineCandidates
     .filter((candidate) => candidate.objectKind === "evidence_capsule")
@@ -174,9 +196,11 @@ async function collectEvidenceSemanticScores(params: Readonly<{
       objectId: candidate.entry.object_id,
       content: candidate.entry.content
     }));
-  if (score === undefined || params.queryText === null || candidates.length === 0) {
-    return new Map();
+  if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
+  if (score === undefined || params.queryText === null) {
+    return emptyEvidenceScoring("not_requested", candidates.length);
   }
+  const startedAt = performance.now();
   try {
     return await score.call(params.context.dependencies.embeddingRecallService, {
       workspaceId: params.workspaceId,
@@ -192,8 +216,27 @@ async function collectEvidenceSemanticScores(params: Readonly<{
       reason: "evidence_candidate_embedding_failed",
       error: error instanceof Error ? error.message : String(error)
     });
-    return new Map();
+    return Object.freeze({
+      ...emptyEvidenceScoring("failed", candidates.length),
+      latencyMs: Math.max(0, performance.now() - startedAt),
+      failureClass: "service_error" as const
+    });
   }
+}
+
+function emptyEvidenceScoring(
+  status: EvidenceCandidateScoringResult["status"],
+  expectedCount: number
+): Readonly<EvidenceCandidateScoringResult> {
+  return Object.freeze({
+    scores: new Map(),
+    status,
+    expectedCount,
+    scoredCount: 0,
+    inferenceCalls: 0,
+    latencyMs: 0,
+    failureClass: null
+  });
 }
 
 function selectLocalPoolScores(

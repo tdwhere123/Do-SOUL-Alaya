@@ -19,6 +19,7 @@ import type {
   EmbeddingRecallRequestScoreSnapshot,
   EmbeddingWorkspaceNeighborResult,
   EmbeddingRecallSupplementResult,
+  EvidenceCandidateScoringResult,
   ScoreEvidenceCandidatesParams,
   MaterializeEmbeddingSupplementFromSnapshotParams,
   PrepareRecallEmbeddingSnapshotParams,
@@ -318,7 +319,7 @@ function resolveCharsPerToken(hint: SoulRecallTokenizerHint | null): number {
 export interface RecallServiceEmbeddingRecallPort {
   scoreEvidenceCandidates?(
     params: ScoreEvidenceCandidatesParams
-  ): Promise<ReadonlyMap<string, number>>;
+  ): Promise<Readonly<EvidenceCandidateScoringResult>>;
   prepareRecallEmbeddingSnapshot?(
     params: PrepareRecallEmbeddingSnapshotParams
   ): Promise<Readonly<EmbeddingRecallRequestScoreSnapshot>>;

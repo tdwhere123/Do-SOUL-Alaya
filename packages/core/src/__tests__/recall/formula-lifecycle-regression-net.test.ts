@@ -155,6 +155,7 @@ function supplementary(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     evidenceSupportVectorsByMemoryId: buildEvidenceSupportVectors(entries),
     budgetPenaltyFactor: 0,

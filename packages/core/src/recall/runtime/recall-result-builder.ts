@@ -44,6 +44,7 @@ export function buildRecallResult(
       deliveredCount: manifested.candidates.length,
       embeddingProviderStatus: assessment.embeddingProviderStatus,
       embeddingSupplementStatus: assessment.embeddingSupplementStatus,
+      evidenceEmbeddingScoring: assessment.evidenceEmbeddingScoring,
       providerDegradationReason: assessment.providerDegradationReason,
       answerRerankDiagnostics: assessment.answerRerankDiagnostics,
       degradationReasons: [...degradationReasons],
@@ -121,6 +122,8 @@ function buildTokenEconomy(
     finePriorityOverflowCount: assessment.finalAssessment.finePriorityOverflowCount,
     preBudgetCandidates: manifested.candidateDiagnostics,
     embeddingInferenceCalls:
-      assessment.embeddingCoarseInjection.embeddingInferenceCalls + preparedEmbeddingInferenceCalls
+      assessment.embeddingCoarseInjection.embeddingInferenceCalls +
+      preparedEmbeddingInferenceCalls +
+      assessment.evidenceEmbeddingScoring.inferenceCalls
   });
 }

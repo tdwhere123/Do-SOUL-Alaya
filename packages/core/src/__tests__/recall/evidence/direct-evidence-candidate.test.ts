@@ -26,7 +26,9 @@ describe("direct evidence recall candidates", () => {
   it("delivers an unbound verified conversation excerpt with evidence identity", async () => {
     const fullExcerpt = `The assistant recommended the blue option. ${"Detailed explanation. ".repeat(90)}tail answer`;
     const evidence = createEvidenceCapsule({ excerpt: fullExcerpt });
-    const score = vi.fn(async () => [0.9]);
+    const score = vi.fn(
+      async (_query: string, _passages: readonly string[]) => [0.9]
+    );
     const { dependencies, countInboundSupports } = createDependencies([]);
     const service = new RecallService({
       ...dependencies,

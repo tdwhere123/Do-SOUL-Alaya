@@ -41,8 +41,7 @@ import {
   buildFinalScoreFactors,
   createFineAssessmentDiagnostic
 } from "./diagnostics/fine-assessment-diagnostics.js";
-import { orderWithBoundedHeadDisplacement } from "./final-order/bounded-head-displacement.js";
-import { orderWithVerifiedAnswerSlot } from "./final-order/verified-answer-slot.js";
+import { orderByFinalAuthority } from "./final-order/final-authority-order.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
@@ -107,31 +106,7 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
 }> {
   const context = createSelectionContext(params);
-  const coverageRelevance =
-    params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
-  const hasEmbeddingHead = hasRankedEmbeddingHead(
-    params.orderedCandidates,
-    context.config.budgets.max_entries
-  );
-  const initialOrder = orderFineAssessmentByCoverage(
-    params.orderedCandidates,
-    context,
-    coverageRelevance,
-    new Set(),
-    !hasEmbeddingHead && context.captureAnswerFeatures
-  );
-  const evictions = hasEmbeddingHead
-    ? resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance)
-    : new Set<string>();
-  const coverageOrdered = hasEmbeddingHead
-    ? orderFineAssessmentByCoverage(
-        initialOrder,
-        context,
-        coverageRelevance,
-        evictions,
-        context.captureAnswerFeatures
-      )
-    : initialOrder;
+  const { coverageOrdered, evictions } = prepareCoverageSelection(params, context);
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
     context.config.budgets.max_entries, evictions,
@@ -175,24 +150,14 @@ function orderDeliveredPacket(
   maxHeadDrop: number | undefined, protectedEvidenceKey: string | null,
   sourceCandidates: readonly FineAssessmentCandidate[]
 ): ReturnType<typeof freezeSelectedPacket> {
-  const publicOrder = [...accumulator.selected].sort((left, right) =>
-    compareFinalDeliveryOrder(left, right, finalOrder, context.rankByCandidateKey)
-  );
-  const boundedOrder = finalOrder === "public_relevance" && maxHeadDrop !== undefined
-    ? orderWithBoundedHeadDisplacement({
-        publicOrder,
-        headRankByKey: context.rankByCandidateKey,
-        keyOf: buildRecallCandidateSelectionKey,
-        maxDownwardDisplacement: maxHeadDrop,
-        protectedRankLimit: context.config.budgets.max_entries
-      })
-    : publicOrder;
-  const verifiedOrder = finalOrder === "public_relevance"
-    ? orderWithVerifiedAnswerSlot({
-        publicOrder: boundedOrder,
-        supportByCandidateKey: context.answerSupportByCandidateKey
-      })
-    : boundedOrder;
+  const verifiedOrder = orderByFinalAuthority({
+    candidates: accumulator.selected,
+    finalOrder,
+    deliveryRankByCandidateKey: context.rankByCandidateKey,
+    maxHeadDrop,
+    protectedRankLimit: context.config.budgets.max_entries,
+    answerSupportByCandidateKey: context.answerSupportByCandidateKey
+  });
   const candidates = retainBoundedDirectEvidenceHead(
     verifiedOrder, protectedEvidenceKey, buildRecallCandidateSelectionKey,
     context.supplementaryData.queryProbes, sourceCandidates
@@ -220,20 +185,33 @@ function orderDeliveredPacket(
   return Object.freeze({ candidates: Object.freeze(ranked), diagnostics: Object.freeze(diagnostics) });
 }
 
-function compareFinalDeliveryOrder(
-  left: Readonly<RecallCandidate>,
-  right: Readonly<RecallCandidate>,
-  finalOrder: "public_relevance" | "delivery_rank",
-  deliveryRankByCandidateKey: ReadonlyMap<string, number>
-): number {
-  const leftKey = buildRecallCandidateSelectionKey(left);
-  const rightKey = buildRecallCandidateSelectionKey(right);
-  if (finalOrder === "delivery_rank") {
-    return (deliveryRankByCandidateKey.get(leftKey) ?? Number.MAX_SAFE_INTEGER) -
-      (deliveryRankByCandidateKey.get(rightKey) ?? Number.MAX_SAFE_INTEGER) ||
-      leftKey.localeCompare(rightKey);
-  }
-  return right.relevance_score - left.relevance_score || leftKey.localeCompare(rightKey);
+function prepareCoverageSelection(
+  params: FineAssessmentSelectionParams,
+  context: FineAssessmentSelectionContext
+): Readonly<{
+  readonly coverageOrdered: readonly FineAssessmentCandidate[];
+  readonly evictions: ReadonlySet<string>;
+}> {
+  const coverageRelevance =
+    params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
+  const hasEmbeddingHead = hasRankedEmbeddingHead(
+    params.orderedCandidates,
+    context.config.budgets.max_entries
+  );
+  const initialOrder = orderFineAssessmentByCoverage(
+    params.orderedCandidates, context, coverageRelevance, new Set(),
+    !hasEmbeddingHead && context.captureAnswerFeatures
+  );
+  const evictions = hasEmbeddingHead
+    ? resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance)
+    : new Set<string>();
+  const coverageOrdered = hasEmbeddingHead
+    ? orderFineAssessmentByCoverage(
+        initialOrder, context, coverageRelevance, evictions,
+        context.captureAnswerFeatures
+      )
+    : initialOrder;
+  return Object.freeze({ coverageOrdered, evictions });
 }
 
 function orderFineAssessmentByCoverage(

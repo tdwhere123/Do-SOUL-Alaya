@@ -451,6 +451,25 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     answer_rerank_scored_count: z.number().int().nonnegative().nullable().default(null),
     answer_rerank_failure_class:
       BenchAnswerRerankFailureClassSchema.nullable().default(null),
+    evidence_embedding_status: z.enum([
+      "not_requested",
+      "not_applicable",
+      "returned",
+      "failed"
+    ]).nullable().default(null),
+    evidence_embedding_expected_count:
+      z.number().int().nonnegative().nullable().default(null),
+    evidence_embedding_scored_count:
+      z.number().int().nonnegative().nullable().default(null),
+    evidence_embedding_inference_calls:
+      z.number().int().nonnegative().nullable().default(null),
+    evidence_embedding_latency_ms: z.number().nonnegative().nullable().default(null),
+    evidence_embedding_failure_class: z.enum([
+      "provider_unavailable",
+      "query_embedding_failed",
+      "candidate_embedding_failed",
+      "service_error"
+    ]).nullable().default(null),
     graph_expansion_plane_count_per_hop:
       GraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:

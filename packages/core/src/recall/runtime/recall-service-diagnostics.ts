@@ -39,6 +39,7 @@ export type RecallEmbeddingProviderStatus =
 
 export type RecallDegradationReason =
   | "evidence_fts_failed"
+  | "evidence_candidate_embedding_failed"
   | "synthesis_fts_failed"
   | "embedding_coarse_injection_failed"
   | "graph_expansion_failed"
@@ -324,6 +325,12 @@ export type RecallAnswerRerankFailureClass =
   | "invalid_score_value"
   | "service_error";
 
+export type RecallEvidenceEmbeddingStatus =
+  import("../../embedding-recall/embedding-recall-service.js").EvidenceCandidateScoringStatus;
+
+export type RecallEvidenceEmbeddingFailureClass =
+  import("../../embedding-recall/embedding-recall-service.js").EvidenceCandidateScoringFailureClass;
+
 export interface RecallAnswerRerankDiagnostics {
   readonly status: RecallAnswerRerankStatus;
   readonly expected_count: number;
@@ -363,6 +370,12 @@ export interface RecallDiagnostics {
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly embedding_supplement_status:
     import("../supplements/supplements.js").EmbeddingSupplementCollectionStatus;
+  readonly evidence_embedding_status: RecallEvidenceEmbeddingStatus;
+  readonly evidence_embedding_expected_count: number;
+  readonly evidence_embedding_scored_count: number;
+  readonly evidence_embedding_inference_calls: number;
+  readonly evidence_embedding_latency_ms: number;
+  readonly evidence_embedding_failure_class: RecallEvidenceEmbeddingFailureClass | null;
   readonly provider_degradation_reason: string | null;
   readonly answer_rerank_status: RecallAnswerRerankStatus;
   readonly answer_rerank_expected_count: number;

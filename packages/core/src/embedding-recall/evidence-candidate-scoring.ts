@@ -7,6 +7,8 @@ import {
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
 import type {
   EmbeddingProviderPort,
+  EvidenceCandidateScoringFailureClass,
+  EvidenceCandidateScoringResult,
   PreparedEmbeddingQueryHandle,
   ScoreEvidenceCandidatesParams
 } from "./types.js";
@@ -23,44 +25,52 @@ export interface EvidenceCandidateScoringDependencies {
 export async function scoreTransientEvidenceCandidates(
   params: ScoreEvidenceCandidatesParams,
   dependencies: EvidenceCandidateScoringDependencies
-): Promise<ReadonlyMap<string, number>> {
+): Promise<EvidenceCandidateScoringResult> {
   const candidates = params.candidates.slice(0, MAX_TRANSIENT_EVIDENCE_CANDIDATES);
-  if (candidates.length === 0 || !dependencies.provider.isAvailable) {
-    return new Map();
+  const startedAt = performance.now();
+  if (candidates.length === 0) return scoringResult("not_applicable", 0, 0, 0, startedAt);
+  if (!dependencies.provider.isAvailable) {
+    return failedScoring(
+      params, dependencies, candidates.length, 0, startedAt, "provider_unavailable"
+    );
   }
+  let inferenceCalls = 0;
+  let failureClass: EvidenceCandidateScoringFailureClass = "query_embedding_failed";
   try {
-    const queryEmbedding = await resolveQueryEmbedding(params, dependencies);
+    const prepared = params.preparedQuery ?? dependencies.queryEngine.prepareQueryEmbedding({
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryText: params.queryText
+    });
+    if (params.preparedQuery === null && !prepared.cacheHit) inferenceCalls += 1;
+    const queryEmbedding = await resolveQueryEmbedding(prepared, dependencies.queryTimeoutMs);
+    failureClass = "candidate_embedding_failed";
+    inferenceCalls += 1;
     const embeddings = await dependencies.provider.embedTexts(
       candidates.map((candidate) => candidate.content),
       { timeoutMs: dependencies.queryTimeoutMs }
     );
     assertValidEmbeddingBatch(embeddings, candidates.length);
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
-    return new Map(candidates.map((candidate, index) => [
+    const scores = new Map(candidates.map((candidate, index) => [
       candidate.candidateKey,
       clamp01(scoreCosine(embeddings[index]!))
     ]));
+    return scoringResult(
+      "returned", candidates.length, scores.size, inferenceCalls, startedAt, null, scores
+    );
   } catch (error) {
-    dependencies.warn("transient evidence embedding degraded", {
-      workspace_id: params.workspaceId,
-      run_id: params.runId,
-      reason: "evidence_candidate_embedding_failed",
-      error: toErrorMessage(error)
-    });
-    return new Map();
+    return failedScoring(
+      params, dependencies, candidates.length, inferenceCalls, startedAt, failureClass, error
+    );
   }
 }
 
 async function resolveQueryEmbedding(
-  params: ScoreEvidenceCandidatesParams,
-  dependencies: EvidenceCandidateScoringDependencies
+  prepared: PreparedEmbeddingQueryHandle,
+  timeoutMs: number
 ): Promise<Float32Array> {
-  const prepared = params.preparedQuery ?? dependencies.queryEngine.prepareQueryEmbedding({
-    workspaceId: params.workspaceId,
-    runId: params.runId,
-    queryText: params.queryText
-  });
-  const snapshot = await settlePreparedQuery(prepared, dependencies.queryTimeoutMs);
+  const snapshot = await settlePreparedQuery(prepared, timeoutMs);
   if (snapshot.status === "ready") {
     return snapshot.embedding;
   }
@@ -68,6 +78,47 @@ async function resolveQueryEmbedding(
     throw new Error(snapshot.error_message ?? snapshot.reason);
   }
   throw new Error("query_embedding_pending");
+}
+
+function failedScoring(
+  params: ScoreEvidenceCandidatesParams,
+  dependencies: EvidenceCandidateScoringDependencies,
+  expectedCount: number,
+  inferenceCalls: number,
+  startedAt: number,
+  failureClass: EvidenceCandidateScoringFailureClass,
+  error: unknown = failureClass
+): EvidenceCandidateScoringResult {
+  dependencies.warn("transient evidence embedding degraded", {
+    workspace_id: params.workspaceId,
+    run_id: params.runId,
+    reason: "evidence_candidate_embedding_failed",
+    failure_class: failureClass,
+    error: toErrorMessage(error)
+  });
+  return scoringResult(
+    "failed", expectedCount, 0, inferenceCalls, startedAt, failureClass
+  );
+}
+
+function scoringResult(
+  status: EvidenceCandidateScoringResult["status"],
+  expectedCount: number,
+  scoredCount: number,
+  inferenceCalls: number,
+  startedAt: number,
+  failureClass: EvidenceCandidateScoringFailureClass | null = null,
+  scores: ReadonlyMap<string, number> = new Map()
+): EvidenceCandidateScoringResult {
+  return Object.freeze({
+    scores,
+    status,
+    expectedCount,
+    scoredCount,
+    inferenceCalls,
+    latencyMs: Math.max(0, performance.now() - startedAt),
+    failureClass
+  });
 }
 
 async function settlePreparedQuery(

@@ -21,8 +21,7 @@ import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
 import {
   buildDirectEvidencePseudoMemoryEntry,
-  isDirectRecallEvidence,
-  resolveDirectEvidenceRecallText
+  isDirectRecallEvidence
 } from "./evidence/direct-evidence-candidate.js";
 
 export interface SemanticSupplementParams {

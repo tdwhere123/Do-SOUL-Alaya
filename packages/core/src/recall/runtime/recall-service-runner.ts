@@ -285,6 +285,9 @@ async function completeCandidateAssessment(
     context, params, prepared, preparedCandidates, rerank.value, reusableAssessment
   );
   const provider = resolveEmbeddingProvider(prepared.policy, preparedEmbeddingQuery, coarse.embeddingCoarseInjection);
+  if (embeddingData.evidenceScoring.status === "failed") {
+    context.degradationReasons?.add("evidence_candidate_embedding_failed");
+  }
   return Object.freeze({
     finalAssessment: delivery.value,
     supplementaryData: rerank.value.supplementaryData,
@@ -292,6 +295,7 @@ async function completeCandidateAssessment(
     embeddingCoarseInjection: coarse.embeddingCoarseInjection,
     embeddingProviderStatus: provider.status,
     embeddingSupplementStatus: embeddingData.supplement.collectionStatus,
+    evidenceEmbeddingScoring: embeddingData.evidenceScoring,
     providerDegradationReason: provider.degradationReason,
     answerRerankDiagnostics: rerank.value.diagnostics,
     phaseLatencyMs: Object.freeze({

@@ -179,7 +179,7 @@ describe("final recall relevance ownership", () => {
         assessed.diagnostics.find((row) => row.object_id === FUSION_WINNER_ID)?.fused_score,
         assessed.diagnostics.find((row) => row.object_id === COVERAGE_NOVEL_ID)?.fused_score
       ]);
-    expect(assessed.candidates.map((candidate) => candidate.budget_state.remaining_entries))
+    expect(assessed.candidates.map((candidate) => candidate.budget_state?.remaining_entries))
       .toEqual([1, 0]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({
@@ -476,6 +476,7 @@ function createSupplementaryData(
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

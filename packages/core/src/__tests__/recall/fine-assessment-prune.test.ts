@@ -453,6 +453,7 @@ function emptySupplementaryData(): RecallSupplementaryData {
     pathExpansionScores: Object.freeze({}),
     pathSuppressionScores: Object.freeze({}),
     embeddingSimilarityScores: Object.freeze({}),
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: Object.freeze({}),
     budgetPenaltyFactor: 1,
     plasticityFactors: Object.freeze({}),

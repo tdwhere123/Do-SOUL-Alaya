@@ -10,7 +10,9 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   EmbeddingRecallService,
-  type PreparedEmbeddingQueryHandle
+  type EvidenceCandidateScoringResult,
+  type PreparedEmbeddingQueryHandle,
+  type ScoreEvidenceCandidatesParams
 } from "../../embedding-recall/embedding-recall-service.js";
 import { RecallService } from "../../recall/recall-service.js";
 import {
@@ -35,39 +37,24 @@ const WORKSPACE_ID = "workspace-1";
 const QUERY_TEXT = "Which color did the assistant recommend?";
 const MEMORY_ID = "memory-lane";
 
-type EvidenceScoreCandidate = Readonly<{
-  readonly candidateKey: string;
-  readonly objectId: string;
-  readonly content: string;
-}>;
-
-type EvidenceScoreRequest = Readonly<{
-  readonly workspaceId: string;
-  readonly runId: string | null;
-  readonly queryText: string;
-  readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
-  readonly candidates: readonly EvidenceScoreCandidate[];
-}>;
-
-type EvidenceScoringPort = RecallServiceEmbeddingRecallPort & Readonly<{
-  scoreEvidenceCandidates?: (
-    params: EvidenceScoreRequest
-  ) => Promise<ReadonlyMap<string, number>>;
-}>;
+type EvidenceScoreCandidate = ScoreEvidenceCandidatesParams["candidates"][number];
+type EvidenceScoreRequest = ScoreEvidenceCandidatesParams;
+type EvidenceScoringPort = RecallServiceEmbeddingRecallPort;
 
 type EvidenceScoringEmbeddingService = EmbeddingRecallService & Required<Pick<
   EvidenceScoringPort,
   "scoreEvidenceCandidates"
 >>;
-
 describe("direct evidence transient embedding assessment", () => {
   it("batches the top 25 public previews against the prepared query and retains the memory lane", async () => {
     const evidence = Array.from({ length: 26 }, (_, index) => createEvidenceCapsule(index));
     const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
-      new Map(params.candidates.map((candidate, index) => [
-        candidate.candidateKey,
-        index === 0 ? 0.99 : 0.2
-      ]))
+      evidenceScores(params, new Map(
+        params.candidates.map((candidate, index) => [
+          candidate.candidateKey,
+          index === 0 ? 0.99 : 0.2
+        ])
+      ))
     );
     const fixture = createRecallFixture({ evidence, scoreEvidenceCandidates });
 
@@ -92,6 +79,14 @@ describe("direct evidence transient embedding assessment", () => {
       .toMatchObject({
         deep_head_trace: expect.objectContaining({ embedding_signal: 0.99 })
       });
+    expect(result.diagnostics).toMatchObject({
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 25,
+      evidence_embedding_scored_count: 25,
+      evidence_embedding_inference_calls: 1,
+      evidence_embedding_failure_class: null
+    });
+    expect(result.diagnostics?.token_economy?.embedding_inference_calls).toBe(2);
     expect(findMemoryCandidate(result)).toMatchObject({
       score_factors: expect.objectContaining({ embedding_similarity: 0.4 })
     });
@@ -109,21 +104,52 @@ describe("direct evidence transient embedding assessment", () => {
     expect(failingScore).toHaveBeenCalledOnce();
     expect(findCandidate(failedResult, evidence[0]!)).toBeDefined();
     expect(findMemoryCandidate(failedResult)).toBeDefined();
+    expect(failedResult.diagnostics).toMatchObject({
+      evidence_embedding_status: "failed",
+      evidence_embedding_expected_count: 1,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: "service_error",
+      degradation_reasons: expect.arrayContaining([
+        "evidence_candidate_embedding_failed"
+      ])
+    });
 
-    const scoreWhenEmpty = vi.fn(async () => new Map<string, number>());
+    const scoreWhenEmpty = vi.fn(async (params: EvidenceScoreRequest) =>
+      evidenceScores(params, new Map()));
     const empty = createRecallFixture({ evidence: [], scoreEvidenceCandidates: scoreWhenEmpty });
 
     const emptyResult = await runRecall(empty);
 
     expect(scoreWhenEmpty).not.toHaveBeenCalled();
     expect(findMemoryCandidate(emptyResult)).toBeDefined();
+    expect(emptyResult.diagnostics).toMatchObject({
+      evidence_embedding_status: "not_applicable",
+      evidence_embedding_expected_count: 0,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null
+    });
   });
 
+  it("uses a transient evidence score to change the bounded delivered survivor", async () => {
+    const evidence = [createEvidenceCapsule(0, "opaque receipt zxq-8842")];
+    const [scoredResult, controlResult] = await Promise.all([
+      runRecall(createRecallFixture({
+        evidence, maxEntries: 1, scoreEvidenceCandidates: evidenceScorePort(0.99)
+      })),
+      runRecall(createRecallFixture({
+        evidence, maxEntries: 1, scoreEvidenceCandidates: evidenceScorePort(null)
+      }))
+    ]);
+
+    expect(findCandidate(scoredResult, evidence[0]!)).toBeDefined();
+    expect(findCandidate(controlResult, evidence[0]!)).toBeUndefined();
+  });
   it("keeps a transient evidence score off a same-id global memory candidate", async () => {
     const evidence = [createEvidenceCapsule(0)];
     const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
-      new Map([[params.candidates[0]!.candidateKey, 0.91]])
-    );
+      evidenceScores(params, new Map([[params.candidates[0]!.candidateKey, 0.91]])));
     const fixture = createRecallFixture({
       evidence,
       scoreEvidenceCandidates,
@@ -193,7 +219,14 @@ describe("direct evidence transient embedding assessment", () => {
       }]
     });
 
-    expect(scores.get(evidenceCandidateKey("snapshot-evidence"))).toBeCloseTo(1);
+    expect(scores.scores.get(evidenceCandidateKey("snapshot-evidence"))).toBeCloseTo(1);
+    expect(scores).toMatchObject({
+      status: "returned",
+      expectedCount: 1,
+      scoredCount: 1,
+      inferenceCalls: 1,
+      failureClass: null
+    });
     expect(embedTexts).toHaveBeenCalledTimes(2);
     expect(embedTexts.mock.calls.map(([texts]) => texts)).toEqual([
       [QUERY_TEXT],
@@ -206,6 +239,7 @@ function createRecallFixture(params: Readonly<{
   readonly evidence: readonly Readonly<EvidenceCapsule>[];
   readonly scoreEvidenceCandidates: NonNullable<EvidenceScoringPort["scoreEvidenceCandidates"]>;
   readonly globalCollisionObjectId?: string;
+  readonly maxEntries?: number;
 }>) {
   const memory = createMemoryEntry({
     object_id: MEMORY_ID,
@@ -268,7 +302,7 @@ function createRecallFixture(params: Readonly<{
     memory,
     service,
     taskSurface,
-    policy: createEmbeddingPolicy(service, taskSurface),
+    policy: createEmbeddingPolicy(service, taskSurface, params.maxEntries),
     preparedQuery,
     querySupplementIfReady
   };
@@ -303,7 +337,8 @@ function globalCollisionDependencies(objectId: string | undefined) {
 
 function createEmbeddingPolicy(
   service: RecallService,
-  taskSurface: ReturnType<typeof createTaskSurface>
+  taskSurface: ReturnType<typeof createTaskSurface>,
+  maxEntries = 40
 ): RecallPolicy {
   const base = service.buildDefaultPolicy("build", taskSurface.runtime_id);
   return overridePolicy(base, {
@@ -332,7 +367,7 @@ function createEmbeddingPolicy(
       ...base.fine_assessment,
       max_candidates: 40,
       budgets: {
-        max_entries: 40,
+        max_entries: maxEntries,
         max_total_tokens: 10_000,
         per_dimension_limits: null
       }
@@ -340,7 +375,10 @@ function createEmbeddingPolicy(
   });
 }
 
-function createEvidenceCapsule(index: number): Readonly<EvidenceCapsule> {
+function createEvidenceCapsule(
+  index: number,
+  recallText = `Public evidence ${index} says the assistant recommended blue.`
+): Readonly<EvidenceCapsule> {
   const objectId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
   return Object.freeze({
     object_id: objectId,
@@ -364,8 +402,8 @@ function createEvidenceCapsule(index: number): Readonly<EvidenceCapsule> {
       artifact_ref: formatGardenSourceTurnFallbackArtifactRef(`turn-${index}:assistant`)
     },
     evidence_health_state: "verified",
-    gist: `Public evidence ${index} says blue.`,
-    excerpt: `Public evidence ${index} says the assistant recommended blue.`,
+    gist: recallText,
+    excerpt: recallText,
     source_hash: formatGardenSourceTurnFallbackSourceHash(
       (index + 1).toString(16).padStart(64, "0")
     ),
@@ -391,6 +429,29 @@ function expectedEvidenceScoreCandidate(capsule: Readonly<EvidenceCapsule>): Evi
   };
 }
 
+function evidenceScores(
+  params: EvidenceScoreRequest,
+  scores: ReadonlyMap<string, number>,
+  status: EvidenceCandidateScoringResult["status"] = "returned"
+): Readonly<EvidenceCandidateScoringResult> {
+  const returned = status === "returned";
+  return Object.freeze({
+    scores, status,
+    expectedCount: params.candidates.length,
+    scoredCount: scores.size,
+    inferenceCalls: returned ? 1 : 0,
+    latencyMs: 0,
+    failureClass: null
+  });
+}
+function evidenceScorePort(score: number | null) {
+  return vi.fn(async (params: EvidenceScoreRequest) => evidenceScores(
+    params,
+    score === null ? new Map() : new Map([[params.candidates[0]!.candidateKey, score]]),
+    score === null ? "not_requested" : "returned"
+  ));
+}
+
 async function runRecall(fixture: ReturnType<typeof createRecallFixture>) {
   return await fixture.service.recall({
     taskSurface: fixture.taskSurface,
@@ -414,9 +475,8 @@ function findCandidate(
   result: Awaited<ReturnType<RecallService["recall"]>>,
   evidence: Readonly<EvidenceCapsule>
 ) {
-  return result.candidates.find((candidate) =>
-    candidate.object_id === evidence.object_id && candidate.object_kind === "evidence_capsule"
-  );
+  return result.candidates.find((candidate) => candidate.object_id === evidence.object_id &&
+    candidate.object_kind === "evidence_capsule");
 }
 
 function findMemoryCandidate(result: Awaited<ReturnType<RecallService["recall"]>>) {

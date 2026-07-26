@@ -84,6 +84,7 @@ function supplementary(queryText: string | null) {
   return {
     queryProbes: compileRecallQueryProbes(queryText),
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map<string, number>(),
     ftsRanks: {},
     trigramFtsRanks: {},
     evidenceFtsRanks: {},

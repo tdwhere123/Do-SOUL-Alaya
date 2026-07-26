@@ -103,6 +103,7 @@ function buildSupplementaryData(): RecallSupplementaryData {
     pathExpansionScores: {},
     pathSuppressionScores: {},
     embeddingSimilarityScores: {},
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: {},
     budgetPenaltyFactor: 0,
     plasticityFactors: {},

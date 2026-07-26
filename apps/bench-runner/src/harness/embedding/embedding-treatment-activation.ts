@@ -3,6 +3,11 @@ import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
 interface EmbeddingTreatmentDiagnostics {
   readonly embedding_provider_status: string;
   readonly provider_degradation_reason: string | null;
+  readonly evidence_embedding_status?: string;
+  readonly evidence_embedding_expected_count?: number;
+  readonly evidence_embedding_scored_count?: number;
+  readonly evidence_embedding_inference_calls?: number;
+  readonly evidence_embedding_failure_class?: string | null;
   readonly embedding_workspace_scanned_count?: number;
   readonly embedding_workspace_truncated?: boolean;
   readonly embedding_workspace_provider_kind?: string;
@@ -33,7 +38,10 @@ export function assertBiEncoderRunActivation(
     "ALAYA_ENABLE_EMBEDDING_SUPPLEMENT"
   );
   if (enabled === null) return;
-  if (enabled) assertBiEncoderTreatmentActive(toActivationEvidence(diagnostics));
+  if (enabled) {
+    assertBiEncoderTreatmentActive(toActivationEvidence(diagnostics));
+    assertEvidenceEmbeddingTreatmentActive(diagnostics);
+  }
   else assertControlInactive(diagnostics);
 }
 
@@ -100,6 +108,7 @@ function toActivationEvidence(
 
 function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void {
   const inactive = diagnostics.embedding_provider_status === "provider_not_requested" &&
+    isEvidenceEmbeddingInactive(diagnostics) &&
     diagnostics.candidates.every(
       (candidate) => !("embedding_similarity" in candidate.score_factors)
     ) &&
@@ -110,4 +119,44 @@ function assertControlInactive(diagnostics: EmbeddingTreatmentDiagnostics): void
   if (!inactive) {
     throw new Error("bi-encoder control activation failed: embedding work was observed");
   }
+}
+
+function assertEvidenceEmbeddingTreatmentActive(
+  diagnostics: EmbeddingTreatmentDiagnostics
+): void {
+  const expected = diagnostics.evidence_embedding_expected_count ?? 0;
+  const scored = diagnostics.evidence_embedding_scored_count ?? 0;
+  const complete = expected > 0 &&
+    diagnostics.evidence_embedding_status === "returned" &&
+    scored === expected &&
+    (diagnostics.evidence_embedding_inference_calls ?? 0) > 0 &&
+    diagnostics.evidence_embedding_failure_class === null;
+  if (complete || isEvidenceEmbeddingNotApplicable(diagnostics)) return;
+  throw new Error(
+    "evidence embedding treatment activation failed: " +
+    `status=${diagnostics.evidence_embedding_status ?? "missing"} ` +
+    `expected=${expected} scored=${scored} ` +
+    `inference_calls=${diagnostics.evidence_embedding_inference_calls ?? 0} ` +
+    `failure=${diagnostics.evidence_embedding_failure_class ?? "none"}`
+  );
+}
+
+function isEvidenceEmbeddingInactive(diagnostics: EmbeddingTreatmentDiagnostics): boolean {
+  const status = diagnostics.evidence_embedding_status ?? "not_requested";
+  return status === "not_requested" &&
+    hasNoEvidenceEmbeddingWork(diagnostics);
+}
+
+function isEvidenceEmbeddingNotApplicable(
+  diagnostics: EmbeddingTreatmentDiagnostics
+): boolean {
+  return diagnostics.evidence_embedding_status === "not_applicable" &&
+    hasNoEvidenceEmbeddingWork(diagnostics);
+}
+
+function hasNoEvidenceEmbeddingWork(diagnostics: EmbeddingTreatmentDiagnostics): boolean {
+  return (diagnostics.evidence_embedding_expected_count ?? 0) === 0 &&
+    (diagnostics.evidence_embedding_scored_count ?? 0) === 0 &&
+    (diagnostics.evidence_embedding_inference_calls ?? 0) === 0 &&
+    (diagnostics.evidence_embedding_failure_class ?? null) === null;
 }

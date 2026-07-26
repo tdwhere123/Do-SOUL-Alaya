@@ -24,7 +24,6 @@ import {
   type CoarseFilterRunResult
 } from "./coarse-filter-result.js";
 import {
-  MAX_RECALL_TIER_MEMORIES,
   MAX_OFFSET_RECALL_TIER_PAGES,
   OFFSET_RECALL_TIER_PAGE_SIZE,
   resolveRecallTierWindowPageLimit,

@@ -280,10 +280,25 @@ const RecallGraphExpansionPlaneCountPerEdgeTypeSchema = z
 
 const RecallDegradationReasonSchema = z.enum([
   "evidence_fts_failed",
+  "evidence_candidate_embedding_failed",
   "synthesis_fts_failed",
   "embedding_coarse_injection_failed",
   "graph_expansion_failed",
   "path_expansion_failed"
+]);
+
+export const BenchEvidenceEmbeddingStatusSchema = z.enum([
+  "not_requested",
+  "not_applicable",
+  "returned",
+  "failed"
+]);
+
+export const BenchEvidenceEmbeddingFailureClassSchema = z.enum([
+  "provider_unavailable",
+  "query_embedding_failed",
+  "candidate_embedding_failed",
+  "service_error"
 ]);
 
 export const BenchAnswerRerankStatusSchema = z.enum([
@@ -356,6 +371,14 @@ export const BenchRecallDiagnosticsSchema = z
       "not_attempted",
       "requested"
     ]).optional(),
+    evidence_embedding_status:
+      BenchEvidenceEmbeddingStatusSchema.default("not_requested"),
+    evidence_embedding_expected_count: z.number().int().nonnegative().default(0),
+    evidence_embedding_scored_count: z.number().int().nonnegative().default(0),
+    evidence_embedding_inference_calls: z.number().int().nonnegative().default(0),
+    evidence_embedding_latency_ms: z.number().nonnegative().default(0),
+    evidence_embedding_failure_class:
+      BenchEvidenceEmbeddingFailureClassSchema.nullable().default(null),
     provider_degradation_reason: z.string().nullable(),
     answer_rerank_status: BenchAnswerRerankStatusSchema,
     answer_rerank_expected_count: z.number().int().nonnegative(),
