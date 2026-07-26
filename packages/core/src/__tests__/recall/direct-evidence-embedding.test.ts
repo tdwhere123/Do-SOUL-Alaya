@@ -146,6 +146,30 @@ describe("direct evidence transient embedding assessment", () => {
     expect(findCandidate(scoredResult, evidence[0]!)).toBeDefined();
     expect(findCandidate(controlResult, evidence[0]!)).toBeUndefined();
   });
+
+  it("keeps evidence embedding off while retaining lexical evidence when embedding is disabled", async () => {
+    const evidence = [createEvidenceCapsule(0)];
+    const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
+      evidenceScores(params, new Map([[params.candidates[0]!.candidateKey, 0.99]])));
+    const fixture = createRecallFixture({
+      evidence,
+      scoreEvidenceCandidates,
+      embeddingEnabled: false
+    });
+
+    const result = await runRecall(fixture);
+
+    expect(scoreEvidenceCandidates).not.toHaveBeenCalled();
+    expect(findCandidate(result, evidence[0]!)).toBeDefined();
+    expect(result.diagnostics).toMatchObject({
+      evidence_embedding_status: "not_requested",
+      evidence_embedding_expected_count: 0,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null
+    });
+  });
+
   it("keeps a transient evidence score off a same-id global memory candidate", async () => {
     const evidence = [createEvidenceCapsule(0)];
     const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
@@ -240,6 +264,7 @@ function createRecallFixture(params: Readonly<{
   readonly scoreEvidenceCandidates: NonNullable<EvidenceScoringPort["scoreEvidenceCandidates"]>;
   readonly globalCollisionObjectId?: string;
   readonly maxEntries?: number;
+  readonly embeddingEnabled?: boolean;
 }>) {
   const memory = createMemoryEntry({
     object_id: MEMORY_ID,
@@ -302,7 +327,12 @@ function createRecallFixture(params: Readonly<{
     memory,
     service,
     taskSurface,
-    policy: createEmbeddingPolicy(service, taskSurface, params.maxEntries),
+    policy: createEmbeddingPolicy(
+      service,
+      taskSurface,
+      params.maxEntries,
+      params.embeddingEnabled
+    ),
     preparedQuery,
     querySupplementIfReady
   };
@@ -338,7 +368,8 @@ function globalCollisionDependencies(objectId: string | undefined) {
 function createEmbeddingPolicy(
   service: RecallService,
   taskSurface: ReturnType<typeof createTaskSurface>,
-  maxEntries = 40
+  maxEntries = 40,
+  embeddingEnabled = true
 ): RecallPolicy {
   const base = service.buildDefaultPolicy("build", taskSurface.runtime_id);
   return overridePolicy(base, {
@@ -358,7 +389,7 @@ function createEmbeddingPolicy(
       semantic_supplement: {
         ...base.coarse_filter.semantic_supplement,
         enabled: true,
-        embedding_enabled: true,
+        embedding_enabled: embeddingEnabled,
         max_supplement: 40,
         injection_cap: 0
       }

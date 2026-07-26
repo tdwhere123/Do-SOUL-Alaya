@@ -82,6 +82,7 @@ export async function collectLegacyEmbeddingAssessmentData(
     settle(collectPoolEmbeddingRescore(context, params, prepared, fineCandidateObjectIds)),
     collectEvidenceSemanticScores({
       context,
+      enabled: prepared.policy.coarse_filter.semantic_supplement.embedding_enabled === true,
       workspaceId: params.workspaceId,
       runId: params.runId ?? null,
       queryText: prepared.queryText,
@@ -137,6 +138,7 @@ export async function collectSnapshotEmbeddingAssessmentData(
     }),
     collectEvidenceSemanticScores({
       context,
+      enabled: prepared.policy.coarse_filter.semantic_supplement.embedding_enabled === true,
       workspaceId: snapshot.workspaceId,
       runId: snapshot.runId,
       queryText: prepared.queryText,
@@ -181,12 +183,14 @@ function buildSnapshotEmbeddingAssessment(params: Readonly<{
 
 async function collectEvidenceSemanticScores(params: Readonly<{
   readonly context: RecallExecutionContext;
+  readonly enabled: boolean;
   readonly workspaceId: string;
   readonly runId: string | null;
   readonly queryText: string | null;
   readonly preparedQuery: PreparedEmbeddingQuery["handle"];
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
+  if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
   const score = params.context.dependencies.embeddingRecallService?.scoreEvidenceCandidates;
   const candidates = params.fineCandidates
     .filter((candidate) => candidate.objectKind === "evidence_capsule")
