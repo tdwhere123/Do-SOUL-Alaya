@@ -77,7 +77,6 @@ describe("direct evidence transient embedding assessment", () => {
 
     expect(findDiagnostic(result, evidenceCandidateKey(evidence[0]!.object_id)))
       .toMatchObject({
-        per_stream_rank: { embedding_similarity: 1 },
         deep_head_trace: expect.objectContaining({ embedding_signal: 0.99 })
       });
     expect(result.diagnostics).toMatchObject({
@@ -162,8 +161,6 @@ describe("direct evidence transient embedding assessment", () => {
 
     expect(scoreEvidenceCandidates).not.toHaveBeenCalled();
     expect(findCandidate(result, evidence[0]!)).toBeDefined();
-    expect(findDiagnostic(result, evidenceCandidateKey(evidence[0]!.object_id))
-      ?.per_stream_rank.embedding_similarity).toBeNull();
     expect(result.diagnostics).toMatchObject({
       evidence_embedding_status: "not_requested",
       evidence_embedding_expected_count: 0,

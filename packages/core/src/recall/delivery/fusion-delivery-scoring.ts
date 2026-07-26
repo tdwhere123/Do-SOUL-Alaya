@@ -152,13 +152,7 @@ function buildFusionRanksForStream(
     .map(({ candidateKey, candidate }) => Object.freeze({
       candidateKey,
       entry: candidate.entry,
-      score: scoreRecallFusionStream(
-        candidateKey,
-        candidate,
-        stream,
-        supplementaryData,
-        nowIso
-      )
+      score: scoreRecallFusionStream(candidate, stream, supplementaryData, nowIso)
     }))
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) =>
