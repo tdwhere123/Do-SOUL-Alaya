@@ -6,6 +6,8 @@ import {
   verifiedRecallEvalPromotionEntryData,
   verifyRecallEvalPromotionEntry
 } from "../../../longmemeval/promotion/verifiers/entry-verifier.js";
+import { normalizeLegacyFullGoldCoverage } from
+  "../../../longmemeval/promotion/verifiers/diagnostics-verifier.js";
 import {
   COMMIT_SHA,
   COMMIT_SHA7,
@@ -117,6 +119,61 @@ describe("recall-eval promotion entry verifier", () => {
       gateSha256: GATE_SHA,
       snapshot: fixture.snapshot
     })).resolves.toBeDefined();
+  });
+
+  it("accepts legacy memory-only coverage without the redundant slice", async () => {
+    const fixture = await writeEntryFixture();
+    await mutateKpiAndRebindManifest(fixture.entryRoot, (payload) => {
+      const legacyCoverage = { ...payload.kpi.full_gold_coverage! };
+      delete legacyCoverage.memory_only;
+      return {
+        ...payload,
+        kpi: {
+          ...payload.kpi,
+          full_gold_coverage: legacyCoverage
+        }
+      };
+    });
+
+    await expect(verifyRecallEvalPromotionEntry({
+      entryRoot: fixture.entryRoot,
+      expectedSelection: fixture.selection,
+      treatment: { embedding_supplement: false, answer_rerank: false },
+      code: {
+        commit_sha: COMMIT_SHA,
+        commit_sha7: COMMIT_SHA7,
+        worktree_state_sha256: WORKTREE_SHA,
+        executed_dist: EXECUTED_DIST
+      },
+      gateSha256: GATE_SHA,
+      snapshot: fixture.snapshot
+    })).resolves.toBeDefined();
+  });
+
+  it("does not restore a missing memory-only slice when evidence changes coverage", async () => {
+    const fixture = await writeEntryFixture();
+    const payload = JSON.parse(await readFile(
+      path.join(fixture.entryRoot, "kpi.json"),
+      "utf8"
+    )) as {
+      kpi: {
+        full_gold_coverage: NonNullable<
+          Parameters<typeof normalizeLegacyFullGoldCoverage>[0]
+        >;
+      };
+    };
+    const actual = { ...payload.kpi.full_gold_coverage };
+    delete actual.memory_only;
+    const expected = {
+      ...payload.kpi.full_gold_coverage,
+      memory_only: {
+        ...payload.kpi.full_gold_coverage.memory_only!,
+        full_gold_at_5: 0
+      }
+    };
+
+    expect(normalizeLegacyFullGoldCoverage(actual, expected)).toEqual(actual);
+    expect(actual).not.toEqual(expected);
   });
 
   it("rejects artifact bytes changed after the manifest was minted", async () => {

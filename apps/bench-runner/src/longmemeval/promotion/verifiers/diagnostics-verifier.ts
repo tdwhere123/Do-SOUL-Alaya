@@ -434,7 +434,13 @@ function assertKpiReaggregation(
     }
   };
   for (const [key, value] of Object.entries(expected)) {
-    assertDeepEqual(payload.kpi[key as keyof KpiPayload["kpi"]], value, `kpi.${key}`);
+    const actual = key === "full_gold_coverage"
+      ? normalizeLegacyFullGoldCoverage(
+          payload.kpi.full_gold_coverage,
+          expected.full_gold_coverage
+        )
+      : payload.kpi[key as keyof KpiPayload["kpi"]];
+    assertDeepEqual(actual, value, `kpi.${key}`);
   }
   if (payload.answerable_evaluated_count !== state.answerable) {
     throw new Error("answerable_evaluated_count differs from diagnostics");
@@ -458,6 +464,19 @@ function assertKpiReaggregation(
   for (const [key, value] of Object.entries(providerFields)) {
     assertDeepEqual(payload.kpi[key as keyof KpiPayload["kpi"]], value, `kpi.${key}`);
   }
+}
+
+export function normalizeLegacyFullGoldCoverage(
+  actual: KpiPayload["kpi"]["full_gold_coverage"],
+  expected: NonNullable<KpiPayload["kpi"]["full_gold_coverage"]>
+): KpiPayload["kpi"]["full_gold_coverage"] {
+  if (actual === undefined || actual.memory_only !== undefined) return actual;
+  const { memory_only: expectedMemoryOnly, ...expectedAllObjects } = expected;
+  if (expectedMemoryOnly === undefined ||
+      !isDeepStrictEqual(expectedAllObjects, expectedMemoryOnly)) {
+    return actual;
+  }
+  return { ...actual, memory_only: expectedMemoryOnly };
 }
 
 function assertDeepEqual(actual: unknown, expected: unknown, label: string): void {

@@ -9,7 +9,7 @@ import { verifyPromotionQuestionMeasurement } from
   "../../../longmemeval/promotion/verifiers/measurement-verifier.js";
 import type { SnapshotQuestionMeasurementOracle } from
   "../../../longmemeval/snapshot/measurement-oracle.js";
-import { promotionMeasurementDiagnostic } from
+import { promotionGoldId, promotionMeasurementDiagnostic } from
   "../recall-eval/specialized-answerable-recall-fixture.js";
 
 type DiagnosticOverrides = Partial<Pick<LongMemEvalQuestionDiagnostic,
@@ -111,6 +111,22 @@ describe("promotion measurement verifier", () => {
       diagnostic,
       expectedGold: [],
       oracle: oracle(measurement, { candidate_absent: 2, materialization_drop: 0 })
+    }).status).toBe("scorable");
+  });
+
+  it("restores non-empty legacy memory-gold kind counts canonically", () => {
+    const questionId = "q-legacy-memory-gold";
+    const goldId = promotionGoldId(questionId);
+    const measurement = memoryGoldMeasurementPrimitives(questionId, goldId);
+    const diagnostic = withoutGoldKindCounts(applyQuestionMeasurementAxes(
+      promotionMeasurementDiagnostic(questionId, "scorable", true),
+      buildQuestionMeasurementAxes(measurement)
+    ));
+
+    expect(verifyPromotionQuestionMeasurement({
+      diagnostic,
+      expectedGold: [goldId],
+      oracle: memoryGoldOracle(measurement, goldId)
     }).status).toBe("scorable");
   });
 
@@ -289,5 +305,39 @@ function measurementPrimitives() {
     isAbstention: false,
     evaluatorGoldMemoryIds: [],
     evaluatorHitAt5: false
+  };
+}
+
+function memoryGoldMeasurementPrimitives(questionId: string, goldId: string) {
+  const diagnostic = promotionMeasurementDiagnostic(questionId, "scorable", true);
+  return {
+    ...measurementPrimitives(),
+    deliveredResults: diagnostic.delivered_results,
+    candidates: diagnostic.candidates,
+    sidecar: new Map([[
+      `memory_entry:${goldId}`,
+      {
+        objectId: goldId,
+        objectKind: "memory_entry" as const,
+        sessionId: "answer-session",
+        hasAnswer: true
+      }
+    ]]),
+    evaluatorGoldMemoryIds: [goldId],
+    evaluatorHitAt5: true
+  };
+}
+
+function memoryGoldOracle(
+  measurement: ReturnType<typeof memoryGoldMeasurementPrimitives>,
+  goldId: string
+): SnapshotQuestionMeasurementOracle {
+  return {
+    ...measurement,
+    goldMemoryIds: [goldId],
+    goldEvidenceIds: [],
+    goldObjectIds: [goldId],
+    goldObjectIdentities: [{ objectId: goldId, objectKind: "memory_entry" }],
+    seedDropReasons: { candidate_absent: 0, materialization_drop: 0 }
   };
 }
