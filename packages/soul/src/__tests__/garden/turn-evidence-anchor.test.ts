@@ -4,6 +4,8 @@ import {
   buildGardenTurnEvidenceArtifactRef,
   isGardenTurnEvidenceFallback
 } from "@do-soul/alaya-soul";
+import { buildEvidenceInput } from
+  "../../garden/materialization-router/inputs.js";
 
 const CREATED_AT = "2026-07-21T12:00:00.000Z";
 
@@ -41,6 +43,33 @@ describe("Garden turn evidence fallback", () => {
     expect(isGardenTurnEvidenceFallback(signal!)).toBe(true);
     expect(preservation.truncated).toBe(true);
     expect(preservation.chars_clipped).toBeGreaterThan(0);
+  });
+
+  it("preserves a receipt-bound trailing newline through evidence materialization", () => {
+    const signal = buildFallback(
+      `${"line\n".repeat(20_000)}tail`,
+      "empty_extraction"
+    )!;
+    const sourceCorpus = signal.raw_payload.full_turn_content as string;
+    const preservation = signal.raw_payload.evidence_preservation as
+      Record<string, unknown>;
+    const evidence = buildEvidenceInput(signal, undefined, {
+      fullTurnExcerpt: true,
+      artifactRef: buildGardenTurnEvidenceArtifactRef(signal.signal_id)
+    });
+
+    expect(sourceCorpus.endsWith("\n")).toBe(true);
+    expect(sourceCorpus.length + Number(preservation.chars_clipped))
+      .toBe(`${"line\n".repeat(20_000)}tail`.length);
+    expect(evidence).toMatchObject({
+      evidence_kind: "conversation_excerpt",
+      evidence_health_state: "verified",
+      gist: sourceCorpus,
+      excerpt: sourceCorpus,
+      source_hash: expect.stringMatching(
+        /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
+      )
+    });
   });
 
   it("rejects a lookalike anchor that carries claimed evidence authority", () => {

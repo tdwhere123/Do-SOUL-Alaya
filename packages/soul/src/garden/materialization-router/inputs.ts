@@ -206,8 +206,7 @@ export function buildEvidenceInput(
   // otherwise the matched_text-span summary is used.
   const excerpt =
     opts?.fullTurnExcerpt === true
-      ? (readStringPayload(signal.raw_payload, "full_turn_content") ??
-         buildSignalSummary(signal))
+      ? readFullTurnEvidenceExcerpt(signal)
       : buildSignalSummary(signal);
   const gist = appendSummarySuffix(excerpt, summarySuffix);
   const sourceHash = opts?.fullTurnExcerpt === true && summarySuffix === undefined
@@ -239,6 +238,19 @@ export function buildEvidenceInput(
     workspace_id: signal.workspace_id,
     surface_id: signal.surface_id
   };
+}
+
+function readFullTurnEvidenceExcerpt(signal: CandidateMemorySignal): string {
+  const exact = signal.raw_payload.full_turn_content;
+  if (
+    typeof exact === "string" &&
+    exact.trim().length > 0 &&
+    resolveVerifiedGardenTurnEvidenceSourceHash(signal, exact) !== null
+  ) {
+    return exact;
+  }
+  return readStringPayload(signal.raw_payload, "full_turn_content") ??
+    buildSignalSummary(signal);
 }
 
 function buildVerifiedUserAssertionSourceHash(
