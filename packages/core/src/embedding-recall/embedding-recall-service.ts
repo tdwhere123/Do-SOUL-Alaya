@@ -17,13 +17,15 @@ export type {
   EmbeddingRecallSupplementResult,
   EmbeddingSimilarityHint,
   EmbeddingVectorRecord,
+  EvidenceEmbeddingCandidate,
   EmbeddingWorkspaceNeighborResult,
   EmbeddingWorkspaceScanOptions,
   MaterializeEmbeddingSupplementFromSnapshotParams,
   PrepareRecallEmbeddingSnapshotParams,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingQuerySnapshot,
-  PreparedEmbeddingSupplement
+  PreparedEmbeddingSupplement,
+  ScoreEvidenceCandidatesParams
 } from "./types.js";
 export type {
   EmbeddingRetryEvent,

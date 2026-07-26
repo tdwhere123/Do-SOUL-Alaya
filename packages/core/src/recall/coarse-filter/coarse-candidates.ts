@@ -70,7 +70,9 @@ export function withEmbeddingSimilarityScores(
   supplementaryData: RecallSupplementaryData,
   hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"],
   injectedSimilarityScores: Readonly<Record<string, number>>,
-  poolRescoreScores: Readonly<Record<string, number>> = {}
+  poolRescoreScores: Readonly<Record<string, number>> = {},
+  evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number> =
+    supplementaryData.evidenceSemanticScoresByCandidateKey
 ): RecallSupplementaryData {
   const merged = new Map<string, number>();
   for (const [objectId, hint] of Object.entries(hintsByObjectId)) {
@@ -82,13 +84,16 @@ export function withEmbeddingSimilarityScores(
   for (const [objectId, rawScore] of Object.entries(poolRescoreScores)) {
     mergeObservedEmbeddingScore(merged, objectId, rawScore);
   }
-  if (merged.size === 0) {
+  if (merged.size === 0 && evidenceSemanticScoresByCandidateKey.size === 0) {
     return supplementaryData;
   }
 
   return Object.freeze({
     ...supplementaryData,
-    embeddingSimilarityScores: Object.freeze(Object.fromEntries(merged))
+    embeddingSimilarityScores: merged.size === 0
+      ? supplementaryData.embeddingSimilarityScores
+      : Object.freeze(Object.fromEntries(merged)),
+    evidenceSemanticScoresByCandidateKey: new Map(evidenceSemanticScoresByCandidateKey)
   });
 }
 

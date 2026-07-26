@@ -30,6 +30,7 @@ export interface EmbeddingAssessmentData {
   readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
   readonly supplement: CollectedEmbeddingSupplementResult;
   readonly poolRescoreScores: Readonly<Record<string, number>>;
+  readonly evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>;
 }
 
 export function startEmbeddingAssessmentPreparation(
@@ -69,17 +70,26 @@ export async function collectLegacyEmbeddingAssessmentData(
   const preparedEmbeddingQuery = unwrapSettled(preparedQueryResult);
   const localFineCandidates = selectLocalFineCandidates(coarse, fineCandidates);
   const fineCandidateObjectIds = localFineCandidates.map((candidate) => candidate.entry.object_id);
-  const [supplementResult, poolResult] = await Promise.all([
+  const [supplementResult, poolResult, evidenceScores] = await Promise.all([
     settle(collectLegacySupplement(
       context, params, prepared, initialAssessment, preparedEmbeddingQuery, localFineCandidates
     )),
-    settle(collectPoolEmbeddingRescore(context, params, prepared, fineCandidateObjectIds))
+    settle(collectPoolEmbeddingRescore(context, params, prepared, fineCandidateObjectIds)),
+    collectEvidenceSemanticScores({
+      context,
+      workspaceId: params.workspaceId,
+      runId: params.runId ?? null,
+      queryText: prepared.queryText,
+      preparedQuery: preparedEmbeddingQuery.handle,
+      fineCandidates
+    })
   ]);
   throwFirstRejected([supplementResult, poolResult]);
   return Object.freeze({
     preparedEmbeddingQuery,
     supplement: unwrapSettled(supplementResult),
-    poolRescoreScores: unwrapSettled(poolResult)
+    poolRescoreScores: unwrapSettled(poolResult),
+    evidenceSemanticScoresByCandidateKey: evidenceScores
   });
 }
 
@@ -135,8 +145,55 @@ export async function collectSnapshotEmbeddingAssessmentData(
     poolRescoreScores: selectLocalPoolScores(
       snapshot.poolScoresByObjectId,
       localFineCandidates
-    )
+    ),
+    evidenceSemanticScoresByCandidateKey: await collectEvidenceSemanticScores({
+      context,
+      workspaceId: snapshot.workspaceId,
+      runId: snapshot.runId,
+      queryText: prepared.queryText,
+      preparedQuery: null,
+      fineCandidates
+    })
   });
+}
+
+async function collectEvidenceSemanticScores(params: Readonly<{
+  readonly context: RecallExecutionContext;
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryText: string | null;
+  readonly preparedQuery: PreparedEmbeddingQuery["handle"];
+  readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
+}>): Promise<ReadonlyMap<string, number>> {
+  const score = params.context.dependencies.embeddingRecallService?.scoreEvidenceCandidates;
+  const candidates = params.fineCandidates
+    .filter((candidate) => candidate.objectKind === "evidence_capsule")
+    .slice(0, 25)
+    .map((candidate) => Object.freeze({
+      candidateKey: buildRecallCandidateDedupeKey(candidate),
+      objectId: candidate.entry.object_id,
+      content: candidate.entry.content
+    }));
+  if (score === undefined || params.queryText === null || candidates.length === 0) {
+    return new Map();
+  }
+  try {
+    return await score.call(params.context.dependencies.embeddingRecallService, {
+      workspaceId: params.workspaceId,
+      runId: params.runId,
+      queryText: params.queryText,
+      preparedQuery: params.preparedQuery,
+      candidates
+    });
+  } catch (error) {
+    params.context.warn("transient evidence embedding degraded", {
+      workspace_id: params.workspaceId,
+      run_id: params.runId,
+      reason: "evidence_candidate_embedding_failed",
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return new Map();
+  }
 }
 
 function selectLocalPoolScores(

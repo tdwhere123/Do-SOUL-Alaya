@@ -72,6 +72,9 @@ export interface RecallSupplementaryData {
   readonly pathSuppressionScores: Readonly<Record<string, number>>;
   // Key presence means query embedding was observed; finite zero is distinct from cold absence.
   readonly embeddingSimilarityScores: Readonly<Record<string, number>>;
+  // Transient evidence previews are keyed by full candidate identity so a
+  // colliding memory object id cannot inherit their semantic signal.
+  readonly evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>;
   // Optional final query-to-candidate relevance owned by a local reranker.
   // Candidate-key identity preserves distinct provenance projections.
   readonly answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>;

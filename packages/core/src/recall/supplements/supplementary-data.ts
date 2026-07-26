@@ -92,6 +92,7 @@ export async function collectSupplementaryData(
     pathExpansionScores: params.coarsePathExpansionScores,
     pathSuppressionScores: params.coarsePathSuppressionScores,
     embeddingSimilarityScores: Object.freeze({}),
+    evidenceSemanticScoresByCandidateKey: new Map(),
     graphSupportCounts: Object.freeze(graphSupportCounts),
     evidenceSupportVectorsByMemoryId: Object.freeze(buildEvidenceSupportVectors(candidates)),
     budgetPenaltyFactor,

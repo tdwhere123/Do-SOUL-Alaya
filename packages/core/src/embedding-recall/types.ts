@@ -165,6 +165,20 @@ export interface PreparedEmbeddingSupplement {
   readonly degradedReason: string | null;
 }
 
+export interface EvidenceEmbeddingCandidate {
+  readonly candidateKey: string;
+  readonly objectId: string;
+  readonly content: string;
+}
+
+export interface ScoreEvidenceCandidatesParams {
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryText: string;
+  readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
+  readonly candidates: readonly Readonly<EvidenceEmbeddingCandidate>[];
+}
+
 export interface EmbeddingRecallRequestScoreSnapshot {
   readonly workspaceId: string;
   readonly runId: string | null;

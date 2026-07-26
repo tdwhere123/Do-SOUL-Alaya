@@ -130,7 +130,8 @@ export function prepareLegacyReassessment(
     initial.supplementaryData,
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
-    embeddingData.poolRescoreScores
+    embeddingData.poolRescoreScores,
+    embeddingData.evidenceSemanticScoresByCandidateKey
   );
   const reassessmentRequired = needsEmbeddingReassessment(embeddingData, coarse);
   return Object.freeze({
@@ -162,7 +163,8 @@ export function prepareSnapshotAssessment(
     base.supplementaryData,
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
-    embeddingData.poolRescoreScores
+    embeddingData.poolRescoreScores,
+    embeddingData.evidenceSemanticScoresByCandidateKey
   );
   return Object.freeze({
     supplementaryData,
@@ -270,5 +272,6 @@ function needsEmbeddingReassessment(
 ): boolean {
   return Object.keys(embeddingData.supplement.similarityHintsByObjectId).length > 0 ||
     coarse.embeddingCoarseInjection.candidates.length > 0 ||
-    Object.keys(embeddingData.poolRescoreScores).length > 0;
+    Object.keys(embeddingData.poolRescoreScores).length > 0 ||
+    embeddingData.evidenceSemanticScoresByCandidateKey.size > 0;
 }

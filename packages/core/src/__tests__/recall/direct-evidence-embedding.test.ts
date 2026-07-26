@@ -1,0 +1,424 @@
+import {
+  MemoryDimension,
+  ProjectMappingState,
+  ScopeClass,
+  formatGardenSourceTurnFallbackArtifactRef,
+  formatGardenSourceTurnFallbackSourceHash,
+  type EvidenceCapsule,
+  type RecallPolicy
+} from "@do-soul/alaya-protocol";
+import { describe, expect, it, vi } from "vitest";
+import {
+  EmbeddingRecallService,
+  type PreparedEmbeddingQueryHandle
+} from "../../embedding-recall/embedding-recall-service.js";
+import { RecallService } from "../../recall/recall-service.js";
+import {
+  buildDirectEvidencePseudoMemoryEntry
+} from "../../recall/coarse-filter/evidence/direct-evidence-candidate.js";
+import type { RecallServiceEmbeddingRecallPort } from
+  "../../recall/runtime/recall-service-types.js";
+import {
+  createEmbeddingRecord,
+  createProvider,
+  hashMemoryContent
+} from "../embedding-recall/embedding-recall-test-helpers.js";
+import {
+  createAnchor,
+  createDependencies,
+  createMemoryEntry,
+  createTaskSurface,
+  overridePolicy
+} from "./recall-service-test-fixtures.js";
+
+const WORKSPACE_ID = "workspace-1";
+const QUERY_TEXT = "Which color did the assistant recommend?";
+const MEMORY_ID = "memory-lane";
+
+type EvidenceScoreCandidate = Readonly<{
+  readonly candidateKey: string;
+  readonly objectId: string;
+  readonly content: string;
+}>;
+
+type EvidenceScoreRequest = Readonly<{
+  readonly workspaceId: string;
+  readonly runId: string | null;
+  readonly queryText: string;
+  readonly preparedQuery: PreparedEmbeddingQueryHandle | null;
+  readonly candidates: readonly EvidenceScoreCandidate[];
+}>;
+
+type EvidenceScoringPort = RecallServiceEmbeddingRecallPort & Readonly<{
+  scoreEvidenceCandidates?: (
+    params: EvidenceScoreRequest
+  ) => Promise<ReadonlyMap<string, number>>;
+}>;
+
+type EvidenceScoringEmbeddingService = EmbeddingRecallService & Required<Pick<
+  EvidenceScoringPort,
+  "scoreEvidenceCandidates"
+>>;
+
+describe("direct evidence transient embedding assessment", () => {
+  it("batches the top 25 public previews against the prepared query and retains the memory lane", async () => {
+    const evidence = Array.from({ length: 26 }, (_, index) => createEvidenceCapsule(index));
+    const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
+      new Map(params.candidates.map((candidate, index) => [
+        candidate.candidateKey,
+        index === 0 ? 0.99 : 0.2
+      ]))
+    );
+    const fixture = createRecallFixture({ evidence, scoreEvidenceCandidates });
+
+    const result = await runRecall(fixture);
+
+    expect(scoreEvidenceCandidates).toHaveBeenCalledOnce();
+    const request = scoreEvidenceCandidates.mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      workspaceId: WORKSPACE_ID,
+      runId: null,
+      queryText: QUERY_TEXT,
+      preparedQuery: fixture.preparedQuery
+    });
+    expect(request?.candidates).toEqual(
+      evidence.slice(0, 25).map((capsule) => expectedEvidenceScoreCandidate(capsule))
+    );
+    expect(fixture.querySupplementIfReady).toHaveBeenCalledWith(expect.objectContaining({
+      preparedQuery: fixture.preparedQuery
+    }));
+
+    expect(findDiagnostic(result, evidenceCandidateKey(evidence[0]!.object_id)))
+      .toMatchObject({
+        deep_head_trace: expect.objectContaining({ embedding_signal: 0.99 })
+      });
+    expect(findMemoryCandidate(result)).toMatchObject({
+      score_factors: expect.objectContaining({ embedding_similarity: 0.4 })
+    });
+  });
+
+  it("fails open when direct candidate scoring fails and skips it when no direct evidence is present", async () => {
+    const evidence = [createEvidenceCapsule(0)];
+    const failingScore = vi.fn(async () => {
+      throw new Error("provider unavailable");
+    });
+    const failed = createRecallFixture({ evidence, scoreEvidenceCandidates: failingScore });
+
+    const failedResult = await runRecall(failed);
+
+    expect(failingScore).toHaveBeenCalledOnce();
+    expect(findCandidate(failedResult, evidence[0]!)).toBeDefined();
+    expect(findMemoryCandidate(failedResult)).toBeDefined();
+
+    const scoreWhenEmpty = vi.fn(async () => new Map<string, number>());
+    const empty = createRecallFixture({ evidence: [], scoreEvidenceCandidates: scoreWhenEmpty });
+
+    const emptyResult = await runRecall(empty);
+
+    expect(scoreWhenEmpty).not.toHaveBeenCalled();
+    expect(findMemoryCandidate(emptyResult)).toBeDefined();
+  });
+
+  it("keeps a transient evidence score off a same-id global memory candidate", async () => {
+    const evidence = [createEvidenceCapsule(0)];
+    const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
+      new Map([[params.candidates[0]!.candidateKey, 0.91]])
+    );
+    const fixture = createRecallFixture({
+      evidence,
+      scoreEvidenceCandidates,
+      globalCollisionObjectId: evidence[0]!.object_id
+    });
+
+    const result = await runRecall(fixture);
+
+    expect(scoreEvidenceCandidates).toHaveBeenCalledOnce();
+    const diagnostics = result.diagnostics?.candidates ?? [];
+    const evidenceDiagnostic = diagnostics.find((candidate) =>
+      candidate.candidate_key === evidenceCandidateKey(evidence[0]!.object_id)
+    );
+    const globalDiagnostic = diagnostics.find((candidate) =>
+      candidate.candidate_key === `global:memory_entry:${evidence[0]!.object_id}`
+    );
+    expect(evidenceDiagnostic?.deep_head_trace?.embedding_signal).toBeCloseTo(0.91);
+    expect(globalDiagnostic?.score_factors.embedding_similarity).toBeUndefined();
+  });
+
+  it("reuses a snapshot-warmed query cache instead of embedding the query a second time", async () => {
+    const memory = createMemoryEntry({
+      object_id: "snapshot-memory",
+      content: "The assistant recommended blue."
+    });
+    const preview = "The public evidence preview says blue.";
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map(() => new Float32Array([1, 0]))
+    );
+    const embeddingService = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [createEmbeddingRecord({
+          object_id: memory.object_id,
+          content_hash: hashMemoryContent(memory.content),
+          embedding: new Float32Array([1, 0])
+        })])
+      },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(async (entry) => ({
+          event_id: "event-1",
+          created_at: "2026-07-26T00:00:00.000Z",
+          revision: 0,
+          ...entry
+        })),
+        queryByEntity: vi.fn(async () => [])
+      },
+      generateQueryId: () => "snapshot-query"
+    }) as unknown as EvidenceScoringEmbeddingService;
+
+    await embeddingService.prepareRecallEmbeddingSnapshot({
+      workspaceId: WORKSPACE_ID,
+      runId: null,
+      queryText: QUERY_TEXT,
+      poolMemories: [memory],
+      maxNeighbors: 0
+    });
+    const scores = await embeddingService.scoreEvidenceCandidates({
+      workspaceId: WORKSPACE_ID,
+      runId: null,
+      queryText: QUERY_TEXT,
+      preparedQuery: null,
+      candidates: [{
+        candidateKey: evidenceCandidateKey("snapshot-evidence"),
+        objectId: "snapshot-evidence",
+        content: preview
+      }]
+    });
+
+    expect(scores.get(evidenceCandidateKey("snapshot-evidence"))).toBeCloseTo(1);
+    expect(embedTexts).toHaveBeenCalledTimes(2);
+    expect(embedTexts.mock.calls.map(([texts]) => texts)).toEqual([
+      [QUERY_TEXT],
+      [preview]
+    ]);
+  });
+});
+
+function createRecallFixture(params: Readonly<{
+  readonly evidence: readonly Readonly<EvidenceCapsule>[];
+  readonly scoreEvidenceCandidates: NonNullable<EvidenceScoringPort["scoreEvidenceCandidates"]>;
+  readonly globalCollisionObjectId?: string;
+}>) {
+  const memory = createMemoryEntry({
+    object_id: MEMORY_ID,
+    content: "The memory lane remains available.",
+    activation_score: 0.7
+  });
+  const taskSurface = { ...createTaskSurface(), display_name: QUERY_TEXT };
+  const preparedQuery: PreparedEmbeddingQueryHandle = {
+    queryId: "prepared-direct-evidence-query",
+    cacheHit: false,
+    getSnapshot: () => Object.freeze({
+      status: "ready" as const,
+      embedding: new Float32Array([1, 0])
+    })
+  };
+  const prepareQuerySupplement = vi.fn(async () => ({
+    preparedQuery,
+    storedVectors: Object.freeze([]),
+    degradedReason: null
+  }));
+  const querySupplementIfReady = vi.fn(async () => ({
+    supplementaryEntries: Object.freeze([]),
+    similarityHintsByObjectId: Object.freeze({
+      [memory.object_id]: Object.freeze({
+        object_id: memory.object_id,
+        normalized_similarity: 0.4
+      })
+    })
+  }));
+  const { dependencies } = createDependencies([memory]);
+  const embeddingRecallService: EvidenceScoringPort = {
+    prepareQuerySupplement,
+    querySupplementIfReady,
+    querySupplement: async () => ({
+      supplementaryEntries: Object.freeze([]),
+      similarityHintsByObjectId: Object.freeze({})
+    }),
+    scoreEvidenceCandidates: params.scoreEvidenceCandidates
+  };
+  const service = new RecallService({
+    ...dependencies,
+    memoryRepo: {
+      ...dependencies.memoryRepo,
+      searchByKeyword: vi.fn(async () => [{ object_id: memory.object_id, normalized_rank: 0.8 }]),
+      findByEvidenceRefs: vi.fn(async () => []),
+      findBoundEvidenceRefs: vi.fn(async () => []),
+      findByIds: vi.fn(async () => [])
+    },
+    evidenceSearchPort: {
+      searchByKeyword: vi.fn(async () => params.evidence.map((capsule, index) => ({
+        object_id: capsule.object_id,
+        normalized_rank: evidenceRank(index)
+      }))),
+      findRecallQualifiedByIds: vi.fn(async () => params.evidence)
+    },
+    embeddingRecallService,
+    ...globalCollisionDependencies(params.globalCollisionObjectId)
+  });
+  return {
+    memory,
+    service,
+    taskSurface,
+    policy: createEmbeddingPolicy(service, taskSurface),
+    preparedQuery,
+    querySupplementIfReady
+  };
+}
+
+function globalCollisionDependencies(objectId: string | undefined) {
+  if (objectId === undefined) return {};
+  return {
+    globalRecallPort: {
+      recall: vi.fn(async () => [{
+        global_object_id: objectId,
+        dimension: MemoryDimension.PROCEDURE,
+        scope_class: ScopeClass.GLOBAL_DOMAIN,
+        content: "Global memory with a colliding object id.",
+        domain_tags: ["global"],
+        evidence_refs: [],
+        activation_score: 0.6,
+        created_at: "2026-07-26T00:00:00.000Z",
+        updated_at: "2026-07-26T00:00:00.000Z"
+      }])
+    },
+    projectMappingPort: {
+      findByWorkspace: vi.fn(async () => []),
+      ensureSuggestedAnchors: vi.fn(async () => [createAnchor({
+        object_id: "accepted-global-collision",
+        global_object_id: objectId,
+        mapping_state: ProjectMappingState.ACCEPTED
+      })])
+    }
+  };
+}
+
+function createEmbeddingPolicy(
+  service: RecallService,
+  taskSurface: ReturnType<typeof createTaskSurface>
+): RecallPolicy {
+  const base = service.buildDefaultPolicy("build", taskSurface.runtime_id);
+  return overridePolicy(base, {
+    coarse_filter: {
+      ...base.coarse_filter,
+      deterministic_match: {
+        ...base.coarse_filter.deterministic_match,
+        scope_filter: null,
+        dimension_filter: null,
+        domain_tag_filter: null
+      },
+      precomputed_rank: {
+        ...base.coarse_filter.precomputed_rank,
+        max_candidates: 40,
+        min_activation_score: null
+      },
+      semantic_supplement: {
+        ...base.coarse_filter.semantic_supplement,
+        enabled: true,
+        embedding_enabled: true,
+        max_supplement: 40,
+        injection_cap: 0
+      }
+    },
+    fine_assessment: {
+      ...base.fine_assessment,
+      max_candidates: 40,
+      budgets: {
+        max_entries: 40,
+        max_total_tokens: 10_000,
+        per_dimension_limits: null
+      }
+    }
+  });
+}
+
+function createEvidenceCapsule(index: number): Readonly<EvidenceCapsule> {
+  const objectId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+  return Object.freeze({
+    object_id: objectId,
+    object_kind: "evidence_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: "2026-07-26T00:00:00.000Z",
+    updated_at: "2026-07-26T00:00:00.000Z",
+    created_by: "garden_compile",
+    evidence_kind: "conversation_excerpt",
+    semantic_anchor: {
+      topic: "color recommendation",
+      keywords: ["color", "blue"],
+      summary: `Public evidence ${index}`
+    },
+    event_anchor: null,
+    physical_anchor: {
+      file_path: null,
+      line_range: null,
+      symbol_name: null,
+      artifact_ref: formatGardenSourceTurnFallbackArtifactRef(`turn-${index}:assistant`)
+    },
+    evidence_health_state: "verified",
+    gist: `Public evidence ${index} says blue.`,
+    excerpt: `Public evidence ${index} says the assistant recommended blue.`,
+    source_hash: formatGardenSourceTurnFallbackSourceHash(
+      (index + 1).toString(16).padStart(64, "0")
+    ),
+    run_id: "run-1",
+    workspace_id: WORKSPACE_ID,
+    surface_id: "surface-1"
+  });
+}
+
+function evidenceRank(index: number): number {
+  return 1 - index / 100;
+}
+
+function evidenceCandidateKey(objectId: string): string {
+  return `workspace_local:evidence_capsule:${objectId}`;
+}
+
+function expectedEvidenceScoreCandidate(capsule: Readonly<EvidenceCapsule>): EvidenceScoreCandidate {
+  return {
+    candidateKey: evidenceCandidateKey(capsule.object_id),
+    objectId: capsule.object_id,
+    content: buildDirectEvidencePseudoMemoryEntry(capsule, 1).content
+  };
+}
+
+async function runRecall(fixture: ReturnType<typeof createRecallFixture>) {
+  return await fixture.service.recall({
+    taskSurface: fixture.taskSurface,
+    workspaceId: WORKSPACE_ID,
+    strategy: "build",
+    policyOverride: fixture.policy,
+    diagnosticCapture: "answer_features"
+  });
+}
+
+function findDiagnostic(
+  result: Awaited<ReturnType<RecallService["recall"]>>,
+  candidateKey: string
+) {
+  return result.diagnostics?.candidates.find((candidate) =>
+    candidate.candidate_key === candidateKey
+  );
+}
+
+function findCandidate(
+  result: Awaited<ReturnType<RecallService["recall"]>>,
+  evidence: Readonly<EvidenceCapsule>
+) {
+  return result.candidates.find((candidate) =>
+    candidate.object_id === evidence.object_id && candidate.object_kind === "evidence_capsule"
+  );
+}
+
+function findMemoryCandidate(result: Awaited<ReturnType<RecallService["recall"]>>) {
+  return result.candidates.find((candidate) => candidate.object_id === MEMORY_ID);
+}

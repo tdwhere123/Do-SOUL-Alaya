@@ -6,6 +6,7 @@ import {
   DEFAULT_QUERY_TIMEOUT_MS
 } from "./constants.js";
 import { EmbeddingRecallTelemetry } from "./embedding-recall-telemetry.js";
+import { scoreTransientEvidenceCandidates } from "./evidence-candidate-scoring.js";
 import {
   EMPTY_SUPPLEMENT_RESULT,
   clampQueryEmbeddingCacheSize,
@@ -30,7 +31,8 @@ import type {
   PrepareRecallEmbeddingSnapshotParams,
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingSupplement,
-  EmbeddingRecallRequestScoreSnapshot
+  EmbeddingRecallRequestScoreSnapshot,
+  ScoreEvidenceCandidatesParams
 } from "./types.js";
 import { WorkspaceNeighborScanner } from "./workspace-neighbor-scanner.js";
 
@@ -45,6 +47,13 @@ export class EmbeddingRecallService {
   private readonly supplementBuilder: EmbeddingSupplementBuilder;
   private readonly workspaceScanner: WorkspaceNeighborScanner;
   private readonly requestSnapshotBuilder: RequestScoreSnapshotBuilder;
+  public readonly scoreEvidenceCandidates = (params: ScoreEvidenceCandidatesParams) =>
+    scoreTransientEvidenceCandidates(params, {
+      provider: this.dependencies.provider,
+      queryEngine: this.queryEngine,
+      queryTimeoutMs: this.queryTimeoutMs,
+      warn: this.warn
+    });
 
   public constructor(public readonly dependencies: EmbeddingRecallServiceDependencies) {
     this.generateQueryId = dependencies.generateQueryId ?? (() => `recall-embedding-${randomUUID()}`);

@@ -11,6 +11,7 @@ type DeepHeadSupplementary = Readonly<Pick<
   RecallSupplementaryData,
   | "queryProbes"
   | "embeddingSimilarityScores"
+  | "evidenceSemanticScoresByCandidateKey"
   | "ftsRanks"
   | "trigramFtsRanks"
   | "evidenceFtsRanks"
@@ -250,6 +251,12 @@ function embeddingSignal(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number | null {
+  const evidenceScore = readObservedUnitScore(
+    supplementaryData.evidenceSemanticScoresByCandidateKey?.get(
+      candidate.fusion.candidate_key
+    )
+  );
+  if (evidenceScore !== null) return evidenceScore;
   const objectId = candidate.entry.object_id;
   const factor = readObservedUnitScore(candidate.effectiveFactors.embedding_similarity);
   if (factor !== null) return factor;

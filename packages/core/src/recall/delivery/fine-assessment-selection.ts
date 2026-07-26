@@ -36,6 +36,7 @@ import {
   hasRankedEmbeddingHead,
   selectEmbeddingHeadEvictions
 } from "./admission/embedding-head-dominance.js";
+import { retainBoundedDirectEvidenceHead, selectBoundedDirectEvidenceHead } from "./admission/direct-evidence-answer-head.js";
 import {
   buildFinalScoreFactors,
   createFineAssessmentDiagnostic
@@ -131,7 +132,14 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
         context.captureAnswerFeatures
       )
     : initialOrder;
-  const finalAccumulator = reduceFineAssessmentCandidates(coverageOrdered, context, evictions);
+  const evidenceHead = selectBoundedDirectEvidenceHead(
+    coverageOrdered, context.supplementaryData.queryProbes,
+    context.config.budgets.max_entries, evictions,
+    (candidates) => collectAdmittedCandidates(candidates, context, evictions),
+    (candidate) => context.answerSupportByCandidateKey.get(
+      candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
+  );
+  const finalAccumulator = reduceFineAssessmentCandidates(evidenceHead.candidates, context, evictions);
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"
     ? freezeSelectedPacket(finalAccumulator)
@@ -139,7 +147,9 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
         finalAccumulator,
         context,
         finalOrder,
-        params.maxHeadDropAfterCoverage
+        params.maxHeadDropAfterCoverage,
+        evidenceHead.protectedCandidateKey,
+        evidenceHead.candidates
       );
   return Object.freeze({
     candidates: delivered.candidates,
@@ -160,14 +170,11 @@ function freezeSelectedPacket(
 }
 
 function orderDeliveredPacket(
-  accumulator: FineAssessmentAccumulator,
-  context: FineAssessmentSelectionContext,
+  accumulator: FineAssessmentAccumulator, context: FineAssessmentSelectionContext,
   finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
-  maxHeadDrop: number | undefined
-): Readonly<{
-  candidates: readonly Readonly<RecallCandidate>[];
-  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-}> {
+  maxHeadDrop: number | undefined, protectedEvidenceKey: string | null,
+  sourceCandidates: readonly FineAssessmentCandidate[]
+): ReturnType<typeof freezeSelectedPacket> {
   const publicOrder = [...accumulator.selected].sort((left, right) =>
     compareFinalDeliveryOrder(left, right, finalOrder, context.rankByCandidateKey)
   );
@@ -180,12 +187,16 @@ function orderDeliveredPacket(
         protectedRankLimit: context.config.budgets.max_entries
       })
     : publicOrder;
-  const candidates = finalOrder === "public_relevance"
+  const verifiedOrder = finalOrder === "public_relevance"
     ? orderWithVerifiedAnswerSlot({
         publicOrder: boundedOrder,
         supportByCandidateKey: context.answerSupportByCandidateKey
       })
     : boundedOrder;
+  const candidates = retainBoundedDirectEvidenceHead(
+    verifiedOrder, protectedEvidenceKey, buildRecallCandidateSelectionKey,
+    context.supplementaryData.queryProbes, sourceCandidates
+  );
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
   const ranked = candidates.map((candidate, index) => {
@@ -206,10 +217,7 @@ function orderDeliveredPacket(
       ? row
       : Object.freeze({ ...row, final_rank: finalRank, post_rank: finalRank });
   });
-  return Object.freeze({
-    candidates: Object.freeze(ranked),
-    diagnostics: Object.freeze(diagnostics)
-  });
+  return Object.freeze({ candidates: Object.freeze(ranked), diagnostics: Object.freeze(diagnostics) });
 }
 
 function compareFinalDeliveryOrder(
