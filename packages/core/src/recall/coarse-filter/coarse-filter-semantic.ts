@@ -358,13 +358,14 @@ async function loadEvidenceCapsulesOrFallback(
   params: SemanticSupplementParams,
   evidenceRankById: ReadonlyMap<string, number>
 ): Promise<readonly Readonly<EvidenceCapsule>[] | null> {
-  const findByIds = params.context.dependencies.evidenceSearchPort?.findByIds;
-  if (findByIds === undefined) {
+  const findQualified =
+    params.context.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
+  if (findQualified === undefined) {
     await admitMemoryEvidenceMatches(params, evidenceRankById);
     return null;
   }
   try {
-    return await findByIds.call(
+    return await findQualified.call(
       params.context.dependencies.evidenceSearchPort,
       params.workspaceId,
       [...evidenceRankById.keys()]
@@ -458,14 +459,15 @@ async function admitDirectEvidenceMatches(
       continue;
     }
     params.evidenceFtsRanks.set(evidence.object_id, rank);
+    const entry = buildDirectEvidencePseudoMemoryEntry(evidence, rank);
     params.addCandidate(
-      buildDirectEvidencePseudoMemoryEntry(evidence, rank),
+      entry,
       "lexical",
       rank,
       "evidence_fts_direct",
       {
         objectKind: "evidence_capsule",
-        answerRerankText: resolveDirectEvidenceRecallText(evidence)
+        answerRerankText: entry.content
       }
     );
   }

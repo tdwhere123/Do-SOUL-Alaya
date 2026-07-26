@@ -42,7 +42,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [evidence])
+        findRecallQualifiedByIds: vi.fn(async () => [evidence])
       }
     });
 
@@ -65,7 +65,7 @@ describe("direct evidence recall candidates", () => {
     expect(candidate?.content_preview.endsWith("…")).toBe(true);
     expect(candidate?.content_preview).not.toContain("tail answer");
     expect(candidate?.token_estimate).toBeLessThan(200);
-    expect(score.mock.calls[0]?.[1]).toEqual([fullExcerpt]);
+    expect(score.mock.calls[0]?.[1]).toEqual([candidate?.content_preview]);
     expect(candidate?.score_factors?.graph_support ?? 0).toBe(0);
     expect(candidate?.score_factors?.path_plasticity ?? 0).toBe(0);
     expect(countInboundSupports).not.toHaveBeenCalledWith(EVIDENCE_ID);
@@ -89,7 +89,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule({
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule({
           physical_anchor: {
             file_path: null,
             line_range: null,
@@ -129,7 +129,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
 
@@ -165,7 +165,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
 
@@ -193,7 +193,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule({
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule({
           physical_anchor: {
             file_path: null,
             line_range: null,
@@ -233,7 +233,7 @@ describe("direct evidence recall candidates", () => {
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 },
           { object_id: SECOND_EVIDENCE_ID, normalized_rank: 0.9 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
 
@@ -265,7 +265,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => {
+        findRecallQualifiedByIds: vi.fn(async () => {
           throw new Error("evidence hydration unavailable");
         })
       }
@@ -298,7 +298,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
 
@@ -341,7 +341,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
 
@@ -371,7 +371,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule({
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule({
           lifecycle_state: "dormant"
         })])
       }
@@ -411,7 +411,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findByIds: vi.fn(async () => [createEvidenceCapsule(override)])
+        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule(override)])
       }
     });
 

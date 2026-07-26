@@ -24,6 +24,7 @@ import {
   prepareEvidenceCapsuleStatements,
   type EvidenceCapsuleStatements
 } from "./evidence-capsule-statements.js";
+import { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
 
 export interface EvidenceCapsuleKeywordHit {
   readonly object_id: string;
@@ -45,6 +46,10 @@ export interface EvidenceCapsuleRepo {
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findRecallQualifiedByIds(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findSourceAnchorsByIds(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
@@ -89,9 +94,11 @@ export interface EvidenceCapsuleListPageOptions {
 // split and ordinal-rank merge shared with synthesis-capsule-repo.ts.
 export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
   private readonly statementHolder: RefreshableStatementHolder<EvidenceCapsuleStatements>;
+  private readonly recallQualifiedReader: RecallQualifiedEvidenceReader;
 
   public constructor(private readonly db: StorageDatabase) {
     this.statementHolder = new RefreshableStatementHolder(db, prepareEvidenceCapsuleStatements);
+    this.recallQualifiedReader = new RecallQualifiedEvidenceReader(db);
   }
 
   private get statements(): EvidenceCapsuleStatements {
@@ -239,6 +246,21 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       return rows.map((row) => parseEvidenceCapsuleRow(row));
     } catch (error) {
       throw new StorageError("QUERY_FAILED", "Failed to load evidence capsules by ids.", error);
+    }
+  }
+
+  public async findRecallQualifiedByIds(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    try {
+      return this.recallQualifiedReader.find(workspaceId, evidenceObjectIds);
+    } catch (error) {
+      throw new StorageError(
+        "QUERY_FAILED",
+        "Failed to load recall-qualified evidence capsules by ids.",
+        error
+      );
     }
   }
 

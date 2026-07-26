@@ -144,6 +144,10 @@ export interface RecallServiceEvidenceSearchPort {
     workspaceId: string,
     evidenceObjectIds: readonly string[]
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+  findRecallQualifiedByIds?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findSourceAnchorsByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]

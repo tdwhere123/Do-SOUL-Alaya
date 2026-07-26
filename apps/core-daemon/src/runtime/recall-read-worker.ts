@@ -121,6 +121,7 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "evidence.searchByKeyword":
     case "evidence.searchManyByKeyword":
     case "evidence.findByIds":
+    case "evidence.findRecallQualifiedByIds":
     case "evidence.findSourceAnchorsByIds":
       return await runEvidenceOperation(request.operation, payload);
     case "synthesis.searchByKeyword":
@@ -279,6 +280,12 @@ async function runEvidenceOperation(
   const workspaceId = readString(payload.workspaceId, "workspaceId");
   if (operation === "evidence.findSourceAnchorsByIds") {
     return await evidenceCapsuleRepo.findSourceAnchorsByIds(
+      workspaceId,
+      readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
+    );
+  }
+  if (operation === "evidence.findRecallQualifiedByIds") {
+    return await evidenceCapsuleRepo.findRecallQualifiedByIds(
       workspaceId,
       readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
     );
