@@ -17,6 +17,7 @@ import type { RecallFusionStream, RecallSupplementaryData } from "../runtime/rec
 import type { RecallFusionCandidateInput } from "./fusion-delivery-scoring-candidate.js";
 
 export function scoreRecallFusionStream(
+  candidateKey: string,
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
   supplementaryData: RecallSupplementaryData,
@@ -26,15 +27,36 @@ export function scoreRecallFusionStream(
     return scoreSynthesisCapsuleFusionStream(candidate, stream, supplementaryData);
   }
   if (candidate.objectKind === "evidence_capsule") {
-    return stream === "evidence_fts"
-      ? clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0)
-      : 0;
+    return scoreEvidenceCapsuleFusionStream(
+      candidateKey,
+      candidate,
+      stream,
+      supplementaryData
+    );
   }
   if (candidate.originPlane === "global") {
     return scoreGlobalFusionStream(candidate, stream, supplementaryData, nowIso);
   }
   return scoreWorkspaceLocalFusionStream(candidate, stream, supplementaryData, nowIso);
 }
+
+function scoreEvidenceCapsuleFusionStream(
+  candidateKey: string,
+  candidate: RecallFusionCandidateInput,
+  stream: RecallFusionStream,
+  supplementaryData: RecallSupplementaryData
+): number {
+  if (stream === "evidence_fts") {
+    return clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0);
+  }
+  if (stream === "embedding_similarity") {
+    return clamp01(
+      supplementaryData.evidenceSemanticScoresByCandidateKey.get(candidateKey) ?? 0
+    );
+  }
+  return 0;
+}
+
 function scoreSynthesisCapsuleFusionStream(
   candidate: RecallFusionCandidateInput,
   stream: RecallFusionStream,
