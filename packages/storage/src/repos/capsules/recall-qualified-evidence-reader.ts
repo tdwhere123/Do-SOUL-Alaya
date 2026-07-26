@@ -4,11 +4,14 @@ import {
   SignalEventType,
   SoulSignalMaterializedPayloadSchema,
   formatGardenSourceTurnFallbackSourceHash,
+  formatGardenSourceTurnFallbackV2SourceHash,
+  isGardenSourceTurnFallbackV2Receipt,
+  projectGardenSourceTurnFallbackV2UserContent,
   readGardenSourceTurnFallbackArtifactSignalId,
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
   type EvidenceCapsule,
-  type GardenSourceTurnFallbackReceipt
+  type GardenSourceTurnFallbackVerifiedReceipt
 } from "@do-soul/alaya-protocol";
 import type BetterSqlite3 from "better-sqlite3";
 import type { StorageDatabase } from "../../sqlite/db.js";
@@ -224,7 +227,7 @@ function isQualified(
 
 function matchesReceipt(
   candidate: EvidenceCandidate,
-  receipt: Readonly<GardenSourceTurnFallbackReceipt>
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
   const capsule = candidate.capsule;
   return receipt.signal_id === candidate.signalId &&
@@ -233,14 +236,25 @@ function matchesReceipt(
     capsule.run_id === receipt.run_id &&
     capsule.surface_id === receipt.surface_id &&
     capsule.gist === receipt.source_corpus &&
-    capsule.excerpt === receipt.source_corpus &&
+    matchesReceiptProjection(capsule, receipt);
+}
+
+function matchesReceiptProjection(
+  capsule: Readonly<EvidenceCapsule>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
+): boolean {
+  if (isGardenSourceTurnFallbackV2Receipt(receipt)) {
+    return capsule.excerpt === projectGardenSourceTurnFallbackV2UserContent(receipt) &&
+      capsule.source_hash === formatGardenSourceTurnFallbackV2SourceHash(receipt.digest);
+  }
+  return capsule.excerpt === receipt.source_corpus &&
     capsule.source_hash === formatGardenSourceTurnFallbackSourceHash(receipt.digest);
 }
 
 function matchesMaterialization(
   row: StoredMaterializationRow,
   candidate: EvidenceCandidate,
-  receipt: Readonly<GardenSourceTurnFallbackReceipt>
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
   const payload = SoulSignalMaterializedPayloadSchema.safeParse(parseJson(row.payload_json));
   if (!payload.success) return false;

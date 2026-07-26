@@ -191,6 +191,48 @@ describe("MaterializationRouter routing and grounding", () => {
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });
 
+  it("materializes only verified v2 User spans into the searchable projection", async () => {
+    const deps = createDeps();
+    const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
+    const userContent = "First line.\nAssistant: quoted inside User content.";
+    const assistantContent = "Private assistant-only elaboration.";
+    const sourceCorpus =
+      `User: ${userContent}\nAssistant: ${assistantContent}`;
+    const signal = buildGardenTurnEvidenceFallback({
+      turnContent: sourceCorpus,
+      turnMessages: [
+        { message_id: "u1", role: "user", content: userContent },
+        { message_id: "a1", role: "assistant", content: assistantContent }
+      ],
+      reason: "empty_extraction",
+      signalId: "fallback-v2",
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      surfaceId: null,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      sourceObservation: {
+        observed_at: "2026-07-21T12:00:00.000Z",
+        authority: "trusted_host_event",
+        source_event_id: "event-v2"
+      }
+    })!;
+
+    await router.materializeSignal(signal);
+
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(expect.objectContaining({
+      gist: sourceCorpus,
+      excerpt: userContent,
+      semantic_anchor: expect.objectContaining({ summary: userContent }),
+      evidence_kind: "conversation_excerpt",
+      evidence_health_state: "verified",
+      source_hash: expect.stringMatching(
+        /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
+      )
+    }));
+    expect(deps.memoryService.create).not.toHaveBeenCalled();
+    expect(deps.claimService.create).not.toHaveBeenCalled();
+  });
+
   it("does not let a provider-selected evidence kind bypass source grounding", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });

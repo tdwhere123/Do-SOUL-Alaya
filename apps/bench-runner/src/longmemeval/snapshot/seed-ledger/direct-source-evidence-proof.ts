@@ -4,12 +4,15 @@ import {
   CandidateMemorySignalSchema,
   SignalEventType,
   SoulSignalMaterializedPayloadSchema,
-  hasGardenSourceTurnFallbackReceiptFormat,
+  hasGardenSourceTurnFallbackAnyReceiptFormat,
+  isGardenSourceTurnFallbackV2Receipt,
+  projectGardenSourceTurnFallbackV2UserContent,
   readGardenSourceTurnFallbackArtifactSignalId,
-  readGardenSourceTurnFallbackSourceHashDigest,
+  readGardenSourceTurnFallbackV2SourceHashDigest,
   verifyGardenSourceTurnFallbackReceipt
 } from "@do-soul/alaya-protocol";
 import {
+  buildLongMemEvalRoundMessages,
   pairSessionIntoRounds,
   type LongMemEvalQuestion
 } from "../../ingestion/dataset.js";
@@ -24,6 +27,11 @@ import type {
 } from "../materialize.js";
 import { SNAPSHOT_SIGNAL_MATERIALIZATION_EVENT_SQL } from
   "./seed-ledger-materialization-proof.js";
+
+type VerifiedV2Receipt = Extract<
+  NonNullable<ReturnType<typeof verifyGardenSourceTurnFallbackReceipt>>,
+  { readonly source_role_spans: unknown }
+>;
 
 interface StoredDirectEvidence {
   readonly object_id: string;
@@ -169,15 +177,13 @@ function assertDirectBinding(
   const artifactSignalId = readGardenSourceTurnFallbackArtifactSignalId(
     readString(anchor?.artifact_ref)
   );
-  const sourceHashDigest = readGardenSourceTurnFallbackSourceHashDigest(
-    row?.source_hash ?? null
-  );
   const expectedSignalId = buildLongMemEvalRoundEvidenceRef(
     source.question_id,
     context.round.sessionIndex,
     context.round.roundIndex
   );
   if (row === undefined || signal === null || receipt === null ||
+      !isGardenSourceTurnFallbackV2Receipt(receipt) ||
       !matchesDirectEvidenceEnvelope(row, question, context) ||
       context.binding.signalId !== expectedSignalId ||
       receipt.signal_id !== context.binding.signalId ||
@@ -185,8 +191,8 @@ function assertDirectBinding(
       receipt.run_id !== question.runId ||
       row.surface_id !== receipt.surface_id ||
       artifactSignalId !== context.binding.signalId ||
-      sourceHashDigest !== receipt.digest ||
-      row.excerpt !== receipt.source_corpus || row.gist !== receipt.source_corpus ||
+      !matchesReceiptSourceHash(row.source_hash, receipt) ||
+      !matchesStoredReceiptProjection(row, receipt) ||
       !matchesCanonicalReceipt(receipt, context.round, source)) {
     throw new Error(`snapshot direct evidence receipt mismatch for ${context.binding.evidenceId}`);
   }
@@ -210,28 +216,96 @@ function matchesDirectEvidenceEnvelope(
 }
 
 function matchesCanonicalReceipt(
-  receipt: NonNullable<ReturnType<typeof verifyGardenSourceTurnFallbackReceipt>>,
+  receipt: VerifiedV2Receipt,
   round: LongMemEvalSnapshotSeedRound,
   source: LongMemEvalQuestion
 ): boolean {
-  const canonical = pairSessionIntoRounds(source.haystack_sessions[round.sessionIndex]!)[
-    round.roundIndex
-  ]?.content.trim();
   const observedAt = requireLongMemEvalTimestamp(source.haystack_dates[round.sessionIndex]);
-  if (canonical === undefined || receipt.signal_id.trim().length === 0 ||
+  if (receipt.signal_id.trim().length === 0 ||
       receipt.workspace_id.trim().length === 0 || receipt.run_id.trim().length === 0) {
     return false;
   }
   const observation = receipt.source_observation;
-  return receipt.chars_clipped <= canonical.length &&
-    receipt.source_corpus.length + receipt.chars_clipped === canonical.length &&
+  const metadataMatches =
     (receipt.surface_id === null || receipt.surface_id === round.sessionId) &&
     receipt.created_at === observedAt &&
     observation?.observed_at === observedAt &&
     observation.authority === "trusted_host_event" &&
-    observation.source_event_id === receipt.signal_id &&
-    receipt.source_corpus === canonical.slice(0, canonical.length - receipt.chars_clipped) &&
-    receipt.truncated === (receipt.chars_clipped > 0);
+    observation.source_event_id === receipt.signal_id;
+  return metadataMatches && matchesCanonicalV2Receipt(receipt, round, source);
+}
+
+function matchesCanonicalV2Receipt(
+  receipt: VerifiedV2Receipt,
+  round: LongMemEvalSnapshotSeedRound,
+  source: LongMemEvalQuestion
+): boolean {
+  const expected = buildExpectedV2Receipt(source, round);
+  return expected !== null &&
+    receipt.source_corpus === expected.sourceCorpus &&
+    projectGardenSourceTurnFallbackV2UserContent(receipt) === expected.userContent &&
+    receipt.source_role_spans.length === expected.sourceRoleSpans.length &&
+    receipt.source_role_spans.every((span, index) => {
+      const expectedSpan = expected.sourceRoleSpans[index];
+      return expectedSpan !== undefined &&
+        span.role === expectedSpan.role &&
+        span.start === expectedSpan.start &&
+        span.end === expectedSpan.end;
+    });
+}
+
+function buildExpectedV2Receipt(
+  source: LongMemEvalQuestion,
+  round: LongMemEvalSnapshotSeedRound
+): ExpectedV2Receipt | null {
+  const session = source.haystack_sessions[round.sessionIndex];
+  const pairedRound = session === undefined
+    ? undefined
+    : pairSessionIntoRounds(session)[round.roundIndex];
+  if (session === undefined || pairedRound === undefined) return null;
+  const messages = buildLongMemEvalRoundMessages(
+    session,
+    pairedRound,
+    `${source.question_id}-s${round.sessionIndex}-r${round.roundIndex}`
+  );
+  let sourceCorpus = "";
+  const sourceRoleSpans: ExpectedV2Receipt["sourceRoleSpans"][number][] = [];
+  const userContent: string[] = [];
+  for (const message of messages) {
+    const content = message.content.trim();
+    const prefix = `${sourceCorpus.length === 0 ? "" : "\n"}` +
+      `${message.role === "user" ? "User" : "Assistant"}: `;
+    const start = sourceCorpus.length + prefix.length;
+    sourceCorpus += prefix + content;
+    sourceRoleSpans.push({ role: message.role, start, end: sourceCorpus.length });
+    if (message.role === "user") userContent.push(content);
+  }
+  return { sourceCorpus, sourceRoleSpans, userContent: userContent.join("\n") };
+}
+
+interface ExpectedV2Receipt {
+  readonly sourceCorpus: string;
+  readonly sourceRoleSpans: readonly Readonly<{
+    readonly role: "user" | "assistant";
+    readonly start: number;
+    readonly end: number;
+  }>[];
+  readonly userContent: string;
+}
+
+function matchesReceiptSourceHash(
+  sourceHash: string | null,
+  receipt: VerifiedV2Receipt
+): boolean {
+  return readGardenSourceTurnFallbackV2SourceHashDigest(sourceHash) === receipt.digest;
+}
+
+function matchesStoredReceiptProjection(
+  row: StoredDirectEvidence,
+  receipt: VerifiedV2Receipt
+): boolean {
+  return row.gist === receipt.source_corpus &&
+    row.excerpt === projectGardenSourceTurnFallbackV2UserContent(receipt);
 }
 
 function assertMaterializationEvent(
@@ -316,7 +390,7 @@ function matchesSidecarRound(
 
 function isDirectEvidenceFormat(row: StoredDirectEvidence): boolean {
   const anchor = parseRecord(row.physical_anchor);
-  return hasGardenSourceTurnFallbackReceiptFormat({
+  return hasGardenSourceTurnFallbackAnyReceiptFormat({
     artifact_ref: readString(anchor?.artifact_ref),
     source_hash: row.source_hash
   });

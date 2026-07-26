@@ -96,6 +96,9 @@ function buildEvidenceFallbackInput(
     turnSeedIndex: input.seedIndex,
     extractionProvider: "official_api_compile",
     evidenceFallbackReason: reason,
+    ...(input.turnMessages === undefined
+      ? {}
+      : { turnMessages: input.turnMessages }),
     ...(input.surfaceId === undefined ? {} : { surfaceId: input.surfaceId }),
     ...(input.sourceObservedAt === undefined
       ? {}

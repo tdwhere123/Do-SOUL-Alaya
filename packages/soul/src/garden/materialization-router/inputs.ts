@@ -13,7 +13,7 @@ import {
 import { deriveFacetsFromText } from "../../shared/facet-keywords.js";
 import { resolveGardenSignalGrounding } from "../grounding/signal-source-grounding.js";
 import {
-  resolveVerifiedGardenTurnEvidenceSourceHash
+  resolveVerifiedGardenTurnEvidenceProjection
 } from "../evidence-preservation/turn-evidence-anchor.js";
 import {
   type ClaimMaterializationInput,
@@ -207,26 +207,21 @@ export function buildEvidenceInput(
     opts?.fullTurnExcerpt === true
       ? readFullTurnEvidenceExcerpt(signal)
       : buildSignalSummary(signal);
-  const verifiedAssertionSourceHash = opts?.fullTurnExcerpt === true
-    ? buildVerifiedUserAssertionSourceHash(signal, sourceCorpus)
-    : null;
+  const projection = resolveEvidenceTextProjection(
+    signal,
+    sourceCorpus,
+    summarySuffix,
+    opts?.fullTurnExcerpt === true
+  );
   const gist = appendSummarySuffix(sourceCorpus, summarySuffix);
-  const sourceHash = opts?.fullTurnExcerpt === true && summarySuffix === undefined
-    ? resolveVerifiedGardenTurnEvidenceSourceHash(signal, gist) ??
-      verifiedAssertionSourceHash
-    : null;
-  const excerpt = sourceHash !== null && sourceHash === verifiedAssertionSourceHash
-    ? buildDistilledFact(signal)
-    : sourceCorpus;
-  const hasVerifiedSourceReceipt = sourceHash !== null;
 
   return {
     created_by: signal.source,
-    evidence_kind: pickEvidenceKind(signal, hasVerifiedSourceReceipt),
+    evidence_kind: pickEvidenceKind(signal, projection.sourceHash !== null),
     semantic_anchor: {
       topic: buildTopicKey(signal),
       keywords: [...signal.domain_tags],
-      summary: appendSummarySuffix(excerpt, summarySuffix)
+      summary: appendSummarySuffix(projection.excerpt, summarySuffix)
     },
     // Signal creation/admission clocks are not source time. A caller can only
     // supply this through the verified EventLog receipt context.
@@ -234,11 +229,11 @@ export function buildEvidenceInput(
     physical_anchor: buildSignalPhysicalAnchor(signal, opts?.artifactRef),
     evidence_health_state: computeEvidenceHealthState(
       signal,
-      hasVerifiedSourceReceipt
+      projection.sourceHash !== null
     ),
     gist,
-    excerpt,
-    source_hash: sourceHash,
+    excerpt: projection.excerpt,
+    source_hash: projection.sourceHash,
     run_id: signal.run_id,
     workspace_id: signal.workspace_id,
     surface_id: signal.surface_id
@@ -250,12 +245,33 @@ function readFullTurnEvidenceExcerpt(signal: CandidateMemorySignal): string {
   if (
     typeof exact === "string" &&
     exact.trim().length > 0 &&
-    resolveVerifiedGardenTurnEvidenceSourceHash(signal, exact) !== null
+    resolveVerifiedGardenTurnEvidenceProjection(signal, exact) !== null
   ) {
     return exact;
   }
   return readStringPayload(signal.raw_payload, "full_turn_content") ??
     buildSignalSummary(signal);
+}
+
+function resolveEvidenceTextProjection(
+  signal: CandidateMemorySignal,
+  sourceCorpus: string,
+  summarySuffix: string | undefined,
+  fullTurnExcerpt: boolean
+): Readonly<{ excerpt: string; sourceHash: string | null }> {
+  if (!fullTurnExcerpt) return { excerpt: sourceCorpus, sourceHash: null };
+  const fallback = resolveVerifiedGardenTurnEvidenceProjection(signal, sourceCorpus);
+  const assertionSourceHash = buildVerifiedUserAssertionSourceHash(signal, sourceCorpus);
+  const sourceHash = summarySuffix === undefined
+    ? fallback?.sourceHash ?? assertionSourceHash
+    : null;
+  if (sourceHash !== null && sourceHash === assertionSourceHash) {
+    return { excerpt: buildDistilledFact(signal), sourceHash };
+  }
+  return {
+    excerpt: fallback?.userContent ?? sourceCorpus,
+    sourceHash
+  };
 }
 
 function buildVerifiedUserAssertionSourceHash(

@@ -1,3 +1,5 @@
+import type { ConversationMessage } from "@do-soul/alaya-protocol";
+
 export interface SeededMemoryResult {
   readonly kind?: "memory_entry";
   readonly memoryId: string;
@@ -52,6 +54,7 @@ export interface BenchSignalSeedInput {
   readonly confidence: number;
   readonly distilledFact: string;
   readonly turnContent: string;
+  readonly turnMessages?: readonly ConversationMessage[];
   readonly matchedText?: string;
   readonly surfaceId?: string | null;
   readonly productionRawPayload?: Readonly<Record<string, unknown>>;

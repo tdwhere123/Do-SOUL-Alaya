@@ -11,7 +11,7 @@ import {
   type LongMemEvalSeedRoundIdentity
 } from "../runner/question/runner-question-seeding.js";
 import {
-  hasGardenSourceTurnFallbackReceiptFormat,
+  hasGardenSourceTurnFallbackAnyReceiptFormat,
   readGardenSourceTurnFallbackArtifactSignalId
 } from "@do-soul/alaya-protocol";
 import { buildLongMemEvalQuestionRuntimeIdentity } from
@@ -334,10 +334,11 @@ function resolveEvidenceRound(
   const artifactRef = typeof anchor.artifact_ref === "string"
     ? anchor.artifact_ref
     : null;
-  const sourceRef = hasGardenSourceTurnFallbackReceiptFormat({
+  const receiptFormat = {
     artifact_ref: artifactRef,
     source_hash: row.source_hash ?? null
-  })
+  };
+  const sourceRef = hasGardenSourceTurnFallbackAnyReceiptFormat(receiptFormat)
     ? readGardenSourceTurnFallbackArtifactSignalId(artifactRef)
     : artifactRef;
   const round = resolveLongMemEvalSeedRoundIdentity(sourceRef, source);

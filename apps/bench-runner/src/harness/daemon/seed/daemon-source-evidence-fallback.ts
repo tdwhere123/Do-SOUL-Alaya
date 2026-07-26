@@ -26,6 +26,7 @@ export function buildBenchSourceEvidenceFallback(
   const observedAt = seed.sourceObservedAt ?? new Date().toISOString();
   const signal = buildGardenTurnEvidenceFallback({
     turnContent: seed.turnContent,
+    ...(seed.turnMessages === undefined ? {} : { turnMessages: seed.turnMessages }),
     reason: seed.evidenceFallbackReason,
     signalId,
     workspaceId: input.activeContext.workspaceId,
@@ -42,6 +43,9 @@ export function buildBenchSourceEvidenceFallback(
     throw new Error("source evidence fallback requires non-empty turn content");
   }
   const preservation = signal.raw_payload.evidence_preservation;
+  if (readRecord(preservation)?.version !== 2) {
+    throw new Error("source evidence fallback requires a complete trusted User projection");
+  }
   return {
     signal,
     truncated: readBoolean(preservation, "truncated"),

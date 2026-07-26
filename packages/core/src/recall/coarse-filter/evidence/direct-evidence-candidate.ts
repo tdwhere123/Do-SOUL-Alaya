@@ -1,5 +1,5 @@
 import {
-  hasGardenSourceTurnFallbackReceiptFormat,
+  hasGardenSourceTurnFallbackAnyReceiptFormat,
   type EvidenceCapsule,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
@@ -15,7 +15,7 @@ export function isDirectRecallEvidence(
     evidence.created_by === "garden_compile" &&
     evidence.evidence_health_state === "verified" &&
     evidence.evidence_kind === "conversation_excerpt" &&
-    hasGardenSourceTurnFallbackReceiptFormat({
+    hasGardenSourceTurnFallbackAnyReceiptFormat({
       artifact_ref: artifactRef ?? null,
       source_hash: evidence.source_hash
     });

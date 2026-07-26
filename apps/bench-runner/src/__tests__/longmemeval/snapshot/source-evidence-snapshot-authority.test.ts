@@ -48,6 +48,11 @@ import { assertSnapshotSeedLedgerBinding } from
 import { assertSnapshotDatasetSubstrateIdentity } from "../../../longmemeval/snapshot/substrate-binding.js";
 import { CREDENTIALLED_CONFIG } from "../compile-seed/compile-seed-fixture.js";
 import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
+import {
+  SOURCE_EVIDENCE_USER_CONTENT,
+  sourceEvidenceCorpus,
+  sourceEvidenceQuestion
+} from "./source-evidence/authority-question-fixture.js";
 
 interface AuthorityFixture {
   readonly dbPath: string;
@@ -60,7 +65,6 @@ interface AuthorityFixture {
 type SeededAuthorityFixture = Omit<AuthorityFixture, "extraction">;
 let root: string | undefined;
 let fixture: AuthorityFixture;
-
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "source-evidence-authority-base-"));
   fixture = await buildAuthorityFixture(root);
@@ -106,14 +110,22 @@ describe("source evidence snapshot authority", () => {
     expect(() => verifyCopy((db) => {
       db.prepare("UPDATE evidence_capsules SET source_hash = NULL WHERE object_id = ?")
         .run(fixture.evidenceId);
-    })).toThrow(/legacy sidecar evidence round identity mismatch/iu);
+    })).toThrow(/direct evidence DB closure mismatch|legacy sidecar evidence round identity mismatch/iu);
+  });
+
+  it("rejects a v2 receipt paired with a v1 source-hash version", () => {
+    expect(() => verifyCopy((db) => {
+      db.prepare("UPDATE evidence_capsules SET source_hash = REPLACE(source_hash, '-v2:', '-v1:') WHERE object_id = ?")
+        .run(fixture.evidenceId);
+    })).toThrow(/direct evidence receipt mismatch/iu);
   });
 
   it.each([
     ["created_by", "other_producer"],
     ["lifecycle_state", "retired"],
     ["evidence_health_state", "questionable"],
-    ["evidence_kind", "inferred"]
+    ["evidence_kind", "inferred"],
+    ["gist", SOURCE_EVIDENCE_USER_CONTENT]
   ])("rejects direct evidence with drifted %s", (column, value) => {
     expect(() => verifyCopy((db) => {
       db.prepare(`UPDATE evidence_capsules SET ${column} = ? WHERE object_id = ?`)
@@ -121,10 +133,10 @@ describe("source evidence snapshot authority", () => {
     })).toThrow(/direct evidence receipt mismatch/iu);
   });
 
-  it("rejects content that differs from its receipt", () => {
+  it("rejects the full receipt corpus as the v2 excerpt", () => {
     expect(() => verifyCopy((db) => {
       db.prepare("UPDATE evidence_capsules SET excerpt = ? WHERE object_id = ?")
-        .run("Assistant: altered source", fixture.evidenceId);
+        .run(sourceEvidenceCorpus(), fixture.evidenceId);
     })).toThrow(/direct evidence receipt mismatch/iu);
   });
 
@@ -139,9 +151,10 @@ describe("source evidence snapshot authority", () => {
     })).toThrow(/direct evidence receipt mismatch/iu);
   });
 
-  it("rejects digest-valid truncation that does not match canonical content", () => {
+  it("rejects a legacy v1 receipt from the current snapshot authority", () => {
     expect(() => verifyCopy((db) => {
-      const sourceCorpus = "Assistant: Take the 7:15 train from Central Station";
+      const canonical = sourceEvidenceCorpus();
+      const sourceCorpus = canonical.slice(0, canonical.length - 2);
       const receipt = {
         signal_id: fixture.signalId,
         workspace_id: fixture.sidecar.questions[0]!.workspaceId,
@@ -467,31 +480,6 @@ function withQuestion(
   question: LongMemEvalSnapshotSidecarFile["questions"][number]
 ): LongMemEvalSnapshotSidecarFile {
   return { ...fixture.sidecar, questions: [question] };
-}
-
-function sourceEvidenceQuestion(): LongMemEvalQuestion {
-  return {
-    question_id: "q-source-evidence-authority",
-    question_type: "single-session-assistant",
-    question: "Which train did the assistant recommend?",
-    answer: "The 7:15 train from Central Station.",
-    question_date: "2026-07-22T00:00:00.000Z",
-    haystack_session_ids: ["answer-session"],
-    haystack_dates: ["2026-07-20T00:00:00.000Z"],
-    haystack_sessions: [[
-      {
-        role: "assistant",
-        content: "Take the 7:15 train from Central Station.",
-        has_answer: true
-      },
-      {
-        role: "user",
-        content: "I check the platform near the main entrance.",
-        has_answer: false
-      }
-    ]],
-    answer_session_ids: ["answer-session"]
-  };
 }
 
 function sha256(value: string): string {

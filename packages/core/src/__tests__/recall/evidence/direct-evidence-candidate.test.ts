@@ -1,6 +1,7 @@
 import {
   formatGardenSourceTurnFallbackArtifactRef,
   formatGardenSourceTurnFallbackSourceHash,
+  formatGardenSourceTurnFallbackV2SourceHash,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
@@ -452,6 +453,12 @@ describe("direct evidence recall candidates", () => {
     expect(isDirectRecallEvidence(evidence, "workspace-1")).toBe(false);
     expect(selectExpansionSeedDrafts(drafts)).toEqual([]);
     expect(selectPreferredExpansionSeedEntries(drafts)).toEqual([]);
+  });
+
+  it("admits recall-qualified v2 evidence through the existing direct path", () => {
+    expect(isDirectRecallEvidence(createEvidenceCapsule({
+      source_hash: formatGardenSourceTurnFallbackV2SourceHash("b".repeat(64))
+    }), "workspace-1")).toBe(true);
   });
 });
 

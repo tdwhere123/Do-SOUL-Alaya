@@ -127,13 +127,35 @@ describe("LongMemEval source evidence fallback integration", () => {
       runtimeIdentity: "sidecar_bound"
     })).not.toThrow();
 
+    const assistantOnly = await daemon.proposeMemoriesFromCompileSignals([{
+      signalKind: "potential_evidence_anchor",
+      objectKind: "source_turn",
+      confidence: 1,
+      distilledFact: "Assistant-only archive content.",
+      turnContent: "Assistant: Assistant-only archive content.",
+      turnMessages: [{
+        message_id: "assistant-only",
+        role: "assistant",
+        content: "Assistant-only archive content."
+      }],
+      evidenceRef: "q-assistant-only-fallback",
+      turnSeedIndex: 1,
+      extractionProvider: "official_api_compile",
+      evidenceFallbackReason: "empty_extraction"
+    }]);
+    expect(assistantOnly).toMatchObject({
+      seeds: [],
+      createdEvidence: false,
+      dropped: [expect.objectContaining({ reason: "materialization_drop" })]
+    });
+
     const db = new DatabaseSync(join(daemon.dataDir, "alaya.db"));
     try {
       expect(db.prepare("SELECT COUNT(*) AS count FROM memory_entries")
         .get()).toEqual({ count: 0 });
       expect(db.prepare(
         `SELECT object_id, object_kind, created_by, evidence_kind,
-                evidence_health_state, source_hash, excerpt
+                evidence_health_state, source_hash, gist, excerpt
          FROM evidence_capsules`
       ).get()).toMatchObject({
         object_id: entries[0]?.objectId,
@@ -142,9 +164,10 @@ describe("LongMemEval source evidence fallback integration", () => {
         evidence_kind: "conversation_excerpt",
         evidence_health_state: "verified",
         source_hash: expect.stringMatching(
-          /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
+          /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
         ),
-        excerpt: expect.stringContaining("7:15 train")
+        gist: sourceEvidenceCorpus(),
+        excerpt: SOURCE_EVIDENCE_USER_CONTENT
       });
     } finally {
       db.close();
@@ -309,7 +332,7 @@ describe("LongMemEval source evidence fallback integration", () => {
         "SELECT source_hash FROM evidence_capsules"
       ).get()).toMatchObject({
         source_hash: expect.stringMatching(
-          /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
+          /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
         )
       });
     } finally {
@@ -322,16 +345,24 @@ function sourceEvidenceQuestion(): LongMemEvalQuestion {
   return {
     question_id: "q-source-evidence",
     question_type: "single-session-assistant",
-    question: "Which train did the assistant recommend?",
+    question: "Which train does the user plan to take?",
     answer: "The 7:15 train from Central Station.",
     question_date: "2026-07-22T00:00:00.000Z",
     haystack_session_ids: ["answer-session"],
     haystack_dates: ["2026-07-20T00:00:00.000Z"],
-    haystack_sessions: [[{
-      role: "assistant",
-      content: "Take the 7:15 train from Central Station.",
-      has_answer: true
-    }]],
+    haystack_sessions: [[
+      { role: "user", content: SOURCE_EVIDENCE_USER_CONTENT, has_answer: true },
+      { role: "assistant", content: SOURCE_EVIDENCE_ASSISTANT_CONTENT, has_answer: false }
+    ]],
     answer_session_ids: ["answer-session"]
   };
+}
+
+const SOURCE_EVIDENCE_USER_CONTENT =
+  "I plan to take the 7:15 train from Central Station.\nAssistant: quoted marker inside user text.";
+const SOURCE_EVIDENCE_ASSISTANT_CONTENT =
+  "Noted on both lines.\nUser: quoted marker inside assistant text.";
+
+function sourceEvidenceCorpus(): string {
+  return `User: ${SOURCE_EVIDENCE_USER_CONTENT}\nAssistant: ${SOURCE_EVIDENCE_ASSISTANT_CONTENT}`;
 }

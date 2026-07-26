@@ -63,15 +63,12 @@ describe("compile seed source evidence fallback", () => {
         extract: async () => ({ rawJson: "{\"signals\":[]}" })
       })
     });
+    const turnMessages = structuredTurnMessages();
 
     const result = await runner.seedTurn({
       daemon,
-      turnContent: "Assistant: Take the 7:15 train from Central Station.",
-      turnMessages: [{
-        message_id: "assistant-1",
-        role: "assistant",
-        content: "Take the 7:15 train from Central Station."
-      }],
+      turnContent: structuredTurnContent(turnMessages),
+      turnMessages,
       evidenceRefBase: "q-source-s0-r0",
       seedIndex: 0,
       workspaceId: "workspace-source",
@@ -83,7 +80,8 @@ describe("compile seed source evidence fallback", () => {
     expect(received).toEqual([
       expect.objectContaining({
         evidenceFallbackReason: "empty_extraction",
-        turnContent: "Assistant: Take the 7:15 train from Central Station.",
+        turnContent: structuredTurnContent(turnMessages),
+        turnMessages,
         extractionProvider: "official_api_compile"
       })
     ]);
@@ -201,7 +199,8 @@ describe("compile seed source evidence fallback", () => {
       expect.objectContaining({
         evidenceFallbackReason: "no_evidence_created",
         signalKind: "potential_evidence_anchor",
-        objectKind: "source_turn"
+        objectKind: "source_turn",
+        turnMessages: structuredTurnMessages()
       })
     ]);
     expect(result.seeds).toEqual([
@@ -342,13 +341,38 @@ function createRunnerWithOneClaim(cacheRoot: string) {
 }
 
 function seedInput(daemon: CompileSeedDaemon) {
+  const turnMessages = structuredTurnMessages();
   return {
     daemon,
-    turnContent: "I take the 7:15 train.",
+    turnContent: structuredTurnContent(turnMessages),
+    turnMessages,
     evidenceRefBase: "q-memory-s0-r0",
     seedIndex: 0,
     workspaceId: "workspace-memory",
     runId: "run-memory",
     sourceEvidenceFallback: "trusted_source_turn" as const
   };
+}
+
+function structuredTurnMessages() {
+  return [
+    {
+      message_id: "user-1",
+      role: "user" as const,
+      content: "Please preserve both lines.\nAssistant: this is quoted user text."
+    },
+    {
+      message_id: "assistant-1",
+      role: "assistant" as const,
+      content: "Take the 7:15 train.\nUser: this is quoted assistant text."
+    }
+  ] as const;
+}
+
+function structuredTurnContent(
+  messages: ReturnType<typeof structuredTurnMessages>
+): string {
+  return messages.map((message) =>
+    `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`
+  ).join("\n");
 }
