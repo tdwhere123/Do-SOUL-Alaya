@@ -201,18 +201,23 @@ export function buildEvidenceInput(
     readonly context?: MaterializationContext;
   }
 ): EvidenceMaterializationInput {
-  // fullTurnExcerpt widens the searchable excerpt/gist to the signal's full
-  // source turn so evidence FTS keeps the query terms distillation drops;
-  // otherwise the matched_text-span summary is used.
-  const excerpt =
+  // Keep the receipt corpus intact in gist, but do not collapse every grounded
+  // assertion from one turn onto the same searchable/displayed projection.
+  const sourceCorpus =
     opts?.fullTurnExcerpt === true
       ? readFullTurnEvidenceExcerpt(signal)
       : buildSignalSummary(signal);
-  const gist = appendSummarySuffix(excerpt, summarySuffix);
+  const verifiedAssertionSourceHash = opts?.fullTurnExcerpt === true
+    ? buildVerifiedUserAssertionSourceHash(signal, sourceCorpus)
+    : null;
+  const gist = appendSummarySuffix(sourceCorpus, summarySuffix);
   const sourceHash = opts?.fullTurnExcerpt === true && summarySuffix === undefined
     ? resolveVerifiedGardenTurnEvidenceSourceHash(signal, gist) ??
-      buildVerifiedUserAssertionSourceHash(signal, gist)
+      verifiedAssertionSourceHash
     : null;
+  const excerpt = sourceHash !== null && sourceHash === verifiedAssertionSourceHash
+    ? buildDistilledFact(signal)
+    : sourceCorpus;
   const hasVerifiedSourceReceipt = sourceHash !== null;
 
   return {

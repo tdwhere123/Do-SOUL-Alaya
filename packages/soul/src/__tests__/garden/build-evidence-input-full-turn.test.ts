@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import {
+  buildVerifiedUserAssertionReceiptPreimage,
+  formatVerifiedUserAssertionSourceHash
+} from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
 
 import { buildEvidenceInput } from "../../garden/materialization-router/inputs.js";
@@ -61,18 +66,53 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
     });
   });
 
-  it("persists a verified User assertion receipt from the production grounding path", () => {
-    const signal = createGroundedGardenSignal();
-    const evidence = buildEvidenceInput(signal, undefined, { fullTurnExcerpt: true });
+  it("keeps a verified receipt corpus in gist while preserving each grounded assertion as the excerpt", () => {
+    const firstAssertion = "I bought my bookshelf from IKEA.";
+    const secondAssertion = "I prefer warm light in the bedroom.";
+    const sourceCorpus = `User: ${firstAssertion} ${secondAssertion}`;
+    const firstSignal = createGroundedGardenSignal(firstAssertion, sourceCorpus, 1);
+    const secondSignal = createGroundedGardenSignal(secondAssertion, sourceCorpus, 2);
+    const firstEvidence = buildEvidenceInput(firstSignal, undefined, { fullTurnExcerpt: true });
+    const secondEvidence = buildEvidenceInput(secondSignal, undefined, { fullTurnExcerpt: true });
+
+    for (const [assertion, evidence] of [
+      [firstAssertion, firstEvidence],
+      [secondAssertion, secondEvidence]
+    ] as const) {
+      expect(evidence).toMatchObject({
+        created_by: "garden_compile",
+        evidence_kind: "conversation_excerpt",
+        evidence_health_state: "verified",
+        gist: sourceCorpus,
+        excerpt: assertion,
+        semantic_anchor: { summary: assertion },
+        source_hash: expectedSourceHash(assertion, sourceCorpus)
+      });
+    }
+    expect(firstEvidence.excerpt).not.toBe(secondEvidence.excerpt);
+    expect(firstEvidence.semantic_anchor.summary).not.toBe(secondEvidence.semantic_anchor.summary);
+  });
+
+  it("keeps the verified assertion authoritative over a divergent schema projection", () => {
+    const assertion = "I bought my bookshelf from IKEA.";
+    const grounded = createGroundedGardenSignal(assertion);
+    const evidence = buildEvidenceInput(createSignal({
+      ...grounded,
+      raw_payload: {
+        ...grounded.raw_payload,
+        field_candidates: [{
+          field_name: "content",
+          value: "A different schema projection.",
+          evidence: assertion,
+          confidence: 1
+        }]
+      }
+    }), undefined, { fullTurnExcerpt: true });
 
     expect(evidence).toMatchObject({
-      created_by: "garden_compile",
-      evidence_kind: "conversation_excerpt",
-      evidence_health_state: "verified",
-      gist: signal.raw_payload.full_turn_content
+      excerpt: assertion,
+      semantic_anchor: { summary: assertion }
     });
-    expect(evidence.source_hash)
-      .toMatch(/^sha256:garden-verified-user-assertion-v1:[a-f0-9]{64}$/u);
   });
 
   it("does not mint a receipt from a rejected or locator-free Garden payload", () => {
@@ -107,13 +147,19 @@ describe("buildEvidenceInput fullTurnExcerpt", () => {
       evidence_health_state: "questionable",
       evidence_kind: "inferred"
     });
-    expect(derived.source_hash).toBeNull();
+    expect(derived).toMatchObject({
+      source_hash: null,
+      excerpt: grounded.raw_payload.full_turn_content,
+      gist: `${grounded.raw_payload.full_turn_content} derived`
+    });
   });
 });
 
-function createGroundedGardenSignal() {
-  const assertion = "I bought my bookshelf from IKEA.";
-  const sourceCorpus = `User: ${assertion}`;
+function createGroundedGardenSignal(
+  assertion = "I bought my bookshelf from IKEA.",
+  sourceCorpus = `User: ${assertion}`,
+  assertionId = 1
+) {
   return createSignal({
     source: "garden_compile",
     object_kind: "fact",
@@ -126,7 +172,7 @@ function createGroundedGardenSignal() {
       source_locator: {
         contract_version: 2,
         kind: "assertion_catalog",
-        assertion_id: 1
+        assertion_id: assertionId
       },
       source_grounding: {
         version: 1,
@@ -139,4 +185,17 @@ function createGroundedGardenSignal() {
       full_turn_content: sourceCorpus
     }
   });
+}
+
+function expectedSourceHash(sourceAssertion: string, sourceCorpus: string): string {
+  const digest = createHash("sha256")
+    .update(buildVerifiedUserAssertionReceiptPreimage({
+      workspace_id: "workspace-1",
+      run_id: "run-1",
+      surface_id: null,
+      source_assertion: sourceAssertion,
+      source_corpus: sourceCorpus
+    }), "utf8")
+    .digest("hex");
+  return formatVerifiedUserAssertionSourceHash(digest);
 }

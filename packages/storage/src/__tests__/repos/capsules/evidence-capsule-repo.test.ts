@@ -270,6 +270,23 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(hits.map((hit) => hit.object_id)).not.toContain("1f5c2a90-0000-4000-8000-000000000002");
   });
 
+  it("indexes an atomic excerpt without leaking unrelated receipt-corpus terms", async () => {
+    const { repo } = await createRepo();
+    const objectId = "1f5c2a90-0000-4000-8000-000000000003";
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: objectId,
+        gist: "User: I bought my bookshelf from IKEA. The patio table is weatherproof cedar.",
+        excerpt: "I bought my bookshelf from IKEA."
+      })
+    );
+
+    await expect(repo.searchByKeyword!("workspace-1", "bookshelf IKEA", 10))
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ object_id: objectId })]));
+    await expect(repo.searchByKeyword!("workspace-1", "weatherproof cedar", 10))
+      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ object_id: objectId })]));
+  });
+
   it("recalls a Chinese evidence excerpt via the trigram lane (previously CJK-blind)", async () => {
     const { repo } = await createRepo();
     await repo.create(

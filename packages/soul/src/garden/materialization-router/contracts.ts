@@ -441,9 +441,8 @@ export interface MaterializationRouterDeps {
   // would otherwise be archived to evidence_only. Trades curation for recall;
   // shared by prod + bench via the single daemon construction.
   readonly materializationConfidenceFloor?: number;
-  // Widen each evidence capsule's searchable excerpt/gist to the signal's full
-  // source turn (full_turn_content) instead of the matched_text span, so evidence
-  // FTS can recall a memory whose distilled content dropped the query terms.
+  // Use the full source turn as the gist basis. A digest-bound assertion keeps
+  // its atomic grounded excerpt; source-turn fallbacks remain searchable whole.
   readonly fullTurnEvidenceExcerpt?: boolean;
   // When true, lift a projection-bearing signal_only signal to memory_entry_only; default-off keeps the curated deferral.
   readonly projectionRoutingEnabled?: boolean;
