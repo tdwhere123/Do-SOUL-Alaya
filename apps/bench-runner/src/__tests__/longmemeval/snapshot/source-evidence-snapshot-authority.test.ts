@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
+import type { SeedExtractionPath } from "@do-soul/alaya-eval";
 import {
   buildGardenSourceTurnFallbackReceiptPreimage,
   formatGardenSourceTurnFallbackArtifactRef,
@@ -17,22 +18,36 @@ import {
 } from "../../../harness/daemon.js";
 import { createCompileSeedRunner } from
   "../../../longmemeval/compile-seed.js";
+import {
+  computeExtractionContentClosureSha256,
+  computeExtractionKeySetSha256
+} from "../../../longmemeval/compile-seed/compile-seed-cache.js";
+import {
+  EXTRACTION_CACHE_KEY_ALGO,
+  EXTRACTION_CACHE_MANIFEST_VERSION,
+  type ExtractionCacheManifestV3,
+  writeExtractionCacheManifest
+} from "../../../longmemeval/extraction/cache/extraction-cache-manifest.js";
 import type { LongMemEvalQuestion } from
   "../../../longmemeval/ingestion/dataset.js";
+import { inspectTurnContentKeySpace } from
+  "../../../longmemeval/extraction/turn-contents.js";
 import { buildLongMemEvalSnapshotQuestion } from
   "../../../longmemeval/runner/question/runner-question-result.js";
 import { seedLongMemEvalQuestion } from
   "../../../longmemeval/runner/question/runner-question-seeding.js";
 import {
   RECALL_EVAL_SNAPSHOT_MANIFEST_VERSION,
+  type LongMemEvalSnapshotSeedRound,
   type LongMemEvalSnapshotSidecarFile
 } from "../../../longmemeval/snapshot/materialize.js";
-import { assertSnapshotDatasetSubstrateIdentity } from
-  "../../../longmemeval/snapshot/substrate-binding.js";
-import { CREDENTIALLED_CONFIG } from
-  "../compile-seed/compile-seed-fixture.js";
-import { writeExtractionCacheTestManifest } from
-  "../extraction/extraction-cache-test-fixture.js";
+import { captureSnapshotExtractionAuthority } from
+  "../../../longmemeval/snapshot/extraction-authority.js";
+import { assertSnapshotSeedLedgerBinding } from
+  "../../../longmemeval/snapshot/seed-ledger/seed-ledger-binding.js";
+import { assertSnapshotDatasetSubstrateIdentity } from "../../../longmemeval/snapshot/substrate-binding.js";
+import { CREDENTIALLED_CONFIG } from "../compile-seed/compile-seed-fixture.js";
+import { writeExtractionCacheTestManifest } from "../extraction/extraction-cache-test-fixture.js";
 
 interface AuthorityFixture {
   readonly dbPath: string;
@@ -40,8 +55,9 @@ interface AuthorityFixture {
   readonly sidecar: LongMemEvalSnapshotSidecarFile;
   readonly evidenceId: string;
   readonly signalId: string;
+  readonly extraction: ReturnType<typeof captureSnapshotExtractionAuthority>;
 }
-
+type SeededAuthorityFixture = Omit<AuthorityFixture, "extraction">;
 let root: string | undefined;
 let fixture: AuthorityFixture;
 
@@ -57,6 +73,22 @@ afterAll(async () => {
 describe("source evidence snapshot authority", () => {
   it("accepts a receipt-bound direct evidence snapshot", () => {
     expect(() => verifyCopy()).not.toThrow();
+  });
+
+  it("does not count receipt-bound direct answer evidence as an empty wipe", () => {
+    const rounds = fixture.sidecar.questions[0]!.seedRounds!;
+    expect(() => assertSnapshotSeedLedgerBinding({
+      dbPath: fixture.dbPath,
+      sidecar: fixture.sidecar,
+      questions: [fixture.question],
+      extraction: fixture.extraction.compact,
+      extractionAuthority: fixture.extraction.authority,
+      seedExtractionPath: seedExtractionPath(rounds),
+      closureAuthority: {
+        kind: "exact",
+        questionWindow: { offset: 0, limit: 1 }
+      }
+    })).not.toThrow();
   });
 
   it("rejects a receipt anchor bound to a different source round", () => {
@@ -251,29 +283,64 @@ async function buildAuthorityFixture(baseRoot: string): Promise<AuthorityFixture
     providerUrl: CREDENTIALLED_CONFIG.providerUrl,
     systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
   });
-  const daemon = await startBenchDaemon({
-    dataDirRoot: baseRoot,
+  const fillDaemon = await startBenchDaemon({
+    dataDirRoot: join(baseRoot, "fill"),
+    workspaceId: "source-evidence-fill-workspace",
+    runId: "source-evidence-fill-run"
+  });
+  try {
+    const fill = await seedFixture(fillDaemon, cacheRoot, true);
+    writeCompleteManifest(cacheRoot, fill.sidecar.questions[0]!.seedRounds!);
+  } finally {
+    await fillDaemon.shutdown();
+  }
+  const authorityDaemon = await startBenchDaemon({
+    dataDirRoot: join(baseRoot, "authority"),
     workspaceId: "source-evidence-authority-workspace",
     runId: "source-evidence-authority-run"
   });
   try {
-    return await seedFixture(daemon, cacheRoot);
+    return {
+      ...await seedFixture(authorityDaemon, cacheRoot, false),
+      extraction: captureSnapshotExtractionAuthority(cacheRoot)
+    };
   } finally {
-    await daemon.shutdown();
+    await authorityDaemon.shutdown();
   }
 }
 
 async function seedFixture(
   daemon: BenchDaemonHandle,
-  cacheRoot: string
-): Promise<AuthorityFixture> {
+  cacheRoot: string,
+  allowLiveExtraction: boolean
+): Promise<SeededAuthorityFixture> {
   const question = sourceEvidenceQuestion();
+  const keySpace = inspectTurnContentKeySpace([question]);
+  let extractionIndex = 0;
   const runner = createCompileSeedRunner({
     config: CREDENTIALLED_CONFIG,
     cacheRoot,
-    allowLiveExtraction: true,
+    allowLiveExtraction,
+    requiredTurnContents: keySpace.distinctTurnContents,
+    requiredExtractionTurns: keySpace.distinctExtractionTurns,
+    requiredQuestionWindow: { offset: 0, limit: 1 },
     extractorFactory: () => ({
-      extract: async () => ({ rawJson: "{\"signals\":[]}" })
+      extract: async () => ({
+        rawJson: extractionIndex++ === 0
+          ? "{\"signals\":[]}"
+          : JSON.stringify({ signals: [{
+            signal_kind: "potential_preference",
+            object_kind: "user_preference",
+            confidence: 0.9,
+            matched_text: "I check the platform near the main entrance.",
+            distilled_fact: "The user checks the platform near the main entrance.",
+            source_locator: {
+              contract_version: 2,
+              kind: "assertion_catalog",
+              assertion_id: 1
+            }
+          }] })
+      })
     })
   });
   const workspace = { ...daemon, detach: async () => undefined };
@@ -300,6 +367,74 @@ async function seedFixture(
     },
     evidenceId: binding.evidenceId,
     signalId: binding.signalId
+  };
+}
+
+function writeCompleteManifest(
+  cacheRoot: string, rounds: readonly LongMemEvalSnapshotSeedRound[]
+): void {
+  const entries = rounds.map((round) => ({
+    cacheKey: round.cacheKey!,
+    rawJsonSha256: round.rawJsonSha256!,
+    rawSignalCount: round.rawSignalCount!,
+    parsedDraftCount: round.draftCount!
+  })).sort((left, right) => left.cacheKey.localeCompare(right.cacheKey));
+  const manifest: ExtractionCacheManifestV3 = {
+    schema_version: EXTRACTION_CACHE_MANIFEST_VERSION,
+    extraction_model: CREDENTIALLED_CONFIG.model,
+    model_family: CREDENTIALLED_CONFIG.model,
+    request_profile: CREDENTIALLED_CONFIG.requestProfile,
+    provider_url: CREDENTIALLED_CONFIG.providerUrl,
+    system_prompt_sha256: sha256(OFFICIAL_API_SYSTEM_PROMPT),
+    cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
+    dataset: "test-fixture",
+    dataset_revision: "b".repeat(64),
+    requested_turns: entries.length,
+    cached_turns: entries.length,
+    coverage: 1,
+    fill_status: "complete",
+    window_offset: 0,
+    window_limit: 1,
+    expected_turns: entries.length,
+    expected_key_set_sha256: computeExtractionKeySetSha256(entries.map((entry) => entry.cacheKey)),
+    content_closure_sha256: computeExtractionContentClosureSha256(entries.map((entry) => ({
+      ...entry,
+      model: CREDENTIALLED_CONFIG.model,
+      requestProfile: CREDENTIALLED_CONFIG.requestProfile
+    }))),
+    content_closure_index: Object.fromEntries(entries.map((entry) => [
+      entry.cacheKey,
+      [entry.rawJsonSha256, entry.rawSignalCount, entry.parsedDraftCount] as const
+    ])),
+    storage: "git-tracked",
+    built_at: "2026-07-26T00:00:00.000Z",
+    builder: "test"
+  };
+  writeExtractionCacheManifest(cacheRoot, manifest);
+}
+
+function seedExtractionPath(rounds: readonly LongMemEvalSnapshotSeedRound[]): SeedExtractionPath {
+  const sum = (value: (round: LongMemEvalSnapshotSeedRound) => number) =>
+    rounds.reduce((total, round) => total + value(round), 0);
+  const candidateAbsent = sum((round) => round.candidateAbsent);
+  const materializationDrop = sum((round) => round.materializationDrop);
+  return {
+    path: "official_api_compile",
+    extraction_attempts: rounds.length,
+    cache_hits: rounds.length,
+    llm_calls: 0,
+    offline_fallbacks: 0,
+    live_extraction_failures: 0,
+    cached_extraction_failures: 0,
+    facts_produced: sum((round) => round.factsProduced),
+    signals_dropped: sum((round) => round.parseDropped + round.compileOverflowDropped) +
+      candidateAbsent + materializationDrop,
+    parse_dropped: sum((round) => round.parseDropped),
+    compile_overflow_dropped: sum((round) => round.compileOverflowDropped),
+    signals_dropped_by_reason: {
+      candidate_absent: candidateAbsent,
+      materialization_drop: materializationDrop
+    }
   };
 }
 
@@ -350,8 +485,8 @@ function sourceEvidenceQuestion(): LongMemEvalQuestion {
         has_answer: true
       },
       {
-        role: "assistant",
-        content: "The platform is posted near the main entrance.",
+        role: "user",
+        content: "I check the platform near the main entrance.",
         has_answer: false
       }
     ]],

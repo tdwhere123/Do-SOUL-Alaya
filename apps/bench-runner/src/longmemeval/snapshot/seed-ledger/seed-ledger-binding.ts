@@ -369,8 +369,12 @@ function assertAnswerDropReasons(
   }
 }
 
-function isVerifiedEmptyAnswerWipeRound(round: LongMemEvalSnapshotSeedRound): boolean {
-  if (round.memoryObjectIds.length > 0 || round.factsProduced > 0) return false;
+function isVerifiedEmptyAnswerWipeRound(
+  round: LongMemEvalSnapshotSeedRound
+): boolean {
+  if (round.memoryObjectIds.length > 0 ||
+      (round.directEvidenceBindings?.length ?? 0) > 0 ||
+      round.factsProduced > 0) return false;
   if (round.candidateAbsent > 0 || round.materializationDrop > 0) return false;
   // Successful empty official extraction.
   if (
