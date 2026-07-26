@@ -53,9 +53,16 @@ export function verifyPromotionQuestionMeasurement(input: {
     scorable: persistedStatus === "scorable"
   });
   const axes = buildCanonicalAxes(input);
-  assertEqual(input.diagnostic.quality_axes, axes, "question measurement axes");
   assertEqual(
-    input.diagnostic.cohort_ledger?.quality_axes,
+    normalizeLegacyGoldKindCounts(input.diagnostic.quality_axes, axes),
+    axes,
+    "question measurement axes"
+  );
+  assertEqual(
+    normalizeLegacyGoldKindCounts(
+      input.diagnostic.cohort_ledger?.quality_axes,
+      axes
+    ),
     axes,
     "cohort ledger measurement axes"
   );
@@ -141,6 +148,27 @@ function identityClassification(diagnostic: LongMemEvalQuestionDiagnostic) {
     retrievalStatus: ledger?.retrieval_status,
     evaluationIssueReason: ledger?.evaluation_issue_reason,
     finalVerdict: ledger?.final_verdict
+  };
+}
+
+function normalizeLegacyGoldKindCounts(
+  actual: LongMemEvalQuestionMeasurementAxes | undefined,
+  expected: LongMemEvalQuestionMeasurementAxes
+): LongMemEvalQuestionMeasurementAxes | undefined {
+  if (actual === undefined) return undefined;
+  const identity = actual.evaluator_identity_integrity_at_5;
+  if (identity.exact_memory_gold_count !== undefined ||
+      identity.exact_evidence_gold_count !== undefined) {
+    return actual;
+  }
+  const expectedIdentity = expected.evaluator_identity_integrity_at_5;
+  return {
+    ...actual,
+    evaluator_identity_integrity_at_5: {
+      ...identity,
+      exact_memory_gold_count: expectedIdentity.exact_memory_gold_count,
+      exact_evidence_gold_count: expectedIdentity.exact_evidence_gold_count
+    }
   };
 }
 

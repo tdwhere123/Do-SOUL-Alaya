@@ -103,6 +103,28 @@ describe("promotion measurement verifier", () => {
     })).toThrow(/answer seed drop reasons differs/u);
   });
 
+  it("accepts legacy axes with both gold-kind counts absent", () => {
+    const diagnostic = withoutGoldKindCounts(seedDropDiagnostic());
+    const measurement = measurementPrimitives();
+
+    expect(verifyPromotionQuestionMeasurement({
+      diagnostic,
+      expectedGold: [],
+      oracle: oracle(measurement, { candidate_absent: 2, materialization_drop: 0 })
+    }).status).toBe("scorable");
+  });
+
+  it("rejects legacy axes with only one gold-kind count absent", () => {
+    const diagnostic = withoutGoldKindCounts(seedDropDiagnostic(), true);
+    const measurement = measurementPrimitives();
+
+    expect(() => verifyPromotionQuestionMeasurement({
+      diagnostic,
+      expectedGold: [],
+      oracle: oracle(measurement, { candidate_absent: 2, materialization_drop: 0 })
+    })).toThrow(/question measurement axes differs/u);
+  });
+
   it("rejects a ledger extraction tuple that differs from seed primitives", () => {
     const diagnostic = withDiagnosticOverrides(seedDropDiagnostic(), {}, {
       extraction_materialization: {
@@ -199,6 +221,36 @@ function withDiagnosticOverrides(
     cohort_ledger: {
       ...requireCohortLedger(diagnostic),
       ...cohortLedgerOverrides
+    }
+  };
+}
+
+function withoutGoldKindCounts(
+  diagnostic: LongMemEvalQuestionDiagnostic,
+  keepMemoryCount = false
+): LongMemEvalQuestionDiagnostic {
+  const axes = diagnostic.quality_axes;
+  const ledgerAxes = diagnostic.cohort_ledger?.quality_axes;
+  if (axes === undefined || ledgerAxes === undefined) {
+    throw new Error("promotion measurement fixture requires quality axes");
+  }
+  const strip = (value: typeof axes) => {
+    const { exact_memory_gold_count, exact_evidence_gold_count, ...identity } =
+      value.evaluator_identity_integrity_at_5;
+    return {
+      ...value,
+      evaluator_identity_integrity_at_5: {
+        ...identity,
+        ...(keepMemoryCount ? { exact_memory_gold_count } : {})
+      }
+    };
+  };
+  return {
+    ...diagnostic,
+    quality_axes: strip(axes),
+    cohort_ledger: {
+      ...requireCohortLedger(diagnostic),
+      quality_axes: strip(ledgerAxes)
     }
   };
 }
