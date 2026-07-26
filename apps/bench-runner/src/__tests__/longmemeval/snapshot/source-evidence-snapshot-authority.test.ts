@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { OFFICIAL_API_SYSTEM_PROMPT } from "@do-soul/alaya-soul";
 import {
   buildGardenSourceTurnFallbackReceiptPreimage,
+  formatGardenSourceTurnFallbackArtifactRef,
   formatGardenSourceTurnFallbackSourceHash
 } from "@do-soul/alaya-protocol";
 import {
@@ -56,6 +57,24 @@ afterAll(async () => {
 describe("source evidence snapshot authority", () => {
   it("accepts a receipt-bound direct evidence snapshot", () => {
     expect(() => verifyCopy()).not.toThrow();
+  });
+
+  it("rejects a receipt anchor bound to a different source round", () => {
+    expect(() => verifyCopy((db) => {
+      db.prepare("UPDATE evidence_capsules SET physical_anchor = ? WHERE object_id = ?")
+        .run(JSON.stringify({
+          artifact_ref: formatGardenSourceTurnFallbackArtifactRef(
+            "q-source-evidence-authority-s0-r1"
+          )
+        }), fixture.evidenceId);
+    })).toThrow(/evidence_capsule source round mismatch/iu);
+  });
+
+  it("rejects a reserved receipt anchor without its source hash", () => {
+    expect(() => verifyCopy((db) => {
+      db.prepare("UPDATE evidence_capsules SET source_hash = NULL WHERE object_id = ?")
+        .run(fixture.evidenceId);
+    })).toThrow(/legacy sidecar evidence round identity mismatch/iu);
   });
 
   it.each([
@@ -172,7 +191,7 @@ describe("source evidence snapshot authority", () => {
     const sidecar = withQuestion({
       ...question,
       sidecar: [
-        evidenceEntry,
+        ...question.sidecar,
         {
           ...evidenceEntry,
           objectKind: "memory_entry"
@@ -324,11 +343,18 @@ function sourceEvidenceQuestion(): LongMemEvalQuestion {
     question_date: "2026-07-22T00:00:00.000Z",
     haystack_session_ids: ["answer-session"],
     haystack_dates: ["2026-07-20T00:00:00.000Z"],
-    haystack_sessions: [[{
-      role: "assistant",
-      content: "Take the 7:15 train from Central Station.",
-      has_answer: true
-    }]],
+    haystack_sessions: [[
+      {
+        role: "assistant",
+        content: "Take the 7:15 train from Central Station.",
+        has_answer: true
+      },
+      {
+        role: "assistant",
+        content: "The platform is posted near the main entrance.",
+        has_answer: false
+      }
+    ]],
     answer_session_ids: ["answer-session"]
   };
 }

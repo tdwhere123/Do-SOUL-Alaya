@@ -10,8 +10,10 @@ import {
   buildLongMemEvalRoundEvidenceRef,
   type LongMemEvalSeedRoundIdentity
 } from "../runner/question/runner-question-seeding.js";
-import { readGardenSourceTurnFallbackArtifactSignalId } from
-  "@do-soul/alaya-protocol";
+import {
+  hasGardenSourceTurnFallbackReceiptFormat,
+  readGardenSourceTurnFallbackArtifactSignalId
+} from "@do-soul/alaya-protocol";
 import { buildLongMemEvalQuestionRuntimeIdentity } from
   "../selection/question-runtime-identity.js";
 import {
@@ -44,6 +46,7 @@ interface StoredEvidenceRow {
   readonly run_id: string;
   readonly surface_id: string | null;
   readonly physical_anchor: string | null;
+  readonly source_hash?: string | null;
 }
 
 export function assertSnapshotDatasetSubstrateIdentity(input: {
@@ -206,8 +209,15 @@ function readStoredObjects(db: DatabaseSync, workspaceId: string) {
 }
 
 function readStoredEvidence(db: DatabaseSync, workspaceId: string) {
+  const sourceHash = db.prepare(`
+    SELECT name FROM pragma_table_info('evidence_capsules')
+     WHERE name = 'source_hash'
+  `).get() === undefined
+    ? "NULL AS source_hash"
+    : "source_hash";
   const rows = db.prepare(`
-    SELECT object_id, object_kind, workspace_id, run_id, surface_id, physical_anchor
+    SELECT object_id, object_kind, workspace_id, run_id, surface_id,
+           physical_anchor, ${sourceHash}
       FROM evidence_capsules WHERE workspace_id = ?
   `).all(workspaceId) as unknown as readonly StoredEvidenceRow[];
   return new Map(rows.map((row) => [row.object_id, row]));
@@ -321,7 +331,16 @@ function resolveEvidenceRound(
     throw new Error(`snapshot sidecar evidence identity mismatch for ${evidenceId}`);
   }
   const anchor = parseRecord(row.physical_anchor, `physical anchor ${evidenceId}`);
-  const round = resolveLongMemEvalSeedRoundIdentity(anchor.artifact_ref, source);
+  const artifactRef = typeof anchor.artifact_ref === "string"
+    ? anchor.artifact_ref
+    : null;
+  const sourceRef = hasGardenSourceTurnFallbackReceiptFormat({
+    artifact_ref: artifactRef,
+    source_hash: row.source_hash ?? null
+  })
+    ? readGardenSourceTurnFallbackArtifactSignalId(artifactRef)
+    : artifactRef;
+  const round = resolveLongMemEvalSeedRoundIdentity(sourceRef, source);
   if (row.surface_id !== round.sessionId) {
     throw new Error(`snapshot sidecar evidence session mismatch for ${evidenceId}`);
   }
