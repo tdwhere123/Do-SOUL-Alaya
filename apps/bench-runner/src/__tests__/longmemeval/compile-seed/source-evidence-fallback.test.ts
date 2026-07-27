@@ -89,6 +89,48 @@ describe("compile seed source evidence fallback", () => {
     expect(runner.stats.factsProduced).toBe(0);
   });
 
+  it("does not charge a rejected empty-extraction fallback to extracted signals", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-empty-rejected-"));
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => {
+        throw new Error("degraded fallback must not run");
+      },
+      proposeMemoriesFromCompileSignals: async () => ({
+        seeds: [],
+        dropped: [{
+          reason: "materialization_drop",
+          detail: "trusted User projection unavailable"
+        }],
+        createdEvidence: false
+      }),
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createCompileSeedRunner({
+      config: CREDENTIALLED_CONFIG,
+      cacheRoot,
+      allowLiveExtraction: true,
+      extractorFactory: () => ({
+        extract: async () => ({ rawJson: "{\"signals\":[]}" })
+      })
+    });
+
+    const result = await runner.seedTurn(seedInput(daemon));
+
+    expect(result.seeds).toEqual([]);
+    expect(runner.stats.factsProduced).toBe(0);
+    expect(runner.stats.signalsDropped).toBe(0);
+    expect(runner.stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 0,
+      materialization_drop: 0
+    });
+  });
+
   it("does not add fallback evidence when extraction materializes memory", async () => {
     cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-memory-"));
     writeExtractionCacheTestManifest({
@@ -209,6 +251,45 @@ describe("compile seed source evidence fallback", () => {
         evidenceId: "evidence-fallback"
       })
     ]);
+  });
+
+  it("does not charge a rejected supplemental fallback twice", async () => {
+    cacheRoot = await mkdtemp(join(tmpdir(), "compile-source-supplement-rejected-"));
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: CREDENTIALLED_CONFIG.model,
+      providerUrl: CREDENTIALLED_CONFIG.providerUrl,
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    let calls = 0;
+    const daemon: CompileSeedDaemon = {
+      proposeMemoryFromSignal: async () => {
+        throw new Error("degraded fallback must not run");
+      },
+      proposeMemoriesFromCompileSignals: async () => {
+        calls += 1;
+        return {
+          seeds: [],
+          dropped: [{
+            reason: calls === 1 ? "candidate_absent" : "materialization_drop",
+            detail: calls === 1 ? "unroutable claim" : "trusted User projection unavailable"
+          }],
+          createdEvidence: false
+        };
+      },
+      proposeSynthesis: async () => ({ synthesisId: null })
+    };
+    const runner = createRunnerWithOneClaim(cacheRoot);
+
+    const result = await runner.seedTurn(seedInput(daemon));
+
+    expect(result.seeds).toEqual([]);
+    expect(runner.stats.factsProduced).toBe(1);
+    expect(runner.stats.signalsDropped).toBe(1);
+    expect(runner.stats.signalsDroppedByReason).toEqual({
+      candidate_absent: 1,
+      materialization_drop: 0
+    });
   });
 
   it("keeps ordinary evidence-only materialization dropped without relabeling it trusted", async () => {

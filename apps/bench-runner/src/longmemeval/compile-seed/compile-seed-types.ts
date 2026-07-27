@@ -221,7 +221,9 @@ export interface CompileSeedExtractionStats {
    * post-materialization accept/review failure is not a drop; it aborts the
    * bench so a recallable memory cannot disappear from the seed sidecar.
    * These counts are a subset of signalsDropped; parse and compile-overflow
-   * drops happen earlier and are excluded here.
+   * drops happen earlier and are excluded here. Supplemental source-evidence
+   * fallback attempts are also excluded because they are not model-envelope
+   * signals represented by factsProduced.
    */
   signalsDroppedByReason: Record<CompileSeedDropReason, number>;
   /**

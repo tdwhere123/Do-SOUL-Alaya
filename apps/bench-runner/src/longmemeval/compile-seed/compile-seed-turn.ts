@@ -111,10 +111,19 @@ async function seedOfficialCompileSignals(
   input: CompileSeedTurnInput,
   signalInputs: readonly BenchSignalSeedInput[]
 ): Promise<readonly SeededObjectResult[]> {
+  // This projection is additional to the extraction envelope, so its failure
+  // cannot enter the extracted-signal conservation ledger.
+  const supplementalFallback =
+    signalInputs[0]?.evidenceFallbackReason !== undefined;
   try {
     const batch: CompileSeedBatchResult =
       await input.daemon.proposeMemoriesFromCompileSignals(signalInputs);
-    recordCompileSignalDrops(context, batch, signalInputs.length);
+    recordCompileSignalDrops(
+      context,
+      batch,
+      signalInputs.length,
+      !supplementalFallback
+    );
     if (
       batchCreatedEvidence(batch) ||
       !sourceEvidenceFallbackEnabled(input) ||
@@ -126,6 +135,13 @@ async function seedOfficialCompileSignals(
     return [...batch.seeds, ...fallbackSeeds];
   } catch (error) {
     if (isUnscoredMaterializedSeedError(error)) throw error;
+    if (supplementalFallback) {
+      process.stderr.write(
+        `[longmemeval compile-seed] source evidence fallback dropped: ` +
+          `${stringifyError(error)}\n`
+      );
+      return [];
+    }
     context.stats.signalsDropped += signalInputs.length;
     context.stats.signalsDroppedByReason.materialization_drop +=
       signalInputs.length;
@@ -150,12 +166,10 @@ async function seedNoEvidenceCreatedFallback(
     const batch = await input.daemon.proposeMemoriesFromCompileSignals([
       fallbackInput
     ]);
-    recordCompileSignalDrops(context, batch, 1);
+    recordCompileSignalDrops(context, batch, 1, false);
     return batch.seeds;
   } catch (error) {
     if (isUnscoredMaterializedSeedError(error)) throw error;
-    context.stats.signalsDropped += 1;
-    context.stats.signalsDroppedByReason.materialization_drop += 1;
     process.stderr.write(
       `[longmemeval compile-seed] source evidence fallback dropped: ` +
         `${stringifyError(error)}\n`
@@ -175,16 +189,20 @@ function batchCreatedEvidence(batch: CompileSeedBatchResult): boolean {
 function recordCompileSignalDrops(
   context: CompileSeedRunnerContext,
   batch: CompileSeedBatchResult,
-  signalCount: number
+  signalCount: number,
+  countsTowardExtractionConservation: boolean
 ): void {
   if (batch.dropped.length === 0) return;
-  context.stats.signalsDropped += batch.dropped.length;
-  for (const drop of batch.dropped) {
-    context.stats.signalsDroppedByReason[drop.reason] += 1;
+  if (countsTowardExtractionConservation) {
+    context.stats.signalsDropped += batch.dropped.length;
+    for (const drop of batch.dropped) {
+      context.stats.signalsDroppedByReason[drop.reason] += 1;
+    }
   }
   process.stderr.write(
-    `[longmemeval compile-seed] ${batch.dropped.length} signal(s) of ` +
-      `${signalCount} did not materialize a memory_entry ` +
+    `[longmemeval compile-seed] ${countsTowardExtractionConservation
+      ? `${batch.dropped.length} signal(s) of ${signalCount}`
+      : "source evidence fallback"} did not materialize a memory_entry ` +
       `(${formatDropBreakdown(batch)}); the round's other facts seeded normally\n`
   );
 }
