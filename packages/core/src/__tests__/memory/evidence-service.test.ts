@@ -45,6 +45,11 @@ describe("EvidenceService", () => {
     const order: string[] = [];
     const appendedEvents: Array<Omit<EventLogEntry, "event_id" | "created_at" | "revision">> = [];
     const store = new Map<string, EvidenceCapsule>();
+    const create = vi.fn(async (capsule: EvidenceCapsule) => {
+      order.push("repo_create");
+      store.set(capsule.object_id, Object.freeze({ ...capsule }));
+      return store.get(capsule.object_id)!;
+    });
 
     const service = new EvidenceService({
       now: () => "2026-03-20T01:00:00.000Z",
@@ -62,11 +67,7 @@ describe("EvidenceService", () => {
         })
       },
       evidenceCapsuleRepo: {
-        create: vi.fn(async (capsule) => {
-          order.push("repo_create");
-          store.set(capsule.object_id, Object.freeze({ ...capsule }));
-          return store.get(capsule.object_id)!;
-        }),
+        create,
         deleteById: vi.fn(async () => {
           throw new Error("not used");
         }),
@@ -85,10 +86,16 @@ describe("EvidenceService", () => {
       }
     });
 
-    const created = await service.create(createEvidenceInput());
+    const projection = {
+      projection_id: 1,
+      projection_kind: "user_assertion" as const,
+      content: "I bought my bookshelf from IKEA."
+    };
+    const created = await service.create(createEvidenceInput(), [projection]);
 
     expect(order).toEqual(["event_log", "repo_create", "notify"]);
     expect(created.object_id).toBe("85b3671a-d8d8-4848-9e5c-07d0a89f5ae9");
+    expect(create).toHaveBeenCalledWith(expect.any(Object), [projection]);
     expect(appendedEvents[0]).toMatchObject({
       event_type: "soul.evidence.created",
       entity_type: "evidence_capsule",

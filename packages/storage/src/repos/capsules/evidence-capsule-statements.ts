@@ -17,8 +17,11 @@ export interface EvidenceCapsuleStatements {
   readonly findByHealthStatement: SqliteStatement;
   readonly findByHealthPagedStatement: SqliteStatement;
   readonly updateHealthStatement: SqliteStatement;
+  readonly createSearchProjectionStatement: SqliteStatement;
   readonly searchByKeywordStatement: SqliteStatement;
   readonly searchByKeywordTrigramStatement: SqliteStatement;
+  readonly searchProjectionByKeywordStatement: SqliteStatement;
+  readonly searchProjectionByKeywordTrigramStatement: SqliteStatement;
 }
 
 export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceCapsuleStatements {
@@ -39,8 +42,15 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
       findEvidenceCapsuleSql("byHealth", "paged")
     ),
     updateHealthStatement: db.connection.prepare(UPDATE_EVIDENCE_HEALTH_SQL),
+    createSearchProjectionStatement: db.connection.prepare(CREATE_EVIDENCE_SEARCH_PROJECTION_SQL),
     searchByKeywordStatement: db.connection.prepare(SEARCH_EVIDENCE_KEYWORD_SQL),
-    searchByKeywordTrigramStatement: db.connection.prepare(SEARCH_EVIDENCE_KEYWORD_TRIGRAM_SQL)
+    searchByKeywordTrigramStatement: db.connection.prepare(SEARCH_EVIDENCE_KEYWORD_TRIGRAM_SQL),
+    searchProjectionByKeywordStatement: db.connection.prepare(
+      SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL
+    ),
+    searchProjectionByKeywordTrigramStatement: db.connection.prepare(
+      SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL
+    )
   };
 }
 
@@ -96,6 +106,17 @@ const UPDATE_EVIDENCE_HEALTH_SQL = `
       UPDATE evidence_capsules
       SET evidence_health_state = ?, updated_at = ?
       WHERE object_id = ?
+`;
+
+const CREATE_EVIDENCE_SEARCH_PROJECTION_SQL = `
+      INSERT INTO evidence_search_projections (
+        evidence_object_id,
+        projection_id,
+        projection_kind,
+        workspace_id,
+        source_hash,
+        content
+      ) VALUES (?, ?, ?, ?, ?, ?)
 `;
 
 const FIND_EVIDENCE_CAPSULES_BY_IDS_SQL = `
@@ -155,5 +176,59 @@ const SEARCH_EVIDENCE_KEYWORD_TRIGRAM_SQL = `
         AND evidence_capsule_fts_trigram MATCH ?
         AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
       ORDER BY raw_rank ASC, evidence_capsule_fts_trigram.object_id ASC
+      LIMIT ?
+`;
+
+const SEARCH_EVIDENCE_PROJECTION_KEYWORD_SQL = `
+      WITH projection_hits AS MATERIALIZED (
+        SELECT
+          evidence_search_projection_fts.evidence_object_id AS object_id,
+          bm25(evidence_search_projection_fts) AS raw_rank
+        FROM evidence_search_projection_fts
+        JOIN evidence_search_projections
+          ON evidence_search_projections.rowid = evidence_search_projection_fts.rowid
+        JOIN evidence_capsules
+          ON evidence_capsules.object_id = evidence_search_projection_fts.evidence_object_id
+        WHERE
+          evidence_search_projection_fts.workspace_id = ?
+          AND evidence_search_projection_fts MATCH ?
+          AND evidence_search_projections.source_hash = evidence_capsules.source_hash
+          AND evidence_search_projections.workspace_id = evidence_capsules.workspace_id
+          AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
+      )
+      SELECT
+        object_id,
+        MIN(raw_rank) AS raw_rank
+      FROM projection_hits
+      GROUP BY object_id
+      ORDER BY raw_rank ASC, object_id ASC
+      LIMIT ?
+`;
+
+const SEARCH_EVIDENCE_PROJECTION_KEYWORD_TRIGRAM_SQL = `
+      WITH projection_hits AS MATERIALIZED (
+        SELECT
+          evidence_search_projection_fts_trigram.evidence_object_id AS object_id,
+          bm25(evidence_search_projection_fts_trigram) AS raw_rank
+        FROM evidence_search_projection_fts_trigram
+        JOIN evidence_search_projections
+          ON evidence_search_projections.rowid =
+            evidence_search_projection_fts_trigram.rowid
+        JOIN evidence_capsules
+          ON evidence_capsules.object_id =
+            evidence_search_projection_fts_trigram.evidence_object_id
+        WHERE
+          evidence_search_projection_fts_trigram.workspace_id = ?
+          AND evidence_search_projection_fts_trigram MATCH ?
+          AND evidence_search_projections.source_hash = evidence_capsules.source_hash
+          AND evidence_search_projections.workspace_id = evidence_capsules.workspace_id
+          AND COALESCE(evidence_capsules.lifecycle_state, '') != 'retired'
+      )
+      SELECT
+        object_id,
+        MIN(raw_rank) AS raw_rank
+      FROM projection_hits
+      GROUP BY object_id
+      ORDER BY raw_rank ASC, object_id ASC
       LIMIT ?
 `;

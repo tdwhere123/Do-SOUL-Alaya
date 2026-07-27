@@ -59,6 +59,7 @@ export {
   salvageRawSignalElements,
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
+  buildGardenTurnEvidenceSearchProjections,
   isGardenTurnEvidenceFallback,
   buildSourceVerificationText,
   buildOfficialApiSourceAssertions,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   EvidenceCapsuleSchema,
+  EvidenceSearchProjectionSchema,
   EvidenceHealthStateSchema,
   MemoryGovernanceEventType,
   SoulEvidenceCreatedPayloadSchema,
@@ -8,6 +9,7 @@ import {
   SoulEvidenceHealthChangedPayloadSchema,
   TransitionCausedBySchema,
   type EvidenceCapsule,
+  type EvidenceSearchProjection,
   type EvidenceHealthState,
   type EventLogEntry,
   type TransitionCausedBy
@@ -37,7 +39,10 @@ export interface EvidenceListPageOptions {
 }
 
 export interface EvidenceServiceEvidenceCapsuleRepoPort {
-  create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
+  create(
+    capsule: EvidenceCapsule,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
+  ): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds?(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
@@ -110,7 +115,10 @@ export class EvidenceService {
     this.now = dependencies.now ?? (() => new Date().toISOString());
   }
 
-  public async create(input: EvidenceCapsuleInput): Promise<Readonly<EvidenceCapsule>> {
+  public async create(
+    input: EvidenceCapsuleInput,
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = []
+  ): Promise<Readonly<EvidenceCapsule>> {
     const timestamp = this.now();
     const evidence = parseEvidenceCapsule({
       ...input,
@@ -121,6 +129,9 @@ export class EvidenceService {
       created_at: timestamp,
       updated_at: timestamp
     });
+    const projections = Object.freeze(
+      searchProjections.map((projection) => EvidenceSearchProjectionSchema.parse(projection))
+    );
 
     const event = await this.dependencies.eventLogRepo.append({
       event_type: MemoryGovernanceEventType.SOUL_EVIDENCE_CREATED,
@@ -137,7 +148,7 @@ export class EvidenceService {
       })
     });
 
-    const created = await this.dependencies.evidenceCapsuleRepo.create(evidence);
+    const created = await this.dependencies.evidenceCapsuleRepo.create(evidence, projections);
     await this.dependencies.runtimeNotifier.notifyEntry(event);
     return created;
   }

@@ -15,11 +15,13 @@ import {
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
   type ConversationMessage,
+  type EvidenceSearchProjection,
   type GardenSourceTurnFallbackRoleSpan,
   type GardenSourceTurnFallbackReason,
   type GardenSourceTurnFallbackReceiptInput,
   type GardenSourceTurnFallbackV2ReceiptInput
 } from "@do-soul/alaya-protocol";
+import { buildOfficialApiSourceAssertions } from "../grounding/source-locator.js";
 
 const RAW_PAYLOAD_MAX_SERIALIZED_CHARS = 16_384;
 
@@ -99,6 +101,22 @@ export function resolveVerifiedGardenTurnEvidenceProjection(
       ? projectGardenSourceTurnFallbackV2UserContent(receipt)
       : null
   });
+}
+
+export function buildGardenTurnEvidenceSearchProjections(
+  signal: CandidateMemorySignal
+): readonly Readonly<EvidenceSearchProjection>[] {
+  const sourceCorpus = signal.raw_payload.full_turn_content;
+  if (typeof sourceCorpus !== "string") return Object.freeze([]);
+  const projection = resolveVerifiedGardenTurnEvidenceProjection(signal, sourceCorpus);
+  if (projection === null || projection.userContent === null) return Object.freeze([]);
+  return Object.freeze(buildOfficialApiSourceAssertions(projection.userContent).map((assertion) =>
+    Object.freeze({
+      projection_id: assertion.assertion_id,
+      projection_kind: "user_assertion" as const,
+      content: assertion.text
+    })
+  ));
 }
 
 function buildCompleteV2RawPayload(

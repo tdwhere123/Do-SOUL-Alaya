@@ -79,6 +79,7 @@ export {
 export {
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
+  buildGardenTurnEvidenceSearchProjections,
   isGardenTurnEvidenceFallback
 } from "./evidence-preservation/turn-evidence-anchor.js";
 export {

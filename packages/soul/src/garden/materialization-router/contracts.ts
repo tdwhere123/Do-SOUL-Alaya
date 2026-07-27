@@ -2,6 +2,7 @@ import {
   type ClaimForm,
   type EdgeProposalTriggerSourceValue,
   type EvidenceCapsule,
+  type EvidenceSearchProjection,
   type MemoryEntry,
   type MemoryGraphEdgeTypeValue,
   type PathGovernanceClass as PathGovernanceClassValue,
@@ -152,7 +153,10 @@ export type ClaimMaterializationInput = Omit<
 };
 
 export interface EvidenceMaterializationPort {
-  create(input: EvidenceMaterializationInput): Promise<MaterializationCreatedObject>;
+  create(
+    input: EvidenceMaterializationInput,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
+  ): Promise<MaterializationCreatedObject>;
   deleteCreatedEvidence(objectId: string): Promise<void>;
 }
 

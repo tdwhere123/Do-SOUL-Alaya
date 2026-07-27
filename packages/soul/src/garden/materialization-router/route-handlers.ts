@@ -6,6 +6,7 @@ import type {
   MaterializationTarget
 } from "./contracts.js";
 import {
+  buildGardenTurnEvidenceSearchProjections,
   buildGardenTurnEvidenceArtifactRef,
   isGardenTurnEvidenceFallback
 } from "../evidence-preservation/turn-evidence-anchor.js";
@@ -253,14 +254,15 @@ export class MaterializationRouterRouteHandlers extends MaterializationRouterMem
     context: MaterializationContext
   ): Promise<MaterializationResult> {
     try {
+      const fallback = isGardenTurnEvidenceFallback(signal);
       const evidence = await this.dependencies.evidenceService.create(buildEvidenceInput(signal, undefined, {
         fullTurnExcerpt: signal.signal_kind === "potential_evidence_anchor" ||
           this.dependencies.fullTurnEvidenceExcerpt,
-        artifactRef: isGardenTurnEvidenceFallback(signal)
+        artifactRef: fallback
           ? buildGardenTurnEvidenceArtifactRef(signal.signal_id)
           : undefined,
         context
-      }));
+      }), fallback ? buildGardenTurnEvidenceSearchProjections(signal) : undefined);
 
       return materializationSuccess({
         signal_id: signal.signal_id,

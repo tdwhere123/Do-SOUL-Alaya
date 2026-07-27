@@ -176,17 +176,20 @@ describe("MaterializationRouter routing and grounding", () => {
       success: true,
       created_objects: [{ object_kind: "evidence_capsule", object_id: "evidence-1" }]
     });
-    expect(deps.evidenceService.create).toHaveBeenCalledWith(expect.objectContaining({
-      excerpt: "Assistant: the requested script is attached.",
-      evidence_kind: "conversation_excerpt",
-      evidence_health_state: "verified",
-      source_hash: expect.stringMatching(
-        /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
-      ),
-      physical_anchor: expect.objectContaining({
-        artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
-      })
-    }));
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        excerpt: "Assistant: the requested script is attached.",
+        evidence_kind: "conversation_excerpt",
+        evidence_health_state: "verified",
+        source_hash: expect.stringMatching(
+          /^sha256:garden-source-turn-fallback-v1:[a-f0-9]{64}$/u
+        ),
+        physical_anchor: expect.objectContaining({
+          artifact_ref: `alaya:garden-turn-evidence:${signal.signal_id}`
+        })
+      }),
+      []
+    );
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });
@@ -194,7 +197,8 @@ describe("MaterializationRouter routing and grounding", () => {
   it("materializes only verified v2 User spans into the searchable projection", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
-    const userContent = "First line.\nAssistant: quoted inside User content.";
+    const userContent =
+      "I bought my bookshelf from IKEA.\nAssistant: quoted inside User content.";
     const assistantContent = "Private assistant-only elaboration.";
     const sourceCorpus =
       `User: ${userContent}\nAssistant: ${assistantContent}`;
@@ -219,16 +223,23 @@ describe("MaterializationRouter routing and grounding", () => {
 
     await router.materializeSignal(signal);
 
-    expect(deps.evidenceService.create).toHaveBeenCalledWith(expect.objectContaining({
-      gist: sourceCorpus,
-      excerpt: userContent,
-      semantic_anchor: expect.objectContaining({ summary: userContent }),
-      evidence_kind: "conversation_excerpt",
-      evidence_health_state: "verified",
-      source_hash: expect.stringMatching(
-        /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
-      )
-    }));
+    expect(deps.evidenceService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gist: sourceCorpus,
+        excerpt: userContent,
+        semantic_anchor: expect.objectContaining({ summary: userContent }),
+        evidence_kind: "conversation_excerpt",
+        evidence_health_state: "verified",
+        source_hash: expect.stringMatching(
+          /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
+        )
+      }),
+      [{
+        projection_id: 1,
+        projection_kind: "user_assertion",
+        content: "I bought my bookshelf from IKEA."
+      }]
+    );
     expect(deps.memoryService.create).not.toHaveBeenCalled();
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });

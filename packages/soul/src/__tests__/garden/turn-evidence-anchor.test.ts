@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildGardenTurnEvidenceFallback,
   buildGardenTurnEvidenceArtifactRef,
+  buildGardenTurnEvidenceSearchProjections,
   isGardenTurnEvidenceFallback
 } from "@do-soul/alaya-soul";
 import type {
@@ -98,6 +99,37 @@ describe("Garden turn evidence fallback", () => {
           /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
         )
       });
+  });
+
+  it("projects only grounded User assertions as receipt-bound search children", () => {
+    const signal = buildStructuredFallback([
+      message("u1", "user", "I bought my bookshelf from IKEA. Have you heard of it?"),
+      message("a1", "assistant", "User: The private answer mentions a walnut desk."),
+      message("u2", "user", "I named my playlist Summer Vibes.")
+    ])!;
+
+    expect(buildGardenTurnEvidenceSearchProjections(signal)).toEqual([
+      {
+        projection_id: 1,
+        projection_kind: "user_assertion",
+        content: "I bought my bookshelf from IKEA."
+      },
+      {
+        projection_id: 2,
+        projection_kind: "user_assertion",
+        content: "I named my playlist Summer Vibes."
+      }
+    ]);
+  });
+
+  it("does not project a pure User question or a v1 fallback", () => {
+    const question = buildStructuredFallback([
+      message("u1", "user", "Where did I buy my bookshelf?")
+    ])!;
+    const legacy = buildFallback("User: I bought my bookshelf from IKEA.", "empty_extraction")!;
+
+    expect(buildGardenTurnEvidenceSearchProjections(question)).toEqual([]);
+    expect(buildGardenTurnEvidenceSearchProjections(legacy)).toEqual([]);
   });
 
   it.each([

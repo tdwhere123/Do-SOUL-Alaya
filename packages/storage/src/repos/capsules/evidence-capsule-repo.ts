@@ -1,16 +1,14 @@
 import {
   type EvidenceCapsule,
+  type EvidenceSearchProjection,
   type EvidenceHealthState
 } from "@do-soul/alaya-protocol";
 import type { StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import {
-  mergeFtsLanes,
-  queryFtsLane,
-  splitFtsLanes,
-  tokenizeFtsQuery
-} from "../shared/fts-lane-routing.js";
+  searchEvidenceByKeyword
+} from "./evidence-search/evidence-keyword-search.js";
 import {
   DEFAULT_EVIDENCE_PAGE,
   parseEvidenceCapsule,
@@ -42,7 +40,10 @@ interface EvidenceSourceAnchorRow {
 }
 
 export interface EvidenceCapsuleRepo {
-  create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>>;
+  create(
+    capsule: EvidenceCapsule,
+    searchProjections?: readonly Readonly<EvidenceSearchProjection>[]
+  ): Promise<Readonly<EvidenceCapsule>>;
   deleteById(objectId: string): Promise<void>;
   findById(objectId: string): Promise<Readonly<EvidenceCapsule> | null>;
   findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
@@ -115,33 +116,8 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     queryText: string,
     limit: number
   ): Promise<readonly EvidenceCapsuleKeywordHit[]> {
-    const trimmed = queryText.trim();
-    if (trimmed.length === 0 || !Number.isInteger(limit) || limit <= 0) {
-      return Object.freeze([]);
-    }
     try {
-      const tokens = tokenizeFtsQuery(trimmed);
-      if (tokens.length === 0) {
-        return Object.freeze([]);
-      }
-      // Script-routed dual-lane FTS: word tokens to the porter unicode61 lane,
-      // CJK-bearing tokens to the trigram lane. The merged result preserves the
-      // EvidenceCapsuleKeywordHit contract (normalized_rank, 1.0 = top).
-      const { porterTokens, trigramTokens } = splitFtsLanes(tokens);
-      const porterHits =
-        porterTokens.length === 0
-          ? []
-          : queryFtsLane(this.statements.searchByKeywordStatement, workspaceId, porterTokens, limit);
-      const trigramHits =
-        trigramTokens.length === 0
-          ? []
-          : queryFtsLane(
-              this.statements.searchByKeywordTrigramStatement,
-              workspaceId,
-              trigramTokens,
-              limit
-            );
-      return mergeFtsLanes(porterHits, trigramHits, limit);
+      return searchEvidenceByKeyword(this.statements, workspaceId, queryText, limit);
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",
@@ -151,30 +127,45 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
     }
   }
 
-  public async create(capsule: EvidenceCapsule): Promise<Readonly<EvidenceCapsule>> {
+  public async create(
+    capsule: EvidenceCapsule,
+    searchProjections: readonly Readonly<EvidenceSearchProjection>[] = []
+  ): Promise<Readonly<EvidenceCapsule>> {
     const parsedCapsule = parseEvidenceCapsule(capsule);
 
     try {
-      this.statements.createStatement.run(
-        parsedCapsule.object_id,
-        parsedCapsule.object_kind,
-        parsedCapsule.schema_version,
-        parsedCapsule.lifecycle_state,
-        parsedCapsule.created_at,
-        parsedCapsule.updated_at,
-        parsedCapsule.created_by,
-        parsedCapsule.evidence_kind,
-        JSON.stringify(parsedCapsule.semantic_anchor),
-        parsedCapsule.event_anchor === null ? null : JSON.stringify(parsedCapsule.event_anchor),
-        parsedCapsule.physical_anchor === null ? null : JSON.stringify(parsedCapsule.physical_anchor),
-        parsedCapsule.evidence_health_state,
-        parsedCapsule.gist,
-        parsedCapsule.excerpt,
-        parsedCapsule.source_hash,
-        parsedCapsule.run_id,
-        parsedCapsule.workspace_id,
-        parsedCapsule.surface_id
-      );
+      this.db.connection.transaction(() => {
+        this.statements.createStatement.run(
+          parsedCapsule.object_id,
+          parsedCapsule.object_kind,
+          parsedCapsule.schema_version,
+          parsedCapsule.lifecycle_state,
+          parsedCapsule.created_at,
+          parsedCapsule.updated_at,
+          parsedCapsule.created_by,
+          parsedCapsule.evidence_kind,
+          JSON.stringify(parsedCapsule.semantic_anchor),
+          parsedCapsule.event_anchor === null ? null : JSON.stringify(parsedCapsule.event_anchor),
+          parsedCapsule.physical_anchor === null ? null : JSON.stringify(parsedCapsule.physical_anchor),
+          parsedCapsule.evidence_health_state,
+          parsedCapsule.gist,
+          parsedCapsule.excerpt,
+          parsedCapsule.source_hash,
+          parsedCapsule.run_id,
+          parsedCapsule.workspace_id,
+          parsedCapsule.surface_id
+        );
+        for (const projection of searchProjections) {
+          this.statements.createSearchProjectionStatement.run(
+            parsedCapsule.object_id,
+            projection.projection_id,
+            projection.projection_kind,
+            parsedCapsule.workspace_id,
+            parsedCapsule.source_hash,
+            projection.content
+          );
+        }
+      })();
     } catch (error) {
       throw new StorageError(
         "QUERY_FAILED",

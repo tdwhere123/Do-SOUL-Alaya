@@ -270,6 +270,48 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(hits.map((hit) => hit.object_id)).not.toContain("1f5c2a90-0000-4000-8000-000000000002");
   });
 
+  it("recalls atomic User search children and collapses them to their evidence owner", async () => {
+    const { database, repo } = await createRepo();
+    const objectId = "1f5c2a90-0000-4000-8000-000000000010";
+    await repo.create(
+      createEvidenceCapsule({
+        object_id: objectId,
+        gist: "receipt owner",
+        excerpt: "A broad trusted User turn.",
+        source_hash: "sha256:garden-source-turn-fallback-v2:abc"
+      }),
+      [
+        {
+          projection_id: 1,
+          projection_kind: "user_assertion",
+          content: "I bought my bookshelf from IKEA."
+        },
+        {
+          projection_id: 2,
+          projection_kind: "user_assertion",
+          content: "I named my playlist Summer Vibes."
+        }
+      ]
+    );
+
+    const hits = await repo.searchByKeyword!("workspace-1", "bookshelf IKEA", 10);
+    expect(hits.filter((hit) => hit.object_id === objectId)).toHaveLength(1);
+
+    database.connection.prepare(
+      "UPDATE evidence_capsules SET source_hash = ? WHERE object_id = ?"
+    ).run("sha256:garden-source-turn-fallback-v2:changed", objectId);
+    await expect(repo.searchByKeyword!("workspace-1", "bookshelf IKEA", 10))
+      .resolves.not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ object_id: objectId })
+      ]));
+
+    await repo.deleteById(objectId);
+    await expect(repo.searchByKeyword!("workspace-1", "bookshelf IKEA", 10))
+      .resolves.not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ object_id: objectId })
+      ]));
+  });
+
   it("indexes an atomic excerpt without leaking unrelated receipt-corpus terms", async () => {
     const { repo } = await createRepo();
     const objectId = "1f5c2a90-0000-4000-8000-000000000003";
