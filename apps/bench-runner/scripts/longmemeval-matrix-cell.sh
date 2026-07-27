@@ -5,7 +5,8 @@
 #           MATRIX_SNAPSHOT, MATRIX_CONTRACT, ALAYA_RECALL_WEIGHT_OVERRIDES,
 #           MATRIX_EXTRACTION_MODEL (must equal cache manifest),
 #           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys),
-#           MATRIX_EXPERIMENT=1 for the contract-free local A/B path.
+#           MATRIX_EXPERIMENT=1 for the contract-free local path,
+#           MATRIX_LIMIT / MATRIX_OFFSET for experiment-only slices.
 set -euo pipefail
 
 CELL="${1:-}"
@@ -24,6 +25,19 @@ EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
 }
 if [[ "$EXPERIMENT" == "1" && -n "${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" ]]; then
   echo "local experiment requires default recall weights" >&2
+  exit 64
+fi
+SLICE_LIMIT="${MATRIX_LIMIT:-}"
+SLICE_OFFSET="${MATRIX_OFFSET:-0}"
+if [[ -n "$SLICE_LIMIT" ]]; then
+  [[ "$EXPERIMENT" == "1" ]] || {
+    echo "MATRIX_LIMIT is experiment-only" >&2; exit 64;
+  }
+  [[ "$SLICE_LIMIT" =~ ^[1-9][0-9]*$ && "$SLICE_OFFSET" =~ ^[0-9]+$ ]] || {
+    echo "MATRIX_LIMIT must be positive and MATRIX_OFFSET nonnegative" >&2; exit 64;
+  }
+elif [[ "${MATRIX_OFFSET+x}" == "x" ]]; then
+  echo "MATRIX_OFFSET requires MATRIX_LIMIT" >&2
   exit 64
 fi
 CACHE_ROOT="${MATRIX_CACHE_ROOT:-$WORKTREE/.do-it/bench-runs/seeds/longmemeval-s-extraction-cache/deepseek-v4-flash-newapi-nonthinking/cache}"
@@ -103,6 +117,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" 
   SNAPSHOT_SHA256="$SNAPSHOT_SHA256" CACHE_MANIFEST_SHA256="$CACHE_MANIFEST_SHA256" \
   DATASET_SHA256="$DATASET_SHA256" \
   EXTRACTION_MODEL="$EXTRACTION_MODEL" \
+  SLICE_LIMIT="$SLICE_LIMIT" SLICE_OFFSET="$SLICE_OFFSET" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
   python3 - "$IDENTITY_PATH" <<'PY'
 import hashlib
@@ -134,6 +149,10 @@ payload = {
 }
 if os.environ["EXPERIMENT"] == "1":
   payload["mode"] = "experiment"
+  payload["evaluation_slice"] = {
+    "offset": int(os.environ["SLICE_OFFSET"]),
+    "limit": int(os.environ["SLICE_LIMIT"]) if os.environ["SLICE_LIMIT"] else None,
+  }
   payload.update(json.loads(os.environ["INPUT_IDENTITY_JSON"]))
 else:
   payload.update({
@@ -186,6 +205,9 @@ else
     "ALAYA_BENCH_EXTRACTION_CACHE_ROOT=$CACHE_ROOT"
     "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE=1"
   )
+fi
+if [[ -n "$SLICE_LIMIT" ]]; then
+  CLI_ARGS+=(--limit "$SLICE_LIMIT" --offset "$SLICE_OFFSET")
 fi
 
 cd "$WORKTREE"

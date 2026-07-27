@@ -41,6 +41,7 @@ describe("LongMemEval experiment identity", () => {
       kind: "longmemeval_experiment_pair_identity",
       snapshot: cellA.snapshot,
       runner: cellA.runner,
+      evaluation_slice: { offset: 100, limit: 100 },
       cells: {
         A: { embedding_mode: "disabled", cross_encoder_enabled: false },
         B: { embedding_mode: "env", cross_encoder_enabled: false }
@@ -51,6 +52,7 @@ describe("LongMemEval experiment identity", () => {
   it.each([
     ["snapshot", { snapshot: { ...cellIdentity("B", "env").snapshot, db_sha256: "9".repeat(64) } }],
     ["runner", { runner: { ...cellIdentity("B", "env").runner, worktree_state_sha256: "8".repeat(64) } }],
+    ["slice", { evaluation_slice: { offset: 200, limit: 100 } }],
     ["treatment", { treatment: { ...cellIdentity("B", "env").treatment, cross_encoder_enabled: true } }]
   ])("rejects %s drift between experiment cells", (_label, drift) => {
     expect(() => buildExperimentPairIdentity(
@@ -116,7 +118,11 @@ function cellIdentity(cell: "A" | "B", embeddingMode: "disabled" | "env") {
       embedding_mode: embeddingMode,
       cross_encoder_enabled: false
     },
-    weight_overrides: null
+    weight_overrides: null,
+    evaluation_slice: {
+      offset: 100,
+      limit: 100
+    }
   };
 }
 

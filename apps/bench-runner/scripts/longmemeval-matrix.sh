@@ -3,7 +3,7 @@
 # Required: MATRIX_RUN_ROOT.
 # Optional: MATRIX_CELLS (default "A B"), MATRIX_AUTHORIZE=1 to run authorizer,
 #           MATRIX_CONTRACT (default $MATRIX_RUN_ROOT/matrix-promotion-contract.json),
-#           MATRIX_EXPERIMENT=1 for a local A/B pair without promotion evidence.
+#           MATRIX_EXPERIMENT=1 for local cells without promotion evidence.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,8 +15,8 @@ AUTHORIZATION="${MATRIX_AUTHORIZATION:-$RUN_ROOT/matrix-promotion-authorization.
 EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
 
 if [[ "$EXPERIMENT" == "1" ]]; then
-  [[ "$CELLS" == "A B" ]] || {
-    echo "local experiment requires the exact A B cell pair" >&2; exit 64;
+  [[ "$CELLS" == "A" || "$CELLS" == "B" || "$CELLS" == "A B" ]] || {
+    echo "local experiment cells must be A, B, or the exact A B pair" >&2; exit 64;
   }
   [[ "${MATRIX_AUTHORIZE:-0}" != "1" ]] || {
     echo "local experiment cannot authorize promotion" >&2; exit 64;
@@ -40,7 +40,7 @@ for cell in $CELLS; do
   fi
 done
 
-if [[ "$EXPERIMENT" == "1" ]]; then
+if [[ "$EXPERIMENT" == "1" && "$CELLS" == "A B" ]]; then
   rtk node "$SCRIPT_DIR/longmemeval-experiment-identity.mjs" pair \
     "$RUN_ROOT/A.runner-identity.json" \
     "$RUN_ROOT/B.runner-identity.json" \

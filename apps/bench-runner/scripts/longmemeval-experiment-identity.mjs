@@ -32,7 +32,14 @@ export async function readExperimentSnapshotIdentity(snapshotPath, datasetPath) 
 export function buildExperimentPairIdentity(cellA, cellB) {
   assertCell(cellA, "A", "disabled");
   assertCell(cellB, "B", "env");
-  const common = ["run_root", "snapshot", "dataset", "runner", "weight_overrides"];
+  const common = [
+    "run_root",
+    "snapshot",
+    "dataset",
+    "runner",
+    "weight_overrides",
+    "evaluation_slice"
+  ];
   if (common.some((field) => !isDeepStrictEqual(cellA[field], cellB[field])) ||
       !isDeepStrictEqual(
         treatmentWithoutEmbedding(cellA.treatment),
@@ -46,6 +53,7 @@ export function buildExperimentPairIdentity(cellA, cellB) {
     snapshot: cellA.snapshot,
     dataset: cellA.dataset,
     runner: cellA.runner,
+    evaluation_slice: cellA.evaluation_slice,
     weight_overrides: cellA.weight_overrides,
     cells: {
       A: cellA.treatment,
@@ -63,10 +71,18 @@ function assertCell(value, cell, embeddingMode) {
     isRecord(value.snapshot) &&
     isRecord(value.dataset) &&
     isRecord(value.runner) &&
+    isEvaluationSlice(value.evaluation_slice) &&
     typeof value.treatment?.extraction_model === "string" &&
     value.treatment?.embedding_mode === embeddingMode &&
     value.treatment?.cross_encoder_enabled === false;
   if (!valid) throw new Error(`experiment A/B identity has invalid cell ${cell}`);
+}
+
+function isEvaluationSlice(value) {
+  return isRecord(value) &&
+    Number.isInteger(value.offset) &&
+    value.offset >= 0 &&
+    (value.limit === null || (Number.isInteger(value.limit) && value.limit > 0));
 }
 
 function treatmentWithoutEmbedding(treatment) {
