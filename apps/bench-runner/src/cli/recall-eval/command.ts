@@ -17,6 +17,7 @@ export async function runRecallEvalCommand(opts: ParsedFlags): Promise<number> {
   }
   try {
     assertLegacyFlags(opts);
+    assertExperimentFlags(opts);
     const expansionCapability = opts.promotionContract === undefined
       ? undefined
       : await verifyLongMemEvalExpansionContractInput(opts.promotionContract);
@@ -53,8 +54,16 @@ export function buildRecallEvalOptions(
     ...(opts.pinnedMetaRoot === undefined ? {} : { pinnedMetaRoot: opts.pinnedMetaRoot }),
     ...(opts.legacyManifestSha256 === undefined ? {} : { legacyManifestSha256: opts.legacyManifestSha256 }),
     ...(opts.legacyDatasetSha256 === undefined ? {} : { legacyDatasetSha256: opts.legacyDatasetSha256 }),
+    ...(opts.experiment === true ? { experiment: true } : {}),
     ...(expansionCapability === undefined ? {} : { expansionCapability })
   };
+}
+
+function assertExperimentFlags(opts: ParsedFlags): void {
+  if (opts.experiment !== true) return;
+  if (opts.legacySnapshot || opts.promotionContract !== undefined) {
+    throw new Error("--experiment cannot be combined with legacy or promotion inputs");
+  }
 }
 
 function assertLegacyFlags(opts: ParsedFlags): void {
@@ -74,6 +83,7 @@ function assertLegacyFlags(opts: ParsedFlags): void {
 
 function renderStart(opts: ParsedFlags): string {
   return `Running recall-eval against snapshot ${opts.snapshot}` +
+    (opts.experiment === true ? " mode=experiment" : "") +
     (opts.legacySnapshot ? " mode=legacy-v1-old-cache diagnostic_only=true" : "") +
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
     (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +

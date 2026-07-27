@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export function resolveMatrixExtractionModel(manifest, explicitModel) {
-  const manifestModel = typeof manifest?.extraction_model === "string"
-    ? manifest.extraction_model.trim()
+  const declared = manifest?.extraction_provenance?.extraction_model ??
+    manifest?.extraction_model;
+  const manifestModel = typeof declared === "string"
+    ? declared.trim()
     : "";
   if (manifestModel.length === 0) {
     throw new Error("extraction cache manifest has no extraction_model");

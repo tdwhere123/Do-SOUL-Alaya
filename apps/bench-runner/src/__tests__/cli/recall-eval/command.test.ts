@@ -43,6 +43,16 @@ it("does not require tier-one evidence for a clean recall-eval fast loop", async
   await expect(runRecallEvalCommand(flags())).resolves.toBe(0);
 });
 
+it("rejects mixing local experiment and promotion authority", async () => {
+  await expect(runRecallEvalCommand({
+    ...flags(),
+    experiment: true,
+    promotionContract: "/tmp/promotion.json"
+  })).resolves.toBe(2);
+
+  expect(mocks.runRecallEval).not.toHaveBeenCalled();
+});
+
 function result(payload: ReturnType<typeof buildFullLongMemEvalPayload>) {
   return {
     slug: "fixture",

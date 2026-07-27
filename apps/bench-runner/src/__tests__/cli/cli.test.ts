@@ -51,6 +51,7 @@ describe("bench-runner CLI", () => {
     expect(exitCode).toBe(0);
     expect(stdoutBuf).toContain("extraction-fill");
     expect(stdoutBuf).toContain("recall-eval --snapshot <db>");
+    expect(stdoutBuf).toContain("--experiment");
     expect(stdoutBuf).toContain("--legacy-manifest-sha256 <sha>");
     expect(stdoutBuf).toContain("--legacy-dataset-sha256 <sha>");
     expect(stdoutBuf).toContain("--concurrency N");
@@ -151,6 +152,13 @@ describe("bench-runner CLI", () => {
 
     expect(exitCode).toBe(2);
     expect(stderrBuf).toMatch(/only valid for authorize-extraction/u);
+  });
+
+  it("rejects experiment mode on unrelated commands", async () => {
+    const exitCode = await runCli(["longmemeval", "--experiment"]);
+
+    expect(exitCode).toBe(2);
+    expect(stderrBuf).toMatch(/--experiment is only valid for recall-eval/u);
   });
 
   it("rejects invalid LongMemEval weight overrides before loading data", async () => {

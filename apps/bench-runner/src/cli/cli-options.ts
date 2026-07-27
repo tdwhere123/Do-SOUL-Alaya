@@ -58,6 +58,7 @@ export interface ParsedFlags {
   readonly legacySnapshot: boolean;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
+  readonly experiment?: boolean;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
   readonly qa: boolean;
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
@@ -97,6 +98,7 @@ export interface ParsedFlagsState {
   legacySnapshot: boolean;
   legacyManifestSha256?: string;
   legacyDatasetSha256?: string;
+  experiment: boolean;
   qa: boolean;
   edgePlane: boolean;
   shards: string[];
@@ -129,6 +131,7 @@ function createParsedFlagsState(): ParsedFlagsState {
     force: false,
     qa: false,
     edgePlane: false,
+    experiment: false,
     legacySnapshot: false,
     shards: [],
     collectingShards: false
@@ -401,6 +404,10 @@ function consumeBooleanFlags(
     state.legacySnapshot = true;
     return index;
   }
+  if (token === "--experiment") {
+    state.experiment = true;
+    return index;
+  }
   if (token === "--source") {
     state.source = args[index + 1];
     return index + 1;
@@ -485,6 +492,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     legacySnapshot: state.legacySnapshot,
     legacyManifestSha256: state.legacyManifestSha256,
     legacyDatasetSha256: state.legacyDatasetSha256,
+    experiment: state.experiment,
     qa: state.qa,
     edgePlane: state.edgePlane
   };

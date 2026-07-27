@@ -56,6 +56,11 @@ export async function assertExpansionRecallAuthority(input: {
   readonly recallWeightOverrides: BenchRecallWeightOverrides | undefined;
   readonly env: Readonly<Record<string, string | undefined>>;
 }): Promise<void> {
+  if (input.options.experiment === true) {
+    assertCapabilityAbsent(input.options.expansionCapability);
+    assertExperimentRecallInvocation(input);
+    return;
+  }
   const full500 = input.options.variant === "longmemeval_s" &&
     input.bundle.sidecar.questions.length === 500;
   if (!full500) {
@@ -71,6 +76,23 @@ export async function assertExpansionRecallAuthority(input: {
     pinnedMetaRoot: input.options.pinnedMetaRoot
   });
   await verifyExpansionSnapshotAuthority(input, capability, selection);
+}
+
+function assertExperimentRecallInvocation(
+  input: Parameters<typeof assertExpansionRecallAuthority>[0]
+): void {
+  const { options, env } = input;
+  if (options.legacySnapshot === true ||
+      options.weightOverridesJson !== undefined ||
+      input.recallWeightOverrides !== undefined ||
+      env[ALAYA_RECALL_WEIGHT_OVERRIDES_ENV] !== undefined ||
+      (options.policyShape ?? "stress") !== "stress" ||
+      (options.simulateReport ?? "none") !== "none") {
+    throw new Error("local experiment differs from the exact A/B contract");
+  }
+  assertFullRecallWindow(options);
+  const cell = recallCell(env);
+  assertRecallEnvironment(env, input.recallWeightOverrides, cell);
 }
 
 async function verifyExpansionSnapshotAuthority(

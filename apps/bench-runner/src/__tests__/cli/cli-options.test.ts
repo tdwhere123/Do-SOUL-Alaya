@@ -39,6 +39,7 @@ describe("parseFlags", () => {
       "--question-manifest=/tmp/questions.json",
       "--extraction-cache-root=/tmp/cache",
       "--promotion-contract=/tmp/promotion.json",
+      "--experiment",
       "--r3-spend-approval=/tmp/r3-spend-approval.json",
       "--legacy-snapshot",
       `--legacy-manifest-sha256=${"a".repeat(64)}`,
@@ -60,6 +61,7 @@ describe("parseFlags", () => {
     expect(parsed.questionManifest).toBe("/tmp/questions.json");
     expect(parsed.extractionCacheRoot).toBe("/tmp/cache");
     expect(parsed.promotionContract).toBe("/tmp/promotion.json");
+    expect(parsed.experiment).toBe(true);
     expect(parsed.r3SpendApproval).toBe("/tmp/r3-spend-approval.json");
     expect(parsed.legacySnapshot).toBe(true);
     expect(parsed.legacyManifestSha256).toBe("a".repeat(64));

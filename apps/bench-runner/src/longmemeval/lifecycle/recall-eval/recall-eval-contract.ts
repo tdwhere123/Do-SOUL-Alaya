@@ -32,6 +32,7 @@ export interface RecallEvalOptions {
   readonly pinnedMetaRoot?: string;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
+  readonly experiment?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
 }
 

@@ -14,4 +14,16 @@ describe("recall-eval CLI options", () => {
       dataDirRoot: "/tmp/working-root"
     });
   });
+
+  it("forwards the explicit local experiment mode", () => {
+    const flags = parseFlags([
+      "--snapshot", "/tmp/source.db",
+      "--experiment"
+    ]);
+
+    expect(buildRecallEvalOptions(flags, flags.snapshot!)).toMatchObject({
+      snapshotDbPath: "/tmp/source.db",
+      experiment: true
+    });
+  });
 });

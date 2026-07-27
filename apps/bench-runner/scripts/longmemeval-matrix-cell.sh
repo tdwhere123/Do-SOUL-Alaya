@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Unified LongMemEval matrix/probe cell entry: record identity, do not freeze it.
+# Unified LongMemEval matrix cell entry.
 # Required: MATRIX_RUN_ROOT (campaign dir with snapshot/source-100.db).
 # Optional: MATRIX_CACHE_ROOT, MATRIX_MODEL_CACHE, MATRIX_DATASET_DIR,
 #           MATRIX_SNAPSHOT, MATRIX_CONTRACT, ALAYA_RECALL_WEIGHT_OVERRIDES,
 #           MATRIX_EXTRACTION_MODEL (must equal cache manifest),
-#           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys).
+#           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys),
+#           MATRIX_EXPERIMENT=1 for the contract-free local A/B path.
 set -euo pipefail
 
 CELL="${1:-}"
@@ -17,6 +18,14 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 RUN_ROOT="${MATRIX_RUN_ROOT:?MATRIX_RUN_ROOT is required}"
+EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
+[[ "$EXPERIMENT" == "0" || "$EXPERIMENT" == "1" ]] || {
+  echo "MATRIX_EXPERIMENT must be 0 or 1" >&2; exit 64;
+}
+if [[ "$EXPERIMENT" == "1" && -n "${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" ]]; then
+  echo "local experiment requires default recall weights" >&2
+  exit 64
+fi
 CACHE_ROOT="${MATRIX_CACHE_ROOT:-$WORKTREE/.do-it/bench-runs/seeds/longmemeval-s-extraction-cache/deepseek-v4-flash-newapi-nonthinking/cache}"
 DATASET_DIR="${MATRIX_DATASET_DIR:-$WORKTREE/apps/bench-runner/data/longmemeval}"
 DATASET="$DATASET_DIR/longmemeval_s.json"
@@ -32,15 +41,30 @@ file_sha() {
   sha256sum "$1" | cut -d " " -f 1
 }
 
-# Input integrity only — checkout/code identity is recorded, never a hard gate.
+# Snapshot and dataset identity are verified by recall-eval again before restore.
 [[ -f "$SNAPSHOT" ]] || { echo "missing snapshot: $SNAPSHOT" >&2; exit 65; }
-[[ -f "$CONTRACT" ]] || { echo "missing promotion contract: $CONTRACT" >&2; exit 65; }
-[[ -f "$CACHE_ROOT/manifest.json" ]] || { echo "missing extraction cache manifest" >&2; exit 65; }
 [[ -f "$DATASET" ]] || { echo "missing dataset: $DATASET" >&2; exit 65; }
+if [[ "$EXPERIMENT" == "1" ]]; then
+  for artifact in \
+    "$SNAPSHOT.manifest.json" \
+    "$SNAPSHOT.sidecar.json" \
+    "$SNAPSHOT.extraction-authority.json"; do
+    [[ -f "$artifact" ]] || { echo "missing snapshot artifact: $artifact" >&2; exit 65; }
+  done
+else
+  [[ -f "$CONTRACT" ]] || { echo "missing promotion contract: $CONTRACT" >&2; exit 65; }
+  [[ -f "$CACHE_ROOT/manifest.json" ]] || {
+    echo "missing extraction cache manifest" >&2; exit 65;
+  }
+fi
 [[ ! -e "$DATA_ROOT" && ! -e "$HISTORY_ROOT" && ! -e "$EVIDENCE_ROOT" ]] || {
   echo "cell output already exists: $CELL under $RUN_ROOT" >&2; exit 65;
 }
-declare -a MODEL_ARGS=("$CACHE_ROOT/manifest.json")
+MODEL_MANIFEST="$CACHE_ROOT/manifest.json"
+if [[ "$EXPERIMENT" == "1" ]]; then
+  MODEL_MANIFEST="$SNAPSHOT.manifest.json"
+fi
+declare -a MODEL_ARGS=("$MODEL_MANIFEST")
 if [[ -n "${MATRIX_EXTRACTION_MODEL:-}" ]]; then
   MODEL_ARGS+=("$MATRIX_EXTRACTION_MODEL")
 fi
@@ -56,15 +80,26 @@ WORKTREE_STATE_SHA256="$({
   printf '%s' "$PORCELAIN"
 } | sha256sum | cut -d ' ' -f 1)"
 DIST_JSON="$(node "$WORKTREE/apps/bench-runner/scripts/executed-dist-closure.mjs" --root "$WORKTREE")"
-GATE_SHA256="$(file_sha "$CONTRACT")"
-SNAPSHOT_SHA256="$(file_sha "$SNAPSHOT")"
-CACHE_MANIFEST_SHA256="$(file_sha "$CACHE_ROOT/manifest.json")"
-DATASET_SHA256="$(file_sha "$DATASET")"
+INPUT_IDENTITY_JSON=""
+SNAPSHOT_SHA256=""
+CACHE_MANIFEST_SHA256=""
+DATASET_SHA256=""
+if [[ "$EXPERIMENT" == "1" ]]; then
+  INPUT_IDENTITY_JSON="$(
+    rtk node "$SCRIPT_DIR/longmemeval-experiment-identity.mjs" \
+      snapshot "$SNAPSHOT" "$DATASET"
+  )"
+else
+  SNAPSHOT_SHA256="$(file_sha "$SNAPSHOT")"
+  CACHE_MANIFEST_SHA256="$(file_sha "$CACHE_ROOT/manifest.json")"
+  DATASET_SHA256="$(file_sha "$DATASET")"
+fi
 
 mkdir -p "$RUN_ROOT"
-CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" \
+CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" \
   WORKTREE_CLEAN="$WORKTREE_CLEAN" WORKTREE_STATE_SHA256="$WORKTREE_STATE_SHA256" \
   DIST_JSON="$DIST_JSON" EMBEDDING_MODE="$EMBEDDING_MODE" CROSS_ENABLED="$CROSS_ENABLED" \
+  INPUT_IDENTITY_JSON="$INPUT_IDENTITY_JSON" \
   SNAPSHOT_SHA256="$SNAPSHOT_SHA256" CACHE_MANIFEST_SHA256="$CACHE_MANIFEST_SHA256" \
   DATASET_SHA256="$DATASET_SHA256" \
   EXTRACTION_MODEL="$EXTRACTION_MODEL" \
@@ -84,14 +119,11 @@ runner = {
   "executed_dist": json.loads(os.environ["DIST_JSON"]),
 }
 payload = {
-  "schema_version": 1,
+  "schema_version": 2 if os.environ["EXPERIMENT"] == "1" else 1,
   "kind": "longmemeval_matrix_cell_runner_identity",
   "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
   "cell": os.environ["CELL"],
   "run_root": os.environ["RUN_ROOT"],
-  "snapshot_sha256": os.environ["SNAPSHOT_SHA256"],
-  "cache_manifest_sha256": os.environ["CACHE_MANIFEST_SHA256"],
-  "dataset_sha256": os.environ["DATASET_SHA256"],
   "runner": runner,
   "treatment": {
     "extraction_model": os.environ["EXTRACTION_MODEL"],
@@ -100,6 +132,15 @@ payload = {
   },
   "weight_overrides": None,
 }
+if os.environ["EXPERIMENT"] == "1":
+  payload["mode"] = "experiment"
+  payload.update(json.loads(os.environ["INPUT_IDENTITY_JSON"]))
+else:
+  payload.update({
+    "snapshot_sha256": os.environ["SNAPSHOT_SHA256"],
+    "cache_manifest_sha256": os.environ["CACHE_MANIFEST_SHA256"],
+    "dataset_sha256": os.environ["DATASET_SHA256"],
+  })
 raw_overrides = os.environ.get("ALAYA_RECALL_WEIGHT_OVERRIDES") or ""
 if raw_overrides:
   payload["weight_overrides"] = {
@@ -129,16 +170,31 @@ for key in ${MATRIX_PASSTHROUGH_ENV:-}; do
   fi
 done
 
+declare -a AUTHORITY_ARGS=()
+declare -a CACHE_ARGS=()
+declare -a CLI_ARGS=()
+if [[ "$EXPERIMENT" == "1" ]]; then
+  CLI_ARGS+=(--experiment)
+else
+  GATE_SHA256="$(file_sha "$CONTRACT")"
+  AUTHORITY_ARGS+=(
+    "ALAYA_BENCH_GATE_CONTRACT_PATH=$CONTRACT"
+    "ALAYA_BENCH_GATE_SHA256=$GATE_SHA256"
+    "ALAYA_BENCH_WORKTREE_STATE_SHA256=$WORKTREE_STATE_SHA256"
+  )
+  CACHE_ARGS+=(
+    "ALAYA_BENCH_EXTRACTION_CACHE_ROOT=$CACHE_ROOT"
+    "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE=1"
+  )
+fi
+
 cd "$WORKTREE"
 set +e
 /usr/bin/env -i \
   "${PASSTHROUGH_ARGS[@]}" \
+  "${AUTHORITY_ARGS[@]}" \
+  "${CACHE_ARGS[@]}" \
   ALAYA_BENCH_ALLOW_LIVE_EXTRACTION=0 \
-  ALAYA_BENCH_GATE_CONTRACT_PATH="$CONTRACT" \
-  ALAYA_BENCH_GATE_SHA256="$GATE_SHA256" \
-  ALAYA_BENCH_WORKTREE_STATE_SHA256="$WORKTREE_STATE_SHA256" \
-  ALAYA_BENCH_EXTRACTION_CACHE_ROOT="$CACHE_ROOT" \
-  ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE=1 \
   OFFICIAL_API_GARDEN_MODEL="$EXTRACTION_MODEL" \
   ALAYA_GARDEN_PROVIDER_KIND=host_worker \
   ALAYA_RECALL_EVAL_EMBEDDING="$EMBEDDING_MODE" \
@@ -159,7 +215,8 @@ set +e
     --simulate-report none \
     --data-dir "$DATASET_DIR" \
     --data-dir-root "$DATA_ROOT" \
-    --history-root "$HISTORY_ROOT"
+    --history-root "$HISTORY_ROOT" \
+    "${CLI_ARGS[@]}"
 status=$?
 set -e
 
