@@ -112,6 +112,9 @@ export interface RecallSupplementaryData {
 export interface CoarseRecallCandidate {
   readonly entry: Readonly<MemoryEntry>;
   readonly answerRerankText?: string;
+  readonly verifiedUserSupportSource?: Readonly<
+    import("../query/recall-answer-support-observation.js").RecallVerifiedUserSupportSource
+  >;
   readonly isAdvisory?: boolean;
   readonly originPlane?: RecallOriginPlane;
   readonly sourceChannel?: string;

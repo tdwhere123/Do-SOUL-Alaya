@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { LongMemEvalQuestionDiagnosticSchema } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 import {
+  RecallAnswerSupportObservationSchema,
   RecallAnswerShapePlanSchema,
   RecallCandidateAnswerSupportSchema,
   RecallDeepHeadTraceSchema
@@ -272,8 +273,23 @@ describe("LongMemEval evidence contract", () => {
       target_terms: ["alice"],
       relation_terms: ["work"]
     };
+    const answerSupportObservation = {
+      schema_version: 1,
+      source_identity: "evidence_ref:evidence-alice-work",
+      support_identity:
+        `verified_user_assertion:evidence-alice-work:sha256:${"c".repeat(64)}`,
+      evidence_ref: "evidence-alice-work",
+      source_role: "user",
+      projection_kind: "atomic_assertion",
+      provenance_status: "verified_user_assertion",
+      query_status: "compatible",
+      event_status: "asserted",
+      time_status: "not_requested",
+      behavior_eligible: true
+    };
     const answerFeatures = completeAnswerFeatures({
-      answer_support: answerSupport
+      answer_support: answerSupport,
+      answer_support_observations: [answerSupportObservation]
     });
     const deepHeadTrace = {
       lexical_agreement: 0.9,
@@ -669,6 +685,57 @@ describe("LongMemEval evidence contract", () => {
         evidence_ref: "forged-evidence"
       }
     }).success).toBe(false);
+    const turnObservation = {
+      schema_version: 1,
+      source_identity: "evidence_ref:evidence-turn",
+      support_identity: null,
+      evidence_ref: "evidence-turn",
+      source_role: "user",
+      projection_kind: "turn_projection",
+      provenance_status: "verified_user_turn",
+      query_status: "compatible",
+      event_status: "unknown",
+      time_status: "unknown",
+      behavior_eligible: false
+    } as const;
+    expect(RecallAnswerSupportObservationSchema.safeParse({
+      ...turnObservation,
+      support_identity: "forged-atomic-support"
+    }).success).toBe(false);
+    expect(RecallAnswerSupportObservationSchema.safeParse({
+      ...turnObservation,
+      behavior_eligible: true
+    }).success).toBe(false);
+    expect(RecallAnswerSupportObservationSchema.safeParse({
+      ...turnObservation,
+      source_identity: "evidence_ref:other-evidence"
+    }).success).toBe(false);
+    expect(RecallAnswerSupportObservationSchema.safeParse({
+      ...turnObservation,
+      provenance_status: "verified_user_assertion"
+    }).success).toBe(false);
+    const atomicObservation = {
+      ...turnObservation,
+      support_identity: "verified_user_assertion:evidence-turn:sha256:digest",
+      projection_kind: "atomic_assertion",
+      provenance_status: "verified_user_assertion",
+      query_status: "compatible",
+      event_status: "asserted",
+      time_status: "compatible",
+      behavior_eligible: true
+    } as const;
+    expect(RecallAnswerSupportObservationSchema.safeParse(atomicObservation).success)
+      .toBe(true);
+    for (const invalid of [
+      { query_status: "value_only" },
+      { event_status: "prospective" },
+      { time_status: "unknown" }
+    ] as const) {
+      expect(RecallAnswerSupportObservationSchema.safeParse({
+        ...atomicObservation,
+        ...invalid
+      }).success).toBe(false);
+    }
     expect(RecallDeepHeadTraceSchema.safeParse({
       lexical_agreement: 0.9,
       evidence_agreement: 0.5,

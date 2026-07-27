@@ -255,6 +255,9 @@ export interface RecallCandidateAnswerFeatures {
   readonly answer_support?: Readonly<
     import("../query/recall-candidate-answer-support.js").RecallCandidateAnswerSupport
   >;
+  readonly answer_support_observations?: readonly Readonly<
+    import("../query/recall-answer-support-observation.js").RecallAnswerSupportObservation
+  >[];
 }
 
 export interface RecallPathExpansionSourceDiagnostic {

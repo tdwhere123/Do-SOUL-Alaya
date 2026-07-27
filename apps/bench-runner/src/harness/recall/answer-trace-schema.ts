@@ -83,6 +83,86 @@ export const RecallCandidateAnswerSupportSchema =
   })
   .readonly();
 
+export const RecallAnswerSupportObservationSchema = z
+  .object({
+    schema_version: z.literal(1),
+    source_identity: z.string().min(1),
+    support_identity: z.string().min(1).nullable(),
+    evidence_ref: z.string().min(1),
+    source_role: z.literal("user"),
+    projection_kind: z.enum(["atomic_assertion", "turn_projection"]),
+    provenance_status: z.enum([
+      "verified_user_assertion",
+      "verified_user_turn"
+    ]),
+    query_status: z.enum([
+      "compatible",
+      "value_only",
+      "unsupported",
+      "observation_only",
+      "ineligible",
+      "unresolved"
+    ]),
+    event_status: z.enum([
+      "asserted",
+      "prospective",
+      "negated",
+      "reversed",
+      "unknown"
+    ]),
+    time_status: z.enum([
+      "not_requested",
+      "compatible",
+      "conflicted",
+      "unknown"
+    ]),
+    behavior_eligible: z.boolean()
+  })
+  .strict()
+  .superRefine((observation, context) => {
+    const atomic = observation.projection_kind === "atomic_assertion";
+    const expectedProvenance = atomic
+      ? "verified_user_assertion"
+      : "verified_user_turn";
+    if (observation.source_identity !== `evidence_ref:${observation.evidence_ref}`) {
+      addIssue(
+        context,
+        ["source_identity"],
+        "source identity must bind the declared evidence ref"
+      );
+    }
+    if (observation.provenance_status !== expectedProvenance) {
+      addIssue(
+        context,
+        ["provenance_status"],
+        "projection kind and provenance must agree"
+      );
+    }
+    if (atomic !== (observation.support_identity !== null)) {
+      addIssue(
+        context,
+        ["support_identity"],
+        "only atomic assertions may claim an answer-support identity"
+      );
+    }
+    const behaviorEligible = atomic &&
+      observation.support_identity !== null &&
+      observation.query_status === "compatible" &&
+      observation.event_status === "asserted" &&
+      (
+        observation.time_status === "not_requested" ||
+        observation.time_status === "compatible"
+      );
+    if (observation.behavior_eligible && !behaviorEligible) {
+      addIssue(
+        context,
+        ["behavior_eligible"],
+        "behavior eligibility requires compatible verified atomic support"
+      );
+    }
+  })
+  .readonly();
+
 const RecallDeepHeadTraceFieldsSchema = z
   .object({
     lexical_agreement: z.number().min(0).max(1),

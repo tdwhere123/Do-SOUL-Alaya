@@ -3,6 +3,9 @@ import { selectFineAssessmentCandidates } from "../../recall/delivery/fine-asses
 import { RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS } from "../../recall/delivery/fine-assessment-answer-features.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
+  projectVerifiedUserAssertionContext
+} from "../../recall/query/recall-user-assertion-context.js";
+import {
   createCandidate,
   createConfig,
   createRankedCandidate,
@@ -147,6 +150,135 @@ describe("selectFineAssessmentCandidates", () => {
       first.diagnostics[0]?.answer_features?.answer_support
     );
   });
+
+  it("separates shared provenance from atomic answer-support identity", () => {
+    const evidenceRef = "evidence-shared";
+    const content = "I bought my new bookshelf from IKEA.";
+    const memory = createCandidate("bookshelf", {
+      content,
+      evidence_refs: [evidenceRef]
+    });
+    const evidenceBase = createCandidate("capsule", {
+      content,
+      evidence_refs: [evidenceRef]
+    }, "evidence_capsule");
+    const evidence = {
+      ...evidenceBase,
+      verifiedUserSupportSource: {
+        schema_version: 1 as const,
+        source_role: "user" as const,
+        projection_kind: "turn_projection" as const,
+        evidence_ref: evidenceRef,
+        support_identity: null
+      },
+      fusion: {
+        ...evidenceBase.fusion,
+        candidate_key: "workspace_local:evidence_capsule:capsule"
+      }
+    };
+    const verified = projectVerifiedUserAssertionContext({
+      evidenceRef,
+      entryContent: content,
+      gist: `User: ${content}`
+    });
+    if (verified === null) throw new Error("test fixture must project");
+    const queryProbes = compileRecallQueryProbes(
+      "Where did I buy my new bookshelf from?"
+    );
+
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [memory, evidence],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes,
+        verifiedUserAssertionContextsByMemoryId: { bookshelf: verified }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([memory, evidence]),
+      captureAnswerFeatures: true
+    });
+    const diagnostics = new Map(
+      result.diagnostics.map((row) => [row.candidate_key, row])
+    );
+    const memoryObservation = diagnostics.get(memory.fusion.candidate_key)
+      ?.answer_features?.answer_support_observations?.[0];
+    const evidenceObservation = diagnostics.get(evidence.fusion.candidate_key)
+      ?.answer_features?.answer_support_observations?.[0];
+
+    expect(memoryObservation).toMatchObject({
+      source_identity: `evidence_ref:${evidenceRef}`,
+      support_identity: expect.stringMatching(
+        /^verified_user_assertion:evidence-shared:sha256:[0-9a-f]{64}$/u
+      ),
+      projection_kind: "atomic_assertion",
+      query_status: "compatible",
+      behavior_eligible: true
+    });
+    expect(evidenceObservation).toMatchObject({
+      source_identity: memoryObservation?.source_identity,
+      support_identity: null,
+      projection_kind: "turn_projection",
+      query_status: "compatible",
+      behavior_eligible: false
+    });
+
+    const stale = selectFineAssessmentCandidates({
+      orderedCandidates: [memory],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes,
+        verifiedUserAssertionContextsByMemoryId: {
+          bookshelf: { ...verified, assertion_text: "stale assertion" }
+        }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([memory]),
+      captureAnswerFeatures: true
+    });
+    expect(stale.diagnostics[0]?.answer_features?.answer_support).toMatchObject({
+      authority: { provenance_status: "unverified" }
+    });
+    expect(stale.diagnostics[0]?.answer_features)
+      .not.toHaveProperty("answer_support_observations");
+  });
+
+  it.each([
+    ["How much total money have I spent on bike expenses?", "observation_only"],
+    ["Remind me what I said about bike expenses.", "unresolved"]
+  ] as const)(
+    "observes verified atomic support when query status is %s",
+    (query, queryStatus) => {
+      const content = "I paid $120 for the bike and $40 for a tune-up.";
+      const candidate = createCandidate("bike-expense", {
+        content,
+        evidence_refs: ["evidence-bike"]
+      });
+      const verified = projectVerifiedUserAssertionContext({
+        evidenceRef: "evidence-bike",
+        entryContent: content,
+        gist: `User: ${content}`
+      });
+      if (verified === null) throw new Error("test fixture must project");
+      const result = selectFineAssessmentCandidates({
+        orderedCandidates: [candidate],
+        config: createConfig(),
+        supplementaryData: createSupplementaryData({
+          queryProbes: compileRecallQueryProbes(query),
+          verifiedUserAssertionContextsByMemoryId: { "bike-expense": verified }
+        }),
+        tokenEstimator: { estimate: vi.fn(() => 6) },
+        rankByCandidateKey: rankMap([candidate]),
+        captureAnswerFeatures: true
+      });
+
+      expect(result.diagnostics[0]?.answer_features
+        ?.answer_support_observations?.[0]).toMatchObject({
+        projection_kind: "atomic_assertion",
+        query_status: queryStatus,
+        behavior_eligible: false
+      });
+    }
+  );
 
   it("keeps memory-keyed diagnostics scoped away from same-id projections", () => {
     const local = createCandidate("shared");

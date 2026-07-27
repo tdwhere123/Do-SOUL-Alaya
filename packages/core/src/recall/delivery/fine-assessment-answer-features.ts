@@ -1,5 +1,8 @@
 import type { MemoryEntry, RecallCandidate } from "@do-soul/alaya-protocol";
 import type {
+  RecallAnswerSupportObservation
+} from "../query/recall-answer-support-observation.js";
+import type {
   RecallCandidateAnswerSupport
 } from "../query/recall-candidate-answer-support.js";
 import type { RecallCandidateAnswerFeatures } from "../runtime/recall-service-types.js";
@@ -10,10 +13,15 @@ export function buildRecallCandidateAnswerFeatures(
   entry: Readonly<MemoryEntry>,
   objectKind: RecallCandidate["object_kind"],
   rawEvidenceGist: string | undefined,
-  answerSupport?: Readonly<RecallCandidateAnswerSupport>
+  answerSupport?: Readonly<RecallCandidateAnswerSupport>,
+  answerSupportObservations: readonly Readonly<RecallAnswerSupportObservation>[] = []
 ): Readonly<RecallCandidateAnswerFeatures> {
   if (objectKind === "synthesis_capsule") {
-    return buildSynthesisAnswerFeatures(entry, answerSupport);
+    return buildSynthesisAnswerFeatures(
+      entry,
+      answerSupport,
+      answerSupportObservations
+    );
   }
   const gist = normalizeEvidenceGist(rawEvidenceGist);
   return Object.freeze({
@@ -36,13 +44,17 @@ export function buildRecallCandidateAnswerFeatures(
     preference_object: entry.preference_object ?? null,
     preference_category: entry.preference_category ?? null,
     preference_polarity: entry.preference_polarity ?? null,
-    ...(answerSupport === undefined ? {} : { answer_support: answerSupport })
+    ...(answerSupport === undefined ? {} : { answer_support: answerSupport }),
+    ...(answerSupportObservations.length === 0
+      ? {}
+      : { answer_support_observations: Object.freeze([...answerSupportObservations]) })
   });
 }
 
 function buildSynthesisAnswerFeatures(
   entry: Readonly<MemoryEntry>,
-  answerSupport: Readonly<RecallCandidateAnswerSupport> | undefined
+  answerSupport: Readonly<RecallCandidateAnswerSupport> | undefined,
+  answerSupportObservations: readonly Readonly<RecallAnswerSupportObservation>[]
 ): Readonly<RecallCandidateAnswerFeatures> {
   return Object.freeze({
     content: entry.content,
@@ -64,7 +76,10 @@ function buildSynthesisAnswerFeatures(
     preference_object: null,
     preference_category: null,
     preference_polarity: null,
-    ...(answerSupport === undefined ? {} : { answer_support: answerSupport })
+    ...(answerSupport === undefined ? {} : { answer_support: answerSupport }),
+    ...(answerSupportObservations.length === 0
+      ? {}
+      : { answer_support_observations: Object.freeze([...answerSupportObservations]) })
   });
 }
 

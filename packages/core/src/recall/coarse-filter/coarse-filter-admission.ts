@@ -29,6 +29,7 @@ export interface CoarseCandidateAdmissionMetadata {
   readonly pathFlowScore?: number;
   readonly objectKind?: RecallCandidate["object_kind"];
   readonly answerRerankText?: string;
+  readonly verifiedUserSupportSource?: CoarseCandidateDraft["verifiedUserSupportSource"];
 }
 
 export interface CoarseCandidateAdderParams {
@@ -118,10 +119,15 @@ function buildNextCoarseCandidateDraft(
       : current?.entityConfidence;
   const answerRerankText =
     metadata.answerRerankText ?? current?.answerRerankText;
+  const verifiedUserSupportSource =
+    metadata.verifiedUserSupportSource ?? current?.verifiedUserSupportSource;
   return {
     entry,
     ...(metadata.objectKind === undefined ? {} : { objectKind: metadata.objectKind }),
     ...(answerRerankText === undefined ? {} : { answerRerankText }),
+    ...(verifiedUserSupportSource === undefined
+      ? {}
+      : { verifiedUserSupportSource }),
     admissionPlanes: uniquePlanes([...(current?.admissionPlanes ?? []), plane]),
     firstAdmissionPlane: current?.firstAdmissionPlane ?? plane,
     sourceChannels: uniqueStrings([

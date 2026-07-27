@@ -26,7 +26,10 @@ const SECOND_EVIDENCE_ID = "00000000-0000-4000-8000-000000000102";
 describe("direct evidence recall candidates", () => {
   it("delivers an unbound verified conversation excerpt with evidence identity", async () => {
     const fullExcerpt = `The assistant recommended the blue option. ${"Detailed explanation. ".repeat(90)}tail answer`;
-    const evidence = createEvidenceCapsule({ excerpt: fullExcerpt });
+    const evidence = createEvidenceCapsule({
+      excerpt: fullExcerpt,
+      source_hash: formatGardenSourceTurnFallbackV2SourceHash("b".repeat(64))
+    });
     const score = vi.fn(
       async (_query: string, _passages: readonly string[]) => [0.9]
     );
@@ -48,13 +51,12 @@ describe("direct evidence recall candidates", () => {
         findRecallQualifiedByIds: vi.fn(async () => [evidence])
       }
     });
-
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
-
     expect(result.candidates).toEqual(expect.arrayContaining([
       expect.objectContaining({
         object_id: EVIDENCE_ID,
@@ -72,6 +74,16 @@ describe("direct evidence recall candidates", () => {
     expect(candidate?.score_factors?.graph_support ?? 0).toBe(0);
     expect(candidate?.score_factors?.path_plasticity ?? 0).toBe(0);
     expect(countInboundSupports).not.toHaveBeenCalledWith(EVIDENCE_ID);
+    const observation = result.diagnostics?.candidates.find((item) =>
+      item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
+    )?.answer_features?.answer_support_observations?.[0];
+    expect(observation).toMatchObject({
+      source_identity: `evidence_ref:${EVIDENCE_ID}`,
+      support_identity: null,
+      projection_kind: "turn_projection",
+      provenance_status: "verified_user_turn",
+      behavior_eligible: false
+    });
   });
 
   it("does not duplicate evidence already bound to a memory entry", async () => {
@@ -102,13 +114,12 @@ describe("direct evidence recall candidates", () => {
         })])
       }
     });
-
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
-      strategy: "build"
+      strategy: "build",
+      diagnosticCapture: "answer_features"
     });
-
     expect(result.candidates.filter((item) => item.object_id === EVIDENCE_ID)).toEqual([]);
     expect(result.candidates.filter((item) => item.object_id === "memory-bound")).toHaveLength(1);
   });
@@ -135,13 +146,11 @@ describe("direct evidence recall candidates", () => {
         findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
-
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
       strategy: "build"
     });
-
     expect(result.candidates.filter((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )).toEqual([]);
@@ -152,6 +161,9 @@ describe("direct evidence recall candidates", () => {
     expect(result.candidates.find((item) =>
       item.object_id === memory.object_id
     )?.source_channels).toContain("evidence_fts");
+    expect(result.diagnostics?.candidates.find((item) =>
+      item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
+    )?.answer_features?.answer_support_observations).toBeUndefined();
   });
 
   it("fails closed when the complete binding authority port is unavailable", async () => {
@@ -171,13 +183,11 @@ describe("direct evidence recall candidates", () => {
         findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
-
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
       strategy: "build"
     });
-
     expect(result.candidates).toEqual([]);
   });
 
@@ -206,13 +216,11 @@ describe("direct evidence recall candidates", () => {
         })])
       }
     });
-
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
       strategy: "build"
     });
-
     expect(result.candidates).toEqual([]);
   });
 
@@ -239,7 +247,6 @@ describe("direct evidence recall candidates", () => {
         findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
       }
     });
-
     const result = await service.recall({
       taskSurface: createTaskSurface("Which color did you recommend?"),
       workspaceId: "workspace-1",
@@ -453,12 +460,6 @@ describe("direct evidence recall candidates", () => {
     expect(isDirectRecallEvidence(evidence, "workspace-1")).toBe(false);
     expect(selectExpansionSeedDrafts(drafts)).toEqual([]);
     expect(selectPreferredExpansionSeedEntries(drafts)).toEqual([]);
-  });
-
-  it("admits recall-qualified v2 evidence through the existing direct path", () => {
-    expect(isDirectRecallEvidence(createEvidenceCapsule({
-      source_hash: formatGardenSourceTurnFallbackV2SourceHash("b".repeat(64))
-    }), "workspace-1")).toBe(true);
   });
 });
 

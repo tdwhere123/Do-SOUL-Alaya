@@ -4,6 +4,7 @@ import { assertBiEncoderRunActivation } from "../embedding/embedding-treatment-a
 import { readOptionalTreatmentBoolean } from "../strict-treatment-config.js";
 import {
   RecallAnswerShapePlanSchema,
+  RecallAnswerSupportObservationSchema,
   RecallCandidateAnswerSupportSchema,
   RecallDeepHeadTraceSchema
 } from "./answer-trace-schema.js";
@@ -169,7 +170,10 @@ export const RecallCandidateAnswerFeaturesSchema = z
     preference_object: z.string().nullable(),
     preference_category: z.string().nullable(),
     preference_polarity: z.enum(["positive", "negative", "neutral"]).nullable(),
-    answer_support: RecallCandidateAnswerSupportSchema.nullable().optional()
+    answer_support: RecallCandidateAnswerSupportSchema.nullable().optional(),
+    answer_support_observations: z.array(
+      RecallAnswerSupportObservationSchema
+    ).readonly().optional()
   })
   .strict()
   .readonly();

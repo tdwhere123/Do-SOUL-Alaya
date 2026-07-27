@@ -55,6 +55,16 @@ export interface RecallCandidateAnswerSupportContext {
   readonly verifiedUserAssertionContext?: Readonly<RecallVerifiedUserAssertionContext>;
 }
 
+export type RecallCandidateAnswerCompatibility = Readonly<{
+  readonly shape: RecallAnswerShape;
+  readonly status: Exclude<RecallCandidateAnswerSupportStatus, "ineligible">;
+  readonly value_supported: boolean;
+  readonly target_supported: boolean;
+  readonly relation_supported: boolean;
+  readonly matched_target_terms: readonly string[];
+  readonly matched_relation_terms: readonly string[];
+}>;
+
 const THIRD_PARTY_SUBJECT =
   /\bmy\s+(?:friend|sister|brother|mother|father|mom|dad|wife|husband|partner|colleague|coworker|roommate|daughter|son|doctor)\b|\b(?:he|she|they|his|her|their)\b/iu;
 const SELF_SUBJECT =
@@ -66,11 +76,57 @@ export function buildRecallCandidateAnswerSupport(
   objectKind: RecallCandidate["object_kind"],
   context: Readonly<RecallCandidateAnswerSupportContext> = {}
 ): Readonly<RecallCandidateAnswerSupport> | null {
-  if (plan.status !== "high_confidence" || plan.shape === null) return null;
+  const compatibility = assessRecallCandidateAnswerCompatibility(plan, entry);
+  if (compatibility === null) return null;
   const eligible = objectKind === "memory_entry" && entry.evidence_refs.length > 0;
-  if (!eligible) return emptySupport(plan.shape, "ineligible", false);
+  if (!eligible) return emptySupport(compatibility.shape, "ineligible", false);
+  if (compatibility.status === "observation_only") {
+    return freezeCompatibilitySupport(compatibility, eligible);
+  }
+  return freezeSupport({
+    shape: compatibility.shape,
+    status: compatibility.status,
+    eligible,
+    valueSupported: compatibility.value_supported,
+    targetSupported: compatibility.target_supported,
+    relationSupported: compatibility.relation_supported,
+    matchedTargetTerms: compatibility.matched_target_terms,
+    matchedRelationTerms: compatibility.matched_relation_terms,
+    authority: buildScalarAuthority(
+      plan,
+      entry,
+      compatibility.value_supported,
+      context
+    )
+  });
+}
+
+function freezeCompatibilitySupport(
+  compatibility: Readonly<RecallCandidateAnswerCompatibility>,
+  eligible: boolean
+): Readonly<RecallCandidateAnswerSupport> {
+  return freezeSupport({
+    shape: compatibility.shape,
+    status: compatibility.status,
+    eligible,
+    valueSupported: compatibility.value_supported,
+    targetSupported: compatibility.target_supported,
+    relationSupported: compatibility.relation_supported,
+    matchedTargetTerms: compatibility.matched_target_terms,
+    matchedRelationTerms: compatibility.matched_relation_terms
+  });
+}
+
+export function assessRecallCandidateAnswerCompatibility(
+  plan: Readonly<RecallAnswerShapePlan>,
+  entry: Readonly<MemoryEntry>
+): Readonly<RecallCandidateAnswerCompatibility> | null {
+  if (plan.status !== "high_confidence" || plan.shape === null) return null;
   if (isAggregateShape(plan.shape)) {
-    return emptySupport(plan.shape, "observation_only", true);
+    return freezeCompatibility({
+      shape: plan.shape,
+      status: "observation_only"
+    });
   }
   const contentTokens = new Set(splitLexicalTokens(entry.content));
   const matchedTargetTerms = plan.target_terms.filter((term) => contentTokens.has(term));
@@ -79,18 +135,16 @@ export function buildRecallCandidateAnswerSupport(
   const targetSupported = matchedTargetTerms.length > 0;
   const relationSupported =
     plan.relation_terms.length === 0 || matchedRelationTerms.length > 0;
-  return freezeSupport({
+  return freezeCompatibility({
     shape: plan.shape,
     status: valueSupported && targetSupported && relationSupported
       ? "compatible"
       : valueSupported ? "value_only" : "unsupported",
-    eligible,
     valueSupported,
     targetSupported,
     relationSupported,
     matchedTargetTerms,
-    matchedRelationTerms,
-    authority: buildScalarAuthority(plan, entry, valueSupported, context)
+    matchedRelationTerms
   });
 }
 
@@ -100,7 +154,10 @@ function buildScalarAuthority(
   valueSupported: boolean,
   context: Readonly<RecallCandidateAnswerSupportContext>
 ): Readonly<RecallCandidateAnswerAuthority> {
-  const verified = isVerifiedContext(entry, context.verifiedUserAssertionContext)
+  const verified = isRecallVerifiedUserAssertionContext(
+    entry,
+    context.verifiedUserAssertionContext
+  )
     ? context.verifiedUserAssertionContext
     : undefined;
   const assertionContext = verified?.user_context ?? entry.content;
@@ -145,7 +202,7 @@ function buildScalarAuthority(
   });
 }
 
-function isVerifiedContext(
+export function isRecallVerifiedUserAssertionContext(
   entry: Readonly<MemoryEntry>,
   context: Readonly<RecallVerifiedUserAssertionContext> | undefined
 ): context is Readonly<RecallVerifiedUserAssertionContext> {
@@ -196,6 +253,26 @@ function emptySupport(
     relationSupported: false,
     matchedTargetTerms: [],
     matchedRelationTerms: []
+  });
+}
+
+function freezeCompatibility(input: Readonly<{
+  shape: RecallAnswerShape;
+  status: Exclude<RecallCandidateAnswerSupportStatus, "ineligible">;
+  valueSupported?: boolean;
+  targetSupported?: boolean;
+  relationSupported?: boolean;
+  matchedTargetTerms?: readonly string[];
+  matchedRelationTerms?: readonly string[];
+}>): Readonly<RecallCandidateAnswerCompatibility> {
+  return Object.freeze({
+    shape: input.shape,
+    status: input.status,
+    value_supported: input.valueSupported ?? false,
+    target_supported: input.targetSupported ?? false,
+    relation_supported: input.relationSupported ?? false,
+    matched_target_terms: Object.freeze([...(input.matchedTargetTerms ?? [])]),
+    matched_relation_terms: Object.freeze([...(input.matchedRelationTerms ?? [])])
   });
 }
 

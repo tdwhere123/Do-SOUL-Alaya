@@ -266,6 +266,9 @@ function mergeCoarseCandidatePair(
     representative.sourceChannels?.[0] ?? supplementary.sourceChannel;
   const firstAdmissionPlane = representative.firstAdmissionPlane ??
     representative.admissionPlanes?.[0] ?? supplementary.firstAdmissionPlane;
+  const verifiedUserSupportSource =
+    representative.verifiedUserSupportSource ??
+    supplementary.verifiedUserSupportSource;
   return Object.freeze({
     ...representative,
     sourceChannels: uniqueStrings([
@@ -286,7 +289,10 @@ function mergeCoarseCandidatePair(
       ...(supplementary.pathExpansionSources ?? [])
     ]),
     ...(sourceChannel === undefined ? {} : { sourceChannel }),
-    ...(firstAdmissionPlane === undefined ? {} : { firstAdmissionPlane })
+    ...(firstAdmissionPlane === undefined ? {} : { firstAdmissionPlane }),
+    ...(verifiedUserSupportSource === undefined
+      ? {}
+      : { verifiedUserSupportSource })
   });
 }
 

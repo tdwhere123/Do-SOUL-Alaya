@@ -3,6 +3,7 @@ import type { EmbeddingRecallSupplementResult } from "../../embedding-recall/emb
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01, compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import type {
+  CoarseRecallCandidate,
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
   RecallServiceWarnPort,
@@ -36,6 +37,7 @@ export interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
   readonly objectKind?: RecallCandidate["object_kind"];
   readonly answerRerankText?: string;
+  readonly verifiedUserSupportSource?: CoarseRecallCandidate["verifiedUserSupportSource"];
   readonly admissionPlanes: readonly RecallAdmissionPlane[];
   readonly firstAdmissionPlane: RecallAdmissionPlane;
   readonly sourceChannels: readonly string[];

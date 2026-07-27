@@ -112,6 +112,9 @@ function buildSupplementedCandidate(
     ...(draft.answerRerankText === undefined
       ? {}
       : { answerRerankText: draft.answerRerankText }),
+    ...(draft.verifiedUserSupportSource === undefined
+      ? {}
+      : { verifiedUserSupportSource: draft.verifiedUserSupportSource }),
     isAdvisory,
     admissionPlanes: Object.freeze([...draft.admissionPlanes]),
     firstAdmissionPlane: draft.firstAdmissionPlane,

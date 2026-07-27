@@ -23,19 +23,20 @@ import type {
   TokenEstimator
 } from "../runtime/recall-service-types.js";
 import { orderByCoverageMarginalGain } from "./coverage-selection.js";
-import {
-  compileRecallAnswerShapePlan,
-  type RecallAnswerShapePlan
-} from "../query/recall-answer-shape-plan.js";
-import {
-  buildRecallCandidateAnswerSupport,
-  type RecallCandidateAnswerSupport
+import type {
+  RecallAnswerSupportObservation
+} from "../query/recall-answer-support-observation.js";
+import type {
+  RecallCandidateAnswerSupport
 } from "../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
 import {
   hasRankedEmbeddingHead,
   selectEmbeddingHeadEvictions
 } from "./admission/embedding-head-dominance.js";
+import {
+  buildFineAssessmentAnswerSupportContext
+} from "./answer-support/answer-support-context.js";
 import { retainBoundedDirectEvidenceHead, selectBoundedDirectEvidenceHead } from "./admission/direct-evidence-answer-head.js";
 import {
   buildFinalScoreFactors,
@@ -76,6 +77,10 @@ export interface FineAssessmentSelectionContext {
   readonly answerSupportByCandidateKey: ReadonlyMap<
     string,
     Readonly<RecallCandidateAnswerSupport>
+  >;
+  readonly answerSupportObservationsByCandidateKey: ReadonlyMap<
+    string,
+    readonly Readonly<RecallAnswerSupportObservation>[]
   >;
   readonly deepHeadTraceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly coverageMarginalGainByCandidateKey: Map<string, number>;
@@ -262,9 +267,11 @@ function createSelectionContext(
   const answerRelevanceRankByCandidateKey =
     params.answerRelevanceRankByCandidateKey ?? new Map();
   const captureAnswerFeatures = params.captureAnswerFeatures ?? false;
-  const answerShapePlan = compileRecallAnswerShapePlan(
-    params.supplementaryData.queryProbes
-  );
+  const answerSupport = buildFineAssessmentAnswerSupportContext({
+    candidates: params.orderedCandidates,
+    supplementaryData: params.supplementaryData,
+    captureObservations: captureAnswerFeatures
+  });
   return Object.freeze({
     config: params.config,
     supplementaryData: params.supplementaryData,
@@ -274,41 +281,15 @@ function createSelectionContext(
     answerRelevanceRankByCandidateKey,
     answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
     captureAnswerFeatures,
-    answerSupportByCandidateKey: buildAnswerSupportByCandidateKey(
-      params,
-      answerShapePlan
-    ),
+    answerSupportByCandidateKey: answerSupport.supportByCandidateKey,
+    answerSupportObservationsByCandidateKey:
+      answerSupport.observationsByCandidateKey,
     deepHeadTraceByCandidateKey: captureAnswerFeatures
       ? params.deepHeadTraceByCandidateKey ?? new Map()
       : new Map(),
     coverageMarginalGainByCandidateKey: new Map(),
     tokenEstimateByCandidateKey: new Map()
   });
-}
-
-function buildAnswerSupportByCandidateKey(
-  params: FineAssessmentSelectionParams,
-  plan: Readonly<RecallAnswerShapePlan>
-): ReadonlyMap<string, Readonly<RecallCandidateAnswerSupport>> {
-  const supportByKey = new Map<string, Readonly<RecallCandidateAnswerSupport>>();
-  const contexts =
-    params.supplementaryData.verifiedUserAssertionContextsByMemoryId ?? {};
-  for (const candidate of params.orderedCandidates) {
-    const verifiedUserAssertionContext = isWorkspaceMemoryCandidate(candidate)
-      ? contexts[candidate.entry.object_id]
-      : undefined;
-    const support = buildRecallCandidateAnswerSupport(
-      plan,
-      candidate.entry,
-      candidate.objectKind ?? "memory_entry",
-      {
-        queryProbes: params.supplementaryData.queryProbes,
-        verifiedUserAssertionContext
-      }
-    );
-    if (support !== null) supportByKey.set(candidate.fusion.candidate_key, support);
-  }
-  return supportByKey;
 }
 
 function resolveEmbeddingHeadEvictions(

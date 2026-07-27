@@ -1,5 +1,4 @@
 import {
-  type EvidenceCapsule,
   type MemoryEntry,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
@@ -19,10 +18,8 @@ import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
 import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
-import {
-  buildDirectEvidencePseudoMemoryEntry,
-  isDirectRecallEvidence
-} from "./evidence/direct-evidence-candidate.js";
+import { admitQualifiedEvidenceMatches } from
+  "./evidence/qualified-evidence-admission.js";
 
 export interface SemanticSupplementParams {
   readonly context: RunCoarseFilterContext;
@@ -313,28 +310,7 @@ async function admitEvidenceMatches(
   if (evidenceRankById.size === 0) {
     return;
   }
-  const capsules = await loadEvidenceCapsulesOrFallback(params, evidenceRankById);
-  if (capsules === null) return;
-  const directEvidence = capsules.filter((capsule) =>
-    isDirectRecallEvidence(capsule, params.workspaceId)
-  );
-  const boundEvidenceRefs = await loadBoundEvidenceRefsOrFallback(
-    params,
-    evidenceRankById,
-    directEvidence
-  );
-  if (boundEvidenceRefs === null) return;
-  const unboundDirectEvidence = directEvidence.filter(
-    (capsule) => !boundEvidenceRefs.has(capsule.object_id)
-  );
-  const unboundDirectIds = new Set(
-    unboundDirectEvidence.map((capsule) => capsule.object_id)
-  );
-  const ordinaryEvidenceRanks = new Map(
-    [...evidenceRankById].filter(([objectId]) => !unboundDirectIds.has(objectId))
-  );
-  await admitMemoryEvidenceMatches(params, ordinaryEvidenceRanks);
-  await admitDirectEvidenceMatches(params, evidenceRankById, unboundDirectEvidence);
+  await admitQualifiedEvidenceMatches(params, evidenceRankById);
 }
 
 function buildEvidenceRanks(
@@ -351,123 +327,4 @@ function buildEvidenceRanks(
     );
   }
   return evidenceRankById;
-}
-
-async function loadEvidenceCapsulesOrFallback(
-  params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>
-): Promise<readonly Readonly<EvidenceCapsule>[] | null> {
-  const findQualified =
-    params.context.dependencies.evidenceSearchPort?.findRecallQualifiedByIds;
-  if (findQualified === undefined) {
-    await admitMemoryEvidenceMatches(params, evidenceRankById);
-    return null;
-  }
-  try {
-    return await findQualified.call(
-      params.context.dependencies.evidenceSearchPort,
-      params.workspaceId,
-      [...evidenceRankById.keys()]
-    );
-  } catch (error) {
-    await admitMemoryEvidenceMatches(params, evidenceRankById);
-    throw error;
-  }
-}
-
-async function loadBoundEvidenceRefsOrFallback(
-  params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>,
-  directEvidence: readonly Readonly<EvidenceCapsule>[]
-): Promise<ReadonlySet<string> | null> {
-  const findBoundEvidenceRefs =
-    params.context.dependencies.memoryRepo.findBoundEvidenceRefs;
-  if (findBoundEvidenceRefs === undefined) {
-    await admitMemoryEvidenceMatches(params, evidenceRankById);
-    return null;
-  }
-  try {
-    return new Set(await findBoundEvidenceRefs.call(
-      params.context.dependencies.memoryRepo,
-      params.workspaceId,
-      directEvidence.map((capsule) => capsule.object_id)
-    ));
-  } catch (error) {
-    await admitMemoryEvidenceMatches(params, evidenceRankById);
-    throw error;
-  }
-}
-
-async function admitMemoryEvidenceMatches(
-  params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>
-): Promise<void> {
-  const findByEvidenceRefs =
-    params.context.dependencies.memoryRepo.findByEvidenceRefs;
-  if (evidenceRankById.size === 0 || findByEvidenceRefs === undefined) {
-    return;
-  }
-  const memoriesByEvidence = await findByEvidenceRefs.call(
-    params.context.dependencies.memoryRepo,
-    params.workspaceId,
-    [...evidenceRankById.keys()]
-  );
-  for (const memory of memoriesByEvidence) {
-    if (!params.byId.has(memory.object_id)) {
-      continue;
-    }
-    let bestRank = 0;
-    for (const ref of memory.evidence_refs) {
-      const evidenceRank = evidenceRankById.get(ref);
-      if (evidenceRank !== undefined && evidenceRank > bestRank) {
-        bestRank = evidenceRank;
-      }
-    }
-    if (bestRank <= 0) {
-      continue;
-    }
-    params.evidenceFtsRanks.set(
-      memory.object_id,
-      Math.max(params.evidenceFtsRanks.get(memory.object_id) ?? 0, bestRank)
-    );
-    params.addCandidate(memory, "lexical", bestRank, "evidence_fts");
-  }
-}
-
-async function admitDirectEvidenceMatches(
-  params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>,
-  capsules: readonly Readonly<EvidenceCapsule>[]
-): Promise<void> {
-  const findMemoryByIds = params.context.dependencies.memoryRepo.findByIds;
-  if (capsules.length === 0 || findMemoryByIds === undefined) {
-    return;
-  }
-  const collidingMemoryIds = new Set((await findMemoryByIds.call(
-    params.context.dependencies.memoryRepo,
-    params.workspaceId,
-    capsules.map((capsule) => capsule.object_id)
-  )).map((memory) => memory.object_id));
-  for (const evidence of capsules) {
-    const rank = evidenceRankById.get(evidence.object_id);
-    if (
-      rank === undefined ||
-      collidingMemoryIds.has(evidence.object_id) ||
-      params.byId.has(evidence.object_id)
-    ) {
-      continue;
-    }
-    params.evidenceFtsRanks.set(evidence.object_id, rank);
-    const entry = buildDirectEvidencePseudoMemoryEntry(evidence, rank);
-    params.addCandidate(
-      entry,
-      "lexical",
-      rank,
-      "evidence_fts_direct",
-      {
-        objectKind: "evidence_capsule",
-        answerRerankText: entry.content
-      }
-    );
-  }
 }

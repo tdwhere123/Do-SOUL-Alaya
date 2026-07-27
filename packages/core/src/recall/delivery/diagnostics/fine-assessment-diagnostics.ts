@@ -143,7 +143,10 @@ function buildAnswerFeatureDiagnostics(
       candidate.entry,
       candidate.objectKind ?? "memory_entry",
       evidenceGist,
-      answerSupport
+      answerSupport,
+      context.answerSupportObservationsByCandidateKey.get(
+        candidate.fusion.candidate_key
+      )
     )
   };
 }
