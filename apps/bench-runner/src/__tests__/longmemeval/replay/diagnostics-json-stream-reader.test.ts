@@ -75,9 +75,38 @@ describe("streaming diagnostics JSON reader", () => {
     }).toThrow(/truncated|trailing/u);
   });
 
-  it("rejects a diagnostics schema mismatch", () => {
+  it.each([1, 2])("accepts supported diagnostics schema v%s", (schemaVersion) => {
     const reader = new DiagnosticsJsonStreamReader();
-    reader.consume('{"schema_version":2,"questions":[]}');
+    reader.consume(`{"schema_version":${schemaVersion},"questions":[]}`);
+    expect(reader.finish()).toMatchObject({ schema_version: schemaVersion });
+  });
+
+  it("streams the nested question shape used by schema v2", () => {
+    const seen: unknown[] = [];
+    const reader = new DiagnosticsJsonStreamReader({
+      collectQuestions: false,
+      onQuestion: (question: unknown) => seen.push(question)
+    });
+    const question = {
+      question_id: "q-1",
+      diagnostics: {
+        question_id: "q-1",
+        candidates: [{ candidate_key: "candidate-1" }]
+      }
+    };
+    reader.consume(JSON.stringify({
+      schema_version: 2,
+      kind: "recall_eval_diagnostics",
+      questions: [question]
+    }));
+
+    expect(reader.finish()).toMatchObject({ schema_version: 2, questions: [] });
+    expect(seen).toEqual([question]);
+  });
+
+  it("rejects an unknown diagnostics schema", () => {
+    const reader = new DiagnosticsJsonStreamReader();
+    reader.consume('{"schema_version":3,"questions":[]}');
     expect(() => reader.finish()).toThrow(/schema_version/u);
   });
 

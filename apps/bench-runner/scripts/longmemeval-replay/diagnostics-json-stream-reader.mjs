@@ -49,7 +49,7 @@ export class DiagnosticsJsonStreamReader {
       throw new Error(`truncated diagnostics JSON in state ${this.#state}`);
     }
     if (!this.#questionsSeen) throw new Error("diagnostics JSON missing questions array");
-    if (this.#metadata.schema_version !== 1) {
+    if (![1, 2].includes(this.#metadata.schema_version)) {
       throw new Error("diagnostics JSON has invalid schema_version");
     }
     return { ...this.#metadata, questions: this.#questions };
