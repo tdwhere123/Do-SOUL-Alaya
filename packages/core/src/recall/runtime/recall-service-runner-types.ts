@@ -24,6 +24,16 @@ import type {
 } from "./recall-service-types.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
 import type { prepareEmbeddingSupplementQuery } from "../supplements/supplements.js";
+import type { RecallPacketPlanTrace } from
+  "../delivery/packet-plan/packet-plan-trace.js";
+
+export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
+
+export function capturesRecallAnswerFeatures(
+  capture: RecallDiagnosticCapture | undefined
+): boolean {
+  return capture === "answer_features" || capture === "packet_trace";
+}
 
 export interface RecallExecutionParams {
   readonly taskSurface: Readonly<TaskObjectSurface>;
@@ -35,7 +45,7 @@ export interface RecallExecutionParams {
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
-  readonly diagnosticCapture?: "answer_features";
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
 }
 
 export interface RecallExecutionContext {
@@ -77,6 +87,7 @@ export interface RecallAssessmentStageResult {
   readonly evidenceEmbeddingScoring: Readonly<EvidenceCandidateScoringResult>;
   readonly providerDegradationReason: string | null;
   readonly answerRerankDiagnostics: Readonly<RecallAnswerRerankDiagnostics>;
+  readonly packetPlanTrace?: Readonly<RecallPacketPlanTrace>;
   readonly phaseLatencyMs: Readonly<{
     readonly embedding: number;
     readonly assessment: number;

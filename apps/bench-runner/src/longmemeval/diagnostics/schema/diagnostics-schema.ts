@@ -9,8 +9,12 @@ import {
   RecallAnswerShapePlanSchema,
   RecallDeepHeadTraceSchema
 } from "../../../harness/recall/answer-trace-schema.js";
+import { RecallPacketPlanTraceSchema } from
+  "../../../harness/recall/recall-diagnostics-support-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
 import { DELIVERY_MISS_DROP_REASONS } from "../miss/delivery-miss-taxonomy.js";
+import { LongMemEvalMissClassificationSchema } from
+  "../miss/miss-classification-schema.js";
 import {
   DiagnosticRecallObjectKindSchema,
   LongMemEvalGoldObjectKindSchema,
@@ -397,23 +401,6 @@ export const LongMemEvalGoldDiagnosticSchema = z
   })
   .readonly();
 
-export const LongMemEvalMissClassificationSchema = z.enum([
-  "hit_at_5",
-  "budget_dropped",
-  "under_ranked",
-  "active_constraint_only",
-  "structural_gap",
-  "lexical_gap",
-  "candidate_absent",
-  "no_gold",
-  "evaluator_identity_inconsistent",
-  "evaluator_identity_indeterminate",
-  "abstained_correctly",
-  "abstain_false_confident",
-  "abstention_uncalibrated",
-  "diagnostics_unavailable"
-]);
-
 export const LongMemEvalQuestionDiagnosticSchema = z
   .object({
     question_id: z.string(),
@@ -438,6 +425,7 @@ export const LongMemEvalQuestionDiagnosticSchema = z
     degradation_reason: z.string().nullable(),
     recall_diagnostics_present: z.boolean(),
     recall_diagnostics_keys: z.array(z.string()).readonly(),
+    packet_plan_trace: RecallPacketPlanTraceSchema.nullable().default(null),
     phase_latency_ms: PhaseLatencyMsSchema.optional(),
     provider_state: BenchEmbeddingProviderStateSchema,
     provider_degradation_reason: z.string().nullable(),

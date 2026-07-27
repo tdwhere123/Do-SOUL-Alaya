@@ -154,7 +154,10 @@ function createBenchRecallOperation(
       runId: input.activeContext.runId,
       strategy: "chat",
       policyOverride: policy,
-      diagnosticCapture: "answer_features",
+      diagnosticCapture:
+        input.effectiveEnv.ALAYA_BENCH_RECALL_PACKET_TRACE === "1"
+          ? "packet_trace"
+          : "answer_features",
       ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
       activeConstraintsCap: null
     });

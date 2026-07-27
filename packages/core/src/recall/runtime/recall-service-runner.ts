@@ -4,6 +4,8 @@ import {
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import type { FineAssessParams } from "../delivery/fine-assessment.js";
+import { buildObservedPacketPlanTrace } from
+  "../delivery/packet-plan/packet-plan-trace.js";
 import {
   applyManifestationBiasSidecar,
   appendWeightTransferTelemetry,
@@ -42,6 +44,7 @@ import { collectAnswerRelevanceScores } from "../rerank/recall-answer-rerank.js"
 import { buildRecallResult } from "./recall-result-builder.js";
 import {
   collectInitialLegacyAssessment,
+  collectPreEmbeddingPacketBaseline,
   collectTimedSupplementaryData,
   deliverOrReuseAssessment,
   prepareLegacyReassessment,
@@ -51,17 +54,19 @@ import {
 import {
   measureAsync,
   measureSync,
-  sumLatencyExcluding
+  sumLatencyExcluding,
+  type TimedResult
 } from "./orchestration/recall-phase-latency.js";
-import type {
-  FineAssessmentResult,
-  FineAssessmentPreparation,
-  PreparedEmbeddingQuery,
-  PreparedRecallRequest,
-  RecallAssessmentStageResult,
-  RecallExecutionContext,
-  RecallExecutionParams,
-  RecallManifestedResult
+import {
+  capturesRecallAnswerFeatures,
+  type FineAssessmentResult,
+  type FineAssessmentPreparation,
+  type PreparedEmbeddingQuery,
+  type PreparedRecallRequest,
+  type RecallAssessmentStageResult,
+  type RecallExecutionContext,
+  type RecallExecutionParams,
+  type RecallManifestedResult
 } from "./recall-service-runner-types.js";
 
 export type { RecallExecutionContext, RecallExecutionParams, PreparedRecallRequest } from "./recall-service-runner-types.js";
@@ -73,6 +78,7 @@ type AssessmentPhaseSeed = Readonly<{
   readonly assessment: number;
   readonly delivery: number;
 }>;
+type PacketBaseline = TimedResult<FineAssessmentResult> | null;
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 
@@ -104,7 +110,7 @@ async function prepareRecallRequest(
   const tokenEstimator = makeTokenEstimator({ hint: params.hostContext?.tokenizer_hint });
   const queryText = normalizeQueryText(params.taskSurface.display_name);
   const queryProbes = compileRecallQueryProbes(queryText);
-  const answerShapePlan = params.diagnosticCapture === "answer_features"
+  const answerShapePlan = capturesRecallAnswerFeatures(params.diagnosticCapture)
     ? compileRecallAnswerShapePlan(queryProbes)
     : null;
   const referenceTime = resolveRecallReferenceTime(params.referenceTime, context.now);
@@ -164,17 +170,27 @@ async function assessCandidateStage(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
+  const packetBaseline = params.diagnosticCapture === "packet_trace"
+    ? await measureAsync(() =>
+        collectPreEmbeddingPacketBaseline(context, params, prepared, coarse)
+      )
+    : null;
   if (coarse.embeddingCoarseInjection.requestScoreSnapshot !== undefined) {
-    return assessSnapshotCandidateStage(context, params, prepared, coarse);
+    return assessSnapshotCandidateStage(
+      context, params, prepared, coarse, packetBaseline
+    );
   }
-  return assessLegacyCandidateStage(context, params, prepared, coarse);
+  return assessLegacyCandidateStage(
+    context, params, prepared, coarse, packetBaseline
+  );
 }
 
 async function assessLegacyCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
+  coarse: CoarseStageResult,
+  packetBaseline: PacketBaseline
 ): Promise<AssessmentStageResult> {
   const waist = prepareRecallFineAssessmentWaist(context, prepared, coarse);
   const embeddingPreparation = startLegacyEmbeddingPreparation(
@@ -212,10 +228,15 @@ async function assessLegacyCandidateStage(
     embedding.value,
     Object.freeze({
       embedding: preparedEmbeddingQuery.latencyMs + embedding.latencyMs,
-      assessment: initialAssessmentLatencyMs + reassessment.latencyMs,
+      assessment:
+        (packetBaseline?.latencyMs ?? 0) +
+        initialAssessmentLatencyMs +
+        reassessment.latencyMs,
       delivery: initialDeliveryLatencyMs
     }),
-    reassessment.value.reassessmentRequired ? undefined : initial.assessment
+    reassessment.value.reassessmentRequired ? undefined : initial.assessment,
+    "legacy",
+    packetBaseline?.value
   );
 }
 
@@ -241,7 +262,8 @@ async function assessSnapshotCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
+  coarse: CoarseStageResult,
+  packetBaseline: PacketBaseline
 ): Promise<AssessmentStageResult> {
   const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const embedding = await measureAsync(() => collectSnapshotEmbeddingAssessmentData(
@@ -260,9 +282,15 @@ async function assessSnapshotCandidateStage(
     embedding.value,
     Object.freeze({
       embedding: embedding.latencyMs,
-      assessment: base.latencyMs + assessment.latencyMs,
+      assessment:
+        (packetBaseline?.latencyMs ?? 0) +
+        base.latencyMs +
+        assessment.latencyMs,
       delivery: 0
-    })
+    }),
+    undefined,
+    "snapshot",
+    packetBaseline?.value
   );
 }
 
@@ -275,7 +303,9 @@ async function completeCandidateAssessment(
   supplementaryData: FineAssessParams["supplementaryData"],
   embeddingData: EmbeddingAssessmentData,
   phaseLatency: AssessmentPhaseSeed,
-  reusableAssessment?: FineAssessmentResult
+  reusableAssessment: FineAssessmentResult | undefined,
+  assessmentPath: "legacy" | "snapshot",
+  packetBaseline?: FineAssessmentResult
 ): Promise<AssessmentStageResult> {
   const { preparedEmbeddingQuery } = embeddingData;
   const rerank = await measureAsync(() => collectAnswerRerankStage(
@@ -298,6 +328,15 @@ async function completeCandidateAssessment(
     evidenceEmbeddingScoring: embeddingData.evidenceScoring,
     providerDegradationReason: provider.degradationReason,
     answerRerankDiagnostics: rerank.value.diagnostics,
+    ...(packetBaseline === undefined
+      ? {}
+      : {
+          packetPlanTrace: buildObservedPacketPlanTrace(
+            assessmentPath,
+            packetBaseline.candidates,
+            delivery.value.candidates
+          )
+        }),
     phaseLatencyMs: Object.freeze({
       embedding: phaseLatency.embedding,
       assessment: phaseLatency.assessment,

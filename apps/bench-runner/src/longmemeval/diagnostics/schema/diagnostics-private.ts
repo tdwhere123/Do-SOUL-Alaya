@@ -18,6 +18,8 @@ import {
   readStringArray
 } from "../artifacts/diagnostics-candidate-readers.js";
 import { RecallAnswerShapePlanSchema } from "../../../harness/recall/answer-trace-schema.js";
+import { RecallPacketPlanTraceSchema } from
+  "../../../harness/recall/recall-diagnostics-support-schema.js";
 
 export { buildObjectIdentityKey };
 
@@ -77,6 +79,7 @@ export function readRecallDiagnostics(
     evidenceEmbeddingFailureClass: readEvidenceEmbeddingFailureClass(
       record.evidence_embedding_failure_class
     ),
+    packetPlanTrace: readPacketPlanTrace(record.packet_plan_trace),
     graphExpansionPlaneCountPerHop:
       readGraphExpansionPlaneCountPerHop(record.graph_expansion_plane_count_per_hop) ??
       createEmptyGraphExpansionPlaneCountPerHop(),
@@ -85,6 +88,14 @@ export function readRecallDiagnostics(
       createEmptyGraphExpansionPlaneCountPerEdgeType(),
     phaseLatencyMs: readNumberRecord(record.phase_latency_ms)
   };
+}
+
+function readPacketPlanTrace(
+  value: unknown
+): NarrowRecallDiagnostics["packetPlanTrace"] {
+  if (value == null) return null;
+  const parsed = RecallPacketPlanTraceSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 function readAnswerShapePlan(

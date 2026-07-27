@@ -18,6 +18,8 @@ import type {
 } from "./recall-service-types.js";
 import { countFamiliesWithHits } from "../delivery/fusion-delivery-families.js";
 import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplements.js";
+import type { RecallPacketPlanTrace } from
+  "../delivery/packet-plan/packet-plan-trace.js";
 
 type BuildRecallDiagnosticsParams = Readonly<{
   readonly queryProbes: Readonly<RecallQueryProbes>;
@@ -27,6 +29,7 @@ type BuildRecallDiagnosticsParams = Readonly<{
   readonly candidatePoolCount: number;
   readonly preBudgetCount: number;
   readonly deliveredCount: number;
+  readonly packetPlanTrace?: Readonly<RecallPacketPlanTrace>;
   readonly embeddingProviderStatus: RecallEmbeddingProviderStatus;
   readonly embeddingSupplementStatus: EmbeddingSupplementCollectionStatus;
   readonly evidenceEmbeddingScoring?: Readonly<EvidenceCandidateScoringResult>;
@@ -56,6 +59,9 @@ export function buildRecallDiagnostics(
     candidate_pool_count: params.candidatePoolCount,
     pre_budget_count: params.preBudgetCount,
     delivered_count: params.deliveredCount,
+    ...(params.packetPlanTrace === undefined
+      ? {}
+      : { packet_plan_trace: params.packetPlanTrace }),
     embedding_provider_status: params.embeddingProviderStatus,
     embedding_supplement_status: params.embeddingSupplementStatus,
     ...buildEvidenceEmbeddingDiagnostics(params.evidenceEmbeddingScoring),

@@ -363,6 +363,8 @@ export interface NarrowRecallDiagnostics {
   readonly evidenceEmbeddingLatencyMs: number | null;
   readonly evidenceEmbeddingFailureClass:
     BenchRecallDiagnostics["evidence_embedding_failure_class"] | null;
+  readonly packetPlanTrace:
+    BenchRecallDiagnostics["packet_plan_trace"] | null;
   readonly graphExpansionPlaneCountPerHop: LongMemEvalGraphExpansionPlaneCountPerHop;
   readonly graphExpansionPlaneCountPerEdgeType: Readonly<LongMemEvalGraphExpansionPlaneCountPerEdgeType>;
   readonly phaseLatencyMs: LongMemEvalPhaseLatencyMs | null;

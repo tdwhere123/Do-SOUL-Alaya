@@ -16,6 +16,7 @@ import type {
   RecallExecutionContext,
   RecallExecutionParams
 } from "../recall-service-runner-types.js";
+import { capturesRecallAnswerFeatures } from "../recall-service-runner-types.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import {
@@ -55,6 +56,25 @@ export function prepareRecallFineAssessmentWaist(
   return prepareFineAssessmentWaist(
     buildFineAssessmentWaistParams(context, prepared, coarse)
   );
+}
+
+export async function collectPreEmbeddingPacketBaseline(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  coarse: CoarseStageResult
+): Promise<FineAssessmentResult> {
+  const waist = prepareFineAssessmentWaist(
+    buildFineAssessmentWaistParams(context, prepared, coarse, "pre_embedding")
+  );
+  const supplementaryData = await collectCoarseFilterSupplementaryData(
+    buildCoarseAssessmentParams(context, params, prepared, coarse, waist.survivors)
+  );
+  const fineParams = buildFineAssessParams(
+    context, params, prepared, supplementaryData, waist.survivors
+  );
+  const preparation = prepareFineAssessment(fineParams, waist);
+  return deliverFineAssessment(fineParams, preparation);
 }
 
 export function collectTimedSupplementaryData(
@@ -211,7 +231,7 @@ function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features",
+    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
     finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop()
   };
 }
@@ -236,19 +256,29 @@ function buildCoarseAssessmentParams(
     queryProbes: prepared.queryProbes,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
-    captureAnswerFeatures: params.diagnosticCapture === "answer_features"
+    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture)
   };
 }
+
+type FineAssessmentWaistSource = "combined" | "pre_embedding";
 
 function buildFineAssessmentWaistParams(
   context: RecallExecutionContext,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
+  coarse: CoarseStageResult,
+  source: FineAssessmentWaistSource = "combined"
 ): Parameters<typeof prepareFineAssessmentWaist>[0] {
-  const snapshotScores = coarse.embeddingCoarseInjection.requestScoreSnapshot
-    ?.poolScoresByObjectId ?? {};
+  const embeddingSimilarityScores = source === "pre_embedding"
+    ? {}
+    : {
+        ...(coarse.embeddingCoarseInjection.requestScoreSnapshot
+          ?.poolScoresByObjectId ?? {}),
+        ...coarse.embeddingCoarseInjection.similarityScores
+      };
   return {
-    candidates: coarse.combinedCoarseCandidates,
+    candidates: source === "pre_embedding"
+      ? coarse.preEmbeddingCoarseCandidates
+      : coarse.combinedCoarseCandidates,
     policy: prepared.policy,
     winnerMemoryIds: prepared.winnerMemoryIds,
     supplementaryData: {
@@ -257,10 +287,7 @@ function buildFineAssessmentWaistParams(
       synthesisFtsRanks: coarse.coarseFilter.synthesisFtsRanks,
       evidenceFtsRanks: coarse.coarseFilter.evidenceFtsRanks,
       structuralScores: coarse.coarseFilter.structuralScores,
-      embeddingSimilarityScores: Object.freeze({
-        ...snapshotScores,
-        ...coarse.embeddingCoarseInjection.similarityScores
-      })
+      embeddingSimilarityScores: Object.freeze(embeddingSimilarityScores)
     },
     warn: context.warn
   };

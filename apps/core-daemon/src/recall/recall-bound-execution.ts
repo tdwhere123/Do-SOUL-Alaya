@@ -3,7 +3,10 @@ import type {
   SoulRecallHostContext,
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
-import type { NodeStrategy } from "@do-soul/alaya-core";
+import type {
+  NodeStrategy,
+  RecallDiagnosticCapture
+} from "@do-soul/alaya-core";
 
 export type RecallBoundSideEffectMode = "production_mcp" | "benchmark";
 
@@ -23,7 +26,7 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
-  readonly diagnosticCapture?: "answer_features";
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
@@ -40,7 +43,7 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly hostContext?: Readonly<SoulRecallHostContext>;
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
-  readonly diagnosticCapture?: "answer_features";
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
 }>;
 
 // Recall scoring is identical across modes; sideEffectMode documents post-recall

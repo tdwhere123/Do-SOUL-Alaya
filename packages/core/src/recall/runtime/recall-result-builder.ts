@@ -42,6 +42,9 @@ export function buildRecallResult(
       candidatePoolCount: coarse.combinedCoarseCandidates.length,
       preBudgetCount: manifested.candidateDiagnostics.length,
       deliveredCount: manifested.candidates.length,
+      ...(assessment.packetPlanTrace === undefined
+        ? {}
+        : { packetPlanTrace: assessment.packetPlanTrace }),
       embeddingProviderStatus: assessment.embeddingProviderStatus,
       embeddingSupplementStatus: assessment.embeddingSupplementStatus,
       evidenceEmbeddingScoring: assessment.evidenceEmbeddingScoring,

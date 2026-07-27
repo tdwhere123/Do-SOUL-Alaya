@@ -3,6 +3,8 @@ import type {
   RecallCandidate,
   RecallScoreFactors,
   RecallOriginPlane} from "@do-soul/alaya-protocol";
+import type { RecallPacketPlanTrace } from
+  "../delivery/packet-plan/packet-plan-trace.js";
 
 export type RecallAdmissionPlane =
   | "activation"
@@ -370,6 +372,7 @@ export interface RecallDiagnostics {
   readonly candidate_pool_count: number;
   readonly pre_budget_count: number;
   readonly delivered_count: number;
+  readonly packet_plan_trace?: Readonly<RecallPacketPlanTrace>;
   readonly embedding_provider_status: RecallEmbeddingProviderStatus;
   readonly embedding_supplement_status:
     import("../supplements/supplements.js").EmbeddingSupplementCollectionStatus;

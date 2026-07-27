@@ -8,6 +8,20 @@ import {
   RecallCandidateAnswerSupportSchema,
   RecallDeepHeadTraceSchema
 } from "./answer-trace-schema.js";
+import {
+  BenchAnswerRerankFailureClassSchema,
+  BenchAnswerRerankStatusSchema,
+  BenchEvidenceEmbeddingFailureClassSchema,
+  BenchEvidenceEmbeddingStatusSchema,
+  RecallMultiSeedGraphFanInDiagnosticsSchema,
+  RecallPacketPlanTraceSchema
+} from "./recall-diagnostics-support-schema.js";
+export {
+  BenchAnswerRerankFailureClassSchema,
+  BenchAnswerRerankStatusSchema,
+  BenchEvidenceEmbeddingFailureClassSchema,
+  BenchEvidenceEmbeddingStatusSchema
+} from "./recall-diagnostics-support-schema.js";
 
 const RecallDiagnosticObjectKindSchema = z.enum(["memory_entry", "evidence_capsule", "synthesis_capsule"]);
 const RecallFusionStreamRankSchema = z
@@ -291,45 +305,6 @@ const RecallDegradationReasonSchema = z.enum([
   "path_expansion_failed"
 ]);
 
-export const BenchEvidenceEmbeddingStatusSchema = z.enum([
-  "not_requested",
-  "not_applicable",
-  "returned",
-  "failed"
-]);
-
-export const BenchEvidenceEmbeddingFailureClassSchema = z.enum([
-  "provider_unavailable",
-  "query_embedding_failed",
-  "candidate_embedding_failed",
-  "service_error"
-]);
-
-export const BenchAnswerRerankStatusSchema = z.enum([
-  "not_requested",
-  "not_applicable",
-  "returned",
-  "failed"
-]);
-
-export const BenchAnswerRerankFailureClassSchema = z.enum([
-  "invalid_score_count",
-  "invalid_score_value",
-  "service_error"
-]);
-
-// see also: packages/core/src/recall/recall-service-types.ts
-//   RecallMultiSeedGraphFanInDiagnostics
-const RecallMultiSeedGraphFanInDiagnosticsSchema = z
-  .object({
-    distinct_seeds: z.number().int().nonnegative(),
-    candidates_per_seed_p50: z.number().nonnegative(),
-    candidates_per_seed_p95: z.number().nonnegative(),
-    dedup_collisions: z.number().int().nonnegative()
-  })
-  .strict()
-  .readonly();
-
 export const BenchRecallDiagnosticsSchema = z
   .object({
     query_probes: z
@@ -361,6 +336,7 @@ export const BenchRecallDiagnosticsSchema = z
     candidate_pool_count: z.number().int().nonnegative(),
     pre_budget_count: z.number().int().nonnegative(),
     delivered_count: z.number().int().nonnegative(),
+    packet_plan_trace: RecallPacketPlanTraceSchema.optional(),
     embedding_provider_status: z.enum([
       "provider_returned",
       "provider_pending",
@@ -399,9 +375,6 @@ export const BenchRecallDiagnosticsSchema = z
       RecallGraphExpansionPlaneCountPerHopSchema,
     graph_expansion_plane_count_per_edge_type:
       RecallGraphExpansionPlaneCountPerEdgeTypeSchema,
-    // Optional. Present when entity-derived seeds drove graph fan-in for
-    // this recall. see also: packages/core/src/recall/recall-service-types.ts
-    //   RecallMultiSeedGraphFanInDiagnostics
     multi_seed_graph_fan_in:
       RecallMultiSeedGraphFanInDiagnosticsSchema.optional(),
     fusion_breakdown: z

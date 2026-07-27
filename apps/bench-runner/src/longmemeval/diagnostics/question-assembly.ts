@@ -152,6 +152,7 @@ function buildRecallTelemetryFields(
   return {
     recall_diagnostics_present: diagnostics !== null,
     recall_diagnostics_keys: diagnostics?.keys ?? [],
+    packet_plan_trace: diagnostics?.packetPlanTrace ?? null,
     ...(diagnostics?.phaseLatencyMs === null || diagnostics?.phaseLatencyMs === undefined
       ? {}
       : { phase_latency_ms: diagnostics.phaseLatencyMs }),
