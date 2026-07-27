@@ -167,30 +167,6 @@ describe("bounded direct-evidence answer head", () => {
     });
   });
 
-  it("uses one semantic-leading capsule for one protected head admission", () => {
-    const peers = peerCandidates().map((candidate) => withEmbeddingScore(candidate, 0.4));
-    peers[4] = {
-      ...peers[4]!,
-      entry: { ...peers[4]!.entry, content: STRONG_EVIDENCE }
-    };
-    const evidence = directEvidence("semantic-head", STRONG_EVIDENCE, 6, 0.2);
-    const result = select([...peers, evidence], {
-      evidenceSemanticScoresByCandidateKey: new Map([[evidence.fusion.candidate_key, 0.99]])
-    });
-
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "semantic-head",
-      "peer-1",
-      "peer-2",
-      "peer-3",
-      "peer-4"
-    ]);
-    expect(result.candidates[0]).toMatchObject({
-      object_id: "semantic-head",
-      relevance_score: 0.2
-    });
-  });
-
   it.each([
     {
       name: "has no semantic score",
