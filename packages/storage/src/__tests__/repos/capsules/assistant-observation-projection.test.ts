@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("Assistant observation projection FTS", () => {
-  it("prefers an equal-rank child descriptor and keeps kind-local numeric identities", async () => {
+  it("keeps kind-local numeric identities when only one child matches", async () => {
     const { repo } = await createEvidenceCapsuleRepo();
     const objectId = "1f5c2a90-0000-4000-8000-000000000011";
     const recommendation = "Choose the moss-green TrailShell pack; its roll-top keeps a laptop dry in rain. It also dries quickly overnight.";
@@ -57,7 +57,78 @@ describe("Assistant observation projection FTS", () => {
     ]);
   });
 
-  it("uses the concrete child as the owner representative when both match", async () => {
+  it("lets the stronger User child outrank a weaker Assistant child", async () => {
+    const { repo } = await createEvidenceCapsuleRepo();
+    const objectId = "1f5c2a90-0000-4000-8000-000000000016";
+    await repo.create(createEvidenceCapsule({
+      object_id: objectId,
+      gist: "Two child descriptions compete on keyword relevance.",
+      excerpt: "Which child description should rank?",
+      source_hash: "sha256:garden-source-turn-fallback-v2:stronger-user-child"
+    }), [
+      {
+        projection_id: 1,
+        projection_kind: "user_assertion",
+        content: "Copperlane Copperlane Copperlane Copperlane Copperlane."
+      },
+      {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: "Copperlane appears in a long observation with unrelated packing, weather, transit, storage, and color details."
+      }
+    ]);
+
+    const hits = await repo.searchByKeyword!("workspace-1", "Copperlane", 10);
+
+    expect(hits).toEqual([
+      {
+        object_id: objectId,
+        normalized_rank: expect.any(Number),
+        matched_projection: {
+          projection_id: 1,
+          projection_kind: "user_assertion"
+        }
+      }
+    ]);
+  });
+
+  it("uses child kind only when BM25 ranks tie exactly", async () => {
+    const { repo } = await createEvidenceCapsuleRepo();
+    const objectId = "1f5c2a90-0000-4000-8000-000000000017";
+    const identicalContent = "Cedarvault retention rule.";
+    await repo.create(createEvidenceCapsule({
+      object_id: objectId,
+      gist: "Two identical child descriptions.",
+      excerpt: "Which retention rule applies?",
+      source_hash: "sha256:garden-source-turn-fallback-v2:child-rank-tie"
+    }), [
+      {
+        projection_id: 1,
+        projection_kind: "user_assertion",
+        content: identicalContent
+      },
+      {
+        projection_id: 2,
+        projection_kind: "assistant_observation",
+        content: identicalContent
+      }
+    ]);
+
+    const hits = await repo.searchByKeyword!("workspace-1", "Cedarvault", 10);
+
+    expect(hits).toEqual([
+      {
+        object_id: objectId,
+        normalized_rank: 1,
+        matched_projection: {
+          projection_id: 2,
+          projection_kind: "assistant_observation"
+        }
+      }
+    ]);
+  });
+
+  it("uses Assistant kind when owner and child normalized ranks tie", async () => {
     const { repo } = await createEvidenceCapsuleRepo();
     const objectId = "1f5c2a90-0000-4000-8000-000000000012";
     const recommendation = "Choose the TrailShell backpack for a rainy commute.";
@@ -77,12 +148,47 @@ describe("Assistant observation projection FTS", () => {
     expect(hits).toEqual([
       expect.objectContaining({
         object_id: objectId,
+        normalized_rank: 1,
         matched_projection: {
           projection_id: 1,
           projection_kind: "assistant_observation"
         }
       })
     ]);
+  });
+
+  it("lets a stronger owner outrank its weaker Assistant projection", async () => {
+    const { repo } = await createEvidenceCapsuleRepo();
+    const targetOwnerId = "1f5c2a90-0000-4000-8000-000000000018";
+    const strongerProjectionOwnerId = "1f5c2a90-0000-4000-8000-000000000019";
+    await repo.create(createEvidenceCapsule({
+      object_id: targetOwnerId,
+      gist: "The owner is the strongest source for the query.",
+      excerpt: "Citrineanchor Citrineanchor Citrineanchor Citrineanchor.",
+      source_hash: "sha256:garden-source-turn-fallback-v2:stronger-owner"
+    }), [{
+      projection_id: 1,
+      projection_kind: "assistant_observation",
+      content: "Citrineanchor appears once among unrelated travel, packing, weather, color, and storage details."
+    }]);
+    await repo.create(createEvidenceCapsule({
+      object_id: strongerProjectionOwnerId,
+      gist: "A different projection supplies the lane baseline.",
+      excerpt: "An unrelated owner excerpt.",
+      source_hash: "sha256:garden-source-turn-fallback-v2:projection-baseline"
+    }), [{
+      projection_id: 1,
+      projection_kind: "assistant_observation",
+      content: "Citrineanchor Citrineanchor Citrineanchor Citrineanchor Citrineanchor."
+    }]);
+
+    const hits = await repo.searchByKeyword!("workspace-1", "Citrineanchor", 10);
+    const targetHit = hits.find((hit) => hit.object_id === targetOwnerId);
+
+    expect(targetHit).toEqual({
+      object_id: targetOwnerId,
+      normalized_rank: 1
+    });
   });
 
   it("selects the strongest concrete projection without duplicating its owner", async () => {

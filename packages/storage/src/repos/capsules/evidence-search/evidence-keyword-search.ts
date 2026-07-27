@@ -100,9 +100,10 @@ function selectProjectionRepresentatives(
 }
 
 function compareProjectionRows(left: ProjectionRankRow, right: ProjectionRankRow): number {
-  return projectionKindPriority(left.projection_kind) -
+  return left.raw_rank - right.raw_rank ||
+    projectionKindPriority(left.projection_kind) -
     projectionKindPriority(right.projection_kind) ||
-    compareProjectionRanks(left, right);
+    left.projection_id - right.projection_id;
 }
 
 function compareProjectionRanks(left: ProjectionRankRow, right: ProjectionRankRow): number {
@@ -149,7 +150,8 @@ function compareOwnerRepresentatives(
   left: RankedEvidenceHit,
   right: RankedEvidenceHit
 ): number {
-  return evidenceHitKindPriority(left.hit) - evidenceHitKindPriority(right.hit) ||
+  return right.hit.normalized_rank - left.hit.normalized_rank ||
+    evidenceHitKindPriority(left.hit) - evidenceHitKindPriority(right.hit) ||
     compareRankedEvidenceHits(left, right);
 }
 
