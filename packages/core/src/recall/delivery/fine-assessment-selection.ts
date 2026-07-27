@@ -37,7 +37,11 @@ import {
 import {
   buildFineAssessmentAnswerSupportContext
 } from "./answer-support/answer-support-context.js";
-import { retainBoundedDirectEvidenceHead, selectBoundedDirectEvidenceHead } from "./admission/direct-evidence-answer-head.js";
+import {
+  retainBoundedAnswerHeads,
+  selectBoundedDirectEvidenceHead,
+  type DirectEvidenceHeadSelection
+} from "./admission/direct-evidence-answer-head.js";
 import {
   buildFinalScoreFactors,
   createFineAssessmentDiagnostic
@@ -117,6 +121,7 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
     context.supplementaryData.evidenceSemanticScoresByCandidateKey,
+    context.finalRelevanceByCandidateKey,
     context.config.budgets.max_entries, evictions,
     (candidates) => collectAdmittedCandidates(candidates, context, evictions),
     (candidate) => context.answerSupportByCandidateKey.get(
@@ -131,8 +136,7 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
         context,
         finalOrder,
         params.maxHeadDropAfterCoverage,
-        evidenceHead.protectedCandidateKey,
-        evidenceHead.protectedRankLimit,
+        evidenceHead.protections,
         evidenceHead.candidates
       );
   return Object.freeze({
@@ -156,8 +160,8 @@ function freezeSelectedPacket(
 function orderDeliveredPacket(
   accumulator: FineAssessmentAccumulator, context: FineAssessmentSelectionContext,
   finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
-  maxHeadDrop: number | undefined, protectedEvidenceKey: string | null,
-  protectedEvidenceRankLimit: number | null,
+  maxHeadDrop: number | undefined,
+  answerHeadProtections: DirectEvidenceHeadSelection<FineAssessmentCandidate>["protections"],
   sourceCandidates: readonly FineAssessmentCandidate[]
 ): ReturnType<typeof freezeSelectedPacket> {
   const verifiedOrder = orderByFinalAuthority({
@@ -168,20 +172,10 @@ function orderDeliveredPacket(
     protectedRankLimit: context.config.budgets.max_entries,
     answerSupportByCandidateKey: context.answerSupportByCandidateKey
   });
-  const evidenceRetained = retainBoundedDirectEvidenceHead(
-    verifiedOrder, protectedEvidenceKey, protectedEvidenceRankLimit,
-    buildRecallCandidateSelectionKey,
-    context.supplementaryData.queryProbes, sourceCandidates
+  const candidates = orderWithAnswerHeadProtections(
+    verifiedOrder, context, finalOrder, maxHeadDrop,
+    answerHeadProtections, sourceCandidates
   );
-  const candidates = finalOrder === "public_relevance" && maxHeadDrop === undefined
-    ? orderWithEmbeddingEvidenceDominance({
-        candidates: evidenceRetained,
-        sourceCandidates,
-        queryProbes: context.supplementaryData.queryProbes,
-        answerSupportByCandidateKey: context.answerSupportByCandidateKey,
-        keyOf: buildRecallCandidateSelectionKey
-      })
-    : evidenceRetained;
   let usedTokens = 0;
   const finalRankByKey = new Map<string, number>();
   const ranked = candidates.map((candidate, index) => {
@@ -203,6 +197,34 @@ function orderDeliveredPacket(
       : Object.freeze({ ...row, final_rank: finalRank, post_rank: finalRank });
   });
   return Object.freeze({ candidates: Object.freeze(ranked), diagnostics: Object.freeze(diagnostics) });
+}
+
+function orderWithAnswerHeadProtections(
+  candidates: readonly Readonly<RecallCandidate>[],
+  context: FineAssessmentSelectionContext,
+  finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
+  maxHeadDrop: number | undefined,
+  protections: DirectEvidenceHeadSelection<FineAssessmentCandidate>["protections"],
+  sourceCandidates: readonly FineAssessmentCandidate[]
+): readonly Readonly<RecallCandidate>[] {
+  const retain = (ordered: readonly Readonly<RecallCandidate>[]) =>
+    retainBoundedAnswerHeads(
+      ordered, protections, buildRecallCandidateSelectionKey,
+      context.supplementaryData.queryProbes, sourceCandidates
+    );
+  const applyDominance = (ordered: readonly Readonly<RecallCandidate>[]) =>
+    finalOrder === "public_relevance" && maxHeadDrop === undefined
+      ? orderWithEmbeddingEvidenceDominance({
+          candidates: ordered,
+          sourceCandidates,
+          queryProbes: context.supplementaryData.queryProbes,
+          answerSupportByCandidateKey: context.answerSupportByCandidateKey,
+          keyOf: buildRecallCandidateSelectionKey
+        })
+      : ordered;
+  return protections.some((protection) => protection.rankLimit === 1)
+    ? retain(applyDominance(candidates))
+    : applyDominance(retain(candidates));
 }
 
 function prepareCoverageSelection(

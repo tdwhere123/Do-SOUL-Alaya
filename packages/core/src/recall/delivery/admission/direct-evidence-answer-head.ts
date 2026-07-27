@@ -8,6 +8,12 @@ import type {
   CoarseRecallCandidate,
   RecallFusionBreakdown
 } from "../../runtime/recall-service-types.js";
+import {
+  addAnswerHeadProtection,
+  selectSemanticMemoryRefinement,
+  type AnswerHeadSelection,
+  type SemanticHeadCandidate
+} from "./semantic-memory-refinement.js";
 
 const DIRECT_EVIDENCE_HEAD_LIMIT = 5;
 const DIRECT_EVIDENCE_FTS_RANK_LIMIT = 25;
@@ -19,22 +25,12 @@ type DirectEvidenceHeadCandidate = Readonly<CoarseRecallCandidate & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
-type SemanticHeadCandidate<T> = Readonly<{
-  readonly candidate: T;
-  readonly candidateKey: string;
-  readonly index: number;
-}>;
-
 type ScoredDirectEvidence<T> = Readonly<SemanticHeadCandidate<T> & {
   readonly evidenceFtsRank: number;
   readonly queryScore: number;
 }>;
 
-export type DirectEvidenceHeadSelection<T> = Readonly<{
-  readonly candidates: readonly T[];
-  readonly protectedCandidateKey: string | null;
-  readonly protectedRankLimit: number | null;
-}>;
+export type DirectEvidenceHeadSelection<T> = AnswerHeadSelection<T>;
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
 type BlocksEvidenceHead<T> = (candidate: T) => boolean;
@@ -43,6 +39,7 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   candidates: readonly T[],
   queryProbes: Readonly<RecallQueryProbes>,
   evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>,
+  publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   maxEntries: number,
   excludedCandidateKeys: ReadonlySet<string>,
   selectDelivered: SelectDelivered<T>,
@@ -56,7 +53,40 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   const semanticLeader = selectUniqueSemanticLeader(
     candidates, evidence, evidenceSemanticScoresByCandidateKey
   );
-  if (semanticLeader !== undefined) {
+  const evidenceSelection = selectEvidenceHead(
+    candidates, baseline, evidence, semanticLeader, headLimit,
+    queryProbes, selectDelivered
+  );
+  return semanticLeader === undefined
+    ? evidenceSelection
+    : selectSemanticMemoryRefinement({
+        evidenceSelection,
+        leader: semanticLeader,
+        headLimit,
+        publicRelevanceByCandidateKey,
+        selectDelivered,
+        keyOf: candidateKey,
+        evidencePermitsVictim: (selection, victim) =>
+          protectedEvidencePermitsVictim(selection, victim, queryProbes),
+        protectionsAreFeasible: (trial, protections, sourceCandidates) =>
+          protectionsAreFeasible(
+            trial, protections, publicRelevanceByCandidateKey,
+            queryProbes, sourceCandidates
+          ),
+        resolveSingleReplacement
+      });
+}
+
+function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
+  candidates: readonly T[],
+  baseline: readonly T[],
+  evidence: readonly ScoredDirectEvidence<T>[],
+  semanticLeader: SemanticHeadCandidate<T> | undefined,
+  headLimit: number,
+  queryProbes: Readonly<RecallQueryProbes>,
+  selectDelivered: SelectDelivered<T>
+): DirectEvidenceHeadSelection<T> {
+  if (semanticLeader?.candidate.objectKind === "evidence_capsule") {
     return selectSemanticHead(candidates, baseline, semanticLeader, selectDelivered);
   }
   const scored = evidence.filter((row) => row.queryScore >= DIRECT_EVIDENCE_SCORE_FLOOR);
@@ -65,22 +95,46 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   const existingHead = bestEvidence(scored.filter((row) => headKeys.has(row.candidateKey)));
   if (existingHead !== undefined) return protectedSelection(candidates, existingHead);
   const existingTail = bestEvidence(scored.filter((row) => baselineKeys.has(row.candidateKey)));
-  if (existingTail !== undefined) return protectedSelection(candidates, existingTail);
-  return selectAdmissionPromotion(
-    candidates, baseline, baseline[headLimit - 1]!,
-    scored, queryProbes, selectDelivered
-  );
+  return existingTail !== undefined
+    ? protectedSelection(candidates, existingTail)
+    : selectAdmissionPromotion(
+        candidates, baseline, baseline[headLimit - 1]!,
+        scored, queryProbes, selectDelivered
+      );
 }
 
-export function retainBoundedDirectEvidenceHead<T>(
+export function retainBoundedAnswerHeads<T>(
   candidates: readonly T[],
-  protectedCandidateKey: string | null,
-  protectedRankLimit: number | null,
+  protections: readonly Readonly<{
+    readonly candidateKey: string;
+    readonly rankLimit: number;
+  }>[],
   keyOf: (candidate: T) => string,
   queryProbes: Readonly<RecallQueryProbes>,
   sourceCandidates: readonly DirectEvidenceHeadCandidate[]
 ): readonly T[] {
-  if (protectedCandidateKey === null || protectedRankLimit === null) return candidates;
+  return [...protections]
+    .sort((left, right) =>
+      left.rankLimit - right.rankLimit ||
+      left.candidateKey.localeCompare(right.candidateKey)
+    )
+    .reduce(
+      (ordered, protection) => retainBoundedAnswerHead(
+        ordered, protection.candidateKey, protection.rankLimit,
+        keyOf, queryProbes, sourceCandidates
+      ),
+      candidates
+    );
+}
+
+function retainBoundedAnswerHead<T>(
+  candidates: readonly T[],
+  protectedCandidateKey: string,
+  protectedRankLimit: number,
+  keyOf: (candidate: T) => string,
+  queryProbes: Readonly<RecallQueryProbes>,
+  sourceCandidates: readonly DirectEvidenceHeadCandidate[]
+): readonly T[] {
   const index = candidates.findIndex((candidate) => keyOf(candidate) === protectedCandidateKey);
   if (index < protectedRankLimit) return candidates;
   if (protectedRankLimit === 1) {
@@ -162,6 +216,58 @@ function selectSemanticHead<T extends DirectEvidenceHeadCandidate>(
   return replacement === undefined
     ? unchangedSelection(candidates)
     : protectedSelection(trialOrder, leader, 1);
+}
+
+function protectedEvidencePermitsVictim<T extends DirectEvidenceHeadCandidate>(
+  selection: DirectEvidenceHeadSelection<T>,
+  victim: T,
+  queryProbes: Readonly<RecallQueryProbes>
+): boolean {
+  return selection.protections.every((protection) => {
+    if (protection.rankLimit === 1) return true;
+    const protectedCandidate = findSourceCandidate(
+      selection.candidates, protection.candidateKey
+    );
+    return protectedCandidate !== undefined &&
+      hasRequiredQueryMargin(
+        scoreQueryEvidenceMatch(protectedCandidate.entry, queryProbes),
+        victim.entry,
+        queryProbes
+      );
+  });
+}
+
+function protectionsAreFeasible<T extends DirectEvidenceHeadCandidate>(
+  trial: readonly T[],
+  protections: DirectEvidenceHeadSelection<T>["protections"],
+  publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
+  queryProbes: Readonly<RecallQueryProbes>,
+  sourceCandidates: readonly T[]
+): boolean {
+  const publicOrder = [...trial].sort((left, right) =>
+    comparePublicRelevance(left, right, publicRelevanceByCandidateKey)
+  );
+  const protectedOrder = retainBoundedAnswerHeads(
+    publicOrder, protections, candidateKey, queryProbes, sourceCandidates
+  );
+  return protections.every((protection) => {
+    const index = protectedOrder.findIndex((candidate) =>
+      candidateKey(candidate) === protection.candidateKey
+    );
+    return index >= 0 && index < protection.rankLimit;
+  });
+}
+
+function comparePublicRelevance(
+  left: DirectEvidenceHeadCandidate,
+  right: DirectEvidenceHeadCandidate,
+  relevanceByCandidateKey: ReadonlyMap<string, number>
+): number {
+  const leftKey = candidateKey(left);
+  const rightKey = candidateKey(right);
+  const leftScore = relevanceByCandidateKey.get(leftKey) ?? left.fusion.fused_score;
+  const rightScore = relevanceByCandidateKey.get(rightKey) ?? right.fusion.fused_score;
+  return rightScore - leftScore || leftKey.localeCompare(rightKey);
 }
 
 function resolveSingleReplacement<T extends DirectEvidenceHeadCandidate>(
@@ -291,19 +397,16 @@ function compareScoredEvidence<T>(
 function unchangedSelection<T>(candidates: readonly T[]): DirectEvidenceHeadSelection<T> {
   return Object.freeze({
     candidates,
-    protectedCandidateKey: null,
-    protectedRankLimit: null
+    protections: Object.freeze([])
   });
 }
 
 function protectedSelection<T>(
   candidates: readonly T[],
   protectedEvidence: Readonly<{ readonly candidateKey: string }>,
-  protectedRankLimit = DIRECT_EVIDENCE_HEAD_LIMIT
+  protectedRankLimit = DIRECT_EVIDENCE_HEAD_LIMIT,
+  protections: DirectEvidenceHeadSelection<T>["protections"] = []
 ): DirectEvidenceHeadSelection<T> {
-  return Object.freeze({
-    candidates,
-    protectedCandidateKey: protectedEvidence.candidateKey,
-    protectedRankLimit
-  });
+  const selection = Object.freeze({ candidates, protections });
+  return addAnswerHeadProtection(selection, protectedEvidence, protectedRankLimit);
 }
