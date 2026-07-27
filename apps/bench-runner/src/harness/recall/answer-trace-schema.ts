@@ -147,7 +147,10 @@ export const RecallAnswerSupportObservationSchema = z
     }
     const behaviorEligible = atomic &&
       observation.support_identity !== null &&
-      observation.query_status === "compatible" &&
+      (
+        observation.query_status === "compatible" ||
+        observation.query_status === "value_only"
+      ) &&
       observation.event_status === "asserted" &&
       (
         observation.time_status === "not_requested" ||

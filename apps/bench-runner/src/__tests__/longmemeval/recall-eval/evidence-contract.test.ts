@@ -726,8 +726,12 @@ describe("LongMemEval evidence contract", () => {
     } as const;
     expect(RecallAnswerSupportObservationSchema.safeParse(atomicObservation).success)
       .toBe(true);
+    expect(RecallAnswerSupportObservationSchema.safeParse({
+      ...atomicObservation,
+      query_status: "value_only"
+    }).success).toBe(true);
     for (const invalid of [
-      { query_status: "value_only" },
+      { query_status: "unsupported" },
       { event_status: "prospective" },
       { time_status: "unknown" }
     ] as const) {
