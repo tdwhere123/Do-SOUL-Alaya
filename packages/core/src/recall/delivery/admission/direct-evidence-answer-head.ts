@@ -1,7 +1,8 @@
 import type { RecallQueryProbes } from "../../query/recall-query-probes.js";
 import { scoreQueryEvidenceMatch } from "../../scoring/query-evidence-scoring.js";
 import {
-  buildRecallCandidateDedupeKey
+  buildRecallCandidateDedupeKey,
+  isWorkspaceMemoryCandidate
 } from "../../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
@@ -18,12 +19,15 @@ type DirectEvidenceHeadCandidate = Readonly<CoarseRecallCandidate & {
   readonly fusion: RecallFusionBreakdown;
 }>;
 
-type ScoredDirectEvidence<T> = Readonly<{
+type SemanticHeadCandidate<T> = Readonly<{
   readonly candidate: T;
   readonly candidateKey: string;
+  readonly index: number;
+}>;
+
+type ScoredDirectEvidence<T> = Readonly<SemanticHeadCandidate<T> & {
   readonly evidenceFtsRank: number;
   readonly queryScore: number;
-  readonly index: number;
 }>;
 
 export type DirectEvidenceHeadSelection<T> = Readonly<{
@@ -145,7 +149,7 @@ function selectAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
 function selectSemanticHead<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   baseline: readonly T[],
-  leader: ScoredDirectEvidence<T>,
+  leader: SemanticHeadCandidate<T>,
   selectDelivered: SelectDelivered<T>
 ): DirectEvidenceHeadSelection<T> {
   if (candidateKeys(baseline).has(leader.candidateKey)) {
@@ -251,18 +255,28 @@ function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   evidence: readonly ScoredDirectEvidence<T>[],
   evidenceScores: ReadonlyMap<string, number>
-): ScoredDirectEvidence<T> | undefined {
-  const ranked = candidates.flatMap((candidate) => {
+): SemanticHeadCandidate<T> | undefined {
+  const evidenceByKey = new Map(evidence.map((row) => [row.candidateKey, row]));
+  const ranked = candidates.flatMap((candidate, index) => {
     const candidateKey = buildRecallCandidateDedupeKey(candidate);
+    const evidenceCandidate = evidenceByKey.get(candidateKey);
     const score = candidate.objectKind === "evidence_capsule"
       ? evidenceScores.get(candidateKey)
       : candidate.effectiveFactors.embedding_similarity;
     return score !== undefined && Number.isFinite(score) && score > 0
-      ? [{ candidateKey, score }]
+      ? [{ candidate, candidateKey, index, score, evidenceCandidate }]
       : [];
   }).sort((left, right) => right.score - left.score);
   if (ranked.length === 0 || ranked[1]?.score === ranked[0]!.score) return undefined;
-  return evidence.find((row) => row.candidateKey === ranked[0]!.candidateKey);
+  const leader = ranked[0]!;
+  if (leader.evidenceCandidate !== undefined) return leader.evidenceCandidate;
+  return isWorkspaceMemoryCandidate(leader.candidate)
+    ? Object.freeze({
+        candidate: leader.candidate,
+        candidateKey: leader.candidateKey,
+        index: leader.index
+      })
+    : undefined;
 }
 
 function compareScoredEvidence<T>(
@@ -284,7 +298,7 @@ function unchangedSelection<T>(candidates: readonly T[]): DirectEvidenceHeadSele
 
 function protectedSelection<T>(
   candidates: readonly T[],
-  protectedEvidence: ScoredDirectEvidence<T>,
+  protectedEvidence: Readonly<{ readonly candidateKey: string }>,
   protectedRankLimit = DIRECT_EVIDENCE_HEAD_LIMIT
 ): DirectEvidenceHeadSelection<T> {
   return Object.freeze({
