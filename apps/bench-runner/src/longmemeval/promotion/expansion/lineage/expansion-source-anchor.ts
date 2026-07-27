@@ -14,6 +14,7 @@ import {
   LongMemEvalExpansionSourceAnchorSchema,
   type LongMemEvalExpansionSourceAnchor
 } from "./expansion-source-anchor-schema.js";
+import { reissuedMatrixEvidence } from "./expansion-promotion-attestation.js";
 
 export function buildLongMemEvalExpansionSourceAnchor(
   capability: LongMemEvalExpansionCapability,
@@ -45,13 +46,32 @@ export function assertLongMemEvalExpansionSourceAnchor(
   config: CompileSeedExtractionConfig,
   target: ExtractionFillCompletion
 ): LongMemEvalExpansionSourceAnchor {
+  return assertSourceAnchor(anchor, capability, config, target, "validator_only");
+}
+
+export function assertLongMemEvalExpansionSourceAnchorCompatibleWithCapability(
+  anchor: unknown,
+  capability: LongMemEvalExpansionCapability,
+  config: CompileSeedExtractionConfig,
+  target: ExtractionFillCompletion
+): LongMemEvalExpansionSourceAnchor {
+  return assertSourceAnchor(anchor, capability, config, target, "matrix_evidence");
+}
+
+function assertSourceAnchor(
+  anchor: unknown,
+  capability: LongMemEvalExpansionCapability,
+  config: CompileSeedExtractionConfig,
+  target: ExtractionFillCompletion,
+  receiptPolicy: "validator_only" | "matrix_evidence"
+): LongMemEvalExpansionSourceAnchor {
   const parsed = LongMemEvalExpansionSourceAnchorSchema.parse(anchor);
   const expected = buildLongMemEvalExpansionSourceAnchor(capability, config, target);
-  // R3 binds the live validator authorization; the anchor keeps the matrix and
-  // source contents stable when a validator-only commit changes its receipt digest.
   const reauthorized = {
     ...parsed,
-    matrix_authorization_sha256: expected.matrix_authorization_sha256
+    ...(receiptPolicy === "validator_only" ? {
+      matrix_authorization_sha256: expected.matrix_authorization_sha256
+    } : reissuedMatrixEvidence(parsed, expected))
   };
   if (!isDeepStrictEqual(reauthorized, expected)) {
     throw new Error("500Q expansion source anchor differs from live capability");

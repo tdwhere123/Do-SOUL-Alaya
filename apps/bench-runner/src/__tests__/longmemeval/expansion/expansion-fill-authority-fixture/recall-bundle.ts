@@ -130,6 +130,28 @@ export function recallBundle(
   } as unknown as RecallEvalSnapshotBundle;
 }
 
+export function withReissuedMatrixLineage(
+  bundle: RecallEvalSnapshotBundle,
+  capability: LongMemEvalExpansionCapability
+): RecallEvalSnapshotBundle {
+  const data = longMemEvalExpansionCapabilityData(capability);
+  const copy = structuredClone(bundle);
+  const extraction = copy.manifest.extraction_provenance!;
+  const runCache = copy.manifest.run_provenance!.extraction_cache!;
+  if (extraction.schema_version !== 3 || runCache.schema_version !== 3) {
+    throw new Error("fixture requires v3 expansion provenance");
+  }
+  const lineage = {
+    ...extraction.expansion_lineage!,
+    matrix_authorization_sha256: data.matrixAuthorizationSha256,
+    matrix_sha256: data.matrix.sha256,
+    product_default: data.productDefault
+  };
+  extraction.expansion_lineage = lineage;
+  runCache.expansion_lineage = lineage;
+  return copy;
+}
+
 function seedExtractionPath() {
   return {
     path: "official_api_compile" as const,

@@ -8,6 +8,7 @@ import {
 } from "./expansion-fill-authority-fixture/fixture.js";
 import {
   mintCapability,
+  mintReissuedMatrixCapability,
   prepare,
   r3SpendApprovalFor
 } from "./expansion-fill-authority-fixture/capability.js";
@@ -315,6 +316,18 @@ describe("500Q expansion fill authority", () => {
     expect(resumed.sourceAnchor).toEqual(first.sourceAnchor);
   });
 
+  it("rejects a full matrix evidence reissue while resuming an anchored fill", async () => {
+    const first = await prepare(mintCapability());
+    state.identity = {
+      manifestSha256: "b".repeat(64),
+      manifest: targetManifest(first.sourceAnchor)
+    };
+
+    await expect(prepare(mintReissuedMatrixCapability())).rejects.toThrow(
+      /source anchor differs/u
+    );
+  });
+
   it("rejects target keyset and count drift before provider construction", async () => {
     const first = await prepare(mintCapability());
     state.identity = {
@@ -406,6 +419,36 @@ describe("500Q expansion fill authority", () => {
       },
       completion: state.targetCompletion
     })).toThrow(/target cache|lineage/u);
+  });
+
+  it("accepts an equivalent reissued matrix receipt when consuming a completed cache", async () => {
+    const capability = await mintCapability();
+    const first = await prepare(Promise.resolve(capability));
+    state.targetCompletion = completion(500, 500, "8", "6");
+    const base = targetManifest(first.sourceAnchor, "complete");
+    const manifest = {
+      ...base,
+      expansion_lineage: buildLongMemEvalExpansionLineage(
+        capability,
+        state.targetCompletion,
+        base
+      )
+    };
+    const reissued = await mintReissuedMatrixCapability();
+    const original = longMemEvalExpansionCapabilityData(capability);
+    const current = longMemEvalExpansionCapabilityData(reissued);
+
+    expect(current.matrixAuthorizationSha256).not.toBe(original.matrixAuthorizationSha256);
+    expect(current.matrix.sha256).not.toBe(original.matrix.sha256);
+    expect(current.productDefault.bundle_sha256).not.toBe(
+      original.productDefault.bundle_sha256
+    );
+
+    expect(() => assertCompleteLongMemEvalExpansionCache({
+      capability: reissued,
+      manifest,
+      completion: state.targetCompletion
+    })).not.toThrow();
   });
 
   it("rejects statusless and complete-without-lineage expansion downgrades", async () => {

@@ -1,7 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 import { isCacheOnlySeedExtractionPath } from "@do-soul/alaya-eval";
-import { hashLongMemEvalSupplementalSourceBinding } from
-  "@do-soul/alaya-eval/internal";
+import {
+  assertLongMemEvalExpansionAuthorityPair,
+  hashLongMemEvalSupplementalSourceBinding
+} from "@do-soul/alaya-eval/internal";
 import type { BenchRecallWeightOverrides } from
   "../../../../harness/recall/recall-weight-overrides.js";
 import { ALAYA_RECALL_WEIGHT_OVERRIDES_ENV } from
@@ -31,7 +33,7 @@ import {
 } from "../expansion-capability.js";
 import { assertLongMemEvalExpansionLineageCompatibleWithCapability } from
   "../lineage/expansion-lineage.js";
-import { assertLongMemEvalExpansionSourceAnchor } from
+import { assertLongMemEvalExpansionSourceAnchorCompatibleWithCapability } from
   "../lineage/expansion-source-anchor.js";
 import { loadCanonicalLongMemEvalExpansionSelection } from
   "../expansion-selection.js";
@@ -241,7 +243,7 @@ function assertSnapshotExtractionAuthority(
     requestProfile: extraction.request_profile,
     apiKey: null
   };
-  const anchor = assertLongMemEvalExpansionSourceAnchor(
+  const anchor = assertLongMemEvalExpansionSourceAnchorCompatibleWithCapability(
     extraction.expansion_source_anchor,
     capability,
     config,
@@ -251,6 +253,7 @@ function assertSnapshotExtractionAuthority(
     extraction.expansion_lineage,
     capability
   );
+  assertLongMemEvalExpansionAuthorityPair(anchor, lineage);
   if (lineage.matrix_authorization_sha256 !==
         anchor.matrix_authorization_sha256 ||
       !isDeepStrictEqual(lineage.target_cache, snapshotTarget(extraction)) ||

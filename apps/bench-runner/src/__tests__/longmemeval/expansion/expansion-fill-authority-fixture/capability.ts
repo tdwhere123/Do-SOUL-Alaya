@@ -53,7 +53,8 @@ export async function prepare(
 
 export async function mintCapability(
   sourceManifestSha = "a".repeat(64),
-  validatorCommitSha?: string
+  validatorCommitSha?: string,
+  productBundleSha256 = "2".repeat(64)
 ): Promise<LongMemEvalExpansionCapability> {
   const contract = expansionPromotionContractFixture();
   const validatorCommit = validatorCommitSha ?? contract.code.commit_sha;
@@ -71,7 +72,7 @@ export async function mintCapability(
     cell: labels[index]!,
     treatment: entry.treatment,
     evidence_root: entry.evidence_root,
-    bundle_sha256: String(index + 1).repeat(64)
+    bundle_sha256: index === 1 ? productBundleSha256 : String(index + 1).repeat(64)
   }));
   const sourceSelection = selection(state.dataset.questions.slice(0, 100));
   const nextSelection = selection(state.dataset.questions);
@@ -116,6 +117,10 @@ export async function mintCapability(
     readContractSha256: async () => parsed.sha256,
     computeExecutedDistIdentity: async () => validatorDist
   });
+}
+
+export function mintReissuedMatrixCapability(): Promise<LongMemEvalExpansionCapability> {
+  return mintCapability(undefined, undefined, "9".repeat(64));
 }
 
 export function r3SpendApprovalFor(

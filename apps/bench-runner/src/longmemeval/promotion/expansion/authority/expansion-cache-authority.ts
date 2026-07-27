@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
+import { assertLongMemEvalExpansionAuthorityPair } from
+  "@do-soul/alaya-eval/internal";
 import type { CompileSeedExtractionConfig } from "../../../compile-seed/compile-seed-types.js";
 import type { ExtractionCacheManifest } from "../../../extraction/cache/extraction-cache-manifest.js";
 import {
@@ -7,11 +9,13 @@ import {
 } from "../../../extraction/fill/fill-completion.js";
 import type { LongMemEvalExpansionCapability } from "../expansion-capability.js";
 import {
-  assertLongMemEvalExpansionLineageMatchesCapability,
+  assertLongMemEvalExpansionLineageCompatibleWithCapability,
   buildLongMemEvalExpansionLineage
 } from "../lineage/expansion-lineage.js";
-import { assertLongMemEvalExpansionSourceAnchor } from
+import { assertLongMemEvalExpansionSourceAnchorCompatibleWithCapability } from
   "../lineage/expansion-source-anchor.js";
+import { reissuedMatrixEvidence } from
+  "../lineage/expansion-promotion-attestation.js";
 
 export function assertCompleteLongMemEvalExpansionCache(input: {
   readonly capability: LongMemEvalExpansionCapability;
@@ -32,23 +36,25 @@ export function assertCompleteLongMemEvalExpansionCache(input: {
     throw new Error("500Q expansion cache manifest differs from live complete closure");
   }
   const config = extractionConfig(manifest);
-  assertLongMemEvalExpansionSourceAnchor(
+  const anchor = assertLongMemEvalExpansionSourceAnchorCompatibleWithCapability(
     manifest.expansion_source_anchor,
     capability,
     config,
     completion
   );
-  const actual = assertLongMemEvalExpansionLineageMatchesCapability(
+  const actual = assertLongMemEvalExpansionLineageCompatibleWithCapability(
     manifest.expansion_lineage,
     capability
   );
+  assertLongMemEvalExpansionAuthorityPair(anchor, actual);
   const expected = buildLongMemEvalExpansionLineage(
     capability,
     completion,
     manifest,
     actual.supplemental_source_receipt_extension
   );
-  if (!isDeepStrictEqual(actual, expected)) {
+  const reauthorized = { ...actual, ...reissuedMatrixEvidence(actual, expected) };
+  if (!isDeepStrictEqual(reauthorized, expected)) {
     throw new Error("500Q expansion lineage differs from live target cache closure");
   }
 }

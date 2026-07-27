@@ -17,6 +17,7 @@ import {
   LongMemEvalExpansionLineageSchema,
   type LongMemEvalExpansionLineage
 } from "./expansion-lineage-schema.js";
+import { reissuedMatrixEvidence } from "./expansion-promotion-attestation.js";
 export {
   LongMemEvalExpansionLineageSchema,
   type LongMemEvalExpansionLineage
@@ -68,13 +69,13 @@ export function assertLongMemEvalExpansionLineageCompatibleWithCapability(
   lineage: unknown,
   capability: LongMemEvalExpansionCapability
 ): LongMemEvalExpansionLineage {
-  return assertLineageCapability(lineage, capability, "validator_reauthorized");
+  return assertLineageCapability(lineage, capability, "matrix_evidence_reauthorized");
 }
 
 function assertLineageCapability(
   lineage: unknown,
   capability: LongMemEvalExpansionCapability,
-  receiptPolicy: "exact" | "validator_reauthorized"
+  receiptPolicy: "exact" | "matrix_evidence_reauthorized"
 ): LongMemEvalExpansionLineage {
   const parsed = LongMemEvalExpansionLineageSchema.parse(lineage);
   const data = longMemEvalExpansionCapabilityData(capability);
@@ -97,12 +98,11 @@ function assertLineageCapability(
     kind: _kind,
     ...actual
   } = parsed;
-  if (receiptPolicy === "validator_reauthorized") {
-    // The live validator changes this receipt digest; the recall caller closes
-    // the preserved producer receipt against the manifest-bound source anchor.
-    actual.matrix_authorization_sha256 = expected.matrix_authorization_sha256;
-  }
-  if (!isDeepStrictEqual(actual, expected)) {
+  const comparable = receiptPolicy === "exact" ? actual : {
+    ...actual,
+    ...reissuedMatrixEvidence(actual, expected)
+  };
+  if (!isDeepStrictEqual(comparable, expected)) {
     throw new Error("500Q expansion lineage differs from live promotion capability");
   }
   if (extension !== undefined &&

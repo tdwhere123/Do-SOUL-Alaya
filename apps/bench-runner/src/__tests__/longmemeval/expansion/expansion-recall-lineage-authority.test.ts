@@ -1,7 +1,3 @@
-import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resetExpansionFillAuthorityFixture,
@@ -15,6 +11,10 @@ import {
   mintCapability,
   prepare
 } from "./expansion-fill-authority-fixture/capability.js";
+import {
+  clearFrozenReuseRoots,
+  frozenReuseEnvironment
+} from "./expansion-fill-authority-fixture/reuse-environment.js";
 import { longMemEvalExpansionCapabilityData } from
   "../../../longmemeval/promotion/expansion/expansion-capability.js";
 import { assertExpansionRecallAuthority } from
@@ -22,11 +22,7 @@ import { assertExpansionRecallAuthority } from
 
 describe("500Q recall lineage authority", () => {
   beforeEach(resetExpansionFillAuthorityFixture);
-  afterEach(async () => {
-    await Promise.all(reuseRoots.splice(0).map((root) =>
-      rm(root, { recursive: true, force: true })
-    ));
-  });
+  afterEach(clearFrozenReuseRoots);
 
   it("accepts immutable lineage after validator-only reauthorization", async () => {
     const frozen = await completeExpansionFixture();
@@ -87,7 +83,7 @@ describe("500Q recall lineage authority", () => {
       bundle: driftedBundle,
       recallWeightOverrides: undefined,
       env: await frozenReuseEnvironment(driftedBundle)
-    })).rejects.toThrow(/lineage differs/u);
+    })).rejects.toThrow(/source anchor and lineage|lineage differs/u);
   });
 });
 
@@ -114,33 +110,5 @@ function stableCapability(
     product: data.productDefault,
     source: data.sourceSelection,
     target: data.nextSelection
-  };
-}
-
-const reuseRoots: string[] = [];
-
-async function frozenReuseEnvironment(
-  bundle: ReturnType<typeof recallBundle>
-): Promise<Record<string, string>> {
-  const root = await mkdtemp(join(tmpdir(), "recall-lineage-authority-"));
-  reuseRoots.push(root);
-  const path = join(root, "consumer-gate.json");
-  const raw = `${JSON.stringify({
-    schema_version: 1,
-    code: {
-      commit_sha: "7".repeat(40),
-      commit_sha7: "7".repeat(7),
-      worktree_state_sha256: "8".repeat(64)
-    },
-    snapshot_reuse: {
-      manifest_sha256: bundle.snapshotManifestSha256,
-      producer: bundle.manifest.run_provenance!.code
-    }
-  })}\n`;
-  await writeFile(path, raw, "utf8");
-  return {
-    ALAYA_RECALL_EVAL_EMBEDDING: "env",
-    ALAYA_BENCH_GATE_CONTRACT_PATH: path,
-    ALAYA_BENCH_GATE_SHA256: createHash("sha256").update(raw).digest("hex")
   };
 }

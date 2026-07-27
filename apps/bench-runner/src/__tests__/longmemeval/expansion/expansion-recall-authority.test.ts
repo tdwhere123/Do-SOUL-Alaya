@@ -1,7 +1,3 @@
-import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resetExpansionFillAuthorityFixture,
@@ -11,6 +7,10 @@ import {
   completeExpansionFixture,
   recallBundle
 } from "./expansion-fill-authority-fixture/recall-bundle.js";
+import {
+  clearFrozenReuseRoots,
+  frozenReuseEnvironment
+} from "./expansion-fill-authority-fixture/reuse-environment.js";
 import { longMemEvalExpansionCapabilityData } from
   "../../../longmemeval/promotion/expansion/expansion-capability.js";
 import { assertExpansionSnapshotAuthority } from
@@ -20,11 +20,7 @@ import { assertExpansionRecallAuthority } from
 
 describe("500Q expansion fill authority", () => {
   beforeEach(resetExpansionFillAuthorityFixture);
-  afterEach(async () => {
-    await Promise.all(reuseRoots.splice(0).map((root) =>
-      rm(root, { recursive: true, force: true })
-    ));
-  });
+  afterEach(clearFrozenReuseRoots);
 
   it("admits only a complete cache-authorized neutral 500Q snapshot producer", async () => {
     const fixture = await completeExpansionFixture();
@@ -450,32 +446,3 @@ describe("500Q expansion fill authority", () => {
     expect(state.verifyIntegrity).not.toHaveBeenCalled();
   });
 });
-
-const reuseRoots: string[] = [];
-
-async function frozenReuseEnvironment(
-  bundle: ReturnType<typeof recallBundle>
-): Promise<Record<string, string>> {
-  const root = await mkdtemp(join(tmpdir(), "snapshot-reuse-authority-"));
-  reuseRoots.push(root);
-  const path = join(root, "consumer-gate.json");
-  const producer = bundle.manifest.run_provenance!.code;
-  const raw = `${JSON.stringify({
-    schema_version: 1,
-    code: {
-      commit_sha: "7".repeat(40),
-      commit_sha7: "7".repeat(7),
-      worktree_state_sha256: "8".repeat(64)
-    },
-    snapshot_reuse: {
-      manifest_sha256: bundle.snapshotManifestSha256,
-      producer
-    }
-  })}\n`;
-  await writeFile(path, raw, "utf8");
-  return {
-    ALAYA_RECALL_EVAL_EMBEDDING: "env",
-    ALAYA_BENCH_GATE_CONTRACT_PATH: path,
-    ALAYA_BENCH_GATE_SHA256: createHash("sha256").update(raw).digest("hex")
-  };
-}
