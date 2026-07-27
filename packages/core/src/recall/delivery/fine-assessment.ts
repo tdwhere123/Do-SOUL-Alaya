@@ -31,6 +31,7 @@ import {
   type FineAssessmentPruneResult
 } from "./fine-assessment-prune.js";
 import {
+  hasObservedDeepHeadEmbedding,
   resolveDeepHeadAssessment,
   resolveDeepHeadScores,
   type RecallDeepHeadAssessment
@@ -137,6 +138,10 @@ export function deliverFineAssessment(
     answerRelevanceScores
   );
   const deepHeadScores = deepHead.scores;
+  const hasEmbeddingRefinement = hasObservedDeepHeadEmbedding(
+    preparation.candidates,
+    params.supplementaryData
+  );
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
     replacePublicRelevance
   });
@@ -150,13 +155,15 @@ export function deliverFineAssessment(
     // Pack by deep-head scores even when public relevance stays fused — otherwise
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
-    // Empty deep-head: fused public order (not coverage scramble). CE owns
-    // final order via delivery_rank; lightweight CE-off keeps public_relevance
-    // (100Q probe: delivery_rank cost B −4 hits vs fused final order).
+    // Without an independent semantic refinement, re-sorting by fused relevance
+    // would erase the set decision the lightweight head just made.
     finalOrderAfterCoverage: deepHeadScores.size === 0
       ? "public_relevance"
-      : replacePublicRelevance ? "delivery_rank" : "public_relevance",
-    maxHeadDropAfterCoverage: !replacePublicRelevance && deepHeadScores.size > 0
+      : replacePublicRelevance
+        ? "delivery_rank"
+        : hasEmbeddingRefinement ? "public_relevance" : "coverage",
+    maxHeadDropAfterCoverage: !replacePublicRelevance &&
+      hasEmbeddingRefinement && deepHeadScores.size > 0
       ? params.finalAuthorityMaxHeadDrop
       : undefined,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,

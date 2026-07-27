@@ -194,6 +194,53 @@ describe("final recall relevance ownership", () => {
     });
   });
 
+  it("preserves coverage order when the lightweight head has no semantic refinement", () => {
+    const primary = createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]);
+    const redundant = createMemory(ACTIVATION_WINNER_ID, 0.7, [{ facet: "occupation_work" }]);
+    const novel = createMemory(COVERAGE_NOVEL_ID, 0.1, [{ facet: "location_place" }]);
+    const memories = [primary, redundant, novel];
+    const basePolicy = buildPolicy();
+    const evidenceScores = {
+      [FUSION_WINNER_ID]: 1,
+      [ACTIVATION_WINNER_ID]: 0.9,
+      [COVERAGE_NOVEL_ID]: 0.8
+    };
+    const assessed = fineAssess({
+      candidates: memories.map((memory) => ({
+        ...createCoarseCandidate(memory),
+        structuralScore: evidenceScores[memory.object_id] ?? 0
+      })),
+      policy: {
+        ...basePolicy,
+        fine_assessment: {
+          ...basePolicy.fine_assessment,
+          budgets: { max_entries: 3, max_total_tokens: 100, per_dimension_limits: null }
+        }
+      },
+      winnerMemoryIds: new Set(),
+      supplementaryData: {
+        ...createSupplementaryData(),
+        evidenceFtsRanks: evidenceScores,
+        structuralScores: evidenceScores,
+        evidenceGistsByMemoryId: {
+          [FUSION_WINNER_ID]: "shared gist",
+          [ACTIVATION_WINNER_ID]: "shared gist",
+          [COVERAGE_NOVEL_ID]: "novel gist"
+        }
+      },
+      tokenEstimator: { estimate: () => 4 },
+      now: () => NOW,
+      warn: vi.fn()
+    });
+
+    expect(assessed.candidates.map((candidate) => candidate.object_id))
+      .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID, ACTIVATION_WINNER_ID]);
+    expect(assessed.diagnostics.map((candidate) => candidate.final_rank))
+      .toEqual(assessed.diagnostics.map((candidate) =>
+        candidate.rank_after_coverage_selector
+      ));
+  });
+
   it("keeps the live packet identical when deep diagnostic capture is enabled", () => {
     const memories = [
       createMemory(FUSION_WINNER_ID, 0.8, [{ facet: "occupation_work" }]),

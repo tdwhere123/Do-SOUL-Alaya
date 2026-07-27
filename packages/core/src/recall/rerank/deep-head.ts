@@ -50,6 +50,15 @@ type LightweightComponents = Readonly<{
   readonly fusionBaselineEligible: boolean;
 }>;
 
+export function hasObservedDeepHeadEmbedding(
+  candidates: readonly DeliverySelectionCandidate[],
+  supplementaryData: DeepHeadSupplementary
+): boolean {
+  return candidates.some(
+    (candidate) => embeddingSignal(candidate, supplementaryData) !== null
+  );
+}
+
 /** Prefer cross-encoder scores when present; otherwise score the pruned waist. */
 export function resolveDeepHeadScores(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
