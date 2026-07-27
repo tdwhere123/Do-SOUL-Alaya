@@ -114,7 +114,7 @@ function deriveRunEvidenceAuthority(
   window: readonly LongMemEvalQuestion[]
 ): LongMemEvalReleaseEvidenceAuthority | null {
   const offset = Math.max(0, opts.offset ?? 0);
-  if (opts.questionManifest !== undefined || offset !== 0) return null;
+  if (opts.questionManifest !== undefined) return null;
   return deriveLongMemEvalReleaseEvidenceAuthority(dataset.promotionAuthority, {
     kind: "execution_window",
     offset,

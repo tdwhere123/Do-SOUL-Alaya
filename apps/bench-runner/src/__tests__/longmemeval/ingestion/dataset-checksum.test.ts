@@ -159,10 +159,10 @@ describe("prepareLongMemEvalRun release evidence authority", () => {
     }
   );
 
-  it("keeps a nonzero-offset window diagnostic-only", async () => {
+  it("grants authority to a nonzero-offset execution window", async () => {
     committedPinRead.sha256 = await seedLocalDataset();
 
-    await expect(prepareCanonicalAuthority({ offset: 1 })).resolves.toBeNull();
+    await expect(prepareCanonicalAuthority({ offset: 1 })).resolves.not.toBeNull();
   });
 
   it("keeps a question-manifest selection diagnostic-only", async () => {
