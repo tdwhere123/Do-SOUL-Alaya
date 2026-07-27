@@ -170,6 +170,22 @@ describe("direct evidence transient embedding assessment", () => {
     });
   });
 
+  it("does not schedule evidence embedding without a scoring capability", async () => {
+    const evidence = [createEvidenceCapsule(0)];
+    const fixture = createRecallFixture({ evidence });
+
+    const result = await runRecall(fixture);
+
+    expect(findCandidate(result, evidence[0]!)).toBeDefined();
+    expect(result.diagnostics).toMatchObject({
+      evidence_embedding_status: "not_requested",
+      evidence_embedding_expected_count: 0,
+      evidence_embedding_scored_count: 0,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null
+    });
+  });
+
   it("keeps a transient evidence score off a same-id global memory candidate", async () => {
     const evidence = [createEvidenceCapsule(0)];
     const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
@@ -261,7 +277,7 @@ describe("direct evidence transient embedding assessment", () => {
 
 function createRecallFixture(params: Readonly<{
   readonly evidence: readonly Readonly<EvidenceCapsule>[];
-  readonly scoreEvidenceCandidates: NonNullable<EvidenceScoringPort["scoreEvidenceCandidates"]>;
+  readonly scoreEvidenceCandidates?: NonNullable<EvidenceScoringPort["scoreEvidenceCandidates"]>;
   readonly globalCollisionObjectId?: string;
   readonly maxEntries?: number;
   readonly embeddingEnabled?: boolean;
@@ -302,7 +318,9 @@ function createRecallFixture(params: Readonly<{
       supplementaryEntries: Object.freeze([]),
       similarityHintsByObjectId: Object.freeze({})
     }),
-    scoreEvidenceCandidates: params.scoreEvidenceCandidates
+    ...(params.scoreEvidenceCandidates === undefined
+      ? {}
+      : { scoreEvidenceCandidates: params.scoreEvidenceCandidates })
   };
   const service = new RecallService({
     ...dependencies,
@@ -318,7 +336,8 @@ function createRecallFixture(params: Readonly<{
         object_id: capsule.object_id,
         normalized_rank: evidenceRank(index)
       }))),
-      findRecallQualifiedByIds: vi.fn(async () => params.evidence)
+      findRecallQualifiedByIds: vi.fn(async () =>
+        params.evidence.map((capsule) => ({ capsule, verified_user_projection: false })))
     },
     embeddingRecallService,
     ...globalCollisionDependencies(params.globalCollisionObjectId)

@@ -1,6 +1,7 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
+  buildRecallCandidateDedupeKey,
   clamp01,
   isSynthesisChildCandidate,
   normalizeActivationScore,
@@ -26,9 +27,17 @@ export function scoreRecallFusionStream(
     return scoreSynthesisCapsuleFusionStream(candidate, stream, supplementaryData);
   }
   if (candidate.objectKind === "evidence_capsule") {
-    return stream === "evidence_fts"
-      ? clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0)
-      : 0;
+    if (stream === "evidence_fts") {
+      return clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0);
+    }
+    if (stream === "embedding_similarity") {
+      return clamp01(
+        supplementaryData.evidenceSemanticScoresByCandidateKey.get(
+          buildRecallCandidateDedupeKey(candidate)
+        ) ?? 0
+      );
+    }
+    return 0;
   }
   if (candidate.originPlane === "global") {
     return scoreGlobalFusionStream(candidate, stream, supplementaryData, nowIso);

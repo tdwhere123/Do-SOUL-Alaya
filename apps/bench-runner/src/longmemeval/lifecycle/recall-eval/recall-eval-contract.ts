@@ -15,6 +15,8 @@ import type { LongMemEvalVariant } from "../../ingestion/dataset.js";
 import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
 import type { LongMemEvalExpansionCapability } from
   "../../promotion/expansion/expansion-capability.js";
+import type { EvidenceSearchProjectionRebuildReport } from
+  "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 
 export interface RecallEvalOptions {
   readonly snapshotDbPath: string;
@@ -33,6 +35,7 @@ export interface RecallEvalOptions {
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
+  readonly derivedEvidenceProjectionRebuild?: boolean;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
 }
 
@@ -44,6 +47,7 @@ export interface RecallEvalResult {
   readonly payload: KpiPayload;
   readonly snapshotManifest: LongMemEvalSnapshotManifest;
   readonly perQuestionDelivered: ReadonlyMap<string, readonly string[]>;
+  readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
 }
 
 export interface RecallEvalQuestionResult {

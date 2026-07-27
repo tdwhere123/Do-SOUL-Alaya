@@ -5,10 +5,8 @@ import {
   SignalState,
   SoulSignalMaterializedPayloadSchema,
   buildGardenSourceTurnFallbackReceiptPreimage,
-  buildGardenSourceTurnFallbackV2ReceiptPreimage,
   formatGardenSourceTurnFallbackArtifactRef,
   formatGardenSourceTurnFallbackSourceHash,
-  formatGardenSourceTurnFallbackV2SourceHash,
   type CandidateMemorySignal,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
@@ -20,6 +18,14 @@ import {
   createEvidenceCapsuleRepo,
   evidenceCapsuleDatabases
 } from "./evidence-capsule-repo-fixture.js";
+import {
+  ASSISTANT_RECOMMENDATION,
+  assistantMatch,
+  ownerMatch,
+  seedAssistantOnlyFallbackV2,
+  seedFallbackV2,
+  tamperAssistantObservationProof
+} from "./assistant-observation-qualified-fixture.js";
 
 afterEach(() => {
   for (const database of evidenceCapsuleDatabases) database.close();
@@ -38,9 +44,12 @@ describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
     insertMaterializationEvent(database, proof.signal, proof.capsule, "event-valid");
 
     await expect(repo.findRecallQualifiedByIds("workspace-1", [
-      proof.capsule.object_id,
-      "missing"
-    ])).resolves.toEqual([proof.capsule]);
+      ownerMatch(proof.capsule.object_id),
+      ownerMatch("missing")
+    ])).resolves.toEqual([{
+      capsule: proof.capsule,
+      verified_user_projection: false
+    }]);
   });
 
   it("accepts a v2 fallback only when the persisted user projection is bound", async () => {
@@ -54,8 +63,11 @@ describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
 
     await expect(repo.findRecallQualifiedByIds(
       "workspace-1",
-      [proof.capsule.object_id]
-    )).resolves.toEqual([proof.capsule]);
+      [ownerMatch(proof.capsule.object_id)]
+    )).resolves.toEqual([{
+      capsule: proof.capsule,
+      verified_user_projection: true
+    }]);
 
     database.connection.prepare(
       "UPDATE evidence_capsules SET excerpt = ? WHERE object_id = ?"
@@ -63,9 +75,133 @@ describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
 
     await expect(repo.findRecallQualifiedByIds(
       "workspace-1",
-      [proof.capsule.object_id]
+      [ownerMatch(proof.capsule.object_id)]
     )).resolves.toEqual([]);
   });
+
+  it("rederives an exact Assistant observation from a trusted v2 receipt", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const proof = await seedFallbackV2(
+      database,
+      repo,
+      "77777777-7777-4777-8777-777777777777",
+      "assistant"
+    );
+    insertMaterializationEvent(database, proof.signal, proof.capsule, "event-assistant-observation");
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [assistantMatch(proof.capsule.object_id)]
+    )).resolves.toEqual([{
+      capsule: proof.capsule,
+      verified_user_projection: true,
+      matched_projection: {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: ASSISTANT_RECOMMENDATION
+      }
+    }]);
+  });
+
+  it("requires a typed Assistant descriptor for an Assistant-only v2 receipt", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const proof = await seedAssistantOnlyFallbackV2(
+      database,
+      repo,
+      "99999999-9999-4999-8999-999999999999"
+    );
+    insertMaterializationEvent(database, proof.signal, proof.capsule, "event-assistant-only");
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [ownerMatch(proof.capsule.object_id)]
+    )).resolves.toEqual([]);
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [assistantMatch(proof.capsule.object_id)]
+    )).resolves.toEqual([{
+      capsule: proof.capsule,
+      verified_user_projection: false,
+      matched_projection: {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: ASSISTANT_RECOMMENDATION
+      }
+    }]);
+  });
+
+  it("rederives Assistant content without treating a changed owner excerpt as authority", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const proof = await seedFallbackV2(
+      database,
+      repo,
+      "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "assistant"
+    );
+    insertMaterializationEvent(database, proof.signal, proof.capsule, "event-owner-excerpt-changed");
+    database.connection.prepare(
+      "UPDATE evidence_capsules SET excerpt = ? WHERE object_id = ?"
+    ).run("changed owner excerpt", proof.capsule.object_id);
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [assistantMatch(proof.capsule.object_id)]
+    )).resolves.toMatchObject([{
+      capsule: {
+        object_id: proof.capsule.object_id,
+        excerpt: "changed owner excerpt"
+      },
+      verified_user_projection: false,
+      matched_projection: {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: ASSISTANT_RECOMMENDATION
+      }
+    }]);
+  });
+
+  it.each(["digest", "span"] as const)(
+    "fail-closes a receipt-invalid Assistant observation %s",
+    async (tamper) => {
+      const { database, repo } = await createEvidenceCapsuleRepo();
+      const proof = await seedFallbackV2(
+        database,
+        repo,
+        "88888888-8888-4888-8888-888888888888",
+        "assistant"
+      );
+      insertMaterializationEvent(database, proof.signal, proof.capsule, `event-tampered-${tamper}`);
+      tamperAssistantObservationProof(database, proof, tamper);
+
+      await expect(repo.findRecallQualifiedByIds(
+        "workspace-1",
+        [assistantMatch(proof.capsule.object_id)]
+      )).resolves.toEqual([]);
+    }
+  );
+
+  it.each(["source_hash", "workspace", "content"] as const)(
+    "fails loudly when a requested Assistant projection drifts in %s",
+    async (tamper) => {
+      const { database, repo } = await createEvidenceCapsuleRepo();
+      const proof = await seedFallbackV2(
+        database,
+        repo,
+        "77777777-7777-4777-8777-777777777777",
+        "assistant"
+      );
+      insertMaterializationEvent(database, proof.signal, proof.capsule, `event-drift-${tamper}`);
+      tamperAssistantObservationProof(database, proof, tamper);
+
+      await expect(repo.findRecallQualifiedByIds(
+        "workspace-1",
+        [assistantMatch(proof.capsule.object_id)]
+      )).rejects.toMatchObject({
+        name: "EvidenceProjectionIntegrityError",
+        message: expect.stringMatching(/projection integrity/u)
+      });
+    }
+  );
 
   it("rejects a forged format-only evidence row", async () => {
     const { repo } = await createEvidenceCapsuleRepo();
@@ -87,7 +223,7 @@ describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
 
     await expect(repo.findRecallQualifiedByIds(
       "workspace-1",
-      [forged.object_id]
+      [ownerMatch(forged.object_id)]
     )).resolves.toEqual([]);
   });
 
@@ -123,7 +259,7 @@ describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
 
       await expect(repo.findRecallQualifiedByIds(
         "workspace-1",
-        [proof.capsule.object_id]
+        [ownerMatch(proof.capsule.object_id)]
       )).resolves.toEqual([]);
     }
   );
@@ -176,122 +312,6 @@ async function seedFallback(
   });
   await repo.create(capsule);
   return { signal: materialized, capsule };
-}
-
-async function seedFallbackV2(
-  database: StorageDatabase,
-  repo: Awaited<ReturnType<typeof createEvidenceCapsuleRepo>>["repo"],
-  evidenceId: string
-): Promise<{
-  readonly signal: CandidateMemorySignal;
-  readonly capsule: EvidenceCapsule;
-}> {
-  const signal = createFallbackV2Signal();
-  const materialized = await persistMaterializedSignal(database, signal);
-  const capsule = createFallbackV2Capsule(evidenceId, materialized);
-  await repo.create(capsule);
-  return { signal: materialized, capsule };
-}
-
-function createFallbackV2Signal(): CandidateMemorySignal {
-  const receiptInput = createFallbackV2ReceiptInput();
-  const digest = sha256(buildGardenSourceTurnFallbackV2ReceiptPreimage(receiptInput));
-  return CandidateMemorySignalSchema.parse({
-    signal_id: receiptInput.signal_id,
-    workspace_id: receiptInput.workspace_id,
-    run_id: receiptInput.run_id,
-    surface_id: receiptInput.surface_id,
-    source: "garden_compile",
-    signal_kind: "potential_evidence_anchor",
-    signal_state: "emitted",
-    object_kind: "source_turn",
-    scope_hint: null,
-    domain_tags: ["source-turn"],
-    confidence: 1,
-    evidence_refs: [],
-    source_memory_refs: [],
-    supersedes_refs: [],
-    exception_to_refs: [],
-    contradicts_refs: [],
-    incompatible_with_refs: [],
-    raw_payload: {
-      full_turn_content: receiptInput.source_corpus,
-      source_role_spans: receiptInput.source_role_spans,
-      evidence_preservation: {
-        version: 2,
-        reason: receiptInput.reason,
-        truncated: false,
-        chars_clipped: 0,
-        source_receipt_sha256: digest
-      }
-    },
-    source_observation: receiptInput.source_observation,
-    created_at: receiptInput.created_at
-  });
-}
-
-function createFallbackV2ReceiptInput() {
-  const corpus = "User: Source fact\nAssistant: Acknowledged";
-  const sourceObservation = {
-    observed_at: "2026-03-20T00:00:00.000Z",
-    authority: "trusted_host_event" as const,
-    source_event_id: "source-signal-v2"
-  };
-  const receiptInput = {
-    signal_id: "signal-v2",
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    created_at: "2026-03-20T00:00:00.000Z",
-    source_observation: sourceObservation,
-    source_corpus: corpus,
-    source_role_spans: [
-      { role: "user" as const, start: 6, end: 17 },
-      { role: "assistant" as const, start: 29, end: 41 }
-    ],
-    reason: "empty_extraction" as const,
-    truncated: false,
-    chars_clipped: 0
-  };
-  return receiptInput;
-}
-
-async function persistMaterializedSignal(
-  database: StorageDatabase,
-  signal: CandidateMemorySignal
-): Promise<CandidateMemorySignal> {
-  const signalRepo = new SqliteSignalRepo(database);
-  await signalRepo.create(signal);
-  await signalRepo.updateState(signal.signal_id, SignalState.MATERIALIZED);
-  return CandidateMemorySignalSchema.parse({
-    ...signal,
-    signal_state: SignalState.MATERIALIZED
-  });
-}
-
-function createFallbackV2Capsule(
-  evidenceId: string,
-  signal: CandidateMemorySignal
-): EvidenceCapsule {
-  return createEvidenceCapsule({
-    object_id: evidenceId,
-    lifecycle_state: "active",
-    created_by: "garden_compile",
-    evidence_kind: "conversation_excerpt",
-    evidence_health_state: "verified",
-    gist: "User: Source fact\nAssistant: Acknowledged",
-    excerpt: "Source fact",
-    source_hash: formatGardenSourceTurnFallbackV2SourceHash(receiptDigest(signal)),
-    physical_anchor: {
-      file_path: null,
-      line_range: null,
-      symbol_name: null,
-      artifact_ref: formatGardenSourceTurnFallbackArtifactRef(signal.signal_id)
-    },
-    run_id: signal.run_id,
-    workspace_id: signal.workspace_id,
-    surface_id: signal.surface_id
-  });
 }
 
 function createFallbackSignal(signalId: string, corpus: string): CandidateMemorySignal {

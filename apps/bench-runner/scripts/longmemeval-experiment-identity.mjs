@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -38,7 +38,8 @@ export function buildExperimentPairIdentity(cellA, cellB) {
     "dataset",
     "runner",
     "weight_overrides",
-    "evaluation_slice"
+    "evaluation_slice",
+    "derived_snapshot_identity"
   ];
   if (common.some((field) => !isDeepStrictEqual(cellA[field], cellB[field])) ||
       !isDeepStrictEqual(
@@ -54,12 +55,29 @@ export function buildExperimentPairIdentity(cellA, cellB) {
     dataset: cellA.dataset,
     runner: cellA.runner,
     evaluation_slice: cellA.evaluation_slice,
+    derived_snapshot_identity: cellA.derived_snapshot_identity,
     weight_overrides: cellA.weight_overrides,
     cells: {
       A: cellA.treatment,
       B: cellB.treatment
     }
   };
+}
+
+export function bindExperimentCellRebuildIdentity(cell, rankIdentity) {
+  if (cell?.treatment?.derived_evidence_projection_rebuild !== true ||
+      cell.derived_snapshot_identity !== null) {
+    throw new Error("experiment cell is not awaiting a derived rebuild identity");
+  }
+  const report = rankIdentity?.snapshot_binding
+    ?.derived_evidence_projection_rebuild;
+  if (!isRebuildReport(report)) {
+    throw new Error("experiment rank artifact lacks a complete derived rebuild identity");
+  }
+  if (report.input_db_sha256 !== cell.snapshot?.db_sha256) {
+    throw new Error("derived rebuild input differs from the frozen experiment snapshot");
+  }
+  return { ...cell, derived_snapshot_identity: report };
 }
 
 function assertCell(value, cell, embeddingMode) {
@@ -74,8 +92,44 @@ function assertCell(value, cell, embeddingMode) {
     isEvaluationSlice(value.evaluation_slice) &&
     typeof value.treatment?.extraction_model === "string" &&
     value.treatment?.embedding_mode === embeddingMode &&
-    value.treatment?.cross_encoder_enabled === false;
+    value.treatment?.cross_encoder_enabled === false &&
+    typeof value.treatment?.derived_evidence_projection_rebuild === "boolean" &&
+    (value.treatment.derived_evidence_projection_rebuild
+      ? isRebuildReport(value.derived_snapshot_identity) &&
+        value.derived_snapshot_identity.input_db_sha256 === value.snapshot.db_sha256
+      : value.derived_snapshot_identity === null);
   if (!valid) throw new Error(`experiment A/B identity has invalid cell ${cell}`);
+}
+
+function isRebuildReport(value) {
+  return isRecord(value) &&
+    value.schema_version === 1 &&
+    value.promotable === false &&
+    isSha256(value.input_db_sha256) &&
+    isSha256(value.rebuilt_db_identity_sha256) &&
+    isNonnegativeInteger(value.source_schema_version) &&
+    isNonnegativeInteger(value.working_schema_version) &&
+    [
+      "eligible_owner_count",
+      "rebuilt_owner_count",
+      "rejected_owner_count",
+      "zero_child_owner_count",
+      "nonzero_child_owner_count",
+      "child_count"
+    ].every((field) => isNonnegativeInteger(value[field])) &&
+    Array.isArray(value.projection_kind_counts) &&
+    value.projection_kind_counts.every((row) =>
+      isRecord(row) && typeof row.projection_kind === "string" &&
+      isNonnegativeInteger(row.child_count)) &&
+    isSha256(value.projection_content_sha256);
+}
+
+function isSha256(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isNonnegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
 }
 
 function isEvaluationSlice(value) {
@@ -129,9 +183,25 @@ async function run(argv) {
     );
     return;
   }
+  if (command === "bind-rebuild" && args.length === 2) {
+    const [cellPath, rankPath] = args;
+    const [cell, rank] = await Promise.all([
+      readFile(cellPath).then((bytes) => parseJson(bytes, cellPath)),
+      readFile(rankPath).then((bytes) => parseJson(bytes, rankPath))
+    ]);
+    const temporaryPath = `${cellPath}.tmp-${process.pid}`;
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(bindExperimentCellRebuildIdentity(cell, rank), null, 2)}\n`,
+      { encoding: "utf8", flag: "wx" }
+    );
+    await rename(temporaryPath, cellPath);
+    return;
+  }
   throw new Error(
     "usage: longmemeval-experiment-identity.mjs " +
-    "snapshot <snapshot.db> <dataset.json> | pair <A.json> <B.json> <out.json>"
+    "snapshot <snapshot.db> <dataset.json> | " +
+    "pair <A.json> <B.json> <out.json> | bind-rebuild <cell.json> <rank.json>"
   );
 }
 

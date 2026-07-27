@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EvidenceCapsuleSchema, EvidenceHealthStateSchema, EvidenceKind, EvidenceKindSchema } from "../../index.js";
+import {
+  EvidenceCapsuleSchema,
+  EvidenceHealthStateSchema,
+  EvidenceKind,
+  EvidenceKindSchema,
+  EvidenceSearchProjectionKindSchema,
+  EvidenceSearchProjectionSchema
+} from "../../index.js";
 
 const validTimestamp = "2026-03-20T00:00:00.000Z";
 
@@ -187,5 +194,19 @@ describe("EvidenceCapsuleSchema", () => {
         }
       }).success
     ).toBe(false);
+  });
+
+  it("keeps projection identity kind-aware", () => {
+    const projections = [
+      { projection_id: 1, projection_kind: "user_assertion", content: "I use a TrailShell pack." },
+      { projection_id: 1, projection_kind: "assistant_observation", content: "Use the TrailShell pack." }
+    ] as const;
+
+    expect(EvidenceSearchProjectionKindSchema.options).toEqual([
+      "user_assertion",
+      "assistant_observation"
+    ]);
+    expect(projections.map((projection) => EvidenceSearchProjectionSchema.parse(projection)))
+      .toEqual(projections);
   });
 });

@@ -407,4 +407,14 @@ describe("prepareRecallEvalDataDir", () => {
       ALAYA_LOCAL_ONNX_THREADS: "65"
     })).rejects.toThrow(/ALAYA_LOCAL_ONNX_THREADS/u);
   });
+
+  it("marks a derived evidence projection rebuild as non-promotable", async () => {
+    const attribution = await buildRecallEvalRuntimeAttribution(
+      attributedManifest("a".repeat(64)),
+      { ALAYA_RECALL_EVAL_EMBEDDING: "disabled" },
+      { nonPromotableDerivedRebuild: true }
+    );
+
+    expect(attribution.gate_eligible).toBe(false);
+  });
 });

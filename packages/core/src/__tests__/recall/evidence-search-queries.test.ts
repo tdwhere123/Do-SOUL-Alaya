@@ -165,6 +165,16 @@ describe("evidence batch hit validation", () => {
       object_id: "evidence-second",
       normalized_rank: 0.8,
       trigram_rank: Number.POSITIVE_INFINITY
+    }],
+    ["a non-positive projection id", {
+      object_id: "evidence-second",
+      normalized_rank: 0.8,
+      matched_projection: { projection_id: 0, projection_kind: "assistant_observation" }
+    }],
+    ["an unknown projection kind", {
+      object_id: "evidence-second",
+      normalized_rank: 0.8,
+      matched_projection: { projection_id: 1, projection_kind: "unverified_summary" }
     }]
   ])("retries the complete scalar reference after %s", async (_caseName, malformedHit) => {
     const fixture = createEvidenceBatchFixture();

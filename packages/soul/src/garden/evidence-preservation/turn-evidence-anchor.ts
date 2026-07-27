@@ -11,6 +11,7 @@ import {
   formatGardenSourceTurnFallbackSourceHash,
   formatGardenSourceTurnFallbackV2SourceHash,
   isGardenSourceTurnFallbackV2Receipt,
+  projectGardenSourceTurnFallbackV2AssistantObservations,
   projectGardenSourceTurnFallbackV2UserContent,
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
@@ -84,6 +85,7 @@ export function buildGardenTurnEvidenceArtifactRef(signalId: string): string {
 export interface VerifiedGardenTurnEvidenceProjection {
   readonly sourceHash: string;
   readonly userContent: string | null;
+  readonly assistantObservations: readonly string[];
 }
 
 export function resolveVerifiedGardenTurnEvidenceProjection(
@@ -93,30 +95,46 @@ export function resolveVerifiedGardenTurnEvidenceProjection(
   if (!hasMaterializableFallbackState(signal.signal_state)) return null;
   const receipt = verifyGardenSourceTurnFallbackReceipt(signal, digest);
   if (receipt === null || sourceCorpus !== receipt.source_corpus) return null;
+  const v2Receipt = isGardenSourceTurnFallbackV2Receipt(receipt) ? receipt : null;
+  const userContent = v2Receipt === null
+    ? null
+    : projectGardenSourceTurnFallbackV2UserContent(v2Receipt);
   return Object.freeze({
-    sourceHash: isGardenSourceTurnFallbackV2Receipt(receipt)
+    sourceHash: v2Receipt !== null
       ? formatGardenSourceTurnFallbackV2SourceHash(receipt.digest)
       : formatGardenSourceTurnFallbackSourceHash(receipt.digest),
-    userContent: isGardenSourceTurnFallbackV2Receipt(receipt)
-      ? projectGardenSourceTurnFallbackV2UserContent(receipt)
-      : null
+    userContent: userContent === "" ? null : userContent,
+    assistantObservations: v2Receipt !== null
+      ? projectGardenSourceTurnFallbackV2AssistantObservations(v2Receipt)
+      : Object.freeze([])
   });
 }
 
 export function buildGardenTurnEvidenceSearchProjections(
   signal: CandidateMemorySignal
 ): readonly Readonly<EvidenceSearchProjection>[] {
-  const sourceCorpus = signal.raw_payload.full_turn_content;
-  if (typeof sourceCorpus !== "string") return Object.freeze([]);
-  const projection = resolveVerifiedGardenTurnEvidenceProjection(signal, sourceCorpus);
-  if (projection === null || projection.userContent === null) return Object.freeze([]);
-  return Object.freeze(buildOfficialApiSourceAssertions(projection.userContent).map((assertion) =>
+  const receipt = verifyGardenSourceTurnFallbackReceipt(signal, digest);
+  if (receipt === null || !isGardenSourceTurnFallbackV2Receipt(receipt)) {
+    return Object.freeze([]);
+  }
+  const userContent = projectGardenSourceTurnFallbackV2UserContent(receipt);
+  const userAssertions = userContent === ""
+    ? []
+    : buildOfficialApiSourceAssertions(userContent).map((assertion) =>
     Object.freeze({
       projection_id: assertion.assertion_id,
       projection_kind: "user_assertion" as const,
       content: assertion.text
     })
-  ));
+  );
+  const assistantObservations =
+    projectGardenSourceTurnFallbackV2AssistantObservations(receipt)
+      .map((content, index) => Object.freeze({
+      projection_id: index + 1,
+      projection_kind: "assistant_observation" as const,
+      content
+      }));
+  return Object.freeze([...userAssertions, ...assistantObservations]);
 }
 
 function buildCompleteV2RawPayload(
@@ -161,7 +179,6 @@ function buildTrustedSourceDocument(
     if (!parsed.success || parsed.data.content.trim().length === 0) return null;
     messages.push(parsed.data);
   }
-  if (!messages.some((message) => message.role === "user")) return null;
   return formatSourceTurnMessages(messages);
 }
 

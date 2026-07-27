@@ -191,7 +191,11 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
-  const score = params.context.dependencies.embeddingRecallService?.scoreEvidenceCandidates;
+  const service = params.context.dependencies.embeddingRecallService;
+  const score = service?.scoreEvidenceCandidates;
+  if (score === undefined || params.queryText === null) {
+    return emptyEvidenceScoring("not_requested", 0);
+  }
   const candidates = params.fineCandidates
     .filter((candidate) => candidate.objectKind === "evidence_capsule")
     .slice(0, 25)
@@ -201,12 +205,9 @@ async function collectEvidenceSemanticScores(params: Readonly<{
       content: candidate.entry.content
     }));
   if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
-  if (score === undefined || params.queryText === null) {
-    return emptyEvidenceScoring("not_requested", candidates.length);
-  }
   const startedAt = performance.now();
   try {
-    return await score.call(params.context.dependencies.embeddingRecallService, {
+    return await score.call(service, {
       workspaceId: params.workspaceId,
       runId: params.runId,
       queryText: params.queryText,

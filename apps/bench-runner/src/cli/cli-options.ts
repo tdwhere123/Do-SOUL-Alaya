@@ -19,6 +19,7 @@ import {
   readFlagValue,
   readRequiredFlagValue
 } from "./options/flag-values.js";
+import { consumeBooleanFlags } from "./options/boolean-flags.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -59,6 +60,7 @@ export interface ParsedFlags {
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
+  readonly rebuildEvidenceSearchProjections?: boolean;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
   readonly qa: boolean;
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
@@ -99,6 +101,7 @@ export interface ParsedFlagsState {
   legacyManifestSha256?: string;
   legacyDatasetSha256?: string;
   experiment: boolean;
+  rebuildEvidenceSearchProjections: boolean;
   qa: boolean;
   edgePlane: boolean;
   shards: string[];
@@ -132,6 +135,7 @@ function createParsedFlagsState(): ParsedFlagsState {
     qa: false,
     edgePlane: false,
     experiment: false,
+    rebuildEvidenceSearchProjections: false,
     legacySnapshot: false,
     shards: [],
     collectingShards: false
@@ -382,39 +386,6 @@ function consumeLegacyIdentityFlags(
   return undefined;
 }
 
-function consumeBooleanFlags(
-  args: ReadonlyArray<string>,
-  index: number,
-  token: string,
-  state: ParsedFlagsState
-): number {
-  if (token === "--force") {
-    state.force = true;
-    return index;
-  }
-  if (token === "--qa" || token === "--answer-judge") {
-    state.qa = true;
-    return index;
-  }
-  if (token === "--edge-plane") {
-    state.edgePlane = true;
-    return index;
-  }
-  if (token === "--legacy-snapshot") {
-    state.legacySnapshot = true;
-    return index;
-  }
-  if (token === "--experiment") {
-    state.experiment = true;
-    return index;
-  }
-  if (token === "--source") {
-    state.source = args[index + 1];
-    return index + 1;
-  }
-  return index;
-}
-
 function parseEmbeddingMode(raw: string): BenchEmbeddingMode {
   if (raw !== "disabled" && raw !== "env") {
     throw new Error("--embedding must be one of: disabled, env");
@@ -493,6 +464,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     legacyManifestSha256: state.legacyManifestSha256,
     legacyDatasetSha256: state.legacyDatasetSha256,
     experiment: state.experiment,
+    rebuildEvidenceSearchProjections: state.rebuildEvidenceSearchProjections,
     qa: state.qa,
     edgePlane: state.edgePlane
   };

@@ -101,7 +101,7 @@ describe("Garden turn evidence fallback", () => {
       });
   });
 
-  it("projects only grounded User assertions as receipt-bound search children", () => {
+  it("keeps User assertions atomic beside complete Assistant observations", () => {
     const signal = buildStructuredFallback([
       message("u1", "user", "I bought my bookshelf from IKEA. Have you heard of it?"),
       message("a1", "assistant", "User: The private answer mentions a walnut desk."),
@@ -118,6 +118,11 @@ describe("Garden turn evidence fallback", () => {
         projection_id: 2,
         projection_kind: "user_assertion",
         content: "I named my playlist Summer Vibes."
+      },
+      {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: "User: The private answer mentions a walnut desk."
       }
     ]);
   });
@@ -132,12 +137,62 @@ describe("Garden turn evidence fallback", () => {
     expect(buildGardenTurnEvidenceSearchProjections(legacy)).toEqual([]);
   });
 
+  it("projects the full trusted Assistant message as a typed observation without promoting the User question", () => {
+    const recommendation = "Choose the moss-green TrailShell pack; its roll-top keeps a laptop dry in rain. It also dries quickly overnight.";
+    const signal = buildStructuredFallback([
+      message("u1", "user", "Which backpack should I use for a rainy commute?"),
+      message("a1", "assistant", recommendation)
+    ])!;
+
+    expect(buildGardenTurnEvidenceSearchProjections(signal)).toEqual([
+      {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: recommendation
+      }
+    ]);
+  });
+
+  it("keeps a trusted Assistant-only round as a v2 observation without inventing User authority", () => {
+    const observation = "Use the TrailShell pack for rain. Its roll-top protects a laptop.";
+    const signal = buildStructuredFallback([
+      message("a1", "assistant", observation)
+    ])!;
+
+    expect(signal.raw_payload).toEqual({
+      full_turn_content: `Assistant: ${observation}`,
+      source_role_spans: [
+        { role: "assistant", start: "Assistant: ".length, end: `Assistant: ${observation}`.length }
+      ],
+      evidence_preservation: {
+        version: 2,
+        reason: "empty_extraction",
+        truncated: false,
+        chars_clipped: 0,
+        source_receipt_sha256: expect.stringMatching(/^[a-f0-9]{64}$/u)
+      }
+    });
+    expect(buildGardenTurnEvidenceSearchProjections(signal)).toEqual([
+      {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: observation
+      }
+    ]);
+    expect(buildEvidenceInput(signal, undefined, { fullTurnExcerpt: true }))
+      .toMatchObject({
+        gist: `Assistant: ${observation}`,
+        excerpt: "Signal fallback-1 (potential_evidence_anchor)",
+        semantic_anchor: {
+          summary: "Signal fallback-1 (potential_evidence_anchor)"
+        },
+        source_hash: expect.stringMatching(
+          /^sha256:garden-source-turn-fallback-v2:[a-f0-9]{64}$/u
+        )
+      });
+  });
+
   it.each([
-    {
-      name: "no User message",
-      messages: [message("a1", "assistant", "assistant-only evidence")],
-      sourceObservation: trustedObservation()
-    },
     {
       name: "untrusted delivery observation",
       messages: [message("u1", "user", "reported role")],

@@ -6,7 +6,8 @@
 #           MATRIX_EXTRACTION_MODEL (must equal cache manifest),
 #           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys),
 #           MATRIX_EXPERIMENT=1 for the contract-free local path,
-#           MATRIX_LIMIT / MATRIX_OFFSET for experiment-only slices.
+#           MATRIX_LIMIT / MATRIX_OFFSET for experiment-only slices,
+#           MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS=1 for a derived rebuild.
 set -euo pipefail
 
 CELL="${1:-}"
@@ -23,6 +24,15 @@ EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
 [[ "$EXPERIMENT" == "0" || "$EXPERIMENT" == "1" ]] || {
   echo "MATRIX_EXPERIMENT must be 0 or 1" >&2; exit 64;
 }
+REBUILD_EVIDENCE_PROJECTIONS="${MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS:-0}"
+[[ "$REBUILD_EVIDENCE_PROJECTIONS" == "0" ||
+   "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]] || {
+  echo "MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS must be 0 or 1" >&2; exit 64;
+}
+if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" && "$EXPERIMENT" != "1" ]]; then
+  echo "evidence search projection rebuild requires MATRIX_EXPERIMENT=1" >&2
+  exit 64
+fi
 if [[ "$EXPERIMENT" == "1" && -n "${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" ]]; then
   echo "local experiment requires default recall weights" >&2
   exit 64
@@ -117,6 +127,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" 
   SNAPSHOT_SHA256="$SNAPSHOT_SHA256" CACHE_MANIFEST_SHA256="$CACHE_MANIFEST_SHA256" \
   DATASET_SHA256="$DATASET_SHA256" \
   EXTRACTION_MODEL="$EXTRACTION_MODEL" \
+  REBUILD_EVIDENCE_PROJECTIONS="$REBUILD_EVIDENCE_PROJECTIONS" \
   SLICE_LIMIT="$SLICE_LIMIT" SLICE_OFFSET="$SLICE_OFFSET" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
   python3 - "$IDENTITY_PATH" <<'PY'
@@ -144,8 +155,11 @@ payload = {
     "extraction_model": os.environ["EXTRACTION_MODEL"],
     "embedding_mode": os.environ["EMBEDDING_MODE"],
     "cross_encoder_enabled": os.environ["CROSS_ENABLED"] == "true",
+    "derived_evidence_projection_rebuild":
+      os.environ["REBUILD_EVIDENCE_PROJECTIONS"] == "1",
   },
   "weight_overrides": None,
+  "derived_snapshot_identity": None,
 }
 if os.environ["EXPERIMENT"] == "1":
   payload["mode"] = "experiment"
@@ -206,6 +220,9 @@ else
     "ALAYA_BENCH_EXTRACTION_CACHE_MIN_COVERAGE=1"
   )
 fi
+if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]]; then
+  CLI_ARGS+=(--rebuild-evidence-search-projections)
+fi
 if [[ -n "$SLICE_LIMIT" ]]; then
   CLI_ARGS+=(--limit "$SLICE_LIMIT" --offset "$SLICE_OFFSET")
 fi
@@ -251,6 +268,11 @@ mapfile -d '' entries < <(
 [[ "${#entries[@]}" -eq 1 ]] || { echo "expected exactly one committed evidence entry" >&2; exit 65; }
 mkdir -p "$(dirname "$EVIDENCE_ROOT")"
 mv "${entries[0]}" "$EVIDENCE_ROOT"
+if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]]; then
+  rtk node "$SCRIPT_DIR/longmemeval-experiment-identity.mjs" bind-rebuild \
+    "$IDENTITY_PATH" \
+    "$EVIDENCE_ROOT/recall-eval-rank-identity.json"
+fi
 if [[ -f "$EVIDENCE_ROOT/kpi.json" ]]; then
   echo "kpi: $EVIDENCE_ROOT/kpi.json" >&2
 fi

@@ -227,6 +227,7 @@ async function emitPostTurnExtractSignals(
     runId: payload.run_id,
     createdAt: payload.created_at ?? row.created_at,
     turnContent: buildPostTurnContent(payload),
+    turnMessages: buildPostTurnConversationMessages(payload),
     sourceObservation: payload.source_observation,
     candidates: stableCandidates,
     signalReceiver: input.signalReceiver,

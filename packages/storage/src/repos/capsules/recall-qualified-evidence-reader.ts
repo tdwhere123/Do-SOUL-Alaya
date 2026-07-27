@@ -6,7 +6,6 @@ import {
   formatGardenSourceTurnFallbackSourceHash,
   formatGardenSourceTurnFallbackV2SourceHash,
   isGardenSourceTurnFallbackV2Receipt,
-  projectGardenSourceTurnFallbackV2UserContent,
   readGardenSourceTurnFallbackArtifactSignalId,
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
@@ -20,6 +19,18 @@ import {
   parseEvidenceCapsuleRow,
   type EvidenceCapsuleRow
 } from "./evidence-capsule-mappers.js";
+import type {
+  EvidenceSearchMatch,
+  RecallQualifiedEvidence
+} from "./evidence-recall-types.js";
+import {
+  compareQualifiedProjectionIdentity,
+  EvidenceProjectionIntegrityError,
+  normalizeEvidenceSearchMatches,
+  qualifyEvidenceMatch,
+  readQualifiedProjectionIndex,
+  type StoredProjectionRow
+} from "./qualification/qualified-evidence-projection.js";
 
 const QUERY_CHUNK_SIZE = 500;
 
@@ -27,6 +38,7 @@ interface QualificationStatements {
   readonly findEvidenceRows: BetterSqlite3.Statement;
   readonly findSignalRows: BetterSqlite3.Statement;
   readonly findMaterializationRows: BetterSqlite3.Statement;
+  readonly findProjectionRows: BetterSqlite3.Statement;
 }
 
 interface StoredSignalRow {
@@ -68,6 +80,12 @@ interface EvidenceCandidate {
   readonly signalId: string;
 }
 
+interface QualificationInputs {
+  readonly candidates: readonly EvidenceCandidate[];
+  readonly signals: ReadonlyMap<string, Readonly<CandidateMemorySignal>>;
+  readonly events: ReadonlyMap<string, readonly StoredMaterializationRow[]>;
+}
+
 export class RecallQualifiedEvidenceReader {
   private readonly statementHolder: RefreshableStatementHolder<QualificationStatements>;
 
@@ -77,31 +95,110 @@ export class RecallQualifiedEvidenceReader {
 
   public find(
     workspaceId: string,
-    evidenceObjectIds: readonly string[]
-  ): readonly Readonly<EvidenceCapsule>[] {
-    const ids = uniqueNonEmpty(evidenceObjectIds);
-    if (ids.length === 0) return [];
-    const qualified: Readonly<EvidenceCapsule>[] = [];
-    for (let offset = 0; offset < ids.length; offset += QUERY_CHUNK_SIZE) {
-      qualified.push(...this.findChunk(workspaceId, ids.slice(offset, offset + QUERY_CHUNK_SIZE)));
+    requestedMatches: readonly EvidenceSearchMatch[]
+  ): readonly RecallQualifiedEvidence[] {
+    const matches = normalizeEvidenceSearchMatches(requestedMatches);
+    if (matches.length === 0) return Object.freeze([]);
+    const qualified: RecallQualifiedEvidence[] = [];
+    for (let offset = 0; offset < matches.length; offset += QUERY_CHUNK_SIZE) {
+      qualified.push(...this.findChunk(
+        workspaceId,
+        matches.slice(offset, offset + QUERY_CHUNK_SIZE)
+      ));
     }
     return qualified.sort((left, right) =>
-      left.created_at.localeCompare(right.created_at) ||
-      left.object_id.localeCompare(right.object_id)
+      left.capsule.created_at.localeCompare(right.capsule.created_at) ||
+      left.capsule.object_id.localeCompare(right.capsule.object_id) ||
+      compareQualifiedProjectionIdentity(left.matched_projection, right.matched_projection)
     );
+  }
+
+  public findReceiptQualifiedOwnerIds(
+    workspaceId: string,
+    requestedObjectIds: readonly string[]
+  ): readonly string[] {
+    const objectIds = [...new Set(requestedObjectIds
+      .map((objectId) => objectId.trim())
+      .filter((objectId) => objectId.length > 0))];
+    const qualified: string[] = [];
+    for (let offset = 0; offset < objectIds.length; offset += QUERY_CHUNK_SIZE) {
+      qualified.push(...this.findReceiptQualifiedOwnerIdsChunk(
+        workspaceId,
+        objectIds.slice(offset, offset + QUERY_CHUNK_SIZE)
+      ));
+    }
+    return Object.freeze(qualified.sort((left, right) => left.localeCompare(right)));
   }
 
   private findChunk(
     workspaceId: string,
+    matches: readonly EvidenceSearchMatch[]
+  ): readonly RecallQualifiedEvidence[] {
+    const evidenceObjectIds = [...new Set(matches.map((match) => match.object_id))];
+    const { candidates, signals, events } = this.readQualificationInputs(
+      workspaceId,
+      evidenceObjectIds
+    );
+    if (candidates.length === 0) return [];
+    const projections = readQualifiedProjectionIndex(
+      this.statementHolder.active().findProjectionRows.all(
+        workspaceId,
+        JSON.stringify(evidenceObjectIds)
+      ) as StoredProjectionRow[]
+    );
+    const candidateById = new Map(candidates.map((candidate) => [
+      candidate.capsule.object_id,
+      candidate
+    ]));
+    return matches.flatMap((match) => {
+      const candidate = candidateById.get(match.object_id);
+      if (candidate === undefined) return [];
+      const receipt = readQualifiedReceipt(
+        candidate,
+        signals.get(candidate.signalId),
+        events,
+        match.matched_projection !== undefined
+      );
+      if (receipt === null) return [];
+      const qualified = qualifyEvidenceMatch(
+        match,
+        candidate.capsule,
+        receipt,
+        projections
+      );
+      return qualified === null ? [] : [qualified];
+    });
+  }
+
+  private findReceiptQualifiedOwnerIdsChunk(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): readonly string[] {
+    const { candidates, signals, events } = this.readQualificationInputs(
+      workspaceId,
+      objectIds
+    );
+    return candidates.flatMap((candidate) => {
+      const receipt = readQualifiedReceipt(
+        candidate,
+        signals.get(candidate.signalId),
+        events,
+        false
+      );
+      return receipt === null ? [] : [candidate.capsule.object_id];
+    });
+  }
+
+  private readQualificationInputs(
+    workspaceId: string,
     evidenceObjectIds: readonly string[]
-  ): readonly Readonly<EvidenceCapsule>[] {
+  ): QualificationInputs {
     const candidates = readEvidenceCandidates(
       this.statementHolder.active().findEvidenceRows.all(
         workspaceId,
         JSON.stringify(evidenceObjectIds)
       ) as EvidenceCapsuleRow[]
     );
-    if (candidates.length === 0) return [];
     const signalIds = [...new Set(candidates.map((candidate) => candidate.signalId))];
     const signals = readSignals(this.statementHolder.active().findSignalRows.all(
       workspaceId,
@@ -112,9 +209,7 @@ export class RecallQualifiedEvidenceReader {
       JSON.stringify(signalIds),
       SignalEventType.SOUL_SIGNAL_MATERIALIZED
     ) as StoredMaterializationRow[]);
-    return candidates
-      .filter((candidate) => isQualified(candidate, signals.get(candidate.signalId), events))
-      .map((candidate) => candidate.capsule);
+    return { candidates, signals, events };
   }
 }
 
@@ -122,7 +217,8 @@ function prepareStatements(db: StorageDatabase): QualificationStatements {
   return {
     findEvidenceRows: db.connection.prepare(FIND_EVIDENCE_ROWS_SQL),
     findSignalRows: db.connection.prepare(FIND_SIGNAL_ROWS_SQL),
-    findMaterializationRows: db.connection.prepare(FIND_MATERIALIZATION_ROWS_SQL)
+    findMaterializationRows: db.connection.prepare(FIND_MATERIALIZATION_ROWS_SQL),
+    findProjectionRows: db.connection.prepare(FIND_PROJECTION_ROWS_SQL)
   };
 }
 
@@ -212,17 +308,29 @@ function groupEvents(
   return grouped;
 }
 
-function isQualified(
+function readQualifiedReceipt(
   candidate: EvidenceCandidate,
   signal: Readonly<CandidateMemorySignal> | undefined,
-  events: ReadonlyMap<string, readonly StoredMaterializationRow[]>
-): boolean {
-  if (signal === undefined) return false;
+  events: ReadonlyMap<string, readonly StoredMaterializationRow[]>,
+  strictProjection: boolean
+): Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null {
+  if (signal === undefined) return null;
   const receipt = verifyGardenSourceTurnFallbackReceipt(signal, sha256);
-  if (receipt === null || !matchesReceipt(candidate, receipt)) return false;
+  if (receipt === null) return null;
+  if (!matchesReceipt(candidate, receipt)) {
+    if (strictProjection) {
+      throw new EvidenceProjectionIntegrityError(
+        candidate.capsule.object_id,
+        "requested projection owner does not match its verified receipt"
+      );
+    }
+    return null;
+  }
   const materializations = events.get(candidate.signalId) ?? [];
   return materializations.length === 1 &&
-    matchesMaterialization(materializations[0]!, candidate, receipt);
+    matchesMaterialization(materializations[0]!, candidate, receipt)
+    ? receipt
+    : null;
 }
 
 function matchesReceipt(
@@ -236,19 +344,17 @@ function matchesReceipt(
     capsule.run_id === receipt.run_id &&
     capsule.surface_id === receipt.surface_id &&
     capsule.gist === receipt.source_corpus &&
-    matchesReceiptProjection(capsule, receipt);
+    matchesReceiptSourceHash(capsule, receipt);
 }
 
-function matchesReceiptProjection(
+function matchesReceiptSourceHash(
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
-  if (isGardenSourceTurnFallbackV2Receipt(receipt)) {
-    return capsule.excerpt === projectGardenSourceTurnFallbackV2UserContent(receipt) &&
-      capsule.source_hash === formatGardenSourceTurnFallbackV2SourceHash(receipt.digest);
-  }
-  return capsule.excerpt === receipt.source_corpus &&
-    capsule.source_hash === formatGardenSourceTurnFallbackSourceHash(receipt.digest);
+  const expected = isGardenSourceTurnFallbackV2Receipt(receipt)
+    ? formatGardenSourceTurnFallbackV2SourceHash(receipt.digest)
+    : formatGardenSourceTurnFallbackSourceHash(receipt.digest);
+  return capsule.source_hash === expected;
 }
 
 function matchesMaterialization(
@@ -272,10 +378,6 @@ function matchesMaterialization(
     created.length === 1 &&
     created[0]?.object_kind === "evidence_capsule" &&
     created[0].object_id === candidate.capsule.object_id;
-}
-
-function uniqueNonEmpty(values: readonly string[]): readonly string[] {
-  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
 function parseJson(value: string | null): unknown {
@@ -320,4 +422,12 @@ const FIND_MATERIALIZATION_ROWS_SQL = `
     AND entity_type = 'candidate_memory_signal'
     AND entity_id IN (SELECT value FROM json_each(?))
     AND event_type = ?
+`;
+
+const FIND_PROJECTION_ROWS_SQL = `
+  SELECT evidence_object_id, projection_id, projection_kind, workspace_id,
+         source_hash, content
+  FROM evidence_search_projections
+  WHERE workspace_id = ?
+    AND evidence_object_id IN (SELECT value FROM json_each(?))
 `;

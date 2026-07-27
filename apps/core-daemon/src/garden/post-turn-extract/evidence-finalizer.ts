@@ -1,4 +1,7 @@
-import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import type {
+  CandidateMemorySignal,
+  ConversationMessage
+} from "@do-soul/alaya-protocol";
 import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
 import { buildGardenTaskEvidenceFallbackSignalId } from "../task-signal-id.js";
 import {
@@ -12,6 +15,7 @@ export interface PostTurnEvidenceFinalizationInput {
   readonly runId: string;
   readonly createdAt: string;
   readonly turnContent: string;
+  readonly turnMessages: readonly ConversationMessage[];
   readonly sourceObservation: CandidateMemorySignal["source_observation"];
   readonly candidates: readonly CandidateMemorySignal[];
   readonly signalReceiver: PostTurnSignalReceiver;
@@ -56,7 +60,8 @@ async function receiveEvidenceFallback(
     runId: input.runId,
     surfaceId: null,
     createdAt: input.createdAt,
-    sourceObservation: input.sourceObservation
+    sourceObservation: input.sourceObservation,
+    turnMessages: input.turnMessages
   });
   if (signal === null) {
     throw new Error(`Garden task ${input.taskId} evidence fallback source content was empty.`);

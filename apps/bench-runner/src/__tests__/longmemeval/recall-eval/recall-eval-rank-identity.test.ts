@@ -67,6 +67,41 @@ describe("recall-eval rank identity", () => {
 
     expect(synthesis).not.toBe(memory);
   });
+
+  it("persists the complete derived snapshot identity in the bound rank artifact", () => {
+    const collected = [{ questionId: "q-1", deliveredObjects: [object("m-1")] }];
+    const report = {
+      schema_version: 1 as const,
+      promotable: false as const,
+      input_db_sha256: "a".repeat(64),
+      rebuilt_db_identity_sha256: "b".repeat(64),
+      source_schema_version: 108,
+      working_schema_version: 110,
+      eligible_owner_count: 3,
+      rebuilt_owner_count: 3,
+      rejected_owner_count: 0,
+      zero_child_owner_count: 1,
+      nonzero_child_owner_count: 2,
+      child_count: 4,
+      projection_kind_counts: [
+        { projection_kind: "assistant_observation", child_count: 1 },
+        { projection_kind: "user_assertion", child_count: 3 }
+      ],
+      projection_content_sha256: "c".repeat(64)
+    };
+    const rendered = renderRecallEvalRankIdentity(collected, {
+      expectedQuestionCount: 1,
+      expectedQuestionIdDigest: snapshotQuestionIdDigest(collected),
+      requireFullSnapshotMatch: true,
+      derivedEvidenceProjectionRebuild: report
+    });
+
+    expect(JSON.parse(rendered)).toMatchObject({
+      snapshot_binding: {
+        derived_evidence_projection_rebuild: report
+      }
+    });
+  });
 });
 
 function object(objectId: string, objectKind = "memory_entry") {

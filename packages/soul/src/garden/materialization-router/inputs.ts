@@ -268,10 +268,9 @@ function resolveEvidenceTextProjection(
   if (sourceHash !== null && sourceHash === assertionSourceHash) {
     return { excerpt: buildDistilledFact(signal), sourceHash };
   }
-  return {
-    excerpt: fallback?.userContent ?? sourceCorpus,
-    sourceHash
-  };
+  const excerpt = fallback?.userContent ??
+    (fallback?.assistantObservations.length ? buildSignalSummary(signal) : sourceCorpus);
+  return { excerpt, sourceHash };
 }
 
 function buildVerifiedUserAssertionSourceHash(

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  bindExperimentCellRebuildIdentity,
   buildExperimentPairIdentity,
   readExperimentSnapshotIdentity
 } from "../../../scripts/longmemeval-experiment-identity.mjs";
@@ -42,6 +43,7 @@ describe("LongMemEval experiment identity", () => {
       snapshot: cellA.snapshot,
       runner: cellA.runner,
       evaluation_slice: { offset: 100, limit: 100 },
+      derived_snapshot_identity: null,
       cells: {
         A: { embedding_mode: "disabled", cross_encoder_enabled: false },
         B: { embedding_mode: "env", cross_encoder_enabled: false }
@@ -53,12 +55,70 @@ describe("LongMemEval experiment identity", () => {
     ["snapshot", { snapshot: { ...cellIdentity("B", "env").snapshot, db_sha256: "9".repeat(64) } }],
     ["runner", { runner: { ...cellIdentity("B", "env").runner, worktree_state_sha256: "8".repeat(64) } }],
     ["slice", { evaluation_slice: { offset: 200, limit: 100 } }],
-    ["treatment", { treatment: { ...cellIdentity("B", "env").treatment, cross_encoder_enabled: true } }]
+    ["treatment", { treatment: { ...cellIdentity("B", "env").treatment, cross_encoder_enabled: true } }],
+    ["rebuild", {
+      treatment: {
+        ...cellIdentity("B", "env").treatment,
+        derived_evidence_projection_rebuild: true
+      }
+    }]
   ])("rejects %s drift between experiment cells", (_label, drift) => {
     expect(() => buildExperimentPairIdentity(
       cellIdentity("A", "disabled"),
       { ...cellIdentity("B", "env"), ...drift }
     )).toThrow(/experiment A\/B identity/u);
+  });
+
+  it("binds a derived projection report from the rank artifact into cell identity", () => {
+    const cell = {
+      ...cellIdentity("A", "disabled"),
+      treatment: {
+        ...cellIdentity("A", "disabled").treatment,
+        derived_evidence_projection_rebuild: true
+      }
+    };
+    const report = rebuildReport();
+
+    expect(bindExperimentCellRebuildIdentity(cell, {
+      schema_version: 2,
+      snapshot_binding: {
+        expected_question_count: 100,
+        expected_question_id_digest: "b".repeat(64),
+        derived_evidence_projection_rebuild: report
+      }
+    })).toMatchObject({
+      derived_snapshot_identity: report
+    });
+  });
+
+  it("rejects A/B cells with different rebuilt database identities", () => {
+    const cellA = rebuiltCellIdentity("A", "disabled", rebuildReport());
+    const cellB = rebuiltCellIdentity("B", "env", {
+      ...rebuildReport(),
+      rebuilt_db_identity_sha256: "f".repeat(64)
+    });
+
+    expect(() => buildExperimentPairIdentity(cellA, cellB))
+      .toThrow(/experiment A\/B identity/u);
+  });
+
+  it("rejects a rebuild identity not derived from the frozen cell snapshot", () => {
+    const cell = {
+      ...cellIdentity("A", "disabled"),
+      treatment: {
+        ...cellIdentity("A", "disabled").treatment,
+        derived_evidence_projection_rebuild: true
+      }
+    };
+
+    expect(() => bindExperimentCellRebuildIdentity(cell, {
+      snapshot_binding: {
+        derived_evidence_projection_rebuild: {
+          ...rebuildReport(),
+          input_db_sha256: "0".repeat(64)
+        }
+      }
+    })).toThrow(/rebuild input differs/u);
   });
 });
 
@@ -116,13 +176,53 @@ function cellIdentity(cell: "A" | "B", embeddingMode: "disabled" | "env") {
     treatment: {
       extraction_model: "DeepSeek-V4-Flash",
       embedding_mode: embeddingMode,
-      cross_encoder_enabled: false
+      cross_encoder_enabled: false,
+      derived_evidence_projection_rebuild: false
     },
+    derived_snapshot_identity: null,
     weight_overrides: null,
     evaluation_slice: {
       offset: 100,
       limit: 100
     }
+  };
+}
+
+function rebuiltCellIdentity(
+  cell: "A" | "B",
+  embeddingMode: "disabled" | "env",
+  report: ReturnType<typeof rebuildReport>
+) {
+  const identity = cellIdentity(cell, embeddingMode);
+  return {
+    ...identity,
+    treatment: {
+      ...identity.treatment,
+      derived_evidence_projection_rebuild: true
+    },
+    derived_snapshot_identity: report
+  };
+}
+
+function rebuildReport() {
+  return {
+    schema_version: 1,
+    promotable: false,
+    input_db_sha256: "1".repeat(64),
+    rebuilt_db_identity_sha256: "d".repeat(64),
+    source_schema_version: 108,
+    working_schema_version: 110,
+    eligible_owner_count: 10,
+    rebuilt_owner_count: 10,
+    rejected_owner_count: 0,
+    zero_child_owner_count: 2,
+    nonzero_child_owner_count: 8,
+    child_count: 12,
+    projection_kind_counts: [
+      { projection_kind: "assistant_observation", child_count: 4 },
+      { projection_kind: "user_assertion", child_count: 8 }
+    ],
+    projection_content_sha256: "e".repeat(64)
   };
 }
 

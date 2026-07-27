@@ -1,10 +1,15 @@
 import {
-  hasGardenSourceTurnFallbackV2ReceiptFormat,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
 import type {
   RecallVerifiedUserSupportSource
 } from "../../query/recall-answer-support-observation.js";
+import type {
+  KeywordSearchResult,
+  RecallEvidenceSearchMatch,
+  RecallEvidenceSearchProjectionIdentity,
+  RecallQualifiedEvidence
+} from "../../runtime/recall-service-types.js";
 import type {
   SemanticSupplementParams
 } from "../coarse-filter-semantic.js";
@@ -15,14 +20,21 @@ import {
 
 interface QualifiedEvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
+  readonly rank: number;
+  readonly recallText?: string;
   readonly verifiedUserSupportSource?: Readonly<RecallVerifiedUserSupportSource>;
 }
 
 export async function admitQualifiedEvidenceMatches(
   params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>
+  evidenceMatches: readonly Readonly<KeywordSearchResult>[]
 ): Promise<void> {
-  const candidates = await loadQualifiedEvidenceOrFallback(params, evidenceRankById);
+  const evidenceRankById = buildEvidenceRankById(evidenceMatches);
+  const candidates = await loadQualifiedEvidenceOrFallback(
+    params,
+    evidenceMatches,
+    evidenceRankById
+  );
   if (candidates === null) return;
   const direct = candidates.filter(({ capsule }) =>
     isDirectRecallEvidence(capsule, params.workspaceId)
@@ -39,11 +51,12 @@ export async function admitQualifiedEvidenceMatches(
     [...evidenceRankById].filter(([objectId]) => !unboundIds.has(objectId))
   );
   await admitMemoryEvidenceMatches(params, ordinaryRanks);
-  await admitDirectEvidenceMatches(params, evidenceRankById, unbound);
+  await admitDirectEvidenceMatches(params, unbound);
 }
 
 async function loadQualifiedEvidenceOrFallback(
   params: SemanticSupplementParams,
+  evidenceMatches: readonly Readonly<KeywordSearchResult>[],
   evidenceRankById: ReadonlyMap<string, number>
 ): Promise<readonly QualifiedEvidenceCandidate[] | null> {
   const findQualified =
@@ -53,46 +66,140 @@ async function loadQualifiedEvidenceOrFallback(
     return null;
   }
   try {
-    const capsules = await findQualified.call(
+    const matches = evidenceMatches.map(toEvidenceSearchMatch);
+    const qualified = await findQualified.call(
       params.context.dependencies.evidenceSearchPort,
       params.workspaceId,
-      [...evidenceRankById.keys()]
+      matches
     );
-    return capsules.map(projectQualifiedEvidenceCandidate);
+    const ownerRankById = buildOwnerRankById(evidenceMatches);
+    const rankByProjection = buildProjectionRankByKey(evidenceMatches);
+    return selectQualifiedEvidenceCandidates(qualified.flatMap((result) => {
+      const rank = result.matched_projection === undefined
+        ? ownerRankById.get(result.capsule.object_id)
+        : rankByProjection.get(projectionMatchKey(
+          result.capsule.object_id,
+          result.matched_projection
+        ));
+      if (rank === undefined) return [];
+      const candidate = projectQualifiedEvidenceCandidate(
+        result,
+        rank
+      );
+      return candidate === null ? [] : [candidate];
+    }));
   } catch (error) {
+    if (isEvidenceProjectionIntegrityError(error)) throw error;
     await admitMemoryEvidenceMatches(params, evidenceRankById);
     throw error;
   }
 }
 
+export function isEvidenceProjectionIntegrityError(error: unknown): boolean {
+  return error instanceof Error &&
+    error.name === "EvidenceProjectionIntegrityError";
+}
+
+function toEvidenceSearchMatch(
+  result: Readonly<KeywordSearchResult>
+): Readonly<RecallEvidenceSearchMatch> {
+  return Object.freeze({
+    object_id: result.object_id,
+    ...(result.matched_projection === undefined
+      ? {}
+      : {
+        matched_projection: Object.freeze({
+          projection_id: result.matched_projection.projection_id,
+          projection_kind: result.matched_projection.projection_kind
+        })
+      })
+  });
+}
+
 function projectQualifiedEvidenceCandidate(
-  capsule: Readonly<EvidenceCapsule>
-): Readonly<QualifiedEvidenceCandidate> {
-  // Receipt verification belongs to findRecallQualifiedByIds; format only
-  // identifies whether that verified receipt carries a complete User projection.
-  const verifiedUserSupportSource = hasVerifiedUserProjection(capsule)
+  qualified: Readonly<RecallQualifiedEvidence>,
+  rank: number
+): Readonly<QualifiedEvidenceCandidate> | null {
+  if (qualified.matched_projection?.projection_kind === "assistant_observation") {
+    return Object.freeze({
+      capsule: qualified.capsule,
+      rank,
+      recallText: qualified.matched_projection.content
+    });
+  }
+  if (qualified.matched_projection !== undefined) return null;
+  const verifiedUserSupportSource = qualified.verified_user_projection
     ? Object.freeze({
       schema_version: 1 as const,
       source_role: "user" as const,
       projection_kind: "turn_projection" as const,
-      evidence_ref: capsule.object_id,
+      evidence_ref: qualified.capsule.object_id,
       support_identity: null
     })
     : undefined;
   return Object.freeze({
-    capsule,
+    capsule: qualified.capsule,
+    rank,
     ...(verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource })
   });
 }
 
-function hasVerifiedUserProjection(capsule: Readonly<EvidenceCapsule>): boolean {
-  return (capsule.excerpt?.trim().length ?? 0) > 0 &&
-    hasGardenSourceTurnFallbackV2ReceiptFormat({
-      artifact_ref: capsule.physical_anchor?.artifact_ref ?? null,
-      source_hash: capsule.source_hash
-    });
+function buildEvidenceRankById(
+  matches: readonly Readonly<KeywordSearchResult>[]
+): ReadonlyMap<string, number> {
+  const ranks = new Map<string, number>();
+  for (const match of matches) {
+    ranks.set(
+      match.object_id,
+      Math.max(ranks.get(match.object_id) ?? 0, match.normalized_rank)
+    );
+  }
+  return ranks;
+}
+
+function buildOwnerRankById(
+  matches: readonly Readonly<KeywordSearchResult>[]
+): ReadonlyMap<string, number> {
+  return buildEvidenceRankById(matches.filter((match) =>
+    match.matched_projection?.projection_kind !== "assistant_observation"
+  ));
+}
+
+function buildProjectionRankByKey(
+  matches: readonly Readonly<KeywordSearchResult>[]
+): ReadonlyMap<string, number> {
+  const ranks = new Map<string, number>();
+  for (const match of matches) {
+    if (match.matched_projection === undefined) continue;
+    const key = projectionMatchKey(match.object_id, match.matched_projection);
+    ranks.set(key, Math.max(ranks.get(key) ?? 0, match.normalized_rank));
+  }
+  return ranks;
+}
+
+function projectionMatchKey(
+  objectId: string,
+  projection: Readonly<RecallEvidenceSearchProjectionIdentity>
+): string {
+  return `${objectId}\u0000${projection.projection_kind}\u0000${projection.projection_id}`;
+}
+
+function selectQualifiedEvidenceCandidates(
+  candidates: readonly QualifiedEvidenceCandidate[]
+): readonly QualifiedEvidenceCandidate[] {
+  const selected = new Map<string, QualifiedEvidenceCandidate>();
+  for (const candidate of candidates) {
+    const current = selected.get(candidate.capsule.object_id);
+    if (current === undefined ||
+        (current.recallText === undefined && candidate.recallText !== undefined) ||
+        ((current.recallText === undefined) === (candidate.recallText === undefined) &&
+          candidate.rank > current.rank)) {
+      selected.set(candidate.capsule.object_id, candidate);
+    }
+  }
+  return [...selected.values()];
 }
 
 async function loadBoundEvidenceRefsOrFallback(
@@ -147,7 +254,6 @@ async function admitMemoryEvidenceMatches(
 
 async function admitDirectEvidenceMatches(
   params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>,
   candidates: readonly QualifiedEvidenceCandidate[]
 ): Promise<void> {
   const findMemoryByIds = params.context.dependencies.memoryRepo.findByIds;
@@ -158,23 +264,25 @@ async function admitDirectEvidenceMatches(
     candidates.map(({ capsule }) => capsule.object_id)
   )).map((memory) => memory.object_id));
   for (const candidate of candidates) {
-    admitDirectEvidenceCandidate(params, evidenceRankById, collidingIds, candidate);
+    admitDirectEvidenceCandidate(params, collidingIds, candidate);
   }
 }
 
 function admitDirectEvidenceCandidate(
   params: SemanticSupplementParams,
-  evidenceRankById: ReadonlyMap<string, number>,
   collidingIds: ReadonlySet<string>,
   candidate: QualifiedEvidenceCandidate
 ): void {
   const evidence = candidate.capsule;
-  const rank = evidenceRankById.get(evidence.object_id);
-  if (rank === undefined || collidingIds.has(evidence.object_id) ||
+  if (collidingIds.has(evidence.object_id) ||
       params.byId.has(evidence.object_id)) return;
-  params.evidenceFtsRanks.set(evidence.object_id, rank);
-  const entry = buildDirectEvidencePseudoMemoryEntry(evidence, rank);
-  params.addCandidate(entry, "lexical", rank, "evidence_fts_direct", {
+  params.evidenceFtsRanks.set(evidence.object_id, candidate.rank);
+  const entry = buildDirectEvidencePseudoMemoryEntry(
+    evidence,
+    candidate.rank,
+    candidate.recallText
+  );
+  params.addCandidate(entry, "lexical", candidate.rank, "evidence_fts_direct", {
     objectKind: "evidence_capsule",
     answerRerankText: entry.content,
     ...(candidate.verifiedUserSupportSource === undefined

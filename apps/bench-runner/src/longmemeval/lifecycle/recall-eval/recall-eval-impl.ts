@@ -227,7 +227,13 @@ async function persistRecallEvalArtifacts(
     limit: context.options.limit ?? null,
     runProvenance: evidence.runProvenance,
     expectedQuestionIdDigest: evidence.expectedQuestionIdDigest,
-    provenanceComplete: evidence.provenanceComplete
+    provenanceComplete: evidence.provenanceComplete,
+    ...(context.derivedEvidenceProjectionRebuild === null
+      ? {}
+      : {
+          derivedEvidenceProjectionRebuild:
+            context.derivedEvidenceProjectionRebuild
+        })
   });
   const entry = await withPublishedDiagnosticsArtifact(
     bundle.diagnosticsArtifact,
@@ -249,7 +255,13 @@ async function persistRecallEvalArtifacts(
     findingsPath: entry.findingsPath,
     payload,
     snapshotManifest: context.manifest,
-    perQuestionDelivered: buildPerQuestionDelivered(collected)
+    perQuestionDelivered: buildPerQuestionDelivered(collected),
+    ...(context.derivedEvidenceProjectionRebuild === null
+      ? {}
+      : {
+          derivedEvidenceProjectionRebuild:
+            context.derivedEvidenceProjectionRebuild
+        })
   };
 }
 

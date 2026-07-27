@@ -2,6 +2,7 @@ import type {
   BudgetSnapshot,
   EventLogEntry,
   EvidenceCapsule,
+  EvidenceSearchProjection,
   MemoryDimension as MemoryDimensionType,
   MemoryEntry,
   PathAnchorRef,
@@ -40,12 +41,28 @@ export interface KeywordSearchResult {
   readonly normalized_rank: number;
   // Trigram-lane ordinal score, present only for substring/CJK trigram hits; feeds trigram_fts. Absent for exact/porter-only hits.
   readonly trigram_rank?: number;
+  readonly matched_projection?: RecallEvidenceSearchProjectionIdentity;
 }
 
 export interface KeywordSearchBatchQuery {
   readonly queryText: string;
   readonly limit: number;
 }
+
+export type RecallEvidenceSearchProjectionIdentity = Readonly<
+  Pick<EvidenceSearchProjection, "projection_id" | "projection_kind">
+>;
+
+export type RecallEvidenceSearchMatch = Readonly<{
+  readonly object_id: string;
+  readonly matched_projection?: RecallEvidenceSearchProjectionIdentity;
+}>;
+
+export type RecallQualifiedEvidence = Readonly<{
+  readonly capsule: Readonly<EvidenceCapsule>;
+  readonly verified_user_projection: boolean;
+  readonly matched_projection?: Readonly<EvidenceSearchProjection>;
+}>;
 
 export interface RecallMemoryListPageOptions {
   readonly limit: number;
@@ -148,8 +165,8 @@ export interface RecallServiceEvidenceSearchPort {
   ): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findRecallQualifiedByIds?(
     workspaceId: string,
-    evidenceObjectIds: readonly string[]
-  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+    matches: readonly RecallEvidenceSearchMatch[]
+  ): Promise<readonly RecallQualifiedEvidence[]>;
   findSourceAnchorsByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]

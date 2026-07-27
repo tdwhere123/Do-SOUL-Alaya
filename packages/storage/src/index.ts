@@ -42,10 +42,14 @@ export {
 } from "./repos/runtime/index.js";
 export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
 export {
+  RecallQualifiedEvidenceReader,
   SqliteEvidenceCapsuleRepo,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleKeywordHit,
+  type EvidenceSearchMatch,
+  type EvidenceSearchProjectionIdentity,
+  type RecallQualifiedEvidence,
   type EvidenceSourceAnchor
 } from "./repos/capsules/index.js";
 export {

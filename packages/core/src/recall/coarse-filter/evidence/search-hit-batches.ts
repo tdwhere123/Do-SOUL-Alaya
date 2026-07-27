@@ -1,3 +1,4 @@
+import { EvidenceSearchProjectionKindSchema } from "@do-soul/alaya-protocol";
 import {
   loadIndexAlignedSearchBatches,
   type IndexAlignedBatchFailure
@@ -43,7 +44,17 @@ function isKeywordSearchResult(value: unknown): value is KeywordSearchResult {
   return typeof hit.object_id === "string" && hit.object_id.trim().length > 0 &&
     typeof hit.normalized_rank === "number" && Number.isFinite(hit.normalized_rank) &&
     (hit.trigram_rank === undefined ||
-      (typeof hit.trigram_rank === "number" && Number.isFinite(hit.trigram_rank)));
+      (typeof hit.trigram_rank === "number" && Number.isFinite(hit.trigram_rank))) &&
+    isMatchedProjectionIdentity(hit.matched_projection);
+}
+
+function isMatchedProjectionIdentity(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const projection = value as Record<string, unknown>;
+  return Number.isInteger(projection.projection_id) &&
+    Number(projection.projection_id) > 0 &&
+    EvidenceSearchProjectionKindSchema.safeParse(projection.projection_kind).success;
 }
 
 function warnBatchFailure(

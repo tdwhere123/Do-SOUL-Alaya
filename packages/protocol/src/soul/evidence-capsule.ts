@@ -82,9 +82,14 @@ export const EvidenceCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap().ext
   surface_id: NonEmptyStringSchema.nullable()
 }).strict().readonly();
 
+export const EvidenceSearchProjectionKindSchema = z.enum([
+  "user_assertion",
+  "assistant_observation"
+]);
+
 export const EvidenceSearchProjectionSchema = z.object({
   projection_id: z.number().int().positive(),
-  projection_kind: z.literal("user_assertion"),
+  projection_kind: EvidenceSearchProjectionKindSchema,
   content: NonEmptyStringSchema
 }).strict().readonly();
 
@@ -94,4 +99,5 @@ export type EventAnchor = z.infer<typeof EventAnchorSchema>;
 export type LineRange = z.infer<typeof LineRangeSchema>;
 export type PhysicalAnchor = z.infer<typeof PhysicalAnchorSchema>;
 export type EvidenceCapsule = z.infer<typeof EvidenceCapsuleSchema>;
+export type EvidenceSearchProjectionKind = z.infer<typeof EvidenceSearchProjectionKindSchema>;
 export type EvidenceSearchProjection = z.infer<typeof EvidenceSearchProjectionSchema>;

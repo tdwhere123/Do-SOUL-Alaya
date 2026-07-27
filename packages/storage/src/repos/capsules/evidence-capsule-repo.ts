@@ -9,6 +9,11 @@ import { StorageError } from "../../shared/errors.js";
 import {
   searchEvidenceByKeyword
 } from "./evidence-search/evidence-keyword-search.js";
+import type {
+  EvidenceCapsuleKeywordHit,
+  EvidenceSearchMatch,
+  RecallQualifiedEvidence
+} from "./evidence-recall-types.js";
 import {
   DEFAULT_EVIDENCE_PAGE,
   parseEvidenceCapsule,
@@ -23,11 +28,15 @@ import {
   type EvidenceCapsuleStatements
 } from "./evidence-capsule-statements.js";
 import { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
+import { EvidenceProjectionIntegrityError } from
+  "./qualification/qualified-evidence-projection.js";
 
-export interface EvidenceCapsuleKeywordHit {
-  readonly object_id: string;
-  readonly normalized_rank: number;
-}
+export type {
+  EvidenceCapsuleKeywordHit,
+  EvidenceSearchMatch,
+  EvidenceSearchProjectionIdentity,
+  RecallQualifiedEvidence
+} from "./evidence-recall-types.js";
 
 export interface EvidenceSourceAnchor {
   readonly evidence_object_id: string;
@@ -49,8 +58,8 @@ export interface EvidenceCapsuleRepo {
   findByIds(workspaceId: string, objectIds: readonly string[]): Promise<readonly Readonly<EvidenceCapsule>[]>;
   findRecallQualifiedByIds(
     workspaceId: string,
-    evidenceObjectIds: readonly string[]
-  ): Promise<readonly Readonly<EvidenceCapsule>[]>;
+    matches: readonly EvidenceSearchMatch[]
+  ): Promise<readonly RecallQualifiedEvidence[]>;
   findSourceAnchorsByIds(
     workspaceId: string,
     evidenceObjectIds: readonly string[]
@@ -242,11 +251,14 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
 
   public async findRecallQualifiedByIds(
     workspaceId: string,
-    evidenceObjectIds: readonly string[]
-  ): Promise<readonly Readonly<EvidenceCapsule>[]> {
+    matches: readonly EvidenceSearchMatch[]
+  ): Promise<readonly RecallQualifiedEvidence[]> {
     try {
-      return this.recallQualifiedReader.find(workspaceId, evidenceObjectIds);
+      return this.recallQualifiedReader.find(workspaceId, matches);
     } catch (error) {
+      if (error instanceof EvidenceProjectionIntegrityError) {
+        throw error;
+      }
       throw new StorageError(
         "QUERY_FAILED",
         "Failed to load recall-qualified evidence capsules by ids.",

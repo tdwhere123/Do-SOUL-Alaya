@@ -8,7 +8,11 @@ import {
   RecallService,
   RuleBasedEntityExtractor
 } from "@do-soul/alaya-core";
-import { findActiveConstraints, SqliteTemporalPathProjectionReader } from "@do-soul/alaya-storage";
+import {
+  findActiveConstraints,
+  SqliteTemporalPathProjectionReader,
+  type EvidenceSearchMatch
+} from "@do-soul/alaya-storage";
 import { DegradationPipeline } from "@do-soul/alaya-soul";
 import { createDaemonEmbeddingRuntime } from "../ai/daemon-embedding-runtime.js";
 import {
@@ -104,8 +108,8 @@ function createRecallEvidenceSearchPort(
     },
     findRecallQualifiedByIds: async (
       workspaceId: string,
-      evidenceObjectIds: readonly string[]
-    ) => await input.evidenceCapsuleRepo.findRecallQualifiedByIds(workspaceId, evidenceObjectIds),
+      matches: readonly EvidenceSearchMatch[]
+    ) => await input.evidenceCapsuleRepo.findRecallQualifiedByIds(workspaceId, matches),
     findSourceAnchorsByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
       await input.evidenceCapsuleRepo.findSourceAnchorsByIds(workspaceId, evidenceObjectIds)
   };

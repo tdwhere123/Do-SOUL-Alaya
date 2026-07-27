@@ -23,7 +23,8 @@ export function isDirectRecallEvidence(
 
 export function buildDirectEvidencePseudoMemoryEntry(
   evidence: Readonly<EvidenceCapsule>,
-  normalizedRank: number
+  normalizedRank: number,
+  recallText: string = resolveDirectEvidenceRecallText(evidence)
 ): Readonly<MemoryEntry> {
   return Object.freeze({
     object_id: evidence.object_id,
@@ -37,7 +38,7 @@ export function buildDirectEvidencePseudoMemoryEntry(
     source_kind: "compiler" as const,
     formation_kind: "derived" as const,
     scope_class: "project" as const,
-    content: createBoundedNonMemoryPreview(resolveDirectEvidenceRecallText(evidence)),
+    content: createBoundedNonMemoryPreview(recallText),
     domain_tags: Object.freeze(["source_evidence"]),
     evidence_refs: Object.freeze([evidence.object_id]),
     workspace_id: evidence.workspace_id,

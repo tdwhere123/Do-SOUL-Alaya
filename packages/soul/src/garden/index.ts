@@ -80,7 +80,9 @@ export {
   buildGardenTurnEvidenceArtifactRef,
   buildGardenTurnEvidenceFallback,
   buildGardenTurnEvidenceSearchProjections,
-  isGardenTurnEvidenceFallback
+  isGardenTurnEvidenceFallback,
+  resolveVerifiedGardenTurnEvidenceProjection,
+  type VerifiedGardenTurnEvidenceProjection
 } from "./evidence-preservation/turn-evidence-anchor.js";
 export {
   WallClockTimeoutError,

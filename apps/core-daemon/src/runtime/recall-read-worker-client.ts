@@ -197,8 +197,8 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
       await this.request("evidence.searchManyByKeyword", { workspaceId, queries }),
     findByIds: async (workspaceId, evidenceObjectIds) =>
       await this.request("evidence.findByIds", { workspaceId, evidenceObjectIds }),
-    findRecallQualifiedByIds: async (workspaceId, evidenceObjectIds) =>
-      await this.request("evidence.findRecallQualifiedByIds", { workspaceId, evidenceObjectIds }),
+    findRecallQualifiedByIds: async (workspaceId, matches) =>
+      await this.request("evidence.findRecallQualifiedByIds", { workspaceId, matches }),
     findSourceAnchorsByIds: async (workspaceId, evidenceObjectIds) =>
       await this.request("evidence.findSourceAnchorsByIds", { workspaceId, evidenceObjectIds })
   };

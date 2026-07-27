@@ -4,6 +4,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
+import type { KeywordSearchResult } from "../runtime/recall-service-types.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
   intentSplitsByAnchor,
@@ -18,7 +19,10 @@ import type { RunCoarseFilterContext } from "./coarse-filter.js";
 import type { AddCoarseCandidate } from "./coarse-filter-admission.js";
 import { loadEvidenceSearchHitBatches } from "./evidence/search-hit-batches.js";
 import { selectEvidenceSearchQueries } from "./evidence/search-query-planner.js";
-import { admitQualifiedEvidenceMatches } from
+import {
+  admitQualifiedEvidenceMatches,
+  isEvidenceProjectionIntegrityError
+} from
   "./evidence/qualified-evidence-admission.js";
 
 export interface SemanticSupplementParams {
@@ -85,7 +89,7 @@ type ScopedKeywordSearch = (
   queryText: string,
   limit: number
 ) => Promise<readonly { readonly object_id: string; readonly normalized_rank: number; readonly trigram_rank?: number }[]>;
-type KeywordSearchResult = Awaited<ReturnType<ScopedKeywordSearch>>;
+type ScopedKeywordSearchResult = Awaited<ReturnType<ScopedKeywordSearch>>;
 
 function createScopedKeywordSearch(
   params: SemanticSupplementParams,
@@ -95,18 +99,18 @@ function createScopedKeywordSearch(
       queryText: string,
       limit: number,
       tier: MemoryEntry["storage_tier"]
-    ) => Promise<KeywordSearchResult>;
+    ) => Promise<ScopedKeywordSearchResult>;
     readonly searchWithinObjectIds?: (
       workspaceId: string,
       queryText: string,
       limit: number,
       objectIds: readonly string[]
-    ) => Promise<KeywordSearchResult>;
+    ) => Promise<ScopedKeywordSearchResult>;
     readonly searchByKeyword?: (
       workspaceId: string,
       queryText: string,
       limit: number
-    ) => Promise<KeywordSearchResult>;
+    ) => Promise<ScopedKeywordSearchResult>;
     readonly objectIds: readonly string[];
   }>
 ): ScopedKeywordSearch {
@@ -272,59 +276,98 @@ async function addEvidenceFtsCandidates(params: SemanticSupplementParams): Promi
   ) {
     return;
   }
+  const evidenceQueries = selectEvidenceSearchQueries(params.queryText, params.queryProbes);
+  const limit = params.config.semantic_supplement.max_supplement;
+  let evidenceHitBatches: readonly (readonly KeywordSearchResult[])[];
   try {
-    const evidenceQueries = selectEvidenceSearchQueries(params.queryText, params.queryProbes);
-    const limit = params.config.semantic_supplement.max_supplement;
-    const evidenceHitBatches = await loadEvidenceSearchHitBatches({
+    evidenceHitBatches = await loadEvidenceSearchHitBatches({
       workspaceId: params.workspaceId,
       queries: evidenceQueries.map((queryText) => ({ queryText, limit })),
       searchPort: params.context.dependencies.evidenceSearchPort,
       warn: params.context.warn
     });
-    const evidenceMatchById = new Map<string, number>();
-    for (const evidenceMatches of evidenceHitBatches) {
-      for (const match of evidenceMatches) {
-        evidenceMatchById.set(
-          match.object_id,
-          Math.max(evidenceMatchById.get(match.object_id) ?? 0, clamp01(match.normalized_rank))
-        );
+  } catch (error) {
+    recordEvidenceFtsFailure(params, error);
+    return;
+  }
+  const evidenceMatchByKey = new Map<string, Readonly<KeywordSearchResult>>();
+  for (const evidenceMatches of evidenceHitBatches) {
+    for (const match of evidenceMatches) {
+      const rankedMatch = Object.freeze({
+        ...match,
+        normalized_rank: clamp01(match.normalized_rank)
+      });
+      const key = evidenceMatchKey(rankedMatch);
+      const current = evidenceMatchByKey.get(key);
+      if (current === undefined || isPreferredEvidenceMatch(rankedMatch, current)) {
+        evidenceMatchByKey.set(key, rankedMatch);
       }
     }
-    await admitEvidenceMatches(params, evidenceMatchById);
-  } catch (error) {
-    recordRecallDegradation(params.context, "evidence_fts_failed");
-    params.context.warn("evidence FTS lookup failed", {
-      workspace_id: params.workspaceId,
-      operation: "evidence_fts_lookup",
-      errorName: errorNameOf(error),
-      error: toErrorMessage(error)
-    });
   }
+  try {
+    await admitEvidenceMatches(params, [...evidenceMatchByKey.values()]);
+  } catch (error) {
+    if (isEvidenceProjectionIntegrityError(error)) throw error;
+    recordEvidenceFtsFailure(params, error);
+  }
+}
+
+function recordEvidenceFtsFailure(
+  params: SemanticSupplementParams,
+  error: unknown
+): void {
+  recordRecallDegradation(params.context, "evidence_fts_failed");
+  params.context.warn("evidence FTS lookup failed", {
+    workspace_id: params.workspaceId,
+    operation: "evidence_fts_lookup",
+    errorName: errorNameOf(error),
+    error: toErrorMessage(error)
+  });
+}
+
+function evidenceMatchKey(match: Readonly<KeywordSearchResult>): string {
+  const projection = match.matched_projection;
+  return projection === undefined
+    ? `${match.object_id}\u0000owner`
+    : `${match.object_id}\u0000${projection.projection_kind}\u0000${projection.projection_id}`;
+}
+
+function isPreferredEvidenceMatch(
+  candidate: Readonly<KeywordSearchResult>,
+  current: Readonly<KeywordSearchResult>
+): boolean {
+  if (candidate.normalized_rank !== current.normalized_rank) {
+    return candidate.normalized_rank > current.normalized_rank;
+  }
+  const candidateProjection = candidate.matched_projection;
+  const currentProjection = current.matched_projection;
+  if (candidateProjection === undefined) return false;
+  if (currentProjection === undefined) return true;
+  if (candidateProjection.projection_kind !== currentProjection.projection_kind) {
+    return candidateProjection.projection_kind < currentProjection.projection_kind;
+  }
+  return candidateProjection.projection_id < currentProjection.projection_id;
 }
 
 async function admitEvidenceMatches(
   params: SemanticSupplementParams,
-  evidenceMatchById: ReadonlyMap<string, number>
+  evidenceMatches: readonly Readonly<KeywordSearchResult>[]
 ): Promise<void> {
-  const evidenceRankById = buildEvidenceRanks(params, evidenceMatchById);
-  if (evidenceRankById.size === 0) {
-    return;
-  }
-  await admitQualifiedEvidenceMatches(params, evidenceRankById);
+  const rankedMatches = buildEvidenceMatches(params, evidenceMatches);
+  if (rankedMatches.length === 0) return;
+  await admitQualifiedEvidenceMatches(params, rankedMatches);
 }
 
-function buildEvidenceRanks(
+function buildEvidenceMatches(
   params: SemanticSupplementParams,
-  evidenceMatchById: ReadonlyMap<string, number>
-): ReadonlyMap<string, number> {
-  const evidenceRankById = new Map<string, number>();
-  for (const [objectId, normalizedRank] of evidenceMatchById.entries()) {
-    const ranked = clamp01(normalizedRank);
-    evidenceRankById.set(objectId, ranked);
+  evidenceMatches: readonly Readonly<KeywordSearchResult>[]
+): readonly Readonly<KeywordSearchResult>[] {
+  return Object.freeze(evidenceMatches.map((match) => {
+    const ranked = clamp01(match.normalized_rank);
     params.evidenceFtsRanksPerRef.set(
-      objectId,
-      Math.max(params.evidenceFtsRanksPerRef.get(objectId) ?? 0, ranked)
+      match.object_id,
+      Math.max(params.evidenceFtsRanksPerRef.get(match.object_id) ?? 0, ranked)
     );
-  }
-  return evidenceRankById;
+    return Object.freeze({ ...match, normalized_rank: ranked });
+  }));
 }

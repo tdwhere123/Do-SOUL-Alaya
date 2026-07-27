@@ -37,7 +37,7 @@ Usage:
   alaya-bench-runner extraction-fill [--variant oracle|s|m] [--limit N] [--offset N] [--concurrency N] [--extraction-initial-concurrency N] [--question-batch-limit N] [--data-dir <path>] [--extraction-cache-root <path>] --extraction-authority <receipt.json> [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--pinned-meta-root <path>] [--promotion-contract <json>] [--r3-spend-approval <json>]
   alaya-bench-runner authorize-extraction [--variant oracle|s|m] [--limit N] [--offset N] [--question-batch-limit N] [--concurrency N] [--data-dir <path>] [--extraction-cache-root <path>] [--pinned-meta-root <path>] --extraction-action probe|fill --extraction-receipt-out <receipt.json> --extraction-output-token-cap N --extraction-output-token-field max_tokens|max_completion_tokens --extraction-input-price-usd-per-million N --extraction-output-price-usd-per-million N --extraction-max-input-tokens N --extraction-disk-floor-bytes N [--extraction-probe-key <sha256>] [--extraction-predecessor-authority <receipt.json>] [--extraction-target-selection <receipt.json>] [--catalog-refill-allowlist <allowlist.json>] [--direct-deepseek-500-operator <operator>|--direct-newapi-deepseek-500-operator <operator>] [--repair-invalid-shards]
   alaya-bench-runner select-extraction-target --variant s --offset 0 --limit 100 --extraction-cache-root <target-root> (--cache-audit-receipt <audit-receipt.json> | --retired-source-rebuild-operator <operator> | --predecessor-target-selection <receipt.json> --extraction-predecessor-authority <receipt.json> [--adopt-existing-child-target-selection <receipt.json> --adopt-existing-child-authority <receipt.json>]) --target-selection-out <receipt.json> [--data-dir <path>] [--pinned-meta-root <path>]
-  alaya-bench-runner recall-eval --snapshot <db> [--experiment | --promotion-contract <json> | --legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
+  alaya-bench-runner recall-eval --snapshot <db> [--experiment [--rebuild-evidence-search-projections] | --promotion-contract <json> | --legacy-snapshot --legacy-manifest-sha256 <sha> --legacy-dataset-sha256 <sha>] [--variant oracle|s|m] [--limit N] [--offset N] [--policy-shape stress|chat] [--weights '<json>'] [--data-dir <path>] [--data-dir-root <path>] [--pinned-meta-root <path>] [--history-root <path>]
   alaya-bench-runner authorize-longmemeval-matrix --contract <json> --out <json>
   alaya-bench-runner audit-extraction-cache --variant s --offset 0 --limit 100 --data-dir <path> --pinned-meta-root <path> --extraction-cache-root <source-root> --rebuild-cache-root <new-root> --cache-audit-output <new-dir> --target-model <model> --target-model-family <family> --target-request-profile <profile> --target-provider-url <url>
   alaya-bench-runner --help
@@ -80,27 +80,33 @@ export async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   const opts = parseCommandFlags(rest);
   if (opts === null) return 2;
-  if (opts.extractionPredecessorAuthority !== undefined && command !== "extraction-fill") {
-    process.stderr.write(
-      "alaya-bench-runner: --extraction-predecessor-authority is only valid for " +
-      "continuation extraction commands\n"
-    );
-    return 2;
-  }
-  if (opts.catalogRefillAllowlist !== undefined && command !== "extraction-fill") {
-    process.stderr.write(
-      "alaya-bench-runner: --catalog-refill-allowlist is only valid for " +
-      "authorize-extraction\n"
-    );
-    return 2;
-  }
-  if (opts.experiment === true && command !== "recall-eval") {
-    process.stderr.write(
-      "alaya-bench-runner: --experiment is only valid for recall-eval\n"
-    );
+  const compatibilityError = commandFlagCompatibilityError(command, opts);
+  if (compatibilityError !== null) {
+    process.stderr.write(`alaya-bench-runner: ${compatibilityError}\n`);
     return 2;
   }
   return dispatchParsedCommand(command, opts);
+}
+
+function commandFlagCompatibilityError(
+  command: string | undefined,
+  opts: ParsedFlags
+): string | null {
+  if (opts.extractionPredecessorAuthority !== undefined &&
+      command !== "extraction-fill") {
+    return "--extraction-predecessor-authority is only valid for " +
+      "continuation extraction commands";
+  }
+  if (opts.catalogRefillAllowlist !== undefined && command !== "extraction-fill") {
+    return "--catalog-refill-allowlist is only valid for authorize-extraction";
+  }
+  if (opts.experiment === true && command !== "recall-eval") {
+    return "--experiment is only valid for recall-eval";
+  }
+  if (opts.rebuildEvidenceSearchProjections === true && command !== "recall-eval") {
+    return "--rebuild-evidence-search-projections is only valid for recall-eval";
+  }
+  return null;
 }
 
 function parseCommandFlags(rest: ReadonlyArray<string>): ParsedFlags | null {

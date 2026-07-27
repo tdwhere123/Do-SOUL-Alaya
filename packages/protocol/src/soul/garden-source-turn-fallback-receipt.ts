@@ -240,14 +240,10 @@ export function isGardenSourceTurnFallbackV2Receipt(
   return receipt !== null && "source_role_spans" in receipt;
 }
 
-export function projectGardenSourceTurnFallbackV2UserContent(
-  receipt: Readonly<GardenSourceTurnFallbackV2Receipt>
-): string {
-  return receipt.source_role_spans
-    .filter((span) => span.role === "user")
-    .map((span) => receipt.source_corpus.slice(span.start, span.end))
-    .join("\n");
-}
+export {
+  projectGardenSourceTurnFallbackV2AssistantObservations,
+  projectGardenSourceTurnFallbackV2UserContent
+} from "./garden-source-turn-fallback/role-span-projection.js";
 
 function hasV1FallbackEnvelope(signal: Readonly<CandidateMemorySignal>): boolean {
   return hasCommonFallbackEnvelope(signal) &&
@@ -351,15 +347,13 @@ function readV2RoleSpans(
       value.length === 0) return null;
   const spans: Readonly<GardenSourceTurnFallbackRoleSpan>[] = [];
   let priorEnd = 0;
-  let hasUser = false;
   for (const candidate of value) {
     const span = readV2RoleSpan(candidate, sourceCorpus, priorEnd);
     if (span === null) return null;
-    if (span.role === "user") hasUser = true;
     spans.push(span);
     priorEnd = span.end;
   }
-  return hasUser && hasCanonicalRoleEnvelope(spans, sourceCorpus)
+  return hasCanonicalRoleEnvelope(spans, sourceCorpus)
     ? Object.freeze(spans)
     : null;
 }

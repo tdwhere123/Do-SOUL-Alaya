@@ -26,6 +26,7 @@ import {
 import type { RecallEvalOptions } from "./recall-eval-contract.js";
 import {
   buildRecallEvalRuntimeAttribution,
+  assertDistinctSnapshotRestorePaths,
   planRecallEvalDataRoot,
   prepareRecallEvalDataRoot,
   recallEvalEmbeddingMode,
@@ -43,6 +44,8 @@ import { assertProductDefaultBiEncoderEnvironment } from
   "../../promotion/product/product-bi-encoder-policy.js";
 import { assertProductDefaultRecallEnvironment } from
   "../../promotion/verifiers/product-policy-verifier.js";
+import type { EvidenceSearchProjectionRebuildReport } from
+  "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -63,6 +66,8 @@ export interface RecallEvalRunContext {
   readonly datasetSha256: string | null;
   readonly measurementForQuestion: SnapshotMeasurementOracleAccessor | null;
   readonly extractionAuthority: SnapshotExtractionAuthority | null;
+  readonly derivedEvidenceProjectionRebuild:
+    EvidenceSearchProjectionRebuildReport | null;
 }
 
 export async function prepareRecallEvalRunContext(
@@ -70,6 +75,13 @@ export async function prepareRecallEvalRunContext(
   recallWeightOverrides: BenchRecallWeightOverrides | undefined,
   ambientEnv: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<RecallEvalRunContext> {
+  if (options.dataDirRoot !== undefined) {
+    await assertDistinctSnapshotRestorePaths(
+      options.snapshotDbPath,
+      options.dataDirRoot
+    );
+  }
+  assertDerivedProjectionRebuildBoundary(options);
   assertProductDefaultRecallEnvironment(
     recallEvalInvocationPolicyEnvironment(ambientEnv),
     {
@@ -96,6 +108,20 @@ export async function prepareRecallEvalRunContext(
     ambientEnv,
     bundle
   ));
+}
+
+function assertDerivedProjectionRebuildBoundary(
+  options: RecallEvalOptions
+): void {
+  if (options.derivedEvidenceProjectionRebuild !== true) return;
+  if (options.experiment !== true) {
+    throw new Error("derived evidence projection rebuild requires experiment mode");
+  }
+  if (options.legacySnapshot === true || options.expansionCapability !== undefined) {
+    throw new Error(
+      "derived evidence projection rebuild cannot use legacy or promotion inputs"
+    );
+  }
 }
 
 function recallEvalInvocationPolicyEnvironment(
@@ -130,7 +156,9 @@ async function prepareBoundRecallEvalRunContext(
       snapshotManifestSha256: bundle.snapshotManifestSha256,
       datasetSha256: bundle.datasetSha256,
       recallOptions,
-      recallWeightOverrides
+      recallWeightOverrides,
+      nonPromotableDerivedRebuild:
+        options.derivedEvidenceProjectionRebuild === true
     }
   );
   const dataDir = await prepareRecallEvalDataRoot(options, bundle, plannedDataDir);
@@ -152,7 +180,8 @@ async function prepareBoundRecallEvalRunContext(
     runtimeAttribution,
     datasetSha256: resolveDatasetSha(bundle),
     measurementForQuestion: bundle.measurementForQuestion,
-    extractionAuthority: bundle.extractionAuthority
+    extractionAuthority: bundle.extractionAuthority,
+    derivedEvidenceProjectionRebuild: dataDir.evidenceProjectionRebuild
   };
 }
 

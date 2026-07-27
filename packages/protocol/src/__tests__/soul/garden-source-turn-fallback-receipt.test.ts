@@ -10,6 +10,7 @@ import {
   hasGardenSourceTurnFallbackReceiptFormat,
   hasGardenSourceTurnFallbackV2ReceiptFormat,
   isGardenSourceTurnFallbackV2Receipt,
+  projectGardenSourceTurnFallbackV2AssistantObservations,
   projectGardenSourceTurnFallbackV2UserContent,
   readGardenSourceTurnFallbackArtifactSignalId,
   readGardenSourceTurnFallbackReceipt,
@@ -101,6 +102,40 @@ describe("Garden source-turn fallback receipt", () => {
     expect(receipt.source_role_spans).toEqual(V2_SPANS);
     expect(projectGardenSourceTurnFallbackV2UserContent(receipt))
       .toBe("first line");
+    expect(projectGardenSourceTurnFallbackV2AssistantObservations(receipt))
+      .toEqual(["reply"]);
+  });
+
+  it("verifies a trusted Assistant-only v2 receipt without creating User content", () => {
+    const corpus = "Assistant: exact complete observation";
+    const receipt = verifyGardenSourceTurnFallbackReceipt(createV2Signal(
+      corpus,
+      [{ role: "assistant", start: "Assistant: ".length, end: corpus.length }]
+    ), digest);
+
+    expect(isGardenSourceTurnFallbackV2Receipt(receipt)).toBe(true);
+    if (!isGardenSourceTurnFallbackV2Receipt(receipt)) {
+      throw new Error("expected a verified Assistant-only v2 receipt");
+    }
+    expect(projectGardenSourceTurnFallbackV2UserContent(receipt)).toBe("");
+    expect(projectGardenSourceTurnFallbackV2AssistantObservations(receipt))
+      .toEqual(["exact complete observation"]);
+  });
+
+  it("projects complete Assistant observations in receipt order", () => {
+    const corpus = "Assistant: first observation\nUser: middle\nAssistant: second observation";
+    const receipt = verifyGardenSourceTurnFallbackReceipt(createV2Signal(corpus, [
+      { role: "assistant", start: 11, end: 28 },
+      { role: "user", start: 35, end: 41 },
+      { role: "assistant", start: 53, end: corpus.length }
+    ]), digest);
+
+    expect(isGardenSourceTurnFallbackV2Receipt(receipt)).toBe(true);
+    if (!isGardenSourceTurnFallbackV2Receipt(receipt)) {
+      throw new Error("expected a verified multi-Assistant v2 receipt");
+    }
+    expect(projectGardenSourceTurnFallbackV2AssistantObservations(receipt))
+      .toEqual(["first observation", "second observation"]);
   });
 
   it("rejects v2 corpus and role-span tampering", () => {
@@ -153,10 +188,7 @@ describe("Garden source-turn fallback receipt", () => {
         V2_SPANS[1]
       ]
     },
-    {
-      name: "Assistant-only",
-      spans: [V2_SPANS[1]]
-    }
+    { name: "detached Assistant span", spans: [V2_SPANS[1]] }
   ])("rejects $name v2 role spans before digest verification", ({ spans }) => {
     const signal = createV2Signal();
 

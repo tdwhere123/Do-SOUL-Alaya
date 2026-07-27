@@ -10,6 +10,8 @@ import {
 import type { RecallEvalQuestionResult } from "../../lifecycle/recall-eval/recall-eval-contract.js";
 import type { RecallEvalRuntimeAttribution } from "../../lifecycle/recall-eval/recall-eval-runtime.js";
 import type { LongMemEvalSnapshotManifest } from "../../snapshot/materialize.js";
+import type { EvidenceSearchProjectionRebuildReport } from
+  "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import { snapshotQuestionIdDigest } from "../../snapshot/materialize.js";
 import {
   buildRecallEvalDiagnosticsEvidence,
@@ -53,6 +55,7 @@ export async function buildRecallEvalArchiveBundle(input: {
   readonly runProvenance: LongMemEvalRunProvenance;
   readonly expectedQuestionIdDigest: string;
   readonly provenanceComplete: boolean;
+  readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
 }): Promise<RecallEvalArchiveBundle> {
   const rankIdentity = renderRankIdentity(input);
   const runProvenance = renderRunProvenance(input);
@@ -115,7 +118,13 @@ function renderRankIdentity(
     expectedQuestionIdDigest: input.manifest.question_id_digest ?? null,
     requireFullSnapshotMatch:
       input.manifest.attribution?.status === "attributed" &&
-      input.offset === 0 && input.limit === null
+      input.offset === 0 && input.limit === null,
+    ...(input.derivedEvidenceProjectionRebuild === undefined
+      ? {}
+      : {
+          derivedEvidenceProjectionRebuild:
+            input.derivedEvidenceProjectionRebuild
+        })
   });
 }
 

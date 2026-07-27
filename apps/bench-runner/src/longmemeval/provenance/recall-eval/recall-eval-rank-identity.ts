@@ -1,6 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { snapshotQuestionIdDigest } from "../../snapshot/materialize.js";
+import type { EvidenceSearchProjectionRebuildReport } from
+  "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 
 export const RECALL_EVAL_RANK_IDENTITY_FILENAME =
   "recall-eval-rank-identity.json";
@@ -17,6 +19,7 @@ export interface RecallEvalRankIdentityBinding {
   readonly expectedQuestionCount: number;
   readonly expectedQuestionIdDigest: string | null;
   readonly requireFullSnapshotMatch: boolean;
+  readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
 }
 
 export function renderRecallEvalRankIdentity(
@@ -42,7 +45,13 @@ export function renderRecallEvalRankIdentity(
     schema_version: 2,
     snapshot_binding: {
       expected_question_count: binding.expectedQuestionCount,
-      expected_question_id_digest: binding.expectedQuestionIdDigest
+      expected_question_id_digest: binding.expectedQuestionIdDigest,
+      ...(binding.derivedEvidenceProjectionRebuild === undefined
+        ? {}
+        : {
+            derived_evidence_projection_rebuild:
+              binding.derivedEvidenceProjectionRebuild
+          })
     },
     replay: {
       question_count: collected.length,

@@ -55,11 +55,19 @@ export function buildRecallEvalOptions(
     ...(opts.legacyManifestSha256 === undefined ? {} : { legacyManifestSha256: opts.legacyManifestSha256 }),
     ...(opts.legacyDatasetSha256 === undefined ? {} : { legacyDatasetSha256: opts.legacyDatasetSha256 }),
     ...(opts.experiment === true ? { experiment: true } : {}),
+    ...(opts.rebuildEvidenceSearchProjections === true
+      ? { derivedEvidenceProjectionRebuild: true }
+      : {}),
     ...(expansionCapability === undefined ? {} : { expansionCapability })
   };
 }
 
 function assertExperimentFlags(opts: ParsedFlags): void {
+  if (opts.rebuildEvidenceSearchProjections === true && opts.experiment !== true) {
+    throw new Error(
+      "--rebuild-evidence-search-projections requires --experiment"
+    );
+  }
   if (opts.experiment !== true) return;
   if (opts.legacySnapshot || opts.promotionContract !== undefined) {
     throw new Error("--experiment cannot be combined with legacy or promotion inputs");
@@ -84,6 +92,9 @@ function assertLegacyFlags(opts: ParsedFlags): void {
 function renderStart(opts: ParsedFlags): string {
   return `Running recall-eval against snapshot ${opts.snapshot}` +
     (opts.experiment === true ? " mode=experiment" : "") +
+    (opts.rebuildEvidenceSearchProjections === true
+      ? " derived_projection_rebuild=true promotable=false"
+      : "") +
     (opts.legacySnapshot ? " mode=legacy-v1-old-cache diagnostic_only=true" : "") +
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
     (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
@@ -94,6 +105,7 @@ function renderStart(opts: ParsedFlags): string {
 function renderResult(result: RecallEvalResult, legacy: boolean): string {
   const kpi = result.payload.kpi;
   const coverage = kpi.full_gold_coverage;
+  const rebuild = result.derivedEvidenceProjectionRebuild;
   return `Done. Slug: ${result.slug}\n` +
     (legacy ? "  substrate=legacy-v1-old-cache measurement=diagnostic-only\n" : "") +
     `  R@1=${pct(kpi.r_at_1)} R@5=${pct(kpi.r_at_5)} R@10=${pct(kpi.r_at_10)}\n` +
@@ -101,5 +113,10 @@ function renderResult(result: RecallEvalResult, legacy: boolean): string {
       `  full-gold@5=${pct(coverage.full_gold_at_5)} cov@5=${pct(coverage.gold_coverage_at_5)} ` +
       `pool@50=${pct(coverage.pool_recall_at_50)} pool@100=${pct(coverage.pool_recall_at_100)}\n`) +
     `  latency p50=${kpi.latency_ms_p50}ms p95=${kpi.latency_ms_p95}ms\n` +
+    (rebuild === undefined ? "" :
+      `  derived-projections owners=${rebuild.rebuilt_owner_count}/${rebuild.eligible_owner_count} ` +
+      `zero=${rebuild.zero_child_owner_count} nonzero=${rebuild.nonzero_child_owner_count} ` +
+      `children=${rebuild.child_count} rejected=${rebuild.rejected_owner_count} ` +
+      `sha256=${rebuild.projection_content_sha256} promotable=false\n`) +
     `  KPI: ${result.kpiPath}\n`;
 }

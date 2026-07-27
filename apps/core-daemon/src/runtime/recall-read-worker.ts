@@ -29,6 +29,7 @@ import {
   findMemoryEntriesByWorkspaceId,
   readRecallTierWindowQuery
 } from "./recall-read-worker/memory-window.js";
+import { readEvidenceSearchMatches } from "./recall-read-worker/evidence-search-matches.js";
 import { postRecallTierWindowChunks } from "./recall-read-worker/tier-window-stream.js";
 
 if (parentPort === null) {
@@ -287,7 +288,7 @@ async function runEvidenceOperation(
   if (operation === "evidence.findRecallQualifiedByIds") {
     return await evidenceCapsuleRepo.findRecallQualifiedByIds(
       workspaceId,
-      readStringArray(payload.evidenceObjectIds, "evidenceObjectIds")
+      readEvidenceSearchMatches(payload.matches)
     );
   }
   return await evidenceCapsuleRepo.findByIds(

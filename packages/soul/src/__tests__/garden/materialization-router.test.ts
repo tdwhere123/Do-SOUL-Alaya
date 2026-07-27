@@ -194,7 +194,7 @@ describe("MaterializationRouter routing and grounding", () => {
     expect(deps.claimService.create).not.toHaveBeenCalled();
   });
 
-  it("materializes only verified v2 User spans into the searchable projection", async () => {
+  it("materializes typed User assertions and complete Assistant observations", async () => {
     const deps = createDeps();
     const router = new MaterializationRouter({ ...deps, fullTurnEvidenceExcerpt: true });
     const userContent =
@@ -238,6 +238,10 @@ describe("MaterializationRouter routing and grounding", () => {
         projection_id: 1,
         projection_kind: "user_assertion",
         content: "I bought my bookshelf from IKEA."
+      }, {
+        projection_id: 1,
+        projection_kind: "assistant_observation",
+        content: assistantContent
       }]
     );
     expect(deps.memoryService.create).not.toHaveBeenCalled();

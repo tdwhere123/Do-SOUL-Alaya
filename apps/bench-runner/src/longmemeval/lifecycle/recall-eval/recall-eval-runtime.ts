@@ -3,9 +3,9 @@ import type {
   BenchEmbeddingProviderKind
 } from "../../../harness/daemon.js";
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { arch, platform, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   createOwnedTempRoot,
   externalTempRoot,
@@ -44,6 +44,10 @@ import {
   type EffectiveRecallOptions
 } from "../../provenance/effective-recall-config.js";
 import type { BenchRecallWeightOverrides } from "../../../harness/recall/recall-weight-overrides.js";
+import {
+  rebuildEvidenceSearchProjectionsOnWorkingCopy,
+  type EvidenceSearchProjectionRebuildReport
+} from "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 
 export function recallEvalEmbeddingMode(
   env: Readonly<Record<string, string | undefined>> = process.env
@@ -126,6 +130,7 @@ export async function buildRecallEvalRuntimeAttribution(
     datasetSha256?: string | null;
     recallOptions?: EffectiveRecallOptions;
     recallWeightOverrides?: BenchRecallWeightOverrides;
+    nonPromotableDerivedRebuild?: boolean;
   }> = {}
 ): Promise<RecallEvalRuntimeAttribution> {
   const identity = await resolveRecallEvalRuntimeIdentity(
@@ -146,9 +151,9 @@ export async function buildRecallEvalRuntimeAttribution(
   });
   return {
     status: manifest.attribution?.status ?? "legacy_unattributed",
-    gate_eligible: isRecallEvalRuntimeGateEligible(
-      manifest, snapshotAttribution.gate_eligible
-    ),
+    gate_eligible: evaluatorBinding.nonPromotableDerivedRebuild === true
+      ? false
+      : isRecallEvalRuntimeGateEligible(manifest, snapshotAttribution.gate_eligible),
     node_version: process.version,
     platform: platform(),
     arch: arch(),
@@ -232,7 +237,7 @@ export async function prepareRecallEvalDataDir(input: {
   readonly snapshotDbPath: string;
   readonly requestedRoot?: string;
   readonly artifactIntegrity?: SnapshotArtifactIntegrity;
-  readonly validateRestoredDb?: (dbPath: string) => void;
+  readonly validateRestoredDb?: (dbPath: string) => void | Promise<void>;
   readonly restoreSnapshot?: (dataDirRoot: string) => void;
   readonly plannedRoot?: OwnedTempRoot;
 }): Promise<OwnedTempRoot> {
@@ -240,6 +245,7 @@ export async function prepareRecallEvalDataDir(input: {
     ? await createOwnedTempRoot("alaya-recall-eval-")
     : externalTempRoot(input.requestedRoot));
   try {
+    await assertDistinctSnapshotRestorePaths(input.snapshotDbPath, root.path);
     if (root.owned) await mkdir(root.path, { recursive: true });
     if (input.artifactIntegrity !== undefined) {
       await verifySnapshotArtifactIntegrity(input.snapshotDbPath, input.artifactIntegrity);
@@ -255,7 +261,7 @@ export async function prepareRecallEvalDataDir(input: {
     } else {
       input.restoreSnapshot(root.path);
     }
-    input.validateRestoredDb?.(`${root.path}/alaya.db`);
+    await input.validateRestoredDb?.(`${root.path}/alaya.db`);
     return root;
   } catch (error) {
     let cleanupError: unknown;
@@ -269,13 +275,41 @@ export async function prepareRecallEvalDataDir(input: {
   }
 }
 
+export async function assertDistinctSnapshotRestorePaths(
+  snapshotDbPath: string,
+  dataDirRoot: string
+): Promise<void> {
+  const [source, targetRoot] = await Promise.all([
+    resolvePhysicalPath(snapshotDbPath),
+    resolvePhysicalPath(dataDirRoot)
+  ]);
+  if (source !== join(targetRoot, "alaya.db")) return;
+  throw new Error(
+    "recall-eval source snapshot must differ from the restored data root alaya.db"
+  );
+}
+
+async function resolvePhysicalPath(filePath: string): Promise<string> {
+  try {
+    return await realpath(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const parent = dirname(filePath);
+    if (parent === filePath) return resolve(filePath);
+    return join(await resolvePhysicalPath(parent), basename(filePath));
+  }
+}
+
 export async function prepareRecallEvalDataRoot(
   options: RecallEvalOptions,
   bundle: RecallEvalSnapshotBundle,
   plannedRoot?: OwnedTempRoot
-): Promise<OwnedTempRoot> {
+): Promise<OwnedTempRoot & Readonly<{
+  evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null;
+}>> {
   const { manifest } = bundle;
-  return await prepareRecallEvalDataDir({
+  let evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null = null;
+  const root = await prepareRecallEvalDataDir({
     snapshotDbPath: bundle.snapshotDbPath,
     requestedRoot: options.dataDirRoot,
     plannedRoot,
@@ -286,12 +320,22 @@ export async function prepareRecallEvalDataRoot(
           manifest
         }) }
       : { artifactIntegrity: manifest.artifact_integrity }),
-    validateRestoredDb: (dbPath) => prepareRecallEvalRestoredDb({
-      manifest,
-      restoredDbPath: dbPath,
-      legacySnapshot: options.legacySnapshot === true
-    })
+    validateRestoredDb: async (dbPath) => {
+      prepareRecallEvalRestoredDb({
+        manifest,
+        restoredDbPath: dbPath,
+        legacySnapshot: options.legacySnapshot === true,
+        derivedEvidenceProjectionRebuild:
+          options.derivedEvidenceProjectionRebuild === true
+      });
+      if (options.derivedEvidenceProjectionRebuild === true) {
+        evidenceProjectionRebuild = await rebuildEvidenceSearchProjectionsOnWorkingCopy({
+          workingDbPath: dbPath
+        });
+      }
+    }
   });
+  return Object.freeze({ ...root, evidenceProjectionRebuild });
 }
 
 export function planRecallEvalDataRoot(options: RecallEvalOptions): OwnedTempRoot {

@@ -19,12 +19,12 @@ import {
   createMemoryEntry,
   createTaskSurface
 } from "../recall-8factor-test-fixtures.js";
+import { qualifyEvidence } from "./qualified-evidence-test-fixture.js";
 
 const EVIDENCE_ID = "00000000-0000-4000-8000-000000000101";
 const SECOND_EVIDENCE_ID = "00000000-0000-4000-8000-000000000102";
-
 describe("direct evidence recall candidates", () => {
-  it("delivers an unbound verified conversation excerpt with evidence identity", async () => {
+  it("keeps verified User support for an owner-only qualified v2 hit", async () => {
     const fullExcerpt = `The assistant recommended the blue option. ${"Detailed explanation. ".repeat(90)}tail answer`;
     const evidence = createEvidenceCapsule({
       excerpt: fullExcerpt,
@@ -48,7 +48,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [evidence])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(evidence, true)])
       }
     });
     const result = await service.recall({
@@ -104,14 +104,14 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule({
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule({
           physical_anchor: {
             file_path: null,
             line_range: null,
             symbol_name: null,
             artifact_ref: "conversation:turn-1:assistant"
           }
-        })])
+        }))])
       }
     });
     const result = await service.recall({
@@ -143,7 +143,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule())])
       }
     });
     const result = await service.recall({
@@ -180,7 +180,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule())])
       }
     });
     const result = await service.recall({
@@ -206,14 +206,14 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule({
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule({
           physical_anchor: {
             file_path: null,
             line_range: null,
             symbol_name: null,
             artifact_ref: "conversation:turn-1:assistant"
           }
-        })])
+        }))])
       }
     });
     const result = await service.recall({
@@ -244,7 +244,7 @@ describe("direct evidence recall candidates", () => {
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 },
           { object_id: SECOND_EVIDENCE_ID, normalized_rank: 0.9 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule())])
       }
     });
     const result = await service.recall({
@@ -308,7 +308,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule())])
       }
     });
 
@@ -351,7 +351,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule()])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule())])
       }
     });
 
@@ -381,9 +381,9 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule({
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule({
           lifecycle_state: "dormant"
-        })])
+        }))])
       }
     });
 
@@ -421,7 +421,7 @@ describe("direct evidence recall candidates", () => {
         searchByKeyword: vi.fn(async () => [
           { object_id: EVIDENCE_ID, normalized_rank: 0.95 }
         ]),
-        findRecallQualifiedByIds: vi.fn(async () => [createEvidenceCapsule(override)])
+        findRecallQualifiedByIds: vi.fn(async () => [qualifyEvidence(createEvidenceCapsule(override))])
       }
     });
 
