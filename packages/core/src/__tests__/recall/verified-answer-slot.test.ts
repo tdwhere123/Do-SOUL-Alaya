@@ -86,25 +86,20 @@ describe("verified answer fifth slot", () => {
     expect(result.candidates).toEqual(baseline.candidates);
   });
 
-  it("keeps answer-support membership independent of verified provenance", () => {
+  it("does not admit a verified answer from outside the selected top ten", () => {
     const candidates = buildPacket(["verified"], 10);
-    const withoutContext = runSelection(
-      candidates,
-      {},
-      "public_relevance",
-      false
-    );
-    const withContext = runSelection(
+    const baseline = runSelection(candidates, {}, "public_relevance", false);
+    const result = runSelection(
       candidates,
       verifiedContexts(candidates),
       "public_relevance",
       false
     );
 
-    const ids = (result: typeof withContext) =>
-      new Set(result.candidates.map((candidate) => candidate.object_id));
-    expect(ids(withoutContext)).toEqual(ids(withContext));
-    expect(ids(withContext).has("verified")).toBe(true);
+    expect(baseline.candidates).toHaveLength(10);
+    expect(baseline.candidates.some((candidate) => candidate.object_id === "verified"))
+      .toBe(false);
+    expect(result.candidates).toEqual(baseline.candidates);
   });
 
   it("does not override delivery-rank final authority", () => {

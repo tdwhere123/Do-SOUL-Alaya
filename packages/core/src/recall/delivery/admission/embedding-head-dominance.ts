@@ -30,11 +30,6 @@ type EvaluatedDominanceReplacement<T> = Readonly<{
   readonly replacement: DominanceReplacement<T>;
 }>;
 
-export type EmbeddingHeadSelectionPlan = Readonly<{
-  readonly evictions: ReadonlySet<string>;
-  readonly protectedCandidateKeys: ReadonlySet<string>;
-}>;
-
 export function hasRankedEmbeddingHead<T extends EmbeddingHeadCandidate>(
   candidates: readonly T[],
   maxEntries: number
@@ -43,7 +38,7 @@ export function hasRankedEmbeddingHead<T extends EmbeddingHeadCandidate>(
   return budget > 0 && candidates.some((candidate) => isEmbeddingHead(candidate, budget));
 }
 
-export function selectEmbeddingHeadPlan<T extends EmbeddingHeadCandidate>(
+export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
   params: Readonly<{
     readonly candidates: readonly T[];
     readonly maxEntries: number;
@@ -52,16 +47,14 @@ export function selectEmbeddingHeadPlan<T extends EmbeddingHeadCandidate>(
     readonly answerRerankedCandidateKeys?: ReadonlySet<string>;
     readonly selectDelivered: (evictions: ReadonlySet<string>) => readonly T[];
   }>
-): Readonly<EmbeddingHeadSelectionPlan> {
+): ReadonlySet<string> {
   const budget = normalizeBudget(params.maxEntries, params.candidates.length);
-  if (budget === 0) return emptySelectionPlan();
+  if (budget === 0) return new Set();
   const embeddingHead = orderedEmbeddingHead(params.candidates, budget);
-  if (embeddingHead.length === 0) return emptySelectionPlan();
+  if (embeddingHead.length === 0) return new Set();
   const selectDelivered = memoizeDeliveredSelection(params.selectDelivered);
   let evictions: ReadonlySet<string> = new Set();
   let delivered = selectDelivered(evictions);
-  const initialDeliveredKeys = candidateKeySet(delivered);
-  let acceptedReplacement = false;
   for (const head of embeddingHead) {
     if (containsCandidate(delivered, head)) continue;
     const replacement = findReplacement({
@@ -75,22 +68,8 @@ export function selectEmbeddingHeadPlan<T extends EmbeddingHeadCandidate>(
     if (replacement === null) continue;
     evictions = replacement.evictions;
     delivered = replacement.delivered;
-    acceptedReplacement = true;
   }
-  const protectedCandidateKeys = acceptedReplacement
-    ? new Set(embeddingHead
-        .filter((head) => containsCandidate(delivered, head)
-          && !initialDeliveredKeys.has(head.fusion.candidate_key))
-        .map((head) => head.fusion.candidate_key))
-    : new Set<string>();
-  return Object.freeze({ evictions, protectedCandidateKeys });
-}
-
-function emptySelectionPlan(): Readonly<EmbeddingHeadSelectionPlan> {
-  return Object.freeze({
-    evictions: new Set<string>(),
-    protectedCandidateKeys: new Set<string>()
-  });
+  return evictions;
 }
 
 function memoizeDeliveredSelection<T>(
@@ -214,12 +193,6 @@ function containsCandidate<T extends EmbeddingHeadCandidate>(
   return candidates.some(
     (candidate) => candidate.fusion.candidate_key === expected.fusion.candidate_key
   );
-}
-
-function candidateKeySet<T extends EmbeddingHeadCandidate>(
-  candidates: readonly T[]
-): ReadonlySet<string> {
-  return new Set(candidates.map((candidate) => candidate.fusion.candidate_key));
 }
 
 function normalizeBudget(value: number, candidateCount: number): number {
