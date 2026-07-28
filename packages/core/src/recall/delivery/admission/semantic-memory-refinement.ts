@@ -23,6 +23,7 @@ type SemanticMemoryRefinementParams<T extends SemanticRefinementCandidate> = Rea
   readonly evidenceSelection: AnswerHeadSelection<T>;
   readonly leader: SemanticHeadCandidate<T>;
   readonly headLimit: number;
+  readonly replacementProtectedCandidateKeys?: readonly string[];
   readonly publicRelevanceByCandidateKey: ReadonlyMap<string, number>;
   readonly selectDelivered: (candidates: readonly T[]) => readonly T[];
   readonly keyOf: (candidate: T) => string;
@@ -132,9 +133,10 @@ function semanticReplacementProtectedKeys<T extends SemanticRefinementCandidate>
   baseline: readonly T[]
 ): ReadonlySet<string> {
   const baselineKeys = candidateKeys(baseline, params.keyOf);
-  const protectedKeys = new Set(params.evidenceSelection.protections
-    .map((item) => item.candidateKey)
-    .filter((key) => baselineKeys.has(key)));
+  const protectedKeys = new Set([
+    ...params.evidenceSelection.protections.map((item) => item.candidateKey),
+    ...(params.replacementProtectedCandidateKeys ?? [])
+  ].filter((key) => baselineKeys.has(key)));
   const protectedTarget = Math.max(0, params.headLimit - 1);
   const publicOrder = [...baseline].sort((left, right) =>
     comparePublicRelevance(params, left, right)

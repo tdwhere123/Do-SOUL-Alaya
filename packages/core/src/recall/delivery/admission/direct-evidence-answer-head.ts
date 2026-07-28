@@ -35,6 +35,11 @@ type DirectEvidenceAdmission<T> = Readonly<{
   readonly delivered: readonly T[];
 }>;
 
+type SemanticMemoryRefinementPlan<T> = Readonly<{
+  readonly leader: SemanticHeadCandidate<T>;
+  readonly replacementProtectedCandidateKeys?: readonly string[];
+}>;
+
 export type DirectEvidenceHeadSelection<T> = AnswerHeadSelection<T>;
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
@@ -61,13 +66,17 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
     candidates, baseline, evidence, semanticLeader, headLimit,
     publicRelevanceByCandidateKey, queryProbes, selectDelivered, blocksEvidenceHead
   );
-  return semanticLeader === undefined ||
-    semanticLeader.candidate.objectKind === "evidence_capsule"
+  const refinement = resolveSemanticMemoryRefinementPlan(
+    candidates, baseline, evidenceSelection, semanticLeader, headLimit, selectDelivered
+  );
+  return refinement === undefined
     ? evidenceSelection
     : selectSemanticMemoryRefinement({
         evidenceSelection,
-        leader: semanticLeader,
+        leader: refinement.leader,
         headLimit,
+        replacementProtectedCandidateKeys:
+          refinement.replacementProtectedCandidateKeys,
         publicRelevanceByCandidateKey,
         selectDelivered,
         keyOf: candidateKey,
@@ -80,6 +89,34 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
           ),
         resolveSingleReplacement
       });
+}
+
+function resolveSemanticMemoryRefinementPlan<T extends DirectEvidenceHeadCandidate>(
+  candidates: readonly T[],
+  baseline: readonly T[],
+  evidenceSelection: AnswerHeadSelection<T>,
+  semanticLeader: SemanticHeadCandidate<T> | undefined,
+  headLimit: number,
+  selectDelivered: SelectDelivered<T>
+): SemanticMemoryRefinementPlan<T> | undefined {
+  if (semanticLeader === undefined) return undefined;
+  if (semanticLeader.candidate.objectKind !== "evidence_capsule") {
+    return Object.freeze({ leader: semanticLeader });
+  }
+  if (headLimit <= 1) return undefined;
+  const delivered = evidenceSelection.candidates === candidates
+    ? baseline
+    : selectDelivered(evidenceSelection.candidates);
+  const memoryLeader = selectUniqueSemanticMemoryLeader(candidates);
+  if (memoryLeader === undefined) return undefined;
+  return candidateKeys(delivered).has(semanticLeader.candidateKey)
+    ? Object.freeze({
+        leader: memoryLeader,
+        replacementProtectedCandidateKeys: Object.freeze([
+          semanticLeader.candidateKey
+        ])
+      })
+    : Object.freeze({ leader: memoryLeader });
 }
 
 function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
@@ -376,7 +413,9 @@ function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
     const candidateKey = buildRecallCandidateDedupeKey(candidate);
     const evidenceCandidate = evidenceByKey.get(candidateKey);
     const score = candidate.objectKind === "evidence_capsule"
-      ? evidenceScores.get(candidateKey)
+      ? evidenceCandidate === undefined
+        ? undefined
+        : evidenceScores.get(candidateKey)
       : candidate.effectiveFactors.embedding_similarity;
     return score !== undefined && Number.isFinite(score) && score > 0
       ? [{ candidate, candidateKey, index, score, evidenceCandidate }]
@@ -391,6 +430,28 @@ function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
         candidateKey: leader.candidateKey,
         index: leader.index
       })
+    : undefined;
+}
+
+function selectUniqueSemanticMemoryLeader<T extends DirectEvidenceHeadCandidate>(
+  candidates: readonly T[]
+): SemanticHeadCandidate<T> | undefined {
+  const ranked = candidates.flatMap((candidate, index) => {
+    const score = candidate.effectiveFactors.embedding_similarity;
+    return isWorkspaceMemoryCandidate(candidate) &&
+      score !== undefined &&
+      Number.isFinite(score) &&
+      score > 0
+      ? [{
+          candidate,
+          candidateKey: buildRecallCandidateDedupeKey(candidate),
+          index,
+          score
+        }]
+      : [];
+  }).sort((left, right) => right.score - left.score);
+  return ranked.length > 0 && ranked[1]?.score !== ranked[0]!.score
+    ? ranked[0]
     : undefined;
 }
 

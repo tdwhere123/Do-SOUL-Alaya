@@ -155,6 +155,52 @@ describe("semantic answer head", () => {
     ]);
   });
 
+  it("keeps an admitted semantic evidence leader while admitting a distinct memory leader", () => {
+    const evidence = withSemanticSignals(
+      qualifiedDirectEvidence("semantic-evidence", 6, "opaque receipt zxq-8842"),
+      1,
+      0
+    );
+    const evidenceKey = "workspace_local:evidence_capsule:semantic-evidence";
+    const memory = withSemanticSignals(semanticLeader(), 2, 0.98);
+    const peers = peerCandidates();
+    const coverageRelevance = new Map([
+      [evidenceKey, 10],
+      ...peers.map((candidate, index) => [
+        candidate.fusion.candidate_key,
+        5 - index
+      ] as const),
+      [memory.fusion.candidate_key, 0]
+    ]);
+    const result = select(
+      [...peers, evidence, memory],
+      5,
+      new Map([[evidenceKey, 0.99]]),
+      coverageRelevance
+    );
+
+    expect(result.candidates[0]?.object_id).toBe("semantic-memory-leader");
+    expect(result.candidates.map((candidate) => candidate.object_id))
+      .toContain("semantic-evidence");
+  });
+
+  it("does not let a non-delivered semantic evidence leader veto a memory leader", () => {
+    const evidence = withSemanticSignals(
+      qualifiedDirectEvidence("semantic-evidence", 6, "opaque receipt zxq-8842"),
+      1,
+      0
+    );
+    const evidenceKey = "workspace_local:evidence_capsule:semantic-evidence";
+    const memory = withSemanticSignals(semanticLeader(), 2, 0.98);
+    const result = select(
+      [...peerCandidates(), evidence, memory],
+      5,
+      new Map([[evidenceKey, 0.99]])
+    );
+
+    expect(result.candidates[0]?.object_id).toBe("semantic-memory-leader");
+  });
+
   it("does not replace a public top-four peer from the coverage-order tail", () => {
     const publicPeers = [1, 2, 3, 4, 5].map((rank) =>
       createRankedCandidate(`public-peer-${rank}`, rank, 1 - rank / 10)
@@ -366,7 +412,7 @@ describe("semantic answer head", () => {
     ]);
   });
 
-  it("does not promote a memory behind an unqualified evidence leader", () => {
+  it("does not let evidence outside bounded discovery veto a memory semantic leader", () => {
     const evidence = withSemanticSignals(
       createCandidate(
         "unqualified-evidence",
@@ -384,6 +430,9 @@ describe("semantic answer head", () => {
       new Map([[evidenceKey, 0.99]])
     );
 
-    expect(result.candidates[0]?.object_id).toBe("peer-1");
+    expect(result.candidates[0]?.object_id).toBe("semantic-memory-leader");
+    expect(result.diagnostics.find(
+      (row) => row.object_id === "semantic-memory-leader"
+    )).toMatchObject({ dropped_reason: null, final_rank: 1 });
   });
 });
