@@ -94,8 +94,7 @@ function readPacketPlanTrace(
   value: unknown
 ): NarrowRecallDiagnostics["packetPlanTrace"] {
   if (value == null) return null;
-  const parsed = RecallPacketPlanTraceSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  return RecallPacketPlanTraceSchema.parse(value);
 }
 
 function readAnswerShapePlan(

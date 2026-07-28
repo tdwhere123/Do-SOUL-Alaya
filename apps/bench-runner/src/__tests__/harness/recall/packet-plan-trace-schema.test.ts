@@ -12,7 +12,7 @@ import {
   LongMemEvalQuestionDiagnosticSchema
 } from "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 
-const packetPlanTrace = {
+const obsoletePacketPlanTraceV1 = {
   schema_version: 1,
   assessment_path: "snapshot",
   baseline_candidate_keys: [
@@ -35,6 +35,80 @@ const packetPlanTrace = {
   }
 } as const;
 
+const packetPlanTraceV2 = {
+  schema_version: 2,
+  assessment_path: "snapshot",
+  baseline_candidate_keys: [
+    "workspace_local:memory_entry:memory-a",
+    "global:evidence_capsule:evidence-b",
+    "workspace_local:synthesis_capsule:synthesis-c"
+  ],
+  planned_candidate_keys: [
+    "workspace_local:memory_entry:memory-a",
+    "global:evidence_capsule:evidence-d",
+    "workspace_local:synthesis_capsule:synthesis-c"
+  ],
+  actual_candidate_keys: [
+    "workspace_local:memory_entry:memory-a",
+    "global:evidence_capsule:evidence-d",
+    "workspace_local:synthesis_capsule:synthesis-c"
+  ],
+  head_width: 2,
+  baseline_head_candidate_keys: [
+    "workspace_local:memory_entry:memory-a",
+    "global:evidence_capsule:evidence-b"
+  ],
+  embedding_head: [{
+    candidate_key: "global:evidence_capsule:evidence-d",
+    embedding_rank: 1
+  }],
+  consensus_head_candidate_keys: [
+    "workspace_local:memory_entry:memory-a",
+    "global:evidence_capsule:evidence-d"
+  ],
+  immutable_tail_candidate_keys: [
+    "workspace_local:synthesis_capsule:synthesis-c"
+  ],
+  protected_candidates: [{
+    candidate_key: "workspace_local:memory_entry:memory-a",
+    rank_limit: 1
+  }],
+  added_candidate_keys: ["global:evidence_capsule:evidence-d"],
+  removed_candidate_keys: ["global:evidence_capsule:evidence-b"],
+  decision: {
+    status: "accepted",
+    reason: "strict_tail_consensus"
+  }
+} as const;
+
+const rejectedPacketPlanTraceV2 = {
+  ...packetPlanTraceV2,
+  actual_candidate_keys: packetPlanTraceV2.baseline_candidate_keys,
+  protected_candidates: [{
+    candidate_key: "global:evidence_capsule:evidence-b",
+    rank_limit: 2
+  }],
+  decision: {
+    status: "rejected",
+    reason: "protected_candidate_constraint"
+  }
+} as const;
+
+const noOpPacketPlanTraceV2 = {
+  ...packetPlanTraceV2,
+  planned_candidate_keys: packetPlanTraceV2.baseline_candidate_keys,
+  actual_candidate_keys: packetPlanTraceV2.baseline_candidate_keys,
+  embedding_head: [],
+  consensus_head_candidate_keys: packetPlanTraceV2.baseline_head_candidate_keys,
+  protected_candidates: [],
+  added_candidate_keys: [],
+  removed_candidate_keys: [],
+  decision: {
+    status: "no_op",
+    reason: "no_finite_embedding_head"
+  }
+} as const;
+
 describe("packet plan trace diagnostics schemas", () => {
   it("keeps bench recall diagnostics compatible when the optional trace is absent", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse(benchDiagnostics());
@@ -45,13 +119,17 @@ describe("packet plan trace diagnostics schemas", () => {
   it("accepts a valid packet plan trace in bench recall diagnostics", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse({
       ...benchDiagnostics(),
-      packet_plan_trace: packetPlanTrace
+      packet_plan_trace: packetPlanTraceV2
     });
 
-    expect(parsed.packet_plan_trace).toEqual(packetPlanTrace);
+    expect(parsed.packet_plan_trace).toEqual(packetPlanTraceV2);
   });
 
-  it("reads the raw trace and persists it through question assembly", () => {
+  it.each([
+    ["accepted", packetPlanTraceV2],
+    ["rejected", rejectedPacketPlanTraceV2],
+    ["no-op", noOpPacketPlanTraceV2]
+  ] as const)("reads and persists a raw %s trace unchanged", (_version, packetPlanTrace) => {
     const recallResult = {
       diagnostics: { packet_plan_trace: packetPlanTrace }
     };
@@ -87,7 +165,23 @@ describe("packet plan trace diagnostics schemas", () => {
     });
   });
 
-  it("accepts nullable and valid packet plan traces in persisted diagnostics", () => {
+  it("rejects the obsolete v1 trace at both bench persistence boundaries", () => {
+    expect(() => BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      packet_plan_trace: obsoletePacketPlanTraceV1
+    })).toThrow();
+
+    expect(() => LongMemEvalQuestionDiagnosticSchema.parse({
+      ...persistedQuestionDiagnostic(),
+      packet_plan_trace: obsoletePacketPlanTraceV1
+    })).toThrow();
+
+    expect(() => readRecallDiagnostics({
+      diagnostics: { packet_plan_trace: obsoletePacketPlanTraceV1 }
+    }, "disabled")).toThrow();
+  });
+
+  it("accepts nullable support-set packet traces in persisted diagnostics", () => {
     expect(
       LongMemEvalQuestionDiagnosticSchema.parse({
         ...persistedQuestionDiagnostic(),
@@ -98,9 +192,70 @@ describe("packet plan trace diagnostics schemas", () => {
     expect(
       LongMemEvalQuestionDiagnosticSchema.parse({
         ...persistedQuestionDiagnostic(),
-        packet_plan_trace: packetPlanTrace
+        packet_plan_trace: packetPlanTraceV2
       }).packet_plan_trace
-    ).toEqual(packetPlanTrace);
+    ).toEqual(packetPlanTraceV2);
+  });
+
+  it("rejects private content, evaluator gold, and unapproved scalar fields", () => {
+    const forbiddenRootFields = [
+      { content_preview: "private" },
+      { evaluator_gold: true },
+      { relevance_score: 0.9 }
+    ];
+    for (const forbidden of forbiddenRootFields) {
+      expect(() => BenchRecallDiagnosticsSchema.parse({
+        ...benchDiagnostics(),
+        packet_plan_trace: { ...packetPlanTraceV2, ...forbidden }
+      })).toThrow();
+    }
+
+    for (const forbidden of [
+      { content_preview: "private" },
+      { evaluator_gold: true },
+      { embedding_similarity: 0.9 }
+    ]) {
+      expect(() => BenchRecallDiagnosticsSchema.parse({
+        ...benchDiagnostics(),
+        packet_plan_trace: {
+          ...packetPlanTraceV2,
+          embedding_head: [{ ...packetPlanTraceV2.embedding_head[0], ...forbidden }]
+        }
+      })).toThrow();
+    }
+  });
+
+  it.each([
+    ["accepted", {
+      ...packetPlanTraceV2,
+      actual_candidate_keys: packetPlanTraceV2.baseline_candidate_keys
+    }],
+    ["rejected", {
+      ...rejectedPacketPlanTraceV2,
+      actual_candidate_keys: rejectedPacketPlanTraceV2.planned_candidate_keys
+    }],
+    ["no-op", {
+      ...noOpPacketPlanTraceV2,
+      planned_candidate_keys: packetPlanTraceV2.planned_candidate_keys
+    }]
+  ] as const)("rejects an inconsistent %s outcome", (_status, packetPlanTrace) => {
+    expect(() => BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      packet_plan_trace: packetPlanTrace
+    })).toThrow();
+  });
+
+  it("rejects a causal decision that contradicts the observed proposal", () => {
+    expect(() => BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      packet_plan_trace: {
+        ...noOpPacketPlanTraceV2,
+        decision: {
+          status: "rejected",
+          reason: "behavior_guard_full_abort"
+        }
+      }
+    })).toThrow();
   });
 });
 

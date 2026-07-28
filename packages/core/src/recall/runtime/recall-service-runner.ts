@@ -4,7 +4,7 @@ import {
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import type { FineAssessParams } from "../delivery/fine-assessment.js";
-import { buildObservedPacketPlanTrace } from
+import { buildSupportSetPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
 import {
   applyManifestationBiasSidecar,
@@ -44,7 +44,6 @@ import { collectAnswerRelevanceScores } from "../rerank/recall-answer-rerank.js"
 import { buildRecallResult } from "./recall-result-builder.js";
 import {
   collectInitialLegacyAssessment,
-  collectPreEmbeddingPacketBaseline,
   collectTimedSupplementaryData,
   deliverOrReuseAssessment,
   prepareLegacyReassessment,
@@ -78,8 +77,6 @@ type AssessmentPhaseSeed = Readonly<{
   readonly assessment: number;
   readonly delivery: number;
 }>;
-type PacketBaseline = TimedResult<FineAssessmentResult> | null;
-
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 
 export async function executeRecall(
@@ -170,27 +167,17 @@ async function assessCandidateStage(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
-  const packetBaseline = params.diagnosticCapture === "packet_trace"
-    ? await measureAsync(() =>
-        collectPreEmbeddingPacketBaseline(context, params, prepared, coarse)
-      )
-    : null;
   if (coarse.embeddingCoarseInjection.requestScoreSnapshot !== undefined) {
-    return assessSnapshotCandidateStage(
-      context, params, prepared, coarse, packetBaseline
-    );
+    return assessSnapshotCandidateStage(context, params, prepared, coarse);
   }
-  return assessLegacyCandidateStage(
-    context, params, prepared, coarse, packetBaseline
-  );
+  return assessLegacyCandidateStage(context, params, prepared, coarse);
 }
 
 async function assessLegacyCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  packetBaseline: PacketBaseline
+  coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
   const waist = prepareRecallFineAssessmentWaist(context, prepared, coarse);
   const embeddingPreparation = startLegacyEmbeddingPreparation(
@@ -228,15 +215,11 @@ async function assessLegacyCandidateStage(
     embedding.value,
     Object.freeze({
       embedding: preparedEmbeddingQuery.latencyMs + embedding.latencyMs,
-      assessment:
-        (packetBaseline?.latencyMs ?? 0) +
-        initialAssessmentLatencyMs +
-        reassessment.latencyMs,
+      assessment: initialAssessmentLatencyMs + reassessment.latencyMs,
       delivery: initialDeliveryLatencyMs
     }),
     reassessment.value.reassessmentRequired ? undefined : initial.assessment,
-    "legacy",
-    packetBaseline?.value
+    "legacy"
   );
 }
 
@@ -262,8 +245,7 @@ async function assessSnapshotCandidateStage(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  packetBaseline: PacketBaseline
+  coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
   const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const embedding = await measureAsync(() => collectSnapshotEmbeddingAssessmentData(
@@ -282,15 +264,11 @@ async function assessSnapshotCandidateStage(
     embedding.value,
     Object.freeze({
       embedding: embedding.latencyMs,
-      assessment:
-        (packetBaseline?.latencyMs ?? 0) +
-        base.latencyMs +
-        assessment.latencyMs,
+      assessment: base.latencyMs + assessment.latencyMs,
       delivery: 0
     }),
     undefined,
-    "snapshot",
-    packetBaseline?.value
+    "snapshot"
   );
 }
 
@@ -304,8 +282,7 @@ async function completeCandidateAssessment(
   embeddingData: EmbeddingAssessmentData,
   phaseLatency: AssessmentPhaseSeed,
   reusableAssessment: FineAssessmentResult | undefined,
-  assessmentPath: "legacy" | "snapshot",
-  packetBaseline?: FineAssessmentResult
+  assessmentPath: "legacy" | "snapshot"
 ): Promise<AssessmentStageResult> {
   const { preparedEmbeddingQuery } = embeddingData;
   const rerank = await measureAsync(() => collectAnswerRerankStage(
@@ -328,13 +305,12 @@ async function completeCandidateAssessment(
     evidenceEmbeddingScoring: embeddingData.evidenceScoring,
     providerDegradationReason: provider.degradationReason,
     answerRerankDiagnostics: rerank.value.diagnostics,
-    ...(packetBaseline === undefined
+    ...(delivery.value.packetPlanObservation === undefined
       ? {}
       : {
-          packetPlanTrace: buildObservedPacketPlanTrace(
+          packetPlanTrace: buildSupportSetPacketPlanTrace(
             assessmentPath,
-            packetBaseline.candidates,
-            delivery.value.candidates
+            delivery.value.packetPlanObservation
           )
         }),
     phaseLatencyMs: Object.freeze({

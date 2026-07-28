@@ -62,7 +62,6 @@ export interface CoarseStageResult {
   readonly coarseFilter: CoarseFilterResult;
   readonly globalCoarseFilter: Awaited<ReturnType<typeof loadGlobalRecallCandidates>>;
   readonly globalRecallClassifications: Parameters<typeof recordGlobalRecallClassificationsSafely>[0]["classifications"];
-  readonly preEmbeddingCoarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly combinedCoarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
   readonly embeddingCoarseInjection: EmbeddingCoarseInjectionResult;
 }
@@ -95,7 +94,6 @@ export async function collectCoarseStage(
     coarseFilter: Object.freeze({ ...coarseFilter, synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks }),
     globalCoarseFilter: global.raw,
     globalRecallClassifications: global.classifications,
-    preEmbeddingCoarseCandidates: lexicalCoarseCandidates,
     combinedCoarseCandidates: combineEmbeddingInjection(lexicalCoarseCandidates, embeddingCoarseInjection.candidates),
     embeddingCoarseInjection
   });

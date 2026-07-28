@@ -9,14 +9,13 @@ import {
 } from "../compile-seed.js";
 import type { LongMemEvalDiagnosticsSpool } from "../diagnostics/spool.js";
 import { inspectTurnContentKeySpace } from "../extraction/turn-contents.js";
-import {
-  deriveLongMemEvalReleaseEvidenceAuthority,
-  loadDatasetWithIdentity
-} from "../ingestion/fetch.js";
+import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import {
   createOwnedTempRoot,
   externalTempRoot
 } from "../lifecycle/owned-temp-root.js";
+import { deriveLongMemEvalRunnerReleaseEvidenceAuthority } from
+  "../release-evidence-authority.js";
 import {
   recallOptionsForPolicyShape,
   resolveBenchEmbeddingProviderLabel,
@@ -115,10 +114,14 @@ function deriveRunEvidenceAuthority(
 ): LongMemEvalReleaseEvidenceAuthority | null {
   const offset = Math.max(0, opts.offset ?? 0);
   if (opts.questionManifest !== undefined) return null;
-  return deriveLongMemEvalReleaseEvidenceAuthority(dataset.promotionAuthority, {
-    kind: "execution_window",
+  return deriveLongMemEvalRunnerReleaseEvidenceAuthority({
+    datasetAuthority: dataset.promotionAuthority,
     offset,
-    limit: window.length
+    selection: {
+      kind: "execution_window",
+      offset,
+      limit: window.length
+    }
   });
 }
 

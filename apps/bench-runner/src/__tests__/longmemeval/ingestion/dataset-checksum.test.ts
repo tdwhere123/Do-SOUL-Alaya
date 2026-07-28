@@ -10,6 +10,10 @@ import {
 } from "../../../longmemeval/ingestion/fetch.js";
 import { aggregateLongMemEvalRunResults } from "../../../longmemeval/runner/archive/runner-archive-aggregate.js";
 import { buildLongMemEvalRunPayload } from "../../../longmemeval/runner/archive/runner-archive-payload.js";
+import { prepareCrossQuestionRun } from
+  "../../../longmemeval/crossquestion/crossquestion-run.js";
+import { prepareMultiturnRun } from
+  "../../../longmemeval/multiturn/multiturn-run.js";
 import { prepareLongMemEvalRun } from "../../../longmemeval/runner/prepare-context.js";
 import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
 import { emptySeedFuelInventory } from "../../../longmemeval/extraction/seed-fuel/seed-fuel-inventory.js";
@@ -159,10 +163,10 @@ describe("prepareLongMemEvalRun release evidence authority", () => {
     }
   );
 
-  it("grants authority to a nonzero-offset execution window", async () => {
+  it("keeps a nonzero-offset execution window diagnostic-only", async () => {
     committedPinRead.sha256 = await seedLocalDataset();
 
-    await expect(prepareCanonicalAuthority({ offset: 1 })).resolves.not.toBeNull();
+    await expect(prepareCanonicalAuthority({ offset: 1 })).resolves.toBeNull();
   });
 
   it("keeps a question-manifest selection diagnostic-only", async () => {
@@ -184,6 +188,26 @@ describe("prepareLongMemEvalRun release evidence authority", () => {
       questionManifest: manifestPath
     })).resolves.toBeNull();
   });
+});
+
+describe("public runner release evidence authority", () => {
+  it.each(["crossquestion", "multiturn"] as const)(
+    "keeps offset-zero %s authority unchanged",
+    async (surface) => {
+      committedPinRead.sha256 = await seedLocalDataset();
+
+      await expect(preparePublicSurfaceAuthority(surface, 0)).resolves.not.toBeNull();
+    }
+  );
+
+  it.each(["crossquestion", "multiturn"] as const)(
+    "keeps a nonzero-offset %s window diagnostic-only",
+    async (surface) => {
+      committedPinRead.sha256 = await seedLocalDataset();
+
+      await expect(preparePublicSurfaceAuthority(surface, 1)).resolves.toBeNull();
+    }
+  );
 });
 
 async function prepareCanonicalAuthority(
@@ -214,6 +238,33 @@ async function prepareCanonicalAuthority(
   } finally {
     await spool.dispose();
   }
+}
+
+async function preparePublicSurfaceAuthority(
+  surface: "crossquestion" | "multiturn",
+  offset: number
+) {
+  vi.stubEnv("OFFICIAL_API_GARDEN_MODEL", "fixture-model");
+  vi.stubEnv("ALAYA_BENCH_EXTRACTION_REQUEST_PROFILE", "provider-default-v1");
+  const extractionCacheRoot = join(tmpDir, `${surface}-authority-extraction-cache`);
+  writeExtractionCacheTestManifest({
+    cacheRoot: extractionCacheRoot,
+    model: "fixture-model",
+    systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+  });
+  const opts = {
+    variant: VARIANT,
+    historyRoot: join(tmpDir, `${surface}-authority-history`),
+    dataDir,
+    dataDirRoot: join(tmpDir, `${surface}-authority-seed-root`),
+    extractionCacheRoot,
+    embeddingMode: "disabled" as const,
+    offset
+  };
+  const context = surface === "crossquestion"
+    ? await prepareCrossQuestionRun(opts)
+    : await prepareMultiturnRun({ ...opts, rounds: 2 });
+  return context.releaseEvidenceAuthority;
 }
 
 describe("loadDataset checksum verification", () => {

@@ -1,9 +1,6 @@
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import { EmbeddingReadinessTracker } from "../provenance/embedding/embedding-readiness.js";
-import {
-  deriveLongMemEvalReleaseEvidenceAuthority,
-  loadDatasetWithIdentity
-} from "../ingestion/fetch.js";
+import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 import {
@@ -17,6 +14,8 @@ import {
   createLongMemEvalSelectionContract,
   type LongMemEvalSelectionContract
 } from "../selection/contract.js";
+import { deriveLongMemEvalRunnerReleaseEvidenceAuthority } from
+  "../release-evidence-authority.js";
 import type {
   LongMemEvalMultiturnRunOptions,
   QuestionResult
@@ -62,6 +61,7 @@ export async function prepareMultiturnRun(
   const questions = dataset.questions;
   const commitInfo = resolveCommitInfo();
   const window = selectQuestionWindow(questions, opts);
+  const offset = Math.max(0, opts.offset ?? 0);
   return {
     opts: effectiveOpts,
     questions,
@@ -69,13 +69,14 @@ export async function prepareMultiturnRun(
     datasetSha256: dataset.sha256,
     datasetChecksumSource: dataset.checksumSource,
     datasetSourcePath: dataset.sourcePath,
-    releaseEvidenceAuthority: deriveLongMemEvalReleaseEvidenceAuthority(
-      dataset.promotionAuthority,
-      {
+    releaseEvidenceAuthority: deriveLongMemEvalRunnerReleaseEvidenceAuthority({
+      datasetAuthority: dataset.promotionAuthority,
+      offset,
+      selection: {
         kind: "dataset_order_subset",
         questionIds: window.map((question) => question.question_id)
       }
-    ),
+    }),
     selectionContract: createLongMemEvalSelectionContract({
       datasetSha256: dataset.sha256,
       questions: window
@@ -91,7 +92,7 @@ export async function prepareMultiturnRun(
     seedRunner: createMultiturnSeedRunner(
       extractionCacheRoot,
       window,
-      Math.max(0, opts.offset ?? 0)
+      offset
     )
   };
 }

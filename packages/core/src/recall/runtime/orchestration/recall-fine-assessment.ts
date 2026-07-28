@@ -58,25 +58,6 @@ export function prepareRecallFineAssessmentWaist(
   );
 }
 
-export async function collectPreEmbeddingPacketBaseline(
-  context: RecallExecutionContext,
-  params: RecallExecutionParams,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Promise<FineAssessmentResult> {
-  const waist = prepareFineAssessmentWaist(
-    buildFineAssessmentWaistParams(context, prepared, coarse, "pre_embedding")
-  );
-  const supplementaryData = await collectCoarseFilterSupplementaryData(
-    buildCoarseAssessmentParams(context, params, prepared, coarse, waist.survivors)
-  );
-  const fineParams = buildFineAssessParams(
-    context, params, prepared, supplementaryData, waist.survivors
-  );
-  const preparation = prepareFineAssessment(fineParams, waist);
-  return deliverFineAssessment(fineParams, preparation);
-}
-
 export function collectTimedSupplementaryData(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
@@ -232,6 +213,7 @@ function buildFineAssessParams(
     now: () => prepared.referenceTime,
     warn: context.warn,
     captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
+    capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop()
   };
 }
@@ -260,25 +242,18 @@ function buildCoarseAssessmentParams(
   };
 }
 
-type FineAssessmentWaistSource = "combined" | "pre_embedding";
-
 function buildFineAssessmentWaistParams(
   context: RecallExecutionContext,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  source: FineAssessmentWaistSource = "combined"
+  coarse: CoarseStageResult
 ): Parameters<typeof prepareFineAssessmentWaist>[0] {
-  const embeddingSimilarityScores = source === "pre_embedding"
-    ? {}
-    : {
-        ...(coarse.embeddingCoarseInjection.requestScoreSnapshot
-          ?.poolScoresByObjectId ?? {}),
-        ...coarse.embeddingCoarseInjection.similarityScores
-      };
+  const embeddingSimilarityScores = {
+    ...(coarse.embeddingCoarseInjection.requestScoreSnapshot
+      ?.poolScoresByObjectId ?? {}),
+    ...coarse.embeddingCoarseInjection.similarityScores
+  };
   return {
-    candidates: source === "pre_embedding"
-      ? coarse.preEmbeddingCoarseCandidates
-      : coarse.combinedCoarseCandidates,
+    candidates: coarse.combinedCoarseCandidates,
     policy: prepared.policy,
     winnerMemoryIds: prepared.winnerMemoryIds,
     supplementaryData: {

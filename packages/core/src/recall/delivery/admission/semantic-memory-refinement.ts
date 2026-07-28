@@ -6,6 +6,7 @@ export type AnswerHeadProtection = Readonly<{
 export type AnswerHeadSelection<T> = Readonly<{
   readonly candidates: readonly T[];
   readonly protections: readonly AnswerHeadProtection[];
+  readonly rejectedCandidateKeys: readonly string[];
 }>;
 
 export type SemanticHeadCandidate<T> = Readonly<{
@@ -60,7 +61,7 @@ export function selectSemanticMemoryRefinement<T extends SemanticRefinementCandi
   if (
     victim === undefined ||
     !params.evidencePermitsVictim(params.evidenceSelection, victim)
-  ) return params.evidenceSelection;
+  ) return rejectSemanticLeader(params);
   const trialOrder = replaceCandidateOrder(
     params.evidenceSelection.candidates,
     params.leader.candidate,
@@ -72,12 +73,13 @@ export function selectSemanticMemoryRefinement<T extends SemanticRefinementCandi
     baseline, trial, params.leader.candidateKey
   );
   if (replacement === undefined || params.keyOf(replacement) !== params.keyOf(victim)) {
-    return params.evidenceSelection;
+    return rejectSemanticLeader(params);
   }
   const refined = addAnswerHeadProtection(
     Object.freeze({
       candidates: trialOrder,
-      protections: params.evidenceSelection.protections
+      protections: params.evidenceSelection.protections,
+      rejectedCandidateKeys: params.evidenceSelection.rejectedCandidateKeys
     }),
     params.leader,
     1
@@ -86,7 +88,7 @@ export function selectSemanticMemoryRefinement<T extends SemanticRefinementCandi
     trial, refined.protections, refined.candidates
   )
     ? refined
-    : params.evidenceSelection;
+    : rejectSemanticLeader(params);
 }
 
 export function addAnswerHeadProtection<T>(
@@ -102,6 +104,25 @@ export function addAnswerHeadProtection<T>(
     protections: Object.freeze([
       ...retained,
       Object.freeze({ candidateKey: protectedCandidate.candidateKey, rankLimit })
+    ]),
+    rejectedCandidateKeys: selection.rejectedCandidateKeys
+  });
+}
+
+function rejectSemanticLeader<T extends SemanticRefinementCandidate>(
+  params: SemanticMemoryRefinementParams<T>
+): AnswerHeadSelection<T> {
+  if (
+    params.evidenceSelection.rejectedCandidateKeys.includes(
+      params.leader.candidateKey
+    )
+  ) return params.evidenceSelection;
+  return Object.freeze({
+    candidates: params.evidenceSelection.candidates,
+    protections: params.evidenceSelection.protections,
+    rejectedCandidateKeys: Object.freeze([
+      ...params.evidenceSelection.rejectedCandidateKeys,
+      params.leader.candidateKey
     ])
   });
 }

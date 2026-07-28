@@ -86,50 +86,6 @@ describe("collectCoarseStage logical-object waist", () => {
     expect(result.combinedCoarseCandidates[1]?.objectKind).toBe("synthesis_capsule");
   });
 
-  it("retains immutable pre-embedding candidates before injecting and merging embedding neighbors", async () => {
-    const fixture = createCandidateFixture();
-    const injectedEntry = createMemoryEntry({
-      object_id: "embedding-only-neighbor",
-      content: "Embedding-only neighbor"
-    });
-    const setup = createStageSetup(fixture.localEntry);
-    stubProducers(fixture.local, fixture.global, fixture.synthesis, fixture.embedding);
-    producerMocks.collectEmbeddingCoarseInjection.mockResolvedValue(Object.freeze({
-      candidates: Object.freeze([fixture.embedding, embeddingCandidate(injectedEntry)]),
-      similarityScores: Object.freeze({}),
-      embeddingInferenceCalls: 0,
-      embeddingProviderStatus: null,
-      providerDegradationReason: null,
-      workspaceScan: null
-    }));
-
-    const result = await collectCoarseStage(setup.context, setup.params, setup.prepared);
-
-    expect(result.preEmbeddingCoarseCandidates).toEqual([
-      {
-        ...fixture.local,
-        sourceChannels: ["local_lexical", "global_lookup", "workspace_local", "global"],
-        admissionPlanes: ["lexical", "evidence_anchor"],
-        structuralScore: 0.7,
-        pathExpansionSources: [
-          pathSource("path-local"),
-          pathSource("path-global")
-        ]
-      },
-      fixture.synthesis
-    ]);
-    expect(Object.isFrozen(result.preEmbeddingCoarseCandidates)).toBe(true);
-    expect(result.preEmbeddingCoarseCandidates.every(Object.isFrozen)).toBe(true);
-    expect(result.combinedCoarseCandidates.map((candidate) => candidate.entry.object_id)).toEqual([
-      fixture.localEntry.object_id,
-      fixture.synthesis.entry.object_id,
-      injectedEntry.object_id
-    ]);
-    expect(result.combinedCoarseCandidates[0]?.sourceChannels).toContain("semantic_supplement");
-    expect(result.preEmbeddingCoarseCandidates[0]?.sourceChannels).not.toContain("semantic_supplement");
-    expect(result.preEmbeddingCoarseCandidates[0]).not.toBe(result.combinedCoarseCandidates[0]);
-  });
-
   it("keeps the workspace-local representative when it arrives after a same-id global candidate", async () => {
     const localEntry = createMemoryEntry({
       object_id: "late-local-representative",

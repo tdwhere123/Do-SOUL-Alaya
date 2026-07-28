@@ -16,6 +16,46 @@ import {
   overridePolicy
 } from "./recall-service-test-fixtures.js";
 
+vi.mock(
+  "../../recall/delivery/final-order/final-packet-consensus.js",
+  async () => {
+  const actual = await vi.importActual<
+    typeof import(
+      "../../recall/delivery/final-order/final-packet-consensus.js"
+    )
+  >("../../recall/delivery/final-order/final-packet-consensus.js");
+  return {
+    ...actual,
+    resolveFinalPacketConsensusPlan: (
+      params: Parameters<typeof actual.resolveFinalPacketConsensusPlan>[0]
+    ) => {
+      const hasEmbeddingRank = params.sourceCandidates.some((candidate) =>
+        Number.isFinite(
+          candidate.fusion.per_stream_rank.embedding_similarity
+        )
+      );
+      if (!hasEmbeddingRank) {
+        return actual.resolveFinalPacketConsensusPlan(params);
+      }
+      return actual.resolveFinalPacketConsensusPlan({
+        ...params,
+        sourceCandidates: params.sourceCandidates.map((candidate) => ({
+          ...candidate,
+          fusion: {
+            ...candidate.fusion,
+            per_stream_rank: {
+              ...candidate.fusion.per_stream_rank,
+              embedding_similarity:
+                candidate.entry.object_id === "packet-tail" ? 1 : null
+            }
+          }
+        }))
+      });
+    }
+  };
+  }
+);
+
 type EmbeddingPath = "legacy" | "snapshot";
 type DiagnosticCapture = "answer_features" | "packet_trace";
 type InvocationSpy = ReturnType<typeof vi.fn>;
@@ -28,39 +68,60 @@ type EmbeddingCalls = Readonly<{
 
 describe("RecallService packet trace integration", () => {
   it.each(["legacy", "snapshot"] as const)(
-    "observes the independent no-embedding packet without changing the %s packet",
+    "emits one support-set trace without changing the %s packet",
     async (path) => {
-      const baseline = await runRecall(path, false, "answer_features");
       const control = await runRecall(path, true, "answer_features");
       const traced = await runRecall(path, true, "packet_trace");
       const trace = traced.result.diagnostics?.packet_plan_trace;
 
+      expect(control.result.diagnostics?.packet_plan_trace).toBeUndefined();
       expect(trace).toMatchObject({
-        schema_version: 1,
+        schema_version: 2,
         assessment_path: path,
-        planned_candidate_keys: null,
+        actual_candidate_keys: packetCandidateKeys(traced.result.candidates),
+        added_candidate_keys: [
+          "workspace_local:memory_entry:packet-tail"
+        ],
+        removed_candidate_keys: [
+          "workspace_local:memory_entry:packet-embedding"
+        ],
         decision: {
-          status: "not_attempted",
-          challenger_candidate_key: null,
-          victim_candidate_key: null,
-          reason: null
+          status: "accepted",
+          reason: "strict_tail_consensus"
         }
       });
-      expect(trace?.baseline_candidate_keys).toEqual(
-        packetCandidateKeys(baseline.result.candidates)
-      );
-      expect(trace?.actual_candidate_keys).toEqual(
-        packetCandidateKeys(traced.result.candidates)
-      );
+      expect(trace?.planned_candidate_keys).toEqual(trace?.actual_candidate_keys);
       expect(traced.result.candidates).toEqual(control.result.candidates);
       expect(traced.result.diagnostics?.candidates).toEqual(
         control.result.diagnostics?.candidates
       );
 
-      expectEmbeddingCalls(baseline.calls, 0);
       expectEmbeddingCalls(control.calls, 1);
       expectEmbeddingCalls(traced.calls, 1);
       expect(invocationCounts(traced.calls)).toEqual(invocationCounts(control.calls));
+    }
+  );
+
+  it.each(["legacy", "snapshot"] as const)(
+    "is an exact packet no-op when embedding is disabled on the %s path",
+    async (path) => {
+      const control = await runRecall(path, false, "answer_features");
+      const traced = await runRecall(path, false, "packet_trace");
+      const trace = traced.result.diagnostics?.packet_plan_trace;
+
+      expect(control.result.diagnostics?.packet_plan_trace).toBeUndefined();
+      expect(trace?.decision).toEqual({
+        status: "no_op",
+        reason: "no_finite_embedding_head"
+      });
+      expect(trace?.baseline_candidate_keys).toEqual(trace?.planned_candidate_keys);
+      expect(trace?.baseline_candidate_keys).toEqual(trace?.actual_candidate_keys);
+      expect(traced.result.candidates).toEqual(control.result.candidates);
+      expect(traced.result.diagnostics?.candidates).toEqual(
+        control.result.diagnostics?.candidates
+      );
+      expectEmbeddingCalls(control.calls, 0);
+      expectEmbeddingCalls(traced.calls, 0);
     }
   );
 });
@@ -114,7 +175,7 @@ async function runRecall(
     fine_assessment: {
       ...basePolicy.fine_assessment,
       budgets: {
-        max_entries: 1,
+        max_entries: 3,
         max_total_tokens: 1_000,
         per_dimension_limits: null
       }
@@ -177,14 +238,24 @@ function createEmbeddingPort(
 function createFixedMemories() {
   return Object.freeze([
     createMemoryEntry({
-      object_id: "packet-baseline",
-      content: "Packet trace primary procedure",
-      activation_score: 0.2
+      object_id: "packet-baseline-a",
+      content: "Packet trace semantic procedure primary step",
+      activation_score: 0.9
+    }),
+    createMemoryEntry({
+      object_id: "packet-baseline-b",
+      content: "Packet trace semantic procedure secondary step",
+      activation_score: 0.8
+    }),
+    createMemoryEntry({
+      object_id: "packet-tail",
+      content: "Packet trace semantic procedure final step",
+      activation_score: 0.7
     }),
     createMemoryEntry({
       object_id: "packet-embedding",
-      content: "Packet trace semantic alternative",
-      activation_score: 0.19
+      content: "Unrelated semantic alternative",
+      activation_score: 0.01
     })
   ]);
 }
@@ -192,12 +263,14 @@ function createFixedMemories() {
 function createEmbeddingRecords(
   memories: ReturnType<typeof createFixedMemories>
 ) {
-  return memories.map((memory, index) => createEmbeddingRecord({
+  const embedded = memories.filter((candidate) =>
+    ["packet-baseline-a", "packet-embedding"].includes(candidate.object_id)
+  );
+  if (embedded.length !== 2) throw new Error("embedding fixture memories missing");
+  return embedded.map((memory) => createEmbeddingRecord({
     object_id: memory.object_id,
     content_hash: hashMemoryContent(memory.content),
-    embedding: index === 0
-      ? new Float32Array([0, 1])
-      : new Float32Array([1, 0])
+    embedding: new Float32Array([0.2, Math.sqrt(0.96)])
   }));
 }
 
@@ -208,6 +281,7 @@ function packetCandidateKeys(
     `${candidate.origin_plane ?? "workspace_local"}:${candidate.object_kind}:${candidate.object_id}`
   );
 }
+
 
 function expectEmbeddingCalls(calls: EmbeddingCalls, expected: number): void {
   expect(calls.provider).toHaveBeenCalledTimes(expected);

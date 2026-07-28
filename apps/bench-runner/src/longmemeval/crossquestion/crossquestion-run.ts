@@ -6,10 +6,7 @@ import { DEFAULT_BENCH_EMBEDDING_PROVIDER_KIND } from "../../harness/daemon/daem
 import { aggregateBenchTokenMetrics } from "../../harness/token/token-economy.js";
 import { resolveBenchRunnerVersion } from "../../shared/version.js";
 import type { LongMemEvalQuestion } from "../ingestion/dataset.js";
-import {
-  deriveLongMemEvalReleaseEvidenceAuthority,
-  loadDatasetWithIdentity
-} from "../ingestion/fetch.js";
+import { loadDatasetWithIdentity } from "../ingestion/fetch.js";
 import type { LongMemEvalReleaseEvidenceAuthority } from
   "@do-soul/alaya-eval/internal";
 import {
@@ -27,6 +24,8 @@ import {
   createLongMemEvalSelectionContract,
   type LongMemEvalSelectionContract
 } from "../selection/contract.js";
+import { deriveLongMemEvalRunnerReleaseEvidenceAuthority } from
+  "../release-evidence-authority.js";
 import type {
   LongMemEvalCrossQuestionRunOptions,
   QuestionResult,
@@ -71,6 +70,7 @@ export async function prepareCrossQuestionRun(
   const embeddingMode = opts.embeddingMode ?? "disabled";
   const commitInfo = resolveCommitInfo();
   const window = selectQuestionWindow(questions, opts);
+  const offset = Math.max(0, opts.offset ?? 0);
   return {
     opts: effectiveOpts,
     questions,
@@ -78,14 +78,15 @@ export async function prepareCrossQuestionRun(
     datasetSha256: dataset.sha256,
     datasetChecksumSource: dataset.checksumSource,
     datasetSourcePath: dataset.sourcePath,
-    releaseEvidenceAuthority: deriveLongMemEvalReleaseEvidenceAuthority(
-      dataset.promotionAuthority,
-      {
+    releaseEvidenceAuthority: deriveLongMemEvalRunnerReleaseEvidenceAuthority({
+      datasetAuthority: dataset.promotionAuthority,
+      offset,
+      selection: {
         kind: "execution_window",
-        offset: Math.max(0, opts.offset ?? 0),
+        offset,
         limit: window.length
       }
-    ),
+    }),
     selectionContract: createLongMemEvalSelectionContract({
       datasetSha256: dataset.sha256,
       questions: window
@@ -100,7 +101,7 @@ export async function prepareCrossQuestionRun(
     seedRunner: createCrossQuestionSeedRunner(
       extractionCacheRoot,
       window,
-      Math.max(0, opts.offset ?? 0)
+      offset
     )
   };
 }

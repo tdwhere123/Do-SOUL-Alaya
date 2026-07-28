@@ -36,6 +36,8 @@ import {
   resolveDeepHeadScores,
   type RecallDeepHeadAssessment
 } from "../rerank/deep-head.js";
+import type { RecallPacketPlanObservation } from
+  "./packet-plan/packet-plan-trace.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -46,6 +48,7 @@ export interface FineAssessParams {
   readonly now: () => string;
   readonly warn: RecallServiceWarnPort;
   readonly captureAnswerFeatures?: boolean;
+  readonly capturePacketPlanTrace?: boolean;
   readonly finalAuthorityMaxHeadDrop?: number;
 }
 
@@ -71,6 +74,7 @@ export interface FineAssessmentWaistParams {
 export function fineAssess(params: FineAssessParams): Readonly<{
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
+  readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
   readonly preparedCandidates: readonly FineAssessmentCandidate[];
   readonly prunedCandidates: FineAssessmentPruneResult["prunedCandidates"];
   readonly coarsePoolSize: number;
@@ -168,6 +172,7 @@ export function deliverFineAssessment(
       : undefined,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
+    capturePacketPlanTrace: params.capturePacketPlanTrace,
     deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey
   });
   return Object.freeze({

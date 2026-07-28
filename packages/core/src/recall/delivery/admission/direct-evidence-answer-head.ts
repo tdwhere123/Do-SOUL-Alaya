@@ -404,7 +404,8 @@ function compareScoredEvidence<T>(
 function unchangedSelection<T>(candidates: readonly T[]): DirectEvidenceHeadSelection<T> {
   return Object.freeze({
     candidates,
-    protections: Object.freeze([])
+    protections: Object.freeze([]),
+    rejectedCandidateKeys: Object.freeze([])
   });
 }
 
@@ -414,6 +415,10 @@ function protectedSelection<T>(
   protectedRankLimit = DIRECT_EVIDENCE_HEAD_LIMIT,
   protections: DirectEvidenceHeadSelection<T>["protections"] = []
 ): DirectEvidenceHeadSelection<T> {
-  const selection = Object.freeze({ candidates, protections });
+  const selection = Object.freeze({
+    candidates,
+    protections,
+    rejectedCandidateKeys: Object.freeze([])
+  });
   return addAnswerHeadProtection(selection, protectedEvidence, protectedRankLimit);
 }

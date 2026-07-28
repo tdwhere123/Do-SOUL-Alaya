@@ -5,7 +5,6 @@ import type {
   RecallScoreFactors
 } from "@do-soul/alaya-protocol";
 import {
-  buildRecallBudgetState,
   buildRecallCandidate,
   buildRecallCandidateSelectionKey
 } from "../runtime/recall-candidate-builder.js";
@@ -23,33 +22,34 @@ import type {
   TokenEstimator
 } from "../runtime/recall-service-types.js";
 import { orderByCoverageMarginalGain } from "./coverage-selection.js";
-import type {
-  RecallAnswerSupportObservation
-} from "../query/recall-answer-support-observation.js";
-import type {
-  RecallCandidateAnswerSupport
-} from "../query/recall-candidate-answer-support.js";
+import type { RecallAnswerSupportObservation } from
+  "../query/recall-answer-support-observation.js";
+import type { RecallCandidateAnswerSupport } from
+  "../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
-import {
-  hasRankedEmbeddingHead,
-  selectEmbeddingHeadEvictions
-} from "./admission/embedding-head-dominance.js";
-import {
-  buildFineAssessmentAnswerSupportContext
-} from "./answer-support/answer-support-context.js";
-import {
-  retainBoundedAnswerHeads,
-  selectBoundedDirectEvidenceHead,
-  type DirectEvidenceHeadSelection
-} from "./admission/direct-evidence-answer-head.js";
+import { hasRankedEmbeddingHead, selectEmbeddingHeadEvictions } from
+  "./admission/embedding-head-dominance.js";
+import { buildFineAssessmentAnswerSupportContext } from
+  "./answer-support/answer-support-context.js";
+import { selectBoundedDirectEvidenceHead } from
+  "./admission/direct-evidence-answer-head.js";
 import {
   buildFinalScoreFactors,
   createFineAssessmentDiagnostic
 } from "./diagnostics/fine-assessment-diagnostics.js";
-import { orderByFinalAuthority } from "./final-order/final-authority-order.js";
-import { orderWithEmbeddingEvidenceDominance } from
-  "./final-order/embedding-evidence-dominance-order.js";
-
+import {
+  buildFinalPacketConsensusObservation,
+  buildConsensusReplayOrder,
+  packetMatchesConsensusPlan,
+  resolveFinalPacketConsensusPlan,
+  selectFinalPacketConsensusCandidates
+} from "./final-order/final-packet-consensus.js";
+import { mergeFinalPacketAdmissionDiagnostics } from "./final-order/final-packet-diagnostics.js";
+import {
+  materializeFinalPacket,
+  orderDeliveredPacket
+} from "./final-order/final-packet-order.js";
+import type { RecallPacketPlanObservation } from "./packet-plan/packet-plan-trace.js";
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
@@ -109,13 +109,16 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly maxHeadDropAfterCoverage?: number;
   readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
   readonly captureAnswerFeatures?: boolean;
+  readonly capturePacketPlanTrace?: boolean;
   readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
 }>;
 
-export function selectFineAssessmentCandidates(params: FineAssessmentSelectionParams): Readonly<{
-  readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-}> {
+type FineAssessmentSelectionResult = ReturnType<typeof freezeSelectedPacket> & Readonly<{
+  readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
+}>;
+export function selectFineAssessmentCandidates(
+  params: FineAssessmentSelectionParams
+): FineAssessmentSelectionResult {
   const context = createSelectionContext(params);
   const { coverageOrdered, evictions } = prepareCoverageSelection(params, context);
   const evidenceHead = selectBoundedDirectEvidenceHead(
@@ -131,17 +134,89 @@ export function selectFineAssessmentCandidates(params: FineAssessmentSelectionPa
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"
     ? freezeSelectedPacket(finalAccumulator)
-    : orderDeliveredPacket(
-        finalAccumulator,
+    : orderDeliveredPacket({
+        selected: finalAccumulator.selected,
+        diagnostics: finalAccumulator.diagnostics,
         context,
         finalOrder,
-        params.maxHeadDropAfterCoverage,
-        evidenceHead.protections,
-        evidenceHead.candidates
-      );
+        maxHeadDrop: params.maxHeadDropAfterCoverage,
+        answerHeadProtections: evidenceHead.protections,
+        sourceCandidates: evidenceHead.candidates
+      });
+  const consensusCandidates = selectFinalPacketConsensusCandidates(
+    evidenceHead.candidates, evidenceHead.rejectedCandidateKeys
+  );
+  const consensus = resolveFinalPacketConsensusPlan({
+    baseline: delivered.candidates,
+    sourceCandidates: consensusCandidates,
+    protectedCandidates: evidenceHead.protections,
+    behaviorGuardFullAbort: delivered.candidates.some((candidate) =>
+      context.answerSupportByCandidateKey.get(
+        buildRecallCandidateSelectionKey(candidate)
+      )?.authority?.behavior_eligible === true
+    )
+  });
+  const consensusResult = applyFinalPacketConsensus(
+    consensus,
+    delivered,
+    consensusCandidates,
+    context,
+    evictions
+  );
+  return buildSelectionResult(params, consensus, consensusResult);
+}
+
+function buildSelectionResult(
+  params: FineAssessmentSelectionParams,
+  consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>,
+  result: ReturnType<typeof applyFinalPacketConsensus>
+): FineAssessmentSelectionResult {
   return Object.freeze({
-    candidates: delivered.candidates,
-    diagnostics: delivered.diagnostics
+    candidates: result.packet.candidates,
+    diagnostics: result.packet.diagnostics,
+    ...(params.capturePacketPlanTrace === true
+      ? {
+          packetPlanObservation: buildFinalPacketConsensusObservation(
+            consensus,
+            result.packet.candidates,
+            result.replayAccepted
+          )
+        }
+      : {})
+  });
+}
+
+function applyFinalPacketConsensus(
+  plan: ReturnType<typeof resolveFinalPacketConsensusPlan>,
+  baseline: ReturnType<typeof freezeSelectedPacket>,
+  sourceCandidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext,
+  evictions: ReadonlySet<string>
+): Readonly<{
+  readonly packet: ReturnType<typeof freezeSelectedPacket>;
+  readonly replayAccepted: boolean;
+}> {
+  if (plan.decision.status !== "accepted") {
+    return Object.freeze({ packet: baseline, replayAccepted: false });
+  }
+  const replay = reduceFineAssessmentCandidates(
+    buildConsensusReplayOrder(plan, sourceCandidates),
+    context,
+    evictions
+  );
+  if (!packetMatchesConsensusPlan(plan, replay.selected)) {
+    return Object.freeze({ packet: baseline, replayAccepted: false });
+  }
+  return Object.freeze({
+    packet: materializeFinalPacket(
+      replay.selected,
+      mergeFinalPacketAdmissionDiagnostics(
+        baseline.diagnostics,
+        replay.diagnostics
+      ),
+      context.config.budgets
+    ),
+    replayAccepted: true
   });
 }
 
@@ -155,76 +230,6 @@ function freezeSelectedPacket(
     candidates: Object.freeze([...accumulator.selected]),
     diagnostics: Object.freeze([...accumulator.diagnostics])
   });
-}
-
-function orderDeliveredPacket(
-  accumulator: FineAssessmentAccumulator, context: FineAssessmentSelectionContext,
-  finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
-  maxHeadDrop: number | undefined,
-  answerHeadProtections: DirectEvidenceHeadSelection<FineAssessmentCandidate>["protections"],
-  sourceCandidates: readonly FineAssessmentCandidate[]
-): ReturnType<typeof freezeSelectedPacket> {
-  const verifiedOrder = orderByFinalAuthority({
-    candidates: accumulator.selected,
-    finalOrder,
-    deliveryRankByCandidateKey: context.rankByCandidateKey,
-    maxHeadDrop,
-    protectedRankLimit: context.config.budgets.max_entries,
-    answerSupportByCandidateKey: context.answerSupportByCandidateKey
-  });
-  const candidates = orderWithAnswerHeadProtections(
-    verifiedOrder, context, finalOrder, maxHeadDrop,
-    answerHeadProtections, sourceCandidates
-  );
-  let usedTokens = 0;
-  const finalRankByKey = new Map<string, number>();
-  const ranked = candidates.map((candidate, index) => {
-    finalRankByKey.set(buildRecallCandidateSelectionKey(candidate), index + 1);
-    const budgetState = buildRecallBudgetState({
-      tokenEstimate: candidate.token_estimate,
-      maxEntries: context.config.budgets.max_entries,
-      maxTotalTokens: context.config.budgets.max_total_tokens,
-      index,
-      usedTokensBeforeCandidate: usedTokens
-    });
-    usedTokens += candidate.token_estimate;
-    return Object.freeze({ ...candidate, budget_state: budgetState });
-  });
-  const diagnostics = accumulator.diagnostics.map((row) => {
-    const finalRank = finalRankByKey.get(row.candidate_key);
-    return finalRank === undefined
-      ? row
-      : Object.freeze({ ...row, final_rank: finalRank, post_rank: finalRank });
-  });
-  return Object.freeze({ candidates: Object.freeze(ranked), diagnostics: Object.freeze(diagnostics) });
-}
-
-function orderWithAnswerHeadProtections(
-  candidates: readonly Readonly<RecallCandidate>[],
-  context: FineAssessmentSelectionContext,
-  finalOrder: Exclude<FineAssessmentSelectionParams["finalOrderAfterCoverage"], "coverage" | undefined>,
-  maxHeadDrop: number | undefined,
-  protections: DirectEvidenceHeadSelection<FineAssessmentCandidate>["protections"],
-  sourceCandidates: readonly FineAssessmentCandidate[]
-): readonly Readonly<RecallCandidate>[] {
-  const retain = (ordered: readonly Readonly<RecallCandidate>[]) =>
-    retainBoundedAnswerHeads(
-      ordered, protections, buildRecallCandidateSelectionKey,
-      context.supplementaryData.queryProbes, sourceCandidates
-    );
-  const applyDominance = (ordered: readonly Readonly<RecallCandidate>[]) =>
-    finalOrder === "public_relevance" && maxHeadDrop === undefined
-      ? orderWithEmbeddingEvidenceDominance({
-          candidates: ordered,
-          sourceCandidates,
-          queryProbes: context.supplementaryData.queryProbes,
-          answerSupportByCandidateKey: context.answerSupportByCandidateKey,
-          keyOf: buildRecallCandidateSelectionKey
-        })
-      : ordered;
-  return protections.some((protection) => protection.rankLimit === 1)
-    ? retain(applyDominance(candidates))
-    : applyDominance(retain(candidates));
 }
 
 function prepareCoverageSelection(
