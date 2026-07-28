@@ -116,7 +116,10 @@ function orderWithAnswerHeadProtections<T extends FinalPacketSourceCandidate>(
       params.answerHeadProtections,
       buildRecallCandidateSelectionKey,
       params.context.supplementaryData.queryProbes,
-      params.sourceCandidates
+      params.sourceCandidates,
+      (candidateKey) => params.context.answerSupportByCandidateKey.get(
+        candidateKey
+      )?.authority?.behavior_eligible === true
     );
   const applyDominance = (ordered: readonly Readonly<RecallCandidate>[]) =>
     params.finalOrder === "public_relevance" && params.maxHeadDrop === undefined

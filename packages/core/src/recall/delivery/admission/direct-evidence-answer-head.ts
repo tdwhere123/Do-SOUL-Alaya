@@ -4,26 +4,24 @@ import {
   buildRecallCandidateDedupeKey,
   isWorkspaceMemoryCandidate
 } from "../../runtime/recall-service-helpers.js";
-import type {
-  CoarseRecallCandidate,
-  RecallFusionBreakdown
-} from "../../runtime/recall-service-types.js";
 import {
   addAnswerHeadProtection,
   selectSemanticMemoryRefinement,
   type AnswerHeadSelection,
   type SemanticHeadCandidate
 } from "./semantic-memory-refinement.js";
+import {
+  DIRECT_EVIDENCE_SCORE_FLOOR,
+  findAnswerHeadSourceCandidate,
+  hasRequiredQueryMargin,
+  retainBoundedAnswerHeads,
+  type AnswerHeadSourceCandidate
+} from "./answer-head/answer-head-retention.js";
 
 const DIRECT_EVIDENCE_HEAD_LIMIT = 5;
 const DIRECT_EVIDENCE_FTS_RANK_LIMIT = 25;
-const DIRECT_EVIDENCE_SCORE_FLOOR = 0.2;
-const DIRECT_EVIDENCE_SCORE_MARGIN = 0.15;
 
-type DirectEvidenceHeadCandidate = Readonly<CoarseRecallCandidate & {
-  readonly effectiveFactors: Readonly<{ readonly embedding_similarity?: number }>;
-  readonly fusion: RecallFusionBreakdown;
-}>;
+type DirectEvidenceHeadCandidate = AnswerHeadSourceCandidate;
 
 type ScoredDirectEvidence<T> = Readonly<SemanticHeadCandidate<T> & {
   readonly evidenceFtsRank: number;
@@ -41,6 +39,7 @@ type SemanticMemoryRefinementPlan<T> = Readonly<{
 }>;
 
 export type DirectEvidenceHeadSelection<T> = AnswerHeadSelection<T>;
+export { retainBoundedAnswerHeads };
 
 type SelectDelivered<T> = (candidates: readonly T[]) => readonly T[];
 type BlocksEvidenceHead<T> = (candidate: T) => boolean;
@@ -85,7 +84,7 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
         protectionsAreFeasible: (trial, protections, sourceCandidates) =>
           protectionsAreFeasible(
             trial, protections, publicRelevanceByCandidateKey,
-            queryProbes, sourceCandidates
+            queryProbes, sourceCandidates, blocksEvidenceHead
           ),
         resolveSingleReplacement
       });
@@ -156,79 +155,6 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   return unchangedSelection(candidates);
 }
 
-export function retainBoundedAnswerHeads<T>(
-  candidates: readonly T[],
-  protections: readonly Readonly<{
-    readonly candidateKey: string;
-    readonly rankLimit: number;
-  }>[],
-  keyOf: (candidate: T) => string,
-  queryProbes: Readonly<RecallQueryProbes>,
-  sourceCandidates: readonly DirectEvidenceHeadCandidate[]
-): readonly T[] {
-  return [...protections]
-    .sort((left, right) =>
-      left.rankLimit - right.rankLimit ||
-      left.candidateKey.localeCompare(right.candidateKey)
-    )
-    .reduce(
-      (ordered, protection) => retainBoundedAnswerHead(
-        ordered, protection.candidateKey, protection.rankLimit,
-        keyOf, queryProbes, sourceCandidates
-      ),
-      candidates
-    );
-}
-
-function retainBoundedAnswerHead<T>(
-  candidates: readonly T[],
-  protectedCandidateKey: string,
-  protectedRankLimit: number,
-  keyOf: (candidate: T) => string,
-  queryProbes: Readonly<RecallQueryProbes>,
-  sourceCandidates: readonly DirectEvidenceHeadCandidate[]
-): readonly T[] {
-  const index = candidates.findIndex((candidate) => keyOf(candidate) === protectedCandidateKey);
-  if (index < protectedRankLimit) return candidates;
-  if (protectedRankLimit === 1) {
-    return moveToRank(candidates, index, protectedRankLimit);
-  }
-  const protectedSource = findSourceCandidate(sourceCandidates, protectedCandidateKey);
-  const victimSource = findSourceCandidate(
-    sourceCandidates,
-    keyOf(candidates[protectedRankLimit - 1]!)
-  );
-  if (
-    protectedSource === undefined ||
-    victimSource === undefined ||
-    !hasRequiredQueryMargin(
-      scoreQueryEvidenceMatch(protectedSource.entry, queryProbes),
-      victimSource.entry,
-      queryProbes
-    )
-  ) return candidates;
-  return moveToRank(candidates, index, protectedRankLimit);
-}
-
-function moveToRank<T>(
-  candidates: readonly T[],
-  index: number,
-  rankLimit: number
-): readonly T[] {
-  const reordered = [...candidates];
-  const [candidate] = reordered.splice(index, 1);
-  reordered.splice(rankLimit - 1, 0, candidate!);
-  return Object.freeze(reordered);
-}
-
-function findSourceCandidate(
-  candidates: readonly DirectEvidenceHeadCandidate[],
-  candidateKey: string
-): DirectEvidenceHeadCandidate | undefined {
-  return candidates.find((candidate) =>
-    buildRecallCandidateDedupeKey(candidate) === candidateKey);
-}
-
 function tryAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
   candidates: readonly T[],
   baseline: readonly T[],
@@ -277,7 +203,7 @@ function protectedEvidencePermitsVictim<T extends DirectEvidenceHeadCandidate>(
 ): boolean {
   return selection.protections.every((protection) => {
     if (protection.rankLimit === 1) return true;
-    const protectedCandidate = findSourceCandidate(
+    const protectedCandidate = findAnswerHeadSourceCandidate(
       selection.candidates, protection.candidateKey
     );
     return protectedCandidate !== undefined &&
@@ -294,13 +220,18 @@ function protectionsAreFeasible<T extends DirectEvidenceHeadCandidate>(
   protections: DirectEvidenceHeadSelection<T>["protections"],
   publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   queryProbes: Readonly<RecallQueryProbes>,
-  sourceCandidates: readonly T[]
+  sourceCandidates: readonly T[],
+  blocksEvidenceHead: BlocksEvidenceHead<T>
 ): boolean {
   const publicOrder = [...trial].sort((left, right) =>
     comparePublicRelevance(left, right, publicRelevanceByCandidateKey)
   );
   const protectedOrder = retainBoundedAnswerHeads(
-    publicOrder, protections, candidateKey, queryProbes, sourceCandidates
+    publicOrder, protections, candidateKey, queryProbes, sourceCandidates,
+    (key) => {
+      const candidate = findAnswerHeadSourceCandidate(sourceCandidates, key);
+      return candidate !== undefined && blocksEvidenceHead(candidate);
+    }
   );
   return protections.every((protection) => {
     const index = protectedOrder.findIndex((candidate) =>
@@ -362,16 +293,6 @@ function candidateKeys<T extends DirectEvidenceHeadCandidate>(
 
 function candidateKey(candidate: DirectEvidenceHeadCandidate): string {
   return buildRecallCandidateDedupeKey(candidate);
-}
-
-function hasRequiredQueryMargin(
-  candidateScore: number,
-  victimEntry: DirectEvidenceHeadCandidate["entry"],
-  queryProbes: Readonly<RecallQueryProbes>
-): boolean {
-  return candidateScore >= DIRECT_EVIDENCE_SCORE_FLOOR &&
-    candidateScore - scoreQueryEvidenceMatch(victimEntry, queryProbes) >=
-      DIRECT_EVIDENCE_SCORE_MARGIN;
 }
 
 function collectEvidenceCandidates<T extends DirectEvidenceHeadCandidate>(

@@ -119,6 +119,24 @@ export function resolveEmbeddingRankConsensusPlan<
   });
 }
 
+export function entersEmbeddingRankConsensusHead<
+  T extends EmbeddingRankConsensusCandidate
+>(
+  baselineHead: readonly T[],
+  contender: T
+): boolean {
+  if (baselineHead.length === 0) return false;
+  const embeddingHead = indexEmbeddingHead(
+    [...baselineHead, contender],
+    baselineHead.length,
+    new Set()
+  );
+  return embeddingHead.has(contender.candidateKey) &&
+    rankConsensusHead(baselineHead, embeddingHead)
+      .slice(0, baselineHead.length)
+      .some((entry) => entry.candidateKey === contender.candidateKey);
+}
+
 function composeProtectedConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   consensusHead: readonly T[],
   baselineHead: readonly T[],

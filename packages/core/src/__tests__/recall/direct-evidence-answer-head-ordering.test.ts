@@ -3,6 +3,8 @@ import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
 } from "../../recall/delivery/fine-assessment-selection.js";
+import { retainBoundedAnswerHeads } from
+  "../../recall/delivery/admission/direct-evidence-answer-head.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   createCandidate,
@@ -51,6 +53,22 @@ function withContent(
   content: string
 ): FineAssessmentCandidate {
   return { ...candidate, entry: { ...candidate.entry, content } };
+}
+
+function withEmbeddingRank(
+  candidate: FineAssessmentCandidate,
+  rank: number
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    fusion: {
+      ...candidate.fusion,
+      per_stream_rank: {
+        ...candidate.fusion.per_stream_rank,
+        embedding_similarity: rank
+      }
+    }
+  };
 }
 
 function select(
@@ -131,5 +149,84 @@ describe("direct-evidence semantic ordering", () => {
 
     expect(objectIds(select([...peers(), candidate], candidate)))
       .toEqual(["semantic-head", "peer-1", "peer-2", "peer-3", "peer-4"]);
+  });
+
+  it("retains a protected tail when embedding consensus corroborates it", () => {
+    const publicPeers = peers().map((candidate) =>
+      withContent(candidate, STRONG_EVIDENCE)
+    );
+    const protectedCandidate = withEmbeddingRank(
+      evidence("protected-tail"),
+      1
+    );
+    const candidates = [...publicPeers, protectedCandidate];
+    const retained = retainBoundedAnswerHeads(
+      candidates,
+      [{
+        candidateKey: protectedCandidate.fusion.candidate_key,
+        rankLimit: 5
+      }],
+      (candidate) => candidate.fusion.candidate_key,
+      compileRecallQueryProbes(QUERY),
+      candidates,
+      () => false
+    );
+
+    expect(retained.map((candidate) => candidate.entry.object_id)).toEqual([
+      "peer-1",
+      "peer-2",
+      "peer-3",
+      "peer-4",
+      "protected-tail",
+      "peer-5"
+    ]);
+  });
+
+  it("leaves an uncorroborated protected candidate in the tail", () => {
+    const publicPeers = peers().map((candidate) =>
+      withContent(candidate, STRONG_EVIDENCE)
+    );
+    const protectedCandidate = withEmbeddingRank(
+      evidence("uncorroborated-tail"),
+      5
+    );
+    const candidates = [...publicPeers, protectedCandidate];
+    const retained = retainBoundedAnswerHeads(
+      candidates,
+      [{
+        candidateKey: protectedCandidate.fusion.candidate_key,
+        rankLimit: 5
+      }],
+      (candidate) => candidate.fusion.candidate_key,
+      compileRecallQueryProbes(QUERY),
+      candidates,
+      () => false
+    );
+
+    expect(retained).toBe(candidates);
+  });
+
+  it("does not displace a behavior-eligible head through semantic consensus", () => {
+    const publicPeers = peers().map((candidate) =>
+      withContent(candidate, STRONG_EVIDENCE)
+    );
+    const protectedCandidate = withEmbeddingRank(
+      evidence("protected-tail"),
+      1
+    );
+    const candidates = [...publicPeers, protectedCandidate];
+    const retained = retainBoundedAnswerHeads(
+      candidates,
+      [{
+        candidateKey: protectedCandidate.fusion.candidate_key,
+        rankLimit: 5
+      }],
+      (candidate) => candidate.fusion.candidate_key,
+      compileRecallQueryProbes(QUERY),
+      candidates,
+      (candidateKey) => candidateKey === publicPeers[4]!.fusion.candidate_key
+    );
+
+    expect(retained).toBe(candidates);
   });
 });

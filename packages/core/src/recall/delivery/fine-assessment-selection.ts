@@ -109,7 +109,10 @@ export function selectFineAssessmentCandidates(
           evidenceHead.protections,
           buildRecallCandidateSelectionKey,
           context.supplementaryData.queryProbes,
-          evidenceHead.candidates
+          evidenceHead.candidates,
+          (candidateKey) => context.answerSupportByCandidateKey.get(
+            candidateKey
+          )?.authority?.behavior_eligible === true
         ),
         finalAccumulator.diagnostics,
         context.config.budgets
