@@ -1,8 +1,8 @@
 import { trimmedSpan, type AssertionSpan } from "./clause-spans.js";
 import { isLocallyClosedAtomicAssertion } from "./reference-closure.js";
 import { hasAssertionPreservingRelativeClauseSuffix } from "./relative-clause.js";
+import { sourceRoleMarkerPrefixLength } from "../source-role/marker.js";
 
-const ROLE_PREFIX = /^(?:User|Assistant)\s*:\s*/iu;
 const DISCOURSE_PREFIX = /^(?:(?:also)\s*,?\s*)?(?:by the way|anyway|actually|well|speaking of)\s*[,：:—–-]?\s*/iu;
 const RELATIVE_CLAUSE = /,\s*(?:which|who)\b/iu;
 const CONVERSATIONAL_TAIL = /,\s*have\s+you\s+heard\s+of\s+(?:it|that|them)\?\s*$/iu;
@@ -34,9 +34,12 @@ function leadingContentBoundary(text: string): {
   readonly contentOffset: number;
   readonly hasDiscoursePrefix: boolean;
 } {
-  const role = ROLE_PREFIX.exec(text)?.[0] ?? "";
-  const discourse = DISCOURSE_PREFIX.exec(text.slice(role.length))?.[0] ?? "";
-  return { contentOffset: role.length + discourse.length, hasDiscoursePrefix: discourse.length > 0 };
+  const roleLength = sourceRoleMarkerPrefixLength(text);
+  const discourse = DISCOURSE_PREFIX.exec(text.slice(roleLength))?.[0] ?? "";
+  return {
+    contentOffset: roleLength + discourse.length,
+    hasDiscoursePrefix: discourse.length > 0
+  };
 }
 
 function appendTailAssertion(

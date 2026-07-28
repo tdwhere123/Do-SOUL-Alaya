@@ -59,6 +59,13 @@ export {
   type SourceAssertionResolution
 } from "./grounding/source-assertion.js";
 export {
+  groundPreferenceProfileFromSource,
+  preferenceProfileGroundingRemovalReason,
+  resolvePreferenceAwareSourceGrounding,
+  type PreferenceAwareSourceGrounding,
+  type PreferenceProfileSourceInput
+} from "./grounding/preference-profile.js";
+export {
   buildOfficialApiSourceAssertions,
   buildOfficialApiSourceCorpus,
   computeOfficialApiSourceCatalogRequestIdentity,

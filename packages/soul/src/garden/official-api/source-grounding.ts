@@ -4,13 +4,12 @@ import type {
 } from "../official-api-signal-parser.js";
 import {
   filterSourceAssertionEntities,
-  resolveSourceAssertion,
   type SourceAssertionRejectionReason
 } from "../grounding/source-assertion.js";
 import {
-  isDirectQuestionSourceText,
-  resolveOfficialApiSourceLocatorQuote
-} from "../grounding/source-locator.js";
+  preferenceProfileGroundingRemovalReason,
+  resolvePreferenceAwareSourceGrounding
+} from "../grounding/preference-profile.js";
 import type { OfficialApiSourceTrustRejection } from "./source-trust.js";
 
 interface OfficialApiSourceGroundingProposal {
@@ -44,18 +43,22 @@ export type OfficialApiGroundingResult =
 
 export function groundOfficialApiDraft(
   draft: OfficialApiSignalDraft,
-  sourceText: string
+  sourceText: string,
+  preferenceSourceCorpus = sourceText
 ): OfficialApiGroundingResult {
-  const resolution = draft.source_locator === undefined
-    ? resolveSourceAssertion(sourceText, draft.matched_text)
-    : resolveOfficialApiSourceLocatorQuote(sourceText, draft.source_locator, draft.matched_text);
+  const preferenceGrounding = resolvePreferenceAwareSourceGrounding({
+    proposal: draft.preference_profile,
+    sourceText,
+    sourceCorpus: preferenceSourceCorpus,
+    proposedMatch: draft.matched_text,
+    ...(draft.source_locator === undefined ? {} : { sourceLocator: draft.source_locator })
+  });
+  const resolution = preferenceGrounding.resolution;
   if (resolution.status === "rejected") return rejectedGrounding(draft, resolution.reason);
-  if (isDirectQuestionSourceText(resolution.assertion)) {
-    return rejectedGrounding(draft, "source_assertion_incomplete");
-  }
   const assertion = resolution.assertion;
   const canonicalEntities = groundCanonicalEntities(draft.canonical_entities, assertion);
-  const reasons = groundingReasons(draft, assertion, canonicalEntities);
+  const preferenceProfile = preferenceGrounding.preferenceProfile;
+  const reasons = groundingReasons(draft, assertion, canonicalEntities, preferenceProfile);
   const {
     matched_text: _matchedText,
     distilled_fact: _distilledFact,
@@ -67,7 +70,8 @@ export function groundOfficialApiDraft(
     ...rest,
     matched_text: assertion,
     distilled_fact: assertion,
-    ...(canonicalEntities.length === 0 ? {} : { canonical_entities: canonicalEntities })
+    ...(canonicalEntities.length === 0 ? {} : { canonical_entities: canonicalEntities }),
+    ...(preferenceProfile === undefined ? {} : { preference_profile: preferenceProfile })
   });
   return {
     status: "grounded",
@@ -123,7 +127,8 @@ function rejectedGrounding(
 function groundingReasons(
   draft: OfficialApiSignalDraft,
   assertion: string,
-  canonicalEntities: readonly string[]
+  canonicalEntities: readonly string[],
+  preferenceProfile: OfficialApiPreferenceProfileDraft | undefined
 ): readonly string[] {
   const reasons: string[] = [];
   if (draft.matched_text.trim() !== assertion) reasons.push("matched_text_expanded_to_source_assertion");
@@ -133,7 +138,11 @@ function groundingReasons(
   if ((draft.canonical_entities?.length ?? 0) !== canonicalEntities.length) {
     reasons.push("unverified_canonical_entities_removed");
   }
-  if (draft.preference_profile !== undefined) reasons.push("unverified_preference_profile_removed");
+  const profileReason = preferenceProfileGroundingRemovalReason(
+    draft.preference_profile,
+    preferenceProfile
+  );
+  if (profileReason !== undefined) reasons.push(profileReason);
   return reasons;
 }
 

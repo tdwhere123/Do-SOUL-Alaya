@@ -1,6 +1,8 @@
 import {
+  buildOfficialApiSourceCorpus,
   filterSourceAssertionEntities,
-  resolveGardenRawPayloadGrounding
+  preferenceProfileGroundingRemovalReason,
+  resolvePreferenceAwareSourceGrounding
 } from "@do-soul/alaya-soul";
 import type { BenchSignalSeedInput } from "../daemon/daemon-types.js";
 
@@ -11,12 +13,27 @@ export function attachCompileSourceGrounding(
   const proposal = readProposal(rawPayload, signalInput);
   const safePayload = stripDerivedGrounding(rawPayload);
   const proposedMatch = proposal.proposed_matched_text;
-  const sourceCorpus = readString(rawPayload.full_turn_content) ?? signalInput.turnContent;
-  const resolution = resolveGardenRawPayloadGrounding({
-    ...safePayload,
-    full_turn_content: sourceCorpus,
-    proposed_matched_text: proposedMatch
+  const sourceCorpus = signalInput.turnMessages === undefined
+    ? signalInput.turnContent
+    : buildOfficialApiSourceCorpus(signalInput.turnContent, signalInput.turnMessages);
+  const cachedSourceCorpus = readCachedSourceCorpus(rawPayload.full_turn_content);
+  if (cachedSourceCorpus !== null && cachedSourceCorpus !== sourceCorpus) {
+    return rejectedPayload(
+      safePayload,
+      sourceCorpus,
+      proposal,
+      "cached_source_corpus_mismatch"
+    );
+  }
+  const grounding = resolvePreferenceAwareSourceGrounding({
+    proposal: proposal.proposed_preference_profile,
+    sourceCorpus,
+    proposedMatch,
+    ...(safePayload.source_locator === undefined
+      ? {}
+      : { sourceLocator: safePayload.source_locator })
   });
+  const resolution = grounding.resolution;
   if (resolution.status === "rejected") {
     return rejectedPayload(safePayload, sourceCorpus, proposal, resolution.reason);
   }
@@ -26,6 +43,7 @@ export function attachCompileSourceGrounding(
         resolution.assertion
       )
     : [];
+  const groundedPreferenceProfile = grounding.preferenceProfile;
   return {
     ...safePayload,
     matched_text: resolution.assertion,
@@ -33,6 +51,7 @@ export function attachCompileSourceGrounding(
     full_turn_content: sourceCorpus,
     source_assertion: resolution.assertion,
     ...(groundedCanonicalEntities.length === 0 ? {} : { canonical_entities: groundedCanonicalEntities }),
+    ...(groundedPreferenceProfile === undefined ? {} : { preference_profile: groundedPreferenceProfile }),
     proposed_matched_text: proposedMatch,
     source_grounding: {
       ...proposal,
@@ -43,7 +62,8 @@ export function attachCompileSourceGrounding(
         proposedMatch,
         resolution.assertion,
         proposal.proposed_canonical_entities,
-        proposal.proposed_preference_profile
+        proposal.proposed_preference_profile,
+        groundedPreferenceProfile
       )
     }
   };
@@ -81,7 +101,8 @@ function stripDerivedGrounding(raw: Readonly<Record<string, unknown>>): Record<s
   const safe = { ...raw };
   for (const key of [
     "matched_text", "distilled_fact", "canonical_entities", "preference_profile",
-    "source_assertion", "source_grounding", "proposed_matched_text", "proposed_distilled_fact"
+    "source_assertion", "source_grounding", "proposed_matched_text", "proposed_distilled_fact",
+    "proposed_canonical_entities", "proposed_preference_profile"
   ]) delete safe[key];
   return safe;
 }
@@ -104,17 +125,26 @@ function groundingReasons(
   proposedMatch: string,
   assertion: string,
   canonicalEntities: unknown,
-  preferenceProfile: unknown
+  preferenceProfile: unknown,
+  groundedPreferenceProfile: unknown
 ): readonly string[] {
   const reasons: string[] = [];
   if (proposedMatch !== assertion) reasons.push("matched_text_expanded_to_source_assertion");
   if (canonicalEntities !== undefined) reasons.push("unverified_canonical_entities_removed");
-  if (preferenceProfile !== undefined) reasons.push("unverified_preference_profile_removed");
+  const profileReason = preferenceProfileGroundingRemovalReason(
+    preferenceProfile,
+    groundedPreferenceProfile
+  );
+  if (profileReason !== undefined) reasons.push(profileReason);
   return reasons;
 }
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readCachedSourceCorpus(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

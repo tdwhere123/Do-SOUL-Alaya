@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { BoundedJsonObjectSchema } from "@do-soul/alaya-protocol";
+import { BOUNDED_JSON_OBJECT_MAX_CHARS } from "../../../../../../packages/protocol/src/shared/schema-primitives.js";
 import {
   isRawPayloadBoundError,
   projectCompileRawPayload
@@ -47,4 +50,98 @@ describe("compile raw payload projection", () => {
       issues: [{ path: ["confidence"], message: "Too big" }]
     })).toBe(false);
   });
+
+  it("fits correlated retained maxima within the protocol raw-payload bound", () => {
+    const profile = maximalPreferenceProfile();
+    const projected = projectCompileRawPayload({
+      matched_text: "m".repeat(1_024),
+      distilled_fact: "d".repeat(2_048),
+      source_assertion: "s".repeat(2_048),
+      proposed_matched_text: "p".repeat(1_024),
+      proposed_distilled_fact: "q".repeat(2_048),
+      full_turn_content: "f".repeat(2_048),
+      turn_content_excerpt: "e".repeat(256),
+      provider_kind: "k".repeat(200),
+      extraction_reason: "r".repeat(400),
+      extracted_object_kind: "o".repeat(200),
+      extraction_provider: "v".repeat(200),
+      canonical_entities: ["a".repeat(512), "b".repeat(512), "c".repeat(512)],
+      temporal_projection: {
+        projection_schema_version: 1,
+        event_time_start: "1".repeat(64),
+        event_time_end: "2".repeat(64),
+        valid_from: "3".repeat(64),
+        valid_to: "4".repeat(64),
+        time_precision: "5".repeat(64),
+        time_source: "6".repeat(64)
+      },
+      preference_profile: profile,
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: "s".repeat(2_048),
+        proposed_matched_text: "p".repeat(2_048),
+        reasons: Array.from({ length: 8 }, (_, index) => `${index}`.repeat(128)),
+        proposed_preference_profile: profile
+      }
+    });
+
+    expect(JSON.stringify(projected).length).toBeLessThanOrEqual(
+      BOUNDED_JSON_OBJECT_MAX_CHARS
+    );
+    expect(BoundedJsonObjectSchema.safeParse(projected).success).toBe(true);
+    expect(projected.source_grounding).toMatchObject({
+      version: 1,
+      status: "grounded",
+      content_basis: "source_assertion",
+      source_assertion: "s".repeat(2_048)
+    });
+  });
+
+  it("leaves an exact digest when a complete long preference proposal is omitted", () => {
+    const proposedPreference = maximalPreferenceProfile();
+    const projected = projectCompileRawPayload({
+      matched_text: "m".repeat(1_024),
+      distilled_fact: "d".repeat(2_048),
+      full_turn_content: "f".repeat(2_048),
+      preference_profile: proposedPreference,
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: "s".repeat(2_048),
+        proposed_matched_text: "p".repeat(1_024),
+        proposed_preference_profile: proposedPreference,
+        reasons: []
+      }
+    });
+    const grounding = projected.source_grounding as Record<string, unknown>;
+
+    expect(grounding).not.toHaveProperty("proposed_preference_profile");
+    expect(grounding.proposed_preference_profile_sha256).toBe(
+      canonicalDigest(proposedPreference)
+    );
+    expect(grounding.reasons).toContain(
+      "proposed_preference_profile_omitted_for_payload_bound"
+    );
+  });
 });
+
+function maximalPreferenceProfile(): Readonly<Record<string, unknown>> {
+  return {
+    projection_schema_version: 1,
+    preference_subject: "s".repeat(1_024),
+    preference_predicate: "p".repeat(1_024),
+    preference_object: "o".repeat(1_024),
+    preference_category: "c".repeat(1_024),
+    preference_polarity: "n".repeat(1_024)
+  };
+}
+
+function canonicalDigest(value: Readonly<Record<string, unknown>>): string {
+  const canonical = Object.fromEntries(
+    Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+  );
+  return `sha256:${createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex")}`;
+}

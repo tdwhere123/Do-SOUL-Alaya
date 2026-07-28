@@ -1,4 +1,5 @@
 import {
+  PREFERENCE_FACT_MAX_CHARS,
   type EventLogEntry,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
@@ -287,7 +288,7 @@ export function jaccardIndex(left: ReadonlySet<string>, right: ReadonlySet<strin
 }
 
 // invariant: NOOP audit content cap matches the distilled fact cap.
-export const AUDIT_DROPPED_CONTENT_MAX_CHARS = 500;
+export const AUDIT_DROPPED_CONTENT_MAX_CHARS = PREFERENCE_FACT_MAX_CHARS;
 
 export function auditDroppedContent(content: string): string {
   const trimmed = content.trim();

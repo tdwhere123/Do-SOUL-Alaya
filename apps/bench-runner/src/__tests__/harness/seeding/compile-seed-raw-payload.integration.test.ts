@@ -4,12 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SignalEventType } from "@do-soul/alaya-protocol";
+import { OfficialApiGardenProvider } from "@do-soul/alaya-soul";
 import {
   initDatabase,
   SqliteEventLogRepo,
   SqliteSignalRepo
 } from "@do-soul/alaya-storage";
 import { startBenchDaemon, type BenchDaemonHandle } from "../../../harness/daemon.js";
+import { extractSeedInputs } from "../../../longmemeval/compile-seed/compile-seed-extract.js";
+import type { CompileSeedExtractionStats } from "../../../longmemeval/compile-seed.js";
 
 function longOfficialCompileInput(turnContent: string) {
   return {
@@ -24,7 +27,7 @@ function longOfficialCompileInput(turnContent: string) {
     productionRawPayload: {
       matched_text: "one durable fact",
       distilled_fact: "The source turn records one durable fact.",
-      full_turn_content: turnContent.slice(0, 2_048)
+      full_turn_content: turnContent
     }
   };
 }
@@ -132,6 +135,97 @@ describe("compile-seed raw payload projection", () => {
     expect(signal?.raw_payload.bench_source_raw_payload_sha256).toMatch(
       /^sha256:[0-9a-f]{64}$/u
     );
+  }, 60_000);
+
+  it("does not truncate a near-cap preference proposal into a grounded prefix", async () => {
+    const proposedObject = "x".repeat(600);
+    const source = `I prefer ${proposedObject}.`;
+    const turnMessages = [{
+      message_id: "u-long-preference",
+      role: "user" as const,
+      content: source
+    }];
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "sk-test",
+      extractor: {
+        extract: async () => ({
+          rawJson: JSON.stringify({
+            signals: [{
+              signal_kind: "potential_preference",
+              object_kind: "preference",
+              confidence: 0.9,
+              matched_text: source,
+              source_locator: {
+                contract_version: 2,
+                kind: "assertion_catalog",
+                assertion_id: 1
+              },
+              preference_profile: {
+                projection_schema_version: 1,
+                preference_subject: "I",
+                preference_predicate: "prefer",
+                preference_object: proposedObject,
+                preference_polarity: "positive"
+              },
+              provider_diagnostics: "x".repeat(15_000)
+            }]
+          })
+        })
+      },
+      generateSignalId: () => "signal-long-preference"
+    });
+    const [draft] = await extractSeedInputs({
+      provider,
+      stats: extractionStats(),
+      turnContent: source,
+      seedIndex: 36,
+      context: {
+        workspace_id: "compile-seed-preference-cap-workspace",
+        run_id: "compile-seed-preference-cap-run",
+        surface_id: null,
+        turn_messages: turnMessages
+      }
+    });
+    expect(draft).toBeDefined();
+    expect.soft(draft?.productionRawPayload?.source_grounding).toMatchObject({
+      status: "grounded",
+      source_assertion: source,
+      proposed_preference_profile: {
+        preference_object: proposedObject
+      }
+    });
+    expect.soft(draft?.productionRawPayload?.preference_profile).toMatchObject({
+      preference_object: proposedObject
+    });
+    root = await mkdtemp(join(tmpdir(), "compile-seed-preference-cap-"));
+    daemon = await startBenchDaemon({
+      dataDirRoot: root,
+      workspaceId: "compile-seed-preference-cap-workspace",
+      runId: "compile-seed-preference-cap-run"
+    });
+
+    const { seeds, dropped } = await daemon.proposeMemoriesFromCompileSignals([{
+      ...draft!,
+      evidenceRef: "compile-seed-preference-cap-evidence",
+      productionRawPayload: {
+        ...draft!.productionRawPayload,
+        projection_pressure: "x".repeat(15_000)
+      }
+    }]);
+
+    expect(dropped).toEqual([]);
+    expect(seeds).toHaveLength(1);
+    const db = initDatabase({ filename: join(daemon.dataDir, "alaya.db") });
+    const signal = await new SqliteSignalRepo(db).getById(seeds[0]!.signalId);
+    expect(signal?.raw_payload.bench_source_raw_payload_projected).toBe(true);
+    expect(signal?.raw_payload.preference_profile).toMatchObject({
+      preference_object: proposedObject
+    });
+    expect(signal?.raw_payload.source_grounding).toMatchObject({
+      proposed_preference_profile: {
+        preference_object: proposedObject
+      }
+    });
   }, 60_000);
 
   it("bounds structured keys when the first projection still overflows after grounding", async () => {
@@ -247,3 +341,23 @@ describe("compile-seed raw payload projection", () => {
     ]);
   }, 60_000);
 });
+
+function extractionStats(): CompileSeedExtractionStats {
+  return {
+    path: "official_api_compile",
+    cacheHits: 0,
+    llmCalls: 0,
+    offlineFallbacks: 0,
+    liveExtractionFailures: 0,
+    cachedExtractionFailures: 0,
+    factsProduced: 0,
+    signalsDropped: 0,
+    signalsDroppedByReason: { candidate_absent: 0, materialization_drop: 0 },
+    parseDropped: 0,
+    compileOverflowDropped: 0,
+    lastTurnRawSignalCount: 1,
+    lastTurnDraftCount: 1,
+    lastExtractionSource: null,
+    lastRawJsonSha256: null
+  };
+}

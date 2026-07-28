@@ -12,7 +12,8 @@ import {
   BoundedReasonSchema,
   BoundedString,
   IsoDatetimeStringSchema,
-  NonNegativeIntSchema
+  NonNegativeIntSchema,
+  PREFERENCE_FACT_MAX_CHARS
 } from "../shared/schema-primitives.js";
 
 const signalEventTypeValues = [
@@ -64,7 +65,7 @@ export const SoulSignalTriagedPayloadSchema = z.object({
   workspace_id: BoundedIdSchema,
   run_id: BoundedIdSchema,
   triage_result: z.enum(triageResultValues),
-  dropped_content: BoundedString(500).optional(),
+  dropped_content: BoundedString(PREFERENCE_FACT_MAX_CHARS).optional(),
   surviving_object_id: BoundedIdSchema.optional(),
   best_similarity: z.number().min(0).max(1).optional(),
   // Governance/audit only (invariant §14): which fail-closed rule deferred

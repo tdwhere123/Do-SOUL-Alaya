@@ -411,6 +411,8 @@ describe("buildRecallFusionDetails preference profile lane", () => {
       object_id: "33333333-3333-4333-8333-333333333333",
       dimension: "preference",
       content: "Dark mode is preferred.",
+      source_kind: "seed",
+      formation_kind: "explicit",
       preference_subject: "operator",
       preference_predicate: "prefer",
       preference_object: "dark mode",
@@ -420,7 +422,9 @@ describe("buildRecallFusionDetails preference profile lane", () => {
     const plainMemory = createMemoryEntry({
       object_id: "44444444-4444-4444-8444-444444444444",
       dimension: "preference",
-      content: "A plain preference without profile fields."
+      content: "A plain preference without profile fields.",
+      source_kind: "seed",
+      formation_kind: "explicit"
     });
 
     const fusion = buildRecallFusionDetails({
@@ -443,7 +447,7 @@ describe("buildRecallFusionDetails preference profile lane", () => {
         }
       ],
       policy,
-      supplementaryData: emptySupplementaryData("preferred theme"),
+      supplementaryData: emptySupplementaryData("preference theme"),
       nowIso: "2026-03-20T10:20:30.000Z"
     });
 

@@ -4,7 +4,10 @@ import {
   requiresGardenSourceGrounding,
   resolveGardenSignalGrounding
 } from "../grounding/signal-source-grounding.js";
-import { SOURCE_ASSERTION_MAX_CHARS } from "../grounding/source-assertion.js";
+import {
+  PREFERENCE_SOURCE_ASSERTION_MAX_CHARS,
+  SOURCE_ASSERTION_MAX_CHARS
+} from "../grounding/source-assertion.js";
 
 export function buildTopicKey(signal: CandidateMemorySignal): string {
   const primaryTag = signal.domain_tags[0] ?? "signal";
@@ -41,9 +44,8 @@ export function buildSignalSummary(signal: CandidateMemorySignal): string {
 // Single source of truth for the distilled-fact length budget: the
 // official-API garden provider clamps raw_payload.distilled_fact to this
 // same constant. see also: garden/compute-provider.ts.
-// invariant: kept <= AUDIT_DROPPED_CONTENT_MAX_CHARS (500) in
-// packages/core/src/governance/reconciliation-service.ts so a dropped fact stays
-// fully reconstructable from the reconciliation audit row.
+// invariant: preference-aware source grounding is the only Garden path above
+// this default cap; its shared 1,200-char bound also governs dropped-content audit.
 export const DISTILLED_FACT_MAX_CHARS = SOURCE_ASSERTION_MAX_CHARS;
 const DISTILLED_FACT_MAX_SENTENCES = 2;
 
@@ -70,7 +72,8 @@ export function buildDistilledFact(signal: CandidateMemorySignal): string {
 
 function buildGroundedGardenFact(signal: CandidateMemorySignal): string {
   const grounding = resolveGardenSignalGrounding(signal);
-  if (grounding.status !== "grounded" || grounding.assertion.length > DISTILLED_FACT_MAX_CHARS) {
+  if (grounding.status !== "grounded" ||
+      grounding.assertion.length > PREFERENCE_SOURCE_ASSERTION_MAX_CHARS) {
     return "";
   }
   return grounding.assertion;

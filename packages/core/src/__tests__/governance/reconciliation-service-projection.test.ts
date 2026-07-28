@@ -284,6 +284,71 @@ describe("ReconciliationService projection metadata", () => {
     });
   });
 
+  it("replaces all preference fields atomically when UPDATE clears a negative profile", async () => {
+    const neighbor = createMemoryEntry({
+      object_id: "memory-neighbor",
+      content: "I dislike dark mode.",
+      evidence_refs: ["evidence-old"],
+      preference_subject: "operator",
+      preference_predicate: "avoid",
+      preference_object: "dark mode",
+      preference_category: "theme",
+      preference_polarity: "negative"
+    });
+    const { deps, update } = createDeps([neighbor], {
+      thresholds: { similarityFloor: 0.2 }
+    });
+    deps.llmDecision.decide = vi.fn<DecideFn>(async () => ({
+      kind: "update",
+      targetObjectId: "memory-neighbor",
+      reason: "the double negation supersedes the negative preference"
+    }));
+    const service = new ReconciliationService(deps);
+
+    await drive(service, {
+      incomingContent: "I don't dislike dark mode.",
+      incomingDomainTags: ["preference"],
+      incomingProjectionFields: {
+        preference_subject: "operator",
+        preference_object: "dark mode",
+        preference_category: "theme"
+      }
+    }).decision;
+
+    expect(requireAt(mockCallAt(update, 0), 1)).toMatchObject({
+      preference_subject: "operator",
+      preference_predicate: null,
+      preference_object: "dark mode",
+      preference_category: "theme",
+      preference_polarity: null
+    });
+  });
+
+  it("does not assemble one preference profile from NOOP survivor and incoming fragments", async () => {
+    const neighbor = createMemoryEntry({
+      object_id: "memory-neighbor",
+      content: "I prefer dark mode.",
+      evidence_refs: ["evidence-old"],
+      preference_subject: "operator",
+      preference_predicate: "prefer"
+    });
+    const { deps, update } = createDeps([neighbor]);
+    const service = new ReconciliationService(deps);
+
+    const decision = await drive(service, {
+      incomingContent: "I prefer dark mode.",
+      incomingDomainTags: ["preference"],
+      incomingProjectionFields: {
+        preference_object: "dark mode",
+        preference_category: "theme",
+        preference_polarity: "positive"
+      }
+    }).decision;
+
+    expect(decision.kind).toBe("noop");
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("NOOP merges missing projection metadata into the surviving row without evidence", async () => {
     const neighbor = createMemoryEntry({
       object_id: "memory-neighbor",

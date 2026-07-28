@@ -69,12 +69,18 @@ function buildProjectionMergeFields(
     return {};
   }
   const fields: MutableProjectionMergeFields = {};
-  for (const key of PROJECTION_FIELD_KEYS) {
+  for (const key of INDEPENDENT_PROJECTION_FIELD_KEYS) {
     if (existing[key] === undefined || existing[key] === null) {
       const value = incoming[key];
       if (value !== undefined && value !== null) {
         fields[key] = value as never;
       }
+    }
+  }
+  if (!hasPreferenceProjection(existing)) {
+    for (const key of PREFERENCE_PROJECTION_FIELD_KEYS) {
+      const value = incoming[key];
+      if (value !== undefined && value !== null) fields[key] = value as never;
     }
   }
   return fields;
@@ -87,10 +93,15 @@ function buildProjectionReplacementFields(
     return {};
   }
   const fields: MutableProjectionMergeFields = {};
-  for (const key of PROJECTION_FIELD_KEYS) {
+  for (const key of INDEPENDENT_PROJECTION_FIELD_KEYS) {
     const value = incoming[key];
     if (value !== undefined) {
       fields[key] = value as never;
+    }
+  }
+  if (hasPreferenceProjection(incoming)) {
+    for (const key of PREFERENCE_PROJECTION_FIELD_KEYS) {
+      fields[key] = (incoming[key] ?? null) as never;
     }
   }
   return fields;
@@ -142,7 +153,7 @@ type MutableProjectionMergeFields = {
   -readonly [K in keyof ReconciliationMemoryProjectionFields]?: ReconciliationMemoryProjectionFields[K];
 };
 
-const PROJECTION_FIELD_KEYS = [
+const INDEPENDENT_PROJECTION_FIELD_KEYS = [
   "projection_schema_version",
   "event_time_start",
   "event_time_end",
@@ -150,13 +161,29 @@ const PROJECTION_FIELD_KEYS = [
   "valid_to",
   "time_precision",
   "time_source",
+  "canonical_entities"
+] as const;
+
+const PREFERENCE_PROJECTION_FIELD_KEYS = [
   "preference_subject",
   "preference_predicate",
   "preference_object",
   "preference_category",
-  "preference_polarity",
-  "canonical_entities"
+  "preference_polarity"
 ] as const;
+
+const PROJECTION_FIELD_KEYS = [
+  ...INDEPENDENT_PROJECTION_FIELD_KEYS,
+  ...PREFERENCE_PROJECTION_FIELD_KEYS
+] as const;
+
+function hasPreferenceProjection(
+  value: Readonly<MemoryEntry> | ReconciliationMemoryProjectionFields
+): boolean {
+  return PREFERENCE_PROJECTION_FIELD_KEYS.some(
+    (key) => value[key] !== undefined && value[key] !== null
+  );
+}
 
 export class ReconciliationService {
   private readonly mutex: KeyedMutex;

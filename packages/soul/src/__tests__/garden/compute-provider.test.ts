@@ -206,7 +206,7 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
     expect(signals[0]!.raw_payload).not.toHaveProperty("temporal_projection");
   });
 
-  it("keeps an unverified preference profile only in the grounding audit", async () => {
+  it("projects only verified preference fields and retains the proposal in the grounding audit", async () => {
     const extractor = createExtractor(JSON.stringify({
       signals: [
         {
@@ -235,7 +235,13 @@ describe("OfficialApiGardenProvider", () => {  it("materializes candidate signal
 
     const signals = await provider.compile("I prefer dark mode.", createContext());
 
-    expect(signals[0]!.raw_payload).not.toHaveProperty("preference_profile");
+    expect(signals[0]!.raw_payload.preference_profile).toEqual({
+      projection_schema_version: 1,
+      preference_subject: "operator",
+      preference_predicate: "prefer",
+      preference_object: "dark mode",
+      preference_polarity: "positive"
+    });
     expect(signals[0]!.raw_payload.source_grounding).toMatchObject({
       proposed_preference_profile: {
         projection_schema_version: 1,

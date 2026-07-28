@@ -410,6 +410,18 @@ describe("official API assertion catalog locator", () => {
     expect(computeOfficialApiSourceCatalogRequestIdentity(source)).toMatch(/^[a-f0-9]{64}$/u);
   });
 
+  it("identifies a direct 600-character preference absent from the historical catalog", () => {
+    const object = "x".repeat(600);
+    const source = `I prefer ${object}.`;
+
+    expect(buildOfficialApiSourceAssertions(source).map(({ text }) => text)).toEqual([
+      source
+    ]);
+    expect(computeOfficialApiSourceCatalogRequestIdentity(source)).toMatch(
+      /^[a-f0-9]{64}$/u
+    );
+  });
+
   it("grounds an atom without inheriting an unresolved wrapper tail", async () => {
     const source = "I moved to Berlin, and I redeemed a $5 coupon last Sunday, which was a nice surprise to them.";
     const assertion = "I moved to Berlin, and I redeemed a $5 coupon last Sunday";

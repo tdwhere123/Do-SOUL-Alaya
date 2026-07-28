@@ -1,3 +1,5 @@
+import { stripSourceRoleMarker } from "../source-role/marker.js";
+
 const ENGLISH_REFERENCE =
   /\b(?:he|she|it|they|him|her|them|his|hers|their|there|here|this|that|these|those|aforementioned|such)\b/giu;
 
@@ -17,7 +19,7 @@ export function hasUnresolvedReference(assertion: string): boolean {
  * omitted turn context to close a request or interlocutor reference.
  */
 export function isLocallyClosedAtomicAssertion(assertion: string): boolean {
-  const value = stripRoleLabel(assertion);
+  const value = stripSourceRoleMarker(assertion);
   return !hasUnresolvedReference(value) && !hasAtomicConversationDependency(value);
 }
 
@@ -109,7 +111,7 @@ function isSimpleValuationTopic(topic: string): boolean {
 }
 
 export function isBoundedTemplateSlotAssertion(assertion: string): boolean {
-  const value = stripRoleLabel(assertion);
+  const value = stripSourceRoleMarker(assertion);
   return matchBoundedTemplateSlot(value) !== null && !hasUnresolvedReference(value);
 }
 
@@ -119,7 +121,7 @@ interface BoundedTemplateSlotMatch {
 }
 
 function matchBoundedTemplateSlot(assertion: string): BoundedTemplateSlotMatch | null {
-  const value = stripRoleLabel(assertion);
+  const value = stripSourceRoleMarker(assertion);
   const pattern = /^Under\s+["“]How We Met["”],\s+I['’]ll\s+include\s+the\s+location\s+where\s+I\s+met\s+them\.\s+For\s+\p{Lu}[\p{Ll}\p{N}'’-]*,\s+it\s+was\s+((?:a|an|the)\s+[\p{L}\p{N}'’ -]{1,80})[.!]$/u;
   const match = pattern.exec(value);
   if (match === null || !isBoundedTemplatePlaceValue(match[1]!)) return null;
@@ -180,10 +182,6 @@ function isTemplateBoundReference(
 ): boolean {
   return (reference === "them" && index === template.themIndex) ||
     (reference === "it" && index === template.itIndex);
-}
-
-function stripRoleLabel(assertion: string): string {
-  return assertion.trim().replace(/^(?:User|Assistant)\s*:\s*/iu, "");
 }
 
 function hasCoordinatedObjectAmbiguity(before: string): boolean {

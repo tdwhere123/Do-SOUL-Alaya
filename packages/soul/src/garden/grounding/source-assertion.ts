@@ -1,3 +1,4 @@
+import { PREFERENCE_FACT_MAX_CHARS } from "@do-soul/alaya-protocol";
 import {
   canExpandAcrossSentenceBoundary,
   coordinateSpan,
@@ -16,6 +17,7 @@ import {
   hasAssertionPreservingRelativeClauseSuffix,
   hasRelativeClauseSuffix
 } from "./source-assertion/relative-clause.js";
+import { stripSourceRoleMarker } from "./source-role/marker.js";
 
 export type SourceAssertionResolution =
   | { readonly status: "grounded"; readonly assertion: string }
@@ -29,6 +31,7 @@ export type SourceAssertionRejectionReason =
   | "source_assertion_too_long";
 
 export const SOURCE_ASSERTION_MAX_CHARS = 500;
+export const PREFERENCE_SOURCE_ASSERTION_MAX_CHARS = PREFERENCE_FACT_MAX_CHARS;
 
 export function buildSourceVerificationText(
   sourceText: string,
@@ -46,14 +49,15 @@ export function buildSourceVerificationText(
 
 export function resolveSourceAssertion(
   sourceText: string,
-  matchedText: string
+  matchedText: string,
+  maxChars = SOURCE_ASSERTION_MAX_CHARS
 ): SourceAssertionResolution {
   const source = sourceText.trim();
   const matched = matchedText.trim();
   if (source.length === 0 || matched.length === 0) {
     return { status: "rejected", reason: "matched_text_absent" };
   }
-  const boundedPrefix = resolveBoundedVerbatimPrefix(source, matched);
+  const boundedPrefix = resolveBoundedVerbatimPrefix(source, matched, maxChars);
   if (boundedPrefix !== null) return boundedPrefix;
   const spans = sentenceSpans(source);
   const resolutions: SourceAssertionResolution[] = [];
@@ -61,7 +65,14 @@ export function resolveSourceAssertion(
   while (offset >= 0) {
     const span = enclosingSentenceSpan(spans, offset, matched.length);
     if (span !== null) {
-      resolutions.push(resolveAssertionAt(source, matched, offset, span.sentence, spans[span.startIndex - 1]));
+      resolutions.push(resolveAssertionAt(
+        source,
+        matched,
+        offset,
+        span.sentence,
+        spans[span.startIndex - 1],
+        maxChars
+      ));
     }
     offset = source.indexOf(matched, offset + 1);
   }
@@ -70,10 +81,13 @@ export function resolveSourceAssertion(
   return resolutions[0]!;
 }
 
-export function resolveAtomicSourceAssertion(assertionText: string): SourceAssertionResolution {
+export function resolveAtomicSourceAssertion(
+  assertionText: string,
+  maxChars = SOURCE_ASSERTION_MAX_CHARS
+): SourceAssertionResolution {
   const assertion = stripSourceRoleLabel(assertionText);
   if (assertion.length === 0) return { status: "rejected", reason: "matched_text_absent" };
-  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+  if (assertion.length > maxChars) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   if (!isLocallyClosedAtomicAssertion(assertion)) {
@@ -107,12 +121,13 @@ function enclosingSentenceSpan(
 
 function resolveBoundedVerbatimPrefix(
   source: string,
-  matched: string
+  matched: string,
+  maxChars: number
 ): SourceAssertionResolution | null {
   const offset = source.indexOf(matched);
   if (offset < 0) return null;
   const assertion = stripSourceRoleLabel(matched);
-  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+  if (assertion.length > maxChars) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   const suffix = source.slice(offset + matched.length);
@@ -217,7 +232,8 @@ function resolveAssertionAt(
   matched: string,
   offset: number,
   sentence: AssertionSpan,
-  previousSentence: AssertionSpan | undefined
+  previousSentence: AssertionSpan | undefined,
+  maxChars: number
 ): SourceAssertionResolution {
   if (hasCrossSentenceChineseReference(source, sentence, previousSentence)) {
     return { status: "rejected", reason: "source_assertion_not_self_contained" };
@@ -239,7 +255,7 @@ function resolveAssertionAt(
   let rejectionReason: SourceAssertionRejectionReason = "source_assertion_incomplete";
   for (const [index, candidate] of candidates.entries()) {
     if (index === 0 && exactHasDanglingTerminal) continue;
-    const resolution = evaluateAssertionCandidate(source, candidate);
+    const resolution = evaluateAssertionCandidate(source, candidate, maxChars);
     if (resolution.status === "grounded") return resolution;
     rejectionReason = strongerRejectionReason(rejectionReason, resolution.reason);
     if (index === 0 && sentence.ambiguous === true && !matchedDisambiguatesInitialism) break;
@@ -300,14 +316,15 @@ function assertionCandidates(
 
 function evaluateAssertionCandidate(
   source: string,
-  candidate: AssertionCandidate
+  candidate: AssertionCandidate,
+  maxChars: number
 ): SourceAssertionResolution {
   const assertion = stripSourceRoleLabel(source.slice(candidate.span.start, candidate.span.end));
   if (candidate.exact && !/[.!?。！？]$/u.test(assertion) &&
       !hasDirectQuestionBoundary(source, candidate.span.end)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
-  if (assertion.length > SOURCE_ASSERTION_MAX_CHARS) {
+  if (assertion.length > maxChars) {
     return { status: "rejected", reason: "source_assertion_too_long" };
   }
   if (isVacuousFirstPersonStub(assertion)) {
@@ -332,7 +349,11 @@ function hasDanglingExactTerminal(
 }
 
 function stripSourceRoleLabel(assertion: string): string {
-  return assertion.trim().replace(/^(?:User|Assistant|用户|助手|团队)\s*:\s*/iu, "").trim();
+  const trimmed = assertion.trim();
+  const roleStripped = stripSourceRoleMarker(trimmed);
+  return roleStripped === trimmed
+    ? trimmed.replace(/^[\t\p{Zs}]*团队[\t\p{Zs}]*(?::|：)[\t\p{Zs}]*/u, "").trim()
+    : roleStripped;
 }
 
 function strongerRejectionReason(

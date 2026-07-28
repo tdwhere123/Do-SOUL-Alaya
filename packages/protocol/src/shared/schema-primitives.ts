@@ -39,6 +39,7 @@ export const BOUNDED_EVIDENCE_ARRAY_MAX = 100;
 // not a free-form tag list — the field contract, not just a materializer-private cap.
 export const CANONICAL_ENTITIES_MAX = 3;
 export const BOUNDED_JSON_OBJECT_MAX_CHARS = 16384;
+export const PREFERENCE_FACT_MAX_CHARS = 1_200;
 
 export const BoundedJsonObjectSchema = z
   .record(z.string(), z.unknown())

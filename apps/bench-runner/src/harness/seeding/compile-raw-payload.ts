@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import { BOUNDED_JSON_OBJECT_MAX_CHARS } from "@do-soul/alaya-protocol";
+
+const PREFERENCE_FIELD_MAX_CHARS = 1_024;
+const PREFERENCE_PROFILE_OMITTED_REASON =
+  "proposed_preference_profile_omitted_for_payload_bound";
 
 const RETAINED_STRING_LIMITS = {
   matched_text: 1_024,
@@ -35,6 +40,26 @@ const BENCH_INTEGER_KEYS = [
   "bench_stored_content_tokens",
   "bench_full_turn_char_count"
 ] as const;
+const OPTIONAL_DUPLICATE_KEYS = [
+  "matched_text",
+  "distilled_fact",
+  "source_assertion",
+  "proposed_matched_text",
+  "proposed_distilled_fact",
+  "turn_content_excerpt",
+  "provider_kind",
+  "extraction_reason",
+  "extracted_object_kind",
+  "extraction_provider",
+  "bench_turn_seed_index",
+  "bench_full_turn_tokens",
+  "bench_stored_content_tokens",
+  "bench_full_turn_char_count",
+  "bench_full_turn_sha256",
+  "bench_source_raw_payload_key_count",
+  "bench_source_raw_payload_char_count",
+  "bench_source_raw_payload_sha256"
+] as const;
 
 export function projectCompileRawPayload(
   rawPayload: Readonly<Record<string, unknown>>
@@ -48,7 +73,7 @@ export function projectCompileRawPayload(
   }
   addStructuredProjection(projection, rawPayload);
   const serialized = canonicalJsonString(rawPayload);
-  return {
+  return fitProjectedPayload({
     ...projection,
     bench_source_raw_payload_projected: true,
     bench_source_raw_payload_key_count: Object.keys(rawPayload).length,
@@ -56,7 +81,7 @@ export function projectCompileRawPayload(
     bench_source_raw_payload_sha256: `sha256:${createHash("sha256")
       .update(serialized, "utf8")
       .digest("hex")}`
-  };
+  });
 }
 
 function addStructuredProjection(
@@ -65,7 +90,7 @@ function addStructuredProjection(
 ): void {
   const canonicalEntities = projectCanonicalEntities(rawPayload.canonical_entities);
   const temporalProjection = projectRecord(rawPayload.temporal_projection, TEMPORAL_STRING_KEYS, 64);
-  const preferenceProfile = projectRecord(rawPayload.preference_profile, PREFERENCE_STRING_KEYS, 512);
+  const preferenceProfile = projectPreferenceProfile(rawPayload.preference_profile);
   const sourceGrounding = projectSourceGrounding(rawPayload.source_grounding);
   if (canonicalEntities.length > 0) projection.canonical_entities = canonicalEntities;
   if (temporalProjection !== null) projection.temporal_projection = temporalProjection;
@@ -99,7 +124,80 @@ function projectSourceGrounding(value: unknown): Record<string, unknown> | null 
       .slice(0, 8)
       .map((reason) => reason.slice(0, 128));
   }
+  const proposedPreference = source.proposed_preference_profile;
+  const projectedPreference = projectPreferenceProfile(proposedPreference);
+  if (projectedPreference !== null) {
+    projection.proposed_preference_profile = projectedPreference;
+  } else if (isRecord(proposedPreference)) {
+    addOmittedPreferenceAudit(projection, proposedPreference);
+  }
   return projection;
+}
+
+function projectPreferenceProfile(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const projected: Record<string, unknown> = {};
+  if (value.projection_schema_version === 1) projected.projection_schema_version = 1;
+  for (const key of PREFERENCE_STRING_KEYS) {
+    const field = value[key];
+    if (typeof field !== "string" || field.length === 0) continue;
+    if (field.length > PREFERENCE_FIELD_MAX_CHARS) return null;
+    projected[key] = field;
+  }
+  return Object.keys(projected).length === 0 ? null : projected;
+}
+
+function fitProjectedPayload(
+  projection: Record<string, unknown>
+): Record<string, unknown> {
+  if (fitsRawPayload(projection)) return projection;
+  const grounding = isRecord(projection.source_grounding)
+    ? projection.source_grounding
+    : null;
+  if (grounding !== null && isRecord(grounding.proposed_preference_profile)) {
+    const proposed = grounding.proposed_preference_profile;
+    delete grounding.proposed_preference_profile;
+    addOmittedPreferenceAudit(grounding, proposed);
+  }
+  for (const key of OPTIONAL_DUPLICATE_KEYS) {
+    if (fitsRawPayload(projection)) return projection;
+    delete projection[key];
+  }
+  compactGroundingReasons(grounding);
+  for (const key of ["canonical_entities", "temporal_projection"] as const) {
+    if (fitsRawPayload(projection)) return projection;
+    delete projection[key];
+  }
+  if (!fitsRawPayload(projection)) {
+    throw new Error("Compile raw-payload projection exceeded its bounded core.");
+  }
+  return projection;
+}
+
+function compactGroundingReasons(grounding: Record<string, unknown> | null): void {
+  if (grounding === null || !Array.isArray(grounding.reasons)) return;
+  grounding.reasons = grounding.reasons.includes(PREFERENCE_PROFILE_OMITTED_REASON)
+    ? [PREFERENCE_PROFILE_OMITTED_REASON]
+    : [];
+}
+
+function fitsRawPayload(value: Readonly<Record<string, unknown>>): boolean {
+  return JSON.stringify(value).length <= BOUNDED_JSON_OBJECT_MAX_CHARS;
+}
+
+function addOmittedPreferenceAudit(
+  grounding: Record<string, unknown>,
+  proposed: Readonly<Record<string, unknown>>
+): void {
+  grounding.proposed_preference_profile_sha256 = digest(proposed);
+  const reasons = Array.isArray(grounding.reasons)
+    ? grounding.reasons.filter((reason): reason is string => typeof reason === "string")
+    : [];
+  grounding.reasons = [...new Set([...reasons, PREFERENCE_PROFILE_OMITTED_REASON])];
+}
+
+function digest(value: unknown): string {
+  return `sha256:${createHash("sha256").update(canonicalJsonString(value), "utf8").digest("hex")}`;
 }
 
 function projectCanonicalEntities(value: unknown): readonly string[] {
@@ -159,4 +257,8 @@ function canonicalize(value: unknown): unknown {
       .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
       .map(([key, nested]) => [key, canonicalize(nested)])
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

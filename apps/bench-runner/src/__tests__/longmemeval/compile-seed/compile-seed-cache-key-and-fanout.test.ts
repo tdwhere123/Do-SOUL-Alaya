@@ -214,6 +214,38 @@ describe("userPrompt shape contract — cache key turn_content dependency", () =
     expect(delegate.extract).toHaveBeenCalledTimes(2);
   });
 
+  it("does not reuse a legacy empty shard when a 600-character preference gains a catalog identity", async () => {
+    writeExtractionCacheTestManifest({
+      cacheRoot,
+      model: "test-model",
+      systemPrompt: OFFICIAL_API_SYSTEM_PROMPT
+    });
+    const source = `I prefer ${"x".repeat(600)}.`;
+    const messages = [{ message_id: "m-long", role: "user" as const, content: source }];
+    writeLegacyEmptyShard(cacheRoot, source, messages);
+    const delegate: BenchSignalExtractor = {
+      extract: vi.fn(async () => ({ rawJson: '{"signals":[]}' }))
+    };
+    const provider = new OfficialApiGardenProvider({
+      apiKey: "test-key",
+      model: "test-model",
+      extractor: createCachingSignalExtractor({
+        delegate,
+        config: testCacheConfig(),
+        cacheRoot
+      })
+    });
+
+    await provider.compile(source, {
+      workspace_id: "ws-1",
+      run_id: "run-long-preference-catalog-delta",
+      surface_id: null,
+      turn_messages: messages
+    });
+
+    expect(delegate.extract).toHaveBeenCalledTimes(2);
+  });
+
   it("continues to reuse a legacy shard when the catalog is unchanged", async () => {
     writeExtractionCacheTestManifest({
       cacheRoot,

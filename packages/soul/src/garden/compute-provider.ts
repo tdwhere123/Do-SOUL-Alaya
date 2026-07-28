@@ -411,7 +411,7 @@ function groundDraftForContext(
     })
   });
   const grounding = trustRejection === null
-    ? groundOfficialApiDraft(draft, groundingSourceText)
+    ? groundOfficialApiDraft(draft, groundingSourceText, sourceCorpus)
     : rejectOfficialApiDraftGrounding(draft, trustRejection);
   if (grounding.status === "rejected") {
     console.warn("garden/compute-provider: rejected ungrounded official-API signal", {

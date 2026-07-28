@@ -2,11 +2,13 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
+  PREFERENCE_SOURCE_ASSERTION_MAX_CHARS,
   resolveAtomicSourceAssertion,
   resolveSourceAssertion,
   SOURCE_ASSERTION_MAX_CHARS,
   type SourceAssertionResolution
 } from "./source-assertion.js";
+import { parseDirectPreferenceRelation } from "./preference-relation.js";
 import { isBoundedTemplateSlotAssertion } from "./source-assertion/reference-closure.js";
 import {
   coordinateSpans,
@@ -14,6 +16,12 @@ import {
   type AssertionSpan
 } from "./source-assertion/clause-spans.js";
 import { atomicAssertionSpans } from "./source-assertion/atomic-spans.js";
+import {
+  collectSourceRoleMarkers,
+  stripSourceRoleMarker,
+  type SourceConversationRole,
+  type SourceRoleMarker
+} from "./source-role/marker.js";
 
 export const OFFICIAL_API_SOURCE_LOCATOR_CONTRACT_VERSION = 2;
 const LEGACY_SENTENCE_RANGE_CONTRACT_VERSION = 1;
@@ -103,7 +111,10 @@ export function buildOfficialApiSourceAssertions(
  * be refilled narrowly instead of invalidating every historical shard.
  */
 export function computeOfficialApiSourceCatalogRequestIdentity(sourceText: string): string | undefined {
-  const legacy = selectBoundedAssertions(indexLegacySourceAssertions(sourceText));
+  const legacy = selectBoundedAssertions(indexLegacySourceAssertions(
+    sourceText,
+    SOURCE_ASSERTION_MAX_CHARS
+  ));
   const current = indexSourceAssertions(sourceText);
   if (sameAssertionCatalog(legacy, current)) return undefined;
   return createHash("sha256").update(JSON.stringify({
@@ -114,10 +125,11 @@ export function computeOfficialApiSourceCatalogRequestIdentity(sourceText: strin
 
 export function resolveOfficialApiSourceLocator(
   sourceText: string,
-  locator: OfficialApiSourceLocator
+  locator: OfficialApiSourceLocator,
+  maxChars = SOURCE_ASSERTION_MAX_CHARS
 ): SourceAssertionResolution {
   if (locator.kind === "assertion_catalog") {
-    return resolveAssertionCatalogLocator(sourceText, locator.assertion_id);
+    return resolveAssertionCatalogLocator(sourceText, locator.assertion_id, maxChars);
   }
   if (locator.end_span < locator.start_span ||
       locator.end_span - locator.start_span + 1 > MAX_LOCATOR_SPANS) {
@@ -136,21 +148,27 @@ export function resolveOfficialApiSourceLocator(
   if (hasDirectQuestion(selected)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
   }
-  return resolveSourceAssertion(sourceText, selectedText);
+  return resolveSourceAssertion(sourceText, selectedText, maxChars);
 }
 
 export function resolveOfficialApiSourceLocatorQuote(
   sourceText: string,
   locator: OfficialApiSourceLocator,
-  proposedText: string
+  proposedText: string,
+  maxChars = SOURCE_ASSERTION_MAX_CHARS
 ): SourceAssertionResolution {
-  const located = resolveOfficialApiSourceLocator(sourceText, locator);
+  const located = resolveOfficialApiSourceLocator(sourceText, locator, maxChars);
   if (located.status === "rejected") return located;
   if (locatorAssertionUniquelyCommitsToQuote(sourceText, located.assertion, proposedText)) {
     return located;
   }
   if (locator.kind !== "assertion_catalog") return rejectedQuote();
-  return resolveCatalogVerbatimQuote(sourceText, locator.assertion_id, proposedText);
+  return resolveCatalogVerbatimQuote(
+    sourceText,
+    locator.assertion_id,
+    proposedText,
+    maxChars
+  );
 }
 
 export function locatorAssertionUniquelyCommitsToQuote(
@@ -166,25 +184,27 @@ export function locatorAssertionUniquelyCommitsToQuote(
 
 function resolveAssertionCatalogLocator(
   sourceText: string,
-  assertionId: number
+  assertionId: number,
+  maxChars: number
 ): SourceAssertionResolution {
   const selected = indexSourceAssertions(sourceText)[assertionId - 1];
   if (selected === undefined) return rejectedRange();
   const sentenceText = sourceText.slice(selected.sentence.start, selected.sentence.end);
   const assertionText = sourceText.slice(selected.start, selected.end);
   return selected.atomic
-    ? resolveAtomicSourceAssertion(assertionText)
-    : resolveSourceAssertion(sentenceText, assertionText);
+    ? resolveAtomicSourceAssertion(assertionText, maxChars)
+    : resolveSourceAssertion(sentenceText, assertionText, maxChars);
 }
 
 function resolveCatalogVerbatimQuote(
   sourceText: string,
   assertionId: number,
-  proposedText: string
+  proposedText: string,
+  maxChars: number
 ): SourceAssertionResolution {
   const quote = proposedText.trim();
-  if (quote.length === 0 || quote.length > SOURCE_ASSERTION_MAX_CHARS) {
-    return resolveSourceAssertion(sourceText, quote);
+  if (quote.length === 0 || quote.length > maxChars) {
+    return resolveSourceAssertion(sourceText, quote, maxChars);
   }
   if (isDirectQuestionSourceText(quote)) {
     return { status: "rejected", reason: "source_assertion_incomplete" };
@@ -195,19 +215,23 @@ function resolveCatalogVerbatimQuote(
     return { status: "rejected", reason: "matched_text_ambiguous" };
   }
   const selected = indexSourceAssertions(sourceText)[assertionId - 1];
-  const markers = collectRoleMarkers(sourceText);
+  const markers = collectSourceRoleMarkers(sourceText);
   const selectedBlock = selected === undefined ? null : sourceMessageBlockAt(markers, selected.start, sourceText.length);
   const quoteBlock = sourceMessageBlockAt(markers, offset, sourceText.length);
   if (selectedBlock === null || quoteBlock === null || selectedBlock.role !== "user" ||
       quoteBlock.role !== "user" || selectedBlock.start !== quoteBlock.start) {
     return rejectedQuote();
   }
-  const resolution = resolveSourceAssertion(sourceText.slice(quoteBlock.start, quoteBlock.end), quote);
+  const resolution = resolveSourceAssertion(
+    sourceText.slice(quoteBlock.start, quoteBlock.end),
+    quote,
+    maxChars
+  );
   if (resolution.status === "grounded" || resolution.reason !== "source_assertion_not_self_contained") {
     return resolution;
   }
-  if (!isRecoverableVerbatimUserQuote(quote)) return resolution;
-  return { status: "grounded", assertion: stripRoleLabel(quote) };
+  if (!isRecoverableVerbatimUserQuote(quote, maxChars)) return resolution;
+  return { status: "grounded", assertion: stripSourceRoleMarker(quote) };
 }
 
 function sourceMessageBlockAt(
@@ -225,9 +249,9 @@ function sourceMessageBlockAt(
   return { start: marker.start, end: markers[index + 1]?.start ?? sourceLength, role: marker.role };
 }
 
-function isRecoverableVerbatimUserQuote(value: string): boolean {
-  const quote = stripRoleLabel(value);
-  if (quote.length === 0 || quote.length > SOURCE_ASSERTION_MAX_CHARS || /[?？]/u.test(quote)) {
+function isRecoverableVerbatimUserQuote(value: string, maxChars: number): boolean {
+  const quote = stripSourceRoleMarker(value);
+  if (quote.length === 0 || quote.length > maxChars || /[?？]/u.test(quote)) {
     return false;
   }
   if (/^(?:(?:by the way|anyway|actually|well|speaking of)\s*,?\s*)?(?:i|we)\b/iu.test(quote)) {
@@ -241,7 +265,7 @@ function hasDirectQuestion(selected: readonly IndexedSourceSpan[]): boolean {
 }
 
 export function isDirectQuestionSourceText(text: string): boolean {
-  const content = stripRoleLabel(text);
+  const content = stripSourceRoleMarker(text);
   if (!/[?？]$/u.test(content)) return false;
   return boundedIndirectQuestionPrefix(content) === null;
 }
@@ -262,7 +286,7 @@ function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssert
   const output = [...selectBoundedAssertions(legacy)];
   if (output.length >= MAX_SOURCE_ASSERTIONS) return output;
 
-  const roleMarkers = collectRoleMarkers(sourceText);
+  const roleMarkers = collectSourceRoleMarkers(sourceText);
   const seen = new Set(legacy.map((assertion) => `${assertion.start}:${assertion.end}`));
   for (const sentence of sentenceSpans(sourceText)) {
     if (roleAt(roleMarkers, sentence.start) !== "user") continue;
@@ -276,8 +300,11 @@ function indexSourceAssertions(sourceText: string): readonly IndexedSourceAssert
   return output;
 }
 
-function indexLegacySourceAssertions(sourceText: string): readonly IndexedSourceAssertion[] {
-  const roleMarkers = collectRoleMarkers(sourceText);
+function indexLegacySourceAssertions(
+  sourceText: string,
+  preferenceMaxChars = PREFERENCE_SOURCE_ASSERTION_MAX_CHARS
+): readonly IndexedSourceAssertion[] {
+  const roleMarkers = collectSourceRoleMarkers(sourceText);
   const sentences = sentenceSpans(sourceText);
   const output: IndexedSourceAssertion[] = [];
   const seen = new Set<string>();
@@ -285,14 +312,29 @@ function indexLegacySourceAssertions(sourceText: string): readonly IndexedSource
     if (roleAt(roleMarkers, sentence.start) !== "user") continue;
     const sentenceText = sourceText.slice(sentence.start, sentence.end);
     if (isDirectQuestionSourceText(sentenceText)) continue;
-    if (appendBoundedIndirectQuestionPrefix(output, seen, sourceText, sentence, sentenceText)) {
+    if (appendBoundedIndirectQuestionPrefix(
+      output,
+      seen,
+      sourceText,
+      sentence,
+      sentenceText,
+      preferenceMaxChars
+    )) {
       continue;
     }
-    appendAssertion(output, seen, sourceText, sentence, sentence);
+    appendAssertion(output, seen, sourceText, sentence, sentence, false, preferenceMaxChars);
     for (const clause of coordinateSpans(sourceText, sentence)) {
-      appendAssertion(output, seen, sourceText, clause, sentence);
+      appendAssertion(output, seen, sourceText, clause, sentence, false, preferenceMaxChars);
     }
-    appendBoundedTemplateSlotPair(output, seen, sourceText, roleMarkers, sentence, sentences[index + 1]);
+    appendBoundedTemplateSlotPair(
+      output,
+      seen,
+      sourceText,
+      roleMarkers,
+      sentence,
+      sentences[index + 1],
+      preferenceMaxChars
+    );
   }
   return output;
 }
@@ -302,9 +344,10 @@ function appendBoundedIndirectQuestionPrefix(
   seen: Set<string>,
   sourceText: string,
   sentence: AssertionSpan,
-  sentenceText: string
+  sentenceText: string,
+  preferenceMaxChars: number
 ): boolean {
-  const content = stripRoleLabel(sentenceText);
+  const content = stripSourceRoleMarker(sentenceText);
   const prefix = boundedIndirectQuestionPrefix(content);
   if (prefix === null) return false;
   const localStart = sentenceText.indexOf(prefix);
@@ -313,7 +356,7 @@ function appendBoundedIndirectQuestionPrefix(
     start: sentence.start + localStart,
     end: sentence.start + localStart + prefix.length
   };
-  appendAssertion(output, seen, sourceText, span, sentence);
+  appendAssertion(output, seen, sourceText, span, sentence, false, preferenceMaxChars);
   return true;
 }
 
@@ -321,14 +364,15 @@ function appendBoundedTemplateSlotPair(
   output: IndexedSourceAssertion[],
   seen: Set<string>,
   sourceText: string,
-  roleMarkers: readonly { readonly start: number; readonly role: "user" | "assistant" }[],
+  roleMarkers: readonly SourceRoleMarker[],
   first: AssertionSpan,
-  second: AssertionSpan | undefined
+  second: AssertionSpan | undefined,
+  preferenceMaxChars: number
 ): void {
   if (second === undefined || roleAt(roleMarkers, second.start) !== "user") return;
   const pair = { start: first.start, end: second.end };
   if (!isBoundedTemplateSlotAssertion(sourceText.slice(pair.start, pair.end))) return;
-  appendAssertion(output, seen, sourceText, pair, pair);
+  appendAssertion(output, seen, sourceText, pair, pair, false, preferenceMaxChars);
 }
 
 function appendAssertion(
@@ -337,18 +381,22 @@ function appendAssertion(
   sourceText: string,
   span: AssertionSpan,
   sentence: AssertionSpan,
-  atomic = false
+  atomic = false,
+  preferenceMaxChars = PREFERENCE_SOURCE_ASSERTION_MAX_CHARS
 ): void {
   const key = `${span.start}:${span.end}`;
   if (seen.has(key)) return;
   seen.add(key);
   const assertionText = sourceText.slice(span.start, span.end);
   const sentenceText = sourceText.slice(sentence.start, sentence.end);
+  const maxChars = parseDirectPreferenceRelation(assertionText) === undefined
+    ? SOURCE_ASSERTION_MAX_CHARS
+    : preferenceMaxChars;
   const resolution = atomic
-    ? resolveAtomicSourceAssertion(assertionText)
-    : resolveSourceAssertion(sentenceText, assertionText);
+    ? resolveAtomicSourceAssertion(assertionText, maxChars)
+    : resolveSourceAssertion(sentenceText, assertionText, maxChars);
   if (resolution.status !== "grounded" ||
-      stripRoleLabel(resolution.assertion) !== stripRoleLabel(assertionText)) return;
+      stripSourceRoleMarker(resolution.assertion) !== stripSourceRoleMarker(assertionText)) return;
   output.push({
     assertion_id: output.length + 1,
     text: assertionText,
@@ -388,7 +436,7 @@ function sameAssertionCatalog(
 }
 
 function indexSourceSpans(sourceText: string): readonly IndexedSourceSpan[] {
-  const roleMarkers = collectRoleMarkers(sourceText);
+  const roleMarkers = collectSourceRoleMarkers(sourceText);
   return sentenceSpans(sourceText).map((span, index) => ({
     span_id: index + 1,
     role: roleAt(roleMarkers, span.start),
@@ -398,26 +446,11 @@ function indexSourceSpans(sourceText: string): readonly IndexedSourceSpan[] {
   }));
 }
 
-function collectRoleMarkers(sourceText: string): readonly {
-  readonly start: number;
-  readonly role: "user" | "assistant";
-}[] {
-  const markers: { start: number; role: "user" | "assistant" }[] = [];
-  for (const match of sourceText.matchAll(/^(User|Assistant)\s*:/gimu)) {
-    markers.push({ start: match.index, role: match[1]!.toLowerCase() as "user" | "assistant" });
-  }
-  return markers;
-}
-
-function stripRoleLabel(text: string): string {
-  return text.trim().replace(/^(?:User|Assistant)\s*:\s*/iu, "").trim();
-}
-
 function roleAt(
-  markers: readonly { readonly start: number; readonly role: "user" | "assistant" }[],
+  markers: readonly SourceRoleMarker[],
   offset: number
-): "user" | "assistant" {
-  let role: "user" | "assistant" = "user";
+): SourceConversationRole {
+  let role: SourceConversationRole = "user";
   for (const marker of markers) {
     if (marker.start > offset) break;
     role = marker.role;

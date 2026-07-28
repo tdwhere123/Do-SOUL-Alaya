@@ -107,6 +107,7 @@ function buildOfficialSeedDrafts(
       confidence: signal.confidence,
       distilledFact: distilled,
       turnContent: input.turnContent,
+      turnMessages: input.context.turn_messages,
       turnSeedIndex: input.seedIndex,
       ...(matchedText === null ? {} : { matchedText }),
       productionRawPayload: stripSchemaGrounding(signal.raw_payload, signal.object_kind),
