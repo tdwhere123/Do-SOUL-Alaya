@@ -129,18 +129,21 @@ describe("embedding-rank consensus packet plan", () => {
       name: "drop",
       baseline: packet("head", "protected", "tail"),
       contender: candidate("novel", 100, 1),
-      protectedCandidates: [{ candidateKey: "protected", rankLimit: 2 }]
+      protectedCandidates: [{ candidateKey: "protected", rankLimit: 2 }],
+      expected: ["novel", "protected", "tail"]
     },
     {
       name: "rank-limit breach",
       baseline: packet("protected", "head", "tail"),
       contender: candidate("novel", 100, 1),
-      protectedCandidates: [{ candidateKey: "protected", rankLimit: 1 }]
+      protectedCandidates: [{ candidateKey: "protected", rankLimit: 1 }],
+      expected: ["protected", "novel", "tail"]
     }
-  ])("aborts rather than allowing a protected candidate $name", ({
+  ])("composes consensus without allowing a protected candidate $name", ({
     baseline,
     contender,
-    protectedCandidates
+    protectedCandidates,
+    expected
   }) => {
     const planned = plan({
       baseline,
@@ -148,7 +151,37 @@ describe("embedding-rank consensus packet plan", () => {
       protectedCandidates
     });
 
-    expect(planned).toBe(baseline);
+    expect(keys(planned)).toEqual(expected);
+  });
+
+  it("retains multiple protections with the same bounded rank", () => {
+    const baseline = packet(
+      "head",
+      "protected-a",
+      "protected-b",
+      "tail-a",
+      "tail-b"
+    );
+    const planned = plan({
+      baseline,
+      candidates: [
+        ...baseline,
+        candidate("novel-a", 100, 1),
+        candidate("novel-b", 99, 2)
+      ],
+      protectedCandidates: [
+        { candidateKey: "protected-a", rankLimit: 3 },
+        { candidateKey: "protected-b", rankLimit: 3 }
+      ]
+    });
+
+    expect(keys(planned)).toEqual([
+      "novel-a",
+      "protected-a",
+      "protected-b",
+      "tail-a",
+      "tail-b"
+    ]);
   });
 
   it("returns the exact baseline when the behavior guard requests a full abort", () => {
@@ -277,7 +310,7 @@ describe("embedding-rank consensus packet plan", () => {
     });
   });
 
-  it("distinguishes protection and cardinality rejections", () => {
+  it("distinguishes infeasible protection and cardinality rejections", () => {
     const protectedBaseline = packet("head", "protected", "tail");
     const protectedPlan = resolve({
       baseline: protectedBaseline,
@@ -285,7 +318,7 @@ describe("embedding-rank consensus packet plan", () => {
         ...protectedBaseline,
         candidate("novel", 100, 1)
       ],
-      protectedCandidates: [{ candidateKey: "protected", rankLimit: 2 }]
+      protectedCandidates: [{ candidateKey: "absent", rankLimit: 2 }]
     });
     expect(protectedPlan.candidates).toBe(protectedBaseline);
     expect(protectedPlan.decision).toEqual({

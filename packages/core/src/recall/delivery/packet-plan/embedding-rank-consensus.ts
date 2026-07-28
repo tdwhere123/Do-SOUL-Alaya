@@ -62,6 +62,13 @@ type ConsensusEntry<T> = Readonly<{
   readonly reciprocalScore: number;
 }>;
 
+type ScheduledProtection<T> = Readonly<{
+  readonly candidate: T;
+  readonly candidateKey: string;
+  readonly deadline: number;
+  readonly baselineRank: number;
+}>;
+
 export function resolveEmbeddingRankConsensusPlan<
   T extends EmbeddingRankConsensusCandidate
 >(params: EmbeddingRankConsensusParams<T>): EmbeddingRankConsensusPlan<T> {
@@ -75,9 +82,15 @@ export function resolveEmbeddingRankConsensusPlan<
   );
   const embeddingHead = [...embeddingHeadByKey.values()]
     .sort(compareEmbeddingHeadEntries);
-  const consensusHead = rankConsensusHead(baselineHead, embeddingHeadByKey)
+  const rankedConsensusHead = rankConsensusHead(baselineHead, embeddingHeadByKey)
     .slice(0, headWidth)
     .map((entry) => entry.candidate);
+  const consensusHead = composeProtectedConsensusHead(
+    rankedConsensusHead,
+    baselineHead,
+    immutableTail,
+    params.protectedCandidates
+  );
   const proposedCandidates = [...consensusHead, ...immutableTail];
   const protectedCandidates = params.protectedCandidates.map((item) => ({ ...item }));
   const decision = resolveDecision({
@@ -104,6 +117,84 @@ export function resolveEmbeddingRankConsensusPlan<
     protectedCandidates,
     decision
   });
+}
+
+function composeProtectedConsensusHead<T extends EmbeddingRankConsensusCandidate>(
+  consensusHead: readonly T[],
+  baselineHead: readonly T[],
+  immutableTail: readonly T[],
+  protections: readonly EmbeddingRankConsensusProtection[]
+): readonly T[] {
+  const scheduled = scheduleHeadProtections(
+    consensusHead, baselineHead, immutableTail, protections
+  );
+  if (scheduled === undefined || scheduled.length === 0) return consensusHead;
+  const protectedKeys = new Set(scheduled.map((item) => item.candidateKey));
+  const unprotected = consensusHead.filter(
+    (candidate) => !protectedKeys.has(candidate.candidateKey)
+  );
+  const byRank = new Map(scheduled.map((item) => [item.deadline, item.candidate]));
+  const composed = Array.from({ length: consensusHead.length }, (_, index) =>
+    byRank.get(index + 1) ?? unprotected.shift()
+  );
+  return composed.every((candidate): candidate is T => candidate !== undefined)
+    ? composed
+    : consensusHead;
+}
+
+function scheduleHeadProtections<T extends EmbeddingRankConsensusCandidate>(
+  consensusHead: readonly T[],
+  baselineHead: readonly T[],
+  immutableTail: readonly T[],
+  protections: readonly EmbeddingRankConsensusProtection[]
+): readonly ScheduledProtection<T>[] | undefined {
+  const proposed = [...consensusHead, ...immutableTail];
+  const baselineByKey = new Map(
+    baselineHead.map((candidate, index) => [
+      candidate.candidateKey,
+      { candidate, baselineRank: index + 1 }
+    ])
+  );
+  const scheduled: ScheduledProtection<T>[] = [];
+  for (const protection of protections) {
+    const proposedRank =
+      proposed.findIndex((item) => item.candidateKey === protection.candidateKey) + 1;
+    if (proposedRank > consensusHead.length && proposedRank <= protection.rankLimit) {
+      continue;
+    }
+    const source = baselineByKey.get(protection.candidateKey);
+    if (
+      source === undefined ||
+      !Number.isInteger(protection.rankLimit) ||
+      protection.rankLimit <= 0
+    ) return undefined;
+    scheduled.push(Object.freeze({
+      ...source,
+      candidateKey: protection.candidateKey,
+      deadline: proposedRank > 0 && proposedRank <= consensusHead.length
+        ? Math.min(protection.rankLimit, proposedRank)
+        : Math.min(protection.rankLimit, consensusHead.length)
+    }));
+  }
+  return assignProtectionRanks(scheduled);
+}
+
+function assignProtectionRanks<T>(
+  protections: readonly ScheduledProtection<T>[]
+): readonly ScheduledProtection<T>[] | undefined {
+  const ordered = [...protections].sort((left, right) =>
+    left.deadline - right.deadline ||
+    left.baselineRank - right.baselineRank ||
+    compareCandidateKeys(left.candidateKey, right.candidateKey)
+  );
+  let nextRank = Number.POSITIVE_INFINITY;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const current = ordered[index]!;
+    nextRank = Math.min(current.deadline, nextRank - 1);
+    if (nextRank <= 0) return undefined;
+    ordered[index] = Object.freeze({ ...current, deadline: nextRank });
+  }
+  return ordered;
 }
 
 function resolveHeadWidth(baselineLength: number): number {

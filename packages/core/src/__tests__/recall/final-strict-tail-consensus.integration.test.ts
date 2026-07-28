@@ -153,6 +153,7 @@ describe("final strict-tail consensus integration", () => {
     const candidates = consensusCandidates({ "baseline-03": protectedEvidence });
 
     const result = select(candidates, {
+      capturePacketPlanTrace: true,
       queryText: "Where did I buy my new bookshelf from?",
       evidenceSemanticScoresByCandidateKey: new Map([
         [protectedEvidence.fusion.candidate_key, 0.9]
@@ -162,6 +163,11 @@ describe("final strict-tail consensus integration", () => {
 
     expect(finalRank).toBeGreaterThan(0);
     expect(finalRank).toBeLessThanOrEqual(5);
+    expect(packetIds(result)).toContain("challenger");
+    expect(result.packetPlanObservation?.decision).toEqual({
+      status: "accepted",
+      reason: "strict_tail_consensus"
+    });
   });
 
   it.each([
