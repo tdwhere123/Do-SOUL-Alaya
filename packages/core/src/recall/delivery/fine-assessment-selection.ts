@@ -1,67 +1,34 @@
-import type {
-  MemoryDimension as MemoryDimensionType,
-  RecallCandidate,
-  RecallPolicy,
-  RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import {
-  buildRecallCandidate,
-  buildRecallCandidateSelectionKey
-} from "../runtime/recall-candidate-builder.js";
-import {
-  buildRecallCandidateDedupeKey,
-  buildRecallLogicalObjectKey,
-  isWorkspaceMemoryCandidate
-} from "../runtime/recall-service-helpers.js";
-import type {
-  CoarseRecallCandidate,
-  RecallCandidateDiagnostic,
-  RecallCandidateDropReason,
-  RecallFusionBreakdown,
-  RecallSupplementaryData,
-  TokenEstimator
-} from "../runtime/recall-service-types.js";
+import type { MemoryDimension as MemoryDimensionType, RecallCandidate, RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
+import { buildRecallCandidate, buildRecallCandidateSelectionKey } from "../runtime/recall-candidate-builder.js";
+import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
+import type { CoarseRecallCandidate, RecallCandidateDiagnostic, RecallCandidateDropReason, RecallFusionBreakdown, RecallSupplementaryData, TokenEstimator } from "../runtime/recall-service-types.js";
 import { orderByCoverageMarginalGain } from "./coverage-selection.js";
-import type { RecallAnswerSupportObservation } from
-  "../query/recall-answer-support-observation.js";
-import type { RecallCandidateAnswerSupport } from
-  "../query/recall-candidate-answer-support.js";
+import type { RecallAnswerSupportObservation } from "../query/recall-answer-support-observation.js";
+import type { RecallCandidateAnswerSupport } from "../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
 import { hasRankedEmbeddingHead, selectEmbeddingHeadEvictions } from
   "./admission/embedding-head-dominance.js";
 import { buildFineAssessmentAnswerSupportContext } from
   "./answer-support/answer-support-context.js";
-import { selectBoundedDirectEvidenceHead } from
+import { retainBoundedAnswerHeads, selectBoundedDirectEvidenceHead } from
   "./admission/direct-evidence-answer-head.js";
-import {
-  buildFinalScoreFactors,
-  createFineAssessmentDiagnostic
-} from "./diagnostics/fine-assessment-diagnostics.js";
-import {
-  buildFinalPacketConsensusObservation,
-  buildConsensusReplayOrder,
-  packetMatchesConsensusPlan,
-  resolveFinalPacketConsensusPlan,
-  selectFinalPacketConsensusCandidates
-} from "./final-order/final-packet-consensus.js";
+import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from
+  "./diagnostics/fine-assessment-diagnostics.js";
+import { buildFinalPacketConsensusObservation, buildConsensusReplayOrder, packetMatchesConsensusPlan, resolveFinalPacketConsensusPlan, selectFinalPacketConsensusCandidates } from "./final-order/final-packet-consensus.js";
 import { mergeFinalPacketAdmissionDiagnostics } from "./final-order/final-packet-diagnostics.js";
-import {
-  materializeFinalPacket,
-  orderDeliveredPacket
-} from "./final-order/final-packet-order.js";
+import { materializeFinalPacket, orderDeliveredPacket } from "./final-order/final-packet-order.js";
+import { orderWithVerifiedAnswerSlot } from "./final-order/verified-answer-slot.js";
 import type { RecallPacketPlanObservation } from "./packet-plan/packet-plan-trace.js";
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
   readonly fusion: RecallFusionBreakdown;
 }>;
-
 interface FineAssessmentAccumulator {
   readonly selected: RecallCandidate[];
   readonly diagnostics: RecallCandidateDiagnostic[];
   readonly admission: FineAssessmentAdmissionState;
 }
-
 interface FineAssessmentAdmissionState {
   readonly seenObjects: Set<string>;
   readonly perDimensionCounts: Map<MemoryDimensionType, number>;
@@ -113,7 +80,7 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
 }>;
 
-type FineAssessmentSelectionResult = ReturnType<typeof freezeSelectedPacket> & Readonly<{
+type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPacket> & Readonly<{
   readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
 }>;
 export function selectFineAssessmentCandidates(
@@ -133,7 +100,20 @@ export function selectFineAssessmentCandidates(
   const finalAccumulator = reduceFineAssessmentCandidates(evidenceHead.candidates, context, evictions);
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"
-    ? freezeSelectedPacket(finalAccumulator)
+    ? materializeFinalPacket(
+        retainBoundedAnswerHeads(
+          orderWithVerifiedAnswerSlot({
+            publicOrder: finalAccumulator.selected,
+            supportByCandidateKey: context.answerSupportByCandidateKey
+          }),
+          evidenceHead.protections,
+          buildRecallCandidateSelectionKey,
+          context.supplementaryData.queryProbes,
+          evidenceHead.candidates
+        ),
+        finalAccumulator.diagnostics,
+        context.config.budgets
+      )
     : orderDeliveredPacket({
         selected: finalAccumulator.selected,
         diagnostics: finalAccumulator.diagnostics,
@@ -188,12 +168,12 @@ function buildSelectionResult(
 
 function applyFinalPacketConsensus(
   plan: ReturnType<typeof resolveFinalPacketConsensusPlan>,
-  baseline: ReturnType<typeof freezeSelectedPacket>,
+  baseline: ReturnType<typeof materializeFinalPacket>,
   sourceCandidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
   evictions: ReadonlySet<string>
 ): Readonly<{
-  readonly packet: ReturnType<typeof freezeSelectedPacket>;
+  readonly packet: ReturnType<typeof materializeFinalPacket>;
   readonly replayAccepted: boolean;
 }> {
   if (plan.decision.status !== "accepted") {
@@ -217,18 +197,6 @@ function applyFinalPacketConsensus(
       context.config.budgets
     ),
     replayAccepted: true
-  });
-}
-
-function freezeSelectedPacket(
-  accumulator: FineAssessmentAccumulator
-): Readonly<{
-  candidates: readonly Readonly<RecallCandidate>[];
-  diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-}> {
-  return Object.freeze({
-    candidates: Object.freeze([...accumulator.selected]),
-    diagnostics: Object.freeze([...accumulator.diagnostics])
   });
 }
 

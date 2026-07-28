@@ -51,7 +51,6 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   blocksEvidenceHead: BlocksEvidenceHead<T>
 ): DirectEvidenceHeadSelection<T> {
   const baseline = selectDelivered(candidates);
-  if (baseline.some(blocksEvidenceHead)) return unchangedSelection(candidates);
   const headLimit = Math.min(DIRECT_EVIDENCE_HEAD_LIMIT, maxEntries, baseline.length);
   if (headLimit <= 0) return unchangedSelection(candidates);
   const evidence = collectEvidenceCandidates(candidates, queryProbes, excludedCandidateKeys);
@@ -60,7 +59,7 @@ export function selectBoundedDirectEvidenceHead<T extends DirectEvidenceHeadCand
   );
   const evidenceSelection = selectEvidenceHead(
     candidates, baseline, evidence, semanticLeader, headLimit,
-    publicRelevanceByCandidateKey, queryProbes, selectDelivered
+    publicRelevanceByCandidateKey, queryProbes, selectDelivered, blocksEvidenceHead
   );
   return semanticLeader === undefined ||
     semanticLeader.candidate.objectKind === "evidence_capsule"
@@ -91,7 +90,8 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
   headLimit: number,
   publicRelevanceByCandidateKey: ReadonlyMap<string, number>,
   queryProbes: Readonly<RecallQueryProbes>,
-  selectDelivered: SelectDelivered<T>
+  selectDelivered: SelectDelivered<T>,
+  blocksEvidenceHead: BlocksEvidenceHead<T>
 ): DirectEvidenceHeadSelection<T> {
   const scored = evidence
     .filter((row) => row.queryScore >= DIRECT_EVIDENCE_SCORE_FLOOR)
@@ -107,7 +107,7 @@ function selectEvidenceHead<T extends DirectEvidenceHeadCandidate>(
     }
     const admission = tryAdmissionPromotion(
       candidates, baseline, baseline[headLimit - 1]!,
-      contender, queryProbes, selectDelivered
+      contender, queryProbes, selectDelivered, blocksEvidenceHead
     );
     if (admission === undefined) continue;
     const rankLimit = resolveEvidenceProtectionRank(
@@ -198,7 +198,8 @@ function tryAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
   insertionTarget: T,
   promoted: ScoredDirectEvidence<T>,
   queryProbes: Readonly<RecallQueryProbes>,
-  selectDelivered: SelectDelivered<T>
+  selectDelivered: SelectDelivered<T>,
+  blocksEvidenceHead: BlocksEvidenceHead<T>
 ): DirectEvidenceAdmission<T> | undefined {
   const trialOrder = moveBefore(candidates, promoted.candidate, insertionTarget);
   const delivered = selectDelivered(trialOrder);
@@ -206,6 +207,7 @@ function tryAdmissionPromotion<T extends DirectEvidenceHeadCandidate>(
     baseline, delivered, promoted.candidateKey
   );
   return replacement !== undefined &&
+    !blocksEvidenceHead(replacement) &&
     hasRequiredQueryMargin(promoted.queryScore, replacement.entry, queryProbes)
     ? Object.freeze({ candidateOrder: trialOrder, delivered })
     : undefined;

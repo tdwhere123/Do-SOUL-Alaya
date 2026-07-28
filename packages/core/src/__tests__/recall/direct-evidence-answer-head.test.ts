@@ -333,6 +333,68 @@ describe("bounded direct-evidence answer head", () => {
       ?.answer_features?.answer_support?.authority?.behavior_eligible).toBe(true);
   });
 
+  it("promotes direct evidence when the verified baseline candidate is not the victim", () => {
+    const verifiedBase = createRankedCandidate("verified", 1, 0.95, {
+      content: "I bought the bookshelf from IKEA.",
+      evidence_refs: ["evidence-verified"]
+    });
+    const context = projectVerifiedUserAssertionContext({
+      evidenceRef: "evidence-verified",
+      entryContent: verifiedBase.entry.content,
+      gist: `User: ${verifiedBase.entry.content}`
+    });
+    if (context === null) throw new Error("fixture must project verified context");
+    const peers = peerCandidates().map((candidate) => ({
+      ...candidate,
+      fusion: {
+        ...candidate.fusion,
+        fused_rank: candidate.fusion.fused_rank + 1
+      }
+    }));
+    const evidence = directEvidence("evidence", STRONG_EVIDENCE, 7, 0.2);
+
+    const result = select([verifiedBase, ...peers, evidence], {
+      maxEntries: 6,
+      verifiedContexts: { verified: context },
+      captureAnswerFeatures: true
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "verified", "peer-1", "peer-2", "peer-3", "evidence", "peer-4"
+    ]);
+    expect(result.candidates.some((candidate) => candidate.object_id === "peer-5"))
+      .toBe(false);
+  });
+
+  it("lets a verified answer promote itself without displacing verified authority", () => {
+    const peers = peerCandidates().map((candidate) =>
+      withEmbeddingScore(candidate, 0.4)
+    );
+    const verifiedBase = createCandidate("verified", {
+      content: "I bought the bookshelf from IKEA.",
+      evidence_refs: ["evidence-verified"]
+    });
+    const verified = withEmbeddingScore({
+      ...verifiedBase,
+      fusion: { ...verifiedBase.fusion, fused_rank: 6, fused_score: 0.2 }
+    }, 0.99);
+    const context = projectVerifiedUserAssertionContext({
+      evidenceRef: "evidence-verified",
+      entryContent: verified.entry.content,
+      gist: `User: ${verified.entry.content}`
+    });
+    if (context === null) throw new Error("fixture must project verified context");
+
+    const result = select([...peers, verified], {
+      maxEntries: 6,
+      verifiedContexts: { verified: context },
+      captureAnswerFeatures: true
+    });
+
+    expect(result.candidates[0]?.object_id).toBe("verified");
+    expect(result.candidates).toHaveLength(6);
+  });
+
   it.each([
     {
       name: "weak query match",

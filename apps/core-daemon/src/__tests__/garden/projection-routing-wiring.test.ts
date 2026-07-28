@@ -89,11 +89,8 @@ describe("projection routing daemon wiring", () => {
     },
     {
       shape: "duration",
-      source: [
-        "By the way, speaking of waiting, it's crazy how long it took for my asylum application to get approved.",
-        "Over a year of uncertainty was really tough."
-      ].join(" "),
-      assertionNeedle: "Over a year",
+      source: "I waited over a year for the decision on my asylum application.",
+      assertionNeedle: "waited over a year",
       query: "How long did I wait for the decision on my asylum application?"
     }
   ])("carries an official grounded User $shape assertion through SQLite into recall authority", async (
@@ -141,6 +138,46 @@ describe("projection routing daemon wiring", () => {
           }
         }
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("does not use a v1 assertion owner's gist as an unverified search projection", async () => {
+    const database = initDatabase({ filename: ":memory:" });
+    try {
+      const harness = await createHarness(database, { projectionRoutingEnabled: true });
+      const source = [
+        "My asylum application took a long time to get approved.",
+        "Over a year of uncertainty was really tough."
+      ].join(" ");
+      const signal = await compileRecallSignal(source, "Over a year");
+      const materialized = await harness.router.materializeSignal(signal);
+
+      expect(materialized.success).toBe(true);
+      const [memory] = await harness.memoryRepo.findByWorkspaceId("workspace-1");
+      const [evidence] = await harness.evidenceRepo.findByWorkspaceId("workspace-1");
+      expect(evidence).toMatchObject({
+        gist: `User: ${source}`,
+        excerpt: "Over a year of uncertainty was really tough.",
+        source_hash: expect.stringMatching(
+          /^sha256:garden-verified-user-assertion-v1:[a-f0-9]{64}$/u
+        )
+      });
+
+      const result = await createRecallService(
+        harness.memoryRepo,
+        harness.evidenceRepo
+      ).recall({
+        taskSurface: recallSurface("What happened with my asylum application?"),
+        workspaceId: "workspace-1",
+        runId: "run-1",
+        strategy: "build",
+        diagnosticCapture: "answer_features"
+      });
+
+      expect(result.candidates.map((row) => row.object_id))
+        .not.toContain(memory?.object_id);
     } finally {
       database.close();
     }

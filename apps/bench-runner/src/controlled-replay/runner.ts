@@ -15,6 +15,7 @@ import {
   FIXTURE_QUESTIONS,
   FIXTURE_SEEDS,
   SCENARIO_LABELS,
+  createControlledReplayDataDir,
   reportMixedUsage,
   scenarioConfigFor,
   seedFixture
@@ -42,6 +43,8 @@ import type {
   ScenarioLabel,
   SeedSidecar
 } from "./types.js";
+
+const WARM_USAGE_REPLAY_COUNT = 3;
 
 export async function runControlledReplay(
   opts: ControlledReplayRunOptions
@@ -124,28 +127,35 @@ async function runScenario(
   reportDeliveryIds: string[]
 ): Promise<{ readonly archive: ScenarioArchive; readonly seeds: readonly SeedSidecar[] }> {
   const scenarioConfig = scenarioConfigFor(label);
-  const daemon = await startBenchDaemon({
+  const dataDirRoot = await createControlledReplayDataDir(label);
+  const daemonOptions = {
+    dataDirRoot,
     workspaceId: `controlled-${label}`,
     runId: `controlled-run-${label}`
-  });
+  } as const;
+  let daemon = await startBenchDaemon(daemonOptions);
   try {
     const seeds = await seedFixture(daemon, scenarioConfig.kindForSeed);
     const sidecar = new Map(seeds.map((seed) => [seed.memoryId, seed] as const));
 
     if (scenarioConfig.reportContextUsage === "mixed") {
-      const preReportObservations: RecallObservation[] = [];
-      for (let index = 0; index < FIXTURE_QUESTIONS.length; index++) {
-        const question = FIXTURE_QUESTIONS[index];
-        if (question === undefined) continue;
-        const recall = await daemon.recall(question.question, {
-          maxResults: scenarioConfig.maxEntries,
-          conflictAwareness: scenarioConfig.conflictAwareness
-        });
-        preReportObservations.push(buildObservation(question, recall, sidecar));
-        await reportMixedUsage(daemon, recall, question, sidecar, index + 1);
-        reportDeliveryIds.push(recall.delivery_id);
-      }
-      await daemon.runtime.runGardenBackgroundPass();
+      const preReportObservations = await runWarmUsageCycles({
+        daemon,
+        sidecar,
+        maxEntries: scenarioConfig.maxEntries,
+        conflictAwareness: scenarioConfig.conflictAwareness,
+        reportDeliveryIds
+      });
+      await daemon.shutdown();
+      daemon = await startBenchDaemon({
+        ...daemonOptions,
+        workspaceId: `${daemonOptions.workspaceId}-restart`,
+        runId: `${daemonOptions.runId}-restart`
+      });
+      await daemon.attachWorkspace({
+        workspaceId: daemonOptions.workspaceId,
+        runId: daemonOptions.runId
+      });
       const observations: RecallObservation[] = [];
       for (const question of FIXTURE_QUESTIONS) {
         const recall = await daemon.recall(question.question, {
@@ -195,4 +205,30 @@ async function runScenario(
   } finally {
     await daemon.shutdown();
   }
+}
+
+async function runWarmUsageCycles(input: Readonly<{
+  daemon: Awaited<ReturnType<typeof startBenchDaemon>>;
+  sidecar: ReadonlyMap<string, SeedSidecar>;
+  maxEntries: number;
+  conflictAwareness: boolean;
+  reportDeliveryIds: string[];
+}>): Promise<readonly RecallObservation[]> {
+  const observations: RecallObservation[] = [];
+  let turnIndex = 0;
+  for (const question of FIXTURE_QUESTIONS) {
+    for (let replay = 0; replay < WARM_USAGE_REPLAY_COUNT; replay++) {
+      const recall = await input.daemon.recall(question.question, {
+        maxResults: input.maxEntries,
+        conflictAwareness: input.conflictAwareness
+      });
+      if (replay === 0) {
+        observations.push(buildObservation(question, recall, input.sidecar));
+      }
+      turnIndex++;
+      await reportMixedUsage(input.daemon, recall, question, turnIndex);
+      input.reportDeliveryIds.push(recall.delivery_id);
+    }
+  }
+  return observations;
 }

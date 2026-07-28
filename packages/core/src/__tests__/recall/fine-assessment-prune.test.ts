@@ -74,6 +74,28 @@ describe("pruneCoarseCandidatesForFineAssessment", () => {
     expect(result.finePrunedCount).toBe(1);
   });
 
+  it("retains bounded temporal-window candidates until temporal fusion can score them", () => {
+    const temporal = coarseCandidate("temporal-neighbor", {
+      admissionPlanes: ["temporal_window"],
+      sourceChannel: "temporal_window",
+      structuralScore: 0
+    });
+    const filler = Array.from({ length: TEST_FINE_BUDGET }, (_, index) =>
+      coarseCandidate(`filler-${index}`, { structuralScore: 1 })
+    );
+    const result = pruneCoarseCandidatesForFineAssessment({
+      candidates: [...filler, temporal],
+      supplementaryData: emptySupplementaryScores(),
+      winnerMemoryIds: new Set(),
+      cap: TEST_FINE_BUDGET
+    });
+
+    expect(result.survivors.some(
+      (candidate) => candidate.entry.object_id === "temporal-neighbor"
+    )).toBe(true);
+    expect(result.priorityCandidateCount).toBe(1);
+  });
+
   it("bounds injected supplements under the waist when winners leave little room", () => {
     const winners = Array.from({ length: TEST_FINE_BUDGET - 2 }, (_, index) =>
       coarseCandidate(`winner-${index}`, {

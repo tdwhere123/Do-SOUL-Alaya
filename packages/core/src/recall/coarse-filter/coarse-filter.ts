@@ -38,6 +38,11 @@ import {
   createCoarseFilterState
 } from "./coarse-filter-pipeline.js";
 import {
+  createTemporalWindowCandidateBudget,
+  type TemporalWindowCandidateBudget
+} from
+  "./temporal/temporal-window-candidates.js";
+import {
   resolveRoutedSurfaceIds,
   sessionRouteEnabled,
   withRoutedSurfaceIds
@@ -58,6 +63,8 @@ export interface RunCoarseFilterOptions {
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
+  readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
 }
 
@@ -356,6 +363,9 @@ export async function runCoarseFilter(
     tierScopedSearchEligible: input.tierScopedSearchEligible,
     byId: input.byId,
     deliveryMaxEntries: options.deliveryMaxEntries,
+    temporalCandidateBudget: options.temporalCandidateBudget ??
+      createTemporalWindowCandidateBudget(options.deliveryMaxEntries),
+    referenceTime: options.referenceTime,
     pathProjectionAsOf: options.pathProjectionAsOf,
     state
   });

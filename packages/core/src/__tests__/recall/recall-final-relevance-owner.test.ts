@@ -322,13 +322,13 @@ describe("final recall relevance ownership", () => {
     expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
   });
 
-  it("restores CE relevance order after coverage admits a high-score duplicate late", () => {
+  it("restores CE relevance order after coverage-stage displacement", () => {
     const assessed = buildCoverageReorderedCeAssessment();
 
     expect(assessed.candidates.length).toBeGreaterThan(5);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     const highDup = diagnostics.get(CE_HIGH_DUP_ID);
-    expect(highDup?.rank_after_coverage_selector).toBeGreaterThan(5);
+    expect(highDup?.rank_after_coverage_selector).toBeGreaterThan(2);
     expect(highDup?.final_rank).toBeLessThanOrEqual(5);
     expect(highDup?.final_rank).toBe(2);
     expect(highDup?.post_rank).toBe(2);

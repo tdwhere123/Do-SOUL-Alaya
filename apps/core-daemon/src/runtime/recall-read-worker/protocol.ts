@@ -2,6 +2,7 @@ export type RecallReadWorkerOperation =
   | "ready"
   | "memory.findByWorkspaceId"
   | "memory.findRecallTierWindow"
+  | "memory.findByEventTimeWindow"
   | "memory.findByDimension"
   | "memory.findByScopeClass"
   | "memory.searchByKeyword"

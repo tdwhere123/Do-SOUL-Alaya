@@ -34,6 +34,7 @@ const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "facet_concept",
   "domain_tag_cluster",
   "session_surface_cohort",
+  "temporal_window",
   "source_proximity",
   "graph_expansion",
   "path_expansion",

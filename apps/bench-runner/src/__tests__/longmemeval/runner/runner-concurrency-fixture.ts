@@ -142,6 +142,9 @@ export function makeRangeDiagnostics(offset: number, limit: number) {
   return makeShardDiagnostics({
     questions: Array.from({ length: limit }, (_, index) => ({
       question_id: `q-${offset + index + 1}`,
+      gold_memory_ids: ["gold"],
+      gold_evidence_ids: [],
+      gold_object_ids: ["gold"],
       candidate_pool_complete: true,
       cohort_ledger: answerableCohortLedger(),
       candidates: []

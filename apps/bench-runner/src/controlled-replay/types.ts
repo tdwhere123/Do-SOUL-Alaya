@@ -52,11 +52,15 @@ export interface RecallObservation {
   readonly diagnostics: readonly CandidateDiagnostic[];
   readonly expectedObjectIds: readonly string[];
   readonly expectedRank: number | null;
+  readonly expectedFusedRank: number | null;
+  readonly expectedPathFusedRank: number | null;
 }
 
 export interface ScenarioMetrics {
   readonly rank_distribution: Record<string, number>;
   readonly expected_rank_by_question: Record<string, number | null>;
+  readonly expected_fused_rank_by_question: Record<string, number | null>;
+  readonly expected_path_fused_rank_by_question: Record<string, number | null>;
   readonly hit_at_5: {
     readonly count: number;
     readonly rate: number;
@@ -95,10 +99,10 @@ export interface ScenarioArchive {
 
 export interface NativeHealthGate {
   readonly id:
-    | "trust_loop_activation_gain"
+    | "warm_usage_hit_at_5_gain"
     | "evidence_stream_gold_delivery"
     | "path_stream_top10_contribution"
-    | "plasticity_gradient_rank_gain";
+    | "co_usage_path_mean_fused_rank_gain";
   readonly label: string;
   readonly current: number | null;
   readonly target: number;

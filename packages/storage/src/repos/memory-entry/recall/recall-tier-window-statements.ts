@@ -5,16 +5,12 @@ import {
   type SqlDefinitionMap,
   type SqliteStatement
 } from "../statement-group-utils.js";
+import { ACTIVE_MEMORY_FILTER_SQL } from "./active-memory-filter-sql.js";
 
 export interface RecallTierWindowStatements {
   readonly findRecallHotWindowStatement: SqliteStatement;
   readonly findRecallTierWindowStatement: SqliteStatement;
 }
-
-const ACTIVE_MEMORY_FILTER_SQL = `
-        AND COALESCE(retention_state, '') != 'tombstoned'
-        AND COALESCE(lifecycle_state, '') != 'dormant'
-`;
 
 const RECALL_TIER_WINDOW_SQL: SqlDefinitionMap<RecallTierWindowStatements> = {
   findRecallHotWindowStatement: `

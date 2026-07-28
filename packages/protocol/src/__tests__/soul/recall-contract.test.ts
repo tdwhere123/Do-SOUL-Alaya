@@ -10,6 +10,7 @@ import { SoulMemorySearchRequestSchema } from "../../soul/mcp-types.js";
 import { RecallCandidateSchema } from "../../soul/recall-candidate.js";
 import {
   ActivationWeightsPatchSchema,
+  MAX_TEMPORAL_RECALL_CANDIDATES,
   RecallPolicySchema
 } from "../../soul/recall-policy.js";
 
@@ -142,6 +143,10 @@ describe("v0.2 recall protocol contract", () => {
         max_candidates: -1
       }
     }).success).toBe(false);
+  });
+
+  it("publishes one bounded temporal candidate limit for recall consumers", () => {
+    expect(MAX_TEMPORAL_RECALL_CANDIDATES).toBe(500);
   });
 
   it("keeps RecallScoreFactors backward-compatible and accepts resolved activation weights", () => {

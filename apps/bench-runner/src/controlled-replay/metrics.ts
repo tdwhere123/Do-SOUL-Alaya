@@ -10,7 +10,7 @@ import type {
 } from "./types.js";
 import {
   absDelta,
-  computeQuestionRankGain,
+  computeMeanQuestionRankGain,
   emptyRankDistribution,
   hasEvidenceStreamContribution,
   hasPathStreamContribution,
@@ -39,22 +39,45 @@ export function buildObservation(
       break;
     }
   }
+  const expectedObjectIds = [...sidecar.entries()]
+    .filter(([, seed]) => expected.has(seed.fixtureId))
+    .map(([objectId]) => objectId);
+  const diagnostics = readCandidateDiagnostics(recall.diagnostics);
+  const expectedFusedRanks = diagnostics
+    .filter((diagnostic) => expectedObjectIds.includes(diagnostic.object_id))
+    .flatMap((diagnostic) =>
+      diagnostic.fused_rank === null ? [] : [diagnostic.fused_rank]
+    );
+  const expectedPathFusedRanks = diagnostics
+    .filter((diagnostic) =>
+      expectedObjectIds.includes(diagnostic.object_id) &&
+      hasPathStreamContribution(diagnostic)
+    )
+    .flatMap((diagnostic) =>
+      diagnostic.fused_rank === null ? [] : [diagnostic.fused_rank]
+    );
   return {
     questionId: question.id,
     deliveryId: recall.delivery_id,
     results: recall.results,
     activeConstraints: recall.active_constraints ?? [],
-    diagnostics: readCandidateDiagnostics(recall.diagnostics),
-    expectedObjectIds: [...sidecar.entries()]
-      .filter(([, seed]) => expected.has(seed.fixtureId))
-      .map(([objectId]) => objectId),
-    expectedRank
+    diagnostics,
+    expectedObjectIds,
+    expectedRank,
+    expectedFusedRank:
+      expectedFusedRanks.length === 0 ? null : Math.min(...expectedFusedRanks),
+    expectedPathFusedRank:
+      expectedPathFusedRanks.length === 0
+        ? null
+        : Math.min(...expectedPathFusedRanks)
   };
 }
 
 interface ObservationMetricAccumulator {
   readonly rankDistribution: Record<string, number>;
   readonly expectedRankByQuestion: Record<string, number | null>;
+  readonly expectedFusedRankByQuestion: Record<string, number | null>;
+  readonly expectedPathFusedRankByQuestion: Record<string, number | null>;
   rankTotal: number;
   rankedCount: number;
   hitAt5: number;
@@ -76,6 +99,8 @@ function accumulateObservationMetrics(
   const acc: ObservationMetricAccumulator = {
     rankDistribution: emptyRankDistribution(),
     expectedRankByQuestion: {},
+    expectedFusedRankByQuestion: {},
+    expectedPathFusedRankByQuestion: {},
     rankTotal: 0,
     rankedCount: 0,
     hitAt5: 0,
@@ -93,6 +118,10 @@ function accumulateObservationMetrics(
   for (const observation of observations) {
     const expectedObjectIds = new Set(observation.expectedObjectIds);
     acc.expectedRankByQuestion[observation.questionId] = observation.expectedRank;
+    acc.expectedFusedRankByQuestion[observation.questionId] =
+      observation.expectedFusedRank;
+    acc.expectedPathFusedRankByQuestion[observation.questionId] =
+      observation.expectedPathFusedRank;
     const bucket = rankBucket(observation.expectedRank);
     acc.rankDistribution[bucket] = (acc.rankDistribution[bucket] ?? 0) + 1;
     if (observation.expectedRank !== null) {
@@ -163,6 +192,8 @@ export function computeMetrics(
   return {
     rank_distribution: acc.rankDistribution,
     expected_rank_by_question: acc.expectedRankByQuestion,
+    expected_fused_rank_by_question: acc.expectedFusedRankByQuestion,
+    expected_path_fused_rank_by_question: acc.expectedPathFusedRankByQuestion,
     hit_at_5: {
       count: acc.hitAt5,
       rate: ratio(acc.hitAt5, observations.length)
@@ -196,6 +227,8 @@ export function aggregateScenarioMetrics(
 ): ScenarioMetrics {
   const rankDistribution = emptyRankDistribution();
   const expectedRankByQuestion: Record<string, number | null> = {};
+  const expectedFusedRankByQuestion: Record<string, number | null> = {};
+  const expectedPathFusedRankByQuestion: Record<string, number | null> = {};
   let rankTotal = 0;
   let rankedScenarioCount = 0;
   let hitAt5Count = 0;
@@ -215,6 +248,16 @@ export function aggregateScenarioMetrics(
   for (const scenario of scenarios) {
     for (const [questionId, rank] of Object.entries(scenario.metrics.expected_rank_by_question)) {
       expectedRankByQuestion[`${scenario.label}/${questionId}`] = rank;
+    }
+    for (const [questionId, rank] of Object.entries(
+      scenario.metrics.expected_fused_rank_by_question
+    )) {
+      expectedFusedRankByQuestion[`${scenario.label}/${questionId}`] = rank;
+    }
+    for (const [questionId, rank] of Object.entries(
+      scenario.metrics.expected_path_fused_rank_by_question
+    )) {
+      expectedPathFusedRankByQuestion[`${scenario.label}/${questionId}`] = rank;
     }
     for (const [bucket, count] of Object.entries(scenario.metrics.rank_distribution)) {
       rankDistribution[bucket] = (rankDistribution[bucket] ?? 0) + count;
@@ -243,6 +286,8 @@ export function aggregateScenarioMetrics(
   return {
     rank_distribution: rankDistribution,
     expected_rank_by_question: expectedRankByQuestion,
+    expected_fused_rank_by_question: expectedFusedRankByQuestion,
+    expected_path_fused_rank_by_question: expectedPathFusedRankByQuestion,
     hit_at_5: {
       count: hitAt5Count,
       rate: ratio(hitAt5Count, hitAt5Denominator)
@@ -304,15 +349,13 @@ export function buildNativeHealthGates(
   aggregateMetrics: ScenarioMetrics
 ): readonly NativeHealthGate[] {
   const warm = scenarios.find((scenario) => scenario.label === "warm-report-context-usage-mixed");
-  const cold = scenarios.find((scenario) => scenario.label === "cold-report-context-usage-none");
   const trustLoopGain =
     warm?.pre_report_metrics === undefined
       ? null
       : round(warm.metrics.hit_at_5.rate - warm.pre_report_metrics.hit_at_5.rate);
-  const plasticityRankGain = computeQuestionRankGain(
-    cold?.metrics.expected_rank_by_question ?? null,
-    warm?.metrics.expected_rank_by_question ?? null,
-    "q-path-target"
+  const coUsagePathMeanFusedRankGain = computeMeanQuestionRankGain(
+    warm?.pre_report_metrics?.expected_fused_rank_by_question ?? null,
+    warm?.metrics.expected_path_fused_rank_by_question ?? null
   );
   const evidenceStreamGoldDelivery =
     aggregateMetrics.evidence_stream_gold_delivery.rate;
@@ -320,8 +363,8 @@ export function buildNativeHealthGates(
 
   return Object.freeze([
     minNativeHealthGate(
-      "trust_loop_activation_gain",
-      "trust loop activation gain",
+      "warm_usage_hit_at_5_gain",
+      "warm usage hit-at-5 gain",
       trustLoopGain,
       0.05
     ),
@@ -338,9 +381,9 @@ export function buildNativeHealthGates(
       0.1
     ),
     minNativeHealthGate(
-      "plasticity_gradient_rank_gain",
-      "plasticity canary rank gain",
-      plasticityRankGain,
+      "co_usage_path_mean_fused_rank_gain",
+      "co-usage path mean fused-rank gain",
+      coUsagePathMeanFusedRankGain,
       2
     )
   ]);

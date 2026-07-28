@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { type MemoryEntry } from "@do-soul/alaya-protocol";
 
 import {
+  DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE,
   DEFAULT_QUERY_EMBEDDING_CACHE_SIZE,
   DEFAULT_QUERY_TIMEOUT_MS
 } from "./constants.js";
 import { EmbeddingRecallTelemetry } from "./embedding-recall-telemetry.js";
-import { scoreTransientEvidenceCandidates } from "./evidence-candidate-scoring.js";
+import { EvidenceDocumentEmbeddingEngine } from "./evidence/evidence-document-embedding-engine.js";
+import { scoreTransientEvidenceCandidates } from "./evidence/evidence-candidate-scoring.js";
 import {
   EMPTY_SUPPLEMENT_RESULT,
   clampQueryEmbeddingCacheSize,
@@ -35,7 +37,6 @@ import type {
   ScoreEvidenceCandidatesParams
 } from "./types.js";
 import { WorkspaceNeighborScanner } from "./workspace-neighbor-scanner.js";
-
 export class EmbeddingRecallService {
   public readonly generateQueryId: () => string;
   public readonly now: () => string;
@@ -47,9 +48,11 @@ export class EmbeddingRecallService {
   private readonly supplementBuilder: EmbeddingSupplementBuilder;
   private readonly workspaceScanner: WorkspaceNeighborScanner;
   private readonly requestSnapshotBuilder: RequestScoreSnapshotBuilder;
+  private readonly evidenceDocumentEngine: EvidenceDocumentEmbeddingEngine;
   public readonly scoreEvidenceCandidates = (params: ScoreEvidenceCandidatesParams) =>
     scoreTransientEvidenceCandidates(params, {
       provider: this.dependencies.provider,
+      documentEngine: this.evidenceDocumentEngine,
       queryEngine: this.queryEngine,
       queryTimeoutMs: this.queryTimeoutMs,
       warn: this.warn
@@ -63,6 +66,9 @@ export class EmbeddingRecallService {
     this.queryTimeoutMs = clampQueryTimeout(dependencies.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS);
     this.queryEmbeddingCacheSize = clampQueryEmbeddingCacheSize(
       dependencies.queryEmbeddingCacheSize ?? DEFAULT_QUERY_EMBEDDING_CACHE_SIZE
+    );
+    this.evidenceDocumentEngine = new EvidenceDocumentEmbeddingEngine(
+      dependencies.provider, DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE
     );
     this.queryEngine = new QueryEmbeddingEngine({
       provider: dependencies.provider,
@@ -100,7 +106,6 @@ export class EmbeddingRecallService {
       warn: this.warn
     });
   }
-
   public prepareRecallEmbeddingSnapshot(
     params: PrepareRecallEmbeddingSnapshotParams
   ): Promise<Readonly<EmbeddingRecallRequestScoreSnapshot>> {
@@ -112,7 +117,6 @@ export class EmbeddingRecallService {
   ): Promise<EmbeddingRecallSupplementResult> {
     return this.supplementBuilder.buildSupplementFromScoreSnapshot(params);
   }
-
   public prepareQueryEmbedding(params: {
     readonly workspaceId: string;
     readonly runId: string | null;
@@ -120,7 +124,6 @@ export class EmbeddingRecallService {
   }): PreparedEmbeddingQueryHandle {
     return this.queryEngine.prepareQueryEmbedding(params);
   }
-
   public async warmQueryEmbeddings(params: {
     readonly workspaceId: string;
     readonly runId: string | null;

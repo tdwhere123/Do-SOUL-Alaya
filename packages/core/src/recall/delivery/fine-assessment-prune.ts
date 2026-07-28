@@ -108,7 +108,7 @@ function partitionPruneCandidates(
   for (const candidate of candidates) {
     if (isProtectedWinner(candidate, winnerMemoryIds)) {
       winners.push(candidate);
-    } else if (isSemanticInjected(candidate)) {
+    } else if (isPriorityInjected(candidate)) {
       injected.push(candidate);
     } else {
       competitive.push(candidate);
@@ -181,7 +181,7 @@ function countPriorityCandidates(
   winnerMemoryIds: ReadonlySet<string>
 ): number {
   return candidates.filter((candidate) =>
-    isProtectedWinner(candidate, winnerMemoryIds) || isSemanticInjected(candidate)
+    isProtectedWinner(candidate, winnerMemoryIds) || isPriorityInjected(candidate)
   ).length;
 }
 
@@ -195,15 +195,20 @@ function isProtectedWinner(
   return (candidate.admissionPlanes ?? []).includes("protected_winner");
 }
 
-function isSemanticInjected(candidate: Readonly<CoarseRecallCandidate>): boolean {
+function isPriorityInjected(candidate: Readonly<CoarseRecallCandidate>): boolean {
   const planes = candidate.admissionPlanes ?? [];
-  if (planes.includes("semantic_supplement")) {
+  if (planes.includes("semantic_supplement") || planes.includes("temporal_window")) {
     return true;
   }
-  if (candidate.sourceChannel === "semantic_supplement") {
+  if (
+    candidate.sourceChannel === "semantic_supplement" ||
+    candidate.sourceChannel === "temporal_window"
+  ) {
     return true;
   }
-  return candidate.sourceChannels?.includes("semantic_supplement") === true;
+  return candidate.sourceChannels?.some(
+    (channel) => channel === "semantic_supplement" || channel === "temporal_window"
+  ) === true;
 }
 
 function compareByCheapPruneSignals(

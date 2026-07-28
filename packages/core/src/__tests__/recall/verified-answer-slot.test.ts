@@ -44,6 +44,20 @@ describe("verified answer fifth slot", () => {
       });
   });
 
+  it("keeps the verified fifth-slot contract when coverage owns packet order", () => {
+    const candidates = buildPacket(["verified"]);
+    const result = runSelection(
+      candidates,
+      verifiedContexts(candidates),
+      "coverage",
+      false
+    );
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "filler-1", "filler-2", "filler-3", "filler-4", "verified", "filler-5", "tail"
+    ]);
+  });
+
   it("keeps public order when multiple tail candidates are eligible", () => {
     const candidates = buildPacket(["verified", "also-verified"]);
     const result = runSelection(
@@ -108,7 +122,7 @@ function runSelection(
   contexts: NonNullable<
     ReturnType<typeof createSupplementaryData>["verifiedUserAssertionContextsByMemoryId"]
   >,
-  finalOrderAfterCoverage: "public_relevance" | "delivery_rank",
+  finalOrderAfterCoverage: "coverage" | "public_relevance" | "delivery_rank",
   captureAnswerFeatures: boolean
 ) {
   return selectFineAssessmentCandidates({

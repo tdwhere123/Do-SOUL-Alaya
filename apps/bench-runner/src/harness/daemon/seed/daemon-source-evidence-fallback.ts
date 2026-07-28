@@ -1,5 +1,6 @@
 import {
-  buildGardenTurnEvidenceFallback
+  buildGardenTurnEvidenceFallback,
+  resolveVerifiedGardenTurnEvidenceProjection
 } from "@do-soul/alaya-soul";
 import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import type { BenchSignalSeedInput } from "./daemon-seed-types.js";
@@ -43,7 +44,15 @@ export function buildBenchSourceEvidenceFallback(
     throw new Error("source evidence fallback requires non-empty turn content");
   }
   const preservation = signal.raw_payload.evidence_preservation;
-  if (readRecord(preservation)?.version !== 2) {
+  const sourceCorpus = signal.raw_payload.full_turn_content;
+  const projection = typeof sourceCorpus === "string"
+    ? resolveVerifiedGardenTurnEvidenceProjection(signal, sourceCorpus)
+    : null;
+  if (
+    readRecord(preservation)?.version !== 2 ||
+    projection?.userContent === null ||
+    projection?.userContent === undefined
+  ) {
     throw new Error("source evidence fallback requires a complete trusted User projection");
   }
   return {

@@ -30,6 +30,60 @@ describe("selected temporal recall read worker", () => {
     }
   });
 
+  it("reads bounded event-time windows through the worker memory port", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-event-window-test-"));
+    const databasePath = join(directory, "alaya.db");
+    const database = openDaemonDatabase(databasePath);
+    const workspaceRepo = new SqliteWorkspaceRepo(database);
+    const memoryRepo = new SqliteMemoryEntryRepo(database);
+
+    try {
+      workspaceRepo.create({
+        workspace_id: workspaceId,
+        name: "Event window worker test",
+        root_path: directory,
+        workspace_kind: "local_repo",
+        repo_path: directory,
+        default_engine_binding: null,
+        workspace_state: "active"
+      });
+      await memoryRepo.create({
+        ...createMemoryEntry(sourceMemoryId, "Outside event"),
+        event_time_start: "2026-06-01T00:00:00.000Z"
+      });
+      await memoryRepo.create({
+        ...createMemoryEntry(targetMemoryId, "Requested event"),
+        event_time_start: "2026-06-15T00:00:00.000Z",
+        event_time_end: "2026-06-16T00:00:00.000Z"
+      });
+      database.close();
+
+      const client = createRecallReadWorkerClient({
+        databaseFilename: databasePath,
+        workerUrl: builtWorkerUrl
+      });
+      expect(client).not.toBeNull();
+      if (client === null) return;
+      try {
+        const result = await client.memoryRepo.findByEventTimeWindow!({
+          workspaceId,
+          tier: "hot",
+          startTime: "2026-06-14T00:00:00.000Z",
+          endTime: "2026-06-17T00:00:00.000Z",
+          limit: 10
+        });
+        expect(result.map((entry) => entry.object_id)).toEqual([targetMemoryId]);
+      } finally {
+        await client.close();
+      }
+    } finally {
+      if (!database.isClosed()) {
+        database.close();
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses only the selected temporal projection for worker path reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-test-"));
     const databasePath = join(directory, "alaya.db");

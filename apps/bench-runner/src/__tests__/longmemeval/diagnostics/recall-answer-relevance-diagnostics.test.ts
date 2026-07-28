@@ -84,6 +84,14 @@ const baseDiagnostics = {
   }
 };
 
+const activeEvidenceEmbedding = {
+  evidence_embedding_status: "returned",
+  evidence_embedding_expected_count: 1,
+  evidence_embedding_scored_count: 1,
+  evidence_embedding_inference_calls: 1,
+  evidence_embedding_failure_class: null
+} as const;
+
 describe("answer relevance candidate diagnostics", () => {
   it("accepts bounded score and positive rank in the strict candidate schema", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse({
@@ -220,6 +228,7 @@ describe("answer relevance candidate diagnostics", () => {
 
     expect(parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
+      ...activeEvidenceEmbedding,
       embedding_provider_status: "provider_returned",
       embedding_workspace_scan_cap: 10_000,
       embedding_workspace_scanned_count: 1,
@@ -237,6 +246,7 @@ describe("answer relevance candidate diagnostics", () => {
 
     expect(parseBenchRecallDiagnosticsForRun({
       ...baseDiagnostics,
+      ...activeEvidenceEmbedding,
       embedding_provider_status: "provider_returned",
       candidates: [{
         ...baseCandidate,

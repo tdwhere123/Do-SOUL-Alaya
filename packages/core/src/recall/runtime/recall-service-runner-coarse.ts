@@ -38,6 +38,10 @@ import {
   throwFirstRejected,
   unwrapSettled
 } from "./settle-parallel.js";
+import {
+  createTemporalWindowCandidateBudget,
+  type TemporalWindowCandidateBudget
+} from "../coarse-filter/temporal/temporal-window-candidates.js";
 
 export type CoarseFilterResult = Awaited<ReturnType<typeof runCoarseFilter>>;
 export type EmbeddingCoarseInjectionResult = Awaited<ReturnType<typeof collectEmbeddingCoarseInjection>>;
@@ -51,6 +55,8 @@ type CoarseFilterOptions = Readonly<{
   readonly queryProbes?: Readonly<RecallQueryProbes>;
   readonly winnerMemoryIds?: ReadonlySet<string>;
   readonly deliveryMaxEntries?: number;
+  readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
+  readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
 }>;
 
@@ -72,9 +78,23 @@ export async function collectCoarseStage(
   prepared: PreparedRecallRequest
 ): Promise<CoarseStageResult> {
   const recallPhaseStart = performance.now();
-  const hotCoarseFilter = await collectHotCoarseFilter(context, params, prepared);
+  const temporalCandidateBudget = createTemporalWindowCandidateBudget(
+    prepared.policy.fine_assessment.budgets.max_entries
+  );
+  const hotCoarseFilter = await collectHotCoarseFilter(
+    context,
+    params,
+    prepared,
+    temporalCandidateBudget
+  );
   const globalPromise = settle(collectGlobalCoarseFilter(context, params, prepared));
-  const coarseFilterPromise = settle(collectExpandedCoarseFilter(context, params, prepared, hotCoarseFilter));
+  const coarseFilterPromise = settle(collectExpandedCoarseFilter(
+    context,
+    params,
+    prepared,
+    hotCoarseFilter,
+    temporalCandidateBudget
+  ));
   const synthesisPromise = settle(collectSynthesisStage(context, params, prepared));
   const [globalResult, coarseFilterResult] = await Promise.all([globalPromise, coarseFilterPromise]);
   throwFirstRejected([globalResult, coarseFilterResult]);
@@ -103,13 +123,16 @@ export async function collectCoarseStage(
 async function collectHotCoarseFilter(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
-  prepared: PreparedRecallRequest
+  prepared: PreparedRecallRequest,
+  temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
 ): Promise<CoarseFilterResult> {
   return collectCoarseFilter(context, params.workspaceId, prepared.policy.coarse_filter, prepared.queryText, {
     timeFilter: params.timeFilter,
     queryProbes: prepared.queryProbes,
     winnerMemoryIds: prepared.winnerMemoryIds,
     deliveryMaxEntries: prepared.policy.fine_assessment.budgets.max_entries,
+    temporalCandidateBudget,
+    referenceTime: prepared.referenceTime,
     pathProjectionAsOf: prepared.temporalProjectionAsOf
   });
 }
@@ -118,7 +141,8 @@ async function collectExpandedCoarseFilter(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  hotCoarseFilter: CoarseFilterResult
+  hotCoarseFilter: CoarseFilterResult,
+  temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
 ): Promise<CoarseFilterResult> {
   return expandTierCascade({
     coarseFilter: (workspaceId, config, queryText, options) => collectCoarseFilter(
@@ -126,7 +150,12 @@ async function collectExpandedCoarseFilter(
       workspaceId,
       config,
       queryText,
-      { ...options, pathProjectionAsOf: prepared.temporalProjectionAsOf }
+      {
+        ...options,
+        temporalCandidateBudget,
+        referenceTime: prepared.referenceTime,
+        pathProjectionAsOf: prepared.temporalProjectionAsOf
+      }
     ),
     projectMappingPort: context.dependencies.projectMappingPort,
     mergeCoarseFilters,

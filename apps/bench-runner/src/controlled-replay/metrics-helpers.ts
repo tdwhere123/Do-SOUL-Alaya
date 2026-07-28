@@ -23,24 +23,21 @@ export function minNativeHealthGate(
   };
 }
 
-export function computeQuestionRankGain(
-  coldRanks: Readonly<Record<string, number | null>> | null,
-  warmRanks: Readonly<Record<string, number | null>> | null,
-  questionId: string
+export function computeMeanQuestionRankGain(
+  beforeRanks: Readonly<Record<string, number | null>> | null,
+  afterRanks: Readonly<Record<string, number | null>> | null
 ): number | null {
-  if (
-    coldRanks === null ||
-    warmRanks === null ||
-    !(questionId in coldRanks) ||
-    !(questionId in warmRanks)
-  ) {
-    return null;
+  if (beforeRanks === null || afterRanks === null) return null;
+  const gains: number[] = [];
+  for (const [questionId, beforeRank] of Object.entries(beforeRanks)) {
+    const afterRank = afterRanks[questionId];
+    if (beforeRank !== null && afterRank !== null && afterRank !== undefined) {
+      gains.push(beforeRank - afterRank);
+    }
   }
-  return round(rankOrMissPenalty(coldRanks[questionId]) - rankOrMissPenalty(warmRanks[questionId]));
-}
-
-export function rankOrMissPenalty(rank: number | null | undefined): number {
-  return rank === null || rank === undefined ? 11 : rank;
+  return gains.length === 0
+    ? null
+    : round(gains.reduce((sum, gain) => sum + gain, 0) / gains.length);
 }
 
 export function metricsFor(

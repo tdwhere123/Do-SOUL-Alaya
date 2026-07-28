@@ -9,6 +9,10 @@ import {
   prepareRecallTierWindowStatements,
   type RecallTierWindowStatements
 } from "./recall/recall-tier-window-statements.js";
+import {
+  prepareRecallEventTimeWindowStatements,
+  type RecallEventTimeWindowStatements
+} from "./recall/event-time-window-statements.js";
 
 export interface MemoryEntryCreateStatements {
   readonly createStatement: SqliteStatement;
@@ -48,7 +52,8 @@ interface MemoryEntryBaseReadStatements {
 
 export interface MemoryEntryReadStatements
   extends MemoryEntryBaseReadStatements,
-    RecallTierWindowStatements {}
+    RecallTierWindowStatements,
+    RecallEventTimeWindowStatements {}
 
 export interface MemoryEntryUpdateStatements {
   readonly updateStatement: SqliteStatement;
@@ -456,7 +461,8 @@ export function prepareMemoryEntryEvidenceRefIndexStatements(
 export function prepareMemoryEntryReadStatements(db: StorageDatabase): MemoryEntryReadStatements {
   return {
     ...prepareStatementGroup(db, MEMORY_ENTRY_READ_SQL),
-    ...prepareRecallTierWindowStatements(db)
+    ...prepareRecallTierWindowStatements(db),
+    ...prepareRecallEventTimeWindowStatements(db)
   };
 }
 

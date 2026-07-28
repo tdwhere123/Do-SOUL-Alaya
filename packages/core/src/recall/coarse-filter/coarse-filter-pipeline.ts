@@ -33,6 +33,11 @@ import {
   type GraphExpansionCandidateSourceDiagnostic
 } from "../expansion/graph-expansion.js";
 import type { RecallGraphExpansionDiagnostics } from "../runtime/recall-service-types.js";
+import {
+  addTemporalWindowCandidates,
+  type TemporalWindowCandidateBudget
+} from
+  "./temporal/temporal-window-candidates.js";
 
 const DYNAMIC_RECALL_PLANE_CAP = 240;
 const ENTITY_EXTRACTION_MAX_ENTITIES = 8;
@@ -120,6 +125,8 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   readonly tierScopedSearchEligible: boolean;
   readonly byId: ReadonlyMap<string, Readonly<MemoryEntry>>;
   readonly deliveryMaxEntries?: number;
+  readonly temporalCandidateBudget?: TemporalWindowCandidateBudget;
+  readonly referenceTime?: string;
   readonly pathProjectionAsOf?: string;
   readonly state: CoarseFilterState;
 }>): Promise<DynamicCoarseFilterResult> {
@@ -127,6 +134,15 @@ export async function admitDynamicCoarseCandidates(params: Readonly<{
   const sourceCohortKeys = await admitSourceProximityCandidates(params);
   const graphExpansionSeedIds = await collectGraphExpansionSeedIds(params);
   const graphResult = await admitPathAndGraphExpansionCandidates(params, graphExpansionSeedIds);
+  await addTemporalWindowCandidates({
+    workspaceId: params.workspaceId,
+    tier: params.tier,
+    queryProbes: params.queryProbes,
+    referenceTime: params.referenceTime,
+    budget: params.temporalCandidateBudget,
+    memoryRepo: params.context.dependencies.memoryRepo,
+    addCandidate: params.state.addCandidate
+  });
   await collectNegativePathSuppressions({
     workspaceId: params.workspaceId,
     byId: params.byId,

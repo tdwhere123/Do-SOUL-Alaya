@@ -179,9 +179,12 @@ describe("bench-runner CLI", () => {
 
       const exitCode = await runCli(["controlled-replay", "--history-root", historyRoot]);
 
-      expect(exitCode).toBe(0);
+      expect(exitCode).toBe(1);
       expect(stdoutBuf).toContain("Controlled replay");
-      expect(stdoutBuf).toContain("Native health: ok");
+      expect(stdoutBuf).toContain("Native health: fail");
+      expect(stderrBuf).toContain(
+        "controlled-replay native health gates failed: warm_usage_hit_at_5_gain"
+      );
       const archivePath = stdoutBuf.match(/Archive: (.+controlled-replay\.json)/)?.[1];
       expect(archivePath).toBeDefined();
       expect(archivePath).toContain(join(historyRoot, "controlled-replay"));
@@ -211,7 +214,7 @@ describe("bench-runner CLI", () => {
       ]);
       expect(archive.contribution_suspects).toHaveLength(3);
       expect(archive.metrics.cold_warm_delta).toBeDefined();
-      expect(archive.native_health_gates.verdict).toBe("ok");
+      expect(archive.native_health_gates.verdict).toBe("fail");
       expect(archive.native_health_gates.gates).toHaveLength(4);
       expect(archive.evidence.harness_mode).toBe("mcp_propose_review");
       expect(archive.evidence.recall_path).toBe("production_recall_service");

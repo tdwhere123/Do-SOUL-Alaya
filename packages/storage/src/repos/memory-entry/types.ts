@@ -45,6 +45,14 @@ export interface RecallTierWindowResult {
   readonly truncated: boolean;
 }
 
+export interface RecallEventTimeWindowQuery {
+  readonly workspaceId: string;
+  readonly tier: StorageTier;
+  readonly startTime: string;
+  readonly endTime: string;
+  readonly limit: number;
+}
+
 export interface MemoryEntryRepoTierUpdateInput {
   readonly objectId: string;
   readonly workspaceId: string;
@@ -89,6 +97,9 @@ export interface MemoryEntryRepo {
     page?: MemoryEntryListPageOptions
   ): Promise<readonly Readonly<MemoryEntry>[]>;
   findRecallTierWindow(query: RecallTierWindowQuery): Promise<Readonly<RecallTierWindowResult>>;
+  findByEventTimeWindow(
+    query: RecallEventTimeWindowQuery
+  ): Promise<readonly Readonly<MemoryEntry>[]>;
   findByWorkspaceIdAll(
     workspaceId: string,
     tier?: StorageTier

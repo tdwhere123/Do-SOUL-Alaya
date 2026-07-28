@@ -240,6 +240,8 @@ export async function setupShard(root: string, id: string, offset: number): Prom
     report_side_effects: undefined,
     questions: [{
       ...streamedQuestion(id),
+      gold_memory_ids: ["gold-a"],
+      gold_object_ids: ["gold-a"],
       hit_at_1: true,
       hit_at_5: true,
       hit_at_10: true,

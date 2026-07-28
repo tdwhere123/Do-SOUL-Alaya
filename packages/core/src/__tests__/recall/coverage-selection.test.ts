@@ -142,7 +142,7 @@ describe("coverage-aware delivery", () => {
 
   it("resolves each candidate coverage identity only once per pass", () => {
     let objectIdReads = 0;
-    const candidates = Array.from({ length: 40 }, (_, index) => {
+    const candidates = Array.from({ length: 200 }, (_, index) => {
       const objectId = `memory-${index}`;
       const candidate = createCandidate(objectId, 1 - index / 100);
       return {
@@ -163,7 +163,7 @@ describe("coverage-aware delivery", () => {
       supplementaryData: createSupplementaryData()
     });
 
-    expect(objectIdReads).toBeLessThanOrEqual(candidates.length * 3);
+    expect(objectIdReads).toBeLessThanOrEqual(candidates.length * 2);
   });
 
   it("matches the legacy pass across generated permutations and rejections", () => {

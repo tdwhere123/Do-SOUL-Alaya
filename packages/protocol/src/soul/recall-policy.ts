@@ -8,6 +8,8 @@ import { ControlPlaneEnvelopeSchema } from "./envelope.js";
 import { MemoryDimensionSchema } from "./memory-entry.js";
 import { ControlPlaneObjectKind, ScopeClassSchema } from "./object-kind.js";
 
+export const MAX_TEMPORAL_RECALL_CANDIDATES = 500;
+
 export const DeterministicMatchConfigSchema = z
   .object({
     scope_filter: z.array(ScopeClassSchema).readonly().nullable(),

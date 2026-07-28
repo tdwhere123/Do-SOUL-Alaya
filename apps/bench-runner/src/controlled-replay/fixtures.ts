@@ -1,3 +1,6 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SoulMemorySearchResponse } from "@do-soul/alaya-protocol";
 import {
   BENCH_SEED_ROTATION,
@@ -128,6 +131,10 @@ export const FIXTURE_QUESTIONS: readonly FixtureQuestion[] = Object.freeze([
   }
 ]);
 
+export async function createControlledReplayDataDir(label: ScenarioLabel): Promise<string> {
+  return await mkdtemp(join(tmpdir(), `alaya-controlled-${label}-`));
+}
+
 export function scenarioConfigFor(label: ScenarioLabel): {
   readonly maxEntries: number;
   readonly conflictAwareness: boolean;
@@ -203,27 +210,17 @@ export async function reportMixedUsage(
   daemon: BenchDaemonHandle,
   recall: SoulMemorySearchResponse,
   question: FixtureQuestion,
-  sidecar: ReadonlyMap<string, SeedSidecar>,
   turnIndex: number
 ): Promise<void> {
-  const expected = new Set(question.expectedSeedIds);
-  const usedObjectIds = recall.results
-    .filter((result) => {
-      const seed = sidecar.get(result.object_id);
-      return seed !== undefined && expected.has(seed.fixtureId);
-    })
-    .map((result) => result.object_id);
-  const fallbackUsed = usedObjectIds.length === 0 && recall.results[0] !== undefined
-    ? [recall.results[0].object_id]
-    : usedObjectIds;
+  const usedObjectIds = selectReportedUsageObjectIds(recall, question.question);
   await daemon.reportContextUsage({
     deliveryId: recall.delivery_id,
-    usageState: fallbackUsed.length > 0 ? "used" : "skipped",
-    ...(fallbackUsed.length === 0 ? {} : { usedObjectIds: fallbackUsed }),
+    usageState: usedObjectIds.length > 0 ? "used" : "skipped",
+    ...(usedObjectIds.length === 0 ? {} : { usedObjectIds }),
     deliveredObjects: recall.results.slice(0, 10).map((result) => ({
       objectId: result.object_id,
       objectKind: result.object_kind,
-      usageStatus: fallbackUsed.includes(result.object_id) ? "used" : "skipped"
+      usageStatus: usedObjectIds.includes(result.object_id) ? "used" : "skipped"
     })),
     turnIndex,
     turnDigest: {
@@ -236,6 +233,33 @@ export async function reportMixedUsage(
     },
     reason: "controlled replay warm mixed usage fixture"
   });
+}
+
+function selectReportedUsageObjectIds(
+  recall: SoulMemorySearchResponse,
+  question: string
+): readonly string[] {
+  const questionTokens = contentTokens(question);
+  return recall.results
+    .map((result, index) => ({
+      objectId: result.object_id,
+      index,
+      overlap: [...contentTokens(result.content_preview)]
+        .filter((token) => questionTokens.has(token)).length
+    }))
+    .filter((candidate) => candidate.overlap > 0)
+    .sort((left, right) =>
+      right.overlap - left.overlap || left.index - right.index
+    )
+    .slice(0, 2)
+    .map((candidate) => candidate.objectId);
+}
+
+function contentTokens(content: string): ReadonlySet<string> {
+  return new Set(
+    (content.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+      .filter((token) => token.length >= 4)
+  );
 }
 
 export { BENCH_SEED_ROTATION };

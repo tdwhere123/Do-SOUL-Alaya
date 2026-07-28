@@ -1,13 +1,6 @@
 import { Worker } from "node:worker_threads";
+import type { PathAnchorRef } from "@do-soul/alaya-protocol";
 import type {
-  MemoryDimension,
-  PathAnchorRef,
-  ScopeClass,
-  StorageTier
-} from "@do-soul/alaya-protocol";
-import type {
-  KeywordSearchBatchQuery,
-  RecallMemoryListPageOptions,
   RecallServiceActiveConstraintsPort,
   RecallServiceEvidenceSearchPort,
   RecallServiceMemoryRepoPort,
@@ -30,9 +23,10 @@ import {
   resolveDefaultWorkerUrl
 } from "./recall-read-worker/client-config.js";
 import { createTierWindowChunkConsumer } from "./recall-read-worker/tier-window-client.js";
-
-type TierWindowReader = NonNullable<RecallServiceMemoryRepoPort["findRecallTierWindow"]>;
-type TierWindowResult = Awaited<ReturnType<TierWindowReader>>;
+import {
+  createWorkerMemoryRepo,
+  type WorkerTierWindowResult
+} from "./recall-read-worker/memory-client.js";
 type SuccessConsumption = Readonly<{ readonly done: boolean; readonly value?: unknown }>;
 
 export interface RecallReadWorkerClient {
@@ -99,96 +93,15 @@ class WorkerBackedRecallReadClient implements RecallReadWorkerClient {
   private closePromise: Promise<void> | null = null;
   private readyPromise: Promise<void> | null = null;
 
-  public readonly memoryRepo: RecallServiceMemoryRepoPort = {
-    findRecallTierWindow: async (query) =>
-      await this.dispatch<TierWindowResult>(
+  public readonly memoryRepo: RecallServiceMemoryRepoPort = createWorkerMemoryRepo({
+    request: async (operation, payload) => await this.request(operation, payload),
+    readTierWindow: async (query) =>
+      await this.dispatch<WorkerTierWindowResult>(
         "memory.findRecallTierWindow",
         query,
         createTierWindowChunkConsumer()
-      ),
-    findByWorkspaceId: async (
-      workspaceId: string,
-      tier?: StorageTier,
-      page?: RecallMemoryListPageOptions
-    ) =>
-      await this.request("memory.findByWorkspaceId", {
-        workspaceId,
-        tier,
-        page
-      }),
-    findByDimension: async (workspaceId: string, dimension: MemoryDimension) =>
-      await this.request("memory.findByDimension", { workspaceId, dimension }),
-    findByScopeClass: async (workspaceId: string, scopeClass: ScopeClass) =>
-      await this.request("memory.findByScopeClass", { workspaceId, scopeClass }),
-    searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>
-      await this.request("memory.searchByKeyword", { workspaceId, queryText, limit }),
-    searchByKeywordWithinObjectIds: async (
-      workspaceId: string,
-      queryText: string,
-      limit: number,
-      objectIds: readonly string[]
-    ) =>
-      await this.request("memory.searchByKeywordWithinObjectIds", {
-        workspaceId,
-        queryText,
-        limit,
-        objectIds
-      }),
-    searchByKeywordWithinTier: async (
-      workspaceId: string,
-      queryText: string,
-      limit: number,
-      tier: StorageTier
-    ) => await this.request("memory.searchByKeywordWithinTier", {
-      workspaceId,
-      queryText,
-      limit,
-      tier
-    }),
-    searchManyByKeywordWithinObjectIds: async (
-      workspaceId: string,
-      queries: readonly Readonly<KeywordSearchBatchQuery>[],
-      objectIds: readonly string[]
-    ) =>
-      await this.request("memory.searchManyByKeywordWithinObjectIds", {
-        workspaceId,
-        queries,
-        objectIds
-      }),
-    searchByAnchorWithinObjectIds: async (
-      workspaceId: string,
-      anchorTokens: readonly string[],
-      optionalTokens: readonly string[],
-      limit: number,
-      objectIds: readonly string[]
-    ) =>
-      await this.request("memory.searchByAnchorWithinObjectIds", {
-        workspaceId,
-        anchorTokens,
-        optionalTokens,
-        limit,
-        objectIds
-      }),
-    searchByAnchorWithinTier: async (
-      workspaceId: string,
-      anchorTokens: readonly string[],
-      optionalTokens: readonly string[],
-      limit: number,
-      tier: StorageTier
-    ) => await this.request("memory.searchByAnchorWithinTier", {
-      workspaceId,
-      anchorTokens,
-      optionalTokens,
-      limit,
-      tier
-    }),
-    findByEvidenceRefs: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
-      await this.request("memory.findByEvidenceRefs", { workspaceId, evidenceObjectIds }),
-    findBoundEvidenceRefs: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
-      await this.request("memory.findBoundEvidenceRefs", { workspaceId, evidenceObjectIds }),
-    findByIds: async (workspaceId: string, objectIds: readonly string[]) =>
-      await this.request("memory.findByIds", { workspaceId, objectIds })
-  };
+      )
+  });
 
   public readonly evidenceSearchPort: RecallServiceEvidenceSearchPort = {
     searchByKeyword: async (workspaceId: string, queryText: string, limit: number) =>

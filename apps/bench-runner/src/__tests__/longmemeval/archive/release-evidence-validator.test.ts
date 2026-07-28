@@ -11,7 +11,7 @@ import {
 import { summarizeProviderStates } from "../../../longmemeval/diagnostics/diagnostics-question.js";
 import type { LongMemEvalQuestionDiagnostic } from "../../../longmemeval/diagnostics/schema/diagnostics-types.js";
 import { validateLongMemEvalReleaseDiagnostics } from "../../../longmemeval/diagnostics/release-evidence-validator.js";
-import { measurementDiagnostic } from
+import { promotionMeasurementDiagnostic } from
   "../recall-eval/specialized-answerable-recall-fixture.js";
 
 describe("LongMemEval release diagnostics acceptance and identity", () => {
@@ -256,10 +256,12 @@ function releaseQualityMetrics(
 
 function releaseSidecar(payload: KpiPayload) {
   const questions = payload.kpi.per_scenario.map((row) => ({
-    ...measurementDiagnostic(
-      row.id,
-      row.scorable === true ? "scorable" : "abstention",
-      row.hit_at_5
+    ...structuredClone(
+      promotionMeasurementDiagnostic(
+        row.id,
+        row.scorable === true ? "scorable" : "abstention",
+        row.hit_at_5
+      )
     ),
     provider_state: "provider_not_requested" as const
   }));

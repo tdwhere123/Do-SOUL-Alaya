@@ -85,12 +85,14 @@ describe("embedding-head evidence order", () => {
   it("does not evaluate delivery when no ranked embedding head exists", () => {
     const selectDelivered = vi.fn(() => []);
     const evictions = selectEmbeddingHeadEvictions({
-      candidates: [
-        candidate("left", Number.POSITIVE_INFINITY),
-        candidate("right", Number.POSITIVE_INFINITY, 0.9)
-      ],
-      maxEntries: 1,
-      embeddingScores: { right: 0.9 },
+      candidates: Array.from({ length: 200 }, (_, index) =>
+        candidate(
+          `candidate-${index}`,
+          Number.POSITIVE_INFINITY,
+          index === 199 ? 0.9 : undefined
+        )),
+      maxEntries: 10,
+      embeddingScores: { "candidate-199": 0.9 },
       selectDelivered
     });
 

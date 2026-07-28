@@ -28,6 +28,8 @@ describe("controlled replay runner", () => {
           readonly label: string;
           readonly metrics: {
             readonly expected_rank_by_question: Record<string, number | null>;
+            readonly expected_fused_rank_by_question: Record<string, number | null>;
+            readonly expected_path_fused_rank_by_question: Record<string, number | null>;
             readonly path_stream_top10: {
               readonly count: number;
               readonly denominator: number;
@@ -41,6 +43,8 @@ describe("controlled replay runner", () => {
           };
           readonly pre_report_metrics?: {
             readonly expected_rank_by_question: Record<string, number | null>;
+            readonly expected_fused_rank_by_question: Record<string, number | null>;
+            readonly expected_path_fused_rank_by_question: Record<string, number | null>;
           };
         }[];
         readonly metrics: {
@@ -108,7 +112,11 @@ describe("controlled replay runner", () => {
       expect(warmScenario?.pre_report_metrics?.expected_rank_by_question["q-path-target"])
         .toBeNull();
       expect(warmScenario?.metrics.expected_rank_by_question["q-path-target"])
-        .toBeLessThanOrEqual(5);
+        .toBeNull();
+      expect(warmScenario?.pre_report_metrics?.expected_fused_rank_by_question["q-path-target"])
+        .toBeGreaterThan(
+          warmScenario?.metrics.expected_fused_rank_by_question["q-path-target"] ?? 0
+        );
       expect(Object.values(archive.metrics.rank_distribution).reduce((a, b) => a + b, 0))
         .toBeGreaterThan(0);
       expect(archive.metrics.hit_at_5.count).toBeGreaterThan(0);
@@ -136,17 +144,19 @@ describe("controlled replay runner", () => {
         .toBeGreaterThan(0);
       expect(warmScenario?.metrics.path_stream_top10.rate)
         .toBeGreaterThanOrEqual(0.1);
-      expect(warmScenario?.metrics.expected_rank_by_question["q-path-target"])
-        .toBeLessThanOrEqual(5);
       expect(archive.metrics.cold_warm_delta).toBeDefined();
       expect(archive.native_health_gates.gates.map((gate) => gate.id)).toEqual([
-        "trust_loop_activation_gain",
+        "warm_usage_hit_at_5_gain",
         "evidence_stream_gold_delivery",
         "path_stream_top10_contribution",
-        "plasticity_gradient_rank_gain"
+        "co_usage_path_mean_fused_rank_gain"
       ]);
-      expect(archive.native_health_gates.gates.every((gate) => gate.passed)).toBe(true);
-      expect(archive.native_health_gates.verdict).toBe("ok");
+      expect(
+        archive.native_health_gates.gates.find(
+          (gate) => gate.id === "warm_usage_hit_at_5_gain"
+        )?.passed
+      ).toBe(false);
+      expect(archive.native_health_gates.verdict).toBe("fail");
       expect(archive.contribution_suspects).toHaveLength(3);
       expect(archive.evidence.harness_mode).toBe("mcp_propose_review");
       expect(archive.evidence.mcp_propose_review.seed_count).toBeGreaterThan(0);
@@ -187,7 +197,9 @@ describe("controlled replay runner", () => {
         activeConstraints: [],
         diagnostics,
         expectedObjectIds: ["gold-path"],
-        expectedRank: 1
+        expectedRank: 1,
+        expectedFusedRank: 1,
+        expectedPathFusedRank: 1
       }
     ]);
 

@@ -31,6 +31,11 @@ import {
 } from "./recall-read-worker/memory-window.js";
 import { readEvidenceSearchMatches } from "./recall-read-worker/evidence-search-matches.js";
 import { postRecallTierWindowChunks } from "./recall-read-worker/tier-window-stream.js";
+import {
+  isRecallReadWorkerRequest,
+  readNumericMessageId,
+  serializeWorkerError
+} from "./recall-read-worker/protocol-validation.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
@@ -93,7 +98,7 @@ async function handleRequest(message: unknown): Promise<void> {
     postResponse({
       id: message.id,
       ok: false,
-      error: serializeError(error)
+      error: serializeWorkerError(error)
     });
   }
 }
@@ -107,6 +112,7 @@ async function runOperation(request: RecallReadWorkerRequest): Promise<unknown> 
     case "ready":
       return null;
     case "memory.findByWorkspaceId":
+    case "memory.findByEventTimeWindow":
     case "memory.findByDimension":
     case "memory.findByScopeClass":
     case "memory.searchByKeyword":
@@ -165,6 +171,8 @@ async function runMemoryOperation(
         payload.tier === undefined ? undefined : StorageTierSchema.parse(payload.tier),
         payload.page === undefined ? undefined : readPage(payload.page)
       );
+    case "memory.findByEventTimeWindow":
+      return await findMemoryEntriesByEventTimeWindow(payload);
     case "memory.findByDimension":
       return await memoryEntryRepo.findByDimension(
         readString(payload.workspaceId, "workspaceId"),
@@ -191,6 +199,16 @@ async function runMemoryOperation(
         readStringArray(payload.objectIds, "objectIds")
       );
   }
+}
+
+async function findMemoryEntriesByEventTimeWindow(payload: Record<string, unknown>) {
+  return await memoryEntryRepo.findByEventTimeWindow({
+    workspaceId: readString(payload.workspaceId, "workspaceId"),
+    tier: StorageTierSchema.parse(payload.tier),
+    startTime: readString(payload.startTime, "startTime"),
+    endTime: readString(payload.endTime, "endTime"),
+    limit: readNumber(payload.limit, "limit")
+  });
 }
 
 async function runMemorySearchOperation(
@@ -363,43 +381,6 @@ async function runPathOperation(
 
 function postResponse(response: RecallReadWorkerResponse): void {
   parentPort?.postMessage(response);
-}
-
-function serializeError(error: unknown): RecallReadWorkerResponse extends infer R
-  ? R extends { readonly ok: false; readonly error: infer E }
-    ? E
-    : never
-  : never {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      ...(error.stack === undefined ? {} : { stack: error.stack })
-    };
-  }
-  return {
-    name: "Error",
-    message: String(error)
-  };
-}
-
-function isRecallReadWorkerRequest(value: unknown): value is RecallReadWorkerRequest {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const record = value as {
-    readonly id?: unknown;
-    readonly operation?: unknown;
-  };
-  return typeof record.id === "number" && typeof record.operation === "string";
-}
-
-function readNumericMessageId(value: unknown): number | null {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-  const id = (value as { readonly id?: unknown }).id;
-  return typeof id === "number" && Number.isFinite(id) ? id : null;
 }
 
 function readDatabaseFilename(value: unknown): string {

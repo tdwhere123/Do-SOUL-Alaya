@@ -3,20 +3,25 @@ import {
   clamp01,
   createCosineBatchScorer,
   toErrorMessage
-} from "./helpers.js";
-import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
+} from "../helpers.js";
+import {
+  EvidenceDocumentEmbeddingError,
+  type EvidenceDocumentEmbeddingEngine
+} from "./evidence-document-embedding-engine.js";
+import type { QueryEmbeddingEngine } from "../query-embedding-engine.js";
 import type {
   EmbeddingProviderPort,
   EvidenceCandidateScoringFailureClass,
   EvidenceCandidateScoringResult,
   PreparedEmbeddingQueryHandle,
   ScoreEvidenceCandidatesParams
-} from "./types.js";
+} from "../types.js";
 
 const MAX_TRANSIENT_EVIDENCE_CANDIDATES = 25;
 
 export interface EvidenceCandidateScoringDependencies {
   readonly provider: EmbeddingProviderPort;
+  readonly documentEngine: EvidenceDocumentEmbeddingEngine;
   readonly queryEngine: Pick<QueryEmbeddingEngine, "prepareQueryEmbedding">;
   readonly queryTimeoutMs: number;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
@@ -45,11 +50,12 @@ export async function scoreTransientEvidenceCandidates(
     if (params.preparedQuery === null && !prepared.cacheHit) inferenceCalls += 1;
     const queryEmbedding = await resolveQueryEmbedding(prepared, dependencies.queryTimeoutMs);
     failureClass = "candidate_embedding_failed";
-    inferenceCalls += 1;
-    const embeddings = await dependencies.provider.embedTexts(
+    const documentBatch = await dependencies.documentEngine.embedDocuments(
       candidates.map((candidate) => candidate.content),
-      { timeoutMs: dependencies.queryTimeoutMs }
+      dependencies.queryTimeoutMs
     );
+    inferenceCalls += documentBatch.inferenceCalls;
+    const embeddings = documentBatch.embeddings;
     assertValidEmbeddingBatch(embeddings, candidates.length);
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
     const scores = new Map(candidates.map((candidate, index) => [
@@ -60,6 +66,9 @@ export async function scoreTransientEvidenceCandidates(
       "returned", candidates.length, scores.size, inferenceCalls, startedAt, null, scores
     );
   } catch (error) {
+    if (error instanceof EvidenceDocumentEmbeddingError) {
+      inferenceCalls += error.inferenceCalls;
+    }
     return failedScoring(
       params, dependencies, candidates.length, inferenceCalls, startedAt, failureClass, error
     );

@@ -35,6 +35,7 @@ function draftPriority(draft: Readonly<CoarseCandidateDraft>): number {
     plane === "facet_concept" ||
     plane === "domain_tag_cluster" ||
     plane === "session_surface_cohort" ||
+    plane === "temporal_window" ||
     plane === "source_proximity" ||
     plane === "graph_expansion" ||
     plane === "path_expansion"
