@@ -1,17 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { MemoryDimension } from "@do-soul/alaya-protocol";
 import {
-  MemoryDimension,
-  ScopeClass,
-  type MemoryEntry,
-  type RecallScoreFactors
-} from "@do-soul/alaya-protocol";
-import {
-  selectFineAssessmentCandidates,
-  type FineAssessmentCandidate
-} from "../../recall/delivery/fine-assessment-selection.js";
-import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
-import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
-import type { RecallSupplementaryData } from "../../recall/runtime/recall-service-types.js";
+  createCandidate,
+  runSelection,
+  withCandidateKey,
+  withDimension,
+  withEntry,
+  withFusionRanks
+} from "./embedding-head/embedding-head-admission-fixtures.js";
 
 describe("embedding-head dominance at the admission boundary", () => {
   it("preserves a CE winner's order while replacing an admitted conflict", () => {
@@ -244,6 +240,119 @@ describe("embedding-head dominance at the admission boundary", () => {
     ]);
   });
 
+  it("keeps a committed embedding replacement through answer-support membership", () => {
+    const conflict = withFusionRanks(createCandidate("conflict", 0.99), 3);
+    const peer = withFusionRanks(createCandidate("peer", 0.9), 4);
+    const embeddingHead = withFusionRanks(createCandidate("embedding-head", 0.8), 1);
+    const support = withFusionRanks(withEntry(
+      createCandidate("support", 0.7),
+      {
+        content: "Six months passed before the reply.",
+        evidence_refs: ["evidence-support"]
+      }
+    ), 5);
+
+    const result = runSelection([conflict, peer, embeddingHead, support], {
+      embeddingSimilarityScores: {
+        conflict: 0.1,
+        peer: 0.2,
+        "embedding-head": 0.9,
+        support: 0.1
+      },
+      queryText: "How long did I wait for the reply?"
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "embedding-head",
+      "support"
+    ]);
+    expect(result.diagnostics.find(
+      (candidate) => candidate.object_id === "conflict"
+    )?.dropped_reason).toBe("embedding_head_dominance");
+  });
+
+  it("keeps every head admitted by a token-underfilled replacement", () => {
+    const conflict = withFusionRanks(createCandidate("conflict", 0.99), 4);
+    const peer = withFusionRanks(createCandidate("peer", 0.9), 5);
+    const headA = withFusionRanks(createCandidate("head-a", 0.8), 1);
+    const headB = withFusionRanks(createCandidate("head-b", 0.7), 2);
+    const support = withFusionRanks(withEntry(createCandidate("support", 0.6), {
+      content: "Six months passed before the reply.",
+      evidence_refs: ["evidence-support"]
+    }), 6);
+    const result = runSelection([conflict, peer, headA, headB, support], {
+      maxEntries: 3,
+      maxTotalTokens: 10,
+      embeddingSimilarityScores: {
+        conflict: 0.1, peer: 0.2, "head-a": 0.9, "head-b": 0.8, support: 0.1
+      },
+      queryText: "How long did I wait for the reply?",
+      tokenEstimate: (content) => {
+        if (content.includes("conflict")) return 8;
+        if (content.includes("peer")) return 2;
+        if (content.includes("head-")) return 4;
+        return 1;
+      }
+    });
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "head-a",
+      "head-b",
+      "support"
+    ]);
+    expect(result.diagnostics.find(
+      (candidate) => candidate.object_id === "conflict"
+    )?.dropped_reason).toBe("embedding_head_dominance");
+  });
+
+  it("keeps sequential dimension replacements ahead of H8 support", () => {
+    const conflictProcedure = withFusionRanks(
+      createCandidate("conflict-procedure", 0.99), 3
+    );
+    const conflictFact = withFusionRanks(withDimension(
+      createCandidate("conflict-fact", 0.9), MemoryDimension.FACT
+    ), 4);
+    const headProcedure = withFusionRanks(createCandidate("head-procedure", 0.8), 1);
+    const headFact = withFusionRanks(withDimension(
+      createCandidate("head-fact", 0.7), MemoryDimension.FACT
+    ), 2);
+    const support = withFusionRanks(withDimension(withEntry(
+      createCandidate("support", 0.6),
+      {
+        content: "Six months passed before the reply.",
+        evidence_refs: ["evidence-support"]
+      }
+    ), MemoryDimension.PREFERENCE), 5);
+    const result = runSelection(
+      [conflictProcedure, conflictFact, headProcedure, headFact, support],
+      {
+        maxEntries: 2,
+        perDimensionLimits: {
+          [MemoryDimension.PROCEDURE]: 1,
+          [MemoryDimension.FACT]: 1
+        },
+        embeddingSimilarityScores: {
+          "conflict-procedure": 0.1,
+          "conflict-fact": 0.2,
+          "head-procedure": 0.9,
+          "head-fact": 0.8,
+          support: 0.1
+        },
+        queryText: "How long did I wait for the reply?"
+      }
+    );
+
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "head-procedure",
+      "head-fact"
+    ]);
+    for (const objectId of ["conflict-procedure", "conflict-fact"]) {
+      expect(result.diagnostics.find(
+        (candidate) => candidate.object_id === objectId
+      )?.dropped_reason).toBe("embedding_head_dominance");
+    }
+  });
+
   it.each(["lexical_fts", "evidence_fts"] as const)(
     "lets a %s-supported challenger keep its delivery win",
     (queryStream) => {
@@ -363,180 +472,3 @@ describe("embedding-head dominance at the admission boundary", () => {
     ]);
   });
 });
-
-type SelectionOverrides = Readonly<{
-  readonly answerRerankedCandidateKeys?: readonly string[];
-  readonly embeddingSimilarityScores?: Readonly<Record<string, number>>;
-  readonly maxEntries?: number;
-  readonly maxTotalTokens?: number;
-  readonly perDimensionLimits?: Readonly<Record<string, number>>;
-  readonly queryText?: string | null;
-  readonly tokenEstimate?: (content: string) => number;
-}>;
-
-function runSelection(
-  candidates: readonly FineAssessmentCandidate[],
-  overrides: SelectionOverrides = {}
-) {
-  return selectFineAssessmentCandidates({
-    orderedCandidates: candidates,
-    config: {
-      conflict_awareness: false,
-      budgets: {
-        max_entries: overrides.maxEntries ?? 2,
-        max_total_tokens: overrides.maxTotalTokens ?? 100,
-        per_dimension_limits: overrides.perDimensionLimits ?? null
-      }
-    },
-    supplementaryData: createSupplementaryData({
-      queryProbes: compileRecallQueryProbes(overrides.queryText ?? null),
-      embeddingSimilarityScores: overrides.embeddingSimilarityScores ?? {},
-      evidenceGistsByMemoryId: Object.fromEntries(
-        candidates.map((candidate) => [candidate.entry.object_id, candidate.entry.object_id])
-      )
-    }),
-    tokenEstimator: { estimate: overrides.tokenEstimate ?? (() => 5) },
-    rankByCandidateKey: createRanks(candidates),
-    finalRelevanceByCandidateKey: relevanceMap(candidates),
-    coverageRelevanceByCandidateKey: relevanceMap(candidates),
-    answerRelevanceRankByCandidateKey: new Map(
-      (overrides.answerRerankedCandidateKeys ?? []).map((key, index) => [key, index + 1])
-    )
-  });
-}
-
-function createCandidate(objectId: string, fusedScore: number): FineAssessmentCandidate {
-  const breakdown = buildEmptyRecallFusionBreakdown(objectId);
-  return {
-    entry: createMemoryEntry(objectId),
-    effectiveScore: fusedScore,
-    effectiveFactors: createScoreFactors(),
-    fusion: {
-      ...breakdown,
-      fused_rank: Math.round((1 - fusedScore) * 100) + 1,
-      fused_score: fusedScore
-    }
-  };
-}
-
-function withFusionRanks(
-  candidate: FineAssessmentCandidate,
-  embeddingRank: number,
-  queryRanks: Readonly<Record<string, number>> = {}
-): FineAssessmentCandidate {
-  return {
-    ...candidate,
-    fusion: {
-      ...candidate.fusion,
-      per_stream_rank: {
-        ...candidate.fusion.per_stream_rank,
-        embedding_similarity: embeddingRank,
-        ...queryRanks
-      }
-    }
-  };
-}
-
-function withDimension(
-  candidate: FineAssessmentCandidate,
-  dimension: MemoryDimension
-): FineAssessmentCandidate {
-  return { ...candidate, entry: { ...candidate.entry, dimension } };
-}
-
-function withCandidateKey(
-  candidate: FineAssessmentCandidate,
-  candidateKey: string
-): FineAssessmentCandidate {
-  return {
-    ...candidate,
-    originPlane: "global",
-    fusion: { ...candidate.fusion, candidate_key: candidateKey }
-  };
-}
-
-function createMemoryEntry(objectId: string): MemoryEntry {
-  return {
-    object_id: objectId,
-    object_kind: "memory_entry",
-    schema_version: 1,
-    lifecycle_state: "active",
-    created_at: "2026-05-13T00:00:00.000Z",
-    updated_at: "2026-05-13T00:00:00.000Z",
-    created_by: "system",
-    dimension: MemoryDimension.PROCEDURE,
-    source_kind: "user",
-    formation_kind: "explicit",
-    scope_class: ScopeClass.PROJECT,
-    content: `Recall content for ${objectId}.`,
-    domain_tags: ["repo"],
-    evidence_refs: [],
-    workspace_id: "workspace-1",
-    run_id: "run-1",
-    surface_id: null,
-    storage_tier: "hot",
-    activation_score: 0.7,
-    retention_score: null,
-    manifestation_state: null,
-    retention_state: null,
-    decay_profile: null,
-    confidence: null,
-    last_used_at: null,
-    last_hit_at: null,
-    reinforcement_count: null,
-    contradiction_count: null,
-    superseded_by: null
-  };
-}
-
-function createScoreFactors(): RecallScoreFactors {
-  return {
-    activation: 0.7,
-    relevance: 0.6,
-    graph_support: 0,
-    path_plasticity: 0,
-    budget_penalty: 0,
-    conflict_penalty: 0
-  };
-}
-
-function createRanks(candidates: readonly FineAssessmentCandidate[]): ReadonlyMap<string, number> {
-  return new Map(candidates.map((candidate, index) => [candidate.fusion.candidate_key, index + 1]));
-}
-
-function relevanceMap(candidates: readonly FineAssessmentCandidate[]): ReadonlyMap<string, number> {
-  return new Map(candidates.map((candidate) => [
-    candidate.fusion.candidate_key,
-    candidate.fusion.fused_score
-  ]));
-}
-
-function createSupplementaryData(
-  overrides: Partial<RecallSupplementaryData> = {}
-): RecallSupplementaryData {
-  return {
-    queryProbes: compileRecallQueryProbes(null),
-    ftsRanks: {},
-    trigramFtsRanks: {},
-    synthesisFtsRanks: {},
-    evidenceFtsRanks: {},
-    sourceProximityScores: {},
-    sourceCohortKeys: {},
-    structuralScores: {},
-    graphExpansionScores: {},
-    entitySeedScores: {},
-    pathExpansionScores: {},
-    pathSuppressionScores: {},
-    embeddingSimilarityScores: {},
-    evidenceSemanticScoresByCandidateKey: new Map(),
-    graphSupportCounts: {},
-    budgetPenaltyFactor: 0,
-    plasticityFactors: {},
-    graphAndPathColdScore: 0,
-    recallsEdgeCount: 0,
-    weightTransferAmount: 0,
-    evidenceGistsByMemoryId: {},
-    governanceCeilingByMemoryId: {},
-    ...overrides
-  };
-}

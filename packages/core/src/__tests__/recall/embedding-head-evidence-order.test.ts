@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   compareEmbeddingEvidenceStrength,
   hasRankedEmbeddingHead,
-  selectEmbeddingHeadEvictions
+  selectEmbeddingHeadPlan
 } from "../../recall/delivery/admission/embedding-head-dominance.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
 
@@ -72,19 +72,78 @@ describe("embedding-head evidence order", () => {
       }
     };
     const head = candidate("head", 1);
-    const evictions = selectEmbeddingHeadEvictions({
+    const plan = selectEmbeddingHeadPlan({
       candidates: [incumbent, head],
       maxEntries: 1,
       embeddingScores: { incumbent: 0.2, head: 0.9 },
       selectDelivered: (excluded) => excluded.has("incumbent") ? [head] : [incumbent]
     });
 
-    expect(evictions.size).toBe(0);
+    expect(plan.evictions.size).toBe(0);
+    expect(plan.protectedCandidateKeys.size).toBe(0);
+  });
+
+  it("reports only embedding targets committed by feasible replacements", () => {
+    const incumbent = candidate("incumbent", 2);
+    const head = candidate("head", 1);
+    const plan = selectEmbeddingHeadPlan({
+      candidates: [incumbent, head],
+      maxEntries: 1,
+      embeddingScores: { incumbent: 0.2, head: 0.9 },
+      selectDelivered: (excluded) => excluded.has("incumbent") ? [head] : [incumbent]
+    });
+
+    expect([...plan.evictions]).toEqual(["incumbent"]);
+    expect([...plan.protectedCandidateKeys]).toEqual(["head"]);
+  });
+
+  it("protects every missing head admitted by one replacement", () => {
+    const incumbent = candidate("incumbent", Number.POSITIVE_INFINITY);
+    const headA = candidate("head-a", 1);
+    const headB = candidate("head-b", 2);
+    const plan = selectEmbeddingHeadPlan({
+      candidates: [incumbent, headA, headB],
+      maxEntries: 2,
+      embeddingScores: { incumbent: 0.1, "head-a": 0.9, "head-b": 0.8 },
+      selectDelivered: (excluded) =>
+        excluded.has("incumbent") ? [headA, headB] : [incumbent]
+    });
+
+    expect([...plan.evictions]).toEqual(["incumbent"]);
+    expect([...plan.protectedCandidateKeys]).toEqual(["head-a", "head-b"]);
+  });
+
+  it("accumulates heads admitted by sequential replacements", () => {
+    const incumbentA = candidate("incumbent-a", Number.POSITIVE_INFINITY);
+    const incumbentB = candidate("incumbent-b", Number.POSITIVE_INFINITY);
+    const headA = candidate("head-a", 1);
+    const headB = candidate("head-b", 2);
+    const plan = selectEmbeddingHeadPlan({
+      candidates: [incumbentA, incumbentB, headA, headB],
+      maxEntries: 2,
+      embeddingScores: {
+        "incumbent-a": 0.1,
+        "incumbent-b": 0.2,
+        "head-a": 0.9,
+        "head-b": 0.8
+      },
+      selectDelivered: (excluded) => {
+        if (excluded.has("incumbent-a") && excluded.has("incumbent-b")) {
+          return [headA, headB];
+        }
+        if (excluded.has("incumbent-a")) return [incumbentB, headA];
+        if (excluded.has("incumbent-b")) return [incumbentA, headB];
+        return [incumbentA, incumbentB];
+      }
+    });
+
+    expect([...plan.evictions]).toEqual(["incumbent-a", "incumbent-b"]);
+    expect([...plan.protectedCandidateKeys]).toEqual(["head-a", "head-b"]);
   });
 
   it("does not evaluate delivery when no ranked embedding head exists", () => {
     const selectDelivered = vi.fn(() => []);
-    const evictions = selectEmbeddingHeadEvictions({
+    const plan = selectEmbeddingHeadPlan({
       candidates: Array.from({ length: 200 }, (_, index) =>
         candidate(
           `candidate-${index}`,
@@ -96,7 +155,8 @@ describe("embedding-head evidence order", () => {
       selectDelivered
     });
 
-    expect(evictions.size).toBe(0);
+    expect(plan.evictions.size).toBe(0);
+    expect(plan.protectedCandidateKeys.size).toBe(0);
     expect(selectDelivered).not.toHaveBeenCalled();
   });
 
@@ -109,7 +169,7 @@ describe("embedding-head evidence order", () => {
       (_excluded: ReadonlySet<string>) => [incumbentA, incumbentB]
     );
 
-    const evictions = selectEmbeddingHeadEvictions({
+    const plan = selectEmbeddingHeadPlan({
       candidates: [incumbentA, incumbentB, headA, headB],
       maxEntries: 2,
       embeddingScores: {
@@ -121,7 +181,8 @@ describe("embedding-head evidence order", () => {
       selectDelivered
     });
 
-    expect(evictions.size).toBe(0);
+    expect(plan.evictions.size).toBe(0);
+    expect(plan.protectedCandidateKeys.size).toBe(0);
     expect(selectDelivered).toHaveBeenCalledTimes(3);
     expect(selectDelivered.mock.calls.map(([excluded]) => [...excluded])).toEqual([
       [],
@@ -209,7 +270,7 @@ function evictedKey(
 ): string | null {
   const byKey = new Map(candidates.map((item) => [item.fusion.candidate_key, item]));
   const head = byKey.get("head")!;
-  const evictions = selectEmbeddingHeadEvictions({
+  const plan = selectEmbeddingHeadPlan({
     candidates,
     maxEntries: 2,
     embeddingScores: scores,
@@ -221,7 +282,7 @@ function evictedKey(
       return delivered;
     }
   });
-  return [...evictions][0] ?? null;
+  return [...plan.evictions][0] ?? null;
 }
 
 function compareBytewise(left: string, right: string): number {

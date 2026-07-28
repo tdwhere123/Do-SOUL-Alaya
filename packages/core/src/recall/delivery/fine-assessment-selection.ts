@@ -6,14 +6,21 @@ import { orderByCoverageMarginalGain } from "./coverage-selection.js";
 import type { RecallAnswerSupportObservation } from "../query/recall-answer-support-observation.js";
 import type { RecallCandidateAnswerSupport } from "../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
-import { hasRankedEmbeddingHead, selectEmbeddingHeadEvictions } from
-  "./admission/embedding-head-dominance.js";
+import {
+  hasRankedEmbeddingHead,
+  selectEmbeddingHeadPlan
+} from "./admission/embedding-head-dominance.js";
 import { buildFineAssessmentAnswerSupportContext } from
   "./answer-support/answer-support-context.js";
-import { retainBoundedAnswerHeads, selectBoundedDirectEvidenceHead } from
-  "./admission/direct-evidence-answer-head.js";
-import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from
-  "./diagnostics/fine-assessment-diagnostics.js";
+import { orderByAnswerSupportMembership } from "./answer-support/answer-support-membership.js";
+import {
+  retainBoundedAnswerHeads,
+  selectBoundedDirectEvidenceHead
+} from "./admission/direct-evidence-answer-head.js";
+import {
+  buildFinalScoreFactors,
+  createFineAssessmentDiagnostic
+} from "./diagnostics/fine-assessment-diagnostics.js";
 import { buildFinalPacketConsensusObservation, buildConsensusReplayOrder, packetMatchesConsensusPlan, resolveFinalPacketConsensusPlan, selectFinalPacketConsensusCandidates } from "./final-order/final-packet-consensus.js";
 import { mergeFinalPacketAdmissionDiagnostics } from "./final-order/final-packet-diagnostics.js";
 import { materializeFinalPacket, orderDeliveredPacket } from "./final-order/final-packet-order.js";
@@ -35,7 +42,6 @@ interface FineAssessmentAdmissionState {
   selectedCount: number;
   totalTokens: number;
 }
-
 export interface FineAssessmentSelectionContext {
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
@@ -87,7 +93,11 @@ export function selectFineAssessmentCandidates(
   params: FineAssessmentSelectionParams
 ): FineAssessmentSelectionResult {
   const context = createSelectionContext(params);
-  const { coverageOrdered, evictions } = prepareCoverageSelection(params, context);
+  const {
+    coverageOrdered,
+    evictions,
+    embeddingProtectedCandidateKeys
+  } = prepareCoverageSelection(params, context);
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
     context.supplementaryData.evidenceSemanticScoresByCandidateKey,
@@ -97,7 +107,20 @@ export function selectFineAssessmentCandidates(
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
-  const finalAccumulator = reduceFineAssessmentCandidates(evidenceHead.candidates, context, evictions);
+  const membershipOrdered = orderByAnswerSupportMembership({
+    candidates: evidenceHead.candidates,
+    protectedCandidateKeys: new Set([
+      ...embeddingProtectedCandidateKeys,
+      ...evidenceHead.protections.map((protection) => protection.candidateKey)
+    ]),
+    supportByCandidateKey: context.answerSupportByCandidateKey,
+    selectAdmitted: (source) => collectAdmittedCandidates(
+      source, context, evictions
+    )
+  });
+  const finalAccumulator = reduceFineAssessmentCandidates(
+    membershipOrdered, context, evictions
+  );
   const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"
     ? materializeFinalPacket(
@@ -209,6 +232,7 @@ function prepareCoverageSelection(
 ): Readonly<{
   readonly coverageOrdered: readonly FineAssessmentCandidate[];
   readonly evictions: ReadonlySet<string>;
+  readonly embeddingProtectedCandidateKeys: ReadonlySet<string>;
 }> {
   const coverageRelevance =
     params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
@@ -220,16 +244,21 @@ function prepareCoverageSelection(
     params.orderedCandidates, context, coverageRelevance, new Set(),
     !hasEmbeddingHead && context.captureAnswerFeatures
   );
-  const evictions = hasEmbeddingHead
-    ? resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance)
-    : new Set<string>();
+  const embeddingPlan = hasEmbeddingHead
+    ? resolveEmbeddingHeadPlan(initialOrder, context, coverageRelevance)
+    : { evictions: new Set<string>(), protectedCandidateKeys: new Set<string>() };
+  const { evictions } = embeddingPlan;
   const coverageOrdered = hasEmbeddingHead
     ? orderFineAssessmentByCoverage(
         initialOrder, context, coverageRelevance, evictions,
         context.captureAnswerFeatures
       )
     : initialOrder;
-  return Object.freeze({ coverageOrdered, evictions });
+  return Object.freeze({
+    coverageOrdered,
+    evictions,
+    embeddingProtectedCandidateKeys: embeddingPlan.protectedCandidateKeys
+  });
 }
 
 function orderFineAssessmentByCoverage(
@@ -290,12 +319,12 @@ function createSelectionContext(
   });
 }
 
-function resolveEmbeddingHeadEvictions(
+function resolveEmbeddingHeadPlan(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
   relevanceByCandidateKey: ReadonlyMap<string, number>
-): ReadonlySet<string> {
-  return selectEmbeddingHeadEvictions({
+) {
+  return selectEmbeddingHeadPlan({
     candidates,
     maxEntries: context.config.budgets.max_entries,
     embeddingScores: context.supplementaryData.embeddingSimilarityScores,
