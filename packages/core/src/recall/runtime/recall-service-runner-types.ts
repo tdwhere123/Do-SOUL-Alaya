@@ -26,6 +26,8 @@ import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplem
 import type { prepareEmbeddingSupplementQuery } from "../supplements/supplements.js";
 import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
+import type { FineAssessmentSelectionBoundaryCase } from
+  "../delivery/selection-boundary/selection-boundary-types.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
@@ -46,6 +48,9 @@ export interface RecallExecutionParams {
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryCase
+  ) => undefined;
 }
 
 export interface RecallExecutionContext {

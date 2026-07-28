@@ -19,6 +19,13 @@ import { mergeFinalPacketAdmissionDiagnostics } from "./final-order/final-packet
 import { materializeFinalPacket, orderDeliveredPacket } from "./final-order/final-packet-order.js";
 import { orderWithVerifiedAnswerSlot } from "./final-order/verified-answer-slot.js";
 import type { RecallPacketPlanObservation } from "./packet-plan/packet-plan-trace.js";
+import {
+  createSelectionBoundaryCapture,
+  notifySelectionBoundaryObserver
+} from
+  "./selection-boundary/selection-boundary-capture.js";
+import type { FineAssessmentSelectionBoundaryCase } from
+  "./selection-boundary/selection-boundary-types.js";
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
@@ -63,7 +70,7 @@ interface FineAssessmentAdmission {
   readonly tokenEstimate: number | null;
 }
 
-type FineAssessmentSelectionParams = Readonly<{
+export type FineAssessmentSelectionParams = Readonly<{
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
   readonly config: Readonly<RecallPolicy>["fine_assessment"];
   readonly supplementaryData: RecallSupplementaryData;
@@ -78,16 +85,24 @@ type FineAssessmentSelectionParams = Readonly<{
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
   readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryCase
+  ) => undefined;
 }>;
 
-type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPacket> & Readonly<{
+export type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPacket> & Readonly<{
   readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
 }>;
 export function selectFineAssessmentCandidates(
   params: FineAssessmentSelectionParams
 ): FineAssessmentSelectionResult {
-  const context = createSelectionContext(params);
-  const { coverageOrdered, evictions } = prepareCoverageSelection(params, context);
+  const boundaryCapture = params.selectionBoundaryObserver === undefined
+    ? undefined
+    : createSelectionBoundaryCapture(params);
+  const selectionParams = boundaryCapture?.params ?? params;
+  const context = createSelectionContext(selectionParams);
+  const { coverageOrdered, evictions } =
+    prepareCoverageSelection(selectionParams, context);
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
     context.supplementaryData.evidenceSemanticScoresByCandidateKey,
@@ -98,7 +113,7 @@ export function selectFineAssessmentCandidates(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
   const finalAccumulator = reduceFineAssessmentCandidates(evidenceHead.candidates, context, evictions);
-  const finalOrder = params.finalOrderAfterCoverage ?? "coverage";
+  const finalOrder = selectionParams.finalOrderAfterCoverage ?? "coverage";
   const delivered = finalOrder === "coverage"
     ? materializeFinalPacket(
         retainBoundedAnswerHeads(
@@ -122,7 +137,7 @@ export function selectFineAssessmentCandidates(
         diagnostics: finalAccumulator.diagnostics,
         context,
         finalOrder,
-        maxHeadDrop: params.maxHeadDropAfterCoverage,
+        maxHeadDrop: selectionParams.maxHeadDropAfterCoverage,
         answerHeadProtections: evidenceHead.protections,
         sourceCandidates: evidenceHead.candidates
       });
@@ -146,27 +161,41 @@ export function selectFineAssessmentCandidates(
     context,
     evictions
   );
-  return buildSelectionResult(params, consensus, consensusResult);
+  return buildSelectionResult(
+    selectionParams,
+    consensus,
+    consensusResult,
+    boundaryCapture?.tokenEstimatesByContent
+  );
 }
 
 function buildSelectionResult(
   params: FineAssessmentSelectionParams,
   consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>,
-  result: ReturnType<typeof applyFinalPacketConsensus>
+  result: ReturnType<typeof applyFinalPacketConsensus>,
+  tokenEstimatesByContent?: ReadonlyMap<string, number>
 ): FineAssessmentSelectionResult {
-  return Object.freeze({
+  const observesBoundary = params.selectionBoundaryObserver !== undefined;
+  const packetConsensus = params.capturePacketPlanTrace === true || observesBoundary
+    ? buildFinalPacketConsensusObservation(
+        consensus,
+        result.packet.candidates,
+        result.replayAccepted
+      )
+    : undefined;
+  const selectionResult = Object.freeze({
     candidates: result.packet.candidates,
     diagnostics: result.packet.diagnostics,
-    ...(params.capturePacketPlanTrace === true
-      ? {
-          packetPlanObservation: buildFinalPacketConsensusObservation(
-            consensus,
-            result.packet.candidates,
-            result.replayAccepted
-          )
-        }
+    ...(params.capturePacketPlanTrace === true && packetConsensus !== undefined
+      ? { packetPlanObservation: packetConsensus }
       : {})
   });
+  if (packetConsensus !== undefined && tokenEstimatesByContent !== undefined) {
+    notifySelectionBoundaryObserver(
+      params, selectionResult, packetConsensus, tokenEstimatesByContent
+    );
+  }
+  return selectionResult;
 }
 
 function applyFinalPacketConsensus(

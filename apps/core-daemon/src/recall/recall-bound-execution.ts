@@ -4,6 +4,7 @@ import type {
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type {
+  FineAssessmentSelectionBoundaryCase,
   NodeStrategy,
   RecallDiagnosticCapture
 } from "@do-soul/alaya-core";
@@ -27,6 +28,9 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryCase
+  ) => undefined;
 }>;
 
 export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
@@ -44,6 +48,9 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly activeConstraintsCap?: number | null;
   readonly referenceTime?: string;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryCase
+  ) => undefined;
 }>;
 
 // Recall scoring is identical across modes; sideEffectMode documents post-recall
@@ -63,6 +70,9 @@ export async function invokeBoundRecall<TRecallResult>(
     ...(params.hostContext === undefined ? {} : { hostContext: params.hostContext }),
     ...(params.referenceTime === undefined ? {} : { referenceTime: params.referenceTime }),
     ...(params.diagnosticCapture === undefined ? {} : { diagnosticCapture: params.diagnosticCapture }),
+    ...(params.selectionBoundaryObserver === undefined
+      ? {}
+      : { selectionBoundaryObserver: params.selectionBoundaryObserver }),
     activeConstraintsCap: params.activeConstraintsCap ?? null
   });
 }

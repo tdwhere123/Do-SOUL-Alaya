@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { KpiPayloadSchema, type KpiPayload } from "@do-soul/alaya-eval";
+import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
 
 import { LONGMEMEVAL_COLD_WARM_COMPARISON_FILENAME } from "../../../longmemeval/archive/archive-evidence.js";
 
@@ -221,11 +222,18 @@ describe("LongMemEval runner", () => {
       .mockResolvedValueOnce(buildRecallResult("delivery-pre", ["gold", "decoy"]))
       .mockResolvedValueOnce(buildRecallResult("delivery-scored", ["decoy", "gold"]));
     const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+    const selectionBoundaryObserver = vi.fn(
+      (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
+    );
 
     const result = await runLongMemEvalRecallCycle({
       daemon: { recall, reportContextUsage },
       query: "Which memory was used?",
-      recallOptions: { maxResults: 10, conflictAwareness: true },
+      recallOptions: {
+        maxResults: 10,
+        conflictAwareness: true,
+        selectionBoundaryObserver
+      },
       referenceTime: "2026-03-04T05:06:07.000Z",
       simulateReport: "mixed",
       goldObjectIdentities: memoryGold("gold"),
@@ -238,6 +246,12 @@ describe("LongMemEval runner", () => {
       maxResults: 10,
       conflictAwareness: true,
       referenceTime: "2026-03-04T05:06:07.000Z"
+    });
+    expect(recall).toHaveBeenNthCalledWith(2, "Which memory was used?", {
+      maxResults: 10,
+      conflictAwareness: true,
+      referenceTime: "2026-03-04T05:06:07.000Z",
+      selectionBoundaryObserver
     });
     expect(reportContextUsage).toHaveBeenCalledTimes(1);
     expect(reportContextUsage).toHaveBeenCalledWith(
@@ -260,11 +274,18 @@ describe("LongMemEval runner", () => {
       .fn()
       .mockResolvedValueOnce(buildRecallResult("delivery-scored", ["gold"]));
     const reportContextUsage = vi.fn().mockResolvedValue(undefined);
+    const selectionBoundaryObserver = vi.fn(
+      (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
+    );
 
     const result = await runLongMemEvalRecallCycle({
       daemon: { recall, reportContextUsage },
       query: "Which memory was used?",
-      recallOptions: { maxResults: 10, conflictAwareness: true },
+      recallOptions: {
+        maxResults: 10,
+        conflictAwareness: true,
+        selectionBoundaryObserver
+      },
       referenceTime: "2026-03-04T05:06:07.000Z",
       simulateReport: "none",
       goldObjectIdentities: memoryGold("gold"),
@@ -273,6 +294,12 @@ describe("LongMemEval runner", () => {
     });
 
     expect(recall).toHaveBeenCalledTimes(1);
+    expect(recall).toHaveBeenCalledWith("Which memory was used?", {
+      maxResults: 10,
+      conflictAwareness: true,
+      referenceTime: "2026-03-04T05:06:07.000Z",
+      selectionBoundaryObserver
+    });
     expect(reportContextUsage).not.toHaveBeenCalled();
     expect(result.scoredRecallResult.delivery_id).toBe("delivery-scored");
     expect(result.reportUsageStats.reportsAttempted).toBe(0);

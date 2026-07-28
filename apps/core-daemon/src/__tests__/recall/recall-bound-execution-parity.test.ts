@@ -7,7 +7,10 @@ import {
   type RecallPolicy,
   type SoulMemorySearchRequest
 } from "@do-soul/alaya-protocol";
-import { buildRecallPolicy } from "@do-soul/alaya-core";
+import {
+  buildRecallPolicy,
+  type FineAssessmentSelectionBoundaryCase
+} from "@do-soul/alaya-core";
 import { runProductionBoundRecall } from "../../mcp-memory/recall-bound-service.js";
 import type { RecallUsageHandlerDependencies } from "../../mcp-memory/recall-usage-handlers.js";
 import { invokeBoundRecall } from "../../recall/recall-bound-execution.js";
@@ -100,6 +103,40 @@ describe("invokeBoundRecall shared input contract", () => {
       ...benchCall,
       taskSurface: undefined
     });
+  });
+
+  it("forwards the experiment observer only when the benchmark opts in", async () => {
+    const policy = makeSharedPolicy();
+    const taskSurface = TaskObjectSurfaceSchema.parse({
+      runtime_id: policy.task_surface_ref,
+      object_kind: ControlPlaneObjectKind.TASK_OBJECT_SURFACE,
+      task_surface_ref: null,
+      expires_at: null,
+      derived_from: null,
+      retention_policy: RetentionPolicy.SESSION_ONLY,
+      surface_kind: "mcp_memory_tool",
+      display_name: "deployment rules",
+      context_refs: []
+    });
+    const recallService = {
+      recall: vi.fn(async () => buildSeededRecallResult("deployment rules"))
+    };
+    const selectionBoundaryObserver = vi.fn(
+      (_boundary: FineAssessmentSelectionBoundaryCase) => undefined
+    );
+
+    await invokeBoundRecall({
+      sideEffectMode: "benchmark",
+      recallService,
+      taskSurface,
+      workspaceId: "ws-observer",
+      policyOverride: policy,
+      selectionBoundaryObserver
+    });
+
+    expect(recallService.recall).toHaveBeenCalledWith(expect.objectContaining({
+      selectionBoundaryObserver
+    }));
   });
 });
 

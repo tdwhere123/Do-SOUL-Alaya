@@ -38,6 +38,8 @@ import {
 } from "../rerank/deep-head.js";
 import type { RecallPacketPlanObservation } from
   "./packet-plan/packet-plan-trace.js";
+import type { FineAssessmentSelectionBoundaryCase } from
+  "./selection-boundary/selection-boundary-types.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -50,6 +52,9 @@ export interface FineAssessParams {
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
   readonly finalAuthorityMaxHeadDrop?: number;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryCase
+  ) => undefined;
 }
 
 export type FineAssessmentPreparation = Readonly<{
@@ -173,7 +178,8 @@ export function deliverFineAssessment(
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
     capturePacketPlanTrace: params.capturePacketPlanTrace,
-    deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey
+    deepHeadTraceByCandidateKey: deepHead.traceByCandidateKey,
+    selectionBoundaryObserver: params.selectionBoundaryObserver
   });
   return Object.freeze({
     ...selected,

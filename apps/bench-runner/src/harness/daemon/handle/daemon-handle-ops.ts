@@ -159,6 +159,9 @@ function createBenchRecallOperation(
           ? "packet_trace"
           : "answer_features",
       ...(opts.referenceTime === undefined ? {} : { referenceTime: opts.referenceTime }),
+      ...(opts.selectionBoundaryObserver === undefined
+        ? {}
+        : { selectionBoundaryObserver: opts.selectionBoundaryObserver }),
       activeConstraintsCap: null
     });
     const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);

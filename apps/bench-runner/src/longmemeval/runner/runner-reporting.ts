@@ -59,9 +59,13 @@ async function runReportedRecallCycle(
   input: LongMemEvalRecallCycleInput,
   recallOptions: BenchRecallOptions
 ): Promise<LongMemEvalRecallCycleResult> {
+  const {
+    selectionBoundaryObserver: _selectionBoundaryObserver,
+    ...preReportRecallOptions
+  } = recallOptions;
   const preReportRecallResult = await input.daemon.recall(
     input.query,
-    recallOptions
+    preReportRecallOptions
   );
   const reportUsage = buildLongMemEvalReportContextUsage({
     simulateReport: input.simulateReport,

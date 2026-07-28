@@ -74,6 +74,10 @@ export * from "./governance/proposals/resolution-service.js";
 export * from "./governance/reconciliation/reconciliation-service.js";
 export * from "./recall/recall-service.js";
 export * from "./recall/query/recall-query-probes.js";
+export {
+  replayFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryCase
+} from "./recall/delivery/selection-boundary/selection-boundary-replay.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";

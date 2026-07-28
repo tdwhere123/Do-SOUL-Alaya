@@ -46,6 +46,11 @@ import { assertProductDefaultRecallEnvironment } from
   "../../promotion/verifiers/product-policy-verifier.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import {
+  createRecallEvalSelectionBoundarySpool
+} from "./recall-eval-selection-replay.js";
+import type { LongMemEvalSelectionBoundarySpool } from
+  "../../selection-replay/selection-boundary-spool.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -68,6 +73,7 @@ export interface RecallEvalRunContext {
   readonly extractionAuthority: SnapshotExtractionAuthority | null;
   readonly derivedEvidenceProjectionRebuild:
     EvidenceSearchProjectionRebuildReport | null;
+  readonly selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
 }
 
 export async function prepareRecallEvalRunContext(
@@ -181,7 +187,9 @@ async function prepareBoundRecallEvalRunContext(
     datasetSha256: resolveDatasetSha(bundle),
     measurementForQuestion: bundle.measurementForQuestion,
     extractionAuthority: bundle.extractionAuthority,
-    derivedEvidenceProjectionRebuild: dataDir.evidenceProjectionRebuild
+    derivedEvidenceProjectionRebuild: dataDir.evidenceProjectionRebuild,
+    selectionBoundarySpool:
+      await createRecallEvalSelectionBoundarySpool(ambientEnv)
   };
 }
 

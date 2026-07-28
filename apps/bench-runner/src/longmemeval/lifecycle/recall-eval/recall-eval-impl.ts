@@ -30,10 +30,8 @@ import { assembleRecallEvalKpi } from "../../recall-eval-kpi.js";
 import { attachQuestionMeasurementAxes } from "../../diagnostics/diagnostics-measurement-axes.js";
 import { buildGoldObjectIdentities } from
   "../../diagnostics/gold-object-identities.js";
-import {
-  buildPerQuestionDelivered,
-  buildRecallEvalArchiveSlug
-} from "../../kpi/recall-eval-archive.js";
+import { buildPerQuestionDelivered, buildRecallEvalArchiveSlug } from
+  "../../kpi/recall-eval-archive.js";
 import { selectRecallEvalBaseline } from "./recall-eval-archive-impl.js";
 import { extractRecallTokenEconomy } from "../../qa/recall-token-economy.js";
 import { runLongMemEvalRecallCycle } from "../../runner.js";
@@ -68,6 +66,8 @@ import {
   type RecallEvalRunContext
 } from "./recall-eval-run-context.js";
 import { renderRecallEvalReport } from "../../kpi/recall-eval-report.js";
+import { captureRecallEvalQuestion, finalizeRecallEvalSelectionBoundarySpool,
+  RECALL_EVAL_SELECTION_BOUNDARY_FILENAME } from "./recall-eval-selection-replay.js";
 import { warmLongMemEvalEmbeddingCaches } from "../../provenance/embedding/embedding-cache-warmup.js";
 import { deriveLongMemEvalMemoryObjectIds } from "../../runner/runner-helpers.js";
 import type { SnapshotQuestionMeasurementOracle } from
@@ -95,17 +95,22 @@ export async function runRecallEval(
   let primaryError: unknown;
   try {
     const collected = await executeRecallEvalRun(context);
-    result = await writeRecallEvalArtifacts(context, collected);
+    const selectionArtifact =
+      await finalizeRecallEvalSelectionBoundarySpool(context.selectionBoundarySpool);
+    result = await writeRecallEvalArtifacts(context, collected, selectionArtifact);
     succeeded = true;
   } catch (error) {
     primaryError = error;
   }
   let cleanupError: unknown;
   try {
-    await finalizeOwnedTempRoot(
-      { path: context.dataDirRoot, owned: context.ownsDataDirRoot },
-      succeeded
-    );
+    await Promise.all([
+      finalizeOwnedTempRoot(
+        { path: context.dataDirRoot, owned: context.ownsDataDirRoot },
+        succeeded
+      ),
+      context.selectionBoundarySpool?.dispose()
+    ]);
   } catch (error) {
     cleanupError = error;
   }
@@ -129,15 +134,16 @@ async function executeRecallEvalRun(
     for (let i = 0; i < context.window.length; i += 1) {
       const question = context.window[i];
       if (question === undefined) continue;
-      const result = await recallEvalOneQuestion({
-        daemon,
-        question,
-        turnIndex: i + 1,
-        embeddingMode: context.daemonLaunch.embeddingMode,
-        recallOptions: context.recallOptions,
-        simulateReport: context.simulateReport,
-        measurement: context.measurementForQuestion?.(question.questionId)
-      });
+      const result = await captureRecallEvalQuestion(
+        context.selectionBoundarySpool, question.questionId,
+        (selectionBoundaryObserver) => recallEvalOneQuestion({
+          daemon, question, turnIndex: i + 1,
+          embeddingMode: context.daemonLaunch.embeddingMode,
+          recallOptions: { ...context.recallOptions, selectionBoundaryObserver },
+          simulateReport: context.simulateReport,
+          measurement: context.measurementForQuestion?.(question.questionId)
+        })
+      );
       collected.push(result);
       writeRecallEvalProgress(i, context.window.length, question.questionId, result);
     }
@@ -156,7 +162,8 @@ async function executeRecallEvalRun(
 
 async function writeRecallEvalArtifacts(
   context: RecallEvalRunContext,
-  collected: readonly RecallEvalQuestionResult[]
+  collected: readonly RecallEvalQuestionResult[],
+  selectionArtifact: string | null
 ): Promise<RecallEvalResult> {
   const offset = context.options.offset ?? 0;
   const limit = context.options.limit ?? null;
@@ -199,7 +206,8 @@ async function writeRecallEvalArtifacts(
   payload.diff_vs_previous = buildDiffVsPrevious(payload, previous, previous?.run_at ?? "");
   return persistRecallEvalArtifacts(
     { ...context, runtimeAttribution }, collected, layout, payload, previous, diff,
-    { runProvenance, expectedQuestionIdDigest, provenanceComplete }
+    { runProvenance, expectedQuestionIdDigest, provenanceComplete },
+    selectionArtifact
   );
 }
 
@@ -214,7 +222,8 @@ async function persistRecallEvalArtifacts(
     runProvenance: Awaited<ReturnType<typeof buildRecallEvalRunProvenance>>;
     expectedQuestionIdDigest: string;
     provenanceComplete: boolean;
-  }>
+  }>,
+  selectionArtifact: string | null
 ): Promise<RecallEvalResult> {
   const slug = buildRecallEvalArchiveSlug(context);
   const report = renderRecallEvalReport(payload, previous, diff);
@@ -243,7 +252,10 @@ async function persistRecallEvalArtifacts(
         fileSidecars: [{
           filename: bundle.diagnosticsFilename,
           sourcePath: bundle.diagnosticsArtifact.finalPath
-        }]
+        }, ...(selectionArtifact === null ? [] : [{
+          filename: RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
+          sourcePath: selectionArtifact
+        }])]
       }
     ),
     isHistoryEntryCommittedError

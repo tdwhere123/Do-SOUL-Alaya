@@ -214,7 +214,8 @@ function buildFineAssessParams(
     warn: context.warn,
     captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
-    finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop()
+    finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop(),
+    selectionBoundaryObserver: params.selectionBoundaryObserver
   };
 }
 

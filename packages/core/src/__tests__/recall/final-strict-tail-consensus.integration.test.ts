@@ -6,6 +6,10 @@ import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
 } from "../../recall/delivery/fine-assessment-selection.js";
+import {
+  replayFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryCase
+} from "../../recall/delivery/selection-boundary/selection-boundary-replay.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   projectVerifiedUserAssertionContext
@@ -219,6 +223,120 @@ describe("final strict-tail consensus integration", () => {
 
     expect(exactResultDigest(result)).toBe(expectedDigest);
   });
+
+  it.each([
+    {
+      name: "coverage without an embedding head reaches no-op consensus",
+      candidates: baselineCandidates(),
+      overrides: {
+        finalOrderAfterCoverage: "coverage" as const
+      },
+      expectedConsensusStatus: "no_op"
+    },
+    {
+      name: "public relevance with an embedding head accepts consensus",
+      candidates: consensusCandidates(),
+      overrides: {
+        finalOrderAfterCoverage: "public_relevance" as const
+      },
+      expectedConsensusStatus: "accepted"
+    },
+    {
+      name: "public relevance preserves a rejected infeasible consensus",
+      candidates: consensusCandidates(),
+      overrides: {
+        finalOrderAfterCoverage: "public_relevance" as const,
+        maxTotalTokens: 50,
+        tokenByObjectId: { challenger: 51 }
+      },
+      expectedConsensusStatus: "rejected"
+    }
+  ])("captures and exactly replays $name", ({
+    candidates,
+    overrides,
+    expectedConsensusStatus
+  }) => {
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    const baseline = select(candidates, {
+      ...overrides,
+      capturePacketPlanTrace: true
+    });
+    const observed = select(candidates, {
+      ...overrides,
+      capturePacketPlanTrace: true,
+      selectionBoundaryObserver: (captured) => {
+        boundary = captured;
+      }
+    });
+
+    expect(exactResultDigest(observed)).toBe(exactResultDigest(baseline));
+    expect(boundary).toBeDefined();
+    expect(() => JSON.stringify(boundary)).not.toThrow();
+    expect(observed.packetPlanObservation?.decision.status)
+      .toBe(expectedConsensusStatus);
+    expect(boundary).toMatchObject({
+      schema_version: 1,
+      expected: {
+        candidate_keys: observed.packetPlanObservation?.actual_candidate_keys,
+        drop_tuples: observed.diagnostics.map((diagnostic) => [
+          diagnostic.candidate_key,
+          diagnostic.dropped_reason
+        ]),
+        token_totals: {
+          delivered: observed.candidates.reduce(
+            (total, candidate) => total + candidate.token_estimate,
+            0
+          )
+        },
+        packet_consensus: observed.packetPlanObservation
+      }
+    });
+    expect(boundary!.expected.visible_result)
+      .toEqual(JSON.parse(JSON.stringify(observed)));
+
+    const serialized = JSON.parse(JSON.stringify(boundary)) as
+      FineAssessmentSelectionBoundaryCase;
+    const replayed = replayFineAssessmentSelectionBoundary(serialized);
+    expect(exactResultDigest(replayed)).toBe(exactResultDigest(observed));
+  });
+
+  it("fails fidelity when serialized input or expected output is tampered", () => {
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    select(consensusCandidates(), {
+      capturePacketPlanTrace: true,
+      finalOrderAfterCoverage: "public_relevance",
+      selectionBoundaryObserver: (captured) => {
+        boundary = captured;
+      }
+    });
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    const inputTamper: FineAssessmentSelectionBoundaryCase = {
+      ...boundary,
+      input: {
+        ...boundary.input,
+        config: {
+          ...boundary.input.config,
+          budgets: {
+            ...boundary.input.config.budgets,
+            max_entries: 1
+          }
+        }
+      }
+    };
+    const outputTamper: FineAssessmentSelectionBoundaryCase = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        candidate_keys: [...boundary.expected.candidate_keys].reverse()
+      }
+    };
+
+    expect(() => replayFineAssessmentSelectionBoundary(inputTamper))
+      .toThrow(/selection boundary fidelity mismatch/u);
+    expect(() => replayFineAssessmentSelectionBoundary(outputTamper))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
 });
 
 type SelectionResult = ReturnType<typeof selectFineAssessmentCandidates>;
@@ -227,9 +345,13 @@ type SelectionOverrides = Readonly<{
   readonly captureAnswerFeatures?: boolean;
   readonly capturePacketPlanTrace?: boolean;
   readonly evidenceSemanticScoresByCandidateKey?: ReadonlyMap<string, number>;
+  readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
   readonly maxTotalTokens?: number;
   readonly perDimensionLimits?: Readonly<Record<string, number>>;
   readonly queryText?: string;
+  readonly selectionBoundaryObserver?: (
+    boundary: FineAssessmentSelectionBoundaryCase
+  ) => undefined;
   readonly tokenByObjectId?: Readonly<Record<string, number>>;
   readonly verifiedUserAssertionContextsByMemoryId?:
     RecallSupplementaryData["verifiedUserAssertionContextsByMemoryId"];
@@ -260,8 +382,12 @@ function select(
       ),
       evidenceSemanticScoresByCandidateKey:
         overrides.evidenceSemanticScoresByCandidateKey ?? new Map(),
-      verifiedUserAssertionContextsByMemoryId:
-        overrides.verifiedUserAssertionContextsByMemoryId
+      ...(overrides.verifiedUserAssertionContextsByMemoryId === undefined
+        ? {}
+        : {
+            verifiedUserAssertionContextsByMemoryId:
+              overrides.verifiedUserAssertionContextsByMemoryId
+          })
     }),
     tokenEstimator: {
       estimate: (content) => {
@@ -274,9 +400,10 @@ function select(
     rankByCandidateKey: rankMap(candidates),
     finalRelevanceByCandidateKey: relevanceMap(candidates),
     coverageRelevanceByCandidateKey: relevanceMap(candidates),
-    finalOrderAfterCoverage: "delivery_rank",
+    finalOrderAfterCoverage: overrides.finalOrderAfterCoverage ?? "delivery_rank",
     captureAnswerFeatures: overrides.captureAnswerFeatures,
-    capturePacketPlanTrace: overrides.capturePacketPlanTrace
+    capturePacketPlanTrace: overrides.capturePacketPlanTrace,
+    selectionBoundaryObserver: overrides.selectionBoundaryObserver
   });
 }
 
