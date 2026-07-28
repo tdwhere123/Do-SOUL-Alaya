@@ -128,6 +128,46 @@ describe("collectCoarseStage logical-object waist", () => {
       "semantic_supplement", "global_lookup", "global", "workspace_local"
     ]));
   });
+
+  it("starts independent global and synthesis reads while hot coarse is pending", async () => {
+    const memory = createMemoryEntry();
+    const setup = createStageSetup(memory);
+    let releaseHot!: (value: CoarseFilterResult) => void;
+    producerMocks.runCoarseFilter.mockImplementation(() =>
+      new Promise<CoarseFilterResult>((resolve) => {
+        releaseHot = resolve;
+      })
+    );
+    producerMocks.loadGlobalRecallCandidates.mockResolvedValue(Object.freeze({
+      total_scanned: 0,
+      candidates: Object.freeze([]),
+      records: Object.freeze([])
+    }));
+    producerMocks.collectSynthesisCoarseCandidates.mockResolvedValue(Object.freeze({
+      candidates: Object.freeze([]),
+      synthesisFtsRanks: Object.freeze({})
+    }));
+    producerMocks.expandTierCascade.mockResolvedValue(coarseResult());
+    producerMocks.collectEmbeddingCoarseInjection.mockResolvedValue(Object.freeze({
+      candidates: Object.freeze([]),
+      similarityScores: Object.freeze({}),
+      embeddingInferenceCalls: 0,
+      embeddingProviderStatus: null,
+      providerDegradationReason: null,
+      workspaceScan: null
+    }));
+
+    const pending = collectCoarseStage(setup.context, setup.params, setup.prepared);
+    await Promise.resolve();
+
+    expect(producerMocks.loadGlobalRecallCandidates).toHaveBeenCalledOnce();
+    expect(producerMocks.collectSynthesisCoarseCandidates).toHaveBeenCalledOnce();
+    expect(producerMocks.expandTierCascade).not.toHaveBeenCalled();
+
+    releaseHot(coarseResult());
+    await pending;
+    expect(producerMocks.expandTierCascade).toHaveBeenCalledOnce();
+  });
 });
 
 function createCandidateFixture() {

@@ -68,7 +68,11 @@ export class EmbeddingRecallService {
       dependencies.queryEmbeddingCacheSize ?? DEFAULT_QUERY_EMBEDDING_CACHE_SIZE
     );
     this.evidenceDocumentEngine = new EvidenceDocumentEmbeddingEngine(
-      dependencies.provider, DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE
+      dependencies.provider,
+      DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE,
+      dependencies.evidenceDocumentEmbeddingRepo,
+      this.now,
+      this.warn
     );
     this.queryEngine = new QueryEmbeddingEngine({
       provider: dependencies.provider,

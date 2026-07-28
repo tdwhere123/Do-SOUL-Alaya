@@ -112,6 +112,9 @@ function buildSupplementedCandidate(
     ...(draft.answerRerankText === undefined
       ? {}
       : { answerRerankText: draft.answerRerankText }),
+    ...(draft.evidenceDocumentIdentity === undefined
+      ? {}
+      : { evidenceDocumentIdentity: draft.evidenceDocumentIdentity }),
     ...(draft.verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource: draft.verifiedUserSupportSource }),

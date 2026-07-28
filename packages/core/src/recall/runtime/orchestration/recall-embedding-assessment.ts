@@ -202,6 +202,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
     .map((candidate) => Object.freeze({
       candidateKey: buildRecallCandidateDedupeKey(candidate),
       objectId: candidate.entry.object_id,
+      documentIdentity: candidate.evidenceDocumentIdentity ?? "owner",
       content: candidate.entry.content
     }));
   if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);

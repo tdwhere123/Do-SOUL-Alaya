@@ -255,6 +255,7 @@ describe("direct evidence transient embedding assessment", () => {
       candidates: [{
         candidateKey: evidenceCandidateKey("snapshot-evidence"),
         objectId: "snapshot-evidence",
+        documentIdentity: "owner",
         content: preview
       }]
     });
@@ -475,6 +476,7 @@ function expectedEvidenceScoreCandidate(capsule: Readonly<EvidenceCapsule>): Evi
   return {
     candidateKey: evidenceCandidateKey(capsule.object_id),
     objectId: capsule.object_id,
+    documentIdentity: "owner",
     content: buildDirectEvidencePseudoMemoryEntry(capsule, 1).content
   };
 }

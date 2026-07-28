@@ -253,6 +253,16 @@ export function createOptionalMemoryEmbeddingRepo(database: StorageDatabase): Me
   return new RepoCtor(database);
 }
 
+export function createOptionalEvidenceRecallEmbeddingRepo(
+  database: StorageDatabase
+): StorageModule.SqliteEvidenceRecallEmbeddingRepo | null {
+  const RepoCtor = StorageModule.SqliteEvidenceRecallEmbeddingRepo;
+  if (typeof RepoCtor !== "function" || !supportsPreparedSqliteConnection(database)) {
+    return null;
+  }
+  return new RepoCtor(database);
+}
+
 export function createOptionalMemoryHqRepo(database: StorageDatabase): MemoryHqRepo | null {
   const RepoCtor = StorageModule.SqliteMemoryHqRepo;
   if (typeof RepoCtor !== "function" || !supportsPreparedSqliteConnection(database)) {

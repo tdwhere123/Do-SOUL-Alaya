@@ -37,6 +37,7 @@ export interface CoarseCandidateDraft {
   readonly entry: Readonly<MemoryEntry>;
   readonly objectKind?: RecallCandidate["object_kind"];
   readonly answerRerankText?: string;
+  readonly evidenceDocumentIdentity?: string;
   readonly verifiedUserSupportSource?: CoarseRecallCandidate["verifiedUserSupportSource"];
   readonly admissionPlanes: readonly RecallAdmissionPlane[];
   readonly firstAdmissionPlane: RecallAdmissionPlane;

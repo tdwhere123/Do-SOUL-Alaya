@@ -44,9 +44,13 @@ export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
 export {
   RecallQualifiedEvidenceReader,
   SqliteEvidenceCapsuleRepo,
+  SqliteEvidenceRecallEmbeddingRepo,
   type EvidenceCapsuleRepo,
   type EvidenceCapsuleListPageOptions,
   type EvidenceCapsuleKeywordHit,
+  type EvidenceRecallEmbeddingRecord,
+  type EvidenceRecallEmbeddingRef,
+  type EvidenceRecallEmbeddingSource,
   type EvidenceSearchMatch,
   type EvidenceSearchProjectionIdentity,
   type RecallQualifiedEvidence,

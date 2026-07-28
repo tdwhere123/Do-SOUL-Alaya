@@ -19,6 +19,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
     const candidates = Array.from({ length: 25 }, (_, index) => ({
       candidateKey: `evidence:${index}`,
       objectId: `object-${index}`,
+      documentIdentity: "owner",
       content: `document ${index}`
     }));
 
@@ -65,6 +66,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       candidates: [{
         candidateKey: "evidence:1",
         objectId: "object-1",
+        documentIdentity: "owner",
         content: "same text"
       }]
     });
@@ -132,6 +134,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       candidates: [{
         candidateKey: "evidence:1",
         objectId: "object-1",
+        documentIdentity: "owner",
         content: "document"
       }]
     } as const;
@@ -177,6 +180,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       candidates: [{
         candidateKey: "evidence:1",
         objectId: "object-1",
+        documentIdentity: "owner",
         content: "document"
       }]
     });

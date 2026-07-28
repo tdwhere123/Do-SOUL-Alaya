@@ -10,6 +10,12 @@ export {
 } from "./evidence-capsule-repo.js";
 export { RecallQualifiedEvidenceReader } from "./recall-qualified-evidence-reader.js";
 export {
+  SqliteEvidenceRecallEmbeddingRepo,
+  type EvidenceRecallEmbeddingRecord,
+  type EvidenceRecallEmbeddingRef,
+  type EvidenceRecallEmbeddingSource
+} from "./embedding/evidence-recall-embedding-repo.js";
+export {
   SqliteSynthesisCapsuleRepo,
   type SynthesisCapsuleKeywordHit,
   type SynthesisCapsuleRepo

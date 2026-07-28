@@ -1,10 +1,30 @@
 import { createHash } from "node:crypto";
-import { assertValidEmbeddingBatch, toErrorMessage } from "../helpers.js";
-import type { EmbeddingProviderPort } from "../types.js";
+import { assertValidEmbeddingBatch, hashMemoryContent, toErrorMessage } from "../helpers.js";
+import type {
+  EmbeddingProviderPort,
+  EvidenceDocumentEmbeddingRecord,
+  EvidenceDocumentEmbeddingRef,
+  EvidenceDocumentEmbeddingRepoPort
+} from "../types.js";
 
 export interface EvidenceDocumentEmbeddingBatch {
   readonly embeddings: readonly Float32Array[];
   readonly inferenceCalls: number;
+  readonly persistedCount: number;
+}
+
+export interface EvidenceDocumentEmbeddingInput {
+  readonly workspaceId: string;
+  readonly documents: readonly Readonly<{
+    readonly ownerObjectId: string;
+    readonly documentIdentity: string;
+    readonly content: string;
+  }>[];
+}
+
+interface PreparedDocument extends EvidenceDocumentEmbeddingRef {
+  readonly content: string;
+  readonly cacheKey: string;
 }
 
 interface DocumentMiss {
@@ -27,25 +47,44 @@ export class EvidenceDocumentEmbeddingError extends Error {
 export class EvidenceDocumentEmbeddingEngine {
   private readonly cache = new Map<string, Float32Array>();
   private readonly pending = new Map<string, Promise<Float32Array>>();
+  private readonly persistedKeys = new Set<string>();
+  private readonly warn: (message: string, meta: Record<string, unknown>) => void;
 
   public constructor(
     private readonly provider: EmbeddingProviderPort,
-    private readonly capacity: number
-  ) {}
+    private readonly capacity: number,
+    private readonly store?: EvidenceDocumentEmbeddingRepoPort,
+    private readonly now: () => string = () => new Date().toISOString(),
+    warn?: (message: string, meta: Record<string, unknown>) => void
+  ) {
+    this.warn = warn ?? (() => undefined);
+  }
 
   public async embedDocuments(
-    texts: readonly string[],
+    input: EvidenceDocumentEmbeddingInput,
     timeoutMs: number
   ): Promise<EvidenceDocumentEmbeddingBatch> {
-    const normalizedTexts = texts.map(normalizeDocumentText);
-    const keys = normalizedTexts.map((text) => this.cacheKey(text));
-    const misses = this.resolveMisses(normalizedTexts, keys);
+    const documents = input.documents.map((document) => this.prepareDocument(document));
+    await this.hydrateStored(
+      input.workspaceId,
+      documents.filter((document) => this.needsStoreLookup(document))
+    );
+    const misses = this.resolveMisses(documents);
     try {
       if (misses.length > 0) this.startMissBatch(misses, timeoutMs);
-      const embeddings = await Promise.all(keys.map((key) => this.resolveVector(key)));
+      const embeddings = await Promise.all(
+        documents.map((document) => this.resolveVector(document.cacheKey))
+      );
+      const persistedCount = await this.persistMissing(
+        input.workspaceId,
+        documents,
+        embeddings,
+        this.persistedKeys
+      );
       return Object.freeze({
         embeddings: Object.freeze(embeddings),
-        inferenceCalls: misses.length > 0 ? 1 : 0
+        inferenceCalls: misses.length > 0 ? 1 : 0,
+        persistedCount
       });
     } catch (error) {
       throw new EvidenceDocumentEmbeddingError(misses.length > 0 ? 1 : 0, error);
@@ -54,20 +93,62 @@ export class EvidenceDocumentEmbeddingEngine {
     }
   }
 
-  private resolveMisses(texts: readonly string[], keys: readonly string[]): DocumentMiss[] {
+  private prepareDocument(
+    document: EvidenceDocumentEmbeddingInput["documents"][number]
+  ): PreparedDocument {
+    const content = normalizeDocumentText(document.content);
+    return {
+      ownerObjectId: document.ownerObjectId,
+      documentIdentity: document.documentIdentity,
+      content,
+      contentHash: hashMemoryContent(content),
+      cacheKey: this.cacheKey(content)
+    };
+  }
+
+  private async hydrateStored(
+    workspaceId: string,
+    documents: readonly PreparedDocument[]
+  ): Promise<void> {
+    if (this.store === undefined || documents.length === 0) return;
+    try {
+      const records = await this.store.findByDocuments({
+        workspaceId,
+        documents,
+        documentRole: DOCUMENT_ROLE,
+        providerKind: this.provider.providerKind,
+        modelId: this.provider.modelId,
+        schemaVersion: this.provider.schemaVersion
+      });
+      for (const record of records) {
+        const document = documents.find((candidate) => matchesRecord(candidate, record));
+        if (document === undefined) continue;
+        this.putCached(document.cacheKey, record.embedding);
+        this.persistedKeys.add(persistentKey(document));
+      }
+    } catch (error) {
+      this.warnStoreFailure("read", workspaceId, error);
+    }
+  }
+
+  private needsStoreLookup(document: PreparedDocument): boolean {
+    return this.getCached(document.cacheKey) === null ||
+      !this.persistedKeys.has(persistentKey(document));
+  }
+
+  private resolveMisses(documents: readonly PreparedDocument[]): DocumentMiss[] {
     const misses: DocumentMiss[] = [];
     const scheduled = new Set<string>();
-    for (let index = 0; index < keys.length; index += 1) {
-      const key = keys[index]!;
+    for (const document of documents) {
       if (
-        this.getCached(key) !== null ||
-        this.pending.has(key) ||
-        scheduled.has(key)
+        this.getCached(document.cacheKey) !== null ||
+        this.pending.has(document.cacheKey) ||
+        scheduled.has(document.cacheKey)
       ) {
         continue;
       }
-      scheduled.add(key);
-      misses.push({ key, text: texts[index]! });
+      scheduled.add(document.cacheKey);
+      misses.push({ key: document.cacheKey, text: document.content });
     }
     return misses;
   }
@@ -87,6 +168,45 @@ export class EvidenceDocumentEmbeddingEngine {
         return vector;
       });
       this.pending.set(miss.key, pending);
+    });
+  }
+
+  private async persistMissing(
+    workspaceId: string,
+    documents: readonly PreparedDocument[],
+    embeddings: readonly Float32Array[],
+    storedKeys: ReadonlySet<string>
+  ): Promise<number> {
+    if (this.store === undefined) return 0;
+    const timestamp = this.now();
+    const records = uniqueMissingRecords(
+      workspaceId,
+      documents,
+      embeddings,
+      storedKeys,
+      this.provider,
+      timestamp
+    );
+    if (records.length === 0) return 0;
+    try {
+      await this.store.upsertMany(records);
+      for (const record of records) this.persistedKeys.add(persistentKey(record));
+      return records.length;
+    } catch (error) {
+      this.warnStoreFailure("write", workspaceId, error);
+      return 0;
+    }
+  }
+
+  private warnStoreFailure(
+    phase: "read" | "write",
+    workspaceId: string,
+    error: unknown
+  ): void {
+    this.warn("evidence document embedding store degraded", {
+      workspace_id: workspaceId,
+      phase,
+      error: toErrorMessage(error)
     });
   }
 
@@ -129,6 +249,54 @@ export class EvidenceDocumentEmbeddingEngine {
     ].join("\u0000");
     return `sha256:${createHash("sha256").update(identity).digest("hex")}`;
   }
+}
+
+function matchesRecord(
+  document: Readonly<PreparedDocument>,
+  record: Readonly<EvidenceDocumentEmbeddingRecord>
+): boolean {
+  return document.ownerObjectId === record.ownerObjectId &&
+    document.documentIdentity === record.documentIdentity &&
+    document.contentHash === record.contentHash;
+}
+
+function persistentKey(document: Readonly<EvidenceDocumentEmbeddingRef>): string {
+  return [
+    document.ownerObjectId,
+    document.documentIdentity,
+    document.contentHash
+  ].join("\u0000");
+}
+
+function uniqueMissingRecords(
+  workspaceId: string,
+  documents: readonly PreparedDocument[],
+  embeddings: readonly Float32Array[],
+  storedKeys: ReadonlySet<string>,
+  provider: EmbeddingProviderPort,
+  timestamp: string
+): readonly EvidenceDocumentEmbeddingRecord[] {
+  const records = new Map<string, EvidenceDocumentEmbeddingRecord>();
+  documents.forEach((document, index) => {
+    const key = persistentKey(document);
+    if (storedKeys.has(key) || records.has(key)) return;
+    const embedding = new Float32Array(embeddings[index]!);
+    records.set(key, Object.freeze({
+      workspaceId,
+      ownerObjectId: document.ownerObjectId,
+      documentIdentity: document.documentIdentity,
+      contentHash: document.contentHash,
+      documentRole: DOCUMENT_ROLE,
+      providerKind: provider.providerKind,
+      modelId: provider.modelId,
+      schemaVersion: provider.schemaVersion,
+      dimensions: embedding.length,
+      embedding,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }));
+  });
+  return Object.freeze([...records.values()]);
 }
 
 function normalizeDocumentText(text: string): string {

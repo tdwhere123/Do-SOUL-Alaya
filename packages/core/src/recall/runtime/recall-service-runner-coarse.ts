@@ -81,13 +81,14 @@ export async function collectCoarseStage(
   const temporalCandidateBudget = createTemporalWindowCandidateBudget(
     prepared.policy.fine_assessment.budgets.max_entries
   );
+  const globalPromise = settle(collectGlobalCoarseFilter(context, params, prepared));
+  const synthesisPromise = settle(collectSynthesisStage(context, params, prepared));
   const hotCoarseFilter = await collectHotCoarseFilter(
     context,
     params,
     prepared,
     temporalCandidateBudget
   );
-  const globalPromise = settle(collectGlobalCoarseFilter(context, params, prepared));
   const coarseFilterPromise = settle(collectExpandedCoarseFilter(
     context,
     params,
@@ -95,7 +96,6 @@ export async function collectCoarseStage(
     hotCoarseFilter,
     temporalCandidateBudget
   ));
-  const synthesisPromise = settle(collectSynthesisStage(context, params, prepared));
   const [globalResult, coarseFilterResult] = await Promise.all([globalPromise, coarseFilterPromise]);
   throwFirstRejected([globalResult, coarseFilterResult]);
   const global = unwrapSettled(globalResult);
@@ -298,6 +298,9 @@ function mergeCoarseCandidatePair(
   const verifiedUserSupportSource =
     representative.verifiedUserSupportSource ??
     supplementary.verifiedUserSupportSource;
+  const evidenceDocumentIdentity =
+    representative.evidenceDocumentIdentity ??
+    supplementary.evidenceDocumentIdentity;
   return Object.freeze({
     ...representative,
     sourceChannels: uniqueStrings([
@@ -321,7 +324,10 @@ function mergeCoarseCandidatePair(
     ...(firstAdmissionPlane === undefined ? {} : { firstAdmissionPlane }),
     ...(verifiedUserSupportSource === undefined
       ? {}
-      : { verifiedUserSupportSource })
+      : { verifiedUserSupportSource }),
+    ...(evidenceDocumentIdentity === undefined
+      ? {}
+      : { evidenceDocumentIdentity })
   });
 }
 

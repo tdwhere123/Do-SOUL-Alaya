@@ -21,6 +21,7 @@ import {
 interface QualifiedEvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly rank: number;
+  readonly documentIdentity: string;
   readonly recallText?: string;
   readonly verifiedUserSupportSource?: Readonly<RecallVerifiedUserSupportSource>;
 }
@@ -124,6 +125,8 @@ function projectQualifiedEvidenceCandidate(
     return Object.freeze({
       capsule: qualified.capsule,
       rank,
+      documentIdentity:
+        `assistant_observation:${qualified.matched_projection.projection_id}`,
       recallText: qualified.matched_projection.content
     });
   }
@@ -140,6 +143,7 @@ function projectQualifiedEvidenceCandidate(
   return Object.freeze({
     capsule: qualified.capsule,
     rank,
+    documentIdentity: "owner",
     ...(verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource })
@@ -285,6 +289,7 @@ function admitDirectEvidenceCandidate(
   params.addCandidate(entry, "lexical", candidate.rank, "evidence_fts_direct", {
     objectKind: "evidence_capsule",
     answerRerankText: entry.content,
+    evidenceDocumentIdentity: candidate.documentIdentity,
     ...(candidate.verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource: candidate.verifiedUserSupportSource })

@@ -1,24 +1,23 @@
 import {
-  hasGardenSourceTurnFallbackAnyReceiptFormat,
   type EvidenceCapsule,
   type MemoryEntry
 } from "@do-soul/alaya-protocol";
+import { hasDirectEvidenceRecallAuthority } from "../../../shared/evidence-recall-authority.js";
 import { createBoundedNonMemoryPreview } from "../non-memory-preview.js";
 
 export function isDirectRecallEvidence(
   evidence: Readonly<EvidenceCapsule>,
   workspaceId: string
 ): boolean {
-  const artifactRef = evidence.physical_anchor?.artifact_ref;
-  return evidence.workspace_id === workspaceId &&
-    evidence.lifecycle_state === "active" &&
-    evidence.created_by === "garden_compile" &&
-    evidence.evidence_health_state === "verified" &&
-    evidence.evidence_kind === "conversation_excerpt" &&
-    hasGardenSourceTurnFallbackAnyReceiptFormat({
-      artifact_ref: artifactRef ?? null,
-      source_hash: evidence.source_hash
-    });
+  return hasDirectEvidenceRecallAuthority({
+    workspaceId: evidence.workspace_id,
+    lifecycleState: evidence.lifecycle_state,
+    createdBy: evidence.created_by,
+    evidenceKind: evidence.evidence_kind,
+    evidenceHealthState: evidence.evidence_health_state,
+    artifactRef: evidence.physical_anchor?.artifact_ref ?? null,
+    sourceHash: evidence.source_hash
+  }, workspaceId);
 }
 
 export function buildDirectEvidencePseudoMemoryEntry(

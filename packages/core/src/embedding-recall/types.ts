@@ -111,6 +111,7 @@ export interface EmbeddingRecallSupplementResult {
 
 export interface EmbeddingRecallServiceDependencies {
   readonly embeddingRepo: EmbeddingRecallRepoPort;
+  readonly evidenceDocumentEmbeddingRepo?: EvidenceDocumentEmbeddingRepoPort;
   readonly provider: EmbeddingProviderPort;
   readonly eventLogRepo: EmbeddingRecallEventLogPort;
   readonly healthJournalRecorder?: HealthJournalRecordPort;
@@ -168,7 +169,56 @@ export interface PreparedEmbeddingSupplement {
 export interface EvidenceEmbeddingCandidate {
   readonly candidateKey: string;
   readonly objectId: string;
+  readonly documentIdentity: string;
   readonly content: string;
+}
+
+export interface EvidenceDocumentEmbeddingRef {
+  readonly ownerObjectId: string;
+  readonly documentIdentity: string;
+  readonly contentHash: string;
+}
+
+export interface EvidenceDocumentEmbeddingRecord extends EvidenceDocumentEmbeddingRef {
+  readonly workspaceId: string;
+  readonly documentRole: "evidence_document";
+  readonly providerKind: string;
+  readonly modelId: string;
+  readonly schemaVersion: number;
+  readonly dimensions: number;
+  readonly embedding: Float32Array;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface EvidenceDocumentEmbeddingSource {
+  readonly workspaceId: string;
+  readonly ownerObjectId: string;
+  readonly documentIdentity: string;
+  readonly content: string;
+  readonly lifecycleState: string;
+  readonly createdBy: string;
+  readonly evidenceKind: string;
+  readonly evidenceHealthState: string;
+  readonly artifactRef: string | null;
+  readonly sourceHash: string | null;
+}
+
+export interface EvidenceDocumentEmbeddingRepoPort {
+  listSourcesByWorkspace(
+    workspaceId: string
+  ): Promise<readonly Readonly<EvidenceDocumentEmbeddingSource>[]>;
+  findByDocuments(input: {
+    readonly workspaceId: string;
+    readonly documents: readonly Readonly<EvidenceDocumentEmbeddingRef>[];
+    readonly documentRole: "evidence_document";
+    readonly providerKind: string;
+    readonly modelId: string;
+    readonly schemaVersion: number;
+  }): Promise<readonly Readonly<EvidenceDocumentEmbeddingRecord>[]>;
+  upsertMany(
+    records: readonly Readonly<EvidenceDocumentEmbeddingRecord>[]
+  ): Promise<void>;
 }
 
 export type EvidenceCandidateScoringStatus =

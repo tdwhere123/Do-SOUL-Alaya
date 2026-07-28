@@ -6,6 +6,11 @@ export {
 } from "./constants.js";
 export { OpenAIEmbeddingClient } from "./openai-client.js";
 export { EmbeddingRecallService } from "./service.js";
+export {
+  EvidenceDocumentEmbeddingBackfillHandler,
+  type EvidenceDocumentEmbeddingBackfillDependencies,
+  type EvidenceDocumentEmbeddingBackfillResult
+} from "./evidence/evidence-document-embedding-backfill-handler.js";
 export type {
   EmbeddingNeighborHit,
   EmbeddingProviderPort,
@@ -20,6 +25,10 @@ export type {
   EvidenceCandidateScoringFailureClass,
   EvidenceCandidateScoringResult,
   EvidenceCandidateScoringStatus,
+  EvidenceDocumentEmbeddingRecord,
+  EvidenceDocumentEmbeddingRef,
+  EvidenceDocumentEmbeddingRepoPort,
+  EvidenceDocumentEmbeddingSource,
   EvidenceEmbeddingCandidate,
   EmbeddingWorkspaceNeighborResult,
   EmbeddingWorkspaceScanOptions,

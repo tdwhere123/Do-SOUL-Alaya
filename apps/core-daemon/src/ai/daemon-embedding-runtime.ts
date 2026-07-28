@@ -2,6 +2,7 @@ import {
   D2Q_SCHEMA_VERSION,
   EmbeddingBackfillHandler,
   EmbeddingRecallService,
+  EvidenceDocumentEmbeddingBackfillHandler,
   LocalOnnxCrossEncoderClient,
   LocalOnnxEmbeddingClient,
   OpenAIEmbeddingClient,
@@ -21,6 +22,7 @@ import {
 } from "../services/embedding-status-service.js";
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
+  createOptionalEvidenceRecallEmbeddingRepo,
   createOptionalMemoryEmbeddingRepo,
   createOptionalMemoryHqRepo
 } from "../runtime/index.js";
@@ -65,6 +67,7 @@ export function createDaemonEmbeddingRuntime(input: {
 
 interface EmbeddingProviderState {
   readonly memoryEmbeddingRepo: ReturnType<typeof createOptionalMemoryEmbeddingRepo>;
+  readonly evidenceEmbeddingRepo: ReturnType<typeof createOptionalEvidenceRecallEmbeddingRepo>;
   readonly embeddingProvider: EmbeddingProviderPort | null;
   readonly embeddingModelId: string | null;
   readonly readiness: EmbeddingProviderReadiness;
@@ -87,6 +90,7 @@ function createEmbeddingProviderState(
   config: EmbeddingRuntimeConfig
 ): EmbeddingProviderState {
   const memoryEmbeddingRepo = createOptionalMemoryEmbeddingRepo(input.database);
+  const evidenceEmbeddingRepo = createOptionalEvidenceRecallEmbeddingRepo(input.database);
   const resolvedProvider = resolveEmbeddingProvider({
     providerKind: config.embeddingProviderKind,
     storageAvailable: memoryEmbeddingRepo !== null,
@@ -103,6 +107,7 @@ function createEmbeddingProviderState(
   const embeddingProvider = observeEmbeddingProviderReadiness(resolvedProvider, readiness);
   return {
     memoryEmbeddingRepo,
+    evidenceEmbeddingRepo,
     embeddingProvider,
     embeddingModelId:
       embeddingProvider?.modelId ??
@@ -158,6 +163,9 @@ function createEmbeddingRecallService(
   }
   return new EmbeddingRecallService({
     embeddingRepo: providerState.memoryEmbeddingRepo,
+    ...(providerState.evidenceEmbeddingRepo === null
+      ? {}
+      : { evidenceDocumentEmbeddingRepo: providerState.evidenceEmbeddingRepo }),
     provider: providerState.embeddingProvider,
     eventLogRepo: input.eventLogRepo,
     healthJournalRecorder: input.healthJournalService,
@@ -174,7 +182,7 @@ function createEmbeddingBackfillHandler(
     return undefined;
   }
   const hqProvider = resolveBackfillHqProvider(input, config);
-  return new EmbeddingBackfillHandler({
+  const memoryHandler = new EmbeddingBackfillHandler({
     memoryRepo: input.memoryEntryRepo,
     memoryEmbeddingRepo: providerState.memoryEmbeddingRepo,
     provider: providerState.embeddingProvider,
@@ -182,6 +190,29 @@ function createEmbeddingBackfillHandler(
     ...(hqProvider === null ? {} : { hqProvider }),
     warn: input.warn
   });
+  if (providerState.evidenceEmbeddingRepo === null) return memoryHandler;
+  const evidenceHandler = new EvidenceDocumentEmbeddingBackfillHandler({
+    evidenceDocumentEmbeddingRepo: providerState.evidenceEmbeddingRepo,
+    provider: providerState.embeddingProvider,
+    warn: input.warn
+  });
+  return composeEmbeddingBackfillHandlers(memoryHandler, evidenceHandler);
+}
+
+function composeEmbeddingBackfillHandlers(
+  memoryHandler: EmbeddingBackfillHandler,
+  evidenceHandler: EvidenceDocumentEmbeddingBackfillHandler
+) {
+  return {
+    handle: async (task: Parameters<EmbeddingBackfillHandler["handle"]>[0]) => {
+      const memory = await memoryHandler.handle(task);
+      const evidence = await evidenceHandler.handle(task);
+      return Object.freeze({
+        objectsAffected: memory.objectsAffected,
+        auditEntries: Object.freeze([...memory.auditEntries, ...evidence.auditEntries])
+      });
+    }
+  };
 }
 
 function resolveBackfillHqProvider(

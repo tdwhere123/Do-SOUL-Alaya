@@ -50,10 +50,14 @@ export async function scoreTransientEvidenceCandidates(
     if (params.preparedQuery === null && !prepared.cacheHit) inferenceCalls += 1;
     const queryEmbedding = await resolveQueryEmbedding(prepared, dependencies.queryTimeoutMs);
     failureClass = "candidate_embedding_failed";
-    const documentBatch = await dependencies.documentEngine.embedDocuments(
-      candidates.map((candidate) => candidate.content),
-      dependencies.queryTimeoutMs
-    );
+    const documentBatch = await dependencies.documentEngine.embedDocuments({
+      workspaceId: params.workspaceId,
+      documents: candidates.map((candidate) => ({
+        ownerObjectId: candidate.objectId,
+        documentIdentity: candidate.documentIdentity,
+        content: candidate.content
+      }))
+    }, dependencies.queryTimeoutMs);
     inferenceCalls += documentBatch.inferenceCalls;
     const embeddings = documentBatch.embeddings;
     assertValidEmbeddingBatch(embeddings, candidates.length);

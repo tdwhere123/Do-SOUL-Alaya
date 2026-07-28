@@ -71,6 +71,25 @@ function isPolicyEnabled(runtime: ReturnType<typeof createDaemonEmbeddingRuntime
 }
 
 describe("daemon local embedding product default", () => {
+  it("shares persistent evidence vectors between Garden backfill and recall", async () => {
+    const { database, runtime } = createRuntime(optedInLocalConfig());
+    try {
+      expect(runtime.embeddingRecallService?.dependencies.evidenceDocumentEmbeddingRepo)
+        .toBeDefined();
+      await expect(runtime.embeddingBackfillHandler?.handle({
+        workspace_id: "workspace-1"
+      })).resolves.toMatchObject({
+        objectsAffected: [],
+        auditEntries: expect.arrayContaining([
+          "embedding_backfill_skipped:no_memories",
+          "evidence_embedding_backfill_skipped:no_documents"
+        ])
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([undefined, "true", "  TrUe  ", "1", " 1 "])(
     "enables the local provider after verified warmup for %s",
     async (configuredValue) => {
