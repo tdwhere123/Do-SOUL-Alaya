@@ -91,6 +91,19 @@ describe("embedding treatment activation", () => {
       .toThrow(/evidence embedding treatment activation failed/u);
   });
 
+  it("accepts fully scored evidence embeddings served without inference calls", () => {
+    expect(() => assertBiEncoderRunActivation({
+      embedding_provider_status: "provider_returned",
+      provider_degradation_reason: null,
+      evidence_embedding_status: "returned",
+      evidence_embedding_expected_count: 4,
+      evidence_embedding_scored_count: 4,
+      evidence_embedding_inference_calls: 0,
+      evidence_embedding_failure_class: null,
+      candidates: [{ score_factors: { embedding_similarity: 0.8 } }]
+    }, { ALAYA_ENABLE_EMBEDDING_SUPPLEMENT: "true" })).not.toThrow();
+  });
+
   it.each([
     ["missing", {}],
     ["not requested", {

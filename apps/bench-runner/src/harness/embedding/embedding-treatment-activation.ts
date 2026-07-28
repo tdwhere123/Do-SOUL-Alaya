@@ -129,7 +129,6 @@ function assertEvidenceEmbeddingTreatmentActive(
   const complete = expected > 0 &&
     diagnostics.evidence_embedding_status === "returned" &&
     scored === expected &&
-    (diagnostics.evidence_embedding_inference_calls ?? 0) > 0 &&
     diagnostics.evidence_embedding_failure_class === null;
   if (complete || isEvidenceEmbeddingNotApplicable(diagnostics)) return;
   throw new Error(
