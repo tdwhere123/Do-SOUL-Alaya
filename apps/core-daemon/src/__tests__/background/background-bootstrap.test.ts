@@ -138,9 +138,9 @@ describe("BackgroundServiceManager", () => {
     vi.useFakeTimers();
     vi.resetModules();
     const warn = vi.fn();
-    vi.doMock("../../runtime/daemon-runtime-helpers.js", async () => {
+    vi.doMock("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js", async () => {
       const actual = await vi.importActual<typeof import("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js")>(
-        "../../runtime/daemon-runtime-helpers.js"
+        "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js"
       );
       return {
         ...actual,
@@ -186,7 +186,7 @@ describe("BackgroundServiceManager", () => {
       expect(JSON.stringify(warn.mock.calls)).not.toContain("abcd1234");
     } finally {
       consoleWarnSpy.mockRestore();
-      vi.doUnmock("../../runtime/daemon-runtime-helpers.js");
+      vi.doUnmock("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js");
       vi.resetModules();
       vi.useRealTimers();
     }

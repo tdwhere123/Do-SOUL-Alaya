@@ -76,8 +76,8 @@ jobs:
       - name: Guard inspector dependency isolation
         run: pnpm run hygiene:inspector-deps
 
-  windows-preflight:
-    name: Windows build + CLI preflight
+  windows-quality:
+    name: Windows build + test + CLI preflight
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - quality
-      - windows-preflight
+      - windows-quality
       - content-contracts
       - self-benchmark
     permissions:

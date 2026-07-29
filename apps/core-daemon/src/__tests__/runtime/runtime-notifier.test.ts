@@ -5,9 +5,9 @@ import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-noti
 describe("RuntimeNotifier", () => {
   async function importRuntimeNotifierWithMockedWarnLogger(warn: ReturnType<typeof vi.fn>) {
     vi.resetModules();
-    vi.doMock("../../runtime/daemon-runtime-helpers.js", async () => {
+    vi.doMock("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js", async () => {
       const actual = await vi.importActual<typeof import("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js")>(
-        "../../runtime/daemon-runtime-helpers.js"
+        "../../runtime/daemon/lifecycle/daemon-runtime-helpers.js"
       );
       return {
         ...actual,
@@ -25,7 +25,7 @@ describe("RuntimeNotifier", () => {
     return {
       createRuntimeNotifier: mod.createRuntimeNotifier,
       cleanup: () => {
-        vi.doUnmock("../../runtime/daemon-runtime-helpers.js");
+        vi.doUnmock("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js");
         vi.resetModules();
       }
     };

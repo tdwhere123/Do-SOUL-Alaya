@@ -15,7 +15,7 @@ const supportMock = vi.hoisted(() => ({
   createConflictDetectionLlmPort: vi.fn(() => null)
 }));
 
-vi.mock("../../runtime/garden-compute-support.js", () => supportMock);
+vi.mock("../../runtime/garden-wiring/garden-compute-support.js", () => supportMock);
 
 import { edgeReconciliationTestInternals } from "../../runtime/recall-materialization/recall-materialization-edge-reconciliation.js";
 

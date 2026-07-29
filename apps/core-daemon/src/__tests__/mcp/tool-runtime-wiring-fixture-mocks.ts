@@ -26,9 +26,9 @@ vi.mock("../../runtime/app.js", () => ({
   createApp: hoisted.createApp
 }));
 
-vi.mock("../../runtime/daemon-runtime-support.js", async () => {
+vi.mock("../../runtime/daemon/lifecycle/daemon-runtime-support.js", async () => {
   const actual = await vi.importActual<Record<string, unknown>>(
-    "../../runtime/daemon-runtime-support.js"
+    "../../runtime/daemon/lifecycle/daemon-runtime-support.js"
   );
   const loadConfigEnvDefault = actual["loadConfigEnv"] as (
     envPath: string
@@ -76,15 +76,15 @@ vi.mock("../../budget/wiring.js", () => ({
   createBudgetProposalPort: vi.fn(() => ({}))
 }));
 
-vi.mock("../../runtime/files-data-dir.js", () => ({
+vi.mock("../../runtime/daemon/support/files-data-dir.js", () => ({
   resolveCoreDaemonFilesDirectory: vi.fn(() => "/tmp/alaya-files")
 }));
 
-vi.mock("../../garden/orphan-query.js", () => ({
+vi.mock("../../garden/support/orphan-query.js", () => ({
   findOrphanedMemoriesForWorkspace: vi.fn(async () => [])
 }));
 
-vi.mock("../../services/config-service.js", () => ({
+vi.mock("../../services/config/config-service.js", () => ({
   createConfigService: vi.fn(() => {
     const getRuntimeGardenComputeConfig = vi.fn(async () => {
       const envValues = await readMockConfigEnv();
@@ -130,11 +130,11 @@ vi.mock("../../services/config-service.js", () => ({
   })
 }));
 
-vi.mock("../../services/environment-status-service.js", () => ({
+vi.mock("../../services/status/environment-status-service.js", () => ({
   createEnvironmentStatusService: hoisted.createEnvironmentStatusService
 }));
 
-vi.mock("../../services/soul-approval-service.js", () => ({
+vi.mock("../../services/soul/soul-approval-service.js", () => ({
   createSoulApprovalService: vi.fn(() => ({}))
 }));
 
@@ -144,7 +144,7 @@ vi.mock("../../handoff/gap-adapter.js", () => ({
   })
 }));
 
-vi.mock("../../mcp/mcp-runtime-registry.js", () => ({
+vi.mock("../../mcp/catalog/mcp-runtime-registry.js", () => ({
   createDaemonMcpRuntimeRegistry: vi.fn((input?: { serverConfigs?: Record<string, unknown> }) => {
     const configuredServerNames = new Set(Object.keys(input?.serverConfigs ?? {}));
     const isConfigured = (serverName: string) => configuredServerNames.has(serverName);

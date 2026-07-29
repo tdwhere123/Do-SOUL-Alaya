@@ -471,4 +471,24 @@ describe("Memory embedding storage repo", () => {
     });
   });
 
+  it("existsAnyByObjectIds probes without requiring blob hydration", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    const presentId = "11111111-1111-4111-8111-111111111111";
+    const absentId = "22222222-2222-4222-8222-222222222222";
+
+    await expect(repo.existsAnyByObjectIds(workspaceId, [])).resolves.toBe(false);
+    await expect(repo.existsAnyByObjectIds(workspaceId, [absentId])).resolves.toBe(false);
+
+    await repo.upsert(
+      createEmbeddingRecord({
+        object_id: presentId,
+        workspace_id: workspaceId,
+        embedding: new Float32Array([0.1, 0.2, 0.3])
+      })
+    );
+
+    await expect(repo.existsAnyByObjectIds(workspaceId, [presentId, absentId])).resolves.toBe(true);
+    await expect(repo.existsAnyByObjectIds("workspace-other", [presentId])).resolves.toBe(false);
+  });
+
 });

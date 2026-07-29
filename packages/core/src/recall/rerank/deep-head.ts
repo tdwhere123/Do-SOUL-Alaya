@@ -48,7 +48,8 @@ export function resolveDeepHeadScores(params: Readonly<{
 export function resolveDeepHeadAssessment(
   params: DeepHeadAssessmentParams
 ): RecallDeepHeadAssessment {
-  const includeTraces = params.includeTraces ?? true;
+  // Product path sets includeTraces via fine-assessment-deep-head; default off.
+  const includeTraces = params.includeTraces ?? false;
   if (params.answerRelevanceScores.size > 0) {
     return buildCrossEncoderAssessment(params, includeTraces);
   }
@@ -86,7 +87,7 @@ export function computeLightweightDeepHeadScores(
 export function resolveIndependentEmbeddingEvidenceAssessment(
   params: DeepHeadAssessmentParams
 ): RecallDeepHeadAssessment {
-  const includeTraces = params.includeTraces ?? true;
+  const includeTraces = params.includeTraces ?? false;
   if (params.answerRelevanceScores.size > 0) {
     return buildCrossEncoderAssessment(params, includeTraces);
   }
@@ -101,7 +102,7 @@ export function resolveIndependentEmbeddingEvidenceAssessment(
 export function resolveNonlexicalUnitIntervalCompositionAssessment(
   params: DeepHeadAssessmentParams
 ): RecallDeepHeadAssessment {
-  const includeTraces = params.includeTraces ?? true;
+  const includeTraces = params.includeTraces ?? false;
   if (params.answerRelevanceScores.size > 0) {
     return buildCrossEncoderAssessment(params, includeTraces);
   }

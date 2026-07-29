@@ -16,6 +16,7 @@ export interface MemoryEmbeddingStatements {
   readonly listByWorkspaceStatement: SqliteStatement;
   readonly findCurrentMemoryContentStatement: SqliteStatement;
   readonly listByObjectIdFilterStatement: SqliteStatement;
+  readonly existsAnyByObjectIdFilterStatement: SqliteStatement;
 }
 
 export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmbeddingStatements {
@@ -52,6 +53,16 @@ export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmb
       WHERE workspace_id = ?
         AND memory_embeddings.vector_valid = 1
       ORDER BY memory_embeddings.object_id ASC
+    `),
+    // Existence-only probe: no blob hydration for precheck / has-any paths.
+    existsAnyByObjectIdFilterStatement: db.connection.prepare(`
+      SELECT 1 AS present
+      FROM memory_embeddings
+      INNER JOIN json_each(?) filter_ids
+        ON filter_ids.value = memory_embeddings.object_id
+      WHERE workspace_id = ?
+        AND memory_embeddings.vector_valid = 1
+      LIMIT 1
     `)
   };
 }

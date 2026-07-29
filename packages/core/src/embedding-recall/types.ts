@@ -38,6 +38,12 @@ export interface EmbeddingRecallRepoPort {
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<EmbeddingVectorRecord>[]>;
+  // Optional existence probe for precheck paths that only need any-hit, not
+  // full vector hydration. Implementations should use LIMIT 1 / EXISTS.
+  existsAnyByObjectIds?(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<boolean>;
   // Optional: full workspace vector scan, used by the embedding-on coarse
   // injection path to find semantically near memories that lexical recall
   // never admitted into the candidate pool. The optional `tierFilter` admits

@@ -97,6 +97,11 @@ export interface MemoryEmbeddingRepo {
     workspaceId: string,
     objectIds: readonly string[]
   ): Promise<readonly Readonly<MemoryEmbeddingRecord>[]>;
+  // Existence-only probe (LIMIT 1); does not hydrate embedding blobs.
+  existsAnyByObjectIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<boolean>;
 }
 
 interface MemoryEmbeddingWorkspaceQuery {
@@ -110,6 +115,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   private readonly listByWorkspaceStatement: SqliteStatement;
   private readonly findCurrentMemoryContentStatement: SqliteStatement;
   private readonly listByObjectIdFilterStatement: SqliteStatement;
+  private readonly existsAnyByObjectIdFilterStatement: SqliteStatement;
   private readonly guardedUpsertTransaction: (
     parsedRecord: Readonly<MemoryEmbeddingRecord>
   ) => Readonly<MemoryEmbeddingRecord> | null;
@@ -121,6 +127,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     this.listByWorkspaceStatement = statements.listByWorkspaceStatement;
     this.findCurrentMemoryContentStatement = statements.findCurrentMemoryContentStatement;
     this.listByObjectIdFilterStatement = statements.listByObjectIdFilterStatement;
+    this.existsAnyByObjectIdFilterStatement = statements.existsAnyByObjectIdFilterStatement;
     this.guardedUpsertTransaction = this.createGuardedUpsertTransaction();
   }
 
@@ -332,6 +339,36 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
       throw new StorageError(
         "QUERY_FAILED",
         `Failed to list filtered memory embeddings for workspace ${parsedWorkspaceId}.`,
+        error
+      );
+    }
+  }
+
+  public async existsAnyByObjectIds(
+    workspaceId: string,
+    objectIds: readonly string[]
+  ): Promise<boolean> {
+    const parsedWorkspaceId = parseWorkspaceId(workspaceId);
+    const parsedObjectIds = Array.from(new Set(objectIds.map((objectId) => parseObjectId(objectId))));
+
+    if (parsedObjectIds.length === 0) {
+      return false;
+    }
+
+    try {
+      const row = this.existsAnyByObjectIdFilterStatement.get(
+        JSON.stringify(parsedObjectIds),
+        parsedWorkspaceId
+      );
+      return row !== undefined && row !== null;
+    } catch (error) {
+      if (error instanceof StorageError) {
+        throw error;
+      }
+
+      throw new StorageError(
+        "QUERY_FAILED",
+        `Failed to probe memory embeddings for workspace ${parsedWorkspaceId}.`,
         error
       );
     }

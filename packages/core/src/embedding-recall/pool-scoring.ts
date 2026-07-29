@@ -12,6 +12,7 @@ import type {
   EmbeddingVectorRecord,
   PreparedEmbeddingQuerySnapshot
 } from "./types.js";
+import { NO_STORED_VECTORS_DEGRADATION_REASON } from "./constants.js";
 
 interface PoolScoringParams {
   readonly workspaceId: string;
@@ -23,6 +24,7 @@ interface PoolScoringParams {
   readonly queryEngine: Pick<QueryEmbeddingEngine, "prepareQueryEmbedding">;
   readonly queryTimeoutMs: number;
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  readonly recordQuietVectorDegradation?: (reason: string) => Promise<void>;
 }
 
 export async function scoreEmbeddingPoolCandidates(
@@ -33,7 +35,12 @@ export async function scoreEmbeddingPoolCandidates(
     return empty;
   }
   const storedVectors = await loadPoolVectors(params);
-  if (storedVectors === null || storedVectors.length === 0) {
+  if (storedVectors === null) {
+    await params.recordQuietVectorDegradation?.("local_vector_lookup_failed");
+    return empty;
+  }
+  if (storedVectors.length === 0) {
+    await params.recordQuietVectorDegradation?.(NO_STORED_VECTORS_DEGRADATION_REASON);
     return empty;
   }
   const queryEmbedding = await resolvePoolQueryEmbeddingSafely(params);

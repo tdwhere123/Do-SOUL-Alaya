@@ -119,7 +119,8 @@ describe("deep head", () => {
         trigramFtsRanks: { traced: 1 },
         evidenceFtsRanks: { traced: 0.25 },
         structuralScores: { traced: 1 }
-      })
+      }),
+      includeTraces: true
     });
     const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
 
@@ -143,7 +144,8 @@ describe("deep head", () => {
     const assessment = resolveDeepHeadAssessment({
       candidates: [candidate],
       answerRelevanceScores: new Map(),
-      supplementaryData: emptySupplementary()
+      supplementaryData: emptySupplementary(),
+      includeTraces: true
     });
     const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
 
@@ -207,7 +209,8 @@ describe("deep head", () => {
     const assessment = resolveDeepHeadAssessment({
       candidates,
       answerRelevanceScores: new Map([[scoredKey, 0.75]]),
-      supplementaryData: emptySupplementary()
+      supplementaryData: emptySupplementary(),
+      includeTraces: true
     });
 
     expect(assessment.traceByCandidateKey.get(scoredKey)).toMatchObject({

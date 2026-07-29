@@ -71,7 +71,15 @@ export interface RelationAssertionRepo {
   ): Promise<readonly Readonly<PathRelation>[] | null>;
 }
 export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
-  public constructor(private readonly db: StorageDatabase) {}
+  private readonly assertEvidenceAnchorsStatement;
+
+  public constructor(private readonly db: StorageDatabase) {
+    this.assertEvidenceAnchorsStatement = db.connection.prepare(`
+      SELECT object_id, workspace_id, event_anchor
+      FROM evidence_capsules
+      WHERE object_id IN (SELECT value FROM json_each(?))
+    `);
+  }
 
   public getStorageConnectionIdentity(): StorageDatabase {
     return this.db;
@@ -164,11 +172,7 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   }): void {
     const evidenceIds = requireUniqueRelationAssertionEvidenceIds(input.evidenceIds);
     try {
-      const rows = this.db.connection.prepare(`
-        SELECT object_id, workspace_id, event_anchor
-        FROM evidence_capsules
-        WHERE object_id IN (SELECT value FROM json_each(?))
-      `).all(JSON.stringify(evidenceIds)) as ReadonlyArray<
+      const rows = this.assertEvidenceAnchorsStatement.all(JSON.stringify(evidenceIds)) as ReadonlyArray<
         Readonly<{ readonly object_id: string; readonly workspace_id: string; readonly event_anchor: string | null }>
       >;
       const rowByEvidenceId = new Map(rows.map((row) => [row.object_id, row]));

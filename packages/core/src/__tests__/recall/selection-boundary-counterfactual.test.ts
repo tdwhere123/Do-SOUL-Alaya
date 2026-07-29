@@ -58,6 +58,7 @@ describe("independent embedding evidence operator", () => {
     const assessment = resolveIndependentEmbeddingEvidenceAssessment({
       candidates: [cold, embedded],
       answerRelevanceScores: new Map(),
+      includeTraces: true,
       supplementaryData: emptySupplementary({
         ftsRanks: { cold: 0.9, embedded: 0.81 },
         trigramFtsRanks: { cold: 0.81, embedded: 1 },
@@ -132,6 +133,7 @@ describe("nonlexical unit-interval composition operator", () => {
     const assessment = resolveNonlexicalUnitIntervalCompositionAssessment({
       candidates: [lexicalOnly],
       answerRelevanceScores: new Map(),
+      includeTraces: true,
       supplementaryData: emptySupplementary({
         ftsRanks: { lex: 0.9 },
         trigramFtsRanks: { lex: 0.81 }
@@ -162,6 +164,7 @@ describe("nonlexical unit-interval composition operator", () => {
     const assessment = resolveNonlexicalUnitIntervalCompositionAssessment({
       candidates: [cold, embedded],
       answerRelevanceScores: new Map(),
+      includeTraces: true,
       supplementaryData: emptySupplementary({
         ftsRanks: { cold: 0.9, embedded: 0.81 },
         trigramFtsRanks: { cold: 0.81, embedded: 1 },

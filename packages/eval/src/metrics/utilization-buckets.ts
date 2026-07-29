@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // Pure aggregation helper for recall-utilization 5-bucket counts.
 // Consumers: bench cohort metric (this module) and the daemon route at
-// apps/core-daemon/src/routes/memory/recall-utilization.ts.
+// apps/core-daemon/src/routes/memory/recall/recall-utilization.ts.
 
 export const UtilizationBucketDeliverySchema = z
   .object({
@@ -59,7 +59,7 @@ export interface UtilizationBucketCohortRow {
 // no_recall counts distinct session_id values whose reports reference a
 // delivery_id that has no matching SOUL_RECALL_DELIVERED in the window;
 // i.e., the agent attached but did not call recall in those sessions.
-// see also: apps/core-daemon/src/routes/memory/recall-utilization.ts
+// see also: apps/core-daemon/src/routes/memory/recall/recall-utilization.ts
 export function computeUtilizationBuckets(input: {
   readonly deliveries: readonly UtilizationBucketDelivery[];
   readonly reports: readonly UtilizationBucketReport[];
