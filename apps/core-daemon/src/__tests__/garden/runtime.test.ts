@@ -132,7 +132,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 type CapturedScheduler = (typeof hoisted.schedulers)[number];
 

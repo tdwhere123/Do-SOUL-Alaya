@@ -360,7 +360,7 @@ async function readLatestPointerSlug(
     return null;
   } catch (error) {
     if (isNotFound(error)) return null;
-    return null;
+    throw error;
   }
 }
 

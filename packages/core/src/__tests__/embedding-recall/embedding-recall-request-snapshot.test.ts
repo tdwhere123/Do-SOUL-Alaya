@@ -282,9 +282,16 @@ describe("EmbeddingRecallService request score snapshot", () => {
       maxSupplement: 1
     });
 
-    expect(snapshot.degradedReason).toBeNull();
+    expect(snapshot.degradedReason).toBe("no_stored_vectors");
     expect(snapshot.workspaceNeighbors.query_embedding_status).toBe("provider_not_requested");
-    expect(append).not.toHaveBeenCalled();
+    expect(append.mock.calls.map(([entry]) => entry.event_type)).toEqual([
+      ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED
+    ]);
+    expect(append.mock.calls[0]?.[0].payload_json).toEqual(
+      expect.objectContaining({
+        degradation_reason: "no_stored_vectors"
+      })
+    );
   });
 
   it("does not invoke an unavailable provider and records supplement degradation", async () => {

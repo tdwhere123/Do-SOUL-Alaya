@@ -6,9 +6,9 @@ import {
 } from "@do-soul/alaya-core";
 import { SqlitePathRelationRepo, initDatabase } from "@do-soul/alaya-storage";
 
-import { createEmbeddingBackfillRuntimeSupport } from "../../garden/scheduler-runtime-maintenance.js";
-import type { CreateGardenSchedulerRuntimeSupportInput } from "../../garden/scheduler-runtime-types.js";
-import { createGardenLegacyPathCandidateRejectionPort } from "../../runtime/garden-legacy-path-admission.js";
+import { createEmbeddingBackfillRuntimeSupport } from "../../garden/scheduler/scheduler-runtime-maintenance.js";
+import type { CreateGardenSchedulerRuntimeSupportInput } from "../../garden/scheduler/scheduler-runtime-types.js";
+import { createGardenLegacyPathCandidateRejectionPort } from "../../runtime/garden-wiring/garden-legacy-path-admission.js";
 
 const BACKFILL_TASK: GardenTaskDescriptor = {
   task_id: "embedding-backfill-s4",

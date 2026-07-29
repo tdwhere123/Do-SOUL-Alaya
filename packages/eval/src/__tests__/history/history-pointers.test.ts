@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -43,6 +43,18 @@ describe("history archive", () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   });
+  it("surfaces non-ENOENT pointer read failures instead of treating them as missing", async () => {
+    const slug = "2026-05-14T080000Z-0aaaaaa";
+    await writeEntry(layout, "self", slug, buildPayload("0aaaaaa"), "report", null);
+    const pointerPath = path.join(root, "self", "latest-run.json");
+    await chmod(pointerPath, 0o000);
+    try {
+      await expect(readLatest(layout, "self")).rejects.toMatchObject({ code: "EACCES" });
+    } finally {
+      await chmod(pointerPath, 0o644);
+    }
+  });
+
   it("keeps latest-run and latest-passing split when a later run fails", async () => {
     const passingSlug = "2026-05-14T080000Z-0aaaaaa";
     const failingSlug = "2026-05-15T080000Z-0bbbbbb";

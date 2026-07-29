@@ -19,7 +19,7 @@ import type { SqliteMemoryEntryRepo, StorageDatabase } from "@do-soul/alaya-stor
 import {
   createEmbeddingStatusService,
   type EmbeddingStatusDegradationSource
-} from "../services/embedding-status-service.js";
+} from "../services/status/embedding-status-service.js";
 import {
   DEFAULT_OPENAI_EMBEDDING_MODEL,
   createOptionalEvidenceRecallEmbeddingRepo,

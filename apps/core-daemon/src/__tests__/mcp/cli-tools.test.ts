@@ -5,13 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../../cli/tools.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
 import { ALAYA_SYSEXITS } from "../../cli/bridge.js";
-import { createMcpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
-import type { McpMemoryToolHandler } from "../../mcp-memory/tool-handler.js";
-import { callAlayaMcpMemoryTool } from "../../mcp/mcp-server.js";
+import { createMcpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
+import type { McpMemoryToolHandler } from "../../mcp-memory/tool/tool-handler.js";
+import { callAlayaMcpMemoryTool } from "../../mcp/server/mcp-server.js";
 import {
   context as realHandlerContext,
   createDeps
-} from "../mcp-memory/mcp-memory-tool-handler-fixture.js";
+} from "../mcp-memory/tool/mcp-memory-tool-handler-fixture.js";
 import { fixturePath } from "../support/test-paths.js";
 
 // Parity runs through one real handler (createMcpMemoryToolHandler over the

@@ -12,9 +12,9 @@ import {
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
 
-import { getBuiltinConversationToolSpecs } from "../../mcp/builtin-conversation-tool-specs.js";
+import { getBuiltinConversationToolSpecs } from "../../mcp/server/builtin-conversation-tool-specs.js";
 
-import type { AlayaDaemonRuntime } from "../../runtime/daemon-runtime-types.js";
+import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 
@@ -50,7 +50,7 @@ async function loadDaemonRuntimeFactory(): Promise<() => Promise<AlayaDaemonRunt
 }
 
 async function installWarnLoggerSpy() {
-  const runtimeHelpers = await import("../../runtime/daemon-runtime-helpers.js");
+  const runtimeHelpers = await import("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js");
   const warn = vi.fn();
   vi.spyOn(runtimeHelpers, "createWarnLogger").mockReturnValue({
     trace: vi.fn(),

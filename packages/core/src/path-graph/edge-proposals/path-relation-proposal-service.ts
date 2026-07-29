@@ -147,8 +147,8 @@ export class PathRelationProposalService {
 
   // Generalized candidate intake. Non-counter producers submit a fully
   // differentiated candidate; it mints once (subject to durable dedup and
-  // governance clamp). This is the stable signature Wave-2 edge folding
-  // calls. Returns a discriminated PathMintOutcome: applied / already_present
+  // governance clamp). Edge folding reuses this entry point instead of a
+  // parallel mint path. Returns a discriminated PathMintOutcome: applied / already_present
   // on success, rejected on a permanent anchor refusal, failed on a
   // transient (caught) error so a no-drop consumer can keep the work pending.
   public async submitCandidate(input: SubmitCandidateInput): Promise<PathMintOutcome> {

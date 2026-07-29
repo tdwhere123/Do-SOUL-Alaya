@@ -6,8 +6,8 @@ import { RuntimeGardenComputeConfigSchema, formatFileSecretRef, type RuntimeGard
 import { initDatabase, SqliteConfigRepo } from "@do-soul/alaya-storage";
 import { describe, expect, it, vi } from "vitest";
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
-import { createDoctorCommand } from "../../cli/doctor.js";
-import { createInstallCommand } from "../../cli/install.js";
+import { createDoctorCommand } from "../../cli/doctor/doctor.js";
+import { createInstallCommand } from "../../cli/install/install.js";
 import { resolveSecretRef } from "../../secrets/index.js";
 
 describe("install keychain migration", () => {

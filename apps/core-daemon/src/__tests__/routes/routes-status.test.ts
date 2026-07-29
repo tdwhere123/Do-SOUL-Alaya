@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { registerStatusRoutes } from "../../routes/workspace/status.js";
+import { registerStatusRoutes } from "../../cli/status.js";
 
 describe("status route", () => {
   it("returns the exported AlayaStatus envelope", async () => {

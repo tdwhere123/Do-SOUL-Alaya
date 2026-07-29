@@ -2,8 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ConversationRuntimeContext, ToolSpec } from "@do-soul/alaya-protocol";
-import { builtinConversationToolRequiresConfirmation } from "../../mcp/builtin-conversation-tool-specs.js";
-import { executeConversationToolOrThrow } from "../../mcp/tool-runtime.js";
+import { builtinConversationToolRequiresConfirmation } from "../../mcp/server/builtin-conversation-tool-specs.js";
+import { executeConversationToolOrThrow } from "../../mcp/tool-runtime/tool-runtime.js";
 export { createDeferred } from "../support/deferred.js";
 
 const tempDirs = new Set<string>();

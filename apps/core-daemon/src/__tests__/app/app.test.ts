@@ -7,7 +7,7 @@ import {
   type CoreDaemonLifecycleState,
   type CoreDaemonServices
 } from "../../runtime/app.js";
-import { createRequestProtection } from "../../runtime/daemon-runtime-support.js";
+import { createRequestProtection } from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 import { appConfigServiceStub } from "../support/app-config-service-stub.js";
 import {
   configRouteServices,

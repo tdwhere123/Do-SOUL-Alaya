@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { EventPublisher } from "@do-soul/alaya-core";
 import { RuntimeGardenComputeConfigSchema } from "@do-soul/alaya-protocol";
 import { initDatabase, SqliteConfigRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
-import { createConfigService } from "../../services/config-service.js";
-import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
+import { createConfigService } from "../../services/config/config-service.js";
+import { resolveAlayaConfigPaths } from "../../cli/support/config-files.js";
 
 describe("config-service legacy secret_ref compatibility", () => {
   it("keeps a persisted legacy keychain ref schema-compatible for the resolver boundary", async () => {

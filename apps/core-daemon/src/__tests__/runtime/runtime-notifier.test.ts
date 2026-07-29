@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EventLogEntry } from "@do-soul/alaya-protocol";
-import { createRuntimeNotifier } from "../../runtime/runtime-notifier.js";
+import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
 
 describe("RuntimeNotifier", () => {
   async function importRuntimeNotifierWithMockedWarnLogger(warn: ReturnType<typeof vi.fn>) {
     vi.resetModules();
     vi.doMock("../../runtime/daemon-runtime-helpers.js", async () => {
-      const actual = await vi.importActual<typeof import("../../runtime/daemon-runtime-helpers.js")>(
+      const actual = await vi.importActual<typeof import("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js")>(
         "../../runtime/daemon-runtime-helpers.js"
       );
       return {
@@ -21,7 +21,7 @@ describe("RuntimeNotifier", () => {
         })
       };
     });
-    const mod = await import("../../runtime/runtime-notifier.js");
+    const mod = await import("../../runtime/daemon/support/runtime-notifier.js");
     return {
       createRuntimeNotifier: mod.createRuntimeNotifier,
       cleanup: () => {

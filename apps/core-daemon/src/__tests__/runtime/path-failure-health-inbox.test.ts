@@ -9,7 +9,7 @@ import {
   initDatabase,
   SqliteHealthIssueGroupRepo
 } from "@do-soul/alaya-storage";
-import { createPathFailureHealthInbox } from "../../runtime/daemon-service-wiring.js";
+import { createPathFailureHealthInbox } from "../../runtime/daemon/wiring/daemon-service-wiring.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

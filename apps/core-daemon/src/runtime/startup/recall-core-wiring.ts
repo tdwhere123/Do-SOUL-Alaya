@@ -1,12 +1,12 @@
 import { isTemporalProjectionSelected } from "@do-soul/alaya-storage";
-import { createDaemonRepositories } from "../daemon-repositories.js";
-import { createDaemonServiceFoundation } from "../daemon-service-foundation.js";
-import { createDaemonCoreServices } from "../daemon-service-wiring.js";
-import type { DaemonStartupStepRecord } from "../daemon-runtime-types.js";
-import { recordStartupStep } from "../daemon-runtime-support.js";
-import { createRecallMaterializationWiring } from "../recall-materialization-wiring.js";
-import type { CreateRecallMaterializationWiringInput } from "../recall-materialization-wiring-types.js";
-import type { RecallReadWorkerClient } from "../recall-read-worker-client.js";
+import { createDaemonRepositories } from "../daemon/wiring/daemon-repositories.js";
+import { createDaemonServiceFoundation } from "../daemon/wiring/daemon-service-foundation.js";
+import { createDaemonCoreServices } from "../daemon/wiring/daemon-service-wiring.js";
+import type { DaemonStartupStepRecord } from "../daemon/lifecycle/daemon-runtime-types.js";
+import { recordStartupStep } from "../daemon/lifecycle/daemon-runtime-support.js";
+import { createRecallMaterializationWiring } from "../recall-materialization/recall-materialization-wiring.js";
+import type { CreateRecallMaterializationWiringInput } from "../recall-materialization/recall-materialization-wiring-types.js";
+import type { RecallReadWorkerClient } from "../recall/recall-read-worker-client.js";
 
 type Repositories = ReturnType<typeof createDaemonRepositories>;
 type Foundation = Awaited<ReturnType<typeof createDaemonServiceFoundation>>;

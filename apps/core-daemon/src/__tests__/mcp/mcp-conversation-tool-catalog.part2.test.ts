@@ -20,7 +20,7 @@ import {
   createDaemonMcpCatalogFromEnv,
   createConversationToolCatalog,
   syncConversationToolCatalog
-} from "../../mcp/mcp-catalog.js";
+} from "../../mcp/catalog/mcp-catalog.js";
 
 import {
   SqliteEventLogRepo,
@@ -29,7 +29,7 @@ import {
   initDatabase
 } from "@do-soul/alaya-storage";
 
-import { createRuntimeNotifier } from "../../runtime/runtime-notifier.js";
+import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
 
 const databases = new Set<ReturnType<typeof initDatabase>>();
 

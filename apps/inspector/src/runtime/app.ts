@@ -15,6 +15,8 @@ import { registerInspectorRecallStatsRoutes } from "../routes/recall-stats.js";
 import { registerInspectorSoulSearchRoutes } from "../routes/soul-search.js";
 import { registerInspectorStatusRoutes } from "../routes/status.js";
 import { registerInspectorStaticRoutes } from "../routes/static.js";
+import { createInspectorLaunchSessionStore } from "../launch/launch-session-store.js";
+import { registerInspectorLaunchSessionRoutes } from "../routes/launch-session.js";
 
 export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "GET /api/config/:workspaceId/soul",
@@ -47,7 +49,8 @@ export const INSPECTOR_ROUTE_SURFACE = Object.freeze([
   "POST /api/proposals/:workspaceId/memory/:memoryId/downgrade",
   "POST /api/proposals/:workspaceId/memory/:memoryId/retire",
   "POST /api/workspaces/:workspaceId/soul/memory/:memoryId/proposals/promote-strictly-governed",
-  "POST /api/soul/search/:workspaceId"
+  "POST /api/soul/search/:workspaceId",
+  "POST /api/launch-session"
 ] as const);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +62,7 @@ export const DEFAULT_INSPECTOR_DAEMON_TIMEOUT_MS = 10_000;
 
 export interface InspectorAppOptions {
   readonly token: string;
+  readonly launchCode?: string;
   readonly workspaceId?: string;
   readonly daemonUrl?: string;
   readonly daemonTimeoutMs?: number;
@@ -73,15 +77,29 @@ export function createInspectorApp(options: InspectorAppOptions): Hono {
   const app = new Hono();
   const env = options.env ?? process.env;
   const proxyOptions = createProxyOptions(options, env);
+  const launchSessionStore = createInspectorLaunchSessionStore();
+  registerLaunchSession(app, options, launchSessionStore);
   registerInspectorMiddleware(app, options.token);
   registerInspectorApiRoutes(app, options, proxyOptions);
   return app;
 }
 
+function registerLaunchSession(
+  app: Hono,
+  options: InspectorAppOptions,
+  launchSessionStore: ReturnType<typeof createInspectorLaunchSessionStore>
+): void {
+  const launchCode = normalizeOptionalSecret(options.launchCode);
+  if (launchCode !== undefined) {
+    launchSessionStore.register(launchCode, options.token);
+  }
+  registerInspectorLaunchSessionRoutes(app, launchSessionStore);
+}
+
 function registerInspectorMiddleware(app: Hono, token: string): void {
   registerRequestIdMiddleware(app);
   registerErrorHandler(app);
-  app.use("/api/*", createInspectorAuthMiddleware(token));
+  app.use("/api/*", createInspectorAuthMiddleware(token, { publicPathPrefixes: ["/api/launch-session"] }));
   app.use("*", async (context, next) => {
     if (isBodylessMethod(context.req.method)) {
       await next();

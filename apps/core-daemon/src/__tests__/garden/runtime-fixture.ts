@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { PathGraphSnapshot, PathRelation } from "@do-soul/alaya-protocol";
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 export type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 

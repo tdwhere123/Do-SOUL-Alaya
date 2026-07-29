@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseDaemonMcpServerRuntimeConfigs,
   readDaemonMcpCatalogEnvironment
-} from "../../mcp/mcp-catalog-parsing.js";
+} from "../../mcp/catalog/mcp-catalog-parsing.js";
 
 // invariant: an invalid tool spec in ALAYA_MCP_TOOL_CATALOG_JSON is dropped
 // (correct), but the drop must be observable via ALAYA_MCP_TOOL_SPEC_INVALID

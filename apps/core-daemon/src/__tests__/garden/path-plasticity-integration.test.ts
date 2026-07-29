@@ -38,7 +38,7 @@ import { EventPublisher } from "@do-soul/alaya-core";
 
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
 
-import { createPathPlasticityService } from "../../garden/path-plasticity-runtime.js";
+import { createPathPlasticityService } from "../../garden/path-plasticity/path-plasticity-runtime.js";
 
 import { createTrustStateRecorder } from "../../trust/state.js";
 

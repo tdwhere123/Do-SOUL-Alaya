@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWorkspaceGitRateLimiter } from "../../routes/workspace/workspace-files.js";
+import { createWorkspaceGitRateLimiter } from "../../routes/workspace/files/workspace-files.js";
 
 describe("createWorkspaceGitRateLimiter", () => {
   afterEach(() => {

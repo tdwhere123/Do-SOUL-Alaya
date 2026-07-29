@@ -3,7 +3,7 @@ import type {
   ConversationMessage
 } from "@do-soul/alaya-protocol";
 import { buildGardenTurnEvidenceFallback } from "@do-soul/alaya-soul";
-import { buildGardenTaskEvidenceFallbackSignalId } from "../task-signal-id.js";
+import { buildGardenTaskEvidenceFallbackSignalId } from "../support/task-signal-id.js";
 import {
   receivedEvidenceCapsule,
   type PostTurnSignalReceiver

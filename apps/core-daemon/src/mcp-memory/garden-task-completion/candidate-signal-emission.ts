@@ -10,11 +10,11 @@ import {
 import {
   GardenTaskUnavailableError,
   GardenTaskValidationError
-} from "../garden-task-handler-support.js";
+} from "../garden-task/garden-task-handler-support.js";
 import type {
   GardenTaskHandlerDependencies,
   GardenTaskToolCallContext
-} from "../garden-task-handlers.js";
+} from "../garden-task/garden-task-handlers.js";
 
 interface CandidateSignalEmissionParams {
   readonly deps: GardenTaskHandlerDependencies;

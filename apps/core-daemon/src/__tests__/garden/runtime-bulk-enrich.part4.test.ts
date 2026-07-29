@@ -112,8 +112,8 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   };
 });
 
-import { createGardenRuntime } from "../../garden/runtime.js";
-import { createGardenSignalRefReplayPort } from "../../runtime/garden-signal-ref-replay.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
+import { createGardenSignalRefReplayPort } from "../../runtime/garden-wiring/garden-signal-ref-replay.js";
 
 type Runtime = ReturnType<typeof createGardenRuntime>;
 

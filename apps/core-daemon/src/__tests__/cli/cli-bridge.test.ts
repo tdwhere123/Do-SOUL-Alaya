@@ -14,8 +14,8 @@ import {
   runAlayaCli,
   resolveAlayaCliDistPaths,
   type LoadedAlayaCliModules
-} from "../../cli/module-loader.js";
-import { AlayaOperationError } from "../../cli/operations-types.js";
+} from "../../cli/support/module-loader.js";
+import { AlayaOperationError } from "../../cli/operations/operations-types.js";
 import { pathEndsWithPosixSegments, toPosixPath } from "../support/test-paths.js";
 
 function createTextSink(): { readonly stream: PassThrough; readonly readText: () => string } {

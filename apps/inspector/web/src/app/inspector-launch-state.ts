@@ -28,10 +28,18 @@ export function useInspectorLaunchState(): InspectorLaunchState {
   useCommandPaletteHotkey(paletteOpen, togglePalette);
 
   useEffect(() => {
-    applyLaunchParams(readLaunchParams(searchParams, location.hash), setAuthError, setReady);
+    let cancelled = false;
+    void bootstrapInspectorSession(readLaunchParams(searchParams), {
+      cancelled: () => cancelled,
+      setAuthError,
+      setReady
+    });
     setUnauthorizedHandler(() => setSessionExpired(true));
-    return () => setUnauthorizedHandler(null);
-  }, [location.hash, searchParams]);
+    return () => {
+      cancelled = true;
+      setUnauthorizedHandler(null);
+    };
+  }, [location.search, searchParams]);
 
   return {
     authError,
@@ -43,33 +51,62 @@ export function useInspectorLaunchState(): InspectorLaunchState {
   };
 }
 
-function applyLaunchParams(
-  launchParams: { readonly token: string | null; readonly workspaceId: string | null },
-  setAuthError: (error: string | null) => void,
-  setReady: (ready: boolean) => void
-) {
-  if (launchParams.token) {
-    setInspectorToken(launchParams.token);
-    setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
-    clearTokenFragment();
-    setAuthError(null);
-    setReady(true);
-  } else if (getInspectorToken()) {
-    setAuthError(null);
-    setReady(true);
-  } else {
-    setAuthError("No token found in URL. Please run `alaya inspect` to open this tool.");
+async function bootstrapInspectorSession(
+  launchParams: { readonly launchCode: string | null; readonly workspaceId: string | null },
+  callbacks: {
+    readonly cancelled: () => boolean;
+    readonly setAuthError: (error: string | null) => void;
+    readonly setReady: (ready: boolean) => void;
   }
+): Promise<void> {
+  if (launchParams.launchCode) {
+    const token = await redeemLaunchCode(launchParams.launchCode);
+    if (callbacks.cancelled()) {
+      return;
+    }
+    if (token === null) {
+      callbacks.setAuthError("Launch code expired or invalid. Please run `alaya inspect` again.");
+      callbacks.setReady(false);
+      return;
+    }
+    setInspectorToken(token);
+    setWorkspaceId(launchWorkspaceId(launchParams.workspaceId));
+    clearLaunchQueryParam();
+    callbacks.setAuthError(null);
+    callbacks.setReady(true);
+    return;
+  }
+
+  if (getInspectorToken()) {
+    callbacks.setAuthError(null);
+    callbacks.setReady(true);
+    return;
+  }
+
+  callbacks.setAuthError("No session found. Please run `alaya inspect` to open this tool.");
+  callbacks.setReady(false);
 }
 
-function readLaunchParams(searchParams: URLSearchParams, hash: string): {
-  readonly token: string | null;
+async function redeemLaunchCode(code: string): Promise<string | null> {
+  const response = await fetch("/api/launch-session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code })
+  });
+  if (!response.ok) {
+    return null;
+  }
+  const body = (await response.json()) as { readonly token?: unknown };
+  return typeof body.token === "string" && body.token.trim().length > 0 ? body.token : null;
+}
+
+function readLaunchParams(searchParams: URLSearchParams): {
+  readonly launchCode: string | null;
   readonly workspaceId: string | null;
 } {
-  const hashParams = new URLSearchParams(hash.replace(/^#/u, ""));
   return {
-    token: hashParams.get("token"),
-    workspaceId: searchParams.get("workspaceId") ?? hashParams.get("workspaceId")
+    launchCode: searchParams.get("launch"),
+    workspaceId: searchParams.get("workspaceId")
   };
 }
 
@@ -77,7 +114,12 @@ function launchWorkspaceId(value: string | null): string | null {
   return value?.trim().length ? value : null;
 }
 
-function clearTokenFragment(): void {
-  if (!window.location.hash.includes("token=")) return;
-  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+function clearLaunchQueryParam(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("launch")) {
+    return;
+  }
+  url.searchParams.delete("launch");
+  const nextSearch = url.searchParams.toString();
+  window.history.replaceState(null, "", `${url.pathname}${nextSearch.length > 0 ? `?${nextSearch}` : ""}`);
 }

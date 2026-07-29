@@ -7,7 +7,7 @@ import {
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
 
-import { createEventLogOrphanDetectionRunner } from "../../garden/scheduler-runtime-maintenance.js";
+import { createEventLogOrphanDetectionRunner } from "../../garden/scheduler/scheduler-runtime-maintenance.js";
 
 function createTask(): GardenTaskDescriptor {
   return {

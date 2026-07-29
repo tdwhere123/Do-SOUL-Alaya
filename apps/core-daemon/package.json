@@ -10,7 +10,15 @@
     "url": "git+https://github.com/tdwhere123/Do-SOUL-Alaya.git",
     "directory": "apps/core-daemon"
   },
-  "keywords": ["mcp", "memory", "agent", "claude-code", "codex", "alaya", "local-first"],
+  "keywords": [
+    "mcp",
+    "memory",
+    "agent",
+    "claude-code",
+    "codex",
+    "alaya",
+    "local-first"
+  ],
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
@@ -26,8 +34,8 @@
       "types": "./dist/index.d.ts"
     },
     "./mcp-server": {
-      "import": "./dist/mcp/mcp-server.js",
-      "types": "./dist/mcp/mcp-server.d.ts"
+      "import": "./dist/mcp/server/mcp-server.js",
+      "types": "./dist/mcp/server/mcp-server.d.ts"
     },
     "./cli/bridge": {
       "import": "./dist/cli/bridge.js",
@@ -57,6 +65,7 @@
   "dependencies": {
     "@do-soul/alaya-core": "workspace:*",
     "@do-soul/alaya-engine-gateway": "workspace:*",
+    "@do-soul/alaya-eval": "workspace:*",
     "@do-soul/alaya-inspector": "workspace:*",
     "@do-soul/alaya-protocol": "workspace:*",
     "@do-soul/alaya-soul": "workspace:*",

@@ -12,9 +12,9 @@ import {
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
 
-import { getBuiltinConversationToolSpecs } from "../../mcp/builtin-conversation-tool-specs.js";
+import { getBuiltinConversationToolSpecs } from "../../mcp/server/builtin-conversation-tool-specs.js";
 
-import type { AlayaDaemonRuntime } from "../../runtime/daemon-runtime-types.js";
+import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 

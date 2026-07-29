@@ -2,11 +2,7 @@ import { z } from "zod";
 
 // Pure aggregation helper for recall-utilization 5-bucket counts.
 // Consumers: bench cohort metric (this module) and the daemon route at
-// apps/core-daemon/src/routes/recall-utilization.ts (which derives the
-// same buckets directly from EventLog payloads).
-//
-// invariant: pure function over already-projected events; does not touch
-// trust state, PathRelation, or any storage. Counts only.
+// apps/core-daemon/src/routes/memory/recall-utilization.ts.
 
 export const UtilizationBucketDeliverySchema = z
   .object({
@@ -50,6 +46,7 @@ export interface UtilizationBucketCohortRow {
   readonly agent_target: string;
   readonly buckets: UtilizationBucketCounts;
   readonly delivery_total: number;
+  readonly single_used_anchor_count: number;
 }
 
 // Compute the 5-bucket split for a single (workspace, agent_target) cohort.
@@ -62,8 +59,7 @@ export interface UtilizationBucketCohortRow {
 // no_recall counts distinct session_id values whose reports reference a
 // delivery_id that has no matching SOUL_RECALL_DELIVERED in the window;
 // i.e., the agent attached but did not call recall in those sessions.
-// see also: apps/core-daemon/src/routes/recall-utilization.ts
-// computeBuckets (must stay in lockstep on this denominator).
+// see also: apps/core-daemon/src/routes/memory/recall-utilization.ts
 export function computeUtilizationBuckets(input: {
   readonly deliveries: readonly UtilizationBucketDelivery[];
   readonly reports: readonly UtilizationBucketReport[];
@@ -172,7 +168,11 @@ export function rollUpUtilizationBucketsByCohort(input: {
         deliveries: cohort.deliveries,
         reports: cohort.reports
       }),
-      delivery_total: cohort.deliveries.length
+      delivery_total: cohort.deliveries.length,
+      single_used_anchor_count: listSingleUsedAnchorDeliveries({
+        deliveries: cohort.deliveries,
+        reports: cohort.reports
+      }).length
     });
   }
   rows.sort((a, b) => {

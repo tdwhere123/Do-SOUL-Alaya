@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
-import { createAlayaOperationsService } from "../../cli/operations-service.js";
+import { resolveAlayaConfigPaths } from "../../cli/support/config-files.js";
+import { createAlayaOperationsService } from "../../cli/operations/operations-service.js";
 import { quoteTomlString } from "../support/test-paths.js";
 
 describe("alaya operations", () => {

@@ -8,7 +8,7 @@ import {
   type RuntimeGardenComputeConfig
 } from "@do-soul/alaya-protocol";
 import { initDatabase, SqliteConfigRepo, SqliteEventLogRepo } from "@do-soul/alaya-storage";
-import type { AlayaConfigPaths } from "../config-files.js";
+import type { AlayaConfigPaths } from "../support/config-files.js";
 import {
   RUNTIME_GARDEN_COMPUTE_CONFIG_KEY,
   fileExists,

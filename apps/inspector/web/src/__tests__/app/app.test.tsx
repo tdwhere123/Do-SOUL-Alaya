@@ -45,12 +45,17 @@ function renderApp(initialEntry: string) {
 
 describe("AppContent", () => {
   beforeEach(() => {
+    sessionStorage.clear();
     setInspectorToken("");
     setWorkspaceId(null);
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: FetchInput) => {
+      vi.fn(async (input: FetchInput, init?: RequestInit) => {
         const url = urlOf(input);
+
+        if (url.includes("/api/launch-session") && init?.method === "POST") {
+          return jsonResponse({ token: "test-token" });
+        }
 
         if (url.includes("/status")) {
           return jsonResponse({ success: true, data: VALID_STATUS });
@@ -90,30 +95,32 @@ describe("AppContent", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    sessionStorage.clear();
     setWorkspaceId(null);
   });
 
-  it("keeps the launch token after redirecting from / to the real overview surface", async () => {
-    renderApp("/?workspaceId=ws1#token=test-token");
+  it("keeps the launch session after redirecting from / to the real overview surface", async () => {
+    renderApp("/?workspaceId=ws1&launch=launch-code");
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
+    expect(await screen.findByTestId("overview-card-proposals")).toBeTruthy();
     expect(screen.getByTestId("overview-card-proposals").textContent).toContain("5");
     expect(screen.getByTestId("inspector-sidebar")).toBeTruthy();
-    expect(screen.queryByText("No token found in URL. Please run `alaya inspect` to open this tool.")).toBeNull();
+    expect(screen.queryByText("No session found. Please run `alaya inspect` to open this tool.")).toBeNull();
   });
 
   it("renders the real legacy /status redirect through the system surface", async () => {
-    renderApp("/status?workspaceId=ws1#token=test-token");
+    renderApp("/status?workspaceId=ws1&launch=launch-code");
 
     expect(await screen.findByText("Startup Log")).toBeTruthy();
     expect(screen.getByText("repo opened")).toBeTruthy();
     expect(screen.getByTestId("system-tabs")).toBeTruthy();
   });
 
-  it("clears stale workspace state when a fresh token URL omits workspaceId", async () => {
+  it("clears stale workspace state when a fresh launch URL omits workspaceId", async () => {
     setWorkspaceId("stale-ws");
 
-    renderApp("/#token=fresh-token");
+    renderApp("/?launch=fresh-launch-code");
 
     expect(await screen.findByTestId("overview-card-daemon")).toBeTruthy();
     expect(getWorkspaceId()).toBeNull();
@@ -122,7 +129,7 @@ describe("AppContent", () => {
   it("renders the lazy graph route through the app router", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => null);
 
-    renderApp("/graph#token=test-token");
+    renderApp("/graph?launch=launch-code");
 
     expect(await screen.findByTestId("graph-no-workspace")).toBeTruthy();
     expect(

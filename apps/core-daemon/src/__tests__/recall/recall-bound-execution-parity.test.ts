@@ -11,8 +11,8 @@ import {
   buildRecallPolicy,
   type FineAssessmentSelectionBoundaryCase
 } from "@do-soul/alaya-core";
-import { runProductionBoundRecall } from "../../mcp-memory/recall-bound-service.js";
-import type { RecallUsageHandlerDependencies } from "../../mcp-memory/recall-usage-handlers.js";
+import { runProductionBoundRecall } from "../../mcp-memory/recall/recall-bound-service.js";
+import type { RecallUsageHandlerDependencies } from "../../mcp-memory/recall/recall-usage-handlers.js";
 import { invokeBoundRecall } from "../../recall/recall-bound-execution.js";
 
 function makeSharedPolicy(): RecallPolicy {

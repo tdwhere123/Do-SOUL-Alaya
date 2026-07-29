@@ -4,7 +4,7 @@ import {
   type PathRelation
 } from "@do-soul/alaya-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { createGraphHealthService } from "../../services/graph-health-service.js";
+import { createGraphHealthService } from "../../services/status/graph-health-service.js";
 
 describe("GraphHealthService", () => {
   it("counts path relations by kind and reports the latest path event", async () => {

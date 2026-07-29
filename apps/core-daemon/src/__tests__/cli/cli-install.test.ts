@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { createInstallCommand } from "../../cli/install.js";
+import { createInstallCommand } from "../../cli/install/install.js";
 import { readSecretLine } from "../../cli/install/masked-stdin.js";
 import type { AlayaCliContext } from "../../cli/bridge.js";
 

@@ -4,7 +4,8 @@ import { type MemoryEntry } from "@do-soul/alaya-protocol";
 import {
   DEFAULT_EVIDENCE_DOCUMENT_EMBEDDING_CACHE_SIZE,
   DEFAULT_QUERY_EMBEDDING_CACHE_SIZE,
-  DEFAULT_QUERY_TIMEOUT_MS
+  DEFAULT_QUERY_TIMEOUT_MS,
+  NO_STORED_VECTORS_DEGRADATION_REASON
 } from "./constants.js";
 import { EmbeddingRecallTelemetry } from "./embedding-recall-telemetry.js";
 import { EvidenceDocumentEmbeddingEngine } from "./evidence/evidence-document-embedding-engine.js";
@@ -179,7 +180,14 @@ export class EmbeddingRecallService {
     }
 
     if (storedVectors.length === 0) {
-      return this.emptyPreparedSupplement(null);
+      await this.recordPrecheckDegraded({
+        workspaceId: params.workspaceId,
+        runId: params.runId,
+        reason: NO_STORED_VECTORS_DEGRADATION_REASON,
+        baseCandidateCount: params.baseCandidateCount,
+        fallbackCandidateCount: params.baseCandidateCount
+      });
+      return this.emptyPreparedSupplement(NO_STORED_VECTORS_DEGRADATION_REASON);
     }
 
     return Object.freeze({
@@ -288,7 +296,14 @@ export class EmbeddingRecallService {
       baseCandidateCount: params.baseCandidateIds.length
     });
 
-    if (storedVectors === null || storedVectors.length === 0) {
+    if (storedVectors === null) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+    if (storedVectors.length === 0) {
+      await this.recordEmbeddingDegraded(
+        { ...params, queryId, baseCandidateCount: params.baseCandidateIds.length },
+        NO_STORED_VECTORS_DEGRADATION_REASON
+      );
       return EMPTY_SUPPLEMENT_RESULT;
     }
 
@@ -330,7 +345,18 @@ export class EmbeddingRecallService {
         baseCandidateCount: params.baseCandidateIds.length
       });
 
-    if (storedVectors === null || storedVectors.length === 0) {
+    if (storedVectors === null) {
+      return EMPTY_SUPPLEMENT_RESULT;
+    }
+    if (storedVectors.length === 0) {
+      await this.recordEmbeddingDegraded(
+        {
+          ...params,
+          queryId: params.preparedQuery.queryId,
+          baseCandidateCount: params.baseCandidateIds.length
+        },
+        NO_STORED_VECTORS_DEGRADATION_REASON
+      );
       return EMPTY_SUPPLEMENT_RESULT;
     }
 

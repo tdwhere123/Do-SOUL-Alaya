@@ -2,8 +2,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CoreError } from "@do-soul/alaya-core";
 import { formatFileSecretRef } from "@do-soul/alaya-protocol";
-import { resolveAlayaConfigPaths } from "../../cli/config-files.js";
-import { normalizeRuntimeEmbeddingConfigPatch } from "../../services/env-file-service.js";
+import { resolveAlayaConfigPaths } from "../../cli/support/config-files.js";
+import { normalizeRuntimeEmbeddingConfigPatch } from "../../services/env-file/env-file-service.js";
 
 describe("normalizeRuntimeEmbeddingConfigPatch paste platform policy", () => {
   const paths = resolveAlayaConfigPaths(path.join(path.sep, "tmp", "alaya-config"));

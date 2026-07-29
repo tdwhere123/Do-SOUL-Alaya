@@ -4,7 +4,7 @@ import {
   GardenProviderKind,
   type GardenComputeProvider
 } from "@do-soul/alaya-soul";
-import { GardenComputeProviderResolver } from "../../services/garden-compute-provider-resolver.js";
+import { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
 
 describe("GardenComputeProviderResolver", () => {
   it("caches the provider for an unchanged runtime config", async () => {

@@ -13,7 +13,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-const { execShell } = await import("../../mcp/tool-runtime-file-write-exec.js");
+const { execShell } = await import("../../mcp/tool-runtime/tool-runtime-file-write-exec.js");
 
 describe.skipIf(process.platform === "win32")("execShell containment failures", () => {
   let root: string;

@@ -22,7 +22,7 @@ import {
   createPathPlasticityWatermarkRegistry,
   createRecallPathPlasticityPort,
   createUsageProofReader
-} from "../../garden/path-plasticity-runtime.js";
+} from "../../garden/path-plasticity/path-plasticity-runtime.js";
 function seedWorkspace(database: ReturnType<typeof initDatabase>): void {
   database.connection
     .prepare(

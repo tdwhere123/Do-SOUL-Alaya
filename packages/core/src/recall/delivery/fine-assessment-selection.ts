@@ -1,104 +1,44 @@
-import type { MemoryDimension as MemoryDimensionType, RecallCandidate, RecallPolicy, RecallScoreFactors } from "@do-soul/alaya-protocol";
 import { buildRecallCandidate, buildRecallCandidateSelectionKey } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
-import type { CoarseRecallCandidate, RecallCandidateDiagnostic, RecallCandidateDropReason, RecallFusionBreakdown, RecallSupplementaryData, TokenEstimator } from "../runtime/recall-service-types.js";
-import { orderByCoverageMarginalGain } from "./coverage-selection.js";
-import type { RecallAnswerSupportObservation } from "../query/recall-answer-support-observation.js";
-import type { RecallCandidateAnswerSupport } from "../query/recall-candidate-answer-support.js";
-import type { RecallDeepHeadTrace } from "../rerank/deep-head.js";
-import { hasRankedEmbeddingHead, selectEmbeddingHeadEvictions } from
-  "./admission/embedding-head-dominance.js";
-import { buildFineAssessmentAnswerSupportContext } from
-  "./answer-support/answer-support-context.js";
-import { retainBoundedAnswerHeads, selectBoundedDirectEvidenceHead } from
-  "./admission/direct-evidence-answer-head.js";
-import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from
-  "./diagnostics/fine-assessment-diagnostics.js";
-import { buildFinalPacketConsensusObservation, buildConsensusReplayOrder, packetMatchesConsensusPlan, resolveFinalPacketConsensusPlan, selectFinalPacketConsensusCandidates } from "./final-order/final-packet-consensus.js";
-import { mergeFinalPacketAdmissionDiagnostics } from "./final-order/final-packet-diagnostics.js";
-import { materializeFinalPacket, orderDeliveredPacket } from "./final-order/final-packet-order.js";
-import { orderWithVerifiedAnswerSlot } from "./final-order/verified-answer-slot.js";
-import type { RecallPacketPlanObservation } from "./packet-plan/packet-plan-trace.js";
+import { selectBoundedDirectEvidenceHead } from "./admission/direct-evidence-answer-head.js";
+import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
+import { resolveFinalPacketConsensusPlan, selectFinalPacketConsensusCandidates } from "./final-order/final-packet-consensus.js";
 import {
-  createSelectionBoundaryCapture,
-  notifySelectionBoundaryObserver
-} from
-  "./selection-boundary/selection-boundary-capture.js";
-import type { FineAssessmentSelectionBoundaryPendingCapture } from
-  "./selection-boundary/selection-boundary-capture.js";
-export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
-  readonly effectiveScore: number;
-  readonly effectiveFactors: RecallScoreFactors;
-  readonly fusion: RecallFusionBreakdown;
-}>;
-interface FineAssessmentAccumulator {
-  readonly selected: RecallCandidate[];
-  readonly diagnostics: RecallCandidateDiagnostic[];
-  readonly admission: FineAssessmentAdmissionState;
-}
-interface FineAssessmentAdmissionState {
-  readonly seenObjects: Set<string>;
-  readonly perDimensionCounts: Map<MemoryDimensionType, number>;
-  selectedCount: number;
-  totalTokens: number;
-}
+  collectAdmittedCandidates,
+  createAdmissionState,
+  estimateCandidateTokens,
+  recordAcceptedAdmission,
+  resolveAdmission
+} from "./fine-assessment-selection/admission.js";
+import {
+  applyFinalPacketConsensus,
+  buildSelectionResult,
+  createSelectionBoundary,
+  materializeFineAssessmentDelivery
+} from "./fine-assessment-selection/consensus-result.js";
+import {
+  createSelectionContext,
+  prepareCoverageSelection
+} from "./fine-assessment-selection/coverage-order.js";
+import type {
+  FineAssessmentAccumulator,
+  FineAssessmentCandidate,
+  FineAssessmentSelectionContext,
+  FineAssessmentSelectionParams,
+  FineAssessmentSelectionResult
+} from "./fine-assessment-selection/types.js";
 
-export interface FineAssessmentSelectionContext {
-  readonly config: Readonly<RecallPolicy>["fine_assessment"];
-  readonly supplementaryData: RecallSupplementaryData;
-  readonly tokenEstimator: TokenEstimator;
-  readonly rankByCandidateKey: ReadonlyMap<string, number>;
-  readonly finalRelevanceByCandidateKey: ReadonlyMap<string, number>;
-  readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
-  readonly answerRerankedCandidateKeys: ReadonlySet<string>;
-  readonly captureAnswerFeatures: boolean;
-  readonly answerSupportByCandidateKey: ReadonlyMap<
-    string,
-    Readonly<RecallCandidateAnswerSupport>
-  >;
-  readonly answerSupportObservationsByCandidateKey: ReadonlyMap<
-    string,
-    readonly Readonly<RecallAnswerSupportObservation>[]
-  >;
-  readonly deepHeadTraceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
-  readonly coverageMarginalGainByCandidateKey: Map<string, number>;
-  readonly tokenEstimateByCandidateKey: Map<string, number>;
-}
+export type {
+  FineAssessmentCandidate,
+  FineAssessmentSelectionContext,
+  FineAssessmentSelectionParams,
+  FineAssessmentSelectionResult
+} from "./fine-assessment-selection/types.js";
 
-interface FineAssessmentAdmission {
-  readonly droppedReason: RecallCandidateDropReason | null;
-  readonly tokenEstimate: number | null;
-}
-
-export type FineAssessmentSelectionParams = Readonly<{
-  readonly orderedCandidates: readonly FineAssessmentCandidate[];
-  readonly config: Readonly<RecallPolicy>["fine_assessment"];
-  readonly supplementaryData: RecallSupplementaryData;
-  readonly tokenEstimator: TokenEstimator;
-  readonly rankByCandidateKey: ReadonlyMap<string, number>;
-  readonly finalRelevanceByCandidateKey?: ReadonlyMap<string, number>;
-  /** Packing relevance; defaults to finalRelevance. Deep-head scores when public scalar stays fused. */
-  readonly coverageRelevanceByCandidateKey?: ReadonlyMap<string, number>;
-  readonly finalOrderAfterCoverage?: "coverage" | "public_relevance" | "delivery_rank";
-  readonly maxHeadDropAfterCoverage?: number;
-  readonly answerRelevanceRankByCandidateKey?: ReadonlyMap<string, number>;
-  readonly captureAnswerFeatures?: boolean;
-  readonly capturePacketPlanTrace?: boolean;
-  readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
-  readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryPendingCapture
-  ) => undefined;
-}>;
-
-export type FineAssessmentSelectionResult = ReturnType<typeof materializeFinalPacket> & Readonly<{
-  readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
-}>;
 export function selectFineAssessmentCandidates(
   params: FineAssessmentSelectionParams
 ): FineAssessmentSelectionResult {
-  const boundaryCapture = params.selectionBoundaryObserver === undefined
-    ? undefined
-    : createSelectionBoundaryCapture(params);
+  const boundaryCapture = createSelectionBoundary(params);
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
   const { coverageOrdered, evictions } =
@@ -112,35 +52,17 @@ export function selectFineAssessmentCandidates(
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
-  const finalAccumulator = reduceFineAssessmentCandidates(evidenceHead.candidates, context, evictions);
+  const finalAccumulator = reduceFineAssessmentCandidates(
+    evidenceHead.candidates, context, evictions
+  );
   const finalOrder = selectionParams.finalOrderAfterCoverage ?? "coverage";
-  const delivered = finalOrder === "coverage"
-    ? materializeFinalPacket(
-        retainBoundedAnswerHeads(
-          orderWithVerifiedAnswerSlot({
-            publicOrder: finalAccumulator.selected,
-            supportByCandidateKey: context.answerSupportByCandidateKey
-          }),
-          evidenceHead.protections,
-          buildRecallCandidateSelectionKey,
-          context.supplementaryData.queryProbes,
-          evidenceHead.candidates,
-          (candidateKey) => context.answerSupportByCandidateKey.get(
-            candidateKey
-          )?.authority?.behavior_eligible === true
-        ),
-        finalAccumulator.diagnostics,
-        context.config.budgets
-      )
-    : orderDeliveredPacket({
-        selected: finalAccumulator.selected,
-        diagnostics: finalAccumulator.diagnostics,
-        context,
-        finalOrder,
-        maxHeadDrop: selectionParams.maxHeadDropAfterCoverage,
-        answerHeadProtections: evidenceHead.protections,
-        sourceCandidates: evidenceHead.candidates
-      });
+  const delivered = materializeFineAssessmentDelivery(
+    finalAccumulator,
+    evidenceHead,
+    context,
+    finalOrder,
+    selectionParams.maxHeadDropAfterCoverage
+  );
   const consensusCandidates = selectFinalPacketConsensusCandidates(
     evidenceHead.candidates, evidenceHead.rejectedCandidateKeys
   );
@@ -159,7 +81,8 @@ export function selectFineAssessmentCandidates(
     delivered,
     consensusCandidates,
     context,
-    evictions
+    evictions,
+    reduceFineAssessmentCandidates
   );
   return buildSelectionResult(
     selectionParams,
@@ -167,202 +90,6 @@ export function selectFineAssessmentCandidates(
     consensusResult,
     boundaryCapture?.tokenEstimatesByContent
   );
-}
-
-function buildSelectionResult(
-  params: FineAssessmentSelectionParams,
-  consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>,
-  result: ReturnType<typeof applyFinalPacketConsensus>,
-  tokenEstimatesByContent?: ReadonlyMap<string, number>
-): FineAssessmentSelectionResult {
-  const observesBoundary = params.selectionBoundaryObserver !== undefined;
-  const packetConsensus = params.capturePacketPlanTrace === true || observesBoundary
-    ? buildFinalPacketConsensusObservation(
-        consensus,
-        result.packet.candidates,
-        result.replayAccepted
-      )
-    : undefined;
-  const selectionResult = Object.freeze({
-    candidates: result.packet.candidates,
-    diagnostics: result.packet.diagnostics,
-    ...(params.capturePacketPlanTrace === true && packetConsensus !== undefined
-      ? { packetPlanObservation: packetConsensus }
-      : {})
-  });
-  if (packetConsensus !== undefined && tokenEstimatesByContent !== undefined) {
-    notifySelectionBoundaryObserver(
-      params, selectionResult, packetConsensus, tokenEstimatesByContent
-    );
-  }
-  return selectionResult;
-}
-
-function applyFinalPacketConsensus(
-  plan: ReturnType<typeof resolveFinalPacketConsensusPlan>,
-  baseline: ReturnType<typeof materializeFinalPacket>,
-  sourceCandidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>
-): Readonly<{
-  readonly packet: ReturnType<typeof materializeFinalPacket>;
-  readonly replayAccepted: boolean;
-}> {
-  if (plan.decision.status !== "accepted") {
-    return Object.freeze({ packet: baseline, replayAccepted: false });
-  }
-  const replay = reduceFineAssessmentCandidates(
-    buildConsensusReplayOrder(plan, sourceCandidates),
-    context,
-    evictions
-  );
-  if (!packetMatchesConsensusPlan(plan, replay.selected)) {
-    return Object.freeze({ packet: baseline, replayAccepted: false });
-  }
-  return Object.freeze({
-    packet: materializeFinalPacket(
-      replay.selected,
-      mergeFinalPacketAdmissionDiagnostics(
-        baseline.diagnostics,
-        replay.diagnostics
-      ),
-      context.config.budgets
-    ),
-    replayAccepted: true
-  });
-}
-
-function prepareCoverageSelection(
-  params: FineAssessmentSelectionParams,
-  context: FineAssessmentSelectionContext
-): Readonly<{
-  readonly coverageOrdered: readonly FineAssessmentCandidate[];
-  readonly evictions: ReadonlySet<string>;
-}> {
-  const coverageRelevance =
-    params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
-  const hasEmbeddingHead = hasRankedEmbeddingHead(
-    params.orderedCandidates,
-    context.config.budgets.max_entries
-  );
-  const captureMarginalGain = context.captureAnswerFeatures;
-  const initialOrder = orderFineAssessmentByCoverage(
-    params.orderedCandidates, context, coverageRelevance, new Set<string>(),
-    !hasEmbeddingHead && captureMarginalGain
-  );
-  if (!hasEmbeddingHead) {
-    return Object.freeze({ coverageOrdered: initialOrder, evictions: new Set<string>() });
-  }
-  const resolved = resolveEmbeddingHeadEvictions(
-    initialOrder,
-    context,
-    coverageRelevance,
-    captureMarginalGain
-  );
-  const evictions = resolved.evictions;
-  const coverageOrdered = evictions.size > 0
-    ? resolved.coverageOrdered
-    : captureMarginalGain
-      ? orderFineAssessmentByCoverage(
-          initialOrder, context, coverageRelevance, new Set<string>(), true
-        )
-      : initialOrder;
-  return Object.freeze({
-    coverageOrdered,
-    evictions
-  });
-}
-
-function orderFineAssessmentByCoverage(
-  candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext,
-  relevanceByCandidateKey: ReadonlyMap<string, number>,
-  evictions: ReadonlySet<string>,
-  captureMarginalGain = false
-): readonly FineAssessmentCandidate[] {
-  const admission = createAdmissionState();
-  return orderByCoverageMarginalGain({
-    candidates,
-    relevanceByCandidateKey,
-    supplementaryData: context.supplementaryData,
-    advancesCoverage: (candidate) => tryRecordAcceptedAdmission(
-      admission,
-      candidate,
-      context,
-      evictions
-    ),
-    onSelection: captureMarginalGain
-      ? (observation) => context.coverageMarginalGainByCandidateKey.set(
-          observation.candidate_key,
-          observation.marginal_gain
-        )
-      : undefined
-  });
-}
-
-function createSelectionContext(
-  params: FineAssessmentSelectionParams
-): FineAssessmentSelectionContext {
-  const answerRelevanceRankByCandidateKey =
-    params.answerRelevanceRankByCandidateKey ?? new Map();
-  const captureAnswerFeatures = params.captureAnswerFeatures ?? false;
-  const answerSupport = buildFineAssessmentAnswerSupportContext({
-    candidates: params.orderedCandidates,
-    supplementaryData: params.supplementaryData,
-    captureObservations: captureAnswerFeatures
-  });
-  return Object.freeze({
-    config: params.config,
-    supplementaryData: params.supplementaryData,
-    tokenEstimator: params.tokenEstimator,
-    rankByCandidateKey: params.rankByCandidateKey,
-    finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
-    answerRelevanceRankByCandidateKey,
-    answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
-    captureAnswerFeatures,
-    answerSupportByCandidateKey: answerSupport.supportByCandidateKey,
-    answerSupportObservationsByCandidateKey:
-      answerSupport.observationsByCandidateKey,
-    deepHeadTraceByCandidateKey: captureAnswerFeatures
-      ? params.deepHeadTraceByCandidateKey ?? new Map()
-      : new Map(),
-    coverageMarginalGainByCandidateKey: new Map(),
-    tokenEstimateByCandidateKey: new Map()
-  });
-}
-
-function resolveEmbeddingHeadEvictions(
-  candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext,
-  relevanceByCandidateKey: ReadonlyMap<string, number>,
-  captureMarginalGain: boolean
-): Readonly<{
-  readonly evictions: ReadonlySet<string>;
-  readonly coverageOrdered: readonly FineAssessmentCandidate[];
-}> {
-  let coverageOrdered = candidates;
-  const evictions = selectEmbeddingHeadEvictions({
-    candidates,
-    maxEntries: context.config.budgets.max_entries,
-    embeddingScores: context.supplementaryData.embeddingSimilarityScores,
-    queryProbes: context.supplementaryData.queryProbes,
-    answerRerankedCandidateKeys: context.answerRerankedCandidateKeys,
-    selectDelivered: (evictionSet) => {
-      coverageOrdered = orderFineAssessmentByCoverage(
-        candidates,
-        context,
-        relevanceByCandidateKey,
-        evictionSet,
-        captureMarginalGain
-      );
-      return collectAdmittedCandidates(
-        coverageOrdered,
-        context,
-        evictionSet
-      );
-    }
-  });
-  return Object.freeze({ evictions, coverageOrdered });
 }
 
 function reduceFineAssessmentCandidates(
@@ -390,15 +117,6 @@ function createFineAssessmentAccumulator(): FineAssessmentAccumulator {
   };
 }
 
-function createAdmissionState(): FineAssessmentAdmissionState {
-  return {
-    seenObjects: new Set<string>(),
-    perDimensionCounts: new Map<MemoryDimensionType, number>(),
-    selectedCount: 0,
-    totalTokens: 0
-  };
-}
-
 function appendFineAssessmentCandidate(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
@@ -416,11 +134,14 @@ function appendFineAssessmentCandidate(
   const objectKey = buildRecallLogicalObjectKey(candidate);
   const admission = resolveAdmission(accumulator.admission, candidate, objectKey, context);
   if (admission.droppedReason !== null) {
-    accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, null, admission.droppedReason, context));
+    accumulator.diagnostics.push(createFineAssessmentDiagnostic(
+      candidate, candidateKey, selectionOrder, null, admission.droppedReason, context
+    ));
     return accumulator;
   }
   const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
-  const finalRelevance = context.finalRelevanceByCandidateKey.get(candidateKey) ?? candidate.fusion.fused_score;
+  const finalRelevance = context.finalRelevanceByCandidateKey.get(candidateKey)
+    ?? candidate.fusion.fused_score;
   const finalRelevanceSource = context.answerRelevanceRankByCandidateKey.has(candidateKey)
     ? "answer_rerank" as const
     : "fusion" as const;
@@ -440,87 +161,9 @@ function appendFineAssessmentCandidate(
       : undefined
   });
   accumulator.selected.push(nextCandidate);
-  accumulator.diagnostics.push(createFineAssessmentDiagnostic(candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context));
+  accumulator.diagnostics.push(createFineAssessmentDiagnostic(
+    candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context
+  ));
   recordAcceptedAdmission(accumulator.admission, candidate, objectKey, tokenEstimate);
   return accumulator;
-}
-
-function resolveAdmission(
-  state: FineAssessmentAdmissionState,
-  candidate: FineAssessmentCandidate,
-  objectKey: string,
-  context: FineAssessmentSelectionContext
-): FineAssessmentAdmission {
-  if (state.seenObjects.has(objectKey)) {
-    return { droppedReason: "duplicate", tokenEstimate: null };
-  }
-  const dimensionCount = state.perDimensionCounts.get(candidate.entry.dimension) ?? 0;
-  const dimensionLimit = context.config.budgets.per_dimension_limits?.[candidate.entry.dimension] ?? null;
-  if (dimensionLimit !== null && dimensionCount >= dimensionLimit) {
-    return { droppedReason: "dimension_limit", tokenEstimate: null };
-  }
-  if (state.selectedCount + 1 > context.config.budgets.max_entries) {
-    return { droppedReason: "max_entries", tokenEstimate: null };
-  }
-  const tokenEstimate = estimateCandidateTokens(candidate, context);
-  if (state.totalTokens + tokenEstimate > context.config.budgets.max_total_tokens) {
-    return { droppedReason: "max_total_tokens", tokenEstimate };
-  }
-  return { droppedReason: null, tokenEstimate };
-}
-
-function tryRecordAcceptedAdmission(
-  state: FineAssessmentAdmissionState,
-  candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>
-): boolean {
-  if (evictions.has(candidate.fusion.candidate_key)) return false;
-  const objectKey = buildRecallLogicalObjectKey(candidate);
-  const admission = resolveAdmission(state, candidate, objectKey, context);
-  if (admission.droppedReason !== null) return false;
-  const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
-  recordAcceptedAdmission(state, candidate, objectKey, tokenEstimate);
-  return true;
-}
-
-function collectAdmittedCandidates(
-  candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>
-): readonly FineAssessmentCandidate[] {
-  const state = createAdmissionState();
-  const delivered: FineAssessmentCandidate[] = [];
-  for (const candidate of candidates) {
-    if (!tryRecordAcceptedAdmission(state, candidate, context, evictions)) continue;
-    delivered.push(candidate);
-  }
-  return delivered;
-}
-
-function recordAcceptedAdmission(
-  state: FineAssessmentAdmissionState,
-  candidate: FineAssessmentCandidate,
-  objectKey: string,
-  tokenEstimate: number
-): void {
-  state.seenObjects.add(objectKey);
-  state.perDimensionCounts.set(
-    candidate.entry.dimension,
-    (state.perDimensionCounts.get(candidate.entry.dimension) ?? 0) + 1
-  );
-  state.selectedCount += 1;
-  state.totalTokens += tokenEstimate;
-}
-
-function estimateCandidateTokens(
-  candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext
-): number {
-  const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  const cached = context.tokenEstimateByCandidateKey.get(candidateKey);
-  if (cached !== undefined) return cached;
-  const estimated = context.tokenEstimator.estimate(candidate.entry.content);
-  context.tokenEstimateByCandidateKey.set(candidateKey, estimated);
-  return estimated;
 }

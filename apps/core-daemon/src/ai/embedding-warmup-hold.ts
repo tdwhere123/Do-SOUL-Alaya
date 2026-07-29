@@ -1,4 +1,4 @@
-import type { EmbeddingProviderWarmupStatus } from "../services/embedding-status-service.js";
+import type { EmbeddingProviderWarmupStatus } from "../services/status/embedding-status-service.js";
 
 export type EmbeddingWarmupHoldReason =
   | "provider_warmup_pending"

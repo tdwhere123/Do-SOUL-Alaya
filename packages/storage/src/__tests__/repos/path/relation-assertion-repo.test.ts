@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { PathRelation } from "@do-soul/alaya-protocol";
 import { SqliteRelationAssertionRepo } from "../../../repos/path/relation-assertion-repo.js";
 import {
+  createEvidenceCapsule,
+  createEvidenceCapsuleRepo
+} from "../capsules/evidence-capsule-repo-fixture.js";
+import {
   createPathRelationFixture,
   createRepo,
   trackedDatabases
@@ -19,6 +23,54 @@ afterEach(() => {
 });
 
 describe("SqliteRelationAssertionRepo", () => {
+  it("verifies multiple evidence anchors with one batched lookup", async () => {
+    const { database, repo: evidenceRepo } = await createEvidenceCapsuleRepo();
+    trackedDatabases.add(database);
+    const repo = new SqliteRelationAssertionRepo(database);
+    const sourceAnchor = {
+      eventType: "engine.response.received",
+      eventId: "evt_1",
+      occurredAt: "2026-03-20T00:00:00.000Z"
+    };
+    const firstEvidenceId = "f6c1b587-be07-4410-b2ca-8bfbc4d82db4";
+    const secondEvidenceId = "3ca5f78f-b5fd-4543-99eb-ce72ab2578ab";
+
+    await evidenceRepo.create(createEvidenceCapsule({ object_id: firstEvidenceId }));
+    await evidenceRepo.create(createEvidenceCapsule({ object_id: secondEvidenceId }));
+
+    expect(() => repo.assertEvidenceAnchorsInCurrentTransaction({
+      workspaceId: "workspace-1",
+      evidenceIds: [firstEvidenceId, secondEvidenceId],
+      sourceAnchor
+    })).not.toThrow();
+  });
+
+  it("rejects batched evidence anchor verification when any id is outside the workspace", async () => {
+    const { database, repo: evidenceRepo } = await createEvidenceCapsuleRepo();
+    trackedDatabases.add(database);
+    const repo = new SqliteRelationAssertionRepo(database);
+    const sourceAnchor = {
+      eventType: "engine.response.received",
+      eventId: "evt_1",
+      occurredAt: "2026-03-20T00:00:00.000Z"
+    };
+    const workspaceEvidenceId = "f6c1b587-be07-4410-b2ca-8bfbc4d82db4";
+    const foreignEvidenceId = "256a7ff5-6150-4a82-9a53-99dbfd08cb77";
+
+    await evidenceRepo.create(createEvidenceCapsule({ object_id: workspaceEvidenceId }));
+    await evidenceRepo.create(createEvidenceCapsule({
+      object_id: foreignEvidenceId,
+      workspace_id: "workspace-2",
+      run_id: "run-3"
+    }));
+
+    expect(() => repo.assertEvidenceAnchorsInCurrentTransaction({
+      workspaceId: "workspace-1",
+      evidenceIds: [workspaceEvidenceId, foreignEvidenceId],
+      sourceAnchor
+    })).toThrow(/Evidence 256a7ff5-6150-4a82-9a53-99dbfd08cb77 is not available in the assertion workspace\./);
+  });
+
   it("binds an exact as-of read to the current verified history generation", async () => {
     const { database } = createRepo();
     const repo = new SqliteRelationAssertionRepo(database);

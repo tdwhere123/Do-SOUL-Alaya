@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { CoreError } from "@do-soul/alaya-core";
-import { registerRunRoutes } from "../../routes/workspace/runs.js";
+import { registerRunRoutes } from "../../routes/workspace/run-snapshot/runs.js";
 import { registerSignalRoutes } from "../../routes/workspace/signals.js";
 import { registerWorkspaceRoutes } from "../../routes/workspace/workspaces.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";

@@ -36,7 +36,7 @@ import {
   SqliteWorkspaceRepo,
   initDatabase
 } from "@do-soul/alaya-storage";
-import { createEdgeAndReconciliationRuntime } from "../../runtime/recall-materialization-edge-reconciliation.js";
+import { createEdgeAndReconciliationRuntime } from "../../runtime/recall-materialization/recall-materialization-edge-reconciliation.js";
 
 const OLD_MEMORY_ID = "11111111-1111-4111-8111-111111111111";
 const NEW_MEMORY_ID = "22222222-2222-4222-8222-222222222222";

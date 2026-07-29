@@ -7,12 +7,12 @@ import {
   rollbackTemporalProjection,
   selectTemporalProjection
 } from "@do-soul/alaya-storage";
-import type { AlayaConfigPaths } from "../../cli/config-files.js";
+import type { AlayaConfigPaths } from "../../cli/support/config-files.js";
 import {
   replaceStorageDbPathInToml,
   writeTextAtomic
 } from "../config/storage-pointer-file.js";
-import { parseStorageDbPathFromToml } from "../storage-config.js";
+import { parseStorageDbPathFromToml } from "../daemon/support/storage-config.js";
 import {
   advanceTemporalCutoverJournal,
   createTemporalCutoverJournal,

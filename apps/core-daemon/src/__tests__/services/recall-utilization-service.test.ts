@@ -11,7 +11,7 @@ import {
 import {
   createRecallUtilizationService,
   type RecallUtilizationEventLogPort
-} from "../../services/recall-utilization-service.js";
+} from "../../services/status/recall-utilization-service.js";
 
 const WORKSPACE_ID = "workspace-1";
 

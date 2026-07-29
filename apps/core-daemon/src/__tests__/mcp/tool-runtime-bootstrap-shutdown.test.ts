@@ -13,7 +13,7 @@ import {
   getToolRuntimeWiringFixture,
   resetToolRuntimeWiringState
 } from "./tool-runtime-wiring-fixture.js";
-import type { AlayaDaemonRuntime } from "../../runtime/daemon-runtime-types.js";
+import type { AlayaDaemonRuntime } from "../../runtime/daemon/lifecycle/daemon-runtime-types.js";
 
 const hoisted = getToolRuntimeWiringFixture();
 const activeRuntimes: Array<AlayaDaemonRuntime> = [];

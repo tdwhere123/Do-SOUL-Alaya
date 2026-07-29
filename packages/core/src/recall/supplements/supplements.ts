@@ -1,4 +1,5 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
+import { NO_STORED_VECTORS_DEGRADATION_REASON } from "../../embedding-recall/constants.js";
 import type {
   EmbeddingRecallSupplementResult,
   PreparedEmbeddingQueryHandle,
@@ -349,7 +350,7 @@ async function precheckStoredVectorsForEmbeddingSupplement(
     : Object.freeze({
         handle: null,
         storedVectors: null,
-        degradedReason: null,
+        degradedReason: NO_STORED_VECTORS_DEGRADATION_REASON,
         preparedSupplementSupported: true
       });
 }

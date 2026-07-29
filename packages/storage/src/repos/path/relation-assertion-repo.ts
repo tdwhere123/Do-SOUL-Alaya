@@ -164,16 +164,16 @@ export class SqliteRelationAssertionRepo implements RelationAssertionRepo {
   }): void {
     const evidenceIds = requireUniqueRelationAssertionEvidenceIds(input.evidenceIds);
     try {
-      const statement = this.db.connection.prepare(`
+      const rows = this.db.connection.prepare(`
         SELECT object_id, workspace_id, event_anchor
         FROM evidence_capsules
-        WHERE object_id = ?
-        LIMIT 1
-      `);
+        WHERE object_id IN (SELECT value FROM json_each(?))
+      `).all(JSON.stringify(evidenceIds)) as ReadonlyArray<
+        Readonly<{ readonly object_id: string; readonly workspace_id: string; readonly event_anchor: string | null }>
+      >;
+      const rowByEvidenceId = new Map(rows.map((row) => [row.object_id, row]));
       for (const evidenceId of evidenceIds) {
-        const row = statement.get(evidenceId) as
-          | Readonly<{ readonly object_id: string; readonly workspace_id: string; readonly event_anchor: string | null }>
-          | undefined;
+        const row = rowByEvidenceId.get(evidenceId);
         if (row === undefined || row.workspace_id !== input.workspaceId) {
           throw new StorageError("NOT_FOUND", `Evidence ${evidenceId} is not available in the assertion workspace.`);
         }

@@ -35,10 +35,10 @@ import {
   SqliteWorkspaceRepo,
   initDatabase
 } from "@do-soul/alaya-storage";
-import { runBulkEnrichTask } from "../../garden/bulk-enrich-runtime-runner.js";
-import { createGardenSignalRefReplayPort } from "../../runtime/garden-signal-ref-replay.js";
-import { createPathRelationRuntime } from "../../runtime/recall-materialization-path-relation.js";
-import { createRuntimeNotifier } from "../../runtime/runtime-notifier.js";
+import { runBulkEnrichTask } from "../../garden/bulk-enrich/bulk-enrich-runtime-runner.js";
+import { createGardenSignalRefReplayPort } from "../../runtime/garden-wiring/garden-signal-ref-replay.js";
+import { createPathRelationRuntime } from "../../runtime/recall-materialization/recall-materialization-path-relation.js";
+import { createRuntimeNotifier } from "../../runtime/daemon/support/runtime-notifier.js";
 
 const WORKSPACE_ID = "workspace-1";
 const RUN_ID = "run-1";

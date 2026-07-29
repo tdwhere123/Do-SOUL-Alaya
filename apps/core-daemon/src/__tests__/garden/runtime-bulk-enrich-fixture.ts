@@ -4,7 +4,7 @@ import {
   type CandidateMemorySignal,
   type GardenTaskDescriptor
 } from "@do-soul/alaya-protocol";
-import { createGardenRuntime } from "../../garden/runtime.js";
+import { createGardenRuntime } from "../../garden/runtime/runtime.js";
 
 export type GardenRuntimeInput = Parameters<typeof createGardenRuntime>[0];
 export type ProduceFn = NonNullable<

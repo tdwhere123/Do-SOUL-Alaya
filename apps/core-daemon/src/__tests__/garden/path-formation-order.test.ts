@@ -23,7 +23,7 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 
-import { loadBackfillFormationObjects } from "../../runtime/path-formation-order.js";
+import { loadBackfillFormationObjects } from "../../runtime/daemon/support/path-formation-order.js";
 
 const databases: StorageDatabase[] = [];
 

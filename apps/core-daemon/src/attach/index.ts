@@ -1,1 +1,1 @@
-export * from "./profile-mutation.js";
+export * from "./profile-mutation/profile-mutation.js";

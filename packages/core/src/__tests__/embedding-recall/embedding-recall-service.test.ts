@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ComputeRecallGardenEventType, type EventLogEntry, type HealthJournalRecordInput } from "@do-soul/alaya-protocol";
+import { ComputeRecallGardenEventType, HealthEventKind, type EventLogEntry, type HealthJournalRecordInput } from "@do-soul/alaya-protocol";
 import { EmbeddingRecallService } from "../../embedding-recall/embedding-recall-service.js";
 import { createEmbeddingRecord, createMemoryEntry, createProvider, hashMemoryContent } from "./embedding-recall-test-helpers.js";
 
@@ -249,6 +249,49 @@ it("preserves provider error context on failed prepared query embeddings", async
       error_name: "TypeError",
       error_message: "network timeout"
     });
+  });
+
+it("reports no_stored_vectors when prepareQuerySupplement finds an empty vector table", async () => {
+    const healthJournal = {
+      record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
+    };
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [])
+      },
+      provider: createProvider(),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      },
+      healthJournalRecorder: healthJournal,
+      generateQueryId: () => "prepare-no-vectors",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+    const eligibleMemories = [
+      createMemoryEntry({ object_id: "memory-1", content: "Lexical baseline." })
+    ];
+
+    const prepared = await service.prepareQuerySupplement({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking",
+      eligibleMemories,
+      baseCandidateCount: 1
+    });
+
+    expect(prepared.preparedQuery).toBeNull();
+    expect(prepared.storedVectors).toEqual([]);
+    expect(prepared.degradedReason).toBe("no_stored_vectors");
+    expect(healthJournal.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        detail_json: expect.objectContaining({
+          query_id: "prepare-no-vectors",
+          reason: "no_stored_vectors"
+        })
+      })
+    );
   });
 
 it("reuses prepared stored vectors instead of reading the vector table twice", async () => {

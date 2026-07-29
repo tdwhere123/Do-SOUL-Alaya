@@ -4,7 +4,7 @@ import {
   classifySoulGraphOriginKind,
   createSoulGraphService,
   deriveDomainTagSummary
-} from "../../runtime/daemon-runtime-support.js";
+} from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 
 import { MemoryGovernanceEventType, type EventLogEntry, type PathRelation } from "@do-soul/alaya-protocol";
 

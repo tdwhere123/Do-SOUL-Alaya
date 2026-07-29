@@ -4,7 +4,7 @@ import {
   rollbackTemporalProjectionCutover
 } from "../runtime/temporal-cutover/cutover.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaSubcommandSpec } from "./bridge.js";
-import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./config-files.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./support/config-files.js";
 
 type TemporalCutoverAction = "cutover" | "rollback" | "recover";
 

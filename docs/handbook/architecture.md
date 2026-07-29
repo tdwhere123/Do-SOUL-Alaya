@@ -216,6 +216,11 @@ HTTP startup fails closed, while managed temporary startup must opt in and pass
 that token directly to its child Inspector process. The daemon never silently
 persists a generated credential.
 
+Remote daemon bind (`ALAYA_ALLOW_REMOTE_DAEMON=1` with non-loopback
+`DAEMON_HOST`) is break-glass only: a single `ALAYA_REQUEST_TOKEN` is not
+sufficient for multi-host exposure, desktop originless bypass is disabled, and
+loopback remains the supported default.
+
 ## Runtime Write Model
 
 State-changing runtime writes follow:

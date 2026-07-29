@@ -4,7 +4,7 @@ import type { GardenTaskEnqueueInput } from "@do-soul/alaya-storage";
 import {
   buildEdgeClassifyTaskId,
   createEdgeClassifyQueueAdapter
-} from "../../garden/edge-classify-queue-adapter.js";
+} from "../../garden/support/edge-classify-queue-adapter.js";
 
 const enqueueFn = () =>
   vi.fn((_input: GardenTaskEnqueueInput): { readonly task_id: string } => ({ task_id: "x" }));

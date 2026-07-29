@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { withRuntimeEmbeddingConfigLock } from "../../services/env-file-io.js";
+import { withRuntimeEmbeddingConfigLock } from "../../services/env-file/env-file-io.js";
 
 describe("withRuntimeEmbeddingConfigLock", () => {
   afterEach(() => {

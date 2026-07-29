@@ -2,7 +2,7 @@ import type { ConversationMessage } from "@do-soul/alaya-protocol";
 import {
   readVerifiedDeliverySourceObservation,
   type VerifiedDeliverySourceObservation
-} from "../../runtime/recall-materialization-source-receipt.js";
+} from "../../runtime/recall-materialization/recall-materialization-source-receipt.js";
 
 const POST_TURN_EXTRACT_EXCERPT_MAX_CHARS = 800;
 

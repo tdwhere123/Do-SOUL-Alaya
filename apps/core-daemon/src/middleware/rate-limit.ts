@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { emitWarning } from "node:process";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, MiddlewareHandler } from "hono";
@@ -119,9 +120,13 @@ export function resolveProtectedRateLimitKey(context: Context): string {
   const token = normalizeHeader(context.req.header("x-request-token"));
   const socket = readSocketRemoteAddress(context) ?? "anonymous";
   if (token !== undefined) {
-    return `token:${token}:${socket}`;
+    return `token:${hashRateLimitCredential(token)}:${socket}`;
   }
   return socket;
+}
+
+function hashRateLimitCredential(credential: string): string {
+  return createHash("sha256").update(credential).digest("hex").slice(0, 16);
 }
 
 function defaultRateLimitKey(context: Context): string {

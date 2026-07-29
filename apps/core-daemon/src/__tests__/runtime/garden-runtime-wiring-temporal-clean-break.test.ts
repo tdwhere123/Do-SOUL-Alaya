@@ -109,7 +109,7 @@ vi.mock("@do-soul/alaya-soul", async (importOriginal) => {
   return { ...actual, GardenScheduler: hoisted.FakeGardenScheduler };
 });
 
-import { createGardenRuntimeWiring } from "../../runtime/garden-runtime-wiring.js";
+import { createGardenRuntimeWiring } from "../../runtime/garden-wiring/garden-runtime-wiring.js";
 
 function getService(
   runtime: Awaited<ReturnType<typeof createGardenRuntimeWiring>>["gardenRuntime"],

@@ -17,7 +17,7 @@ const supportMock = vi.hoisted(() => ({
 
 vi.mock("../../runtime/garden-compute-support.js", () => supportMock);
 
-import { edgeReconciliationTestInternals } from "../../runtime/recall-materialization-edge-reconciliation.js";
+import { edgeReconciliationTestInternals } from "../../runtime/recall-materialization/recall-materialization-edge-reconciliation.js";
 
 const gardenConfig = {
   provider_kind: "official_api",

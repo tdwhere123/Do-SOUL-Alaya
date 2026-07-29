@@ -1,6 +1,6 @@
 import { SoulActiveConstraintSchema } from "@do-soul/alaya-protocol";
 import { findActiveConstraints } from "@do-soul/alaya-storage";
-import type { RecallPathReadPorts } from "../recall-path-readers.js";
+import type { RecallPathReadPorts } from "../recall/recall-path-readers.js";
 
 export async function runWorkerActiveConstraints(input: Readonly<{
   readonly payload: Record<string, unknown>;

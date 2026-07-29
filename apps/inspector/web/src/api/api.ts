@@ -1,7 +1,7 @@
 /**
  * api.ts - Thin fetch wrapper for Alaya Inspector
  *
- * Single source of every HTTP call (Reviewer Gate G3). Pages MUST go through
+ * Single source of every HTTP call; pages MUST go through
  * `apiFetch`. Adds: token injection, workspaceId path interpolation, GET 5xx
  * retry-once with exponential backoff, and a global 401 handler for the
  * SessionExpired surface.
@@ -19,17 +19,44 @@ let inspectorToken: string | null = null;
 let currentWorkspaceId: string | null = null;
 let onUnauthorized: (() => void) | null = null;
 
+const INSPECTOR_TOKEN_STORAGE_KEY = "alaya-inspector-token";
+const INSPECTOR_WORKSPACE_STORAGE_KEY = "alaya-inspector-workspace-id";
+
 export const setInspectorToken = (token: string) => {
   inspectorToken = token;
+  if (token.trim().length === 0) {
+    sessionStorage.removeItem(INSPECTOR_TOKEN_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(INSPECTOR_TOKEN_STORAGE_KEY, token);
 };
 
-export const getInspectorToken = () => inspectorToken;
+export const getInspectorToken = () => {
+  if (inspectorToken !== null && inspectorToken.trim().length > 0) {
+    return inspectorToken;
+  }
+  const stored = sessionStorage.getItem(INSPECTOR_TOKEN_STORAGE_KEY);
+  inspectorToken = stored;
+  return stored;
+};
 
 export const setWorkspaceId = (id: string | null) => {
   currentWorkspaceId = id;
+  if (id === null || id.trim().length === 0) {
+    sessionStorage.removeItem(INSPECTOR_WORKSPACE_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(INSPECTOR_WORKSPACE_STORAGE_KEY, id);
 };
 
-export const getWorkspaceId = () => currentWorkspaceId;
+export const getWorkspaceId = () => {
+  if (currentWorkspaceId !== null && currentWorkspaceId.trim().length > 0) {
+    return currentWorkspaceId;
+  }
+  const stored = sessionStorage.getItem(INSPECTOR_WORKSPACE_STORAGE_KEY);
+  currentWorkspaceId = stored;
+  return stored;
+};
 
 export const setUnauthorizedHandler = (handler: (() => void) | null) => {
   onUnauthorized = handler;

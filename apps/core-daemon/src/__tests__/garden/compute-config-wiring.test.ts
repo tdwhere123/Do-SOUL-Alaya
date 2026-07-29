@@ -5,7 +5,7 @@ import {
   ALAYA_OFFICIAL_GARDEN_SECRET_REF_ENV,
   resolveEdgeClassifyWiring,
   readOfficialGardenSecretRef
-} from "../../runtime/daemon-runtime-support.js";
+} from "../../runtime/daemon/lifecycle/daemon-runtime-support.js";
 import { resolveGardenOpenAiCredential } from "../../garden/index.js";
 
 /**

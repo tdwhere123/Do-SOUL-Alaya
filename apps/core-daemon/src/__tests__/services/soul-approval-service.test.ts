@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { FileApprovalEventType } from "@do-soul/alaya-protocol";
-import { createSoulApprovalService } from "../../services/soul-approval-service.js";
+import { createSoulApprovalService } from "../../services/soul/soul-approval-service.js";
 
 describe("SoulApprovalService", () => {
   it("throws NOT_FOUND when no pending approval exists for the run", async () => {

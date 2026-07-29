@@ -13,15 +13,15 @@ import {
 
 import { ALAYA_SYSEXITS, type AlayaCliContext } from "../../cli/bridge.js";
 
-import { createReviewCommand } from "../../cli/review.js";
+import { createReviewCommand } from "../../cli/review/review.js";
 
-import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal-workflow.js";
+import { createMcpMemoryProposalWorkflow } from "../../mcp-memory/proposal/proposal-workflow.js";
 
 import type {
   McpMemoryToolCallContext,
   McpMemoryToolCallResult,
   McpMemoryToolHandler
-} from "../../mcp-memory/tool-handler.js";
+} from "../../mcp-memory/tool/tool-handler.js";
 
 type HandlerStub = Record<
   string,

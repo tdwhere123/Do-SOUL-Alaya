@@ -5,7 +5,7 @@ import {
   type SoulContextObjectIdentity,
   type SoulReportContextUsageRequest
 } from "@do-soul/alaya-protocol";
-import type { RecallUsageHandlerDependencies } from "../recall-usage-handlers.js";
+import type { RecallUsageHandlerDependencies } from "../recall/recall-usage-handlers.js";
 
 type SupportedUsageObjectKind = RecallCandidate["object_kind"];
 

@@ -4,7 +4,7 @@ import {
   cleanupPostTurnExtractHarnesses,
   createPostTurnPayload,
   createRoutingHarness
-} from "../mcp-memory/post-turn-extract-task-fixture.js";
+} from "../mcp-memory/garden/post-turn-extract-task-fixture.js";
 
 afterEach(() => {
   cleanupPostTurnExtractHarnesses();

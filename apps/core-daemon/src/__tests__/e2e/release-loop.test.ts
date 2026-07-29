@@ -51,7 +51,7 @@ import {
   SqliteWorkspaceRepo
 } from "@do-soul/alaya-storage";
 
-import { ALAYA_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool-catalog.js";
+import { ALAYA_MEMORY_TOOL_NAMES } from "../../mcp-memory/tool/tool-catalog.js";
 
 import { createAlayaCliBridge } from "../../cli/bridge.js";
 
@@ -59,7 +59,7 @@ import { registerAlayaCliCommands } from "../../cli/register.js";
 
 import { createAlayaDaemonRuntime, type AlayaDaemonRuntime } from "../../index.js";
 
-import { createAlayaMcpServer } from "../../mcp/mcp-server.js";
+import { createAlayaMcpServer } from "../../mcp/server/mcp-server.js";
 
 import {
   PRIMARY_MEMORY_ID,

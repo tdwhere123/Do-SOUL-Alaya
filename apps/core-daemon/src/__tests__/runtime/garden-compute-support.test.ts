@@ -7,8 +7,8 @@ import { LocalHeuristics } from "@do-soul/alaya-soul";
 import {
   buildGardenComputeRoutingProviders,
   createConflictDetectionLlmPort
-} from "../../runtime/garden-compute-support.js";
-import { GardenComputeProviderResolver } from "../../services/garden-compute-provider-resolver.js";
+} from "../../runtime/garden-wiring/garden-compute-support.js";
+import { GardenComputeProviderResolver } from "../../services/support/garden-compute-provider-resolver.js";
 
 const originalConflictProviderUrl = process.env.ALAYA_CONFLICT_LLM_PROVIDER_URL;
 const originalConflictApiKey = process.env.ALAYA_CONFLICT_LLM_API_KEY;

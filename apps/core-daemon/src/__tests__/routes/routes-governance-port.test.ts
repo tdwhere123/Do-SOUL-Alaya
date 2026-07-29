@@ -1,22 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import { VerificationVerdict } from "@do-soul/alaya-protocol";
-import { registerGovernanceRoutes } from "../../routes/governance/governance.js";
+import { registerGovernanceRoutes } from "../../routes/governance/matrix/governance.js";
 import { registerGreenStatusRoutes } from "../../routes/garden/green-status.js";
-import { registerOverrideRoutes } from "../../routes/governance/overrides.js";
-import { registerSecurityStatusRoutes } from "../../routes/workspace/security-status.js";
-import { registerConflictMatrixRoutes } from "../../routes/governance/conflict-matrix.js";
-import { registerSlotRoutes } from "../../routes/governance/slots.js";
-import { registerBudgetRoutes } from "../../routes/governance/budget.js";
+import { registerOverrideRoutes } from "../../routes/governance/matrix/overrides.js";
+import { registerSecurityStatusRoutes } from "../../routes/workspace/status/security-status.js";
+import { registerConflictMatrixRoutes } from "../../routes/governance/matrix/conflict-matrix.js";
+import { registerSlotRoutes } from "../../routes/governance/matrix/slots.js";
+import { registerBudgetRoutes } from "../../routes/governance/matrix/budget.js";
 import { registerHealthJournalRoutes, type HealthJournalRouteServices } from "../../routes/garden/health-journal.js";
 import { registerErrorHandler } from "../../middleware/error-handler.js";
-import type { GovernanceRouteServices } from "../../routes/governance/governance.js";
+import type { GovernanceRouteServices } from "../../routes/governance/matrix/governance.js";
 import type { GreenStatusRouteServices } from "../../routes/garden/green-status.js";
-import type { OverrideRouteServices } from "../../routes/governance/overrides.js";
-import type { SecurityStatusRouteServices } from "../../routes/workspace/security-status.js";
-import type { ConflictMatrixRouteServices } from "../../routes/governance/conflict-matrix.js";
-import type { SlotRouteServices } from "../../routes/governance/slots.js";
-import type { BudgetRouteServices } from "../../routes/governance/budget.js";
+import type { OverrideRouteServices } from "../../routes/governance/matrix/overrides.js";
+import type { SecurityStatusRouteServices } from "../../routes/workspace/status/security-status.js";
+import type { ConflictMatrixRouteServices } from "../../routes/governance/matrix/conflict-matrix.js";
+import type { SlotRouteServices } from "../../routes/governance/matrix/slots.js";
+import type { BudgetRouteServices } from "../../routes/governance/matrix/budget.js";
 import { routeServices } from "../support/route-service-stubs.js";
 
 describe("routes-governance port batch", () => {

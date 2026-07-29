@@ -6,31 +6,31 @@ import {
   type AlayaDaemonRuntime,
   type AlayaDaemonServer,
   type DaemonStartupStepRecord
-} from "./runtime/daemon-runtime-types.js";
-import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
-import { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
-import { validateDaemonEnv } from "./runtime/daemon-env.js";
-import { createDaemonRepositories } from "./runtime/daemon-repositories.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
+import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/support/config-files.js";
+import { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
+import { validateDaemonEnv } from "./runtime/daemon/support/daemon-env.js";
+import { createDaemonRepositories } from "./runtime/daemon/wiring/daemon-repositories.js";
 import {
   createWarnLogger,
   installUnhandledRejectionHandler
-} from "./runtime/daemon-runtime-helpers.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-helpers.js";
 import {
   createRequestProtection,
   listServerHardConstraints,
   loadConfigEnv,
   recordStartupStep,
   resolveDatabasePath
-} from "./runtime/daemon-runtime-support.js";
-import { createDaemonServiceFoundation } from "./runtime/daemon-service-foundation.js";
-import { resolveCoreDaemonFilesDirectory } from "./runtime/files-data-dir.js";
-import { finalizeDaemonRuntimeFromWiring } from "./runtime/finalize-daemon-runtime-wiring.js";
-import { createGardenRuntimeWiring } from "./runtime/garden-runtime-wiring.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-support.js";
+import { createDaemonServiceFoundation } from "./runtime/daemon/wiring/daemon-service-foundation.js";
+import { resolveCoreDaemonFilesDirectory } from "./runtime/daemon/support/files-data-dir.js";
+import { finalizeDaemonRuntimeFromWiring } from "./runtime/daemon/lifecycle/finalize-daemon-runtime-wiring.js";
+import { createGardenRuntimeWiring } from "./runtime/garden-wiring/garden-runtime-wiring.js";
 import { closeDaemonStartupResourcesAfterFailure } from "./runtime/startup/cleanup.js";
 import { openDaemonDatabase } from "./runtime/startup/database.js";
 import { createRecallAndCoreWiring } from "./runtime/startup/recall-core-wiring.js";
-import type { RecallReadWorkerClient } from "./runtime/recall-read-worker-client.js";
-import { createRuntimeNotifier } from "./runtime/runtime-notifier.js";
+import type { RecallReadWorkerClient } from "./runtime/recall/recall-read-worker-client.js";
+import { createRuntimeNotifier } from "./runtime/daemon/support/runtime-notifier.js";
 import { isRemoteDaemonOptInEnabled } from "./runtime/server-options.js";
 import { acquireTemporalRuntimeLease } from "./runtime/temporal-cutover/lease.js";
 
@@ -40,8 +40,8 @@ export type {
   AlayaDaemonRuntimeServices,
   AlayaDaemonServer,
   DaemonStartupStepRecord
-} from "./runtime/daemon-runtime-types.js";
-export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
+} from "./runtime/daemon/lifecycle/daemon-runtime-types.js";
+export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/daemon/support/cjk-warmup.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
 

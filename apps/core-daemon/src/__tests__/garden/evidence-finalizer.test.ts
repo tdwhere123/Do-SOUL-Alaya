@@ -2,7 +2,7 @@ import type { CandidateMemorySignal } from "@do-soul/alaya-protocol";
 import { buildGardenTurnEvidenceSearchProjections } from "@do-soul/alaya-soul";
 import { describe, expect, it, vi } from "vitest";
 import { finalizePostTurnEvidence } from "../../garden/post-turn-extract/evidence-finalizer.js";
-import { buildGardenTaskEvidenceFallbackSignalId } from "../../garden/task-signal-id.js";
+import { buildGardenTaskEvidenceFallbackSignalId } from "../../garden/support/task-signal-id.js";
 
 const CREATED_AT = "2026-07-27T12:00:00.000Z";
 

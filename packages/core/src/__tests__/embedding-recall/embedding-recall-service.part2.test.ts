@@ -78,6 +78,60 @@ it("records degraded fallback when the prepared query embedding is not ready by 
     );
   });
 
+it("records no_stored_vectors when querySupplement finds an empty vector table", async () => {
+    const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
+      event_id: `event-${entry.event_type}`,
+      created_at: "2026-04-23T00:00:00.000Z",
+      revision: 0,
+      ...entry
+    }));
+    const healthJournal = {
+      record: vi.fn(async (_entry: HealthJournalRecordInput) => undefined)
+    };
+    const service = new EmbeddingRecallService({
+      embeddingRepo: {
+        listByObjectIds: vi.fn(async () => [])
+      },
+      provider: createProvider(),
+      eventLogRepo: {
+        append: appendSpy,
+        queryByEntity: vi.fn(async () => [])
+      },
+      healthJournalRecorder: healthJournal,
+      generateQueryId: () => "query-no-vectors",
+      now: () => "2026-04-23T00:00:00.000Z"
+    });
+
+    const result = await service.querySupplement({
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "Semantic recall ranking",
+      eligibleMemories: [createMemoryEntry({ object_id: "memory-1" })],
+      baseCandidateIds: ["memory-1"],
+      maxSupplement: 2
+    });
+
+    expect(result.supplementaryEntries).toEqual([]);
+    expect(result.similarityHintsByObjectId).toEqual({});
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED,
+        payload_json: expect.objectContaining({
+          query_id: "query-no-vectors",
+          degradation_reason: "no_stored_vectors"
+        })
+      })
+    );
+    expect(healthJournal.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_kind: HealthEventKind.EMBEDDING_SUPPLEMENT,
+        detail_json: expect.objectContaining({
+          reason: "no_stored_vectors"
+        })
+      })
+    );
+  });
+
 it("degrades to keyword-only recall when the embedding provider is unavailable", async () => {
     const appendSpy = vi.fn(async (entry: Omit<EventLogEntry, "event_id" | "created_at" | "revision">) => ({
       event_id: `event-${entry.event_type}`,

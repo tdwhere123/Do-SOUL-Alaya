@@ -14,7 +14,7 @@ import {
   type ProfileMutationAuditRow,
   type ProfileMutationAuditWriter,
   type ProfileMutationFs
-} from "../../attach/profile-mutation.js";
+} from "../../attach/profile-mutation/profile-mutation.js";
 
 import {
   PROFILE_TEST_HOME,

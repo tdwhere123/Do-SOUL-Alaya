@@ -1,2 +1,2 @@
-export * from "./credential.js";
-export * from "./task-signal-id.js";
+export * from "./support/credential.js";
+export * from "./support/task-signal-id.js";

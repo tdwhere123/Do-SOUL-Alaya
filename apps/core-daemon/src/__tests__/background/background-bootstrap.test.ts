@@ -139,7 +139,7 @@ describe("BackgroundServiceManager", () => {
     vi.resetModules();
     const warn = vi.fn();
     vi.doMock("../../runtime/daemon-runtime-helpers.js", async () => {
-      const actual = await vi.importActual<typeof import("../../runtime/daemon-runtime-helpers.js")>(
+      const actual = await vi.importActual<typeof import("../../runtime/daemon/lifecycle/daemon-runtime-helpers.js")>(
         "../../runtime/daemon-runtime-helpers.js"
       );
       return {

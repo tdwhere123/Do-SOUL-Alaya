@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AlayaOperationError } from "../operations-types.js";
+import { AlayaOperationError } from "../operations/operations-types.js";
 
 export type CliFailureCategory = "subcommand" | "bootstrap" | "shutdown";
 

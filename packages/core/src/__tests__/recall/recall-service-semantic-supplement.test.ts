@@ -75,6 +75,34 @@ it("preserves the legacy query-embedding receiver", async () => {
     expect(result.handle).toBe(preparedQuery);
   });
 
+it("reports no_stored_vectors from the legacy hasStoredVectors precheck", async () => {
+    const basePolicy = new RecallService(createDependencies([]).dependencies)
+      .buildDefaultPolicy("analyze", createTaskSurface().runtime_id);
+    const eligibleMemory = createMemoryEntry({ object_id: "memory-lexical" });
+    const result = await prepareEmbeddingSupplementQuery({
+      dependencies: {
+        embeddingRecallService: {
+          hasStoredVectors: vi.fn(async () => false),
+          prepareQueryEmbedding: vi.fn(() => createPreparedQueryHandle("prepared-query-unused"))
+        }
+      },
+      config: overridePolicy(basePolicy, {
+        coarse_filter: {
+          ...basePolicy.coarse_filter,
+          semantic_supplement: { enabled: true, max_supplement: 1, embedding_enabled: true }
+        }
+      }),
+      workspaceId: "workspace-1",
+      runId: "run-1",
+      queryText: "query",
+      localEligibleCandidates: [{ entry: eligibleMemory }],
+      lexicalFallbackCount: 1
+    });
+
+    expect(result.handle).toBeNull();
+    expect(result.degradedReason).toBe("no_stored_vectors");
+  });
+
 it("keeps the lexical baseline when a non-decisive semantic supplement joins the pool", async () => {
     const memories = [
       createMemoryEntry({
@@ -390,7 +418,7 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
       }
     });
 
-    await service.recall({
+    const result = await service.recall({
       taskSurface: createTaskSurface(),
       workspaceId: "workspace-1",
       strategy: "analyze",
@@ -403,6 +431,8 @@ it("skips prepared embedding work when no stored vectors exist for eligible memo
         expect.objectContaining({ object_id: "memory-lexical" })
       ])
     });
+    expect(result.diagnostics?.embedding_provider_status).toBe("provider_failed");
+    expect(result.diagnostics?.provider_degradation_reason).toBe("no_stored_vectors");
     expect(prepareQueryEmbedding).not.toHaveBeenCalled();
     expect(querySupplementIfReady).not.toHaveBeenCalled();
     expect(querySupplement).not.toHaveBeenCalled();

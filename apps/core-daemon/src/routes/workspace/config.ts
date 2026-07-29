@@ -13,8 +13,8 @@ import {
 import type { Context, Hono } from "hono";
 import { z, type ZodTypeAny } from "zod";
 import { parseJsonBody } from "../shared/shared.js";
-import type { AppConfigService } from "../../services/config-service.js";
-import type { EnvironmentStatusService } from "../../services/environment-status-service.js";
+import type { AppConfigService } from "../../services/config/config-service.js";
+import type { EnvironmentStatusService } from "../../services/status/environment-status-service.js";
 
 const ManifestationBudgetReadSchema = ManifestationBudgetConfigSchema.and(
   z.object({ source: z.enum(["default", "stored"]) }).readonly()

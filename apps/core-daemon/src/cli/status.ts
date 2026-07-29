@@ -1,6 +1,6 @@
 import type { SourceGroundingDeferStats, TrustSummary } from "@do-soul/alaya-protocol";
 import type { DaemonStartupStepRecord } from "../index.js";
-import type { RecallUtilizationService, RecallUtilizationStats } from "../services/recall-utilization-service.js";
+import type { RecallUtilizationService, RecallUtilizationStats } from "../services/status/recall-utilization-service.js";
 import { ALAYA_SYSEXITS, type AlayaCliArgsSchema, type AlayaCliContext, type AlayaCliResult, type AlayaSubcommandSpec } from "./bridge.js";
 import { projectSourceGroundingDeferStats } from "./source-grounding-defers/projection.js";
 

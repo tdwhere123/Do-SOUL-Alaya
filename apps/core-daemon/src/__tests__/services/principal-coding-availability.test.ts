@@ -3,7 +3,7 @@ import {
   CORE_DAEMON_ENVIRONMENT_TOOLS,
   PRINCIPAL_CODING_REQUIRED_TOOLS,
   derivePrincipalCodingAvailability
-} from "../../services/principal-coding-availability.js";
+} from "../../services/support/principal-coding-availability.js";
 
 describe("principal coding availability", () => {
   it("reports unavailable when the principal runtime is not configured", () => {

@@ -15,6 +15,7 @@ export const MAX_EMBEDDING_REQUEST_TOTAL_WALLCLOCK_MS = 30_000;
 export const EMBEDDING_TRANSPORT_BACKSTOP_MARGIN_MS = 2_000;
 export const QUERY_EMBEDDING_WARMUP_BATCH_SIZE = 16;
 export const EMBEDDING_WORKSPACE_SCAN_CAP = 5_000;
+export const NO_STORED_VECTORS_DEGRADATION_REASON = "no_stored_vectors";
 
 export function resolveEmbeddingWorkspaceScanCap(): number {
   const configured = getCoreConfig().embedding.workspaceScanCap;
