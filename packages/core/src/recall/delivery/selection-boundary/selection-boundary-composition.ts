@@ -38,12 +38,9 @@ export type SelectionCompositionOptions = Readonly<{
   readonly finalAuthorityMaxHeadDrop?: number;
 }>;
 
-/** Alias of the shared live delivery branch contract. */
-export type SelectionCompositionBranch = FineAssessmentDeliveryBranch;
-
 export type SelectionCompositionReconstruction = Readonly<{
   readonly result: FineAssessmentSelectionResult;
-  readonly branch: SelectionCompositionBranch;
+  readonly branch: FineAssessmentDeliveryBranch;
   readonly deepHead: RecallDeepHeadAssessment;
   readonly delivery: ReturnType<typeof applyDeliverySelection>;
 }>;
@@ -103,7 +100,7 @@ export function buildCompositionSelectionParams(
   supplementaryData: ReturnType<typeof restoreSupplementaryData>,
   delivery: ReturnType<typeof applyDeliverySelection>,
   deepHead: RecallDeepHeadAssessment,
-  branch: SelectionCompositionBranch,
+  branch: FineAssessmentDeliveryBranch,
   tokenEstimator: FineAssessmentSelectionParams["tokenEstimator"] =
     createCapturedTokenEstimator(input.token_estimates_by_content)
 ): FineAssessmentSelectionParams {
@@ -133,7 +130,7 @@ function assertCompositionInputs(
   input: FineAssessmentSelectionBoundaryInput,
   delivery: ReturnType<typeof applyDeliverySelection>,
   deepHead: RecallDeepHeadAssessment,
-  branch: SelectionCompositionBranch
+  branch: FineAssessmentDeliveryBranch
 ): void {
   assertCandidateOrder(delivery.orderedCandidates, input.ordered_candidates);
   assertNumberMapEquals(

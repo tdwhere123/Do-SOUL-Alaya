@@ -18,7 +18,7 @@ export type DeepHeadAssessmentResolver = (
  * Capture-on keeps traces; capture-off keeps scores only.
  * One gate for live, composition, and counterfactual assessment paths.
  */
-export function gateDeepHeadAssessment(
+function gateDeepHeadAssessment(
   assessment: RecallDeepHeadAssessment,
   captureAnswerFeatures?: boolean
 ): RecallDeepHeadAssessment {

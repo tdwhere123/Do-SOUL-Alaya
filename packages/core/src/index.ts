@@ -84,7 +84,6 @@ export {
 export {
   reconstructFineAssessmentComposition,
   SELECTION_COMPOSITION_FIDELITY_MISMATCH,
-  type SelectionCompositionBranch,
   type SelectionCompositionOptions,
   type SelectionCompositionReconstruction
 } from "./recall/delivery/selection-boundary/selection-boundary-composition.js";
@@ -105,32 +104,12 @@ export {
   createLivePlusCompanionTokenEstimator,
   proveLiveTokenEstimatesMatchDeclaredEstimator,
   selectionBoundaryContentSha256,
-  type CfTokenCompanionAuxiliaryEstimate,
-  type CfTokenCompanionEstimatorIdentity,
   type CfTokenCompanionRecordSlice,
   type LiveTokenEstimateReconstructionProof
 } from "./recall/delivery/selection-boundary/selection-boundary-cf-token-companion.js";
 export {
-  combineIndependentEmbeddingEvidence,
-  combineNonlexicalUnitIntervalComposition,
-  resolveIndependentEmbeddingEvidenceAssessment,
-  resolveNonlexicalUnitIntervalCompositionAssessment
-} from "./recall/rerank/deep-head.js";
-export {
   buildFineAssessmentComponentLedger
 } from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
-export type {
-  ComponentLedgerCandidate,
-  ComponentLedgerDuplicateEvidence,
-  ComponentLedgerFloodTerms,
-  ComponentLedgerFusionSlice,
-  ComponentLedgerSelectionInputs,
-  ComponentLedgerUnits,
-  ComponentSourceObservation,
-  ComponentSourceState,
-  FineAssessmentComponentLedger,
-  SelectedEmbeddingSource
-} from "./recall/delivery/selection-boundary/selection-boundary-component-ledger-types.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";

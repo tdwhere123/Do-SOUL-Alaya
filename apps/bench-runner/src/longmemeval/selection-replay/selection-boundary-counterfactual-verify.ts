@@ -52,12 +52,6 @@ export type SelectionCounterfactualCellMetrics =
     readonly operator: SelectionCounterfactualOperatorId;
   }>;
 
-/** @deprecated Prefer SelectionCounterfactualCellMetrics. */
-export type IndependentEmbeddingCounterfactualCellMetrics =
-  SelectionCounterfactualCellMetrics & Readonly<{
-    readonly operator: typeof INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR;
-  }>;
-
 export type CounterfactualQuestionTransition = Readonly<{
   readonly questionId: string;
   readonly baselineHitAt5: boolean;
@@ -152,14 +146,14 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
   artifactPath: string,
   goldMapPath: string,
   options: EvaluateOptions = {}
-): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
+): Promise<SelectionCounterfactualCellMetrics> {
   return evaluateSelectionCounterfactual(
     artifactPath,
     goldMapPath,
     INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
     reconstructIndependentEmbeddingEvidenceComposition,
     options
-  ) as Promise<IndependentEmbeddingCounterfactualCellMetrics>;
+  );
 }
 
 export async function evaluateIndependentEmbeddingEvidenceCounterfactualWithCompanion(
@@ -168,7 +162,7 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactualWithComp
   companionGzipPath: string,
   companionManifestPath: string,
   options: Omit<EvaluateOptions, "cfTokenCompanion"> = {}
-): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
+): Promise<SelectionCounterfactualCellMetrics> {
   return evaluateSelectionCounterfactualWithCompanion(
     artifactPath,
     goldMapPath,
@@ -177,7 +171,7 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactualWithComp
     INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
     reconstructIndependentEmbeddingEvidenceComposition,
     options
-  ) as Promise<IndependentEmbeddingCounterfactualCellMetrics>;
+  );
 }
 
 export async function evaluateNonlexicalUnitIntervalCompositionCounterfactual(
@@ -229,16 +223,6 @@ export function resolveSelectionCounterfactualPromoteReady(
     promoteReady: blockers.length === 0,
     blockers: Object.freeze(blockers)
   });
-}
-
-export function resolveIndependentEmbeddingPromoteReady(
-  cellA: SelectionCounterfactualCellMetrics,
-  cellB: SelectionCounterfactualCellMetrics
-): Readonly<{
-  readonly promoteReady: boolean;
-  readonly blockers: readonly string[];
-}> {
-  return resolveSelectionCounterfactualPromoteReady(cellA, cellB);
 }
 
 export function summarizeCohortHitTransitions(

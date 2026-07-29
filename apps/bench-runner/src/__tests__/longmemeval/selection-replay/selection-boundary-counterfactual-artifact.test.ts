@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   evaluateIndependentEmbeddingEvidenceCounterfactual,
-  resolveIndependentEmbeddingPromoteReady
+  resolveSelectionCounterfactualPromoteReady
 } from
   "../../../longmemeval/selection-replay/selection-boundary-counterfactual-verify.js";
 import {
@@ -32,7 +32,7 @@ describe("independent embedding evidence counterfactual (closed-capture)", () =>
       CLOSED_CAPTURE_SELECTION_BOUNDARY_B,
       CLOSED_CAPTURE_COUNTERFACTUAL_GOLD_B
     );
-    const promote = resolveIndependentEmbeddingPromoteReady(cellA, cellB);
+    const promote = resolveSelectionCounterfactualPromoteReady(cellA, cellB);
 
     expect(cellA.baselineCompositionCount).toBe(500);
     expect(cellA.answerableCount).toBe(470);
