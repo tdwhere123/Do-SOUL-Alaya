@@ -149,6 +149,44 @@ export function resolveIndependentEmbeddingEvidenceAssessment(params: Readonly<{
   });
 }
 
+/**
+ * Lexical agreement echoes fusion lexical/trigram family-max; omit it from the
+ * unit-interval objective. No flood/RRF cold baseline.
+ */
+export function combineNonlexicalUnitIntervalComposition(
+  embedding: number | null,
+  evidenceAgreement: number
+): number {
+  return embedding !== null
+    ? probabilisticOr(embedding, evidenceAgreement)
+    : evidenceAgreement;
+}
+
+export function resolveNonlexicalUnitIntervalCompositionAssessment(params: Readonly<{
+  readonly candidates: readonly DeliverySelectionCandidate[];
+  readonly answerRelevanceScores: ReadonlyMap<string, number>;
+  readonly supplementaryData: DeepHeadSupplementary;
+}>): RecallDeepHeadAssessment {
+  if (params.answerRelevanceScores.size > 0) {
+    return buildCrossEncoderAssessment(params);
+  }
+  const components = params.candidates.map((candidate) =>
+    buildLightweightComponents(candidate, params.supplementaryData)
+  );
+  const active = components.some((item) => item.embedding !== null) ||
+    components.some((item) => item.evidenceAgreement > 0);
+  const traces = params.candidates.map((candidate, index) => [
+    candidate.fusion.candidate_key,
+    buildNonlexicalUnitIntervalCompositionTrace(components[index]!, active)
+  ] as const);
+  return Object.freeze({
+    scores: active
+      ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
+      : new Map(),
+    traceByCandidateKey: new Map(traces)
+  });
+}
+
 function buildCrossEncoderAssessment(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
   readonly answerRelevanceScores: ReadonlyMap<string, number>;
@@ -260,6 +298,36 @@ function buildIndependentEmbeddingEvidenceTrace(
   return buildDeepHeadTrace(
     components,
     combineIndependentEmbeddingEvidence(null, components.resolvedEvidence),
+    "evidence_only",
+    false
+  );
+}
+
+function buildNonlexicalUnitIntervalCompositionTrace(
+  components: LightweightComponents,
+  active: boolean
+): RecallDeepHeadTrace {
+  const nonlexical = Object.freeze({
+    ...components,
+    resolvedEvidence: components.evidenceAgreement
+  });
+  if (!active) {
+    return buildDeepHeadTrace(nonlexical, null, "inactive", false);
+  }
+  if (nonlexical.embedding !== null) {
+    return buildDeepHeadTrace(
+      nonlexical,
+      combineNonlexicalUnitIntervalComposition(
+        nonlexical.embedding,
+        nonlexical.evidenceAgreement
+      ),
+      "embedding_evidence",
+      false
+    );
+  }
+  return buildDeepHeadTrace(
+    nonlexical,
+    combineNonlexicalUnitIntervalComposition(null, nonlexical.evidenceAgreement),
     "evidence_only",
     false
   );

@@ -90,8 +90,10 @@ export {
 } from "./recall/delivery/selection-boundary/selection-boundary-composition.js";
 export {
   INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
+  NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR,
   counterfactualDeliveredCandidateKeys,
   reconstructIndependentEmbeddingEvidenceComposition,
+  reconstructNonlexicalUnitIntervalComposition,
   type CounterfactualCompositionOptions
 } from "./recall/delivery/selection-boundary/selection-boundary-counterfactual.js";
 export {
@@ -110,7 +112,9 @@ export {
 } from "./recall/delivery/selection-boundary/selection-boundary-cf-token-companion.js";
 export {
   combineIndependentEmbeddingEvidence,
-  resolveIndependentEmbeddingEvidenceAssessment
+  combineNonlexicalUnitIntervalComposition,
+  resolveIndependentEmbeddingEvidenceAssessment,
+  resolveNonlexicalUnitIntervalCompositionAssessment
 } from "./recall/rerank/deep-head.js";
 export {
   buildFineAssessmentComponentLedger

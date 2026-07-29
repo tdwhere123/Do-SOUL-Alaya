@@ -2,11 +2,16 @@ import { readFile } from "node:fs/promises";
 import {
   counterfactualDeliveredCandidateKeys,
   INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
+  NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR,
   reconstructFineAssessmentComposition,
   reconstructIndependentEmbeddingEvidenceComposition,
+  reconstructNonlexicalUnitIntervalComposition,
   SELECTION_BOUNDARY_FIDELITY_MISMATCH,
   auxiliaryEstimatesToMap,
-  type SelectionCompositionOptions
+  type CounterfactualCompositionOptions,
+  type FineAssessmentSelectionBoundaryCase,
+  type SelectionCompositionOptions,
+  type SelectionCompositionReconstruction
 } from "@do-soul/alaya-core";
 import {
   forEachSelectionBoundaryGzipRecord,
@@ -20,6 +25,14 @@ import {
   loadCfTokenCompanionArtifact,
   type CfTokenCompanionLoad
 } from "./selection-boundary-cf-token-companion.js";
+import {
+  accumulateCounterfactualRecord,
+  anyGoldInHead,
+  createCounterfactualCellAccumulator,
+  rollupCounterfactualCellMetricsBase,
+  type CounterfactualRecordEvaluation,
+  type SelectionCounterfactualCellMetricsBase
+} from "./selection-boundary-counterfactual-metrics.js";
 
 const COUNTERFACTUAL_ARTIFACT_ERRORS = Object.freeze({
   utf8Invalid: (context: string) =>
@@ -30,30 +43,26 @@ const COUNTERFACTUAL_ARTIFACT_ERRORS = Object.freeze({
     `selection counterfactual gzip exceeds the ${maxBytes} byte size limit`
 });
 
-export type IndependentEmbeddingCounterfactualCellMetrics = Readonly<{
-  readonly operator: typeof INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR;
-  readonly recordCount: number;
-  readonly baselineCompositionCount: number;
-  readonly counterfactualEvaluableCount: number;
-  readonly unseenTokenFailureCount: number;
-  readonly answerableCount: number;
-  readonly evaluableAnswerableCount: number;
-  readonly baselineAnyAt5: number;
-  readonly baselineAnyAt5OnEvaluable: number;
-  readonly counterfactualAnyAt5: number;
-  readonly anyAt5Gain: number;
-  readonly anyAt5Loss: number;
-  readonly goldBearingCount: number;
-  readonly evaluableGoldBearingCount: number;
-  readonly baselineFullGoldAt5: number;
-  readonly baselineFullGoldAt5OnEvaluable: number;
-  readonly counterfactualFullGoldAt5: number;
-  readonly fullGoldAt5DeltaOnEvaluable: number;
-  readonly membershipChurnQuestions: number;
-  readonly orderChurnQuestions: number;
-  /** Full-cell gates require complete evaluability plus no regression. */
-  readonly nonRegressive: boolean;
-  readonly cellBlockers: readonly string[];
+export type SelectionCounterfactualOperatorId =
+  | typeof INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR
+  | typeof NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR;
+
+export type SelectionCounterfactualCellMetrics =
+  SelectionCounterfactualCellMetricsBase & Readonly<{
+    readonly operator: SelectionCounterfactualOperatorId;
+  }>;
+
+/** @deprecated Prefer SelectionCounterfactualCellMetrics. */
+export type IndependentEmbeddingCounterfactualCellMetrics =
+  SelectionCounterfactualCellMetrics & Readonly<{
+    readonly operator: typeof INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR;
+  }>;
+
+export type CounterfactualQuestionTransition = Readonly<{
+  readonly questionId: string;
+  readonly baselineHitAt5: boolean;
+  readonly counterfactualHitAt5: boolean | null;
+  readonly unseenTokenFailure: boolean;
 }>;
 
 type GoldQuestion = Readonly<{
@@ -61,48 +70,25 @@ type GoldQuestion = Readonly<{
   readonly goldObjectIds: readonly string[];
 }>;
 
-type CounterfactualRecordEvaluation = Readonly<{
-  readonly baselineKeys: readonly string[];
-  readonly counterfactualKeys: readonly string[] | null;
-  readonly unseenTokenFailure: boolean;
-  readonly answerable: boolean;
-  readonly goldObjectIds: readonly string[];
-}>;
+type CounterfactualReconstruct = (
+  boundary: FineAssessmentSelectionBoundaryCase,
+  options?: CounterfactualCompositionOptions
+) => SelectionCompositionReconstruction;
 
-type CounterfactualCellAccumulator = {
-  baselineCompositionCount: number;
-  counterfactualEvaluableCount: number;
-  unseenTokenFailureCount: number;
-  answerableCount: number;
-  evaluableAnswerableCount: number;
-  baselineAnyAt5: number;
-  baselineAnyAt5OnEvaluable: number;
-  counterfactualAnyAt5: number;
-  anyAt5Gain: number;
-  anyAt5Loss: number;
-  goldBearingCount: number;
-  evaluableGoldBearingCount: number;
-  baselineFullGoldAt5: number;
-  baselineFullGoldAt5OnEvaluable: number;
-  counterfactualFullGoldAt5: number;
-  membershipChurnQuestions: number;
-  orderChurnQuestions: number;
+type EvaluateOptions = SelectionCompositionOptions & {
+  readonly maxArtifactBytes?: number;
+  readonly authoritativeOnly?: boolean;
+  readonly cfTokenCompanion?: CfTokenCompanionLoad;
+  readonly onRecord?: (evaluation: CounterfactualRecordEvaluation) => void;
 };
 
-/**
- * Evaluate the registered independent-embedding counterfactual against a
- * closed-capture selection sidecar plus slim gold map. Unseen token estimates
- * fail loud per question and mark the cell incomplete (do not invent estimates).
- */
-export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
+export async function evaluateSelectionCounterfactual(
   artifactPath: string,
   goldMapPath: string,
-  options: SelectionCompositionOptions & {
-    readonly maxArtifactBytes?: number;
-    readonly authoritativeOnly?: boolean;
-    readonly cfTokenCompanion?: CfTokenCompanionLoad;
-  } = {}
-): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
+  operator: SelectionCounterfactualOperatorId,
+  reconstruct: CounterfactualReconstruct,
+  options: EvaluateOptions = {}
+): Promise<SelectionCounterfactualCellMetrics> {
   const goldByQuestion = await loadGoldByQuestion(goldMapPath);
   const maxArtifactBytes = options.maxArtifactBytes ??
     LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES;
@@ -118,15 +104,15 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
       if (hardError !== null) return;
       if (authoritativeOnly && !record.authoritative) return;
       try {
-        accumulateCounterfactualRecord(
-          acc,
-          evaluateCounterfactualRecord(
-            record,
-            goldByQuestion,
-            options,
-            options.cfTokenCompanion
-          )
+        const evaluation = evaluateCounterfactualRecord(
+          record,
+          goldByQuestion,
+          options,
+          options.cfTokenCompanion,
+          reconstruct
         );
+        accumulateCounterfactualRecord(acc, evaluation);
+        options.onRecord?.(evaluation);
       } catch (error) {
         hardError = error instanceof Error ? error : new Error(String(error));
       }
@@ -134,11 +120,46 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
   );
 
   if (hardError !== null) throw hardError;
-  return rollupCounterfactualCellMetrics(
-    acc,
-    recordCount,
-    authoritativeOnly
+  return Object.freeze({
+    operator,
+    ...rollupCounterfactualCellMetricsBase(acc, recordCount, authoritativeOnly)
+  });
+}
+
+export async function evaluateSelectionCounterfactualWithCompanion(
+  artifactPath: string,
+  goldMapPath: string,
+  companionGzipPath: string,
+  companionManifestPath: string,
+  operator: SelectionCounterfactualOperatorId,
+  reconstruct: CounterfactualReconstruct,
+  options: Omit<EvaluateOptions, "cfTokenCompanion"> = {}
+): Promise<SelectionCounterfactualCellMetrics> {
+  const cfTokenCompanion = await loadCfTokenCompanionArtifact({
+    gzipPath: companionGzipPath,
+    manifestPath: companionManifestPath
+  });
+  return evaluateSelectionCounterfactual(
+    artifactPath,
+    goldMapPath,
+    operator,
+    reconstruct,
+    { ...options, cfTokenCompanion }
   );
+}
+
+export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
+  artifactPath: string,
+  goldMapPath: string,
+  options: EvaluateOptions = {}
+): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
+  return evaluateSelectionCounterfactual(
+    artifactPath,
+    goldMapPath,
+    INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
+    reconstructIndependentEmbeddingEvidenceComposition,
+    options
+  ) as Promise<IndependentEmbeddingCounterfactualCellMetrics>;
 }
 
 export async function evaluateIndependentEmbeddingEvidenceCounterfactualWithCompanion(
@@ -146,25 +167,54 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactualWithComp
   goldMapPath: string,
   companionGzipPath: string,
   companionManifestPath: string,
-  options: SelectionCompositionOptions & {
-    readonly maxArtifactBytes?: number;
-    readonly authoritativeOnly?: boolean;
-  } = {}
+  options: Omit<EvaluateOptions, "cfTokenCompanion"> = {}
 ): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
-  const cfTokenCompanion = await loadCfTokenCompanionArtifact({
-    gzipPath: companionGzipPath,
-    manifestPath: companionManifestPath
-  });
-  return evaluateIndependentEmbeddingEvidenceCounterfactual(
+  return evaluateSelectionCounterfactualWithCompanion(
     artifactPath,
     goldMapPath,
-    { ...options, cfTokenCompanion }
+    companionGzipPath,
+    companionManifestPath,
+    INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
+    reconstructIndependentEmbeddingEvidenceComposition,
+    options
+  ) as Promise<IndependentEmbeddingCounterfactualCellMetrics>;
+}
+
+export async function evaluateNonlexicalUnitIntervalCompositionCounterfactual(
+  artifactPath: string,
+  goldMapPath: string,
+  options: EvaluateOptions = {}
+): Promise<SelectionCounterfactualCellMetrics> {
+  return evaluateSelectionCounterfactual(
+    artifactPath,
+    goldMapPath,
+    NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR,
+    reconstructNonlexicalUnitIntervalComposition,
+    options
   );
 }
 
-export function resolveIndependentEmbeddingPromoteReady(
-  cellA: IndependentEmbeddingCounterfactualCellMetrics,
-  cellB: IndependentEmbeddingCounterfactualCellMetrics
+export async function evaluateNonlexicalUnitIntervalCompositionCounterfactualWithCompanion(
+  artifactPath: string,
+  goldMapPath: string,
+  companionGzipPath: string,
+  companionManifestPath: string,
+  options: Omit<EvaluateOptions, "cfTokenCompanion"> = {}
+): Promise<SelectionCounterfactualCellMetrics> {
+  return evaluateSelectionCounterfactualWithCompanion(
+    artifactPath,
+    goldMapPath,
+    companionGzipPath,
+    companionManifestPath,
+    NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR,
+    reconstructNonlexicalUnitIntervalComposition,
+    options
+  );
+}
+
+export function resolveSelectionCounterfactualPromoteReady(
+  cellA: SelectionCounterfactualCellMetrics,
+  cellB: SelectionCounterfactualCellMetrics
 ): Readonly<{
   readonly promoteReady: boolean;
   readonly blockers: readonly string[];
@@ -181,11 +231,75 @@ export function resolveIndependentEmbeddingPromoteReady(
   });
 }
 
+export function resolveIndependentEmbeddingPromoteReady(
+  cellA: SelectionCounterfactualCellMetrics,
+  cellB: SelectionCounterfactualCellMetrics
+): Readonly<{
+  readonly promoteReady: boolean;
+  readonly blockers: readonly string[];
+}> {
+  return resolveSelectionCounterfactualPromoteReady(cellA, cellB);
+}
+
+export function summarizeCohortHitTransitions(
+  transitions: readonly CounterfactualQuestionTransition[],
+  cohortQuestionIds: ReadonlySet<string>
+): Readonly<{
+  readonly cohortSize: number;
+  readonly evaluable: number;
+  readonly missToHit: number;
+  readonly hitToMiss: number;
+  readonly stayHit: number;
+  readonly stayMiss: number;
+}> {
+  let evaluable = 0;
+  let missToHit = 0;
+  let hitToMiss = 0;
+  let stayHit = 0;
+  let stayMiss = 0;
+  for (const row of transitions) {
+    if (!cohortQuestionIds.has(row.questionId)) continue;
+    if (row.counterfactualHitAt5 === null) continue;
+    evaluable += 1;
+    if (!row.baselineHitAt5 && row.counterfactualHitAt5) missToHit += 1;
+    else if (row.baselineHitAt5 && !row.counterfactualHitAt5) hitToMiss += 1;
+    else if (row.baselineHitAt5) stayHit += 1;
+    else stayMiss += 1;
+  }
+  return Object.freeze({
+    cohortSize: cohortQuestionIds.size,
+    evaluable,
+    missToHit,
+    hitToMiss,
+    stayHit,
+    stayMiss
+  });
+}
+
+export function toQuestionTransition(
+  evaluation: CounterfactualRecordEvaluation
+): CounterfactualQuestionTransition {
+  const baselineHitAt5 = anyGoldInHead(
+    evaluation.baselineKeys,
+    evaluation.goldObjectIds,
+    5
+  );
+  return Object.freeze({
+    questionId: evaluation.questionId,
+    baselineHitAt5,
+    counterfactualHitAt5: evaluation.counterfactualKeys === null
+      ? null
+      : anyGoldInHead(evaluation.counterfactualKeys, evaluation.goldObjectIds, 5),
+    unseenTokenFailure: evaluation.unseenTokenFailure
+  });
+}
+
 function evaluateCounterfactualRecord(
   record: SelectionBoundaryArtifactRecord,
   goldByQuestion: ReadonlyMap<string, GoldQuestion>,
   options: SelectionCompositionOptions,
-  cfTokenCompanion: CfTokenCompanionLoad | undefined
+  cfTokenCompanion: CfTokenCompanionLoad | undefined,
+  reconstruct: CounterfactualReconstruct
 ): CounterfactualRecordEvaluation {
   reconstructFineAssessmentComposition(record.boundary, {
     finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
@@ -197,17 +311,14 @@ function evaluateCounterfactualRecord(
     companionRecordKey(record.question_id, record.invocation_index)
   );
   try {
-    const reconstructed = reconstructIndependentEmbeddingEvidenceComposition(
-      record.boundary,
-      {
-        finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop,
-        ...(companionSlice === undefined ? {} : {
-          cfTokenCompanionAuxiliaryByContentSha256: auxiliaryEstimatesToMap(
-            companionSlice.auxiliary_estimates
-          )
-        })
-      }
-    );
+    const reconstructed = reconstruct(record.boundary, {
+      finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop,
+      ...(companionSlice === undefined ? {} : {
+        cfTokenCompanionAuxiliaryByContentSha256: auxiliaryEstimatesToMap(
+          companionSlice.auxiliary_estimates
+        )
+      })
+    });
     counterfactualKeys = counterfactualDeliveredCandidateKeys(
       reconstructed.result
     );
@@ -222,6 +333,7 @@ function evaluateCounterfactualRecord(
     );
   }
   return Object.freeze({
+    questionId: record.question_id,
     baselineKeys,
     counterfactualKeys,
     unseenTokenFailure,
@@ -230,199 +342,9 @@ function evaluateCounterfactualRecord(
   });
 }
 
-function accumulateCounterfactualRecord(
-  acc: CounterfactualCellAccumulator,
-  evaluation: CounterfactualRecordEvaluation
-): void {
-  acc.baselineCompositionCount += 1;
-  if (evaluation.unseenTokenFailure) acc.unseenTokenFailureCount += 1;
-  if (evaluation.counterfactualKeys !== null) {
-    acc.counterfactualEvaluableCount += 1;
-    if (!sameMembership(evaluation.baselineKeys, evaluation.counterfactualKeys)) {
-      acc.membershipChurnQuestions += 1;
-    }
-    if (!sameOrder(evaluation.baselineKeys, evaluation.counterfactualKeys)) {
-      acc.orderChurnQuestions += 1;
-    }
-  }
-  if (!evaluation.answerable) return;
-  acc.answerableCount += 1;
-  accumulateAnswerableGoldMetrics(acc, evaluation);
-}
-
-function accumulateAnswerableGoldMetrics(
-  acc: CounterfactualCellAccumulator,
-  evaluation: CounterfactualRecordEvaluation
-): void {
-  const baselineHit = anyGoldInHead(
-    evaluation.baselineKeys,
-    evaluation.goldObjectIds,
-    5
-  );
-  if (baselineHit) acc.baselineAnyAt5 += 1;
-  if (evaluation.goldObjectIds.length > 0) {
-    acc.goldBearingCount += 1;
-    if (fullGoldInHead(evaluation.baselineKeys, evaluation.goldObjectIds, 5)) {
-      acc.baselineFullGoldAt5 += 1;
-    }
-  }
-  if (evaluation.counterfactualKeys === null) return;
-  acc.evaluableAnswerableCount += 1;
-  if (baselineHit) acc.baselineAnyAt5OnEvaluable += 1;
-  const counterfactualHit = anyGoldInHead(
-    evaluation.counterfactualKeys,
-    evaluation.goldObjectIds,
-    5
-  );
-  if (counterfactualHit) acc.counterfactualAnyAt5 += 1;
-  if (!baselineHit && counterfactualHit) acc.anyAt5Gain += 1;
-  if (baselineHit && !counterfactualHit) acc.anyAt5Loss += 1;
-  if (evaluation.goldObjectIds.length === 0) return;
-  acc.evaluableGoldBearingCount += 1;
-  if (fullGoldInHead(evaluation.baselineKeys, evaluation.goldObjectIds, 5)) {
-    acc.baselineFullGoldAt5OnEvaluable += 1;
-  }
-  if (fullGoldInHead(evaluation.counterfactualKeys, evaluation.goldObjectIds, 5)) {
-    acc.counterfactualFullGoldAt5 += 1;
-  }
-}
-
-function rollupCounterfactualCellMetrics(
-  acc: CounterfactualCellAccumulator,
-  recordCount: number,
-  authoritativeOnly: boolean
-): IndependentEmbeddingCounterfactualCellMetrics {
-  const fullGoldAt5DeltaOnEvaluable =
-    acc.counterfactualFullGoldAt5 - acc.baselineFullGoldAt5OnEvaluable;
-  const cellBlockers = collectCellBlockers({
-    anyAt5Loss: acc.anyAt5Loss,
-    fullGoldAt5Delta: fullGoldAt5DeltaOnEvaluable,
-    answerableCount: acc.answerableCount,
-    baselineCompositionCount: acc.baselineCompositionCount,
-    counterfactualEvaluableCount: acc.counterfactualEvaluableCount,
-    unseenTokenFailureCount: acc.unseenTokenFailureCount,
-    recordCount: authoritativeOnly ? acc.baselineCompositionCount : recordCount
-  });
-  return Object.freeze({
-    operator: INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
-    recordCount,
-    baselineCompositionCount: acc.baselineCompositionCount,
-    counterfactualEvaluableCount: acc.counterfactualEvaluableCount,
-    unseenTokenFailureCount: acc.unseenTokenFailureCount,
-    answerableCount: acc.answerableCount,
-    evaluableAnswerableCount: acc.evaluableAnswerableCount,
-    baselineAnyAt5: acc.baselineAnyAt5,
-    baselineAnyAt5OnEvaluable: acc.baselineAnyAt5OnEvaluable,
-    counterfactualAnyAt5: acc.counterfactualAnyAt5,
-    anyAt5Gain: acc.anyAt5Gain,
-    anyAt5Loss: acc.anyAt5Loss,
-    goldBearingCount: acc.goldBearingCount,
-    evaluableGoldBearingCount: acc.evaluableGoldBearingCount,
-    baselineFullGoldAt5: acc.baselineFullGoldAt5,
-    baselineFullGoldAt5OnEvaluable: acc.baselineFullGoldAt5OnEvaluable,
-    counterfactualFullGoldAt5: acc.counterfactualFullGoldAt5,
-    fullGoldAt5DeltaOnEvaluable,
-    membershipChurnQuestions: acc.membershipChurnQuestions,
-    orderChurnQuestions: acc.orderChurnQuestions,
-    nonRegressive: cellBlockers.length === 0,
-    cellBlockers
-  });
-}
-
-function createCounterfactualCellAccumulator(): CounterfactualCellAccumulator {
-  return {
-    baselineCompositionCount: 0,
-    counterfactualEvaluableCount: 0,
-    unseenTokenFailureCount: 0,
-    answerableCount: 0,
-    evaluableAnswerableCount: 0,
-    baselineAnyAt5: 0,
-    baselineAnyAt5OnEvaluable: 0,
-    counterfactualAnyAt5: 0,
-    anyAt5Gain: 0,
-    anyAt5Loss: 0,
-    goldBearingCount: 0,
-    evaluableGoldBearingCount: 0,
-    baselineFullGoldAt5: 0,
-    baselineFullGoldAt5OnEvaluable: 0,
-    counterfactualFullGoldAt5: 0,
-    membershipChurnQuestions: 0,
-    orderChurnQuestions: 0
-  };
-}
-
-function collectCellBlockers(input: Readonly<{
-  readonly anyAt5Loss: number;
-  readonly fullGoldAt5Delta: number;
-  readonly answerableCount: number;
-  readonly baselineCompositionCount: number;
-  readonly counterfactualEvaluableCount: number;
-  readonly unseenTokenFailureCount: number;
-  readonly recordCount: number;
-}>): readonly string[] {
-  const blockers: string[] = [];
-  if (input.counterfactualEvaluableCount !== input.baselineCompositionCount) {
-    blockers.push("incomplete_counterfactual_coverage");
-  }
-  if (input.unseenTokenFailureCount > 0) {
-    blockers.push("unseen_token_estimate_failures");
-  }
-  if (input.anyAt5Loss > 0) blockers.push("any_at_5_regression");
-  if (input.fullGoldAt5Delta < 0) blockers.push("full_gold_at_5_decline");
-  if (input.answerableCount <= 0) blockers.push("no_answerable_questions");
-  if (input.recordCount <= 0) blockers.push("no_records");
-  return Object.freeze(blockers);
-}
-
 function isUnseenTokenFailure(error: unknown): boolean {
   return error instanceof Error &&
     error.message === SELECTION_BOUNDARY_FIDELITY_MISMATCH;
-}
-
-function sameMembership(
-  left: readonly string[],
-  right: readonly string[]
-): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((key) => rightSet.has(key));
-}
-
-function sameOrder(
-  left: readonly string[],
-  right: readonly string[]
-): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((key, index) => key === right[index]);
-}
-
-function objectIdFromCandidateKey(candidateKey: string): string {
-  const parts = candidateKey.split(":");
-  return parts[parts.length - 1]!;
-}
-
-function anyGoldInHead(
-  candidateKeys: readonly string[],
-  goldObjectIds: readonly string[],
-  head: number
-): boolean {
-  if (goldObjectIds.length === 0) return false;
-  const gold = new Set(goldObjectIds);
-  return candidateKeys.slice(0, head).some((key) =>
-    gold.has(objectIdFromCandidateKey(key))
-  );
-}
-
-function fullGoldInHead(
-  candidateKeys: readonly string[],
-  goldObjectIds: readonly string[],
-  head: number
-): boolean {
-  if (goldObjectIds.length === 0) return false;
-  const delivered = new Set(
-    candidateKeys.slice(0, head).map(objectIdFromCandidateKey)
-  );
-  return goldObjectIds.every((objectId) => delivered.has(objectId));
 }
 
 async function loadGoldByQuestion(

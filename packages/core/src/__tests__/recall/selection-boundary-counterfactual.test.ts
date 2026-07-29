@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   counterfactualDeliveredCandidateKeys,
-  reconstructIndependentEmbeddingEvidenceComposition
+  reconstructIndependentEmbeddingEvidenceComposition,
+  reconstructNonlexicalUnitIntervalComposition
 } from
   "../../recall/delivery/selection-boundary/selection-boundary-counterfactual.js";
 import { reconstructFineAssessmentComposition } from
   "../../recall/delivery/selection-boundary/selection-boundary-composition.js";
 import {
   combineIndependentEmbeddingEvidence,
-  resolveIndependentEmbeddingEvidenceAssessment
+  combineNonlexicalUnitIntervalComposition,
+  resolveIndependentEmbeddingEvidenceAssessment,
+  resolveNonlexicalUnitIntervalCompositionAssessment
 } from "../../recall/rerank/deep-head.js";
 import {
   SELECTION_BOUNDARY_FIDELITY_MISMATCH
@@ -111,6 +114,86 @@ describe("independent embedding evidence counterfactual composition", () => {
 
     expect(() => reconstructIndependentEmbeddingEvidenceComposition(stripped))
       .toThrow(SELECTION_BOUNDARY_FIDELITY_MISMATCH);
+  });
+});
+
+describe("nonlexical unit-interval composition operator", () => {
+  it("omits lexical agreement from the unit-interval objective", () => {
+    expect(combineNonlexicalUnitIntervalComposition(0.4, 0.5)).toBeCloseTo(0.7);
+    expect(combineNonlexicalUnitIntervalComposition(null, 0.5)).toBe(0.5);
+  });
+
+  it("scores with evidence agreement only when lexical is the sole receipt signal", () => {
+    const lexicalOnly = fusedCandidate({
+      objectId: "lex",
+      fusedScore: 0.3,
+      contributions: { lexical_fts: 0.02 }
+    });
+    const assessment = resolveNonlexicalUnitIntervalCompositionAssessment({
+      candidates: [lexicalOnly],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        ftsRanks: { lex: 0.9 },
+        trigramFtsRanks: { lex: 0.81 }
+      })
+    });
+    // Lexical-only waist does not activate: fusion order preserved.
+    expect(assessment.scores.size).toBe(0);
+    expect(assessment.traceByCandidateKey.get(lexicalOnly.fusion.candidate_key))
+      .toMatchObject({
+        score_source: "inactive",
+        lexical_agreement: expect.closeTo(Math.sqrt(0.9 * 0.81), 5),
+        resolved_evidence: 0,
+        resolved_score: null
+      });
+  });
+
+  it("keeps evidence agreement and embedding without fusion cold baseline", () => {
+    const cold = fusedCandidate({
+      objectId: "cold",
+      fusedScore: 0.4,
+      contributions: { lexical_fts: 0.02, evidence_fts: 0.02 }
+    });
+    const embedded = fusedCandidate({
+      objectId: "embedded",
+      fusedScore: 0.2,
+      embedding: 0.4
+    });
+    const assessment = resolveNonlexicalUnitIntervalCompositionAssessment({
+      candidates: [cold, embedded],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        ftsRanks: { cold: 0.9, embedded: 0.81 },
+        trigramFtsRanks: { cold: 0.81, embedded: 1 },
+        evidenceFtsRanks: { cold: 0.64, embedded: 0.25 },
+        structuralScores: { cold: 1, embedded: 1 }
+      })
+    });
+
+    expect(assessment.traceByCandidateKey.get(cold.fusion.candidate_key))
+      .toMatchObject({
+        score_source: "evidence_only",
+        fusion_baseline_used: false,
+        resolved_evidence: expect.closeTo(Math.sqrt(0.64 * 1), 5),
+        resolved_score: expect.closeTo(Math.sqrt(0.64 * 1), 5)
+      });
+    expect(assessment.scores.get(embedded.fusion.candidate_key))
+      .toBeCloseTo(combineNonlexicalUnitIntervalComposition(0.4, Math.sqrt(0.25)));
+  });
+
+  it("reconstructs without asserting CURRENT packet identity", () => {
+    const boundary = captureFineAssessmentSelectionBoundary(
+      "surface-selection-nonlexical-cf"
+    );
+    const baseline = reconstructFineAssessmentComposition(boundary);
+    const counterfactual = reconstructNonlexicalUnitIntervalComposition(boundary);
+    expect(counterfactualDeliveredCandidateKeys(baseline.result))
+      .toEqual(boundary.expected.candidate_keys);
+    expect(
+      [...counterfactual.deepHead.traceByCandidateKey.values()].every(
+        (trace) => !trace.fusion_baseline_used
+      )
+    ).toBe(true);
   });
 });
 

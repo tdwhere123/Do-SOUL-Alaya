@@ -6,10 +6,13 @@ import { applyDeliverySelection } from "../delivery-selection.js";
 import {
   resolveFineAssessmentDeliveryBranch
 } from "../fine-assessment-delivery-branch.js";
-import { resolveFineAssessmentDeepHead } from
-  "../fine-assessment-deep-head.js";
 import {
-  resolveIndependentEmbeddingEvidenceAssessment
+  resolveFineAssessmentDeepHead,
+  type DeepHeadAssessmentResolver
+} from "../fine-assessment-deep-head.js";
+import {
+  resolveIndependentEmbeddingEvidenceAssessment,
+  resolveNonlexicalUnitIntervalCompositionAssessment
 } from "../../rerank/deep-head.js";
 import { buildRecallCandidateSelectionKey } from
   "../../runtime/recall-candidate-builder.js";
@@ -32,6 +35,9 @@ import {
 export const INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR =
   "independent_embedding_evidence" as const;
 
+export const NONLEXICAL_UNIT_INTERVAL_COMPOSITION_OPERATOR =
+  "nonlexical_unit_interval_composition" as const;
+
 export type CounterfactualCompositionOptions = SelectionCompositionOptions &
   Readonly<{
     /** Companion waist estimates keyed by content sha256; F0 live map unchanged. */
@@ -51,6 +57,43 @@ export function reconstructIndependentEmbeddingEvidenceComposition(
   boundary: FineAssessmentSelectionBoundaryCase,
   options: CounterfactualCompositionOptions = {}
 ): SelectionCompositionReconstruction {
+  return reconstructCounterfactualComposition(
+    boundary,
+    options,
+    resolveIndependentEmbeddingEvidenceAssessment
+  );
+}
+
+/**
+ * Counterfactual composition omitting fusion-echo lexical agreement from the
+ * unit-interval deep-head objective. Product CURRENT default unchanged.
+ */
+export function reconstructNonlexicalUnitIntervalComposition(
+  boundary: FineAssessmentSelectionBoundaryCase,
+  options: CounterfactualCompositionOptions = {}
+): SelectionCompositionReconstruction {
+  return reconstructCounterfactualComposition(
+    boundary,
+    options,
+    resolveNonlexicalUnitIntervalCompositionAssessment
+  );
+}
+
+export function counterfactualDeliveredCandidateKeys(
+  result: FineAssessmentSelectionResult
+): readonly string[] {
+  return Object.freeze(
+    result.candidates.map((candidate) =>
+      buildRecallCandidateSelectionKey(candidate)
+    )
+  );
+}
+
+function reconstructCounterfactualComposition(
+  boundary: FineAssessmentSelectionBoundaryCase,
+  options: CounterfactualCompositionOptions,
+  resolveAssessment: DeepHeadAssessmentResolver
+): SelectionCompositionReconstruction {
   validateSelectionBoundary(boundary);
   const input = boundary.input;
   const candidates = input.ordered_candidates;
@@ -64,7 +107,7 @@ export function reconstructIndependentEmbeddingEvidenceComposition(
       supplementaryData,
       captureAnswerFeatures: input.capture_answer_features
     },
-    resolveIndependentEmbeddingEvidenceAssessment
+    resolveAssessment
   );
   const branch = resolveFineAssessmentDeliveryBranch({
     answerRelevanceScores,
@@ -95,14 +138,4 @@ export function reconstructIndependentEmbeddingEvidenceComposition(
     deepHead,
     delivery
   });
-}
-
-export function counterfactualDeliveredCandidateKeys(
-  result: FineAssessmentSelectionResult
-): readonly string[] {
-  return Object.freeze(
-    result.candidates.map((candidate) =>
-      buildRecallCandidateSelectionKey(candidate)
-    )
-  );
 }
