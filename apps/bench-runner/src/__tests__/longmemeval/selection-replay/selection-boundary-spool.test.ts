@@ -137,6 +137,37 @@ describe("LongMemEval selection-boundary spool", () => {
     expect(replayBoundary).not.toHaveBeenCalled();
   });
 
+  it("treats literal U+2028 and U+2029 as JSON content, not record delimiters", async () => {
+    vi.doUnmock("@do-soul/alaya-core");
+    vi.resetModules();
+    const realSpoolModule = await import(
+      "../../../longmemeval/selection-replay/selection-boundary-spool.js"
+    );
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-unicode.ndjson.gz");
+    const candidate = createRankedCandidate("candidate-unicode", 1, 0.9);
+    const boundaryV2 = capturedBoundaryV2([{
+      ...candidate,
+      entry: {
+        ...candidate.entry,
+        content: "before\u2028middle\u2029after"
+      }
+    }]);
+    const encoded = `${JSON.stringify(
+      record("question-unicode", 0, true, boundaryV2)
+    )}\n`;
+
+    expect(encoded).toContain("\u2028");
+    expect(encoded).toContain("\u2029");
+    expect([...encoded].filter((character) => character === "\n")).toHaveLength(1);
+    expect(() => JSON.parse(encoded.slice(0, -1))).not.toThrow();
+    await writeFile(artifactPath, gzipSync(Buffer.from(encoded, "utf8")));
+
+    await expect(
+      realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
+    ).resolves.toEqual({ recordCount: 1 });
+  });
+
   it("rejects truncated committed source identity before publishing", async () => {
     vi.doUnmock("@do-soul/alaya-core");
     vi.resetModules();

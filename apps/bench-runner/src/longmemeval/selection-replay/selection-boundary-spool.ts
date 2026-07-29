@@ -10,9 +10,9 @@ import {
 import { createReadStream, createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline";
-import { Readable, Transform } from "node:stream";
+import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { TextDecoder } from "node:util";
 import { createGunzip, createGzip } from "node:zlib";
 import {
   replayFineAssessmentSelectionBoundary,
@@ -216,14 +216,11 @@ function encodeQuestionRecords(
 async function verifyRecordStream(
   stream: AsyncIterable<Buffer | string>
 ): Promise<{ readonly recordCount: number }> {
-  const lines = createInterface({
-    input: Readable.from(stream),
-    crlfDelay: Infinity
-  });
   let recordCount = 0;
   let previous: SelectionBoundaryRecord | undefined;
-  for await (const line of lines) {
-    if (line.length === 0) continue;
+  for await (const encoded of readLfDelimitedRecords(stream)) {
+    if (encoded.byteLength === 0) continue;
+    const line = decodeSelectionBoundaryRecord(encoded, recordCount);
     const record = parseSelectionBoundaryRecord(line, recordCount);
     assertRecordSequence(record, previous);
     replayFineAssessmentSelectionBoundary(record.boundary);
@@ -234,6 +231,47 @@ async function verifyRecordStream(
     throw new Error("selection replay question has no authoritative invocation");
   }
   return { recordCount };
+}
+
+async function* readLfDelimitedRecords(
+  stream: AsyncIterable<Buffer | string>
+): AsyncGenerator<Buffer> {
+  let pending: Buffer[] = [];
+  for await (const chunk of stream) {
+    const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    let start = 0;
+    let newline = raw.indexOf(0x0a, start);
+    while (newline >= 0) {
+      yield completeRecord(pending, raw.subarray(start, newline));
+      pending = [];
+      start = newline + 1;
+      newline = raw.indexOf(0x0a, start);
+    }
+    if (start < raw.byteLength) pending.push(raw.subarray(start));
+  }
+  if (pending.length > 0) yield Buffer.concat(pending);
+}
+
+function completeRecord(pending: readonly Buffer[], tail: Buffer): Buffer {
+  return pending.length === 0
+    ? tail
+    : Buffer.concat([...pending, tail]);
+}
+
+function decodeSelectionBoundaryRecord(
+  encoded: Buffer,
+  recordIndex: number
+): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(encoded);
+  } catch {
+    const context = [
+      `record_index=${recordIndex}`,
+      `utf8_bytes=${encoded.byteLength}`,
+      `sha256=${createHash("sha256").update(encoded).digest("hex")}`
+    ].join(", ");
+    throw new Error(`selection replay record UTF-8 is invalid (${context})`);
+  }
 }
 
 function parseSelectionBoundaryRecord(
