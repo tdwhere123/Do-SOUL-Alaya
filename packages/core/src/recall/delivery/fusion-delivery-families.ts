@@ -56,11 +56,10 @@ export const RECALL_FUSION_FAMILY_IDS: readonly RecallFusionFamilyId[] = Object.
 // Max, not mean: a family casts one ballot at the strength of its strongest member.
 // Correlated duplicates collapse (max(a,a,a)=a); a lone strong lane is not diluted by
 // weak siblings. Mean would still be ~one vote under high ρ, but softens the best signal.
-export function aggregateFamilyContributions(
+export function familyMaxContributionsById(
   contributions: Readonly<Partial<Record<RecallFusionStream, number>>> | RecallFusionStreamContributions
-): number {
-  let total = 0;
-  for (const familyId of RECALL_FUSION_FAMILY_IDS) {
+): Readonly<Record<RecallFusionFamilyId, number>> {
+  const entries = RECALL_FUSION_FAMILY_IDS.map((familyId) => {
     let familyVote = 0;
     for (const stream of RECALL_FUSION_FAMILY_STREAMS[familyId]) {
       const contribution = contributions[stream] ?? 0;
@@ -68,7 +67,21 @@ export function aggregateFamilyContributions(
         familyVote = contribution;
       }
     }
-    total += familyVote;
+    return [familyId, familyVote] as const;
+  });
+  return Object.freeze(Object.fromEntries(entries) as Record<
+    RecallFusionFamilyId,
+    number
+  >);
+}
+
+export function aggregateFamilyContributions(
+  contributions: Readonly<Partial<Record<RecallFusionStream, number>>> | RecallFusionStreamContributions
+): number {
+  const byId = familyMaxContributionsById(contributions);
+  let total = 0;
+  for (const familyId of RECALL_FUSION_FAMILY_IDS) {
+    total += byId[familyId];
   }
   return total;
 }

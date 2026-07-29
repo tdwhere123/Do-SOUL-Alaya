@@ -111,6 +111,44 @@ export function computeLightweightDeepHeadScores(
   ]));
 }
 
+/**
+ * Independent embedding combines with resolved evidence when observed;
+ * absent embedding keeps resolved evidence (no fusion cold fallback).
+ */
+export function combineIndependentEmbeddingEvidence(
+  embedding: number | null,
+  resolvedEvidence: number
+): number {
+  return embedding !== null
+    ? probabilisticOr(embedding, resolvedEvidence)
+    : resolvedEvidence;
+}
+
+export function resolveIndependentEmbeddingEvidenceAssessment(params: Readonly<{
+  readonly candidates: readonly DeliverySelectionCandidate[];
+  readonly answerRelevanceScores: ReadonlyMap<string, number>;
+  readonly supplementaryData: DeepHeadSupplementary;
+}>): RecallDeepHeadAssessment {
+  if (params.answerRelevanceScores.size > 0) {
+    return buildCrossEncoderAssessment(params);
+  }
+  const components = params.candidates.map((candidate) =>
+    buildLightweightComponents(candidate, params.supplementaryData)
+  );
+  const active = components.some((item) => item.embedding !== null) ||
+    components.some((item) => item.resolvedEvidence > 0);
+  const traces = params.candidates.map((candidate, index) => [
+    candidate.fusion.candidate_key,
+    buildIndependentEmbeddingEvidenceTrace(components[index]!, active)
+  ] as const);
+  return Object.freeze({
+    scores: active
+      ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
+      : new Map(),
+    traceByCandidateKey: new Map(traces)
+  });
+}
+
 function buildCrossEncoderAssessment(params: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
   readonly answerRelevanceScores: ReadonlyMap<string, number>;
@@ -198,6 +236,32 @@ function buildLightweightTrace(
       : components.resolvedEvidence,
     fusionBaselineUsed ? "fusion_evidence" : "evidence_only",
     fusionBaselineUsed
+  );
+}
+
+function buildIndependentEmbeddingEvidenceTrace(
+  components: LightweightComponents,
+  active: boolean
+): RecallDeepHeadTrace {
+  if (!active) {
+    return buildDeepHeadTrace(components, null, "inactive", false);
+  }
+  if (components.embedding !== null) {
+    return buildDeepHeadTrace(
+      components,
+      combineIndependentEmbeddingEvidence(
+        components.embedding,
+        components.resolvedEvidence
+      ),
+      "embedding_evidence",
+      false
+    );
+  }
+  return buildDeepHeadTrace(
+    components,
+    combineIndependentEmbeddingEvidence(null, components.resolvedEvidence),
+    "evidence_only",
+    false
   );
 }
 

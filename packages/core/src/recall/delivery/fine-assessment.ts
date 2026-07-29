@@ -20,6 +20,10 @@ import {
   buildRecallFusionDetails
 } from "./fusion-delivery.js";
 import { applyDeliverySelection } from "./delivery-selection.js";
+import { resolveFineAssessmentDeliveryBranch } from
+  "./fine-assessment-delivery-branch.js";
+import { resolveFineAssessmentDeepHead } from
+  "./fine-assessment-deep-head.js";
 import { computeEffectiveScoreDetails } from "../scoring/scoring.js";
 import {
   selectFineAssessmentCandidates,
@@ -30,12 +34,6 @@ import {
   resolveFineAssessmentCandidateBudget,
   type FineAssessmentPruneResult
 } from "./fine-assessment-prune.js";
-import {
-  hasObservedDeepHeadEmbedding,
-  resolveDeepHeadAssessment,
-  resolveDeepHeadScores,
-  type RecallDeepHeadAssessment
-} from "../rerank/deep-head.js";
 import type { RecallPacketPlanObservation } from
   "./packet-plan/packet-plan-trace.js";
 import type { FineAssessmentSelectionBoundaryCase } from
@@ -138,21 +136,22 @@ export function deliverFineAssessment(
 ): ReturnType<typeof fineAssess> {
   const answerRelevanceScores =
     params.supplementaryData.answerRelevanceScoresByCandidateKey ?? new Map();
-  // CE present → scores own public relevance. Lightweight head reorders only so
-  // fused_score / 8-factor governance stay visible on RecallCandidate.
-  const replacePublicRelevance = answerRelevanceScores.size > 0;
-  const deepHead = resolveDeliveryDeepHead(
-    params,
-    preparation,
-    answerRelevanceScores
-  );
+  const deepHead = resolveFineAssessmentDeepHead({
+    candidates: preparation.candidates,
+    answerRelevanceScores,
+    supplementaryData: params.supplementaryData,
+    captureAnswerFeatures: params.captureAnswerFeatures
+  });
   const deepHeadScores = deepHead.scores;
-  const hasEmbeddingRefinement = hasObservedDeepHeadEmbedding(
-    preparation.candidates,
-    params.supplementaryData
-  );
+  const branch = resolveFineAssessmentDeliveryBranch({
+    answerRelevanceScores,
+    candidates: preparation.candidates,
+    supplementaryData: params.supplementaryData,
+    deepHeadScores,
+    finalAuthorityMaxHeadDrop: params.finalAuthorityMaxHeadDrop
+  });
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {
-    replacePublicRelevance
+    replacePublicRelevance: branch.replacePublicRelevance
   });
   const selected = selectFineAssessmentCandidates({
     orderedCandidates: delivery.orderedCandidates,
@@ -164,17 +163,8 @@ export function deliverFineAssessment(
     // Pack by deep-head scores even when public relevance stays fused — otherwise
     // coverage undoes the lightweight reorder by re-ranking on fused_score.
     coverageRelevanceByCandidateKey: deepHeadScores,
-    // Without an independent semantic refinement, re-sorting by fused relevance
-    // would erase the set decision the lightweight head just made.
-    finalOrderAfterCoverage: deepHeadScores.size === 0
-      ? "public_relevance"
-      : replacePublicRelevance
-        ? "delivery_rank"
-        : hasEmbeddingRefinement ? "public_relevance" : "coverage",
-    maxHeadDropAfterCoverage: !replacePublicRelevance &&
-      hasEmbeddingRefinement && deepHeadScores.size > 0
-      ? params.finalAuthorityMaxHeadDrop
-      : undefined,
+    finalOrderAfterCoverage: branch.finalOrderAfterCoverage,
+    maxHeadDropAfterCoverage: branch.maxHeadDropAfterCoverage,
     answerRelevanceRankByCandidateKey: delivery.answerRelevanceRankByCandidateKey,
     captureAnswerFeatures: params.captureAnswerFeatures,
     capturePacketPlanTrace: params.capturePacketPlanTrace,
@@ -189,25 +179,6 @@ export function deliverFineAssessment(
     fineEvaluated: preparation.fineEvaluated,
     finePrunedCount: preparation.finePrunedCount,
     finePriorityOverflowCount: preparation.finePriorityOverflowCount
-  });
-}
-
-function resolveDeliveryDeepHead(
-  params: FineAssessParams,
-  preparation: FineAssessmentPreparation,
-  answerRelevanceScores: ReadonlyMap<string, number>
-): RecallDeepHeadAssessment {
-  const input = {
-    candidates: preparation.candidates,
-    answerRelevanceScores,
-    supplementaryData: params.supplementaryData
-  };
-  if (params.captureAnswerFeatures === true) {
-    return resolveDeepHeadAssessment(input);
-  }
-  return Object.freeze({
-    scores: resolveDeepHeadScores(input),
-    traceByCandidateKey: new Map()
   });
 }
 

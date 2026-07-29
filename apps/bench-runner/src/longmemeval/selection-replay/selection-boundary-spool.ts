@@ -12,12 +12,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { TextDecoder } from "node:util";
-import { createGunzip, createGzip } from "node:zlib";
+import { createGzip } from "node:zlib";
 import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
 } from "@do-soul/alaya-core";
+import {
+  createCompressedSizeLimit,
+  forEachSelectionBoundaryGzipRecord,
+  type SelectionBoundaryArtifactRecord
+} from "./selection-boundary-artifact-reader.js";
 
 // Keep full 500Q selector inputs bounded while allowing 4x the original headroom.
 export const LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES =
@@ -39,18 +43,22 @@ export interface LongMemEvalSelectionBoundarySpool {
   dispose(): Promise<void>;
 }
 
-type SelectionBoundaryRecord = Readonly<{
-  readonly question_id: string;
-  readonly invocation_index: number;
-  readonly authoritative: boolean;
-  readonly boundary: FineAssessmentSelectionBoundaryCase;
-}>;
+type SelectionBoundaryRecord = SelectionBoundaryArtifactRecord;
 
 interface SelectionBoundarySourceIdentity {
   readonly bytes: number;
   readonly sha256: string;
   readonly recordCount: number;
 }
+
+const SELECTION_REPLAY_ARTIFACT_ERRORS = Object.freeze({
+  utf8Invalid: (context: string) =>
+    `selection replay record UTF-8 is invalid (${context})`,
+  jsonInvalid: (context: string) =>
+    `selection replay record JSON is invalid (${context})`,
+  gzipExceeded: (maxBytes: number) =>
+    `selection replay gzip exceeds the ${formatByteLimit(maxBytes)} size limit`
+});
 
 export async function createLongMemEvalSelectionBoundarySpool(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -77,18 +85,19 @@ async function verifySelectionBoundaryArtifact(
   artifactPath: string,
   maxArtifactBytes: number
 ): Promise<{ readonly recordCount: number }> {
-  let recordCount: number | undefined;
-  await pipeline(
-    createReadStream(artifactPath),
-    compressedSizeLimit(maxArtifactBytes),
-    createGunzip(),
-    async (source) => {
-      const verified = await verifyRecordStream(source);
-      recordCount = verified.recordCount;
+  let previous: SelectionBoundaryRecord | undefined;
+  const { recordCount } = await forEachSelectionBoundaryGzipRecord(
+    artifactPath,
+    maxArtifactBytes,
+    SELECTION_REPLAY_ARTIFACT_ERRORS,
+    (record) => {
+      assertRecordSequence(record, previous);
+      replayFineAssessmentSelectionBoundary(record.boundary);
+      previous = record;
     }
   );
-  if (recordCount === undefined) {
-    throw new Error("selection replay verification did not complete");
+  if (previous !== undefined && !previous.authoritative) {
+    throw new Error("selection replay question has no authoritative invocation");
   }
   return { recordCount };
 }
@@ -160,7 +169,10 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
         createReadStream(this.#spoolPath),
         sourceMeter,
         createGzip(),
-        compressedSizeLimit(this.maxArtifactBytes),
+        createCompressedSizeLimit(
+          this.maxArtifactBytes,
+          SELECTION_REPLAY_ARTIFACT_ERRORS.gzipExceeded
+        ),
         createWriteStream(partialPath, { flags: "wx" })
       );
       assertSourceIdentity(expectedSource, sourceMeter.identity());
@@ -213,85 +225,6 @@ function encodeQuestionRecords(
   return Buffer.from(text, "utf8");
 }
 
-async function verifyRecordStream(
-  stream: AsyncIterable<Buffer | string>
-): Promise<{ readonly recordCount: number }> {
-  let recordCount = 0;
-  let previous: SelectionBoundaryRecord | undefined;
-  for await (const encoded of readLfDelimitedRecords(stream)) {
-    if (encoded.byteLength === 0) continue;
-    const line = decodeSelectionBoundaryRecord(encoded, recordCount);
-    const record = parseSelectionBoundaryRecord(line, recordCount);
-    assertRecordSequence(record, previous);
-    replayFineAssessmentSelectionBoundary(record.boundary);
-    previous = record;
-    recordCount += 1;
-  }
-  if (previous !== undefined && !previous.authoritative) {
-    throw new Error("selection replay question has no authoritative invocation");
-  }
-  return { recordCount };
-}
-
-async function* readLfDelimitedRecords(
-  stream: AsyncIterable<Buffer | string>
-): AsyncGenerator<Buffer> {
-  let pending: Buffer[] = [];
-  for await (const chunk of stream) {
-    const raw = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    let start = 0;
-    let newline = raw.indexOf(0x0a, start);
-    while (newline >= 0) {
-      yield completeRecord(pending, raw.subarray(start, newline));
-      pending = [];
-      start = newline + 1;
-      newline = raw.indexOf(0x0a, start);
-    }
-    if (start < raw.byteLength) pending.push(raw.subarray(start));
-  }
-  if (pending.length > 0) yield Buffer.concat(pending);
-}
-
-function completeRecord(pending: readonly Buffer[], tail: Buffer): Buffer {
-  return pending.length === 0
-    ? tail
-    : Buffer.concat([...pending, tail]);
-}
-
-function decodeSelectionBoundaryRecord(
-  encoded: Buffer,
-  recordIndex: number
-): string {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(encoded);
-  } catch {
-    const context = [
-      `record_index=${recordIndex}`,
-      `utf8_bytes=${encoded.byteLength}`,
-      `sha256=${createHash("sha256").update(encoded).digest("hex")}`
-    ].join(", ");
-    throw new Error(`selection replay record UTF-8 is invalid (${context})`);
-  }
-}
-
-function parseSelectionBoundaryRecord(
-  line: string,
-  recordIndex: number
-): SelectionBoundaryRecord {
-  try {
-    return JSON.parse(line) as SelectionBoundaryRecord;
-  } catch {
-    const sha256 = createHash("sha256").update(line, "utf8").digest("hex");
-    const context = [
-      `record_index=${recordIndex}`,
-      `chars=${line.length}`,
-      `utf8_bytes=${Buffer.byteLength(line, "utf8")}`,
-      `sha256=${sha256}`
-    ].join(", ");
-    throw new Error(`selection replay record JSON is invalid (${context})`);
-  }
-}
-
 function assertRecordSequence(
   record: SelectionBoundaryRecord,
   previous: SelectionBoundaryRecord | undefined
@@ -313,22 +246,6 @@ function assertRecordSequence(
       (!beginsQuestion && previous?.authoritative === true)) {
     throw new Error("selection replay record sequence is invalid");
   }
-}
-
-function compressedSizeLimit(maxBytes: number): Transform {
-  let compressedBytes = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      compressedBytes += chunk.byteLength;
-      if (compressedBytes > maxBytes) {
-        callback(new Error(
-          `selection replay gzip exceeds the ${formatByteLimit(maxBytes)} size limit`
-        ));
-        return;
-      }
-      callback(null, chunk);
-    }
-  });
 }
 
 class SourceIdentityMeter extends Transform {

@@ -78,6 +78,40 @@ export {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
 } from "./recall/delivery/selection-boundary/selection-boundary-replay.js";
+export {
+  SELECTION_BOUNDARY_FIDELITY_MISMATCH
+} from "./recall/delivery/selection-boundary/selection-boundary-restore.js";
+export {
+  reconstructFineAssessmentComposition,
+  SELECTION_COMPOSITION_FIDELITY_MISMATCH,
+  type SelectionCompositionBranch,
+  type SelectionCompositionOptions,
+  type SelectionCompositionReconstruction
+} from "./recall/delivery/selection-boundary/selection-boundary-composition.js";
+export {
+  INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
+  counterfactualDeliveredCandidateKeys,
+  reconstructIndependentEmbeddingEvidenceComposition
+} from "./recall/delivery/selection-boundary/selection-boundary-counterfactual.js";
+export {
+  combineIndependentEmbeddingEvidence,
+  resolveIndependentEmbeddingEvidenceAssessment
+} from "./recall/rerank/deep-head.js";
+export {
+  buildFineAssessmentComponentLedger
+} from "./recall/delivery/selection-boundary/selection-boundary-component-ledger.js";
+export type {
+  ComponentLedgerCandidate,
+  ComponentLedgerDuplicateEvidence,
+  ComponentLedgerFloodTerms,
+  ComponentLedgerFusionSlice,
+  ComponentLedgerSelectionInputs,
+  ComponentLedgerUnits,
+  ComponentSourceObservation,
+  ComponentSourceState,
+  FineAssessmentComponentLedger,
+  SelectedEmbeddingSource
+} from "./recall/delivery/selection-boundary/selection-boundary-component-ledger-types.js";
 export * from "./shared/cjk-segmentation.js";
 export * from "./shared/entity-extraction-port.js";
 export * from "./shared/entity-extraction-rules.js";
