@@ -10,7 +10,10 @@ import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
 } from "../../recall/delivery/selection-boundary/selection-boundary-replay.js";
-import { cloneSelectionBoundaryJson } from
+import {
+  cloneSelectionBoundaryJson,
+  selectionBoundaryJsonSha256
+} from
   "../../recall/delivery/selection-boundary/selection-boundary-json.js";
 import {
   createConfig,
@@ -35,19 +38,56 @@ describe("fine-assessment selection boundary fidelity", () => {
       .toThrow(/undefined array value/u);
   });
 
-  it("detects drift in the complete visible candidate and diagnostic result", () => {
+  it("hashes canonical JSON independently of object key insertion order", () => {
+    expect(selectionBoundaryJsonSha256({
+      beta: [2, { delta: true, gamma: "value" }],
+      alpha: 1
+    })).toBe(selectionBoundaryJsonSha256({
+      alpha: 1,
+      beta: [2, { gamma: "value", delta: true }]
+    }));
+  });
+
+  it("stores only the complete visible-result digest", () => {
     const boundary = captureBoundary();
-    const candidate = boundary.expected.visible_result.candidates[0]!;
-    const diagnostic = boundary.expected.visible_result.diagnostics[0]!;
-    const candidateDrift = withVisibleResult(boundary, {
-      ...boundary.expected.visible_result,
+    expect(boundary.schema_version).toBe(2);
+    expect(boundary.expected.visible_result_sha256)
+      .toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(boundary.expected).not.toHaveProperty("visible_result");
+  });
+
+  it("detects drift in the complete visible candidate and diagnostic digest", () => {
+    const boundary = captureBoundary();
+    const digestDrift = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        visible_result_sha256: `sha256:${"0".repeat(64)}`
+      }
+    };
+
+    expect(() => replayFineAssessmentSelectionBoundary(digestDrift))
+      .toThrow(/selection boundary fidelity mismatch/u);
+  });
+
+  it("changes the visible-result digest for nested candidate or diagnostic drift", () => {
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    const visibleResult = selectFixture((captured) => {
+      boundary = captured;
+      return undefined;
+    });
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const candidate = visibleResult.candidates[0]!;
+    const diagnostic = visibleResult.diagnostics[0]!;
+    const candidateDrift = {
+      ...visibleResult,
       candidates: [
         { ...candidate, token_estimate: candidate.token_estimate + 1 },
-        ...boundary.expected.visible_result.candidates.slice(1)
+        ...visibleResult.candidates.slice(1)
       ]
-    });
-    const diagnosticDrift = withVisibleResult(boundary, {
-      ...boundary.expected.visible_result,
+    };
+    const diagnosticDrift = {
+      ...visibleResult,
       diagnostics: [
         {
           ...diagnostic,
@@ -56,20 +96,22 @@ describe("fine-assessment selection boundary fidelity", () => {
             relevance: diagnostic.score_factors.relevance + 0.01
           }
         },
-        ...boundary.expected.visible_result.diagnostics.slice(1)
+        ...visibleResult.diagnostics.slice(1)
       ]
-    });
+    };
 
-    expect(() => replayFineAssessmentSelectionBoundary(candidateDrift))
-      .toThrow(/selection boundary fidelity mismatch/u);
-    expect(() => replayFineAssessmentSelectionBoundary(diagnosticDrift))
-      .toThrow(/selection boundary fidelity mismatch/u);
+    expect(selectionBoundaryJsonSha256(visibleResult))
+      .toBe(boundary.expected.visible_result_sha256);
+    expect(selectionBoundaryJsonSha256(candidateDrift))
+      .not.toBe(boundary.expected.visible_result_sha256);
+    expect(selectionBoundaryJsonSha256(diagnosticDrift))
+      .not.toBe(boundary.expected.visible_result_sha256);
   });
 
   it.each([
     ["schema version", (boundary: FineAssessmentSelectionBoundaryCase) => ({
       ...boundary,
-      schema_version: 2
+      schema_version: 1
     })],
     ["duplicate candidate key", (boundary: FineAssessmentSelectionBoundaryCase) => {
       const [first, second, ...tail] = boundary.input.ordered_candidates;
@@ -224,17 +266,4 @@ function fixtureCandidates(): readonly FineAssessmentCandidate[] {
       1 - index * 0.05
     )
   ));
-}
-
-function withVisibleResult(
-  boundary: FineAssessmentSelectionBoundaryCase,
-  visibleResult: FineAssessmentSelectionBoundaryCase["expected"]["visible_result"]
-): FineAssessmentSelectionBoundaryCase {
-  return {
-    ...boundary,
-    expected: {
-      ...boundary.expected,
-      visible_result: visibleResult
-    }
-  };
 }

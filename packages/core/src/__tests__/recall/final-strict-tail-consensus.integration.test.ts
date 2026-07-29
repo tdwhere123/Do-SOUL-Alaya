@@ -10,6 +10,8 @@ import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
 } from "../../recall/delivery/selection-boundary/selection-boundary-replay.js";
+import { selectionBoundaryJsonSha256 } from
+  "../../recall/delivery/selection-boundary/selection-boundary-json.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import {
   projectVerifiedUserAssertionContext
@@ -275,7 +277,7 @@ describe("final strict-tail consensus integration", () => {
     expect(observed.packetPlanObservation?.decision.status)
       .toBe(expectedConsensusStatus);
     expect(boundary).toMatchObject({
-      schema_version: 1,
+      schema_version: 2,
       expected: {
         candidate_keys: observed.packetPlanObservation?.actual_candidate_keys,
         drop_tuples: observed.diagnostics.map((diagnostic) => [
@@ -291,8 +293,9 @@ describe("final strict-tail consensus integration", () => {
         packet_consensus: observed.packetPlanObservation
       }
     });
-    expect(boundary!.expected.visible_result)
-      .toEqual(JSON.parse(JSON.stringify(observed)));
+    expect(boundary!.expected.visible_result_sha256)
+      .toBe(selectionBoundaryJsonSha256(observed));
+    expect(boundary!.expected).not.toHaveProperty("visible_result");
 
     const serialized = JSON.parse(JSON.stringify(boundary)) as
       FineAssessmentSelectionBoundaryCase;

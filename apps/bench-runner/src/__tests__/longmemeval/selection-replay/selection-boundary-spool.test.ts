@@ -4,9 +4,20 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { selectFineAssessmentCandidates } from
+  "../../../../../../packages/core/src/recall/delivery/fine-assessment-selection.js";
+import {
+  createConfig,
+  createRankedCandidate,
+  createSupplementaryData,
+  rankMap
+} from
+  "../../../../../../packages/core/src/__tests__/recall/fine-assessment-selection-fixtures.js";
 
 const { replayBoundary } = vi.hoisted(() => ({
-  replayBoundary: vi.fn((boundary: FineAssessmentSelectionBoundaryCase) => boundary)
+  replayBoundary: vi.fn<
+    (boundary: FineAssessmentSelectionBoundaryCase) => unknown
+  >((boundary) => boundary)
 }));
 
 vi.mock("@do-soul/alaya-core", () => ({
@@ -24,7 +35,8 @@ const roots: string[] = [];
 const spools: LongMemEvalSelectionBoundarySpool[] = [];
 
 beforeEach(() => {
-  replayBoundary.mockClear();
+  replayBoundary.mockReset();
+  replayBoundary.mockImplementation((boundary) => boundary);
 });
 
 afterEach(async () => {
@@ -36,7 +48,7 @@ afterEach(async () => {
 
 describe("LongMemEval selection-boundary spool", () => {
   it("is absent by default and refuses concurrent experimental capture", async () => {
-    expect(LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES).toBe(64 * 1024 * 1024);
+    expect(LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES).toBe(256 * 1024 * 1024);
     await expect(createLongMemEvalSelectionBoundarySpool({
       env: {},
       concurrency: 1
@@ -86,6 +98,33 @@ describe("LongMemEval selection-boundary spool", () => {
     ]);
   });
 
+  it("round-trips a real schema-v2 capture through gzip and real replay", async () => {
+    vi.doUnmock("@do-soul/alaya-core");
+    vi.resetModules();
+    const realSpoolModule = await import(
+      "../../../longmemeval/selection-replay/selection-boundary-spool.js"
+    );
+    const spool = await realSpoolModule.createLongMemEvalSelectionBoundarySpool({
+      env: { ALAYA_BENCH_SELECTION_REPLAY: "1" },
+      concurrency: 1
+    });
+    if (spool === null) throw new Error("selection replay spool was not enabled");
+    spools.push(spool);
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-v2.ndjson.gz");
+    const boundaryV2 = capturedBoundaryV2();
+    const capture = spool.beginQuestion("question-v2");
+    capture.observer(boundaryV2);
+    await capture.commit();
+    await spool.writeGzipArtifact(artifactPath);
+
+    expect(boundaryV2.schema_version).toBe(2);
+    await expect(
+      realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
+    ).resolves.toEqual({ recordCount: 1 });
+    expect(replayBoundary).not.toHaveBeenCalled();
+  });
+
   it("fails loud and leaves no artifact when the gzip limit is exceeded", async () => {
     const spool = await enabledSpool(1);
     const outputRoot = await temporaryRoot();
@@ -95,7 +134,9 @@ describe("LongMemEval selection-boundary spool", () => {
     await capture.commit();
 
     await expect(spool.writeGzipArtifact(artifactPath))
-      .rejects.toThrow(/selection replay.*64 MiB|selection replay.*size limit/u);
+      .rejects.toThrow(
+        "selection replay gzip exceeds the 1 byte size limit"
+      );
     await expect(access(artifactPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -133,6 +174,35 @@ function boundary(seed: string): FineAssessmentSelectionBoundaryCase {
     input: { fixture_seed: seed },
     expected: { fixture_seed: seed }
   } as unknown as FineAssessmentSelectionBoundaryCase;
+}
+
+function capturedBoundaryV2(): FineAssessmentSelectionBoundaryCase {
+  const candidates = [
+    createRankedCandidate("candidate-1", 1, 0.9),
+    createRankedCandidate("candidate-2", 2, 0.8)
+  ];
+  let captured: FineAssessmentSelectionBoundaryCase | undefined;
+  selectFineAssessmentCandidates({
+    orderedCandidates: candidates,
+    config: createConfig(),
+    supplementaryData: createSupplementaryData(),
+    tokenEstimator: { estimate: () => 5 },
+    rankByCandidateKey: rankMap(candidates),
+    finalRelevanceByCandidateKey: new Map(candidates.map((candidate) => [
+      candidate.fusion.candidate_key,
+      candidate.fusion.fused_score
+    ])),
+    finalOrderAfterCoverage: "public_relevance",
+    capturePacketPlanTrace: true,
+    selectionBoundaryObserver: (boundary) => {
+      captured = boundary;
+      return undefined;
+    }
+  });
+  if (captured === undefined) {
+    throw new Error("selection boundary was not observed");
+  }
+  return captured;
 }
 
 function record(

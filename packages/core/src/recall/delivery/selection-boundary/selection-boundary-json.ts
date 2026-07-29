@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 const FIDELITY_ERROR = "selection boundary fidelity mismatch";
 
 export function assertSelectionBoundaryJsonValue(
@@ -32,6 +34,32 @@ export function assertSelectionBoundaryJsonValue(
 export function cloneSelectionBoundaryJson<T>(value: T): T {
   assertSelectionBoundaryJsonValue(value);
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+export function selectionBoundaryJsonSha256(
+  value: unknown
+): `sha256:${string}` {
+  assertSelectionBoundaryJsonValue(value);
+  return `sha256:${createHash("sha256")
+    .update(canonicalSelectionBoundaryJson(value), "utf8")
+    .digest("hex")}`;
+}
+
+function canonicalSelectionBoundaryJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalSelectionBoundaryJson).join(",")}]`;
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const entries = Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) =>
+      `${JSON.stringify(key)}:${canonicalSelectionBoundaryJson(record[key])}`
+    );
+  return `{${entries.join(",")}}`;
 }
 
 function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {

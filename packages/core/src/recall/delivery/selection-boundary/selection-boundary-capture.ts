@@ -13,7 +13,8 @@ import type { RecallPacketPlanObservation } from
   "../packet-plan/packet-plan-trace.js";
 import {
   assertSelectionBoundaryJsonValue,
-  cloneSelectionBoundaryJson
+  cloneSelectionBoundaryJson,
+  selectionBoundaryJsonSha256
 } from "./selection-boundary-json.js";
 
 export interface FineAssessmentSelectionBoundaryCapture {
@@ -51,7 +52,7 @@ export function captureFineAssessmentSelectionBoundary(
   tokenEstimatesByContent: ReadonlyMap<string, number>
 ): FineAssessmentSelectionBoundaryCase {
   const boundary = Object.freeze({
-    schema_version: 1 as const,
+    schema_version: 2 as const,
     input: buildSelectionBoundaryInput(params, tokenEstimatesByContent),
     expected: buildSelectionBoundaryExpected(result, packetConsensus)
   });
@@ -145,7 +146,7 @@ export function buildSelectionBoundaryExpected(
       )
     }),
     packet_consensus: packetConsensus,
-    visible_result: cloneSelectionBoundaryJson({
+    visible_result_sha256: selectionBoundaryJsonSha256({
       candidates: result.candidates,
       diagnostics: result.diagnostics,
       ...(packetPlanVisible ? { packetPlanObservation: packetConsensus } : {})

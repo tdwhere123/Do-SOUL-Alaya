@@ -19,8 +19,9 @@ import {
   type FineAssessmentSelectionBoundaryCase
 } from "@do-soul/alaya-core";
 
+// Keep full 500Q selector inputs bounded while allowing 4x the original headroom.
 export const LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES =
-  64 * 1024 * 1024;
+  256 * 1024 * 1024;
 export const LONGMEMEVAL_SELECTION_REPLAY_ENV =
   "ALAYA_BENCH_SELECTION_REPLAY";
 
@@ -214,11 +215,18 @@ function compressedSizeLimit(maxBytes: number): Transform {
       compressedBytes += chunk.byteLength;
       if (compressedBytes > maxBytes) {
         callback(new Error(
-          "selection replay gzip exceeds the 64 MiB size limit"
+          `selection replay gzip exceeds the ${formatByteLimit(maxBytes)} size limit`
         ));
         return;
       }
       callback(null, chunk);
     }
   });
+}
+
+function formatByteLimit(maxBytes: number): string {
+  const mebibyte = 1024 * 1024;
+  return maxBytes % mebibyte === 0
+    ? `${maxBytes / mebibyte} MiB`
+    : `${maxBytes} ${maxBytes === 1 ? "byte" : "bytes"}`;
 }

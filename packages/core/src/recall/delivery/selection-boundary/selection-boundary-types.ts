@@ -1,8 +1,7 @@
-import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
+import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import type { RecallPacketPlanObservation } from
   "../packet-plan/packet-plan-trace.js";
 import type {
-  RecallCandidateDiagnostic,
   RecallCandidateDropReason,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
@@ -49,17 +48,11 @@ export type FineAssessmentSelectionBoundaryExpected = Readonly<{
   )[];
   readonly token_totals: Readonly<{ readonly delivered: number }>;
   readonly packet_consensus: Readonly<RecallPacketPlanObservation>;
-  readonly visible_result: FineAssessmentSelectionBoundaryVisibleResult;
-}>;
-
-export type FineAssessmentSelectionBoundaryVisibleResult = Readonly<{
-  readonly candidates: readonly Readonly<RecallCandidate>[];
-  readonly diagnostics: readonly Readonly<RecallCandidateDiagnostic>[];
-  readonly packetPlanObservation?: Readonly<RecallPacketPlanObservation>;
+  readonly visible_result_sha256: `sha256:${string}`;
 }>;
 
 export type FineAssessmentSelectionBoundaryCase = Readonly<{
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly input: FineAssessmentSelectionBoundaryInput;
   readonly expected: FineAssessmentSelectionBoundaryExpected;
 }>;

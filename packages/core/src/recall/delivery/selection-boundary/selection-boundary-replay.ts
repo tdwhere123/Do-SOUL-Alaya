@@ -13,7 +13,10 @@ import type {
 } from "./selection-boundary-types.js";
 import type { RecallSupplementaryData } from
   "../../runtime/recall-service-types.js";
-import { assertSelectionBoundaryJsonValue } from "./selection-boundary-json.js";
+import {
+  assertSelectionBoundaryJsonValue,
+  selectionBoundaryJsonSha256
+} from "./selection-boundary-json.js";
 
 export type { FineAssessmentSelectionBoundaryCase } from
   "./selection-boundary-types.js";
@@ -34,7 +37,10 @@ export function replayFineAssessmentSelectionBoundary(
     packetConsensus,
     boundary.input.capture_packet_plan_trace === true
   );
-  if (canonicalJson(actual) !== canonicalJson(boundary.expected)) {
+  if (
+    selectionBoundaryJsonSha256(actual) !==
+    selectionBoundaryJsonSha256(boundary.expected)
+  ) {
     throwFidelityMismatch();
   }
   if (boundary.input.capture_packet_plan_trace === true) return replayed;
@@ -47,8 +53,13 @@ export function replayFineAssessmentSelectionBoundary(
 function validateSelectionBoundary(
   boundary: FineAssessmentSelectionBoundaryCase
 ): void {
-  if (boundary.schema_version !== 1) throwFidelityMismatch();
+  if (boundary.schema_version !== 2) throwFidelityMismatch();
   assertSelectionBoundaryJsonValue(boundary);
+  if (!/^sha256:[0-9a-f]{64}$/u.test(
+    boundary.expected.visible_result_sha256
+  )) {
+    throwFidelityMismatch();
+  }
   assertUniqueKeys(
     boundary.input.ordered_candidates.map(
       (candidate) => candidate.fusion.candidate_key
@@ -176,17 +187,6 @@ function restoreSupplementaryData(
       )
     })
   };
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  const record = value as Readonly<Record<string, unknown>>;
-  return `{${Object.keys(record).sort().map((key) =>
-    `${JSON.stringify(key)}:${canonicalJson(record[key])}`
-  ).join(",")}}`;
 }
 
 function throwFidelityMismatch(): never {
