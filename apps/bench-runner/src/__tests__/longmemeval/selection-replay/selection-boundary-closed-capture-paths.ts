@@ -43,6 +43,31 @@ export const CLOSED_CAPTURE_COUNTERFACTUAL_GOLD_B = join(
   "B/public/2026-07-29T025954Z-9e58d32-policy-stress-recall-eval-snapshot/selection-counterfactual-gold.json"
 );
 
+export const CLOSED_CAPTURE_CF_TOKEN_ROOT = join(
+  REPO_ROOT,
+  ".do-it/bench-runs/recall-any5-evidence-first/p81-500q-f0-baseline-9e58d32/gate2-cf-token"
+);
+
+export const CLOSED_CAPTURE_CF_TOKEN_COMPANION_A_GZIP = join(
+  CLOSED_CAPTURE_CF_TOKEN_ROOT,
+  "companion-a.ndjson.gz"
+);
+
+export const CLOSED_CAPTURE_CF_TOKEN_COMPANION_A_MANIFEST = join(
+  CLOSED_CAPTURE_CF_TOKEN_ROOT,
+  "companion-a.manifest.json"
+);
+
+export const CLOSED_CAPTURE_CF_TOKEN_COMPANION_B_GZIP = join(
+  CLOSED_CAPTURE_CF_TOKEN_ROOT,
+  "companion-b.ndjson.gz"
+);
+
+export const CLOSED_CAPTURE_CF_TOKEN_COMPANION_B_MANIFEST = join(
+  CLOSED_CAPTURE_CF_TOKEN_ROOT,
+  "companion-b.manifest.json"
+);
+
 export async function selectionBoundaryArtifactPresent(
   path: string
 ): Promise<boolean> {

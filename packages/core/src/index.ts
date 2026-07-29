@@ -91,8 +91,23 @@ export {
 export {
   INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR,
   counterfactualDeliveredCandidateKeys,
-  reconstructIndependentEmbeddingEvidenceComposition
+  reconstructIndependentEmbeddingEvidenceComposition,
+  type CounterfactualCompositionOptions
 } from "./recall/delivery/selection-boundary/selection-boundary-counterfactual.js";
+export {
+  CF_TOKEN_COMPANION_ESTIMATOR,
+  CF_TOKEN_COMPANION_SCHEMA_VERSION,
+  auxiliaryEstimatesToMap,
+  buildCfTokenCompanionAuxiliaryEstimates,
+  cfTokenCompanionEstimatorIdentity,
+  createLivePlusCompanionTokenEstimator,
+  proveLiveTokenEstimatesMatchDeclaredEstimator,
+  selectionBoundaryContentSha256,
+  type CfTokenCompanionAuxiliaryEstimate,
+  type CfTokenCompanionEstimatorIdentity,
+  type CfTokenCompanionRecordSlice,
+  type LiveTokenEstimateReconstructionProof
+} from "./recall/delivery/selection-boundary/selection-boundary-cf-token-companion.js";
 export {
   combineIndependentEmbeddingEvidence,
   resolveIndependentEmbeddingEvidenceAssessment

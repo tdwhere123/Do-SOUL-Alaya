@@ -5,6 +5,7 @@ import {
   reconstructFineAssessmentComposition,
   reconstructIndependentEmbeddingEvidenceComposition,
   SELECTION_BOUNDARY_FIDELITY_MISMATCH,
+  auxiliaryEstimatesToMap,
   type SelectionCompositionOptions
 } from "@do-soul/alaya-core";
 import {
@@ -14,6 +15,11 @@ import {
 import {
   LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES
 } from "./selection-boundary-spool.js";
+import {
+  companionRecordKey,
+  loadCfTokenCompanionArtifact,
+  type CfTokenCompanionLoad
+} from "./selection-boundary-cf-token-companion.js";
 
 const COUNTERFACTUAL_ARTIFACT_ERRORS = Object.freeze({
   utf8Invalid: (context: string) =>
@@ -94,6 +100,7 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
   options: SelectionCompositionOptions & {
     readonly maxArtifactBytes?: number;
     readonly authoritativeOnly?: boolean;
+    readonly cfTokenCompanion?: CfTokenCompanionLoad;
   } = {}
 ): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
   const goldByQuestion = await loadGoldByQuestion(goldMapPath);
@@ -113,7 +120,12 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
       try {
         accumulateCounterfactualRecord(
           acc,
-          evaluateCounterfactualRecord(record, goldByQuestion, options)
+          evaluateCounterfactualRecord(
+            record,
+            goldByQuestion,
+            options,
+            options.cfTokenCompanion
+          )
         );
       } catch (error) {
         hardError = error instanceof Error ? error : new Error(String(error));
@@ -126,6 +138,27 @@ export async function evaluateIndependentEmbeddingEvidenceCounterfactual(
     acc,
     recordCount,
     authoritativeOnly
+  );
+}
+
+export async function evaluateIndependentEmbeddingEvidenceCounterfactualWithCompanion(
+  artifactPath: string,
+  goldMapPath: string,
+  companionGzipPath: string,
+  companionManifestPath: string,
+  options: SelectionCompositionOptions & {
+    readonly maxArtifactBytes?: number;
+    readonly authoritativeOnly?: boolean;
+  } = {}
+): Promise<IndependentEmbeddingCounterfactualCellMetrics> {
+  const cfTokenCompanion = await loadCfTokenCompanionArtifact({
+    gzipPath: companionGzipPath,
+    manifestPath: companionManifestPath
+  });
+  return evaluateIndependentEmbeddingEvidenceCounterfactual(
+    artifactPath,
+    goldMapPath,
+    { ...options, cfTokenCompanion }
   );
 }
 
@@ -151,7 +184,8 @@ export function resolveIndependentEmbeddingPromoteReady(
 function evaluateCounterfactualRecord(
   record: SelectionBoundaryArtifactRecord,
   goldByQuestion: ReadonlyMap<string, GoldQuestion>,
-  options: SelectionCompositionOptions
+  options: SelectionCompositionOptions,
+  cfTokenCompanion: CfTokenCompanionLoad | undefined
 ): CounterfactualRecordEvaluation {
   reconstructFineAssessmentComposition(record.boundary, {
     finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
@@ -159,10 +193,20 @@ function evaluateCounterfactualRecord(
   const baselineKeys = record.boundary.expected.candidate_keys;
   let counterfactualKeys: readonly string[] | null = null;
   let unseenTokenFailure = false;
+  const companionSlice = cfTokenCompanion?.recordsByKey.get(
+    companionRecordKey(record.question_id, record.invocation_index)
+  );
   try {
     const reconstructed = reconstructIndependentEmbeddingEvidenceComposition(
       record.boundary,
-      { finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop }
+      {
+        finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop,
+        ...(companionSlice === undefined ? {} : {
+          cfTokenCompanionAuxiliaryByContentSha256: auxiliaryEstimatesToMap(
+            companionSlice.auxiliary_estimates
+          )
+        })
+      }
     );
     counterfactualKeys = counterfactualDeliveredCandidateKeys(
       reconstructed.result

@@ -103,15 +103,15 @@ export function buildCompositionSelectionParams(
   supplementaryData: ReturnType<typeof restoreSupplementaryData>,
   delivery: ReturnType<typeof applyDeliverySelection>,
   deepHead: RecallDeepHeadAssessment,
-  branch: SelectionCompositionBranch
+  branch: SelectionCompositionBranch,
+  tokenEstimator: FineAssessmentSelectionParams["tokenEstimator"] =
+    createCapturedTokenEstimator(input.token_estimates_by_content)
 ): FineAssessmentSelectionParams {
   return {
     orderedCandidates: delivery.orderedCandidates,
     config: input.config,
     supplementaryData,
-    tokenEstimator: createCapturedTokenEstimator(
-      input.token_estimates_by_content
-    ),
+    tokenEstimator,
     rankByCandidateKey: delivery.rankByCandidateKey,
     finalRelevanceByCandidateKey: delivery.finalRelevanceByCandidateKey,
     coverageRelevanceByCandidateKey: deepHead.scores,

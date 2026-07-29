@@ -25,19 +25,31 @@ import {
   type SelectionCompositionOptions,
   type SelectionCompositionReconstruction
 } from "./selection-boundary-composition.js";
+import {
+  createLivePlusCompanionTokenEstimator
+} from "./selection-boundary-cf-token-companion.js";
 
 export const INDEPENDENT_EMBEDDING_EVIDENCE_OPERATOR =
   "independent_embedding_evidence" as const;
+
+export type CounterfactualCompositionOptions = SelectionCompositionOptions &
+  Readonly<{
+    /** Companion waist estimates keyed by content sha256; F0 live map unchanged. */
+    readonly cfTokenCompanionAuxiliaryByContentSha256?: ReadonlyMap<
+      string,
+      number
+    >;
+  }>;
 
 /**
  * Counterfactual composition: same delivery seam as baseline reconstruction,
  * but deep-head scores use the registered independent-embedding operator.
  * Does not assert captured CURRENT-path fidelity; token estimates still fail
- * closed on unseen content.
+ * closed on unseen content unless a proved companion map is supplied.
  */
 export function reconstructIndependentEmbeddingEvidenceComposition(
   boundary: FineAssessmentSelectionBoundaryCase,
-  options: SelectionCompositionOptions = {}
+  options: CounterfactualCompositionOptions = {}
 ): SelectionCompositionReconstruction {
   validateSelectionBoundary(boundary);
   const input = boundary.input;
@@ -70,7 +82,11 @@ export function reconstructIndependentEmbeddingEvidenceComposition(
       supplementaryData,
       delivery,
       deepHead,
-      branch
+      branch,
+      createLivePlusCompanionTokenEstimator(
+        input.token_estimates_by_content,
+        options.cfTokenCompanionAuxiliaryByContentSha256
+      )
     )
   );
   return Object.freeze({
