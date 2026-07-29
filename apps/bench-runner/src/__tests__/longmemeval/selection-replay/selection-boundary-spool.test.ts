@@ -1,7 +1,16 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  truncate,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from
@@ -73,6 +82,8 @@ describe("LongMemEval selection-boundary spool", () => {
     await second.commit();
 
     await spool.writeGzipArtifact(artifactPath);
+    expect(replayBoundary).toHaveBeenCalledTimes(3);
+    replayBoundary.mockClear();
 
     const records = gunzipSync(await readFile(artifactPath))
       .toString("utf8")
@@ -98,7 +109,7 @@ describe("LongMemEval selection-boundary spool", () => {
     ]);
   });
 
-  it("round-trips a real schema-v2 capture through gzip and real replay", async () => {
+  it("round-trips a real schema-v2 capture with a 2 MiB record", async () => {
     vi.doUnmock("@do-soul/alaya-core");
     vi.resetModules();
     const realSpoolModule = await import(
@@ -112,10 +123,11 @@ describe("LongMemEval selection-boundary spool", () => {
     spools.push(spool);
     const outputRoot = await temporaryRoot();
     const artifactPath = join(outputRoot, "selection-boundaries-v2.ndjson.gz");
-    const boundaryV2 = capturedBoundaryV2();
+    const boundaryV2 = largeCapturedBoundaryV2();
     const capture = spool.beginQuestion("question-v2");
     capture.observer(boundaryV2);
     await capture.commit();
+    expect((await stat(rawSpoolPath(spool))).size).toBeGreaterThan(2 * 1024 * 1024);
     await spool.writeGzipArtifact(artifactPath);
 
     expect(boundaryV2.schema_version).toBe(2);
@@ -123,6 +135,69 @@ describe("LongMemEval selection-boundary spool", () => {
       realSpoolModule.verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
     ).resolves.toEqual({ recordCount: 1 });
     expect(replayBoundary).not.toHaveBeenCalled();
+  });
+
+  it("rejects truncated committed source identity before publishing", async () => {
+    vi.doUnmock("@do-soul/alaya-core");
+    vi.resetModules();
+    const realSpoolModule = await import(
+      "../../../longmemeval/selection-replay/selection-boundary-spool.js"
+    );
+    const spool = await realSpoolModule.createLongMemEvalSelectionBoundarySpool({
+      env: { ALAYA_BENCH_SELECTION_REPLAY: "1" },
+      concurrency: 1
+    });
+    if (spool === null) throw new Error("selection replay spool was not enabled");
+    spools.push(spool);
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-truncated.ndjson.gz");
+    const capture = spool.beginQuestion("question-truncated");
+    capture.observer(largeCapturedBoundaryV2());
+    await capture.commit();
+    expect((await stat(rawSpoolPath(spool))).size).toBeGreaterThan(1024 * 1024);
+    await truncate(rawSpoolPath(spool), 1024 * 1024);
+
+    await expect(spool.writeGzipArtifact(artifactPath))
+      .rejects.toThrow(/selection replay source identity mismatch/u);
+    await expect(access(artifactPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("reports bounded non-content context for a truncated record", async () => {
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-invalid.ndjson.gz");
+    const secret = "PRIVATE_SELECTION_BOUNDARY_CONTENT";
+    const truncatedRecord = `{"boundary":"${secret}界`;
+    await writeFile(artifactPath, gzipSync(Buffer.from(truncatedRecord, "utf8")));
+    const sha256 = createHash("sha256")
+      .update(truncatedRecord, "utf8")
+      .digest("hex");
+
+    const error = await verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)
+      .then(() => null, (caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain("record_index=0");
+    expect(message).toContain(`chars=${truncatedRecord.length}`);
+    expect(message).toContain(
+      `utf8_bytes=${Buffer.byteLength(truncatedRecord, "utf8")}`
+    );
+    expect(message).toContain(`sha256=${sha256}`);
+    expect(message).not.toContain(secret);
+  });
+
+  it("rejects an externally verified gzip above its injected compressed cap", async () => {
+    const outputRoot = await temporaryRoot();
+    const artifactPath = join(outputRoot, "selection-boundaries-capped.ndjson.gz");
+    const encoded = `${JSON.stringify(
+      record("question-capped", 0, true, boundary("capped"))
+    )}\n`;
+    await writeFile(artifactPath, gzipSync(Buffer.from(encoded, "utf8")));
+
+    await expect(
+      verifyLongMemEvalSelectionBoundaryArtifact(artifactPath, 1)
+    ).rejects.toThrow(
+      "selection replay gzip exceeds the 1 byte size limit"
+    );
   });
 
   it("fails loud and leaves no artifact when the gzip limit is exceeded", async () => {
@@ -176,11 +251,12 @@ function boundary(seed: string): FineAssessmentSelectionBoundaryCase {
   } as unknown as FineAssessmentSelectionBoundaryCase;
 }
 
-function capturedBoundaryV2(): FineAssessmentSelectionBoundaryCase {
-  const candidates = [
+function capturedBoundaryV2(
+  candidates = [
     createRankedCandidate("candidate-1", 1, 0.9),
     createRankedCandidate("candidate-2", 2, 0.8)
-  ];
+  ]
+): FineAssessmentSelectionBoundaryCase {
   let captured: FineAssessmentSelectionBoundaryCase | undefined;
   selectFineAssessmentCandidates({
     orderedCandidates: candidates,
@@ -203,6 +279,22 @@ function capturedBoundaryV2(): FineAssessmentSelectionBoundaryCase {
     throw new Error("selection boundary was not observed");
   }
   return captured;
+}
+
+function largeCapturedBoundaryV2(): FineAssessmentSelectionBoundaryCase {
+  const content = "x".repeat(60 * 1024);
+  return capturedBoundaryV2(Array.from({ length: 36 }, (_, index) => {
+    const candidate = createRankedCandidate(
+      `candidate-${index + 1}`,
+      index + 1,
+      1 - index / 100
+    );
+    return { ...candidate, entry: { ...candidate.entry, content } };
+  }));
+}
+
+function rawSpoolPath(spool: LongMemEvalSelectionBoundarySpool): string {
+  return join(spool.rootPath, "selection-boundaries.ndjson");
 }
 
 function record(

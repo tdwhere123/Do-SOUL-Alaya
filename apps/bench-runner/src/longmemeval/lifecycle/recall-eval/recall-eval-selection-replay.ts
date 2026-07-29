@@ -3,7 +3,6 @@ import type { FineAssessmentSelectionBoundaryCase } from
   "@do-soul/alaya-core";
 import {
   createLongMemEvalSelectionBoundarySpool,
-  verifyLongMemEvalSelectionBoundaryArtifact,
   type LongMemEvalSelectionBoundarySpool
 } from "../../selection-replay/selection-boundary-spool.js";
 
@@ -25,7 +24,6 @@ export async function finalizeRecallEvalSelectionBoundarySpool(
     RECALL_EVAL_SELECTION_BOUNDARY_FILENAME
   );
   await spool.writeGzipArtifact(artifactPath);
-  await verifyLongMemEvalSelectionBoundaryArtifact(artifactPath);
   return artifactPath;
 }
 

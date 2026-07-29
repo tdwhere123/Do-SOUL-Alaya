@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFile,
   mkdir,
@@ -11,7 +11,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { Transform } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import {
@@ -46,6 +46,12 @@ type SelectionBoundaryRecord = Readonly<{
   readonly boundary: FineAssessmentSelectionBoundaryCase;
 }>;
 
+interface SelectionBoundarySourceIdentity {
+  readonly bytes: number;
+  readonly sha256: string;
+  readonly recordCount: number;
+}
+
 export async function createLongMemEvalSelectionBoundarySpool(input: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly concurrency: number;
@@ -61,16 +67,39 @@ export async function createLongMemEvalSelectionBoundarySpool(input: {
 }
 
 export async function verifyLongMemEvalSelectionBoundaryArtifact(
-  artifactPath: string
+  artifactPath: string,
+  maxArtifactBytes = LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES
 ): Promise<{ readonly recordCount: number }> {
-  return verifyRecordStream(createReadStream(artifactPath).pipe(createGunzip()));
+  return verifySelectionBoundaryArtifact(artifactPath, maxArtifactBytes);
+}
+
+async function verifySelectionBoundaryArtifact(
+  artifactPath: string,
+  maxArtifactBytes: number
+): Promise<{ readonly recordCount: number }> {
+  let recordCount: number | undefined;
+  await pipeline(
+    createReadStream(artifactPath),
+    compressedSizeLimit(maxArtifactBytes),
+    createGunzip(),
+    async (source) => {
+      const verified = await verifyRecordStream(source);
+      recordCount = verified.recordCount;
+    }
+  );
+  if (recordCount === undefined) {
+    throw new Error("selection replay verification did not complete");
+  }
+  return { recordCount };
 }
 
 class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
   readonly #spoolPath: string;
+  readonly #sourceHash = createHash("sha256");
   #disposed = false;
-  #sealed = false;
   #recordCount = 0;
+  #sourceBytes = 0;
+  #sealedIdentity: SelectionBoundarySourceIdentity | null = null;
 
   private constructor(
     public readonly rootPath: string,
@@ -109,11 +138,10 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
         if (boundaries.length === 0) {
           throw new Error("selection replay captured no selection invocation");
         }
-        await appendFile(
-          this.#spoolPath,
-          encodeQuestionRecords(questionId, boundaries),
-          "utf8"
-        );
+        const encoded = encodeQuestionRecords(questionId, boundaries);
+        await appendFile(this.#spoolPath, encoded);
+        this.#sourceHash.update(encoded);
+        this.#sourceBytes += encoded.byteLength;
         this.#recordCount += boundaries.length;
       }
     });
@@ -123,18 +151,26 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
     artifactPath: string
   ): Promise<{ readonly recordCount: number }> {
     this.#assertWritable();
-    this.#sealed = true;
+    const expectedSource = this.#seal();
     await mkdir(dirname(artifactPath), { recursive: true });
     const partialPath = `${artifactPath}.partial-${randomUUID()}`;
     try {
+      const sourceMeter = new SourceIdentityMeter();
       await pipeline(
         createReadStream(this.#spoolPath),
+        sourceMeter,
         createGzip(),
         compressedSizeLimit(this.maxArtifactBytes),
         createWriteStream(partialPath, { flags: "wx" })
       );
+      assertSourceIdentity(expectedSource, sourceMeter.identity());
+      const verified = await verifySelectionBoundaryArtifact(
+        partialPath,
+        this.maxArtifactBytes
+      );
+      assertVerifiedRecordCount(expectedSource, verified.recordCount);
       await rename(partialPath, artifactPath);
-      return { recordCount: this.#recordCount };
+      return verified;
     } catch (error) {
       await rm(partialPath, { force: true });
       throw error;
@@ -149,31 +185,46 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
 
   #assertWritable(): void {
     if (this.#disposed) throw new Error("selection replay spool is disposed");
-    if (this.#sealed) throw new Error("selection replay spool is sealed");
+    if (this.#sealedIdentity !== null) {
+      throw new Error("selection replay spool is sealed");
+    }
+  }
+
+  #seal(): SelectionBoundarySourceIdentity {
+    this.#sealedIdentity = {
+      bytes: this.#sourceBytes,
+      sha256: this.#sourceHash.digest("hex"),
+      recordCount: this.#recordCount
+    };
+    return this.#sealedIdentity;
   }
 }
 
 function encodeQuestionRecords(
   questionId: string,
   boundaries: readonly FineAssessmentSelectionBoundaryCase[]
-): string {
-  return boundaries.map((boundary, invocationIndex) => JSON.stringify({
+): Buffer {
+  const text = boundaries.map((boundary, invocationIndex) => JSON.stringify({
     question_id: questionId,
     invocation_index: invocationIndex,
     authoritative: invocationIndex === boundaries.length - 1,
     boundary
   } satisfies SelectionBoundaryRecord)).join("\n") + (boundaries.length === 0 ? "" : "\n");
+  return Buffer.from(text, "utf8");
 }
 
 async function verifyRecordStream(
-  stream: NodeJS.ReadableStream
+  stream: AsyncIterable<Buffer | string>
 ): Promise<{ readonly recordCount: number }> {
-  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  const lines = createInterface({
+    input: Readable.from(stream),
+    crlfDelay: Infinity
+  });
   let recordCount = 0;
   let previous: SelectionBoundaryRecord | undefined;
   for await (const line of lines) {
     if (line.length === 0) continue;
-    const record = JSON.parse(line) as SelectionBoundaryRecord;
+    const record = parseSelectionBoundaryRecord(line, recordCount);
     assertRecordSequence(record, previous);
     replayFineAssessmentSelectionBoundary(record.boundary);
     previous = record;
@@ -183,6 +234,24 @@ async function verifyRecordStream(
     throw new Error("selection replay question has no authoritative invocation");
   }
   return { recordCount };
+}
+
+function parseSelectionBoundaryRecord(
+  line: string,
+  recordIndex: number
+): SelectionBoundaryRecord {
+  try {
+    return JSON.parse(line) as SelectionBoundaryRecord;
+  } catch {
+    const sha256 = createHash("sha256").update(line, "utf8").digest("hex");
+    const context = [
+      `record_index=${recordIndex}`,
+      `chars=${line.length}`,
+      `utf8_bytes=${Buffer.byteLength(line, "utf8")}`,
+      `sha256=${sha256}`
+    ].join(", ");
+    throw new Error(`selection replay record JSON is invalid (${context})`);
+  }
 }
 
 function assertRecordSequence(
@@ -222,6 +291,53 @@ function compressedSizeLimit(maxBytes: number): Transform {
       callback(null, chunk);
     }
   });
+}
+
+class SourceIdentityMeter extends Transform {
+  readonly #hash = createHash("sha256");
+  #bytes = 0;
+  #recordCount = 0;
+
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null, data?: Buffer) => void
+  ): void {
+    this.#hash.update(chunk);
+    this.#bytes += chunk.byteLength;
+    for (const byte of chunk) {
+      if (byte === 0x0a) this.#recordCount += 1;
+    }
+    callback(null, chunk);
+  }
+
+  identity(): SelectionBoundarySourceIdentity {
+    return {
+      bytes: this.#bytes,
+      sha256: this.#hash.digest("hex"),
+      recordCount: this.#recordCount
+    };
+  }
+}
+
+function assertSourceIdentity(
+  expected: SelectionBoundarySourceIdentity,
+  actual: SelectionBoundarySourceIdentity
+): void {
+  if (actual.bytes !== expected.bytes ||
+      actual.sha256 !== expected.sha256 ||
+      actual.recordCount !== expected.recordCount) {
+    throw new Error("selection replay source identity mismatch");
+  }
+}
+
+function assertVerifiedRecordCount(
+  expected: SelectionBoundarySourceIdentity,
+  actualRecordCount: number
+): void {
+  if (actualRecordCount !== expected.recordCount) {
+    throw new Error("selection replay verified record count mismatch");
+  }
 }
 
 function formatByteLimit(maxBytes: number): string {
