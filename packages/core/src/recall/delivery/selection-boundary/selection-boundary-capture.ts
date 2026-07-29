@@ -22,6 +22,15 @@ export interface FineAssessmentSelectionBoundaryCapture {
   readonly tokenEstimatesByContent: ReadonlyMap<string, number>;
 }
 
+/** Structural refs only — canonicalize and hash on materialize. */
+export type FineAssessmentSelectionBoundaryPendingCapture = Readonly<{
+  readonly params: FineAssessmentSelectionParams;
+  readonly result: FineAssessmentSelectionResult;
+  readonly packetConsensus: Readonly<RecallPacketPlanObservation>;
+  readonly tokenEstimatesByContent: ReadonlyMap<string, number>;
+  readonly packetPlanVisible: boolean;
+}>;
+
 export function createSelectionBoundaryCapture(
   params: FineAssessmentSelectionParams
 ): FineAssessmentSelectionBoundaryCapture {
@@ -45,19 +54,55 @@ export function createSelectionBoundaryCapture(
   });
 }
 
+export function captureFineAssessmentSelectionBoundaryPending(
+  params: FineAssessmentSelectionParams,
+  result: FineAssessmentSelectionResult,
+  packetConsensus: Readonly<RecallPacketPlanObservation>,
+  tokenEstimatesByContent: ReadonlyMap<string, number>,
+  packetPlanVisible = result.packetPlanObservation !== undefined
+): FineAssessmentSelectionBoundaryPendingCapture {
+  return Object.freeze({
+    params,
+    result,
+    packetConsensus,
+    tokenEstimatesByContent,
+    packetPlanVisible
+  });
+}
+
+export function materializeFineAssessmentSelectionBoundary(
+  pending: FineAssessmentSelectionBoundaryPendingCapture
+): FineAssessmentSelectionBoundaryCase {
+  const boundary = Object.freeze({
+    schema_version: 2 as const,
+    input: buildSelectionBoundaryInput(
+      pending.params,
+      pending.tokenEstimatesByContent
+    ),
+    expected: buildSelectionBoundaryExpected(
+      pending.result,
+      pending.packetConsensus,
+      pending.packetPlanVisible
+    )
+  });
+  assertSelectionBoundaryJsonValue(boundary);
+  return boundary;
+}
+
 export function captureFineAssessmentSelectionBoundary(
   params: FineAssessmentSelectionParams,
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
   tokenEstimatesByContent: ReadonlyMap<string, number>
 ): FineAssessmentSelectionBoundaryCase {
-  const boundary = Object.freeze({
-    schema_version: 2 as const,
-    input: buildSelectionBoundaryInput(params, tokenEstimatesByContent),
-    expected: buildSelectionBoundaryExpected(result, packetConsensus)
-  });
-  assertSelectionBoundaryJsonValue(boundary);
-  return boundary;
+  return materializeFineAssessmentSelectionBoundary(
+    captureFineAssessmentSelectionBoundaryPending(
+      params,
+      result,
+      packetConsensus,
+      tokenEstimatesByContent
+    )
+  );
 }
 
 export function notifySelectionBoundaryObserver(
@@ -66,11 +111,13 @@ export function notifySelectionBoundaryObserver(
   packetConsensus: Readonly<RecallPacketPlanObservation>,
   tokenEstimatesByContent: ReadonlyMap<string, number>
 ): void {
-  const observerResult = params.selectionBoundaryObserver?.(
-    captureFineAssessmentSelectionBoundary(
-      params, result, packetConsensus, tokenEstimatesByContent
-    )
+  const pending = captureFineAssessmentSelectionBoundaryPending(
+    params,
+    result,
+    packetConsensus,
+    tokenEstimatesByContent
   );
+  const observerResult = params.selectionBoundaryObserver?.(pending);
   if (observerResult !== undefined) {
     throw new Error("selection boundary observer must return undefined synchronously");
   }

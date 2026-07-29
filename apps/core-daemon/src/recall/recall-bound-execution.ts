@@ -4,7 +4,7 @@ import type {
   TaskObjectSurface
 } from "@do-soul/alaya-protocol";
 import type {
-  FineAssessmentSelectionBoundaryCase,
+  FineAssessmentSelectionBoundaryPendingCapture,
   NodeStrategy,
   RecallDiagnosticCapture
 } from "@do-soul/alaya-core";
@@ -29,7 +29,7 @@ export type BoundRecallInvokeParams = Readonly<{
   readonly referenceTime?: string;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
 }>;
 
@@ -49,7 +49,7 @@ export type InvokeBoundRecallParams<TRecallResult> = Readonly<{
   readonly referenceTime?: string;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
 }>;
 

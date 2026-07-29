@@ -16,7 +16,7 @@ import type {
   RecallExecutionContext,
   RecallExecutionParams
 } from "../recall-service-runner-types.js";
-import { capturesRecallAnswerFeatures } from "../recall-service-runner-types.js";
+import { shouldCaptureRecallAnswerFeatures } from "../recall-service-runner-types.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
 import {
@@ -212,7 +212,7 @@ function buildFineAssessParams(
     tokenEstimator: prepared.tokenEstimator,
     now: () => prepared.referenceTime,
     warn: context.warn,
-    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture),
+    captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params),
     capturePacketPlanTrace: params.diagnosticCapture === "packet_trace",
     finalAuthorityMaxHeadDrop: recallFinalAuthorityMaxHeadDrop(),
     selectionBoundaryObserver: params.selectionBoundaryObserver
@@ -239,7 +239,7 @@ function buildCoarseAssessmentParams(
     queryProbes: prepared.queryProbes,
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
-    captureAnswerFeatures: capturesRecallAnswerFeatures(params.diagnosticCapture)
+    captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params)
   };
 }
 

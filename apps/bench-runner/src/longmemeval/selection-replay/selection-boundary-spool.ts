@@ -15,7 +15,9 @@ import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import {
   replayFineAssessmentSelectionBoundary,
-  type FineAssessmentSelectionBoundaryCase
+  materializeFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryCase,
+  type FineAssessmentSelectionBoundaryPendingCapture
 } from "@do-soul/alaya-core";
 import {
   createCompressedSizeLimit,
@@ -29,10 +31,12 @@ export const LONGMEMEVAL_SELECTION_BOUNDARY_GZIP_MAX_BYTES =
 export const LONGMEMEVAL_SELECTION_REPLAY_ENV =
   "ALAYA_BENCH_SELECTION_REPLAY";
 
+type SelectionBoundarySpoolCapture =
+  | FineAssessmentSelectionBoundaryPendingCapture
+  | FineAssessmentSelectionBoundaryCase;
+
 export interface LongMemEvalSelectionBoundaryQuestionCapture {
-  readonly observer: (
-    boundary: FineAssessmentSelectionBoundaryCase
-  ) => undefined;
+  readonly observer: (capture: SelectionBoundarySpoolCapture) => undefined;
   commit(): Promise<void>;
 }
 
@@ -132,21 +136,26 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
   beginQuestion(questionId: string): LongMemEvalSelectionBoundaryQuestionCapture {
     this.#assertWritable();
     if (questionId.length === 0) throw new Error("selection replay question id is empty");
-    const boundaries: FineAssessmentSelectionBoundaryCase[] = [];
+    const pendingCaptures: SelectionBoundarySpoolCapture[] = [];
     let committed = false;
     return Object.freeze({
-      observer: (boundary: FineAssessmentSelectionBoundaryCase) => {
+      observer: (capture: SelectionBoundarySpoolCapture) => {
         if (committed) throw new Error("selection replay question is committed");
-        boundaries.push(boundary);
+        pendingCaptures.push(capture);
         return undefined;
       },
       commit: async () => {
         if (committed) throw new Error("selection replay question is committed");
         committed = true;
         this.#assertWritable();
-        if (boundaries.length === 0) {
+        if (pendingCaptures.length === 0) {
           throw new Error("selection replay captured no selection invocation");
         }
+        const boundaries = pendingCaptures.map((capture) =>
+          "schema_version" in capture
+            ? capture
+            : materializeFineAssessmentSelectionBoundary(capture)
+        );
         const encoded = encodeQuestionRecords(questionId, boundaries);
         await appendFile(this.#spoolPath, encoded);
         this.#sourceHash.update(encoded);

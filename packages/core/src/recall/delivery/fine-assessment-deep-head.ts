@@ -11,25 +11,11 @@ export type DeepHeadAssessmentResolver = (
     readonly supplementaryData: Parameters<
       typeof resolveDeepHeadAssessment
     >[0]["supplementaryData"];
+    readonly includeTraces?: boolean;
   }>
 ) => RecallDeepHeadAssessment;
 
-/**
- * Capture-on keeps traces; capture-off keeps scores only.
- * One gate for live, composition, and counterfactual assessment paths.
- */
-function gateDeepHeadAssessment(
-  assessment: RecallDeepHeadAssessment,
-  captureAnswerFeatures?: boolean
-): RecallDeepHeadAssessment {
-  if (captureAnswerFeatures === true) return assessment;
-  return Object.freeze({
-    scores: assessment.scores,
-    traceByCandidateKey: new Map()
-  });
-}
-
-/** Resolve deep-head via injected assessment, then apply the capture gate. */
+/** Resolve deep-head via injected assessment; skip trace materialization off capture. */
 export function resolveFineAssessmentDeepHead(
   input: Readonly<{
     readonly candidates: readonly DeliverySelectionCandidate[];
@@ -41,12 +27,10 @@ export function resolveFineAssessmentDeepHead(
   }>,
   resolveAssessment: DeepHeadAssessmentResolver = resolveDeepHeadAssessment
 ): RecallDeepHeadAssessment {
-  return gateDeepHeadAssessment(
-    resolveAssessment({
-      candidates: input.candidates,
-      answerRelevanceScores: input.answerRelevanceScores,
-      supplementaryData: input.supplementaryData
-    }),
-    input.captureAnswerFeatures
-  );
+  return resolveAssessment({
+    candidates: input.candidates,
+    answerRelevanceScores: input.answerRelevanceScores,
+    supplementaryData: input.supplementaryData,
+    includeTraces: input.captureAnswerFeatures === true
+  });
 }

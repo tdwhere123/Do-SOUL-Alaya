@@ -114,6 +114,7 @@ function reconstructCounterfactualComposition(
     candidates,
     supplementaryData,
     deepHeadScores: deepHead.scores,
+    embeddingObserved: deepHead.embeddingObserved,
     finalAuthorityMaxHeadDrop: options.finalAuthorityMaxHeadDrop
   });
   const delivery = applyDeliverySelection(candidates, deepHead.scores, {

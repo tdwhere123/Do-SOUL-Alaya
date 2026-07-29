@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
+import { materializeFineAssessmentSelectionBoundary } from
+  "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-capture.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectFineAssessmentCandidates } from
   "../../../../../../packages/core/src/recall/delivery/fine-assessment-selection.js";
@@ -29,9 +31,18 @@ const { replayBoundary } = vi.hoisted(() => ({
   >((boundary) => boundary)
 }));
 
-vi.mock("@do-soul/alaya-core", () => ({
-  replayFineAssessmentSelectionBoundary: replayBoundary
-}));
+vi.mock("@do-soul/alaya-core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@do-soul/alaya-core")>();
+  const captureModule = await import(
+    "../../../../../../packages/core/src/recall/delivery/selection-boundary/selection-boundary-capture.js"
+  );
+  return {
+    ...actual,
+    materializeFineAssessmentSelectionBoundary:
+      captureModule.materializeFineAssessmentSelectionBoundary,
+    replayFineAssessmentSelectionBoundary: replayBoundary
+  };
+});
 
 import {
   createLongMemEvalSelectionBoundarySpool,
@@ -300,9 +311,10 @@ function capturedBoundaryV2(
       candidate.fusion.fused_score
     ])),
     finalOrderAfterCoverage: "public_relevance",
+    captureAnswerFeatures: true,
     capturePacketPlanTrace: true,
-    selectionBoundaryObserver: (boundary) => {
-      captured = boundary;
+    selectionBoundaryObserver: (pending) => {
+      captured = materializeFineAssessmentSelectionBoundary(pending);
       return undefined;
     }
   });

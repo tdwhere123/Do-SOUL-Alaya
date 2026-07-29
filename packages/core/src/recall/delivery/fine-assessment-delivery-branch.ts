@@ -17,15 +17,17 @@ export function resolveFineAssessmentDeliveryBranch(input: Readonly<{
   readonly candidates: readonly DeliverySelectionCandidate[];
   readonly supplementaryData: Parameters<typeof hasObservedDeepHeadEmbedding>[1];
   readonly deepHeadScores: ReadonlyMap<string, number>;
+  readonly embeddingObserved?: boolean;
   readonly finalAuthorityMaxHeadDrop?: number;
 }>): FineAssessmentDeliveryBranch {
   // CE present → scores own public relevance. Lightweight head reorders only so
   // fused_score / 8-factor governance stay visible on RecallCandidate.
   const replacePublicRelevance = input.answerRelevanceScores.size > 0;
-  const hasEmbeddingRefinement = hasObservedDeepHeadEmbedding(
-    input.candidates,
-    input.supplementaryData
-  );
+  const hasEmbeddingRefinement = input.embeddingObserved ??
+    hasObservedDeepHeadEmbedding(
+      input.candidates,
+      input.supplementaryData
+    );
   return Object.freeze({
     replacePublicRelevance,
     hasEmbeddingRefinement,

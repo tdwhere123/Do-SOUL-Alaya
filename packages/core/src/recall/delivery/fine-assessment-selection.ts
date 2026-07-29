@@ -24,8 +24,8 @@ import {
   notifySelectionBoundaryObserver
 } from
   "./selection-boundary/selection-boundary-capture.js";
-import type { FineAssessmentSelectionBoundaryCase } from
-  "./selection-boundary/selection-boundary-types.js";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
+  "./selection-boundary/selection-boundary-capture.js";
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
   readonly effectiveScore: number;
   readonly effectiveFactors: RecallScoreFactors;
@@ -86,7 +86,7 @@ export type FineAssessmentSelectionParams = Readonly<{
   readonly capturePacketPlanTrace?: boolean;
   readonly deepHeadTraceByCandidateKey?: ReadonlyMap<string, RecallDeepHeadTrace>;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
 }>;
 
@@ -245,20 +245,32 @@ function prepareCoverageSelection(
     params.orderedCandidates,
     context.config.budgets.max_entries
   );
+  const captureMarginalGain = context.captureAnswerFeatures;
   const initialOrder = orderFineAssessmentByCoverage(
-    params.orderedCandidates, context, coverageRelevance, new Set(),
-    !hasEmbeddingHead && context.captureAnswerFeatures
+    params.orderedCandidates, context, coverageRelevance, new Set<string>(),
+    !hasEmbeddingHead && captureMarginalGain
   );
-  const evictions = hasEmbeddingHead
-    ? resolveEmbeddingHeadEvictions(initialOrder, context, coverageRelevance)
-    : new Set<string>();
-  const coverageOrdered = hasEmbeddingHead
-    ? orderFineAssessmentByCoverage(
-        initialOrder, context, coverageRelevance, evictions,
-        context.captureAnswerFeatures
-      )
-    : initialOrder;
-  return Object.freeze({ coverageOrdered, evictions });
+  if (!hasEmbeddingHead) {
+    return Object.freeze({ coverageOrdered: initialOrder, evictions: new Set<string>() });
+  }
+  const resolved = resolveEmbeddingHeadEvictions(
+    initialOrder,
+    context,
+    coverageRelevance,
+    captureMarginalGain
+  );
+  const evictions = resolved.evictions;
+  const coverageOrdered = evictions.size > 0
+    ? resolved.coverageOrdered
+    : captureMarginalGain
+      ? orderFineAssessmentByCoverage(
+          initialOrder, context, coverageRelevance, new Set<string>(), true
+        )
+      : initialOrder;
+  return Object.freeze({
+    coverageOrdered,
+    evictions
+  });
 }
 
 function orderFineAssessmentByCoverage(
@@ -322,20 +334,35 @@ function createSelectionContext(
 function resolveEmbeddingHeadEvictions(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
-  relevanceByCandidateKey: ReadonlyMap<string, number>
-): ReadonlySet<string> {
-  return selectEmbeddingHeadEvictions({
+  relevanceByCandidateKey: ReadonlyMap<string, number>,
+  captureMarginalGain: boolean
+): Readonly<{
+  readonly evictions: ReadonlySet<string>;
+  readonly coverageOrdered: readonly FineAssessmentCandidate[];
+}> {
+  let coverageOrdered = candidates;
+  const evictions = selectEmbeddingHeadEvictions({
     candidates,
     maxEntries: context.config.budgets.max_entries,
     embeddingScores: context.supplementaryData.embeddingSimilarityScores,
     queryProbes: context.supplementaryData.queryProbes,
     answerRerankedCandidateKeys: context.answerRerankedCandidateKeys,
-    selectDelivered: (evictions) => collectAdmittedCandidates(
-      orderFineAssessmentByCoverage(candidates, context, relevanceByCandidateKey, evictions),
-      context,
-      evictions
-    )
+    selectDelivered: (evictionSet) => {
+      coverageOrdered = orderFineAssessmentByCoverage(
+        candidates,
+        context,
+        relevanceByCandidateKey,
+        evictionSet,
+        captureMarginalGain
+      );
+      return collectAdmittedCandidates(
+        coverageOrdered,
+        context,
+        evictionSet
+      );
+    }
   });
+  return Object.freeze({ evictions, coverageOrdered });
 }
 
 function reduceFineAssessmentCandidates(

@@ -11,6 +11,11 @@ import {
   type FineAssessmentSelectionBoundaryCase
 } from "../../recall/delivery/selection-boundary/selection-boundary-replay.js";
 import {
+  materializeFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryPendingCapture
+} from
+  "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
+import {
   cloneSelectionBoundaryJson,
   selectionBoundaryJsonSha256
 } from
@@ -72,8 +77,8 @@ describe("fine-assessment selection boundary fidelity", () => {
 
   it("changes the visible-result digest for nested candidate or diagnostic drift", () => {
     let boundary: FineAssessmentSelectionBoundaryCase | undefined;
-    const visibleResult = selectFixture((captured) => {
-      boundary = captured;
+    const visibleResult = selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
       return undefined;
     });
     if (boundary === undefined) throw new Error("selection boundary was not observed");
@@ -188,7 +193,7 @@ describe("fine-assessment selection boundary fidelity", () => {
 
   it("rejects asynchronous observer callbacks", () => {
     const asyncObserver = (() => Promise.resolve()) as unknown as (
-      boundary: FineAssessmentSelectionBoundaryCase
+      pending: FineAssessmentSelectionBoundaryPendingCapture
     ) => undefined;
     expect(() => selectFixture(asyncObserver))
       .toThrow(/must return undefined synchronously/u);
@@ -213,7 +218,11 @@ describe("fine-assessment selection boundary fidelity", () => {
       tokenEstimator: { estimate: () => 5 },
       now: () => "2026-07-29T00:00:00.000Z",
       warn: vi.fn(),
-      selectionBoundaryObserver: observer
+      captureAnswerFeatures: true,
+      selectionBoundaryObserver: (pending) => {
+        observer(materializeFineAssessmentSelectionBoundary(pending));
+        return undefined;
+      }
     });
 
     expect(observer).toHaveBeenCalledTimes(1);
@@ -229,8 +238,8 @@ function captureBoundary(
   estimator = vi.fn((_content: string) => 5)
 ): FineAssessmentSelectionBoundaryCase {
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
-  selectFixture((captured) => {
-    boundary = captured;
+  selectFixture((pending) => {
+    boundary = materializeFineAssessmentSelectionBoundary(pending);
     return undefined;
   }, estimator);
   if (boundary === undefined) throw new Error("selection boundary was not observed");
@@ -238,7 +247,7 @@ function captureBoundary(
 }
 
 function selectFixture(
-  observer?: (boundary: FineAssessmentSelectionBoundaryCase) => undefined,
+  observer?: (pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined,
   estimator = vi.fn((_content: string) => 5)
 ) {
   const candidates = fixtureCandidates();
@@ -253,6 +262,7 @@ function selectFixture(
       candidate.fusion.fused_score
     ])),
     finalOrderAfterCoverage: "public_relevance",
+    captureAnswerFeatures: observer !== undefined,
     capturePacketPlanTrace: true,
     selectionBoundaryObserver: observer
   });

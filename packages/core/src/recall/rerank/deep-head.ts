@@ -40,6 +40,14 @@ export type RecallDeepHeadTrace = Readonly<{
 export type RecallDeepHeadAssessment = Readonly<{
   readonly scores: ReadonlyMap<string, number>;
   readonly traceByCandidateKey: ReadonlyMap<string, RecallDeepHeadTrace>;
+  readonly embeddingObserved: boolean;
+}>;
+
+type DeepHeadAssessmentParams = Readonly<{
+  readonly candidates: readonly DeliverySelectionCandidate[];
+  readonly answerRelevanceScores: ReadonlyMap<string, number>;
+  readonly supplementaryData: DeepHeadSupplementary;
+  readonly includeTraces?: boolean;
 }>;
 
 type LightweightComponents = Readonly<{
@@ -74,17 +82,17 @@ export function resolveDeepHeadScores(params: Readonly<{
   );
 }
 
-export function resolveDeepHeadAssessment(params: Readonly<{
-  readonly candidates: readonly DeliverySelectionCandidate[];
-  readonly answerRelevanceScores: ReadonlyMap<string, number>;
-  readonly supplementaryData: DeepHeadSupplementary;
-}>): RecallDeepHeadAssessment {
+export function resolveDeepHeadAssessment(
+  params: DeepHeadAssessmentParams
+): RecallDeepHeadAssessment {
+  const includeTraces = params.includeTraces ?? true;
   if (params.answerRelevanceScores.size > 0) {
-    return buildCrossEncoderAssessment(params);
+    return buildCrossEncoderAssessment(params, includeTraces);
   }
   return computeLightweightDeepHeadAssessment(
     params.candidates,
-    params.supplementaryData
+    params.supplementaryData,
+    includeTraces
   );
 }
 
@@ -124,19 +132,31 @@ export function combineIndependentEmbeddingEvidence(
     : resolvedEvidence;
 }
 
-export function resolveIndependentEmbeddingEvidenceAssessment(params: Readonly<{
-  readonly candidates: readonly DeliverySelectionCandidate[];
-  readonly answerRelevanceScores: ReadonlyMap<string, number>;
-  readonly supplementaryData: DeepHeadSupplementary;
-}>): RecallDeepHeadAssessment {
+export function resolveIndependentEmbeddingEvidenceAssessment(
+  params: DeepHeadAssessmentParams
+): RecallDeepHeadAssessment {
+  const includeTraces = params.includeTraces ?? true;
   if (params.answerRelevanceScores.size > 0) {
-    return buildCrossEncoderAssessment(params);
+    return buildCrossEncoderAssessment(params, includeTraces);
   }
   const components = params.candidates.map((candidate) =>
     buildLightweightComponents(candidate, params.supplementaryData)
   );
-  const active = components.some((item) => item.embedding !== null) ||
+  const embeddingObserved = components.some((item) => item.embedding !== null);
+  const active = embeddingObserved ||
     components.some((item) => item.resolvedEvidence > 0);
+  if (!includeTraces) {
+    return Object.freeze({
+      scores: active
+        ? new Map(params.candidates.map((candidate, index) => [
+            candidate.fusion.candidate_key,
+            resolveIndependentEmbeddingEvidenceScore(components[index]!, active)
+          ]))
+        : new Map(),
+      traceByCandidateKey: new Map(),
+      embeddingObserved
+    });
+  }
   const traces = params.candidates.map((candidate, index) => [
     candidate.fusion.candidate_key,
     buildIndependentEmbeddingEvidenceTrace(components[index]!, active)
@@ -145,7 +165,8 @@ export function resolveIndependentEmbeddingEvidenceAssessment(params: Readonly<{
     scores: active
       ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
       : new Map(),
-    traceByCandidateKey: new Map(traces)
+    traceByCandidateKey: new Map(traces),
+    embeddingObserved
   });
 }
 
@@ -162,19 +183,31 @@ export function combineNonlexicalUnitIntervalComposition(
     : evidenceAgreement;
 }
 
-export function resolveNonlexicalUnitIntervalCompositionAssessment(params: Readonly<{
-  readonly candidates: readonly DeliverySelectionCandidate[];
-  readonly answerRelevanceScores: ReadonlyMap<string, number>;
-  readonly supplementaryData: DeepHeadSupplementary;
-}>): RecallDeepHeadAssessment {
+export function resolveNonlexicalUnitIntervalCompositionAssessment(
+  params: DeepHeadAssessmentParams
+): RecallDeepHeadAssessment {
+  const includeTraces = params.includeTraces ?? true;
   if (params.answerRelevanceScores.size > 0) {
-    return buildCrossEncoderAssessment(params);
+    return buildCrossEncoderAssessment(params, includeTraces);
   }
   const components = params.candidates.map((candidate) =>
     buildLightweightComponents(candidate, params.supplementaryData)
   );
-  const active = components.some((item) => item.embedding !== null) ||
+  const embeddingObserved = components.some((item) => item.embedding !== null);
+  const active = embeddingObserved ||
     components.some((item) => item.evidenceAgreement > 0);
+  if (!includeTraces) {
+    return Object.freeze({
+      scores: active
+        ? new Map(params.candidates.map((candidate, index) => [
+            candidate.fusion.candidate_key,
+            resolveNonlexicalUnitIntervalCompositionScore(components[index]!, active)
+          ]))
+        : new Map(),
+      traceByCandidateKey: new Map(),
+      embeddingObserved
+    });
+  }
   const traces = params.candidates.map((candidate, index) => [
     candidate.fusion.candidate_key,
     buildNonlexicalUnitIntervalCompositionTrace(components[index]!, active)
@@ -183,15 +216,26 @@ export function resolveNonlexicalUnitIntervalCompositionAssessment(params: Reado
     scores: active
       ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
       : new Map(),
-    traceByCandidateKey: new Map(traces)
+    traceByCandidateKey: new Map(traces),
+    embeddingObserved
   });
 }
 
-function buildCrossEncoderAssessment(params: Readonly<{
-  readonly candidates: readonly DeliverySelectionCandidate[];
-  readonly answerRelevanceScores: ReadonlyMap<string, number>;
-  readonly supplementaryData: DeepHeadSupplementary;
-}>): RecallDeepHeadAssessment {
+function buildCrossEncoderAssessment(
+  params: DeepHeadAssessmentParams,
+  includeTraces: boolean
+): RecallDeepHeadAssessment {
+  const embeddingObserved = hasObservedDeepHeadEmbedding(
+    params.candidates,
+    params.supplementaryData
+  );
+  if (!includeTraces) {
+    return Object.freeze({
+      scores: params.answerRelevanceScores,
+      traceByCandidateKey: new Map(),
+      embeddingObserved
+    });
+  }
   return Object.freeze({
     scores: params.answerRelevanceScores,
     traceByCandidateKey: new Map(params.candidates.map((candidate) => {
@@ -207,19 +251,34 @@ function buildCrossEncoderAssessment(params: Readonly<{
           false
         )
       ];
-    }))
+    })),
+    embeddingObserved
   });
 }
 
 function computeLightweightDeepHeadAssessment(
   candidates: readonly DeliverySelectionCandidate[],
-  supplementaryData: DeepHeadSupplementary
+  supplementaryData: DeepHeadSupplementary,
+  includeTraces: boolean
 ): RecallDeepHeadAssessment {
   const components = candidates.map((candidate) =>
     buildLightweightComponents(candidate, supplementaryData)
   );
-  const active = components.some((item) => item.embedding !== null) ||
+  const embeddingObserved = components.some((item) => item.embedding !== null);
+  const active = embeddingObserved ||
     components.some((item) => item.resolvedEvidence > 0);
+  if (!includeTraces) {
+    return Object.freeze({
+      scores: active
+        ? new Map(candidates.map((candidate, index) => [
+            candidate.fusion.candidate_key,
+            resolveLightweightScore(candidate, components[index]!, active)!
+          ]))
+        : new Map(),
+      traceByCandidateKey: new Map(),
+      embeddingObserved
+    });
+  }
   const traces = candidates.map((candidate, index) => [
     candidate.fusion.candidate_key,
     buildLightweightTrace(candidate, components[index]!, active)
@@ -228,7 +287,8 @@ function computeLightweightDeepHeadAssessment(
     scores: active
       ? new Map(traces.map(([key, trace]) => [key, trace.resolved_score!]))
       : new Map(),
-    traceByCandidateKey: new Map(traces)
+    traceByCandidateKey: new Map(traces),
+    embeddingObserved
   });
 }
 
@@ -248,6 +308,42 @@ function buildLightweightComponents(
       supplementaryData.queryProbes
     )
   });
+}
+
+function resolveLightweightScore(
+  candidate: DeliverySelectionCandidate,
+  components: LightweightComponents,
+  active: boolean
+): number | null {
+  if (!active) return null;
+  if (components.embedding !== null) {
+    return probabilisticOr(components.embedding, components.resolvedEvidence);
+  }
+  const fusionBaselineUsed = components.fusionBaselineEligible;
+  return fusionBaselineUsed
+    ? probabilisticOr(clamp01(candidate.fusion.fused_score), components.resolvedEvidence)
+    : components.resolvedEvidence;
+}
+
+function resolveIndependentEmbeddingEvidenceScore(
+  components: LightweightComponents,
+  active: boolean
+): number {
+  return active
+    ? combineIndependentEmbeddingEvidence(components.embedding, components.resolvedEvidence)
+    : 0;
+}
+
+function resolveNonlexicalUnitIntervalCompositionScore(
+  components: LightweightComponents,
+  active: boolean
+): number {
+  return active
+    ? combineNonlexicalUnitIntervalComposition(
+      components.embedding,
+      components.evidenceAgreement
+    )
+    : 0;
 }
 
 function buildLightweightTrace(

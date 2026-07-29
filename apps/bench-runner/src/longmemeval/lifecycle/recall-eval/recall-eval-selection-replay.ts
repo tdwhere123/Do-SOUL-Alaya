@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { FineAssessmentSelectionBoundaryCase } from
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "@do-soul/alaya-core";
 import {
   createLongMemEvalSelectionBoundarySpool,
@@ -32,7 +32,7 @@ export async function captureRecallEvalQuestion<T>(
   questionId: string,
   run: (
     observer: ((
-      boundary: FineAssessmentSelectionBoundaryCase
+      boundary: FineAssessmentSelectionBoundaryPendingCapture
     ) => undefined) | undefined
   ) => Promise<T>
 ): Promise<T> {

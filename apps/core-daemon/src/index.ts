@@ -8,7 +8,7 @@ import {
   type DaemonStartupStepRecord
 } from "./runtime/daemon-runtime-types.js";
 import { resolveAlayaConfigDir, resolveAlayaConfigPaths } from "./cli/config-files.js";
-import { startCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
+import { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
 import { validateDaemonEnv } from "./runtime/daemon-env.js";
 import { createDaemonRepositories } from "./runtime/daemon-repositories.js";
 import {
@@ -41,7 +41,7 @@ export type {
   AlayaDaemonServer,
   DaemonStartupStepRecord
 } from "./runtime/daemon-runtime-types.js";
-export { startCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
+export { startCjkSegmentationWarmup, awaitCjkSegmentationWarmup } from "./runtime/cjk-warmup.js";
 export { resolveSecretRef } from "./secrets/index.js";
 export type { ResolveSecretError, ResolvedSecret, SecretRefReader } from "./secrets/index.js";
 
@@ -87,7 +87,7 @@ async function createRuntimeBootstrapContext() {
   const startupSteps: DaemonStartupStepRecord[] = [];
   const validatedEnv = validateDaemonEnv(process.env);
   const warnLogger = createWarnLogger();
-  startCjkSegmentationWarmup(warnLogger);
+  await awaitCjkSegmentationWarmup(warnLogger);
   installUnhandledRejectionHandler(warnLogger);
   const runtimeNotifier = createRuntimeNotifier();
   const requestProtection = createRequestProtection(validatedEnv, (message, meta) => {

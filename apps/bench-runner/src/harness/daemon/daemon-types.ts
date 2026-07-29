@@ -4,7 +4,7 @@ import type {
   SoulMemorySearchResponse
 } from "@do-soul/alaya-protocol";
 import type { AlayaDaemonRuntime } from "@do-soul/alaya";
-import type { FineAssessmentSelectionBoundaryCase } from "@do-soul/alaya-core";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from "@do-soul/alaya-core";
 import type { CoRecallWarmupSummary } from "../embedding/co-recall-warmup.js";
 import type { BenchRecallWeightOverrides } from "../recall/recall-weight-overrides.js";
 import type { SeedObjectKind } from "../seeding/seed-rotation.js";
@@ -73,7 +73,7 @@ export interface BenchRecallOptions {
   readonly conflictAwareness?: boolean;
   readonly referenceTime?: string;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
 }
 

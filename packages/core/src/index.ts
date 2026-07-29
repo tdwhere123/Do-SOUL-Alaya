@@ -79,6 +79,10 @@ export {
   type FineAssessmentSelectionBoundaryCase
 } from "./recall/delivery/selection-boundary/selection-boundary-replay.js";
 export {
+  materializeFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryPendingCapture
+} from "./recall/delivery/selection-boundary/selection-boundary-capture.js";
+export {
   SELECTION_BOUNDARY_FIDELITY_MISMATCH
 } from "./recall/delivery/selection-boundary/selection-boundary-restore.js";
 export {

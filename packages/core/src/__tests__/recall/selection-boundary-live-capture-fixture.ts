@@ -4,6 +4,8 @@ import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
+import { materializeFineAssessmentSelectionBoundary } from
+  "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
 import {
   createRankedCandidate,
   createSupplementaryData
@@ -15,8 +17,8 @@ export function captureFineAssessmentSelectionBoundary(
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   fineAssess({
     ...buildLiveCaptureBase(taskSurfaceRef),
-    selectionBoundaryObserver: (captured) => {
-      boundary = captured;
+    selectionBoundaryObserver: (pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
       return undefined;
     }
   });

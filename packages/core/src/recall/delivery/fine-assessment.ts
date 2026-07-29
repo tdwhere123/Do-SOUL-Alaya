@@ -36,8 +36,8 @@ import {
 } from "./fine-assessment-prune.js";
 import type { RecallPacketPlanObservation } from
   "./packet-plan/packet-plan-trace.js";
-import type { FineAssessmentSelectionBoundaryCase } from
-  "./selection-boundary/selection-boundary-types.js";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
+  "./selection-boundary/selection-boundary-capture.js";
 
 export interface FineAssessParams {
   readonly candidates: readonly Readonly<CoarseRecallCandidate>[];
@@ -51,7 +51,7 @@ export interface FineAssessParams {
   readonly capturePacketPlanTrace?: boolean;
   readonly finalAuthorityMaxHeadDrop?: number;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
 }
 
@@ -148,6 +148,7 @@ export function deliverFineAssessment(
     candidates: preparation.candidates,
     supplementaryData: params.supplementaryData,
     deepHeadScores,
+    embeddingObserved: deepHead.embeddingObserved,
     finalAuthorityMaxHeadDrop: params.finalAuthorityMaxHeadDrop
   });
   const delivery = applyDeliverySelection(preparation.candidates, deepHeadScores, {

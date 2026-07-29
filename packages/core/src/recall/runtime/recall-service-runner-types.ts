@@ -26,8 +26,8 @@ import type { EmbeddingSupplementCollectionStatus } from "../supplements/supplem
 import type { prepareEmbeddingSupplementQuery } from "../supplements/supplements.js";
 import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
-import type { FineAssessmentSelectionBoundaryCase } from
-  "../delivery/selection-boundary/selection-boundary-types.js";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
+  "../delivery/selection-boundary/selection-boundary-capture.js";
 
 export type RecallDiagnosticCapture = "answer_features" | "packet_trace";
 
@@ -35,6 +35,14 @@ export function capturesRecallAnswerFeatures(
   capture: RecallDiagnosticCapture | undefined
 ): boolean {
   return capture === "answer_features" || capture === "packet_trace";
+}
+
+export function shouldCaptureRecallAnswerFeatures(params: Readonly<{
+  readonly diagnosticCapture?: RecallDiagnosticCapture;
+  readonly selectionBoundaryObserver?: unknown;
+}>): boolean {
+  return params.diagnosticCapture === "packet_trace" ||
+    params.selectionBoundaryObserver !== undefined;
 }
 
 export interface RecallExecutionParams {
@@ -49,7 +57,7 @@ export interface RecallExecutionParams {
   readonly referenceTime?: string;
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
 }
 
