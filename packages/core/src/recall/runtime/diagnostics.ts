@@ -1,5 +1,5 @@
 import type { RecallCandidate, RecallPolicy } from "@do-soul/alaya-protocol";
-import { NO_STORED_VECTORS_DEGRADATION_REASON } from "../../embedding-recall/constants.js";
+import { normalizeEmbeddingProviderDegradationReason } from "../embedding-mcp-degradation.js";
 import type { PreparedEmbeddingQueryHandle } from "../../embedding-recall/embedding-recall-service.js";
 import type {
   EvidenceCandidateScoringResult
@@ -365,16 +365,4 @@ export function resolveEmbeddingProviderDegradationReason(
   return null;
 }
 
-export function normalizeEmbeddingProviderDegradationReason(reason: string): string | null {
-  const normalized = reason.trim().toLowerCase();
-  if (
-    normalized === "query_embedding_failed" ||
-    normalized === "provider_unavailable" ||
-    normalized === "local_vector_lookup_failed" ||
-    normalized === "query_embedding_pending" ||
-    normalized === NO_STORED_VECTORS_DEGRADATION_REASON
-  ) {
-    return normalized;
-  }
-  return "provider_unavailable";
-}
+export { normalizeEmbeddingProviderDegradationReason };

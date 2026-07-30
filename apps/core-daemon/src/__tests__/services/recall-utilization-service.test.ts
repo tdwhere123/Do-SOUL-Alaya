@@ -138,7 +138,7 @@ function fakeEventLogRepo(rows: readonly EventLogEntry[]): RecallUtilizationEven
 
 describe("recall-utilization-service", () => {
 
-  it("returns zero stats when no events are present", async () => {
+  it("returns zero counts and null latency percentiles when no events are present", async () => {
     const service = createRecallUtilizationService({ eventLogRepo: fakeEventLogRepo([]) });
     const stats = await service.getStats({ workspaceId: WORKSPACE_ID });
 
@@ -152,13 +152,15 @@ describe("recall-utilization-service", () => {
     expect(stats.recall.unique_runs).toBe(0);
     expect(stats.recall.miss_ratio).toBe(0);
     expect(stats.recall.p50_pointer_count).toBe(0);
-    expect(stats.recall.p50_latency_ms).toBe(0);
+    expect(stats.recall.p50_latency_ms).toBeNull();
+    expect(stats.recall.p95_latency_ms).toBeNull();
+    expect(stats.recall.p99_latency_ms).toBeNull();
     expect(stats.embedding).toEqual({
       total_queries: 0,
       returned_candidate_count: 0,
-      p50_latency_ms: 0,
-      p95_latency_ms: 0,
-      p99_latency_ms: 0,
+      p50_latency_ms: null,
+      p95_latency_ms: null,
+      p99_latency_ms: null,
       latency_buckets: [
         { label: "<=150ms", count: 0 },
         { label: "<=300ms", count: 0 },
@@ -263,6 +265,34 @@ describe("recall-utilization-service", () => {
     });
   });
 
+  it("aggregates recall delivery end-to-end latency percentiles", async () => {
+    // Fixture latencies (unsorted): nearest-rank p95/p99 and average p50.
+    const latencyMsByDelivery = [120, 280, 90, 1250, 40, 600, 150, 95, 310, 180] as const;
+    const rows = latencyMsByDelivery.map((latencyMs, index) =>
+      makeRow({
+        type: RecallContextEventType.SOUL_RECALL_DELIVERED,
+        entityId: `delivery_${index + 1}`,
+        runId: `run-${(index % 3) + 1}`,
+        payload: deliveredPayload({
+          deliveryId: `delivery_${index + 1}`,
+          runId: `run-${(index % 3) + 1}`,
+          pointerCount: index + 1,
+          latencyMs
+        })
+      })
+    );
+
+    const stats = await createRecallUtilizationService({
+      eventLogRepo: fakeEventLogRepo(rows)
+    }).getStats({ workspaceId: WORKSPACE_ID });
+
+    // sorted: 40, 90, 95, 120, 150, 180, 280, 310, 600, 1250
+    expect(stats.recall.total).toBe(10);
+    expect(stats.recall.p50_latency_ms).toBe(165);
+    expect(stats.recall.p95_latency_ms).toBe(1250);
+    expect(stats.recall.p99_latency_ms).toBe(1250);
+  });
+
   it("computes a single recall with no usage report", async () => {
     const rows = [
       makeRow({
@@ -288,6 +318,8 @@ describe("recall-utilization-service", () => {
     expect(stats.recall.miss_ratio).toBe(0);
     expect(stats.recall.p50_pointer_count).toBe(3);
     expect(stats.recall.p50_latency_ms).toBe(142);
+    expect(stats.recall.p95_latency_ms).toBe(142);
+    expect(stats.recall.p99_latency_ms).toBe(142);
     expect(stats.usage.total).toBe(0);
     expect(stats.usage.follow_through_ratio).toBe(0);
   });
@@ -330,6 +362,9 @@ describe("recall-utilization-service", () => {
     expect(stats.recall.miss_ratio).toBe(0.25);
     expect(stats.recall.p50_pointer_count).toBe(1.5);
     expect(stats.recall.p50_latency_ms).toBe(90);
+    // sorted latencies: 60, 80, 100, 200 — nearest-rank p95/p99 → 200
+    expect(stats.recall.p95_latency_ms).toBe(200);
+    expect(stats.recall.p99_latency_ms).toBe(200);
   });
 
   it("computes used_ratio across used / skipped only and follow_through_ratio over recalls", async () => {

@@ -5,8 +5,10 @@ import {
   SignalState,
   SoulSignalMaterializedPayloadSchema,
   buildGardenSourceTurnFallbackReceiptPreimage,
+  buildVerifiedUserAssertionReceiptPreimage,
   formatGardenSourceTurnFallbackArtifactRef,
   formatGardenSourceTurnFallbackSourceHash,
+  formatVerifiedUserAssertionSourceHash,
   type CandidateMemorySignal,
   type EvidenceCapsule
 } from "@do-soul/alaya-protocol";
@@ -77,6 +79,51 @@ describe("SqliteEvidenceCapsuleRepo.findRecallQualifiedByIds", () => {
       "workspace-1",
       [ownerMatch(proof.capsule.object_id)]
     )).resolves.toEqual([]);
+  });
+
+  it("qualifies when source_hash is assertion-family and excerpt is the distilled fact", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const proof = await seedFallbackV2(
+      database,
+      repo,
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    );
+    const assertion = "I bought my bookshelf from IKEA.";
+    const sourceHash = formatVerifiedUserAssertionSourceHash(
+      createHash("sha256")
+        .update(buildVerifiedUserAssertionReceiptPreimage({
+          workspace_id: proof.signal.workspace_id,
+          run_id: proof.signal.run_id,
+          surface_id: proof.signal.surface_id,
+          source_assertion: assertion,
+          source_corpus: proof.capsule.gist
+        }), "utf8")
+        .digest("hex")
+    );
+    database.connection.prepare(`
+      UPDATE evidence_capsules
+      SET excerpt = ?, source_hash = ?
+      WHERE object_id = ?
+    `).run(assertion, sourceHash, proof.capsule.object_id);
+    const capsule = {
+      ...proof.capsule,
+      excerpt: assertion,
+      source_hash: sourceHash
+    };
+    insertMaterializationEvent(database, proof.signal, capsule, "event-assertion-family");
+
+    await expect(repo.findRecallQualifiedByIds(
+      "workspace-1",
+      [ownerMatch(capsule.object_id)]
+    )).resolves.toMatchObject([{
+      capsule: {
+        object_id: capsule.object_id,
+        excerpt: assertion,
+        source_hash: sourceHash,
+        gist: proof.capsule.gist
+      },
+      verified_user_projection: false
+    }]);
   });
 
   it("rederives an exact Assistant observation from a trusted v2 receipt", async () => {

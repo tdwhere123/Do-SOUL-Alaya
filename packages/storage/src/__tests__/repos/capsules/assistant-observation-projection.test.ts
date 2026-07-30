@@ -163,8 +163,8 @@ describe("Assistant observation projection FTS", () => {
     const strongerProjectionOwnerId = "1f5c2a90-0000-4000-8000-000000000019";
     await repo.create(createEvidenceCapsule({
       object_id: targetOwnerId,
-      gist: "The owner is the strongest source for the query.",
-      excerpt: "Citrineanchor Citrineanchor Citrineanchor Citrineanchor.",
+      gist: "Citrineanchor Citrineanchor Citrineanchor Citrineanchor.",
+      excerpt: "The owner is the strongest source for the query.",
       source_hash: "sha256:garden-source-turn-fallback-v2:stronger-owner"
     }), [{
       projection_id: 1,

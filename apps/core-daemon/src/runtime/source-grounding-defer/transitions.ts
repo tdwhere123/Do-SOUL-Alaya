@@ -1,5 +1,6 @@
 import {
   CoreError,
+  appendEventLogSynchronously,
   fingerprintSourceGroundingClaimToken,
   type SourceGroundingDeferCommittedTransition,
   type SourceGroundingDeferTransitionPort
@@ -32,8 +33,8 @@ export function createSourceGroundingDeferTransitions(
     recordDefer: (input) => repos.eventLogRepo.transactional(() => {
       assertClaimOwner(repos, input.signal.workspace_id, input.signal.signal_id, input.claim_token);
       const events = [
-        repos.eventLogRepo.append(input.events[0]),
-        repos.eventLogRepo.append(input.events[1])
+        appendEventLogSynchronously(repos.eventLogRepo, input.events[0]),
+        appendEventLogSynchronously(repos.eventLogRepo, input.events[1])
       ] as const;
       const signal = requireSignalCas(repos, {
         signalId: input.signal.signal_id,
@@ -52,7 +53,7 @@ export function createSourceGroundingDeferTransitions(
     claimRedrive: (input) => claimRedrive(repos, input),
     completeRedrive: (input) => repos.eventLogRepo.transactional(() => {
       assertClaimOwner(repos, input.workspace_id, input.signal_id, input.claim_token);
-      const event = repos.eventLogRepo.append(input.event);
+      const event = appendEventLogSynchronously(repos.eventLogRepo, input.event);
       const signal = requireSignalCas(repos, {
         signalId: input.signal_id,
         workspaceId: input.workspace_id,
@@ -77,7 +78,7 @@ function claimRedrive(
     return repos.eventLogRepo.transactional(() => {
       const audit_event = input.audit_event === undefined
         ? null
-        : repos.eventLogRepo.append(input.audit_event);
+        : appendEventLogSynchronously(repos.eventLogRepo, input.audit_event);
       const queued = repos.queueRepo.claim(
         input.workspace_id,
         input.signal_id,
@@ -108,7 +109,7 @@ function failRedrive(
 ): SourceGroundingDeferCommittedTransition {
   return repos.eventLogRepo.transactional(() => {
     assertClaimOwner(repos, input.workspace_id, input.signal_id, input.claim_token);
-    const event = repos.eventLogRepo.append(input.event);
+    const event = appendEventLogSynchronously(repos.eventLogRepo, input.event);
     const signal = requireSignalCas(repos, {
       signalId: input.signal_id,
       workspaceId: input.workspace_id,
@@ -125,7 +126,7 @@ function reconcileStaleClaim(
 ): SourceGroundingDeferCommittedTransition {
   return repos.eventLogRepo.transactional(() => {
     const claim = readExpectedExpiredClaim(repos, input);
-    const event = repos.eventLogRepo.append(input.event);
+    const event = appendEventLogSynchronously(repos.eventLogRepo, input.event);
     const signal = requireSignalCas(repos, {
       signalId: input.signal_id,
       workspaceId: input.workspace_id,

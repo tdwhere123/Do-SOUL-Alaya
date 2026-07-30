@@ -81,7 +81,17 @@ describe("Memory embedding storage repo", () => {
       -0.5,
       0.75
     ]);
-    await expect(repo.listByWorkspace(workspaceId)).resolves.toEqual([persisted]);
+    await expect(repo.listByWorkspace(workspaceId, { limit: 10 })).resolves.toEqual([persisted]);
+  });
+
+  it("rejects unfiltered listByWorkspace without a positive limit", async () => {
+    const { workspaceId, repo } = await createRepoContext();
+    await expect(repo.listByWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+    await expect(repo.listByWorkspace(workspaceId, { limit: 0 })).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
   });
 
   it("allows migration 052 DDL to be re-run without failing on existing objects", async () => {
@@ -195,9 +205,12 @@ describe("Memory embedding storage repo", () => {
     });
     expect(wrongModelRows).toEqual([]);
 
-    // No filter falls back to the original behavior: returns both rows.
-    const unfiltered = await repo.listByWorkspace(workspaceId);
-    expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
+    // No filter without a positive limit is rejected (unbounded blob hydrate footgun).
+    await expect(repo.listByWorkspace(workspaceId)).rejects.toMatchObject({
+      code: "VALIDATION_FAILED"
+    });
+    const capped = await repo.listByWorkspace(workspaceId, { limit: 10 });
+    expect(capped.map((row) => row.object_id).sort()).toEqual([
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222"
     ]);
@@ -233,7 +246,7 @@ describe("Memory embedding storage repo", () => {
       "22222222-2222-4222-8222-222222222222"
     ]);
 
-    const unfiltered = await repo.listByWorkspace(workspaceId);
+    const unfiltered = await repo.listByWorkspace(workspaceId, { limit: 10 });
     expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222"
@@ -273,11 +286,9 @@ describe("Memory embedding storage repo", () => {
     });
     expect(filtered.map((row) => row.object_id)).toEqual([activeId]);
 
-    const unfiltered = await repo.listByWorkspace(workspaceId);
+    const unfiltered = await repo.listByWorkspace(workspaceId, { limit: 10 });
     expect(unfiltered.map((row) => row.object_id).sort()).toEqual([
-      activeId,
-      dormantId,
-      tombstonedId
+      activeId
     ]);
   });
 

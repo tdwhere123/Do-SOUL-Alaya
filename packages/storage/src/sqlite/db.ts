@@ -5,6 +5,7 @@ import { StorageError } from "../shared/errors.js";
 import { migrateEngineBindingApiKeysToCiphertext } from "../repos/shared/api-key-cipher.js";
 import { migrateEmbeddingVectorValidity } from "./embedding-vector-validity-migration.js";
 import { LruCache } from "./lru-cache.js";
+import { applySqliteWritePragmas } from "./apply-sqlite-write-pragmas.js";
 import {
   TEMPORAL_OFFLINE_MIGRATION_VERSION,
   assertCanonicalSchemaVersionTable,
@@ -17,7 +18,7 @@ import {
   resolveTemporalDatabaseMode,
   type TemporalDatabaseMode
 } from "./temporal-cutover-gate.js";
-import type { SqliteWriteQueuePort } from "./write-queue-port.js";
+import type { SqliteWriteQueuePort } from "./write-queue/port.js";
 
 export { TEMPORAL_OFFLINE_MIGRATION_VERSION, type TemporalDatabaseMode } from "./temporal-cutover-gate.js";
 
@@ -39,8 +40,13 @@ const databaseCache = new LruCache<string, StorageDatabase>(MAX_DATABASE_CACHE_E
 
 let sqliteWriteQueuePort: SqliteWriteQueuePort | null = null;
 
+// Process-global for install/wiring convenience; prefer ctor/db-scoped injection on next seam touch.
 export function configureSqliteWriteQueuePort(port: SqliteWriteQueuePort | null): void {
   sqliteWriteQueuePort = port;
+}
+
+export function getSqliteWriteQueuePort(): SqliteWriteQueuePort | null {
+  return sqliteWriteQueuePort;
 }
 
 interface MigrationStatements {
@@ -95,17 +101,18 @@ export class StorageDatabase {
       assertRuntimeTemporalDatabaseReady(this.filename, knownMigrationMaxVersion());
     }
     const database = openDatabase(this.filename);
-    database.pragma("foreign_keys = ON");
-    database.pragma("journal_mode = WAL");
-    database.pragma(`busy_timeout = ${this.reopenBusyTimeoutMs}`);
-    database.pragma("synchronous = NORMAL");
-    database.pragma("analysis_limit = 400");
+    applySqliteWritePragmas(database, {
+      busyTimeoutMs: this.reopenBusyTimeoutMs,
+      analysisLimit: 400
+    });
     this.connection = database;
     this.connectionVersion += 1;
     this.closed = false;
     if (this.filename !== ":memory:") {
       evictDatabaseCacheIfNeeded(this.filename);
-      databaseCache.set(this.filename, this);
+      databaseCache.set(this.filename, this, {
+        blocksEviction: (filename) => sqliteWriteQueuePort?.blocksEviction(filename) === true
+      });
     }
   }
 
@@ -210,7 +217,10 @@ export function initDatabase(options: InitDatabaseOptions = {}): StorageDatabase
 
   if (filename !== ":memory:") {
     evictDatabaseCacheIfNeeded(filename);
-    databaseCache.set(filename, storageDatabase);
+    databaseCache.set(filename, storageDatabase, {
+      blocksEviction: (cachedFilename) =>
+        sqliteWriteQueuePort?.blocksEviction(cachedFilename) === true
+    });
   }
 
   return storageDatabase;
@@ -220,13 +230,10 @@ function configureDatabaseConnection(
   database: SqliteConnection,
   busyTimeoutMs: number
 ): void {
-  database.pragma("foreign_keys = ON");
-  // WAL keeps readers independent; timeout bounds lock waits for writers.
-  database.pragma("journal_mode = WAL");
-  database.pragma(`busy_timeout = ${busyTimeoutMs}`);
-  database.pragma("synchronous = NORMAL");
-  // Bounded planner sampling avoids multi-second full scans on large databases.
-  database.pragma("analysis_limit = 400");
+  applySqliteWritePragmas(database, {
+    busyTimeoutMs,
+    analysisLimit: 400
+  });
 }
 
 function normalizeBusyTimeoutMs(value: number | undefined): number {

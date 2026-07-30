@@ -16,7 +16,10 @@ import {
 } from "@do-soul/alaya-storage";
 import { createRecallReadWorkerClient } from "../../../runtime/recall/recall-read-worker-client.js";
 import { createRecallTemporalProjectionEnsurer } from "../../../runtime/recall/recall-path-readers.js";
-import { openDaemonDatabase } from "../../../runtime/startup/database.js";
+import {
+  closeDaemonSqliteWriteQueue,
+  openDaemonDatabase
+} from "../../../runtime/startup/database.js";
 
 const builtWorkerUrl = new URL("../../../../dist/runtime/recall/recall-read-worker.js", import.meta.url);
 const sourceMemoryId = "11111111-1111-4111-8111-111111111111";
@@ -33,7 +36,7 @@ describe("selected temporal recall read worker", () => {
   it("reads bounded event-time windows through the worker memory port", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-event-window-test-"));
     const databasePath = join(directory, "alaya.db");
-    const database = openDaemonDatabase(databasePath);
+    const database = await openDaemonDatabase(databasePath);
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const memoryRepo = new SqliteMemoryEntryRepo(database);
 
@@ -80,6 +83,7 @@ describe("selected temporal recall read worker", () => {
       if (!database.isClosed()) {
         database.close();
       }
+      await closeDaemonSqliteWriteQueue();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -87,7 +91,7 @@ describe("selected temporal recall read worker", () => {
   it("uses only the selected temporal projection for worker path reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-test-"));
     const databasePath = join(directory, "alaya.db");
-    const database = openDaemonDatabase(databasePath);
+    const database = await openDaemonDatabase(databasePath);
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const memoryRepo = new SqliteMemoryEntryRepo(database);
     const pathRelationRepo = new SqlitePathRelationRepo(database);
@@ -147,6 +151,7 @@ describe("selected temporal recall read worker", () => {
       if (!database.isClosed()) {
         database.close();
       }
+      await closeDaemonSqliteWriteQueue();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -154,7 +159,7 @@ describe("selected temporal recall read worker", () => {
   it("rebuilds selected current and exact as-of projections before worker reads", async () => {
     const directory = mkdtempSync(join(tmpdir(), "alaya-recall-worker-temporal-rebuild-test-"));
     const databasePath = join(directory, "alaya.db");
-    const database = openDaemonDatabase(databasePath);
+    const database = await openDaemonDatabase(databasePath);
     const workspaceRepo = new SqliteWorkspaceRepo(database);
     const eventLogRepo = new SqliteEventLogRepo(database);
     const evidenceRepo = new SqliteEvidenceCapsuleRepo(database);
@@ -196,7 +201,7 @@ describe("selected temporal recall read worker", () => {
         run_state: "idle",
         current_surface_id: null
       });
-      const sourceEvent = eventLogRepo.append({
+      const sourceEvent = await eventLogRepo.append({
         event_type: SignalEventType.SOUL_SIGNAL_EMITTED,
         entity_type: "candidate_memory_signal",
         entity_id: "signal-temporal-worker",
@@ -291,6 +296,7 @@ describe("selected temporal recall read worker", () => {
       if (!database.isClosed()) {
         database.close();
       }
+      await closeDaemonSqliteWriteQueue();
       rmSync(directory, { recursive: true, force: true });
     }
   });

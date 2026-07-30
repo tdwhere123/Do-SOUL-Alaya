@@ -77,13 +77,19 @@ function memoizeDeliveredSelection<T>(
 ): (evictions: ReadonlySet<string>) => readonly T[] {
   const deliveredByEvictionSet = new Map<string, readonly T[]>();
   return (evictions) => {
-    const key = JSON.stringify([...evictions].sort(compareCandidateKeysBytewise));
+    const key = evictionSetMemoKey(evictions);
     const cached = deliveredByEvictionSet.get(key);
     if (cached !== undefined) return cached;
     const delivered = selectDelivered(evictions);
     deliveredByEvictionSet.set(key, delivered);
     return delivered;
   };
+}
+
+/** Stable Map key for an eviction set — sorted join, same identity as sorted JSON.stringify. */
+export function evictionSetMemoKey(evictions: ReadonlySet<string>): string {
+  if (evictions.size === 0) return "";
+  return [...evictions].sort(compareCandidateKeysBytewise).join("\0");
 }
 
 function findReplacement<T extends EmbeddingHeadCandidate>(params: Readonly<{

@@ -20,6 +20,8 @@ import {
   selectionBoundaryJsonSha256
 } from
   "../../recall/delivery/selection-boundary/selection-boundary-json.js";
+import { createSelectionBoundary } from
+  "../../recall/delivery/fine-assessment-selection/consensus-result.js";
 import {
   createConfig,
   createRankedCandidate,
@@ -231,6 +233,26 @@ describe("fine-assessment selection boundary fidelity", () => {
         `workspace_local:${candidate.object_kind}:${candidate.object_id}`
       )
     );
+  });
+
+  it("skips selection-boundary capture and deep-clone without an observer", () => {
+    const candidates = fixtureCandidates();
+    const params = {
+      orderedCandidates: candidates,
+      config: createConfig(),
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: rankMap(candidates)
+    };
+    expect(createSelectionBoundary(params)).toBeUndefined();
+
+    const stringify = vi.spyOn(JSON, "stringify");
+    try {
+      selectFineAssessmentCandidates(params);
+      expect(stringify).not.toHaveBeenCalled();
+    } finally {
+      stringify.mockRestore();
+    }
   });
 });
 

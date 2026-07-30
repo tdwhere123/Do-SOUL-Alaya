@@ -121,8 +121,10 @@ export class ProposalConnectionHost implements ProposalStatements {
   }
 
   public transaction<T>(fn: () => T, options: { readonly immediate?: boolean } = {}): T {
+    // EventLog revision CAS shares the DB with the write-queue worker; default
+    // IMMEDIATE so SELECT MAX+INSERT cannot race a DEFERRED upgrade.
     const txn = this.activeConnection().transaction(fn);
-    return options.immediate === true ? txn.immediate() : txn();
+    return options.immediate === false ? txn() : txn.immediate();
   }
 
   private activeStatements(): ProposalStatements {

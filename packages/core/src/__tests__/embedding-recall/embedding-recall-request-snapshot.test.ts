@@ -335,6 +335,45 @@ describe("EmbeddingRecallService request score snapshot", () => {
       ComputeRecallGardenEventType.RECALL_EMBEDDING_SUPPLEMENT_DEGRADED
     ]);
   });
+
+  it("skips workspace blob hydrate when maxNeighbors <= 0 and only loads pool via listByObjectIds", async () => {
+    const memory = createMemoryEntry({ object_id: "pool-only", content: "Pool only." });
+    const listByWorkspace = vi.fn(async () => [
+      createEmbeddingRecord({
+        object_id: "workspace-neighbor",
+        content_hash: "sha256:neighbor",
+        embedding: new Float32Array([0, 1])
+      })
+    ]);
+    const listByObjectIds = vi.fn(async () => [
+      createEmbeddingRecord({
+        object_id: memory.object_id,
+        content_hash: hashMemoryContent(memory.content),
+        embedding: new Float32Array([1, 0])
+      })
+    ]);
+    const embedTexts = vi.fn(async () => [new Float32Array([1, 0])]);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByWorkspace, listByObjectIds },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: { append: createEventAppendSpy(), queryByEntity: vi.fn(async () => []) }
+    });
+
+    const snapshot = await service.prepareRecallEmbeddingSnapshot({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "pool only query",
+      poolMemories: [memory],
+      maxNeighbors: 0
+    });
+
+    expect(listByWorkspace).not.toHaveBeenCalled();
+    expect(listByObjectIds).toHaveBeenCalledOnce();
+    expect(listByObjectIds).toHaveBeenCalledWith("workspace-1", [memory.object_id]);
+    expect(snapshot.poolScoresByObjectId[memory.object_id]).toBeCloseTo(1, 7);
+    expect(snapshot.workspaceNeighbors.hits).toEqual([]);
+    expect(snapshot.workspaceNeighbors.workspace_scan_requested).toBeUndefined();
+  });
 });
 
 function createHydrationMemories() {

@@ -1,4 +1,5 @@
 import type { StorageDatabase } from "../../sqlite/db.js";
+import { EVENT_LOG_APPEND_SYNC_SQL, EVENT_LOG_SELECT_COLUMNS } from "./event-log/append-sql.js";
 
 export interface SqliteStatement {
   run(...args: readonly unknown[]): { readonly changes: number };
@@ -53,34 +54,8 @@ export interface EventLogRevisionStatements {
   readonly nextRevisionStatement: SqliteStatement;
 }
 
-const EVENT_LOG_SELECT_COLUMNS = `
-        event_id,
-        event_type,
-        entity_type,
-        entity_id,
-        workspace_id,
-        run_id,
-        caused_by,
-        revision,
-        payload_json,
-        created_at
-`;
-
 const EVENT_LOG_MUTATION_SQL: SqlDefinitionMap<EventLogMutationStatements> = {
-  appendStatement: `
-      INSERT INTO event_log (
-        event_id,
-        event_type,
-        entity_type,
-        entity_id,
-        workspace_id,
-        run_id,
-        caused_by,
-        revision,
-        payload_json,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
+  appendStatement: EVENT_LOG_APPEND_SYNC_SQL,
   deleteByIdStatement: "DELETE FROM event_log WHERE event_id = ?"
 };
 

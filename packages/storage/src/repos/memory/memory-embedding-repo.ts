@@ -61,7 +61,10 @@ export interface MemoryEmbeddingListByWorkspaceOptions {
   // COLD memories before they enter the embedding candidate pool (see also
   // EmbeddingRecallRepoPort).
   readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
-  // Hard cap on the rows returned. Applied after tier filtering.
+  // Required for unfiltered scans (no tier/provider/model/schema filter):
+  // positive limit only. Unbounded default hydration is rejected.
+  // Filtered queries may omit limit; prefer an explicit positive limit anyway.
+  // see also: packages/core/src/embedding-recall/constants.ts:EMBEDDING_WORKSPACE_SCAN_CAP
   readonly limit?: number;
   // invariant: cosine space is valid only within one (provider_kind, model_id).
   // SQL-level filter so the workspace scan cap admits only vectors that can
@@ -112,7 +115,6 @@ interface MemoryEmbeddingWorkspaceQuery {
 export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   private readonly upsertStatement: SqliteStatement;
   private readonly findByObjectIdStatement: SqliteStatement;
-  private readonly listByWorkspaceStatement: SqliteStatement;
   private readonly findCurrentMemoryContentStatement: SqliteStatement;
   private readonly listByObjectIdFilterStatement: SqliteStatement;
   private readonly existsAnyByObjectIdFilterStatement: SqliteStatement;
@@ -124,7 +126,6 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
     const statements = prepareMemoryEmbeddingStatements(db);
     this.upsertStatement = statements.upsertStatement;
     this.findByObjectIdStatement = statements.findByObjectIdStatement;
-    this.listByWorkspaceStatement = statements.listByWorkspaceStatement;
     this.findCurrentMemoryContentStatement = statements.findCurrentMemoryContentStatement;
     this.listByObjectIdFilterStatement = statements.listByObjectIdFilterStatement;
     this.existsAnyByObjectIdFilterStatement = statements.existsAnyByObjectIdFilterStatement;
@@ -281,12 +282,10 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
 
     try {
       if (usesDefaultWorkspaceEmbeddingQuery(options)) {
-        const rows = parseRows(
-          this.listByWorkspaceStatement.all(parsedWorkspaceId),
-          MemoryEmbeddingRowParser,
-          "memory embedding row"
+        throw new StorageError(
+          "VALIDATION_FAILED",
+          "listByWorkspace requires a positive limit (or tier/provider/model/schema filters) to avoid unbounded embedding blob hydration."
         );
-        return Object.freeze(rows.map((row) => parseMemoryEmbeddingRow(row)));
       }
 
       const query = buildWorkspaceEmbeddingQuery(parsedWorkspaceId, options);
@@ -375,6 +374,7 @@ export class SqliteMemoryEmbeddingRepo implements MemoryEmbeddingRepo {
   }
 }
 
+// invariant: unfiltered listByWorkspace without a positive limit must not hydrate all blobs.
 function usesDefaultWorkspaceEmbeddingQuery(
   options: MemoryEmbeddingListByWorkspaceOptions | undefined
 ): boolean {

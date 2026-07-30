@@ -201,6 +201,8 @@ function stableEvidenceRefs(entry: Readonly<MemoryEntry>): readonly string[] {
   return [...uniqueStrings(entry.evidence_refs)].sort();
 }
 
+// Assertion-family source_hash qualifies recall and verified-assertion context;
+// turn-fallback qualifies recall only — one column, two additive families.
 function hasValidSourceReceipt(
   entry: Readonly<MemoryEntry>,
   evidence: Readonly<EvidenceCapsule>

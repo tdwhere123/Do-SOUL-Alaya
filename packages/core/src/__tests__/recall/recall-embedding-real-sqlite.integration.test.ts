@@ -242,10 +242,12 @@ describe("RecallService embedding integration (real SQLite + stored vectors)", (
     ]);
     expect(live.diagnostics?.provider_degradation_reason).toBeNull();
 
-    expect(emptyTable.candidates.map((candidate) => candidate.object_id)).toEqual([LEXICAL_ID]);
-    expect(emptyTable.candidates.some((candidate) => candidate.object_id === SEMANTIC_ID)).toBe(
-      false
-    );
+    // Empty vector table still fills the delivery budget from non-embedding
+    // paths; the regression signal is ranking flip plus no_stored_vectors.
+    expect(emptyTable.candidates.slice(0, 2).map((candidate) => candidate.object_id)).toEqual([
+      LEXICAL_ID,
+      SEMANTIC_ID
+    ]);
     expect(emptyTable.diagnostics?.provider_degradation_reason).toBe(
       NO_STORED_VECTORS_DEGRADATION_REASON
     );

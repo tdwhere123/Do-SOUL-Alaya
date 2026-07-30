@@ -137,7 +137,7 @@ export class SqliteFileRepo implements FileRepo {
           record: parsedRecord,
           event: storedEvent
         };
-      })();
+      }).immediate();
     } catch (error) {
       throw new StorageError("QUERY_FAILED", `Failed to create file ${parsedRecord.file_id}.`, error);
     }

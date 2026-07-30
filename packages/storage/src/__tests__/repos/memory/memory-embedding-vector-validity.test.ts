@@ -46,7 +46,7 @@ describe("Memory embedding vector validity", () => {
     await expect(repo.findByObjectId(validObjectId)).resolves.toMatchObject({
       object_id: validObjectId
     });
-    await expect(repo.listByWorkspace(workspaceId)).resolves.toEqual([
+    await expect(repo.listByWorkspace(workspaceId, { limit: 10 })).resolves.toEqual([
       expect.objectContaining({ object_id: validObjectId })
     ]);
     await expect(repo.listByWorkspace(workspaceId, {

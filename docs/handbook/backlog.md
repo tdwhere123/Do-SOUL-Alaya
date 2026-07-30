@@ -66,9 +66,11 @@ Issues are numbered `#BL-NNN` in plain decimal sequence.
 
 ### #BL-060 — SQLite worker queue for blocking storage operations
 
-**Status**: Open (design spike landed 2026-07-07). **Due**: after S7 async SQLite comparison is reviewed.
+**Status**: Close condition met (2026-07-30) — queue infra + EventLog standalone hot-path migration.
 
-**Context**: The daemon still uses synchronous `better-sqlite3` on the main thread. S7 added a blocking probe, tail-latency test, bench driver, and doctor storage-growth advisory, but moving writes or heavy cleanup into a worker-thread queue is a larger storage architecture migration that must preserve EventLog-first transaction ordering. Branch landed typed port stub `packages/storage/src/sqlite/write-queue-port.ts` and contract test.
+**Context**: S7 witnessed main-thread `better-sqlite3` writes inflating concurrent recall tail latency. Worker-thread queue lands under `packages/storage/src/sqlite/` (default-on via daemon `installDefaultSqliteWriteQueue`; opt out `ALAYA_SQLITE_WRITE_QUEUE=0|false|off|disabled`). Standalone `SqliteEventLogRepo.append` now enqueues payload SQL (`event-log-queue-append.ts`) with revision CAS as a scalar subquery on the worker connection; callers that already `await append` yield the event loop. In-transaction / `transactional()` appends stay synchronous on the caller connection so EventLog-first multi-table CAS (`EventPublisher.decideAppendThenApply` / `mutateThenAppendMany`) remains one SQLite txn. Proof: `event-log-write-queue.test.ts` (CAS + sync-in-txn + production-shaped read responsiveness) and `concurrent-sqlite-tail-latency.test.ts`.
+
+**Remaining gap (honest)**: Ontology / memory-entry / garden-task writes that are not part of a queued EventLog standalone append still sync on the main connection (required when co-committed with EventLog inside `transactional()`). Further ontology-only hot paths can migrate later without reopening the EventLog-first seam.
 
 **Close condition**: a worker-thread write queue or reviewed async SQLite replacement keeps EventLog-first / transaction-CAS invariants intact and improves concurrent recall tail latency against the S7 witness.
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createInMemorySqliteWriteQueuePort,
   type SqliteWriteQueuePort
-} from "../../sqlite/write-queue-port.js";
+} from "../../sqlite/write-queue/port.js";
 
 describe("SqliteWriteQueuePort contract", () => {
   it("serializes enqueue and blocks cache eviction until work completes", async () => {
@@ -148,5 +148,40 @@ describe("SqliteWriteQueuePort contract", () => {
     );
 
     emitWarning.mockRestore();
+  });
+
+  it("drains the serial chain before close rejects new work", async () => {
+    const queue = createInMemorySqliteWriteQueuePort();
+    const filename = "/tmp/alaya/serial-close.db";
+    let completed = false;
+    let releaseSlowJob: (() => void) | undefined;
+    const slowJobGate = new Promise<void>((resolve) => {
+      releaseSlowJob = resolve;
+    });
+
+    const inflight = queue.enqueue({
+      jobId: "inflight",
+      kind: "event_log_transaction",
+      filename,
+      execute: async () => {
+        await slowJobGate;
+        completed = true;
+      }
+    });
+    const closing = queue.close!();
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    releaseSlowJob?.();
+    await expect(inflight).resolves.toBeUndefined();
+    await closing;
+    expect(completed).toBe(true);
+    await expect(
+      queue.enqueue({
+        jobId: "after-close",
+        kind: "maintenance",
+        filename,
+        execute: async () => undefined
+      })
+    ).rejects.toThrow(/closed/);
   });
 });

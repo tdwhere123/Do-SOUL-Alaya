@@ -1,11 +1,12 @@
 import { WorkspaceRunEventType, type EventLogEntry } from "@do-soul/alaya-protocol";
-import type { StorageDatabase } from "../../sqlite/db.js";
+import { getSqliteWriteQueuePort, type StorageDatabase } from "../../sqlite/db.js";
 import { RefreshableStatementHolder } from "../../sqlite/refreshable-statement-holder.js";
 import { StorageError } from "../../shared/errors.js";
 import {
   appendInCurrentTransaction as appendEventLogInTransaction,
   wrapAppendError
 } from "./event-log-append.js";
+import { appendEventLogViaWriteQueue } from "./event-log/queue-append.js";
 import {
   CONVERSATION_MESSAGE_EVENT_TYPES,
   DEFAULT_EVENT_LOG_PAGE,
@@ -55,7 +56,7 @@ export class SqliteEventLogRepo implements EventLogRepo {
     return this.db;
   }
 
-  public append(event: EventLogAppendInput): EventLogEntry {
+  public append(event: EventLogAppendInput): EventLogEntry | Promise<EventLogEntry> {
     // Always auto-compute revision so the unique index on (entity_type, entity_id, revision) is
     // never violated by callers that hardcode revision: 0 or supply stale MAX+1 values.
     // The SELECT MAX + INSERT pair must be one write transaction even when callers append
@@ -63,6 +64,13 @@ export class SqliteEventLogRepo implements EventLogRepo {
     const connection = this.activeConnection();
     if (connection.inTransaction) {
       return this.appendInCurrentTransaction(event);
+    }
+
+    const queue = getSqliteWriteQueuePort();
+    // Worker payload path: revision CAS runs as a scalar subquery on the worker
+    // connection so the main event loop is not blocked by the INSERT.
+    if (queue !== null && this.db.filename !== ":memory:") {
+      return appendEventLogViaWriteQueue(this.db, queue, event);
     }
 
     const txn = connection.transaction(() => this.appendInCurrentTransaction(event));

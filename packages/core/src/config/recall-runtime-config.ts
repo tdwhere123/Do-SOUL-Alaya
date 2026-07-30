@@ -28,7 +28,7 @@ function flagEnabled(raw: string | undefined): boolean {
 }
 
 function defaultOn(raw: string | undefined): boolean {
-  return !/^(?:0|false|off|no)$/iu.test(raw ?? "on");
+  return !/^(?:0|false|off|no|disabled)$/iu.test(raw ?? "on");
 }
 
 function yesEnabled(raw: string | undefined): boolean {

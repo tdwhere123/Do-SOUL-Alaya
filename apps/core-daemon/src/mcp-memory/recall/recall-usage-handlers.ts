@@ -30,7 +30,12 @@ import {
 import type { GardenTaskEnqueueInput, GardenTaskRow } from "@do-soul/alaya-storage";
 import type { GraphEdgeCreationPort } from "@do-soul/alaya-soul";
 import { enqueuePostTurnExtractTask, enqueueRecallExtractTask } from "../garden-task/post-turn-extract-queue.js";
-import { buildMemorySearchResult, buildRecallStrategyMix } from "./recall-result.js";
+import {
+  buildMemorySearchResult,
+  buildRecallStrategyMix,
+  resolveMcpDegradationReason,
+  type RecallMcpHonestyDiagnostics
+} from "./recall-result.js";
 import { buildRecallPolicy, dedupeDeliveredObjectIdentities, uniqueObjectIds } from "./recall-usage-recall-support.js";
 import { runProductionBoundRecall } from "./recall-bound-service.js";
 import {
@@ -85,6 +90,7 @@ export interface RecallUsageHandlerDependencies {
       readonly coarse_filter_count: number;
       readonly fine_assessment_count: number;
       readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
+      readonly diagnostics?: RecallMcpHonestyDiagnostics | null;
     }>>;
   };
   readonly trustStateRecorder: {
@@ -338,8 +344,8 @@ function buildRecallResponse(
     active_constraints: recallResult.active_constraints,
     active_constraints_count: recallResult.active_constraints_count,
     total_count: totalCount,
-    strategy_mix: buildRecallStrategyMix(policyOverride, results),
-    degradation_reason: resolveDegradationReason(recallResult, explainabilityPartial)
+    strategy_mix: buildRecallStrategyMix(policyOverride, results, recallResult.diagnostics),
+    degradation_reason: resolveMcpDegradationReason(recallResult, explainabilityPartial)
   });
 }
 
@@ -420,15 +426,6 @@ function candidateHasPartialExplainability(candidate: Readonly<RecallCandidate>)
     candidate.score_factors === undefined ||
     candidate.budget_state === undefined
   );
-}
-
-function resolveDegradationReason(
-  recallResult: Readonly<{
-    readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
-  }>,
-  explainabilityPartial: boolean
-): SoulMemorySearchDegradationReason | "recall_explainability_partial" | null {
-  return recallResult.degradation_reason ?? (explainabilityPartial ? "recall_explainability_partial" : null);
 }
 
 async function maybeEmitCoUsage(

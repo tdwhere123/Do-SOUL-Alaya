@@ -10,6 +10,61 @@ const LOOKUPS: readonly Lookup[] = [
 ];
 
 describe("index-aligned search batch validation", () => {
+  it("prefers searchMany when both batch and scalar ports are available", async () => {
+    const batchHits = [[hit("batch-alpha")], [hit("batch-beta")]];
+    const searchMany = vi.fn(async () => batchHits);
+    const searchOne = vi.fn(async (lookup: Lookup) => [hit(`scalar-${lookup.key}`)]);
+    const onBatchFailure = vi.fn();
+
+    const batches = await loadIndexAlignedSearchBatches({
+      lookups: LOOKUPS,
+      searchMany,
+      searchOne,
+      isHit,
+      maxHitsForLookup: (lookup) => lookup.limit,
+      onBatchFailure
+    });
+
+    expect(batches).toEqual(batchHits);
+    expect(searchMany).toHaveBeenCalledTimes(1);
+    expect(searchOne).not.toHaveBeenCalled();
+    expect(onBatchFailure).not.toHaveBeenCalled();
+  });
+
+  it("scalar fallback returns the same ordered hits as a successful batch for a fixture", async () => {
+    const ordered = [[hit("alpha-1"), hit("alpha-2")], [hit("beta-1")]];
+    const searchOne = vi.fn(async (lookup: Lookup) =>
+      lookup.key === "alpha" ? ordered[0]! : ordered[1]!
+    );
+    const batch = await loadIndexAlignedSearchBatches({
+      lookups: [
+        { key: "alpha", limit: 2 },
+        { key: "beta", limit: 1 }
+      ],
+      searchMany: async () => ordered,
+      searchOne,
+      isHit,
+      maxHitsForLookup: (lookup) => lookup.limit,
+      onBatchFailure: vi.fn()
+    });
+    const fallback = await loadIndexAlignedSearchBatches({
+      lookups: [
+        { key: "alpha", limit: 2 },
+        { key: "beta", limit: 1 }
+      ],
+      searchMany: async () => {
+        throw new Error("batch unavailable");
+      },
+      searchOne,
+      isHit,
+      maxHitsForLookup: (lookup) => lookup.limit,
+      onBatchFailure: vi.fn()
+    });
+
+    expect(fallback).toEqual(batch);
+    expect(fallback).toEqual(ordered);
+  });
+
   it.each([
     ["a sparse outer batch", createSparseOuterBatch],
     ["a sparse inner hit batch", createSparseInnerBatch]

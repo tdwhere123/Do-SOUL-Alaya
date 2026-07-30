@@ -42,4 +42,30 @@ describe("LruCache", () => {
     expect(cache.get("a")).toBe("new");
     expect(cache.get("b")).toBe("2");
   });
+
+  it("set skips blocked keys and may temporarily oversize", () => {
+    const cache = new LruCache<string, string>(2);
+    cache.set("blocked", "1");
+    cache.set("free", "2");
+    cache.set("incoming", "3", {
+      blocksEviction: (key) => key === "blocked"
+    });
+
+    expect(cache.get("blocked")).toBe("1");
+    expect(cache.get("free")).toBeUndefined();
+    expect(cache.get("incoming")).toBe("3");
+    expect(cache.size).toBe(2);
+  });
+
+  it("set does not deleteOldest a sole blocked entry", () => {
+    const cache = new LruCache<string, string>(1);
+    cache.set("blocked", "1");
+    cache.set("incoming", "2", {
+      blocksEviction: (key) => key === "blocked"
+    });
+
+    expect(cache.get("blocked")).toBe("1");
+    expect(cache.get("incoming")).toBe("2");
+    expect(cache.size).toBe(2);
+  });
 });

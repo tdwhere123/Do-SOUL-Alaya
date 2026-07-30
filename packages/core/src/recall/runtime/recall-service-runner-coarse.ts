@@ -42,6 +42,11 @@ import {
   createTemporalWindowCandidateBudget,
   type TemporalWindowCandidateBudget
 } from "../coarse-filter/temporal/temporal-window-candidates.js";
+import { warmEmbeddingQuery } from "./coarse/warm-embedding-query.js";
+import {
+  freezeCoarseStageResult,
+  freezeLexicalCoarseWithWarm
+} from "./coarse/freeze-coarse-results.js";
 
 export type CoarseFilterResult = Awaited<ReturnType<typeof runCoarseFilter>>;
 export type EmbeddingCoarseInjectionResult = Awaited<ReturnType<typeof collectEmbeddingCoarseInjection>>;
@@ -77,10 +82,50 @@ export async function collectCoarseStage(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest
 ): Promise<CoarseStageResult> {
-  const recallPhaseStart = performance.now();
   const temporalCandidateBudget = createTemporalWindowCandidateBudget(
     prepared.policy.fine_assessment.budgets.max_entries
   );
+  const lexical = await collectLexicalCoarseWithWarm(
+    context,
+    params,
+    prepared,
+    temporalCandidateBudget
+  );
+  const embeddingCoarseInjection = await collectEmbeddingInjection(
+    context,
+    params,
+    prepared,
+    lexical.lexicalCoarseCandidates
+  );
+  return freezeCoarseStageResult(
+    lexical,
+    embeddingCoarseInjection,
+    performance.now(),
+    combineEmbeddingInjection
+  );
+}
+
+interface LexicalCoarseWithWarm {
+  readonly recallPhaseStart: number;
+  readonly recallAfterCoarse: number;
+  readonly recallAfterSynthesis: number;
+  readonly coarseFilter: CoarseFilterResult;
+  readonly globalCoarseFilter: Awaited<ReturnType<typeof loadGlobalRecallCandidates>>;
+  readonly globalRecallClassifications: Parameters<
+    typeof recordGlobalRecallClassificationsSafely
+  >[0]["classifications"];
+  readonly lexicalCoarseCandidates: readonly Readonly<CoarseRecallCandidate>[];
+}
+
+async function collectLexicalCoarseWithWarm(
+  context: RecallExecutionContext,
+  params: RecallExecutionParams,
+  prepared: PreparedRecallRequest,
+  temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
+): Promise<LexicalCoarseWithWarm> {
+  const recallPhaseStart = performance.now();
+  // Query embedding needs only query text — overlap with synthesis FTS, not pool merge.
+  const embeddingWarmPromise = settle(warmEmbeddingQuery(context, params, prepared));
   const globalPromise = settle(collectGlobalCoarseFilter(context, params, prepared));
   const synthesisPromise = settle(collectSynthesisStage(context, params, prepared));
   const hotCoarseFilter = await collectHotCoarseFilter(
@@ -103,22 +148,23 @@ export async function collectCoarseStage(
   const recallAfterCoarse = performance.now();
   const synthesisCoarseFilter = unwrapSettled(await synthesisPromise);
   const recallAfterSynthesis = performance.now();
-  const lexicalCoarseCandidates = mergeLexicalCoarseCandidates(coarseFilter, global.filteredCandidates, synthesisCoarseFilter);
-  const embeddingCoarseInjection = await collectEmbeddingInjection(context, params, prepared, lexicalCoarseCandidates);
-  const recallAfterEmbedding = performance.now();
-  return Object.freeze({
+  // Synthesis children belong in exclude/pool — inject only after lexical merge.
+  const lexicalCoarseCandidates = mergeLexicalCoarseCandidates(
+    coarseFilter,
+    global.filteredCandidates,
+    synthesisCoarseFilter
+  );
+  await embeddingWarmPromise;
+  return freezeLexicalCoarseWithWarm<LexicalCoarseWithWarm>({
     recallPhaseStart,
     recallAfterCoarse,
     recallAfterSynthesis,
-    recallAfterEmbedding,
-    coarseFilter: Object.freeze({ ...coarseFilter, synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks }),
-    globalCoarseFilter: global.raw,
-    globalRecallClassifications: global.classifications,
-    combinedCoarseCandidates: combineEmbeddingInjection(lexicalCoarseCandidates, embeddingCoarseInjection.candidates),
-    embeddingCoarseInjection
+    coarseFilter,
+    synthesisFtsRanks: synthesisCoarseFilter.synthesisFtsRanks,
+    global,
+    lexicalCoarseCandidates
   });
 }
-
 
 async function collectHotCoarseFilter(
   context: RecallExecutionContext,

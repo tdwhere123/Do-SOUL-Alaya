@@ -248,20 +248,20 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expectFrozenPropertyWriteThrows(created, "gist", "mutated");
   });
 
-  it("recalls an English evidence excerpt via the porter word lane", async () => {
+  it("recalls English evidence corpus via the porter word lane", async () => {
     const { repo } = await createRepo();
     await repo.create(
       createEvidenceCapsule({
         object_id: "1f5c2a90-0000-4000-8000-000000000001",
-        gist: "build gist",
-        excerpt: "The deployment pipeline rotates the staging credentials nightly."
+        gist: "The deployment pipeline rotates the staging credentials nightly.",
+        excerpt: "staging credentials rotate nightly"
       })
     );
     await repo.create(
       createEvidenceCapsule({
         object_id: "1f5c2a90-0000-4000-8000-000000000002",
-        gist: "other gist",
-        excerpt: "An unrelated note about lunch preferences."
+        gist: "An unrelated note about lunch preferences.",
+        excerpt: "lunch preferences"
       })
     );
 
@@ -312,7 +312,7 @@ describe("SqliteEvidenceCapsuleRepo", () => {
       ]));
   });
 
-  it("indexes an atomic excerpt without leaking unrelated receipt-corpus terms", async () => {
+  it("indexes gist corpus when excerpt is a narrow distilled fact", async () => {
     const { repo } = await createRepo();
     const objectId = "1f5c2a90-0000-4000-8000-000000000003";
     await repo.create(
@@ -326,23 +326,23 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await expect(repo.searchByKeyword!("workspace-1", "bookshelf IKEA", 10))
       .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ object_id: objectId })]));
     await expect(repo.searchByKeyword!("workspace-1", "weatherproof cedar", 10))
-      .resolves.not.toEqual(expect.arrayContaining([expect.objectContaining({ object_id: objectId })]));
+      .resolves.toEqual(expect.arrayContaining([expect.objectContaining({ object_id: objectId })]));
   });
 
-  it("recalls a Chinese evidence excerpt via the trigram lane (previously CJK-blind)", async () => {
+  it("recalls Chinese evidence corpus via the trigram lane (previously CJK-blind)", async () => {
     const { repo } = await createRepo();
     await repo.create(
       createEvidenceCapsule({
         object_id: "2f5c2a90-0000-4000-8000-000000000001",
-        gist: "中文摘要",
-        excerpt: "用户每天晚上轮换部署流水线的临时凭证。"
+        gist: "用户每天晚上轮换部署流水线的临时凭证。",
+        excerpt: "轮换部署流水线凭证"
       })
     );
     await repo.create(
       createEvidenceCapsule({
         object_id: "2f5c2a90-0000-4000-8000-000000000002",
-        gist: "无关摘要",
-        excerpt: "关于午餐偏好的一段无关记录。"
+        gist: "关于午餐偏好的一段无关记录。",
+        excerpt: "午餐偏好"
       })
     );
 
@@ -356,8 +356,8 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await repo.create(
       createEvidenceCapsule({
         object_id: "2f5c2a90-0000-4000-8000-000000000003",
-        gist: "短词摘要",
-        excerpt: "The release note labels the handoff keyword as 部署 before approval."
+        gist: "The release note labels the handoff keyword as 部署 before approval.",
+        excerpt: "handoff keyword 部署"
       })
     );
 
@@ -365,13 +365,13 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     expect(hits.map((hit) => hit.object_id)).toContain("2f5c2a90-0000-4000-8000-000000000003");
   });
 
-  it("recalls a mixed-script evidence excerpt by fanning out to both lanes", async () => {
+  it("recalls mixed-script evidence corpus by fanning out to both lanes", async () => {
     const { repo } = await createRepo();
     await repo.create(
       createEvidenceCapsule({
         object_id: "3f5c2a90-0000-4000-8000-000000000001",
-        gist: "mixed gist",
-        excerpt: "The 部署 pipeline rotates 凭证 every night."
+        gist: "The 部署 pipeline rotates 凭证 every night.",
+        excerpt: "pipeline rotates 凭证"
       })
     );
 
@@ -386,15 +386,15 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await repo.create(
       createEvidenceCapsule({
         object_id: "4f5c2a90-0000-4000-8000-000000000001",
-        gist: "中文摘要",
-        excerpt: "部署流水线轮换部署流水线的临时凭证，部署流水线全程自动化。"
+        gist: "部署流水线轮换部署流水线的临时凭证，部署流水线全程自动化。",
+        excerpt: "部署流水线自动化"
       })
     );
     await repo.create(
       createEvidenceCapsule({
         object_id: "4f5c2a90-0000-4000-8000-000000000002",
-        gist: "弱匹配",
-        excerpt: "这段记录只在结尾顺带提到部署流水线一次。"
+        gist: "这段记录只在结尾顺带提到部署流水线一次。",
+        excerpt: "顺带提到部署流水线"
       })
     );
     // Porter lane: a single mediocre hit. Under per-lane min-max this single
@@ -403,8 +403,8 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await repo.create(
       createEvidenceCapsule({
         object_id: "4f5c2a90-0000-4000-8000-000000000003",
-        gist: "porter weak",
-        excerpt: "A long unrelated note that mentions deployment once in passing."
+        gist: "A long unrelated note that mentions deployment once in passing.",
+        excerpt: "mentions deployment once"
       })
     );
 
@@ -439,14 +439,14 @@ describe("SqliteEvidenceCapsuleRepo", () => {
     await repo.create(
       createEvidenceCapsule({
         object_id: "0a000000-0000-4000-8000-000000000001",
-        gist: "trigram top",
+        gist: "部署流水线",
         excerpt: "部署流水线"
       })
     );
     await repo.create(
       createEvidenceCapsule({
         object_id: "f0000000-0000-4000-8000-000000000001",
-        gist: "porter top",
+        gist: "deployment pipeline",
         excerpt: "deployment pipeline"
       })
     );

@@ -19,7 +19,9 @@ const SAMPLE_STATS = {
     miss_count: 4,
     miss_ratio: 0.0952,
     p50_pointer_count: 3,
-    p50_latency_ms: 120
+    p50_latency_ms: 120,
+    p95_latency_ms: 400,
+    p99_latency_ms: 800
   },
   embedding: {
     total_queries: 3,
@@ -94,6 +96,59 @@ describe("recall-stats route", () => {
       until: null,
       excludeAgentTargets: undefined
     });
+  });
+
+  it("passes through null latency percentiles without inventing zero", async () => {
+    const emptyLatencyStats = {
+      ...SAMPLE_STATS,
+      recall: {
+        ...SAMPLE_STATS.recall,
+        total: 0,
+        unique_sessions: 0,
+        unique_runs: 0,
+        null_run: 0,
+        miss_count: 0,
+        miss_ratio: 0,
+        p50_pointer_count: 0,
+        p50_latency_ms: null,
+        p95_latency_ms: null,
+        p99_latency_ms: null
+      },
+      embedding: {
+        ...SAMPLE_STATS.embedding,
+        total_queries: 0,
+        returned_candidate_count: 0,
+        p50_latency_ms: null,
+        p95_latency_ms: null,
+        p99_latency_ms: null,
+        latency_buckets: SAMPLE_STATS.embedding.latency_buckets.map((bucket) => ({
+          ...bucket,
+          count: 0
+        }))
+      },
+      usage: {
+        ...SAMPLE_STATS.usage,
+        total: 0,
+        used: 0,
+        skipped: 0,
+        not_applicable: 0,
+        used_ratio: 0,
+        follow_through_ratio: 0
+      }
+    };
+    const getStats = vi.fn().mockResolvedValue(emptyLatencyStats);
+    const getById = vi.fn().mockResolvedValue({ workspace_id: "ws1" });
+    const app = buildApp({
+      workspaceService: { getById },
+      recallUtilizationService: { getStats }
+    });
+
+    const response = await app.request("/workspaces/ws1/recall-stats");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toEqual({ success: true, data: emptyLatencyStats });
+    expect(body.data.recall.p50_latency_ms).toBeNull();
+    expect(body.data.embedding.p99_latency_ms).toBeNull();
   });
 
   it("returns 404 when the workspace is not found", async () => {

@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import type { CoreDaemonLifecycleState, RequestProtectionConfig } from "../../app.js";
+import { closeDaemonSqliteWriteQueue } from "../../startup/database.js";
 import { closeServer, type CloseableHttpServer } from "./daemon-server-close.js";
 import {
   clearSignalShutdownTimeout,
@@ -183,6 +184,7 @@ function createShutdownHandler(
       await stopBackgroundServices(input, state);
       await closeRuntimeResources(input, state);
       try {
+        await closeDaemonSqliteWriteQueue();
         input.database.close();
       } finally {
         await input.temporalRuntimeLease?.release();

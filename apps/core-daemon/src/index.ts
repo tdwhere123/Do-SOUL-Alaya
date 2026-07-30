@@ -103,9 +103,9 @@ async function createRuntimeBootstrapContext() {
   const dbPath = await resolveDatabasePath(configPaths, join(configPaths.configDir, "alaya.db"));
   const filesDirectory = resolveCoreDaemonFilesDirectory();
   const temporalRuntimeLease = await acquireTemporalRuntimeLease(dbPath);
-  let database: ReturnType<typeof openDaemonDatabase>;
+  let database: Awaited<ReturnType<typeof openDaemonDatabase>>;
   try {
-    database = openDaemonDatabase(dbPath);
+    database = await openDaemonDatabase(dbPath);
   } catch (error) {
     await temporalRuntimeLease.release();
     throw error;

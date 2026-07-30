@@ -13,7 +13,6 @@ export interface SqliteStatement {
 export interface MemoryEmbeddingStatements {
   readonly upsertStatement: SqliteStatement;
   readonly findByObjectIdStatement: SqliteStatement;
-  readonly listByWorkspaceStatement: SqliteStatement;
   readonly findCurrentMemoryContentStatement: SqliteStatement;
   readonly listByObjectIdFilterStatement: SqliteStatement;
   readonly existsAnyByObjectIdFilterStatement: SqliteStatement;
@@ -28,13 +27,6 @@ export function prepareMemoryEmbeddingStatements(db: StorageDatabase): MemoryEmb
       WHERE object_id = ?
         AND vector_valid = 1
       LIMIT 1
-    `),
-    listByWorkspaceStatement: db.connection.prepare(`
-      SELECT${MEMORY_EMBEDDING_SELECT_COLUMNS}
-      FROM memory_embeddings
-      WHERE workspace_id = ?
-        AND vector_valid = 1
-      ORDER BY object_id ASC
     `),
     findCurrentMemoryContentStatement: db.connection.prepare(`
       SELECT content

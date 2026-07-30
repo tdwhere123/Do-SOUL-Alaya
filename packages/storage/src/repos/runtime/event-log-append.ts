@@ -16,6 +16,8 @@ export function computeNextRevision(
   return (row?.max_revision ?? -1) + 1;
 }
 
+// Sync path owns revision assignment on the caller connection; worker path
+// keeps CAS inside EVENT_LOG_APPEND_WITH_REVISION_SQL (shared column source).
 export function appendInCurrentTransaction(
   statements: Pick<EventLogMutationStatements, "appendStatement"> &
     Pick<EventLogRevisionStatements, "nextRevisionStatement">,

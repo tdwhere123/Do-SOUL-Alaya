@@ -24,6 +24,7 @@ import type {
   PreparedEmbeddingQueryHandle,
   PreparedEmbeddingQuerySnapshot
 } from "../types.js";
+import { selectTopNeighborHits } from "./neighbor-top-k.js";
 
 interface RequestScoreSnapshotDependencies {
   readonly provider: EmbeddingProviderPort;
@@ -233,10 +234,9 @@ export class RequestScoreSnapshotBuilder {
         }));
       }
     }
-    neighbors.sort(compareNeighborHits);
     return Object.freeze({
       poolScores: Object.freeze(poolScores),
-      neighbors: Object.freeze(neighbors.slice(0, params.maxNeighbors)),
+      neighbors: selectTopNeighborHits(neighbors, params.maxNeighbors),
       scoringLatencyMs: elapsedMs(this.deps.nowEpochMs(), startedAtEpochMs)
     });
   }
@@ -425,12 +425,4 @@ function buildNeighborResult(
       schema_version: provider.schemaVersion
     } : {})
   });
-}
-
-function compareNeighborHits(
-  left: Readonly<EmbeddingNeighborHit>,
-  right: Readonly<EmbeddingNeighborHit>
-): number {
-  const delta = right.normalized_similarity - left.normalized_similarity;
-  return delta !== 0 ? delta : left.object_id.localeCompare(right.object_id);
 }

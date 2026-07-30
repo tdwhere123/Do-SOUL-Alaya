@@ -3,8 +3,22 @@ import {
   resolveLocalOnnxSessionOptionsFromEnv,
   withLocalTransformersOfflineLoad,
   type LocalOnnxSessionOptions
-} from "./local-onnx-embedding-client.js";
-import { withLocalOnnxHostSingleFlight } from "./local-onnx-host-single-flight.js";
+} from "../local-onnx-embedding-client.js";
+import { withLocalOnnxHostSingleFlight } from "../local-onnx-host-single-flight.js";
+import {
+  createLocalOnnxCrossEncoderScoreCache,
+  scoreWithCache
+} from "./local-onnx-cached-score.js";
+import type { CrossEncoderScoreCache } from "./score-cache.js";
+import {
+  LocalOnnxCrossEncoderError,
+  classifyLocalOnnxCrossEncoderLoadError
+} from "./local-onnx-error.js";
+
+export {
+  LocalOnnxCrossEncoderError,
+  type LocalOnnxCrossEncoderErrorCode
+} from "./local-onnx-error.js";
 
 interface LocalOnnxCrossEncoderPair { readonly query: string; readonly passage: string }
 interface LocalOnnxCrossEncoderRuntime {
@@ -21,21 +35,6 @@ type LocalOnnxCrossEncoderLoader = (
   options: LocalOnnxCrossEncoderLoadOptions
 ) => Promise<LocalOnnxCrossEncoderRuntime>;
 
-export type LocalOnnxCrossEncoderErrorCode = "DEPENDENCY_MISSING" | "MODEL_UNAVAILABLE"
-  | "INVALID_INPUT" | "INVALID_OUTPUT" | "QUEUE_FULL" | "QUEUE_TIMEOUT"
-  | "MODEL_LOAD_TIMEOUT" | "INFERENCE_TIMEOUT";
-
-export class LocalOnnxCrossEncoderError extends Error {
-  public readonly name = "LocalOnnxCrossEncoderError";
-  public constructor(
-    public readonly code: LocalOnnxCrossEncoderErrorCode,
-    message: string,
-    public readonly modelId: string,
-    options?: ErrorOptions
-  ) {
-    super(message, options);
-  }
-}
 export interface LocalOnnxCrossEncoderClientOptions {
   readonly modelId?: string;
   readonly cacheDir?: string | null;
@@ -45,6 +44,8 @@ export interface LocalOnnxCrossEncoderClientOptions {
   readonly queueWaitTimeoutMs?: number;
   readonly modelLoadTimeoutMs?: number;
   readonly inferenceTimeoutMs?: number;
+  /** Bounded LRU of (modelId, query, passage) → score. Set 0 to disable. */
+  readonly scoreCacheSize?: number;
   readonly loader?: LocalOnnxCrossEncoderLoader;
   readonly transformersImporter?: LocalOnnxCrossEncoderTransformersImporter;
 }
@@ -77,6 +78,7 @@ export class LocalOnnxCrossEncoderClient {
   private readonly queueWaitTimeoutMs: number;
   private readonly modelLoadTimeoutMs: number;
   private readonly inferenceTimeoutMs: number;
+  private readonly scoreCache: CrossEncoderScoreCache;
   private readonly loader: LocalOnnxCrossEncoderLoader;
   private readonly queue: ScoreJob[] = [];
   private modelPromise: Promise<LocalOnnxCrossEncoderRuntime> | null = null;
@@ -117,6 +119,11 @@ export class LocalOnnxCrossEncoderClient {
       "inferenceTimeoutMs",
       options.inferenceTimeoutMs ?? DEFAULT_INFERENCE_TIMEOUT_MS
     );
+    this.scoreCache = createLocalOnnxCrossEncoderScoreCache(
+      this.modelId,
+      options.scoreCacheSize,
+      validateLimit
+    );
     const importer = options.transformersImporter ?? importTransformers;
     this.loader = options.loader ?? ((modelId, cacheDir, loadOptions) =>
       defaultLocalOnnxCrossEncoderLoader(modelId, cacheDir, loadOptions, importer));
@@ -141,7 +148,12 @@ export class LocalOnnxCrossEncoderClient {
     if (passages.length === 0) {
       return Object.freeze([]);
     }
-    return await this.enqueue(query, passages);
+    return await scoreWithCache(
+      this.scoreCache,
+      query,
+      passages,
+      (queuedQuery, queuedPassages) => this.enqueue(queuedQuery, queuedPassages)
+    );
   }
   private enqueue(query: string, passages: readonly string[]): Promise<readonly number[]> {
     if (this.terminalError !== null) {
@@ -265,7 +277,7 @@ export class LocalOnnxCrossEncoderClient {
         }
       ).catch((error: unknown) => {
         this.modelPromise = null;
-        throw classifyLoadError(error, this.modelId, this.cacheDir);
+        throw classifyLocalOnnxCrossEncoderLoadError(error, this.modelId, this.cacheDir);
       });
     }
     return this.modelPromise;
@@ -364,29 +376,6 @@ function validateScores(
       "INVALID_OUTPUT", `Local ONNX cross-encoder score ${invalidIndex} was not finite.`, modelId
     );
   }
-}
-function classifyLoadError(
-  error: unknown,
-  modelId: string,
-  cacheDir: string | null
-): LocalOnnxCrossEncoderError {
-  if (error instanceof LocalOnnxCrossEncoderError) {
-    return error;
-  }
-  if ((error as { readonly code?: string }).code === "ERR_MODULE_NOT_FOUND") {
-    return new LocalOnnxCrossEncoderError(
-      "DEPENDENCY_MISSING",
-      "@huggingface/transformers is required for the local ONNX cross-encoder.",
-      modelId,
-      { cause: error }
-    );
-  }
-  return new LocalOnnxCrossEncoderError(
-    "MODEL_UNAVAILABLE",
-    `Local ONNX cross-encoder model '${modelId}' was not available in cache '${cacheDir ?? "default"}'; remote loading is disabled.`,
-    modelId,
-    { cause: error }
-  );
 }
 type LocalOnnxTokenizer = (
   queries: readonly string[],

@@ -4,6 +4,7 @@ import {
   isGardenSourceTurnFallbackV2Receipt,
   projectGardenSourceTurnFallbackV2AssistantObservations,
   projectGardenSourceTurnFallbackV2UserContent,
+  readVerifiedUserAssertionSourceHashDigest,
   type EvidenceCapsule,
   type EvidenceSearchProjection,
   type GardenSourceTurnFallbackVerifiedReceipt
@@ -150,6 +151,11 @@ function matchesOwnerProjection(
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
+  // Assertion-family stores the distilled fact in excerpt; turn-span equality
+  // would reject the display-atomic arm after matchesReceiptSourceHash already bound it.
+  if (readVerifiedUserAssertionSourceHashDigest(capsule.source_hash) !== null) {
+    return (capsule.excerpt?.trim() ?? "").length > 0;
+  }
   if (!isGardenSourceTurnFallbackV2Receipt(receipt)) {
     return capsule.excerpt === receipt.source_corpus;
   }

@@ -32,18 +32,33 @@ try {
   const command = await server.ssrLoadModule(
     "/apps/bench-runner/src/cli/promotion/command.ts"
   );
+  const contract = await server.ssrLoadModule(
+    "/apps/bench-runner/src/longmemeval/promotion/schema/contract.ts"
+  );
+  const authorizationSchema = await server.ssrLoadModule(
+    "/apps/bench-runner/src/longmemeval/promotion/schema/authorization.ts"
+  );
+  const atomicOutput = await server.ssrLoadModule(
+    "/apps/bench-runner/src/cli/promotion/atomic-output.ts"
+  );
+  const authorization = JSON.parse(authorizationJson);
   const exitCode = await command.runAuthorizeLongMemEvalMatrixCommand([
     "--contract", join(root, "contract.json"),
     "--out", join(root, "authorization.json")
   ], {
     authorize: async () => {
       if (mode === "failure") throw new Error("fixture authorization failure");
-      return JSON.parse(authorizationJson);
+      return authorization;
     },
     resolveValidatorIdentity: async () => {
       throw new Error("subprocess fixture skips live validator resolution");
     },
     checkoutRoot: repoRoot,
+    parseContract: contract.parseLongMemEvalMatrixPromotionContract,
+    parseAuthorization: (value) => authorizationSchema.LongMemEvalMatrixPromotionAuthorizationSchema.parse(value),
+    renderAuthorization: authorizationSchema.renderLongMemEvalMatrixPromotionAuthorization,
+    renderRejection: authorizationSchema.renderLongMemEvalMatrixPromotionRejection,
+    publishAuthorization: atomicOutput.publishExclusiveAuthorization,
     stdout: (message) => process.stdout.write(message),
     stderr: (message) => process.stderr.write(message)
   });

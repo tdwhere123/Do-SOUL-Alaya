@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli } from "../../../cli/index.js";
+import { runMergeLongMemEvalCommand } from "../../../cli/merge/command/merge-command.js";
 import { loadMergeShards } from "../../../cli/merge/command/merge-command-shards.js";
 import { LongMemEvalDiagnosticsSpool } from "../../../longmemeval/diagnostics/spool.js";
 // @ts-expect-error The executable MJS verifier is intentionally outside the package declaration surface.
@@ -231,5 +232,83 @@ describe("merge-longmemeval evidence bundle", () => {
     )) as { run: { provenance_complete: boolean } };
     expect(kpi.measurement_attribution.provenance_complete).toBe(false);
     expect(manifest.run.provenance_complete).toBe(false);
+  });
+
+  it("fail-closes dataset pin/data load for mixed verified and unverified shards", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "merge-mixed-evidence-"));
+    roots.push(root);
+    const verified = path.join(root, "verified");
+    const unverified = path.join(root, "unverified");
+    await setupShard(verified, "q-verified", 0);
+    await writeShardRoot(
+      unverified,
+      withEligibleMeasurementContract(makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_1: 1,
+          r_at_5: 1,
+          r_at_10: 1,
+          per_scenario: [{ id: "q-unverified", version: 1, hit_at_5: true, tier: "warm" }]
+        }
+      })),
+      makeShardDiagnostics()
+    );
+
+    const historyRoot = path.join(root, "history");
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      await expect(runMergeLongMemEvalCommand({
+        historyRoot,
+        shards: [verified, unverified],
+        variant: "longmemeval_s",
+        dataDir: path.join(root, "missing-data"),
+        pinnedMetaRoot: path.join(root, "missing-pinned")
+      })).resolves.toBe(2);
+      expect(stderr).toHaveBeenCalledWith(expect.stringMatching(
+        /dataset not pinned: longmemeval_s/u
+      ));
+      await expect(readdir(historyRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it("fail-closes dataset pin/data load when every shard is unverified", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "merge-all-unverified-dataset-"));
+    roots.push(root);
+    const shard = path.join(root, "shard");
+    await writeShardRoot(
+      shard,
+      withEligibleMeasurementContract(makeShardKpi({
+        evaluated_count: 1,
+        kpi: {
+          ...makeShardKpi().kpi,
+          r_at_1: 1,
+          r_at_5: 1,
+          r_at_10: 1,
+          per_scenario: [{ id: "q-unverified", version: 1, hit_at_5: true, tier: "warm" }]
+        }
+      })),
+      makeShardDiagnostics()
+    );
+
+    const historyRoot = path.join(root, "history");
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      await expect(runMergeLongMemEvalCommand({
+        historyRoot,
+        shards: [shard],
+        variant: "longmemeval_s",
+        dataDir: path.join(root, "missing-data"),
+        pinnedMetaRoot: path.join(root, "missing-pinned")
+      })).resolves.toBe(2);
+      expect(stderr).toHaveBeenCalledWith(expect.stringMatching(
+        /dataset not pinned: longmemeval_s/u
+      ));
+      await expect(readdir(historyRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

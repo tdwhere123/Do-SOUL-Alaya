@@ -70,9 +70,9 @@ soul:mcp-types.ts#SoulListPendingEdgeProposalsRequestSchema(edge_type,limit,min_
 soul:mcp-types.ts#SoulListPendingEdgeProposalsResponseSchema(proposals,total_count)#1934e5d
 soul:mcp-types.ts#SoulListPendingProposalsRequestSchema(limit,since)#4da2b41
 soul:mcp-types.ts#SoulListPendingProposalsResponseSchema(proposals,total_count)#842166a
-soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#dd992a3|enum=cold_cascade_engaged|recall_explainability_partial|warm_cascade_engaged
+soul:mcp-types.ts#SoulMemorySearchDegradationReasonSchema()#a36fda8|enum=cold_cascade_engaged|no_stored_vectors|provider_failed|provider_missing|provider_unavailable|recall_explainability_partial|warm_cascade_engaged
 soul:mcp-types.ts#SoulMemorySearchRequestSchema(active_constraints_cap,dimension,domain_tags,host_context,max_results,query,recent_turn,scope_class,since,source_observed_at,time_field,until)#c5070a3
-soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,degradation_reason,delivery_id,protocol_version,results,strategy_mix,total_count)#df6fc29
+soul:mcp-types.ts#SoulMemorySearchResponseSchema(active_constraints,active_constraints_count,degradation_reason,delivery_id,protocol_version,results,strategy_mix,total_count)#aae5d68
 soul:mcp-types.ts#SoulOpenPointerContentSchema(content,domain_tags,evidence_refs,excerpt,gist,object_id,object_kind,schema_version)#e9b7fcd
 soul:mcp-types.ts#SoulOpenPointerRequestSchema(object_id)#a7a3c8a
 soul:mcp-types.ts#SoulOpenPointerResponseSchema(content,object_id,object_kind)#4d23f8a

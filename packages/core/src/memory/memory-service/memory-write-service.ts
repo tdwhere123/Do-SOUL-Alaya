@@ -11,6 +11,7 @@ import {
 import { CoreError } from "../../shared/errors.js";
 import { scheduleAuditedAsyncSideEffect } from "../../runtime/async-side-effect-auditor.js";
 import { parseNonEmptyString, parseObjectId } from "../../shared/validators.js";
+import { appendMemoryEventLogSynchronously } from "./memory-audit-append.js";
 import type {
   MemoryEntryInput,
   MemoryEntryRepoUpdateFields,
@@ -25,7 +26,6 @@ import type {
   MemoryEntryWritePort
 } from "./types.js";
 import {
-  isPromiseLike,
   parseMemoryEntry,
   parseReason,
   parseStorageTier,
@@ -207,14 +207,11 @@ export class MemoryWriteService {
   private appendCreatedEventSynchronously(
     eventInput: Omit<EventLogEntry, "event_id" | "created_at" | "revision">
   ): EventLogEntry {
-    const event = this.dependencies.eventLogRepo.append(eventInput);
-    if (isPromiseLike(event)) {
-      throw new CoreError(
-        "CONFLICT",
-        "Memory create transaction requires a synchronous EventLog append port."
-      );
-    }
-    return event;
+    return appendMemoryEventLogSynchronously(
+      this.dependencies.eventLogRepo,
+      eventInput,
+      "Memory create transaction requires a synchronous EventLog append port."
+    );
   }
 
   public async update(

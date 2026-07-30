@@ -5,6 +5,7 @@ import {
   PathActivationCandidateProducer,
   RelationAssertionService,
   ResolutionService,
+  appendEventLogSynchronously,
   type GlobalMemoryRecallSubscription,
   type ManifestationResolverEventLogWriterPort,
   type PathActivationCandidateProducerPathReaderPort
@@ -346,7 +347,7 @@ export function createAtomicManifestationEventLogWriter(
 ): ManifestationResolverEventLogWriterPort {
   return {
     appendAtomically: (entries) => eventLogRepo.transactional(() =>
-      entries.map((entry) => eventLogRepo.append(entry))
+      entries.map((entry) => appendEventLogSynchronously(eventLogRepo, entry))
     )
   };
 }

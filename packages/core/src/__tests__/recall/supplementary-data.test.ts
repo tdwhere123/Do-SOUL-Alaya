@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BankruptcyKind,
   EvidenceCapsuleSchema, VERIFIED_USER_ASSERTION_SOURCE_HASH_PREFIX,
+  RuntimeMode,
   buildVerifiedUserAssertionReceiptPreimage, formatVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
@@ -403,6 +405,77 @@ describe("collectSupplementaryData", () => {
       })
     );
   });
+
+  it("invokes independent supplement ports in parallel without changing freeze shape", async () => {
+    const candidate = createMemoryEntry({
+      object_id: "memory-a",
+      evidence_refs: ["evidence-1"]
+    });
+    const started: string[] = [];
+    const release = new Map<string, () => void>();
+    const gate = (name: string) => new Promise<void>((resolve) => {
+      started.push(name);
+      release.set(name, resolve);
+    });
+    const countInboundRecallMetricsByMemoryId = vi.fn(async () => {
+      await gate("graph");
+      return new Map([["memory-a", { weightedEdgeCount: 1, recallCount: 2 }]]);
+    });
+    const getSnapshot = vi.fn(async () => {
+      await gate("budget");
+      return {
+        snapshot_at: "2026-03-23T00:00:00.000Z",
+        run_id: "run-1",
+        current_mode: RuntimeMode.LEAN,
+        bankruptcy_kind: BankruptcyKind.NONE,
+        pressure_ratio: 0,
+        trigger_summary: "ok",
+        active_dossier: null,
+        pending_proposal: null
+      };
+    });
+    const getStrengthByMemoryId = vi.fn(async () => {
+      await gate("plasticity");
+      return new Map([["memory-a", 0.5]]);
+    });
+    const findByIds = vi.fn(async () => {
+      await gate("evidence");
+      return [];
+    });
+
+    const pending = collectWith({
+      candidates: [candidate],
+      graphSupportPort: {
+        countInboundSupports: vi.fn(async () => 0),
+        countInboundEdgesWeighted: vi.fn(async () => 0),
+        countInboundRecalls: vi.fn(async () => 0),
+        countInboundRecallMetricsByMemoryId
+      },
+      budgetPenaltyPort: { getSnapshot },
+      pathPlasticityPort: { getStrengthByMemoryId },
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds
+      },
+      runId: "run-1",
+      coarseEvidenceFtsRanks: { "memory-a": 1 },
+      coarseEvidenceFtsRanksPerRef: { "evidence-1": 1 }
+    });
+
+    await vi.waitFor(() => expect(started.sort()).toEqual(
+      ["budget", "evidence", "graph", "plasticity"].sort()
+    ));
+    for (const unlock of release.values()) unlock();
+    const result = await pending;
+
+    expect(countInboundRecallMetricsByMemoryId).toHaveBeenCalledTimes(1);
+    expect(getSnapshot).toHaveBeenCalledTimes(1);
+    expect(getStrengthByMemoryId).toHaveBeenCalledTimes(1);
+    expect(findByIds).toHaveBeenCalledTimes(1);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(result.graphSupportCounts).toEqual({ "memory-a": 1 });
+    expect(result.plasticityFactors).toEqual({ "memory-a": 0.5 });
+  });
 });
 
 async function collectWith(params: {
@@ -410,6 +483,9 @@ async function collectWith(params: {
   readonly graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]>;
   readonly warn?: RecallServiceDependencies["warn"];
   readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
+  readonly budgetPenaltyPort?: RecallServiceDependencies["budgetPenaltyPort"];
+  readonly pathPlasticityPort?: RecallServiceDependencies["pathPlasticityPort"];
+  readonly runId?: string | null;
   readonly captureAnswerFeatures?: boolean;
   readonly coarseEvidenceFtsRanks?: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
@@ -420,12 +496,18 @@ async function collectWith(params: {
     dependencies: {
       ...dependencies,
       graphSupportPort: params.graphSupportPort,
-      evidenceSearchPort: params.evidenceSearchPort
+      evidenceSearchPort: params.evidenceSearchPort,
+      ...(params.budgetPenaltyPort === undefined
+        ? {}
+        : { budgetPenaltyPort: params.budgetPenaltyPort }),
+      ...(params.pathPlasticityPort === undefined
+        ? {}
+        : { pathPlasticityPort: params.pathPlasticityPort })
     },
     warn: params.warn ?? (() => undefined),
     candidates: params.candidates,
     workspaceId: "workspace-1",
-    runId: null,
+    runId: params.runId ?? null,
     queryText: null,
     queryProbes: compileRecallQueryProbes(null),
     policy: service.buildDefaultPolicy("chat", createTaskSurface().runtime_id),

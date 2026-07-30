@@ -4,12 +4,15 @@ import {
   type EventLogEntry,
   type WorkspaceRunEvent
 } from "@do-soul/alaya-protocol";
+import { isPromiseLike } from "../shared/promise-utils.js";
 import { reportAsyncSideEffectFailure, scheduleAuditedAsyncSideEffect } from "./async-side-effect-auditor.js";
 
 export type EventPublisherInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface EventPublisherEventLogRepoPort {
-  append(event: EventPublisherInput): EventLogEntry;
+  // Standalone appends may be async when the storage write queue is installed;
+  // appends inside transactional() must stay synchronous.
+  append(event: EventPublisherInput): EventLogEntry | Promise<EventLogEntry>;
   deleteById(eventId: string): void;
   /**
    * Wrap `fn` in a single SQLite transaction. `fn` must be synchronous; an
@@ -139,13 +142,13 @@ export class EventPublisher {
       assertSynchronousMutationResult(produced);
       const collected: EventLogEntry[] = [];
       for (const input of produced.events) {
-        collected.push(repo.append(input));
+        collected.push(appendEventLogSynchronously(repo, input));
       }
       if (produced.apply) {
         const postApplyEvents = produced.apply();
         if (postApplyEvents !== undefined && postApplyEvents.length > 0) {
           for (const input of postApplyEvents) {
-            collected.push(repo.append(input));
+            collected.push(appendEventLogSynchronously(repo, input));
           }
         }
       }
@@ -176,7 +179,7 @@ export class EventPublisher {
     const { entries, result } = repo.transactional(() => {
       const decision = decide();
       assertSynchronousMutationResult(decision);
-      const entries = decision.eventInputs.map((input) => repo.append(input));
+      const entries = decision.eventInputs.map((input) => appendEventLogSynchronously(repo, input));
       const result = decision.apply(entries);
       assertSynchronousMutationResult(result);
       return { entries, result };
@@ -239,7 +242,7 @@ export class EventPublisher {
   private async appendToEventLog(
     eventInput: EventPublisherInput
   ): Promise<EventLogEntry> {
-    return this.dependencies.eventLogRepo.append(eventInput);
+    return await this.dependencies.eventLogRepo.append(eventInput);
   }
 
   private appendManyInTransaction<T>(
@@ -262,7 +265,7 @@ export class EventPublisher {
     }>(() => {
       const collected: EventLogEntry[] = [];
       for (const input of eventInputs) {
-        collected.push(repo.append(input));
+        collected.push(appendEventLogSynchronously(repo, input));
       }
       const result = mutate(collected);
       assertSynchronousMutationResult(result);
@@ -325,4 +328,29 @@ function assertSynchronousMutationResult(result: unknown): void {
         "Move any awaitable work outside of appendManyWithMutation."
     );
   }
+}
+
+/**
+ * Unwraps `append()` when the caller is inside `transactional()` (or any other
+ * sync-required seam). Standalone appends may return a Promise via the write
+ * queue; treating that as sync would break EventLog-first CAS atomicity.
+ */
+export class EventLogSyncAppendRequiredError extends Error {
+  public constructor() {
+    super(
+      "EventLog append inside a transaction must be synchronous so EventLog-first CAS stays one SQLite txn."
+    );
+    this.name = "EventLogSyncAppendRequiredError";
+  }
+}
+
+export function appendEventLogSynchronously(
+  repo: Pick<EventPublisherEventLogRepoPort, "append">,
+  input: EventPublisherInput
+): EventLogEntry {
+  const entry = repo.append(input);
+  if (isPromiseLike(entry)) {
+    throw new EventLogSyncAppendRequiredError();
+  }
+  return entry;
 }

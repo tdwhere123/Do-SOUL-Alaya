@@ -69,14 +69,51 @@ export async function collectSupplementaryData(
   params: CollectSupplementaryDataParams
 ): Promise<RecallSupplementaryData> {
   const candidates = params.candidates;
-  const graphMetrics = await collectGraphMetrics(params);
-  const graphSupportCounts = graphMetrics.graphSupportCounts;
-  const recallEdgeCounts = graphMetrics.recallEdgeCounts;
-  const budgetPenaltyFactor = await collectBudgetPenaltyFactor(params);
-  const plasticityFactors = await collectPlasticityFactors(params);
-  const coldMetrics = computeColdGraphPathMetrics(params, graphSupportCounts, recallEdgeCounts, plasticityFactors);
-  const evidenceAndGovernance = await collectEvidenceAndGovernanceData(params, candidates);
+  // graphMetrics is independent of budget+plasticity; evidence needs candidates only.
+  const [graphMetrics, budgetPenaltyFactor, plasticityFactors, evidenceAndGovernance] =
+    await Promise.all([
+      collectGraphMetrics(params),
+      collectBudgetPenaltyFactor(params),
+      collectPlasticityFactors(params),
+      collectEvidenceAndGovernanceData(params, candidates)
+    ]);
+  const coldMetrics = computeColdGraphPathMetrics(
+    params,
+    graphMetrics.graphSupportCounts,
+    graphMetrics.recallEdgeCounts,
+    plasticityFactors
+  );
+  return freezeSupplementaryData(
+    params,
+    candidates,
+    graphMetrics.graphSupportCounts,
+    budgetPenaltyFactor,
+    plasticityFactors,
+    coldMetrics,
+    evidenceAndGovernance
+  );
+}
 
+function freezeSupplementaryData(
+  params: CollectSupplementaryDataParams,
+  candidates: readonly Readonly<MemoryEntry>[],
+  graphSupportCounts: Readonly<Record<string, number>>,
+  budgetPenaltyFactor: number,
+  plasticityFactors: Readonly<Record<string, number>>,
+  coldMetrics: Readonly<{
+    readonly graphAndPathColdScore: number;
+    readonly recallsEdgeCount: number;
+    readonly weightTransferAmount: number;
+  }>,
+  evidenceAndGovernance: Readonly<{
+    readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+    readonly verifiedUserAssertionContextsByMemoryId: Readonly<
+      Record<string, Readonly<RecallVerifiedUserAssertionContext>>
+    >;
+    readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
+    readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
+  }>
+): RecallSupplementaryData {
   return Object.freeze({
     queryProbes: params.queryProbes,
     ftsRanks: params.coarseFtsRanks,

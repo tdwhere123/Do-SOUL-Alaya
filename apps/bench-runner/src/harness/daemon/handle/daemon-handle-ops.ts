@@ -171,7 +171,7 @@ function createBenchRecallOperation(
     const recallResult = validateBenchRecallDiagnostics(rawRecallResult, input.effectiveEnv);
     const results = collectBenchRecallResults(recallResult, policy, opts.maxResults);
     const delivery = await recordBenchRecallDelivery(input, results, recallResult);
-    emitBenchContextLensAssembledEvent(input.dataDir, {
+    await emitBenchContextLensAssembledEvent(input.dataDir, {
       taskSurfaceRef: taskSurface.runtime_id,
       lensEntryCount: results.length,
       totalTokenEstimate: results.reduce(

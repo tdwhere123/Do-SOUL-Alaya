@@ -62,6 +62,8 @@ export interface EmbeddingWorkspaceScanOptions {
   // whose backing memory_entry sits in one of the listed tiers.
   readonly tierFilter?: readonly ("hot" | "warm" | "cold")[];
   // Hard cap on the number of records returned. Applied after tier filtering.
+  // Unfiltered scans (no tier/provider/model/schema filter) require a positive
+  // limit; unbounded default blob hydration is rejected by the storage repo.
   readonly limit?: number;
   // invariant: cosine space is valid only within one (provider_kind, model_id);
   // SQL-side restriction prevents the scan cap from being consumed by vectors

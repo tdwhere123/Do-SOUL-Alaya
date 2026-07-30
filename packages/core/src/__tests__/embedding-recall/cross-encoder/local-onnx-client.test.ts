@@ -7,12 +7,12 @@ import {
   LocalOnnxCrossEncoderError,
   type LocalOnnxCrossEncoderClientOptions,
   type LocalOnnxCrossEncoderTransformersModule
-} from "../../embedding-recall/local-onnx-cross-encoder-client.js";
+} from "../../../embedding-recall/cross-encoder/local-onnx-client.js";
 import {
   LocalOnnxEmbeddingClient,
   defaultLocalOnnxCacheDir,
   type LocalOnnxEmbeddingTransformersModule
-} from "../../embedding-recall/local-onnx-embedding-client.js";
+} from "../../../embedding-recall/local-onnx-embedding-client.js";
 
 type LocalOnnxCrossEncoderLoader = NonNullable<LocalOnnxCrossEncoderClientOptions["loader"]>;
 type LocalOnnxCrossEncoderRuntime = Awaited<ReturnType<LocalOnnxCrossEncoderLoader>>;
@@ -101,6 +101,53 @@ describe("LocalOnnxCrossEncoderClient", () => {
     await second;
 
     expect(maxActive).toBe(1);
+  });
+
+  it("caches scores by modelId/query/passage and returns identical values on hit", async () => {
+    const { loader, infer } = loaderFor(async (pairs) =>
+      pairs.map(({ passage }) => Number(passage))
+    );
+    const client = new LocalOnnxCrossEncoderClient({
+      loader,
+      modelId: "test-ce",
+      scoreCacheSize: 256
+    });
+
+    const first = await client.score("q", ["1", "2"]);
+    const second = await client.score("q", ["2", "1"]);
+
+    expect(infer).toHaveBeenCalledTimes(1);
+    expect(second[0]).toBe(first[1]);
+    expect(second[1]).toBe(first[0]);
+    expect(first[0]).toBeCloseTo(1 / (1 + Math.exp(-1)), 12);
+    expect(first[1]).toBeCloseTo(1 / (1 + Math.exp(-2)), 12);
+  });
+
+  it("infers only cache misses and preserves passage order", async () => {
+    const { loader, infer } = loaderFor(async (pairs) =>
+      pairs.map(({ passage }) => Number(passage))
+    );
+    const client = new LocalOnnxCrossEncoderClient({
+      loader,
+      scoreCacheSize: 256
+    });
+
+    await client.score("q", ["1"]);
+    expect(infer).toHaveBeenCalledTimes(1);
+    const scores = await client.score("q", ["1", "3"]);
+    expect(infer).toHaveBeenCalledTimes(2);
+    const missBatch = infer.mock.calls[1]?.[0] ?? [];
+    expect(missBatch.map((pair) => pair.passage)).toEqual(["3"]);
+    expect(scores[0]).toBeCloseTo(1 / (1 + Math.exp(-1)), 12);
+    expect(scores[1]).toBeCloseTo(1 / (1 + Math.exp(-3)), 12);
+  });
+
+  it("disables the score cache when scoreCacheSize is 0", async () => {
+    const { loader, infer } = loaderFor(async (pairs) => pairs.map(() => 0.5));
+    const client = new LocalOnnxCrossEncoderClient({ loader, scoreCacheSize: 0 });
+    await client.score("q", ["p"]);
+    await client.score("q", ["p"]);
+    expect(infer).toHaveBeenCalledTimes(2);
   });
 
   it("bounds the waiting queue and times out queued callers", async () => {

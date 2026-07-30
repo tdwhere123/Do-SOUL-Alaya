@@ -43,14 +43,18 @@ export interface RecallUtilizationStats {
     readonly miss_count: number;
     readonly miss_ratio: number;
     readonly p50_pointer_count: number;
-    readonly p50_latency_ms: number;
+    /** Null when the window has no recall deliveries (not a zero-latency claim). */
+    readonly p50_latency_ms: number | null;
+    readonly p95_latency_ms: number | null;
+    readonly p99_latency_ms: number | null;
   }>;
   readonly embedding: Readonly<{
     readonly total_queries: number;
     readonly returned_candidate_count: number;
-    readonly p50_latency_ms: number;
-    readonly p95_latency_ms: number;
-    readonly p99_latency_ms: number;
+    /** Null when the window has no embedding supplement queries. */
+    readonly p50_latency_ms: number | null;
+    readonly p95_latency_ms: number | null;
+    readonly p99_latency_ms: number | null;
     readonly latency_buckets: readonly RecallLatencyBucket[];
   }>;
   readonly usage: Readonly<{
@@ -195,8 +199,10 @@ function buildRecallStats(
     null_run: runIds.filter((id) => id === null).length,
     miss_count: missCount,
     miss_ratio: total === 0 ? 0 : missCount / total,
-    p50_pointer_count: percentile50(pointerCounts),
-    p50_latency_ms: percentile50(latencies)
+    p50_pointer_count: percentile50(pointerCounts) ?? 0,
+    p50_latency_ms: percentile50(latencies),
+    p95_latency_ms: percentileNearestRank(latencies, 95),
+    p99_latency_ms: percentileNearestRank(latencies, 99)
   };
 }
 
@@ -285,18 +291,18 @@ function invalidRecallUtilizationPayload(row: EventLogEntry, cause: unknown): Co
   );
 }
 
-function percentile50(values: readonly number[]): number {
+function percentile50(values: readonly number[]): number | null {
   if (values.length === 0) {
-    return 0;
+    return null;
   }
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
-function percentileNearestRank(values: readonly number[], percentile: number): number {
+function percentileNearestRank(values: readonly number[], percentile: number): number | null {
   if (values.length === 0) {
-    return 0;
+    return null;
   }
   const sorted = [...values].sort((a, b) => a - b);
   const index = Math.min(

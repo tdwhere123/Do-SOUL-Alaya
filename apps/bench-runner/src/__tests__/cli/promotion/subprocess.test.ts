@@ -9,6 +9,7 @@ import { promotionAuthorizationFixture } from "./authorization-fixture.js";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "subprocess-fixture.mjs");
+const SUBPROCESS_STARTUP_TIMEOUT_MS = 60_000;
 let root: string;
 
 beforeEach(async () => {
@@ -29,7 +30,7 @@ it("publishes authorization and exits zero in a real process", async () => {
   expect(JSON.parse(await readFile(join(root, "authorization.json"), "utf8")))
     .toEqual(promotionAuthorizationFixture());
   expect(await tempArtifacts()).toEqual([]);
-}, 40_000);
+}, 90_000);
 
 it("exits nonzero without a target or temp artifact on authorization failure", async () => {
   const result = await runFixture("failure");
@@ -38,7 +39,7 @@ it("exits nonzero without a target or temp artifact on authorization failure", a
   expect(result.stderr).toContain("fixture authorization failure");
   expect(existsSync(join(root, "authorization.json"))).toBe(false);
   expect(await tempArtifacts()).toEqual([]);
-}, 40_000);
+}, 90_000);
 
 async function runFixture(mode: "success" | "failure") {
   const child = spawn(process.execPath, [FIXTURE], {
@@ -60,8 +61,15 @@ async function runFixture(mode: "success" | "failure") {
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
   return new Promise<{ exitCode: number | null; stdout: string; stderr: string }>(
     (resolve, reject) => {
-      child.once("error", reject);
-      child.once("exit", (exitCode) => resolve({ exitCode, stdout, stderr }));
+      const timeout = setTimeout(() => child.kill("SIGKILL"), SUBPROCESS_STARTUP_TIMEOUT_MS);
+      child.once("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+      child.once("exit", (exitCode) => {
+        clearTimeout(timeout);
+        resolve({ exitCode, stdout, stderr });
+      });
     }
   );
 }

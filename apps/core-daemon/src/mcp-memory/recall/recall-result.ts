@@ -4,8 +4,17 @@ import type {
   RecallCandidate,
   RecallPolicy,
   RecallScoreFactors,
+  SoulMemorySearchDegradationReason,
   SoulRecallStrategyMix
 } from "@do-soul/alaya-protocol";
+import { mapEmbeddingProviderDiagnosticToMcpReason } from "@do-soul/alaya-core";
+
+/** Diagnostics slice needed for honest MCP strategy_mix / degradation_reason. */
+export type RecallMcpHonestyDiagnostics = Readonly<{
+  readonly embedding_supplement_status?: string;
+  readonly embedding_provider_status?: string;
+  readonly provider_degradation_reason?: string | null;
+}>;
 
 export function buildMemorySearchResult(
   candidate: Readonly<RecallCandidate>,
@@ -40,16 +49,14 @@ export function buildMemorySearchResult(
 
 export function buildRecallStrategyMix(
   policy: RecallPolicy,
-  results: readonly Readonly<MemorySearchResult>[]
+  results: readonly Readonly<MemorySearchResult>[],
+  diagnostics?: RecallMcpHonestyDiagnostics | null
 ): SoulRecallStrategyMix {
   return {
     deterministic_match: true,
     precomputed_rank: policy.coarse_filter.precomputed_rank.max_candidates > 0,
-    semantic_supplement: results.some(
-      (result) =>
-        result.source_channels.includes("semantic_supplement") ||
-        result.score_factors.embedding_similarity !== undefined
-    ),
+    // Only when the embedding supplement path was actually requested.
+    semantic_supplement: diagnostics?.embedding_supplement_status === "requested",
     graph_support: results.some(
       (result) =>
         result.source_channels.includes("graph_support") ||
@@ -62,6 +69,67 @@ export function buildRecallStrategyMix(
     ),
     global_recall: results.some((result) => result.source_channels.includes("global"))
   };
+}
+
+export function resolveMcpDegradationReason(
+  recallResult: Readonly<{
+    readonly degradation_reason?: SoulMemorySearchDegradationReason | null;
+    readonly diagnostics?: RecallMcpHonestyDiagnostics | null;
+  }>,
+  explainabilityPartial: boolean
+): SoulMemorySearchDegradationReason | null {
+  if (recallResult.degradation_reason !== undefined && recallResult.degradation_reason !== null) {
+    return recallResult.degradation_reason;
+  }
+  const embeddingReason = mapEmbeddingDegradationReason(recallResult.diagnostics);
+  if (embeddingReason !== null) {
+    return embeddingReason;
+  }
+  return explainabilityPartial ? "recall_explainability_partial" : null;
+}
+
+function mapEmbeddingDegradationReason(
+  diagnostics: RecallMcpHonestyDiagnostics | null | undefined
+): SoulMemorySearchDegradationReason | null {
+  if (diagnostics === undefined || diagnostics === null) {
+    return null;
+  }
+  if (diagnostics.embedding_supplement_status === "provider_missing") {
+    return "provider_missing";
+  }
+  const mappedProviderReason = mapProviderDegradationReason(
+    diagnostics.provider_degradation_reason
+  );
+  // Intentional embedding-off: do not invent unavailable from warmup/pending.
+  if (diagnostics.embedding_supplement_status === "disabled") {
+    return isHardEmbeddingFailureReason(mappedProviderReason) ? mappedProviderReason : null;
+  }
+  if (mappedProviderReason !== null) {
+    return mappedProviderReason;
+  }
+  if (diagnostics.embedding_provider_status === "provider_failed") {
+    return "provider_failed";
+  }
+  if (diagnostics.embedding_provider_status === "provider_pending") {
+    return "provider_unavailable";
+  }
+  return null;
+}
+
+function mapProviderDegradationReason(
+  reason: string | null | undefined
+): SoulMemorySearchDegradationReason | null {
+  return mapEmbeddingProviderDiagnosticToMcpReason(reason);
+}
+
+function isHardEmbeddingFailureReason(
+  reason: SoulMemorySearchDegradationReason | null
+): reason is SoulMemorySearchDegradationReason {
+  return (
+    reason === "provider_failed" ||
+    reason === "provider_missing" ||
+    reason === "no_stored_vectors"
+  );
 }
 
 function buildSelectionReason(candidate: Readonly<RecallCandidate>): string {

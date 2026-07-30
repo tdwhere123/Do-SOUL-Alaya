@@ -3,10 +3,16 @@ import {
   MemoryDimension,
   MemorySearchResultSchema,
   ScopeClass,
+  SoulMemorySearchResponseSchema,
+  type MemorySearchResult,
   type RecallCandidate,
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
-import { buildMemorySearchResult } from "../../../mcp-memory/recall/recall-result.js";
+import {
+  buildMemorySearchResult,
+  buildRecallStrategyMix,
+  resolveMcpDegradationReason
+} from "../../../mcp-memory/recall/recall-result.js";
 
 const GOLDEN_MCP_RECALL_RESULT = Object.freeze({
   object_id: "memory-1",
@@ -97,8 +103,210 @@ describe("buildMemorySearchResult", () => {
   });
 });
 
+describe("buildRecallStrategyMix", () => {
+  it("keeps semantic_supplement false when embedding is disabled even if scores look semantic", () => {
+    const results: MemorySearchResult[] = [
+      {
+        object_id: "memory-1",
+        object_kind: "memory_entry",
+        relevance_score: 0.9,
+        content_preview: "semantic-looking hit",
+        evidence_pointers: ["memory-1"],
+        selection_reason: "Selected by workspace recall.",
+        source_channels: ["ranked_recall", "workspace_local", "semantic_supplement"],
+        score_factors: {
+          activation: 0.5,
+          relevance: 0.9,
+          embedding_similarity: 0.88
+        },
+        budget_state: {
+          token_estimate: 4,
+          max_entries: 10,
+          max_total_tokens: 100,
+          remaining_entries: 9,
+          remaining_tokens: 96,
+          within_budget: true
+        }
+      }
+    ];
+
+    const mix = buildRecallStrategyMix(createPolicy(), results, {
+      embedding_supplement_status: "disabled"
+    });
+
+    expect(mix.semantic_supplement).toBe(false);
+  });
+
+  it("sets semantic_supplement true only when embedding_supplement_status is requested", () => {
+    const mix = buildRecallStrategyMix(createPolicy(), [], {
+      embedding_supplement_status: "requested"
+    });
+    expect(mix.semantic_supplement).toBe(true);
+
+    expect(
+      buildRecallStrategyMix(createPolicy(), [], {
+        embedding_supplement_status: "provider_missing"
+      }).semantic_supplement
+    ).toBe(false);
+  });
+});
+
+describe("resolveMcpDegradationReason", () => {
+  it("maps provider_missing and no_stored_vectors to non-null MCP degradation_reason", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "provider_missing"
+          }
+        },
+        false
+      )
+    ).toBe("provider_missing");
+
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "not_attempted",
+            provider_degradation_reason: "no_stored_vectors"
+          }
+        },
+        false
+      )
+    ).toBe("no_stored_vectors");
+  });
+
+  it("maps provider unavailable/failed diagnostics without leaving null", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "requested",
+            provider_degradation_reason: "provider_unavailable"
+          }
+        },
+        false
+      )
+    ).toBe("provider_unavailable");
+
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "requested",
+            embedding_provider_status: "provider_failed"
+          }
+        },
+        false
+      )
+    ).toBe("provider_failed");
+  });
+
+  it("does not invent degradation when embedding was intentionally disabled", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "disabled",
+            embedding_provider_status: "provider_not_requested",
+            provider_degradation_reason: null
+          }
+        },
+        false
+      )
+    ).toBeNull();
+  });
+
+  it("does not invent provider_unavailable from provider_warmup_pending when embedding is disabled", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "disabled",
+            provider_degradation_reason: "provider_warmup_pending"
+          }
+        },
+        false
+      )
+    ).toBeNull();
+  });
+
+  it("still surfaces hard embedding failures when supplement status is disabled", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "disabled",
+            provider_degradation_reason: "query_embedding_failed"
+          }
+        },
+        false
+      )
+    ).toBe("provider_failed");
+  });
+
+  it("does not invent MCP degradation_reason for unknown provider_degradation_reason strings", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          diagnostics: {
+            embedding_supplement_status: "requested",
+            provider_degradation_reason: "totally_unknown_diagnostic"
+          }
+        },
+        false
+      )
+    ).toBeNull();
+  });
+
+  it("preserves cascade degradation_reason over embedding mapping", () => {
+    expect(
+      resolveMcpDegradationReason(
+        {
+          degradation_reason: "cold_cascade_engaged",
+          diagnostics: {
+            embedding_supplement_status: "provider_missing"
+          }
+        },
+        false
+      )
+    ).toBe("cold_cascade_engaged");
+  });
+
+  it("emits schema-valid SoulMemorySearchResponse degradation_reason values", () => {
+    for (const reason of [
+      "provider_missing",
+      "provider_unavailable",
+      "provider_failed",
+      "no_stored_vectors"
+    ] as const) {
+      const parsed = SoulMemorySearchResponseSchema.parse({
+        delivery_id: "delivery-1",
+        results: [],
+        total_count: 0,
+        strategy_mix: {
+          deterministic_match: true,
+          precomputed_rank: true,
+          semantic_supplement: false,
+          graph_support: false,
+          path_plasticity: false,
+          global_recall: false
+        },
+        degradation_reason: reason
+      });
+      expect(parsed.degradation_reason).toBe(reason);
+    }
+  });
+});
+
 function createPolicy(): RecallPolicy {
   return {
+    coarse_filter: {
+      precomputed_rank: {
+        max_candidates: 10
+      }
+    },
     fine_assessment: {
       conflict_awareness: false,
       budgets: {

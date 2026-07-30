@@ -3,7 +3,13 @@ import type { EventLogEntry } from "@do-soul/alaya-protocol";
 export type EventLogAppendInput = Omit<EventLogEntry, "event_id" | "created_at" | "revision">;
 
 export interface EventLogRepo {
-  append(event: EventLogAppendInput): EventLogEntry;
+  /**
+   * Standalone appends may return a Promise when the worker write queue is
+   * installed (payload SQL off the main connection). Appends inside
+   * `transactional()` / an open transaction stay synchronous on the caller
+   * connection so EventLog-first multi-table CAS remains one SQLite txn.
+   */
+  append(event: EventLogAppendInput): EventLogEntry | Promise<EventLogEntry>;
   deleteById(eventId: string): void;
   transactional<T>(fn: () => T): T;
   queryByEntityPage?(

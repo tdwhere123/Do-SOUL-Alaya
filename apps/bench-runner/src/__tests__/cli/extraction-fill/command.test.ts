@@ -126,6 +126,50 @@ it("loads the R3 approval file before handing the fill to the runtime gate", asy
   expect(run).toHaveBeenCalledWith(expect.objectContaining({ r3SpendApproval: approval }));
 });
 
+it("fail-closes when an R3 spend path is set but the reader dep is missing", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => completedFillResult());
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_oracle",
+    extractionAuthority: "/fixture/extraction-authority.json",
+    r3SpendApproval: "/fixture/r3-spend-approval.json"
+  } as ParsedFlags, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(2);
+  expect(run).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(
+    expect.stringMatching(/R3 spend approval reader is unavailable/u)
+  );
+});
+
+it("fail-closes when a promotion contract is set but the expansion verifier dep is missing", async () => {
+  const signalSource = new FakeSignalSource();
+  const run = vi.fn(async () => completedFillResult());
+  const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const command = runExtractionFillCommand as unknown as (
+    opts: ParsedFlags,
+    dependencies: { readonly runExtractionFill: typeof run; readonly signalSource: FakeSignalSource }
+  ) => Promise<number>;
+
+  const exitCode = await command({
+    variant: "longmemeval_oracle",
+    extractionAuthority: "/fixture/extraction-authority.json",
+    promotionContract: "/fixture/promotion-contract.json"
+  } as ParsedFlags, { runExtractionFill: run, signalSource });
+
+  expect(exitCode).toBe(2);
+  expect(run).not.toHaveBeenCalled();
+  expect(stderr).toHaveBeenCalledWith(
+    expect.stringMatching(/expansion contract verifier is unavailable/u)
+  );
+});
+
 it("passes an explicit extraction initial concurrency to the fill runtime", async () => {
   const signalSource = new FakeSignalSource();
   const run = vi.fn(async () => completedFillResult());

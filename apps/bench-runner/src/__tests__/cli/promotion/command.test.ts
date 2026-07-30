@@ -14,6 +14,14 @@ import {
   LongMemEvalMatrixPromotionRejectionSchema
 } from
   "../../../longmemeval/promotion/schema/authorization.js";
+import {
+  parseLongMemEvalMatrixPromotionContract
+} from "../../../longmemeval/promotion/schema/contract.js";
+import {
+  renderLongMemEvalMatrixPromotionAuthorization,
+  renderLongMemEvalMatrixPromotionRejection
+} from "../../../longmemeval/promotion/schema/authorization.js";
+import { publishExclusiveAuthorization } from "../../../cli/promotion/atomic-output.js";
 import { promotionAuthorizationFixture } from "./authorization-fixture.js";
 import { expansionPromotionContractFixture } from
   "../../longmemeval/expansion/expansion-promotion-contract-fixture.js";
@@ -168,6 +176,11 @@ function captureIo(
       throw new Error("fixture skips live validator resolution");
     }),
     checkoutRoot: "/repo",
+    parseContract: parseLongMemEvalMatrixPromotionContract,
+    parseAuthorization: (value) => LongMemEvalMatrixPromotionAuthorizationSchema.parse(value),
+    renderAuthorization: renderLongMemEvalMatrixPromotionAuthorization,
+    renderRejection: renderLongMemEvalMatrixPromotionRejection,
+    publishAuthorization: publishExclusiveAuthorization,
     stdout,
     stderr
   };

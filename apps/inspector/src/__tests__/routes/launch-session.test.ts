@@ -39,6 +39,49 @@ describe("inspector launch session", () => {
     expect(first.status).toBe(200);
     await expectStatus(app, { code: "single-use" }, 401);
   });
+
+  it("rate-limits consecutive invalid redeems and resets on success", async () => {
+    let now = 1_000;
+    const store = createInspectorLaunchSessionStore(() => now);
+    const app = new Hono();
+    registerInspectorLaunchSessionRoutes(app, store, {
+      maxConsecutiveFailures: 3,
+      windowMs: 60_000,
+      nowMs: () => now
+    });
+
+    await expectStatus(app, { code: "bad-1" }, 401);
+    await expectStatus(app, { code: "bad-2" }, 401);
+    const limited = await redeem(app, { code: "bad-3" });
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: "rate_limited" });
+    await expectStatus(app, { code: "bad-4" }, 429);
+
+    now = 61_001;
+    store.register("good-code", "secret-token");
+    const success = await redeem(app, { code: "good-code" });
+    expect(success.status).toBe(200);
+    expect(await success.json()).toEqual({ token: "secret-token" });
+
+    await expectStatus(app, { code: "bad-after-reset" }, 401);
+  });
+
+  it("keys failure limits by client identity", async () => {
+    const store = createInspectorLaunchSessionStore();
+    const app = new Hono();
+    let clientKey = "client-a";
+    registerInspectorLaunchSessionRoutes(app, store, {
+      maxConsecutiveFailures: 2,
+      windowMs: 60_000,
+      resolveClientKey: () => clientKey
+    });
+
+    await expectStatus(app, { code: "bad-a1" }, 401);
+    await expectStatus(app, { code: "bad-a2" }, 429);
+
+    clientKey = "client-b";
+    await expectStatus(app, { code: "bad-b1" }, 401);
+  });
 });
 
 function createApp(code: string, token: string): Hono {
@@ -50,10 +93,14 @@ function createApp(code: string, token: string): Hono {
 }
 
 async function expectStatus(app: Hono, body: unknown, status: number): Promise<void> {
-  const response = await app.request("/api/launch-session", {
+  const response = await redeem(app, body);
+  expect(response.status).toBe(status);
+}
+
+async function redeem(app: Hono, body: unknown): Promise<Response> {
+  return await app.request("/api/launch-session", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
-  expect(response.status).toBe(status);
 }

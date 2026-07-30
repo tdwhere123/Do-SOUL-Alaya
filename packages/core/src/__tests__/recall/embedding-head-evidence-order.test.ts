@@ -1,10 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   compareEmbeddingEvidenceStrength,
+  evictionSetMemoKey,
   hasRankedEmbeddingHead,
   selectEmbeddingHeadEvictions
 } from "../../recall/delivery/admission/embedding-head-dominance.js";
 import { buildEmptyRecallFusionBreakdown } from "../../recall/delivery/fusion-delivery-scoring.js";
+
+describe("embedding-head eviction memo key", () => {
+  it("joins sorted keys without JSON.stringify and ignores Set insertion order", () => {
+    const left = new Set(["z", "a", "m"]);
+    const right = new Set(["m", "z", "a"]);
+    expect(evictionSetMemoKey(left)).toBe(evictionSetMemoKey(right));
+    expect(evictionSetMemoKey(left)).toBe(["a", "m", "z"].join("\0"));
+    expect(evictionSetMemoKey(new Set())).toBe("");
+  });
+
+  it("reuses selectDelivered for identical eviction membership", () => {
+    const selectDelivered = vi.fn((evictions: ReadonlySet<string>) => {
+      const kept = ["a", "b"].filter((key) => !evictions.has(key));
+      const delivered = kept.map((key) => candidate(key, 3));
+      if (delivered.length < 2) delivered.push(candidate("head", 1));
+      return delivered;
+    });
+    const candidates = [candidate("a", 3), candidate("b", 4), candidate("head", 1)];
+    selectEmbeddingHeadEvictions({
+      candidates,
+      maxEntries: 2,
+      embeddingScores: { a: 0.2, b: 0.1, head: 0.9 },
+      selectDelivered
+    });
+    const keys = selectDelivered.mock.calls.map(([evictions]) => evictionSetMemoKey(evictions));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+});
 
 describe("embedding-head evidence order", () => {
   it("reports semantic equality for equal positive scores and ranks", () => {

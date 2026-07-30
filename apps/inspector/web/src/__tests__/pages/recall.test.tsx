@@ -31,7 +31,9 @@ const SAMPLE_STATS = {
     miss_count: 4,
     miss_ratio: 0.0952,
     p50_pointer_count: 3,
-    p50_latency_ms: 120
+    p50_latency_ms: 120,
+    p95_latency_ms: 400,
+    p99_latency_ms: 800
   },
   embedding: {
     total_queries: 3,
@@ -97,8 +99,54 @@ describe("RecallPage", () => {
     expect(screen.getByTestId("recall-kpi-used").textContent).toContain("60.0%");
     expect(screen.getByTestId("recall-kpi-follow").textContent).toContain("71.4%");
     expect(screen.getByText("embedding queries").parentElement?.textContent).toContain("3");
+    expect(screen.getByText("p50 latency").parentElement?.textContent).toContain(
+      "p50 120 / p95 400 / p99 800 ms"
+    );
     expect(screen.getByText("embedding latency").parentElement?.textContent).toContain(
       "p50 280 / p95 900 / p99 1250 ms"
+    );
+  });
+
+  it("renders n/a for empty-window latency percentiles", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async (input: FetchInput) => {
+      const url = urlOf(input);
+      if (url.includes("/recall-stats/ws1")) {
+        return jsonResponse({
+          success: true,
+          data: {
+            ...SAMPLE_STATS,
+            recall: {
+              ...SAMPLE_STATS.recall,
+              total: 0,
+              p50_latency_ms: null,
+              p95_latency_ms: null,
+              p99_latency_ms: null
+            },
+            embedding: {
+              ...SAMPLE_STATS.embedding,
+              total_queries: 0,
+              returned_candidate_count: 0,
+              p50_latency_ms: null,
+              p95_latency_ms: null,
+              p99_latency_ms: null,
+              latency_buckets: SAMPLE_STATS.embedding.latency_buckets.map((bucket) => ({
+                ...bucket,
+                count: 0
+              }))
+            }
+          }
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    renderRecall();
+    expect(await screen.findByTestId("recall-kpi-total")).toBeTruthy();
+    expect(screen.getByText("p50 latency").parentElement?.textContent).toContain(
+      "p50 n/a / p95 n/a / p99 n/a ms"
+    );
+    expect(screen.getByText("embedding latency").parentElement?.textContent).toContain(
+      "p50 n/a / p95 n/a / p99 n/a ms"
     );
   });
 

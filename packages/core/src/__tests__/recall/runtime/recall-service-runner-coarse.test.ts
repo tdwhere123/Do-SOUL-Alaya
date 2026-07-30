@@ -168,8 +168,116 @@ describe("collectCoarseStage logical-object waist", () => {
     await pending;
     expect(producerMocks.expandTierCascade).toHaveBeenCalledOnce();
   });
+
+  it("warms query embedding while synthesis is still pending", async () => {
+    const memory = createMemoryEntry();
+    const synthesisChild = candidate(memory, {
+      originPlane: "workspace_local",
+      sourceChannels: ["synthesis_child"],
+      admissionPlanes: ["synthesis_child"]
+    });
+    let releaseSynthesis!: (value: Readonly<{
+      candidates: readonly Readonly<CoarseRecallCandidate>[];
+      synthesisFtsRanks: Readonly<Record<string, number>>;
+    }>) => void;
+    let resolveWarm!: () => void;
+    const warmStarted = new Promise<void>((resolve) => {
+      resolveWarm = resolve;
+    });
+    const prepareQueryEmbedding = vi.fn(() => {
+      resolveWarm();
+      return {
+        queryId: "warm-query",
+        cacheHit: false,
+        getSnapshot: () => ({ status: "ready" as const, embedding: new Float32Array([1]) }),
+        waitForSnapshot: vi.fn(async () => ({ status: "ready" as const, embedding: new Float32Array([1]) }))
+      };
+    });
+    const setup = createEmbeddingWarmSetup(memory, prepareQueryEmbedding);
+    producerMocks.runCoarseFilter.mockResolvedValue(coarseResult());
+    producerMocks.expandTierCascade.mockResolvedValue(coarseResult());
+    producerMocks.loadGlobalRecallCandidates.mockResolvedValue(Object.freeze({
+      total_scanned: 0,
+      candidates: Object.freeze([]),
+      records: Object.freeze([])
+    }));
+    producerMocks.collectSynthesisCoarseCandidates.mockImplementation(
+      () => new Promise((resolve) => {
+        releaseSynthesis = resolve;
+      })
+    );
+    producerMocks.collectEmbeddingCoarseInjection.mockResolvedValue(Object.freeze({
+      candidates: Object.freeze([]),
+      similarityScores: Object.freeze({}),
+      embeddingInferenceCalls: 0,
+      embeddingProviderStatus: null,
+      providerDegradationReason: null,
+      workspaceScan: null
+    }));
+
+    const pending = collectCoarseStage(setup.context, setup.params, setup.prepared);
+    await warmStarted;
+    expect(prepareQueryEmbedding).toHaveBeenCalledOnce();
+    expect(producerMocks.collectEmbeddingCoarseInjection).not.toHaveBeenCalled();
+
+    releaseSynthesis(Object.freeze({
+      candidates: Object.freeze([synthesisChild]),
+      synthesisFtsRanks: Object.freeze({ [memory.object_id]: 0.9 })
+    }));
+    await pending;
+
+    expect(producerMocks.collectEmbeddingCoarseInjection).toHaveBeenCalledOnce();
+    const poolCandidates = producerMocks.collectEmbeddingCoarseInjection.mock.calls[0]?.[0]
+      ?.poolCandidates as readonly Readonly<CoarseRecallCandidate>[];
+    expect(poolCandidates?.some((row) => row.sourceChannels?.includes("synthesis_child"))).toBe(true);
+  });
 });
 
+function createEmbeddingWarmSetup(
+  memory: Readonly<MemoryEntry>,
+  prepareQueryEmbedding: ReturnType<typeof vi.fn>
+): Readonly<{
+  context: RecallExecutionContext;
+  params: RecallExecutionParams;
+  prepared: PreparedRecallRequest;
+}> {
+  const setup = createStageSetup(memory);
+  const policy = setup.prepared.policy;
+  const embeddingPolicy = Object.freeze({
+    ...policy,
+    coarse_filter: Object.freeze({
+      ...policy.coarse_filter,
+      semantic_supplement: Object.freeze({
+        ...policy.coarse_filter.semantic_supplement,
+        embedding_enabled: true,
+        max_supplement: 5
+      })
+    })
+  });
+  return Object.freeze({
+    context: Object.freeze({
+      ...setup.context,
+      dependencies: {
+        ...setup.context.dependencies,
+        embeddingRecallService: {
+          prepareQueryEmbedding,
+          prepareRecallEmbeddingSnapshot: vi.fn(async () => {
+            throw new Error("snapshot must not run in coarse warm ordering test");
+          }),
+          materializeEmbeddingSupplementFromSnapshot: vi.fn(async () => {
+            throw new Error("materialize must not run in coarse warm ordering test");
+          })
+        }
+      },
+      buildDefaultPolicy: () => embeddingPolicy
+    }),
+    params: setup.params,
+    prepared: Object.freeze({
+      ...setup.prepared,
+      policy: embeddingPolicy
+    })
+  });
+}
 function createCandidateFixture() {
   const localEntry = createMemoryEntry({
     object_id: "shared-logical-object",

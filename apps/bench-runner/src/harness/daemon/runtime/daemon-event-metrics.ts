@@ -53,7 +53,7 @@ export async function readMaterializedObjects(
 // the production assembler writes, so the event is schema-faithful.
 // initDatabase caches the connection by path
 // (the same handle the daemon holds); the connection is NOT closed here.
-export function emitBenchContextLensAssembledEvent(
+export async function emitBenchContextLensAssembledEvent(
   dataDir: string,
   input: {
     readonly taskSurfaceRef: string;
@@ -62,11 +62,11 @@ export function emitBenchContextLensAssembledEvent(
     readonly runId: string;
     readonly workspaceId: string;
   }
-): void {
+): Promise<void> {
   const db = initDatabase({ filename: join(dataDir, "alaya.db") });
   const eventLogRepo = new SqliteEventLogRepo(db);
   const lensRuntimeId = `bench_lens_${randomUUID().replace(/-/gu, "")}`;
-  eventLogRepo.append({
+  await eventLogRepo.append({
     event_type: RecallContextEventType.SOUL_CONTEXT_LENS_ASSEMBLED,
     entity_type: "context_lens",
     entity_id: lensRuntimeId,

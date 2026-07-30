@@ -1,5 +1,8 @@
 import { access, constants as fsConstants, stat } from "node:fs/promises";
-import type { WorkspaceBootstrapReconcileResult } from "@do-soul/alaya-core";
+import {
+  localOnnxHostSingleFlightEnabled,
+  type WorkspaceBootstrapReconcileResult
+} from "@do-soul/alaya-core";
 import type { GardenCredentialProvenance } from "../../services/config/config-service.js";
 import type { GraphHealthWarning } from "../../services/status/graph-health-service.js";
 import type { AlayaCliArgsSchema } from "../bridge.js";
@@ -319,10 +322,25 @@ function writeRecallGraphSummary(stream: NodeJS.WritableStream, report: DoctorRe
     stream.write(
       `embedding mode: ${report.provider.embedding.effective_mode} (provider_configured=${report.provider.embedding.provider_configured ? "yes" : "no"})\n`
     );
+    writeLocalOnnxHostSingleFlightHint(stream);
   }
   if (report.bootstrap_reconcile !== undefined) {
     stream.write(`${formatBootstrapReconcileSummary(report.bootstrap_reconcile)}\n`);
   }
+}
+
+function writeLocalOnnxHostSingleFlightHint(stream: NodeJS.WritableStream): void {
+  const provider = process.env.ALAYA_EMBEDDING_PROVIDER?.trim().toLowerCase();
+  if (provider !== undefined && provider !== "" && provider !== "local_onnx") {
+    return;
+  }
+  if (localOnnxHostSingleFlightEnabled()) {
+    stream.write("local ONNX host single-flight: enabled\n");
+    return;
+  }
+  stream.write(
+    "local ONNX host single-flight: off (set ALAYA_LOCAL_ONNX_HOST_SINGLE_FLIGHT=1 when multiple local ONNX processes share a host)\n"
+  );
 }
 
 function writeDoctorProfileSummary(stream: NodeJS.WritableStream, report: DoctorReport): void {

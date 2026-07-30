@@ -36,6 +36,8 @@ import {
   readNumericMessageId,
   serializeWorkerError
 } from "../recall-read-worker/protocol-validation.js";
+import { enqueueRecallReadRequest } from "../recall-read-worker/request-queue.js";
+import { attachRecallReadRequestListener } from "../recall-read-worker/unexpected-queue-failure.js";
 
 if (parentPort === null) {
   throw new Error("recall read worker requires a parent port");
@@ -64,12 +66,7 @@ type WorkerKeywordSearchQuery = Readonly<{
   readonly limit: number;
 }>;
 
-let requestQueue: Promise<void> = Promise.resolve();
-
-parentPort.on("message", (message: unknown) => {
-  // Keep the chain alive if a handler rejects outside its own catch.
-  requestQueue = requestQueue.then(() => handleRequest(message)).catch(() => undefined);
-});
+attachRecallReadRequestListener(parentPort, handleRequest, enqueueRecallReadRequest);
 
 async function handleRequest(message: unknown): Promise<void> {
   if (!isRecallReadWorkerRequest(message)) {

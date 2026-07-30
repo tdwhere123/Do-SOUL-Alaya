@@ -1,6 +1,7 @@
 import { resolveEmbeddingWorkspaceScanCap } from "./constants.js";
 import { clamp01, cosineSimilarity, emptyWorkspaceNeighborResult, toErrorMessage } from "./helpers.js";
 import type { QueryEmbeddingEngine } from "./query-embedding-engine.js";
+import { selectTopNeighborHits } from "./scoring/neighbor-top-k.js";
 import { resolveEmbeddingRecallTiers } from "./tier-config.js";
 import type {
   EmbeddingNeighborHit,
@@ -176,33 +177,30 @@ export class WorkspaceNeighborScanner {
     params: WorkspaceNeighborParams
   ): readonly Readonly<EmbeddingNeighborHit>[] {
     const excluded = new Set(params.excludeObjectIds);
-    return storedVectors
-      .filter(
-        (record) =>
-          !excluded.has(record.object_id) &&
-          record.provider_kind === this.deps.provider.providerKind &&
-          record.model_id === this.deps.provider.modelId &&
-          record.schema_version === this.deps.provider.schemaVersion &&
-          record.dimensions === queryEmbedding.length
-      )
-      .flatMap((record) => {
-        const normalizedSimilarity = clamp01(cosineSimilarity(queryEmbedding, record.embedding));
-        if (normalizedSimilarity <= 0) {
-          return [];
-        }
-        return [
-          Object.freeze({
-            object_id: record.object_id,
-            normalized_similarity: normalizedSimilarity,
-            content_hash: record.content_hash
-          })
-        ];
-      })
-      .sort((left, right) => {
-        const delta = right.normalized_similarity - left.normalized_similarity;
-        return delta !== 0 ? delta : left.object_id.localeCompare(right.object_id);
-      })
-      .slice(0, params.maxNeighbors);
+    const hits: EmbeddingNeighborHit[] = [];
+    for (const record of storedVectors) {
+      if (
+        excluded.has(record.object_id) ||
+        record.provider_kind !== this.deps.provider.providerKind ||
+        record.model_id !== this.deps.provider.modelId ||
+        record.schema_version !== this.deps.provider.schemaVersion ||
+        record.dimensions !== queryEmbedding.length
+      ) {
+        continue;
+      }
+      const normalizedSimilarity = clamp01(cosineSimilarity(queryEmbedding, record.embedding));
+      if (normalizedSimilarity <= 0) {
+        continue;
+      }
+      hits.push(
+        Object.freeze({
+          object_id: record.object_id,
+          normalized_similarity: normalizedSimilarity,
+          content_hash: record.content_hash
+        })
+      );
+    }
+    return selectTopNeighborHits(hits, params.maxNeighbors);
   }
 
   private workspaceNeighborResult(

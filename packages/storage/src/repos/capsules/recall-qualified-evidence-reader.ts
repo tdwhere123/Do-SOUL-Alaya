@@ -3,10 +3,12 @@ import {
   CandidateMemorySignalSchema,
   SignalEventType,
   SoulSignalMaterializedPayloadSchema,
+  buildVerifiedUserAssertionReceiptPreimage,
   formatGardenSourceTurnFallbackSourceHash,
   formatGardenSourceTurnFallbackV2SourceHash,
   isGardenSourceTurnFallbackV2Receipt,
   readGardenSourceTurnFallbackArtifactSignalId,
+  readVerifiedUserAssertionSourceHashDigest,
   verifyGardenSourceTurnFallbackReceipt,
   type CandidateMemorySignal,
   type EvidenceCapsule,
@@ -242,7 +244,15 @@ function readEvidenceCandidate(row: EvidenceCapsuleRow): EvidenceCandidate | nul
     return signalId !== null && matchesEvidenceEnvelope(capsule)
       ? { capsule, signalId }
       : null;
-  } catch {
+  } catch (error) {
+    process.emitWarning("evidence candidate parse failed; skipping row", {
+      code: "ALAYA_EVIDENCE_CANDIDATE_PARSE_FAILED",
+      detail: JSON.stringify({
+        layer: "storage",
+        object_id: row.object_id,
+        error: error instanceof Error ? error.message : "unknown"
+      })
+    });
     return null;
   }
 }
@@ -347,10 +357,27 @@ function matchesReceipt(
     matchesReceiptSourceHash(capsule, receipt);
 }
 
+// Assertion-family source_hash qualifies recall and verified-assertion context;
+// turn-fallback qualifies recall only — one column, two additive families.
 function matchesReceiptSourceHash(
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
+  const assertionDigest = readVerifiedUserAssertionSourceHashDigest(capsule.source_hash);
+  if (assertionDigest !== null) {
+    const assertion = capsule.excerpt?.trim() ?? "";
+    if (assertion.length === 0) return false;
+    const expectedDigest = createHash("sha256")
+      .update(buildVerifiedUserAssertionReceiptPreimage({
+        workspace_id: receipt.workspace_id,
+        run_id: receipt.run_id,
+        surface_id: receipt.surface_id,
+        source_assertion: assertion,
+        source_corpus: receipt.source_corpus
+      }), "utf8")
+      .digest("hex");
+    return assertionDigest === expectedDigest;
+  }
   const expected = isGardenSourceTurnFallbackV2Receipt(receipt)
     ? formatGardenSourceTurnFallbackV2SourceHash(receipt.digest)
     : formatGardenSourceTurnFallbackSourceHash(receipt.digest);
