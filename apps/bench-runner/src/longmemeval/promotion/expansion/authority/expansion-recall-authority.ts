@@ -90,9 +90,29 @@ function assertExperimentRecallInvocation(
       (options.simulateReport ?? "none") !== "none") {
     throw new Error("local experiment differs from the exact A/B contract");
   }
-  assertFullRecallWindow(options);
+  assertExperimentRecallWindow(options, input.bundle.sidecar.questions.length);
   const cell = recallCell(env);
   assertRecallEnvironment(env, input.recallWeightOverrides, cell);
+}
+
+function assertExperimentRecallWindow(
+  options: RecallEvalOptions,
+  questionCount: number
+): void {
+  if (options.limit === undefined) {
+    if (options.offset !== undefined) {
+      throw new Error("local experiment offset requires a limit");
+    }
+    return;
+  }
+  const offset = options.offset ?? 0;
+  if (!Number.isSafeInteger(offset) || offset < 0 ||
+      !Number.isSafeInteger(options.limit) || options.limit < 1) {
+    throw new Error("local experiment recall window must be positive and nonnegative");
+  }
+  if (offset + options.limit > questionCount) {
+    throw new Error("local experiment recall window exceeds the snapshot");
+  }
 }
 
 async function verifyExpansionSnapshotAuthority(

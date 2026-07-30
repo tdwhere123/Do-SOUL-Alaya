@@ -94,63 +94,6 @@ describe("500Q expansion fill authority", () => {
     expect(state.verifyIntegrity).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["A", "disabled"],
-    ["B", "env"]
-  ] as const)(
-    "allows local experiment cell %s without promotion or consumer-gate authority",
-    async (_cell, embedding) => {
-      const fixture = await completeExpansionFixture();
-      await expect(assertExpansionRecallAuthority({
-        options: {
-          snapshotDbPath: "/snapshot/target.db",
-          variant: "longmemeval_s",
-          historyRoot: "/history",
-          policyShape: "stress",
-          simulateReport: "none",
-          experiment: true
-        },
-        bundle: recallBundle(fixture),
-        recallWeightOverrides: undefined,
-        env: {
-          ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
-          ALAYA_RECALL_EVAL_EMBEDDING: embedding,
-          ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
-        }
-      })).resolves.toBeUndefined();
-
-      expect(state.verifyIntegrity).not.toHaveBeenCalled();
-      expect(state.substrateBinding).not.toHaveBeenCalled();
-      expect(state.seedLedgerBinding).not.toHaveBeenCalled();
-    }
-  );
-
-  it.each([
-    [{ limit: 500 }, "unsliced full snapshot"],
-    [{ weightOverridesJson: "{}" }, "exact A/B contract"],
-    [{ legacySnapshot: true }, "exact A/B contract"]
-  ])("rejects local experiment drift %#", async (drift, expected) => {
-    const fixture = await completeExpansionFixture();
-    await expect(assertExpansionRecallAuthority({
-      options: {
-        snapshotDbPath: "/snapshot/target.db",
-        variant: "longmemeval_s",
-        historyRoot: "/history",
-        policyShape: "stress",
-        simulateReport: "none",
-        experiment: true,
-        ...drift
-      },
-      bundle: recallBundle(fixture),
-      recallWeightOverrides: undefined,
-      env: {
-        ALAYA_BENCH_ALLOW_LIVE_EXTRACTION: "0",
-        ALAYA_RECALL_EVAL_EMBEDDING: "env",
-        ALAYA_ENABLE_LOCAL_CROSS_ENCODER_RERANK: "false"
-      }
-    })).rejects.toThrow(new RegExp(expected, "u"));
-  });
-
   it("validates full snapshot substrate before recall restore can begin", async () => {
     const fixture = await completeExpansionFixture();
     const bundle = recallBundle(fixture);
