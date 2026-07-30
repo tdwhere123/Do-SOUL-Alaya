@@ -19,7 +19,9 @@ import {
 import {
   RecallFloodEdgeTraceV1Schema,
   RecallH1FuelCoverageSchemaShape,
-  RecallH1MaxProductSchema
+  RecallH1MaxProductSchema,
+  RecallH1OverlaySchema,
+  validateRecallH1FloodOverlayRelationship
 } from "./h1/recall-h1-diagnostics-schema.js";
 export {
   BenchAnswerRerankFailureClassSchema,
@@ -103,9 +105,11 @@ const RecallIntegratedFloodCandidateDiagnosticsSchema = z
     edge_traces: z.array(RecallFloodEdgeTraceV1Schema).max(16).readonly().optional(),
     edge_trace_truncated_count: z.number().int().nonnegative().optional(),
     score_mode: z.literal("rrf_seeded_h1_max_product").optional(),
-    h1_max_product: RecallH1MaxProductSchema.optional()
+    h1_max_product: RecallH1MaxProductSchema.optional(),
+    h1_overlay: RecallH1OverlaySchema.optional()
   })
   .strict()
+  .superRefine(validateRecallH1FloodOverlayRelationship)
   .readonly();
 
 const RecallFloodFuelCoverageSummarySchema = z

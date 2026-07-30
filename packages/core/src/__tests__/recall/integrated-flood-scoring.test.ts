@@ -392,6 +392,7 @@ describe("computeIntegratedFloodScore", () => {
       h1_transferable_count: 0,
       h1_edge_winner_count: 0,
       h1_direct_winner_count: 0,
+      h1_overlay_applied_count: 0,
       h1_evaluated_edge_count: 0,
       h1_seed_overlap_edge_count: 0,
       h1_transferred_edge_count: 0,

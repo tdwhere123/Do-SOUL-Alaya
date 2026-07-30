@@ -412,7 +412,7 @@ function recordCandidateAxes(
   state.axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
   state.raByKey.set(candidate.candidateKey, Object.freeze({
     object: candidate.object,
-    path: quantize(h1Transfer?.pathContribution ?? transfer.value),
+    path: quantize(transfer.value),
     evidence: candidate.evidence,
     temporal: candidate.temporal, control: candidate.control
   }));

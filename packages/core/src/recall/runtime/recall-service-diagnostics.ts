@@ -161,6 +161,16 @@ export interface IntegratedFloodCandidateDiagnostics {
     readonly frontier_admitted: boolean;
     readonly transition_counts: Readonly<RecallFloodH1TransitionCounts>;
   }>;
+  readonly h1_overlay?: Readonly<{
+    readonly schema_version: 1;
+    readonly baseline_score: number;
+    readonly edge_score: number;
+    readonly final_score: number;
+    readonly delta: number;
+    readonly applied: boolean;
+    readonly winner: "baseline" | "edge";
+    readonly winning_edge_trace: Readonly<RecallFloodEdgeTraceV1> | null;
+  }>;
 }
 
 export interface FloodFuelCoverageSummary {
@@ -174,6 +184,7 @@ export interface FloodFuelCoverageSummary {
   readonly h1_transferable_count?: number;
   readonly h1_edge_winner_count?: number;
   readonly h1_direct_winner_count?: number;
+  readonly h1_overlay_applied_count?: number;
   readonly h1_evaluated_edge_count?: number;
   readonly h1_seed_overlap_edge_count?: number;
   readonly h1_transferred_edge_count?: number;

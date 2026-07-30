@@ -279,34 +279,64 @@ function scoreH1MaxProductCandidate(
     memorySupplementEligible: isWorkspaceMemoryCandidate(params.candidate),
     axisInputs: {
       R_obj: ra?.object ?? 0,
-      A_path: 0,
-      B_evidence: 0
+      A_path: ra?.path ?? 0,
+      B_evidence: ra?.evidence ?? 0
     },
     supplementaryData: params.supplementaryData
   });
+  const overlayApplied =
+    h1.winner !== null && h1.strongestTransfer > baseline.score;
+  const score = overlayApplied ? h1.strongestTransfer : baseline.score;
+  const h1Diagnostics = buildH1ScoringDiagnostics({
+    h1,
+    directPotential: ra?.object ?? 0,
+    baselineScore: baseline.score,
+    score,
+    overlayApplied,
+    frontierAdmitted:
+      params.candidate.firstAdmissionPlane === "graph_expansion"
+  });
   return Object.freeze({
-    score: h1.potential,
+    score,
     diagnostics: Object.freeze({
       ...baseline.diagnostics,
-      A_path: h1.strongestTransfer,
-      path_status: h1.strongestTransfer > 0
-        ? "active"
-        : baseline.diagnostics.path_status,
-      final_score: h1.potential,
+      final_score: score,
       edge_traces: h1.traces,
       edge_trace_truncated_count: h1.truncatedCount,
       score_mode: "rrf_seeded_h1_max_product",
-      h1_max_product: Object.freeze({
-        schema_version: 1,
-        seed_basis: "rrf_family_base",
-        direct_potential: ra?.object ?? 0,
-        strongest_transfer: h1.strongestTransfer,
-        winner: h1.winner === null ? "direct" : "edge",
-        winning_edge_trace: h1.winner,
-        frontier_admitted:
-          params.candidate.firstAdmissionPlane === "graph_expansion",
-        transition_counts: h1.transitionCounts
-      })
+      ...h1Diagnostics
+    })
+  });
+}
+
+function buildH1ScoringDiagnostics(params: Readonly<{
+  readonly h1: Readonly<H1MaxProductTransferResult>;
+  readonly directPotential: number;
+  readonly baselineScore: number;
+  readonly score: number;
+  readonly overlayApplied: boolean;
+  readonly frontierAdmitted: boolean;
+}>) {
+  return Object.freeze({
+    h1_max_product: Object.freeze({
+      schema_version: 1 as const,
+      seed_basis: "rrf_family_base" as const,
+      direct_potential: params.directPotential,
+      strongest_transfer: params.h1.strongestTransfer,
+      winner: params.h1.winner === null ? "direct" as const : "edge" as const,
+      winning_edge_trace: params.h1.winner,
+      frontier_admitted: params.frontierAdmitted,
+      transition_counts: params.h1.transitionCounts
+    }),
+    h1_overlay: Object.freeze({
+      schema_version: 1 as const,
+      baseline_score: params.baselineScore,
+      edge_score: params.h1.strongestTransfer,
+      final_score: params.score,
+      delta: params.score - params.baselineScore,
+      applied: params.overlayApplied,
+      winner: params.overlayApplied ? "edge" as const : "baseline" as const,
+      winning_edge_trace: params.overlayApplied ? params.h1.winner : null
     })
   });
 }

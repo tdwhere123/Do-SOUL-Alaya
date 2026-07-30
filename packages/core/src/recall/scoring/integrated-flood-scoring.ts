@@ -277,6 +277,7 @@ function buildH1CoverageSummary(
   FloodFuelCoverageSummary,
   "h1_candidate_count" | "h1_transferable_count" |
   "h1_edge_winner_count" | "h1_direct_winner_count" |
+  "h1_overlay_applied_count" |
   "h1_evaluated_edge_count" | "h1_seed_overlap_edge_count" |
   "h1_transferred_edge_count" | "h1_rejected_edge_count" |
   "h1_newly_admitted_frontier_target_count" | "h1_reason_counts"
@@ -297,6 +298,9 @@ function buildH1CoverageSummary(
     ).length,
     h1_edge_winner_count: edgeWinners,
     h1_direct_winner_count: h1Rows.length - edgeWinners,
+    h1_overlay_applied_count: diagnostics.filter(
+      (row) => row.h1_overlay?.applied === true
+    ).length,
     h1_evaluated_edge_count: sumTransitions(h1Rows, "evaluated_edge_count"),
     h1_seed_overlap_edge_count: sumTransitions(h1Rows, "seed_overlap_edge_count"),
     h1_transferred_edge_count: sumTransitions(h1Rows, "transferred_edge_count"),

@@ -23,7 +23,9 @@ import {
 import {
   RecallFloodEdgeTraceV1Schema as DiagnosticFloodEdgeTraceV1Schema,
   RecallH1FuelCoverageSchemaShape as DiagnosticH1FuelCoverageSchemaShape,
-  RecallH1MaxProductSchema as DiagnosticH1MaxProductSchema
+  RecallH1MaxProductSchema as DiagnosticH1MaxProductSchema,
+  RecallH1OverlaySchema as DiagnosticH1OverlaySchema,
+  validateRecallH1FloodOverlayRelationship
 } from "../../../harness/recall/h1/recall-h1-diagnostics-schema.js";
 export { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
 
@@ -77,9 +79,11 @@ export const DiagnosticFloodPotentialSchema = z
     edge_traces: z.array(DiagnosticFloodEdgeTraceV1Schema).max(16).readonly().optional(),
     edge_trace_truncated_count: z.number().int().nonnegative().optional(),
     score_mode: z.literal("rrf_seeded_h1_max_product").optional(),
-    h1_max_product: DiagnosticH1MaxProductSchema.optional()
+    h1_max_product: DiagnosticH1MaxProductSchema.optional(),
+    h1_overlay: DiagnosticH1OverlaySchema.optional()
   })
   .strict()
+  .superRefine(validateRecallH1FloodOverlayRelationship)
   .readonly();
 
 const DiagnosticFloodFuelCoverageSchema = z

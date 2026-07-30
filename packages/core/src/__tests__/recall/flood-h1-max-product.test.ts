@@ -191,6 +191,74 @@ describe("H=1 max-product flood transfer", () => {
     });
   });
 
+  it("preserves the integrated H0 baseline for a direct winner", () => {
+    const { seedBase, targetBase, scenario } = createBaselineIdentityHarness();
+    expect(seedBase).toBeGreaterThan(targetBase * 2.5);
+    const directWinner = scenario("path-direct-winner", targetBase * 0.5);
+
+    expect(directWinner.h1.flood_potential?.h1_max_product).toMatchObject({
+      winner: "direct",
+      winning_edge_trace: null
+    });
+    expect(directWinner.h1.flood_potential?.h1_overlay).toMatchObject({
+      baseline_score: directWinner.h0.fused_score,
+      applied: false,
+      winner: "baseline",
+      winning_edge_trace: null
+    });
+    expect(directWinner.h1.flood_fuel_coverage?.h1_overlay_applied_count)
+      .toBe(0);
+    expect(directWinner.h1.fused_score).toBeCloseTo(
+      directWinner.h0.fused_score,
+      15
+    );
+    expect(directWinner.h1.fused_rank).toBe(directWinner.h0.fused_rank);
+  });
+
+  it("preserves H0 when a raw edge winner does not clear its integrated score", () => {
+    const { targetBase, scenario } = createBaselineIdentityHarness();
+    const weakEdgeWinner = scenario("path-below-baseline", targetBase * 1.2);
+
+    expect(
+      weakEdgeWinner.h1.flood_potential?.h1_max_product?.strongest_transfer
+    ).toBeLessThan(weakEdgeWinner.h0.fused_score);
+    expect(weakEdgeWinner.h1.fused_score).toBeCloseTo(
+      weakEdgeWinner.h0.fused_score,
+      15
+    );
+    expect(weakEdgeWinner.h1.fused_rank).toBe(weakEdgeWinner.h0.fused_rank);
+    expect(weakEdgeWinner.h1.flood_potential?.h1_overlay).toMatchObject({
+      baseline_score: weakEdgeWinner.h0.fused_score,
+      applied: false,
+      winner: "baseline",
+      winning_edge_trace: null
+    });
+  });
+
+  it("applies a traced edge only when it exceeds the integrated H0 score", () => {
+    const { targetBase, scenario } = createBaselineIdentityHarness();
+    const strongEdgeWinner = scenario("path-above-baseline", targetBase * 2.5);
+
+    expect(
+      strongEdgeWinner.h1.flood_potential?.h1_max_product?.strongest_transfer
+    ).toBeGreaterThan(strongEdgeWinner.h0.fused_score);
+    expect(strongEdgeWinner.h1.fused_score).toBeGreaterThan(
+      strongEdgeWinner.h0.fused_score
+    );
+    expect(strongEdgeWinner.h1.flood_potential?.h1_max_product).toMatchObject({
+      winner: "edge",
+      winning_edge_trace: { path_id: "path-above-baseline" }
+    });
+    expect(strongEdgeWinner.h1.flood_potential?.h1_overlay).toMatchObject({
+      baseline_score: strongEdgeWinner.h0.fused_score,
+      applied: true,
+      winner: "edge",
+      winning_edge_trace: { path_id: "path-above-baseline" }
+    });
+    expect(strongEdgeWinner.h1.flood_fuel_coverage?.h1_overlay_applied_count)
+      .toBe(1);
+  });
+
   it("activates through the installed runtime configuration", () => {
     const seed = createMemoryEntry({ object_id: "seed" });
     const target = createMemoryEntry({ object_id: "target" });
@@ -286,5 +354,78 @@ function supplementary(
     evidenceGistsByMemoryId: {},
     governanceCeilingByMemoryId: {},
     pathInflowByTarget: { [targetObjectId]: [inflow] }
+  };
+}
+
+function createBaselineIdentityHarness() {
+  const seed = createMemoryEntry({ object_id: "seed" });
+  const target = createMemoryEntry({
+    object_id: "target",
+    evidence_refs: ["ev-target"]
+  });
+  const candidates = [seed, target].map((entry) => ({
+    entry,
+    effectiveScore: entry.object_id === seed.object_id ? 1 : 0,
+    effectiveFactors: { activation: 0, relevance: 0 }
+  }));
+  const run = (h1MaxProduct: boolean, inflow?: PathInflowEdge) =>
+    buildRecallFusionDetails({
+      candidates,
+      policy: {} as RecallPolicy,
+      supplementaryData: baselineIdentitySupplementary(
+        seed.object_id,
+        target.object_id,
+        inflow
+      ),
+      nowIso: "2026-07-30T00:00:00.000Z",
+      h1MaxProduct
+    });
+  const seedKey = `workspace_local:memory_entry:${seed.object_id}`;
+  const targetKey = `workspace_local:memory_entry:${target.object_id}`;
+  const noPath = run(false);
+  const seedBase = noPath.get(seedKey)!.per_axis_contribution!.object;
+  const targetBase = noPath.get(targetKey)!.per_axis_contribution!.object;
+  const scenario = (pathId: string, transfer: number) => {
+    const inflow = edge(pathId, transfer / seedBase);
+    return {
+      h0: run(false, inflow).get(targetKey)!,
+      h1: run(true, inflow).get(targetKey)!
+    };
+  };
+  return { seedBase, targetBase, scenario };
+}
+
+function baselineIdentitySupplementary(
+  seedObjectId: string,
+  targetObjectId: string,
+  inflow?: PathInflowEdge
+): RecallSupplementaryData {
+  const pathInflowByTarget = inflow === undefined
+    ? {}
+    : { [targetObjectId]: [inflow] };
+  return {
+    ...supplementary(
+      seedObjectId,
+      targetObjectId,
+      inflow ?? edge("unused", 0)
+    ),
+    ftsRanks: { [seedObjectId]: 1, [targetObjectId]: 2 },
+    trigramFtsRanks: { [seedObjectId]: 1 },
+    synthesisFtsRanks: { [seedObjectId]: 1 },
+    evidenceFtsRanks: { [seedObjectId]: 1 },
+    structuralScores: { [seedObjectId]: 1 },
+    graphExpansionScores: { [seedObjectId]: 1 },
+    entitySeedScores: { [seedObjectId]: 1 },
+    pathExpansionScores: { [seedObjectId]: 1 },
+    embeddingSimilarityScores: { [seedObjectId]: 1 },
+    evidenceSupportVectorsByMemoryId: {
+      [targetObjectId]: [{
+        source_kind: "evidence_ref",
+        source_id: "ev-target",
+        support: 1
+      }]
+    },
+    recallsEdgeCount: inflow === undefined ? 0 : 1,
+    pathInflowByTarget
   };
 }
