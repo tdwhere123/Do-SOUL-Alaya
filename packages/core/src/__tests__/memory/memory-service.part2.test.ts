@@ -146,6 +146,64 @@ it("persists projection-only updates through the production service boundary", a
     );
   });
 
+it("persists canonical_entities and records it as an updated field", async () => {
+    const { appendSpy, dependencies, repoUpdateSpy } = createDependencies();
+    const service = new MemoryService(dependencies);
+
+    await service.update(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      { canonical_entities: ["alice", "berlin"] },
+      "reconciliation_projection_merge"
+    );
+
+    expect(repoUpdateSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      expect.objectContaining({
+        canonical_entities: ["alice", "berlin"],
+        updated_at: "2026-03-21T01:00:00.000Z"
+      })
+    );
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "soul.memory.updated",
+        payload_json: expect.objectContaining({
+          updated_fields: ["canonical_entities"]
+        })
+      })
+    );
+  });
+
+it.each([
+    { field: "confidence", update: { confidence: 0.8 } },
+    { field: "retention_state", update: { retention_state: "consolidated" } },
+    { field: "facet_tags", update: { facet_tags: [{ facet: "person", value: "alice" }] } }
+] as const)("persists standalone $field updates and records the exact field", async ({ field, update }) => {
+    const { appendSpy, dependencies, repoUpdateSpy } = createDependencies();
+    const service = new MemoryService(dependencies);
+
+    await service.update(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      update,
+      "reconciliation_projection_merge"
+    );
+
+    expect(repoUpdateSpy).toHaveBeenCalledWith(
+      "70a0b18b-5f8b-4fd2-a1b0-97ce48113fca",
+      expect.objectContaining({
+        ...update,
+        updated_at: "2026-03-21T01:00:00.000Z"
+      })
+    );
+    expect(appendSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "soul.memory.updated",
+        payload_json: expect.objectContaining({
+          updated_fields: [field]
+        })
+      })
+    );
+  });
+
 it("revokes green mapping when an evidence rewrite removes every prior anchor", async () => {
     const pierceSpy = vi.fn(async () => undefined);
     const { dependencies } = createDependencies({
