@@ -79,13 +79,17 @@ interface StoredMaterializationRow {
 
 interface EvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
-  readonly signalId: string;
+  readonly signalId: string | null;
 }
 
 interface QualificationInputs {
   readonly candidates: readonly EvidenceCandidate[];
   readonly signals: ReadonlyMap<string, Readonly<CandidateMemorySignal>>;
   readonly events: ReadonlyMap<string, readonly StoredMaterializationRow[]>;
+}
+
+interface QualifiedEvidenceProof {
+  readonly turnReceipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null;
 }
 
 export class RecallQualifiedEvidenceReader {
@@ -155,17 +159,17 @@ export class RecallQualifiedEvidenceReader {
     return matches.flatMap((match) => {
       const candidate = candidateById.get(match.object_id);
       if (candidate === undefined) return [];
-      const receipt = readQualifiedReceipt(
+      const proof = readQualifiedProof(
         candidate,
-        signals.get(candidate.signalId),
+        candidate.signalId === null ? undefined : signals.get(candidate.signalId),
         events,
         match.matched_projection !== undefined
       );
-      if (receipt === null) return [];
+      if (proof === null) return [];
       const qualified = qualifyEvidenceMatch(
         match,
         candidate.capsule,
-        receipt,
+        proof.turnReceipt,
         projections
       );
       return qualified === null ? [] : [qualified];
@@ -181,13 +185,13 @@ export class RecallQualifiedEvidenceReader {
       objectIds
     );
     return candidates.flatMap((candidate) => {
-      const receipt = readQualifiedReceipt(
+      const proof = readQualifiedProof(
         candidate,
-        signals.get(candidate.signalId),
+        candidate.signalId === null ? undefined : signals.get(candidate.signalId),
         events,
         false
       );
-      return receipt === null ? [] : [candidate.capsule.object_id];
+      return proof === null ? [] : [candidate.capsule.object_id];
     });
   }
 
@@ -201,7 +205,9 @@ export class RecallQualifiedEvidenceReader {
         JSON.stringify(evidenceObjectIds)
       ) as EvidenceCapsuleRow[]
     );
-    const signalIds = [...new Set(candidates.map((candidate) => candidate.signalId))];
+    const signalIds = [...new Set(candidates.flatMap((candidate) =>
+      candidate.signalId === null ? [] : [candidate.signalId]
+    ))];
     const signals = readSignals(this.statementHolder.active().findSignalRows.all(
       workspaceId,
       JSON.stringify(signalIds)
@@ -241,9 +247,7 @@ function readEvidenceCandidate(row: EvidenceCapsuleRow): EvidenceCandidate | nul
     const signalId = readGardenSourceTurnFallbackArtifactSignalId(
       capsule.physical_anchor?.artifact_ref ?? null
     );
-    return signalId !== null && matchesEvidenceEnvelope(capsule)
-      ? { capsule, signalId }
-      : null;
+    return matchesEvidenceEnvelope(capsule) ? { capsule, signalId } : null;
   } catch (error) {
     process.emitWarning("evidence candidate parse failed; skipping row", {
       code: "ALAYA_EVIDENCE_CANDIDATE_PARSE_FAILED",
@@ -318,29 +322,58 @@ function groupEvents(
   return grouped;
 }
 
-function readQualifiedReceipt(
+function readQualifiedProof(
   candidate: EvidenceCandidate,
   signal: Readonly<CandidateMemorySignal> | undefined,
   events: ReadonlyMap<string, readonly StoredMaterializationRow[]>,
   strictProjection: boolean
-): Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null {
+): Readonly<QualifiedEvidenceProof> | null {
+  if (readVerifiedUserAssertionSourceHashDigest(candidate.capsule.source_hash) !== null) {
+    return matchesAssertionReceipt(candidate.capsule)
+      ? Object.freeze({ turnReceipt: null })
+      : rejectProof(candidate, strictProjection);
+  }
+  if (candidate.signalId === null) return null;
   if (signal === undefined) return null;
   const receipt = verifyGardenSourceTurnFallbackReceipt(signal, sha256);
   if (receipt === null) return null;
   if (!matchesReceipt(candidate, receipt)) {
-    if (strictProjection) {
-      throw new EvidenceProjectionIntegrityError(
-        candidate.capsule.object_id,
-        "requested projection owner does not match its verified receipt"
-      );
-    }
-    return null;
+    return rejectProof(candidate, strictProjection);
   }
   const materializations = events.get(candidate.signalId) ?? [];
   return materializations.length === 1 &&
     matchesMaterialization(materializations[0]!, candidate, receipt)
-    ? receipt
+    ? Object.freeze({ turnReceipt: receipt })
     : null;
+}
+
+function rejectProof(
+  candidate: EvidenceCandidate,
+  strictProjection: boolean
+): null {
+  if (strictProjection) {
+    throw new EvidenceProjectionIntegrityError(
+      candidate.capsule.object_id,
+      "requested projection owner does not match its verified receipt"
+    );
+  }
+  return null;
+}
+
+function matchesAssertionReceipt(capsule: Readonly<EvidenceCapsule>): boolean {
+  const observedDigest = readVerifiedUserAssertionSourceHashDigest(capsule.source_hash);
+  const assertion = capsule.excerpt?.trim() ?? "";
+  if (observedDigest === null || assertion.length === 0) return false;
+  const expectedDigest = createHash("sha256")
+    .update(buildVerifiedUserAssertionReceiptPreimage({
+      workspace_id: capsule.workspace_id,
+      run_id: capsule.run_id,
+      surface_id: capsule.surface_id,
+      source_assertion: assertion,
+      source_corpus: capsule.gist
+    }), "utf8")
+    .digest("hex");
+  return observedDigest === expectedDigest;
 }
 
 function matchesReceipt(
@@ -348,6 +381,7 @@ function matchesReceipt(
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
   const capsule = candidate.capsule;
+  if (candidate.signalId === null) return false;
   return receipt.signal_id === candidate.signalId &&
     receipt.source_observation?.authority === "trusted_host_event" &&
     capsule.workspace_id === receipt.workspace_id &&
@@ -357,27 +391,10 @@ function matchesReceipt(
     matchesReceiptSourceHash(capsule, receipt);
 }
 
-// Assertion-family source_hash qualifies recall and verified-assertion context;
-// turn-fallback qualifies recall only — one column, two additive families.
 function matchesReceiptSourceHash(
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
-  const assertionDigest = readVerifiedUserAssertionSourceHashDigest(capsule.source_hash);
-  if (assertionDigest !== null) {
-    const assertion = capsule.excerpt?.trim() ?? "";
-    if (assertion.length === 0) return false;
-    const expectedDigest = createHash("sha256")
-      .update(buildVerifiedUserAssertionReceiptPreimage({
-        workspace_id: receipt.workspace_id,
-        run_id: receipt.run_id,
-        surface_id: receipt.surface_id,
-        source_assertion: assertion,
-        source_corpus: receipt.source_corpus
-      }), "utf8")
-      .digest("hex");
-    return assertionDigest === expectedDigest;
-  }
   const expected = isGardenSourceTurnFallbackV2Receipt(receipt)
     ? formatGardenSourceTurnFallbackV2SourceHash(receipt.digest)
     : formatGardenSourceTurnFallbackSourceHash(receipt.digest);
@@ -389,6 +406,7 @@ function matchesMaterialization(
   candidate: EvidenceCandidate,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
 ): boolean {
+  if (candidate.signalId === null) return false;
   const payload = SoulSignalMaterializedPayloadSchema.safeParse(parseJson(row.payload_json));
   if (!payload.success) return false;
   const created = payload.data.created_objects;

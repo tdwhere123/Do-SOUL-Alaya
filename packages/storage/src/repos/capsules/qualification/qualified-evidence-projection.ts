@@ -83,7 +83,7 @@ export function readQualifiedProjectionIndex(
 export function qualifyEvidenceMatch(
   match: EvidenceSearchMatch,
   capsule: Readonly<EvidenceCapsule>,
-  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
   projections: QualifiedProjectionIndex
 ): RecallQualifiedEvidence | null {
   const verifiedUserProjection = hasVerifiedUserProjection(capsule, receipt);
@@ -140,7 +140,7 @@ function normalizeProjectionIdentity(
 
 function hasVerifiedUserProjection(
   capsule: Readonly<EvidenceCapsule>,
-  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null
 ): boolean {
   if (!isGardenSourceTurnFallbackV2Receipt(receipt)) return false;
   const content = projectGardenSourceTurnFallbackV2UserContent(receipt);
@@ -149,13 +149,14 @@ function hasVerifiedUserProjection(
 
 function matchesOwnerProjection(
   capsule: Readonly<EvidenceCapsule>,
-  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null
 ): boolean {
   // Assertion-family stores the distilled fact in excerpt; turn-span equality
-  // would reject the display-atomic arm after matchesReceiptSourceHash already bound it.
+  // would reject the display-atomic arm after its assertion proof already bound it.
   if (readVerifiedUserAssertionSourceHashDigest(capsule.source_hash) !== null) {
     return (capsule.excerpt?.trim() ?? "").length > 0;
   }
+  if (receipt === null) return false;
   if (!isGardenSourceTurnFallbackV2Receipt(receipt)) {
     return capsule.excerpt === receipt.source_corpus;
   }
@@ -166,7 +167,7 @@ function matchesOwnerProjection(
 function rederiveAssistantProjection(
   identity: EvidenceSearchProjectionIdentity,
   capsule: Readonly<EvidenceCapsule>,
-  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt>,
+  receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
   projections: QualifiedProjectionIndex
 ): Readonly<EvidenceSearchProjection> | null {
   if (!isGardenSourceTurnFallbackV2Receipt(receipt)) return null;
