@@ -164,6 +164,7 @@ async function bootBenchDaemon(
     activeRuntime: resources.runtime,
     activeServer: resources.server,
     activeMcpClient: resources.mcpClient,
+    dispatchCli: resources.dispatchCli,
     recallWeightOverrides: state.recallWeightOverrides,
     embeddingMode: state.embeddingMode,
     embeddingProviderKind: state.embeddingProviderKind,

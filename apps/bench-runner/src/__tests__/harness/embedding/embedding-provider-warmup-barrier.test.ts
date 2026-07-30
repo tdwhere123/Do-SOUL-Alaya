@@ -120,6 +120,7 @@ function createOperations(
     activeRuntime,
     activeServer: { close: async () => undefined },
     activeMcpClient: {} as Client,
+    dispatchCli: async () => ({ exitCode: 0 }),
     embeddingMode: "env",
     embeddingProviderKind: "openai",
     effectiveEnv: { OPENAI_EMBEDDING_MODEL: MODEL_ID },

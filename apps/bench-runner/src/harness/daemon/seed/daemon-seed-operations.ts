@@ -5,8 +5,7 @@ import {
   SignalSource,
   type CandidateMemorySignal,
   type SoulEmitCandidateSignalResponse,
-  type SoulProposeMemoryUpdateResponse,
-  type SoulReviewMemoryProposalResponse
+  type SoulProposeMemoryUpdateResponse
 } from "@do-soul/alaya-protocol";
 import { normalizeSchemaGroundedSignal } from "@do-soul/alaya-soul";
 import {
@@ -85,19 +84,13 @@ export async function acceptSeededMemory(
     );
   }
 
-  const reviewResponse = await input.callMcpTool<SoulReviewMemoryProposalResponse>(
-    "soul.review_memory_proposal",
-    {
-      proposal_id: proposeResponse.proposal_id,
-      verdict: "accept",
-      reason: "bench seed auto-accept",
-      reviewer_identity: input.reviewerIdentity,
-      reviewer_token: input.reviewerToken
-    }
-  );
+  const reviewResponse = await input.reviewMemoryProposal({
+    proposalId: proposeResponse.proposal_id,
+    reason: "bench seed auto-accept"
+  });
   if (reviewResponse.resolution_state !== "accepted") {
     throw new Error(
-      `soul.review_memory_proposal returned unexpected state=${reviewResponse.resolution_state}`
+      `alaya review accept returned unexpected state=${reviewResponse.resolution_state}`
     );
   }
   return { proposalId: proposeResponse.proposal_id };

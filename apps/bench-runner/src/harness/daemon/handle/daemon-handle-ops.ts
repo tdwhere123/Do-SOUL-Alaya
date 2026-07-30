@@ -21,6 +21,7 @@ import {
   proposeMemoryFromSignal,
   proposeSynthesis
 } from "../seed/daemon-seed-operations.js";
+import { createBenchSeedProposalReviewer } from "../seed/daemon-seed-review.js";
 import {
   buildBenchDiagnosticRecallPolicy,
   buildBenchMemorySearchResult,
@@ -83,6 +84,7 @@ interface BenchDaemonOpsInput {
   readonly activeRuntime: AlayaDaemonRuntime;
   readonly activeServer: { close(): Promise<unknown> };
   readonly activeMcpClient: Client;
+  readonly dispatchCli: BenchDaemonHandle["dispatchCli"];
   readonly recallWeightOverrides?: BenchRecallWeightOverrides;
   readonly embeddingMode: BenchEmbeddingMode;
   readonly embeddingProviderKind: BenchEmbeddingProviderKind;
@@ -342,8 +344,11 @@ function createBenchSeedOperations(
     ): Promise<TOutput> => await callMcpTool<TOutput>(input.activeMcpClient, name, args),
     readMaterializedObjects: async (signalId: string) =>
       await readMaterializedObjects(input.dataDir, signalId),
-    reviewerIdentity: input.reviewerCredentials.identity,
-    reviewerToken: input.reviewerCredentials.token
+    reviewMemoryProposal: createBenchSeedProposalReviewer({
+      activeContext: input.activeContext,
+      dispatchCli: input.dispatchCli,
+      reviewerIdentity: input.reviewerCredentials.identity
+    })
   };
   return {
     proposeMemory: async (content, evidenceRef, options) =>
