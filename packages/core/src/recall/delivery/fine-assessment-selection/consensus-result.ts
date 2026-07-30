@@ -15,12 +15,15 @@ import type {
   FineAssessmentSelectionParams,
   FineAssessmentSelectionResult
 } from "./types.js";
+import type { FineAssessmentPreProjectionCapture } from
+  "../selection-boundary/selection-boundary-types.js";
 
 export function buildSelectionResult(
   params: FineAssessmentSelectionParams,
   consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>,
   result: ReturnType<typeof applyFinalPacketConsensus>,
-  tokenEstimatesByContent?: ReadonlyMap<string, number>
+  tokenEstimatesByContent?: ReadonlyMap<string, number>,
+  preProjection?: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionResult {
   const observesBoundary = params.selectionBoundaryObserver !== undefined;
   const packetConsensus = params.capturePacketPlanTrace === true || observesBoundary
@@ -39,7 +42,11 @@ export function buildSelectionResult(
   });
   if (packetConsensus !== undefined && tokenEstimatesByContent !== undefined) {
     notifySelectionBoundaryObserver(
-      params, selectionResult, packetConsensus, tokenEstimatesByContent
+      params,
+      selectionResult,
+      packetConsensus,
+      tokenEstimatesByContent,
+      preProjection
     );
   }
   return selectionResult;

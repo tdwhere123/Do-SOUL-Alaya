@@ -2,7 +2,10 @@ import {
   selectFineAssessmentCandidates,
   type FineAssessmentSelectionResult
 } from "../fine-assessment-selection.js";
-import { buildSelectionBoundaryExpected } from
+import {
+  buildSelectionBoundaryExpected,
+  type FineAssessmentSelectionBoundaryPendingCapture
+} from
   "./selection-boundary-capture.js";
 import {
   restoreSelectionParams,
@@ -21,9 +24,16 @@ export function replayFineAssessmentSelectionBoundary(
 ): FineAssessmentSelectionResult {
   validateSelectionBoundary(boundary);
   const params = restoreSelectionParams(boundary.input);
+  let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
   const replayed = selectFineAssessmentCandidates({
     ...params,
-    capturePacketPlanTrace: true
+    capturePacketPlanTrace: true,
+    ...(boundary.expected.pre_projection === undefined ? {} : {
+      selectionBoundaryObserver: (capture) => {
+        pending = capture;
+        return undefined;
+      }
+    })
   });
   const packetConsensus = replayed.packetPlanObservation;
   if (packetConsensus === undefined) {
@@ -32,7 +42,8 @@ export function replayFineAssessmentSelectionBoundary(
   const actual = buildSelectionBoundaryExpected(
     replayed,
     packetConsensus,
-    boundary.input.capture_packet_plan_trace === true
+    boundary.input.capture_packet_plan_trace === true,
+    pending?.preProjection
   );
   if (
     selectionBoundaryJsonSha256(actual) !==

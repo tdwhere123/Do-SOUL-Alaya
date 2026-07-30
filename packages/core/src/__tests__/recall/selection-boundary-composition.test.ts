@@ -61,6 +61,43 @@ describe("fine-assessment selection composition reconstruction", () => {
     expect(() => reconstructFineAssessmentComposition(drifted))
       .toThrow(SELECTION_COMPOSITION_FIDELITY_MISMATCH);
   });
+
+  it("rebuilds the projection ledger and rejects post-settlement drift", () => {
+    const boundary = captureLiveBoundary();
+    const projection = boundary.expected.pre_projection;
+    if (projection === undefined) throw new Error("pre-projection was not captured");
+    expect(() => reconstructFineAssessmentComposition(boundary)).not.toThrow();
+    let tokenTotal = 0;
+    const admissionActions = projection.admission_actions.map((action) => {
+      if (action.witness.kind !== "retained") return action;
+      const tokenEstimate = action.witness.token_estimate +
+        (action.pre_projection_rank === 1 ? 1 : 0);
+      const driftedAction = {
+        ...action,
+        witness: {
+          ...action.witness,
+          token_total_before: tokenTotal,
+          token_estimate: tokenEstimate
+        }
+      };
+      tokenTotal += tokenEstimate;
+      return driftedAction;
+    });
+    const drifted: FineAssessmentSelectionBoundaryCase = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: {
+          ...projection,
+          token_total: tokenTotal,
+          admission_actions: admissionActions
+        }
+      }
+    };
+
+    expect(() => reconstructFineAssessmentComposition(drifted))
+      .toThrow(SELECTION_COMPOSITION_FIDELITY_MISMATCH);
+  });
 });
 
 function captureLiveBoundary(): FineAssessmentSelectionBoundaryCase {

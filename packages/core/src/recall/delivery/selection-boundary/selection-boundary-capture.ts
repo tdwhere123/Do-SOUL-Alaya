@@ -6,9 +6,12 @@ import type {
   FineAssessmentSelectionBoundaryCase,
   FineAssessmentSelectionBoundaryExpected,
   FineAssessmentSelectionBoundaryInput,
+  FineAssessmentPreProjectionCapture,
   SelectionBoundaryNumberMap,
   SerializedRecallSupplementaryData
 } from "./selection-boundary-types.js";
+import { completeFineAssessmentPreProjection } from
+  "./pre-projection/observation.js";
 import type { RecallPacketPlanObservation } from
   "../packet-plan/packet-plan-trace.js";
 import {
@@ -29,6 +32,7 @@ export type FineAssessmentSelectionBoundaryPendingCapture = Readonly<{
   readonly packetConsensus: Readonly<RecallPacketPlanObservation>;
   readonly tokenEstimatesByContent: ReadonlyMap<string, number>;
   readonly packetPlanVisible: boolean;
+  readonly preProjection?: FineAssessmentPreProjectionCapture;
 }>;
 
 export function createSelectionBoundaryCapture(
@@ -59,14 +63,16 @@ export function captureFineAssessmentSelectionBoundaryPending(
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
   tokenEstimatesByContent: ReadonlyMap<string, number>,
-  packetPlanVisible = result.packetPlanObservation !== undefined
+  packetPlanVisible = result.packetPlanObservation !== undefined,
+  preProjection?: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionBoundaryPendingCapture {
   return Object.freeze({
     params,
     result,
     packetConsensus,
     tokenEstimatesByContent,
-    packetPlanVisible
+    packetPlanVisible,
+    ...(preProjection === undefined ? {} : { preProjection })
   });
 }
 
@@ -82,7 +88,8 @@ export function materializeFineAssessmentSelectionBoundary(
     expected: buildSelectionBoundaryExpected(
       pending.result,
       pending.packetConsensus,
-      pending.packetPlanVisible
+      pending.packetPlanVisible,
+      pending.preProjection
     )
   });
   assertSelectionBoundaryJsonValue(boundary);
@@ -109,13 +116,16 @@ export function notifySelectionBoundaryObserver(
   params: FineAssessmentSelectionParams,
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
-  tokenEstimatesByContent: ReadonlyMap<string, number>
+  tokenEstimatesByContent: ReadonlyMap<string, number>,
+  preProjection?: FineAssessmentPreProjectionCapture
 ): void {
   const pending = captureFineAssessmentSelectionBoundaryPending(
     params,
     result,
     packetConsensus,
-    tokenEstimatesByContent
+    tokenEstimatesByContent,
+    result.packetPlanObservation !== undefined,
+    preProjection
   );
   const observerResult = params.selectionBoundaryObserver?.(pending);
   if (observerResult !== undefined) {
@@ -176,7 +186,8 @@ function serializeOptionalSelectionInputs(
 export function buildSelectionBoundaryExpected(
   result: FineAssessmentSelectionResult,
   packetConsensus: Readonly<RecallPacketPlanObservation>,
-  packetPlanVisible = result.packetPlanObservation !== undefined
+  packetPlanVisible = result.packetPlanObservation !== undefined,
+  preProjection?: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionBoundaryExpected {
   return Object.freeze({
     candidate_keys: packetConsensus.actual_candidate_keys,
@@ -197,6 +208,14 @@ export function buildSelectionBoundaryExpected(
       candidates: result.candidates,
       diagnostics: result.diagnostics,
       ...(packetPlanVisible ? { packetPlanObservation: packetConsensus } : {})
+    }),
+    ...(preProjection === undefined ? {} : {
+      pre_projection: cloneSelectionBoundaryJson(
+        completeFineAssessmentPreProjection(
+          preProjection,
+          packetConsensus.actual_candidate_keys
+        )
+      )
     })
   });
 }

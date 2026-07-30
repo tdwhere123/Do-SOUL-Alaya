@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { MemoryDimension } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
-
 import {
   selectFineAssessmentCandidates,
   type FineAssessmentCandidate
@@ -10,6 +9,10 @@ import {
   replayFineAssessmentSelectionBoundary,
   type FineAssessmentSelectionBoundaryCase
 } from "../../recall/delivery/selection-boundary/selection-boundary-replay.js";
+import {
+  materializeFineAssessmentSelectionBoundary,
+  type FineAssessmentSelectionBoundaryPendingCapture
+} from "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
 import { selectionBoundaryJsonSha256 } from
   "../../recall/delivery/selection-boundary/selection-boundary-json.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
@@ -28,7 +31,6 @@ import {
 describe("final strict-tail consensus integration", () => {
   it("uses reciprocal consensus as final authority while preserving the strict tail", () => {
     const candidates = consensusCandidates();
-
     const result = select(candidates, {
       capturePacketPlanTrace: true,
       tokenByObjectId: { "baseline-03": 3, challenger: 7 }
@@ -98,10 +100,8 @@ describe("final strict-tail consensus integration", () => {
       result.packetPlanObservation?.planned_candidate_keys
     );
   });
-
   it("is byte-exact when no candidate has a finite raw embedding rank", () => {
     const result = select(baselineCandidates());
-
     expect(exactResultDigest(result)).toBe(
       "a7dad0b4e5c3b47d1c925fe94ba193368cc5764a60bbe26c9e7e1281dbd9cef5"
     );
@@ -122,7 +122,6 @@ describe("final strict-tail consensus integration", () => {
       gist: `User: ${content}`
     });
     if (verified === null) throw new Error("test fixture must project");
-
     const result = select(candidates, {
       captureAnswerFeatures: true,
       queryText: "Where did I buy my new bookshelf from?",
@@ -267,15 +266,19 @@ describe("final strict-tail consensus integration", () => {
       ...overrides,
       capturePacketPlanTrace: true,
       selectionBoundaryObserver: (captured) => {
-        boundary = captured;
+        boundary = materializeFineAssessmentSelectionBoundary(captured);
       }
     });
-
     expect(exactResultDigest(observed)).toBe(exactResultDigest(baseline));
     expect(boundary).toBeDefined();
     expect(() => JSON.stringify(boundary)).not.toThrow();
     expect(observed.packetPlanObservation?.decision.status)
       .toBe(expectedConsensusStatus);
+    if (expectedConsensusStatus === "accepted") {
+      expect(boundary!.expected.pre_projection?.candidate_keys.map(
+        (key) => key.split(":").at(-1)
+      )).toEqual(baselineIds());
+    }
     expect(boundary).toMatchObject({
       schema_version: 2,
       expected: {
@@ -296,7 +299,6 @@ describe("final strict-tail consensus integration", () => {
     expect(boundary!.expected.visible_result_sha256)
       .toBe(selectionBoundaryJsonSha256(observed));
     expect(boundary!.expected).not.toHaveProperty("visible_result");
-
     const serialized = JSON.parse(JSON.stringify(boundary)) as
       FineAssessmentSelectionBoundaryCase;
     const replayed = replayFineAssessmentSelectionBoundary(serialized);
@@ -309,11 +311,10 @@ describe("final strict-tail consensus integration", () => {
       capturePacketPlanTrace: true,
       finalOrderAfterCoverage: "public_relevance",
       selectionBoundaryObserver: (captured) => {
-        boundary = captured;
+        boundary = materializeFineAssessmentSelectionBoundary(captured);
       }
     });
     if (boundary === undefined) throw new Error("selection boundary was not observed");
-
     const inputTamper: FineAssessmentSelectionBoundaryCase = {
       ...boundary,
       input: {
@@ -353,7 +354,7 @@ type SelectionOverrides = Readonly<{
   readonly perDimensionLimits?: Readonly<Record<string, number>>;
   readonly queryText?: string;
   readonly selectionBoundaryObserver?: (
-    boundary: FineAssessmentSelectionBoundaryCase
+    boundary: FineAssessmentSelectionBoundaryPendingCapture
   ) => undefined;
   readonly tokenByObjectId?: Readonly<Record<string, number>>;
   readonly verifiedUserAssertionContextsByMemoryId?:

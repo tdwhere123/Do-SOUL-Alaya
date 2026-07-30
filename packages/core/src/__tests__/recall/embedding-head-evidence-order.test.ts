@@ -111,6 +111,29 @@ describe("embedding-head evidence order", () => {
     expect(evictions.size).toBe(0);
   });
 
+  it("reports the dominating head for every committed eviction", () => {
+    const incumbent = candidate("incumbent", 2);
+    const head = candidate("head", 1);
+    const observed: {
+      evictedCandidateKey: string;
+      dominatingCandidateKey: string;
+    }[] = [];
+    const evictions = selectEmbeddingHeadEvictions({
+      candidates: [incumbent, head],
+      maxEntries: 1,
+      embeddingScores: { incumbent: 0.2, head: 0.9 },
+      selectDelivered: (excluded) =>
+        excluded.has("incumbent") ? [head] : [incumbent],
+      onEviction: (witness) => observed.push(witness)
+    });
+
+    expect([...evictions]).toEqual(["incumbent"]);
+    expect(observed).toEqual([{
+      evictedCandidateKey: "incumbent",
+      dominatingCandidateKey: "head"
+    }]);
+  });
+
   it("does not evaluate delivery when no ranked embedding head exists", () => {
     const selectDelivered = vi.fn(() => []);
     const evictions = selectEmbeddingHeadEvictions({

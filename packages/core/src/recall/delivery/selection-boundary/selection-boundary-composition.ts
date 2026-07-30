@@ -24,11 +24,14 @@ import {
 import type {
   FineAssessmentSelectionBoundaryCase,
   FineAssessmentSelectionBoundaryInput,
+  FineAssessmentPreProjectionCapture,
   SelectionBoundaryNumberMap
 } from "./selection-boundary-types.js";
 import {
   selectionBoundaryJsonSha256
 } from "./selection-boundary-json.js";
+import type { FineAssessmentSelectionBoundaryPendingCapture } from
+  "./selection-boundary-capture.js";
 
 export const SELECTION_COMPOSITION_FIDELITY_MISMATCH =
   "selection composition fidelity mismatch";
@@ -77,16 +80,24 @@ export function reconstructFineAssessmentComposition(
     replacePublicRelevance: branch.replacePublicRelevance
   });
   assertCompositionInputs(input, delivery, deepHead, branch);
-  const selected = selectFineAssessmentCandidates(
-    buildCompositionSelectionParams(
-      input,
-      supplementaryData,
-      delivery,
-      deepHead,
-      branch
-    )
+  let pending: FineAssessmentSelectionBoundaryPendingCapture | undefined;
+  const selectionParams = buildCompositionSelectionParams(
+    input,
+    supplementaryData,
+    delivery,
+    deepHead,
+    branch
   );
-  assertCompositionExpected(boundary, selected);
+  const selected = selectFineAssessmentCandidates({
+    ...selectionParams,
+    ...(boundary.expected.pre_projection === undefined ? {} : {
+      selectionBoundaryObserver: (capture) => {
+        pending = capture;
+        return undefined;
+      }
+    })
+  });
+  assertCompositionExpected(boundary, selected, pending?.preProjection);
   return Object.freeze({
     result: selected,
     branch,
@@ -165,14 +176,16 @@ function assertCompositionInputs(
 
 function assertCompositionExpected(
   boundary: FineAssessmentSelectionBoundaryCase,
-  selected: FineAssessmentSelectionResult
+  selected: FineAssessmentSelectionResult,
+  preProjection?: FineAssessmentPreProjectionCapture
 ): void {
   const packetConsensus = selected.packetPlanObservation;
   if (packetConsensus === undefined) throwCompositionMismatch();
   const actual = buildSelectionBoundaryExpected(
     selected,
     packetConsensus,
-    boundary.input.capture_packet_plan_trace === true
+    boundary.input.capture_packet_plan_trace === true,
+    preProjection
   );
   if (
     selectionBoundaryJsonSha256(actual) !==

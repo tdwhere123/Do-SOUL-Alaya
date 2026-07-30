@@ -34,6 +34,7 @@ export function createSelectionContext(
     answerRelevanceRankByCandidateKey,
     answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
     captureAnswerFeatures,
+    capturePreProjection: params.selectionBoundaryObserver !== undefined,
     answerSupportByCandidateKey: answerSupport.supportByCandidateKey,
     answerSupportObservationsByCandidateKey:
       answerSupport.observationsByCandidateKey,
@@ -51,6 +52,7 @@ export function prepareCoverageSelection(
 ): Readonly<{
   readonly coverageOrdered: readonly FineAssessmentCandidate[];
   readonly evictions: ReadonlySet<string>;
+  readonly evictionWitnessByCandidateKey: ReadonlyMap<string, string>;
 }> {
   const coverageRelevance =
     params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
@@ -64,7 +66,11 @@ export function prepareCoverageSelection(
     !hasEmbeddingHead && captureMarginalGain
   );
   if (!hasEmbeddingHead) {
-    return Object.freeze({ coverageOrdered: initialOrder, evictions: new Set<string>() });
+    return Object.freeze({
+      coverageOrdered: initialOrder,
+      evictions: new Set<string>(),
+      evictionWitnessByCandidateKey: new Map<string, string>()
+    });
   }
   const resolved = resolveEmbeddingHeadEvictions(
     initialOrder,
@@ -82,7 +88,8 @@ export function prepareCoverageSelection(
       : initialOrder;
   return Object.freeze({
     coverageOrdered,
-    evictions
+    evictions,
+    evictionWitnessByCandidateKey: resolved.evictionWitnessByCandidateKey
   });
 }
 
@@ -121,35 +128,42 @@ function resolveEmbeddingHeadEvictions(
 ): Readonly<{
   readonly evictions: ReadonlySet<string>;
   readonly coverageOrdered: readonly FineAssessmentCandidate[];
+  readonly evictionWitnessByCandidateKey: ReadonlyMap<string, string>;
 }> {
-  let coverageOrdered = candidates;
+  const evictionWitnessByCandidateKey = new Map<string, string>();
   const evictions = selectEmbeddingHeadEvictions({
     candidates,
     maxEntries: context.config.budgets.max_entries,
     embeddingScores: context.supplementaryData.embeddingSimilarityScores,
     queryProbes: context.supplementaryData.queryProbes,
     answerRerankedCandidateKeys: context.answerRerankedCandidateKeys,
-    selectDelivered: (evictionSet) => {
-      coverageOrdered = orderFineAssessmentByCoverage(
+    ...(context.capturePreProjection ? {
+      onEviction: (witness) => evictionWitnessByCandidateKey.set(
+        witness.evictedCandidateKey,
+        witness.dominatingCandidateKey
+      )
+    } : {}),
+    selectDelivered: (evictionSet) => collectAdmittedCandidates(
+      orderFineAssessmentByCoverage(
         candidates,
         context,
         relevanceByCandidateKey,
         evictionSet,
         captureMarginalGain
-      );
-      return collectAdmittedCandidates(
-        coverageOrdered,
-        context,
-        evictionSet
-      );
-    }
+      ),
+      context,
+      evictionSet
+    )
   });
-  coverageOrdered = orderFineAssessmentByCoverage(
-    candidates,
-    context,
-    relevanceByCandidateKey,
+  return Object.freeze({
     evictions,
-    captureMarginalGain
-  );
-  return Object.freeze({ evictions, coverageOrdered });
+    coverageOrdered: orderFineAssessmentByCoverage(
+      candidates,
+      context,
+      relevanceByCandidateKey,
+      evictions,
+      captureMarginalGain
+    ),
+    evictionWitnessByCandidateKey
+  });
 }

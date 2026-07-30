@@ -46,6 +46,10 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
     readonly queryProbes?: Readonly<RecallQueryProbes>;
     readonly answerRerankedCandidateKeys?: ReadonlySet<string>;
     readonly selectDelivered: (evictions: ReadonlySet<string>) => readonly T[];
+    readonly onEviction?: (input: Readonly<{
+      readonly evictedCandidateKey: string;
+      readonly dominatingCandidateKey: string;
+    }>) => void;
   }>
 ): ReadonlySet<string> {
   const budget = normalizeBudget(params.maxEntries, params.candidates.length);
@@ -66,8 +70,12 @@ export function selectEmbeddingHeadEvictions<T extends EmbeddingHeadCandidate>(
       delivered
     });
     if (replacement === null) continue;
-    evictions = replacement.evictions;
-    delivered = replacement.delivered;
+    params.onEviction?.(Object.freeze({
+      evictedCandidateKey: replacement.incumbent.fusion.candidate_key,
+      dominatingCandidateKey: head.fusion.candidate_key
+    }));
+    evictions = replacement.replacement.evictions;
+    delivered = replacement.replacement.delivered;
   }
   return evictions;
 }
@@ -101,7 +109,7 @@ function findReplacement<T extends EmbeddingHeadCandidate>(params: Readonly<{
   readonly evictions: ReadonlySet<string>;
   readonly delivered: readonly T[];
   readonly selectDelivered: (evictions: ReadonlySet<string>) => readonly T[];
-}>): DominanceReplacement<T> | null {
+}>): EvaluatedDominanceReplacement<T> | null {
   let weakest: EvaluatedDominanceReplacement<T> | null = null;
   for (const incumbent of params.delivered) {
     if (!isReplaceable(incumbent, params)) continue;
@@ -113,7 +121,7 @@ function findReplacement<T extends EmbeddingHeadCandidate>(params: Readonly<{
       weakest = evaluated;
     }
   }
-  return weakest?.replacement ?? null;
+  return weakest;
 }
 
 function buildFeasibleReplacement<T extends EmbeddingHeadCandidate>(

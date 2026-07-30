@@ -28,6 +28,8 @@ import {
   createSupplementaryData,
   rankMap
 } from "./fine-assessment-selection-fixtures.js";
+import type { FineAssessmentPreProjectionObservation } from
+  "../../recall/delivery/selection-boundary/selection-boundary-types.js";
 
 describe("fine-assessment selection boundary fidelity", () => {
   it("omits optional undefined object properties without shifting arrays", () => {
@@ -61,6 +63,149 @@ describe("fine-assessment selection boundary fidelity", () => {
     expect(boundary.expected.visible_result_sha256)
       .toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(boundary.expected).not.toHaveProperty("visible_result");
+  });
+
+  it("captures the settled pre-projection sequence and admission actions", () => {
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, true);
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const preProjection = readPreProjection(boundary);
+
+    expect(boundary.expected.candidate_keys).toEqual([
+      "workspace_local:memory_entry:candidate-6",
+      "workspace_local:memory_entry:candidate-5",
+      "workspace_local:memory_entry:candidate-4",
+      "workspace_local:memory_entry:candidate-3",
+      "workspace_local:memory_entry:candidate-2",
+      "workspace_local:memory_entry:candidate-1"
+    ]);
+    expect(preProjection.schema_version).toBe(1);
+    expect(preProjection.candidate_keys).toEqual([
+      "workspace_local:memory_entry:candidate-1",
+      "workspace_local:memory_entry:candidate-2",
+      "workspace_local:memory_entry:candidate-3",
+      "workspace_local:memory_entry:candidate-4",
+      "workspace_local:memory_entry:candidate-5",
+      "workspace_local:memory_entry:candidate-6"
+    ]);
+    expect(preProjection.token_total).toBe(30);
+    expect(preProjection.admission_actions).toEqual(
+      preProjection.candidate_keys.map(
+      (candidateKey, index) => ({
+        candidate_key: candidateKey,
+        action: "retain",
+        selection_order: index + 1,
+        pre_projection_rank: index + 1,
+        dropped_reason: null,
+        witness: {
+          kind: "retained",
+          selected_count_before: index,
+          token_total_before: index * 5,
+          token_estimate: 5
+        }
+      })
+    ));
+    expect(preProjection.introduced_candidate_keys).toEqual([]);
+    expect(preProjection.ordered_subsequence).toBe(false);
+    expect(preProjection.qualified_ordered_subsequence).toBe(false);
+    expect(preProjection.projection_actions.every((action) =>
+      action.reason_code === "unwitnessed_reorder" &&
+      action.qualification === "ineligible"
+    )).toBe(true);
+  });
+
+  it("keeps visible candidates and diagnostics identical with capture on or off", () => {
+    const withoutCapture = selectFixture(undefined, undefined, true);
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    const withCapture = selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true);
+
+    expect(boundary).toBeDefined();
+    expect(withCapture.candidates).toEqual(withoutCapture.candidates);
+    expect(withCapture.diagnostics).toEqual(withoutCapture.diagnostics);
+  });
+
+  it("captures excluded admission actions outside the settled sequence", () => {
+    const candidates = fixtureCandidates();
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: {
+        ...createConfig(),
+        budgets: { ...createConfig().budgets, max_entries: 2 }
+      },
+      supplementaryData: createSupplementaryData(),
+      tokenEstimator: { estimate: () => 5 },
+      rankByCandidateKey: rankMap(candidates),
+      finalOrderAfterCoverage: "coverage",
+      selectionBoundaryObserver: (pending) => {
+        boundary = materializeFineAssessmentSelectionBoundary(pending);
+        return undefined;
+      }
+    });
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+    const preProjection = readPreProjection(boundary);
+
+    expect(preProjection.candidate_keys).toEqual([
+      "workspace_local:memory_entry:candidate-1",
+      "workspace_local:memory_entry:candidate-2"
+    ]);
+    expect(preProjection.admission_actions.slice(2)).toEqual(
+      preProjection.admission_actions.slice(2).map((_action, index) => ({
+        candidate_key: `workspace_local:memory_entry:candidate-${index + 3}`,
+        action: "exclude",
+        selection_order: index + 3,
+        pre_projection_rank: null,
+        dropped_reason: "max_entries",
+        witness: {
+          kind: "max_entries",
+          accepted_before: 2,
+          limit: 2
+        }
+      }))
+    );
+  });
+
+  it.each([
+    ["candidate key", (ledger: FineAssessmentPreProjectionObservation) => ({
+      ...ledger,
+      candidate_keys: ["tampered", ...ledger.candidate_keys.slice(1)]
+    })],
+    ["pre-projection rank", (ledger: FineAssessmentPreProjectionObservation) => ({
+      ...ledger,
+      admission_actions: [
+        { ...ledger.admission_actions[0]!, pre_projection_rank: 2 },
+        ...ledger.admission_actions.slice(1)
+      ]
+    })],
+    ["drop reason", (ledger: FineAssessmentPreProjectionObservation) => ({
+      ...ledger,
+      admission_actions: [
+        { ...ledger.admission_actions[0]!, dropped_reason: "max_entries" },
+        ...ledger.admission_actions.slice(1)
+      ]
+    })],
+    ["token total", (ledger: FineAssessmentPreProjectionObservation) => ({
+      ...ledger,
+      token_total: ledger.token_total + 1
+    })]
+  ])("rejects tampered pre-projection %s", (_, mutate) => {
+    const boundary = captureBoundary();
+    const tampered = {
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: mutate(readPreProjection(boundary))
+      }
+    } as unknown as FineAssessmentSelectionBoundaryCase;
+
+    expect(() => replayFineAssessmentSelectionBoundary(tampered))
+      .toThrow(/selection boundary fidelity mismatch/u);
   });
 
   it("detects drift in the complete visible candidate and diagnostic digest", () => {
@@ -171,6 +316,18 @@ describe("fine-assessment selection boundary fidelity", () => {
           ...boundary.input.ordered_candidates.slice(1)
         ]
       }
+    })],
+    ["malformed admission action", (
+      boundary: FineAssessmentSelectionBoundaryCase
+    ) => ({
+      ...boundary,
+      expected: {
+        ...boundary.expected,
+        pre_projection: {
+          ...boundary.expected.pre_projection!,
+          admission_actions: [null]
+        }
+      }
     })]
   ])("rejects invalid %s", (_, mutate) => {
     const invalid = mutate(captureBoundary()) as unknown as
@@ -268,23 +425,41 @@ function captureBoundary(
   return boundary;
 }
 
+function readPreProjection(
+  boundary: FineAssessmentSelectionBoundaryCase
+): FineAssessmentPreProjectionObservation {
+  if (boundary.expected.pre_projection === undefined) {
+    throw new Error("selection boundary did not capture pre-projection");
+  }
+  return boundary.expected.pre_projection;
+}
+
 function selectFixture(
   observer?: (pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined,
-  estimator = vi.fn((_content: string) => 5)
+  estimator = vi.fn((_content: string) => 5),
+  captureAnswerFeatures = observer !== undefined,
+  reverseFinalOrder = false
 ) {
   const candidates = fixtureCandidates();
+  const finalRelevanceByCandidateKey = new Map(candidates.map(
+    (candidate, index) => [
+      candidate.fusion.candidate_key,
+      reverseFinalOrder ? (index + 1) / 10 : candidate.fusion.fused_score
+    ]
+  ));
   return selectFineAssessmentCandidates({
     orderedCandidates: candidates,
     config: createConfig(),
     supplementaryData: createSupplementaryData(),
     tokenEstimator: { estimate: estimator },
     rankByCandidateKey: rankMap(candidates),
-    finalRelevanceByCandidateKey: new Map(candidates.map((candidate) => [
+    finalRelevanceByCandidateKey,
+    coverageRelevanceByCandidateKey: new Map(candidates.map((candidate) => [
       candidate.fusion.candidate_key,
       candidate.fusion.fused_score
     ])),
     finalOrderAfterCoverage: "public_relevance",
-    captureAnswerFeatures: observer !== undefined,
+    captureAnswerFeatures,
     capturePacketPlanTrace: true,
     selectionBoundaryObserver: observer
   });
