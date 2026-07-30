@@ -30,17 +30,25 @@ describe("local expansion recall experiment authority", () => {
   afterEach(clearFrozenReuseRoots);
 
   it.each([
-    ["A", "disabled"],
-    ["B", "env"]
+    ["H0", "A", "disabled", undefined],
+    ["H0", "B", "env", undefined],
+    ["H1", "A", "disabled", "on"],
+    ["H1", "B", "env", "on"]
   ] as const)(
-    "allows cell %s without promotion or consumer-gate authority",
-    async (_cell, embedding) => {
+    "allows %s cell %s without promotion or consumer-gate authority",
+    async (_hypothesis, _cell, embedding, h1MaxProduct) => {
       const fixture = await completeExpansionFixture();
       await expect(assertExpansionRecallAuthority({
         options: { ...BASE_OPTIONS, experiment: true },
         bundle: recallBundle(fixture),
         recallWeightOverrides: undefined,
-        env: { ...BASE_ENV, ALAYA_RECALL_EVAL_EMBEDDING: embedding }
+        env: {
+          ...BASE_ENV,
+          ALAYA_RECALL_EVAL_EMBEDDING: embedding,
+          ...(h1MaxProduct === undefined ? {} : {
+            ALAYA_RECALL_CONF_H1_MAX_PRODUCT: h1MaxProduct
+          })
+        }
       })).resolves.toBeUndefined();
 
       expect(state.verifyIntegrity).not.toHaveBeenCalled();
@@ -48,6 +56,37 @@ describe("local expansion recall experiment authority", () => {
       expect(state.seedLedgerBinding).not.toHaveBeenCalled();
     }
   );
+
+  it("rejects a non-canonical H1 experiment flag value", async () => {
+    const fixture = await completeExpansionFixture();
+
+    await expect(assertExpansionRecallAuthority({
+      options: { ...BASE_OPTIONS, experiment: true },
+      bundle: recallBundle(fixture),
+      recallWeightOverrides: undefined,
+      env: {
+        ...BASE_ENV,
+        ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "true"
+      }
+    })).rejects.toThrow(/H1|product-default recall policy/u);
+  });
+
+  it("keeps production recall on the default policy when the H1 flag is present", async () => {
+    const fixture = await completeExpansionFixture();
+
+    await expect(assertExpansionRecallAuthority({
+      options: {
+        ...BASE_OPTIONS,
+        expansionCapability: fixture.capability
+      },
+      bundle: recallBundle(fixture),
+      recallWeightOverrides: undefined,
+      env: {
+        ...BASE_ENV,
+        ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
+      }
+    })).rejects.toThrow(/product-default recall policy/u);
+  });
 
   it("allows a bounded slice without weakening production or policy guards", async () => {
     const fixture = await completeExpansionFixture();

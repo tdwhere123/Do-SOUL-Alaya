@@ -91,8 +91,9 @@ function assertExperimentRecallInvocation(
     throw new Error("local experiment differs from the exact A/B contract");
   }
   assertExperimentRecallWindow(options, input.bundle.sidecar.questions.length);
-  const cell = recallCell(env);
-  assertRecallEnvironment(env, input.recallWeightOverrides, cell);
+  const productDefaultEnv = withoutExperimentOperator(env);
+  const cell = recallCell(productDefaultEnv);
+  assertRecallEnvironment(productDefaultEnv, input.recallWeightOverrides, cell);
 }
 
 function assertExperimentRecallWindow(
@@ -113,6 +114,20 @@ function assertExperimentRecallWindow(
   if (offset + options.limit > questionCount) {
     throw new Error("local experiment recall window exceeds the snapshot");
   }
+}
+
+function withoutExperimentOperator(
+  env: Readonly<Record<string, string | undefined>>
+): Readonly<Record<string, string | undefined>> {
+  const key = "ALAYA_RECALL_CONF_H1_MAX_PRODUCT";
+  const value = env[key];
+  if (value === undefined) return env;
+  if (value !== "on") {
+    throw new Error("local experiment H1 operator must be exactly on");
+  }
+  const productDefaultEnv = { ...env };
+  delete productDefaultEnv[key];
+  return productDefaultEnv;
 }
 
 async function verifyExpansionSnapshotAuthority(
