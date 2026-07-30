@@ -204,7 +204,11 @@ async function prepareLongMemEvalQuestionInWorkspace(
     input.daemon.runEdgePlanePassIfConfigured()
   );
   await runCoherenceEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
-  await runAnswersWithEdgesIfEnabled(input, workspace, seedState.coherenceMembers);
+  await runAnswersWithEdges(
+    input.question.question_id,
+    workspace,
+    seedState.coherenceMembers
+  );
   const goldMemoryIds = deriveLongMemEvalGoldMemoryIds(
     seedState.sidecar,
     seedState.answerSessionSet
@@ -272,10 +276,6 @@ function runQuestionRecallCycle(
   });
 }
 
-export function isAnswersWithEdgesEnabled(): boolean {
-  return true;
-}
-
 async function buildTimedQuestionResult(input: {
   readonly input: LongMemEvalQuestionRunInput;
   readonly workspace: BenchWorkspaceHandle;
@@ -334,15 +334,11 @@ async function runCoherenceEdgesIfEnabled(
   );
 }
 
-async function runAnswersWithEdgesIfEnabled(
-  input: LongMemEvalQuestionRunInput,
-  workspace: Awaited<ReturnType<BenchDaemonHandle["attachWorkspace"]>>,
+export async function runAnswersWithEdges(
+  questionId: string,
+  workspace: Pick<BenchWorkspaceHandle, "accrueAnswersWithCoRelevance">,
   members: readonly BenchEdgeFormationMember[]
 ): Promise<void> {
-  // Flood/answers_with is always on; only embeddingMode gates bench edge mint.
-  if (input.embeddingMode !== "env") {
-    return;
-  }
   const config = resolveLongMemEvalEdgeFormationConfig(process.env).answersWith;
   const summary = await workspace.accrueAnswersWithCoRelevance(members, {
     bar: config.bar,
@@ -350,7 +346,7 @@ async function runAnswersWithEdgesIfEnabled(
     crossSessionOnly: config.crossSessionOnly
   });
   console.error(
-    `[answers-with-edges] q=${input.question.question_id} ` +
+    `[answers-with-edges] q=${questionId} ` +
       `co_relevant=${summary.coRelevantPairs} kept=${summary.keptPairs} ` +
       `minted=${summary.minted}`
   );

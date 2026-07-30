@@ -20,6 +20,11 @@ import {
   LongMemEvalGoldObjectKindSchema,
   validatePersistedQuestionMeasurement
 } from "./gold-identity-schema.js";
+import {
+  RecallFloodEdgeTraceV1Schema as DiagnosticFloodEdgeTraceV1Schema,
+  RecallH1FuelCoverageSchemaShape as DiagnosticH1FuelCoverageSchemaShape,
+  RecallH1MaxProductSchema as DiagnosticH1MaxProductSchema
+} from "../../../harness/recall/h1/recall-h1-diagnostics-schema.js";
 export { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
 
 export const BenchEmbeddingProviderStateSchema = z.enum([
@@ -48,39 +53,9 @@ const DiagnosticAxisContributionsSchema = z
   .record(z.string(), z.number())
   .readonly();
 
-export const DiagnosticFloodEdgeTraceV1Schema = z
-  .object({
-    schema_version: z.literal(1),
-    path_id: z.string().min(1),
-    relation_kind: z.string().min(1),
-    seed_object_id: z.string().min(1),
-    target_object_id: z.string().min(1),
-    input_potential: z.number().min(0),
-    edge_conductance: z.number(),
-    slice_compatibility: z.enum([
-      "not_evaluated",
-      "no_query_key",
-      "missing_source_key",
-      "missing_target_key",
-      "missing_source_and_target_key",
-      "no_slice_match",
-      "slice_match"
-    ]),
-    raw_transfer: z.number(),
-    capped_transfer: z.number().min(0),
-    decision: z.enum(["transferred", "rejected"]),
-    reason: z.enum([
-      "transferred",
-      "capped",
-      "self_loop",
-      "missing_edge_provenance",
-      "missing_or_zero_input",
-      "non_positive_conductance",
-      "no_slice_match"
-    ])
-  })
-  .strict()
-  .readonly();
+export {
+  RecallFloodEdgeTraceV1Schema as DiagnosticFloodEdgeTraceV1Schema
+} from "../../../harness/recall/h1/recall-h1-diagnostics-schema.js";
 
 export const DiagnosticFloodPotentialSchema = z
   .object({
@@ -100,7 +75,9 @@ export const DiagnosticFloodPotentialSchema = z
     e_direct_status: z.string(),
     fuel_verified: z.boolean(),
     edge_traces: z.array(DiagnosticFloodEdgeTraceV1Schema).max(16).readonly().optional(),
-    edge_trace_truncated_count: z.number().int().nonnegative().optional()
+    edge_trace_truncated_count: z.number().int().nonnegative().optional(),
+    score_mode: z.literal("rrf_seeded_h1_max_product").optional(),
+    h1_max_product: DiagnosticH1MaxProductSchema.optional()
   })
   .strict()
   .readonly();
@@ -112,7 +89,8 @@ const DiagnosticFloodFuelCoverageSchema = z
     fuel_verified_count: z.number().int().nonnegative(),
     slice_active_count: z.number().int().nonnegative(),
     path_active_count: z.number().int().nonnegative(),
-    evidence_active_count: z.number().int().nonnegative()
+    evidence_active_count: z.number().int().nonnegative(),
+    ...DiagnosticH1FuelCoverageSchemaShape
   })
   .readonly();
 

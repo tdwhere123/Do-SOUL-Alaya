@@ -44,6 +44,8 @@ function readRecallFloodEnv(recall: RecallConfig, name: string): RecallEnvLookup
       return matched(stringify(recall.confFloodCapTotal));
     case "ALAYA_RECALL_CONF_SLICE_COMPATIBILITY":
       return matched(recall.confSliceCompatibility ? "on" : undefined);
+    case "ALAYA_RECALL_CONF_H1_MAX_PRODUCT":
+      return matched(recall.confH1MaxProduct ? "on" : undefined);
     case "ALAYA_RECALL_PATH_EMB_MODULATION":
       return matched(recall.pathEmbModulation);
     default:

@@ -16,6 +16,11 @@ import {
   RecallMultiSeedGraphFanInDiagnosticsSchema,
   RecallPacketPlanTraceSchema
 } from "./recall-diagnostics-support-schema.js";
+import {
+  RecallFloodEdgeTraceV1Schema,
+  RecallH1FuelCoverageSchemaShape,
+  RecallH1MaxProductSchema
+} from "./h1/recall-h1-diagnostics-schema.js";
 export {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
@@ -78,40 +83,6 @@ const RecallConformantAxisContributionSchema = z
   .record(z.string(), z.number().min(0))
   .readonly();
 
-const RecallFloodEdgeTraceV1Schema = z
-  .object({
-    schema_version: z.literal(1),
-    path_id: z.string().min(1),
-    relation_kind: z.string().min(1),
-    seed_object_id: z.string().min(1),
-    target_object_id: z.string().min(1),
-    input_potential: z.number().min(0),
-    edge_conductance: z.number(),
-    slice_compatibility: z.enum([
-      "not_evaluated",
-      "no_query_key",
-      "missing_source_key",
-      "missing_target_key",
-      "missing_source_and_target_key",
-      "no_slice_match",
-      "slice_match"
-    ]),
-    raw_transfer: z.number(),
-    capped_transfer: z.number().min(0),
-    decision: z.enum(["transferred", "rejected"]),
-    reason: z.enum([
-      "transferred",
-      "capped",
-      "self_loop",
-      "missing_edge_provenance",
-      "missing_or_zero_input",
-      "non_positive_conductance",
-      "no_slice_match"
-    ])
-  })
-  .strict()
-  .readonly();
-
 const RecallIntegratedFloodCandidateDiagnosticsSchema = z
   .object({
     R_obj: z.number().min(0),
@@ -130,7 +101,9 @@ const RecallIntegratedFloodCandidateDiagnosticsSchema = z
     e_direct_status: z.string().min(1),
     fuel_verified: z.boolean(),
     edge_traces: z.array(RecallFloodEdgeTraceV1Schema).max(16).readonly().optional(),
-    edge_trace_truncated_count: z.number().int().nonnegative().optional()
+    edge_trace_truncated_count: z.number().int().nonnegative().optional(),
+    score_mode: z.literal("rrf_seeded_h1_max_product").optional(),
+    h1_max_product: RecallH1MaxProductSchema.optional()
   })
   .strict()
   .readonly();
@@ -142,7 +115,8 @@ const RecallFloodFuelCoverageSummarySchema = z
     fuel_verified_count: z.number().int().nonnegative(),
     slice_active_count: z.number().int().nonnegative(),
     path_active_count: z.number().int().nonnegative(),
-    evidence_active_count: z.number().int().nonnegative()
+    evidence_active_count: z.number().int().nonnegative(),
+    ...RecallH1FuelCoverageSchemaShape
   })
   .strict()
   .readonly();

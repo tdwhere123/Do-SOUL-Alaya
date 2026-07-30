@@ -24,6 +24,8 @@ import {
   type ExtractionRequestProfile
 } from "../extraction/cache/extraction-cache-manifest.js";
 import type { SnapshotArtifactIntegrity } from "./integrity.js";
+import type { SnapshotGraphPreflight } from
+  "./current/snapshot-graph-preflight.js";
 import type { ExtractionFillSummaryContract } from
   "../extraction/fill/manifest/fill-manifest-contract.js";
 import type { LongMemEvalExpansionLineage } from "../promotion/expansion/lineage/expansion-lineage-schema.js";
@@ -187,6 +189,7 @@ export interface LongMemEvalSnapshotManifest {
   readonly run_provenance?: LongMemEvalSnapshotRunProvenance;
   readonly question_id_digest?: string;
   readonly dataset_sha256?: string;
+  readonly graph_preflight?: Readonly<SnapshotGraphPreflight>;
   readonly attribution?: Readonly<{
     status: "attributed" | "legacy_unattributed";
     gate_eligible: boolean;

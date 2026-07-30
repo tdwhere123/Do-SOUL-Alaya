@@ -23,6 +23,8 @@ import { LongMemEvalExpansionSourceAnchorSchema } from
   "../promotion/expansion/lineage/expansion-source-anchor-schema.js";
 import { SupplementalSourceProvenanceBindingSchema } from
   "../extraction/cache/supplemental-source-receipt.js";
+import { SnapshotGraphPreflightSchema } from
+  "./current/snapshot-graph-preflight-contract.js";
 
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const SnapshotExtractionBaseSchema = z.object({
@@ -88,7 +90,6 @@ const SnapshotAttributionSchema = z
     gate_eligible: z.boolean()
   })
   .readonly();
-
 export function validateSnapshotManifest(
   parsed: unknown,
   filePath: string,
@@ -102,6 +103,9 @@ export function validateSnapshotManifest(
     : LongMemEvalSnapshotRunProvenanceSchema.parse(record.run_provenance);
   const artifactIntegrity = parseArtifactIntegrity(record.artifact_integrity, filePath);
   const storedAttribution = parseSnapshotAttribution(record.attribution, filePath);
+  const graphPreflight = record.graph_preflight === undefined
+    ? undefined
+    : SnapshotGraphPreflightSchema.parse(record.graph_preflight);
   const seedExtractionPath = parseSeedExtractionPath(
     record.seed_extraction_path,
     filePath
@@ -129,6 +133,7 @@ export function validateSnapshotManifest(
     ...manifest,
     ...(artifactIntegrity === undefined ? {} : { artifact_integrity: artifactIntegrity }),
     ...(runProvenance === undefined ? {} : { run_provenance: runProvenance }),
+    ...(graphPreflight === undefined ? {} : { graph_preflight: graphPreflight }),
     attribution: storedAttribution?.status === "attributed"
       ? derivedAttribution
       : { status: "legacy_unattributed", gate_eligible: false }

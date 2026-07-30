@@ -15,7 +15,7 @@ export interface FloodEdgeTransferResult {
   readonly truncatedCount: number;
 }
 
-type FloodEdgeTransferInput = Readonly<{
+export type FloodEdgeTransferInput = Readonly<{
   readonly inflow: readonly PathInflowEdge[] | undefined;
   readonly targetObjectId: string;
   readonly rObjectById: ReadonlyMap<string, number>;
@@ -130,7 +130,26 @@ function compareText(left: string, right: string): number {
 export function computeFloodEdgeTransfer(
   input: FloodEdgeTransferInput
 ): Readonly<FloodEdgeTransferResult> {
-  const supports: number[] = [];
+  const traces = evaluateFloodEdgeTraces(input);
+  const supports = traces
+    .filter((trace) => trace.decision === "transferred")
+    .map((trace) => trace.capped_transfer);
+  const limit = Math.max(0, Math.trunc(input.traceLimit ?? RECALL_FLOOD_EDGE_TRACE_LIMIT));
+  const ordered = [...traces].sort(compareTrace);
+  const value = Math.min(
+    noisyOrDecorrelate(supports, supports.map(() => 1), input.rhoPath),
+    clamp01(input.capTotal)
+  );
+  return Object.freeze({
+    value,
+    traces: Object.freeze(ordered.slice(0, limit)),
+    truncatedCount: Math.max(0, ordered.length - limit)
+  });
+}
+
+export function evaluateFloodEdgeTraces(
+  input: FloodEdgeTransferInput
+): readonly Readonly<RecallFloodEdgeTraceV1>[] {
   const traces: Readonly<RecallFloodEdgeTraceV1>[] = [];
   for (const edge of input.inflow ?? []) {
     const inputPotential = input.rObjectById.get(edge.seedObjectId) ?? 0;
@@ -146,19 +165,6 @@ export function computeFloodEdgeTransfer(
       input.enforceSliceCompatibility === true
     );
     traces.push(trace);
-    if (trace.decision === "transferred") {
-      supports.push(trace.capped_transfer);
-    }
   }
-  const limit = Math.max(0, Math.trunc(input.traceLimit ?? RECALL_FLOOD_EDGE_TRACE_LIMIT));
-  const ordered = traces.sort(compareTrace);
-  const value = Math.min(
-    noisyOrDecorrelate(supports, supports.map(() => 1), input.rhoPath),
-    clamp01(input.capTotal)
-  );
-  return Object.freeze({
-    value,
-    traces: Object.freeze(ordered.slice(0, limit)),
-    truncatedCount: Math.max(0, ordered.length - limit)
-  });
+  return Object.freeze(traces);
 }

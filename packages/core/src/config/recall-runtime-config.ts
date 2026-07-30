@@ -12,6 +12,7 @@ export interface RecallRuntimeConfig {
   readonly confFloodCap: number | undefined;
   readonly confFloodCapTotal: number | undefined;
   readonly confSliceCompatibility: boolean;
+  readonly confH1MaxProduct: boolean;
   readonly pathEmbModulation: string | undefined;
   readonly projectionsEnabled: boolean;
   readonly lexicalDecorr: string | undefined;
@@ -91,6 +92,7 @@ export function parseRecallRuntimeConfigFromEnv(
     confFloodCap: readOptionalNumber(env[keys.confFloodCap]),
     confFloodCapTotal: readOptionalNumber(env[keys.confFloodCapTotal]),
     confSliceCompatibility: flagEnabled(env[keys.confSliceCompatibility]),
+    confH1MaxProduct: flagEnabled(env[keys.confH1MaxProduct]),
     pathEmbModulation: env[keys.pathEmbModulation],
     projectionsEnabled: defaultOn(env[keys.projections]),
     lexicalDecorr: env[keys.lexicalDecorr],

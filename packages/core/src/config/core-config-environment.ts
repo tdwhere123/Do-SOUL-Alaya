@@ -10,6 +10,7 @@ export const CORE_CONFIG_ENV_KEYS = Object.freeze({
     confFloodCap: "ALAYA_RECALL_CONF_FLOOD_CAP",
     confFloodCapTotal: "ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL",
     confSliceCompatibility: "ALAYA_RECALL_CONF_SLICE_COMPATIBILITY",
+    confH1MaxProduct: "ALAYA_RECALL_CONF_H1_MAX_PRODUCT",
     pathEmbModulation: "ALAYA_RECALL_PATH_EMB_MODULATION",
     projections: "ALAYA_RECALL_PROJECTIONS",
     lexicalDecorr: "ALAYA_RECALL_LEXICAL_DECORR",

@@ -36,12 +36,16 @@ describe("effective recall config identity", () => {
     const adapterDrift = buildEffectiveRecallConfigIdentity({
       ALAYA_RECALL_SOURCE_REF_ROBUST: "false"
     }, options);
+    const h1Drift = buildEffectiveRecallConfigIdentity({
+      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
+    }, options);
 
     expect(equivalent.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(equivalentAdapter.effective_config_sha256).toBe(base.effective_config_sha256);
     expect(runtimeDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(requestDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
     expect(adapterDrift.effective_config_sha256).not.toBe(base.effective_config_sha256);
+    expect(h1Drift.effective_config_sha256).not.toBe(base.effective_config_sha256);
   });
 
   it("binds the policy-derived fine-evaluation budget into provenance", () => {
@@ -125,6 +129,25 @@ describe("effective recall config identity", () => {
   it("allows the attributed bounded-final-authority treatment before reading inputs", async () => {
     const treatment = {
       ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP: "2"
+    };
+    expect(buildEffectiveRecallConfigIdentity(treatment, {
+      maxResults: 10,
+      conflictAwareness: true
+    }).effective_config_sha256).not.toBe(buildEffectiveRecallConfigIdentity({}, {
+      maxResults: 10,
+      conflictAwareness: true
+    }).effective_config_sha256);
+
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/missing/snapshot.db",
+      variant: "longmemeval_oracle",
+      historyRoot: "/missing/history"
+    }, undefined, treatment)).rejects.toThrow(/ENOENT|no such file|snapshot manifest/u);
+  });
+
+  it("allows attributed H1 max-product experiments before reading inputs", async () => {
+    const treatment = {
+      ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on"
     };
     expect(buildEffectiveRecallConfigIdentity(treatment, {
       maxResults: 10,

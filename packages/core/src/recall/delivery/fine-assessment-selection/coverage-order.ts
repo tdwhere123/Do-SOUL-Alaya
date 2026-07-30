@@ -144,5 +144,12 @@ function resolveEmbeddingHeadEvictions(
       );
     }
   });
+  coverageOrdered = orderFineAssessmentByCoverage(
+    candidates,
+    context,
+    relevanceByCandidateKey,
+    evictions,
+    captureMarginalGain
+  );
   return Object.freeze({ evictions, coverageOrdered });
 }

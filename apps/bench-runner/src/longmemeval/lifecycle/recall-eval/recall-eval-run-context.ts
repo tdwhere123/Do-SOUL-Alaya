@@ -138,6 +138,7 @@ function recallEvalInvocationPolicyEnvironment(
   parseRecallRuntimeConfigFromEnv(env);
   const diagnostic = { ...env };
   delete diagnostic.ALAYA_RECALL_FINAL_AUTHORITY_MAX_HEAD_DROP;
+  delete diagnostic.ALAYA_RECALL_CONF_H1_MAX_PRODUCT;
   return diagnostic;
 }
 

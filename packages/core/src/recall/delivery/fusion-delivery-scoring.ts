@@ -10,6 +10,8 @@ import {
   buildConformantAxisContext,
   type ConformantAxisContext
 } from "../scoring/conformant-fusion-scoring.js";
+import type { H1MaxProductTransferResult } from
+  "../flood/h1-max-product.js";
 import {
   buildFloodFuelCoverageSummary,
   computeIntegratedFloodScore
@@ -39,6 +41,7 @@ import type {
   RecallSupplementaryData,
   IntegratedFloodCandidateDiagnostics
 } from "../runtime/recall-service-types.js";
+import { recallEnvFlagEnabled } from "../../config/recall-env-access.js";
 
 export {
   activeFusionStreams,
@@ -52,6 +55,7 @@ export function buildRecallFusionDetails(params: Readonly<{
   readonly policy: Readonly<RecallPolicy>;
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
+  readonly h1MaxProduct?: boolean;
 }>): ReadonlyMap<string, RecallFusionBreakdown> {
   const resolved = resolveRrfFusionWeights({
     policy: params.policy,
@@ -72,7 +76,9 @@ export function buildRecallFusionDetails(params: Readonly<{
     ranksByStream,
     resolved,
     supplementaryData: params.supplementaryData,
-    nowIso: params.nowIso
+    nowIso: params.nowIso,
+    h1MaxProduct: params.h1MaxProduct ??
+      recallEnvFlagEnabled("ALAYA_RECALL_CONF_H1_MAX_PRODUCT")
   });
   const prelim = buildPreliminaryFusionCandidates(streamSnapshots, params.supplementaryData, axisContext);
   const fusedRankByCandidateKey = buildFusedRankByCandidateKey(prelim);
@@ -230,6 +236,10 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
   readonly axisContext: ConformantAxisContext;
 }>): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
   const ra = params.axisContext.raByKey.get(params.candidateKey);
+  const h1 = params.axisContext.h1MaxProductByKey.get(params.candidateKey);
+  if (h1 !== undefined) {
+    return scoreH1MaxProductCandidate(params, ra, h1);
+  }
   const scored = computeIntegratedFloodScore({
     entry: params.candidate.entry,
     memorySupplementEligible: isWorkspaceMemoryCandidate(params.candidate),
@@ -250,6 +260,53 @@ function scoreIntegratedFusionCandidate(params: Readonly<{
       ...scored.diagnostics,
       edge_traces: trace.traces,
       edge_trace_truncated_count: trace.truncatedCount
+    })
+  });
+}
+
+function scoreH1MaxProductCandidate(
+  params: Readonly<{
+    readonly candidate: RecallFusionCandidateInput;
+    readonly supplementaryData: RecallSupplementaryData;
+    readonly candidateKey: string;
+    readonly axisContext: ConformantAxisContext;
+  }>,
+  ra: Readonly<Record<"object" | "path" | "evidence" | "temporal" | "control", number>> | undefined,
+  h1: Readonly<H1MaxProductTransferResult>
+): Readonly<{ readonly score: number; readonly diagnostics: IntegratedFloodCandidateDiagnostics }> {
+  const baseline = computeIntegratedFloodScore({
+    entry: params.candidate.entry,
+    memorySupplementEligible: isWorkspaceMemoryCandidate(params.candidate),
+    axisInputs: {
+      R_obj: ra?.object ?? 0,
+      A_path: 0,
+      B_evidence: 0
+    },
+    supplementaryData: params.supplementaryData
+  });
+  return Object.freeze({
+    score: h1.potential,
+    diagnostics: Object.freeze({
+      ...baseline.diagnostics,
+      A_path: h1.strongestTransfer,
+      path_status: h1.strongestTransfer > 0
+        ? "active"
+        : baseline.diagnostics.path_status,
+      final_score: h1.potential,
+      edge_traces: h1.traces,
+      edge_trace_truncated_count: h1.truncatedCount,
+      score_mode: "rrf_seeded_h1_max_product",
+      h1_max_product: Object.freeze({
+        schema_version: 1,
+        seed_basis: "rrf_family_base",
+        direct_potential: ra?.object ?? 0,
+        strongest_transfer: h1.strongestTransfer,
+        winner: h1.winner === null ? "direct" : "edge",
+        winning_edge_trace: h1.winner,
+        frontier_admitted:
+          params.candidate.firstAdmissionPlane === "graph_expansion",
+        transition_counts: h1.transitionCounts
+      })
     })
   });
 }

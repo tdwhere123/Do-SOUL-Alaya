@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   installCoreConfigFromProcessEnv,
   parseRecallRuntimeConfigFromEnv,
+  recallEnvFlagEnabled,
   recallEnvRaw,
   resolveCoreConfigEnvironmentKeys,
   resetCoreConfigForTests
@@ -16,6 +17,7 @@ const RECALL_ENV_FIXTURE = Object.freeze({
   ALAYA_RECALL_CONF_FLOOD_CAP: "0.55",
   ALAYA_RECALL_CONF_FLOOD_CAP_TOTAL: "0.66",
   ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "true",
+  ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "true",
   ALAYA_RECALL_PATH_EMB_MODULATION: "path-emb",
   ALAYA_RECALL_PROJECTIONS: "off",
   ALAYA_RECALL_LEXICAL_DECORR: "decorr",
@@ -28,6 +30,7 @@ const RECALL_ENV_FIXTURE = Object.freeze({
 const EXPECTED_RECALL_ENV = Object.freeze({
   ...RECALL_ENV_FIXTURE,
   ALAYA_RECALL_CONF_SLICE_COMPATIBILITY: "on",
+  ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "on",
   ALAYA_RECALL_PROJECTIONS: "off",
   ALAYA_RECALL_INTENT_V2: "on",
   ALAYA_RECALL_SESSION_ROUTE: "on"
@@ -136,7 +139,8 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
 
   it("captures slice compatibility as default off", () => {
     expect(parseRecallRuntimeConfigFromEnv({})).toMatchObject({
-      confSliceCompatibility: false
+      confSliceCompatibility: false,
+      confH1MaxProduct: false
     });
   });
 
@@ -149,5 +153,17 @@ describe("parseRecallRuntimeConfigFromEnv", () => {
     expect(["off", "0", "false", "yes", "unexpected"].map(parse)).toEqual([
       false, false, false, false, false
     ]);
+  });
+
+  it("installs H1 max-product into the runtime lookup used by recall", () => {
+    try {
+      installCoreConfigFromProcessEnv({
+        ALAYA_RECALL_CONF_H1_MAX_PRODUCT: "true"
+      });
+
+      expect(recallEnvFlagEnabled("ALAYA_RECALL_CONF_H1_MAX_PRODUCT")).toBe(true);
+    } finally {
+      resetCoreConfigForTests();
+    }
   });
 });

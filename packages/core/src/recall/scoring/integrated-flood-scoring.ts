@@ -2,10 +2,13 @@ import type { ManifestationState, MemoryEntry } from "@do-soul/alaya-protocol";
 import { clampManifestationByGovernance } from "../../path-graph/path-relations/path-manifestation-policy.js";
 import { facetOverlapCountFor, facetSliceEnabled } from "../delivery/fusion-delivery-streams.js";
 import { clamp01 } from "../runtime/recall-service-helpers.js";
+import { RECALL_FLOOD_EDGE_REASONS } from
+  "../runtime/recall-service-types.js";
 import type {
   FloodAxisInactiveReason,
   FloodFuelCoverageSummary,
   IntegratedFloodCandidateDiagnostics,
+  RecallFloodEdgeTraceV1,
   RecallSupplementaryData
 } from "../runtime/recall-service-types.js";
 import {
@@ -263,6 +266,63 @@ export function buildFloodFuelCoverageSummary(
     fuel_verified_count: fuelVerifiedCount,
     slice_active_count: sliceActiveCount,
     path_active_count: pathActiveCount,
-    evidence_active_count: evidenceActiveCount
+    evidence_active_count: evidenceActiveCount,
+    ...buildH1CoverageSummary(diagnostics)
   });
+}
+
+function buildH1CoverageSummary(
+  diagnostics: readonly IntegratedFloodCandidateDiagnostics[]
+): Pick<
+  FloodFuelCoverageSummary,
+  "h1_candidate_count" | "h1_transferable_count" |
+  "h1_edge_winner_count" | "h1_direct_winner_count" |
+  "h1_evaluated_edge_count" | "h1_seed_overlap_edge_count" |
+  "h1_transferred_edge_count" | "h1_rejected_edge_count" |
+  "h1_newly_admitted_frontier_target_count" | "h1_reason_counts"
+> {
+  const h1Rows = diagnostics.flatMap((row) =>
+    row.h1_max_product === undefined ? [] : [row.h1_max_product]);
+  const reasonCounts = emptyH1ReasonCounts();
+  for (const row of h1Rows) {
+    for (const reason of RECALL_FLOOD_EDGE_REASONS) {
+      reasonCounts[reason] += row.transition_counts.reason_counts[reason];
+    }
+  }
+  const edgeWinners = h1Rows.filter((row) => row.winner === "edge").length;
+  return Object.freeze({
+    h1_candidate_count: h1Rows.length,
+    h1_transferable_count: h1Rows.filter(
+      (row) => row.strongest_transfer > 0
+    ).length,
+    h1_edge_winner_count: edgeWinners,
+    h1_direct_winner_count: h1Rows.length - edgeWinners,
+    h1_evaluated_edge_count: sumTransitions(h1Rows, "evaluated_edge_count"),
+    h1_seed_overlap_edge_count: sumTransitions(h1Rows, "seed_overlap_edge_count"),
+    h1_transferred_edge_count: sumTransitions(h1Rows, "transferred_edge_count"),
+    h1_rejected_edge_count: sumTransitions(h1Rows, "rejected_edge_count"),
+    h1_newly_admitted_frontier_target_count: h1Rows.filter(
+      (row) => row.frontier_admitted
+    ).length,
+    h1_reason_counts: Object.freeze(reasonCounts)
+  });
+}
+
+function emptyH1ReasonCounts(): Record<
+  RecallFloodEdgeTraceV1["reason"],
+  number
+> {
+  return Object.fromEntries(
+    RECALL_FLOOD_EDGE_REASONS.map((reason) => [reason, 0])
+  ) as Record<RecallFloodEdgeTraceV1["reason"], number>;
+}
+
+function sumTransitions(
+  rows: readonly NonNullable<
+    IntegratedFloodCandidateDiagnostics["h1_max_product"]
+  >[],
+  key: "evaluated_edge_count" | "seed_overlap_edge_count" |
+    "transferred_edge_count" | "rejected_edge_count"
+): number {
+  return rows.reduce((sum, row) => sum + row.transition_counts[key], 0);
 }

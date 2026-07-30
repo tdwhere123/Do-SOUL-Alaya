@@ -387,7 +387,25 @@ describe("computeIntegratedFloodScore", () => {
       fuel_verified_count: 1,
       slice_active_count: 1,
       path_active_count: 1,
-      evidence_active_count: 1
+      evidence_active_count: 1,
+      h1_candidate_count: 0,
+      h1_transferable_count: 0,
+      h1_edge_winner_count: 0,
+      h1_direct_winner_count: 0,
+      h1_evaluated_edge_count: 0,
+      h1_seed_overlap_edge_count: 0,
+      h1_transferred_edge_count: 0,
+      h1_rejected_edge_count: 0,
+      h1_newly_admitted_frontier_target_count: 0,
+      h1_reason_counts: {
+        transferred: 0,
+        capped: 0,
+        self_loop: 0,
+        missing_edge_provenance: 0,
+        missing_or_zero_input: 0,
+        non_positive_conductance: 0,
+        no_slice_match: 0
+      }
     });
   });
 });

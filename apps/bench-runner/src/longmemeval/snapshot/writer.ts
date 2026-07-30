@@ -21,6 +21,8 @@ import { deriveSnapshotAttribution } from "./attribution.js";
 import {
   assertCurrentSnapshotWriteAuthority
 } from "./current/current-substrate-authority.js";
+import { assertSnapshotAnswersWithFormation } from
+  "./current/snapshot-answers-with-formation.js";
 import { buildSnapshotArtifactIntegrity } from "./integrity.js";
 import {
   MAX_SNAPSHOT_EXTRACTION_AUTHORITY_BYTES,
@@ -63,6 +65,10 @@ export async function writeRecallEvalSnapshotArtifacts(
     runProvenance: input.runProvenance,
     datasetSha256: datasetSha
   });
+  const graphPreflight = assertSnapshotAnswersWithFormation(
+    liveDbPath,
+    input.snapshotQuestions.map((question) => question.workspaceId)
+  );
   const schemaMigrationVersion = readSchemaMigrationVersion(liveDbPath);
   const authorityPath = snapshotExtractionAuthorityPath(input.snapshotOut);
   mkdirSync(dirname(authorityPath), { recursive: true });
@@ -90,7 +96,8 @@ export async function writeRecallEvalSnapshotArtifacts(
   const integrity = await buildSnapshotArtifactIntegrity(input.snapshotOut);
   assertCapturedAuthorityIntegrity(integrity, authorityPath, captured.bytes);
   writeSnapshotManifest(input.snapshotOut, buildManifest({
-    input, schemaMigrationVersion, extraction, integrity, datasetSha, questionDigest
+    input, schemaMigrationVersion, extraction, integrity, datasetSha,
+    questionDigest, graphPreflight
   }));
 }
 
@@ -121,6 +128,7 @@ function buildManifest(context: {
   readonly integrity: Awaited<ReturnType<typeof buildSnapshotArtifactIntegrity>>;
   readonly datasetSha: string;
   readonly questionDigest: string;
+  readonly graphPreflight: ReturnType<typeof assertSnapshotAnswersWithFormation>;
 }) {
   const { input } = context;
   const runProvenance = compactSnapshotRunProvenance(input.runProvenance);
@@ -141,6 +149,7 @@ function buildManifest(context: {
     run_provenance: runProvenance,
     question_id_digest: context.questionDigest,
     dataset_sha256: context.datasetSha,
+    graph_preflight: context.graphPreflight,
     attribution: deriveSnapshotAttribution({
       artifactIntegrity: context.integrity,
       runProvenance,

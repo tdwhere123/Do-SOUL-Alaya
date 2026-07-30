@@ -41,7 +41,7 @@ export function shouldCaptureRecallAnswerFeatures(params: Readonly<{
   readonly diagnosticCapture?: RecallDiagnosticCapture;
   readonly selectionBoundaryObserver?: unknown;
 }>): boolean {
-  return params.diagnosticCapture === "packet_trace" ||
+  return capturesRecallAnswerFeatures(params.diagnosticCapture) ||
     params.selectionBoundaryObserver !== undefined;
 }
 

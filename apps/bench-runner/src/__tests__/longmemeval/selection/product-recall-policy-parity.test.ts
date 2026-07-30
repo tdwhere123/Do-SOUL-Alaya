@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RecallPolicy, SoulMemorySearchRequest } from "@do-soul/alaya-protocol";
 import { buildBenchDiagnosticRecallPolicy } from "../../../harness/daemon/runtime/daemon-recall-result.js";
-import { buildRecallPolicy as buildDaemonMemorySearchRecallPolicy } from "../../../../../core-daemon/src/mcp-memory/recall-usage-recall-support.js";
+import { buildRecallPolicy as buildDaemonMemorySearchRecallPolicy } from "../../../../../core-daemon/src/mcp-memory/recall/recall-usage-recall-support.js";
 import { buildEffectiveRecallConfigIdentity } from "../../../longmemeval/provenance/effective-recall-config.js";
 import { canonicalProductRecallConfig } from "../../../longmemeval/promotion/verifiers/product-policy-verifier.js";
 

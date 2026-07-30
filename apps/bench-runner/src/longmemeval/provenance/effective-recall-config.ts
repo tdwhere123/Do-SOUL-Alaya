@@ -95,8 +95,12 @@ function normalizedCoreRuntime(
   env: Readonly<Record<string, string | undefined>>
 ) {
   const config = parseCoreConfigFromEnv(env);
+  const { confH1MaxProduct, ...recall } = config.recall;
   return {
-    recall: config.recall,
+    recall: {
+      ...recall,
+      rrf_seeded_h1_max_product: confH1MaxProduct
+    },
     embedding: {
       backfill_concurrency: resolveBackfillBatchConcurrency(
         config.embedding.backfillConcurrency

@@ -3,6 +3,10 @@ import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { noisyOrDecorrelate } from "./conformant-evidence-math.js";
 import { computeFloodEdgeTransfer } from "../flood/edge-transfer.js";
 import {
+  computeH1MaxProductTransfer,
+  type H1MaxProductTransferResult
+} from "../flood/h1-max-product.js";
+import {
   deriveMemorySliceKeysV1,
   derivePathAnchorSliceKeysV1,
   deriveQuerySliceKeysV1,
@@ -104,6 +108,10 @@ export interface ConformantAxisContext {
   readonly axisRankByKey: ReadonlyMap<string, Readonly<Record<RecallConformantAxis, number | null>>>;
   readonly raByKey: ReadonlyMap<string, Readonly<Record<RecallConformantAxis, number>>>;
   readonly edgeTraceByKey: ReadonlyMap<string, Readonly<FloodEdgeTraceBundle>>;
+  readonly h1MaxProductByKey: ReadonlyMap<
+    string,
+    Readonly<H1MaxProductTransferResult>
+  >;
 }
 
 interface FloodEdgeTraceBundle {
@@ -189,6 +197,7 @@ export function buildConformantAxisContext(params: Readonly<{
   readonly supplementaryData: RecallSupplementaryData;
   readonly nowIso: string;
   readonly enforceSliceCompatibility?: boolean;
+  readonly h1MaxProduct?: boolean;
 }>): ConformantAxisContext {
   const rhoEvidence = resolveConformantRhoEvidence();
   const rhoPath = resolveConformantRhoPath();
@@ -200,15 +209,25 @@ export function buildConformantAxisContext(params: Readonly<{
   const axisRankByKey = new Map<string, Readonly<Record<RecallConformantAxis, number | null>>>();
   const raByKey = new Map<string, Readonly<Record<RecallConformantAxis, number>>>();
   const edgeTraceByKey = new Map<string, Readonly<FloodEdgeTraceBundle>>();
+  const h1MaxProductByKey = new Map<
+    string,
+    Readonly<H1MaxProductTransferResult>
+  >();
   const enforceSliceCompatibility = params.enforceSliceCompatibility
     ?? recallEnvFlagEnabled("ALAYA_RECALL_CONF_SLICE_COMPATIBILITY");
   for (const candidate of seeded) {
     recordCandidateAxes(candidate, rObjectById, params.supplementaryData, {
       rhoPath, capPerSource, capTotal, axisRankByKey, raByKey, edgeTraceByKey,
-      sliceSelection, enforceSliceCompatibility
+      h1MaxProductByKey, sliceSelection, enforceSliceCompatibility,
+      h1MaxProduct: params.h1MaxProduct === true
     });
   }
-  return Object.freeze({ axisRankByKey, raByKey, edgeTraceByKey });
+  return Object.freeze({
+    axisRankByKey,
+    raByKey,
+    edgeTraceByKey,
+    h1MaxProductByKey
+  });
 }
 
 function seedConformantCandidates(
@@ -349,20 +368,24 @@ function buildObjectPotentialById(
   return result;
 }
 
+type CandidateAxisState = Readonly<{
+  rhoPath: number;
+  capPerSource: number;
+  capTotal: number;
+  axisRankByKey: Map<string, Readonly<Record<RecallConformantAxis, number | null>>>;
+  raByKey: Map<string, Readonly<Record<RecallConformantAxis, number>>>;
+  edgeTraceByKey: Map<string, Readonly<FloodEdgeTraceBundle>>;
+  h1MaxProductByKey: Map<string, Readonly<H1MaxProductTransferResult>>;
+  sliceSelection: Readonly<SliceSelectionContext>;
+  enforceSliceCompatibility: boolean;
+  h1MaxProduct: boolean;
+}>;
+
 function recordCandidateAxes(
   candidate: SeededConformantCandidate,
   rObjectById: ReadonlyMap<string, number>,
   supplementaryData: RecallSupplementaryData,
-  state: Readonly<{
-    rhoPath: number;
-    capPerSource: number;
-    capTotal: number;
-    axisRankByKey: Map<string, Readonly<Record<RecallConformantAxis, number | null>>>;
-    raByKey: Map<string, Readonly<Record<RecallConformantAxis, number>>>;
-    edgeTraceByKey: Map<string, Readonly<FloodEdgeTraceBundle>>;
-    sliceSelection: Readonly<SliceSelectionContext>;
-    enforceSliceCompatibility: boolean;
-  }>
+  state: CandidateAxisState
 ): void {
   const inflow = candidate.memorySupplementEligible
     ? supplementaryData.pathInflowByTarget?.[candidate.objectId]
@@ -376,16 +399,49 @@ function recordCandidateAxes(
     sliceCompatibilityByPathId,
     enforceSliceCompatibility: state.enforceSliceCompatibility
   });
+  const h1Transfer = computeCandidateH1Transfer(
+    candidate,
+    rObjectById,
+    inflow,
+    sliceCompatibilityByPathId,
+    state
+  );
+  if (h1Transfer !== null) {
+    state.h1MaxProductByKey.set(candidate.candidateKey, h1Transfer);
+  }
   state.axisRankByKey.set(candidate.candidateKey, NULL_AXIS_RANK);
   state.raByKey.set(candidate.candidateKey, Object.freeze({
-    object: candidate.object, path: quantize(transfer.value), evidence: candidate.evidence,
+    object: candidate.object,
+    path: quantize(h1Transfer?.pathContribution ?? transfer.value),
+    evidence: candidate.evidence,
     temporal: candidate.temporal, control: candidate.control
   }));
   if (inflow !== undefined && inflow.length > 0) {
     state.edgeTraceByKey.set(candidate.candidateKey, Object.freeze({
-      traces: transfer.traces, truncatedCount: transfer.truncatedCount
+      traces: h1Transfer?.traces ?? transfer.traces,
+      truncatedCount: h1Transfer?.truncatedCount ?? transfer.truncatedCount
     }));
   }
+}
+
+function computeCandidateH1Transfer(
+  candidate: SeededConformantCandidate,
+  rObjectById: ReadonlyMap<string, number>,
+  inflow: readonly PathInflowEdge[] | undefined,
+  sliceCompatibilityByPathId: ReadonlyMap<string, Readonly<SliceCompatibilityV1>>,
+  state: CandidateAxisState
+): Readonly<H1MaxProductTransferResult> | null {
+  if (!state.h1MaxProduct) return null;
+  return computeH1MaxProductTransfer({
+    inflow,
+    targetObjectId: candidate.objectId,
+    rObjectById,
+    capPerSource: state.capPerSource,
+    capTotal: state.capTotal,
+    rhoPath: state.rhoPath,
+    sliceCompatibilityByPathId,
+    directPotential: candidate.object
+  });
 }
 
 function scoreControlAxis(candidate: FusionContributionCandidate): number {
