@@ -86,6 +86,26 @@ describe("LongMemEval edge trace integration", () => {
         facet_tags: [{ facet: "location_place", value: "Paris" }],
         projection_schema_version: 1
       },
+      selector_observation: {
+        evidence: { directness: "none", validity: "none" },
+        path: {
+          status: "complete",
+          receipts: [expect.objectContaining({
+            receipt_status: "complete",
+            path_id: PATH_ID,
+            relation_kind: "answers_with",
+            source_object_id: SEED_ID,
+            target_object_id: TARGET_ID,
+            source_anchor: {
+              kind: "object_facet",
+              object_id: SEED_ID,
+              facet_key: "location_place"
+            },
+            target_anchor: { kind: "object", object_id: TARGET_ID },
+            edge_conductance: 1
+          })]
+        }
+      },
       path_suppression_score: 0
     });
     const target = parsed.fusion_breakdown.find((row) => row.object_id === TARGET_ID);
@@ -110,6 +130,7 @@ describe("LongMemEval edge trace integration", () => {
     });
     expect(strictQuestion.candidates.find((row) => row.object_id === TARGET_ID)).toMatchObject({
       answer_features: targetCandidate?.answer_features,
+      selector_observation: targetCandidate?.selector_observation,
       path_suppression_score: 0
     });
     expect(strictQuestion.gold[0]?.flood_potential?.edge_traces?.[0]).toEqual(

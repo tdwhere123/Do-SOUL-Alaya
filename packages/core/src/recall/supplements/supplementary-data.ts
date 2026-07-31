@@ -112,6 +112,7 @@ function freezeSupplementaryData(
     >;
     readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
     readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
+    readonly pathInflowAvailability: NonNullable<RecallSupplementaryData["pathInflowAvailability"]>;
   }>
 ): RecallSupplementaryData {
   return Object.freeze({
@@ -142,6 +143,7 @@ function freezeSupplementaryData(
       evidenceAndGovernance.verifiedUserAssertionContextsByMemoryId,
     governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
     pathInflowByTarget: evidenceAndGovernance.pathInflowByTarget,
+    pathInflowAvailability: evidenceAndGovernance.pathInflowAvailability,
     querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
   });
 }
@@ -209,6 +211,7 @@ async function collectEvidenceAndGovernanceData(
   >;
   readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
   readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
+  readonly pathInflowAvailability: NonNullable<RecallSupplementaryData["pathInflowAvailability"]>;
 }>> {
   const evidenceContexts = await collectRecallEvidenceContexts({
     dependencies: params.dependencies,
@@ -228,7 +231,8 @@ async function collectEvidenceAndGovernanceData(
   return Object.freeze({
     ...evidenceContexts,
     governanceCeilingByMemoryId: governanceDerivations.governanceCeilingByMemoryId,
-    pathInflowByTarget: governanceDerivations.pathInflowByTarget
+    pathInflowByTarget: governanceDerivations.pathInflowByTarget,
+    pathInflowAvailability: governanceDerivations.pathInflowAvailability
   });
 }
 

@@ -370,6 +370,7 @@ describe("selectFineAssessmentCandidates", () => {
     });
 
     expect(result.diagnostics[0]).not.toHaveProperty("answer_features");
+    expect(result.diagnostics[0]).not.toHaveProperty("selector_observation");
   });
 
   it("deduplicates object representations while retaining provenance diagnostics", () => {
@@ -486,12 +487,13 @@ describe("selectFineAssessmentCandidates", () => {
     expect(withTrace.candidates).toEqual(withoutTrace.candidates);
     expect(withoutTrace.diagnostics[0]).not.toHaveProperty("deep_head_trace");
     expect(withoutTrace.diagnostics[0]).not.toHaveProperty("coverage_marginal_gain");
+    expect(withoutTrace.diagnostics[0]).not.toHaveProperty("selector_observation");
     expect(withTrace.diagnostics[0]).toMatchObject({
       deep_head_trace: trace,
-      coverage_marginal_gain: 1
+      coverage_marginal_gain: 1,
+      selector_observation: { coverage: { marginal_gain: 1 } }
     });
     expect(withTrace.diagnostics.find((row) => row.object_id === "redundant"))
       .toMatchObject({ coverage_marginal_gain: 0.45 });
   });
-
 });

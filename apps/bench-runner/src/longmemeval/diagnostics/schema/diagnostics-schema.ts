@@ -11,6 +11,8 @@ import {
 } from "../../../harness/recall/answer-trace-schema.js";
 import { RecallPacketPlanTraceSchema } from
   "../../../harness/recall/recall-diagnostics-support-schema.js";
+import { RecallCandidateSelectorObservationSchema } from
+  "../../../harness/recall/candidate-selector-observation-schema.js";
 import { LongMemEvalQuestionMeasurementAxesSchema } from "../schema/measurement-axes-schema.js";
 import { DELIVERY_MISS_DROP_REASONS } from "../miss/delivery-miss-taxonomy.js";
 import { LongMemEvalMissClassificationSchema } from
@@ -238,6 +240,7 @@ const LongMemEvalReplayCandidateSchema = z
     answer_features: DiagnosticCandidateAnswerFeaturesSchema.nullable().default(null),
     deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
     coverage_marginal_gain: z.number().min(0).max(1).nullable().default(null),
+    selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     score_factors: DiagnosticScoreFactorsSchema
   })

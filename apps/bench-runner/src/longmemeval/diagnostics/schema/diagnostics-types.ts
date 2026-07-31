@@ -20,6 +20,8 @@ import {
 import type { BenchRecallDiagnostics } from "../../../harness/recall/recall-diagnostics-schema.js";
 import type { DeliveryMissDropReason } from "../miss/delivery-miss-taxonomy.js";
 import type { RecallCandidate, RecallOriginPlane } from "@do-soul/alaya-protocol";
+import { RecallCandidateSelectorObservationSchema } from
+  "../../../harness/recall/candidate-selector-observation-schema.js";
 
 // @anchor diagnostics-schema: the persisted shape of these records is owned
 // by diagnostics-schema.ts; these aliases keep one source of truth.
@@ -43,6 +45,9 @@ export type DiagnosticAnswerShapePlan = z.infer<typeof RecallAnswerShapePlanSche
 export type DiagnosticDeepHeadTrace = z.infer<typeof RecallDeepHeadTraceSchema>;
 export type DiagnosticCandidateAnswerFeatures = z.infer<
   typeof DiagnosticCandidateAnswerFeaturesSchema
+>;
+export type DiagnosticSelectorObservation = z.infer<
+  typeof RecallCandidateSelectorObservationSchema
 >;
 export type DiagnosticFloodEdgeTraceV1 = z.infer<typeof DiagnosticFloodEdgeTraceV1Schema>;
 export type DiagnosticFloodPotential = z.infer<typeof DiagnosticFloodPotentialSchema>;
@@ -96,6 +101,7 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly answer_features: DiagnosticCandidateAnswerFeatures | null;
   readonly deep_head_trace: DiagnosticDeepHeadTrace | null;
   readonly coverage_marginal_gain: number | null;
+  readonly selector_observation: DiagnosticSelectorObservation | null;
   readonly path_suppression_score: number | null;
   readonly score_factors: DiagnosticScoreFactors;
 }>;
@@ -409,6 +415,7 @@ export interface CandidateDiagnostic {
   readonly answerFeatures: DiagnosticCandidateAnswerFeatures | null;
   readonly deepHeadTrace: DiagnosticDeepHeadTrace | null;
   readonly coverageMarginalGain: number | null;
+  readonly selectorObservation: DiagnosticSelectorObservation | null;
   readonly pathSuppressionScore: number | null;
   readonly coverageSelectorAction: DeliveryStageAction | null;
   readonly sessionCoverageAction: DeliveryStageAction | null;

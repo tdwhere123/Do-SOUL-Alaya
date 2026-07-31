@@ -203,7 +203,7 @@ describe("final strict-tail consensus integration", () => {
 
     expect(incumbent?.answer_features?.answer_support?.authority.behavior_eligible).toBe(true);
     expect(exactResultDigest(result)).toBe(
-      "15e33cfaff09840ce19d4f5344a905e6e2f6f0ea40a5d90db1c228226c9f24bd"
+      "e37427be8f8a9fb1619364529dffc93c2ba39b593d8c3288822c3e23e161a7a8"
     );
   });
 

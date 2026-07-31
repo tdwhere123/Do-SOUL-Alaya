@@ -23,6 +23,8 @@ import {
   RecallH1OverlaySchema,
   validateRecallH1FloodOverlayRelationship
 } from "./h1/recall-h1-diagnostics-schema.js";
+import { RecallCandidateSelectorObservationSchema } from
+  "./candidate-selector-observation-schema.js";
 export {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
@@ -210,6 +212,7 @@ const RecallCandidateDiagnosticSchema = z
     answer_features: RecallCandidateAnswerFeaturesSchema.nullable().default(null),
     deep_head_trace: RecallDeepHeadTraceSchema.nullable().default(null),
     coverage_marginal_gain: z.number().min(0).max(1).nullable().default(null),
+    selector_observation: RecallCandidateSelectorObservationSchema.nullable().default(null),
     path_suppression_score: z.number().nullable().default(null),
     rank_after_fusion: z.number().int().positive().optional(),
     rank_after_feature_rerank: z.number().int().positive().optional(),

@@ -24,6 +24,8 @@ import {
   readDiagnosticCandidateIdentity
 } from "../candidate-identity.js";
 import type { DiagnosticCandidateIdentityMode } from "../candidate-identity.js";
+import { readCandidateSelectorObservation } from
+  "./candidate-selector-observation-reader.js";
 export { buildObjectIdentityKey } from "../candidate-identity.js";
 const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
   "protected_winner",
@@ -154,6 +156,8 @@ function readCandidateRow(
   if (record.coverage_marginal_gain != null && (
     coverageMarginalGain === null || coverageMarginalGain < 0 || coverageMarginalGain > 1
   )) return null;
+  const selectorObservation = readCandidateSelectorObservation(record.selector_observation);
+  if (record.selector_observation != null && selectorObservation === null) return null;
   const pathSuppressionScore = readNumber(record.path_suppression_score);
   if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
   const candidate: CandidateDiagnostic = {
@@ -167,6 +171,7 @@ function readCandidateRow(
     answerFeatures,
     deepHeadTrace,
     coverageMarginalGain,
+    selectorObservation,
     pathSuppressionScore,
     ...readCandidateDelivery(record)
   };

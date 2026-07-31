@@ -5,6 +5,8 @@ import type {
   RecallOriginPlane} from "@do-soul/alaya-protocol";
 import type { RecallPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
+import type { RecallCandidateSelectorObservation } from
+  "./diagnostics/candidate-selector-observation.js";
 
 export type RecallAdmissionPlane =
   | "activation"
@@ -256,6 +258,8 @@ export interface RecallCandidateDiagnostic {
     import("../rerank/deep-head.js").RecallDeepHeadTrace
   >;
   readonly coverage_marginal_gain?: number;
+  // Capture-only upstream state; delivery never reads this field.
+  readonly selector_observation?: Readonly<RecallCandidateSelectorObservation>;
   readonly path_suppression_score: number;
   // Live delivery-stage ranks (1-based). Provenance only — never feeds ranking.
   readonly rank_after_fusion?: number;

@@ -13,6 +13,8 @@ import type {
 } from "../../runtime/recall-service-types.js";
 import { selectRecallAdmissionAttributionPlane } from "../../scoring/scoring.js";
 import { buildRecallCandidateAnswerFeatures } from "../fine-assessment-answer-features.js";
+import { buildCandidateSelectorObservation } from
+  "./candidate-selector-observation.js";
 import type {
   FineAssessmentCandidate,
   FineAssessmentSelectionContext
@@ -54,6 +56,9 @@ export function createFineAssessmentDiagnostic(
     path_expansion_sources: Object.freeze([...(candidate.pathExpansionSources ?? [])]),
     ...buildAnswerFeatureDiagnostics(candidate, context),
     ...buildDecisionTraceDiagnostics(candidate, context),
+    ...(context.captureAnswerFeatures
+      ? { selector_observation: buildCandidateSelectorObservation(candidate, context) }
+      : {}),
     ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank, selectionOrder),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>"
   });

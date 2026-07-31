@@ -23,6 +23,8 @@ export interface PathInflowEdge {
   readonly weight: number;
 }
 
+export type RecallPathInflowAvailability = "not_observed" | "available" | "unavailable";
+
 export interface EvidenceSupportVector {
   readonly source_kind: "evidence_ref";
   readonly source_id: string;
@@ -63,6 +65,8 @@ export interface RecallSupplementaryData {
   // Conformant-only: target object_id → inflow edges (seed object_id + learned-edge weight π),
   // the adjacency the path FLOOD sums over. Absent (flag-off) → no flood.
   readonly pathInflowByTarget?: Readonly<Record<string, readonly PathInflowEdge[]>>;
+  /** Capture provenance for distinguishing an empty path set from a failed path read. */
+  readonly pathInflowAvailability?: RecallPathInflowAvailability;
   // Active sign-aware suppression deltas keyed by target memory id. A positive
   // value is subtracted from that memory's fused recall score before final
   // ranking, demoting targets that a reinforced negative path (recall_bias < 0)
