@@ -148,10 +148,14 @@ function validatePacketPlanStructure(
     ...trace.immutable_tail_candidate_keys
   ];
   const headKeys = new Set(trace.consensus_head_candidate_keys);
-  const proposal = [
+  const residualProposal = [
     ...trace.consensus_head_candidate_keys,
     ...trace.baseline_candidate_keys.filter((key) => !headKeys.has(key))
-  ].slice(0, trace.baseline_candidate_keys.length);
+  ];
+  const immutableProposal = [
+    ...trace.consensus_head_candidate_keys,
+    ...trace.immutable_tail_candidate_keys.filter((key) => !headKeys.has(key))
+  ];
   if (
     trace.head_width !== Math.ceil(trace.baseline_candidate_keys.length / 2) ||
     trace.baseline_head_candidate_keys.length !== trace.head_width ||
@@ -167,7 +171,10 @@ function validatePacketPlanStructure(
       "Packet plan baseline partition is inconsistent"
     );
   }
-  if (!sameOrderedKeys(trace.planned_candidate_keys, proposal)) {
+  if (
+    !sameOrderedKeys(trace.planned_candidate_keys, residualProposal) &&
+    !sameOrderedKeys(trace.planned_candidate_keys, immutableProposal)
+  ) {
     addPacketPlanIssue(
       context,
       ["planned_candidate_keys"],

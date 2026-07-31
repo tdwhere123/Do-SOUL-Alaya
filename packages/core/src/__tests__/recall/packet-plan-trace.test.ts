@@ -16,7 +16,7 @@ describe("support-set packet plan trace", () => {
       assessment_path: "snapshot",
       ...acceptedObservation(),
       added_candidate_keys: ["global:evidence_capsule:added-d"],
-      removed_candidate_keys: ["workspace_local:synthesis_capsule:tail-c"]
+      removed_candidate_keys: ["global:evidence_capsule:baseline-b"]
     });
     expect(Object.isFrozen(trace)).toBe(true);
     expect(Object.isFrozen(trace.embedding_head)).toBe(true);
@@ -131,12 +131,12 @@ function acceptedObservation(): RecallPacketPlanObservation {
     planned_candidate_keys: [
       "workspace_local:memory_entry:baseline-a",
       "global:evidence_capsule:added-d",
-      "global:evidence_capsule:baseline-b"
+      "workspace_local:synthesis_capsule:tail-c"
     ],
     actual_candidate_keys: [
       "workspace_local:memory_entry:baseline-a",
       "global:evidence_capsule:added-d",
-      "global:evidence_capsule:baseline-b"
+      "workspace_local:synthesis_capsule:tail-c"
     ],
     head_width: 2,
     baseline_head_candidate_keys: [

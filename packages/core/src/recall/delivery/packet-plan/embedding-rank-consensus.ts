@@ -170,11 +170,23 @@ function composeProposedPacket<T extends EmbeddingRankConsensusCandidate>(
   baseline: readonly T[]
 ): readonly T[] {
   const headKeys = candidateKeys(consensusHead);
-  // Prefer displaced baseline-head over immutable-tail when an outside key enters.
-  return [
+  const residual = [
     ...consensusHead,
     ...baseline.filter((candidate) => !headKeys.has(candidate.candidateKey))
-  ].slice(0, baseline.length);
+  ];
+  // In-pack emb promotion reshuffles membership without outside keys.
+  if (
+    residual.length === baseline.length &&
+    candidateKeys(residual).size === baseline.length
+  ) {
+    return residual;
+  }
+  // Outside introduce keeps the immutable tail; displaced head exits the pack.
+  const immutableTail = baseline.slice(resolveHeadWidth(baseline.length));
+  return [
+    ...consensusHead,
+    ...immutableTail.filter((candidate) => !headKeys.has(candidate.candidateKey))
+  ];
 }
 
 function scheduleHeadProtections<T extends EmbeddingRankConsensusCandidate>(

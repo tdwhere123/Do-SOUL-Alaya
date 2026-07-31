@@ -10,7 +10,7 @@ describe("embedding-rank consensus packet plan", () => {
     { packetSize: 9, headWidth: 5 },
     { packetSize: 10, headWidth: 5 }
   ])(
-    "derives its head from a $packetSize-entry packet and keeps displaced head over tail",
+    "derives its head from a $packetSize-entry packet and preserves its tail on outside introduce",
     ({ packetSize, headWidth }) => {
       const baseline = packet(...Array.from(
         { length: packetSize },
@@ -26,14 +26,11 @@ describe("embedding-rank consensus packet plan", () => {
       expect(keys(planned)).toEqual([
         "novel",
         ...keys(baseline.slice(0, headWidth - 1)),
-        ...keys(baseline.slice(headWidth - 1, packetSize - 1))
+        ...keys(baseline.slice(headWidth))
       ]);
-      expect(planned).toHaveLength(baseline.length);
-      if (packetSize > 1) {
-        expect(keys(planned)).not.toContain(keys(baseline)[packetSize - 1]);
-      }
-      if (packetSize > headWidth) {
-        expect(keys(planned)).toContain(keys(baseline)[headWidth - 1]);
+      expect(planned.slice(headWidth)).toEqual(baseline.slice(headWidth));
+      for (let index = headWidth; index < baseline.length; index += 1) {
+        expect(planned[index]).toBe(baseline[index]);
       }
     }
   );
@@ -73,7 +70,7 @@ describe("embedding-rank consensus packet plan", () => {
       candidates: [...baseline, candidate("novel", 100, 1)]
     });
 
-    expect(keys(planned)).toEqual(["novel", "a", "b"]);
+    expect(keys(planned)).toEqual(["novel", "a", "c"]);
     expect(planned).toHaveLength(baseline.length);
   });
 
@@ -109,9 +106,9 @@ describe("embedding-rank consensus packet plan", () => {
       "incumbent-a",
       "novel-z",
       "novel-a",
-      "incumbent-b",
-      "incumbent-c",
-      "tail-d"
+      "tail-d",
+      "tail-e",
+      "tail-f"
     ];
 
     for (const ranked of [
@@ -133,14 +130,14 @@ describe("embedding-rank consensus packet plan", () => {
       baseline: packet("head", "protected", "tail"),
       contender: candidate("novel", 100, 1),
       protectedCandidates: [{ candidateKey: "protected", rankLimit: 2 }],
-      expected: ["novel", "protected", "head"]
+      expected: ["novel", "protected", "tail"]
     },
     {
       name: "rank-limit breach",
       baseline: packet("protected", "head", "tail"),
       contender: candidate("novel", 100, 1),
       protectedCandidates: [{ candidateKey: "protected", rankLimit: 1 }],
-      expected: ["protected", "novel", "head"]
+      expected: ["protected", "novel", "tail"]
     }
   ])("composes consensus without allowing a protected candidate $name", ({
     baseline,
@@ -182,8 +179,8 @@ describe("embedding-rank consensus packet plan", () => {
       "novel-a",
       "protected-a",
       "protected-b",
-      "head",
-      "tail-a"
+      "tail-a",
+      "tail-b"
     ]);
   });
 
@@ -236,9 +233,9 @@ describe("embedding-rank consensus packet plan", () => {
       "a",
       "novel",
       "b",
-      "c",
       "tail-d",
-      "tail-e"
+      "tail-e",
+      "tail-f"
     ]);
     expect(resolved.decision).toEqual({
       status: "accepted",

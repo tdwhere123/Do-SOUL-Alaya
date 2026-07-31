@@ -90,24 +90,25 @@ function assertSupportSetObservation(
   if (!sameOrderedKeys(baseline, [...baselineHead, ...immutableTail])) {
     throw validationError("Packet plan baseline partition is inconsistent");
   }
-  if (!sameOrderedKeys(planned, composeResidualProposal(consensusHead, baseline))) {
+  const headKeys = new Set(consensusHead);
+  const residualProposal = [
+    ...consensusHead,
+    ...baseline.filter((key) => !headKeys.has(key))
+  ];
+  const immutableProposal = [
+    ...consensusHead,
+    ...immutableTail.filter((key) => !headKeys.has(key))
+  ];
+  if (
+    !sameOrderedKeys(planned, residualProposal) &&
+    !sameOrderedKeys(planned, immutableProposal)
+  ) {
     throw validationError("Packet plan proposal is inconsistent");
   }
   assertEmbeddingHead(observation);
   assertProtections(observation);
   assertDecisionReason(observation);
   assertDecision(observation, baseline, planned, actual);
-}
-
-function composeResidualProposal(
-  consensusHead: readonly string[],
-  baseline: readonly string[]
-): readonly string[] {
-  const headKeys = new Set(consensusHead);
-  return [
-    ...consensusHead,
-    ...baseline.filter((key) => !headKeys.has(key))
-  ].slice(0, baseline.length);
 }
 
 function assertEmbeddingHead(observation: RecallPacketPlanObservation): void {

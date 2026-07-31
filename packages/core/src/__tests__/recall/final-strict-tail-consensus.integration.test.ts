@@ -29,7 +29,7 @@ import {
 } from "./fine-assessment-selection-fixtures.js";
 
 describe("final strict-tail consensus integration", () => {
-  it("uses reciprocal consensus as final authority while keeping displaced head over tail", () => {
+  it("uses reciprocal consensus as final authority while preserving the strict tail", () => {
     const candidates = consensusCandidates();
     const result = select(candidates, {
       capturePacketPlanTrace: true,
@@ -42,25 +42,25 @@ describe("final strict-tail consensus integration", () => {
       "baseline-02",
       "baseline-05",
       "baseline-04",
-      "baseline-03",
       "baseline-06",
       "baseline-07",
       "baseline-08",
-      "baseline-09"
+      "baseline-09",
+      "baseline-10"
     ]);
     expect(packetIds(result).slice(5)).toEqual([
-      "baseline-03",
       "baseline-06",
       "baseline-07",
       "baseline-08",
-      "baseline-09"
+      "baseline-09",
+      "baseline-10"
     ]);
     expect(result.candidates[5]?.budget_state).toEqual({
-      token_estimate: 3,
+      token_estimate: 5,
       max_entries: 10,
       max_total_tokens: 100,
       remaining_entries: 4,
-      remaining_tokens: 70,
+      remaining_tokens: 68,
       within_budget: true
     });
     expect(finalDiagnosticRanks(result)).toEqual([
@@ -69,11 +69,11 @@ describe("final strict-tail consensus integration", () => {
       ["baseline-02", 3],
       ["baseline-05", 4],
       ["baseline-04", 5],
-      ["baseline-03", 6],
-      ["baseline-06", 7],
-      ["baseline-07", 8],
-      ["baseline-08", 9],
-      ["baseline-09", 10]
+      ["baseline-06", 6],
+      ["baseline-07", 7],
+      ["baseline-08", 8],
+      ["baseline-09", 9],
+      ["baseline-10", 10]
     ]);
     expect(result.diagnostics.find(
       (row) => row.object_id === "challenger"
@@ -89,12 +89,6 @@ describe("final strict-tail consensus integration", () => {
       pre_budget_rank: 3,
       selection_order: 3,
       rank_after_coverage_selector: 3,
-      final_rank: 6,
-      dropped_reason: null
-    });
-    expect(result.diagnostics.find(
-      (row) => row.object_id === "baseline-10"
-    )).toMatchObject({
       final_rank: null,
       dropped_reason: "max_entries"
     });
@@ -182,7 +176,7 @@ describe("final strict-tail consensus integration", () => {
     expect(packetIds(result)).toEqual([
       "protected-evidence",
       "challenger",
-      "ordinary"
+      "filler"
     ]);
   });
 

@@ -46,12 +46,12 @@ const packetPlanTraceV2 = {
   planned_candidate_keys: [
     "workspace_local:memory_entry:memory-a",
     "global:evidence_capsule:evidence-d",
-    "global:evidence_capsule:evidence-b"
+    "workspace_local:synthesis_capsule:synthesis-c"
   ],
   actual_candidate_keys: [
     "workspace_local:memory_entry:memory-a",
     "global:evidence_capsule:evidence-d",
-    "global:evidence_capsule:evidence-b"
+    "workspace_local:synthesis_capsule:synthesis-c"
   ],
   head_width: 2,
   baseline_head_candidate_keys: [
@@ -74,7 +74,7 @@ const packetPlanTraceV2 = {
     rank_limit: 1
   }],
   added_candidate_keys: ["global:evidence_capsule:evidence-d"],
-  removed_candidate_keys: ["workspace_local:synthesis_capsule:synthesis-c"],
+  removed_candidate_keys: ["global:evidence_capsule:evidence-b"],
   decision: {
     status: "accepted",
     reason: "strict_tail_consensus"

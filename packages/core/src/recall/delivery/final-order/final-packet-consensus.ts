@@ -64,12 +64,19 @@ export function buildFinalPacketConsensusObservation(
   const headKeys = new Set(
     plan.consensusHead.map((candidate) => candidate.candidateKey)
   );
+  const residualProposal = [
+    ...plan.consensusHead,
+    ...plan.baseline.filter((candidate) => !headKeys.has(candidate.candidateKey))
+  ];
+  const immutableProposal = [
+    ...plan.consensusHead,
+    ...plan.immutableTail.filter((candidate) => !headKeys.has(candidate.candidateKey))
+  ];
   const proposed = plan.decision.status === "accepted"
     ? plan.candidates
-    : [
-        ...plan.consensusHead,
-        ...plan.baseline.filter((candidate) => !headKeys.has(candidate.candidateKey))
-      ].slice(0, plan.baseline.length);
+    : residualProposal.length === plan.baseline.length
+      ? residualProposal
+      : immutableProposal;
   const decision = plan.decision.status === "accepted" && !replayAccepted
     ? { status: "rejected", reason: "admission_infeasible" } as const
     : plan.decision;
