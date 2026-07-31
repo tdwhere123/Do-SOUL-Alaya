@@ -4,6 +4,8 @@ export type EmbeddingRankConsensusCandidate = Readonly<{
   readonly candidateKey: string;
   readonly fusedScore: number;
   readonly rawEmbeddingRank?: number;
+  /** Coverage/evidence-head admit rank; gates emb-only introduces outside baselineHead. */
+  readonly selectionRank?: number;
 }>;
 
 export type EmbeddingRankConsensusProtection = Readonly<{
@@ -83,7 +85,12 @@ export function resolveEmbeddingRankConsensusPlan<
   );
   const embeddingHead = [...embeddingHeadByKey.values()]
     .sort(compareEmbeddingHeadEntries);
-  const rankedConsensusHead = rankConsensusHead(baselineHead, embeddingHeadByKey)
+  const rankedConsensusHead = rankConsensusHead(
+    baselineHead,
+    embeddingHeadByKey,
+    candidateKeys(params.baseline),
+    headWidth
+  )
     .slice(0, headWidth)
     .map((entry) => entry.candidate);
   const consensusHead = composeProtectedConsensusHead(
@@ -136,8 +143,14 @@ export function entersEmbeddingRankConsensusHead<
     baselineHead.length,
     new Set()
   );
+  const baselineKeys = candidateKeys([...baselineHead, contender]);
   return embeddingHead.has(contender.candidateKey) &&
-    rankConsensusHead(baselineHead, embeddingHead)
+    rankConsensusHead(
+      baselineHead,
+      embeddingHead,
+      baselineKeys,
+      baselineHead.length
+    )
       .slice(0, baselineHead.length)
       .some((entry) => entry.candidateKey === contender.candidateKey);
 }
@@ -289,7 +302,9 @@ function isEligibleEmbeddingRank(
 
 function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   baselineHead: readonly T[],
-  embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>
+  embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>,
+  baselineKeys: ReadonlySet<string>,
+  headWidth: number
 ): readonly ConsensusEntry<T>[] {
   const entries = new Map<string, ConsensusEntry<T>>();
   baselineHead.forEach((candidate, index) => {
@@ -304,6 +319,10 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   });
   for (const [candidateKey, embedding] of embeddingHead) {
     if (entries.has(candidateKey)) continue;
+    // Emb-only introduce needs selection authority in-pack, or strict emb=1 outside.
+    if (!mayIntroduceEmbeddingOnly(embedding, baselineKeys, headWidth)) {
+      continue;
+    }
     entries.set(candidateKey, Object.freeze({
       candidate: embedding.candidate,
       candidateKey,
@@ -311,6 +330,20 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
     }));
   }
   return [...entries.values()].sort(compareConsensusEntries);
+}
+
+function mayIntroduceEmbeddingOnly<T extends EmbeddingRankConsensusCandidate>(
+  embedding: EmbeddingRankConsensusHeadEntry<T>,
+  baselineKeys: ReadonlySet<string>,
+  headWidth: number
+): boolean {
+  if (embedding.embeddingRank === 1) return true;
+  const selectionRank = embedding.candidate.selectionRank;
+  return baselineKeys.has(embedding.candidate.candidateKey) &&
+    selectionRank !== undefined &&
+    Number.isFinite(selectionRank) &&
+    selectionRank > 0 &&
+    selectionRank <= headWidth;
 }
 
 function compareEmbeddingHeadEntries<T extends EmbeddingRankConsensusCandidate>(

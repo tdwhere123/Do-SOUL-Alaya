@@ -19,6 +19,7 @@ export type FinalPacketConsensusCandidate = Readonly<{
   readonly candidateKey: string;
   readonly fusedScore: number;
   readonly rawEmbeddingRank?: number;
+  readonly selectionRank?: number;
   readonly sourceCandidate: FineAssessmentCandidate;
 }>;
 
@@ -31,9 +32,12 @@ export function resolveFinalPacketConsensusPlan(
     readonly sourceCandidates: readonly FineAssessmentCandidate[];
     readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
     readonly behaviorGuardFullAbort: boolean;
+    readonly selectionRankByCandidateKey?: ReadonlyMap<string, number>;
   }>
 ): FinalPacketConsensusPlan {
-  const consensusCandidates = params.sourceCandidates.map(toConsensusCandidate);
+  const consensusCandidates = params.sourceCandidates.map((candidate) =>
+    toConsensusCandidate(candidate, params.selectionRankByCandidateKey)
+  );
   const sourceByKey = new Map(consensusCandidates.map((candidate) => [
     candidate.candidateKey,
     candidate
@@ -126,16 +130,20 @@ export function packetMatchesConsensusPlan(
 }
 
 function toConsensusCandidate(
-  candidate: FineAssessmentCandidate
+  candidate: FineAssessmentCandidate,
+  selectionRankByCandidateKey?: ReadonlyMap<string, number>
 ): FinalPacketConsensusCandidate {
+  const candidateKey = buildRecallCandidateDedupeKey(candidate);
   const rawEmbeddingRank =
     candidate.fusion.per_stream_rank.embedding_similarity;
+  const selectionRank = selectionRankByCandidateKey?.get(candidateKey);
   return Object.freeze({
-    candidateKey: buildRecallCandidateDedupeKey(candidate),
+    candidateKey,
     fusedScore: candidate.fusion.fused_score,
     ...(rawEmbeddingRank === null
       ? {}
       : { rawEmbeddingRank }),
+    ...(selectionRank === undefined ? {} : { selectionRank }),
     sourceCandidate: candidate
   });
 }

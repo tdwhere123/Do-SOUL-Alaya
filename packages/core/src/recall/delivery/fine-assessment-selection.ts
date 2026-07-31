@@ -103,6 +103,12 @@ function resolveSelectionConsensus(
   result: ReturnType<typeof applyFinalPacketConsensus>;
 }> {
   // Consensus scans full H; evidence-head rejects must not hide embedding ranks.
+  const selectionRankByCandidateKey = new Map(
+    evidenceHead.candidates.map((candidate, index) => [
+      buildRecallCandidateDedupeKey(candidate),
+      index + 1
+    ] as const)
+  );
   const consensus = resolveFinalPacketConsensusPlan({
     baseline: delivered.candidates,
     sourceCandidates: orderedCandidates,
@@ -111,7 +117,8 @@ function resolveSelectionConsensus(
       context.answerSupportByCandidateKey.get(
         buildRecallCandidateSelectionKey(candidate)
       )?.authority?.behavior_eligible === true
-    )
+    ),
+    selectionRankByCandidateKey
   });
   const consensusResult = applyFinalPacketConsensus(
     consensus,
