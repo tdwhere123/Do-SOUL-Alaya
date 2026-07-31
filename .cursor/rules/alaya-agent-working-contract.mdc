@@ -42,8 +42,9 @@ code — either default them with proof or delete; "wired" ≠ "default-on".
 - SLIs measure what they claim. Retrieval fail-open that hides empty hits is a
   measurement lie. Cover-ups (empty catch, weakened tests, fixture edits) are
   defects.
-- Trust live `git` / files over GitNexus when they conflict. Advisory hooks ≠
-  hard enforcement; validators ≠ tracked delivery completeness.
+- Trust live `git` / files over any code-index MCP (e.g. CodeGraph) when they
+  conflict. Advisory hooks ≠ hard enforcement; validators ≠ tracked delivery
+  completeness.
 
 ## 4. Mode and artifact discipline
 
