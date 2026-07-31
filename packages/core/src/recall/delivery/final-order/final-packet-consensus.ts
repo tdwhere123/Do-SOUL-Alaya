@@ -25,17 +25,6 @@ export type FinalPacketConsensusCandidate = Readonly<{
 export type FinalPacketConsensusPlan =
   EmbeddingRankConsensusPlan<FinalPacketConsensusCandidate>;
 
-export function selectFinalPacketConsensusCandidates(
-  candidates: readonly FineAssessmentCandidate[],
-  rejectedCandidateKeys: readonly string[]
-): readonly FineAssessmentCandidate[] {
-  if (rejectedCandidateKeys.length === 0) return candidates;
-  const rejected = new Set(rejectedCandidateKeys);
-  return Object.freeze(candidates.filter((candidate) =>
-    !rejected.has(buildRecallCandidateDedupeKey(candidate))
-  ));
-}
-
 export function resolveFinalPacketConsensusPlan(
   params: Readonly<{
     readonly baseline: readonly Readonly<RecallCandidate>[];

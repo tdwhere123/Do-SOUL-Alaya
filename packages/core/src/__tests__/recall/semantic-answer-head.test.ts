@@ -247,7 +247,7 @@ describe("semantic answer head", () => {
       .toMatchObject({ dropped_reason: "max_entries", final_rank: null });
   });
 
-  it("fails the semantic refinement atomically when evidence misses the new boundary margin", () => {
+  it("allows full-H consensus to introduce emb-rank-1 after atomic refinement failure", () => {
     const peers = [...peerCandidates()];
     const evidence = qualifiedDirectEvidence("atomic-evidence");
     peers[3] = {
@@ -262,9 +262,18 @@ describe("semantic answer head", () => {
 
     const result = select([...peers, evidence, semanticLeader()]);
 
-    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual(
-      evidenceOnly.candidates.map((candidate) => candidate.object_id)
-    );
+    // Refinement still fails atomically for the evidence-head rewrite, but consensus
+    // over full H may introduce the emb-rank-1 memory without hiding it behind rejects.
+    expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
+      "peer-1",
+      "semantic-memory-leader",
+      "peer-2",
+      "peer-4",
+      "atomic-evidence"
+    ]);
+    expect(result.diagnostics.find(
+      (row) => row.object_id === "semantic-memory-leader"
+    )).toMatchObject({ dropped_reason: null, final_rank: 2 });
   });
 
   it("keeps evidence ahead of an admitted semantic leader when composition is infeasible", () => {

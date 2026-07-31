@@ -108,6 +108,78 @@ describe("final strict-tail consensus integration", () => {
     expect(packetIds(result)).toEqual(baselineIds());
   });
 
+  it("introduces emb-rank-1 from full orderedCandidates despite evidence-head rejection", () => {
+    const content =
+      "I waited over a year for the decision on my asylum application.";
+    const evidenceBase = createCandidate("protected-evidence", {
+      content,
+      evidence_refs: ["evidence-protected"]
+    }, "evidence_capsule");
+    const protectedEvidence = ranked({
+      ...evidenceBase,
+      fusion: {
+        ...evidenceBase.fusion,
+        candidate_key: "workspace_local:evidence_capsule:protected-evidence",
+        per_stream_rank: {
+          ...evidenceBase.fusion.per_stream_rank,
+          evidence_fts: 1
+        }
+      }
+    }, 1, 1);
+    const ordinary = ranked(createCandidate("ordinary", { content }), 2, 0.9);
+    const filler = ranked(createCandidate("filler", { content }), 3, 0.8);
+    const challenger = withEmbeddingRank(withEmbeddingSimilarity(ranked(
+      createCandidate("challenger", {
+        content: "I waited six months for the decision on my asylum application.",
+        evidence_refs: ["evidence-support"]
+      }),
+      4,
+      0.4
+    ), 0.99), 1);
+    const candidates = [protectedEvidence, ordinary, filler, challenger];
+
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: candidates,
+      config: {
+        ...createConfig(),
+        budgets: { ...createConfig().budgets, max_entries: 3 }
+      },
+      supplementaryData: createSupplementaryData({
+        queryProbes: compileRecallQueryProbes(
+          "How long did I wait for the decision on my asylum application?"
+        ),
+        embeddingSimilarityScores: {
+          "protected-evidence": 0.9,
+          ordinary: 0.9,
+          filler: 0.9,
+          challenger: 0.1
+        }
+      }),
+      tokenEstimator: { estimate: () => 6 },
+      rankByCandidateKey: rankMap(candidates),
+      finalRelevanceByCandidateKey: relevanceMap(candidates),
+      coverageRelevanceByCandidateKey: relevanceMap(candidates),
+      finalOrderAfterCoverage: "delivery_rank",
+      capturePacketPlanTrace: true
+    });
+
+    expect(result.packetPlanObservation?.decision).toEqual({
+      status: "accepted",
+      reason: "strict_tail_consensus"
+    });
+    expect(result.packetPlanObservation?.embedding_head).toEqual([
+      {
+        candidate_key: "workspace_local:memory_entry:challenger",
+        embedding_rank: 1
+      }
+    ]);
+    expect(packetIds(result)).toEqual([
+      "protected-evidence",
+      "challenger",
+      "filler"
+    ]);
+  });
+
   it("fully aborts when a delivered baseline incumbent is behavior eligible", () => {
     const content = "I bought my new bookshelf from IKEA.";
     const evidenceRef = "evidence-bookshelf";
@@ -451,6 +523,19 @@ function withEmbeddingRank(
   rank: number
 ): FineAssessmentCandidate {
   return withStreamRanks(candidate, { embedding_similarity: rank });
+}
+
+function withEmbeddingSimilarity(
+  candidate: FineAssessmentCandidate,
+  embeddingSimilarity: number
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    effectiveFactors: {
+      ...candidate.effectiveFactors,
+      embedding_similarity: embeddingSimilarity
+    }
+  };
 }
 
 function withStreamRanks(

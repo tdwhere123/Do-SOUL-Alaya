@@ -5,7 +5,7 @@ import {
   type DirectEvidenceHeadSelection
 } from "./admission/direct-evidence-answer-head.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
-import { resolveFinalPacketConsensusPlan, selectFinalPacketConsensusCandidates } from "./final-order/final-packet-consensus.js";
+import { resolveFinalPacketConsensusPlan } from "./final-order/final-packet-consensus.js";
 import {
   collectAdmittedCandidates,
   createAdmissionState,
@@ -80,7 +80,8 @@ export function selectFineAssessmentCandidates(
     evidenceHead,
     delivered,
     context,
-    evictions
+    evictions,
+    selectionParams.orderedCandidates
   );
   return buildSelectionResult(
     selectionParams,
@@ -95,17 +96,16 @@ function resolveSelectionConsensus(
   evidenceHead: DirectEvidenceHeadSelection<FineAssessmentCandidate>,
   delivered: ReturnType<typeof materializeFineAssessmentDelivery>,
   context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>
+  evictions: ReadonlySet<string>,
+  orderedCandidates: readonly FineAssessmentCandidate[]
 ): Readonly<{
   consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>;
   result: ReturnType<typeof applyFinalPacketConsensus>;
 }> {
-  const consensusCandidates = selectFinalPacketConsensusCandidates(
-    evidenceHead.candidates, evidenceHead.rejectedCandidateKeys
-  );
+  // Consensus scans full H; evidence-head rejects must not hide embedding ranks.
   const consensus = resolveFinalPacketConsensusPlan({
     baseline: delivered.candidates,
-    sourceCandidates: consensusCandidates,
+    sourceCandidates: orderedCandidates,
     protectedCandidates: evidenceHead.protections,
     behaviorGuardFullAbort: delivered.candidates.some((candidate) =>
       context.answerSupportByCandidateKey.get(
@@ -116,7 +116,7 @@ function resolveSelectionConsensus(
   const consensusResult = applyFinalPacketConsensus(
     consensus,
     delivered,
-    consensusCandidates,
+    orderedCandidates,
     context,
     evictions,
     reduceFineAssessmentCandidates
