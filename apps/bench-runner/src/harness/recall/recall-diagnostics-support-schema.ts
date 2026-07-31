@@ -147,10 +147,11 @@ function validatePacketPlanStructure(
     ...trace.baseline_head_candidate_keys,
     ...trace.immutable_tail_candidate_keys
   ];
+  const headKeys = new Set(trace.consensus_head_candidate_keys);
   const proposal = [
     ...trace.consensus_head_candidate_keys,
-    ...trace.immutable_tail_candidate_keys
-  ];
+    ...trace.baseline_candidate_keys.filter((key) => !headKeys.has(key))
+  ].slice(0, trace.baseline_candidate_keys.length);
   if (
     trace.head_width !== Math.ceil(trace.baseline_candidate_keys.length / 2) ||
     trace.baseline_head_candidate_keys.length !== trace.head_width ||
@@ -245,9 +246,12 @@ function validatePacketPlanDecisionReason(
   }
   if (
     reason === "cardinality_mismatch" &&
-    trace.consensus_head_candidate_keys.length === trace.head_width
+    trace.consensus_head_candidate_keys.length === trace.head_width &&
+    trace.planned_candidate_keys.length === trace.baseline_candidate_keys.length &&
+    new Set(trace.planned_candidate_keys).size ===
+      trace.baseline_candidate_keys.length
   ) {
-    addPacketPlanIssue(context, ["decision"], "Cardinality rejection has a full head");
+    addPacketPlanIssue(context, ["decision"], "Cardinality rejection has a complete proposal");
   }
   validateProtectionDecision(trace, context);
 }
