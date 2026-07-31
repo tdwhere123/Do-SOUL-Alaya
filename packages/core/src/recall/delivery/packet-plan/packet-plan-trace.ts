@@ -90,13 +90,24 @@ function assertSupportSetObservation(
   if (!sameOrderedKeys(baseline, [...baselineHead, ...immutableTail])) {
     throw validationError("Packet plan baseline partition is inconsistent");
   }
-  if (!sameOrderedKeys(planned, [...consensusHead, ...immutableTail])) {
+  if (!sameOrderedKeys(planned, composeResidualProposal(consensusHead, baseline))) {
     throw validationError("Packet plan proposal is inconsistent");
   }
   assertEmbeddingHead(observation);
   assertProtections(observation);
   assertDecisionReason(observation);
   assertDecision(observation, baseline, planned, actual);
+}
+
+function composeResidualProposal(
+  consensusHead: readonly string[],
+  baseline: readonly string[]
+): readonly string[] {
+  const headKeys = new Set(consensusHead);
+  return [
+    ...consensusHead,
+    ...baseline.filter((key) => !headKeys.has(key))
+  ].slice(0, baseline.length);
 }
 
 function assertEmbeddingHead(observation: RecallPacketPlanObservation): void {
@@ -172,9 +183,13 @@ function assertDecisionReason(
   }
   if (
     reason === "cardinality_mismatch" &&
-    observation.consensus_head_candidate_keys.length === observation.head_width
+    observation.consensus_head_candidate_keys.length === observation.head_width &&
+    observation.planned_candidate_keys.length ===
+      observation.baseline_candidate_keys.length &&
+    new Set(observation.planned_candidate_keys).size ===
+      observation.baseline_candidate_keys.length
   ) {
-    throw validationError("Cardinality rejection has a complete consensus head");
+    throw validationError("Cardinality rejection has a complete consensus proposal");
   }
   assertProtectionDecision(observation);
 }

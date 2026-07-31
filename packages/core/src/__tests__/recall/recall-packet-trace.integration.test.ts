@@ -83,7 +83,7 @@ describe("RecallService packet trace integration", () => {
           "workspace_local:memory_entry:packet-tail"
         ],
         removed_candidate_keys: [
-          "workspace_local:memory_entry:packet-embedding"
+          "workspace_local:memory_entry:packet-baseline-b"
         ],
         decision: {
           status: "accepted",

@@ -61,7 +61,15 @@ export function buildFinalPacketConsensusObservation(
   actual: readonly Readonly<RecallCandidate>[],
   replayAccepted: boolean
 ): RecallPacketPlanObservation {
-  const proposed = [...plan.consensusHead, ...plan.immutableTail];
+  const headKeys = new Set(
+    plan.consensusHead.map((candidate) => candidate.candidateKey)
+  );
+  const proposed = plan.decision.status === "accepted"
+    ? plan.candidates
+    : [
+        ...plan.consensusHead,
+        ...plan.baseline.filter((candidate) => !headKeys.has(candidate.candidateKey))
+      ].slice(0, plan.baseline.length);
   const decision = plan.decision.status === "accepted" && !replayAccepted
     ? { status: "rejected", reason: "admission_infeasible" } as const
     : plan.decision;
