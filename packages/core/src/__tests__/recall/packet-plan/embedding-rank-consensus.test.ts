@@ -10,7 +10,7 @@ describe("embedding-rank consensus packet plan", () => {
     { packetSize: 9, headWidth: 5 },
     { packetSize: 10, headWidth: 5 }
   ])(
-    "derives its head from a $packetSize-entry packet and preserves its tail on outside introduce",
+    "derives its head from a $packetSize-entry packet and preserves its tail",
     ({ packetSize, headWidth }) => {
       const baseline = packet(...Array.from(
         { length: packetSize },
@@ -50,7 +50,7 @@ describe("embedding-rank consensus packet plan", () => {
     expect(planned).toBe(baseline);
   });
 
-  it("promotes an emb-dominant baseline-tail key into the consensus head", () => {
+  it("never promotes a baseline-tail key even when the source ranks it first", () => {
     const baseline = packet("head-a", "head-b", "tail");
     const rankedTail = candidate("tail", 100, 1);
 
@@ -59,64 +59,8 @@ describe("embedding-rank consensus packet plan", () => {
       candidates: [...baseline, rankedTail]
     });
 
-    expect(keys(planned)).toEqual(["tail", "head-a", "head-b"]);
-    expect(planned[0]?.candidateKey).toBe("tail");
-  });
-
-  it("promotes in-pack emb-dominant gold with selection authority", () => {
-    // c8c3f81d shape: emb=2 at pack tail, selectionRank within headWidth.
-    const baseline = packet(
-      "h1", "h2", "h3", "h4", "h5", "gold", "t7", "t8", "t9", "t10"
-    );
-    const gold = candidate("gold", 23, 2, 2);
-    const planned = plan({
-      baseline,
-      candidates: [
-        candidate("h1", 0, 1, 1),
-        candidate("h2", 0, 5, 8),
-        candidate("h3", 0, 4, 4),
-        candidate("h4", 0, 3, 7),
-        candidate("h5", 0, 6, 5),
-        gold,
-        ...baseline.slice(6)
-      ]
-    });
-    expect(keys(planned).slice(0, 5)).toContain("gold");
-    expect(keys(planned).indexOf("gold")).toBeLessThan(5);
-  });
-
-  it("does not promote in-pack emb-2 without selection authority", () => {
-    // 6d550036 distractor shape: emb=2 at pack tail, selectionRank beyond headWidth.
-    const baseline = packet(
-      "h1", "h2", "h3", "gold", "h5", "distractor", "t7", "t8", "t9", "t10"
-    );
-    const planned = plan({
-      baseline,
-      candidates: [
-        candidate("h1", 0, 1, 6),
-        candidate("h2", 0, 3, 4),
-        candidate("h3", 0, 5, 2),
-        candidate("gold", 6, 11, 1),
-        candidate("h5", 0, 7, 5),
-        candidate("distractor", 42, 2, 11),
-        ...baseline.slice(6)
-      ]
-    });
-    expect(keys(planned).indexOf("distractor")).toBeGreaterThanOrEqual(5);
-    expect(keys(planned).indexOf("gold")).toBeLessThan(5);
-  });
-
-  it("still introduces outside-pack strict emb-1 without selection rank", () => {
-    // 0a995998 shape: emb-dominant outside pack.
-    const baseline = packet(
-      "h1", "h2", "h3", "h4", "h5", "t6", "t7", "t8", "t9", "t10"
-    );
-    const novel = candidate("novel", 100, 1);
-    const planned = plan({
-      baseline,
-      candidates: [...baseline, novel]
-    });
-    expect(planned[0]?.candidateKey).toBe("novel");
+    expect(planned).toBe(baseline);
+    expect(planned[2]).toBe(baseline[2]);
   });
 
   it("clamps the consensus head to the baseline length", () => {
@@ -147,25 +91,24 @@ describe("embedding-rank consensus packet plan", () => {
   });
 
   it("orders equal reciprocal-rank scores by fused score, then key, independent of input order", () => {
-    // In-pack emb>1 introduces need selectionRank ≤ headWidth (pack size 6 → 3).
     const baseline = packet(
       "incumbent-a",
       "incumbent-b",
       "incumbent-c",
-      "novel-z",
-      "novel-a",
-      "novel-b"
+      "tail-d",
+      "tail-e",
+      "tail-f"
     );
-    const highFused = candidate("novel-z", 9, 2, 1);
-    const lexicalFirst = candidate("novel-a", 8, 2, 2);
-    const lexicalSecond = candidate("novel-b", 8, 2, 3);
+    const highFused = candidate("novel-z", 9, 2);
+    const lexicalFirst = candidate("novel-a", 8, 2);
+    const lexicalSecond = candidate("novel-b", 8, 2);
     const expected = [
       "incumbent-a",
       "novel-z",
       "novel-a",
-      "incumbent-b",
-      "incumbent-c",
-      "novel-b"
+      "tail-d",
+      "tail-e",
+      "tail-f"
     ];
 
     for (const ranked of [
@@ -175,12 +118,7 @@ describe("embedding-rank consensus packet plan", () => {
     ]) {
       const planned = plan({
         baseline,
-        candidates: [
-          baseline[0]!,
-          baseline[1]!,
-          baseline[2]!,
-          ...ranked
-        ]
+        candidates: [...baseline, ...ranked]
       });
       expect(keys(planned)).toEqual(expected);
     }
@@ -274,7 +212,7 @@ describe("embedding-rank consensus packet plan", () => {
 
   it("resolves truthful frozen metadata for an accepted consensus", () => {
     const baseline = packet("a", "b", "c", "tail-d", "tail-e", "tail-f");
-    const novel = candidate("novel", 9, 1);
+    const novel = candidate("novel", 9, 2);
     const protection = { candidateKey: "a", rankLimit: 1 };
     const resolved = resolve({
       baseline,
@@ -286,7 +224,7 @@ describe("embedding-rank consensus packet plan", () => {
     expect(resolved.headWidth).toBe(3);
     expect(keys(resolved.baselineHead)).toEqual(["a", "b", "c"]);
     expect(resolved.embeddingHead).toEqual([
-      { candidate: novel, embeddingRank: 1 }
+      { candidate: novel, embeddingRank: 2 }
     ]);
     expect(keys(resolved.consensusHead)).toEqual(["a", "novel", "b"]);
     expect(keys(resolved.immutableTail)).toEqual(["tail-d", "tail-e", "tail-f"]);
@@ -414,7 +352,6 @@ type Candidate = Readonly<{
   candidateKey: string;
   fusedScore: number;
   rawEmbeddingRank?: number;
-  selectionRank?: number;
 }>;
 
 type Protection = Readonly<{
@@ -425,14 +362,12 @@ type Protection = Readonly<{
 function candidate(
   candidateKey: string,
   fusedScore = 0,
-  rawEmbeddingRank?: number,
-  selectionRank?: number
+  rawEmbeddingRank?: number
 ): Candidate {
   return Object.freeze({
     candidateKey,
     fusedScore,
-    ...(rawEmbeddingRank === undefined ? {} : { rawEmbeddingRank }),
-    ...(selectionRank === undefined ? {} : { selectionRank })
+    ...(rawEmbeddingRank === undefined ? {} : { rawEmbeddingRank })
   });
 }
 

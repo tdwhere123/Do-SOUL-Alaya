@@ -4,8 +4,6 @@ export type EmbeddingRankConsensusCandidate = Readonly<{
   readonly candidateKey: string;
   readonly fusedScore: number;
   readonly rawEmbeddingRank?: number;
-  /** Coverage/evidence-head admit rank; gates emb-only introduces outside baselineHead. */
-  readonly selectionRank?: number;
 }>;
 
 export type EmbeddingRankConsensusProtection = Readonly<{
@@ -77,20 +75,14 @@ export function resolveEmbeddingRankConsensusPlan<
   const headWidth = resolveHeadWidth(params.baseline.length);
   const baselineHead = params.baseline.slice(0, headWidth);
   const immutableTail = params.baseline.slice(headWidth);
-  // Lexical tail must stay emb-eligible: immutable exclusion buried emb-dominant gold already in pack.
   const embeddingHeadByKey = indexEmbeddingHead(
     params.candidates,
     headWidth,
-    new Set()
+    candidateKeys(immutableTail)
   );
   const embeddingHead = [...embeddingHeadByKey.values()]
     .sort(compareEmbeddingHeadEntries);
-  const rankedConsensusHead = rankConsensusHead(
-    baselineHead,
-    embeddingHeadByKey,
-    candidateKeys(params.baseline),
-    headWidth
-  )
+  const rankedConsensusHead = rankConsensusHead(baselineHead, embeddingHeadByKey)
     .slice(0, headWidth)
     .map((entry) => entry.candidate);
   const consensusHead = composeProtectedConsensusHead(
@@ -99,10 +91,7 @@ export function resolveEmbeddingRankConsensusPlan<
     immutableTail,
     params.protectedCandidates
   );
-  const proposedCandidates = composeProposedPacket(
-    consensusHead,
-    params.baseline
-  );
+  const proposedCandidates = [...consensusHead, ...immutableTail];
   const protectedCandidates = params.protectedCandidates.map((item) => ({ ...item }));
   const decision = resolveDecision({
     behaviorGuardFullAbort: params.behaviorGuardFullAbort,
@@ -111,8 +100,7 @@ export function resolveEmbeddingRankConsensusPlan<
     consensusHead,
     proposedCandidates,
     protectedCandidates,
-    headWidth,
-    baselineLength: params.baseline.length
+    headWidth
   });
   const candidates = decision.status === "accepted"
     ? proposedCandidates
@@ -143,14 +131,8 @@ export function entersEmbeddingRankConsensusHead<
     baselineHead.length,
     new Set()
   );
-  const baselineKeys = candidateKeys([...baselineHead, contender]);
   return embeddingHead.has(contender.candidateKey) &&
-    rankConsensusHead(
-      baselineHead,
-      embeddingHead,
-      baselineKeys,
-      baselineHead.length
-    )
+    rankConsensusHead(baselineHead, embeddingHead)
       .slice(0, baselineHead.length)
       .some((entry) => entry.candidateKey === contender.candidateKey);
 }
@@ -178,40 +160,13 @@ function composeProtectedConsensusHead<T extends EmbeddingRankConsensusCandidate
     : consensusHead;
 }
 
-function composeProposedPacket<T extends EmbeddingRankConsensusCandidate>(
-  consensusHead: readonly T[],
-  baseline: readonly T[]
-): readonly T[] {
-  const headKeys = candidateKeys(consensusHead);
-  const residual = [
-    ...consensusHead,
-    ...baseline.filter((candidate) => !headKeys.has(candidate.candidateKey))
-  ];
-  // In-pack emb promotion reshuffles membership without outside keys.
-  if (
-    residual.length === baseline.length &&
-    candidateKeys(residual).size === baseline.length
-  ) {
-    return residual;
-  }
-  // Outside introduce keeps the immutable tail; displaced head exits the pack.
-  const immutableTail = baseline.slice(resolveHeadWidth(baseline.length));
-  return [
-    ...consensusHead,
-    ...immutableTail.filter((candidate) => !headKeys.has(candidate.candidateKey))
-  ];
-}
-
 function scheduleHeadProtections<T extends EmbeddingRankConsensusCandidate>(
   consensusHead: readonly T[],
   baselineHead: readonly T[],
   immutableTail: readonly T[],
   protections: readonly EmbeddingRankConsensusProtection[]
 ): readonly ScheduledProtection<T>[] | undefined {
-  const proposed = composeProposedPacket(
-    consensusHead,
-    [...baselineHead, ...immutableTail]
-  );
+  const proposed = [...consensusHead, ...immutableTail];
   const baselineByKey = new Map(
     baselineHead.map((candidate, index) => [
       candidate.candidateKey,
@@ -302,9 +257,7 @@ function isEligibleEmbeddingRank(
 
 function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   baselineHead: readonly T[],
-  embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>,
-  baselineKeys: ReadonlySet<string>,
-  headWidth: number
+  embeddingHead: ReadonlyMap<string, EmbeddingRankConsensusHeadEntry<T>>
 ): readonly ConsensusEntry<T>[] {
   const entries = new Map<string, ConsensusEntry<T>>();
   baselineHead.forEach((candidate, index) => {
@@ -319,10 +272,6 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
   });
   for (const [candidateKey, embedding] of embeddingHead) {
     if (entries.has(candidateKey)) continue;
-    // Emb-only introduce needs selection authority in-pack, or strict emb=1 outside.
-    if (!mayIntroduceEmbeddingOnly(embedding, baselineKeys, headWidth)) {
-      continue;
-    }
     entries.set(candidateKey, Object.freeze({
       candidate: embedding.candidate,
       candidateKey,
@@ -330,20 +279,6 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
     }));
   }
   return [...entries.values()].sort(compareConsensusEntries);
-}
-
-function mayIntroduceEmbeddingOnly<T extends EmbeddingRankConsensusCandidate>(
-  embedding: EmbeddingRankConsensusHeadEntry<T>,
-  baselineKeys: ReadonlySet<string>,
-  headWidth: number
-): boolean {
-  if (embedding.embeddingRank === 1) return true;
-  const selectionRank = embedding.candidate.selectionRank;
-  return baselineKeys.has(embedding.candidate.candidateKey) &&
-    selectionRank !== undefined &&
-    Number.isFinite(selectionRank) &&
-    selectionRank > 0 &&
-    selectionRank <= headWidth;
 }
 
 function compareEmbeddingHeadEntries<T extends EmbeddingRankConsensusCandidate>(
@@ -382,17 +317,12 @@ function resolveDecision<T extends EmbeddingRankConsensusCandidate>(
     readonly proposedCandidates: readonly T[];
     readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
     readonly headWidth: number;
-    readonly baselineLength: number;
   }>
 ): EmbeddingRankConsensusDecision {
   if (params.embeddingHead.length === 0) {
     return { status: "no_op", reason: "no_finite_embedding_head" };
   }
-  if (
-    params.consensusHead.length !== params.headWidth ||
-    params.proposedCandidates.length !== params.baselineLength ||
-    candidateKeys(params.proposedCandidates).size !== params.baselineLength
-  ) {
+  if (params.consensusHead.length !== params.headWidth) {
     return { status: "rejected", reason: "cardinality_mismatch" };
   }
   if (hasSameKeyOrder(params.consensusHead, params.baselineHead)) {

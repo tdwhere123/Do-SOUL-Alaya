@@ -147,14 +147,9 @@ function validatePacketPlanStructure(
     ...trace.baseline_head_candidate_keys,
     ...trace.immutable_tail_candidate_keys
   ];
-  const headKeys = new Set(trace.consensus_head_candidate_keys);
-  const residualProposal = [
+  const proposal = [
     ...trace.consensus_head_candidate_keys,
-    ...trace.baseline_candidate_keys.filter((key) => !headKeys.has(key))
-  ];
-  const immutableProposal = [
-    ...trace.consensus_head_candidate_keys,
-    ...trace.immutable_tail_candidate_keys.filter((key) => !headKeys.has(key))
+    ...trace.immutable_tail_candidate_keys
   ];
   if (
     trace.head_width !== Math.ceil(trace.baseline_candidate_keys.length / 2) ||
@@ -171,10 +166,7 @@ function validatePacketPlanStructure(
       "Packet plan baseline partition is inconsistent"
     );
   }
-  if (
-    !sameOrderedKeys(trace.planned_candidate_keys, residualProposal) &&
-    !sameOrderedKeys(trace.planned_candidate_keys, immutableProposal)
-  ) {
+  if (!sameOrderedKeys(trace.planned_candidate_keys, proposal)) {
     addPacketPlanIssue(
       context,
       ["planned_candidate_keys"],
@@ -253,12 +245,9 @@ function validatePacketPlanDecisionReason(
   }
   if (
     reason === "cardinality_mismatch" &&
-    trace.consensus_head_candidate_keys.length === trace.head_width &&
-    trace.planned_candidate_keys.length === trace.baseline_candidate_keys.length &&
-    new Set(trace.planned_candidate_keys).size ===
-      trace.baseline_candidate_keys.length
+    trace.consensus_head_candidate_keys.length === trace.head_width
   ) {
-    addPacketPlanIssue(context, ["decision"], "Cardinality rejection has a complete proposal");
+    addPacketPlanIssue(context, ["decision"], "Cardinality rejection has a full head");
   }
   validateProtectionDecision(trace, context);
 }

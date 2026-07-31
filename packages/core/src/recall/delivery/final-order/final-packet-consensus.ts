@@ -19,7 +19,6 @@ export type FinalPacketConsensusCandidate = Readonly<{
   readonly candidateKey: string;
   readonly fusedScore: number;
   readonly rawEmbeddingRank?: number;
-  readonly selectionRank?: number;
   readonly sourceCandidate: FineAssessmentCandidate;
 }>;
 
@@ -32,12 +31,9 @@ export function resolveFinalPacketConsensusPlan(
     readonly sourceCandidates: readonly FineAssessmentCandidate[];
     readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
     readonly behaviorGuardFullAbort: boolean;
-    readonly selectionRankByCandidateKey?: ReadonlyMap<string, number>;
   }>
 ): FinalPacketConsensusPlan {
-  const consensusCandidates = params.sourceCandidates.map((candidate) =>
-    toConsensusCandidate(candidate, params.selectionRankByCandidateKey)
-  );
+  const consensusCandidates = params.sourceCandidates.map(toConsensusCandidate);
   const sourceByKey = new Map(consensusCandidates.map((candidate) => [
     candidate.candidateKey,
     candidate
@@ -65,22 +61,7 @@ export function buildFinalPacketConsensusObservation(
   actual: readonly Readonly<RecallCandidate>[],
   replayAccepted: boolean
 ): RecallPacketPlanObservation {
-  const headKeys = new Set(
-    plan.consensusHead.map((candidate) => candidate.candidateKey)
-  );
-  const residualProposal = [
-    ...plan.consensusHead,
-    ...plan.baseline.filter((candidate) => !headKeys.has(candidate.candidateKey))
-  ];
-  const immutableProposal = [
-    ...plan.consensusHead,
-    ...plan.immutableTail.filter((candidate) => !headKeys.has(candidate.candidateKey))
-  ];
-  const proposed = plan.decision.status === "accepted"
-    ? plan.candidates
-    : residualProposal.length === plan.baseline.length
-      ? residualProposal
-      : immutableProposal;
+  const proposed = [...plan.consensusHead, ...plan.immutableTail];
   const decision = plan.decision.status === "accepted" && !replayAccepted
     ? { status: "rejected", reason: "admission_infeasible" } as const
     : plan.decision;
@@ -130,20 +111,16 @@ export function packetMatchesConsensusPlan(
 }
 
 function toConsensusCandidate(
-  candidate: FineAssessmentCandidate,
-  selectionRankByCandidateKey?: ReadonlyMap<string, number>
+  candidate: FineAssessmentCandidate
 ): FinalPacketConsensusCandidate {
-  const candidateKey = buildRecallCandidateDedupeKey(candidate);
   const rawEmbeddingRank =
     candidate.fusion.per_stream_rank.embedding_similarity;
-  const selectionRank = selectionRankByCandidateKey?.get(candidateKey);
   return Object.freeze({
-    candidateKey,
+    candidateKey: buildRecallCandidateDedupeKey(candidate),
     fusedScore: candidate.fusion.fused_score,
     ...(rawEmbeddingRank === null
       ? {}
       : { rawEmbeddingRank }),
-    ...(selectionRank === undefined ? {} : { selectionRank }),
     sourceCandidate: candidate
   });
 }
