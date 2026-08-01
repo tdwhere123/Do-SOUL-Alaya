@@ -94,6 +94,32 @@ it("gates LongMemEval budget drops by share while retaining count details", () =
   });
 });
 
+it("keeps unified-selector score non-monotonicity diagnostic-only", () => {
+  const base = buildPayload("abc1234");
+  const payload: KpiPayload = {
+    ...base,
+    bench_name: "public",
+    split: "longmemeval-s",
+    dataset: { name: "longmemeval_s", size: 500, source: "fixture" },
+    sample_size: 500,
+    evaluated_count: 500,
+    recall_pipeline_version: "fusion-evidence-first-v3",
+    kpi: {
+      ...base.kpi,
+      r_at_5: 0.95,
+      quality_metrics: {
+        ...passingQualityMetrics(500),
+        non_monotonic_rate: 1,
+        non_monotonic_count: 500,
+        non_monotonic_denominator: 500
+      }
+    }
+  };
+
+  expect(collectReleaseHardGates(payload).map((gate) => gate.id))
+    .not.toContain("longmemeval_s_non_monotonic_rate");
+});
+
 it("fails LongMemEval budget drops when the share exceeds the rate target", () => {
   const metrics = passingQualityMetrics(500);
   metrics.budget_drop_distribution.max_entries = {

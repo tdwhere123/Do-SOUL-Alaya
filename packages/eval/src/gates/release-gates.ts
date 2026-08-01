@@ -275,7 +275,11 @@ function pushLongMemEvalPipelineGates(
     return;
   }
   gates.push(
-    maxGate("longmemeval_s_non_monotonic_rate", "non_monotonic_rate", metrics?.non_monotonic_rate ?? null, 0.1, "ratio"),
+    // The unified Selector orders a set by governed marginal utility, not by
+    // the candidate activation field exposed as relevance_score. Its output
+    // may therefore be intentionally non-monotone by that scalar. Keep the
+    // metric diagnostic-only; rank identity and final-packet integrity remain
+    // independently verified before release.
     maxGate(
       "longmemeval_s_budget_dropped_rate",
       budgetDropGateLabel(metrics),

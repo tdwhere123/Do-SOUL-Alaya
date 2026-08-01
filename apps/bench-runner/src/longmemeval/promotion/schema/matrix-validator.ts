@@ -39,7 +39,6 @@ interface ResolvedPromotionMatrixCell {
 const CELL_ORDER = ["A", "B"] as const;
 type PromotionCell = typeof CELL_ORDER[number];
 const REQUIRED_PIPELINE_GATES = [
-  "longmemeval_s_non_monotonic_rate",
   "longmemeval_s_budget_dropped_rate",
   "longmemeval_s_no_gold",
   "longmemeval_s_evaluator_identity_issue",
