@@ -338,7 +338,7 @@ describe("packet plan trace diagnostics schemas", () => {
         ...noOpPacketPlanTraceV3,
         decision: {
           status: "rejected",
-          reason: "behavior_guard_full_abort"
+          reason: "protected_candidate_constraint"
         }
       }
     })).toThrow();

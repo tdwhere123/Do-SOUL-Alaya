@@ -17,7 +17,6 @@ export type EmbeddingRankConsensusParams<
   readonly baseline: readonly T[];
   readonly candidates: readonly T[];
   readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
-  readonly behaviorGuardFullAbort: boolean;
 }>;
 
 export type EmbeddingRankConsensusDecision =
@@ -28,7 +27,6 @@ export type EmbeddingRankConsensusDecision =
   | Readonly<{
       readonly status: "rejected";
       readonly reason:
-        | "behavior_guard_full_abort"
         | "cardinality_mismatch"
         | "protected_candidate_constraint";
     }>
@@ -97,7 +95,6 @@ export function resolveEmbeddingRankConsensusPlan<
   );
   const protectedCandidates = params.protectedCandidates.map((item) => ({ ...item }));
   const decision = resolveDecision({
-    behaviorGuardFullAbort: params.behaviorGuardFullAbort,
     baselineHead,
     embeddingHead,
     consensusHead,
@@ -363,7 +360,6 @@ function compareOptionalRanks(
 
 function resolveDecision<T extends EmbeddingRankConsensusCandidate>(
   params: Readonly<{
-    readonly behaviorGuardFullAbort: boolean;
     readonly baselineHead: readonly T[];
     readonly embeddingHead: readonly EmbeddingRankConsensusHeadEntry<T>[];
     readonly consensusHead: readonly T[];
@@ -383,9 +379,6 @@ function resolveDecision<T extends EmbeddingRankConsensusCandidate>(
     return params.embeddingHead.length === 0
       ? { status: "no_op", reason: "no_finite_embedding_head" }
       : { status: "no_op", reason: "unchanged_consensus" };
-  }
-  if (params.behaviorGuardFullAbort) {
-    return { status: "rejected", reason: "behavior_guard_full_abort" };
   }
   if (!protectionsAreSatisfied(
     params.proposedCandidates,

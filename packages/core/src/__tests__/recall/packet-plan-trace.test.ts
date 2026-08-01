@@ -262,7 +262,7 @@ describe("support-set packet plan trace", () => {
       actual_candidate_keys: accepted.baseline_candidate_keys,
       decision: {
         status: "rejected",
-        reason: "behavior_guard_full_abort"
+        reason: "protected_candidate_constraint"
       },
       embedding_head: [],
       consensus_head_candidate_keys: accepted.baseline_head_candidate_keys,

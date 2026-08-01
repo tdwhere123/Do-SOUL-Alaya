@@ -169,7 +169,7 @@ describe("collectCoarseStage logical-object waist", () => {
     expect(producerMocks.expandTierCascade).toHaveBeenCalledOnce();
   });
 
-  it("warms query embedding while synthesis is still pending", async () => {
+  it("does not prewarm query embedding before the embedding pool is assembled", async () => {
     const memory = createMemoryEntry();
     const synthesisChild = candidate(memory, {
       originPlane: "workspace_local",
@@ -180,19 +180,7 @@ describe("collectCoarseStage logical-object waist", () => {
       candidates: readonly Readonly<CoarseRecallCandidate>[];
       synthesisFtsRanks: Readonly<Record<string, number>>;
     }>) => void;
-    let resolveWarm!: () => void;
-    const warmStarted = new Promise<void>((resolve) => {
-      resolveWarm = resolve;
-    });
-    const prepareQueryEmbedding = vi.fn(() => {
-      resolveWarm();
-      return {
-        queryId: "warm-query",
-        cacheHit: false,
-        getSnapshot: () => ({ status: "ready" as const, embedding: new Float32Array([1]) }),
-        waitForSnapshot: vi.fn(async () => ({ status: "ready" as const, embedding: new Float32Array([1]) }))
-      };
-    });
+    const prepareQueryEmbedding = vi.fn();
     const setup = createEmbeddingWarmSetup(memory, prepareQueryEmbedding);
     producerMocks.runCoarseFilter.mockResolvedValue(coarseResult());
     producerMocks.expandTierCascade.mockResolvedValue(coarseResult());
@@ -216,8 +204,6 @@ describe("collectCoarseStage logical-object waist", () => {
     }));
 
     const pending = collectCoarseStage(setup.context, setup.params, setup.prepared);
-    await warmStarted;
-    expect(prepareQueryEmbedding).toHaveBeenCalledOnce();
     expect(producerMocks.collectEmbeddingCoarseInjection).not.toHaveBeenCalled();
 
     releaseSynthesis(Object.freeze({
@@ -230,6 +216,7 @@ describe("collectCoarseStage logical-object waist", () => {
     const poolCandidates = producerMocks.collectEmbeddingCoarseInjection.mock.calls[0]?.[0]
       ?.poolCandidates as readonly Readonly<CoarseRecallCandidate>[];
     expect(poolCandidates?.some((row) => row.sourceChannels?.includes("synthesis_child"))).toBe(true);
+    expect(prepareQueryEmbedding).not.toHaveBeenCalled();
   });
 });
 

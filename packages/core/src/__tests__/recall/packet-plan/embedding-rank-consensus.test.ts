@@ -184,23 +184,11 @@ describe("embedding-rank consensus packet plan", () => {
     ]);
   });
 
-  it("returns the exact baseline when the behavior guard requests a full abort", () => {
-    const baseline = packet("a", "b", "tail");
-    const planned = plan({
-      baseline,
-      candidates: [...baseline, candidate("novel", 100, 1)],
-      behaviorGuardFullAbort: true
-    });
-
-    expect(planned).toBe(baseline);
-  });
-
-  it("reports an absent embedding proposal before consulting the behavior guard", () => {
+  it("reports an absent embedding proposal as a no-op", () => {
     const baseline = packet("a", "b", "tail");
     const resolved = resolve({
       baseline,
-      candidates: baseline,
-      behaviorGuardFullAbort: true
+      candidates: baseline
     });
 
     expect(resolved.candidates).toBe(baseline);
@@ -293,23 +281,6 @@ describe("embedding-rank consensus packet plan", () => {
     });
   });
 
-  it("reports behavior-guard rejection while retaining the proposal metadata", () => {
-    const baseline = packet("a", "b", "tail");
-    const novel = candidate("novel", 100, 1);
-    const resolved = resolve({
-      baseline,
-      candidates: [...baseline, novel],
-      behaviorGuardFullAbort: true
-    });
-
-    expect(resolved.candidates).toBe(baseline);
-    expect(keys(resolved.consensusHead)).toEqual(["novel", "a"]);
-    expect(resolved.decision).toEqual({
-      status: "rejected",
-      reason: "behavior_guard_full_abort"
-    });
-  });
-
   it("distinguishes infeasible protection and cardinality rejections", () => {
     const protectedBaseline = packet("head", "protected", "tail");
     const protectedPlan = resolve({
@@ -379,13 +350,11 @@ function plan(params: {
   baseline: readonly Candidate[];
   candidates: readonly Candidate[];
   protectedCandidates?: readonly Protection[];
-  behaviorGuardFullAbort?: boolean;
 }): readonly Candidate[] {
   return resolveEmbeddingRankConsensusPlan({
     baseline: params.baseline,
     candidates: params.candidates,
-    protectedCandidates: params.protectedCandidates ?? [],
-    behaviorGuardFullAbort: params.behaviorGuardFullAbort ?? false
+    protectedCandidates: params.protectedCandidates ?? []
   }).candidates;
 }
 
@@ -393,13 +362,11 @@ function resolve(params: {
   baseline: readonly Candidate[];
   candidates: readonly Candidate[];
   protectedCandidates?: readonly Protection[];
-  behaviorGuardFullAbort?: boolean;
 }) {
   return resolveEmbeddingRankConsensusPlan({
     baseline: params.baseline,
     candidates: params.candidates,
-    protectedCandidates: params.protectedCandidates ?? [],
-    behaviorGuardFullAbort: params.behaviorGuardFullAbort ?? false
+    protectedCandidates: params.protectedCandidates ?? []
   });
 }
 

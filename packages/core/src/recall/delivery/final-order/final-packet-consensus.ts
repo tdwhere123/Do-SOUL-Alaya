@@ -63,7 +63,6 @@ export function resolveFinalPacketConsensusPlan(
     readonly baseline: readonly Readonly<RecallCandidate>[];
     readonly sourceCandidates: readonly FineAssessmentCandidate[];
     readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
-    readonly behaviorGuardFullAbort: boolean;
     readonly membershipGovernance?: FinalPacketConsensusMembershipGovernance;
   }>
 ): FinalPacketConsensusPlan {
@@ -91,8 +90,7 @@ export function resolveFinalPacketConsensusPlan(
   const embeddingPlan = resolveEmbeddingRankConsensusPlan({
     baseline,
     candidates: consensusCandidates,
-    protectedCandidates: baselineProtections,
-    behaviorGuardFullAbort: params.behaviorGuardFullAbort
+    protectedCandidates: baselineProtections
   });
   const embeddingTailChanged = embeddingPlan.decision.status === "accepted" &&
     !sameCandidateOrder(

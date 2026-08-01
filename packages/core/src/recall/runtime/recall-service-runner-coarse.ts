@@ -42,7 +42,6 @@ import {
   createTemporalWindowCandidateBudget,
   type TemporalWindowCandidateBudget
 } from "../coarse-filter/temporal/temporal-window-candidates.js";
-import { warmEmbeddingQuery } from "./coarse/warm-embedding-query.js";
 import {
   freezeCoarseStageResult,
   freezeLexicalCoarseWithWarm
@@ -124,8 +123,6 @@ async function collectLexicalCoarseWithWarm(
   temporalCandidateBudget: TemporalWindowCandidateBudget | undefined
 ): Promise<LexicalCoarseWithWarm> {
   const recallPhaseStart = performance.now();
-  // Query embedding needs only query text — overlap with synthesis FTS, not pool merge.
-  const embeddingWarmPromise = settle(warmEmbeddingQuery(context, params, prepared));
   const globalPromise = settle(collectGlobalCoarseFilter(context, params, prepared));
   const synthesisPromise = settle(collectSynthesisStage(context, params, prepared));
   const hotCoarseFilter = await collectHotCoarseFilter(
@@ -154,7 +151,6 @@ async function collectLexicalCoarseWithWarm(
     global.filteredCandidates,
     synthesisCoarseFilter
   );
-  await embeddingWarmPromise;
   return freezeLexicalCoarseWithWarm<LexicalCoarseWithWarm>({
     recallPhaseStart,
     recallAfterCoarse,

@@ -26,7 +26,6 @@ const RecallPacketPlanDecisionSchema = z.discriminatedUnion("status", [
     status: z.literal("rejected"),
     reason: z.enum([
       "admission_infeasible",
-      "behavior_guard_full_abort",
       "cardinality_mismatch",
       "protected_candidate_constraint"
     ])
@@ -398,8 +397,7 @@ function validatePacketPlanDecisionReason(
     addPacketPlanIssue(context, ["decision"], "Unchanged consensus is inconsistent");
   }
   if (
-    ["strict_tail_consensus", "behavior_guard_full_abort",
-      "protected_candidate_constraint"].includes(reason) &&
+    ["strict_tail_consensus", "protected_candidate_constraint"].includes(reason) &&
     ((!hasEmbeddingHead && trace.protected_candidates.length === 0) ||
       !changed)
   ) {

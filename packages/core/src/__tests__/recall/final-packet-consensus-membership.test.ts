@@ -36,7 +36,6 @@ describe("final packet consensus membership", () => {
         baseline,
         sourceCandidates,
         protectedCandidates: [],
-        behaviorGuardFullAbort: false,
         membershipGovernance: {
           preProjection: baseline,
           queryProbes: compileRecallQueryProbes(null),
@@ -84,7 +83,6 @@ describe("final packet consensus membership", () => {
       baseline,
       sourceCandidates,
       protectedCandidates: [],
-      behaviorGuardFullAbort: true,
       membershipGovernance: {
         preProjection: baseline,
         queryProbes: compileRecallQueryProbes(null),
@@ -120,7 +118,6 @@ describe("final packet consensus membership", () => {
       baseline,
       sourceCandidates,
       protectedCandidates: [],
-      behaviorGuardFullAbort: false,
       membershipGovernance: {
         preProjection: [...baseline].reverse(),
         queryProbes: compileRecallQueryProbes(null),
@@ -154,7 +151,6 @@ describe("final packet consensus membership", () => {
       baseline,
       sourceCandidates,
       protectedCandidates: [],
-      behaviorGuardFullAbort: false,
       membershipGovernance: {
         preProjection: baseline,
         queryProbes: compileRecallQueryProbes(null),
@@ -178,8 +174,7 @@ describe("final packet consensus membership", () => {
     const plan = resolveFinalPacketConsensusPlan({
       baseline,
       sourceCandidates,
-      protectedCandidates: [],
-      behaviorGuardFullAbort: false
+      protectedCandidates: []
     });
 
     expect(plan.embeddingHead.length).toBeGreaterThan(0);
@@ -197,14 +192,13 @@ describe("final packet consensus membership", () => {
     const plan = resolveFinalPacketConsensusPlan({
       baseline,
       sourceCandidates: consensusCandidates(),
-      protectedCandidates: [],
-      behaviorGuardFullAbort: true
+      protectedCandidates: []
     });
     const observation = buildFinalPacketConsensusObservation(plan, baseline, false);
 
     expect(observation.decision).toEqual({
       status: "rejected",
-      reason: "behavior_guard_full_abort"
+      reason: "admission_infeasible"
     });
     expect(observation.planned_candidate_keys).not.toEqual(
       observation.actual_candidate_keys

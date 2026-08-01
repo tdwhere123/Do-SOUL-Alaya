@@ -1,4 +1,4 @@
-import { buildRecallCandidate, buildRecallCandidateSelectionKey } from "../runtime/recall-candidate-builder.js";
+import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import {
   selectBoundedDirectEvidenceHead,
@@ -112,11 +112,6 @@ function resolveSelectionConsensus(
     baseline: delivered.candidates,
     sourceCandidates: orderedCandidates,
     protectedCandidates: evidenceHead.protections,
-    behaviorGuardFullAbort: delivered.candidates.some((candidate) =>
-      context.answerSupportByCandidateKey.get(
-        buildRecallCandidateSelectionKey(candidate)
-      )?.authority?.behavior_eligible === true
-    ),
     membershipGovernance
   });
   const consensusResult = applyFinalPacketConsensus(

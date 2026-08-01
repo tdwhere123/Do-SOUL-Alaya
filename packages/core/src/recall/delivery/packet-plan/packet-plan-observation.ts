@@ -28,7 +28,6 @@ export type RecallPacketPlanDecision =
       readonly status: "rejected";
       readonly reason:
         | "admission_infeasible"
-        | "behavior_guard_full_abort"
         | "cardinality_mismatch"
         | "protected_candidate_constraint";
     }>;
@@ -375,8 +374,7 @@ function assertDecisionReason(
     throw validationError("Unchanged consensus decision is inconsistent");
   }
   if (
-    ["strict_tail_consensus", "behavior_guard_full_abort",
-      "protected_candidate_constraint"].includes(reason) &&
+    ["strict_tail_consensus", "protected_candidate_constraint"].includes(reason) &&
     ((!hasEmbeddingHead && observation.protected_candidates.length === 0) ||
       !changed)
   ) {
