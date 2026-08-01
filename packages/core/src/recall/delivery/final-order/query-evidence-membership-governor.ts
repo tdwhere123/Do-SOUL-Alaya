@@ -91,6 +91,7 @@ export function governQueryEvidenceMembership<
   readonly pathInflowByTarget?: Readonly<Record<string, readonly PathInflowEdge[]>>;
   readonly behaviorAuthorityEvidenceRefByCandidateKey: ReadonlyMap<string, string>;
   readonly fixedCandidateKeys?: ReadonlySet<string>;
+  readonly selectorConsensusActive?: boolean;
 }>): QueryEvidenceMembershipPlan<T> {
   if (params.preProjectionHead.length !== params.proposedHead.length) {
     return freezeMembershipPlan(params.proposedHead, [], [], false);
@@ -206,30 +207,32 @@ function buildRequirements<T extends QueryEvidenceMembershipCandidate>(
 ): readonly MembershipRequirement[] {
   const requirements: MembershipRequirement[] = params.preProjectionHead.flatMap(
     (candidate) => {
-    const behaviorEvidenceRef = params.behaviorAuthorityEvidenceRefByCandidateKey.get(
-      candidate.candidateKey
-    );
-    const behaviorEligible = behaviorEvidenceRef !== undefined;
-    const directQueryEvidence = hasNonEmbeddingQueryEvidenceRank(
-      candidate.sourceCandidate.fusion.per_stream_rank,
-      params.queryProbes,
-      params.proposedHead.length
-    );
-    if (!behaviorEligible && !directQueryEvidence) return [];
-    const authority = behaviorEligible
-      ? behaviorIdentityAuthority(behaviorEvidenceRef)
-      : directQueryEvidenceAuthority(
-          candidate, params.queryProbes, params.proposedHead.length,
-          "pre_projection_requirement"
+      const behaviorEvidenceRef = params.behaviorAuthorityEvidenceRefByCandidateKey.get(
+        candidate.candidateKey
+      );
+      const behaviorEligible = behaviorEvidenceRef !== undefined;
+      const directQueryEvidence = !params.selectorConsensusActive &&
+        hasNonEmbeddingQueryEvidenceRank(
+          candidate.sourceCandidate.fusion.per_stream_rank,
+          params.queryProbes,
+          params.proposedHead.length
         );
-    if (authority === null) return [];
-    return [Object.freeze({
-      candidateKey: candidate.candidateKey,
-      identityRequired: behaviorEligible,
-      sessionKey: membershipSessionKey(candidate.sourceCandidate),
-      authority
-    })];
-  });
+      if (!behaviorEligible && !directQueryEvidence) return [];
+      const authority = behaviorEligible
+        ? behaviorIdentityAuthority(behaviorEvidenceRef)
+        : directQueryEvidenceAuthority(
+            candidate, params.queryProbes, params.proposedHead.length,
+            "pre_projection_requirement"
+          );
+      if (authority === null) return [];
+      return [Object.freeze({
+        candidateKey: candidate.candidateKey,
+        identityRequired: behaviorEligible,
+        sessionKey: membershipSessionKey(candidate.sourceCandidate),
+        authority
+      })];
+    }
+  );
   const requirementKeys = new Set(requirements.map((item) => item.candidateKey));
   for (const candidate of params.proposedHead) {
     if (

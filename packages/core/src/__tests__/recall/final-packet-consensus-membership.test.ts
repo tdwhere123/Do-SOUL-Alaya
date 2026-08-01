@@ -131,7 +131,7 @@ describe("final packet consensus membership", () => {
     )).toEqual(baseline.map((candidate) => candidate.object_id));
   });
 
-  it("returns the exact baseline when membership is infeasible", () => {
+  it("lets selector consensus resolve an ordinary direct-evidence conflict", () => {
     const baseline = select(baselineCandidates()).candidates;
     const sourceCandidates = consensusCandidates().map((candidate, index) => {
       if (index < 5) {
@@ -159,12 +159,12 @@ describe("final packet consensus membership", () => {
     });
 
     expect(plan.decision).toEqual({
-      status: "no_op",
-      reason: "unchanged_consensus"
+      status: "accepted",
+      reason: "nested_membership_consensus"
     });
-    expect(plan.candidates.map((candidate) =>
-      candidate.sourceCandidate.entry.object_id
-    )).toEqual(baseline.map((candidate) => candidate.object_id));
+    expect(plan.membershipAuthorizations.some((authorization) =>
+      authorization.kind === "selector_consensus"
+    )).toBe(true);
   });
 
   it("lets the final selector consume finite embedding ranks", () => {

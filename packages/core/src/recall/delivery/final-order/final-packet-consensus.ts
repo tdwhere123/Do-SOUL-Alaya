@@ -297,6 +297,7 @@ function resolveMembershipGovernance(
     pathInflowByTarget: governance.pathInflowByTarget,
     behaviorAuthorityEvidenceRefByCandidateKey:
       governance.behaviorAuthorityEvidenceRefByCandidateKey,
+    selectorConsensusActive: plan.embeddingHead.length > 0,
     fixedCandidateKeys: new Set(
       plan.protectedCandidates
         .map((protection) => protection.candidateKey)
