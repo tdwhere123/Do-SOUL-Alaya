@@ -62,15 +62,6 @@ describe("selection boundary pre-projection decision receipts", () => {
         token_estimate: 5,
         limit: 5
       }
-    },
-    {
-      name: "embedding dominance",
-      fixture: embeddingDominanceFixture,
-      reason: "embedding_head_dominance",
-      witness: {
-        kind: "embedding_head_dominance",
-        dominating_candidate_key: "workspace_local:memory_entry:embedding-head"
-      }
     }
   ])("captures and replays the live $name receipt", ({
     fixture,
@@ -112,7 +103,7 @@ describe("selection boundary pre-projection decision receipts", () => {
       .toThrow(/selection boundary fidelity mismatch/u);
   });
 
-  it("marks an accepted consensus introduction as unqualified", () => {
+  it("replays an embedding consensus introduction through the final selector", () => {
     const boundary = captureBoundary(consensusFixture());
     const preProjection = requirePreProjection(boundary);
 
@@ -123,10 +114,19 @@ describe("selection boundary pre-projection decision receipts", () => {
     expect(preProjection.introduced_candidate_keys).toEqual([
       "workspace_local:memory_entry:challenger"
     ]);
-    expect(preProjection.projection_actions.some((action) =>
-      action.action === "exclude" ||
+    const retained = preProjection.projection_actions.filter((action) =>
+      action.action === "retain"
+    );
+    expect(retained).toHaveLength(preProjection.candidate_keys.length - 1);
+    expect(retained.filter((action) =>
+      action.reason_code === "stable_order_identity"
+    )).toHaveLength(preProjection.candidate_keys.length - 3);
+    expect(retained.filter((action) =>
       action.reason_code === "unwitnessed_reorder"
-    )).toBe(true);
+    )).toHaveLength(2);
+    expect(preProjection.projection_actions.filter((action) =>
+      action.action === "exclude"
+    )).toHaveLength(1);
     expect(preProjection.qualified_ordered_subsequence).toBe(false);
     expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
   });
@@ -217,34 +217,6 @@ function tokenLimitFixture(): CaptureFixture {
   return {
     candidates: rankedCandidates(2),
     maxTotalTokens: 5
-  };
-}
-
-function embeddingDominanceFixture(): CaptureFixture {
-  const conflict = createRankedCandidate("conflict", 1, 0.99);
-  const protectedWinner = createRankedCandidate("protected", 2, 0.9);
-  const embeddingBase = createRankedCandidate("embedding-head", 3, 0.7);
-  const embeddingHead = withEmbeddingRank(embeddingBase, 1);
-  const novel = createRankedCandidate("novel", 4, 0.4);
-  const candidates = [conflict, protectedWinner, embeddingHead, novel];
-  return {
-    candidates,
-    maxEntries: 2,
-    supplementaryData: createSupplementaryData({
-      evidenceGistsByMemoryId: {
-        conflict: "shared-gist",
-        protected: "protected-gist",
-        "embedding-head": "shared-gist",
-        novel: "novel-gist"
-      },
-      embeddingSimilarityScores: {
-        conflict: 0.2,
-        "embedding-head": 0.9
-      }
-    }),
-    answerRelevanceRankByCandidateKey: new Map([
-      [protectedWinner.fusion.candidate_key, 1]
-    ])
   };
 }
 

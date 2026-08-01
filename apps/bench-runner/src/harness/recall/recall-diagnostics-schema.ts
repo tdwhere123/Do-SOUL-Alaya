@@ -283,7 +283,8 @@ const RecallDegradationReasonSchema = z.enum([
   "synthesis_fts_failed",
   "embedding_coarse_injection_failed",
   "graph_expansion_failed",
-  "path_expansion_failed"
+  "path_expansion_failed",
+  "packet_plan_trace_capture_failed"
 ]);
 
 export const BenchRecallDiagnosticsSchema = z

@@ -13,7 +13,7 @@ import type {
 import { completeFineAssessmentPreProjection } from
   "./pre-projection/observation.js";
 import type { RecallPacketPlanObservation } from
-  "../packet-plan/packet-plan-trace.js";
+  "../packet-plan/packet-plan-observation.js";
 import {
   assertSelectionBoundaryJsonValue,
   cloneSelectionBoundaryJson,

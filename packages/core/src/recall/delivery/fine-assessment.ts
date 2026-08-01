@@ -35,7 +35,7 @@ import {
   type FineAssessmentPruneResult
 } from "./fine-assessment-prune.js";
 import type { RecallPacketPlanObservation } from
-  "./packet-plan/packet-plan-trace.js";
+  "./packet-plan/packet-plan-observation.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from
   "./selection-boundary/selection-boundary-capture.js";
 

@@ -1,6 +1,6 @@
 import type { RecallPolicy } from "@do-soul/alaya-protocol";
 import type { RecallPacketPlanObservation } from
-  "../packet-plan/packet-plan-trace.js";
+  "../packet-plan/packet-plan-observation.js";
 import type {
   RecallCandidateDropReason,
   RecallSupplementaryData

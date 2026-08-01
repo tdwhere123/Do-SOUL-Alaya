@@ -3,6 +3,8 @@ import { selectFineAssessmentCandidates } from
   "../../recall/delivery/fine-assessment-selection.js";
 import { collectGovernancePathDerivations } from
   "../../recall/supplements/supplementary-data-governance-paths.js";
+import { compileRecallQueryProbes } from
+  "../../recall/query/recall-query-probes.js";
 import {
   createCandidate,
   createConfig,
@@ -55,6 +57,7 @@ describe("candidate selector observation", () => {
 
     expect(diagnostics.get("memory-1")?.selector_observation).toEqual({
       schema_version: 1,
+      demand: { atoms: [], matches: [], unmatched: [] },
       evidence: expectedReferencedEvidence(),
       temporal: expectedTemporalObservation(),
       coverage: { marginal_gain: 0.7 },
@@ -112,6 +115,34 @@ describe("candidate selector observation", () => {
     const observation = selectObservation(memory, [], "unavailable");
 
     expect(observation.path).toEqual({ status: "unavailable", receipts: [] });
+  });
+
+  it("records demand atoms with their content, Key, or Evidence source", () => {
+    const memory = createCandidate("memory-1", {
+      content: "I graduated with a degree in history.",
+      evidence_refs: ["memory-1"]
+    });
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [memory],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes: compileRecallQueryProbes("degree evidence-memory-1")
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([memory]),
+      captureAnswerFeatures: true
+    });
+    const demand = result.diagnostics[0]!.selector_observation!.demand;
+
+    expect(demand.matches).toEqual(expect.arrayContaining([
+      { kind: "lexical_term", value: "degree", source: "content" },
+      { kind: "evidence_ref", value: "memory-1", source: "evidence" }
+    ]));
+    expect(demand.unmatched).toEqual(expect.arrayContaining([
+      { kind: "lexical_term", value: "evidence-memory-1" },
+      { kind: "phrase", value: "degree evidence-memory-1" }
+    ]));
+    expect(demand.atoms.every(Object.isFrozen)).toBe(true);
   });
 
   it("marks a failed governance Path lookup as unavailable", async () => {

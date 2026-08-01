@@ -4,7 +4,7 @@ import {
   type RecallPolicy
 } from "@do-soul/alaya-protocol";
 import type { FineAssessParams } from "../delivery/fine-assessment.js";
-import { buildSupportSetPacketPlanTrace } from
+import { captureSupportSetPacketPlanTrace } from
   "../delivery/packet-plan/packet-plan-trace.js";
 import {
   applyManifestationBiasSidecar,
@@ -295,6 +295,9 @@ async function completeCandidateAssessment(
   if (embeddingData.evidenceScoring.status === "failed") {
     context.degradationReasons?.add("evidence_candidate_embedding_failed");
   }
+  const packetPlanTrace = captureAssessmentPacketPlanTrace(
+    context, assessmentPath, delivery.value.packetPlanObservation
+  );
   return Object.freeze({
     finalAssessment: delivery.value,
     supplementaryData: rerank.value.supplementaryData,
@@ -305,14 +308,7 @@ async function completeCandidateAssessment(
     evidenceEmbeddingScoring: embeddingData.evidenceScoring,
     providerDegradationReason: provider.degradationReason,
     answerRerankDiagnostics: rerank.value.diagnostics,
-    ...(delivery.value.packetPlanObservation === undefined
-      ? {}
-      : {
-          packetPlanTrace: buildSupportSetPacketPlanTrace(
-            assessmentPath,
-            delivery.value.packetPlanObservation
-          )
-        }),
+    ...(packetPlanTrace === undefined ? {} : { packetPlanTrace }),
     phaseLatencyMs: Object.freeze({
       embedding: phaseLatency.embedding,
       assessment: phaseLatency.assessment,
@@ -320,6 +316,19 @@ async function completeCandidateAssessment(
       delivery: phaseLatency.delivery + delivery.latencyMs
     })
   });
+}
+
+function captureAssessmentPacketPlanTrace(
+  context: RecallExecutionContext,
+  assessmentPath: "legacy" | "snapshot",
+  observation: FineAssessmentResult["packetPlanObservation"]
+) {
+  if (observation === undefined) return undefined;
+  const capture = captureSupportSetPacketPlanTrace(assessmentPath, observation);
+  if (capture.status === "captured") return capture.trace;
+  context.degradationReasons?.add("packet_plan_trace_capture_failed");
+  context.warn("recall packet plan trace capture failed", capture.failure);
+  return undefined;
 }
 
 async function collectAnswerRerankStage(

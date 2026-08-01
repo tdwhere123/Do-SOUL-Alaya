@@ -128,10 +128,8 @@ function resolveTokenAdmission(
 export function tryRecordAcceptedAdmission(
   state: FineAssessmentAdmissionState,
   candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>
+  context: FineAssessmentSelectionContext
 ): boolean {
-  if (evictions.has(candidate.fusion.candidate_key)) return false;
   const objectKey = buildRecallLogicalObjectKey(candidate);
   const admission = resolveAdmission(state, candidate, objectKey, context);
   if (admission.droppedReason !== null) return false;
@@ -142,13 +140,12 @@ export function tryRecordAcceptedAdmission(
 
 export function collectAdmittedCandidates(
   candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>
+  context: FineAssessmentSelectionContext
 ): readonly FineAssessmentCandidate[] {
   const state = createAdmissionState();
   const delivered: FineAssessmentCandidate[] = [];
   for (const candidate of candidates) {
-    if (!tryRecordAcceptedAdmission(state, candidate, context, evictions)) continue;
+    if (!tryRecordAcceptedAdmission(state, candidate, context)) continue;
     delivered.push(candidate);
   }
   return delivered;

@@ -75,12 +75,12 @@ describe("fine-assessment selection boundary fidelity", () => {
     const preProjection = readPreProjection(boundary);
 
     expect(boundary.expected.candidate_keys).toEqual([
-      "workspace_local:memory_entry:candidate-6",
-      "workspace_local:memory_entry:candidate-5",
-      "workspace_local:memory_entry:candidate-4",
-      "workspace_local:memory_entry:candidate-3",
+      "workspace_local:memory_entry:candidate-1",
       "workspace_local:memory_entry:candidate-2",
-      "workspace_local:memory_entry:candidate-1"
+      "workspace_local:memory_entry:candidate-3",
+      "workspace_local:memory_entry:candidate-4",
+      "workspace_local:memory_entry:candidate-5",
+      "workspace_local:memory_entry:candidate-6"
     ]);
     expect(preProjection.schema_version).toBe(1);
     expect(preProjection.candidate_keys).toEqual([
@@ -109,11 +109,11 @@ describe("fine-assessment selection boundary fidelity", () => {
       })
     ));
     expect(preProjection.introduced_candidate_keys).toEqual([]);
-    expect(preProjection.ordered_subsequence).toBe(false);
-    expect(preProjection.qualified_ordered_subsequence).toBe(false);
+    expect(preProjection.ordered_subsequence).toBe(true);
+    expect(preProjection.qualified_ordered_subsequence).toBe(true);
     expect(preProjection.projection_actions.every((action) =>
-      action.reason_code === "unwitnessed_reorder" &&
-      action.qualification === "ineligible"
+      action.reason_code === "stable_order_identity" &&
+      action.qualification === "permitted"
     )).toBe(true);
   });
 

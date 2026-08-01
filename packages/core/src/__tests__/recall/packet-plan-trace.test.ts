@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSupportSetPacketPlanTrace,
+  assertRecallPacketPlanObservation,
+  type RecallPacketMembershipAuthorization,
   type RecallPacketPlanObservation
-} from "../../recall/delivery/packet-plan/packet-plan-trace.js";
+} from "../../recall/delivery/packet-plan/packet-plan-observation.js";
+import { captureSupportSetPacketPlanTrace } from
+  "../../recall/delivery/packet-plan/packet-plan-trace.js";
 
 describe("support-set packet plan trace", () => {
   it("freezes an accepted IDs-only trace whose planned packet is actual", () => {
@@ -12,7 +15,7 @@ describe("support-set packet plan trace", () => {
     );
 
     expect(trace).toEqual({
-      schema_version: 2,
+      schema_version: 3,
       assessment_path: "snapshot",
       ...acceptedObservation(),
       added_candidate_keys: ["global:evidence_capsule:added-d"],
@@ -38,6 +41,7 @@ describe("support-set packet plan trace", () => {
       embedding_head: [],
       consensus_head_candidate_keys: baseline,
       immutable_tail_candidate_keys: [],
+      membership_authorizations: [],
       protected_candidates: [],
       decision: {
         status: "no_op",
@@ -52,11 +56,149 @@ describe("support-set packet plan trace", () => {
     expect(trace.decision).toEqual(observation.decision);
   });
 
+  it("accepts membership consensus without an embedding head", () => {
+    const accepted = acceptedObservation();
+    const planned = [
+      accepted.baseline_candidate_keys[0]!,
+      accepted.baseline_candidate_keys[2]!,
+      "workspace_local:memory_entry:added-d"
+    ];
+    const observation: RecallPacketPlanObservation = {
+      ...accepted,
+      planned_candidate_keys: planned,
+      actual_candidate_keys: planned,
+      head_width: 3,
+      baseline_head_candidate_keys: accepted.baseline_candidate_keys,
+      embedding_head: [],
+      consensus_head_candidate_keys: planned,
+      immutable_tail_candidate_keys: [],
+      tail_policy: "nested_membership_exchange",
+      membership_authorizations: [directAuthorization(
+        planned[2]!, 3, accepted.baseline_candidate_keys[2]!,
+        accepted.baseline_candidate_keys[1]!
+      )],
+      decision: {
+        status: "accepted",
+        reason: "nested_membership_consensus"
+      }
+    };
+
+    expect(buildSupportSetPacketPlanTrace("snapshot", observation).decision)
+      .toEqual(observation.decision);
+  });
+
+  it("rejects a nested trace with a forged baseline prefix", () => {
+    const accepted = acceptedObservation();
+    const planned = [
+      accepted.baseline_candidate_keys[0]!,
+      accepted.baseline_candidate_keys[2]!,
+      "workspace_local:memory_entry:added-d"
+    ];
+    expect(() => buildSupportSetPacketPlanTrace("snapshot", {
+      ...accepted,
+      planned_candidate_keys: planned,
+      actual_candidate_keys: planned,
+      head_width: 3,
+      baseline_head_candidate_keys: [...accepted.baseline_candidate_keys].reverse(),
+      embedding_head: [],
+      consensus_head_candidate_keys: planned,
+      immutable_tail_candidate_keys: [],
+      tail_policy: "nested_membership_exchange",
+      membership_authorizations: [directAuthorization(
+        planned[2]!, 3, accepted.baseline_candidate_keys[2]!,
+        accepted.baseline_candidate_keys[1]!
+      )],
+      decision: { status: "accepted", reason: "nested_membership_consensus" }
+    })).toThrow();
+  });
+
+  it("rejects a membership receipt bound to an unrelated source", () => {
+    const accepted = acceptedObservation();
+    const planned = [
+      accepted.baseline_candidate_keys[0]!,
+      accepted.baseline_candidate_keys[2]!,
+      "workspace_local:memory_entry:added-d"
+    ];
+    expect(() => buildSupportSetPacketPlanTrace("snapshot", {
+      ...accepted,
+      planned_candidate_keys: planned,
+      actual_candidate_keys: planned,
+      head_width: 3,
+      baseline_head_candidate_keys: accepted.baseline_candidate_keys,
+      embedding_head: [],
+      consensus_head_candidate_keys: planned,
+      immutable_tail_candidate_keys: [],
+      tail_policy: "nested_membership_exchange",
+      membership_authorizations: [{
+        ...directAuthorization(
+          planned[2]!, 3, accepted.baseline_candidate_keys[2]!,
+          accepted.baseline_candidate_keys[1]!
+        ),
+        authorized_candidate_key: accepted.baseline_candidate_keys[0]!
+      }],
+      decision: { status: "accepted", reason: "nested_membership_consensus" }
+    })).toThrow();
+  });
+
+  it("rejects an unauthorized permutation of the baseline head", () => {
+    const accepted = acceptedObservation();
+    const consensusHead = [...accepted.baseline_head_candidate_keys].reverse();
+    const planned = [
+      ...consensusHead,
+      ...accepted.immutable_tail_candidate_keys
+    ];
+
+    expect(() => assertRecallPacketPlanObservation({
+      ...accepted,
+      planned_candidate_keys: planned,
+      actual_candidate_keys: planned,
+      consensus_head_candidate_keys: consensusHead,
+      embedding_head: consensusHead.map((candidateKey, index) => ({
+        candidate_key: candidateKey,
+        embedding_rank: index + 1
+      })),
+      membership_authorizations: [],
+      decision: { status: "accepted", reason: "strict_tail_consensus" }
+    })).toThrow();
+  });
+
+  it("rejects a new head member disguised as a protected baseline candidate", () => {
+    const accepted = acceptedObservation();
+    const introduced = accepted.consensus_head_candidate_keys[1]!;
+
+    expect(() => assertRecallPacketPlanObservation({
+      ...accepted,
+      membership_authorizations: [],
+      protected_candidates: [{ candidate_key: introduced, rank_limit: 2 }]
+    })).toThrow();
+  });
+
+  it.each([
+    ["embedding stream", { stream: "embedding_similarity" }],
+    ["out-of-head direct rank", { rank: 3 }],
+    ["zero source-proximity rank", { source_proximity_rank: 0 }],
+    ["zero evidence-agreement rank", { source_evidence_agreement_rank: 0 }]
+  ])("rejects direct evidence with an invalid %s", (_name, witnessPatch) => {
+    const accepted = acceptedObservation();
+    const authorization = accepted.membership_authorizations[0]!;
+    if (authorization.kind !== "direct_query_evidence") {
+      throw new Error("Expected direct authorization fixture");
+    }
+    expect(() => assertRecallPacketPlanObservation({
+      ...accepted,
+      membership_authorizations: [{
+        ...authorization,
+        witness: { ...authorization.witness, ...witnessPatch }
+      }]
+    } as unknown as RecallPacketPlanObservation)).toThrow();
+  });
+
   it("records a rejected proposal while preserving the actual baseline", () => {
     const accepted = acceptedObservation();
     const rejected: RecallPacketPlanObservation = {
       ...accepted,
       actual_candidate_keys: accepted.baseline_candidate_keys,
+      membership_authorizations: [],
       protected_candidates: [{
         candidate_key: "global:evidence_capsule:baseline-b",
         rank_limit: 2
@@ -71,6 +213,46 @@ describe("support-set packet plan trace", () => {
 
     expect(trace.planned_candidate_keys).not.toEqual(trace.actual_candidate_keys);
     expect(trace.actual_candidate_keys).toEqual(trace.baseline_candidate_keys);
+  });
+
+  it("accepts strict-tail admission failure without a nested tail policy", () => {
+    const accepted = acceptedObservation();
+    const observation: RecallPacketPlanObservation = {
+      ...accepted,
+      actual_candidate_keys: accepted.baseline_candidate_keys,
+      decision: { status: "rejected", reason: "admission_infeasible" }
+    };
+
+    expect(buildSupportSetPacketPlanTrace("snapshot", observation).decision)
+      .toEqual(observation.decision);
+  });
+
+  it("accepts nested admission failure with its tail policy", () => {
+    const accepted = acceptedObservation();
+    const planned = [
+      accepted.baseline_candidate_keys[0]!,
+      accepted.baseline_candidate_keys[2]!,
+      "workspace_local:memory_entry:added-d"
+    ];
+    const observation: RecallPacketPlanObservation = {
+      ...accepted,
+      planned_candidate_keys: planned,
+      actual_candidate_keys: accepted.baseline_candidate_keys,
+      head_width: 3,
+      baseline_head_candidate_keys: accepted.baseline_candidate_keys,
+      embedding_head: [],
+      consensus_head_candidate_keys: planned,
+      immutable_tail_candidate_keys: [],
+      tail_policy: "nested_membership_exchange",
+      membership_authorizations: [directAuthorization(
+        planned[2]!, 3, accepted.baseline_candidate_keys[2]!,
+        accepted.baseline_candidate_keys[1]!
+      )],
+      decision: { status: "rejected", reason: "admission_infeasible" }
+    };
+
+    expect(buildSupportSetPacketPlanTrace("snapshot", observation).decision)
+      .toEqual(observation.decision);
   });
 
   it("rejects a decision reason that contradicts its observed proposal", () => {
@@ -119,7 +301,37 @@ describe("support-set packet plan trace", () => {
       mutate(acceptedObservation())
     )).toThrow();
   });
+
+  it("contains an unexpected trace projection fault", () => {
+    const observation = new Proxy(acceptedObservation(), {
+      get(target, property, receiver) {
+        if (property === "baseline_candidate_keys") {
+          throw new Error("injected projection fault");
+        }
+        return Reflect.get(target, property, receiver);
+      }
+    });
+
+    expect(captureSupportSetPacketPlanTrace("snapshot", observation))
+      .toEqual({
+        status: "failed",
+        failure: {
+          code: "packet_plan_trace_projection_failed",
+          error_name: "Error"
+        }
+      });
+  });
 });
+
+function buildSupportSetPacketPlanTrace(
+  assessmentPath: "legacy" | "snapshot",
+  observation: RecallPacketPlanObservation
+) {
+  assertRecallPacketPlanObservation(observation);
+  const capture = captureSupportSetPacketPlanTrace(assessmentPath, observation);
+  if (capture.status === "failed") throw new Error("Trace capture unexpectedly failed");
+  return capture.trace;
+}
 
 function acceptedObservation(): RecallPacketPlanObservation {
   return {
@@ -154,6 +366,12 @@ function acceptedObservation(): RecallPacketPlanObservation {
     immutable_tail_candidate_keys: [
       "workspace_local:synthesis_capsule:tail-c"
     ],
+    membership_authorizations: [directAuthorization(
+      "global:evidence_capsule:added-d",
+      2,
+      "global:evidence_capsule:baseline-b",
+      "global:evidence_capsule:baseline-b"
+    )],
     protected_candidates: [{
       candidate_key: "workspace_local:memory_entry:baseline-a",
       rank_limit: 1
@@ -163,4 +381,38 @@ function acceptedObservation(): RecallPacketPlanObservation {
       reason: "strict_tail_consensus"
     }
   };
+}
+
+function directAuthorization(
+  candidateKey: string,
+  slot: number,
+  displacedKey: string,
+  evictedKey: string
+): RecallPacketMembershipAuthorization {
+  return {
+    kind: "direct_query_evidence",
+    authorized_candidate_key: candidateKey,
+    satisfied_by_candidate_key: candidateKey,
+    satisfied_head_slot: slot,
+    displaced_head_baseline: { slot, candidate_key: displacedKey },
+    evicted_packet_baseline: {
+      slot: acceptedBaseline().indexOf(evictedKey) + 1,
+      candidate_key: evictedKey
+    },
+    witness: {
+      origin: "proposed_head",
+      stream: "lexical_fts",
+      rank: 1,
+      source_proximity_rank: 1,
+      source_evidence_agreement_rank: 1
+    }
+  };
+}
+
+function acceptedBaseline(): readonly string[] {
+  return [
+    "workspace_local:memory_entry:baseline-a",
+    "global:evidence_capsule:baseline-b",
+    "workspace_local:synthesis_capsule:tail-c"
+  ];
 }

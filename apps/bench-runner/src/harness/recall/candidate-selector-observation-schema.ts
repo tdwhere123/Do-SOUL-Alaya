@@ -1,6 +1,27 @@
 import { PathAnchorRefSchema } from "@do-soul/alaya-protocol";
 import { z } from "zod";
 
+const RecallSelectorDemandAtomBaseSchema = z.object({
+  kind: z.enum([
+    "lexical_term",
+    "phrase",
+    "object_id",
+    "evidence_ref",
+    "dimension",
+    "scope_class",
+    "domain_tag",
+    "date_term",
+    "facet"
+  ]),
+  value: z.string().min(1)
+}).strict();
+
+const RecallSelectorDemandAtomSchema = RecallSelectorDemandAtomBaseSchema.readonly();
+
+const RecallSelectorDemandMatchSchema = RecallSelectorDemandAtomBaseSchema.extend({
+  source: z.enum(["content", "key", "evidence"])
+}).strict().readonly();
+
 const RecallSelectorPathReceiptSchema = z
   .object({
     receipt_status: z.enum(["complete", "partial"]),
@@ -19,6 +40,11 @@ const RecallSelectorPathReceiptSchema = z
 export const RecallCandidateSelectorObservationSchema = z
   .object({
     schema_version: z.literal(1),
+    demand: z.object({
+      atoms: z.array(RecallSelectorDemandAtomSchema).readonly(),
+      matches: z.array(RecallSelectorDemandMatchSchema).readonly(),
+      unmatched: z.array(RecallSelectorDemandAtomSchema).readonly()
+    }).strict().readonly().nullable().default(null),
     evidence: z.object({
       directness: z.enum(["direct_document", "referenced", "none", "unresolved"]),
       authority: z.enum([

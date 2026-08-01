@@ -50,7 +50,7 @@ describe("embedding-rank consensus packet plan", () => {
     expect(planned).toBe(baseline);
   });
 
-  it("never promotes a baseline-tail key even when the source ranks it first", () => {
+  it("promotes a baseline-tail key when the source ranks it first", () => {
     const baseline = packet("head-a", "head-b", "tail");
     const rankedTail = candidate("tail", 100, 1);
 
@@ -59,8 +59,8 @@ describe("embedding-rank consensus packet plan", () => {
       candidates: [...baseline, rankedTail]
     });
 
-    expect(planned).toBe(baseline);
-    expect(planned[2]).toBe(baseline[2]);
+    expect(keys(planned)).toEqual(["tail", "head-a", "head-b"]);
+    expect(planned).not.toBe(baseline);
   });
 
   it("clamps the consensus head to the baseline length", () => {

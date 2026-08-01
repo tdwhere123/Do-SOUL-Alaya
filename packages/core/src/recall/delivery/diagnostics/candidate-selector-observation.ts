@@ -5,8 +5,12 @@ import type { RecallCandidateAnswerSupport } from
   "../../query/recall-candidate-answer-support.js";
 import { isWorkspaceMemoryCandidate } from
   "../../runtime/recall-service-helpers.js";
+import { splitLexicalTokens } from "../../query/recall-query-probes.js";
 import type {
   PathInflowEdge,
+  RecallSelectorDemandAtom,
+  RecallSelectorDemandAtomKind,
+  RecallSelectorDemandMatch,
   RecallCandidateSelectorObservation,
   RecallSelectorEventStatus,
   RecallSelectorEvidenceAuthority,
@@ -29,6 +33,7 @@ export function buildCandidateSelectorObservation(
   const observations = context.answerSupportObservationsByCandidateKey.get(candidateKey) ?? [];
   return Object.freeze({
     schema_version: 1,
+    demand: buildDemandObservation(candidate, context),
     evidence: buildEvidenceObservation(candidate, support, observations),
     temporal: buildTemporalObservation(candidate, support, observations),
     coverage: Object.freeze({
@@ -36,6 +41,103 @@ export function buildCandidateSelectorObservation(
     }),
     path: buildPathObservation(candidate, context)
   });
+}
+
+function buildDemandObservation(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): RecallCandidateSelectorObservation["demand"] {
+  const probes = context.supplementaryData.queryProbes;
+  const atoms = buildDemandAtoms(probes, context.supplementaryData.querySoughtFacets);
+  const content = candidate.entry.content.toLocaleLowerCase();
+  const contentTokens = new Set(splitLexicalTokens(candidate.entry.content));
+  const matches = atoms.flatMap((atom) => {
+    const source = matchDemandAtom(atom, candidate, content, contentTokens);
+    return source === null ? [] : [{ ...atom, source }];
+  });
+  const matchedKeys = new Set(matches.map((match) => demandAtomKey(match)));
+  return Object.freeze({
+    atoms: Object.freeze(atoms),
+    matches: Object.freeze(matches.map((match) => Object.freeze(match))),
+    unmatched: Object.freeze(atoms
+      .filter((atom) => !matchedKeys.has(demandAtomKey(atom)))
+      .map((atom) => Object.freeze(atom)))
+  });
+}
+
+function buildDemandAtoms(
+  probes: FineAssessmentSelectionContext["supplementaryData"]["queryProbes"],
+  soughtFacets: readonly string[] | undefined
+): readonly RecallSelectorDemandAtom[] {
+  const atoms = new Map<string, RecallSelectorDemandAtom>();
+  const add = (kind: RecallSelectorDemandAtomKind, values: readonly unknown[]) => {
+    for (const value of values) {
+      const normalized = String(value).trim().toLocaleLowerCase();
+      if (normalized.length === 0) continue;
+      const atom = Object.freeze({ kind, value: normalized } as const);
+      atoms.set(demandAtomKey(atom), atom);
+    }
+  };
+  add("lexical_term", probes.lexical_terms);
+  add("phrase", probes.phrases);
+  add("object_id", probes.object_ids);
+  add("evidence_ref", probes.evidence_refs);
+  add("dimension", probes.dimensions);
+  add("scope_class", probes.scope_classes);
+  add("domain_tag", probes.domain_tags);
+  add("date_term", probes.date_terms);
+  add("facet", soughtFacets ?? []);
+  return Object.freeze([...atoms.values()]);
+}
+
+function matchDemandAtom(
+  atom: Readonly<RecallSelectorDemandAtom>,
+  candidate: FineAssessmentCandidate,
+  content: string,
+  contentTokens: ReadonlySet<string>
+): RecallSelectorDemandMatch["source"] | null {
+  switch (atom.kind) {
+    case "lexical_term":
+      return contentTokens.has(atom.value) ? "content" : null;
+    case "phrase":
+    case "date_term":
+      return content.includes(atom.value) ? "content" : null;
+    case "object_id":
+      return candidate.entry.object_id.toLocaleLowerCase() === atom.value
+        ? "key" : null;
+    case "evidence_ref":
+      return candidate.entry.evidence_refs
+          .some((value) => value.toLocaleLowerCase() === atom.value)
+        ? "evidence" : null;
+    case "dimension":
+      return String(candidate.entry.dimension).toLocaleLowerCase() === atom.value
+        ? "key" : null;
+    case "scope_class":
+      return String(candidate.entry.scope_class).toLocaleLowerCase() === atom.value
+        ? "key" : null;
+    case "domain_tag":
+      return (candidate.entry.domain_tags ?? [])
+          .some((value) => value.toLocaleLowerCase() === atom.value)
+        ? "key" : null;
+    case "facet":
+      return matchFacetKey(atom.value, candidate) ? "key" : null;
+  }
+}
+
+function matchFacetKey(facet: string, candidate: FineAssessmentCandidate): boolean {
+  const fields = [
+    ...(candidate.entry.domain_tags ?? []),
+    ...(candidate.entry.canonical_entities ?? []),
+    candidate.entry.preference_subject,
+    candidate.entry.preference_predicate,
+    candidate.entry.preference_object,
+    candidate.entry.preference_category
+  ];
+  return fields.some((value) => value?.toLocaleLowerCase().includes(facet));
+}
+
+function demandAtomKey(atom: Readonly<RecallSelectorDemandAtom>): string {
+  return `${atom.kind}:${atom.value}`;
 }
 
 function buildEvidenceObservation(

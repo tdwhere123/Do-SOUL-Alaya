@@ -281,10 +281,8 @@ describe("final recall relevance ownership", () => {
     )).toBe(true);
   });
 
-  it("uses public relevance final order when deep-head is a no-op", () => {
-    // Emb+agreement cold → empty deep-head. Coverage packing can place a
-    // medium-fused novel ahead of a high-fused duplicate; fused public order
-    // must still bind the delivered packet (not coverage scramble).
+  it("keeps coverage order when deep-head is a no-op", () => {
+    // The final selector owns the packet order after coverage selection.
     const primary = createMemory(FUSION_WINNER_ID, 0.9, [{ facet: "occupation_work" }]);
     const redundant = createMemory(ACTIVATION_WINNER_ID, 0.85, [{ facet: "occupation_work" }]);
     const novel = createMemory(COVERAGE_NOVEL_ID, 0.5, [{ facet: "location_place" }]);
@@ -313,32 +311,24 @@ describe("final recall relevance ownership", () => {
     });
 
     expect(assessed.candidates.map((candidate) => candidate.object_id))
-      .toEqual([FUSION_WINNER_ID, ACTIVATION_WINNER_ID, COVERAGE_NOVEL_ID]);
+      .toEqual([FUSION_WINNER_ID, COVERAGE_NOVEL_ID, ACTIVATION_WINNER_ID]);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get(COVERAGE_NOVEL_ID)?.rank_after_coverage_selector)
       .toBeLessThan(diagnostics.get(ACTIVATION_WINNER_ID)?.rank_after_coverage_selector ?? 0);
     expect(diagnostics.get(FUSION_WINNER_ID)).toMatchObject({ final_rank: 1, post_rank: 1 });
-    expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
-    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
+    expect(diagnostics.get(COVERAGE_NOVEL_ID)).toMatchObject({ final_rank: 2, post_rank: 2 });
+    expect(diagnostics.get(ACTIVATION_WINNER_ID)).toMatchObject({ final_rank: 3, post_rank: 3 });
   });
 
-  it("restores CE relevance order after coverage-stage displacement", () => {
+  it("does not restore CE relevance order after coverage-stage displacement", () => {
     const assessed = buildCoverageReorderedCeAssessment();
 
     expect(assessed.candidates.length).toBeGreaterThan(5);
     const diagnostics = new Map(assessed.diagnostics.map((row) => [row.object_id, row]));
     const highDup = diagnostics.get(CE_HIGH_DUP_ID);
     expect(highDup?.rank_after_coverage_selector).toBeGreaterThan(2);
-    expect(highDup?.final_rank).toBeLessThanOrEqual(5);
-    expect(highDup?.final_rank).toBe(2);
-    expect(highDup?.post_rank).toBe(2);
-    expect(assessed.candidates.map((candidate) => candidate.relevance_score)).toEqual(
-      [...assessed.candidates]
-        .map((candidate) => candidate.relevance_score)
-        .sort((left, right) => right - left)
-    );
-    expect(assessed.candidates[0]?.object_id).toBe(CE_TOP_ID);
-    expect(assessed.candidates[1]?.object_id).toBe(CE_HIGH_DUP_ID);
+    expect(highDup?.final_rank).toBe(highDup?.rank_after_coverage_selector);
+    expect(highDup?.post_rank).toBe(highDup?.final_rank);
   });
 
   it("uses only the injected clock when a retired benchmark env is present", () => {

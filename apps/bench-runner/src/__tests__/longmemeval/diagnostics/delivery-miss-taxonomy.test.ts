@@ -88,20 +88,6 @@ describe("classifyDeliveryMissTaxonomy", () => {
     ).toBe("budget_drop");
   });
 
-  it("classifies embedding-head dominance as an explicit delivery admission drop", () => {
-    expect(
-      classifyDeliveryMissTaxonomy({
-        deliveredRank: null,
-        candidate: candidate({
-          preBudgetRank: 2,
-          droppedReason: "embedding_head_dominance"
-        }),
-        anyObjectCandidate: undefined,
-        diagnosticsAvailable: true
-      })
-    ).toBe("budget_drop");
-  });
-
   it("does not blame coverage when the feature head already moved fused top-5 gold out", () => {
     expect(
       classifyDeliveryMissTaxonomy({

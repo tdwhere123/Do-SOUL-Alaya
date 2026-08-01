@@ -1,46 +1,22 @@
 import { z } from "zod";
-
-export const BenchEvidenceEmbeddingStatusSchema = z.enum([
-  "not_requested",
-  "not_applicable",
-  "returned",
-  "failed"
-]);
-
-export const BenchEvidenceEmbeddingFailureClassSchema = z.enum([
-  "provider_unavailable",
-  "query_embedding_failed",
-  "candidate_embedding_failed",
-  "service_error"
-]);
-
-export const BenchAnswerRerankStatusSchema = z.enum([
-  "not_requested",
-  "not_applicable",
-  "returned",
-  "failed"
-]);
-
-export const BenchAnswerRerankFailureClassSchema = z.enum([
-  "invalid_score_count",
-  "invalid_score_value",
-  "service_error"
-]);
-
-export const RecallMultiSeedGraphFanInDiagnosticsSchema = z
-  .object({
-    distinct_seeds: z.number().int().nonnegative(),
-    candidates_per_seed_p50: z.number().nonnegative(),
-    candidates_per_seed_p95: z.number().nonnegative(),
-    dedup_collisions: z.number().int().nonnegative()
-  })
-  .strict()
-  .readonly();
+import {
+  MembershipAuthorizationSchema,
+  NonBlankStringSchema,
+  type MembershipAuthorization,
+  type MembershipSlot
+} from "./packet-plan-membership-schema.js";
+export {
+  BenchAnswerRerankFailureClassSchema,
+  BenchAnswerRerankStatusSchema,
+  BenchEvidenceEmbeddingFailureClassSchema,
+  BenchEvidenceEmbeddingStatusSchema,
+  RecallMultiSeedGraphFanInDiagnosticsSchema
+} from "./recall-stage-status-schema.js";
 
 const RecallPacketPlanDecisionSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("accepted"),
-    reason: z.literal("strict_tail_consensus")
+    reason: z.enum(["strict_tail_consensus", "nested_membership_consensus"])
   }).strict().readonly(),
   z.object({
     status: z.literal("no_op"),
@@ -59,7 +35,7 @@ const RecallPacketPlanDecisionSchema = z.discriminatedUnion("status", [
 
 const RecallPacketPlanEmbeddingRankSchema = z
   .object({
-    candidate_key: z.string().min(1),
+    candidate_key: NonBlankStringSchema,
     embedding_rank: z.number().int().positive()
   })
   .strict()
@@ -67,7 +43,7 @@ const RecallPacketPlanEmbeddingRankSchema = z
 
 const RecallPacketPlanProtectionSchema = z
   .object({
-    candidate_key: z.string().min(1),
+    candidate_key: NonBlankStringSchema,
     rank_limit: z.number().int().positive()
   })
   .strict()
@@ -75,19 +51,26 @@ const RecallPacketPlanProtectionSchema = z
 
 const RecallPacketPlanTraceShapeSchema = z
   .object({
-    schema_version: z.literal(2),
+    schema_version: z.literal(3),
     assessment_path: z.enum(["legacy", "snapshot"]),
-    baseline_candidate_keys: z.array(z.string().min(1)).readonly(),
-    planned_candidate_keys: z.array(z.string().min(1)).readonly(),
-    actual_candidate_keys: z.array(z.string().min(1)).readonly(),
+    baseline_candidate_keys: z.array(NonBlankStringSchema).readonly(),
+    planned_candidate_keys: z.array(NonBlankStringSchema).readonly(),
+    actual_candidate_keys: z.array(NonBlankStringSchema).readonly(),
     head_width: z.number().int().nonnegative(),
-    baseline_head_candidate_keys: z.array(z.string().min(1)).readonly(),
+    baseline_head_candidate_keys: z.array(NonBlankStringSchema).readonly(),
     embedding_head: z.array(RecallPacketPlanEmbeddingRankSchema).readonly(),
-    consensus_head_candidate_keys: z.array(z.string().min(1)).readonly(),
-    immutable_tail_candidate_keys: z.array(z.string().min(1)).readonly(),
+    consensus_head_candidate_keys: z.array(NonBlankStringSchema).readonly(),
+    immutable_tail_candidate_keys: z.array(NonBlankStringSchema).readonly(),
+    tail_policy: z.enum([
+      "head_tail_exchange",
+      "nested_membership_exchange"
+    ]).optional(),
+    membership_authorizations: z.array(
+      MembershipAuthorizationSchema
+    ).readonly(),
     protected_candidates: z.array(RecallPacketPlanProtectionSchema).readonly(),
-    added_candidate_keys: z.array(z.string().min(1)).readonly(),
-    removed_candidate_keys: z.array(z.string().min(1)).readonly(),
+    added_candidate_keys: z.array(NonBlankStringSchema).readonly(),
+    removed_candidate_keys: z.array(NonBlankStringSchema).readonly(),
     decision: RecallPacketPlanDecisionSchema
   })
   .strict()
@@ -133,13 +116,50 @@ export const RecallPacketPlanTraceSchema =
 export type BenchRecallPacketPlanTrace = z.infer<
   typeof RecallPacketPlanTraceSchema
 >;
-
 function sameOrderedKeys(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length &&
     left.every((candidateKey, index) => candidateKey === right[index]);
 }
 
 function validatePacketPlanStructure(
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>,
+  context: z.RefinementCtx
+): void {
+  validatePacketPlanWidths(trace, context);
+  validatePacketPlanPartitions(trace, context);
+  validatePacketPlanSets(trace, context);
+  validateMembershipAuthorizations(trace, context);
+  validateTailPolicy(trace, context);
+}
+
+function validatePacketPlanWidths(
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>,
+  context: z.RefinementCtx
+): void {
+  const expectedHeadWidth = trace.tail_policy === "nested_membership_exchange"
+    ? Math.min(5, trace.baseline_candidate_keys.length)
+    : Math.ceil(trace.baseline_candidate_keys.length / 2);
+  if (
+    trace.head_width !== expectedHeadWidth ||
+    trace.baseline_head_candidate_keys.length !== trace.head_width ||
+    (trace.decision.reason !== "cardinality_mismatch" &&
+      trace.consensus_head_candidate_keys.length !== trace.head_width)
+  ) {
+    addPacketPlanIssue(context, ["head_width"], "Packet plan head width is inconsistent");
+  }
+  if (!sameOrderedKeys(
+    trace.baseline_head_candidate_keys,
+    trace.baseline_candidate_keys.slice(0, trace.head_width)
+  )) {
+    addPacketPlanIssue(
+      context,
+      ["baseline_head_candidate_keys"],
+      "Packet plan baseline head is not a prefix"
+    );
+  }
+}
+
+function validatePacketPlanPartitions(
   trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>,
   context: z.RefinementCtx
 ): void {
@@ -152,14 +172,17 @@ function validatePacketPlanStructure(
     ...trace.immutable_tail_candidate_keys
   ];
   if (
-    trace.head_width !== Math.ceil(trace.baseline_candidate_keys.length / 2) ||
-    trace.baseline_head_candidate_keys.length !== trace.head_width ||
-    (trace.decision.reason !== "cardinality_mismatch" &&
-      trace.consensus_head_candidate_keys.length !== trace.head_width)
+    trace.decision.reason !== "cardinality_mismatch" &&
+    trace.planned_candidate_keys.length !== trace.baseline_candidate_keys.length
   ) {
-    addPacketPlanIssue(context, ["head_width"], "Packet plan head width is inconsistent");
+    addPacketPlanIssue(
+      context, ["planned_candidate_keys"], "Packet plan cardinality is inconsistent"
+    );
   }
-  if (!sameOrderedKeys(trace.baseline_candidate_keys, baselinePartition)) {
+  if (
+    trace.tail_policy === undefined &&
+    !sameOrderedKeys(trace.baseline_candidate_keys, baselinePartition)
+  ) {
     addPacketPlanIssue(
       context,
       ["baseline_head_candidate_keys"],
@@ -173,7 +196,136 @@ function validatePacketPlanStructure(
       "Packet plan proposal is inconsistent"
     );
   }
-  validatePacketPlanSets(trace, context);
+}
+
+function validateMembershipAuthorizations(
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>,
+  context: z.RefinementCtx
+): void {
+  if (trace.tail_policy === "head_tail_exchange") return;
+  const receipts = trace.membership_authorizations;
+  if (receipts.length === 0 &&
+      ["strict_tail_consensus", "admission_infeasible"].includes(
+        trace.decision.reason
+      )) return;
+  const deliverable = trace.decision.status === "accepted" ||
+    trace.decision.reason === "admission_infeasible";
+  if (!deliverable) {
+    if (receipts.length > 0) {
+      addPacketPlanIssue(
+        context, ["membership_authorizations"],
+        "Rejected packet proposal carries membership authorization"
+      );
+    }
+    return;
+  }
+  const satisfied = receipts.map((item) => item.satisfied_by_candidate_key);
+  const protectedKeys = new Set(
+    trace.protected_candidates.map((item) => item.candidate_key)
+  );
+  const introduced = trace.consensus_head_candidate_keys.filter(
+    (key) => !trace.baseline_head_candidate_keys.includes(key) &&
+      !protectedKeys.has(key)
+  );
+  if (new Set(satisfied).size !== satisfied.length ||
+      !sameKeySet(introduced, satisfied) ||
+      !retainedHeadOrderIsStable(trace) ||
+      receipts.some((receipt) => !authorizationIsBound(receipt, trace))) {
+    addPacketPlanIssue(
+      context, ["membership_authorizations"], "Invalid authorization binding"
+    );
+  }
+}
+
+function retainedHeadOrderIsStable(
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>
+): boolean {
+  const retained = trace.consensus_head_candidate_keys.filter(
+    (key) => trace.baseline_head_candidate_keys.includes(key)
+  );
+  const expected = trace.baseline_head_candidate_keys.filter(
+    (key) => trace.consensus_head_candidate_keys.includes(key)
+  );
+  return sameOrderedKeys(retained, expected);
+}
+
+function authorizationIsBound(
+  receipt: MembershipAuthorization,
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>
+): boolean {
+  const index = receipt.satisfied_head_slot - 1;
+  if (trace.consensus_head_candidate_keys[index] !== receipt.satisfied_by_candidate_key) {
+    return false;
+  }
+  const displacedKey = trace.baseline_head_candidate_keys[index];
+  const expectedDisplaced = displacedKey === undefined ||
+    displacedKey === receipt.satisfied_by_candidate_key ? null : displacedKey;
+  if (!slotMatches(receipt.displaced_head_baseline, expectedDisplaced, index)) return false;
+  const added = trace.membership_authorizations.filter(
+    (item) => !trace.baseline_candidate_keys.includes(item.satisfied_by_candidate_key)
+  );
+  const addedIndex = added.indexOf(receipt);
+  const removed = trace.baseline_candidate_keys.filter(
+    (key) => !trace.planned_candidate_keys.includes(key)
+  );
+  const expectedEvicted = addedIndex < 0 ? null : removed[addedIndex] ?? null;
+  const evictedIndex = expectedEvicted === null ? -1 :
+    trace.baseline_candidate_keys.indexOf(expectedEvicted);
+  if (!slotMatches(receipt.evicted_packet_baseline, expectedEvicted, evictedIndex)) {
+    return false;
+  }
+  return witnessIsBound(receipt, trace.head_width);
+}
+
+function witnessIsBound(
+  receipt: MembershipAuthorization,
+  headWidth: number
+): boolean {
+  if (receipt.kind === "direct_query_evidence") {
+    return receipt.witness.rank <= headWidth &&
+      receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key;
+  }
+  if (receipt.kind === "behavior_identity") {
+    return receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key;
+  }
+  if (receipt.kind === "graph_path_opportunity") {
+    return receipt.witness.graph_expansion_rank <= headWidth &&
+      receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key &&
+      receipt.witness.target_candidate_key === receipt.satisfied_by_candidate_key;
+  }
+  return receipt.witness.protected_candidate_key === receipt.authorized_candidate_key &&
+    receipt.witness.source_candidate_key === receipt.authorized_candidate_key &&
+    receipt.witness.substitute_candidate_key === receipt.satisfied_by_candidate_key &&
+    receipt.witness.target_candidate_key === receipt.satisfied_by_candidate_key;
+}
+
+function slotMatches(
+  slot: MembershipSlot | null,
+  expectedKey: string | null,
+  expectedIndex: number
+): boolean {
+  return expectedKey === null
+    ? slot === null
+    : slot?.candidate_key === expectedKey && slot.slot === expectedIndex + 1;
+}
+
+function sameKeySet(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((key) => right.includes(key));
+}
+
+function validateTailPolicy(
+  trace: z.infer<typeof RecallPacketPlanTraceShapeSchema>,
+  context: z.RefinementCtx
+): void {
+  const reason = trace.decision.reason;
+  const requiresTailPolicy = reason === "nested_membership_consensus";
+  const headTailExchange = trace.tail_policy === "head_tail_exchange";
+  const permitsTailPolicy = requiresTailPolicy || headTailExchange ||
+    reason === "admission_infeasible";
+  if ((requiresTailPolicy && trace.tail_policy === undefined) ||
+      (!permitsTailPolicy && trace.tail_policy !== undefined)) {
+    addPacketPlanIssue(context, ["tail_policy"], "Membership tail policy is inconsistent");
+  }
 }
 
 function validatePacketPlanSets(
@@ -199,6 +351,15 @@ function validatePacketPlanSets(
     (entry) => entry.embedding_rank > trace.head_width
   )) {
     addPacketPlanIssue(context, ["embedding_head"], "Embedding rank exceeds packet head");
+  }
+  if (trace.protected_candidates.some(
+    (entry) => !trace.baseline_candidate_keys.includes(entry.candidate_key)
+  )) {
+    addPacketPlanIssue(
+      context,
+      ["protected_candidates"],
+      "Packet protection is outside the baseline head contract"
+    );
   }
   const added = setDifference(
     trace.planned_candidate_keys,
@@ -237,11 +398,18 @@ function validatePacketPlanDecisionReason(
     addPacketPlanIssue(context, ["decision"], "Unchanged consensus is inconsistent");
   }
   if (
-    ["strict_tail_consensus", "admission_infeasible",
-      "behavior_guard_full_abort", "protected_candidate_constraint"].includes(reason) &&
-    (!hasEmbeddingHead || !changed)
+    ["strict_tail_consensus", "behavior_guard_full_abort",
+      "protected_candidate_constraint"].includes(reason) &&
+    ((!hasEmbeddingHead && trace.protected_candidates.length === 0) ||
+      !changed)
   ) {
     addPacketPlanIssue(context, ["decision"], "Changed consensus is inconsistent");
+  }
+  if (
+    ["nested_membership_consensus", "admission_infeasible"].includes(reason) &&
+    !changed
+  ) {
+    addPacketPlanIssue(context, ["decision"], "Changed membership is inconsistent");
   }
   if (
     reason === "cardinality_mismatch" &&
@@ -269,7 +437,8 @@ function validateProtectionDecision(
     addPacketPlanIssue(context, ["decision"], "No protected constraint was violated");
   }
   if (
-    ["strict_tail_consensus", "admission_infeasible"].includes(
+    ["strict_tail_consensus", "nested_membership_consensus",
+      "admission_infeasible"].includes(
       trace.decision.reason
     ) &&
     !protectionsSatisfied

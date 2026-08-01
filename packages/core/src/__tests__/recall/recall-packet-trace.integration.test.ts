@@ -73,23 +73,27 @@ describe("RecallService packet trace integration", () => {
       const control = await runRecall(path, true, "answer_features");
       const traced = await runRecall(path, true, "packet_trace");
       const trace = traced.result.diagnostics?.packet_plan_trace;
+      if (trace === undefined) throw new Error("packet trace was not emitted");
+      const baselineKeys = new Set(trace.baseline_candidate_keys);
 
       expect(control.result.diagnostics?.packet_plan_trace).toBeUndefined();
       expect(trace).toMatchObject({
-        schema_version: 2,
+        schema_version: 3,
         assessment_path: path,
         actual_candidate_keys: packetCandidateKeys(traced.result.candidates),
-        added_candidate_keys: [
-          "workspace_local:memory_entry:packet-tail"
-        ],
-        removed_candidate_keys: [
-          "workspace_local:memory_entry:packet-embedding"
-        ],
         decision: {
           status: "accepted",
           reason: "strict_tail_consensus"
         }
       });
+      expect(trace.added_candidate_keys).toEqual(
+        trace.actual_candidate_keys.filter((key) => !baselineKeys.has(key))
+      );
+      expect(trace.removed_candidate_keys).toEqual(
+        trace.baseline_candidate_keys.filter(
+          (key) => !trace.actual_candidate_keys.includes(key)
+        )
+      );
       expect(trace?.planned_candidate_keys).toEqual(trace?.actual_candidate_keys);
       expect(traced.result.candidates).toEqual(control.result.candidates);
       expect(traced.result.diagnostics?.candidates).toEqual(

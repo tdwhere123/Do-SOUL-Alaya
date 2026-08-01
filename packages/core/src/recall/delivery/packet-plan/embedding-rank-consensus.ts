@@ -60,6 +60,7 @@ type ConsensusEntry<T> = Readonly<{
   readonly candidate: T;
   readonly candidateKey: string;
   readonly reciprocalScore: number;
+  readonly embeddingRank?: number;
 }>;
 
 type ScheduledProtection<T> = Readonly<{
@@ -74,11 +75,11 @@ export function resolveEmbeddingRankConsensusPlan<
 >(params: EmbeddingRankConsensusParams<T>): EmbeddingRankConsensusPlan<T> {
   const headWidth = resolveHeadWidth(params.baseline.length);
   const baselineHead = params.baseline.slice(0, headWidth);
-  const immutableTail = params.baseline.slice(headWidth);
+  const baselineTail = params.baseline.slice(headWidth);
   const embeddingHeadByKey = indexEmbeddingHead(
     params.candidates,
     headWidth,
-    candidateKeys(immutableTail)
+    new Set()
   );
   const embeddingHead = [...embeddingHeadByKey.values()]
     .sort(compareEmbeddingHeadEntries);
@@ -88,10 +89,12 @@ export function resolveEmbeddingRankConsensusPlan<
   const consensusHead = composeProtectedConsensusHead(
     rankedConsensusHead,
     baselineHead,
-    immutableTail,
+    baselineTail,
     params.protectedCandidates
   );
-  const proposedCandidates = [...consensusHead, ...immutableTail];
+  const proposedCandidates = composeConsensusPacket(
+    consensusHead, params.baseline
+  );
   const protectedCandidates = params.protectedCandidates.map((item) => ({ ...item }));
   const decision = resolveDecision({
     behaviorGuardFullAbort: params.behaviorGuardFullAbort,
@@ -105,6 +108,7 @@ export function resolveEmbeddingRankConsensusPlan<
   const candidates = decision.status === "accepted"
     ? proposedCandidates
     : params.baseline;
+  const immutableTail = candidates.slice(headWidth);
 
   return deepFreeze({
     baseline: params.baseline,
@@ -117,6 +121,36 @@ export function resolveEmbeddingRankConsensusPlan<
     protectedCandidates,
     decision
   });
+}
+
+function composeConsensusPacket<T extends EmbeddingRankConsensusCandidate>(
+  consensusHead: readonly T[],
+  baseline: readonly T[]
+): readonly T[] {
+  const headWidth = consensusHead.length;
+  const baselineHead = baseline.slice(0, headWidth);
+  const selectedBaselineKeys = new Set(
+    consensusHead
+      .map((candidate) => candidate.candidateKey)
+      .filter((candidateKey) => baseline.some(
+        (candidate) => candidate.candidateKey === candidateKey
+      ))
+  );
+  const novelCount = headWidth - selectedBaselineKeys.size;
+  const droppedBaselineHead = new Set(
+    baselineHead
+      .filter((candidate) => !selectedBaselineKeys.has(candidate.candidateKey))
+      .slice(0, novelCount)
+      .map((candidate) => candidate.candidateKey)
+  );
+  const droppedKeys = new Set([
+    ...selectedBaselineKeys,
+    ...droppedBaselineHead
+  ]);
+  return Object.freeze([
+    ...consensusHead,
+    ...baseline.filter((candidate) => !droppedKeys.has(candidate.candidateKey))
+  ]);
 }
 
 export function entersEmbeddingRankConsensusHead<
@@ -168,7 +202,7 @@ function scheduleHeadProtections<T extends EmbeddingRankConsensusCandidate>(
 ): readonly ScheduledProtection<T>[] | undefined {
   const proposed = [...consensusHead, ...immutableTail];
   const baselineByKey = new Map(
-    baselineHead.map((candidate, index) => [
+    [...baselineHead, ...immutableTail].map((candidate, index) => [
       candidate.candidateKey,
       { candidate, baselineRank: index + 1 }
     ])
@@ -267,7 +301,10 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
       candidate,
       candidateKey: candidate.candidateKey,
       reciprocalScore: 1 / (index + 1) +
-        (embedding === undefined ? 0 : 1 / embedding.embeddingRank)
+        (embedding === undefined ? 0 : 1 / embedding.embeddingRank),
+      ...(embedding === undefined
+        ? {}
+        : { embeddingRank: embedding.embeddingRank })
     }));
   });
   for (const [candidateKey, embedding] of embeddingHead) {
@@ -275,7 +312,8 @@ function rankConsensusHead<T extends EmbeddingRankConsensusCandidate>(
     entries.set(candidateKey, Object.freeze({
       candidate: embedding.candidate,
       candidateKey,
-      reciprocalScore: 1 / embedding.embeddingRank
+      reciprocalScore: 1 / embedding.embeddingRank,
+      embeddingRank: embedding.embeddingRank
     }));
   }
   return [...entries.values()].sort(compareConsensusEntries);
@@ -302,10 +340,25 @@ function compareConsensusEntries<T extends EmbeddingRankConsensusCandidate>(
 ): number {
   const reciprocalDelta = right.reciprocalScore - left.reciprocalScore;
   if (reciprocalDelta !== 0) return reciprocalDelta;
+  const embeddingDelta = compareOptionalRanks(
+    left.embeddingRank,
+    right.embeddingRank
+  );
+  if (embeddingDelta !== 0) return embeddingDelta;
   const fusedDelta = right.candidate.fusedScore - left.candidate.fusedScore;
   return fusedDelta !== 0
     ? fusedDelta
     : compareCandidateKeys(left.candidateKey, right.candidateKey);
+}
+
+function compareOptionalRanks(
+  left: number | undefined,
+  right: number | undefined
+): number {
+  if (left === undefined && right === undefined) return 0;
+  if (left === undefined) return 1;
+  if (right === undefined) return -1;
+  return left - right;
 }
 
 function resolveDecision<T extends EmbeddingRankConsensusCandidate>(
@@ -319,14 +372,17 @@ function resolveDecision<T extends EmbeddingRankConsensusCandidate>(
     readonly headWidth: number;
   }>
 ): EmbeddingRankConsensusDecision {
-  if (params.embeddingHead.length === 0) {
-    return { status: "no_op", reason: "no_finite_embedding_head" };
-  }
   if (params.consensusHead.length !== params.headWidth) {
     return { status: "rejected", reason: "cardinality_mismatch" };
   }
-  if (hasSameKeyOrder(params.consensusHead, params.baselineHead)) {
-    return { status: "no_op", reason: "unchanged_consensus" };
+  const consensusChanged = !hasSameKeyOrder(
+    params.consensusHead,
+    params.baselineHead
+  );
+  if (!consensusChanged) {
+    return params.embeddingHead.length === 0
+      ? { status: "no_op", reason: "no_finite_embedding_head" }
+      : { status: "no_op", reason: "unchanged_consensus" };
   }
   if (params.behaviorGuardFullAbort) {
     return { status: "rejected", reason: "behavior_guard_full_abort" };
@@ -336,6 +392,9 @@ function resolveDecision<T extends EmbeddingRankConsensusCandidate>(
     params.protectedCandidates
   )) {
     return { status: "rejected", reason: "protected_candidate_constraint" };
+  }
+  if (params.embeddingHead.length === 0) {
+    return { status: "accepted", reason: "strict_tail_consensus" };
   }
   return { status: "accepted", reason: "strict_tail_consensus" };
 }

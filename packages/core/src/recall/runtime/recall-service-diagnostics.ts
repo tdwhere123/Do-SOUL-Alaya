@@ -32,7 +32,6 @@ export type RecallAdmissionPlane =
 export type RecallCandidateDropReason =
   | "duplicate"
   | "dimension_limit"
-  | "embedding_head_dominance"
   | "max_entries"
   | "max_total_tokens";
 
@@ -48,7 +47,8 @@ export type RecallDegradationReason =
   | "synthesis_fts_failed"
   | "embedding_coarse_injection_failed"
   | "graph_expansion_failed"
-  | "path_expansion_failed";
+  | "path_expansion_failed"
+  | "packet_plan_trace_capture_failed";
 
 export interface RecallEmbeddingWorkspaceScanDiagnostics {
   readonly workspace_scan_truncated?: boolean;

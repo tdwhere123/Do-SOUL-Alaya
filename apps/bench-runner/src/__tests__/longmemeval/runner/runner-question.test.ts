@@ -76,6 +76,11 @@ describe("runLongMemEvalQuestion QA delivery", () => {
         minted: 0,
         belowThreshold: 0
       })),
+      accrueAnswersWithCoRelevance: vi.fn(async () => ({
+        coRelevantPairs: 0,
+        keptPairs: 0,
+        minted: 0
+      })),
       proposeSynthesis: vi.fn(async () => ({ synthesisId: null })),
       recall: vi.fn(async () => buildRecallResult("delivery-1", ["memory-decoy-1"])),
       queryTokenMetrics: vi.fn(async () => ({

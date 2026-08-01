@@ -326,7 +326,7 @@ describe("coverage-aware delivery", () => {
     )?.dropped_reason).toBe("dimension_limit");
   });
 
-  it("replans coverage without a dominance-evicted candidate", () => {
+  it("keeps embedding as evidence instead of a pre-governor deletion authority", () => {
     const conflict = createCandidate("conflict", 0.99);
     const protectedWinner = createCandidate("protected", 0.9);
     const embeddingBase = createCandidate("embedding-head", 0.7);
@@ -365,12 +365,15 @@ describe("coverage-aware delivery", () => {
       ])
     });
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "protected",
-      "embedding-head"
+      "embedding-head",
+      "protected"
     ]);
     expect(result.diagnostics.find(
       (candidate) => candidate.object_id === "conflict"
-    )?.dropped_reason).toBe("embedding_head_dominance");
+    )?.dropped_reason).toBe("max_entries");
+    expect(result.diagnostics.find(
+      (candidate) => candidate.object_id === "embedding-head"
+    )?.dropped_reason).toBeNull();
   });
 
   it("uses diminishing returns without discarding repeated-gist items", () => {
@@ -453,7 +456,7 @@ describe("coverage-aware delivery", () => {
     ]);
   });
 
-  it("packs by coverageRelevance even when public finalRelevance stays fused", () => {
+  it("keeps the final packet in the coverage-selected order", () => {
     const highFusedDupA = createCandidate("dup-a", 0.99);
     const highFusedDupB = createCandidate("dup-b", 0.98);
     const lowFusedNovel = createCandidate("novel", 0.4);
@@ -490,32 +493,32 @@ describe("coverage-aware delivery", () => {
     });
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
-      "dup-a",
-      "novel"
+      "novel",
+      "dup-a"
     ]);
     expect(result.candidates.map((candidate) => candidate.relevance_score)).toEqual([
-      0.99,
-      0.4
+      0.4,
+      0.99
     ]);
-    // Coverage chooses the admitted set; public delivery remains relevance-ordered.
+    // Coverage chooses both the admitted set and the final selector order.
     expect(result.candidates[0]).toMatchObject({
-      score_factors: { relevance: 0.99 },
+      score_factors: { relevance: 0.4 },
       budget_state: { remaining_entries: 1, remaining_tokens: 94 }
     });
     const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
     expect(diagnostics.get("novel")).toMatchObject({
       rank_after_coverage_selector: 1,
-      final_rank: 2,
-      post_rank: 2
-    });
-    expect(diagnostics.get("dup-a")).toMatchObject({
-      rank_after_coverage_selector: 2,
       final_rank: 1,
       post_rank: 1
     });
+    expect(diagnostics.get("dup-a")).toMatchObject({
+      rank_after_coverage_selector: 2,
+      final_rank: 2,
+      post_rank: 2
+    });
   });
 
-  it("optionally bounds final public-order displacement without changing membership", () => {
+  it("does not perform a second public-order displacement", () => {
     const publicA = createCandidate("public-a", 0.99);
     const publicB = createCandidate("public-b", 0.98);
     const headA = createCandidate("head-a", 0.4);
@@ -539,13 +542,13 @@ describe("coverage-aware delivery", () => {
 
     expect(result.candidates.map((candidate) => candidate.object_id)).toEqual([
       "public-a",
-      "head-a",
-      "public-b"
+      "public-b",
+      "head-a"
     ]);
     expect(new Set(result.candidates.map((candidate) => candidate.object_id)))
       .toEqual(new Set(candidates.map((candidate) => candidate.entry.object_id)));
     const diagnostics = new Map(result.diagnostics.map((row) => [row.object_id, row]));
-    expect(diagnostics.get("head-a")).toMatchObject({ final_rank: 2, post_rank: 2 });
+    expect(diagnostics.get("head-a")).toMatchObject({ final_rank: 3, post_rank: 3 });
     expect(result.candidates[1]?.budget_state).toMatchObject({
       remaining_entries: 1,
       remaining_tokens: 88

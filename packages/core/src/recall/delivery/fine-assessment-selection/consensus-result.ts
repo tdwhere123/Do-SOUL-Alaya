@@ -2,12 +2,10 @@ import {
   createSelectionBoundaryCapture,
   notifySelectionBoundaryObserver
 } from "../selection-boundary/selection-boundary-capture.js";
-import { buildRecallCandidateSelectionKey } from "../../runtime/recall-candidate-builder.js";
-import { retainBoundedAnswerHeads, selectBoundedDirectEvidenceHead } from "../admission/direct-evidence-answer-head.js";
-import { buildFinalPacketConsensusObservation, buildConsensusReplayOrder, packetMatchesConsensusPlan, resolveFinalPacketConsensusPlan } from "../final-order/final-packet-consensus.js";
+import { buildFinalPacketConsensusObservation, buildConsensusReplayOrder, packetMatchesConsensusMembership, resolveFinalPacketConsensusPlan } from "../final-order/final-packet-consensus.js";
 import { mergeFinalPacketAdmissionDiagnostics } from "../final-order/final-packet-diagnostics.js";
-import { materializeFinalPacket, orderDeliveredPacket } from "../final-order/final-packet-order.js";
-import { orderWithVerifiedAnswerSlot } from "../final-order/verified-answer-slot.js";
+import { materializeFinalPacket } from "../final-order/final-packet-order.js";
+import { buildRecallCandidateSelectionKey } from "../../runtime/recall-candidate-builder.js";
 import type {
   FineAssessmentAccumulator,
   FineAssessmentCandidate,
@@ -26,21 +24,19 @@ export function buildSelectionResult(
   preProjection?: FineAssessmentPreProjectionCapture
 ): FineAssessmentSelectionResult {
   const observesBoundary = params.selectionBoundaryObserver !== undefined;
-  const packetConsensus = params.capturePacketPlanTrace === true || observesBoundary
-    ? buildFinalPacketConsensusObservation(
-        consensus,
-        result.packet.candidates,
-        result.replayAccepted
-      )
-    : undefined;
+  const packetConsensus = buildFinalPacketConsensusObservation(
+    consensus,
+    result.packet.candidates,
+    result.replayAccepted
+  );
   const selectionResult = Object.freeze({
     candidates: result.packet.candidates,
     diagnostics: result.packet.diagnostics,
-    ...(params.capturePacketPlanTrace === true && packetConsensus !== undefined
+    ...(params.capturePacketPlanTrace === true
       ? { packetPlanObservation: packetConsensus }
       : {})
   });
-  if (packetConsensus !== undefined && tokenEstimatesByContent !== undefined) {
+  if (observesBoundary && tokenEstimatesByContent !== undefined) {
     notifySelectionBoundaryObserver(
       params,
       selectionResult,
@@ -57,11 +53,9 @@ export function applyFinalPacketConsensus(
   baseline: ReturnType<typeof materializeFinalPacket>,
   sourceCandidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>,
   reduceCandidates: (
     candidates: readonly FineAssessmentCandidate[],
-    context: FineAssessmentSelectionContext,
-    evictions: ReadonlySet<string>
+    context: FineAssessmentSelectionContext
   ) => FineAssessmentAccumulator
 ): Readonly<{
   readonly packet: ReturnType<typeof materializeFinalPacket>;
@@ -72,15 +66,30 @@ export function applyFinalPacketConsensus(
   }
   const replay = reduceCandidates(
     buildConsensusReplayOrder(plan, sourceCandidates),
-    context,
-    evictions
+    context
   );
-  if (!packetMatchesConsensusPlan(plan, replay.selected)) {
+  if (!packetMatchesConsensusMembership(plan, replay.selected)) {
     return Object.freeze({ packet: baseline, replayAccepted: false });
+  }
+  const replayByKey = new Map(
+    replay.selected.map((candidate) => [
+      buildRecallCandidateSelectionKey(candidate),
+      candidate
+    ])
+  );
+  const orderedReplay = [] as Array<
+    ReturnType<typeof materializeFinalPacket>["candidates"][number]
+  >;
+  for (const candidate of plan.candidates) {
+    const replayCandidate = replayByKey.get(candidate.candidateKey);
+    if (replayCandidate === undefined) {
+      return Object.freeze({ packet: baseline, replayAccepted: false });
+    }
+    orderedReplay.push(replayCandidate);
   }
   return Object.freeze({
     packet: materializeFinalPacket(
-      replay.selected,
+      orderedReplay,
       mergeFinalPacketAdmissionDiagnostics(
         baseline.diagnostics,
         replay.diagnostics
@@ -99,37 +108,11 @@ export function createSelectionBoundary(params: FineAssessmentSelectionParams) {
 
 export function materializeFineAssessmentDelivery(
   finalAccumulator: FineAssessmentAccumulator,
-  evidenceHead: ReturnType<typeof selectBoundedDirectEvidenceHead>,
-  context: FineAssessmentSelectionContext,
-  finalOrder: NonNullable<FineAssessmentSelectionParams["finalOrderAfterCoverage"]>,
-  maxHeadDrop?: number
+  context: FineAssessmentSelectionContext
 ): ReturnType<typeof materializeFinalPacket> {
-  if (finalOrder === "coverage") {
-    return materializeFinalPacket(
-      retainBoundedAnswerHeads(
-        orderWithVerifiedAnswerSlot({
-          publicOrder: finalAccumulator.selected,
-          supportByCandidateKey: context.answerSupportByCandidateKey
-        }),
-        evidenceHead.protections,
-        buildRecallCandidateSelectionKey,
-        context.supplementaryData.queryProbes,
-        evidenceHead.candidates,
-        (candidateKey) => context.answerSupportByCandidateKey.get(
-          candidateKey
-        )?.authority?.behavior_eligible === true
-      ),
-      finalAccumulator.diagnostics,
-      context.config.budgets
-    );
-  }
-  return orderDeliveredPacket({
-    selected: finalAccumulator.selected,
-    diagnostics: finalAccumulator.diagnostics,
-    context,
-    finalOrder,
-    maxHeadDrop,
-    answerHeadProtections: evidenceHead.protections,
-    sourceCandidates: evidenceHead.candidates
-  });
+  return materializeFinalPacket(
+    finalAccumulator.selected,
+    finalAccumulator.diagnostics,
+    context.config.budgets
+  );
 }

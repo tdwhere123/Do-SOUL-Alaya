@@ -35,8 +35,8 @@ const obsoletePacketPlanTraceV1 = {
   }
 } as const;
 
-const packetPlanTraceV2 = {
-  schema_version: 2,
+const packetPlanTraceV3 = {
+  schema_version: 3,
   assessment_path: "snapshot",
   baseline_candidate_keys: [
     "workspace_local:memory_entry:memory-a",
@@ -69,6 +69,27 @@ const packetPlanTraceV2 = {
   immutable_tail_candidate_keys: [
     "workspace_local:synthesis_capsule:synthesis-c"
   ],
+  membership_authorizations: [{
+    kind: "direct_query_evidence",
+    authorized_candidate_key: "global:evidence_capsule:evidence-d",
+    satisfied_by_candidate_key: "global:evidence_capsule:evidence-d",
+    satisfied_head_slot: 2,
+    displaced_head_baseline: {
+      slot: 2,
+      candidate_key: "global:evidence_capsule:evidence-b"
+    },
+    evicted_packet_baseline: {
+      slot: 2,
+      candidate_key: "global:evidence_capsule:evidence-b"
+    },
+    witness: {
+      origin: "proposed_head",
+      stream: "lexical_fts",
+      rank: 1,
+      source_proximity_rank: null,
+      source_evidence_agreement_rank: null
+    }
+  }],
   protected_candidates: [{
     candidate_key: "workspace_local:memory_entry:memory-a",
     rank_limit: 1
@@ -81,9 +102,10 @@ const packetPlanTraceV2 = {
   }
 } as const;
 
-const rejectedPacketPlanTraceV2 = {
-  ...packetPlanTraceV2,
-  actual_candidate_keys: packetPlanTraceV2.baseline_candidate_keys,
+const rejectedPacketPlanTraceV3 = {
+  ...packetPlanTraceV3,
+  actual_candidate_keys: packetPlanTraceV3.baseline_candidate_keys,
+  membership_authorizations: [],
   protected_candidates: [{
     candidate_key: "global:evidence_capsule:evidence-b",
     rank_limit: 2
@@ -94,18 +116,73 @@ const rejectedPacketPlanTraceV2 = {
   }
 } as const;
 
-const noOpPacketPlanTraceV2 = {
-  ...packetPlanTraceV2,
-  planned_candidate_keys: packetPlanTraceV2.baseline_candidate_keys,
-  actual_candidate_keys: packetPlanTraceV2.baseline_candidate_keys,
+const noOpPacketPlanTraceV3 = {
+  ...packetPlanTraceV3,
+  planned_candidate_keys: packetPlanTraceV3.baseline_candidate_keys,
+  actual_candidate_keys: packetPlanTraceV3.baseline_candidate_keys,
   embedding_head: [],
-  consensus_head_candidate_keys: packetPlanTraceV2.baseline_head_candidate_keys,
+  consensus_head_candidate_keys: packetPlanTraceV3.baseline_head_candidate_keys,
+  membership_authorizations: [],
   protected_candidates: [],
   added_candidate_keys: [],
   removed_candidate_keys: [],
   decision: {
     status: "no_op",
     reason: "no_finite_embedding_head"
+  }
+} as const;
+
+const nestedMembershipPacketPlanTraceV3 = {
+  ...packetPlanTraceV3,
+  planned_candidate_keys: [
+    packetPlanTraceV3.baseline_candidate_keys[0],
+    packetPlanTraceV3.baseline_candidate_keys[2],
+    "workspace_local:memory_entry:added-d"
+  ],
+  actual_candidate_keys: [
+    packetPlanTraceV3.baseline_candidate_keys[0],
+    packetPlanTraceV3.baseline_candidate_keys[2],
+    "workspace_local:memory_entry:added-d"
+  ],
+  head_width: 3,
+  baseline_head_candidate_keys: packetPlanTraceV3.baseline_candidate_keys,
+  embedding_head: [],
+  consensus_head_candidate_keys: [
+    packetPlanTraceV3.baseline_candidate_keys[0],
+    packetPlanTraceV3.baseline_candidate_keys[2],
+    "workspace_local:memory_entry:added-d"
+  ],
+  immutable_tail_candidate_keys: [],
+  tail_policy: "nested_membership_exchange",
+  membership_authorizations: [{
+    kind: "same_session_substitution",
+    authorized_candidate_key: packetPlanTraceV3.baseline_candidate_keys[1],
+    satisfied_by_candidate_key: "workspace_local:memory_entry:added-d",
+    satisfied_head_slot: 3,
+    displaced_head_baseline: {
+      slot: 3,
+      candidate_key: packetPlanTraceV3.baseline_candidate_keys[2]
+    },
+    evicted_packet_baseline: {
+      slot: 2,
+      candidate_key: packetPlanTraceV3.baseline_candidate_keys[1]
+    },
+    witness: {
+      protected_candidate_key: packetPlanTraceV3.baseline_candidate_keys[1],
+      substitute_candidate_key: "workspace_local:memory_entry:added-d",
+      source_candidate_key: packetPlanTraceV3.baseline_candidate_keys[1],
+      target_candidate_key: "workspace_local:memory_entry:added-d",
+      path_id: "path-1",
+      path_source_version: "path-v1",
+      relation_kind: "answers_with",
+      session_key: "session-1"
+    }
+  }],
+  added_candidate_keys: ["workspace_local:memory_entry:added-d"],
+  removed_candidate_keys: [packetPlanTraceV3.baseline_candidate_keys[1]],
+  decision: {
+    status: "accepted",
+    reason: "nested_membership_consensus"
   }
 } as const;
 
@@ -119,16 +196,25 @@ describe("packet plan trace diagnostics schemas", () => {
   it("accepts a valid packet plan trace in bench recall diagnostics", () => {
     const parsed = BenchRecallDiagnosticsSchema.parse({
       ...benchDiagnostics(),
-      packet_plan_trace: packetPlanTraceV2
+      packet_plan_trace: packetPlanTraceV3
     });
 
-    expect(parsed.packet_plan_trace).toEqual(packetPlanTraceV2);
+    expect(parsed.packet_plan_trace).toEqual(packetPlanTraceV3);
+  });
+
+  it("accepts membership consensus without an embedding head", () => {
+    const parsed = BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      packet_plan_trace: nestedMembershipPacketPlanTraceV3
+    });
+
+    expect(parsed.packet_plan_trace).toEqual(nestedMembershipPacketPlanTraceV3);
   });
 
   it.each([
-    ["accepted", packetPlanTraceV2],
-    ["rejected", rejectedPacketPlanTraceV2],
-    ["no-op", noOpPacketPlanTraceV2]
+    ["accepted", packetPlanTraceV3],
+    ["rejected", rejectedPacketPlanTraceV3],
+    ["no-op", noOpPacketPlanTraceV3]
   ] as const)("reads and persists a raw %s trace unchanged", (_version, packetPlanTrace) => {
     const recallResult = {
       diagnostics: { packet_plan_trace: packetPlanTrace }
@@ -192,9 +278,9 @@ describe("packet plan trace diagnostics schemas", () => {
     expect(
       LongMemEvalQuestionDiagnosticSchema.parse({
         ...persistedQuestionDiagnostic(),
-        packet_plan_trace: packetPlanTraceV2
+        packet_plan_trace: packetPlanTraceV3
       }).packet_plan_trace
-    ).toEqual(packetPlanTraceV2);
+    ).toEqual(packetPlanTraceV3);
   });
 
   it("rejects private content, evaluator gold, and unapproved scalar fields", () => {
@@ -206,7 +292,7 @@ describe("packet plan trace diagnostics schemas", () => {
     for (const forbidden of forbiddenRootFields) {
       expect(() => BenchRecallDiagnosticsSchema.parse({
         ...benchDiagnostics(),
-        packet_plan_trace: { ...packetPlanTraceV2, ...forbidden }
+        packet_plan_trace: { ...packetPlanTraceV3, ...forbidden }
       })).toThrow();
     }
 
@@ -218,8 +304,8 @@ describe("packet plan trace diagnostics schemas", () => {
       expect(() => BenchRecallDiagnosticsSchema.parse({
         ...benchDiagnostics(),
         packet_plan_trace: {
-          ...packetPlanTraceV2,
-          embedding_head: [{ ...packetPlanTraceV2.embedding_head[0], ...forbidden }]
+          ...packetPlanTraceV3,
+          embedding_head: [{ ...packetPlanTraceV3.embedding_head[0], ...forbidden }]
         }
       })).toThrow();
     }
@@ -227,16 +313,16 @@ describe("packet plan trace diagnostics schemas", () => {
 
   it.each([
     ["accepted", {
-      ...packetPlanTraceV2,
-      actual_candidate_keys: packetPlanTraceV2.baseline_candidate_keys
+      ...packetPlanTraceV3,
+      actual_candidate_keys: packetPlanTraceV3.baseline_candidate_keys
     }],
     ["rejected", {
-      ...rejectedPacketPlanTraceV2,
-      actual_candidate_keys: rejectedPacketPlanTraceV2.planned_candidate_keys
+      ...rejectedPacketPlanTraceV3,
+      actual_candidate_keys: rejectedPacketPlanTraceV3.planned_candidate_keys
     }],
     ["no-op", {
-      ...noOpPacketPlanTraceV2,
-      planned_candidate_keys: packetPlanTraceV2.planned_candidate_keys
+      ...noOpPacketPlanTraceV3,
+      planned_candidate_keys: packetPlanTraceV3.planned_candidate_keys
     }]
   ] as const)("rejects an inconsistent %s outcome", (_status, packetPlanTrace) => {
     expect(() => BenchRecallDiagnosticsSchema.parse({
@@ -249,11 +335,41 @@ describe("packet plan trace diagnostics schemas", () => {
     expect(() => BenchRecallDiagnosticsSchema.parse({
       ...benchDiagnostics(),
       packet_plan_trace: {
-        ...noOpPacketPlanTraceV2,
+        ...noOpPacketPlanTraceV3,
         decision: {
           status: "rejected",
           reason: "behavior_guard_full_abort"
         }
+      }
+    })).toThrow();
+  });
+
+  it("rejects nested membership with a forged baseline prefix", () => {
+    expect(() => BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      packet_plan_trace: {
+        ...nestedMembershipPacketPlanTraceV3,
+        baseline_head_candidate_keys: [
+          ...nestedMembershipPacketPlanTraceV3.baseline_head_candidate_keys
+        ].reverse()
+      }
+    })).toThrow();
+  });
+
+  it("rejects a membership receipt bound to an unrelated source", () => {
+    const receipt = nestedMembershipPacketPlanTraceV3.membership_authorizations[0];
+    expect(() => BenchRecallDiagnosticsSchema.parse({
+      ...benchDiagnostics(),
+      packet_plan_trace: {
+        ...nestedMembershipPacketPlanTraceV3,
+        membership_authorizations: [{
+          ...receipt,
+          witness: {
+            ...receipt.witness,
+            source_candidate_key:
+              nestedMembershipPacketPlanTraceV3.baseline_candidate_keys[0]
+          }
+        }]
       }
     })).toThrow();
   });

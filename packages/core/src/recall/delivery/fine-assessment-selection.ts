@@ -48,39 +48,34 @@ export function selectFineAssessmentCandidates(
   const boundaryCapture = createSelectionBoundary(params);
   const selectionParams = boundaryCapture?.params ?? params;
   const context = createSelectionContext(selectionParams);
-  const { coverageOrdered, evictions, evictionWitnessByCandidateKey } =
-    prepareCoverageSelection(selectionParams, context);
+  const coverageOrdered = prepareCoverageSelection(selectionParams, context);
+  const excludedCandidateKeys = new Set<string>();
   const evidenceHead = selectBoundedDirectEvidenceHead(
     coverageOrdered, context.supplementaryData.queryProbes,
     context.supplementaryData.evidenceSemanticScoresByCandidateKey,
     context.finalRelevanceByCandidateKey,
-    context.config.budgets.max_entries, evictions,
-    (candidates) => collectAdmittedCandidates(candidates, context, evictions),
+    context.config.budgets.max_entries, excludedCandidateKeys,
+    (candidates) => collectAdmittedCandidates(candidates, context),
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
   const finalAccumulator = reduceFineAssessmentCandidates(
-    evidenceHead.candidates,
+    coverageOrdered,
     context,
-    evictions,
-    context.capturePreProjection ? evictionWitnessByCandidateKey : undefined
+    boundaryCapture !== undefined
   );
   const preProjection = boundaryCapture === undefined
     ? undefined
     : captureFineAssessmentPreProjection(finalAccumulator);
-  const finalOrder = selectionParams.finalOrderAfterCoverage ?? "coverage";
   const delivered = materializeFineAssessmentDelivery(
     finalAccumulator,
-    evidenceHead,
-    context,
-    finalOrder,
-    selectionParams.maxHeadDropAfterCoverage
+    context
   );
   const { consensus, result } = resolveSelectionConsensus(
     evidenceHead,
+    finalAccumulator.selected,
     delivered,
     context,
-    evictions,
     selectionParams.orderedCandidates
   );
   return buildSelectionResult(
@@ -94,15 +89,25 @@ export function selectFineAssessmentCandidates(
 
 function resolveSelectionConsensus(
   evidenceHead: DirectEvidenceHeadSelection<FineAssessmentCandidate>,
+  preProjection: readonly Readonly<ReturnType<typeof buildRecallCandidate>>[],
   delivered: ReturnType<typeof materializeFineAssessmentDelivery>,
   context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>,
   orderedCandidates: readonly FineAssessmentCandidate[]
 ): Readonly<{
   consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>;
   result: ReturnType<typeof applyFinalPacketConsensus>;
 }> {
   // Consensus scans full H; evidence-head rejects must not hide embedding ranks.
+  const membershipGovernance = context.answerRelevanceRankByCandidateKey.size > 0
+    ? undefined
+    : {
+        preProjection,
+        queryProbes: context.supplementaryData.queryProbes,
+        pathInflowByTarget: pathInflowForMembership(context),
+        behaviorAuthorityEvidenceRefByCandidateKey: behaviorAuthorityEvidenceRefs(
+          orderedCandidates, context
+        )
+      };
   const consensus = resolveFinalPacketConsensusPlan({
     baseline: delivered.candidates,
     sourceCandidates: orderedCandidates,
@@ -111,36 +116,58 @@ function resolveSelectionConsensus(
       context.answerSupportByCandidateKey.get(
         buildRecallCandidateSelectionKey(candidate)
       )?.authority?.behavior_eligible === true
-    )
+    ),
+    membershipGovernance
   });
   const consensusResult = applyFinalPacketConsensus(
     consensus,
     delivered,
     orderedCandidates,
     context,
-    evictions,
     reduceFineAssessmentCandidates
   );
   return Object.freeze({ consensus, result: consensusResult });
 }
 
+function pathInflowForMembership(
+  context: FineAssessmentSelectionContext
+): FineAssessmentSelectionContext["supplementaryData"]["pathInflowByTarget"] {
+  const availability = context.supplementaryData.pathInflowAvailability;
+  return availability === "unavailable" || availability === "not_observed"
+    ? undefined
+    : context.supplementaryData.pathInflowByTarget;
+}
+
+function behaviorAuthorityEvidenceRefs(
+  candidates: readonly FineAssessmentCandidate[],
+  context: FineAssessmentSelectionContext
+): ReadonlyMap<string, string> {
+  return new Map(candidates.flatMap((candidate) => {
+    const candidateKey = buildRecallCandidateDedupeKey(candidate);
+    const authority = context.answerSupportByCandidateKey.get(
+      candidateKey
+    )?.authority;
+    const evidenceRef = authority?.behavior_eligible === true
+      ? authority.evidence_ref
+      : null;
+    return evidenceRef === null ? [] : [[candidateKey, evidenceRef] as const];
+  }));
+}
+
 function reduceFineAssessmentCandidates(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
-  evictions: ReadonlySet<string>,
-  evictionWitnessByCandidateKey?: ReadonlyMap<string, string>
+  captureAdmissionReceipts = false
 ): FineAssessmentAccumulator {
   return candidates.reduce(
     (accumulator, candidate, index) => appendFineAssessmentCandidate(
       accumulator,
       candidate,
       index + 1,
-      context,
-      evictions.has(candidate.fusion.candidate_key),
-      evictionWitnessByCandidateKey
+      context
     ),
     createFineAssessmentAccumulator(
-      evictionWitnessByCandidateKey !== undefined
+      captureAdmissionReceipts
     )
   );
 }
@@ -160,17 +187,9 @@ function appendFineAssessmentCandidate(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
   selectionOrder: number,
-  context: FineAssessmentSelectionContext,
-  dominanceEvicted: boolean,
-  evictionWitnessByCandidateKey?: ReadonlyMap<string, string>
+  context: FineAssessmentSelectionContext
 ): FineAssessmentAccumulator {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
-  if (dominanceEvicted) {
-    return appendDominanceExclusion(
-      accumulator, candidate, candidateKey, selectionOrder, context,
-      evictionWitnessByCandidateKey
-    );
-  }
   const objectKey = buildRecallLogicalObjectKey(candidate);
   const admission = resolveAdmission(accumulator.admission, candidate, objectKey, context);
   recordAdmissionReceipt(accumulator, admission.receipt);
@@ -224,25 +243,6 @@ function appendAcceptedCandidate(
   return accumulator;
 }
 
-function appendDominanceExclusion(
-  accumulator: FineAssessmentAccumulator,
-  candidate: FineAssessmentCandidate,
-  candidateKey: string,
-  selectionOrder: number,
-  context: FineAssessmentSelectionContext,
-  evictionWitnessByCandidateKey?: ReadonlyMap<string, string>
-): FineAssessmentAccumulator {
-  recordDominanceReceipt(
-    accumulator,
-    candidateKey,
-    evictionWitnessByCandidateKey
-  );
-  return appendAdmissionExclusion(
-    accumulator, candidate, candidateKey, selectionOrder,
-    "embedding_head_dominance", context
-  );
-}
-
 function appendAdmissionExclusion(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
@@ -266,21 +266,4 @@ function recordAdmissionReceipt(
     throw new Error("fine-assessment admission receipt is missing");
   }
   accumulator.admissionReceipts.push(receipt);
-}
-
-function recordDominanceReceipt(
-  accumulator: FineAssessmentAccumulator,
-  candidateKey: string,
-  evictionWitnessByCandidateKey?: ReadonlyMap<string, string>
-): void {
-  if (accumulator.admissionReceipts === undefined) return;
-  const dominatingCandidateKey =
-    evictionWitnessByCandidateKey?.get(candidateKey);
-  if (dominatingCandidateKey === undefined) {
-    throw new Error("embedding eviction receipt is missing");
-  }
-  accumulator.admissionReceipts.push(Object.freeze({
-    kind: "embedding_head_dominance",
-    dominating_candidate_key: dominatingCandidateKey
-  }));
 }

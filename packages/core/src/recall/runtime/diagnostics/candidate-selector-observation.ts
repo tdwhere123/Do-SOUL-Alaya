@@ -1,5 +1,25 @@
 import type { MemoryEntry, PathAnchorRef } from "@do-soul/alaya-protocol";
 
+export type RecallSelectorDemandAtomKind =
+  | "lexical_term"
+  | "phrase"
+  | "object_id"
+  | "evidence_ref"
+  | "dimension"
+  | "scope_class"
+  | "domain_tag"
+  | "date_term"
+  | "facet";
+
+export interface RecallSelectorDemandAtom {
+  readonly kind: RecallSelectorDemandAtomKind;
+  readonly value: string;
+}
+
+export interface RecallSelectorDemandMatch extends RecallSelectorDemandAtom {
+  readonly source: "content" | "key" | "evidence";
+}
+
 export type RecallSelectorEvidenceDirectness =
   | "direct_document"
   | "referenced"
@@ -48,6 +68,11 @@ export interface RecallSelectorPathReceipt {
 
 export interface RecallCandidateSelectorObservation {
   readonly schema_version: 1;
+  readonly demand: Readonly<{
+    readonly atoms: readonly Readonly<RecallSelectorDemandAtom>[];
+    readonly matches: readonly Readonly<RecallSelectorDemandMatch>[];
+    readonly unmatched: readonly Readonly<RecallSelectorDemandAtom>[];
+  }>;
   readonly evidence: Readonly<{
     readonly directness: RecallSelectorEvidenceDirectness;
     readonly authority: RecallSelectorEvidenceAuthority;

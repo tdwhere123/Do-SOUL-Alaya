@@ -4,7 +4,7 @@ import type { RecallAnswerSupportObservation } from "../../query/recall-answer-s
 import type { RecallCandidateAnswerSupport } from "../../query/recall-candidate-answer-support.js";
 import type { RecallDeepHeadTrace } from "../../rerank/deep-head.js";
 import { materializeFinalPacket } from "../final-order/final-packet-order.js";
-import type { RecallPacketPlanObservation } from "../packet-plan/packet-plan-trace.js";
+import type { RecallPacketPlanObservation } from "../packet-plan/packet-plan-observation.js";
 import type { FineAssessmentSelectionBoundaryPendingCapture } from "../selection-boundary/selection-boundary-capture.js";
 
 export type FineAssessmentCandidate = Readonly<CoarseRecallCandidate & {
@@ -55,10 +55,6 @@ export type FineAssessmentAdmissionReceipt =
       readonly token_total_before: number;
       readonly token_estimate: number;
       readonly limit: number;
-    }>
-  | Readonly<{
-      readonly kind: "embedding_head_dominance";
-      readonly dominating_candidate_key: string;
     }>;
 
 export interface FineAssessmentSelectionContext {
@@ -68,9 +64,7 @@ export interface FineAssessmentSelectionContext {
   readonly rankByCandidateKey: ReadonlyMap<string, number>;
   readonly finalRelevanceByCandidateKey: ReadonlyMap<string, number>;
   readonly answerRelevanceRankByCandidateKey: ReadonlyMap<string, number>;
-  readonly answerRerankedCandidateKeys: ReadonlySet<string>;
   readonly captureAnswerFeatures: boolean;
-  readonly capturePreProjection: boolean;
   readonly answerSupportByCandidateKey: ReadonlyMap<
     string,
     Readonly<RecallCandidateAnswerSupport>

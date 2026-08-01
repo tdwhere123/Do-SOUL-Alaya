@@ -1,10 +1,7 @@
 import { orderByCoverageMarginalGain } from "../coverage-selection.js";
-import { hasRankedEmbeddingHead, selectEmbeddingHeadEvictions } from
-  "../admission/embedding-head-dominance.js";
 import { buildFineAssessmentAnswerSupportContext } from
   "../answer-support/answer-support-context.js";
 import {
-  collectAdmittedCandidates,
   createAdmissionState,
   tryRecordAcceptedAdmission
 } from "./admission.js";
@@ -32,9 +29,7 @@ export function createSelectionContext(
     rankByCandidateKey: params.rankByCandidateKey,
     finalRelevanceByCandidateKey: params.finalRelevanceByCandidateKey ?? new Map(),
     answerRelevanceRankByCandidateKey,
-    answerRerankedCandidateKeys: new Set(answerRelevanceRankByCandidateKey.keys()),
     captureAnswerFeatures,
-    capturePreProjection: params.selectionBoundaryObserver !== undefined,
     answerSupportByCandidateKey: answerSupport.supportByCandidateKey,
     answerSupportObservationsByCandidateKey:
       answerSupport.observationsByCandidateKey,
@@ -49,55 +44,21 @@ export function createSelectionContext(
 export function prepareCoverageSelection(
   params: FineAssessmentSelectionParams,
   context: FineAssessmentSelectionContext
-): Readonly<{
-  readonly coverageOrdered: readonly FineAssessmentCandidate[];
-  readonly evictions: ReadonlySet<string>;
-  readonly evictionWitnessByCandidateKey: ReadonlyMap<string, string>;
-}> {
+): readonly FineAssessmentCandidate[] {
   const coverageRelevance =
     params.coverageRelevanceByCandidateKey ?? context.finalRelevanceByCandidateKey;
-  const hasEmbeddingHead = hasRankedEmbeddingHead(
+  return orderFineAssessmentByCoverage(
     params.orderedCandidates,
-    context.config.budgets.max_entries
-  );
-  const captureMarginalGain = context.captureAnswerFeatures;
-  const initialOrder = orderFineAssessmentByCoverage(
-    params.orderedCandidates, context, coverageRelevance, new Set<string>(),
-    !hasEmbeddingHead && captureMarginalGain
-  );
-  if (!hasEmbeddingHead) {
-    return Object.freeze({
-      coverageOrdered: initialOrder,
-      evictions: new Set<string>(),
-      evictionWitnessByCandidateKey: new Map<string, string>()
-    });
-  }
-  const resolved = resolveEmbeddingHeadEvictions(
-    initialOrder,
     context,
     coverageRelevance,
-    captureMarginalGain
+    context.captureAnswerFeatures
   );
-  const evictions = resolved.evictions;
-  const coverageOrdered = evictions.size > 0
-    ? resolved.coverageOrdered
-    : captureMarginalGain
-      ? orderFineAssessmentByCoverage(
-          initialOrder, context, coverageRelevance, new Set<string>(), true
-        )
-      : initialOrder;
-  return Object.freeze({
-    coverageOrdered,
-    evictions,
-    evictionWitnessByCandidateKey: resolved.evictionWitnessByCandidateKey
-  });
 }
 
 function orderFineAssessmentByCoverage(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
   relevanceByCandidateKey: ReadonlyMap<string, number>,
-  evictions: ReadonlySet<string>,
   captureMarginalGain = false
 ): readonly FineAssessmentCandidate[] {
   const admission = createAdmissionState();
@@ -108,8 +69,7 @@ function orderFineAssessmentByCoverage(
     advancesCoverage: (candidate) => tryRecordAcceptedAdmission(
       admission,
       candidate,
-      context,
-      evictions
+      context
     ),
     onSelection: captureMarginalGain
       ? (observation) => context.coverageMarginalGainByCandidateKey.set(
@@ -117,53 +77,5 @@ function orderFineAssessmentByCoverage(
           observation.marginal_gain
         )
       : undefined
-  });
-}
-
-function resolveEmbeddingHeadEvictions(
-  candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext,
-  relevanceByCandidateKey: ReadonlyMap<string, number>,
-  captureMarginalGain: boolean
-): Readonly<{
-  readonly evictions: ReadonlySet<string>;
-  readonly coverageOrdered: readonly FineAssessmentCandidate[];
-  readonly evictionWitnessByCandidateKey: ReadonlyMap<string, string>;
-}> {
-  const evictionWitnessByCandidateKey = new Map<string, string>();
-  const evictions = selectEmbeddingHeadEvictions({
-    candidates,
-    maxEntries: context.config.budgets.max_entries,
-    embeddingScores: context.supplementaryData.embeddingSimilarityScores,
-    queryProbes: context.supplementaryData.queryProbes,
-    answerRerankedCandidateKeys: context.answerRerankedCandidateKeys,
-    ...(context.capturePreProjection ? {
-      onEviction: (witness) => evictionWitnessByCandidateKey.set(
-        witness.evictedCandidateKey,
-        witness.dominatingCandidateKey
-      )
-    } : {}),
-    selectDelivered: (evictionSet) => collectAdmittedCandidates(
-      orderFineAssessmentByCoverage(
-        candidates,
-        context,
-        relevanceByCandidateKey,
-        evictionSet,
-        captureMarginalGain
-      ),
-      context,
-      evictionSet
-    )
-  });
-  return Object.freeze({
-    evictions,
-    coverageOrdered: orderFineAssessmentByCoverage(
-      candidates,
-      context,
-      relevanceByCandidateKey,
-      evictions,
-      captureMarginalGain
-    ),
-    evictionWitnessByCandidateKey
   });
 }

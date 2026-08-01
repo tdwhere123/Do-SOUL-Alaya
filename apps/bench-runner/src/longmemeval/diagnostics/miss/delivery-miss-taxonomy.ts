@@ -3,7 +3,6 @@ import type { RecallCandidateDropReason } from "@do-soul/alaya-core";
 const DROP_REASON_VALUES = [
   "duplicate",
   "dimension_limit",
-  "embedding_head_dominance",
   "max_entries",
   "max_total_tokens"
 ] as const satisfies readonly RecallCandidateDropReason[];

@@ -348,8 +348,7 @@ function witnessMatchesExclusion(
       isNonNegativeFinite(witness.token_estimate) &&
       isNonNegativeFinite(witness.limit);
   }
-  return reason === "embedding_head_dominance" &&
-    isNonEmptyString(witness.dominating_candidate_key);
+  return false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

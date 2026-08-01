@@ -6,6 +6,7 @@ import { LongMemEvalQuestionDiagnosticSchema } from
 
 const SELECTOR_OBSERVATION = {
   schema_version: 1,
+  demand: null,
   evidence: {
     directness: "referenced",
     authority: "verified_user_assertion",
