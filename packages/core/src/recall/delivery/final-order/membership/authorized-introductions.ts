@@ -3,6 +3,7 @@ import { hasNonEmbeddingQueryEvidenceRank } from
   "../../../scoring/query-evidence-support.js";
 import type { QueryEvidenceMembershipCandidate } from
   "../query-evidence-membership-governor.js";
+import { selectorConsensusAuthority } from "./authorization.js";
 
 export function authorizedIntroductionKeys<
   T extends QueryEvidenceMembershipCandidate
@@ -25,6 +26,12 @@ export function authorizedIntroductionKeys<
         params.queryProbes,
         params.proposedHead.length
       ))
+      .map((candidate) => candidate.candidateKey),
+    ...params.proposedHead
+      .filter((candidate) => selectorConsensusAuthority(
+        candidate,
+        params.proposedHead.length
+      ) !== null)
       .map((candidate) => candidate.candidateKey),
     ...params.substituteCandidateKeys
   ]);

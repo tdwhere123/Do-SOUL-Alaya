@@ -109,7 +109,7 @@ describe("selection boundary pre-projection decision receipts", () => {
 
     expect(boundary.expected.packet_consensus.decision).toEqual({
       status: "accepted",
-      reason: "strict_tail_consensus"
+      reason: "nested_membership_consensus"
     });
     expect(preProjection.introduced_candidate_keys).toEqual([
       "workspace_local:memory_entry:challenger"
@@ -120,10 +120,10 @@ describe("selection boundary pre-projection decision receipts", () => {
     expect(retained).toHaveLength(preProjection.candidate_keys.length - 1);
     expect(retained.filter((action) =>
       action.reason_code === "stable_order_identity"
-    )).toHaveLength(preProjection.candidate_keys.length - 3);
+    )).toHaveLength(preProjection.candidate_keys.length - 4);
     expect(retained.filter((action) =>
       action.reason_code === "unwitnessed_reorder"
-    )).toHaveLength(2);
+    )).toHaveLength(3);
     expect(preProjection.projection_actions.filter((action) =>
       action.action === "exclude"
     )).toHaveLength(1);

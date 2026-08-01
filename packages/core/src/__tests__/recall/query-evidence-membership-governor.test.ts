@@ -237,7 +237,7 @@ describe("query-evidence membership governor", () => {
     ]);
   });
 
-  it("restores a member displaced only by embedding consensus", () => {
+  it("allows an embedding consensus introduction alongside protected members", () => {
     const protectedCandidate = candidate("protected", "session-a", {
       lexical_fts: 1
     });
@@ -257,9 +257,15 @@ describe("query-evidence membership governor", () => {
 
     expect(plan.head.map((item) => item.candidateKey)).toEqual([
       protectedCandidate.candidateKey,
-      incumbent.candidateKey
+      embeddingOnly.candidateKey
     ]);
     expect(plan.feasible).toBe(true);
+    expect(plan.authorizations).toEqual([{
+      kind: "selector_consensus",
+      authorizedCandidateKey: embeddingOnly.candidateKey,
+      satisfiedByCandidateKey: embeddingOnly.candidateKey,
+      witness: { kind: "selector_consensus", embeddingRank: 1 }
+    }]);
   });
 
   it("preserves baseline order for an embedding-only permutation", () => {

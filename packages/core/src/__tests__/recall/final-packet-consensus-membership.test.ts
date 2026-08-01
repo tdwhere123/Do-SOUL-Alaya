@@ -187,6 +187,37 @@ describe("final packet consensus membership", () => {
     )).toContain("challenger");
   });
 
+  it("keeps an embedding-selected member when direct protections are present", () => {
+    const baseline = select(baselineCandidates()).candidates;
+    const sourceCandidates = consensusCandidates().map((candidate) =>
+      candidate.entry.object_id === "baseline-01"
+        ? withStreamRanks(candidate, { lexical_fts: 1 })
+        : candidate
+    );
+
+    const plan = resolveFinalPacketConsensusPlan({
+      baseline,
+      sourceCandidates,
+      protectedCandidates: [],
+      membershipGovernance: {
+        preProjection: baseline,
+        queryProbes: compileRecallQueryProbes("what was recorded?"),
+        behaviorAuthorityEvidenceRefByCandidateKey: new Map()
+      }
+    });
+
+    expect(plan.decision).toEqual({
+      status: "accepted",
+      reason: "nested_membership_consensus"
+    });
+    expect(plan.candidates.slice(0, 5).map((candidate) =>
+      candidate.sourceCandidate.entry.object_id
+    )).toContain("challenger");
+    expect(plan.membershipAuthorizations.some((authorization) =>
+      authorization.kind === "selector_consensus"
+    )).toBe(true);
+  });
+
   it("fails closed when no membership authority is available", () => {
     const baseline = select(baselineCandidates()).candidates;
     const plan = resolveFinalPacketConsensusPlan({

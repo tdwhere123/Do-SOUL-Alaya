@@ -287,6 +287,10 @@ function witnessIsBound(
   if (receipt.kind === "behavior_identity") {
     return receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key;
   }
+  if (receipt.kind === "selector_consensus") {
+    return receipt.witness.embedding_rank <= headWidth &&
+      receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key;
+  }
   if (receipt.kind === "graph_path_opportunity") {
     return receipt.witness.graph_expansion_rank <= headWidth &&
       receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key &&

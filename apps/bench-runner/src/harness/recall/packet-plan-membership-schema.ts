@@ -60,6 +60,13 @@ export const MembershipAuthorizationSchema = z.discriminatedUnion("kind", [
   }).strict().readonly(),
   z.object({
     ...MembershipAuthorizationBase,
+    kind: z.literal("selector_consensus"),
+    witness: z.object({
+      embedding_rank: z.number().int().positive()
+    }).strict().readonly()
+  }).strict().readonly(),
+  z.object({
+    ...MembershipAuthorizationBase,
     kind: z.literal("same_session_substitution"),
     witness: z.object({
       protected_candidate_key: NonBlankStringSchema,

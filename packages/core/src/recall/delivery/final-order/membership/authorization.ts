@@ -10,6 +10,7 @@ import {
 
 type AuthorizationCandidate = Readonly<{
   readonly candidateKey: string;
+  readonly rawEmbeddingRank?: number;
   readonly sourceCandidate: Readonly<{
     readonly entry: Readonly<{ readonly evidence_refs: readonly string[] }>;
     readonly fusion: Readonly<{ readonly per_stream_rank: RecallFusionStreamRanks }>;
@@ -39,6 +40,10 @@ export type MembershipRequirementAuthority =
   | Readonly<{
       readonly kind: "behavior_identity";
       readonly evidenceRef: string | null;
+    }>
+  | Readonly<{
+      readonly kind: "selector_consensus";
+      readonly embeddingRank: number;
     }>;
 
 export type MembershipSubstitutionAuthority = Readonly<{
@@ -117,6 +122,17 @@ export function behaviorIdentityAuthority(
   });
 }
 
+export function selectorConsensusAuthority(
+  candidate: AuthorizationCandidate,
+  maxRank: number
+): MembershipRequirementAuthority | null {
+  const rank = candidate.rawEmbeddingRank;
+  if (typeof rank !== "number" || !Number.isInteger(rank) || rank <= 0 || rank > maxRank) {
+    return null;
+  }
+  return Object.freeze({ kind: "selector_consensus" as const, embeddingRank: rank });
+}
+
 export function behaviorAuthoritiesAreBound(
   candidates: readonly AuthorizationCandidate[],
   evidenceRefByCandidateKey: ReadonlyMap<string, string>
@@ -183,12 +199,14 @@ export function buildMembershipAuthorizations<T extends AuthorizationCandidate>(
     const requirement = params.requirements.find(
       (item) => item.candidateKey === candidate.candidateKey
     );
-    const authority = requirement?.authority ?? directQueryEvidenceAuthority(
-      candidate,
-      params.queryProbes,
-      params.governedHead.length,
-      "proposed_head"
-    );
+    const authority = requirement?.authority ??
+      directQueryEvidenceAuthority(
+        candidate,
+        params.queryProbes,
+        params.governedHead.length,
+        "proposed_head"
+      ) ??
+      selectorConsensusAuthority(candidate, params.governedHead.length);
     if (authority === null ||
         (authority.kind === "behavior_identity" && authority.evidenceRef === null)) {
       return null;

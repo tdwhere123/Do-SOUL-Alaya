@@ -340,7 +340,8 @@ function composeNestedMembershipPack(
     completeTail.splice(victimIndex, 1);
   }
   if (head.length + completeTail.length !== capacity) return undefined;
-  const nested = !sameCandidateOrder(completeTail, originalTail);
+  const nested = membershipWidth !== plan.headWidth ||
+    !sameCandidateOrder(completeTail, originalTail);
   const candidates = [...head, ...completeTail];
   if (new Set(candidates.map((candidate) => candidate.candidateKey)).size !== capacity) {
     return undefined;
@@ -410,6 +411,13 @@ function toMembershipAuthorizationObservation(
       ...common,
       kind: "behavior_identity" as const,
       witness: { evidence_ref: witness.evidenceRef }
+    });
+  }
+  if (receipt.kind === "selector_consensus" && "embeddingRank" in witness) {
+    return deepFreeze({
+      ...common,
+      kind: "selector_consensus" as const,
+      witness: { embedding_rank: witness.embeddingRank }
     });
   }
   if (receipt.kind === "same_session_substitution" && "sessionKey" in witness) {

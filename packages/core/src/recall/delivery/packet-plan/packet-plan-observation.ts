@@ -76,6 +76,10 @@ export type RecallPacketMembershipAuthorization =
       readonly witness: Readonly<{ readonly evidence_ref: string }>;
     }>
   | RecallPacketMembershipAuthorizationBase & Readonly<{
+      readonly kind: "selector_consensus";
+      readonly witness: Readonly<{ readonly embedding_rank: number }>;
+    }>
+  | RecallPacketMembershipAuthorizationBase & Readonly<{
       readonly kind: "same_session_substitution";
       readonly witness: Readonly<{
         readonly protected_candidate_key: string;
@@ -249,6 +253,10 @@ function witnessIsBound(
   }
   if (receipt.kind === "behavior_identity") {
     return receipt.witness.evidence_ref.trim().length > 0 &&
+      receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key;
+  }
+  if (receipt.kind === "selector_consensus") {
+    return isBoundedPositiveRank(receipt.witness.embedding_rank, headWidth) &&
       receipt.authorized_candidate_key === receipt.satisfied_by_candidate_key;
   }
   if (receipt.kind === "graph_path_opportunity") {

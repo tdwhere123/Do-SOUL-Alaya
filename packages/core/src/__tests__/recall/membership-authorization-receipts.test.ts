@@ -8,7 +8,7 @@ import { captureSupportSetPacketPlanTrace } from
 
 type MembershipAuthorization = Readonly<{
   readonly kind: "direct_query_evidence" | "graph_path_opportunity" |
-    "behavior_identity" | "same_session_substitution";
+    "behavior_identity" | "selector_consensus" | "same_session_substitution";
   readonly authorized_candidate_key: string;
   readonly satisfied_by_candidate_key: string;
   readonly satisfied_head_slot: number;
@@ -42,6 +42,7 @@ describe("packet-plan membership authorization receipts", () => {
     ["direct query evidence", directAuthorization()],
     ["graph path opportunity", graphAuthorization()],
     ["behavior identity", behaviorAuthorization()],
+    ["selector consensus", selectorConsensusAuthorization()],
     ["same-session substitution", substitutionAuthorization()]
   ])("emits a frozen v3 receipt for %s", (_name, authorization) => {
     const trace = buildSupportSetPacketPlanTrace(
@@ -206,6 +207,13 @@ function behaviorAuthorization(): MembershipAuthorization {
   return Object.freeze({
     ...authorizationBase("behavior_identity"),
     witness: Object.freeze({ evidence_ref: "evidence:verified-user-assertion" })
+  });
+}
+
+function selectorConsensusAuthorization(): MembershipAuthorization {
+  return Object.freeze({
+    ...authorizationBase("selector_consensus"),
+    witness: Object.freeze({ embedding_rank: 1 })
   });
 }
 
