@@ -6,7 +6,7 @@ import type {
 export type RecallSelectorDemandAtom = RecallQueryDemandAtom;
 
 export interface RecallSelectorDemandMatch extends RecallSelectorDemandAtom {
-  readonly source: "content" | "key" | "evidence" | "source_role" | "temporal";
+  readonly source: "content" | "key" | "evidence" | "temporal";
 }
 
 export type RecallSelectorEvidenceDirectness =
@@ -56,7 +56,7 @@ export interface RecallSelectorPathReceipt {
 }
 
 export interface RecallCandidateSelectorObservation {
-  readonly schema_version: 1;
+  readonly schema_version: 2;
   readonly demand: Readonly<{
     readonly atoms: readonly Readonly<RecallSelectorDemandAtom>[];
     readonly matches: readonly Readonly<RecallSelectorDemandMatch>[];

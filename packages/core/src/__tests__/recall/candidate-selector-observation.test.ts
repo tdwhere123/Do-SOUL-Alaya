@@ -57,7 +57,7 @@ describe("candidate selector observation", () => {
     );
 
     expect(diagnostics.get("memory-1")?.selector_observation).toEqual({
-      schema_version: 1,
+      schema_version: 2,
       demand: { atoms: [], matches: [], unmatched: [] },
       evidence: expectedReferencedEvidence(),
       temporal: expectedTemporalObservation(),
@@ -138,7 +138,7 @@ describe("candidate selector observation", () => {
 
     expect(demand.matches).toEqual(expect.arrayContaining([
       {
-        id: "target:degree", kind: "target", value: "degree",
+        id: "lexical_term:degree", kind: "lexical_term", value: "degree",
         priority: "supporting", source: "content"
       },
       {
@@ -148,7 +148,7 @@ describe("candidate selector observation", () => {
     ]));
     expect(demand.unmatched).toEqual(expect.arrayContaining([
       {
-        id: "target:evidence-memory-1", kind: "target",
+        id: "lexical_term:evidence-memory-1", kind: "lexical_term",
         value: "evidence-memory-1", priority: "supporting"
       },
       {
@@ -159,7 +159,7 @@ describe("candidate selector observation", () => {
     expect(demand.atoms.every(Object.isFrozen)).toBe(true);
   });
 
-  it("matches an answer slot only through target-bound answer applicability", () => {
+  it("records open-vocabulary applicability without fabricating an answer slot", () => {
     const applicable = createCandidate("bike", {
       content: "I spent $120 on bike expenses.",
       evidence_refs: ["bike-evidence"]
@@ -185,14 +185,22 @@ describe("candidate selector observation", () => {
       diagnostic.selector_observation!.demand
     ]));
 
-    expect(demandById.get("bike")?.matches).toContainEqual({
-      id: "answer_slot:amount", kind: "answer_slot", value: "amount",
-      priority: "core", source: "evidence"
-    });
+    expect(demandById.get("bike")?.matches).toEqual(expect.arrayContaining([
+      {
+        id: "lexical_term:bike", kind: "lexical_term", value: "bike",
+        priority: "supporting", source: "content"
+      },
+      {
+        id: "lexical_term:expenses", kind: "lexical_term", value: "expenses",
+        priority: "supporting", source: "content"
+      }
+    ]));
     expect(demandById.get("rent")?.unmatched).toContainEqual({
-      id: "answer_slot:amount", kind: "answer_slot", value: "amount",
-      priority: "core"
+      id: "lexical_term:bike", kind: "lexical_term", value: "bike",
+      priority: "supporting"
     });
+    expect(demandById.get("bike")?.atoms.some(({ id }) =>
+      id.startsWith("answer_slot:"))).toBe(false);
   });
 
   it("attributes demand matches found only in linked Evidence", () => {
@@ -217,11 +225,11 @@ describe("candidate selector observation", () => {
     expect(result.diagnostics[0]?.selector_observation?.demand.matches).toEqual(
       expect.arrayContaining([
         {
-          id: "target:yoga", kind: "target", value: "yoga",
+          id: "lexical_term:yoga", kind: "lexical_term", value: "yoga",
           priority: "supporting", source: "evidence"
         },
         {
-          id: "target:classes", kind: "target", value: "classes",
+          id: "lexical_term:classes", kind: "lexical_term", value: "classes",
           priority: "supporting", source: "evidence"
         }
       ])

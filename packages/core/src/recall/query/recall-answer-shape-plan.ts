@@ -1,8 +1,8 @@
-import type { RecallQueryProbes } from "./recall-query-probes.js";
+import { isRecallScalarRelationTerm } from "./recall-answer-scalar-binding.js";
 import {
-  isRecallQueryOperatorTerm,
-  isRecallQueryRelationTerm
-} from "./demand/query-term-role.js";
+  splitLexicalTokens,
+  type RecallQueryProbes
+} from "./recall-query-probes.js";
 
 export type RecallAnswerShape =
   | "place"
@@ -38,9 +38,10 @@ export function compileRecallAnswerShapePlan(
     return emptyPlan(shapes.length > 1 ? "ambiguous" : "unknown");
   }
 
-  const relationTerms = probes.lexical_terms.filter(isRecallQueryRelationTerm);
+  const cueTerms = answerCueTerms(text);
+  const relationTerms = probes.lexical_terms.filter(isRecallScalarRelationTerm);
   const targetTerms = probes.lexical_terms.filter(
-    (term) => !isRecallQueryOperatorTerm(term) && !isRecallQueryRelationTerm(term)
+    (term) => !cueTerms.has(term) && !isRecallScalarRelationTerm(term)
   );
   if (targetTerms.length === 0) {
     return emptyPlan("unknown");
@@ -67,6 +68,20 @@ function detectAnswerShapes(text: string): readonly RecallAnswerShape[] {
     shapes.push("count");
   }
   return shapes;
+}
+
+function answerCueTerms(text: string): ReadonlySet<string> {
+  const patterns = [
+    PLACE_CUE,
+    DURATION_CUE,
+    DISTINCT_ENTITIES_CUE,
+    SUM_CUE,
+    COUNT_CUE
+  ];
+  return new Set(patterns.flatMap((pattern) => {
+    const match = pattern.exec(text)?.[0];
+    return match === undefined ? [] : splitLexicalTokens(match);
+  }));
 }
 
 function emptyPlan(

@@ -5,6 +5,7 @@ export interface NestedSetCandidate {
   readonly conjunctiveCoreDemandIds: readonly string[];
   readonly supportingDemandIds: readonly string[];
   readonly applicabilityDemandIds: readonly string[];
+  readonly demandCoverage: Readonly<Record<string, number>>;
   readonly evidenceGroup: string | null;
   readonly proposalSupport: number;
   readonly risk: number;
@@ -104,6 +105,7 @@ function bestSafeNestedExchange(
       incumbentHead,
       incumbentPack,
       scenarios: safetyScenarios,
+      dominanceScenarios: proposalScenarios,
       packSize: options.packSize
     })));
   const best = proposals.sort((left, right) =>
@@ -121,8 +123,17 @@ function buildSafeExchange(params: Readonly<{
   incumbentHead: readonly NestedSetCandidate[];
   incumbentPack: readonly NestedSetCandidate[];
   scenarios: readonly string[];
+  dominanceScenarios: readonly string[];
   packSize: number;
 }>): readonly NestedExchange[] {
+  const evictee = params.incumbentHead[params.evicteeIndex];
+  if (evictee === undefined) return [];
+  const certifiedCoreGain = params.challenger.coreDemandIds.some((id) =>
+    !evictee.coreDemandIds.includes(id)
+  );
+  if (!certifiedCoreGain && !preservesObservedActivation(
+    params.challenger, evictee, params.dominanceScenarios
+  )) return [];
   const head = params.incumbentHead.map((candidate, index) =>
     index === params.evicteeIndex ? params.challenger : candidate
   );
@@ -135,6 +146,19 @@ function buildSafeExchange(params: Readonly<{
     objective: Object.freeze(objectiveVector(head, params.scenarios, "head")),
     challengerKey: params.challenger.key
   })];
+}
+
+function preservesObservedActivation(
+  challenger: NestedSetCandidate,
+  evictee: NestedSetCandidate,
+  scenarios: readonly string[]
+): boolean {
+  return scenarios.every((scenario) => {
+    const incumbentRank = evictee.scenarioRanks[scenario];
+    if (!finiteRank(incumbentRank)) return true;
+    const challengerRank = challenger.scenarioRanks[scenario];
+    return finiteRank(challengerRank) && challengerRank <= incumbentRank;
+  });
 }
 
 function isActivationOpportunity(
@@ -155,16 +179,18 @@ function safeSetReplacement(
 ): boolean {
   const incumbentUtility = scenarioUtilityVector(incumbent, scenarios);
   const proposedUtility = scenarioUtilityVector(proposed, scenarios);
-  const incumbentDemand = coreDemandSet(incumbent);
-  const proposedDemand = coreDemandSet(proposed);
-  const incumbentSupporting = supportingDemandSet(incumbent);
-  const proposedSupporting = supportingDemandSet(proposed);
-  if (!setContainsAll(proposedDemand, incumbentDemand)) return false;
-  if (!setContainsAll(proposedSupporting, incumbentSupporting)) return false;
+  const incumbentDemand = facilityCoverageByDemand(incumbent, "core");
+  const proposedDemand = facilityCoverageByDemand(proposed, "core");
+  const incumbentSupporting = facilityCoverageByDemand(incumbent, "supporting");
+  const proposedSupporting = facilityCoverageByDemand(proposed, "supporting");
+  if (!preservesCoverage(proposedDemand, incumbentDemand)) return false;
+  if (!preservesCoverage(proposedSupporting, incumbentSupporting)) return false;
   if (!preservesCandidateApplicability(incumbent, proposed)) return false;
   if (totalRisk(proposed) > totalRisk(incumbent)) return false;
-  const demandGain = proposedDemand.size > incumbentDemand.size;
-  const supportingGain = proposedSupporting.size > incumbentSupporting.size;
+  const demandGain = totalCoverage(proposedDemand) >
+    totalCoverage(incumbentDemand) + UTILITY_EPSILON;
+  const supportingGain = totalCoverage(proposedSupporting) >
+    totalCoverage(incumbentSupporting) + UTILITY_EPSILON;
   const activationLoss = proposedUtility.some((value, index) =>
     value + UTILITY_EPSILON < incumbentUtility[index]!
   );
@@ -193,16 +219,6 @@ function scenarioUtilityVector(
   return scenarios.map((scenario) => candidates.reduce(
     (sum, candidate) => sum + rankUtility(candidate.scenarioRanks[scenario]), 0
   ));
-}
-
-function coreDemandSet(candidates: readonly NestedSetCandidate[]): ReadonlySet<string> {
-  return new Set(candidates.flatMap((candidate) => candidate.coreDemandIds));
-}
-
-function supportingDemandSet(
-  candidates: readonly NestedSetCandidate[]
-): ReadonlySet<string> {
-  return new Set(candidates.flatMap((candidate) => candidate.supportingDemandIds));
 }
 
 function setContainsAll(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
@@ -274,8 +290,10 @@ function objectiveVector(
   const robustUtility = Math.min(...scenarioUtilities);
   const nominalUtility = scenarioUtilities.reduce((sum, value) => sum + value, 0) /
     Math.max(1, scenarioUtilities.length);
-  const coreCoverage = uniqueCount(selected.flatMap((item) => item.coreDemandIds));
-  const supportingCoverage = uniqueCount(selected.flatMap((item) => item.supportingDemandIds));
+  const coreCoverage = totalCoverage(facilityCoverageByDemand(selected, "core"));
+  const supportingCoverage = totalCoverage(
+    facilityCoverageByDemand(selected, "supporting")
+  );
   const evidenceCoverage = uniqueCount(selected.flatMap((item) =>
     item.evidenceGroup === null ? [] : [item.evidenceGroup]
   ));
@@ -333,6 +351,7 @@ function normalizeCandidates(
       applicabilityDemandIds: Object.freeze([
         ...new Set(candidate.applicabilityDemandIds)
       ]),
+      demandCoverage: Object.freeze({ ...candidate.demandCoverage }),
       proposalSupport: finiteNonNegative(candidate.proposalSupport),
       risk: finiteNonNegative(candidate.risk),
       tokenCost: finiteNonNegative(candidate.tokenCost)
@@ -375,6 +394,44 @@ function rankWithin(value: number | null | undefined, limit: number): boolean {
 
 function finiteNonNegative(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function facilityCoverageByDemand(
+  candidates: readonly NestedSetCandidate[],
+  priority: "core" | "supporting"
+): ReadonlyMap<string, number> {
+  const evidenceByDemand = new Map<string, Map<string, number>>();
+  for (const candidate of candidates) {
+    const ids = priority === "core" ? candidate.coreDemandIds : candidate.supportingDemandIds;
+    const group = candidate.evidenceGroup ?? `candidate:${candidate.key}`;
+    for (const id of ids) {
+      const strength = bounded(candidate.demandCoverage[id] ?? 0);
+      const byEvidence = evidenceByDemand.get(id) ?? new Map<string, number>();
+      byEvidence.set(group, Math.max(byEvidence.get(group) ?? 0, strength));
+      evidenceByDemand.set(id, byEvidence);
+    }
+  }
+  return new Map([...evidenceByDemand].map(([id, byEvidence]) => [
+    id,
+    1 - [...byEvidence.values()].reduce((remaining, value) => remaining * (1 - value), 1)
+  ]));
+}
+
+function preservesCoverage(
+  proposed: ReadonlyMap<string, number>,
+  incumbent: ReadonlyMap<string, number>
+): boolean {
+  return [...incumbent].every(([id, value]) =>
+    (proposed.get(id) ?? 0) + UTILITY_EPSILON >= value
+  );
+}
+
+function totalCoverage(coverage: ReadonlyMap<string, number>): number {
+  return [...coverage.values()].reduce((sum, value) => sum + value, 0);
+}
+
+function bounded(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
 }
 
 function uniqueCount(values: readonly string[]): number {

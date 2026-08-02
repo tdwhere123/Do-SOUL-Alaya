@@ -136,6 +136,10 @@ export function matchRecallRelationTerms(
   });
 }
 
+export function isRecallScalarRelationTerm(term: string): boolean {
+  return RELATION_ALIASES.some((aliases) => aliases.has(term));
+}
+
 export function resolveRecallTargetStatus(
   targetTerms: readonly string[],
   tokens: ReadonlySet<string>

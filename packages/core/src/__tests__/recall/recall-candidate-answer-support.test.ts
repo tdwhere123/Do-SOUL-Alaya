@@ -57,7 +57,7 @@ describe("recall candidate answer support", () => {
       value_supported: true,
       target_supported: true,
       relation_supported: true,
-      matched_target_terms: ["bookshelf"]
+      matched_target_terms: ["new", "bookshelf"]
     });
   });
 

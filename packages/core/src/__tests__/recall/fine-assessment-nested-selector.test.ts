@@ -31,7 +31,7 @@ describe("selectNestedFineAssessmentCandidates", () => {
     ]);
   });
 
-  it("projects source-role demand into the nested semantic selection", () => {
+  it("projects observed lexical and semantic channels through one selector", () => {
     const plain = ranked("plain", 1, 2);
     const answer = attributedAnswer(withStreamRank(
       ranked("answer", 2, 1, "evidence_capsule"), "lexical_fts", 1
@@ -146,8 +146,29 @@ describe("selectNestedFineAssessmentCandidates", () => {
     );
 
     expect(projected[0]?.supportingDemandIds).toEqual(expect.arrayContaining([
-      "target:online", "target:communities", "phrase:online communities"
+      "lexical_term:online", "lexical_term:communities", "phrase:online communities"
     ]));
+  });
+
+  it("weights demand by information in the current candidate field", () => {
+    const candidates = [
+      withContent(attributedUser(withStreamRank(
+        ranked("rare", 1, 1, "evidence_capsule"), "lexical_fts", 1
+      )), "A Rust project used an actor runtime."),
+      withContent(attributedUser(withStreamRank(
+        ranked("common-a", 2, 2, "evidence_capsule"), "lexical_fts", 2
+      )), "A Java project used a service runtime."),
+      withContent(attributedUser(withStreamRank(
+        ranked("common-b", 3, 3, "evidence_capsule"), "lexical_fts", 3
+      )), "A Python project used a task runtime.")
+    ];
+    const projected = projectFineAssessmentNestedField(
+      candidates, context(candidates, "Which Rust project used an actor runtime?")
+    );
+
+    expect(projected[0]?.demandCoverage["lexical_term:rust"] ?? 0).toBeGreaterThan(
+      projected[0]?.demandCoverage["lexical_term:project"] ?? 0
+    );
   });
 
   it("does not reward text matches without an Evidence validity receipt", () => {
@@ -160,32 +181,32 @@ describe("selectNestedFineAssessmentCandidates", () => {
     );
 
     expect(projected[0]?.supportingDemandIds).toEqual([]);
-    expect(projected[0]?.applicabilityDemandIds).toContain("target:bookshelf");
+    expect(projected[0]?.applicabilityDemandIds).toContain("lexical_term:bookshelf");
   });
 
   it("retains core demand authority when independent channels corroborate it", () => {
-    const answer = attributedAnswer(withStreamRank(
+    const answer = withEventTime(withContent(attributedAnswer(withStreamRank(
       ranked("answer", 12, 1, "evidence_capsule"), "lexical_fts", 1
-    ));
+    )), "I visited Paris."), "2025-02-01T00:00:00.000Z");
     const projected = projectFineAssessmentNestedField(
-      [answer], context([answer], "Which option did you recommend?")
+      [answer], context([answer], "What was the latest place I visited?")
     );
 
-    expect(projected[0]?.coreDemandIds).toContain("source_role:assistant");
+    expect(projected[0]?.coreDemandIds).toContain("ordering:latest");
   });
 
   it("retains same-candidate conjunctive demand with one strong channel", () => {
-    const answer = withContent(attributedAnswer(
+    const answer = withEventTime(withContent(attributedAnswer(
       withStreamRank(ranked("answer", 12, null, "evidence_capsule"), "lexical_fts", 1)
-    ), "I recommend the Rust language.");
+    ), "I visited Paris."), "2025-02-01T00:00:00.000Z");
     const projected = projectFineAssessmentNestedField(
-      [answer], context([answer], "Which language did you recommend?")
+      [answer], context([answer], "What was the latest place I visited?")
     );
 
-    expect(projected[0]?.coreDemandIds).toContain("source_role:assistant");
+    expect(projected[0]?.coreDemandIds).toContain("ordering:latest");
   });
 
-  it("does not let a relation alone qualify broad source-role demand", () => {
+  it("does not let one isolated lexical match qualify a core demand", () => {
     const candidate = withContent(attributedUser(
       withStreamRank(ranked("candidate", 12, null, "evidence_capsule"), "graph_expansion", 1)
     ), "I take the train every morning.");
@@ -197,61 +218,27 @@ describe("selectNestedFineAssessmentCandidates", () => {
     expect(projected[0]?.supportingDemandIds).toEqual([]);
   });
 
-  it("binds personalized recommendation demand to user preference Evidence", () => {
-    const preference = withPreferenceDimension(attributedUser(
-      ranked("preference", 12, 1, "evidence_capsule")
-    ));
-    const projected = projectFineAssessmentNestedField(
-      [preference],
-      context([preference], "Can you recommend a restaurant based on my preferences?")
-    );
-
-    expect(projected[0]?.coreDemandIds).toEqual(expect.arrayContaining([
-      "answer_slot:recommendation",
-      "source_role:user"
-    ]));
-  });
-
-  it("binds personalized recommendation to a relevant user fact across noun inflection", () => {
+  it("does not fabricate a core role for open-ended recommendation wording", () => {
     const fact = withContent(attributedUser(
-      withStreamRank(ranked("fact", 12, null, "evidence_capsule"), "lexical_fts", 1)
+      withStreamRank(ranked("fact", 12, 1, "evidence_capsule"), "lexical_fts", 1)
     ), "I enjoy classic cocktails at small get-togethers.");
     const projected = projectFineAssessmentNestedField(
       [fact], context([fact], "Can you suggest a cocktail for my get-together?")
     );
 
-    expect(projected[0]?.coreDemandIds).toEqual(expect.arrayContaining([
-      "answer_slot:recommendation",
-      "source_role:user"
-    ]));
-    expect(projected[0]?.supportingDemandIds).toContain("target:cocktail");
-  });
-
-  it("uses an explicit source-target conjunction for episodic user Evidence", () => {
-    const episode = withContent(attributedUser(
-      withStreamRank(ranked("episode", 12, null, "evidence_capsule"), "lexical_fts", 1)
-    ), "I stayed at a quiet hotel in Miami.");
-    const projected = projectFineAssessmentNestedField(
-      [episode], context([episode], "Can you suggest a hotel for my Miami trip?")
-    );
-
-    expect(projected[0]?.coreDemandIds).toContain("source_role:user");
-    expect(projected[0]?.coreDemandIds).toContain("answer_slot:recommendation");
-    expect(projected[0]?.conjunctiveCoreDemandIds.some((id) =>
-      id.includes("source_role:user") && id.includes("target:hotel"))).toBe(true);
-    expect(projected[0]?.coreDemandIds.some((id) =>
-      id.startsWith("conjunction:"))).toBe(false);
+    expect(projected[0]?.coreDemandIds).toEqual([]);
+    expect(projected[0]?.supportingDemandIds).toContain("lexical_term:cocktail");
   });
 
   it("can safely exchange a qualified lexical candidate without semantic state", () => {
     const plain = ranked("plain", 1, null);
-    const answer = withContent(attributedAnswer(
+    const answer = withEventTime(withContent(attributedAnswer(
       withStreamRank(ranked("answer", 8, null, "evidence_capsule"), "lexical_fts", 1)
-    ), "I recommend the Rust language.");
+    ), "I visited Paris."), "2025-02-01T00:00:00.000Z");
     const candidates = [plain, answer];
     const result = refineNestedFineAssessmentCandidates(
       candidates,
-      context(candidates, "Which language did you recommend?", 1),
+      context(candidates, "What was the latest place I visited?", 1),
       {
         headKeys: ["workspace_local:memory_entry:plain"],
         packKeys: ["workspace_local:memory_entry:plain"]
@@ -377,14 +364,5 @@ function withEventTime(
   return {
     ...candidate,
     entry: { ...candidate.entry, event_time_start: eventTime }
-  };
-}
-
-function withPreferenceDimension(
-  candidate: FineAssessmentCandidate
-): FineAssessmentCandidate {
-  return {
-    ...candidate,
-    entry: { ...candidate.entry, dimension: "preference" }
   };
 }

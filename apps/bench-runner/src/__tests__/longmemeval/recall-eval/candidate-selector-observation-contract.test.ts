@@ -4,7 +4,7 @@ import { buildQuestionDiagnostic } from
 import { LongMemEvalQuestionDiagnosticSchema } from
   "../../../longmemeval/diagnostics/schema/diagnostics-schema.js";
 
-const SELECTOR_OBSERVATION = {
+const LEGACY_SELECTOR_OBSERVATION = {
   schema_version: 1,
   demand: null,
   evidence: {
@@ -42,6 +42,28 @@ const SELECTOR_OBSERVATION = {
   }
 } as const;
 
+const SELECTOR_OBSERVATION = {
+  ...LEGACY_SELECTOR_OBSERVATION,
+  schema_version: 2,
+  demand: {
+    atoms: [
+      { id: "ordering:latest", kind: "ordering", value: "latest", priority: "core" },
+      { id: "lexical_term:work", kind: "lexical_term", value: "work", priority: "supporting" }
+    ],
+    matches: [{
+      id: "ordering:latest",
+      kind: "ordering",
+      value: "latest",
+      priority: "core",
+      source: "temporal"
+    }],
+    unmatched: [
+      { id: "lexical_term:work", kind: "lexical_term", value: "work", priority: "supporting" }
+    ]
+  },
+  evidence: { ...LEGACY_SELECTOR_OBSERVATION.evidence, source_role: "user" }
+} as const;
+
 describe("candidate selector observation contract", () => {
   it("survives raw candidate narrowing and persisted replay", () => {
     const question = buildQuestion({ selector_observation: SELECTOR_OBSERVATION });
@@ -49,6 +71,13 @@ describe("candidate selector observation contract", () => {
     expect(question.candidates[0]?.selector_observation).toEqual(SELECTOR_OBSERVATION);
     expect(LongMemEvalQuestionDiagnosticSchema.parse(question).candidates[0]
       ?.selector_observation).toEqual(SELECTOR_OBSERVATION);
+  });
+
+  it("keeps archived version-one observations readable", () => {
+    const question = buildQuestion({ selector_observation: LEGACY_SELECTOR_OBSERVATION });
+
+    expect(LongMemEvalQuestionDiagnosticSchema.parse(question).candidates[0]
+      ?.selector_observation).toEqual(LEGACY_SELECTOR_OBSERVATION);
   });
 
   it("defaults old rows to null and rejects malformed receipts", () => {

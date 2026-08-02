@@ -5,73 +5,46 @@ import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
 
 describe("compileRecallQueryDemand", () => {
-  it("represents an Assistant recommendation without routing the query", () => {
+  it("keeps open-vocabulary query terms without assigning semantic roles", () => {
     const demand = compile("Can you remind me which back-end languages you recommended I learn?");
 
     expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "choice", "core"),
-      atom("source_role", "assistant", "core"),
-      atom("relation", "recommended", "supporting"),
-      atom("target", "back-end", "supporting"),
-      atom("target", "languages", "supporting")
+      atom("lexical_term", "back-end", "supporting"),
+      atom("lexical_term", "languages", "supporting"),
+      atom("lexical_term", "recommended", "supporting")
     ]));
+    expect(demand.atoms.some(({ id }) => id.startsWith("source_role:"))).toBe(false);
   });
 
-  it("does not treat a prospective recommendation request as Assistant history", () => {
+  it("does not turn prospective wording into a ranking branch", () => {
     const demand = compile("Can you recommend a language for my next project?");
 
-    expect(demand.atoms).not.toContainEqual(
-      atom("source_role", "assistant", "core")
-    );
     expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "recommendation", "core"),
-      atom("source_role", "user", "core"),
-      atom("relation", "recommend", "supporting")
+      atom("lexical_term", "recommend", "supporting"),
+      atom("lexical_term", "language", "supporting"),
+      atom("lexical_term", "project", "supporting")
     ]));
-  });
-
-  it("keeps retrospective recommendations on the Assistant evidence source", () => {
-    const demand = compile("What did you recommend for my previous project?");
-
-    expect(demand.atoms).toContainEqual(
-      atom("source_role", "assistant", "core")
-    );
-    expect(demand.atoms).not.toContainEqual(
-      atom("answer_slot", "recommendation", "core")
-    );
-  });
-
-  it("represents open-ended personal tips as recommendation demand", () => {
-    const demand = compile("I'm planning meal prep next week, any suggestions?");
-
-    expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "recommendation", "core"),
-      atom("source_role", "user", "core")
-    ]));
+    expect(demand.atoms.some(({ id }) => id.startsWith("source_role:"))).toBe(false);
   });
 
   it("keeps colloquial time and the requested fact as independent demands", () => {
     const demand = compile("What did my friend tell me a couple of days ago?");
 
     expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "fact", "core"),
       atom("temporal", "a couple of days ago", "core"),
-      atom("relation", "tell", "supporting"),
-      atom("target", "friend", "supporting")
+      atom("lexical_term", "tell", "supporting"),
+      atom("lexical_term", "friend", "supporting")
     ]));
-    expect(demand.atoms).not.toContainEqual(atom("source_role", "user", "core"));
   });
 
   it("represents sequence and bounded time without a query-type branch", () => {
     const demand = compile("In what order did I visit cities in the past three months?");
 
     expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "fact", "core"),
       atom("ordering", "sequence", "core"),
       atom("temporal", "past three months", "core"),
-      atom("source_role", "user", "core"),
-      atom("relation", "visit", "supporting"),
-      atom("target", "cities", "supporting")
+      atom("lexical_term", "visit", "supporting"),
+      atom("lexical_term", "cities", "supporting")
     ]));
   });
 
@@ -79,52 +52,47 @@ describe("compileRecallQueryDemand", () => {
     const demand = compile("How much total did I spend on train tickets?");
 
     expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "amount", "core"),
-      atom("source_role", "user", "core"),
-      atom("relation", "spend", "supporting"),
-      atom("target", "train", "supporting"),
-      atom("target", "tickets", "supporting")
+      atom("lexical_term", "spend", "supporting"),
+      atom("lexical_term", "train", "supporting"),
+      atom("lexical_term", "tickets", "supporting")
     ]));
   });
 
-  it("keeps retrieval intent words out of target applicability", () => {
+  it("retains content-bearing terms for field-conditioned weighting", () => {
     const demand = compile(
       "I was looking back at our previous chat and wanted to confirm, " +
       "how many times did the Chiefs play the Jaguars at Arrowhead Stadium?"
     );
 
     expect(demand.atoms).toEqual(expect.arrayContaining([
-      atom("answer_slot", "count", "core"),
-      atom("relation", "play", "supporting"),
-      atom("target", "chiefs", "supporting"),
-      atom("target", "jaguars", "supporting"),
-      atom("target", "arrowhead", "supporting"),
-      atom("target", "stadium", "supporting")
+      atom("lexical_term", "back", "supporting"),
+      atom("lexical_term", "confirm", "supporting"),
+      atom("lexical_term", "play", "supporting"),
+      atom("lexical_term", "chiefs", "supporting"),
+      atom("lexical_term", "jaguars", "supporting"),
+      atom("lexical_term", "arrowhead", "supporting"),
+      atom("lexical_term", "stadium", "supporting")
     ]));
-    expect(demand.atoms).not.toEqual(expect.arrayContaining([
-      atom("target", "back", "supporting"),
-      atom("target", "confirm", "supporting"),
-      atom("target", "how", "supporting"),
-      atom("target", "times", "supporting")
-    ]));
+    expect(demand.atoms).not.toContainEqual(
+      atom("lexical_term", "how", "supporting")
+    );
   });
 
-  it("does not turn operator-only phrases into answer coverage", () => {
+  it("leaves phrase value to the field objective instead of a word list", () => {
     const demand = compile(
       "I've been thinking about making a cocktail, but I'm not sure which one to choose."
     );
 
-    expect(demand.atoms).not.toEqual(expect.arrayContaining([
-      atom("phrase", "been thinking", "supporting"),
-      atom("phrase", "thinking about", "supporting")
-    ]));
-    expect(demand.atoms).toContainEqual(atom("target", "cocktail", "supporting"));
+    expect(demand.atoms).toContainEqual(
+      atom("lexical_term", "cocktail", "supporting")
+    );
   });
 
   it("deduplicates atoms and freezes the resulting state", () => {
     const demand = compile("Which option did you recommend and recommend again?");
 
-    expect(demand.atoms.filter((item) => item.id === "relation:recommend")).toHaveLength(1);
+    expect(demand.atoms.filter((item) =>
+      item.id === "lexical_term:recommend")).toHaveLength(1);
     expect(Object.isFrozen(demand)).toBe(true);
     expect(Object.isFrozen(demand.atoms)).toBe(true);
   });
@@ -135,8 +103,7 @@ function compile(query: string) {
 }
 
 function atom(
-  kind: "answer_slot" | "source_role" | "ordering" | "temporal" | "target" | "relation" |
-    "phrase",
+  kind: "ordering" | "temporal" | "lexical_term" | "phrase",
   value: string,
   priority: "core" | "supporting"
 ) {

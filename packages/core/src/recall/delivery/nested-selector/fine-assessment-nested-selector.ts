@@ -79,12 +79,12 @@ export function projectFineAssessmentNestedField(
       ) ?? null
     })
   );
-  return gateDemandCoverage(
+  return calibrateDemandCoverage(gateDemandCoverage(
     calibrateOrderingDemandCoverage(
       calibrateScenarioRankTies(projected), candidates
     ),
     context.config.budgets.max_entries
-  );
+  ), context.config.budgets.max_entries);
 }
 
 export function projectFineAssessmentNestedCandidate(
@@ -116,6 +116,7 @@ export function projectFineAssessmentNestedCandidate(
     applicabilityDemandIds: applicabilityDemandIds(
       demandMatches, conjunctiveDemandIds
     ),
+    demandCoverage: Object.freeze({}),
     evidenceGroup: evidenceGroup(candidate, context),
     proposalSupport: activation?.proposal_activation ?? 0,
     risk: selectorRisk(observation),
@@ -262,7 +263,7 @@ function eligibleOrderingKeys(
   const applicable = projected.filter((candidate) =>
     candidate.coreDemandIds.includes(orderingId) &&
     candidate.supportingDemandIds.some((id) =>
-      id.startsWith("target:") || id.startsWith("relation:") || id.startsWith("phrase:"))
+      id.startsWith("lexical_term:") || id.startsWith("phrase:"))
   );
   if (orderingId === "ordering:sequence") {
     return new Set(applicable.map(({ key }) => key));
@@ -324,6 +325,48 @@ function observedDemandScenarios(
   });
 }
 
+function calibrateDemandCoverage(
+  candidates: readonly NestedSetCandidate[],
+  packSize: number
+): readonly NestedSetCandidate[] {
+  const documentFrequency = new Map<string, number>();
+  for (const candidate of candidates) {
+    const ids = new Set([...candidate.coreDemandIds, ...candidate.supportingDemandIds]);
+    for (const id of ids) {
+      documentFrequency.set(id, (documentFrequency.get(id) ?? 0) + 1);
+    }
+  }
+  return Object.freeze(candidates.map((candidate) => Object.freeze({
+    ...candidate,
+    demandCoverage: demandCoverage(
+      candidate, candidates.length, documentFrequency, packSize
+    )
+  })));
+}
+
+function demandCoverage(
+  candidate: NestedSetCandidate,
+  fieldSize: number,
+  documentFrequency: ReadonlyMap<string, number>,
+  packSize: number
+): Readonly<Record<string, number>> {
+  const ids = new Set([...candidate.coreDemandIds, ...candidate.supportingDemandIds]);
+  const relevance = robustDemandRelevance(candidate, packSize);
+  return Object.freeze(Object.fromEntries([...ids].map((id) => {
+    const frequency = documentFrequency.get(id) ?? fieldSize;
+    const information = Math.log1p(fieldSize / Math.max(1, frequency)) /
+      Math.log1p(Math.max(1, fieldSize));
+    return [id, information * relevance];
+  })));
+}
+
+function robustDemandRelevance(candidate: NestedSetCandidate, packSize: number): number {
+  const ranks = observedDemandScenarios(candidate, packSize)
+    .map((scenario) => candidate.scenarioRanks[scenario])
+    .filter(finiteRank);
+  return ranks.length === 0 ? 0 : 1 / Math.max(...ranks);
+}
+
 function validCoreDemandIds(
   observation: ReturnType<typeof buildCandidateSelectorObservation>
 ): readonly string[] {
@@ -350,7 +393,7 @@ function conjunctiveCoreDemandIds(
   const exactCore = coreMatches.some(({ kind }) =>
     kind === "object_id" || kind === "evidence_ref");
   const supportingPairs = coreMatches.flatMap((core) =>
-    matches.filter((match) => qualifiesCoreBinding(core.kind, match))
+    matches.filter(isSelectorSupportingMatch)
       .map((supporting) => conjunctionId(core.id, supporting.id))
   );
   return exactCore || supportingPairs.length > 0
@@ -361,20 +404,12 @@ function conjunctiveCoreDemandIds(
     : Object.freeze([]);
 }
 
-function qualifiesCoreBinding(
-  coreKind: string,
-  match: ReturnType<typeof buildCandidateSelectorObservation>["demand"]["matches"][number]
-): boolean {
-  return isSelectorSupportingMatch(match) &&
-    (match.kind !== "relation" || coreKind === "ordering");
-}
-
 function isSelectorSupportingMatch(
   match: ReturnType<typeof buildCandidateSelectorObservation>["demand"]["matches"][number]
 ): boolean {
   return match.priority === "supporting" &&
-    (match.kind === "target" || match.kind === "relation" ||
-      match.kind === "phrase" || match.kind === "facet");
+    (match.kind === "lexical_term" || match.kind === "phrase" ||
+      match.kind === "facet");
 }
 
 function applicabilityDemandIds(

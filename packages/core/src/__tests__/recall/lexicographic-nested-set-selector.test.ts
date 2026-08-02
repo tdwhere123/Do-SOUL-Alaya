@@ -127,7 +127,7 @@ describe("selectLexicographicNestedSet", () => {
     expect(result.headKeys).toEqual(["anchor", "balanced"]);
   });
 
-  it("lets projector-qualified core demand precede an activation tradeoff", () => {
+  it("lets certified core demand precede observed activation", () => {
     const candidates = [
       candidate("incumbent", { delivery: 1, fusion: 1, semantic: 1 }),
       candidate("temporal", { delivery: 8, fusion: 2, semantic: 2 }, {
@@ -159,7 +159,7 @@ describe("selectLexicographicNestedSet", () => {
     expect(result.headKeys).toEqual(["first", "weak"]);
   });
 
-  it("lets a sparse channel propose without making it a global safety scenario", () => {
+  it("lets a sparse certified core channel propose without globalizing it", () => {
     const candidates = [
       candidate("anchor", { delivery: 1, fusion: 1 }),
       candidate("weak", { delivery: 2, fusion: 8 }),
@@ -195,6 +195,22 @@ describe("selectLexicographicNestedSet", () => {
     expect(result.headKeys).toEqual(["answer"]);
   });
 
+  it("does not exchange observed activation for open-vocabulary facility gain", () => {
+    const candidates = [
+      candidate("incumbent", { delivery: 1, fusion: 1, semantic: 1 }),
+      candidate("facility", { delivery: 8, fusion: 2, semantic: 1 }, {
+        supportingDemandIds: ["lexical_term:rare"]
+      })
+    ];
+
+    const result = refineIncumbentNestedSet(candidates, {
+      headKeys: ["incumbent"],
+      packKeys: ["incumbent", "facility"]
+    }, { headSize: 1, packSize: 2 });
+
+    expect(result.headKeys).toEqual(["incumbent"]);
+  });
+
   it("requires one replacement witness to preserve a candidate's applicability", () => {
     const candidates = [
       candidate("coherent", { delivery: 1, semantic: 8, lexical: 8 }, {
@@ -219,6 +235,10 @@ function candidate(
   scenarioRanks: Readonly<Record<string, number | null>>,
   extra: Partial<NestedSetCandidate> = {}
 ): NestedSetCandidate {
+  const demandIds = [
+    ...(extra.coreDemandIds ?? []),
+    ...(extra.supportingDemandIds ?? [])
+  ];
   return Object.freeze({
     key,
     scenarioRanks,
@@ -226,6 +246,9 @@ function candidate(
     conjunctiveCoreDemandIds: Object.freeze([]),
     supportingDemandIds: Object.freeze([]),
     applicabilityDemandIds: Object.freeze([]),
+    demandCoverage: Object.freeze(Object.fromEntries(
+      demandIds.map((id) => [id, 1])
+    )),
     evidenceGroup: null,
     proposalSupport: 0,
     risk: 0,
