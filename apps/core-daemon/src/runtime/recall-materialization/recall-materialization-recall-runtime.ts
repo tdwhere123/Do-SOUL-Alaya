@@ -10,6 +10,7 @@ import {
 } from "@do-soul/alaya-core";
 import {
   findActiveConstraints,
+  SqliteRecallRoutingKeyProjectionRepo,
   SqliteTemporalPathProjectionReader,
   type EvidenceSearchMatch
 } from "@do-soul/alaya-storage";
@@ -238,6 +239,7 @@ function createRecallService(input: {
     activeConstraintsPort: input.recallSearchRuntime.recallActiveConstraintsPort,
     robustSourceRefParsing: readRobustSourceRefParsing(),
     evidenceSearchPort: input.recallSearchRuntime.recallEvidenceSearchPort,
+    routingKeyProjectionPort: new SqliteRecallRoutingKeyProjectionRepo(input.input.database),
     synthesisSearchPort: input.recallSearchRuntime.recallSynthesisSearchPort,
     ...createRecallGlobalMemoryPorts(input),
     budgetPenaltyPort: {

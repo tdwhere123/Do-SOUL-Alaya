@@ -7,6 +7,8 @@ import type {
   SoulActiveConstraint,
   SoulMemorySearchDegradationReason
 } from "@do-soul/alaya-protocol";
+import type { SelectedSliceKeyV2 } from "../flood/slice-key-contract.js";
+import type { AttributedKeyActivationV1 } from "../flood/attributed-key-activation.js";
 
 import type { RecallAdmissionPlane, RecallDiagnostics, RecallPathExpansionSourceDiagnostic } from "./recall-service-diagnostics.js";
 
@@ -45,6 +47,15 @@ export interface RecallResult {
 
 export interface RecallSupplementaryData {
   readonly queryProbes: Readonly<import("../query/recall-query-probes.js").RecallQueryProbes>;
+  readonly routingKeysByOwnerIdentity?: ReadonlyMap<
+    string,
+    readonly Readonly<SelectedSliceKeyV2>[]
+  >;
+  readonly queryRoutingKeys?: readonly Readonly<SelectedSliceKeyV2>[];
+  readonly keyActivationByOwnerIdentity?: ReadonlyMap<
+    string,
+    Readonly<AttributedKeyActivationV1>
+  >;
   readonly ftsRanks: Readonly<Record<string, number>>;
   // Trigram-lane normalized rank, surfaced separately from ftsRanks so the
   // trigram_fts fusion stream can read substring / spelling-variant / CJK

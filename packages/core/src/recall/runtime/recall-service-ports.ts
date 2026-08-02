@@ -35,6 +35,7 @@ import type {
   GlobalMemoryRecallPort
 } from "./global-memory-recall-port.js";
 import type { RecallFailureHealthInboxPort } from "./recall-failure-health-inbox.js";
+import type { RecallRoutingKeyProjectionPort } from "./routing-key-projection-port.js";
 
 export interface KeywordSearchResult {
   readonly object_id: string;
@@ -445,6 +446,7 @@ export interface RecallServiceDependencies {
   readonly pathExpansionPort?: RecallServicePathExpansionPort;
   readonly activeConstraintsPort?: RecallServiceActiveConstraintsPort;
   readonly evidenceSearchPort?: RecallServiceEvidenceSearchPort;
+  readonly routingKeyProjectionPort?: RecallRoutingKeyProjectionPort;
   readonly synthesisSearchPort?: RecallServiceSynthesisSearchPort;
   readonly manifestationSidecarPort?: RecallServiceManifestationSidecarPort;
   // Optional decorator over every buildDefaultPolicy output; the daemon injects runtime-driven scoring_weight_overrides. Must return a valid RecallPolicy; identity is the safe default.

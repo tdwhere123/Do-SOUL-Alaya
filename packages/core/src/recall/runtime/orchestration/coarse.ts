@@ -100,6 +100,10 @@ export async function collectCoarseFilterSupplementaryData(
     candidates: params.coarseFilter.candidates
       .filter(isWorkspaceMemoryCandidate)
       .map((candidate) => candidate.entry),
+    routingKeyOwnerIds: params.coarseFilter.candidates.map(
+      (candidate) => candidate.entry.object_id
+    ),
+    routingKeyAsOfMs: Date.parse(params.now()),
     workspaceId: params.workspaceId,
     pathProjectionAsOf: params.pathProjectionAsOf,
     runId: params.runId,

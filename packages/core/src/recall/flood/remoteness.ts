@@ -1,9 +1,9 @@
-import type { SliceCompatibilityV1 } from "./slice-key-selector.js";
+import type { SliceCompatibilityV2 } from "./slice-key-selector.js";
 import { clamp01 } from "../../shared/clamp.js";
 
 export type SingleHopSliceCompatibility =
   | "not_evaluated"
-  | SliceCompatibilityV1["reason"];
+  | SliceCompatibilityV2["reason"];
 
 export type SingleHopRemotenessReason =
   | "transferred"
@@ -27,7 +27,7 @@ interface SingleHopRemotenessInput {
   readonly edgeConductance: number;
   readonly capPerSource: number;
   readonly selfLoop: boolean;
-  readonly sliceCompatibility?: Readonly<SliceCompatibilityV1>;
+  readonly sliceCompatibility?: Readonly<SliceCompatibilityV2>;
   readonly enforceSliceCompatibility?: boolean;
   readonly edgeProvenanceValid?: boolean;
 }

@@ -29,6 +29,10 @@ import {
 import type {
   RecallVerifiedUserAssertionContext
 } from "../query/recall-user-assertion-context.js";
+import {
+  collectRoutingKeySupplement,
+  type RoutingKeySupplement
+} from "./routing-key-supplement.js";
 
 const RECALLS_EDGE_COLD_THRESHOLD = 50;
 export const SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY = 16;
@@ -41,9 +45,13 @@ interface CollectSupplementaryDataParams {
     | "graphSupportPort"
     | "pathExpansionPort"
     | "pathPlasticityPort"
+    | "routingKeyProjectionPort"
+    | "entityExtractionPort"
   >;
   readonly warn: RecallServiceWarnPort;
   readonly candidates: readonly Readonly<MemoryEntry>[];
+  readonly routingKeyOwnerIds: readonly string[];
+  readonly routingKeyAsOfMs: number;
   readonly workspaceId: string;
   readonly pathProjectionAsOf?: string;
   readonly runId: string | null;
@@ -70,12 +78,27 @@ export async function collectSupplementaryData(
 ): Promise<RecallSupplementaryData> {
   const candidates = params.candidates;
   // graphMetrics is independent of budget+plasticity; evidence needs candidates only.
-  const [graphMetrics, budgetPenaltyFactor, plasticityFactors, evidenceAndGovernance] =
+  const [
+    graphMetrics,
+    budgetPenaltyFactor,
+    plasticityFactors,
+    evidenceAndGovernance,
+    routingKeySupplement
+  ] =
     await Promise.all([
       collectGraphMetrics(params),
       collectBudgetPenaltyFactor(params),
       collectPlasticityFactors(params),
-      collectEvidenceAndGovernanceData(params, candidates)
+      collectEvidenceAndGovernanceData(params, candidates),
+      collectRoutingKeySupplement({
+        dependencies: params.dependencies,
+        warn: params.warn,
+        workspaceId: params.workspaceId,
+        ownerIds: params.routingKeyOwnerIds,
+        asOfMs: params.routingKeyAsOfMs,
+        queryText: params.queryText,
+        queryProbes: params.queryProbes
+      })
     ]);
   const coldMetrics = computeColdGraphPathMetrics(
     params,
@@ -90,7 +113,8 @@ export async function collectSupplementaryData(
     budgetPenaltyFactor,
     plasticityFactors,
     coldMetrics,
-    evidenceAndGovernance
+    evidenceAndGovernance,
+    routingKeySupplement
   );
 }
 
@@ -113,10 +137,14 @@ function freezeSupplementaryData(
     readonly governanceCeilingByMemoryId: Readonly<Record<string, ManifestationState>>;
     readonly pathInflowByTarget: Readonly<Record<string, readonly PathInflowEdge[]>>;
     readonly pathInflowAvailability: NonNullable<RecallSupplementaryData["pathInflowAvailability"]>;
-  }>
+  }>,
+  routingKeySupplement: Readonly<RoutingKeySupplement>
 ): RecallSupplementaryData {
   return Object.freeze({
     queryProbes: params.queryProbes,
+    routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,
+    queryRoutingKeys: routingKeySupplement.queryKeys,
+    keyActivationByOwnerIdentity: routingKeySupplement.activationByOwnerIdentity,
     ftsRanks: params.coarseFtsRanks,
     trigramFtsRanks: params.coarseTrigramFtsRanks,
     synthesisFtsRanks: params.coarseSynthesisFtsRanks,

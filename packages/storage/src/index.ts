@@ -54,7 +54,12 @@ export {
   type EventLogPageOptions,
   type EventLogRepo
 } from "./repos/runtime/index.js";
-export { SqliteSignalRepo, type SignalRepo } from "./repos/signal/index.js";
+export {
+  SqliteRecallRoutingKeyProjectionRepo,
+  SqliteSignalRepo,
+  type SignalRepo,
+  type StoredRecallRoutingKeyProjection
+} from "./repos/signal/index.js";
 export {
   RecallQualifiedEvidenceReader,
   SqliteEvidenceCapsuleRepo,

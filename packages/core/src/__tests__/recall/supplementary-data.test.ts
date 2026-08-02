@@ -74,6 +74,57 @@ describe("collectSupplementaryData", () => {
     expect(findByIds).toHaveBeenCalledTimes(2);
   });
 
+  it("collects proposed routing keys without promoting their authority", async () => {
+    const candidate = createMemoryEntry({ object_id: "memory-key" });
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText: "What did Ada Lovelace work on?",
+      entityExtractionPort: {
+        extract: vi.fn(async () => [{
+          surface: "Ada Lovelace",
+          normalized: "ada lovelace",
+          kind: "proper_noun",
+          confidence: 0.9
+        }])
+      },
+      routingKeyProjectionPort: {
+        findByOwnerIds: vi.fn(async () => [{
+          owner_id: candidate.object_id,
+          owner_kind: "memory_entry",
+          source_signal_id: "signal-1",
+          independence_group: "source-event:event-1",
+          signal_kind: "potential_claim",
+          object_type: "fact",
+          reliability: 0.75,
+          proposed_entities: ["Ada Lovelace"],
+          proposed_preference: {
+            subject: null, predicate: null, object: null, category: null, polarity: null
+          },
+          temporal: { start: null, end: null, precision: null },
+          proposed_fact: "Ada worked on the analytical engine.",
+          source_version: "signal:signal-1:v1"
+        }])
+      }
+    });
+    const keys = result.routingKeysByOwnerIdentity?.get(
+      JSON.stringify(["memory_entry", candidate.object_id])
+    );
+
+    expect(keys?.map((key) => key.dimension)).toEqual(["entity", "semantic"]);
+    expect(keys?.every((key) => key.authority === "proposed_routing_only")).toBe(true);
+    expect(keys?.every((key) =>
+      key.independence_group === "source-event:event-1"
+    )).toBe(true);
+    expect(result.queryRoutingKeys?.some((key) =>
+      key.dimension === "entity" && key.normalized_value === "ada lovelace" &&
+      key.reliability === 0.9
+    )).toBe(true);
+    expect(result.keyActivationByOwnerIdentity?.get(
+      JSON.stringify(["memory_entry", candidate.object_id])
+    )?.proposal_activation).toBeCloseTo(0.675);
+  });
+
   it("derives a unique User assertion receipt from the loaded evidence capsule", async () => {
     const content = "Over a year of uncertainty was really tough.";
     const evidence = createEvidenceCapsule({
@@ -483,6 +534,9 @@ async function collectWith(params: {
   readonly graphSupportPort: NonNullable<RecallServiceDependencies["graphSupportPort"]>;
   readonly warn?: RecallServiceDependencies["warn"];
   readonly evidenceSearchPort?: RecallServiceDependencies["evidenceSearchPort"];
+  readonly routingKeyProjectionPort?: RecallServiceDependencies["routingKeyProjectionPort"];
+  readonly entityExtractionPort?: RecallServiceDependencies["entityExtractionPort"];
+  readonly queryText?: string | null;
   readonly budgetPenaltyPort?: RecallServiceDependencies["budgetPenaltyPort"];
   readonly pathPlasticityPort?: RecallServiceDependencies["pathPlasticityPort"];
   readonly runId?: string | null;
@@ -497,6 +551,8 @@ async function collectWith(params: {
       ...dependencies,
       graphSupportPort: params.graphSupportPort,
       evidenceSearchPort: params.evidenceSearchPort,
+      routingKeyProjectionPort: params.routingKeyProjectionPort,
+      entityExtractionPort: params.entityExtractionPort,
       ...(params.budgetPenaltyPort === undefined
         ? {}
         : { budgetPenaltyPort: params.budgetPenaltyPort }),
@@ -506,10 +562,12 @@ async function collectWith(params: {
     },
     warn: params.warn ?? (() => undefined),
     candidates: params.candidates,
+    routingKeyOwnerIds: params.candidates.map((candidate) => candidate.object_id),
+    routingKeyAsOfMs: 1_773_811_200_000,
     workspaceId: "workspace-1",
     runId: params.runId ?? null,
-    queryText: null,
-    queryProbes: compileRecallQueryProbes(null),
+    queryText: params.queryText ?? null,
+    queryProbes: compileRecallQueryProbes(params.queryText ?? null),
     policy: service.buildDefaultPolicy("chat", createTaskSurface().runtime_id),
     coarseFtsRanks: {},
     coarseTrigramFtsRanks: {},

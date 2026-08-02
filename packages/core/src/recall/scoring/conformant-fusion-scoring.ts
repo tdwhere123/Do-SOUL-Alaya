@@ -7,15 +7,16 @@ import {
   type H1MaxProductTransferResult
 } from "../flood/h1-max-product.js";
 import {
-  deriveMemorySliceKeysV1,
-  derivePathAnchorSliceKeysV1,
-  deriveQuerySliceKeysV1,
-  selectSliceCompatibilityV1
+  deriveMemorySliceKeysV2,
+  derivePathAnchorSliceKeysV2,
+  deriveQuerySliceKeysV2,
+  selectSliceCompatibilityV2
 } from "../flood/slice-key-selector.js";
 import type {
-  SliceCompatibilityV1
+  SliceCompatibilityV2
 } from "../flood/slice-key-selector.js";
-import type { SelectedSliceKeyV1 } from "../flood/slice-key-contract.js";
+import type { SelectedSliceKeyV2 } from "../flood/slice-key-contract.js";
+import { projectedRoutingKeyOwnerIdentity } from "../flood/projected-routing-keys.js";
 import {
   resolveFusionContribution as resolveAdaptiveFusionContribution,
   type FusionContributionCandidate,
@@ -131,12 +132,12 @@ interface SeededConformantCandidate {
 }
 
 interface SliceSelectionContext {
-  readonly queryKeysByWorkspace: ReadonlyMap<string, readonly SelectedSliceKeyV1[]>;
-  readonly memoryKeysByWorkspaceObject: ReadonlyMap<string, readonly SelectedSliceKeyV1[]>;
+  readonly queryKeysByWorkspace: ReadonlyMap<string, readonly SelectedSliceKeyV2[]>;
+  readonly memoryKeysByWorkspaceObject: ReadonlyMap<string, readonly SelectedSliceKeyV2[]>;
   readonly asOfMs: number;
 }
 
-const EMPTY_SLICE_KEYS: readonly SelectedSliceKeyV1[] = Object.freeze([]);
+const EMPTY_SLICE_KEYS: readonly SelectedSliceKeyV2[] = Object.freeze([]);
 
 const NULL_AXIS_RANK: Readonly<Record<RecallConformantAxis, number | null>> =
   Object.freeze({ object: null, path: null, evidence: null, temporal: null, control: null });
@@ -266,22 +267,32 @@ function seedConformantCandidates(
 function buildSliceSelectionContext(
   params: Parameters<typeof buildConformantAxisContext>[0]
 ): Readonly<SliceSelectionContext> {
-  const queryKeysByWorkspace = new Map<string, readonly SelectedSliceKeyV1[]>();
-  const memoryKeysByWorkspaceObject = new Map<string, readonly SelectedSliceKeyV1[]>();
+  const queryKeysByWorkspace = new Map<string, readonly SelectedSliceKeyV2[]>();
+  const memoryKeysByWorkspaceObject = new Map<string, readonly SelectedSliceKeyV2[]>();
   const parsedAsOfMs = Date.parse(params.nowIso);
   const asOfMs = Number.isSafeInteger(parsedAsOfMs) ? parsedAsOfMs : 0;
   for (const { candidate } of params.candidates) {
     if (!isWorkspaceMemoryCandidate(candidate)) continue;
     const workspaceId = candidate.entry.workspace_id;
     if (!queryKeysByWorkspace.has(workspaceId)) {
-      queryKeysByWorkspace.set(workspaceId, deriveQuerySliceKeysV1({
-        workspaceId, queryProbes: params.supplementaryData.queryProbes,
-        asOfMs, nowIso: params.nowIso
-      }));
+      queryKeysByWorkspace.set(
+        workspaceId,
+        params.supplementaryData.queryRoutingKeys ?? deriveQuerySliceKeysV2({
+          workspaceId, queryProbes: params.supplementaryData.queryProbes,
+          asOfMs, nowIso: params.nowIso
+        })
+      );
     }
-    memoryKeysByWorkspaceObject.set(memoryProjectionKey(workspaceId, candidate.entry.object_id), deriveMemorySliceKeysV1({
+    const currentKeys = deriveMemorySliceKeysV2({
       workspaceId, entry: candidate.entry, asOfMs
-    }));
+    });
+    const projectedKeys = params.supplementaryData.routingKeysByOwnerIdentity?.get(
+      projectedRoutingKeyOwnerIdentity("memory_entry", candidate.entry.object_id)
+    ) ?? EMPTY_SLICE_KEYS;
+    memoryKeysByWorkspaceObject.set(
+      memoryProjectionKey(workspaceId, candidate.entry.object_id),
+      mergeSliceKeys(currentKeys, projectedKeys)
+    );
   }
   return Object.freeze({ queryKeysByWorkspace, memoryKeysByWorkspaceObject, asOfMs });
 }
@@ -290,8 +301,8 @@ function selectCompatibilityByPathId(
   inflow: readonly PathInflowEdge[] | undefined,
   target: Readonly<MemoryEntry>,
   context: Readonly<SliceSelectionContext>
-): ReadonlyMap<string, Readonly<SliceCompatibilityV1>> {
-  const result = new Map<string, Readonly<SliceCompatibilityV1>>();
+): ReadonlyMap<string, Readonly<SliceCompatibilityV2>> {
+  const result = new Map<string, Readonly<SliceCompatibilityV2>>();
   const workspaceId = target.workspace_id;
   const queryKeys = context.queryKeysByWorkspace.get(workspaceId) ?? EMPTY_SLICE_KEYS;
   const targetMemoryKeys = memoryKeysFor(context, workspaceId, target.object_id);
@@ -305,7 +316,7 @@ function selectCompatibilityByPathId(
       targetMemoryKeys,
       pathAnchorKeys(edge, "target", workspaceId, context.asOfMs)
     );
-    result.set(edge.pathId, selectSliceCompatibilityV1({
+    result.set(edge.pathId, selectSliceCompatibilityV2({
       queryKeys,
       sourceKeys,
       targetKeys
@@ -322,7 +333,7 @@ function memoryKeysFor(
   context: Readonly<SliceSelectionContext>,
   workspaceId: string,
   objectId: string
-): readonly SelectedSliceKeyV1[] {
+): readonly SelectedSliceKeyV2[] {
   return context.memoryKeysByWorkspaceObject.get(memoryProjectionKey(workspaceId, objectId))
     ?? EMPTY_SLICE_KEYS;
 }
@@ -332,12 +343,12 @@ function pathAnchorKeys(
   side: "source" | "target",
   workspaceId: string,
   asOfMs: number
-): readonly SelectedSliceKeyV1[] {
+): readonly SelectedSliceKeyV2[] {
   const anchor = side === "source" ? edge.seedAnchor : edge.targetAnchor;
   if (edge.pathId === undefined || edge.pathSourceVersion === undefined || anchor === undefined) {
     return EMPTY_SLICE_KEYS;
   }
-  return derivePathAnchorSliceKeysV1({
+  return derivePathAnchorSliceKeysV2({
     workspaceId,
     pathId: edge.pathId,
     side,
@@ -348,9 +359,9 @@ function pathAnchorKeys(
 }
 
 function mergeSliceKeys(
-  left: readonly SelectedSliceKeyV1[],
-  right: readonly SelectedSliceKeyV1[]
-): readonly SelectedSliceKeyV1[] {
+  left: readonly SelectedSliceKeyV2[],
+  right: readonly SelectedSliceKeyV2[]
+): readonly SelectedSliceKeyV2[] {
   if (right.length === 0) return left;
   const byId = new Map(left.map((key) => [key.key_id, key]));
   for (const key of right) byId.set(key.key_id, key);
@@ -428,7 +439,7 @@ function computeCandidateH1Transfer(
   candidate: SeededConformantCandidate,
   rObjectById: ReadonlyMap<string, number>,
   inflow: readonly PathInflowEdge[] | undefined,
-  sliceCompatibilityByPathId: ReadonlyMap<string, Readonly<SliceCompatibilityV1>>,
+  sliceCompatibilityByPathId: ReadonlyMap<string, Readonly<SliceCompatibilityV2>>,
   state: CandidateAxisState
 ): Readonly<H1MaxProductTransferResult> | null {
   if (!state.h1MaxProduct) return null;

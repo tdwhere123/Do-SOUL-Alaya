@@ -3,7 +3,7 @@ import type {
   PathInflowEdge,
   RecallFloodEdgeTraceV1
 } from "../runtime/recall-service-types.js";
-import type { SliceCompatibilityV1 } from "./slice-key-selector.js";
+import type { SliceCompatibilityV2 } from "./slice-key-selector.js";
 import { evaluateSingleHopRemoteness } from "./remoteness.js";
 import { clamp01 } from "../../shared/clamp.js";
 
@@ -23,7 +23,7 @@ export type FloodEdgeTransferInput = Readonly<{
   readonly capTotal: number;
   readonly rhoPath: number;
   readonly traceLimit?: number;
-  readonly sliceCompatibilityByPathId?: ReadonlyMap<string, Readonly<SliceCompatibilityV1>>;
+  readonly sliceCompatibilityByPathId?: ReadonlyMap<string, Readonly<SliceCompatibilityV2>>;
   readonly enforceSliceCompatibility?: boolean;
 }>;
 
@@ -32,7 +32,7 @@ function traceForEdge(
   targetObjectId: string,
   inputPotential: number,
   capPerSource: number,
-  sliceCompatibility: Readonly<SliceCompatibilityV1> | undefined,
+  sliceCompatibility: Readonly<SliceCompatibilityV2> | undefined,
   enforceSliceCompatibility: boolean
 ): Readonly<RecallFloodEdgeTraceV1> {
   const tracePotential = enforceSliceCompatibility ? clamp01(inputPotential) : inputPotential;

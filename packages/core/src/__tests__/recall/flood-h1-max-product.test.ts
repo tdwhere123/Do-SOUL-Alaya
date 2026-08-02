@@ -12,7 +12,7 @@ import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
 import type { FloodEdgeTransferInput } from
   "../../recall/flood/edge-transfer.js";
-import type { SliceCompatibilityV1 } from
+import type { SliceCompatibilityV2 } from
   "../../recall/flood/slice-key-selector.js";
 import type { PathInflowEdge } from
   "../../recall/runtime/recall-service-types.js";
@@ -319,9 +319,9 @@ function edge(pathId: string | undefined, weight: number): PathInflowEdge {
 }
 
 function compatibility(
-  decision: SliceCompatibilityV1["decision"],
-  reason: SliceCompatibilityV1["reason"]
-): SliceCompatibilityV1 {
+  decision: SliceCompatibilityV2["decision"],
+  reason: SliceCompatibilityV2["reason"]
+): SliceCompatibilityV2 {
   return { decision, reason, matches: [] };
 }
 
