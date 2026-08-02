@@ -226,6 +226,8 @@ function serializeSupplementaryData(
   const {
     evidenceSemanticScoresByCandidateKey,
     answerRelevanceScoresByCandidateKey,
+    routingKeysByOwnerIdentity,
+    keyActivationByOwnerIdentity,
     ...plainData
   } = data;
   return Object.freeze({
@@ -235,6 +237,12 @@ function serializeSupplementaryData(
     ...(answerRelevanceScoresByCandidateKey === undefined ? {} : {
       answerRelevanceScoresByCandidateKey:
         stableNumberEntries(answerRelevanceScoresByCandidateKey)
+    }),
+    ...(routingKeysByOwnerIdentity === undefined ? {} : {
+      routingKeysByOwnerIdentity: stableEntries(routingKeysByOwnerIdentity)
+    }),
+    ...(keyActivationByOwnerIdentity === undefined ? {} : {
+      keyActivationByOwnerIdentity: stableEntries(keyActivationByOwnerIdentity)
     })
   });
 }

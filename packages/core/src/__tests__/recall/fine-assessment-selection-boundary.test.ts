@@ -65,6 +65,22 @@ describe("fine-assessment selection boundary fidelity", () => {
     expect(boundary.expected).not.toHaveProperty("visible_result");
   });
 
+  it("round-trips attributed routing maps as deterministic JSON entries", () => {
+    let boundary: FineAssessmentSelectionBoundaryCase | undefined;
+    selectFixture((pending) => {
+      boundary = materializeFineAssessmentSelectionBoundary(pending);
+      return undefined;
+    }, undefined, true, false, createSupplementaryData({
+      routingKeysByOwnerIdentity: new Map(),
+      keyActivationByOwnerIdentity: new Map()
+    }));
+    if (boundary === undefined) throw new Error("selection boundary was not observed");
+
+    expect(boundary.input.supplementary_data.routingKeysByOwnerIdentity).toEqual([]);
+    expect(boundary.input.supplementary_data.keyActivationByOwnerIdentity).toEqual([]);
+    expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
+  });
+
   it("captures the settled pre-projection sequence and admission actions", () => {
     let boundary: FineAssessmentSelectionBoundaryCase | undefined;
     selectFixture((pending) => {
@@ -438,7 +454,8 @@ function selectFixture(
   observer?: (pending: FineAssessmentSelectionBoundaryPendingCapture) => undefined,
   estimator = vi.fn((_content: string) => 5),
   captureAnswerFeatures = observer !== undefined,
-  reverseFinalOrder = false
+  reverseFinalOrder = false,
+  supplementaryData = createSupplementaryData()
 ) {
   const candidates = fixtureCandidates();
   const finalRelevanceByCandidateKey = new Map(candidates.map(
@@ -450,7 +467,7 @@ function selectFixture(
   return selectFineAssessmentCandidates({
     orderedCandidates: candidates,
     config: createConfig(),
-    supplementaryData: createSupplementaryData(),
+    supplementaryData,
     tokenEstimator: { estimate: estimator },
     rankByCandidateKey: rankMap(candidates),
     finalRelevanceByCandidateKey,

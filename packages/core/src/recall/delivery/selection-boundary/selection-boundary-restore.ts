@@ -44,6 +44,9 @@ export function validateSelectionBoundary(
   if (boundary.input.deep_head_trace_by_candidate_key !== undefined) {
     assertUniqueEntryKeys(boundary.input.deep_head_trace_by_candidate_key);
   }
+  for (const entries of serializedSupplementaryMaps(boundary.input)) {
+    assertUniqueEntryKeys(entries);
+  }
   assertFinalCandidateIdentity(boundary);
   if (boundary.expected.pre_projection !== undefined) {
     assertPreProjection(
@@ -102,6 +105,8 @@ export function restoreSupplementaryData(
   const {
     evidenceSemanticScoresByCandidateKey,
     answerRelevanceScoresByCandidateKey,
+    routingKeysByOwnerIdentity,
+    keyActivationByOwnerIdentity,
     ...plainData
   } = data;
   return {
@@ -113,6 +118,12 @@ export function restoreSupplementaryData(
       answerRelevanceScoresByCandidateKey: new Map(
         answerRelevanceScoresByCandidateKey
       )
+    }),
+    ...(routingKeysByOwnerIdentity === undefined ? {} : {
+      routingKeysByOwnerIdentity: new Map(routingKeysByOwnerIdentity)
+    }),
+    ...(keyActivationByOwnerIdentity === undefined ? {} : {
+      keyActivationByOwnerIdentity: new Map(keyActivationByOwnerIdentity)
     })
   };
 }
@@ -149,6 +160,19 @@ function serializedNumberMaps(
     ...(input.answer_relevance_rank_by_candidate_key === undefined
       ? []
       : [input.answer_relevance_rank_by_candidate_key])
+  ];
+}
+
+function serializedSupplementaryMaps(
+  input: FineAssessmentSelectionBoundaryInput
+): readonly (readonly (readonly [string, unknown])[])[] {
+  return [
+    ...(input.supplementary_data.routingKeysByOwnerIdentity === undefined
+      ? []
+      : [input.supplementary_data.routingKeysByOwnerIdentity]),
+    ...(input.supplementary_data.keyActivationByOwnerIdentity === undefined
+      ? []
+      : [input.supplementary_data.keyActivationByOwnerIdentity])
   ];
 }
 

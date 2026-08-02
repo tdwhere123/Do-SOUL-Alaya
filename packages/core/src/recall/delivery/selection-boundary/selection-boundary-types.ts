@@ -11,9 +11,13 @@ import type {
   FineAssessmentCandidate
 } from "../fine-assessment-selection.js";
 
-export type SelectionBoundaryNumberMap = readonly (
-  readonly [key: string, value: number]
+export type SelectionBoundaryMap<T> = readonly (
+  readonly [key: string, value: T]
 )[];
+
+export type SelectionBoundaryNumberMap = SelectionBoundaryMap<number>;
+
+type MapValue<T> = T extends ReadonlyMap<string, infer V> ? V : never;
 
 export type FineAssessmentPreProjectionAction = Readonly<{
   readonly candidate_key: string;
@@ -84,10 +88,18 @@ export type SerializedRecallSupplementaryData = Readonly<
   Omit<
     RecallSupplementaryData,
     "evidenceSemanticScoresByCandidateKey" |
-    "answerRelevanceScoresByCandidateKey"
+    "answerRelevanceScoresByCandidateKey" |
+    "routingKeysByOwnerIdentity" |
+    "keyActivationByOwnerIdentity"
   > & {
     readonly evidenceSemanticScoresByCandidateKey: SelectionBoundaryNumberMap;
     readonly answerRelevanceScoresByCandidateKey?: SelectionBoundaryNumberMap;
+    readonly routingKeysByOwnerIdentity?: SelectionBoundaryMap<
+      MapValue<RecallSupplementaryData["routingKeysByOwnerIdentity"]>
+    >;
+    readonly keyActivationByOwnerIdentity?: SelectionBoundaryMap<
+      MapValue<RecallSupplementaryData["keyActivationByOwnerIdentity"]>
+    >;
   }
 >;
 
