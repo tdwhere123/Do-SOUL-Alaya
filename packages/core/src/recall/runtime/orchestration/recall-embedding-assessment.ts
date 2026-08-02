@@ -14,7 +14,12 @@ import {
   buildRecallCandidateDedupeKey,
   isWorkspaceMemoryCandidate
 } from "../recall-service-helpers.js";
-import type { CoarseRecallCandidate } from "../recall-service-types.js";
+import type {
+  CoarseRecallCandidate,
+  RecallSupplementaryData
+} from "../recall-service-types.js";
+import { buildEvidenceSemanticCandidates } from
+  "./evidence-semantic-candidates.js";
 import type {
   FineAssessmentResult,
   PreparedEmbeddingQuery,
@@ -30,6 +35,9 @@ import {
 } from "../settle-parallel.js";
 
 type PreparedQueryPromise = Promise<Settled<PreparedEmbeddingQuery>> | null;
+type EvidenceDocumentsByMemoryId = NonNullable<
+  RecallSupplementaryData["evidenceSemanticDocumentsByMemoryId"]
+>;
 
 export interface EmbeddingAssessmentData {
   readonly preparedEmbeddingQuery: PreparedEmbeddingQuery;
@@ -69,6 +77,7 @@ export async function collectLegacyEmbeddingAssessmentData(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
   initialAssessment: FineAssessmentResult,
+  evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId,
   fineCandidates: readonly Readonly<CoarseRecallCandidate>[],
   preparedQueryResult: Awaited<NonNullable<PreparedQueryPromise>>
 ): Promise<EmbeddingAssessmentData> {
@@ -87,7 +96,8 @@ export async function collectLegacyEmbeddingAssessmentData(
       runId: params.runId ?? null,
       queryText: prepared.queryText,
       preparedQuery: preparedEmbeddingQuery.handle,
-      fineCandidates
+      fineCandidates,
+      evidenceDocumentsByMemoryId
     })
   ]);
   throwFirstRejected([supplementResult, poolResult]);
@@ -117,7 +127,8 @@ export async function collectSnapshotEmbeddingAssessmentData(
   context: RecallExecutionContext,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  fineCandidates: readonly Readonly<CoarseRecallCandidate>[]
+  fineCandidates: readonly Readonly<CoarseRecallCandidate>[],
+  evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId
 ): Promise<EmbeddingAssessmentData> {
   const snapshot = coarse.embeddingCoarseInjection.requestScoreSnapshot;
   if (snapshot === undefined) {
@@ -143,7 +154,8 @@ export async function collectSnapshotEmbeddingAssessmentData(
       runId: snapshot.runId,
       queryText: prepared.queryText,
       preparedQuery: null,
-      fineCandidates
+      fineCandidates,
+      evidenceDocumentsByMemoryId
     })
   ]);
   return buildSnapshotEmbeddingAssessment({
@@ -189,6 +201,7 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   readonly queryText: string | null;
   readonly preparedQuery: PreparedEmbeddingQuery["handle"];
   readonly fineCandidates: readonly Readonly<CoarseRecallCandidate>[];
+  readonly evidenceDocumentsByMemoryId: EvidenceDocumentsByMemoryId;
 }>): Promise<Readonly<EvidenceCandidateScoringResult>> {
   if (!params.enabled) return emptyEvidenceScoring("not_requested", 0);
   const service = params.context.dependencies.embeddingRecallService;
@@ -196,14 +209,10 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   if (score === undefined || params.queryText === null) {
     return emptyEvidenceScoring("not_requested", 0);
   }
-  const candidates = params.fineCandidates
-    .filter((candidate) => candidate.objectKind === "evidence_capsule")
-    .map((candidate) => Object.freeze({
-      candidateKey: buildRecallCandidateDedupeKey(candidate),
-      objectId: candidate.entry.object_id,
-      documentIdentity: candidate.evidenceDocumentIdentity ?? "owner",
-      content: candidate.entry.content
-    }));
+  const candidates = buildEvidenceSemanticCandidates({
+    candidates: params.fineCandidates,
+    evidenceDocumentsByMemoryId: params.evidenceDocumentsByMemoryId
+  });
   if (candidates.length === 0) return emptyEvidenceScoring("not_applicable", 0);
   const startedAt = performance.now();
   try {

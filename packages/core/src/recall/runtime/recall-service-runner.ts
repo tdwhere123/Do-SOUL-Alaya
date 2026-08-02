@@ -189,6 +189,7 @@ async function assessLegacyCandidateStage(
     prepared,
     coarse,
     initial.assessment,
+    initial.supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {},
     coarse.combinedCoarseCandidates,
     preparedEmbeddingQuery.value
   ));
@@ -245,7 +246,11 @@ async function assessSnapshotCandidateStage(
 ): Promise<AssessmentStageResult> {
   const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const embedding = await measureAsync(() => collectSnapshotEmbeddingAssessmentData(
-    context, prepared, coarse, coarse.combinedCoarseCandidates
+    context,
+    prepared,
+    coarse,
+    coarse.combinedCoarseCandidates,
+    base.value.supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {}
   ));
   const assessment = measureSync(() => prepareSnapshotAssessment(
     context, params, prepared, coarse, base.value, embedding.value

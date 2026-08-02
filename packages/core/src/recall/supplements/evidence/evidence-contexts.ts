@@ -23,9 +23,18 @@ const MAX_REFS_PER_MEMORY = 8;
 
 export interface RecallEvidenceContexts {
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  readonly evidenceSemanticDocumentsByMemoryId: Readonly<
+    Record<string, readonly Readonly<RecallEvidenceSemanticDocument>[]>
+  >;
   readonly verifiedUserAssertionContextsByMemoryId: Readonly<
     Record<string, Readonly<RecallVerifiedUserAssertionContext>>
   >;
+}
+
+export interface RecallEvidenceSemanticDocument {
+  readonly evidenceRef: string;
+  readonly documentIdentity: string;
+  readonly content: string;
 }
 
 interface EvidenceRecord {
@@ -80,6 +89,7 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
 function emptyEvidenceContexts(): Readonly<RecallEvidenceContexts> {
   return Object.freeze({
     evidenceGistsByMemoryId: Object.freeze({}),
+    evidenceSemanticDocumentsByMemoryId: Object.freeze({}),
     verifiedUserAssertionContextsByMemoryId: Object.freeze({})
   });
 }
@@ -132,6 +142,10 @@ function buildMemoryEvidenceContexts(
 ): Readonly<RecallEvidenceContexts> {
   const evidenceById = buildEvidenceById(workspaceId, capsules);
   const gists: Record<string, string> = {};
+  const semanticDocuments: Record<
+    string,
+    readonly Readonly<RecallEvidenceSemanticDocument>[]
+  > = {};
   const contexts: Record<string, Readonly<RecallVerifiedUserAssertionContext>> = {};
   for (const entry of gistCandidates) {
     const refs = orderEvidenceRefs(entry, ranksByRef);
@@ -140,13 +154,36 @@ function buildMemoryEvidenceContexts(
     if (gist !== undefined) gists[entry.object_id] = gist;
   }
   for (const entry of authorityCandidates) {
+    const documents = semanticEvidenceDocuments(entry, evidenceById, ranksByRef);
+    if (documents.length > 0) semanticDocuments[entry.object_id] = documents;
     const context = projectUniqueVerifiedContext(entry, evidenceById);
     if (context !== null) contexts[entry.object_id] = context;
   }
   return Object.freeze({
     evidenceGistsByMemoryId: Object.freeze(gists),
+    evidenceSemanticDocumentsByMemoryId: Object.freeze(semanticDocuments),
     verifiedUserAssertionContextsByMemoryId: Object.freeze(contexts)
   });
+}
+
+function semanticEvidenceDocuments(
+  entry: Readonly<MemoryEntry>,
+  evidenceById: ReadonlyMap<string, EvidenceRecord>,
+  ranksByRef: Readonly<Record<string, number>>
+): readonly Readonly<RecallEvidenceSemanticDocument>[] {
+  return Object.freeze(orderEvidenceRefs(entry, ranksByRef)
+    .slice(0, MAX_REFS_PER_MEMORY)
+    .flatMap((ref) => {
+      const evidence = evidenceById.get(ref)?.evidence;
+      if (evidence === undefined || evidence.lifecycle_state !== "active" ||
+          evidence.evidence_health_state !== "verified") return [];
+      const content = evidence.gist.trim();
+      return content.length === 0 ? [] : [Object.freeze({
+        evidenceRef: evidence.object_id,
+        documentIdentity: evidence.object_id,
+        content
+      })];
+    }));
 }
 
 function buildEvidenceById(
@@ -171,7 +208,9 @@ function orderEvidenceRefs(
   ranksByRef: Readonly<Record<string, number>>
 ): readonly string[] {
   return [...entry.evidence_refs].sort(
-    (left, right) => (ranksByRef[right] ?? 0) - (ranksByRef[left] ?? 0)
+    (left, right) =>
+      (ranksByRef[right] ?? 0) - (ranksByRef[left] ?? 0) ||
+      left.localeCompare(right)
   );
 }
 

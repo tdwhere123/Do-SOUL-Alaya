@@ -132,6 +132,9 @@ function freezeSupplementaryData(
   }>,
   evidenceAndGovernance: Readonly<{
     readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+    readonly evidenceSemanticDocumentsByMemoryId: NonNullable<
+      RecallSupplementaryData["evidenceSemanticDocumentsByMemoryId"]
+    >;
     readonly verifiedUserAssertionContextsByMemoryId: Readonly<
       Record<string, Readonly<RecallVerifiedUserAssertionContext>>
     >;
@@ -170,6 +173,8 @@ function freezeSupplementaryData(
     recallsEdgeCount: coldMetrics.recallsEdgeCount,
     weightTransferAmount: coldMetrics.weightTransferAmount,
     evidenceGistsByMemoryId: evidenceAndGovernance.evidenceGistsByMemoryId,
+    evidenceSemanticDocumentsByMemoryId:
+      evidenceAndGovernance.evidenceSemanticDocumentsByMemoryId,
     verifiedUserAssertionContextsByMemoryId:
       evidenceAndGovernance.verifiedUserAssertionContextsByMemoryId,
     governanceCeilingByMemoryId: evidenceAndGovernance.governanceCeilingByMemoryId,
@@ -247,6 +252,9 @@ async function collectEvidenceAndGovernanceData(
   candidates: readonly Readonly<MemoryEntry>[]
 ): Promise<Readonly<{
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  readonly evidenceSemanticDocumentsByMemoryId: NonNullable<
+    RecallSupplementaryData["evidenceSemanticDocumentsByMemoryId"]
+  >;
   readonly verifiedUserAssertionContextsByMemoryId: Readonly<
     Record<string, Readonly<RecallVerifiedUserAssertionContext>>
   >;

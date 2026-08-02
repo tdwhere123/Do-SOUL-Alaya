@@ -87,6 +87,7 @@ export type FineAssessmentSelectionBoundaryInput = Readonly<{
 export type SerializedRecallSupplementaryData = Readonly<
   Omit<
     RecallSupplementaryData,
+    "evidenceSemanticDocumentsByMemoryId" |
     "evidenceSemanticScoresByCandidateKey" |
     "answerRelevanceScoresByCandidateKey" |
     "routingKeysByOwnerIdentity" |

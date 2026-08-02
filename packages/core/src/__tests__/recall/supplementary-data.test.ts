@@ -159,6 +159,11 @@ describe("collectSupplementaryData", () => {
     });
 
     expect(result.evidenceGistsByMemoryId[candidate.object_id]).toBe(evidence.gist);
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id]).toEqual([{
+      evidenceRef: evidence.object_id,
+      documentIdentity: evidence.object_id,
+      content: evidence.gist
+    }]);
     expect(result.verifiedUserAssertionContextsByMemoryId?.[candidate.object_id])
       .toEqual({
         schema_version: 1,
@@ -191,6 +196,8 @@ describe("collectSupplementaryData", () => {
     });
 
     expect(result.evidenceGistsByMemoryId[candidate.object_id]).toBe(evidence.gist);
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id])
+      .toBeUndefined();
     expect(result.verifiedUserAssertionContextsByMemoryId?.[candidate.object_id])
       .toBeUndefined();
   });
@@ -214,6 +221,11 @@ describe("collectSupplementaryData", () => {
     });
 
     expect(result.evidenceGistsByMemoryId[candidate.object_id]).toBeUndefined();
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id]).toEqual([{
+      evidenceRef: evidence.object_id,
+      documentIdentity: evidence.object_id,
+      content: evidence.gist
+    }]);
     expect(result.verifiedUserAssertionContextsByMemoryId?.[candidate.object_id])
       .toMatchObject({ assertion_text: content, evidence_ref: evidence.object_id });
   });

@@ -103,6 +103,12 @@ export interface RecallSupplementaryData {
   readonly weightTransferAmount: number;
   // Evidence capsule gist keyed by memory id — coverage delivery identity + diagnostics.
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
+  readonly evidenceSemanticDocumentsByMemoryId?: Readonly<Record<
+    string,
+    readonly Readonly<
+      import("../supplements/evidence/evidence-contexts.js").RecallEvidenceSemanticDocument
+    >[]
+  >>;
   readonly verifiedUserAssertionContextsByMemoryId?: Readonly<
     Record<
       string,

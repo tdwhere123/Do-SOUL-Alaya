@@ -224,6 +224,7 @@ function serializeSupplementaryData(
   data: FineAssessmentSelectionParams["supplementaryData"]
 ): SerializedRecallSupplementaryData {
   const {
+    evidenceSemanticDocumentsByMemoryId: _evidenceSemanticDocumentsByMemoryId,
     evidenceSemanticScoresByCandidateKey,
     answerRelevanceScoresByCandidateKey,
     routingKeysByOwnerIdentity,

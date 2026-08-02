@@ -60,12 +60,9 @@ export async function scoreTransientEvidenceCandidates(
     const embeddings = documentBatch.embeddings;
     assertValidEmbeddingBatch(embeddings, candidates.length);
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
-    const scores = new Map(candidates.map((candidate, index) => [
-      candidate.candidateKey,
-      clamp01(scoreCosine(embeddings[index]!))
-    ]));
+    const scores = aggregateCandidateScores(candidates, embeddings, scoreCosine);
     return scoringResult(
-      "returned", candidates.length, scores.size, inferenceCalls, startedAt, null, scores
+      "returned", candidates.length, candidates.length, inferenceCalls, startedAt, null, scores
     );
   } catch (error) {
     if (error instanceof EvidenceDocumentEmbeddingError) {
@@ -75,6 +72,19 @@ export async function scoreTransientEvidenceCandidates(
       params, dependencies, candidates.length, inferenceCalls, startedAt, failureClass, error
     );
   }
+}
+
+function aggregateCandidateScores(
+  candidates: ScoreEvidenceCandidatesParams["candidates"],
+  embeddings: readonly Float32Array[],
+  scoreCosine: (embedding: Float32Array) => number
+): ReadonlyMap<string, number> {
+  const scores = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
+    const score = clamp01(scoreCosine(embeddings[index]!));
+    scores.set(candidate.candidateKey, Math.max(scores.get(candidate.candidateKey) ?? 0, score));
+  });
+  return scores;
 }
 
 async function resolveQueryEmbedding(

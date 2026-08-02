@@ -111,6 +111,46 @@ describe("EmbeddingRecallService evidence document cache", () => {
     ]);
   });
 
+  it("attributes the strongest linked document score to one candidate", async () => {
+    const embedTexts = vi.fn(async (texts: readonly string[]) =>
+      texts.map((text) => text === "query" || text === "strong"
+        ? new Float32Array([1, 0])
+        : new Float32Array([0, 1]))
+    );
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      provider: createProvider({ embedTexts }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const result = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates: [
+        {
+          candidateKey: "memory:1",
+          objectId: "memory-1",
+          documentIdentity: "evidence-weak",
+          content: "weak"
+        },
+        {
+          candidateKey: "memory:1",
+          objectId: "memory-1",
+          documentIdentity: "evidence-strong",
+          content: "strong"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({ expectedCount: 2, scoredCount: 2 });
+    expect([...result.scores]).toEqual([["memory:1", 1]]);
+  });
+
   it("fails open on a document batch error and retries it on the next request", async () => {
     let call = 0;
     const embedTexts = vi.fn(async (texts: readonly string[]) => {
