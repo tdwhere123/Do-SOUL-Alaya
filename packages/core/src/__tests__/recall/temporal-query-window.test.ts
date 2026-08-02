@@ -191,6 +191,40 @@ describe("parseQueryTimeWindow relative product terms", () => {
       endMs: Date.UTC(2023, 4, 14) + 86_400_000 - 1
     });
   });
+
+  it("resolves colloquial offsets without dropping their time constraint", () => {
+    expect(parseQueryTimeWindow(
+      compileRecallQueryProbes("what did my friend tell me a couple of days ago"),
+      anchor
+    )).toEqual({
+      startMs: Date.UTC(2023, 4, 15),
+      endMs: Date.UTC(2023, 4, 15) + 86_400_000 - 1
+    });
+    expect(parseQueryTimeWindow(compileRecallQueryProbes("what happened a week ago"), anchor)).toEqual({
+      startMs: Date.UTC(2023, 4, 8),
+      endMs: Date.UTC(2023, 4, 15) - 1
+    });
+  });
+
+  it("resolves a month-only phrase against the query anchor", () => {
+    expect(parseQueryTimeWindow(
+      compileRecallQueryProbes("what did I do in the month of February"),
+      anchor
+    )).toEqual({
+      startMs: Date.UTC(2023, 1, 1),
+      endMs: Date.UTC(2023, 2, 1) - 1
+    });
+  });
+
+  it("resolves multi-unit lookbacks to bounded calendar ranges", () => {
+    expect(parseQueryTimeWindow(
+      compileRecallQueryProbes("where did I travel in the last four months"),
+      anchor
+    )).toEqual({
+      startMs: Date.UTC(2023, 1, 1),
+      endMs: Date.UTC(2023, 4, 18) - 1
+    });
+  });
 });
 
 describe("scoreTemporalQueryWindow", () => {
