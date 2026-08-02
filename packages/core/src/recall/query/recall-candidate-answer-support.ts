@@ -79,7 +79,18 @@ export function buildRecallCandidateAnswerSupport(
   const compatibility = assessRecallCandidateAnswerCompatibility(plan, entry);
   if (compatibility === null) return null;
   const eligible = objectKind === "memory_entry" && entry.evidence_refs.length > 0;
-  if (!eligible) return emptySupport(compatibility.shape, "ineligible", false);
+  if (!eligible) {
+    return freezeSupport({
+      shape: compatibility.shape,
+      status: "ineligible",
+      eligible: false,
+      valueSupported: compatibility.value_supported,
+      targetSupported: compatibility.target_supported,
+      relationSupported: compatibility.relation_supported,
+      matchedTargetTerms: compatibility.matched_target_terms,
+      matchedRelationTerms: compatibility.matched_relation_terms
+    });
+  }
   if (compatibility.status === "observation_only") {
     return freezeCompatibilitySupport(compatibility, eligible);
   }
@@ -122,19 +133,23 @@ export function assessRecallCandidateAnswerCompatibility(
   entry: Readonly<MemoryEntry>
 ): Readonly<RecallCandidateAnswerCompatibility> | null {
   if (plan.status !== "high_confidence" || plan.shape === null) return null;
-  if (isAggregateShape(plan.shape)) {
-    return freezeCompatibility({
-      shape: plan.shape,
-      status: "observation_only"
-    });
-  }
   const contentTokens = new Set(splitLexicalTokens(entry.content));
   const matchedTargetTerms = plan.target_terms.filter((term) => contentTokens.has(term));
   const matchedRelationTerms = matchRecallRelationTerms(plan.relation_terms, contentTokens);
-  const valueSupported = supportsRecallScalarValue(plan.shape, entry.content);
   const targetSupported = matchedTargetTerms.length > 0;
   const relationSupported =
     plan.relation_terms.length === 0 || matchedRelationTerms.length > 0;
+  if (isAggregateShape(plan.shape)) {
+    return freezeCompatibility({
+      shape: plan.shape,
+      status: "observation_only",
+      targetSupported,
+      relationSupported,
+      matchedTargetTerms,
+      matchedRelationTerms
+    });
+  }
+  const valueSupported = supportsRecallScalarValue(plan.shape, entry.content);
   return freezeCompatibility({
     shape: plan.shape,
     status: valueSupported && targetSupported && relationSupported
@@ -237,23 +252,6 @@ function resolveTimeStatus(
 
 function isAggregateShape(shape: RecallAnswerShape): boolean {
   return shape === "count" || shape === "sum" || shape === "distinct_entities";
-}
-
-function emptySupport(
-  shape: RecallAnswerShape,
-  status: "observation_only" | "ineligible",
-  eligible: boolean
-): Readonly<RecallCandidateAnswerSupport> {
-  return freezeSupport({
-    shape,
-    status,
-    eligible,
-    valueSupported: false,
-    targetSupported: false,
-    relationSupported: false,
-    matchedTargetTerms: [],
-    matchedRelationTerms: []
-  });
 }
 
 function freezeCompatibility(input: Readonly<{

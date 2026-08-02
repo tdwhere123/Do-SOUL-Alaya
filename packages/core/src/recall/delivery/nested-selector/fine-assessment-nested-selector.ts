@@ -26,6 +26,15 @@ export interface FineAssessmentNestedSelection {
   readonly plan: Readonly<NestedSetSelectionResult> | null;
 }
 
+const DEMAND_ACTIVATION_SCENARIOS = Object.freeze([
+  "semantic",
+  "lexical",
+  "structural",
+  "graph_path",
+  "temporal_facet",
+  "evidence_semantic"
+]);
+
 export function selectNestedFineAssessmentCandidates(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext
@@ -80,13 +89,17 @@ export function projectFineAssessmentNestedField(
   context: FineAssessmentSelectionContext
 ): readonly NestedSetCandidate[] {
   const evidenceRankByKey = rankEvidenceSemanticScores(candidates, context);
-  return Object.freeze(candidates.map((candidate, index) =>
+  const projected = candidates.map((candidate, index) =>
     projectFineAssessmentNestedCandidate(candidate, index + 1, context, {
       evidence_semantic: evidenceRankByKey.get(
         buildRecallCandidateDedupeKey(candidate)
       ) ?? null
     })
-  ));
+  );
+  return gateDemandCoverage(
+    calibrateScenarioRankTies(projected),
+    context.config.budgets.max_entries
+  );
 }
 
 export function projectFineAssessmentNestedCandidate(
@@ -108,9 +121,9 @@ export function projectFineAssessmentNestedCandidate(
       ...familyScenarioRanks(candidate),
       ...additionalScenarioRanks
     }),
-    coreDemandIds: Object.freeze(demandMatches
+    coreDemandIds: Object.freeze(demandEvidenceIsValid(observation) ? demandMatches
       .filter(({ priority }) => priority === "core")
-      .map(({ id }) => id)),
+      .map(({ id }) => id) : []),
     supportingDemandIds: Object.freeze(demandMatches
       .filter(({ priority }) => priority === "supporting")
       .map(({ id }) => id)),
@@ -128,8 +141,7 @@ function rankEvidenceSemanticScores(
   const scores = context.supplementaryData.evidenceSemanticScoresByCandidateKey;
   const ordered = candidates.flatMap((candidate) => {
     const key = buildRecallCandidateDedupeKey(candidate);
-    const score = scores.get(key) ??
-      context.deepHeadTraceByCandidateKey.get(key)?.evidence_agreement;
+    const score = scores.get(key);
     return score !== undefined && Number.isFinite(score) && score > 0
       ? [{ key, score }]
       : [];
@@ -203,6 +215,63 @@ function reorderCandidates(
 function bestFiniteRank(values: readonly (number | null)[]): number | null {
   const observed = values.filter(finiteRank);
   return observed.length === 0 ? null : Math.min(...observed);
+}
+
+function calibrateScenarioRankTies(
+  candidates: readonly NestedSetCandidate[]
+): readonly NestedSetCandidate[] {
+  return Object.freeze(candidates.map((candidate) => Object.freeze({
+    ...candidate,
+    scenarioRanks: Object.freeze(Object.fromEntries(
+      Object.entries(candidate.scenarioRanks).map(([scenario, rank]) => [
+        scenario,
+        finiteRank(rank) ? conservativeScenarioRank(candidates, scenario, rank) : null
+      ])
+    ))
+  })));
+}
+
+function conservativeScenarioRank(
+  candidates: readonly NestedSetCandidate[],
+  scenario: string,
+  rank: number
+): number {
+  const observedBeforeOrTied = candidates.filter((candidate) => {
+    const candidateRank = candidate.scenarioRanks[scenario];
+    return finiteRank(candidateRank) && candidateRank <= rank;
+  }).length;
+  return Math.max(rank, observedBeforeOrTied);
+}
+
+function gateDemandCoverage(
+  candidates: readonly NestedSetCandidate[],
+  packSize: number
+): readonly NestedSetCandidate[] {
+  return Object.freeze(candidates.map((candidate) => Object.freeze({
+    ...candidate,
+    coreDemandIds: hasCorroboratedDemandActivation(candidate, packSize)
+      ? candidate.coreDemandIds
+      : Object.freeze([])
+  })));
+}
+
+function hasCorroboratedDemandActivation(
+  candidate: NestedSetCandidate,
+  packSize: number
+): boolean {
+  const observed = DEMAND_ACTIVATION_SCENARIOS.filter((scenario) => {
+    const rank = candidate.scenarioRanks[scenario];
+    return finiteRank(rank) && rank <= packSize;
+  });
+  return observed.length >= 2;
+}
+
+function demandEvidenceIsValid(
+  observation: ReturnType<typeof buildCandidateSelectorObservation>
+): boolean {
+  return observation.evidence.validity === "behavior_eligible" ||
+    observation.evidence.validity === "recall_qualified" ||
+    observation.evidence.validity === "observed_reference";
 }
 
 function finiteRank(value: number | null | undefined): value is number {

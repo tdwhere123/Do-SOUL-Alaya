@@ -17,6 +17,17 @@ describe("compileRecallQueryDemand", () => {
     ]));
   });
 
+  it("does not treat a prospective recommendation request as Assistant history", () => {
+    const demand = compile("Can you recommend a language for my next project?");
+
+    expect(demand.atoms).not.toContainEqual(
+      atom("source_role", "assistant", "core")
+    );
+    expect(demand.atoms).toContainEqual(
+      atom("relation", "recommend", "supporting")
+    );
+  });
+
   it("keeps colloquial time and the requested fact as independent demands", () => {
     const demand = compile("What did my friend tell me a couple of days ago?");
 

@@ -52,7 +52,7 @@ const RELATION_TERMS = new Set([
 ]);
 
 const ASSISTANT_SOURCE =
-  /\b(?:you|your)\b.{0,48}\b(?:recommend(?:ed)?|suggest(?:ed)?|say|said|tell|told|mention(?:ed)?|advise(?:d)?|provide(?:d)?|share(?:d)?)\b/iu;
+  /\b(?:you|your)\b.{0,48}\b(?:recommended|suggested|said|told|mentioned|advised|provided|shared)\b|\bdid\s+you\b.{0,48}\b(?:recommend|suggest|say|tell|mention|advise|provide|share)\b/iu;
 const USER_SOURCE =
   /\bi\b.{0,48}\b(?:ask(?:ed)?|say|said|tell|told|mention(?:ed)?|share(?:d)?|spend|spent|travel(?:ed)?|visit(?:ed)?|buy|bought|choose|chose)\b/iu;
 
@@ -109,7 +109,7 @@ function answerSlotAtoms(text: string): readonly RecallQueryDemandAtom[] {
 
 function sourceRoleAtoms(text: string): readonly RecallQueryDemandAtom[] {
   const atoms: RecallQueryDemandAtom[] = [];
-  if (ASSISTANT_SOURCE.test(text) || /你.{0,16}(?:建议|推荐|说过|提到)/u.test(text)) {
+  if (ASSISTANT_SOURCE.test(text) || /你.{0,16}(?:建议过|推荐过|说过|提到过|曾建议|曾推荐)/u.test(text)) {
     atoms.push(demandAtom("source_role", "assistant", "core"));
   }
   if (USER_SOURCE.test(text) || /我.{0,16}(?:说过|提到|买|去过|花了)/u.test(text)) {

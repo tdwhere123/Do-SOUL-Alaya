@@ -30,11 +30,9 @@ describe("selectNestedFineAssessmentCandidates", () => {
 
   it("projects source-role demand into the nested semantic selection", () => {
     const plain = ranked("plain", 1, 2);
-    const answer = {
-      ...ranked("answer", 2, 1, "evidence_capsule"),
-      evidenceDocumentIdentity: "assistant_observation:1",
-      evidenceSourceRole: "assistant" as const
-    };
+    const answer = attributedAnswer(withStreamRank(
+      ranked("answer", 2, 1, "evidence_capsule"), "lexical_fts", 1
+    ));
     const candidates = [plain, answer];
     const result = selectNestedFineAssessmentCandidates(
       candidates,
@@ -96,7 +94,41 @@ describe("selectNestedFineAssessmentCandidates", () => {
 
     expect(projected.map((candidate) =>
       candidate.scenarioRanks.evidence_semantic
-    )).toEqual([1, 1, 3]);
+    )).toEqual([2, 2, 3]);
+  });
+
+  it("treats a broad rank tie as the worst position the channel can prove", () => {
+    const candidates = [
+      withStreamRank(ranked("a", 1, 1), "existing_score", 1),
+      withStreamRank(ranked("b", 2, 2), "existing_score", 1),
+      withStreamRank(ranked("c", 3, 3), "existing_score", 3)
+    ];
+
+    const projected = projectFineAssessmentNestedField(candidates, context(candidates));
+
+    expect(projected.map((candidate) =>
+      candidate.scenarioRanks.structural
+    )).toEqual([2, 2, 3]);
+  });
+
+  it("withholds core demand authority from a one-channel candidate", () => {
+    const answer = attributedAnswer(ranked("answer", 12, 1, "evidence_capsule"));
+    const projected = projectFineAssessmentNestedField(
+      [answer], context([answer], "Which option did you recommend?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toEqual([]);
+  });
+
+  it("retains core demand authority when independent channels corroborate it", () => {
+    const answer = attributedAnswer(withStreamRank(
+      ranked("answer", 12, 1, "evidence_capsule"), "lexical_fts", 1
+    ));
+    const projected = projectFineAssessmentNestedField(
+      [answer], context([answer], "Which option did you recommend?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toContain("source_role:assistant");
   });
 });
 
@@ -138,5 +170,30 @@ function ranked(
         embedding_similarity: semanticRank
       }
     }
+  };
+}
+
+function withStreamRank(
+  candidate: FineAssessmentCandidate,
+  stream: keyof FineAssessmentCandidate["fusion"]["per_stream_rank"],
+  rank: number
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    fusion: {
+      ...candidate.fusion,
+      per_stream_rank: {
+        ...candidate.fusion.per_stream_rank,
+        [stream]: rank
+      }
+    }
+  };
+}
+
+function attributedAnswer(candidate: FineAssessmentCandidate): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    evidenceDocumentIdentity: "assistant_observation:1",
+    evidenceSourceRole: "assistant"
   };
 }

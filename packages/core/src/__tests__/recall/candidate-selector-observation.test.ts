@@ -159,6 +159,42 @@ describe("candidate selector observation", () => {
     expect(demand.atoms.every(Object.isFrozen)).toBe(true);
   });
 
+  it("matches an answer slot only through target-bound answer applicability", () => {
+    const applicable = createCandidate("bike", {
+      content: "I spent $120 on bike expenses.",
+      evidence_refs: ["bike-evidence"]
+    });
+    const distractor = createCandidate("rent", {
+      content: "I spent $500 on rent.",
+      evidence_refs: ["rent-evidence"]
+    });
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [applicable, distractor],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes: compileRecallQueryProbes(
+          "How much total money have I spent on bike expenses?"
+        )
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([applicable, distractor]),
+      captureAnswerFeatures: true
+    });
+    const demandById = new Map(result.diagnostics.map((diagnostic) => [
+      diagnostic.object_id,
+      diagnostic.selector_observation!.demand
+    ]));
+
+    expect(demandById.get("bike")?.matches).toContainEqual({
+      id: "answer_slot:amount", kind: "answer_slot", value: "amount",
+      priority: "core", source: "evidence"
+    });
+    expect(demandById.get("rent")?.unmatched).toContainEqual({
+      id: "answer_slot:amount", kind: "answer_slot", value: "amount",
+      priority: "core"
+    });
+  });
+
   it("marks a failed governance Path lookup as unavailable", async () => {
     const memory = createCandidate("memory-1");
     const result = await collectGovernancePathDerivations({

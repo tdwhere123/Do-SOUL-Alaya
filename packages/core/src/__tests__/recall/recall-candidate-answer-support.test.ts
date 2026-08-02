@@ -96,7 +96,7 @@ describe("recall candidate answer support", () => {
     });
   });
 
-  it("keeps aggregate shapes observation-only", () => {
+  it("keeps aggregate shapes observation-only while binding their applicability", () => {
     const candidate = createCandidate("bike-expense", {
       content: "I paid $120 for the bike and $40 for a tune-up.",
       evidence_refs: ["evidence-bike"]
@@ -109,7 +109,11 @@ describe("recall candidate answer support", () => {
     )).toMatchObject({
       shape: "sum",
       status: "observation_only",
-      eligible: true
+      eligible: true,
+      target_supported: true,
+      relation_supported: true,
+      matched_target_terms: ["bike"],
+      matched_relation_terms: ["spent"]
     });
   });
 
@@ -127,7 +131,13 @@ describe("recall candidate answer support", () => {
       plan,
       synthesis.entry,
       "synthesis_capsule"
-    )?.status).toBe("ineligible");
+    )).toMatchObject({
+      status: "ineligible",
+      eligible: false,
+      value_supported: true,
+      target_supported: true,
+      relation_supported: true
+    });
     expect(buildRecallCandidateAnswerSupport(
       plan,
       ungrounded.entry,

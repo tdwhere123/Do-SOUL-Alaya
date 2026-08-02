@@ -34,7 +34,7 @@ export function buildCandidateSelectorObservation(
   const observations = context.answerSupportObservationsByCandidateKey.get(candidateKey) ?? [];
   return Object.freeze({
     schema_version: 1,
-    demand: buildDemandObservation(candidate, context),
+    demand: buildDemandObservation(candidate, context, support),
     evidence: buildEvidenceObservation(candidate, support, observations),
     temporal: buildTemporalObservation(candidate, support, observations),
     coverage: Object.freeze({
@@ -46,7 +46,8 @@ export function buildCandidateSelectorObservation(
 
 function buildDemandObservation(
   candidate: FineAssessmentCandidate,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  support: Readonly<RecallCandidateAnswerSupport> | undefined
 ): RecallCandidateSelectorObservation["demand"] {
   const probes = context.supplementaryData.queryProbes;
   const atoms = compileRecallQueryDemand(probes, {
@@ -56,7 +57,7 @@ function buildDemandObservation(
   const contentTokens = new Set(splitLexicalTokens(candidate.entry.content));
   const matches = atoms.flatMap((atom) => {
     const source = matchDemandAtom(
-      atom, candidate, context, content, contentTokens
+      atom, candidate, context, content, contentTokens, support
     );
     return source === null ? [] : [{ ...atom, source }];
   });
@@ -75,7 +76,8 @@ function matchDemandAtom(
   candidate: FineAssessmentCandidate,
   context: FineAssessmentSelectionContext,
   content: string,
-  contentTokens: ReadonlySet<string>
+  contentTokens: ReadonlySet<string>,
+  support: Readonly<RecallCandidateAnswerSupport> | undefined
 ): RecallSelectorDemandMatch["source"] | null {
   switch (atom.kind) {
     case "target":
@@ -91,7 +93,7 @@ function matchDemandAtom(
     case "ordering":
       return candidate.entry.event_time_start === undefined ? null : "temporal";
     case "answer_slot":
-      return null;
+      return matchesAnswerSlot(atom.value, support) ? "evidence" : null;
     case "object_id":
       return candidate.entry.object_id.toLocaleLowerCase() === atom.value
         ? "key" : null;
@@ -111,6 +113,27 @@ function matchDemandAtom(
         ? "key" : null;
     case "facet":
       return matchFacetKey(atom.value, candidate) ? "key" : null;
+  }
+}
+
+function matchesAnswerSlot(
+  slot: string,
+  support: Readonly<RecallCandidateAnswerSupport> | undefined
+): boolean {
+  if (support === undefined || !support.target_supported || !support.relation_supported) {
+    return false;
+  }
+  switch (slot) {
+    case "amount":
+      return support.shape === "sum";
+    case "count":
+      return support.shape === "count" || support.shape === "distinct_entities";
+    case "duration":
+      return support.shape === "duration" && support.value_supported;
+    case "place":
+      return support.shape === "place" && support.value_supported;
+    default:
+      return false;
   }
 }
 

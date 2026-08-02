@@ -127,7 +127,7 @@ describe("selectLexicographicNestedSet", () => {
     expect(result.headKeys).toEqual(["anchor", "balanced"]);
   });
 
-  it("allows a typed core-demand gain to precede activation-family tradeoffs", () => {
+  it("lets projector-qualified core demand precede an activation tradeoff", () => {
     const candidates = [
       candidate("incumbent", { delivery: 1, fusion: 1, semantic: 1 }),
       candidate("temporal", { delivery: 8, fusion: 2, semantic: 2 }, {
