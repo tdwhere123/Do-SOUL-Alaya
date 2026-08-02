@@ -14,10 +14,7 @@ import {
   type EmbeddingRankConsensusPlan,
   type EmbeddingRankConsensusProtection
 } from "../packet-plan/embedding-rank-consensus.js";
-import type {
-  RecallPacketMembershipAuthorization,
-  RecallPacketPlanObservation
-} from
+import type { RecallPacketPlanObservation } from
   "../packet-plan/packet-plan-observation.js";
 import { assertRecallPacketPlanObservation } from
   "../packet-plan/packet-plan-observation.js";
@@ -27,6 +24,8 @@ import {
   attachAuthorizationEffects,
   type QueryEvidenceMembershipAuthorizationReceipt
 } from "./membership/authorization.js";
+import { toMembershipAuthorizationObservation } from
+  "./membership/authorization-observation.js";
 
 export type FinalPacketConsensusCandidate = Readonly<{
   readonly candidateKey: string;
@@ -189,19 +188,24 @@ export function applyMembershipGovernance(
   plan: FinalPacketConsensusPlan,
   governance: FinalPacketConsensusMembershipGovernance | undefined,
   sourceCandidates: readonly FinalPacketConsensusCandidate[],
-  sourceByKey: ReadonlyMap<string, FinalPacketConsensusCandidate>
+  sourceByKey: ReadonlyMap<string, FinalPacketConsensusCandidate>,
+  fallbackPlan?: FinalPacketConsensusPlan
 ): FinalPacketConsensusPlan {
   if (governance === undefined) return plan;
   const membershipWidth = Math.min(5, plan.candidates.length);
   const membership = resolveMembershipGovernance(
     plan, governance, sourceCandidates, sourceByKey, membershipWidth
   );
-  if (!membership.feasible) return exactBaselineMembershipPlan(plan);
+  if (!membership.feasible) {
+    return fallbackPlan ?? exactBaselineMembershipPlan(plan);
+  }
   if (
     membership.authorizations.length === 0 &&
     sameCandidateOrder(membership.head, plan.baseline.slice(0, membershipWidth))
   ) {
-    return plan;
+    return sameCandidateMembership(
+      plan.candidates.slice(0, membershipWidth), membership.head
+    ) ? plan : fallbackPlan ?? exactBaselineMembershipPlan(plan);
   }
   if (sameCandidateOrder(membership.head, plan.candidates.slice(0, membershipWidth))) {
     return membership.authorizations.length === 0
@@ -220,9 +224,13 @@ export function applyMembershipGovernance(
   const nestedPack = composeNestedMembershipPack(
     plan, membership.head, sourceCandidates, membershipWidth
   );
-  if (nestedPack === undefined) return plan;
+  if (nestedPack === undefined) {
+    return fallbackPlan ?? exactBaselineMembershipPlan(plan);
+  }
   const { candidates, immutableTail, nested } = nestedPack;
-  if (!protectionsSatisfied(candidates, plan.protectedCandidates)) return plan;
+  if (!protectionsSatisfied(candidates, plan.protectedCandidates)) {
+    return fallbackPlan ?? exactBaselineMembershipPlan(plan);
+  }
   const membershipAuthorizations = attachAuthorizationEffects(
     membership.authorizations,
     plan.baseline.slice(0, membershipWidth),
@@ -354,92 +362,6 @@ function composeNestedMembershipPack(
   });
 }
 
-function toMembershipAuthorizationObservation(
-  receipt: QueryEvidenceMembershipAuthorizationReceipt
-): RecallPacketMembershipAuthorization {
-  const common = {
-    authorized_candidate_key: receipt.authorizedCandidateKey,
-    satisfied_by_candidate_key: receipt.satisfiedByCandidateKey,
-    satisfied_head_slot: receipt.satisfiedHeadSlot,
-    displaced_head_baseline: receipt.displacedHeadBaseline === null
-      ? null
-      : {
-          slot: receipt.displacedHeadBaseline.slot,
-          candidate_key: receipt.displacedHeadBaseline.candidateKey
-        },
-    evicted_packet_baseline: receipt.evictedPacketBaseline === null
-      ? null
-      : {
-          slot: receipt.evictedPacketBaseline.slot,
-          candidate_key: receipt.evictedPacketBaseline.candidateKey
-        }
-  } as const;
-  const witness = receipt.witness;
-  if (receipt.kind === "direct_query_evidence" &&
-      "origin" in witness && "stream" in witness) {
-    return deepFreeze({
-      ...common,
-      kind: "direct_query_evidence" as const,
-      witness: {
-        origin: witness.origin,
-        stream: witness.stream,
-        rank: witness.rank,
-        source_proximity_rank: witness.sourceProximityRank,
-        source_evidence_agreement_rank: witness.sourceEvidenceAgreementRank
-      }
-    });
-  }
-  if (receipt.kind === "graph_path_opportunity" && "certificate" in witness) {
-    return deepFreeze({
-      ...common,
-      kind: "graph_path_opportunity" as const,
-      witness: {
-        graph_expansion_rank: witness.graphRank,
-        source_proximity_rank: witness.sourceProximityRank,
-        source_candidate_key: witness.certificate.sourceCandidateKey,
-        target_candidate_key: witness.certificate.targetCandidateKey,
-        path_id: witness.certificate.pathId,
-        path_source_version: witness.certificate.pathSourceVersion,
-        relation_kind: witness.certificate.relationKind
-      }
-    });
-  }
-  if (receipt.kind === "behavior_identity" && "evidenceRef" in witness) {
-    if (witness.evidenceRef === null) {
-      throw new CoreError("VALIDATION", "Behavior authorization lacks evidence");
-    }
-    return deepFreeze({
-      ...common,
-      kind: "behavior_identity" as const,
-      witness: { evidence_ref: witness.evidenceRef }
-    });
-  }
-  if (receipt.kind === "selector_consensus" && "embeddingRank" in witness) {
-    return deepFreeze({
-      ...common,
-      kind: "selector_consensus" as const,
-      witness: { embedding_rank: witness.embeddingRank }
-    });
-  }
-  if (receipt.kind === "same_session_substitution" && "sessionKey" in witness) {
-    return deepFreeze({
-      ...common,
-      kind: "same_session_substitution" as const,
-      witness: {
-        protected_candidate_key: witness.protectedCandidateKey,
-        substitute_candidate_key: witness.substituteCandidateKey,
-        source_candidate_key: witness.sourceCandidateKey,
-        target_candidate_key: witness.targetCandidateKey,
-        path_id: witness.pathId,
-        path_source_version: witness.pathSourceVersion,
-        relation_kind: witness.relationKind,
-        session_key: witness.sessionKey
-      }
-    });
-  }
-  throw new CoreError("VALIDATION", "Membership authorization witness is inconsistent");
-}
-
 function findEvictableTailIndex(
   tail: readonly FinalPacketConsensusCandidate[],
   protections: readonly EmbeddingRankConsensusProtection[]
@@ -487,6 +409,16 @@ function sameCandidateOrder(
 ): boolean {
   return left.length === right.length && left.every(
     (candidate, index) => candidate.candidateKey === right[index]?.candidateKey
+  );
+}
+
+function sameCandidateMembership(
+  left: readonly FinalPacketConsensusCandidate[],
+  right: readonly FinalPacketConsensusCandidate[]
+): boolean {
+  const rightKeys = new Set(right.map((candidate) => candidate.candidateKey));
+  return left.length === right.length && left.every(
+    (candidate) => rightKeys.has(candidate.candidateKey)
   );
 }
 

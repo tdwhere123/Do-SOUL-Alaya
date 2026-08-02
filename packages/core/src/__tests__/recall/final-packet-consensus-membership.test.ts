@@ -350,4 +350,45 @@ describe("final packet consensus membership", () => {
     expect(() => buildFinalPacketConsensusObservation(plan, baseline, false))
       .not.toThrow();
   });
+
+  it("restores the incumbent when a nested introduction lacks authority", () => {
+    const baseline = select(baselineCandidates()).candidates;
+    const sourceCandidates = consensusCandidates();
+    const incumbent = resolveFinalPacketConsensusPlan({
+      baseline, sourceCandidates, protectedCandidates: []
+    });
+    const byId = new Map(sourceCandidates.map((candidate) => [
+      candidate.entry.object_id, candidate.fusion.candidate_key
+    ]));
+    const headKeys = [
+      byId.get("baseline-01")!,
+      byId.get("baseline-02")!,
+      byId.get("baseline-04")!,
+      byId.get("baseline-05")!,
+      byId.get("baseline-06")!
+    ];
+    const headSet = new Set(headKeys);
+    const packKeys = [
+      ...headKeys,
+      ...incumbent.candidates
+        .map(({ candidateKey }) => candidateKey)
+        .filter((key) => !headSet.has(key))
+    ].slice(0, incumbent.candidates.length);
+
+    const plan = applyLexicographicNestedMembership({
+      plan: incumbent,
+      sourceCandidates,
+      headKeys,
+      packKeys,
+      membershipGovernance: {
+        preProjection: baseline,
+        queryProbes: compileRecallQueryProbes(null),
+        behaviorAuthorityEvidenceRefByCandidateKey: new Map()
+      }
+    });
+
+    expect(plan).toBe(incumbent);
+    expect(() => buildFinalPacketConsensusObservation(plan, baseline, false))
+      .not.toThrow();
+  });
 });

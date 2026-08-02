@@ -53,7 +53,8 @@ export function applyLexicographicNestedMembership(params: Readonly<{
     }
   });
   return applyMembershipGovernance(
-    proposal, params.membershipGovernance, sourceCandidates, sourceByKey
+    proposal, params.membershipGovernance, sourceCandidates, sourceByKey,
+    params.plan
   );
 }
 
