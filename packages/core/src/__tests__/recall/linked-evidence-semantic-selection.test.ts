@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+
+import { selectBoundedDirectEvidenceHead } from
+  "../../recall/delivery/admission/direct-evidence-answer-head.js";
+import { compileRecallQueryProbes } from
+  "../../recall/query/recall-query-probes.js";
+import type { FineAssessmentCandidate } from
+  "../../recall/delivery/fine-assessment-selection.js";
+import { createCandidate } from "./fine-assessment-selection-fixtures.js";
+
+describe("linked Evidence semantic selection", () => {
+  it("inherits a linked Evidence observation when choosing the Memory leader", () => {
+    const primary = withSemanticActivation(createCandidate("primary"), 0.2);
+    const linked = withSemanticActivation(createCandidate("linked"), 0.05);
+    const candidates = [primary, linked];
+    const selection = selectBoundedDirectEvidenceHead(
+      candidates,
+      compileRecallQueryProbes(null),
+      new Map([[linked.fusion.candidate_key, 1]]),
+      new Map([
+        [primary.fusion.candidate_key, 0.8],
+        [linked.fusion.candidate_key, 0.1]
+      ]),
+      2,
+      new Set(),
+      (ordered) => ordered.slice(0, 2),
+      () => false
+    );
+
+    expect(selection.protections).toEqual([{
+      candidateKey: linked.fusion.candidate_key,
+      rankLimit: 1
+    }]);
+  });
+
+  it("does not weaken a Memory observation when linked Evidence is weaker", () => {
+    const primary = withSemanticActivation(createCandidate("primary"), 0.8);
+    const linked = withSemanticActivation(createCandidate("linked"), 0.2);
+    const selection = selectBoundedDirectEvidenceHead(
+      [primary, linked],
+      compileRecallQueryProbes(null),
+      new Map([
+        [primary.fusion.candidate_key, 0.1],
+        [linked.fusion.candidate_key, 0.4]
+      ]),
+      new Map(),
+      2,
+      new Set(),
+      (ordered) => ordered.slice(0, 2),
+      () => false
+    );
+
+    expect(selection.protections).toEqual([{
+      candidateKey: primary.fusion.candidate_key,
+      rankLimit: 1
+    }]);
+  });
+
+  it("ignores an invalid linked observation instead of poisoning Memory activation", () => {
+    const primary = withSemanticActivation(createCandidate("primary"), 0.8);
+    const linked = withSemanticActivation(createCandidate("linked"), 0.2);
+    const selection = selectBoundedDirectEvidenceHead(
+      [primary, linked],
+      compileRecallQueryProbes(null),
+      new Map([
+        [primary.fusion.candidate_key, Number.NaN],
+        [linked.fusion.candidate_key, 0.4]
+      ]),
+      new Map(),
+      2,
+      new Set(),
+      (ordered) => ordered.slice(0, 2),
+      () => false
+    );
+
+    expect(selection.protections).toEqual([{
+      candidateKey: primary.fusion.candidate_key,
+      rankLimit: 1
+    }]);
+  });
+});
+
+function withSemanticActivation(
+  candidate: FineAssessmentCandidate,
+  embeddingSimilarity: number
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    effectiveFactors: {
+      ...candidate.effectiveFactors,
+      embedding_similarity: embeddingSimilarity
+    }
+  };
+}

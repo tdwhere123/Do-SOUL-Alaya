@@ -333,11 +333,9 @@ function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
   const ranked = candidates.flatMap((candidate, index) => {
     const candidateKey = buildRecallCandidateDedupeKey(candidate);
     const evidenceCandidate = evidenceByKey.get(candidateKey);
-    const score = candidate.objectKind === "evidence_capsule"
-      ? evidenceCandidate === undefined
-        ? undefined
-        : evidenceScores.get(candidateKey)
-      : candidate.effectiveFactors.embedding_similarity;
+    const score = resolveSemanticActivation(
+      candidate, candidateKey, evidenceCandidate, evidenceScores
+    );
     return score !== undefined && Number.isFinite(score) && score > 0
       ? [{ candidate, candidateKey, index, score, evidenceCandidate }]
       : [];
@@ -351,6 +349,30 @@ function selectUniqueSemanticLeader<T extends DirectEvidenceHeadCandidate>(
         candidateKey: leader.candidateKey,
         index: leader.index
       })
+    : undefined;
+}
+
+function resolveSemanticActivation<T extends DirectEvidenceHeadCandidate>(
+  candidate: T,
+  candidateKey: string,
+  evidenceCandidate: ScoredDirectEvidence<T> | undefined,
+  evidenceScores: ReadonlyMap<string, number>
+): number | undefined {
+  const linkedEvidenceScore = validSemanticActivation(evidenceScores.get(candidateKey));
+  if (candidate.objectKind === "evidence_capsule") {
+    return evidenceCandidate === undefined ? undefined : linkedEvidenceScore;
+  }
+  const memoryContentScore = validSemanticActivation(
+    candidate.effectiveFactors.embedding_similarity
+  );
+  if (memoryContentScore === undefined) return linkedEvidenceScore;
+  if (linkedEvidenceScore === undefined) return memoryContentScore;
+  return Math.max(memoryContentScore, linkedEvidenceScore);
+}
+
+function validSemanticActivation(score: number | undefined): number | undefined {
+  return score !== undefined && Number.isFinite(score) && score > 0
+    ? score
     : undefined;
 }
 
