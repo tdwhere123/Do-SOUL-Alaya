@@ -23,6 +23,7 @@ interface QualifiedEvidenceCandidate {
   readonly rank: number;
   readonly documentIdentity: string;
   readonly recallText?: string;
+  readonly sourceRole?: "user" | "assistant";
   readonly verifiedUserSupportSource?: Readonly<RecallVerifiedUserSupportSource>;
 }
 
@@ -127,7 +128,8 @@ function projectQualifiedEvidenceCandidate(
       rank,
       documentIdentity:
         `assistant_observation:${qualified.matched_projection.projection_id}`,
-      recallText: qualified.matched_projection.content
+      recallText: qualified.matched_projection.content,
+      sourceRole: "assistant"
     });
   }
   if (qualified.matched_projection !== undefined) return null;
@@ -144,6 +146,7 @@ function projectQualifiedEvidenceCandidate(
     capsule: qualified.capsule,
     rank,
     documentIdentity: "owner",
+    ...(verifiedUserSupportSource === undefined ? {} : { sourceRole: "user" as const }),
     ...(verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource })
@@ -286,10 +289,13 @@ function admitDirectEvidenceCandidate(
     candidate.rank,
     candidate.recallText
   );
-  params.addCandidate(entry, "lexical", candidate.rank, "evidence_fts_direct", {
+    params.addCandidate(entry, "lexical", candidate.rank, "evidence_fts_direct", {
     objectKind: "evidence_capsule",
     answerRerankText: entry.content,
-    evidenceDocumentIdentity: candidate.documentIdentity,
+      evidenceDocumentIdentity: candidate.documentIdentity,
+      ...(candidate.sourceRole === undefined
+        ? {}
+        : { evidenceSourceRole: candidate.sourceRole }),
     ...(candidate.verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource: candidate.verifiedUserSupportSource })

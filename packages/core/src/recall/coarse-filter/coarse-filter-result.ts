@@ -115,6 +115,9 @@ function buildSupplementedCandidate(
     ...(draft.evidenceDocumentIdentity === undefined
       ? {}
       : { evidenceDocumentIdentity: draft.evidenceDocumentIdentity }),
+    ...(draft.evidenceSourceRole === undefined
+      ? {}
+      : { evidenceSourceRole: draft.evidenceSourceRole }),
     ...(draft.verifiedUserSupportSource === undefined
       ? {}
       : { verifiedUserSupportSource: draft.verifiedUserSupportSource }),

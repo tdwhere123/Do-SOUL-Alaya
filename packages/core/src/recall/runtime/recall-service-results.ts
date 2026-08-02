@@ -47,6 +47,7 @@ export interface RecallResult {
 
 export interface RecallSupplementaryData {
   readonly queryProbes: Readonly<import("../query/recall-query-probes.js").RecallQueryProbes>;
+  readonly queryTimeWindow?: Readonly<import("../scoring/temporal-fusion-scoring.js").QueryTimeWindow>;
   readonly routingKeysByOwnerIdentity?: ReadonlyMap<
     string,
     readonly Readonly<SelectedSliceKeyV2>[]
@@ -128,6 +129,7 @@ export interface CoarseRecallCandidate {
   readonly entry: Readonly<MemoryEntry>;
   readonly answerRerankText?: string;
   readonly evidenceDocumentIdentity?: string;
+  readonly evidenceSourceRole?: "user" | "assistant";
   readonly verifiedUserSupportSource?: Readonly<
     import("../query/recall-answer-support-observation.js").RecallVerifiedUserSupportSource
   >;

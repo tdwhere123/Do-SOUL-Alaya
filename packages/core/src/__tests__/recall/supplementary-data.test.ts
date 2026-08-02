@@ -13,6 +13,19 @@ import { collectSupplementaryData, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY } from ".
 import { createDependencies, createMemoryEntry, createTaskSurface } from "./recall-service-test-fixtures.js";
 
 describe("collectSupplementaryData", () => {
+  it("seals an anchored query-time window into Selector state", async () => {
+    const supplementary = await collectWith({
+      candidates: [],
+      graphSupportPort: emptyGraphSupportPort(),
+      queryText: "what happened in the last four months"
+    });
+
+    expect(supplementary.queryTimeWindow).toEqual({
+      startMs: Date.UTC(2025, 11, 1),
+      endMs: Date.UTC(2026, 2, 19) - 1
+    });
+  });
+
   it("preserves finite zero embedding observations and rejects non-finite scores", async () => {
     const supplementary = await collectWith({
       candidates: [],

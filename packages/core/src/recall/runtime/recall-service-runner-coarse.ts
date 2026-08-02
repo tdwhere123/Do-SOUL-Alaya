@@ -343,6 +343,8 @@ function mergeCoarseCandidatePair(
   const evidenceDocumentIdentity =
     representative.evidenceDocumentIdentity ??
     supplementary.evidenceDocumentIdentity;
+  const evidenceSourceRole = representative.evidenceSourceRole ??
+    supplementary.evidenceSourceRole;
   return Object.freeze({
     ...representative,
     sourceChannels: uniqueStrings([
@@ -369,7 +371,8 @@ function mergeCoarseCandidatePair(
       : { verifiedUserSupportSource }),
     ...(evidenceDocumentIdentity === undefined
       ? {}
-      : { evidenceDocumentIdentity })
+      : { evidenceDocumentIdentity }),
+    ...(evidenceSourceRole === undefined ? {} : { evidenceSourceRole })
   });
 }
 

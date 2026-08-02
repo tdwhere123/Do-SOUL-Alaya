@@ -1,23 +1,12 @@
 import type { MemoryEntry, PathAnchorRef } from "@do-soul/alaya-protocol";
+import type {
+  RecallQueryDemandAtom
+} from "../../query/recall-query-demand.js";
 
-export type RecallSelectorDemandAtomKind =
-  | "lexical_term"
-  | "phrase"
-  | "object_id"
-  | "evidence_ref"
-  | "dimension"
-  | "scope_class"
-  | "domain_tag"
-  | "date_term"
-  | "facet";
-
-export interface RecallSelectorDemandAtom {
-  readonly kind: RecallSelectorDemandAtomKind;
-  readonly value: string;
-}
+export type RecallSelectorDemandAtom = RecallQueryDemandAtom;
 
 export interface RecallSelectorDemandMatch extends RecallSelectorDemandAtom {
-  readonly source: "content" | "key" | "evidence";
+  readonly source: "content" | "key" | "evidence" | "source_role" | "temporal";
 }
 
 export type RecallSelectorEvidenceDirectness =
@@ -77,6 +66,7 @@ export interface RecallCandidateSelectorObservation {
     readonly directness: RecallSelectorEvidenceDirectness;
     readonly authority: RecallSelectorEvidenceAuthority;
     readonly validity: RecallSelectorEvidenceValidity;
+    readonly source_role: "user" | "assistant" | null;
     readonly document_identity: string | null;
     readonly evidence_refs: readonly string[];
     readonly event_status: RecallSelectorEventStatus;

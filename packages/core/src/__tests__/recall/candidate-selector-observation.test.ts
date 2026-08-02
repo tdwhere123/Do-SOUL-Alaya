@@ -28,6 +28,7 @@ describe("candidate selector observation", () => {
     const capsule = {
       ...capsuleBase,
       evidenceDocumentIdentity: "owner",
+      evidenceSourceRole: "user" as const,
       verifiedUserSupportSource: {
         schema_version: 1 as const,
         source_role: "user" as const,
@@ -71,6 +72,7 @@ describe("candidate selector observation", () => {
         directness: "direct_document",
         authority: "verified_user_projection",
         validity: "recall_qualified",
+        source_role: "user",
         document_identity: "owner"
       },
       path: { status: "not_observed", receipts: [] }
@@ -135,12 +137,24 @@ describe("candidate selector observation", () => {
     const demand = result.diagnostics[0]!.selector_observation!.demand;
 
     expect(demand.matches).toEqual(expect.arrayContaining([
-      { kind: "lexical_term", value: "degree", source: "content" },
-      { kind: "evidence_ref", value: "memory-1", source: "evidence" }
+      {
+        id: "target:degree", kind: "target", value: "degree",
+        priority: "supporting", source: "content"
+      },
+      {
+        id: "evidence_ref:memory-1", kind: "evidence_ref", value: "memory-1",
+        priority: "core", source: "evidence"
+      }
     ]));
     expect(demand.unmatched).toEqual(expect.arrayContaining([
-      { kind: "lexical_term", value: "evidence-memory-1" },
-      { kind: "phrase", value: "degree evidence-memory-1" }
+      {
+        id: "target:evidence-memory-1", kind: "target",
+        value: "evidence-memory-1", priority: "supporting"
+      },
+      {
+        id: "phrase:degree evidence-memory-1", kind: "phrase",
+        value: "degree evidence-memory-1", priority: "supporting"
+      }
     ]));
     expect(demand.atoms.every(Object.isFrozen)).toBe(true);
   });
@@ -201,6 +215,7 @@ function expectedReferencedEvidence() {
     directness: "referenced",
     authority: "unverified",
     validity: "observed_reference",
+    source_role: null,
     document_identity: null,
     evidence_refs: ["evidence-memory-1"],
     event_status: "not_observed",

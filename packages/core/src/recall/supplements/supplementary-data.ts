@@ -20,6 +20,7 @@ import type {
 } from "../runtime/recall-service-types.js";
 import { readWithTemporalProjection } from "../runtime/recall-service-ports.js";
 import { computeMaxWeightTransferAmount } from "../scoring/scoring.js";
+import { parseQueryTimeWindow } from "../scoring/temporal-fusion-scoring.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { collectGovernancePathDerivations } from "./supplementary-data-governance-paths.js";
 import { deriveQuerySoughtFacets } from "../query/query-facet-router.js";
@@ -140,8 +141,10 @@ function freezeSupplementaryData(
   }>,
   routingKeySupplement: Readonly<RoutingKeySupplement>
 ): RecallSupplementaryData {
+  const queryTimeWindow = resolveQueryTimeWindow(params);
   return Object.freeze({
     queryProbes: params.queryProbes,
+    ...(queryTimeWindow === null ? {} : { queryTimeWindow }),
     routingKeysByOwnerIdentity: routingKeySupplement.keysByOwnerIdentity,
     queryRoutingKeys: routingKeySupplement.queryKeys,
     keyActivationByOwnerIdentity: routingKeySupplement.activationByOwnerIdentity,
@@ -174,6 +177,16 @@ function freezeSupplementaryData(
     pathInflowAvailability: evidenceAndGovernance.pathInflowAvailability,
     querySoughtFacets: deriveQuerySoughtFacets(params.queryProbes)
   });
+}
+
+function resolveQueryTimeWindow(
+  params: Pick<CollectSupplementaryDataParams, "queryProbes" | "routingKeyAsOfMs">
+) {
+  if (!Number.isFinite(params.routingKeyAsOfMs)) return null;
+  return parseQueryTimeWindow(
+    params.queryProbes,
+    new Date(params.routingKeyAsOfMs).toISOString()
+  );
 }
 
 async function collectGraphMetrics(

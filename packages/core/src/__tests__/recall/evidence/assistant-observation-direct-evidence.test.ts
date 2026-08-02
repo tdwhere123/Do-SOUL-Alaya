@@ -90,6 +90,9 @@ describe("Assistant observation direct evidence", () => {
     expect(score.mock.calls[0]?.[1]).toEqual([recommendation]);
     expect(result.diagnostics?.candidates.find((item) =>
       item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
+    )?.selector_observation?.evidence.source_role).toBe("assistant");
+    expect(result.diagnostics?.candidates.find((item) =>
+      item.object_id === EVIDENCE_ID && item.object_kind === "evidence_capsule"
     )?.answer_features?.answer_support_observations).toBeUndefined();
   });
 

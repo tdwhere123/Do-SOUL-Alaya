@@ -6,10 +6,11 @@ import type { RecallCandidateAnswerSupport } from
 import { isWorkspaceMemoryCandidate } from
   "../../runtime/recall-service-helpers.js";
 import { splitLexicalTokens } from "../../query/recall-query-probes.js";
+import { compileRecallQueryDemand } from
+  "../../query/recall-query-demand.js";
 import type {
   PathInflowEdge,
   RecallSelectorDemandAtom,
-  RecallSelectorDemandAtomKind,
   RecallSelectorDemandMatch,
   RecallCandidateSelectorObservation,
   RecallSelectorEventStatus,
@@ -48,11 +49,15 @@ function buildDemandObservation(
   context: FineAssessmentSelectionContext
 ): RecallCandidateSelectorObservation["demand"] {
   const probes = context.supplementaryData.queryProbes;
-  const atoms = buildDemandAtoms(probes, context.supplementaryData.querySoughtFacets);
+  const atoms = compileRecallQueryDemand(probes, {
+    soughtFacets: context.supplementaryData.querySoughtFacets
+  }).atoms;
   const content = candidate.entry.content.toLocaleLowerCase();
   const contentTokens = new Set(splitLexicalTokens(candidate.entry.content));
   const matches = atoms.flatMap((atom) => {
-    const source = matchDemandAtom(atom, candidate, content, contentTokens);
+    const source = matchDemandAtom(
+      atom, candidate, context, content, contentTokens
+    );
     return source === null ? [] : [{ ...atom, source }];
   });
   const matchedKeys = new Set(matches.map((match) => demandAtomKey(match)));
@@ -65,43 +70,28 @@ function buildDemandObservation(
   });
 }
 
-function buildDemandAtoms(
-  probes: FineAssessmentSelectionContext["supplementaryData"]["queryProbes"],
-  soughtFacets: readonly string[] | undefined
-): readonly RecallSelectorDemandAtom[] {
-  const atoms = new Map<string, RecallSelectorDemandAtom>();
-  const add = (kind: RecallSelectorDemandAtomKind, values: readonly unknown[]) => {
-    for (const value of values) {
-      const normalized = String(value).trim().toLocaleLowerCase();
-      if (normalized.length === 0) continue;
-      const atom = Object.freeze({ kind, value: normalized } as const);
-      atoms.set(demandAtomKey(atom), atom);
-    }
-  };
-  add("lexical_term", probes.lexical_terms);
-  add("phrase", probes.phrases);
-  add("object_id", probes.object_ids);
-  add("evidence_ref", probes.evidence_refs);
-  add("dimension", probes.dimensions);
-  add("scope_class", probes.scope_classes);
-  add("domain_tag", probes.domain_tags);
-  add("date_term", probes.date_terms);
-  add("facet", soughtFacets ?? []);
-  return Object.freeze([...atoms.values()]);
-}
-
 function matchDemandAtom(
   atom: Readonly<RecallSelectorDemandAtom>,
   candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext,
   content: string,
   contentTokens: ReadonlySet<string>
 ): RecallSelectorDemandMatch["source"] | null {
   switch (atom.kind) {
-    case "lexical_term":
+    case "target":
+    case "relation":
       return contentTokens.has(atom.value) ? "content" : null;
     case "phrase":
-    case "date_term":
       return content.includes(atom.value) ? "content" : null;
+    case "temporal":
+      return eventOverlapsQueryWindow(candidate, context) ? "temporal"
+        : content.includes(atom.value) ? "content" : null;
+    case "source_role":
+      return candidate.evidenceSourceRole === atom.value ? "source_role" : null;
+    case "ordering":
+      return candidate.entry.event_time_start === undefined ? null : "temporal";
+    case "answer_slot":
+      return null;
     case "object_id":
       return candidate.entry.object_id.toLocaleLowerCase() === atom.value
         ? "key" : null;
@@ -124,6 +114,17 @@ function matchDemandAtom(
   }
 }
 
+function eventOverlapsQueryWindow(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): boolean {
+  const window = context.supplementaryData.queryTimeWindow;
+  const start = Date.parse(candidate.entry.event_time_start ?? "");
+  const end = Date.parse(candidate.entry.event_time_end ?? "") || start;
+  return window !== undefined && Number.isFinite(start) &&
+    Math.min(start, end) <= window.endMs && Math.max(start, end) >= window.startMs;
+}
+
 function matchFacetKey(facet: string, candidate: FineAssessmentCandidate): boolean {
   const fields = [
     ...(candidate.entry.domain_tags ?? []),
@@ -137,7 +138,7 @@ function matchFacetKey(facet: string, candidate: FineAssessmentCandidate): boole
 }
 
 function demandAtomKey(atom: Readonly<RecallSelectorDemandAtom>): string {
-  return `${atom.kind}:${atom.value}`;
+  return atom.id;
 }
 
 function buildEvidenceObservation(
@@ -154,6 +155,7 @@ function buildEvidenceObservation(
     directness,
     authority,
     validity: resolveEvidenceValidity(directness, behaviorEligible),
+    source_role: candidate.evidenceSourceRole ?? null,
     document_identity: documentIdentity,
     evidence_refs: Object.freeze([...candidate.entry.evidence_refs]),
     event_status: resolveEventStatus(support?.authority?.event_status, observations),
