@@ -221,11 +221,6 @@ function validateSupportStatus(
   const allSupported = support.value_supported &&
     support.target_supported &&
     support.relation_supported;
-  const noSupport = !support.value_supported &&
-    !support.target_supported &&
-    !support.relation_supported &&
-    support.matched_target_terms.length === 0 &&
-    support.matched_relation_terms.length === 0;
   const valid = support.status === "compatible"
     ? support.eligible && !aggregate && allSupported
     : support.status === "value_only"
@@ -233,8 +228,8 @@ function validateSupportStatus(
       : support.status === "unsupported"
         ? support.eligible && !aggregate && !support.value_supported
         : support.status === "observation_only"
-          ? support.eligible && aggregate && noSupport
-          : !support.eligible && noSupport;
+          ? support.eligible && aggregate && !support.value_supported
+          : !support.eligible;
   if (!valid) addIssue(context, ["status"], "answer-support state is inconsistent");
 }
 

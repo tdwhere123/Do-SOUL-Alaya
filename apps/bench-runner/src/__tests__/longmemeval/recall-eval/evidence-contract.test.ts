@@ -67,6 +67,34 @@ function completeAnswerFeatures(overrides: Readonly<Record<string, unknown>> = {
 }
 
 describe("LongMemEval evidence contract", () => {
+  it("accepts aggregate observations that retain target and relation evidence", () => {
+    expect(RecallCandidateAnswerSupportSchema.parse({
+      schema_version: 1,
+      shape: "count",
+      status: "observation_only",
+      eligible: true,
+      value_supported: false,
+      target_supported: true,
+      relation_supported: true,
+      matched_target_terms: ["books"],
+      matched_relation_terms: ["read"]
+    })).toMatchObject({ status: "observation_only", target_supported: true });
+  });
+
+  it("accepts ineligible projections that retain observed compatibility", () => {
+    expect(RecallCandidateAnswerSupportSchema.parse({
+      schema_version: 1,
+      shape: "place",
+      status: "ineligible",
+      eligible: false,
+      value_supported: true,
+      target_supported: true,
+      relation_supported: true,
+      matched_target_terms: ["alice"],
+      matched_relation_terms: ["work"]
+    })).toMatchObject({ status: "ineligible", value_supported: true });
+  });
+
   it("adds an explicit reconstructable cohort while old rows still parse", () => {
     const missing = diagnostic({ id: "q-missing" });
     expect(missing.cohort_ledger).toMatchObject({
