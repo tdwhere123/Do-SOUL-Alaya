@@ -198,7 +198,6 @@ async function collectEvidenceSemanticScores(params: Readonly<{
   }
   const candidates = params.fineCandidates
     .filter((candidate) => candidate.objectKind === "evidence_capsule")
-    .slice(0, 25)
     .map((candidate) => Object.freeze({
       candidateKey: buildRecallCandidateDedupeKey(candidate),
       objectId: candidate.entry.object_id,

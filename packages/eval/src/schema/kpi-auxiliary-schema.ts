@@ -133,14 +133,14 @@ export const RecallTokenEconomySchema = z
     // the candidates actually returned. Mirrors the chars/token heuristic
     // used by makeTokenEstimator in core.
     delivered_context_tokens_estimate: PerCallStatSchema,
-    // Coarse-pool size — the candidate count before the coarse→fine waist.
+    // Complete admitted candidate field before final selection.
     coarse_pool_size: PerCallStatSchema,
-    // Fine-assess evaluated count after coarse→fine prune (may be < coarse_pool_size).
+    // Current runs evaluate the complete field, so this equals coarse_pool_size.
     fine_evaluated: PerCallStatSchema,
-    // Coarse candidates dropped by the coarse→fine waist before scoring.
+    // Current runs emit zero; retained so hidden pre-selection deletion is observable.
     fine_pruned_count: PerCallStatSchema,
-    // Priority candidates excluded by the shared hard fine-assessment budget.
-    // Optional so archived v1 payloads remain readable; current runs emit it.
+    // Current runs emit zero because channel priority cannot delete candidates.
+    // Optional so archived v1 payloads remain readable.
     fine_priority_overflow_count: PerCallStatSchema.optional(),
     // Distinct fusion families with any member-stream hit (~5), not raw lane
     // count, across the pre-budget candidate set per recall.

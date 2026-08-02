@@ -192,14 +192,14 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       expect(semantic.enabled).toBe(true);
       expect(semantic.injection_cap).toBe(3);
       expect(semantic.injection_similarity_floor).toBe(0.8);
-      expect(decorated.fine_assessment.max_candidates).toBe(113);
+      expect(decorated.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       teardown(fixture);
       restoreEnv();
     }
   });
 
-  it("preserves an explicit larger fine budget and remains idempotent", async () => {
+  it("keeps candidate-field activation decoration idempotent", async () => {
     saveEnv();
     const fixture = buildFixture();
     try {
@@ -233,8 +233,7 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
             injection_cap: 3,
             injection_similarity_floor: 0.8
           }
-        },
-        fine_assessment: { ...base.fine_assessment, max_candidates: 300 }
+        }
       };
 
       const first = runtime.defaultPolicyDecorator!(explicit);
@@ -243,8 +242,8 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
         injection_cap: 3,
         injection_similarity_floor: 0.8
       });
-      expect(first.fine_assessment.max_candidates).toBe(300);
-      expect(second.fine_assessment.max_candidates).toBe(300);
+      expect(first.fine_assessment).not.toHaveProperty("max_candidates");
+      expect(second.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       teardown(fixture);
       restoreEnv();
@@ -280,17 +279,17 @@ describe("createDaemonEmbeddingRuntime — recall policy decorator wiring", () =
       await expect(runtime.providerWarmup).resolves.toBe("ready");
       const online = runtime.defaultPolicyDecorator!(makeBasePolicy());
       expect(online.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
-      expect(online.fine_assessment.max_candidates).toBe(120);
+      expect(online.fine_assessment).not.toHaveProperty("max_candidates");
 
       available = false;
       const offline = runtime.defaultPolicyDecorator!(online);
       expect(offline.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
-      expect(offline.fine_assessment.max_candidates).toBe(120);
+      expect(offline.fine_assessment).not.toHaveProperty("max_candidates");
 
       available = true;
       const restored = runtime.defaultPolicyDecorator!(offline);
       expect(restored.coarse_filter.semantic_supplement.embedding_enabled).toBe(true);
-      expect(restored.fine_assessment.max_candidates).toBe(120);
+      expect(restored.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       teardown(fixture);
       restoreEnv();

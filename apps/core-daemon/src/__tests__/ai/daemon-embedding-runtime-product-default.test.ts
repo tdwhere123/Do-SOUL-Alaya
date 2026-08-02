@@ -370,7 +370,7 @@ describe("daemon local embedding product default", () => {
       await warmupStarted;
       const pending = effectiveSharedProductPolicy(runtime);
       expect(pending.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
-      expect(pending.fine_assessment.max_candidates).toBe(200);
+      expect(pending.fine_assessment).not.toHaveProperty("max_candidates");
 
       resolveWarmup([new Float32Array([1])]);
       await expect(runtime.providerWarmup).resolves.toBe("ready");
@@ -387,7 +387,7 @@ describe("daemon local embedding product default", () => {
       await expect(runtime.providerWarmup).resolves.toBe("failed");
       const failed = effectiveSharedProductPolicy(runtime);
       expect(failed.coarse_filter.semantic_supplement.embedding_enabled).toBe(false);
-      expect(failed.fine_assessment.max_candidates).toBe(200);
+      expect(failed.fine_assessment).not.toHaveProperty("max_candidates");
     } finally {
       database.close();
     }
@@ -403,8 +403,9 @@ describe("daemon local embedding product default", () => {
         injection_cap: 10,
         injection_similarity_floor: 0.5
       });
-      expect(ready.fine_assessment.max_candidates).toBe(210);
-      expect(runtime.defaultPolicyDecorator!(ready).fine_assessment.max_candidates).toBe(210);
+      expect(ready.fine_assessment).not.toHaveProperty("max_candidates");
+      expect(runtime.defaultPolicyDecorator!(ready).fine_assessment)
+        .not.toHaveProperty("max_candidates");
     } finally {
       database.close();
     }

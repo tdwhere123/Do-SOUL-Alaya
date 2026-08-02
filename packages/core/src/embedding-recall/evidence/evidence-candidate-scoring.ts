@@ -17,8 +17,6 @@ import type {
   ScoreEvidenceCandidatesParams
 } from "../types.js";
 
-const MAX_TRANSIENT_EVIDENCE_CANDIDATES = 25;
-
 export interface EvidenceCandidateScoringDependencies {
   readonly provider: EmbeddingProviderPort;
   readonly documentEngine: EvidenceDocumentEmbeddingEngine;
@@ -31,7 +29,7 @@ export async function scoreTransientEvidenceCandidates(
   params: ScoreEvidenceCandidatesParams,
   dependencies: EvidenceCandidateScoringDependencies
 ): Promise<EvidenceCandidateScoringResult> {
-  const candidates = params.candidates.slice(0, MAX_TRANSIENT_EVIDENCE_CANDIDATES);
+  const candidates = params.candidates;
   const startedAt = performance.now();
   if (candidates.length === 0) return scoringResult("not_applicable", 0, 0, 0, startedAt);
   if (!dependencies.provider.isAvailable) {

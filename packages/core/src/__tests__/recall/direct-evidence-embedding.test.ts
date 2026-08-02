@@ -46,7 +46,7 @@ type EvidenceScoringEmbeddingService = EmbeddingRecallService & Required<Pick<
   "scoreEvidenceCandidates"
 >>;
 describe("direct evidence transient embedding assessment", () => {
-  it("batches the top 25 public previews against the prepared query and retains the memory lane", async () => {
+  it("scores every admitted public preview before final selection", async () => {
     const evidence = Array.from({ length: 26 }, (_, index) => createEvidenceCapsule(index));
     const scoreEvidenceCandidates = vi.fn(async (params: EvidenceScoreRequest) =>
       evidenceScores(params, new Map(
@@ -69,7 +69,7 @@ describe("direct evidence transient embedding assessment", () => {
       preparedQuery: fixture.preparedQuery
     });
     expect(request?.candidates).toEqual(
-      evidence.slice(0, 25).map((capsule) => expectedEvidenceScoreCandidate(capsule))
+      evidence.map((capsule) => expectedEvidenceScoreCandidate(capsule))
     );
     expect(fixture.querySupplementIfReady).toHaveBeenCalledWith(expect.objectContaining({
       preparedQuery: fixture.preparedQuery
@@ -81,8 +81,8 @@ describe("direct evidence transient embedding assessment", () => {
       });
     expect(result.diagnostics).toMatchObject({
       evidence_embedding_status: "returned",
-      evidence_embedding_expected_count: 25,
-      evidence_embedding_scored_count: 25,
+      evidence_embedding_expected_count: 26,
+      evidence_embedding_scored_count: 26,
       evidence_embedding_inference_calls: 1,
       evidence_embedding_failure_class: null
     });
@@ -416,7 +416,6 @@ function createEmbeddingPolicy(
     },
     fine_assessment: {
       ...base.fine_assessment,
-      max_candidates: 40,
       budgets: {
         max_entries: maxEntries,
         max_total_tokens: 10_000,

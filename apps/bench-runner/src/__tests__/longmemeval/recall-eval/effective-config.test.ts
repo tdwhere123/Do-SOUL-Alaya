@@ -48,7 +48,7 @@ describe("effective recall config identity", () => {
     expect(h1Drift.effective_config_sha256).not.toBe(base.effective_config_sha256);
   });
 
-  it("binds the policy-derived fine-evaluation budget into provenance", () => {
+  it("binds result budgets into provenance without a pre-selection field cap", () => {
     const tenResultPolicy = buildBenchDiagnosticRecallPolicy("surface", 10, true);
     const twentyResultPolicy = buildBenchDiagnosticRecallPolicy("surface", 20, true);
     const tenResultIdentity = buildEffectiveRecallConfigIdentity({}, {
@@ -60,8 +60,8 @@ describe("effective recall config identity", () => {
       conflictAwareness: true
     });
 
-    expect(tenResultPolicy.fine_assessment.max_candidates).toBe(200);
-    expect(twentyResultPolicy.fine_assessment.max_candidates).toBe(400);
+    expect(tenResultPolicy.fine_assessment).not.toHaveProperty("max_candidates");
+    expect(twentyResultPolicy.fine_assessment).not.toHaveProperty("max_candidates");
     expect(twentyResultIdentity.effective_config_sha256)
       .not.toBe(tenResultIdentity.effective_config_sha256);
   });

@@ -331,13 +331,13 @@ export interface RecallPathExpansionSourceDiagnostic {
 export interface RecallTokenEconomy {
   // Sum of token_estimate over delivered candidates, same heuristic as RecallCandidate.token_estimate.
   readonly delivered_context_tokens_estimate: number;
-  // Coarse-stage pool size before the coarse→fine waist (matches candidate_pool_count).
+  // Complete admitted candidate field (matches candidate_pool_count).
   readonly coarse_pool_size: number;
-  // Candidates that entered fine scoring after coarse→fine prune (may be < coarse_pool_size).
+  // Every admitted candidate receives fine scoring before the final Selector.
   readonly fine_evaluated: number;
-  // Coarse candidates dropped by the coarse→fine waist before scoring.
+  // Must remain zero: a non-zero value would reveal hidden pre-selection deletion.
   readonly fine_pruned_count: number;
-  // Priority candidates excluded because all classes share the same hard fine-assessment budget.
+  // Must remain zero because channel priority cannot own candidate deletion.
   readonly fine_priority_overflow_count: number;
   // Distinct fusion families with any member-stream hit (~5), not raw lane count.
   readonly fusion_families_with_hits: number;

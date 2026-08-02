@@ -16,7 +16,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       },
       generateQueryId: () => "query-id"
     });
-    const candidates = Array.from({ length: 25 }, (_, index) => ({
+    const candidates = Array.from({ length: 31 }, (_, index) => ({
       candidateKey: `evidence:${index}`,
       objectId: `object-${index}`,
       documentIdentity: "owner",
@@ -38,7 +38,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       candidates
     });
 
-    expect(embedTexts.mock.calls.map(([texts]) => texts.length)).toEqual([1, 25]);
+    expect(embedTexts.mock.calls.map(([texts]) => texts.length)).toEqual([1, 31]);
     expect(first.inferenceCalls).toBe(2);
     expect(second.inferenceCalls).toBe(0);
     expect([...second.scores]).toEqual([...first.scores]);

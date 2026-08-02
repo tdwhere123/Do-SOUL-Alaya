@@ -99,13 +99,11 @@ describe("RecallService", () => {
     expect(tokenEconomy?.delivered_context_tokens_estimate).toBe(
       expectedDelivered
     );
-    // coarse_pool_size equals candidate_pool_count (== combined coarse
-    // candidates before the coarse→fine waist).
+    // coarse_pool_size equals the complete combined candidate field.
     expect(tokenEconomy?.coarse_pool_size).toBe(
       result.diagnostics?.candidate_pool_count ?? -1
     );
-    // Small fixture pools sit under the waist cap, so fine_evaluated matches
-    // coarse_pool_size and fine_pruned_count is zero.
+    // Fine assessment must preserve the full field until final selection.
     expect(tokenEconomy?.fine_evaluated).toBe(tokenEconomy?.coarse_pool_size);
     expect(tokenEconomy?.fine_pruned_count).toBe(0);
     expect(tokenEconomy?.fine_priority_overflow_count).toBe(0);

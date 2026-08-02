@@ -69,7 +69,6 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
       })
     }),
     fine: Object.freeze({
-      max_candidates: 20 + 5,
       budgets: Object.freeze({
         max_total_tokens: 3000,
         max_entries: 15,
@@ -96,7 +95,6 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
       })
     }),
     fine: Object.freeze({
-      max_candidates: 50 + 5,
       budgets: Object.freeze({
         max_total_tokens: 5000,
         max_entries: 30,
@@ -127,7 +125,6 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
       })
     }),
     fine: Object.freeze({
-      max_candidates: 30 + 5,
       budgets: Object.freeze({
         max_total_tokens: 4000,
         max_entries: 20,
@@ -154,7 +151,6 @@ export const STRATEGY_RECALL_DEFAULTS: Readonly<
       })
     }),
     fine: Object.freeze({
-      max_candidates: 40 + 5,
       budgets: Object.freeze({
         max_total_tokens: 4500,
         max_entries: 25,

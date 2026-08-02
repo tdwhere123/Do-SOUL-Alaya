@@ -47,7 +47,6 @@ import {
   collectTimedSupplementaryData,
   deliverOrReuseAssessment,
   prepareLegacyReassessment,
-  prepareRecallFineAssessmentWaist,
   prepareSnapshotAssessment
 } from "./orchestration/recall-fine-assessment.js";
 import {
@@ -179,13 +178,10 @@ async function assessLegacyCandidateStage(
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult
 ): Promise<AssessmentStageResult> {
-  const waist = prepareRecallFineAssessmentWaist(context, prepared, coarse);
   const embeddingPreparation = startLegacyEmbeddingPreparation(
-    context, params, prepared, coarse, waist.survivors
+    context, params, prepared, coarse, coarse.combinedCoarseCandidates
   );
-  const initial = await collectInitialLegacyAssessment(
-    context, params, prepared, coarse, waist
-  );
+  const initial = await collectInitialLegacyAssessment(context, params, prepared, coarse);
   const preparedEmbeddingQuery = await embeddingPreparation;
   const embedding = await measureAsync(() => collectLegacyEmbeddingAssessmentData(
     context,
@@ -193,7 +189,7 @@ async function assessLegacyCandidateStage(
     prepared,
     coarse,
     initial.assessment,
-    initial.waist.survivors,
+    coarse.combinedCoarseCandidates,
     preparedEmbeddingQuery.value
   ));
   const reassessment = measureSync(() => prepareLegacyReassessment(
@@ -249,7 +245,7 @@ async function assessSnapshotCandidateStage(
 ): Promise<AssessmentStageResult> {
   const base = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const embedding = await measureAsync(() => collectSnapshotEmbeddingAssessmentData(
-    context, prepared, coarse, base.value.waist.survivors
+    context, prepared, coarse, coarse.combinedCoarseCandidates
   ));
   const assessment = measureSync(() => prepareSnapshotAssessment(
     context, params, prepared, coarse, base.value, embedding.value

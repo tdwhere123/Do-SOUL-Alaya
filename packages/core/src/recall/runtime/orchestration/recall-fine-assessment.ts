@@ -2,12 +2,8 @@ import { withEmbeddingSimilarityScores } from "../../coarse-filter/coarse-candid
 import {
   deliverFineAssessment,
   prepareFineAssessment,
-  prepareFineAssessmentWaist,
-  type FineAssessParams,
-  type FineAssessmentWaistParams
+  type FineAssessParams
 } from "../../delivery/fine-assessment.js";
-import type { FineAssessmentPruneResult } from
-  "../../delivery/fine-assessment-prune.js";
 import type { CoarseStageResult } from "../recall-service-runner-coarse.js";
 import type {
   FineAssessmentPreparation,
@@ -33,7 +29,6 @@ import { recallFinalAuthorityMaxHeadDrop } from
 export type LegacyInitialAssessment = Readonly<{
   readonly assessment: FineAssessmentResult;
   readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly waist: FineAssessmentPruneResult;
   readonly assessmentSpans: readonly TimedSpan[];
   readonly deliverySpans: readonly TimedSpan[];
 }>;
@@ -45,33 +40,25 @@ type RerankResult = Readonly<{
 
 export type CollectedFineAssessmentData = Readonly<{
   readonly supplementaryData: FineAssessParams["supplementaryData"];
-  readonly waist: FineAssessmentPruneResult;
 }>;
-
-export function prepareRecallFineAssessmentWaist(
-  context: RecallExecutionContext,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): FineAssessmentPruneResult {
-  return prepareFineAssessmentWaist(
-    buildFineAssessmentWaistParams(context, prepared, coarse)
-  );
-}
 
 export function collectTimedSupplementaryData(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  waist: FineAssessmentPruneResult = prepareRecallFineAssessmentWaist(
-    context, prepared, coarse
-  )
+  coarse: CoarseStageResult
 ): Promise<TimedResult<CollectedFineAssessmentData>> {
   return measureAsync(async () => {
     const supplementaryData = await collectCoarseFilterSupplementaryData(
-      buildCoarseAssessmentParams(context, params, prepared, coarse, waist.survivors)
+      buildCoarseAssessmentParams(
+        context,
+        params,
+        prepared,
+        coarse,
+        coarse.combinedCoarseCandidates
+      )
     );
-    return Object.freeze({ supplementaryData, waist });
+    return Object.freeze({ supplementaryData });
   });
 }
 
@@ -79,24 +66,21 @@ export async function collectInitialLegacyAssessment(
   context: RecallExecutionContext,
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult,
-  waist: FineAssessmentPruneResult
+  coarse: CoarseStageResult
 ): Promise<LegacyInitialAssessment> {
-  const collected = await collectTimedSupplementaryData(
-    context, params, prepared, coarse, waist
-  );
+  const collected = await collectTimedSupplementaryData(context, params, prepared, coarse);
   const fineParams = buildFineAssessParams(
-    context, params, prepared, collected.value.supplementaryData, collected.value.waist.survivors
+    context,
+    params,
+    prepared,
+    collected.value.supplementaryData,
+    coarse.combinedCoarseCandidates
   );
-  const preparation = measureSync(() => prepareFineAssessment(
-    fineParams,
-    collected.value.waist
-  ));
+  const preparation = measureSync(() => prepareFineAssessment(fineParams));
   const delivery = measureSync(() => deliverFineAssessment(fineParams, preparation.value));
   return Object.freeze({
     assessment: delivery.value,
     supplementaryData: collected.value.supplementaryData,
-    waist: collected.value.waist,
     assessmentSpans: Object.freeze([asTimedSpan(collected), asTimedSpan(preparation)]),
     deliverySpans: Object.freeze([asTimedSpan(delivery)])
   });
@@ -139,12 +123,13 @@ export function prepareLegacyReassessment(
     supplementaryData,
     reassessmentRequired,
     preparedCandidates: reassessmentRequired
-      ? prepareFineAssessment(
-        buildFineAssessParams(
-          context, params, prepared, supplementaryData, initial.waist.survivors
-        ),
-        initial.waist
-      )
+      ? prepareFineAssessment(buildFineAssessParams(
+        context,
+        params,
+        prepared,
+        supplementaryData,
+        coarse.combinedCoarseCandidates
+      ))
       : preparationFromAssessment(initial.assessment)
   });
 }
@@ -169,12 +154,13 @@ export function prepareSnapshotAssessment(
   );
   return Object.freeze({
     supplementaryData,
-    preparedCandidates: prepareFineAssessment(
-      buildFineAssessParams(
-        context, params, prepared, supplementaryData, base.waist.survivors
-      ),
-      base.waist
-    )
+    preparedCandidates: prepareFineAssessment(buildFineAssessParams(
+      context,
+      params,
+      prepared,
+      supplementaryData,
+      coarse.combinedCoarseCandidates
+    ))
   });
 }
 
@@ -224,7 +210,7 @@ function buildCoarseAssessmentParams(
   params: RecallExecutionParams,
   prepared: PreparedRecallRequest,
   coarse: CoarseStageResult,
-  candidates: FineAssessmentWaistParams["candidates"]
+  candidates: FineAssessParams["candidates"]
 ): Parameters<typeof collectCoarseFilterSupplementaryData>[0] {
   return {
     dependencies: context.dependencies,
@@ -240,32 +226,6 @@ function buildCoarseAssessmentParams(
     winnerMemoryIds: prepared.winnerMemoryIds,
     tokenEstimator: prepared.tokenEstimator,
     captureAnswerFeatures: shouldCaptureRecallAnswerFeatures(params)
-  };
-}
-
-function buildFineAssessmentWaistParams(
-  context: RecallExecutionContext,
-  prepared: PreparedRecallRequest,
-  coarse: CoarseStageResult
-): Parameters<typeof prepareFineAssessmentWaist>[0] {
-  const embeddingSimilarityScores = {
-    ...(coarse.embeddingCoarseInjection.requestScoreSnapshot
-      ?.poolScoresByObjectId ?? {}),
-    ...coarse.embeddingCoarseInjection.similarityScores
-  };
-  return {
-    candidates: coarse.combinedCoarseCandidates,
-    policy: prepared.policy,
-    winnerMemoryIds: prepared.winnerMemoryIds,
-    supplementaryData: {
-      ftsRanks: coarse.coarseFilter.ftsRanks,
-      trigramFtsRanks: coarse.coarseFilter.trigramFtsRanks,
-      synthesisFtsRanks: coarse.coarseFilter.synthesisFtsRanks,
-      evidenceFtsRanks: coarse.coarseFilter.evidenceFtsRanks,
-      structuralScores: coarse.coarseFilter.structuralScores,
-      embeddingSimilarityScores: Object.freeze(embeddingSimilarityScores)
-    },
-    warn: context.warn
   };
 }
 

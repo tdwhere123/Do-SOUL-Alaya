@@ -99,7 +99,6 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
       }
     },
     fine_assessment: {
-      max_candidates: limits.fine,
       budgets: {
         max_total_tokens: input.maxTotalTokens,
         max_entries: maxResults,
@@ -121,7 +120,7 @@ export function buildRecallPolicy(input: RecallPolicyBuilderInput): RecallPolicy
 function resolveRecallPolicyCandidateLimits(
   input: RecallPolicyBuilderInput,
   maxResults: number
-): Readonly<{ coarse: number; semantic: number; fine: number }> {
+): Readonly<{ coarse: number; semantic: number }> {
   const coarseFloor = Number.isFinite(input.coarseFloor ?? 0)
     ? Math.max(input.coarseFloor ?? 0, 0)
     : 0;
@@ -133,13 +132,9 @@ function resolveRecallPolicyCandidateLimits(
     Math.max(coarse, maxResults * 10, 1),
     RECALL_TOTAL_CANDIDATE_CAP
   );
-  const semanticSupplementEnabled = input.embeddingSupplementEnabled ?? true;
-  const fine = coarse +
-    (semanticSupplementEnabled ? keywordCandidateLimit : 0);
   return Object.freeze({
     coarse,
-    semantic: keywordCandidateLimit,
-    fine: Math.min(fine, RECALL_TOTAL_CANDIDATE_CAP)
+    semantic: keywordCandidateLimit
   });
 }
 
@@ -154,10 +149,6 @@ export function applyRecallPolicyEmbeddingState(
     ? resolveEffectiveInjectionCap(policy, semanticEnabled, configuredCap)
     : configuredCap;
   const floor = input.injectionSimilarityFloor ?? semantic.injection_similarity_floor;
-  const fineMax = input.embeddingEnabled && effectiveCap !== undefined
-    ? resolveEmbeddingFineCandidateBudget(policy, semanticEnabled, effectiveCap)
-    : policy.fine_assessment.max_candidates;
-
   return {
     ...policy,
     coarse_filter: {
@@ -169,10 +160,6 @@ export function applyRecallPolicyEmbeddingState(
         ...(effectiveCap === undefined ? {} : { injection_cap: effectiveCap }),
         ...(floor === undefined ? {} : { injection_similarity_floor: floor })
       }
-    },
-    fine_assessment: {
-      ...policy.fine_assessment,
-      ...(fineMax === undefined ? {} : { max_candidates: fineMax })
     }
   };
 }
@@ -193,16 +180,6 @@ function resolveEffectiveInjectionCap(
   if (configuredCap === undefined) return undefined;
   const directBudget = resolveDirectCandidateBudget(policy, semanticEnabled);
   return Math.min(configuredCap, RECALL_TOTAL_CANDIDATE_CAP - directBudget);
-}
-
-function resolveEmbeddingFineCandidateBudget(
-  policy: Readonly<RecallPolicy>,
-  semanticEnabled: boolean,
-  injectionCap: number
-): number {
-  const directBudget = resolveDirectCandidateBudget(policy, semanticEnabled);
-  const existing = normalizeRecallCandidateLimit(policy.fine_assessment.max_candidates ?? 0);
-  return Math.max(existing, directBudget + injectionCap);
 }
 
 function resolveDirectCandidateBudget(
