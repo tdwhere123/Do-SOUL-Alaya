@@ -51,7 +51,7 @@ export async function scoreTransientEvidenceCandidates(
     const documentBatch = await dependencies.documentEngine.embedDocuments({
       workspaceId: params.workspaceId,
       documents: candidates.map((candidate) => ({
-        ownerObjectId: candidate.objectId,
+        ownerObjectId: candidate.evidenceObjectId,
         documentIdentity: candidate.documentIdentity,
         content: candidate.content
       }))

@@ -18,14 +18,14 @@ describe("evidence semantic candidate projection", () => {
       evidenceDocumentsByMemoryId: {
         "memory-1": [{
           evidenceRef: "evidence-a",
-          documentIdentity: "evidence-a",
+          documentIdentity: "owner",
           content: "grounded conversation evidence"
         }]
       }
     })).toEqual([{
       candidateKey: "workspace_local:memory_entry:memory-1",
-      objectId: "memory-1",
-      documentIdentity: "linked_evidence:evidence-a",
+      evidenceObjectId: "evidence-a",
+      documentIdentity: "owner",
       content: "grounded conversation evidence"
     }]);
   });
@@ -51,7 +51,7 @@ describe("evidence semantic candidate projection", () => {
       }
     })).toEqual([{
       candidateKey: "workspace_local:evidence_capsule:evidence-1",
-      objectId: "evidence-1",
+      evidenceObjectId: "evidence-1",
       documentIdentity: "assistant:1",
       content: direct.entry.content
     }]);

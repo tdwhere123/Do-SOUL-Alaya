@@ -18,7 +18,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
     });
     const candidates = Array.from({ length: 31 }, (_, index) => ({
       candidateKey: `evidence:${index}`,
-      objectId: `object-${index}`,
+      evidenceObjectId: `object-${index}`,
       documentIdentity: "owner",
       content: `document ${index}`
     }));
@@ -65,7 +65,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       preparedQuery: null,
       candidates: [{
         candidateKey: "evidence:1",
-        objectId: "object-1",
+        evidenceObjectId: "object-1",
         documentIdentity: "owner",
         content: "same text"
       }]
@@ -100,8 +100,18 @@ describe("EmbeddingRecallService evidence document cache", () => {
       queryText: "query",
       preparedQuery: null,
       candidates: [
-        { candidateKey: "evidence:beta", objectId: "beta", content: "beta" },
-        { candidateKey: "evidence:alpha", objectId: "alpha", content: "alpha" }
+        {
+          candidateKey: "evidence:beta",
+          evidenceObjectId: "beta",
+          documentIdentity: "gist",
+          content: "beta"
+        },
+        {
+          candidateKey: "evidence:alpha",
+          evidenceObjectId: "alpha",
+          documentIdentity: "gist",
+          content: "alpha"
+        }
       ]
     });
 
@@ -134,13 +144,13 @@ describe("EmbeddingRecallService evidence document cache", () => {
       candidates: [
         {
           candidateKey: "memory:1",
-          objectId: "memory-1",
+          evidenceObjectId: "evidence-weak",
           documentIdentity: "evidence-weak",
           content: "weak"
         },
         {
           candidateKey: "memory:1",
-          objectId: "memory-1",
+          evidenceObjectId: "evidence-strong",
           documentIdentity: "evidence-strong",
           content: "strong"
         }
@@ -149,6 +159,48 @@ describe("EmbeddingRecallService evidence document cache", () => {
 
     expect(result).toMatchObject({ expectedCount: 2, scoredCount: 2 });
     expect([...result.scores]).toEqual([["memory:1", 1]]);
+  });
+
+  it("persists linked documents under evidence identity while scoring memory identity", async () => {
+    const upsertMany = vi.fn(async () => undefined);
+    const service = new EmbeddingRecallService({
+      embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+      evidenceDocumentEmbeddingRepo: {
+        findByDocuments: vi.fn(async () => []),
+        upsertMany
+      },
+      provider: createProvider({
+        embedTexts: vi.fn(async (texts: readonly string[]) =>
+          texts.map(() => new Float32Array([1, 0])))
+      }),
+      eventLogRepo: {
+        append: vi.fn(),
+        queryByEntity: vi.fn(async () => [])
+      }
+    });
+
+    const result = await service.scoreEvidenceCandidates({
+      workspaceId: "workspace-1",
+      runId: null,
+      queryText: "query",
+      preparedQuery: null,
+      candidates: [{
+        candidateKey: "workspace_local:memory_entry:memory-1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "gist",
+        content: "grounded evidence"
+      }]
+    });
+
+    expect([...result.scores]).toEqual([
+      ["workspace_local:memory_entry:memory-1", 1]
+    ]);
+    expect(upsertMany).toHaveBeenCalledWith([
+      expect.objectContaining({
+        ownerObjectId: "evidence-1",
+        documentIdentity: "gist"
+      })
+    ]);
   });
 
   it("fails open on a document batch error and retries it on the next request", async () => {
@@ -173,7 +225,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       preparedQuery: null,
       candidates: [{
         candidateKey: "evidence:1",
-        objectId: "object-1",
+        evidenceObjectId: "object-1",
         documentIdentity: "owner",
         content: "document"
       }]
@@ -219,7 +271,7 @@ describe("EmbeddingRecallService evidence document cache", () => {
       },
       candidates: [{
         candidateKey: "evidence:1",
-        objectId: "object-1",
+        evidenceObjectId: "object-1",
         documentIdentity: "owner",
         content: "document"
       }]

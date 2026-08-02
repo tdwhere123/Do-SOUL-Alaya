@@ -87,6 +87,34 @@ describe("collectSupplementaryData", () => {
     expect(findByIds).toHaveBeenCalledTimes(2);
   });
 
+  it("projects the same direct-evidence owner document prepared by backfill", async () => {
+    const evidence = createEvidenceCapsule({
+      gist: "Conversation evidence gist.",
+      excerpt: "The original grounded conversation excerpt.",
+      source_hash: `sha256:garden-source-turn-fallback-v2:${"a".repeat(64)}`,
+      artifact_ref: "alaya:garden-turn-evidence:signal-1"
+    });
+    const candidate = createMemoryEntry({
+      object_id: "memory-grounded-evidence",
+      evidence_refs: [evidence.object_id]
+    });
+    const result = await collectWith({
+      candidates: [candidate],
+      graphSupportPort: emptyGraphSupportPort(),
+      evidenceSearchPort: {
+        searchByKeyword: vi.fn(async () => []),
+        findByIds: vi.fn(async () => [evidence])
+      }
+    });
+
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id])
+      .toEqual([{
+        evidenceRef: evidence.object_id,
+        documentIdentity: "owner",
+        content: evidence.excerpt
+      }]);
+  });
+
   it("collects proposed routing keys without promoting their authority", async () => {
     const candidate = createMemoryEntry({ object_id: "memory-key" });
     const result = await collectWith({
@@ -159,11 +187,8 @@ describe("collectSupplementaryData", () => {
     });
 
     expect(result.evidenceGistsByMemoryId[candidate.object_id]).toBe(evidence.gist);
-    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id]).toEqual([{
-      evidenceRef: evidence.object_id,
-      documentIdentity: evidence.object_id,
-      content: evidence.gist
-    }]);
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id])
+      .toBeUndefined();
     expect(result.verifiedUserAssertionContextsByMemoryId?.[candidate.object_id])
       .toEqual({
         schema_version: 1,
@@ -221,11 +246,8 @@ describe("collectSupplementaryData", () => {
     });
 
     expect(result.evidenceGistsByMemoryId[candidate.object_id]).toBeUndefined();
-    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id]).toEqual([{
-      evidenceRef: evidence.object_id,
-      documentIdentity: evidence.object_id,
-      content: evidence.gist
-    }]);
+    expect(result.evidenceSemanticDocumentsByMemoryId?.[candidate.object_id])
+      .toBeUndefined();
     expect(result.verifiedUserAssertionContextsByMemoryId?.[candidate.object_id])
       .toMatchObject({ assertion_text: content, evidence_ref: evidence.object_id });
   });
@@ -623,6 +645,7 @@ function createEvidenceCapsule(overrides: Readonly<{
   readonly gist: string;
   readonly excerpt: string;
   readonly source_hash?: string | null;
+  readonly artifact_ref?: string | null;
 }>) {
   const digest = createHash("sha256")
     .update(buildVerifiedUserAssertionReceiptPreimage(
@@ -644,7 +667,14 @@ function createEvidenceCapsule(overrides: Readonly<{
       summary: "User supplied a grounded recall assertion."
     },
     event_anchor: null,
-    physical_anchor: null,
+    physical_anchor: overrides.artifact_ref === undefined
+      ? null
+      : {
+          file_path: null,
+          line_range: null,
+          symbol_name: null,
+          artifact_ref: overrides.artifact_ref
+        },
     evidence_health_state: overrides.evidence_health_state ?? "verified",
     gist: overrides.gist,
     excerpt: overrides.excerpt,

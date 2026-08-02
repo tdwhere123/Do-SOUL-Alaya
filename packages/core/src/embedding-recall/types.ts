@@ -176,7 +176,7 @@ export interface PreparedEmbeddingSupplement {
 
 export interface EvidenceEmbeddingCandidate {
   readonly candidateKey: string;
-  readonly objectId: string;
+  readonly evidenceObjectId: string;
   readonly documentIdentity: string;
   readonly content: string;
 }

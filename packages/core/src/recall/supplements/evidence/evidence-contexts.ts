@@ -9,6 +9,10 @@ import {
   projectVerifiedUserAssertionContext,
   type RecallVerifiedUserAssertionContext
 } from "../../query/recall-user-assertion-context.js";
+import { createBoundedNonMemoryPreview } from
+  "../../coarse-filter/non-memory-preview.js";
+import { isDirectRecallEvidence } from
+  "../../coarse-filter/evidence/direct-evidence-candidate.js";
 import { uniqueStrings } from "../../expansion/path-relations.js";
 import {
   errorNameOf,
@@ -154,7 +158,9 @@ function buildMemoryEvidenceContexts(
     if (gist !== undefined) gists[entry.object_id] = gist;
   }
   for (const entry of authorityCandidates) {
-    const documents = semanticEvidenceDocuments(entry, evidenceById, ranksByRef);
+    const documents = semanticEvidenceDocuments(
+      workspaceId, entry, evidenceById, ranksByRef
+    );
     if (documents.length > 0) semanticDocuments[entry.object_id] = documents;
     const context = projectUniqueVerifiedContext(entry, evidenceById);
     if (context !== null) contexts[entry.object_id] = context;
@@ -167,6 +173,7 @@ function buildMemoryEvidenceContexts(
 }
 
 function semanticEvidenceDocuments(
+  workspaceId: string,
   entry: Readonly<MemoryEntry>,
   evidenceById: ReadonlyMap<string, EvidenceRecord>,
   ranksByRef: Readonly<Record<string, number>>
@@ -175,12 +182,14 @@ function semanticEvidenceDocuments(
     .slice(0, MAX_REFS_PER_MEMORY)
     .flatMap((ref) => {
       const evidence = evidenceById.get(ref)?.evidence;
-      if (evidence === undefined || evidence.lifecycle_state !== "active" ||
-          evidence.evidence_health_state !== "verified") return [];
-      const content = evidence.gist.trim();
+      if (evidence === undefined ||
+          !isDirectRecallEvidence(evidence, workspaceId)) return [];
+      const content = createBoundedNonMemoryPreview(
+        evidence.excerpt ?? evidence.gist
+      );
       return content.length === 0 ? [] : [Object.freeze({
         evidenceRef: evidence.object_id,
-        documentIdentity: evidence.object_id,
+        documentIdentity: "owner",
         content
       })];
     }));

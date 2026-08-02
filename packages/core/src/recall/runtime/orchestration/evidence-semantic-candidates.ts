@@ -29,7 +29,7 @@ function directEvidenceCandidate(
 ): Readonly<EvidenceEmbeddingCandidate> {
   return Object.freeze({
     candidateKey: buildRecallCandidateDedupeKey(candidate),
-    objectId: candidate.entry.object_id,
+    evidenceObjectId: candidate.entry.object_id,
     documentIdentity: candidate.evidenceDocumentIdentity ?? "owner",
     content: candidate.entry.content
   });
@@ -41,8 +41,8 @@ function linkedEvidenceCandidate(
 ): Readonly<EvidenceEmbeddingCandidate> {
   return Object.freeze({
     candidateKey: buildRecallCandidateDedupeKey(candidate),
-    objectId: candidate.entry.object_id,
-    documentIdentity: `linked_evidence:${document.documentIdentity}`,
+    evidenceObjectId: document.evidenceRef,
+    documentIdentity: document.documentIdentity,
     content: document.content
   });
 }
