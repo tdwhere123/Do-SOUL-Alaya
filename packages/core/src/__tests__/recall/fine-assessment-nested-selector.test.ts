@@ -4,6 +4,7 @@ import { createSelectionContext } from
 import {
   projectFineAssessmentNestedField,
   projectFineAssessmentNestedCandidate,
+  refineNestedFineAssessmentCandidates,
   selectNestedFineAssessmentCandidates
 } from
   "../../recall/delivery/nested-selector/fine-assessment-nested-selector.js";
@@ -19,13 +20,15 @@ import {
 } from "./fine-assessment-selection-fixtures.js";
 
 describe("selectNestedFineAssessmentCandidates", () => {
-  it("preserves the existing order exactly when semantic observation is absent", () => {
+  it("keeps one selector active when semantic observation is absent", () => {
     const candidates = [ranked("one", 1, null), ranked("two", 2, null)];
     const result = selectNestedFineAssessmentCandidates(candidates, context(candidates));
 
-    expect(result.status).toBe("no_semantic_observation");
-    expect(result.orderedCandidates).toBe(candidates);
-    expect(result.plan).toBeNull();
+    expect(result.orderedCandidates).toEqual(candidates);
+    expect(result.plan?.packKeys).toEqual([
+      "workspace_local:memory_entry:one",
+      "workspace_local:memory_entry:two"
+    ]);
   });
 
   it("projects source-role demand into the nested semantic selection", () => {
@@ -39,7 +42,6 @@ describe("selectNestedFineAssessmentCandidates", () => {
       context(candidates, "Which option did you recommend?", 1)
     );
 
-    expect(result.status).toBe("selected");
     expect(result.plan?.headKeys).toEqual([
       "workspace_local:evidence_capsule:answer"
     ]);
@@ -120,6 +122,47 @@ describe("selectNestedFineAssessmentCandidates", () => {
     expect(projected[0]?.coreDemandIds).toEqual([]);
   });
 
+  it("withholds supporting coverage from an uncorroborated channel", () => {
+    const candidate = withContent(
+      withStreamRank(ranked("candidate", 12, null), "lexical_fts", 1),
+      "I joined several unrelated communities."
+    );
+    const projected = projectFineAssessmentNestedField(
+      [candidate], context([candidate], "Which online communities did I join?")
+    );
+
+    expect(projected[0]?.supportingDemandIds).toEqual([]);
+  });
+
+  it("retains supporting coverage when independent channels corroborate it", () => {
+    const candidate = withContent(
+      attributedUser(withStreamRank(
+        ranked("candidate", 12, 1, "evidence_capsule"), "lexical_fts", 1
+      )),
+      "I joined several online communities."
+    );
+    const projected = projectFineAssessmentNestedField(
+      [candidate], context([candidate], "Which online communities did I join?")
+    );
+
+    expect(projected[0]?.supportingDemandIds).toEqual(expect.arrayContaining([
+      "target:online", "target:communities", "phrase:online communities"
+    ]));
+  });
+
+  it("does not reward text matches without an Evidence validity receipt", () => {
+    const candidate = withoutEvidence(withContent(
+      withStreamRank(ranked("candidate", 1, 1), "lexical_fts", 1),
+      "I bought my new bookshelf from IKEA."
+    ));
+    const projected = projectFineAssessmentNestedField(
+      [candidate], context([candidate], "Where did I buy my new bookshelf?")
+    );
+
+    expect(projected[0]?.supportingDemandIds).toEqual([]);
+    expect(projected[0]?.applicabilityDemandIds).toContain("target:bookshelf");
+  });
+
   it("retains core demand authority when independent channels corroborate it", () => {
     const answer = attributedAnswer(withStreamRank(
       ranked("answer", 12, 1, "evidence_capsule"), "lexical_fts", 1
@@ -129,6 +172,110 @@ describe("selectNestedFineAssessmentCandidates", () => {
     );
 
     expect(projected[0]?.coreDemandIds).toContain("source_role:assistant");
+  });
+
+  it("retains same-candidate conjunctive demand with one strong channel", () => {
+    const answer = withContent(attributedAnswer(
+      withStreamRank(ranked("answer", 12, null, "evidence_capsule"), "lexical_fts", 1)
+    ), "I recommend the Rust language.");
+    const projected = projectFineAssessmentNestedField(
+      [answer], context([answer], "Which language did you recommend?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toContain("source_role:assistant");
+  });
+
+  it("does not let a relation alone qualify broad source-role demand", () => {
+    const candidate = withContent(attributedUser(
+      withStreamRank(ranked("candidate", 12, null, "evidence_capsule"), "graph_expansion", 1)
+    ), "I take the train every morning.");
+    const projected = projectFineAssessmentNestedField(
+      [candidate], context([candidate], "Where do I take yoga classes?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toEqual([]);
+    expect(projected[0]?.supportingDemandIds).toEqual([]);
+  });
+
+  it("binds personalized recommendation demand to user preference Evidence", () => {
+    const preference = withPreferenceDimension(attributedUser(
+      ranked("preference", 12, 1, "evidence_capsule")
+    ));
+    const projected = projectFineAssessmentNestedField(
+      [preference],
+      context([preference], "Can you recommend a restaurant based on my preferences?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toEqual(expect.arrayContaining([
+      "answer_slot:recommendation",
+      "source_role:user"
+    ]));
+  });
+
+  it("binds personalized recommendation to a relevant user fact across noun inflection", () => {
+    const fact = withContent(attributedUser(
+      withStreamRank(ranked("fact", 12, null, "evidence_capsule"), "lexical_fts", 1)
+    ), "I enjoy classic cocktails at small get-togethers.");
+    const projected = projectFineAssessmentNestedField(
+      [fact], context([fact], "Can you suggest a cocktail for my get-together?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toEqual(expect.arrayContaining([
+      "answer_slot:recommendation",
+      "source_role:user"
+    ]));
+    expect(projected[0]?.supportingDemandIds).toContain("target:cocktail");
+  });
+
+  it("uses an explicit source-target conjunction for episodic user Evidence", () => {
+    const episode = withContent(attributedUser(
+      withStreamRank(ranked("episode", 12, null, "evidence_capsule"), "lexical_fts", 1)
+    ), "I stayed at a quiet hotel in Miami.");
+    const projected = projectFineAssessmentNestedField(
+      [episode], context([episode], "Can you suggest a hotel for my Miami trip?")
+    );
+
+    expect(projected[0]?.coreDemandIds).toContain("source_role:user");
+    expect(projected[0]?.coreDemandIds).toContain("answer_slot:recommendation");
+    expect(projected[0]?.conjunctiveCoreDemandIds.some((id) =>
+      id.includes("source_role:user") && id.includes("target:hotel"))).toBe(true);
+    expect(projected[0]?.coreDemandIds.some((id) =>
+      id.startsWith("conjunction:"))).toBe(false);
+  });
+
+  it("can safely exchange a qualified lexical candidate without semantic state", () => {
+    const plain = ranked("plain", 1, null);
+    const answer = withContent(attributedAnswer(
+      withStreamRank(ranked("answer", 8, null, "evidence_capsule"), "lexical_fts", 1)
+    ), "I recommend the Rust language.");
+    const candidates = [plain, answer];
+    const result = refineNestedFineAssessmentCandidates(
+      candidates,
+      context(candidates, "Which language did you recommend?", 1),
+      {
+        headKeys: ["workspace_local:memory_entry:plain"],
+        packKeys: ["workspace_local:memory_entry:plain"]
+      }
+    );
+
+    expect(result.plan?.headKeys).toEqual([
+      "workspace_local:evidence_capsule:answer"
+    ]);
+  });
+
+  it("grants latest ordering coverage only to the applicable temporal extremum", () => {
+    const earlier = withEventTime(withContent(attributedUser(
+      withStreamRank(ranked("earlier", 1, null, "evidence_capsule"), "lexical_fts", 1)
+    ), "I visited Rome."), "2025-01-01T00:00:00.000Z");
+    const later = withEventTime(withContent(attributedUser(
+      withStreamRank(ranked("later", 2, null, "evidence_capsule"), "lexical_fts", 2)
+    ), "I visited Paris."), "2025-02-01T00:00:00.000Z");
+    const projected = projectFineAssessmentNestedField(
+      [earlier, later], context([earlier, later], "What was the latest place I visited?")
+    );
+
+    expect(projected[0]?.coreDemandIds).not.toContain("ordering:latest");
+    expect(projected[1]?.coreDemandIds).toContain("ordering:latest");
   });
 });
 
@@ -195,5 +342,49 @@ function attributedAnswer(candidate: FineAssessmentCandidate): FineAssessmentCan
     ...candidate,
     evidenceDocumentIdentity: "assistant_observation:1",
     evidenceSourceRole: "assistant"
+  };
+}
+
+function attributedUser(candidate: FineAssessmentCandidate): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    evidenceDocumentIdentity: "user_observation:1",
+    evidenceSourceRole: "user"
+  };
+}
+
+function withContent(
+  candidate: FineAssessmentCandidate,
+  content: string
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    entry: { ...candidate.entry, content }
+  };
+}
+
+function withoutEvidence(candidate: FineAssessmentCandidate): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    entry: { ...candidate.entry, evidence_refs: [] }
+  };
+}
+
+function withEventTime(
+  candidate: FineAssessmentCandidate,
+  eventTime: string
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    entry: { ...candidate.entry, event_time_start: eventTime }
+  };
+}
+
+function withPreferenceDimension(
+  candidate: FineAssessmentCandidate
+): FineAssessmentCandidate {
+  return {
+    ...candidate,
+    entry: { ...candidate.entry, dimension: "preference" }
   };
 }

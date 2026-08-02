@@ -5,7 +5,10 @@ import type { RecallCandidateAnswerSupport } from
   "../../query/recall-candidate-answer-support.js";
 import { isWorkspaceMemoryCandidate } from
   "../../runtime/recall-service-helpers.js";
-import { splitLexicalTokens } from "../../query/recall-query-probes.js";
+import {
+  foldLexicalMorphology,
+  splitLexicalTokens
+} from "../../query/recall-query-probes.js";
 import { compileRecallQueryDemand } from
   "../../query/recall-query-demand.js";
 import type {
@@ -55,9 +58,11 @@ function buildDemandObservation(
   }).atoms;
   const content = candidate.entry.content.toLocaleLowerCase();
   const contentTokens = new Set(splitLexicalTokens(candidate.entry.content));
+  const evidence = evidenceText(candidate, context);
+  const evidenceTokens = new Set(splitLexicalTokens(evidence));
   const matches = atoms.flatMap((atom) => {
     const source = matchDemandAtom(
-      atom, candidate, context, content, contentTokens, support
+      atom, candidate, context, content, contentTokens, evidence, evidenceTokens, support
     );
     return source === null ? [] : [{ ...atom, source }];
   });
@@ -77,23 +82,26 @@ function matchDemandAtom(
   context: FineAssessmentSelectionContext,
   content: string,
   contentTokens: ReadonlySet<string>,
+  evidence: string,
+  evidenceTokens: ReadonlySet<string>,
   support: Readonly<RecallCandidateAnswerSupport> | undefined
 ): RecallSelectorDemandMatch["source"] | null {
   switch (atom.kind) {
     case "target":
     case "relation":
-      return contentTokens.has(atom.value) ? "content" : null;
+      return matchesTextValue(atom.value, contentTokens, evidenceTokens);
     case "phrase":
-      return content.includes(atom.value) ? "content" : null;
+      return content.includes(atom.value) ? "content"
+        : evidence.includes(atom.value) ? "evidence" : null;
     case "temporal":
       return eventOverlapsQueryWindow(candidate, context) ? "temporal"
         : content.includes(atom.value) ? "content" : null;
     case "source_role":
-      return candidate.evidenceSourceRole === atom.value ? "source_role" : null;
+      return matchesSourceRole(atom.value, candidate, support) ? "source_role" : null;
     case "ordering":
       return candidate.entry.event_time_start === undefined ? null : "temporal";
     case "answer_slot":
-      return matchesAnswerSlot(atom.value, support) ? "evidence" : null;
+      return matchesAnswerSlot(atom.value, candidate, support) ? "evidence" : null;
     case "object_id":
       return candidate.entry.object_id.toLocaleLowerCase() === atom.value
         ? "key" : null;
@@ -116,10 +124,33 @@ function matchDemandAtom(
   }
 }
 
+function evidenceText(
+  candidate: FineAssessmentCandidate,
+  context: FineAssessmentSelectionContext
+): string {
+  if (!isWorkspaceMemoryCandidate(candidate)) return "";
+  return context.supplementaryData.evidenceGistsByMemoryId[
+    candidate.entry.object_id
+  ]?.toLocaleLowerCase() ?? "";
+}
+
+function matchesTextValue(
+  value: string,
+  contentTokens: ReadonlySet<string>,
+  evidenceTokens: ReadonlySet<string>
+): RecallSelectorDemandMatch["source"] | null {
+  if (matchesLexicalValue(value, contentTokens)) return "content";
+  return matchesLexicalValue(value, evidenceTokens) ? "evidence" : null;
+}
+
 function matchesAnswerSlot(
   slot: string,
+  candidate: FineAssessmentCandidate,
   support: Readonly<RecallCandidateAnswerSupport> | undefined
 ): boolean {
+  if (slot === "recommendation") {
+    return isPersonalizationEvidence(candidate) || isVerifiedUserEvidence(candidate, support);
+  }
   if (support === undefined || !support.target_supported || !support.relation_supported) {
     return false;
   }
@@ -135,6 +166,48 @@ function matchesAnswerSlot(
     default:
       return false;
   }
+}
+
+function matchesLexicalValue(
+  value: string,
+  contentTokens: ReadonlySet<string>
+): boolean {
+  const queryForms = lexicalForms(value);
+  return [...contentTokens].some((token) =>
+    [...lexicalForms(token)].some((form) => queryForms.has(form))
+  );
+}
+
+function lexicalForms(value: string): ReadonlySet<string> {
+  const normalized = value.replace(/[.]+$/u, "").toLocaleLowerCase();
+  return new Set([normalized, ...foldLexicalMorphology(normalized)]);
+}
+
+function matchesSourceRole(
+  role: string,
+  candidate: FineAssessmentCandidate,
+  support: Readonly<RecallCandidateAnswerSupport> | undefined
+): boolean {
+  if (candidate.evidenceSourceRole === role) return true;
+  return role === "user" && isVerifiedUserEvidence(candidate, support);
+}
+
+function isVerifiedUserEvidence(
+  candidate: FineAssessmentCandidate,
+  support: Readonly<RecallCandidateAnswerSupport> | undefined
+): boolean {
+  return candidate.evidenceSourceRole === "user" ||
+    candidate.verifiedUserSupportSource !== undefined ||
+    support?.authority?.provenance_status === "verified_user_assertion";
+}
+
+function isPersonalizationEvidence(candidate: FineAssessmentCandidate): boolean {
+  return String(candidate.entry.dimension) === "preference" ||
+    candidate.entry.preference_subject != null ||
+    candidate.entry.preference_predicate != null ||
+    candidate.entry.preference_object != null ||
+    candidate.entry.preference_category != null ||
+    candidate.entry.preference_polarity != null;
 }
 
 function eventOverlapsQueryWindow(

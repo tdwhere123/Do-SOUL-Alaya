@@ -195,6 +195,39 @@ describe("candidate selector observation", () => {
     });
   });
 
+  it("attributes demand matches found only in linked Evidence", () => {
+    const memory = createCandidate("down-dog", {
+      content: "I enjoy using Down Dog for home practice.",
+      evidence_refs: ["down-dog-evidence"]
+    });
+    const result = selectFineAssessmentCandidates({
+      orderedCandidates: [memory],
+      config: createConfig(),
+      supplementaryData: createSupplementaryData({
+        queryProbes: compileRecallQueryProbes("Where do I take yoga classes?"),
+        evidenceGistsByMemoryId: {
+          "down-dog": "I use Down Dog when I cannot make it to Serenity Yoga classes."
+        }
+      }),
+      tokenEstimator: { estimate: vi.fn(() => 6) },
+      rankByCandidateKey: rankMap([memory]),
+      captureAnswerFeatures: true
+    });
+
+    expect(result.diagnostics[0]?.selector_observation?.demand.matches).toEqual(
+      expect.arrayContaining([
+        {
+          id: "target:yoga", kind: "target", value: "yoga",
+          priority: "supporting", source: "evidence"
+        },
+        {
+          id: "target:classes", kind: "target", value: "classes",
+          priority: "supporting", source: "evidence"
+        }
+      ])
+    );
+  });
+
   it("marks a failed governance Path lookup as unavailable", async () => {
     const memory = createCandidate("memory-1");
     const result = await collectGovernancePathDerivations({

@@ -1,4 +1,8 @@
 import type { RecallQueryProbes } from "./recall-query-probes.js";
+import {
+  isRecallQueryOperatorTerm,
+  isRecallQueryRelationTerm
+} from "./demand/query-term-role.js";
 
 export type RecallAnswerShape =
   | "place"
@@ -25,97 +29,6 @@ const SUM_CUE =
   /\bhow much\s+total\b|\btotal\s+(?:money|amount|cost)\b|\b(?:sum|total)\b.{0,32}\b(?:spent|paid|expenses?|costs?)\b/iu;
 const COUNT_CUE = /\bhow many\b/iu;
 
-const ANSWER_OPERATOR_TERMS = new Set([
-  "am",
-  "are",
-  "be",
-  "been",
-  "being",
-  "can",
-  "could",
-  "did",
-  "do",
-  "does",
-  "where",
-  "how",
-  "long",
-  "many",
-  "much",
-  "total",
-  "money",
-  "amount",
-  "cost",
-  "different",
-  "distinct",
-  "unique",
-  "current",
-  "favorite",
-  "favourite",
-  "first",
-  "last",
-  "local",
-  "new",
-  "previous",
-  "second",
-  "seconds",
-  "minute",
-  "minutes",
-  "hour",
-  "hours",
-  "day",
-  "days",
-  "week",
-  "weeks",
-  "month",
-  "months",
-  "year",
-  "years",
-  "may",
-  "might",
-  "should",
-  "was",
-  "were",
-  "will",
-  "would"
-]);
-
-const RELATION_TERMS = new Set([
-  "attend",
-  "attended",
-  "assemble",
-  "assembled",
-  "bought",
-  "buy",
-  "collect",
-  "collected",
-  "complete",
-  "completed",
-  "cost",
-  "costs",
-  "have",
-  "live",
-  "lived",
-  "marinate",
-  "marinated",
-  "meet",
-  "met",
-  "move",
-  "moved",
-  "own",
-  "paid",
-  "pay",
-  "redeem",
-  "redeemed",
-  "spend",
-  "spent",
-  "take",
-  "took",
-  "visit",
-  "visited",
-  "wait",
-  "waited"
-]);
-
 export function compileRecallAnswerShapePlan(
   probes: Readonly<RecallQueryProbes>
 ): Readonly<RecallAnswerShapePlan> {
@@ -125,9 +38,9 @@ export function compileRecallAnswerShapePlan(
     return emptyPlan(shapes.length > 1 ? "ambiguous" : "unknown");
   }
 
-  const relationTerms = probes.lexical_terms.filter((term) => RELATION_TERMS.has(term));
+  const relationTerms = probes.lexical_terms.filter(isRecallQueryRelationTerm);
   const targetTerms = probes.lexical_terms.filter(
-    (term) => !ANSWER_OPERATOR_TERMS.has(term) && !RELATION_TERMS.has(term)
+    (term) => !isRecallQueryOperatorTerm(term) && !isRecallQueryRelationTerm(term)
   );
   if (targetTerms.length === 0) {
     return emptyPlan("unknown");

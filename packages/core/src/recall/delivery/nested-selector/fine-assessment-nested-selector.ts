@@ -21,9 +21,8 @@ import {
 } from "./lexicographic-set-selector.js";
 
 export interface FineAssessmentNestedSelection {
-  readonly status: "selected" | "no_semantic_observation";
   readonly orderedCandidates: readonly FineAssessmentCandidate[];
-  readonly plan: Readonly<NestedSetSelectionResult> | null;
+  readonly plan: Readonly<NestedSetSelectionResult>;
 }
 
 const DEMAND_ACTIVATION_SCENARIOS = Object.freeze([
@@ -40,20 +39,12 @@ export function selectNestedFineAssessmentCandidates(
   context: FineAssessmentSelectionContext
 ): Readonly<FineAssessmentNestedSelection> {
   const projected = projectFineAssessmentNestedField(candidates, context);
-  if (!projected.some((candidate) => finiteRank(candidate.scenarioRanks.semantic))) {
-    return Object.freeze({
-      status: "no_semantic_observation",
-      orderedCandidates: candidates,
-      plan: null
-    });
-  }
   const packSize = Math.min(context.config.budgets.max_entries, candidates.length);
   const plan = selectLexicographicNestedSet(projected, {
     headSize: Math.min(5, packSize),
     packSize
   });
   return Object.freeze({
-    status: "selected",
     orderedCandidates: reorderCandidates(candidates, plan.packKeys),
     plan
   });
@@ -65,20 +56,12 @@ export function refineNestedFineAssessmentCandidates(
   incumbent: Readonly<IncumbentNestedSetInput>
 ): Readonly<FineAssessmentNestedSelection> {
   const projected = projectFineAssessmentNestedField(candidates, context);
-  if (!projected.some((candidate) => finiteRank(candidate.scenarioRanks.semantic))) {
-    return Object.freeze({
-      status: "no_semantic_observation",
-      orderedCandidates: candidates,
-      plan: null
-    });
-  }
   const packSize = Math.min(context.config.budgets.max_entries, incumbent.packKeys.length);
   const plan = refineIncumbentNestedSet(projected, incumbent, {
     headSize: Math.min(5, packSize),
     packSize
   });
   return Object.freeze({
-    status: "selected",
     orderedCandidates: reorderCandidates(candidates, plan.packKeys),
     plan
   });
@@ -97,7 +80,9 @@ export function projectFineAssessmentNestedField(
     })
   );
   return gateDemandCoverage(
-    calibrateScenarioRankTies(projected),
+    calibrateOrderingDemandCoverage(
+      calibrateScenarioRankTies(projected), candidates
+    ),
     context.config.budgets.max_entries
   );
 }
@@ -110,6 +95,10 @@ export function projectFineAssessmentNestedCandidate(
 ): NestedSetCandidate {
   const observation = buildCandidateSelectorObservation(candidate, context);
   const demandMatches = observation.demand.matches;
+  const coreDemandIds = validCoreDemandIds(observation);
+  const conjunctiveDemandIds = conjunctiveCoreDemandIds(
+    demandMatches, coreDemandIds
+  );
   const activation = context.supplementaryData.keyActivationByOwnerIdentity?.get(
     buildRecallLogicalObjectKey(candidate)
   );
@@ -121,12 +110,12 @@ export function projectFineAssessmentNestedCandidate(
       ...familyScenarioRanks(candidate),
       ...additionalScenarioRanks
     }),
-    coreDemandIds: Object.freeze(demandEvidenceIsValid(observation) ? demandMatches
-      .filter(({ priority }) => priority === "core")
-      .map(({ id }) => id) : []),
-    supportingDemandIds: Object.freeze(demandMatches
-      .filter(({ priority }) => priority === "supporting")
-      .map(({ id }) => id)),
+    coreDemandIds,
+    conjunctiveCoreDemandIds: conjunctiveDemandIds,
+    supportingDemandIds: validSupportingDemandIds(observation),
+    applicabilityDemandIds: applicabilityDemandIds(
+      demandMatches, conjunctiveDemandIds
+    ),
     evidenceGroup: evidenceGroup(candidate, context),
     proposalSupport: activation?.proposal_activation ?? 0,
     risk: selectorRisk(observation),
@@ -243,27 +232,161 @@ function conservativeScenarioRank(
   return Math.max(rank, observedBeforeOrTied);
 }
 
+function calibrateOrderingDemandCoverage(
+  projected: readonly NestedSetCandidate[],
+  candidates: readonly FineAssessmentCandidate[]
+): readonly NestedSetCandidate[] {
+  const sourceByKey = new Map(candidates.map((candidate) => [
+    buildRecallCandidateDedupeKey(candidate), candidate
+  ]));
+  const orderingIds = new Set(projected.flatMap(({ coreDemandIds }) =>
+    coreDemandIds.filter((id) => id.startsWith("ordering:"))
+  ));
+  const eligibleByOrdering = new Map([...orderingIds].map((id) => [
+    id, eligibleOrderingKeys(id, projected, sourceByKey)
+  ]));
+  return Object.freeze(projected.map((candidate) => Object.freeze({
+    ...candidate,
+    coreDemandIds: filterOrderingIds(candidate.coreDemandIds, candidate.key, eligibleByOrdering),
+    conjunctiveCoreDemandIds: filterOrderingIds(
+      candidate.conjunctiveCoreDemandIds, candidate.key, eligibleByOrdering
+    )
+  })));
+}
+
+function eligibleOrderingKeys(
+  orderingId: string,
+  projected: readonly NestedSetCandidate[],
+  sourceByKey: ReadonlyMap<string, FineAssessmentCandidate>
+): ReadonlySet<string> {
+  const applicable = projected.filter((candidate) =>
+    candidate.coreDemandIds.includes(orderingId) &&
+    candidate.supportingDemandIds.some((id) =>
+      id.startsWith("target:") || id.startsWith("relation:") || id.startsWith("phrase:"))
+  );
+  if (orderingId === "ordering:sequence") {
+    return new Set(applicable.map(({ key }) => key));
+  }
+  const times = applicable.map(({ key }) => ({
+    key,
+    time: Date.parse(sourceByKey.get(key)?.entry.event_time_start ?? "")
+  })).filter(({ time }) => Number.isFinite(time));
+  if (times.length === 0) return new Set();
+  const extreme = orderingId === "ordering:earliest"
+    ? Math.min(...times.map(({ time }) => time))
+    : Math.max(...times.map(({ time }) => time));
+  return new Set(times.filter(({ time }) => time === extreme).map(({ key }) => key));
+}
+
+function filterOrderingIds(
+  ids: readonly string[],
+  candidateKey: string,
+  eligibleByOrdering: ReadonlyMap<string, ReadonlySet<string>>
+): readonly string[] {
+  return Object.freeze(ids.filter((id) => [...eligibleByOrdering].every(
+    ([orderingId, eligible]) =>
+      !containsDemandId(id, orderingId) || eligible.has(candidateKey)
+  )));
+}
+
+function containsDemandId(id: string, demandId: string): boolean {
+  return id === demandId || id.startsWith(`conjunction:${demandId}&`) ||
+    id.endsWith(`&${demandId}`);
+}
+
 function gateDemandCoverage(
   candidates: readonly NestedSetCandidate[],
   packSize: number
 ): readonly NestedSetCandidate[] {
-  return Object.freeze(candidates.map((candidate) => Object.freeze({
-    ...candidate,
-    coreDemandIds: hasCorroboratedDemandActivation(candidate, packSize)
-      ? candidate.coreDemandIds
-      : Object.freeze([])
-  })));
+  return Object.freeze(candidates.map((candidate) => {
+    const observed = observedDemandScenarios(candidate, packSize);
+    const conjunctive = observed.length === 1 &&
+      candidate.conjunctiveCoreDemandIds.length > 0;
+    return Object.freeze({
+      ...candidate,
+      coreDemandIds: observed.length >= 2 || conjunctive
+        ? candidate.coreDemandIds
+        : Object.freeze([]),
+      supportingDemandIds: observed.length >= 2 || conjunctive
+        ? candidate.supportingDemandIds
+        : Object.freeze([])
+    });
+  }));
 }
 
-function hasCorroboratedDemandActivation(
+function observedDemandScenarios(
   candidate: NestedSetCandidate,
   packSize: number
-): boolean {
-  const observed = DEMAND_ACTIVATION_SCENARIOS.filter((scenario) => {
+): readonly string[] {
+  return DEMAND_ACTIVATION_SCENARIOS.filter((scenario) => {
     const rank = candidate.scenarioRanks[scenario];
     return finiteRank(rank) && rank <= packSize;
   });
-  return observed.length >= 2;
+}
+
+function validCoreDemandIds(
+  observation: ReturnType<typeof buildCandidateSelectorObservation>
+): readonly string[] {
+  if (!demandEvidenceIsValid(observation)) return Object.freeze([]);
+  return Object.freeze(observation.demand.matches
+    .filter(({ priority }) => priority === "core")
+    .map(({ id }) => id));
+}
+
+function validSupportingDemandIds(
+  observation: ReturnType<typeof buildCandidateSelectorObservation>
+): readonly string[] {
+  if (!demandEvidenceIsValid(observation)) return Object.freeze([]);
+  return Object.freeze(observation.demand.matches
+    .filter(isSelectorSupportingMatch)
+    .map(({ id }) => id));
+}
+
+function conjunctiveCoreDemandIds(
+  matches: ReturnType<typeof buildCandidateSelectorObservation>["demand"]["matches"],
+  coreDemandIds: readonly string[]
+): readonly string[] {
+  const coreMatches = matches.filter(({ priority }) => priority === "core");
+  const exactCore = coreMatches.some(({ kind }) =>
+    kind === "object_id" || kind === "evidence_ref");
+  const supportingPairs = coreMatches.flatMap((core) =>
+    matches.filter((match) => qualifiesCoreBinding(core.kind, match))
+      .map((supporting) => conjunctionId(core.id, supporting.id))
+  );
+  return exactCore || supportingPairs.length > 0
+    ? Object.freeze([...new Set([
+        ...(exactCore ? coreDemandIds : []),
+        ...supportingPairs
+      ])])
+    : Object.freeze([]);
+}
+
+function qualifiesCoreBinding(
+  coreKind: string,
+  match: ReturnType<typeof buildCandidateSelectorObservation>["demand"]["matches"][number]
+): boolean {
+  return isSelectorSupportingMatch(match) &&
+    (match.kind !== "relation" || coreKind === "ordering");
+}
+
+function isSelectorSupportingMatch(
+  match: ReturnType<typeof buildCandidateSelectorObservation>["demand"]["matches"][number]
+): boolean {
+  return match.priority === "supporting" &&
+    (match.kind === "target" || match.kind === "relation" ||
+      match.kind === "phrase" || match.kind === "facet");
+}
+
+function applicabilityDemandIds(
+  matches: ReturnType<typeof buildCandidateSelectorObservation>["demand"]["matches"],
+  conjunctiveIds: readonly string[]
+): readonly string[] {
+  const supporting = matches.filter(isSelectorSupportingMatch).map(({ id }) => id);
+  return Object.freeze([...new Set([...supporting, ...conjunctiveIds])]);
+}
+
+function conjunctionId(left: string, right: string): string {
+  return `conjunction:${[left, right].sort().join("&")}`;
 }
 
 function demandEvidenceIsValid(

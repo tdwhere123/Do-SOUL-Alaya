@@ -38,10 +38,10 @@ describe("selectLexicographicNestedSet", () => {
     expect(result.headKeys).toContain("f1");
   });
 
-  it("uses core demand coverage only after primary scenario utility ties", () => {
+  it("treats qualified core demand as the first selection contract", () => {
     const candidates = [
       candidate("plain", { delivery: 1, fusion: 1 }),
-      candidate("covers", { delivery: 1, fusion: 1 }, { coreDemandIds: ["source_role:assistant"] }),
+      candidate("covers", { delivery: 2, fusion: 2 }, { coreDemandIds: ["source_role:assistant"] }),
       candidate("tail", { delivery: 3, fusion: 3 })
     ];
 
@@ -96,7 +96,7 @@ describe("selectLexicographicNestedSet", () => {
     expect(result.headKeys).toContain("opportunity");
   });
 
-  it("allows an exchange only when the complete head is Pareto non-decreasing", () => {
+  it("does not overwrite an incumbent for activation alone", () => {
     const candidates = [
       candidate("fusion-anchor", { delivery: 1, fusion: 1, semantic: 8, lexical: 2 }),
       candidate("weak", { delivery: 2, fusion: 9, semantic: 9, lexical: 9 }),
@@ -108,8 +108,8 @@ describe("selectLexicographicNestedSet", () => {
       packKeys: ["fusion-anchor", "weak", "opportunity"]
     }, { headSize: 2, packSize: 3 });
 
-    expect(result.headKeys).toEqual(["fusion-anchor", "opportunity"]);
-    expect(result.packKeys).toEqual(["fusion-anchor", "opportunity", "weak"]);
+    expect(result.headKeys).toEqual(["fusion-anchor", "weak"]);
+    expect(result.packKeys).toEqual(["fusion-anchor", "weak", "opportunity"]);
   });
 
   it("rejects a head tradeoff that weakens any observed activation family", () => {
@@ -158,6 +158,60 @@ describe("selectLexicographicNestedSet", () => {
 
     expect(result.headKeys).toEqual(["first", "weak"]);
   });
+
+  it("lets a sparse channel propose without making it a global safety scenario", () => {
+    const candidates = [
+      candidate("anchor", { delivery: 1, fusion: 1 }),
+      candidate("weak", { delivery: 2, fusion: 8 }),
+      candidate("path", { delivery: 8, fusion: 9, graph_path: 1 }, {
+        coreDemandIds: ["relation:depends-on"]
+      })
+    ];
+
+    const result = refineIncumbentNestedSet(candidates, {
+      headKeys: ["anchor", "weak"],
+      packKeys: ["anchor", "weak", "path"]
+    }, { headSize: 2, packSize: 3 });
+
+    expect(result.scenarios).not.toContain("graph_path");
+    expect(result.headKeys).toEqual(["anchor", "path"]);
+  });
+
+  it("does not trade away unique supporting demand for stronger activation", () => {
+    const candidates = [
+      candidate("answer", { delivery: 2, fusion: 2, semantic: 2 }, {
+        supportingDemandIds: ["target:yoga", "target:classes"]
+      }),
+      candidate("broad", { delivery: 1, fusion: 1, semantic: 1 }, {
+        supportingDemandIds: ["target:yoga"]
+      })
+    ];
+
+    const result = refineIncumbentNestedSet(candidates, {
+      headKeys: ["answer"],
+      packKeys: ["answer", "broad"]
+    }, { headSize: 1, packSize: 2 });
+
+    expect(result.headKeys).toEqual(["answer"]);
+  });
+
+  it("requires one replacement witness to preserve a candidate's applicability", () => {
+    const candidates = [
+      candidate("coherent", { delivery: 1, semantic: 8, lexical: 8 }, {
+        applicabilityDemandIds: ["target:tea", "target:oil", "target:ratio"]
+      }),
+      candidate("fragment", { delivery: 8, semantic: 1, lexical: 1 }, {
+        applicabilityDemandIds: ["target:oil"]
+      })
+    ];
+
+    const result = refineIncumbentNestedSet(candidates, {
+      headKeys: ["coherent"],
+      packKeys: ["coherent", "fragment"]
+    }, { headSize: 1, packSize: 2 });
+
+    expect(result.headKeys).toEqual(["coherent"]);
+  });
 });
 
 function candidate(
@@ -169,7 +223,9 @@ function candidate(
     key,
     scenarioRanks,
     coreDemandIds: Object.freeze([]),
+    conjunctiveCoreDemandIds: Object.freeze([]),
     supportingDemandIds: Object.freeze([]),
+    applicabilityDemandIds: Object.freeze([]),
     evidenceGroup: null,
     proposalSupport: 0,
     risk: 0,

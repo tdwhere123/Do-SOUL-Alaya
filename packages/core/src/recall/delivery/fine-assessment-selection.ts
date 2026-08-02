@@ -128,15 +128,13 @@ function resolveSelectionConsensus(
       packKeys: incumbentConsensus.candidates.map(({ candidateKey }) => candidateKey)
     }
   );
-  const consensus = nested.plan === null
-    ? incumbentConsensus
-    : applyLexicographicNestedMembership({
-        plan: incumbentConsensus,
-        sourceCandidates: orderedCandidates,
-        headKeys: nested.plan.headKeys,
-        packKeys: nested.plan.packKeys,
-        membershipGovernance
-      });
+  const consensus = applyLexicographicNestedMembership({
+    plan: incumbentConsensus,
+    sourceCandidates: orderedCandidates,
+    headKeys: nested.plan.headKeys,
+    packKeys: nested.plan.packKeys,
+    membershipGovernance
+  });
   const consensusResult = applyFinalPacketConsensus(
     consensus,
     delivered,

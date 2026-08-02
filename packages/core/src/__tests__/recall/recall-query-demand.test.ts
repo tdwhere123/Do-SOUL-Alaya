@@ -23,9 +23,31 @@ describe("compileRecallQueryDemand", () => {
     expect(demand.atoms).not.toContainEqual(
       atom("source_role", "assistant", "core")
     );
-    expect(demand.atoms).toContainEqual(
+    expect(demand.atoms).toEqual(expect.arrayContaining([
+      atom("answer_slot", "recommendation", "core"),
+      atom("source_role", "user", "core"),
       atom("relation", "recommend", "supporting")
+    ]));
+  });
+
+  it("keeps retrospective recommendations on the Assistant evidence source", () => {
+    const demand = compile("What did you recommend for my previous project?");
+
+    expect(demand.atoms).toContainEqual(
+      atom("source_role", "assistant", "core")
     );
+    expect(demand.atoms).not.toContainEqual(
+      atom("answer_slot", "recommendation", "core")
+    );
+  });
+
+  it("represents open-ended personal tips as recommendation demand", () => {
+    const demand = compile("I'm planning meal prep next week, any suggestions?");
+
+    expect(demand.atoms).toEqual(expect.arrayContaining([
+      atom("answer_slot", "recommendation", "core"),
+      atom("source_role", "user", "core")
+    ]));
   });
 
   it("keeps colloquial time and the requested fact as independent demands", () => {
@@ -65,6 +87,40 @@ describe("compileRecallQueryDemand", () => {
     ]));
   });
 
+  it("keeps retrieval intent words out of target applicability", () => {
+    const demand = compile(
+      "I was looking back at our previous chat and wanted to confirm, " +
+      "how many times did the Chiefs play the Jaguars at Arrowhead Stadium?"
+    );
+
+    expect(demand.atoms).toEqual(expect.arrayContaining([
+      atom("answer_slot", "count", "core"),
+      atom("relation", "play", "supporting"),
+      atom("target", "chiefs", "supporting"),
+      atom("target", "jaguars", "supporting"),
+      atom("target", "arrowhead", "supporting"),
+      atom("target", "stadium", "supporting")
+    ]));
+    expect(demand.atoms).not.toEqual(expect.arrayContaining([
+      atom("target", "back", "supporting"),
+      atom("target", "confirm", "supporting"),
+      atom("target", "how", "supporting"),
+      atom("target", "times", "supporting")
+    ]));
+  });
+
+  it("does not turn operator-only phrases into answer coverage", () => {
+    const demand = compile(
+      "I've been thinking about making a cocktail, but I'm not sure which one to choose."
+    );
+
+    expect(demand.atoms).not.toEqual(expect.arrayContaining([
+      atom("phrase", "been thinking", "supporting"),
+      atom("phrase", "thinking about", "supporting")
+    ]));
+    expect(demand.atoms).toContainEqual(atom("target", "cocktail", "supporting"));
+  });
+
   it("deduplicates atoms and freezes the resulting state", () => {
     const demand = compile("Which option did you recommend and recommend again?");
 
@@ -79,7 +135,8 @@ function compile(query: string) {
 }
 
 function atom(
-  kind: "answer_slot" | "source_role" | "ordering" | "temporal" | "target" | "relation",
+  kind: "answer_slot" | "source_role" | "ordering" | "temporal" | "target" | "relation" |
+    "phrase",
   value: string,
   priority: "core" | "supporting"
 ) {

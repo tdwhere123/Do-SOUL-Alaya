@@ -300,7 +300,7 @@ export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly st
   const surface = new Set(lexicalTerms);
   const expansions: string[] = [];
   for (const term of lexicalTerms) {
-    for (const variant of foldMorphology(term)) {
+    for (const variant of foldLexicalMorphology(term)) {
       expansions.push(variant);
     }
     for (const synonym of SYNONYM_EXPANSION_BY_TERM.get(term) ?? []) {
@@ -315,7 +315,7 @@ export function expandLexicalTerms(lexicalTerms: readonly string[]): readonly st
 }
 
 // Conservative noun-plural folding; verb stemming remains owned by the FTS tokenizer.
-function foldMorphology(term: string): readonly string[] {
+export function foldLexicalMorphology(term: string): readonly string[] {
   if (!/^[a-z][a-z'-]*$/u.test(term)) {
     return [];
   }

@@ -1,5 +1,9 @@
 import type { RecallQueryProbes } from "./recall-query-probes.js";
 import { splitLexicalTokens } from "./recall-query-probes.js";
+import {
+  isRecallQueryOperatorTerm,
+  isRecallQueryRelationTerm
+} from "./demand/query-term-role.js";
 
 export type RecallQueryDemandKind =
   | "answer_slot"
@@ -34,27 +38,14 @@ export interface CompileRecallQueryDemandOptions {
   readonly soughtFacets?: readonly string[];
 }
 
-const OPERATOR_TERMS = new Set([
-  "about", "again", "been", "being", "could", "current", "did", "does",
-  "earliest", "first", "from", "have", "into", "last", "latest", "long",
-  "many", "most", "much", "order", "previous", "recently", "remind", "specific",
-  "that", "their", "there", "these", "they", "this", "those", "total", "what",
-  "when", "where", "which", "while", "with", "would", "your"
-]);
-
-const RELATION_TERMS = new Set([
-  "ask", "asked", "attend", "attended", "bought", "buy", "choose", "chose",
-  "decide", "decided", "gave", "give", "learn", "learned", "like", "liked",
-  "mention", "mentioned", "met", "move", "moved", "own", "paid", "pay",
-  "prefer", "preferred", "provide", "provided", "recommend", "recommended",
-  "say", "said", "share", "shared", "spend", "spent", "suggest", "suggested",
-  "tell", "told", "travel", "traveled", "visit", "visited", "watch", "watched"
-]);
-
 const ASSISTANT_SOURCE =
   /\b(?:you|your)\b.{0,48}\b(?:recommended|suggested|said|told|mentioned|advised|provided|shared)\b|\bdid\s+you\b.{0,48}\b(?:recommend|suggest|say|tell|mention|advise|provide|share)\b/iu;
 const USER_SOURCE =
-  /\bi\b.{0,48}\b(?:ask(?:ed)?|say|said|tell|told|mention(?:ed)?|share(?:d)?|spend|spent|travel(?:ed)?|visit(?:ed)?|buy|bought|choose|chose)\b/iu;
+  /\bi\b.{0,48}\b(?:ask(?:ed)?|say|said|tell|told|mention(?:ed)?|share(?:d)?|spend|spent|travel(?:ed)?|visit(?:ed)?|buy|bought|choose|chose|take|took|use(?:d)?|attend(?:ed)?)\b/iu;
+const PERSONAL_CONTEXT =
+  /\b(?:i|me|my|mine|myself)\b|\b(?:for|to)\s+me\b|我|我的|适合我/iu;
+const PROSPECTIVE_RECOMMENDATION =
+  /\b(?:can|could|would)\s+you\s+(?:please\s+)?(?:recommend|suggest|advise)\b|\bwhat\s+should\s+i\b|\bany\s+(?:recommendations?|suggestions?|tips|advice)\b|\b(?:recommendations?|suggestions?|tips|advice)\s+(?:for|to)\s+me\b|(?:推荐|建议).{0,16}(?:给我|适合我)/iu;
 
 export function compileRecallQueryDemand(
   probes: Readonly<RecallQueryProbes>,
@@ -81,7 +72,9 @@ function structuralDemandAtoms(
   soughtFacets: readonly string[]
 ): readonly RecallQueryDemandAtom[] {
   return [
-    ...probes.phrases.map((value) => demandAtom("phrase", normalize(value), "supporting")),
+    ...probes.phrases
+      .filter(isInformativePhrase)
+      .map((value) => demandAtom("phrase", normalize(value), "supporting")),
     ...probes.object_ids.map((value) => demandAtom("object_id", normalize(value), "core")),
     ...probes.evidence_refs.map((value) => demandAtom("evidence_ref", normalize(value), "core")),
     ...probes.dimensions.map((value) => demandAtom("dimension", normalize(value), "supporting")),
@@ -91,7 +84,16 @@ function structuralDemandAtoms(
   ];
 }
 
+function isInformativePhrase(value: string): boolean {
+  return splitLexicalTokens(value).some((term) =>
+    !isRecallQueryOperatorTerm(term) && !isRecallQueryRelationTerm(term)
+  );
+}
+
 function answerSlotAtoms(text: string): readonly RecallQueryDemandAtom[] {
+  if (isProspectivePersonalRecommendation(text)) {
+    return [demandAtom("answer_slot", "recommendation", "core")];
+  }
   if (/\bhow long\b/iu.test(text)) return [demandAtom("answer_slot", "duration", "core")];
   if (/\bhow many\b/iu.test(text)) return [demandAtom("answer_slot", "count", "core")];
   if (/\bhow much\b/iu.test(text)) return [demandAtom("answer_slot", "amount", "core")];
@@ -115,7 +117,16 @@ function sourceRoleAtoms(text: string): readonly RecallQueryDemandAtom[] {
   if (USER_SOURCE.test(text) || /我.{0,16}(?:说过|提到|买|去过|花了)/u.test(text)) {
     atoms.push(demandAtom("source_role", "user", "core"));
   }
+  if (isProspectivePersonalRecommendation(text)) {
+    atoms.push(demandAtom("source_role", "user", "core"));
+  }
   return atoms;
+}
+
+function isProspectivePersonalRecommendation(text: string): boolean {
+  return !ASSISTANT_SOURCE.test(text) &&
+    PERSONAL_CONTEXT.test(text) &&
+    PROSPECTIVE_RECOMMENDATION.test(text);
 }
 
 function orderingAtoms(text: string): readonly RecallQueryDemandAtom[] {
@@ -137,8 +148,8 @@ function lexicalDemandAtoms(
   const temporalTokens = new Set(probes.date_terms.flatMap(splitLexicalTokens));
   return probes.lexical_terms.flatMap((term) => {
     const normalized = normalize(term);
-    if (OPERATOR_TERMS.has(normalized) || temporalTokens.has(normalized)) return [];
-    const kind = RELATION_TERMS.has(normalized) ? "relation" : "target";
+    if (isRecallQueryOperatorTerm(normalized) || temporalTokens.has(normalized)) return [];
+    const kind = isRecallQueryRelationTerm(normalized) ? "relation" : "target";
     return [demandAtom(kind, normalized, "supporting")];
   });
 }
@@ -152,5 +163,5 @@ function demandAtom(
 }
 
 function normalize(value: string): string {
-  return value.trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+  return value.trim().replace(/[.]+$/u, "").replace(/\s+/gu, " ").toLocaleLowerCase();
 }
