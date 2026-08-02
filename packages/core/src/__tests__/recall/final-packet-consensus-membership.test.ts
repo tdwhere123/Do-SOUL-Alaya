@@ -292,4 +292,62 @@ describe("final packet consensus membership", () => {
     expect(() => buildFinalPacketConsensusObservation(plan, baseline, false))
       .not.toThrow();
   });
+
+  it("does not let set selection reorder retained head members", () => {
+    const baseline = select(baselineCandidates()).candidates;
+    const sourceCandidates = consensusCandidates().map((candidate) =>
+      candidate.entry.object_id === "baseline-06"
+        ? withStreamRanks(candidate, {
+            lexical_fts: 1,
+            source_proximity: 1,
+            source_evidence_agreement: 1
+          })
+        : candidate
+    );
+    const incumbent = resolveFinalPacketConsensusPlan({
+      baseline, sourceCandidates, protectedCandidates: []
+    });
+    const byId = new Map(sourceCandidates.map((candidate) => [
+      candidate.entry.object_id, candidate.fusion.candidate_key
+    ]));
+    const headKeys = [
+      byId.get("baseline-05")!,
+      byId.get("baseline-04")!,
+      byId.get("baseline-02")!,
+      byId.get("baseline-01")!,
+      byId.get("baseline-06")!
+    ];
+    const headSet = new Set(headKeys);
+    const packKeys = [
+      ...headKeys,
+      ...incumbent.candidates
+        .map(({ candidateKey }) => candidateKey)
+        .filter((key) => !headSet.has(key))
+    ].slice(0, incumbent.candidates.length);
+
+    const plan = applyLexicographicNestedMembership({
+      plan: incumbent,
+      sourceCandidates,
+      headKeys,
+      packKeys,
+      membershipGovernance: {
+        preProjection: baseline,
+        queryProbes: compileRecallQueryProbes(null),
+        behaviorAuthorityEvidenceRefByCandidateKey: new Map()
+      }
+    });
+
+    const finalIds = plan.consensusHead.map(({ sourceCandidate }) =>
+      sourceCandidate.entry.object_id
+    );
+    expect(finalIds.filter((id) => id !== "baseline-06")).toEqual([
+      "baseline-01",
+      "baseline-02",
+      "baseline-04",
+      "baseline-05"
+    ]);
+    expect(finalIds).toContain("baseline-06");
+    expect(() => buildFinalPacketConsensusObservation(plan, baseline, false))
+      .not.toThrow();
+  });
 });

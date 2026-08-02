@@ -25,11 +25,18 @@ export function applyLexicographicNestedMembership(params: Readonly<{
   const sourceByKey = new Map(sourceCandidates.map((candidate) => [
     candidate.candidateKey, candidate
   ]));
-  const candidates = resolveCandidates(params.packKeys, sourceByKey);
-  if (candidates.length !== params.packKeys.length ||
-      !protectionsSatisfied(candidates, params.plan)) return params.plan;
+  const requested = resolveCandidates(params.packKeys, sourceByKey);
+  if (requested.length !== params.packKeys.length) return params.plan;
+  const head = stabilizeRetainedHeadOrder(
+    requested.slice(0, params.headKeys.length),
+    params.plan.baseline.slice(0, params.headKeys.length)
+  );
+  const candidates = Object.freeze([
+    ...head,
+    ...requested.slice(params.headKeys.length)
+  ]);
+  if (!protectionsSatisfied(candidates, params.plan)) return params.plan;
   if (sameOrder(candidates, params.plan.candidates)) return params.plan;
-  const head = candidates.slice(0, params.headKeys.length);
   if (sameOrder(head, params.plan.baseline.slice(0, head.length))) return params.plan;
   const proposal = deepFreeze({
     ...params.plan,
@@ -48,6 +55,25 @@ export function applyLexicographicNestedMembership(params: Readonly<{
   return applyMembershipGovernance(
     proposal, params.membershipGovernance, sourceCandidates, sourceByKey
   );
+}
+
+function stabilizeRetainedHeadOrder(
+  requestedHead: readonly FinalPacketConsensusCandidate[],
+  baselineHead: readonly FinalPacketConsensusCandidate[]
+): readonly FinalPacketConsensusCandidate[] {
+  const requestedKeys = new Set(
+    requestedHead.map((candidate) => candidate.candidateKey)
+  );
+  const retained = baselineHead.filter((candidate) =>
+    requestedKeys.has(candidate.candidateKey)
+  );
+  let retainedIndex = 0;
+  return Object.freeze(requestedHead.map((candidate) => {
+    const isRetained = baselineHead.some((baseline) =>
+      baseline.candidateKey === candidate.candidateKey
+    );
+    return isRetained ? retained[retainedIndex++]! : candidate;
+  }));
 }
 
 function validNestedKeys(params: Parameters<
