@@ -6,6 +6,10 @@ import {
 } from "./admission/direct-evidence-answer-head.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
 import { resolveFinalPacketConsensusPlan } from "./final-order/final-packet-consensus.js";
+import { applyLexicographicNestedMembership } from
+  "./nested-selector/nested-consensus-projection.js";
+import { refineNestedFineAssessmentCandidates } from
+  "./nested-selector/fine-assessment-nested-selector.js";
 import {
   collectAdmittedCandidates,
   createAdmissionState,
@@ -108,12 +112,30 @@ function resolveSelectionConsensus(
           orderedCandidates, context
         )
       };
-  const consensus = resolveFinalPacketConsensusPlan({
+  const incumbentConsensus = resolveFinalPacketConsensusPlan({
     baseline: delivered.candidates,
     sourceCandidates: orderedCandidates,
     protectedCandidates: evidenceHead.protections,
     membershipGovernance
   });
+  const headSize = Math.min(5, incumbentConsensus.candidates.length);
+  const nested = refineNestedFineAssessmentCandidates(
+    orderedCandidates,
+    context,
+    {
+      headKeys: incumbentConsensus.candidates
+        .slice(0, headSize).map(({ candidateKey }) => candidateKey),
+      packKeys: incumbentConsensus.candidates.map(({ candidateKey }) => candidateKey)
+    }
+  );
+  const consensus = nested.plan === null
+    ? incumbentConsensus
+    : applyLexicographicNestedMembership({
+        plan: incumbentConsensus,
+        sourceCandidates: orderedCandidates,
+        headKeys: nested.plan.headKeys,
+        packKeys: nested.plan.packKeys
+      });
   const consensusResult = applyFinalPacketConsensus(
     consensus,
     delivered,
