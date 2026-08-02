@@ -194,9 +194,14 @@ function assertMembershipAuthorizations(
   if (!sameKeySet(
     introduced,
     authorizations.map((item) => item.satisfied_by_candidate_key)
-  ) || !retainedHeadOrderIsStable(observation) ||
-      authorizations.some((item) => !authorizationIsBound(item, observation))) {
-    throw validationError("Packet membership authorization receipt is inconsistent");
+  )) {
+    throw validationError("Packet membership authorization candidates are inconsistent");
+  }
+  if (!retainedHeadOrderIsStable(observation)) {
+    throw validationError("Packet membership retained order is inconsistent");
+  }
+  if (authorizations.some((item) => !authorizationIsBound(item, observation))) {
+    throw validationError("Packet membership authorization binding is inconsistent");
   }
 }
 
