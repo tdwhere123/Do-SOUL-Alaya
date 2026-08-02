@@ -6,6 +6,8 @@ import {
   "../../recall/delivery/final-order/final-packet-consensus.js";
 import { assertRecallPacketPlanObservation } from
   "../../recall/delivery/packet-plan/packet-plan-observation.js";
+import { applyLexicographicNestedMembership } from
+  "../../recall/delivery/nested-selector/nested-consensus-projection.js";
 import { compileRecallQueryProbes } from
   "../../recall/query/recall-query-probes.js";
 import {
@@ -238,6 +240,56 @@ describe("final packet consensus membership", () => {
       observation.baseline_candidate_keys
     );
     expect(() => assertRecallPacketPlanObservation(observation))
+      .not.toThrow();
+  });
+
+  it("reissues membership receipts after a nested selector exchange", () => {
+    const baseline = select(baselineCandidates()).candidates;
+    const sourceCandidates = consensusCandidates().map((candidate) =>
+      candidate.entry.object_id === "baseline-06"
+        ? withStreamRanks(candidate, {
+            lexical_fts: 1,
+            source_proximity: 1,
+            source_evidence_agreement: 1
+          })
+        : candidate
+    );
+    const incumbent = resolveFinalPacketConsensusPlan({
+      baseline, sourceCandidates, protectedCandidates: []
+    });
+    const introducedKey = sourceCandidates.find((candidate) =>
+      candidate.entry.object_id === "baseline-06"
+    )!.fusion.candidate_key;
+    const headKeys = [
+      ...incumbent.candidates.slice(0, 4).map(({ candidateKey }) => candidateKey),
+      introducedKey
+    ];
+    const headSet = new Set(headKeys);
+    const packKeys = [
+      ...headKeys,
+      ...incumbent.candidates
+        .map(({ candidateKey }) => candidateKey)
+        .filter((key) => !headSet.has(key))
+    ];
+
+    const plan = applyLexicographicNestedMembership({
+      plan: incumbent,
+      sourceCandidates,
+      headKeys,
+      packKeys,
+      membershipGovernance: {
+        preProjection: baseline,
+        queryProbes: compileRecallQueryProbes(null),
+        behaviorAuthorityEvidenceRefByCandidateKey: new Map()
+      }
+    });
+
+    expect(plan.consensusHead.map(({ candidateKey }) => candidateKey))
+      .toContain(introducedKey);
+    expect(plan.membershipAuthorizations.map(({ satisfiedByCandidateKey }) =>
+      satisfiedByCandidateKey
+    )).toContain(introducedKey);
+    expect(() => buildFinalPacketConsensusObservation(plan, baseline, false))
       .not.toThrow();
   });
 });

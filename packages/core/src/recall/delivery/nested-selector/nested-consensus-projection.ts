@@ -5,35 +5,49 @@ import type { FineAssessmentCandidate } from
   "../fine-assessment-selection/types.js";
 import type {
   FinalPacketConsensusCandidate,
+  FinalPacketConsensusMembershipGovernance,
   FinalPacketConsensusPlan
 } from "../final-order/final-packet-consensus.js";
+import { applyMembershipGovernance } from
+  "../final-order/final-packet-consensus.js";
 
 export function applyLexicographicNestedMembership(params: Readonly<{
   readonly plan: FinalPacketConsensusPlan;
   readonly sourceCandidates: readonly FineAssessmentCandidate[];
   readonly headKeys: readonly string[];
   readonly packKeys: readonly string[];
+  readonly membershipGovernance?: FinalPacketConsensusMembershipGovernance;
 }>): FinalPacketConsensusPlan {
-  if (!validNestedKeys(params)) return params.plan;
-  const candidates = resolveCandidates(params.packKeys, params.sourceCandidates);
+  if (!validNestedKeys(params) || params.membershipGovernance === undefined) {
+    return params.plan;
+  }
+  const sourceCandidates = params.sourceCandidates.map(toConsensusCandidate);
+  const sourceByKey = new Map(sourceCandidates.map((candidate) => [
+    candidate.candidateKey, candidate
+  ]));
+  const candidates = resolveCandidates(params.packKeys, sourceByKey);
   if (candidates.length !== params.packKeys.length ||
       !protectionsSatisfied(candidates, params.plan)) return params.plan;
   if (sameOrder(candidates, params.plan.candidates)) return params.plan;
   const head = candidates.slice(0, params.headKeys.length);
   if (sameOrder(head, params.plan.baseline.slice(0, head.length))) return params.plan;
-  return deepFreeze({
+  const proposal = deepFreeze({
     ...params.plan,
     candidates,
     headWidth: head.length,
     baselineHead: params.plan.baseline.slice(0, head.length),
     consensusHead: head,
     immutableTail: candidates.slice(head.length),
+    membershipAuthorizations: [],
     tailPolicy: "nested_membership_exchange" as const,
     decision: {
       status: "accepted" as const,
       reason: "nested_membership_consensus" as const
     }
   });
+  return applyMembershipGovernance(
+    proposal, params.membershipGovernance, sourceCandidates, sourceByKey
+  );
 }
 
 function validNestedKeys(params: Parameters<
@@ -46,12 +60,8 @@ function validNestedKeys(params: Parameters<
 
 function resolveCandidates(
   keys: readonly string[],
-  source: readonly FineAssessmentCandidate[]
+  byKey: ReadonlyMap<string, FinalPacketConsensusCandidate>
 ): readonly FinalPacketConsensusCandidate[] {
-  const byKey = new Map(source.map((candidate) => {
-    const projected = toConsensusCandidate(candidate);
-    return [projected.candidateKey, projected] as const;
-  }));
   return keys.flatMap((key) => byKey.get(key) ?? []);
 }
 

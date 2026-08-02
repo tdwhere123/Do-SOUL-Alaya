@@ -185,7 +185,7 @@ function toConsensusCandidate(
   });
 }
 
-function applyMembershipGovernance(
+export function applyMembershipGovernance(
   plan: FinalPacketConsensusPlan,
   governance: FinalPacketConsensusMembershipGovernance | undefined,
   sourceCandidates: readonly FinalPacketConsensusCandidate[],

@@ -134,7 +134,8 @@ function resolveSelectionConsensus(
         plan: incumbentConsensus,
         sourceCandidates: orderedCandidates,
         headKeys: nested.plan.headKeys,
-        packKeys: nested.plan.packKeys
+        packKeys: nested.plan.packKeys,
+        membershipGovernance
       });
   const consensusResult = applyFinalPacketConsensus(
     consensus,
