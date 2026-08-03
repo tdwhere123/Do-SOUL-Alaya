@@ -82,8 +82,8 @@ describe("RecallService packet trace integration", () => {
         assessment_path: path,
         actual_candidate_keys: packetCandidateKeys(traced.result.candidates),
         decision: {
-        status: "accepted",
-          reason: "nested_membership_consensus"
+          status: "accepted",
+          reason: "strict_tail_consensus"
         }
       });
       expect(trace.added_candidate_keys).toEqual(

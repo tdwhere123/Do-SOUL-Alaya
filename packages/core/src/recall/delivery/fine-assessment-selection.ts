@@ -6,10 +6,6 @@ import {
 } from "./admission/direct-evidence-answer-head.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
 import { resolveFinalPacketConsensusPlan } from "./final-order/final-packet-consensus.js";
-import { applyLexicographicNestedMembership } from
-  "./nested-selector/nested-consensus-projection.js";
-import { refineNestedFineAssessmentCandidates } from
-  "./nested-selector/fine-assessment-nested-selector.js";
 import {
   collectAdmittedCandidates,
   createAdmissionState,
@@ -77,7 +73,6 @@ export function selectFineAssessmentCandidates(
   );
   const { consensus, result } = resolveSelectionConsensus(
     evidenceHead,
-    finalAccumulator.selected,
     delivered,
     context,
     selectionParams.orderedCandidates
@@ -93,7 +88,6 @@ export function selectFineAssessmentCandidates(
 
 function resolveSelectionConsensus(
   evidenceHead: DirectEvidenceHeadSelection<FineAssessmentCandidate>,
-  preProjection: readonly Readonly<ReturnType<typeof buildRecallCandidate>>[],
   delivered: ReturnType<typeof materializeFineAssessmentDelivery>,
   context: FineAssessmentSelectionContext,
   orderedCandidates: readonly FineAssessmentCandidate[]
@@ -102,38 +96,10 @@ function resolveSelectionConsensus(
   result: ReturnType<typeof applyFinalPacketConsensus>;
 }> {
   // Consensus scans full H; evidence-head rejects must not hide embedding ranks.
-  const membershipGovernance = context.answerRelevanceRankByCandidateKey.size > 0
-    ? undefined
-    : {
-        preProjection,
-        queryProbes: context.supplementaryData.queryProbes,
-        pathInflowByTarget: pathInflowForMembership(context),
-        behaviorAuthorityEvidenceRefByCandidateKey: behaviorAuthorityEvidenceRefs(
-          orderedCandidates, context
-        )
-      };
-  const incumbentConsensus = resolveFinalPacketConsensusPlan({
+  const consensus = resolveFinalPacketConsensusPlan({
     baseline: delivered.candidates,
     sourceCandidates: orderedCandidates,
-    protectedCandidates: evidenceHead.protections,
-    membershipGovernance
-  });
-  const headSize = Math.min(5, incumbentConsensus.candidates.length);
-  const nested = refineNestedFineAssessmentCandidates(
-    orderedCandidates,
-    context,
-    {
-      headKeys: incumbentConsensus.candidates
-        .slice(0, headSize).map(({ candidateKey }) => candidateKey),
-      packKeys: incumbentConsensus.candidates.map(({ candidateKey }) => candidateKey)
-    }
-  );
-  const consensus = applyLexicographicNestedMembership({
-    plan: incumbentConsensus,
-    sourceCandidates: orderedCandidates,
-    headKeys: nested.plan.headKeys,
-    packKeys: nested.plan.packKeys,
-    membershipGovernance
+    protectedCandidates: evidenceHead.protections
   });
   const consensusResult = applyFinalPacketConsensus(
     consensus,
@@ -143,31 +109,6 @@ function resolveSelectionConsensus(
     reduceFineAssessmentCandidates
   );
   return Object.freeze({ consensus, result: consensusResult });
-}
-
-function pathInflowForMembership(
-  context: FineAssessmentSelectionContext
-): FineAssessmentSelectionContext["supplementaryData"]["pathInflowByTarget"] {
-  const availability = context.supplementaryData.pathInflowAvailability;
-  return availability === "unavailable" || availability === "not_observed"
-    ? undefined
-    : context.supplementaryData.pathInflowByTarget;
-}
-
-function behaviorAuthorityEvidenceRefs(
-  candidates: readonly FineAssessmentCandidate[],
-  context: FineAssessmentSelectionContext
-): ReadonlyMap<string, string> {
-  return new Map(candidates.flatMap((candidate) => {
-    const candidateKey = buildRecallCandidateDedupeKey(candidate);
-    const authority = context.answerSupportByCandidateKey.get(
-      candidateKey
-    )?.authority;
-    const evidenceRef = authority?.behavior_eligible === true
-      ? authority.evidence_ref
-      : null;
-    return evidenceRef === null ? [] : [[candidateKey, evidenceRef] as const];
-  }));
 }
 
 function reduceFineAssessmentCandidates(
