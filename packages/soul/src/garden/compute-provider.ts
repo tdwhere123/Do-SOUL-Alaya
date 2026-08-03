@@ -144,6 +144,7 @@ export const OFFICIAL_API_SYSTEM_PROMPT = [
   "You extract candidate durable memory signals from a single operator turn.",
   'Return strict JSON only with shape {"signals":[...]} and no markdown.',
   'Each signal must include "signal_kind", "object_kind", "confidence", "matched_text", "distilled_fact", and "source_locator".',
+  '"confidence" must be a JSON number from 0 through 1, never a string label such as "high", "medium", or "low".',
   'Use only supported signal kinds such as "potential_preference" and "potential_claim".',
   'Use "source_locator":{"contract_version":2,"kind":"assertion_catalog","assertion_id":N} for every signal.',
   "Return only assertion_id from the provided source_assertions catalog for evidence selection; never invent or rewrite a catalog assertion.",

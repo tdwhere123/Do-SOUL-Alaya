@@ -45,4 +45,13 @@ describe("official API system prompt", () => {
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain('"assertion_catalog"');
     expect(OFFICIAL_API_SYSTEM_PROMPT).toContain("Return only assertion_id");
   });
+
+  it("defines confidence as a bounded JSON number rather than a label", () => {
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      '"confidence" must be a JSON number from 0 through 1'
+    );
+    expect(OFFICIAL_API_SYSTEM_PROMPT).toContain(
+      'never a string label such as "high", "medium", or "low"'
+    );
+  });
 });
