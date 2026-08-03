@@ -7,6 +7,7 @@
 #           MATRIX_PASSTHROUGH_ENV (space-separated extra env keys),
 #           MATRIX_EXPERIMENT=1 for the contract-free local path,
 #           MATRIX_LIMIT / MATRIX_OFFSET for experiment-only slices,
+#           MATRIX_SEED_EXTRACTION_SYSTEM_PROMPT for historical snapshot closure,
 #           MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS=1 for a derived rebuild.
 set -euo pipefail
 
@@ -25,6 +26,7 @@ EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
   echo "MATRIX_EXPERIMENT must be 0 or 1" >&2; exit 64;
 }
 REBUILD_EVIDENCE_PROJECTIONS="${MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS:-0}"
+HISTORICAL_PROMPT="${MATRIX_SEED_EXTRACTION_SYSTEM_PROMPT:-}"
 [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "0" ||
    "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]] || {
   echo "MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS must be 0 or 1" >&2; exit 64;
@@ -32,6 +34,14 @@ REBUILD_EVIDENCE_PROJECTIONS="${MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS:-0}"
 if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" && "$EXPERIMENT" != "1" ]]; then
   echo "evidence search projection rebuild requires MATRIX_EXPERIMENT=1" >&2
   exit 64
+fi
+if [[ -n "$HISTORICAL_PROMPT" ]]; then
+  [[ "$EXPERIMENT" == "1" ]] || {
+    echo "historical seed prompt requires MATRIX_EXPERIMENT=1" >&2; exit 64;
+  }
+  [[ -f "$HISTORICAL_PROMPT" ]] || {
+    echo "missing historical seed prompt: $HISTORICAL_PROMPT" >&2; exit 65;
+  }
 fi
 if [[ "$EXPERIMENT" == "1" && -n "${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" ]]; then
   echo "local experiment requires default recall weights" >&2
@@ -95,6 +105,10 @@ fi
 EXTRACTION_MODEL="$(
   rtk node "$SCRIPT_DIR/longmemeval-matrix-cache-model.mjs" "${MODEL_ARGS[@]}"
 )"
+HISTORICAL_PROMPT_SHA256=""
+if [[ -n "$HISTORICAL_PROMPT" ]]; then
+  HISTORICAL_PROMPT_SHA256="$(file_sha "$HISTORICAL_PROMPT")"
+fi
 
 HEAD_SHA="$(git -C "$WORKTREE" rev-parse HEAD)"
 PORCELAIN="$(git -C "$WORKTREE" status --porcelain=v1 --untracked-files=normal || true)"
@@ -128,6 +142,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" 
   DATASET_SHA256="$DATASET_SHA256" \
   EXTRACTION_MODEL="$EXTRACTION_MODEL" \
   REBUILD_EVIDENCE_PROJECTIONS="$REBUILD_EVIDENCE_PROJECTIONS" \
+  HISTORICAL_PROMPT_SHA256="$HISTORICAL_PROMPT_SHA256" \
   SLICE_LIMIT="$SLICE_LIMIT" SLICE_OFFSET="$SLICE_OFFSET" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
   python3 - "$IDENTITY_PATH" <<'PY'
@@ -161,6 +176,9 @@ payload = {
   "weight_overrides": None,
   "derived_snapshot_identity": None,
 }
+if os.environ["HISTORICAL_PROMPT_SHA256"]:
+  payload["treatment"]["historical_seed_prompt_sha256"] = \
+    os.environ["HISTORICAL_PROMPT_SHA256"]
 if os.environ["EXPERIMENT"] == "1":
   payload["mode"] = "experiment"
   payload["evaluation_slice"] = {
@@ -222,6 +240,9 @@ else
 fi
 if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]]; then
   CLI_ARGS+=(--rebuild-evidence-search-projections)
+fi
+if [[ -n "$HISTORICAL_PROMPT" ]]; then
+  CLI_ARGS+=(--seed-extraction-system-prompt "$HISTORICAL_PROMPT")
 fi
 if [[ -n "$SLICE_LIMIT" ]]; then
   CLI_ARGS+=(--limit "$SLICE_LIMIT" --offset "$SLICE_OFFSET")

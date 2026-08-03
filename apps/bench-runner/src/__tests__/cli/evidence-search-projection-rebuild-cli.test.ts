@@ -89,20 +89,31 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     }, undefined, {})).rejects.toThrow(/requires derived evidence projection rebuild/u);
   });
 
-  it("rejects a historical prompt without a digest-bound retrofit ledger", async () => {
+  it("allows a historical prompt to verify an experiment snapshot without retrofit", async () => {
     const exitCode = await runCli([
       "recall-eval",
       "--snapshot",
       "/tmp/not-read.db",
       "--experiment",
-      "--rebuild-evidence-search-projections",
       "--seed-extraction-system-prompt",
       "/tmp/historical-prompt.txt"
     ]);
 
     expect(exitCode).toBe(2);
-    expect(stderr).toMatch(
-      /--seed-extraction-system-prompt requires --fact-frame-retrofit-ledger/u
-    );
+    expect(stderr).not.toMatch(/requires --fact-frame-retrofit-ledger/u);
+    expect(stderr).toMatch(/not-read\.db/u);
+  });
+
+  it("keeps historical snapshot prompts experiment-only", async () => {
+    const exitCode = await runCli([
+      "recall-eval",
+      "--snapshot",
+      "/tmp/not-read.db",
+      "--seed-extraction-system-prompt",
+      "/tmp/historical-prompt.txt"
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/--seed-extraction-system-prompt requires --experiment/u);
   });
 });

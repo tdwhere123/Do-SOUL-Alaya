@@ -69,10 +69,9 @@ export function buildRecallEvalOptions(
 }
 
 function assertExperimentFlags(opts: ParsedFlags): void {
-  if (opts.seedExtractionSystemPrompt !== undefined &&
-      opts.factFrameRetrofitLedger === undefined) {
+  if (opts.seedExtractionSystemPrompt !== undefined && opts.experiment !== true) {
     throw new Error(
-      "--seed-extraction-system-prompt requires --fact-frame-retrofit-ledger"
+      "--seed-extraction-system-prompt requires --experiment"
     );
   }
   if (opts.factFrameRetrofitLedger !== undefined &&

@@ -120,8 +120,8 @@ function assertDerivedProjectionRebuildBoundary(
   options: RecallEvalOptions
 ): void {
   if (options.seedExtractionSystemPromptPath !== undefined &&
-      options.factFrameRetrofitLedgerPath === undefined) {
-    throw new Error("historical extraction prompt requires a fact-frame retrofit ledger");
+      options.experiment !== true) {
+    throw new Error("historical extraction prompt requires experiment mode");
   }
   if (options.factFrameRetrofitLedgerPath !== undefined &&
       options.derivedEvidenceProjectionRebuild !== true) {
