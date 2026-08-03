@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   SignalEventType,
+  SignalState,
   SoulSignalMaterializedPayloadSchema,
   buildVerifiedUserAssertionReceiptPreimage,
   formatVerifiedUserAssertionSourceHash,
@@ -9,6 +10,7 @@ import {
 } from "@do-soul/alaya-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { StorageDatabase } from "../../../../sqlite/db.js";
+import { SqliteSignalRepo } from "../../../../repos/signal/signal-repo.js";
 import {
   createEvidenceCapsule,
   createEvidenceCapsuleRepo,
@@ -114,7 +116,103 @@ describe("verified assertion evidence qualification", () => {
       "requested Assistant observation does not match its verified receipt"
     );
   });
+
+  it("rederives a fact key from its materialized grounded Signal", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa");
+    const signal = await persistAssertionSignal(database);
+    await repo.create(capsule, [{
+      projection_id: 5,
+      projection_kind: "fact_key",
+      content: "I bought my bookshelf"
+    }]);
+    insertMaterializationEvent(database, signal, capsule);
+
+    await expect(repo.findRecallQualifiedByIds("workspace-1", [{
+      object_id: capsule.object_id,
+      matched_projection: { projection_id: 5, projection_kind: "fact_key" }
+    }])).resolves.toEqual([{
+      capsule,
+      verified_user_projection: false,
+      matched_projection: {
+        projection_id: 5,
+        projection_kind: "fact_key",
+        content: "I bought my bookshelf"
+      }
+    }]);
+    await expect(repo.findRecallQualifiedFactKeysByIds(
+      "workspace-1",
+      [capsule.object_id]
+    )).resolves.toEqual([expect.objectContaining({
+      matched_projection: expect.objectContaining({ projection_kind: "fact_key" })
+    })]);
+  });
+
+  it("fails closed when a stored fact key differs from its grounded frame", async () => {
+    const { database, repo } = await createEvidenceCapsuleRepo();
+    const capsule = assertionCapsule("aaaaaaaa-2222-4222-8222-aaaaaaaaaaaa");
+    const signal = await persistAssertionSignal(database);
+    await repo.create(capsule, [{
+      projection_id: 5,
+      projection_kind: "fact_key",
+      content: "I bought my desk from"
+    }]);
+    insertMaterializationEvent(database, signal, capsule);
+
+    await expect(repo.findRecallQualifiedByIds("workspace-1", [{
+      object_id: capsule.object_id,
+      matched_projection: { projection_id: 5, projection_kind: "fact_key" }
+    }])).rejects.toThrow("requested fact key does not match its grounded Signal");
+  });
 });
+
+async function persistAssertionSignal(database: StorageDatabase): Promise<CandidateMemorySignal> {
+  const signal = {
+    signal_id: "signal-assertion",
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: null,
+    source: "garden_compile",
+    signal_kind: "potential_claim",
+    signal_state: "emitted",
+    object_kind: "fact",
+    scope_hint: null,
+    domain_tags: [],
+    confidence: 0.9,
+    evidence_refs: [],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
+    raw_payload: {
+      source_assertion: ASSERTION,
+      distilled_fact: ASSERTION,
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: ASSERTION,
+        proposed_matched_text: ASSERTION,
+        reasons: []
+      },
+      fact_frame: {
+        schema_version: 1,
+        slots: [
+          { role: "subject", text: "I" },
+          { role: "relation", text: "bought" },
+          { role: "value", text: "my bookshelf" },
+          { role: "qualifier", text: "from IKEA" }
+        ]
+      }
+    },
+    created_at: "2026-03-20T00:00:00.000Z"
+  } as const;
+  const repo = new SqliteSignalRepo(database);
+  await repo.create(signal);
+  await repo.updateState(signal.signal_id, SignalState.MATERIALIZED);
+  return { ...signal, signal_state: SignalState.MATERIALIZED };
+}
 
 function assertionCapsule(
   objectId: string,

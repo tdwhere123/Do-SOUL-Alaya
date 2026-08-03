@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { SignalKind, type CandidateMemorySignal } from "@do-soul/alaya-protocol";
+import {
+  AssociativeFactFrameSchema,
+  SignalKind,
+  type AssociativeFactFrame,
+  type CandidateMemorySignal
+} from "@do-soul/alaya-protocol";
 import { DISTILLED_FACT_MAX_CHARS } from "./materialization-router.js";
 import {
   parseOfficialApiTemporalProjection,
@@ -14,7 +19,7 @@ export const OFFICIAL_API_SIGNAL_LIMIT = 64;
 // invariant: extraction-cache reuse binds this parser behavior explicitly rather than
 // inferring compatibility from raw cache identity alone. source_locator is additive
 // and independently versioned, so locator absence keeps legacy v1 output unchanged.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v2";
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v3";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
@@ -85,6 +90,10 @@ const OfficialApiTemporalProjectionSchema = z.preprocess(
     (value) => value === null || (typeof value === "object" && value !== null)
   )
 );
+const OptionalAssociativeFactFrameSchema = z.preprocess((value) => {
+  const parsed = AssociativeFactFrameSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}, AssociativeFactFrameSchema.optional());
 const PreferencePolarityValueSchema = z.union([
   z.literal("positive"),
   z.literal("negative"),
@@ -135,7 +144,8 @@ const OfficialApiSignalEntrySchema = z.object({
   // Optional only for legacy extraction-cache replay; a declared locator must parse strictly.
   source_locator: OfficialApiSourceLocatorSchema.optional(),
   temporal_projection: OfficialApiTemporalProjectionSchema,
-  preference_profile: OfficialApiPreferenceProfileSchema
+  preference_profile: OfficialApiPreferenceProfileSchema,
+  fact_frame: OptionalAssociativeFactFrameSchema
 }).loose().readonly();
 
 export type { OfficialApiTemporalProjectionDraft } from "./temporal/observed-projection.js";
@@ -166,6 +176,7 @@ export interface OfficialApiSignalDraft {
   readonly source_locator?: OfficialApiSourceLocator;
   readonly temporal_projection?: OfficialApiTemporalProjectionDraft;
   readonly preference_profile?: OfficialApiPreferenceProfileDraft;
+  readonly fact_frame?: AssociativeFactFrame;
 }
 
 // Exported so the LongMemEval bench seed path can drive its ingestion
@@ -371,7 +382,8 @@ export function parseOfficialApiSignalEntry(candidate: unknown): OfficialApiSign
     ...(clampedReason === null ? {} : { reason: clampedReason }),
     ...(record.source_locator === undefined ? {} : { source_locator: record.source_locator }),
     ...(record.temporal_projection === null ? {} : { temporal_projection: record.temporal_projection }),
-    ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile })
+    ...(record.preference_profile === null ? {} : { preference_profile: record.preference_profile }),
+    ...(record.fact_frame === undefined ? {} : { fact_frame: record.fact_frame })
   });
 }
 

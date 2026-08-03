@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildAssociativeFactKeyProjections,
+  groundAssociativeFactFrame
+} from "../../soul/associative-fact-frame.js";
+
+describe("associative fact frame", () => {
+  it("grounds exact ordered slots and builds the complete plus marginal key field", () => {
+    const frame = groundAssociativeFactFrame({
+      schema_version: 1,
+      slots: [
+        { role: "subject", text: "I" },
+        { role: "relation", text: "started using" },
+        { role: "value", text: "Atlas" },
+        { role: "qualifier", text: "for research" },
+        { role: "time", text: "in March" }
+      ]
+    }, "I started using Atlas for research in March.");
+
+    expect(frame).not.toBeNull();
+    expect(buildAssociativeFactKeyProjections(frame!)).toEqual([
+      { projection_id: 1, projection_kind: "fact_key", content: "I started using Atlas for research in March" },
+      { projection_id: 2, projection_kind: "fact_key", content: "started using Atlas for research in March" },
+      { projection_id: 3, projection_kind: "fact_key", content: "I Atlas for research in March" },
+      { projection_id: 4, projection_kind: "fact_key", content: "I started using for research in March" },
+      { projection_id: 5, projection_kind: "fact_key", content: "I started using Atlas in March" },
+      { projection_id: 6, projection_kind: "fact_key", content: "I started using Atlas for research" }
+    ]);
+  });
+
+  it("rejects the whole frame when any slot is fabricated or out of source order", () => {
+    expect(groundAssociativeFactFrame({
+      schema_version: 1,
+      slots: [
+        { role: "subject", text: "I" },
+        { role: "relation", text: "use" },
+        { role: "value", text: "Atlas" }
+      ]
+    }, "I use Nova.")).toBeNull();
+
+    expect(groundAssociativeFactFrame({
+      schema_version: 1,
+      slots: [
+        { role: "value", text: "Atlas" },
+        { role: "subject", text: "I" },
+        { role: "relation", text: "use" }
+      ]
+    }, "I use Atlas.")).toBeNull();
+  });
+
+  it("requires a subject, relation, and value instead of accepting arbitrary fragments", () => {
+    expect(groundAssociativeFactFrame({
+      schema_version: 1,
+      slots: [
+        { role: "subject", text: "I" },
+        { role: "qualifier", text: "often" },
+        { role: "time", text: "on Fridays" }
+      ]
+    }, "I often work on Fridays.")).toBeNull();
+  });
+});

@@ -1,3 +1,4 @@
+import { groundAssociativeFactFrame } from "@do-soul/alaya-protocol";
 import type {
   OfficialApiPreferenceProfileDraft,
   OfficialApiSignalDraft
@@ -18,6 +19,7 @@ interface OfficialApiSourceGroundingProposal {
   readonly proposed_distilled_fact?: string;
   readonly proposed_canonical_entities?: readonly string[];
   readonly proposed_preference_profile?: OfficialApiPreferenceProfileDraft;
+  readonly proposed_fact_frame?: OfficialApiSignalDraft["fact_frame"];
   readonly reasons: readonly string[];
 }
 
@@ -58,12 +60,16 @@ export function groundOfficialApiDraft(
   const assertion = resolution.assertion;
   const canonicalEntities = groundCanonicalEntities(draft.canonical_entities, assertion);
   const preferenceProfile = preferenceGrounding.preferenceProfile;
-  const reasons = groundingReasons(draft, assertion, canonicalEntities, preferenceProfile);
+  const factFrame = groundAssociativeFactFrame(draft.fact_frame, assertion) ?? undefined;
+  const reasons = groundingReasons(
+    draft, assertion, canonicalEntities, preferenceProfile, factFrame
+  );
   const {
     matched_text: _matchedText,
     distilled_fact: _distilledFact,
     canonical_entities: _canonicalEntities,
     preference_profile: _preferenceProfile,
+    fact_frame: _factFrame,
     ...rest
   } = draft;
   const groundedDraft: OfficialApiSignalDraft = Object.freeze({
@@ -71,7 +77,8 @@ export function groundOfficialApiDraft(
     matched_text: assertion,
     distilled_fact: assertion,
     ...(canonicalEntities.length === 0 ? {} : { canonical_entities: canonicalEntities }),
-    ...(preferenceProfile === undefined ? {} : { preference_profile: preferenceProfile })
+    ...(preferenceProfile === undefined ? {} : { preference_profile: preferenceProfile }),
+    ...(factFrame === undefined ? {} : { fact_frame: factFrame })
   });
   return {
     status: "grounded",
@@ -85,6 +92,7 @@ export function groundOfficialApiDraft(
       ...(draft.distilled_fact === undefined ? {} : { proposed_distilled_fact: draft.distilled_fact }),
       ...(draft.canonical_entities === undefined ? {} : { proposed_canonical_entities: draft.canonical_entities }),
       ...(draft.preference_profile === undefined ? {} : { proposed_preference_profile: draft.preference_profile }),
+      ...(draft.fact_frame === undefined ? {} : { proposed_fact_frame: draft.fact_frame }),
       reasons: Object.freeze(reasons)
     })
   };
@@ -106,6 +114,7 @@ function rejectedGrounding(
     canonical_entities: _canonicalEntities,
     preference_profile: _preferenceProfile,
     temporal_projection: _temporalProjection,
+    fact_frame: _factFrame,
     ...safeDraft
   } = draft;
   return {
@@ -119,6 +128,7 @@ function rejectedGrounding(
       ...(draft.distilled_fact === undefined ? {} : { proposed_distilled_fact: draft.distilled_fact }),
       ...(draft.canonical_entities === undefined ? {} : { proposed_canonical_entities: draft.canonical_entities }),
       ...(draft.preference_profile === undefined ? {} : { proposed_preference_profile: draft.preference_profile }),
+      ...(draft.fact_frame === undefined ? {} : { proposed_fact_frame: draft.fact_frame }),
       reasons: Object.freeze([reason])
     })
   };
@@ -128,7 +138,8 @@ function groundingReasons(
   draft: OfficialApiSignalDraft,
   assertion: string,
   canonicalEntities: readonly string[],
-  preferenceProfile: OfficialApiPreferenceProfileDraft | undefined
+  preferenceProfile: OfficialApiPreferenceProfileDraft | undefined,
+  factFrame: OfficialApiSignalDraft["fact_frame"]
 ): readonly string[] {
   const reasons: string[] = [];
   if (draft.matched_text.trim() !== assertion) reasons.push("matched_text_expanded_to_source_assertion");
@@ -143,6 +154,9 @@ function groundingReasons(
     preferenceProfile
   );
   if (profileReason !== undefined) reasons.push(profileReason);
+  if (draft.fact_frame !== undefined && factFrame === undefined) {
+    reasons.push("proposed_fact_frame_not_source_grounded");
+  }
   return reasons;
 }
 

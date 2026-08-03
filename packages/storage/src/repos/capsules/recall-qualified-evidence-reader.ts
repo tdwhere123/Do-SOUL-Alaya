@@ -77,6 +77,10 @@ interface StoredMaterializationRow {
   readonly payload_json: string;
 }
 
+interface EvidenceQualificationRow extends EvidenceCapsuleRow {
+  readonly source_signal_id: string | null;
+}
+
 interface EvidenceCandidate {
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly signalId: string | null;
@@ -170,7 +174,8 @@ export class RecallQualifiedEvidenceReader {
         match,
         candidate.capsule,
         proof.turnReceipt,
-        projections
+        projections,
+        candidate.signalId === null ? undefined : signals.get(candidate.signalId)
       );
       return qualified === null ? [] : [qualified];
     });
@@ -203,7 +208,7 @@ export class RecallQualifiedEvidenceReader {
       this.statementHolder.active().findEvidenceRows.all(
         workspaceId,
         JSON.stringify(evidenceObjectIds)
-      ) as EvidenceCapsuleRow[]
+      ) as EvidenceQualificationRow[]
     );
     const signalIds = [...new Set(candidates.flatMap((candidate) =>
       candidate.signalId === null ? [] : [candidate.signalId]
@@ -231,7 +236,7 @@ function prepareStatements(db: StorageDatabase): QualificationStatements {
 }
 
 function readEvidenceCandidates(
-  rows: readonly EvidenceCapsuleRow[]
+  rows: readonly EvidenceQualificationRow[]
 ): readonly EvidenceCandidate[] {
   const candidates: EvidenceCandidate[] = [];
   for (const row of rows) {
@@ -241,10 +246,10 @@ function readEvidenceCandidates(
   return candidates;
 }
 
-function readEvidenceCandidate(row: EvidenceCapsuleRow): EvidenceCandidate | null {
+function readEvidenceCandidate(row: EvidenceQualificationRow): EvidenceCandidate | null {
   try {
     const capsule = parseEvidenceCapsuleRow(row);
-    const signalId = readGardenSourceTurnFallbackArtifactSignalId(
+    const signalId = row.source_signal_id ?? readGardenSourceTurnFallbackArtifactSignalId(
       capsule.physical_anchor?.artifact_ref ?? null
     );
     return matchesEvidenceEnvelope(capsule) ? { capsule, signalId } : null;
@@ -442,7 +447,14 @@ const FIND_EVIDENCE_ROWS_SQL = `
   SELECT object_id, object_kind, schema_version, lifecycle_state, created_at,
          updated_at, created_by, evidence_kind, semantic_anchor, event_anchor,
          physical_anchor, evidence_health_state, gist, excerpt, source_hash,
-         run_id, workspace_id, surface_id
+         run_id, workspace_id, surface_id,
+         (
+           SELECT CASE WHEN COUNT(*) = 1 THEN MIN(owner.signal_id) ELSE NULL END
+           FROM recall_routing_key_owners AS owner
+           WHERE owner.workspace_id = evidence_capsules.workspace_id
+             AND owner.owner_kind = 'evidence_capsule'
+             AND owner.owner_id = evidence_capsules.object_id
+         ) AS source_signal_id
   FROM evidence_capsules
   WHERE workspace_id = ?
     AND object_id IN (SELECT value FROM json_each(?))

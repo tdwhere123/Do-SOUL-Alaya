@@ -1,12 +1,15 @@
 import {
+  buildAssociativeFactKeyProjections,
   EvidenceSearchProjectionKindSchema,
   EvidenceSearchProjectionSchema,
+  groundAssociativeFactFrame,
   isGardenSourceTurnFallbackV2Receipt,
   projectGardenSourceTurnFallbackV2AssistantObservations,
   projectGardenSourceTurnFallbackV2UserContent,
   readVerifiedUserAssertionSourceHashDigest,
   type EvidenceCapsule,
   type EvidenceSearchProjection,
+  type CandidateMemorySignal,
   type GardenSourceTurnFallbackVerifiedReceipt
 } from "@do-soul/alaya-protocol";
 import type {
@@ -84,7 +87,8 @@ export function qualifyEvidenceMatch(
   match: EvidenceSearchMatch,
   capsule: Readonly<EvidenceCapsule>,
   receipt: Readonly<GardenSourceTurnFallbackVerifiedReceipt> | null,
-  projections: QualifiedProjectionIndex
+  projections: QualifiedProjectionIndex,
+  signal?: Readonly<CandidateMemorySignal>
 ): RecallQualifiedEvidence | null {
   const verifiedUserProjection = hasVerifiedUserProjection(capsule, receipt);
   if (match.matched_projection?.projection_kind === "assistant_observation") {
@@ -98,6 +102,25 @@ export function qualifyEvidenceMatch(
       throw new EvidenceProjectionIntegrityError(
         capsule.object_id,
         "requested Assistant observation does not match its verified receipt"
+      );
+    }
+    return Object.freeze({
+      capsule,
+      verified_user_projection: verifiedUserProjection,
+      matched_projection: projection
+    });
+  }
+  if (match.matched_projection?.projection_kind === "fact_key") {
+    const projection = rederiveFactKeyProjection(
+      match.matched_projection,
+      capsule,
+      signal,
+      projections
+    );
+    if (projection === null) {
+      throw new EvidenceProjectionIntegrityError(
+        capsule.object_id,
+        "requested fact key does not match its grounded Signal"
       );
     }
     return Object.freeze({
@@ -188,6 +211,50 @@ function rederiveAssistantProjection(
     projection_kind: "assistant_observation",
     content
   });
+}
+
+function rederiveFactKeyProjection(
+  identity: EvidenceSearchProjectionIdentity,
+  capsule: Readonly<EvidenceCapsule>,
+  signal: Readonly<CandidateMemorySignal> | undefined,
+  projections: QualifiedProjectionIndex
+): Readonly<EvidenceSearchProjection> | null {
+  if (!matchesFactKeySignalEnvelope(signal, capsule)) return null;
+  const assertion = readPayloadText(signal.raw_payload.source_assertion);
+  if (assertion === null || assertion !== capsule.excerpt) return null;
+  const frame = groundAssociativeFactFrame(signal.raw_payload.fact_frame, assertion);
+  if (frame === null) return null;
+  const expected = buildAssociativeFactKeyProjections(frame).find(
+    (projection) => projection.projection_id === identity.projection_id
+  );
+  const stored = projections.get(projectionKey(capsule.object_id, identity));
+  if (expected === undefined || stored === undefined ||
+      stored.evidenceObjectId !== capsule.object_id ||
+      stored.workspaceId !== signal.workspace_id ||
+      stored.sourceHash !== capsule.source_hash ||
+      stored.projection.content !== expected.content) return null;
+  return expected;
+}
+
+function matchesFactKeySignalEnvelope(
+  signal: Readonly<CandidateMemorySignal> | undefined,
+  capsule: Readonly<EvidenceCapsule>
+): signal is Readonly<CandidateMemorySignal> {
+  if (signal === undefined || signal.source !== "garden_compile" ||
+      signal.signal_state !== "materialized" ||
+      signal.workspace_id !== capsule.workspace_id ||
+      signal.run_id !== capsule.run_id ||
+      signal.surface_id !== capsule.surface_id) return false;
+  const grounding = signal.raw_payload.source_grounding;
+  return typeof grounding === "object" && grounding !== null && !Array.isArray(grounding) &&
+    (grounding as Record<string, unknown>).status === "grounded" &&
+    (grounding as Record<string, unknown>).content_basis === "source_assertion";
+}
+
+function readPayloadText(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 function matchKey(match: EvidenceSearchMatch): string {

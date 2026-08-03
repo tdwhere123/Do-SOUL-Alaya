@@ -36,4 +36,53 @@ describe("MaterializationRouter activity recallability", () => {
 
     expect(target.route_target).not.toBe("memory_entry_only");
   });
+
+  it("writes grounded associative fact keys beside Evidence without changing Memory truth", async () => {
+    const dependencies = createDeps();
+    const router = new MaterializationRouter(dependencies);
+    const assertion = "I use Atlas for research.";
+    const signal = createSignal({
+      source: "garden_compile",
+      object_kind: "activity",
+      confidence: 0.9,
+      raw_payload: {
+        distilled_fact: assertion,
+        matched_text: assertion,
+        proposed_matched_text: assertion,
+        full_turn_content: assertion,
+        source_assertion: assertion,
+        source_grounding: {
+          version: 1,
+          status: "grounded",
+          content_basis: "source_assertion",
+          source_assertion: assertion,
+          proposed_matched_text: assertion,
+          reasons: []
+        },
+        fact_frame: {
+          schema_version: 1,
+          slots: [
+            { role: "subject", text: "I" },
+            { role: "relation", text: "use" },
+            { role: "value", text: "Atlas" },
+            { role: "qualifier", text: "for research" }
+          ]
+        }
+      }
+    });
+
+    await router.materialize(signal, router.route(signal));
+
+    expect(dependencies.evidenceService.create).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.arrayContaining([{
+        projection_id: 4,
+        projection_kind: "fact_key",
+        content: "I use for research"
+      }])
+    );
+    expect(dependencies.memoryService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ content: assertion })
+    );
+  });
 });

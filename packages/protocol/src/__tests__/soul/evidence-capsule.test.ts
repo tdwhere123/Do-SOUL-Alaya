@@ -204,7 +204,8 @@ describe("EvidenceCapsuleSchema", () => {
 
     expect(EvidenceSearchProjectionKindSchema.options).toEqual([
       "user_assertion",
-      "assistant_observation"
+      "assistant_observation",
+      "fact_key"
     ]);
     expect(projections.map((projection) => EvidenceSearchProjectionSchema.parse(projection)))
       .toEqual(projections);

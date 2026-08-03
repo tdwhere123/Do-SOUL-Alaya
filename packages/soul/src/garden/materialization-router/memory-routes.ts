@@ -23,6 +23,8 @@ import {
   readPartialFailureCreatedObjects
 } from "./materialization-results.js";
 import { MaterializationRouterPathSideEffects } from "./path-side-effects.js";
+import { buildFactKeySearchProjections } from
+  "../grounding/fact-frame/search-projections.js";
 
 type MemoryEntryMaterialization = {
   readonly evidence: MaterializationCreatedObject;
@@ -157,12 +159,14 @@ export class MaterializationRouterMemoryRoutes extends MaterializationRouterPath
     await this.preflightSignalRefFallback(signal);
 
     const createdObjects: MaterializationCreatedObject[] = [];
-    const evidence = await this.dependencies.evidenceService.create(
-      buildEvidenceInput(signal, undefined, {
-        fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
-        context
-      })
-    );
+    const evidenceInput = buildEvidenceInput(signal, undefined, {
+      fullTurnExcerpt: this.dependencies.fullTurnEvidenceExcerpt,
+      context
+    });
+    const factKeys = buildFactKeySearchProjections(signal.raw_payload);
+    const evidence = factKeys.length === 0
+      ? await this.dependencies.evidenceService.create(evidenceInput)
+      : await this.dependencies.evidenceService.create(evidenceInput, factKeys);
     createdObjects.push({ object_kind: evidence.object_kind, object_id: evidence.object_id });
 
     let memory: MemoryMaterializationCreatedObject;

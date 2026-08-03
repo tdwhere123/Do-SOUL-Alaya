@@ -22,6 +22,7 @@ import type {
   RecallServiceDependencies,
   RecallServiceWarnPort
 } from "../../runtime/recall-service-types.js";
+import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
 
 const MAX_REFS_PER_MEMORY = 8;
 
@@ -71,13 +72,17 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
   ]);
   if (evidenceIds.length === 0) return emptyEvidenceContexts();
   try {
-    const capsules = await evidenceSearchPort.findByIds(params.workspaceId, evidenceIds);
+    const [capsules, factKeys] = await Promise.all([
+      evidenceSearchPort.findByIds(params.workspaceId, evidenceIds),
+      loadQualifiedFactKeys(params, evidenceIds)
+    ]);
     return buildMemoryEvidenceContexts(
       params.workspaceId,
       gistCandidates,
       authorityCandidates,
       params.coarseEvidenceFtsRanksPerRef,
-      capsules
+      capsules,
+      factKeys
     );
   } catch (error) {
     params.warn("evidence context lookup for coverage and answer authority failed", {
@@ -87,6 +92,30 @@ export async function collectRecallEvidenceContexts(params: Readonly<{
       error: toErrorMessage(error)
     });
     return emptyEvidenceContexts();
+  }
+}
+
+async function loadQualifiedFactKeys(
+  params: Parameters<typeof collectRecallEvidenceContexts>[0],
+  evidenceIds: readonly string[]
+): Promise<readonly RecallQualifiedEvidence[]> {
+  const find = params.dependencies.evidenceSearchPort
+    ?.findRecallQualifiedFactKeysByIds;
+  if (find === undefined) return Object.freeze([]);
+  try {
+    return await find.call(
+      params.dependencies.evidenceSearchPort,
+      params.workspaceId,
+      evidenceIds
+    );
+  } catch (error) {
+    params.warn("fact-key evidence context lookup failed", {
+      workspace_id: params.workspaceId,
+      operation: "qualified_fact_key_lookup",
+      errorName: errorNameOf(error),
+      error: toErrorMessage(error)
+    });
+    return Object.freeze([]);
   }
 }
 
@@ -142,9 +171,11 @@ function buildMemoryEvidenceContexts(
   gistCandidates: readonly Readonly<MemoryEntry>[],
   authorityCandidates: readonly Readonly<MemoryEntry>[],
   ranksByRef: Readonly<Record<string, number>>,
-  capsules: readonly Readonly<EvidenceCapsule>[]
+  capsules: readonly Readonly<EvidenceCapsule>[],
+  qualifiedFactKeys: readonly Readonly<RecallQualifiedEvidence>[]
 ): Readonly<RecallEvidenceContexts> {
   const evidenceById = buildEvidenceById(workspaceId, capsules);
+  const factKeysByEvidenceId = buildFactKeysByEvidenceId(qualifiedFactKeys);
   const gists: Record<string, string> = {};
   const semanticDocuments: Record<
     string,
@@ -159,7 +190,7 @@ function buildMemoryEvidenceContexts(
   }
   for (const entry of authorityCandidates) {
     const documents = semanticEvidenceDocuments(
-      workspaceId, entry, evidenceById, ranksByRef
+      workspaceId, entry, evidenceById, factKeysByEvidenceId, ranksByRef
     );
     if (documents.length > 0) semanticDocuments[entry.object_id] = documents;
     const context = projectUniqueVerifiedContext(entry, evidenceById);
@@ -172,26 +203,59 @@ function buildMemoryEvidenceContexts(
   });
 }
 
+function buildFactKeysByEvidenceId(
+  qualified: readonly Readonly<RecallQualifiedEvidence>[]
+): ReadonlyMap<string, readonly Readonly<RecallQualifiedEvidence>[]> {
+  const grouped = new Map<string, RecallQualifiedEvidence[]>();
+  for (const item of qualified) {
+    if (item.matched_projection?.projection_kind !== "fact_key") continue;
+    const current = grouped.get(item.capsule.object_id) ?? [];
+    current.push(item);
+    grouped.set(item.capsule.object_id, current);
+  }
+  return new Map([...grouped].map(([evidenceId, items]) => [
+    evidenceId,
+    Object.freeze(items.sort((left, right) =>
+      left.matched_projection!.projection_id - right.matched_projection!.projection_id
+    ))
+  ]));
+}
+
 function semanticEvidenceDocuments(
   workspaceId: string,
   entry: Readonly<MemoryEntry>,
   evidenceById: ReadonlyMap<string, EvidenceRecord>,
+  factKeysByEvidenceId: ReadonlyMap<
+    string,
+    readonly Readonly<RecallQualifiedEvidence>[]
+  >,
   ranksByRef: Readonly<Record<string, number>>
 ): readonly Readonly<RecallEvidenceSemanticDocument>[] {
   return Object.freeze(orderEvidenceRefs(entry, ranksByRef)
     .slice(0, MAX_REFS_PER_MEMORY)
     .flatMap((ref) => {
       const evidence = evidenceById.get(ref)?.evidence;
-      if (evidence === undefined ||
-          !isDirectRecallEvidence(evidence, workspaceId)) return [];
+      if (evidence === undefined) return [];
       const content = createBoundedNonMemoryPreview(
         evidence.excerpt ?? evidence.gist
       );
-      return content.length === 0 ? [] : [Object.freeze({
-        evidenceRef: evidence.object_id,
-        documentIdentity: "owner",
-        content
-      })];
+      const owner = !isDirectRecallEvidence(evidence, workspaceId) || content.length === 0
+        ? []
+        : [Object.freeze({
+            evidenceRef: evidence.object_id,
+            documentIdentity: "owner",
+            content
+          })];
+      const factKeys = (factKeysByEvidenceId.get(evidence.object_id) ?? [])
+        .flatMap((qualified) => {
+          const projection = qualified.matched_projection;
+          return projection?.projection_kind !== "fact_key" ? [] : [Object.freeze({
+            evidenceRef: evidence.object_id,
+            documentIdentity: `fact_key:${projection.projection_id}`,
+            content: projection.content
+          })];
+        });
+      return [...owner, ...factKeys];
     }));
 }
 

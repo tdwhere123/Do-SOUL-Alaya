@@ -179,6 +179,10 @@ export interface RecallServiceEvidenceSearchPort {
     workspaceId: string,
     matches: readonly RecallEvidenceSearchMatch[]
   ): Promise<readonly RecallQualifiedEvidence[]>;
+  findRecallQualifiedFactKeysByIds?(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly RecallQualifiedEvidence[]>;
   findSourceAnchorsByIds?(
     workspaceId: string,
     evidenceObjectIds: readonly string[]

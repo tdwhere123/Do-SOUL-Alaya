@@ -61,6 +61,7 @@ function buildOfficialRawPayload(
     ...(input.distilledFact === undefined ? {} : { distilled_fact: input.distilledFact }),
     ...(input.temporalProjection === undefined ? {} : { temporal_projection: input.temporalProjection }),
     ...(draft.preference_profile === undefined ? {} : { preference_profile: draft.preference_profile }),
+    ...(draft.fact_frame === undefined ? {} : { fact_frame: draft.fact_frame }),
     ...(draft.canonical_entities === undefined || draft.canonical_entities.length === 0
       ? {}
       : { canonical_entities: draft.canonical_entities }),

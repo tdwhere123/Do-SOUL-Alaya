@@ -84,7 +84,8 @@ export const EvidenceCapsuleSchema = PersistentObjectEnvelopeSchema.unwrap().ext
 
 export const EvidenceSearchProjectionKindSchema = z.enum([
   "user_assertion",
-  "assistant_observation"
+  "assistant_observation",
+  "fact_key"
 ]);
 
 export const EvidenceSearchProjectionSchema = z.object({

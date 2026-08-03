@@ -10,6 +10,7 @@ export interface EvidenceCapsuleStatements {
   readonly findByArtifactRefStatement: SqliteStatement;
   readonly findByIdsStatement: SqliteStatement;
   readonly findSourceAnchorsByIdsStatement: SqliteStatement;
+  readonly findFactKeyProjectionIdentitiesByIdsStatement: SqliteStatement;
   readonly findByRunIdStatement: SqliteStatement;
   readonly findByRunIdPagedStatement: SqliteStatement;
   readonly findByWorkspaceIdStatement: SqliteStatement;
@@ -31,6 +32,9 @@ export function prepareEvidenceCapsuleStatements(db: StorageDatabase): EvidenceC
     findByArtifactRefStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL),
     findByIdsStatement: db.connection.prepare(FIND_EVIDENCE_CAPSULES_BY_IDS_SQL),
     findSourceAnchorsByIdsStatement: db.connection.prepare(FIND_EVIDENCE_SOURCE_ANCHORS_BY_IDS_SQL),
+    findFactKeyProjectionIdentitiesByIdsStatement: db.connection.prepare(
+      FIND_FACT_KEY_PROJECTION_IDENTITIES_BY_IDS_SQL
+    ),
     findByRunIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun")),
     findByRunIdPagedStatement: db.connection.prepare(findEvidenceCapsuleSql("byRun", "paged")),
     findByWorkspaceIdStatement: db.connection.prepare(findEvidenceCapsuleSql("byWorkspace")),
@@ -125,6 +129,15 @@ const FIND_EVIDENCE_CAPSULES_BY_IDS_SQL = `
       WHERE workspace_id = ?
         AND object_id IN (SELECT value FROM json_each(?))
       ORDER BY created_at ASC, object_id ASC
+`;
+
+const FIND_FACT_KEY_PROJECTION_IDENTITIES_BY_IDS_SQL = `
+      SELECT evidence_object_id AS object_id, projection_id, projection_kind
+      FROM evidence_search_projections
+      WHERE workspace_id = ?
+        AND evidence_object_id IN (SELECT value FROM json_each(?))
+        AND projection_kind = 'fact_key'
+      ORDER BY evidence_object_id ASC, projection_id ASC
 `;
 
 const FIND_EVIDENCE_CAPSULE_BY_ARTIFACT_REF_SQL = `

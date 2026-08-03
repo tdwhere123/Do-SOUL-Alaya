@@ -43,6 +43,12 @@ export interface EvidenceSourceAnchor {
   readonly artifact_ref: string;
 }
 
+interface FactKeyProjectionIdentityRow {
+  readonly object_id: string;
+  readonly projection_id: number;
+  readonly projection_kind: "fact_key";
+}
+
 interface EvidenceSourceAnchorRow {
   readonly evidence_object_id: string;
   readonly artifact_ref: string | null;
@@ -59,6 +65,10 @@ export interface EvidenceCapsuleRepo {
   findRecallQualifiedByIds(
     workspaceId: string,
     matches: readonly EvidenceSearchMatch[]
+  ): Promise<readonly RecallQualifiedEvidence[]>;
+  findRecallQualifiedFactKeysByIds(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
   ): Promise<readonly RecallQualifiedEvidence[]>;
   findSourceAnchorsByIds(
     workspaceId: string,
@@ -262,6 +272,38 @@ export class SqliteEvidenceCapsuleRepo implements EvidenceCapsuleRepo {
       throw new StorageError(
         "QUERY_FAILED",
         "Failed to load recall-qualified evidence capsules by ids.",
+        error
+      );
+    }
+  }
+
+  public async findRecallQualifiedFactKeysByIds(
+    workspaceId: string,
+    evidenceObjectIds: readonly string[]
+  ): Promise<readonly RecallQualifiedEvidence[]> {
+    const ids = uniqueNonEmpty(evidenceObjectIds);
+    if (ids.length === 0) return [];
+    try {
+      const matches: EvidenceSearchMatch[] = [];
+      for (let offset = 0; offset < ids.length; offset += 500) {
+        const rows = this.statements.findFactKeyProjectionIdentitiesByIdsStatement.all(
+          workspaceId,
+          JSON.stringify(ids.slice(offset, offset + 500))
+        ) as FactKeyProjectionIdentityRow[];
+        matches.push(...rows.map((row) => Object.freeze({
+          object_id: row.object_id,
+          matched_projection: Object.freeze({
+            projection_id: row.projection_id,
+            projection_kind: row.projection_kind
+          })
+        })));
+      }
+      return this.recallQualifiedReader.find(workspaceId, matches);
+    } catch (error) {
+      if (error instanceof EvidenceProjectionIntegrityError) throw error;
+      throw new StorageError(
+        "QUERY_FAILED",
+        "Failed to load recall-qualified fact-key projections.",
         error
       );
     }
