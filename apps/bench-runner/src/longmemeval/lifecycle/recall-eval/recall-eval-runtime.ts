@@ -330,7 +330,16 @@ export async function prepareRecallEvalDataRoot(
       });
       if (options.derivedEvidenceProjectionRebuild === true) {
         evidenceProjectionRebuild = await rebuildEvidenceSearchProjectionsOnWorkingCopy({
-          workingDbPath: dbPath
+          workingDbPath: dbPath,
+          ...(options.factFrameRetrofitLedgerPath === undefined
+            ? {}
+            : { factFrameRetrofitLedgerPath: options.factFrameRetrofitLedgerPath }),
+          ...(bundle.sourceExtractionSystemPromptSha256 === undefined
+            ? {}
+            : {
+                sourceExtractionSystemPromptSha256:
+                  bundle.sourceExtractionSystemPromptSha256
+              })
         });
       }
     }

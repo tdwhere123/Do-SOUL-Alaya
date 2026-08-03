@@ -44,6 +44,7 @@ const SELECTED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0, CONTENT);
 const MATERIALIZED_KEY = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT);
 const EXTRA_KEY = sha256("extra cache member");
 const SELECTED_RAW_SHA = sha256('{"signals":[]}');
+const HISTORICAL_SYSTEM_PROMPT = "historical source-extraction prompt";
 const CONTENT_ONLY_SELECTED_KEY = computeCacheKey(
   MODEL,
   PROFILE,
@@ -69,6 +70,12 @@ describe("contained snapshot seed-ledger closure", () => {
       cacheKey: CONTENT_ONLY_SELECTED_KEY
     };
     expect(() => verifyRounds(rounds)).toThrow(/canonical seed round identity mismatch/u);
+  });
+
+  it("accepts an explicitly supplied historical prompt without weakening cache binding", () => {
+    const rounds = canonicalRounds(HISTORICAL_SYSTEM_PROMPT);
+    expect(() => verifyRounds(rounds, false, HISTORICAL_SYSTEM_PROMPT)).not.toThrow();
+    expect(() => verifyRounds(rounds)).toThrow(/identity mismatch|closure is incomplete/u);
   });
 
   it("accepts a canonical zero-signal answer round as candidate absence", () => {
@@ -108,13 +115,14 @@ describe("contained snapshot seed-ledger closure", () => {
 
 function verifyRounds(
   rounds: LongMemEvalSnapshotSeedRound[],
-  answerRound = false
+  answerRound = false,
+  systemPrompt = OFFICIAL_API_SYSTEM_PROMPT
 ): void {
   const root = mkdtempSync(join(tmpdir(), "contained-seed-ledger-"));
   roots.push(root);
   const dbPath = join(root, "snapshot.db");
   initDatabase({ filename: dbPath }).close();
-  const extractionFixture = extraction();
+  const extractionFixture = extraction(systemPrompt);
   assertSnapshotSeedLedgerBinding({
     dbPath,
     sidecar: sidecar(rounds, answerRound),
@@ -148,20 +156,25 @@ function verifyRounds(
     closureAuthority: {
       kind: "contained",
       questionWindow: { offset: 0, limit: 1 }
-    }
+    },
+    systemPrompt
   });
 }
 
-function extraction() {
+function extraction(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT) {
+  const selectedKey = fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0, CONTENT, systemPrompt);
+  const materializedKey = fixtureRoundCacheKey(
+    FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT, systemPrompt
+  );
   const entries = [{
-    cacheKey: SELECTED_KEY,
+    cacheKey: selectedKey,
     model: MODEL,
     requestProfile: PROFILE,
     rawJsonSha256: SELECTED_RAW_SHA,
     rawSignalCount: 0,
     parsedDraftCount: 0
   }, {
-    cacheKey: MATERIALIZED_KEY,
+    cacheKey: materializedKey,
     model: MODEL,
     requestProfile: PROFILE,
     rawJsonSha256: sha256('{"signals":[{}]}'),
@@ -181,7 +194,7 @@ function extraction() {
     model_family: MODEL,
     request_profile: PROFILE,
     provider_url: "redacted",
-    system_prompt_sha256: sha256(OFFICIAL_API_SYSTEM_PROMPT),
+    system_prompt_sha256: sha256(systemPrompt),
     cache_key_algo: EXTRACTION_CACHE_KEY_ALGO,
     dataset: "longmemeval-s",
     dataset_revision: "b".repeat(64),
@@ -216,7 +229,7 @@ function extraction() {
   };
 }
 
-function canonicalRounds(): LongMemEvalSnapshotSeedRound[] {
+function canonicalRounds(systemPrompt = OFFICIAL_API_SYSTEM_PROMPT): LongMemEvalSnapshotSeedRound[] {
   return [{
     sessionIndex: 0,
     roundIndex: 0,
@@ -224,7 +237,7 @@ function canonicalRounds(): LongMemEvalSnapshotSeedRound[] {
     contentSha256: sha256(CONTENT),
     hasAnswer: false,
     extractionSource: "cache",
-    cacheKey: SELECTED_KEY,
+    cacheKey: fixtureRoundCacheKey(FIXTURE_QUESTION, 0, 0, CONTENT, systemPrompt),
     rawJsonSha256: SELECTED_RAW_SHA,
     rawSignalCount: 0,
     draftCount: 0,
@@ -241,7 +254,9 @@ function canonicalRounds(): LongMemEvalSnapshotSeedRound[] {
     contentSha256: sha256(MATERIALIZED_CONTENT),
     hasAnswer: false,
     extractionSource: "cache",
-    cacheKey: MATERIALIZED_KEY,
+    cacheKey: fixtureRoundCacheKey(
+      FIXTURE_QUESTION, 0, 1, MATERIALIZED_CONTENT, systemPrompt
+    ),
     rawJsonSha256: sha256('{"signals":[{}]}'),
     rawSignalCount: 1,
     draftCount: 1,
@@ -310,14 +325,15 @@ function fixtureRoundCacheKey(
   source: LongMemEvalQuestion,
   sessionIndex: number,
   roundIndex: number,
-  content: string
+  content: string,
+  systemPrompt = OFFICIAL_API_SYSTEM_PROMPT
 ): string {
   const session = source.haystack_sessions[sessionIndex]!;
   const round = pairSessionIntoRounds(session)[roundIndex]!;
   return computeExtractionTurnCacheKey(
     MODEL,
     PROFILE,
-    OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt,
     {
       turnContent: content,
       turnMessages: buildLongMemEvalRoundMessages(

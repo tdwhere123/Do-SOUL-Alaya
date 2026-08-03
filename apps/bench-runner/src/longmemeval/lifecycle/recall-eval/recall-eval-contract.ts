@@ -36,6 +36,8 @@ export interface RecallEvalOptions {
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
   readonly derivedEvidenceProjectionRebuild?: boolean;
+  readonly factFrameRetrofitLedgerPath?: string;
+  readonly seedExtractionSystemPromptPath?: string;
   readonly expansionCapability?: LongMemEvalExpansionCapability;
 }
 

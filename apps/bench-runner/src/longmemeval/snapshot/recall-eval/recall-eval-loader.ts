@@ -16,6 +16,9 @@ import {
 } from "../legacy/legacy-substrate.js";
 import { bindCurrentSnapshotArtifacts } from "../current/current-bound-artifacts.js";
 import type { SnapshotExtractionAuthority } from "../extraction-authority.js";
+import { readRegularFileNoFollow, sha256Buffer } from "../bound-file.js";
+
+const MAX_HISTORICAL_SYSTEM_PROMPT_BYTES = 64 * 1024;
 
 export interface RecallEvalSnapshotBundle {
   readonly snapshotDbPath: string;
@@ -25,6 +28,7 @@ export interface RecallEvalSnapshotBundle {
   readonly snapshotManifestSha256: string | null;
   readonly datasetSha256: string | null;
   readonly measurementForQuestion: SnapshotMeasurementOracleAccessor | null;
+  readonly sourceExtractionSystemPromptSha256?: string;
 }
 
 export async function loadRecallEvalSnapshot(input: {
@@ -35,6 +39,7 @@ export async function loadRecallEvalSnapshot(input: {
   readonly pinnedMetaRoot?: string;
   readonly legacyManifestSha256?: string;
   readonly legacyDatasetSha256?: string;
+  readonly seedExtractionSystemPromptPath?: string;
 }, currentSnapshotRoot?: string): Promise<RecallEvalSnapshotBundle> {
   const bundle = input.legacySnapshot === true
     ? {
@@ -86,6 +91,9 @@ async function readAttributedSnapshotBundle(
     targetRoot: currentSnapshotRoot
   });
   const { manifest, sidecar, snapshotDbPath, extractionAuthority } = bound;
+  const historicalPrompt = input.seedExtractionSystemPromptPath === undefined
+    ? null
+    : readHistoricalSystemPrompt(input.seedExtractionSystemPromptPath);
   assertSnapshotConsumerBinding({
     snapshotDbPath,
     manifest,
@@ -99,7 +107,8 @@ async function readAttributedSnapshotBundle(
     sidecar,
     extractionAuthority,
     dataDir: input.dataDir,
-    pinnedMetaRoot: input.pinnedMetaRoot
+    pinnedMetaRoot: input.pinnedMetaRoot,
+    ...(historicalPrompt === null ? {} : { systemPrompt: historicalPrompt.text })
   });
   return {
     snapshotDbPath,
@@ -107,8 +116,26 @@ async function readAttributedSnapshotBundle(
     sidecar,
     extractionAuthority,
     snapshotManifestSha256: bound.manifestSha256,
+    ...(historicalPrompt === null
+      ? {}
+      : { sourceExtractionSystemPromptSha256: historicalPrompt.sha256 }),
     ...authority
   };
+}
+
+function readHistoricalSystemPrompt(path: string): {
+  readonly text: string;
+  readonly sha256: string;
+} {
+  const bytes = readRegularFileNoFollow(path, MAX_HISTORICAL_SYSTEM_PROMPT_BYTES);
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("historical extraction system prompt is not valid UTF-8");
+  }
+  if (text.length === 0) throw new Error("historical extraction system prompt is empty");
+  return Object.freeze({ text, sha256: sha256Buffer(bytes) });
 }
 
 function requireCurrentRoot(value: string | undefined): string {

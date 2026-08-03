@@ -153,6 +153,7 @@ export async function verifyCurrentRecallSnapshotAuthority(input: {
   readonly extractionAuthority: SnapshotExtractionAuthority;
   readonly dataDir?: string;
   readonly pinnedMetaRoot?: string;
+  readonly systemPrompt?: string;
 }): Promise<{
   readonly datasetSha256: string;
   readonly measurementForQuestion: SnapshotMeasurementOracleAccessor;
@@ -181,7 +182,8 @@ export async function verifyCurrentRecallSnapshotAuthority(input: {
     extraction,
     extractionAuthority: input.extractionAuthority,
     seedExtractionPath: input.manifest.seed_extraction_path,
-    questionWindow: executionQuestionWindow(runProvenance)
+    questionWindow: executionQuestionWindow(runProvenance),
+    ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt })
   });
   return {
     datasetSha256: dataset.sha256,
@@ -271,11 +273,13 @@ function assertSnapshotSubstrate(input: {
   readonly extractionAuthority: SnapshotExtractionAuthority;
   readonly seedExtractionPath: SeedExtractionPath | undefined;
   readonly questionWindow: { readonly offset: number; readonly limit: number };
+  readonly systemPrompt?: string;
 }): void {
   assertSnapshotDatasetSubstrateIdentity(input);
   assertSnapshotSeedLedgerBinding({
     ...input,
-    closureAuthority: { kind: "contained", questionWindow: input.questionWindow }
+    closureAuthority: { kind: "contained", questionWindow: input.questionWindow },
+    ...(input.systemPrompt === undefined ? {} : { systemPrompt: input.systemPrompt })
   });
 }
 

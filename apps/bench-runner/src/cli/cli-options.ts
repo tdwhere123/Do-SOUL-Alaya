@@ -61,6 +61,8 @@ export interface ParsedFlags {
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
   readonly rebuildEvidenceSearchProjections?: boolean;
+  readonly factFrameRetrofitLedger?: string;
+  readonly seedExtractionSystemPrompt?: string;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
   readonly qa: boolean;
   // --edge-plane: drain the BULK_ENRICH edge pass before recall (cumulative
@@ -102,6 +104,8 @@ export interface ParsedFlagsState {
   legacyDatasetSha256?: string;
   experiment: boolean;
   rebuildEvidenceSearchProjections: boolean;
+  factFrameRetrofitLedger?: string;
+  seedExtractionSystemPrompt?: string;
   qa: boolean;
   edgePlane: boolean;
   shards: string[];
@@ -111,6 +115,8 @@ export interface ParsedFlagsState {
 export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--extraction-predecessor-authority");
   assertFlagAtMostOnce(args, "--catalog-refill-allowlist");
+  assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
+  assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -340,6 +346,20 @@ function consumeOtherPathFlags(
     state.snapshot = readFlagValue(args, index, token, "--snapshot");
     return nextIndex(index, token);
   }
+  if (matchFlagToken(token, "--fact-frame-retrofit-ledger")) {
+    state.factFrameRetrofitLedger = readRequiredFlagValue(
+      args, index, token, "--fact-frame-retrofit-ledger",
+      "--fact-frame-retrofit-ledger requires an NDJSON path"
+    );
+    return nextIndex(index, token);
+  }
+  if (matchFlagToken(token, "--seed-extraction-system-prompt")) {
+    state.seedExtractionSystemPrompt = readRequiredFlagValue(
+      args, index, token, "--seed-extraction-system-prompt",
+      "--seed-extraction-system-prompt requires a text path"
+    );
+    return nextIndex(index, token);
+  }
   if (matchFlagToken(token, "--concurrency")) {
     state.concurrency = parsePositiveInt(
       readFlagValue(args, index, token, "--concurrency"), "--concurrency"
@@ -465,6 +485,8 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     legacyDatasetSha256: state.legacyDatasetSha256,
     experiment: state.experiment,
     rebuildEvidenceSearchProjections: state.rebuildEvidenceSearchProjections,
+    factFrameRetrofitLedger: state.factFrameRetrofitLedger,
+    seedExtractionSystemPrompt: state.seedExtractionSystemPrompt,
     qa: state.qa,
     edgePlane: state.edgePlane
   };

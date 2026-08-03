@@ -119,6 +119,14 @@ export async function prepareRecallEvalRunContext(
 function assertDerivedProjectionRebuildBoundary(
   options: RecallEvalOptions
 ): void {
+  if (options.seedExtractionSystemPromptPath !== undefined &&
+      options.factFrameRetrofitLedgerPath === undefined) {
+    throw new Error("historical extraction prompt requires a fact-frame retrofit ledger");
+  }
+  if (options.factFrameRetrofitLedgerPath !== undefined &&
+      options.derivedEvidenceProjectionRebuild !== true) {
+    throw new Error("fact-frame retrofit ledger requires derived evidence projection rebuild");
+  }
   if (options.derivedEvidenceProjectionRebuild !== true) return;
   if (options.experiment !== true) {
     throw new Error("derived evidence projection rebuild requires experiment mode");

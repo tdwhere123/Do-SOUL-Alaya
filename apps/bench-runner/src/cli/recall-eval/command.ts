@@ -58,11 +58,29 @@ export function buildRecallEvalOptions(
     ...(opts.rebuildEvidenceSearchProjections === true
       ? { derivedEvidenceProjectionRebuild: true }
       : {}),
+    ...(opts.factFrameRetrofitLedger === undefined
+      ? {}
+      : { factFrameRetrofitLedgerPath: opts.factFrameRetrofitLedger }),
+    ...(opts.seedExtractionSystemPrompt === undefined
+      ? {}
+      : { seedExtractionSystemPromptPath: opts.seedExtractionSystemPrompt }),
     ...(expansionCapability === undefined ? {} : { expansionCapability })
   };
 }
 
 function assertExperimentFlags(opts: ParsedFlags): void {
+  if (opts.seedExtractionSystemPrompt !== undefined &&
+      opts.factFrameRetrofitLedger === undefined) {
+    throw new Error(
+      "--seed-extraction-system-prompt requires --fact-frame-retrofit-ledger"
+    );
+  }
+  if (opts.factFrameRetrofitLedger !== undefined &&
+      opts.rebuildEvidenceSearchProjections !== true) {
+    throw new Error(
+      "--fact-frame-retrofit-ledger requires --rebuild-evidence-search-projections"
+    );
+  }
   if (opts.rebuildEvidenceSearchProjections === true && opts.experiment !== true) {
     throw new Error(
       "--rebuild-evidence-search-projections requires --experiment"
@@ -95,6 +113,8 @@ function renderStart(opts: ParsedFlags): string {
     (opts.rebuildEvidenceSearchProjections === true
       ? " derived_projection_rebuild=true promotable=false"
       : "") +
+    (opts.factFrameRetrofitLedger === undefined ? "" : " fact_frame_retrofit=true") +
+    (opts.seedExtractionSystemPrompt === undefined ? "" : " historical_prompt=true") +
     (opts.legacySnapshot ? " mode=legacy-v1-old-cache diagnostic_only=true" : "") +
     (opts.offset !== undefined ? ` offset=${opts.offset}` : "") +
     (opts.limit !== undefined ? ` limit=${opts.limit}` : "") +
@@ -118,5 +138,9 @@ function renderResult(result: RecallEvalResult, legacy: boolean): string {
       `zero=${rebuild.zero_child_owner_count} nonzero=${rebuild.nonzero_child_owner_count} ` +
       `children=${rebuild.child_count} rejected=${rebuild.rejected_owner_count} ` +
       `sha256=${rebuild.projection_content_sha256} promotable=false\n`) +
+    (rebuild?.fact_frame_retrofit === undefined ? "" :
+      `  fact-frame-retrofit owners=${rebuild.fact_frame_retrofit.rebuilt_owner_count} ` +
+      `projections=${rebuild.fact_frame_retrofit.projection_count} ` +
+      `ledger_sha256=${rebuild.fact_frame_retrofit.ledger_sha256}\n`) +
     `  KPI: ${result.kpiPath}\n`;
 }

@@ -74,8 +74,10 @@ export function assertSnapshotSeedLedgerBinding(input: {
   readonly extractionAuthority: SnapshotExtractionAuthority;
   readonly seedExtractionPath: SeedExtractionPath | undefined;
   readonly closureAuthority: SnapshotSeedLedgerClosureAuthority;
+  readonly systemPrompt?: string;
 }): void {
-  const extraction = requireCompleteExtraction(input.extraction);
+  const systemPrompt = input.systemPrompt ?? OFFICIAL_API_SYSTEM_PROMPT;
+  const extraction = requireCompleteExtraction(input.extraction, systemPrompt);
   const totals = emptyTotals();
   const closure = new Map<string, ExtractionContentClosureEntry>();
   const db = new DatabaseSync(input.dbPath, { readOnly: true });
@@ -83,7 +85,9 @@ export function assertSnapshotSeedLedgerBinding(input: {
     input.sidecar.questions.forEach((question, index) => {
       const source = input.questions[index];
       if (source === undefined) throw new Error("snapshot seed ledger question order mismatch");
-      assertQuestionLedger(db, question, source, extraction, totals, closure);
+      assertQuestionLedger(
+        db, question, source, extraction, totals, closure, systemPrompt
+      );
     });
   } finally {
     db.close();
@@ -98,14 +102,15 @@ export function assertSnapshotSeedLedgerBinding(input: {
 }
 
 function requireCompleteExtraction(
-  value: SnapshotExtractionProvenance | null
+  value: SnapshotExtractionProvenance | null,
+  systemPrompt: string
 ): CompleteExtraction {
   if (value?.schema_version !== EXTRACTION_CACHE_MANIFEST_VERSION ||
       value.fill_status !== "complete" || value.content_closure_sha256 === undefined ||
       value.expected_turns === undefined || value.expected_key_set_sha256 === undefined ||
       value.request_profile === undefined ||
       value.cache_key_algo !== EXTRACTION_CACHE_KEY_ALGO ||
-      value.system_prompt_sha256 !== sha256(OFFICIAL_API_SYSTEM_PROMPT)) {
+      value.system_prompt_sha256 !== sha256(systemPrompt)) {
     throw new Error("promotion snapshot extraction closure is incomplete or drifted");
   }
   return value as CompleteExtraction;
@@ -117,7 +122,8 @@ function assertQuestionLedger(
   source: LongMemEvalQuestion,
   extraction: CompleteExtraction,
   totals: LedgerTotals,
-  closure: Map<string, ExtractionContentClosureEntry>
+  closure: Map<string, ExtractionContentClosureEntry>,
+  systemPrompt: string
 ): void {
   const ledger = question.seedRounds;
   const expected = canonicalRounds(source);
@@ -127,7 +133,7 @@ function assertQuestionLedger(
   ledger.forEach((round, index) => {
     const canonical = expected[index];
     if (canonical === undefined) throw new Error("snapshot canonical seed round order mismatch");
-    assertRoundIdentity(round, canonical, extraction, source);
+    assertRoundIdentity(round, canonical, extraction, source, systemPrompt);
     assertRoundConservation(round);
     addClosureEntry(closure, round, extraction);
     addTotals(totals, round);
@@ -157,14 +163,15 @@ function assertRoundIdentity(
   actual: LongMemEvalSnapshotSeedRound,
   expected: ReturnType<typeof canonicalRounds>[number],
   extraction: CompleteExtraction,
-  source: LongMemEvalQuestion
+  source: LongMemEvalQuestion,
+  systemPrompt: string
 ): void {
   const content = expected.round.content.trim();
   // invariant: must match fill/seed computeExtractionTurnCacheKey (trusted-role digest)
   const cacheKey = computeExtractionTurnCacheKey(
     extraction.extraction_model,
     extraction.request_profile,
-    OFFICIAL_API_SYSTEM_PROMPT,
+    systemPrompt,
     {
       turnContent: content,
       turnMessages: buildLongMemEvalRoundMessages(

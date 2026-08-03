@@ -23,36 +23,23 @@ import {
   type StorageDatabase
 } from "@do-soul/alaya-storage";
 import { sha256File } from "../integrity.js";
+import {
+  applyFactFrameRetrofit,
+  readFactFrameRetrofitLedger
+} from "./fact-frame-retrofit.js";
+import {
+  EVIDENCE_PROJECTION_REBUILD_REPORT_SCHEMA_VERSION,
+  type EvidenceSearchProjectionKindCount,
+  type EvidenceSearchProjectionRebuildReport,
+  type EvidenceSearchProjectionRebuildReportBody
+} from "./evidence-search-projection-rebuild-report.js";
+
+export type {
+  EvidenceSearchProjectionKindCount,
+  EvidenceSearchProjectionRebuildReport
+} from "./evidence-search-projection-rebuild-report.js";
 
 const FIRST_EVIDENCE_PROJECTION_SCHEMA_VERSION = 109;
-const REBUILD_REPORT_SCHEMA_VERSION = 1;
-
-export interface EvidenceSearchProjectionKindCount {
-  readonly projection_kind: string;
-  readonly child_count: number;
-}
-
-export interface EvidenceSearchProjectionRebuildReport {
-  readonly schema_version: typeof REBUILD_REPORT_SCHEMA_VERSION;
-  readonly promotable: false;
-  readonly input_db_sha256: string;
-  readonly rebuilt_db_identity_sha256: string;
-  readonly source_schema_version: number;
-  readonly working_schema_version: number;
-  readonly eligible_owner_count: number;
-  readonly rebuilt_owner_count: number;
-  readonly rejected_owner_count: number;
-  readonly zero_child_owner_count: number;
-  readonly nonzero_child_owner_count: number;
-  readonly child_count: number;
-  readonly projection_kind_counts: readonly EvidenceSearchProjectionKindCount[];
-  readonly projection_content_sha256: string;
-}
-
-type EvidenceSearchProjectionRebuildReportBody = Omit<
-  EvidenceSearchProjectionRebuildReport,
-  "input_db_sha256" | "rebuilt_db_identity_sha256"
->;
 
 interface EvidenceProjectionOwnerRow {
   readonly object_id: string;
@@ -101,9 +88,14 @@ export class EvidenceSearchProjectionRebuildError extends Error {
 
 export async function rebuildEvidenceSearchProjectionsOnWorkingCopy(input: {
   readonly workingDbPath: string;
+  readonly factFrameRetrofitLedgerPath?: string;
+  readonly sourceExtractionSystemPromptSha256?: string;
 }): Promise<EvidenceSearchProjectionRebuildReport> {
   const inputDbSha256 = await sha256File(input.workingDbPath);
   const sourceSchemaVersion = assertEligibleWorkingSchema(input.workingDbPath);
+  const retrofitLedger = input.factFrameRetrofitLedgerPath === undefined
+    ? null
+    : readFactFrameRetrofitLedger(input.factFrameRetrofitLedgerPath);
   const db = initDatabase({
     filename: input.workingDbPath,
     temporalMode: "candidate"
@@ -111,18 +103,34 @@ export async function rebuildEvidenceSearchProjectionsOnWorkingCopy(input: {
   let report: EvidenceSearchProjectionRebuildReportBody;
   try {
     const workingSchemaVersion = assertCurrentProjectionSchema(db);
-    report = db.connection.transaction(() =>
-      rebuildAllVerifiedOwners(db, sourceSchemaVersion, workingSchemaVersion)
-    ).immediate();
+    report = db.connection.transaction(() => {
+      const rebuilt = rebuildAllVerifiedOwners(
+        db,
+        sourceSchemaVersion,
+        workingSchemaVersion
+      );
+      if (retrofitLedger === null) return rebuilt;
+      return Object.freeze({
+        ...rebuilt,
+        fact_frame_retrofit: applyFactFrameRetrofit(db, retrofitLedger)
+      });
+    }).immediate();
   } finally {
     db.close();
   }
+  const attributedReport = input.sourceExtractionSystemPromptSha256 === undefined
+    ? report
+    : Object.freeze({
+        ...report,
+        source_extraction_system_prompt_sha256:
+          input.sourceExtractionSystemPromptSha256
+      });
   return Object.freeze({
-    ...report,
+    ...attributedReport,
     input_db_sha256: inputDbSha256,
     rebuilt_db_identity_sha256: digestRebuiltDatabaseIdentity(
       inputDbSha256,
-      report
+      attributedReport
     )
   });
 }
@@ -355,7 +363,7 @@ function buildReport(
     (owner) => owner.projections.length === 0
   ).length;
   return Object.freeze({
-    schema_version: REBUILD_REPORT_SCHEMA_VERSION,
+    schema_version: EVIDENCE_PROJECTION_REBUILD_REPORT_SCHEMA_VERSION,
     promotable: false,
     source_schema_version: sourceSchemaVersion,
     working_schema_version: workingSchemaVersion,
@@ -377,7 +385,7 @@ function emptyReport(
   rejectedOwnerCount: number
 ): EvidenceSearchProjectionRebuildReportBody {
   return Object.freeze({
-    schema_version: REBUILD_REPORT_SCHEMA_VERSION,
+    schema_version: EVIDENCE_PROJECTION_REBUILD_REPORT_SCHEMA_VERSION,
     promotable: false,
     source_schema_version: sourceSchemaVersion,
     working_schema_version: workingSchemaVersion,
