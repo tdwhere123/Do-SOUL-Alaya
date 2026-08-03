@@ -256,6 +256,23 @@ describe("OfficialApiGardenProvider", () => {  it("emits a per-turn count when t
     expect(drafts).toHaveLength(1);
   });
 
+  it("normalizes canonical decimal confidence strings and rejects other text", () => {
+    const drafts = parseOfficialApiSignals(JSON.stringify({ signals: [{
+      signal_kind: "potential_claim",
+      object_kind: "fact",
+      confidence: "0.95",
+      matched_text: "The release is on Friday."
+    }, {
+      signal_kind: "potential_claim",
+      object_kind: "fact",
+      confidence: "95%",
+      matched_text: "The release is on Friday."
+    }] }));
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.confidence).toBe(0.95);
+  });
+
 
   it("caps the signal count and clamps oversized parsed fields", () => {
     const oversizedMatchedText = "x".repeat(10_000);

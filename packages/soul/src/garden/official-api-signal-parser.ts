@@ -19,10 +19,11 @@ export const OFFICIAL_API_SIGNAL_LIMIT = 64;
 // invariant: extraction-cache reuse binds this parser behavior explicitly rather than
 // inferring compatibility from raw cache identity alone. source_locator is additive
 // and independently versioned, so locator absence keeps legacy v1 output unchanged.
-export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v3";
+export const OFFICIAL_API_SIGNAL_PARSER_SEMANTICS_VERSION = "official-api-signal-parser-v4";
 const MAX_OFFICIAL_API_OBJECT_KIND_CHARS = 200;
 const MAX_OFFICIAL_API_MATCHED_TEXT_CHARS = 4_000;
 const MAX_OFFICIAL_API_REASON_CHARS = 400;
+const CANONICAL_CONFIDENCE_PATTERN = /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u;
 const UnknownRecordSchema = z.record(z.string(), z.unknown()).readonly();
 const OfficialApiSignalsEnvelopeSchema = z.object({
   signals: z.array(z.unknown()).readonly()
@@ -43,6 +44,13 @@ const OfficialApiSignalKindSchema = z.preprocess(
     z.literal(SignalKind.POTENTIAL_PREFERENCE)
   ])
 );
+const OfficialApiConfidenceSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const normalized = value.trim();
+  return CANONICAL_CONFIDENCE_PATTERN.test(normalized)
+    ? Number(normalized)
+    : value;
+}, z.number().min(0).max(1));
 const StringArraySchema = z
   .preprocess((value) => (Array.isArray(value) ? value : []), z.array(OptionalTrimmedStringSchema))
   .transform((values) => {
@@ -134,7 +142,7 @@ const OfficialApiPreferenceProfileSchema = z
 const OfficialApiSignalEntrySchema = z.object({
   signal_kind: OfficialApiSignalKindSchema,
   object_kind: RequiredTrimmedStringSchema,
-  confidence: z.number(),
+  confidence: OfficialApiConfidenceSchema,
   matched_text: RequiredTrimmedStringSchema,
   evidence_refs: StringArraySchema,
   source_memory_refs: StringArraySchema,
