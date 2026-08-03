@@ -80,6 +80,35 @@ describe("candidate selector observation contract", () => {
       ?.selector_observation).toEqual(LEGACY_SELECTOR_OBSERVATION);
   });
 
+  it("persists admission attempts and fact-key projection attribution", () => {
+    const admissionAttempts = [{
+      pass: "final_selector",
+      selection_order: 2,
+      admitted: true,
+      dropped_reason: null
+    }] as const;
+    const projectionMatches = [{
+      evidence_ref: "evidence-alice-work",
+      projection_kind: "fact_key",
+      projection_id: 5,
+      normalized_rank: 0.8,
+      fact_key_forms: [{
+        kind: "leave_one_slot_out",
+        omitted_slot: { slot_index: 2, role: "value" }
+      }]
+    }] as const;
+
+    const question = buildQuestion({
+      admission_attempts: admissionAttempts,
+      evidence_projection_matches: projectionMatches
+    });
+
+    expect(question.candidates[0]?.admission_attempts).toEqual(admissionAttempts);
+    expect(question.candidates[0]?.evidence_projection_matches).toEqual(
+      projectionMatches
+    );
+  });
+
   it("defaults old rows to null and rejects malformed receipts", () => {
     const legacy = LongMemEvalQuestionDiagnosticSchema.parse(buildQuestion({}));
     expect(legacy.candidates[0]?.selector_observation).toBeNull();

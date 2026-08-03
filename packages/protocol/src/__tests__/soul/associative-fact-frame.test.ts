@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAttributedAssociativeFactKeyProjections,
   buildAssociativeFactKeyProjections,
   groundAssociativeFactFrame
 } from "../../soul/associative-fact-frame.js";
@@ -26,6 +27,17 @@ describe("associative fact frame", () => {
       { projection_id: 5, projection_kind: "fact_key", content: "I started using Atlas in March" },
       { projection_id: 6, projection_kind: "fact_key", content: "I started using Atlas for research" }
     ]);
+    expect(buildAttributedAssociativeFactKeyProjections(frame!)[4]).toEqual({
+      projection: {
+        projection_id: 5,
+        projection_kind: "fact_key",
+        content: "I started using Atlas in March"
+      },
+      forms: [{
+        kind: "leave_one_slot_out",
+        omitted_slot: { slot_index: 3, role: "qualifier" }
+      }]
+    });
   });
 
   it("rejects the whole frame when any slot is fabricated or out of source order", () => {

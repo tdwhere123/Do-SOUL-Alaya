@@ -1,11 +1,14 @@
 import { buildRecallCandidate } from "../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey, buildRecallLogicalObjectKey, isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
 import {
-  selectBoundedDirectEvidenceHead,
-  type DirectEvidenceHeadSelection
+  selectBoundedDirectEvidenceHead
 } from "./admission/direct-evidence-answer-head.js";
 import { buildFinalScoreFactors, createFineAssessmentDiagnostic } from "./diagnostics/fine-assessment-diagnostics.js";
-import { resolveFinalPacketConsensusPlan } from "./final-order/final-packet-consensus.js";
+import {
+  buildFinalSelectorOrder,
+  fineAssessmentPacketMatchesPlannedMembership,
+  resolveFinalPacketConsensusPlan
+} from "./final-order/final-packet-consensus.js";
 import {
   collectAdmittedCandidates,
   createAdmissionState,
@@ -14,7 +17,6 @@ import {
   resolveAdmission
 } from "./fine-assessment-selection/admission.js";
 import {
-  applyFinalPacketConsensus,
   buildSelectionResult,
   createSelectionBoundary,
   materializeFineAssessmentDelivery
@@ -33,6 +35,8 @@ import type {
   FineAssessmentSelectionParams,
   FineAssessmentSelectionResult
 } from "./fine-assessment-selection/types.js";
+import type { RecallAdmissionDiagnosticPass } from
+  "../runtime/recall-service-diagnostics.js";
 
 export type {
   FineAssessmentAdmissionReceipt,
@@ -59,8 +63,14 @@ export function selectFineAssessmentCandidates(
     (candidate) => context.answerSupportByCandidateKey.get(
       candidate.fusion.candidate_key)?.authority?.behavior_eligible === true
   );
-  const finalAccumulator = reduceFineAssessmentCandidates(
+  const selection = resolveAdmissionAwareFinalSelection(
+    selectionParams,
     coverageOrdered,
+    context,
+    evidenceHead.protections
+  );
+  const finalAccumulator = reduceFineAssessmentCandidates(
+    selection.order,
     context,
     boundaryCapture !== undefined
   );
@@ -71,57 +81,50 @@ export function selectFineAssessmentCandidates(
     finalAccumulator,
     context
   );
-  const { consensus, result } = resolveSelectionConsensus(
-    evidenceHead,
-    delivered,
-    context,
-    selectionParams.orderedCandidates
-  );
   return buildSelectionResult(
     selectionParams,
-    consensus,
-    result,
+    selection.consensus,
+    delivered,
     boundaryCapture?.tokenEstimatesByContent,
     preProjection
   );
 }
 
-function resolveSelectionConsensus(
-  evidenceHead: DirectEvidenceHeadSelection<FineAssessmentCandidate>,
-  delivered: ReturnType<typeof materializeFineAssessmentDelivery>,
+function resolveAdmissionAwareFinalSelection(
+  params: FineAssessmentSelectionParams,
+  coverageOrdered: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
-  orderedCandidates: readonly FineAssessmentCandidate[]
-): Readonly<{
-  consensus: ReturnType<typeof resolveFinalPacketConsensusPlan>;
-  result: ReturnType<typeof applyFinalPacketConsensus>;
-}> {
-  // Consensus scans full H; evidence-head rejects must not hide embedding ranks.
+  protectedCandidates: Parameters<typeof resolveFinalPacketConsensusPlan>[0]["protectedCandidates"]
+) {
   const consensus = resolveFinalPacketConsensusPlan({
-    baseline: delivered.candidates,
-    sourceCandidates: orderedCandidates,
-    protectedCandidates: evidenceHead.protections
+    baseline: collectAdmittedCandidates(coverageOrdered, context),
+    sourceCandidates: params.orderedCandidates,
+    protectedCandidates
   });
-  const consensusResult = applyFinalPacketConsensus(
-    consensus,
-    delivered,
-    orderedCandidates,
-    context,
-    reduceFineAssessmentCandidates
-  );
-  return Object.freeze({ consensus, result: consensusResult });
+  const proposedOrder = buildFinalSelectorOrder(consensus, coverageOrdered);
+  if (consensus.decision.status !== "accepted") {
+    return Object.freeze({ consensus, order: proposedOrder });
+  }
+  const feasiblePacket = collectAdmittedCandidates(proposedOrder, context);
+  const order = fineAssessmentPacketMatchesPlannedMembership(consensus, feasiblePacket)
+    ? proposedOrder
+    : coverageOrdered;
+  return Object.freeze({ consensus, order });
 }
 
 function reduceFineAssessmentCandidates(
   candidates: readonly FineAssessmentCandidate[],
   context: FineAssessmentSelectionContext,
-  captureAdmissionReceipts = false
+  captureAdmissionReceipts = false,
+  admissionPass: RecallAdmissionDiagnosticPass = "final_selector"
 ): FineAssessmentAccumulator {
   return candidates.reduce(
     (accumulator, candidate, index) => appendFineAssessmentCandidate(
       accumulator,
       candidate,
       index + 1,
-      context
+      context,
+      admissionPass
     ),
     createFineAssessmentAccumulator(
       captureAdmissionReceipts
@@ -144,7 +147,8 @@ function appendFineAssessmentCandidate(
   accumulator: FineAssessmentAccumulator,
   candidate: FineAssessmentCandidate,
   selectionOrder: number,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  admissionPass: RecallAdmissionDiagnosticPass
 ): FineAssessmentAccumulator {
   const candidateKey = buildRecallCandidateDedupeKey(candidate);
   const objectKey = buildRecallLogicalObjectKey(candidate);
@@ -153,13 +157,13 @@ function appendFineAssessmentCandidate(
   if (admission.droppedReason !== null) {
     return appendAdmissionExclusion(
       accumulator, candidate, candidateKey, selectionOrder,
-      admission.droppedReason, context
+      admission.droppedReason, context, admissionPass
     );
   }
   const tokenEstimate = admission.tokenEstimate ?? estimateCandidateTokens(candidate, context);
   return appendAcceptedCandidate(
     accumulator, candidate, candidateKey, selectionOrder, objectKey,
-    tokenEstimate, context
+    tokenEstimate, context, admissionPass
   );
 }
 
@@ -170,7 +174,8 @@ function appendAcceptedCandidate(
   selectionOrder: number,
   objectKey: string,
   tokenEstimate: number,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  admissionPass: RecallAdmissionDiagnosticPass
 ): FineAssessmentAccumulator {
   const finalRelevance = context.finalRelevanceByCandidateKey.get(candidateKey)
     ?? candidate.fusion.fused_score;
@@ -194,7 +199,8 @@ function appendAcceptedCandidate(
   });
   accumulator.selected.push(nextCandidate);
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(
-    candidate, candidateKey, selectionOrder, accumulator.selected.length, null, context
+    candidate, candidateKey, selectionOrder, accumulator.selected.length, null,
+    context, admissionPass
   ));
   recordAcceptedAdmission(accumulator.admission, candidate, objectKey, tokenEstimate);
   return accumulator;
@@ -206,10 +212,12 @@ function appendAdmissionExclusion(
   candidateKey: string,
   selectionOrder: number,
   droppedReason: Exclude<FineAssessmentAdmissionReceipt["kind"], "retained">,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  admissionPass: RecallAdmissionDiagnosticPass
 ): FineAssessmentAccumulator {
   accumulator.diagnostics.push(createFineAssessmentDiagnostic(
-    candidate, candidateKey, selectionOrder, null, droppedReason, context
+    candidate, candidateKey, selectionOrder, null, droppedReason,
+    context, admissionPass
   ));
   return accumulator;
 }

@@ -213,6 +213,15 @@ export interface RecallFusionBreakdown {
   readonly flood_fuel_coverage?: Readonly<FloodFuelCoverageSummary>;
 }
 
+export type RecallAdmissionDiagnosticPass = "final_selector";
+
+export interface RecallAdmissionAttemptDiagnostic {
+  readonly pass: RecallAdmissionDiagnosticPass;
+  readonly selection_order: number;
+  readonly admitted: boolean;
+  readonly dropped_reason: RecallCandidateDropReason | null;
+}
+
 export interface RecallCandidateDiagnostic {
   readonly candidate_key: string;
   readonly object_id: string;
@@ -227,6 +236,10 @@ export interface RecallCandidateDiagnostic {
   readonly plane_winning_admission: RecallAdmissionPlane;
   readonly pre_budget_rank: number;
   readonly selection_order: number;
+  readonly admission_attempts: readonly Readonly<RecallAdmissionAttemptDiagnostic>[];
+  readonly evidence_projection_matches: readonly Readonly<
+    import("./recall-service-results.js").RecallEvidenceProjectionMatchReceipt
+  >[];
   readonly fused_rank: number;
   readonly fused_score: number;
   readonly per_stream_rank: RecallFusionStreamRanks;

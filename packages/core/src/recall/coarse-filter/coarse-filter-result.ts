@@ -2,6 +2,7 @@ import type { ProjectMappingAnchor } from "@do-soul/alaya-protocol";
 import { classifyProjectMappingCandidate } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
+  RecallEvidenceProjectionMatchReceipt,
   RecallGraphExpansionDiagnostics,
   RecallResult,
   RecallServiceDependencies
@@ -22,6 +23,10 @@ export interface CoarseFilterRunResult {
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly evidenceProjectionMatchesByRef: Readonly<Record<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: Readonly<Record<string, number>>;
@@ -45,6 +50,10 @@ export interface BuildCoarseFilterResultParams {
   readonly trigramFtsRanks: ReadonlyMap<string, number>;
   readonly evidenceFtsRanks: ReadonlyMap<string, number>;
   readonly evidenceFtsRanksPerRef: ReadonlyMap<string, number>;
+  readonly evidenceProjectionMatchesByRef: ReadonlyMap<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >;
   readonly sourceProximityScores: ReadonlyMap<string, number>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: ReadonlyMap<string, number>;
@@ -67,6 +76,9 @@ export function buildCoarseFilterResult(
     synthesisFtsRanks: Object.freeze({}),
     evidenceFtsRanks: Object.freeze(Object.fromEntries(params.evidenceFtsRanks.entries())),
     evidenceFtsRanksPerRef: Object.freeze(Object.fromEntries(params.evidenceFtsRanksPerRef.entries())),
+    evidenceProjectionMatchesByRef: freezeProjectionMatches(
+      params.evidenceProjectionMatchesByRef
+    ),
     sourceProximityScores: Object.freeze(Object.fromEntries(params.sourceProximityScores.entries())),
     sourceCohortKeys: params.sourceCohortKeys,
     structuralScores: Object.freeze(Object.fromEntries(params.structuralScores.entries())),
@@ -78,6 +90,18 @@ export function buildCoarseFilterResult(
     pathSuppressionScores: Object.freeze(Object.fromEntries(params.pathSuppressionScores.entries())),
     degradation_reason: null
   });
+}
+
+function freezeProjectionMatches(
+  matches: ReadonlyMap<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >
+): Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>> {
+  return Object.freeze(Object.fromEntries([...matches].map(([evidenceRef, receipts]) => [
+    evidenceRef,
+    Object.freeze([...receipts])
+  ])));
 }
 
 function buildSupplementedCandidates(

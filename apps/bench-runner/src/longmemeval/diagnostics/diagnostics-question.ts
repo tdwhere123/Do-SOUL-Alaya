@@ -100,6 +100,8 @@ function buildReplayRankingFields(candidate: CandidateDiagnostic) {
     final_rank: candidate.finalRank,
     pre_budget_rank: candidate.preBudgetRank,
     selection_order: candidate.selectionOrder,
+    admission_attempts: candidate.admissionAttempts,
+    evidence_projection_matches: candidate.evidenceProjectionMatches,
     fused_rank: candidate.fusedRank,
     fused_score: candidate.fusedScore,
     answer_relevance_score: candidate.answerRelevanceScore,

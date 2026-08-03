@@ -1,4 +1,5 @@
 import type {
+  AssociativeFactKeyProjectionForm,
   BudgetSnapshot,
   EventLogEntry,
   EvidenceCapsule,
@@ -63,6 +64,7 @@ export type RecallQualifiedEvidence = Readonly<{
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly verified_user_projection: boolean;
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
+  readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
 }>;
 
 export interface RecallMemoryListPageOptions {

@@ -3,7 +3,8 @@ import { RecallOriginPlaneSchema } from "@do-soul/alaya-protocol";
 import {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
-  RecallCandidateAnswerFeaturesSchema
+  RecallCandidateAnswerFeaturesSchema,
+  RecallEvidenceProjectionMatchReceiptSchema
 } from "../../../harness/recall/recall-diagnostics-schema.js";
 import {
   RecallAnswerShapePlanSchema,
@@ -40,6 +41,21 @@ export const BenchEmbeddingProviderStateSchema = z.enum([
 ]);
 
 export const DeliveryMissDropReasonSchema = z.enum(DELIVERY_MISS_DROP_REASONS);
+
+const DiagnosticAdmissionAttemptSchema = z.object({
+  pass: z.literal("final_selector"),
+  selection_order: z.number().int().positive(),
+  admitted: z.boolean(),
+  dropped_reason: z.string().min(1).nullable()
+}).strict().readonly();
+
+export const DiagnosticAdmissionAttemptsSchema = z.array(
+  DiagnosticAdmissionAttemptSchema
+).readonly();
+
+export const DiagnosticEvidenceProjectionMatchesSchema = z.array(
+  RecallEvidenceProjectionMatchReceiptSchema
+).readonly();
 
 const DiagnosticStreamRanksSchema = z
   .record(z.string(), z.number().nullable())
@@ -207,6 +223,8 @@ const LongMemEvalReplayCandidateSchema = z
     final_rank: z.number().nullable(),
     pre_budget_rank: z.number().nullable(),
     selection_order: z.number().nullable(),
+    admission_attempts: DiagnosticAdmissionAttemptsSchema.default([]),
+    evidence_projection_matches: DiagnosticEvidenceProjectionMatchesSchema.default([]),
     fused_rank: z.number().nullable(),
     fused_score: z.number().nullable(),
     answer_relevance_score: z.number().min(0).max(1).nullable().default(null),

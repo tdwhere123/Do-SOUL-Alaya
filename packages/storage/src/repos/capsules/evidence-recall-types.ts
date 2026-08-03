@@ -1,4 +1,5 @@
 import type {
+  AssociativeFactKeyProjectionForm,
   EvidenceCapsule,
   EvidenceSearchProjection
 } from "@do-soul/alaya-protocol";
@@ -22,4 +23,5 @@ export interface RecallQualifiedEvidence {
   readonly capsule: Readonly<EvidenceCapsule>;
   readonly verified_user_projection: boolean;
   readonly matched_projection?: Readonly<EvidenceSearchProjection>;
+  readonly matched_fact_key_forms?: readonly Readonly<AssociativeFactKeyProjectionForm>[];
 }

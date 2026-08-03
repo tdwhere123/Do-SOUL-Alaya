@@ -4,6 +4,7 @@ import {
   DiagnosticCandidateAnswerFeaturesSchema,
   DiagnosticFloodEdgeTraceV1Schema,
   DiagnosticFloodPotentialSchema,
+  DiagnosticEvidenceProjectionMatchesSchema,
   DiagnosticRecallResultSchema,
   LongMemEvalGoldDiagnosticSchema,
   LongMemEvalMissTaxonomySchema,
@@ -49,6 +50,15 @@ export type DiagnosticCandidateAnswerFeatures = z.infer<
 export type DiagnosticSelectorObservation = z.infer<
   typeof RecallCandidateSelectorObservationSchema
 >;
+export type DiagnosticAdmissionAttempt = Readonly<{
+  readonly pass: "final_selector";
+  readonly selection_order: number;
+  readonly admitted: boolean;
+  readonly dropped_reason: string | null;
+}>;
+export type DiagnosticEvidenceProjectionMatch = z.infer<
+  typeof DiagnosticEvidenceProjectionMatchesSchema
+>[number];
 export type DiagnosticFloodEdgeTraceV1 = z.infer<typeof DiagnosticFloodEdgeTraceV1Schema>;
 export type DiagnosticFloodPotential = z.infer<typeof DiagnosticFloodPotentialSchema>;
 export type DiagnosticFloodFuelCoverage = Readonly<{
@@ -69,6 +79,8 @@ export type LongMemEvalReplayCandidate = Readonly<{
   readonly final_rank: number | null;
   readonly pre_budget_rank: number | null;
   readonly selection_order: number | null;
+  readonly admission_attempts: readonly DiagnosticAdmissionAttempt[];
+  readonly evidence_projection_matches: readonly DiagnosticEvidenceProjectionMatch[];
   readonly fused_rank: number | null;
   readonly fused_score: number | null;
   readonly answer_relevance_score: number | null;
@@ -386,6 +398,8 @@ export interface CandidateDiagnostic {
   readonly originPlane: RecallOriginPlane;
   readonly preBudgetRank: number | null;
   readonly selectionOrder: number | null;
+  readonly admissionAttempts: readonly DiagnosticAdmissionAttempt[];
+  readonly evidenceProjectionMatches: readonly DiagnosticEvidenceProjectionMatch[];
   readonly finalRank: number | null;
   readonly fusedRank: number | null;
   readonly fusedScore: number | null;

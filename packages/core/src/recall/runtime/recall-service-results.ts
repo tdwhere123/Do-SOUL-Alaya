@@ -1,4 +1,5 @@
 import type {
+  AssociativeFactKeyProjectionForm,
   ManifestationState,
   MemoryEntry,
   PathAnchorRef,
@@ -31,6 +32,14 @@ export interface EvidenceSupportVector {
   readonly source_kind: "evidence_ref";
   readonly source_id: string;
   readonly support: number;
+}
+
+export interface RecallEvidenceProjectionMatchReceipt {
+  readonly evidence_ref: string;
+  readonly projection_kind: "owner" | "assistant_observation" | "fact_key";
+  readonly projection_id: number | null;
+  readonly normalized_rank: number;
+  readonly fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
 }
 
 export interface RecallResult {
@@ -66,6 +75,10 @@ export interface RecallSupplementaryData {
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   // Per-ref grain (evidenceFtsRanks aggregates to memory id); absent → lane-count fallback.
   readonly evidenceFtsRanksPerRef?: Readonly<Record<string, number>>;
+  readonly evidenceProjectionMatchesByRef: Readonly<Record<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: Readonly<Record<string, number>>;

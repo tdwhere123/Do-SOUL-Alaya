@@ -103,7 +103,7 @@ describe("selection boundary pre-projection decision receipts", () => {
       .toThrow(/selection boundary fidelity mismatch/u);
   });
 
-  it("replays an embedding consensus introduction through the final selector", () => {
+  it("captures an embedding consensus order at the single final selector", () => {
     const boundary = captureBoundary(consensusFixture());
     const preProjection = requirePreProjection(boundary);
 
@@ -111,23 +111,24 @@ describe("selection boundary pre-projection decision receipts", () => {
       status: "accepted",
       reason: "strict_tail_consensus"
     });
-    expect(preProjection.introduced_candidate_keys).toEqual([
-      "workspace_local:memory_entry:challenger"
-    ]);
+    expect(preProjection.introduced_candidate_keys).toEqual([]);
     const retained = preProjection.projection_actions.filter((action) =>
       action.action === "retain"
     );
-    expect(retained).toHaveLength(preProjection.candidate_keys.length - 1);
+    expect(retained).toHaveLength(preProjection.candidate_keys.length);
     expect(retained.filter((action) =>
       action.reason_code === "stable_order_identity"
-    )).toHaveLength(preProjection.candidate_keys.length - 3);
+    )).toHaveLength(preProjection.candidate_keys.length);
     expect(retained.filter((action) =>
       action.reason_code === "unwitnessed_reorder"
-    )).toHaveLength(2);
+    )).toHaveLength(0);
     expect(preProjection.projection_actions.filter((action) =>
       action.action === "exclude"
+    )).toHaveLength(0);
+    expect(preProjection.admission_actions.filter((action) =>
+      action.action === "exclude"
     )).toHaveLength(1);
-    expect(preProjection.qualified_ordered_subsequence).toBe(false);
+    expect(preProjection.qualified_ordered_subsequence).toBe(true);
     expect(() => replayFineAssessmentSelectionBoundary(boundary)).not.toThrow();
   });
 

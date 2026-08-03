@@ -25,6 +25,12 @@ import {
 } from "./h1/recall-h1-diagnostics-schema.js";
 import { RecallCandidateSelectorObservationSchema } from
   "./candidate-selector-observation-schema.js";
+import {
+  RecallAdmissionAttemptDiagnosticSchema,
+  RecallEvidenceProjectionMatchReceiptSchema
+} from "./candidate-projection-diagnostics-schema.js";
+export { RecallEvidenceProjectionMatchReceiptSchema } from
+  "./candidate-projection-diagnostics-schema.js";
 export {
   BenchAnswerRerankFailureClassSchema,
   BenchAnswerRerankStatusSchema,
@@ -186,6 +192,10 @@ const RecallCandidateDiagnosticSchema = z
     plane_winning_admission: z.string().min(1),
     pre_budget_rank: z.number().int().positive(),
     selection_order: z.number().int().positive(),
+    admission_attempts: z.array(RecallAdmissionAttemptDiagnosticSchema).readonly().default([]),
+    evidence_projection_matches: z.array(
+      RecallEvidenceProjectionMatchReceiptSchema
+    ).readonly().default([]),
     fused_rank: z.number().int().positive(),
     fused_score: z.number().min(0),
     answer_relevance_score: z.number().min(0).max(1).optional(),

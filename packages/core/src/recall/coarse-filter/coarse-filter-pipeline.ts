@@ -33,6 +33,8 @@ import {
   type GraphExpansionCandidateSourceDiagnostic
 } from "../expansion/graph-expansion.js";
 import type { RecallGraphExpansionDiagnostics } from "../runtime/recall-service-types.js";
+import type { RecallEvidenceProjectionMatchReceipt } from
+  "../runtime/recall-service-results.js";
 import {
   addTemporalWindowCandidates,
   type TemporalWindowCandidateBudget
@@ -56,6 +58,10 @@ export interface CoarseFilterState {
   readonly trigramFtsRanks: Map<string, number>;
   readonly evidenceFtsRanks: Map<string, number>;
   readonly evidenceFtsRanksPerRef: Map<string, number>;
+  readonly evidenceProjectionMatchesByRef: Map<
+    string,
+    RecallEvidenceProjectionMatchReceipt[]
+  >;
   readonly sourceProximityScores: Map<string, number>;
   readonly structuralScores: Map<string, number>;
   readonly graphExpansionScores: Map<string, number>;
@@ -81,6 +87,10 @@ export function createCoarseFilterState(params: Readonly<{
     trigramFtsRanks: new Map<string, number>(),
     evidenceFtsRanks: new Map<string, number>(),
     evidenceFtsRanksPerRef: new Map<string, number>(),
+    evidenceProjectionMatchesByRef: new Map<
+      string,
+      RecallEvidenceProjectionMatchReceipt[]
+    >(),
     sourceProximityScores: new Map<string, number>(),
     structuralScores: new Map<string, number>(),
     graphExpansionScores: new Map<string, number>(),
@@ -180,6 +190,7 @@ export function buildCoarseFilterRunResult(params: Readonly<{
     trigramFtsRanks: params.state.trigramFtsRanks,
     evidenceFtsRanks: params.state.evidenceFtsRanks,
     evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef,
+    evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef,
     sourceProximityScores: params.state.sourceProximityScores,
     sourceCohortKeys: params.dynamic.sourceCohortKeys,
     structuralScores: params.state.structuralScores,
@@ -231,7 +242,8 @@ async function admitSemanticAndContentCandidates(
     ftsRanks: params.state.ftsRanks,
     trigramFtsRanks: params.state.trigramFtsRanks,
     evidenceFtsRanks: params.state.evidenceFtsRanks,
-    evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef
+    evidenceFtsRanksPerRef: params.state.evidenceFtsRanksPerRef,
+    evidenceProjectionMatchesByRef: params.state.evidenceProjectionMatchesByRef
   });
   addContentDerivedExpansionCandidates({
     tierMemories: params.tierMemories,

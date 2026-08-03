@@ -5,6 +5,8 @@ import {
 import { clamp01, errorNameOf, toErrorMessage } from "../runtime/recall-service-helpers.js";
 import { recordRecallDegradation } from "../runtime/diagnostics.js";
 import type { KeywordSearchResult } from "../runtime/recall-service-types.js";
+import type { RecallEvidenceProjectionMatchReceipt } from
+  "../runtime/recall-service-results.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import {
   intentSplitsByAnchor,
@@ -41,6 +43,10 @@ export interface SemanticSupplementParams {
   readonly trigramFtsRanks: Map<string, number>;
   readonly evidenceFtsRanks: Map<string, number>;
   readonly evidenceFtsRanksPerRef: Map<string, number>;
+  readonly evidenceProjectionMatchesByRef: Map<
+    string,
+    RecallEvidenceProjectionMatchReceipt[]
+  >;
 }
 
 export async function addSemanticSupplementCandidates(params: SemanticSupplementParams): Promise<void> {

@@ -1,6 +1,5 @@
 import type { RecallCandidate } from "@do-soul/alaya-protocol";
 import { deepFreeze } from "../../../shared/deep-freeze.js";
-import { CoreError } from "../../../shared/errors.js";
 import { buildRecallCandidateSelectionKey } from
   "../../runtime/recall-candidate-builder.js";
 import { buildRecallCandidateDedupeKey } from
@@ -31,26 +30,13 @@ export type FinalPacketConsensusPlan =
 
 export function resolveFinalPacketConsensusPlan(
   params: Readonly<{
-    readonly baseline: readonly Readonly<RecallCandidate>[];
+    readonly baseline: readonly FineAssessmentCandidate[];
     readonly sourceCandidates: readonly FineAssessmentCandidate[];
     readonly protectedCandidates: readonly EmbeddingRankConsensusProtection[];
   }>
 ): FinalPacketConsensusPlan {
   const consensusCandidates = params.sourceCandidates.map(toConsensusCandidate);
-  const sourceByKey = new Map(consensusCandidates.map((candidate) => [
-    candidate.candidateKey,
-    candidate
-  ]));
-  const baseline = params.baseline.flatMap((candidate) => {
-    const source = sourceByKey.get(buildRecallCandidateSelectionKey(candidate));
-    return source === undefined ? [] : [source];
-  });
-  if (baseline.length !== params.baseline.length) {
-    throw new CoreError(
-      "VALIDATION",
-      "Final packet consensus could not resolve every baseline candidate"
-    );
-  }
+  const baseline = params.baseline.map(toConsensusCandidate);
   const baselineKeys = new Set(baseline.map((candidate) => candidate.candidateKey));
   const baselineProtections = params.protectedCandidates.filter((protection) =>
     baselineKeys.has(protection.candidateKey)
@@ -106,10 +92,13 @@ export function buildFinalPacketConsensusObservation(
   return observation;
 }
 
-export function buildConsensusReplayOrder(
+export function buildFinalSelectorOrder(
   plan: FinalPacketConsensusPlan,
   sourceCandidates: readonly FineAssessmentCandidate[]
 ): readonly FineAssessmentCandidate[] {
+  if (plan.decision.status !== "accepted") {
+    return Object.freeze([...sourceCandidates]);
+  }
   const planned = plan.candidates.map((candidate) => candidate.sourceCandidate);
   const plannedKeys = new Set(plan.candidates.map((candidate) => candidate.candidateKey));
   return Object.freeze([
@@ -120,15 +109,35 @@ export function buildConsensusReplayOrder(
   ]);
 }
 
-export function packetMatchesConsensusMembership(
+export function packetMatchesPlannedMembership(
   plan: FinalPacketConsensusPlan,
   actual: readonly Readonly<RecallCandidate>[]
 ): boolean {
-  if (plan.candidates.length !== actual.length) return false;
+  return packetKeysMatchPlannedMembership(
+    plan,
+    actual.map(buildRecallCandidateSelectionKey)
+  );
+}
+
+export function fineAssessmentPacketMatchesPlannedMembership(
+  plan: FinalPacketConsensusPlan,
+  actual: readonly FineAssessmentCandidate[]
+): boolean {
+  return packetKeysMatchPlannedMembership(
+    plan,
+    actual.map(buildRecallCandidateDedupeKey)
+  );
+}
+
+function packetKeysMatchPlannedMembership(
+  plan: FinalPacketConsensusPlan,
+  receivedKeys: readonly string[]
+): boolean {
+  if (plan.candidates.length !== receivedKeys.length) return false;
   const expected = new Set(plan.candidates.map((candidate) => candidate.candidateKey));
-  const received = new Set(actual.map(buildRecallCandidateSelectionKey));
+  const received = new Set(receivedKeys);
   return expected.size === plan.candidates.length &&
-    received.size === actual.length &&
+    received.size === receivedKeys.length &&
     [...expected].every((candidateKey) => received.has(candidateKey));
 }
 

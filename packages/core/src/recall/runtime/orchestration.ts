@@ -40,6 +40,7 @@ import {
   toErrorMessage
 } from "./recall-service-helpers.js";
 import type {
+  RecallEvidenceProjectionMatchReceipt,
   RecallResult,
   RecallServiceDependencies,
   RecallServiceWarnPort
@@ -245,6 +246,10 @@ export function mergeCoarseFilters(
       current.evidenceFtsRanksPerRef,
       next.evidenceFtsRanksPerRef
     ),
+    evidenceProjectionMatchesByRef: mergeProjectionMatchRecords(
+      current.evidenceProjectionMatchesByRef,
+      next.evidenceProjectionMatchesByRef
+    ),
     sourceProximityScores: mergeReadonlyRecords(
       current.sourceProximityScores,
       next.sourceProximityScores
@@ -265,6 +270,17 @@ export function mergeCoarseFilters(
     ),
     degradation_reason: degradationReason
   });
+}
+
+function mergeProjectionMatchRecords(
+  left: Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>>,
+  right: Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>>
+): Readonly<Record<string, readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]>> {
+  const refs = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return Object.freeze(Object.fromEntries([...refs].map((ref) => [
+    ref,
+    Object.freeze([...(left[ref] ?? []), ...(right[ref] ?? [])])
+  ])));
 }
 
 export async function appendWeightTransferTelemetry(params: Readonly<{

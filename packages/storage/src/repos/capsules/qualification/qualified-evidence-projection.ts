@@ -1,5 +1,5 @@
 import {
-  buildAssociativeFactKeyProjections,
+  buildAttributedAssociativeFactKeyProjections,
   EvidenceSearchProjectionKindSchema,
   EvidenceSearchProjectionSchema,
   groundAssociativeFactFrame,
@@ -9,6 +9,7 @@ import {
   readVerifiedUserAssertionSourceHashDigest,
   type EvidenceCapsule,
   type EvidenceSearchProjection,
+  type AssociativeFactKeyProjectionForm,
   type CandidateMemorySignal,
   type GardenSourceTurnFallbackVerifiedReceipt
 } from "@do-soul/alaya-protocol";
@@ -32,6 +33,11 @@ interface BoundProjection {
   readonly workspaceId: string;
   readonly sourceHash: string;
   readonly projection: Readonly<EvidenceSearchProjection>;
+}
+
+interface RederivedFactKeyProjection {
+  readonly projection: Readonly<EvidenceSearchProjection>;
+  readonly forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
 }
 
 export type QualifiedProjectionIndex = ReadonlyMap<string, BoundProjection>;
@@ -111,13 +117,13 @@ export function qualifyEvidenceMatch(
     });
   }
   if (match.matched_projection?.projection_kind === "fact_key") {
-    const projection = rederiveFactKeyProjection(
+    const attributed = rederiveFactKeyProjection(
       match.matched_projection,
       capsule,
       signal,
       projections
     );
-    if (projection === null) {
+    if (attributed === null) {
       throw new EvidenceProjectionIntegrityError(
         capsule.object_id,
         "requested fact key does not match its grounded Signal"
@@ -126,7 +132,8 @@ export function qualifyEvidenceMatch(
     return Object.freeze({
       capsule,
       verified_user_projection: verifiedUserProjection,
-      matched_projection: projection
+      matched_projection: attributed.projection,
+      matched_fact_key_forms: attributed.forms
     });
   }
   if (!matchesOwnerProjection(capsule, receipt)) return null;
@@ -218,22 +225,23 @@ function rederiveFactKeyProjection(
   capsule: Readonly<EvidenceCapsule>,
   signal: Readonly<CandidateMemorySignal> | undefined,
   projections: QualifiedProjectionIndex
-): Readonly<EvidenceSearchProjection> | null {
+): Readonly<RederivedFactKeyProjection> | null {
   if (!matchesFactKeySignalEnvelope(signal, capsule)) return null;
   const assertion = readPayloadText(signal.raw_payload.source_assertion);
   if (assertion === null || assertion !== capsule.excerpt) return null;
   const frame = groundAssociativeFactFrame(signal.raw_payload.fact_frame, assertion);
   if (frame === null) return null;
-  const expected = buildAssociativeFactKeyProjections(frame).find(
-    (projection) => projection.projection_id === identity.projection_id
+  const attributed = buildAttributedAssociativeFactKeyProjections(frame).find(
+    ({ projection }) => projection.projection_id === identity.projection_id
   );
+  const expected = attributed?.projection;
   const stored = projections.get(projectionKey(capsule.object_id, identity));
   if (expected === undefined || stored === undefined ||
       stored.evidenceObjectId !== capsule.object_id ||
       stored.workspaceId !== signal.workspace_id ||
       stored.sourceHash !== capsule.source_hash ||
       stored.projection.content !== expected.content) return null;
-  return expected;
+  return attributed === undefined ? null : Object.freeze(attributed);
 }
 
 function matchesFactKeySignalEnvelope(

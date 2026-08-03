@@ -10,6 +10,8 @@ import type {
   RecallEvidenceSearchProjectionIdentity,
   RecallQualifiedEvidence
 } from "../../runtime/recall-service-types.js";
+import type { RecallEvidenceProjectionMatchReceipt } from
+  "../../runtime/recall-service-results.js";
 import type {
   SemanticSupplementParams
 } from "../coarse-filter-semantic.js";
@@ -84,6 +86,7 @@ async function loadQualifiedEvidenceOrFallback(
           result.matched_projection
         ));
       if (rank === undefined) return [];
+      recordQualifiedProjectionMatch(params, result, rank);
       const candidate = projectQualifiedEvidenceCandidate(
         result,
         rank
@@ -95,6 +98,44 @@ async function loadQualifiedEvidenceOrFallback(
     await admitMemoryEvidenceMatches(params, evidenceRankById);
     throw error;
   }
+}
+
+function recordQualifiedProjectionMatch(
+  params: SemanticSupplementParams,
+  qualified: Readonly<RecallQualifiedEvidence>,
+  rank: number
+): void {
+  const evidenceRef = qualified.capsule.object_id;
+  const projection = qualified.matched_projection;
+  const projectionKind = projection?.projection_kind === "assistant_observation" ||
+    projection?.projection_kind === "fact_key"
+    ? projection.projection_kind
+    : "owner";
+  const receipt: RecallEvidenceProjectionMatchReceipt = Object.freeze({
+    evidence_ref: evidenceRef,
+    projection_kind: projectionKind,
+    projection_id: projectionKind === "owner" ? null : projection?.projection_id ?? null,
+    normalized_rank: rank,
+    fact_key_forms: Object.freeze([...(qualified.matched_fact_key_forms ?? [])])
+  });
+  const current = params.evidenceProjectionMatchesByRef.get(evidenceRef) ?? [];
+  const identity = projectionMatchReceiptIdentity(receipt);
+  const retained = current.filter((candidate) =>
+    projectionMatchReceiptIdentity(candidate) !== identity
+  );
+  const existing = current.find((candidate) =>
+    projectionMatchReceiptIdentity(candidate) === identity
+  );
+  params.evidenceProjectionMatchesByRef.set(evidenceRef, [
+    ...retained,
+    existing !== undefined && existing.normalized_rank > rank ? existing : receipt
+  ]);
+}
+
+function projectionMatchReceiptIdentity(
+  receipt: Readonly<RecallEvidenceProjectionMatchReceipt>
+): string {
+  return `${receipt.projection_kind}:${receipt.projection_id ?? "owner"}`;
 }
 
 export function isEvidenceProjectionIntegrityError(error: unknown): boolean {

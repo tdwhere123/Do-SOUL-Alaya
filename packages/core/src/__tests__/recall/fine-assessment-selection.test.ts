@@ -19,6 +19,7 @@ describe("selectFineAssessmentCandidates", () => {
   it("copies bounded answer features and path suppression from existing recall state", () => {
     const longGist = `  ${"g".repeat(RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS + 4)}  `;
     const candidate = createCandidate("memory-1", {
+      evidence_refs: ["evidence-memory-1"],
       projection_schema_version: 1,
       event_time_start: "2026-05-01T00:00:00.000Z",
       event_time_end: "2026-05-02T00:00:00.000Z",
@@ -36,7 +37,19 @@ describe("selectFineAssessmentCandidates", () => {
     });
     const supplementaryData = createSupplementaryData({
       evidenceGistsByMemoryId: { "memory-1": longGist },
-      pathSuppressionScores: { "memory-1": 0.25 }
+      pathSuppressionScores: { "memory-1": 0.25 },
+      evidenceProjectionMatchesByRef: {
+        "evidence-memory-1": [{
+          evidence_ref: "evidence-memory-1",
+          projection_kind: "fact_key",
+          projection_id: 4,
+          normalized_rank: 0.8,
+          fact_key_forms: [{
+            kind: "leave_one_slot_out",
+            omitted_slot: { slot_index: 2, role: "value" }
+          }]
+        }]
+      }
     });
 
     const result = selectFineAssessmentCandidates({
@@ -50,12 +63,22 @@ describe("selectFineAssessmentCandidates", () => {
 
     expect(result.diagnostics[0]).toMatchObject({
       path_suppression_score: 0.25,
+      evidence_projection_matches: [{
+        evidence_ref: "evidence-memory-1",
+        projection_kind: "fact_key",
+        projection_id: 4,
+        normalized_rank: 0.8,
+        fact_key_forms: [{
+          kind: "leave_one_slot_out",
+          omitted_slot: { slot_index: 2, role: "value" }
+        }]
+      }],
       answer_features: {
         content: "Recall content for memory-1.",
         evidence_gist: "g".repeat(RECALL_DIAGNOSTIC_EVIDENCE_GIST_MAX_CHARS),
         evidence_gist_truncated: true,
         domain_tags: ["repo"],
-        evidence_refs: [],
+        evidence_refs: ["evidence-memory-1"],
         facet_tags: [{ facet: "food_dining", value: "tea" }],
         canonical_entities: ["alice", "tea"],
         projection_schema_version: 1,

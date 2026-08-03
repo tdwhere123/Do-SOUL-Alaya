@@ -13,6 +13,8 @@ import type {
 import {
   DiagnosticCandidateAnswerFeaturesSchema,
   DiagnosticFloodPotentialSchema,
+  DiagnosticEvidenceProjectionMatchesSchema,
+  DiagnosticAdmissionAttemptsSchema,
   DiagnosticQueryProbesSchema
 } from "../schema/diagnostics-schema.js";
 import { RecallDeepHeadTraceSchema } from
@@ -26,41 +28,9 @@ import {
 import type { DiagnosticCandidateIdentityMode } from "../candidate-identity.js";
 import { readCandidateSelectorObservation } from
   "./candidate-selector-observation-reader.js";
+import { readDiagnosticLabelArray } from
+  "./candidate-readers/source-label-reader.js";
 export { buildObjectIdentityKey } from "../candidate-identity.js";
-const DIAGNOSTIC_ADMISSION_PLANES = Object.freeze([
-  "protected_winner",
-  "activation",
-  "object_probe",
-  "lexical",
-  "evidence_anchor",
-  "facet_concept",
-  "domain_tag_cluster",
-  "session_surface_cohort",
-  "temporal_window",
-  "source_proximity",
-  "graph_expansion",
-  "path_expansion",
-  "semantic_supplement"
-] as const);
-
-const DIAGNOSTIC_SOURCE_LABELS = new Set<string>([
-  ...DIAGNOSTIC_ADMISSION_PLANES,
-  ...DIAGNOSTIC_ADMISSION_PLANES.map((plane) => `plane:${plane}`),
-  "query_probe_lexical",
-  "warm_cascade",
-  "cold_cascade",
-  "semantic_supplement",
-  "graph_support",
-  "path_plasticity",
-  "ranked_recall",
-  "workspace_local",
-  "project",
-  "global",
-  "advisory",
-  "lexical",
-  "lexical_expanded",
-  "evidence_fts"
-]);
 
 const DELIVERY_STAGE_ACTIONS = new Set(["noop", "kept", "promoted", "displaced"]);
 
@@ -160,12 +130,22 @@ function readCandidateRow(
   if (record.selector_observation != null && selectorObservation === null) return null;
   const pathSuppressionScore = readNumber(record.path_suppression_score);
   if (record.path_suppression_score != null && pathSuppressionScore === null) return null;
+  const admissionAttempts = DiagnosticAdmissionAttemptsSchema.safeParse(
+    record.admission_attempts ?? []
+  );
+  if (!admissionAttempts.success) return null;
+  const projectionMatches = DiagnosticEvidenceProjectionMatchesSchema.safeParse(
+    record.evidence_projection_matches ?? []
+  );
+  if (!projectionMatches.success) return null;
   const candidate: CandidateDiagnostic = {
     candidateKey: identity.candidateKey,
     objectId: identity.objectId,
     objectKind: identity.objectKind,
     ...readCandidateBasics(record),
     originPlane: identity.originPlane,
+    admissionAttempts: admissionAttempts.data,
+    evidenceProjectionMatches: projectionMatches.data,
     ...readCandidateScoring(record, fusion),
     ...readCandidateProvenance(record),
     answerFeatures,
@@ -481,12 +461,6 @@ export function readStringArray(value: unknown): readonly string[] | null {
     (item): item is string => typeof item === "string" && item.length > 0
   );
   return strings.length === value.length ? strings : null;
-}
-
-function readDiagnosticLabelArray(value: unknown): readonly string[] | null {
-  const strings = readStringArray(value);
-  if (strings === null) return null;
-  return strings.filter((item) => DIAGNOSTIC_SOURCE_LABELS.has(item));
 }
 
 function lastString(values: readonly string[] | null): string | null {

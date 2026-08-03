@@ -15,6 +15,7 @@ import { collectSupplementaryData } from "../../supplements/supplementary-data.j
 import type {
   CoarseRecallCandidate,
   RecallCandidateDiagnostic,
+  RecallEvidenceProjectionMatchReceipt,
   RecallGraphExpansionDiagnostics,
   RecallResult,
   RecallServiceDependencies,
@@ -32,6 +33,10 @@ export type CoarseFilterResult = Readonly<{
   readonly synthesisFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanks: Readonly<Record<string, number>>;
   readonly evidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly evidenceProjectionMatchesByRef: Readonly<Record<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >>;
   readonly sourceProximityScores: Readonly<Record<string, number>>;
   readonly sourceCohortKeys: Readonly<Record<string, string>>;
   readonly structuralScores: Readonly<Record<string, number>>;
@@ -115,6 +120,8 @@ export async function collectCoarseFilterSupplementaryData(
     coarseSynthesisFtsRanks: params.coarseFilter.synthesisFtsRanks,
     coarseEvidenceFtsRanks: params.coarseFilter.evidenceFtsRanks,
     coarseEvidenceFtsRanksPerRef: params.coarseFilter.evidenceFtsRanksPerRef,
+    coarseEvidenceProjectionMatchesByRef:
+      params.coarseFilter.evidenceProjectionMatchesByRef,
     coarseSourceProximityScores: params.coarseFilter.sourceProximityScores,
     coarseSourceCohortKeys: params.coarseFilter.sourceCohortKeys,
     coarseStructuralScores: params.coarseFilter.structuralScores,

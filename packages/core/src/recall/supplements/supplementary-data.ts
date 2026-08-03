@@ -14,6 +14,7 @@ import {
 import type {
   EvidenceSupportVector,
   PathInflowEdge,
+  RecallEvidenceProjectionMatchReceipt,
   RecallServiceDependencies,
   RecallServiceWarnPort,
   RecallSupplementaryData
@@ -64,6 +65,10 @@ interface CollectSupplementaryDataParams {
   readonly coarseSynthesisFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanks: Readonly<Record<string, number>>;
   readonly coarseEvidenceFtsRanksPerRef: Readonly<Record<string, number>>;
+  readonly coarseEvidenceProjectionMatchesByRef: Readonly<Record<
+    string,
+    readonly Readonly<RecallEvidenceProjectionMatchReceipt>[]
+  >>;
   readonly coarseSourceProximityScores: Readonly<Record<string, number>>;
   readonly coarseSourceCohortKeys: Readonly<Record<string, string>>;
   readonly coarseStructuralScores: Readonly<Record<string, number>>;
@@ -156,6 +161,7 @@ function freezeSupplementaryData(
     synthesisFtsRanks: params.coarseSynthesisFtsRanks,
     evidenceFtsRanks: params.coarseEvidenceFtsRanks,
     evidenceFtsRanksPerRef: params.coarseEvidenceFtsRanksPerRef,
+    evidenceProjectionMatchesByRef: params.coarseEvidenceProjectionMatchesByRef,
     sourceProximityScores: params.coarseSourceProximityScores,
     sourceCohortKeys: params.coarseSourceCohortKeys,
     structuralScores: params.coarseStructuralScores,

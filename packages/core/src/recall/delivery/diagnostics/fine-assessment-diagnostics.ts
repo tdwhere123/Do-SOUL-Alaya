@@ -7,6 +7,7 @@ import {
 } from "../../runtime/recall-service-helpers.js";
 import type {
   RecallAdmissionPlane,
+  RecallAdmissionDiagnosticPass,
   RecallCandidateDiagnostic,
   RecallCandidateDropReason,
   RecallSupplementaryData
@@ -32,7 +33,8 @@ export function createFineAssessmentDiagnostic(
   selectionOrder: number,
   finalRank: number | null,
   droppedReason: RecallCandidateDropReason | null,
-  context: FineAssessmentSelectionContext
+  context: FineAssessmentSelectionContext,
+  admissionPass: RecallAdmissionDiagnosticPass
 ): Readonly<RecallCandidateDiagnostic> {
   const admissionPlanes: readonly RecallAdmissionPlane[] = Object.freeze([
     ...(candidate.admissionPlanes ?? ["activation"])
@@ -43,6 +45,16 @@ export function createFineAssessmentDiagnostic(
     ...buildAdmissionDiagnosticFields(candidate, admissionPlanes),
     pre_budget_rank: selectionOrder,
     selection_order: selectionOrder,
+    admission_attempts: Object.freeze([Object.freeze({
+      pass: admissionPass,
+      selection_order: selectionOrder,
+      admitted: droppedReason === null,
+      dropped_reason: droppedReason
+    })]),
+    evidence_projection_matches: collectEvidenceProjectionMatches(
+      candidate,
+      context.supplementaryData
+    ),
     ...buildFusionDiagnosticFields(candidate),
     final_rank: finalRank,
     post_rank: finalRank,
@@ -62,6 +74,24 @@ export function createFineAssessmentDiagnostic(
     ...buildCompatibilityStageDiagnosticAliases(candidate.fusion.fused_rank, ranks.deliveryRank, selectionOrder),
     session_key: candidate.entry.surface_id ?? candidate.entry.run_id ?? "<no-session>"
   });
+}
+
+function collectEvidenceProjectionMatches(
+  candidate: FineAssessmentCandidate,
+  supplementaryData: RecallSupplementaryData
+) {
+  const evidenceRefs = new Set(candidate.entry.evidence_refs);
+  if (candidate.objectKind === "evidence_capsule") {
+    evidenceRefs.add(candidate.entry.object_id);
+  }
+  const matchesByRef = supplementaryData.evidenceProjectionMatchesByRef ?? {};
+  return Object.freeze([...evidenceRefs].flatMap((evidenceRef) =>
+    matchesByRef[evidenceRef] ?? []
+  ).sort((left, right) =>
+    right.normalized_rank - left.normalized_rank ||
+    left.projection_kind.localeCompare(right.projection_kind) ||
+    (left.projection_id ?? 0) - (right.projection_id ?? 0)
+  ));
 }
 
 export function buildFinalScoreFactors(

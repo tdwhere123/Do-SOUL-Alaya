@@ -138,7 +138,11 @@ describe("verified assertion evidence qualification", () => {
         projection_id: 5,
         projection_kind: "fact_key",
         content: "I bought my bookshelf"
-      }
+      },
+      matched_fact_key_forms: [{
+        kind: "leave_one_slot_out",
+        omitted_slot: { slot_index: 3, role: "qualifier" }
+      }]
     }]);
     await expect(repo.findRecallQualifiedFactKeysByIds(
       "workspace-1",
