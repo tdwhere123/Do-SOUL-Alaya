@@ -47,7 +47,13 @@ export const RecallEvalRankIdentitySchema = z.object({
   replay: z.object({
     question_count: z.number().int().positive(),
     question_id_digest: Sha256Schema,
-    full_snapshot_match: z.literal(true)
+    full_snapshot_match: z.literal(true),
+    selection_boundary: z.object({
+      filename: z.literal("selection-boundaries.ndjson.gz"),
+      sha256: Sha256Schema,
+      bytes: z.number().int().positive(),
+      record_count: z.number().int().positive()
+    }).strict().optional()
   }).strict(),
   questions: z.array(z.object({
     question_id: z.string().min(1),

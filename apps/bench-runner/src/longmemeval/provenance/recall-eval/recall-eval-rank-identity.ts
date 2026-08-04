@@ -5,6 +5,8 @@ import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+import type { RecallEvalSelectionBoundaryBinding } from
+  "../../lifecycle/recall-eval/recall-eval-selection-replay.js";
 
 export const RECALL_EVAL_RANK_IDENTITY_FILENAME =
   "recall-eval-rank-identity.json";
@@ -23,6 +25,7 @@ export interface RecallEvalRankIdentityBinding {
   readonly requireFullSnapshotMatch: boolean;
   readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
   readonly warmDerivedSnapshot?: WarmDerivedSnapshotBinding;
+  readonly selectionBoundary?: RecallEvalSelectionBoundaryBinding;
 }
 
 export function renderRecallEvalRankIdentity(
@@ -40,6 +43,7 @@ export function renderRecallEvalRankIdentity(
   if (binding.requireFullSnapshotMatch && !fullSnapshotMatch) {
     throw new Error("recall-eval rank identity does not match the frozen snapshot binding");
   }
+  assertSelectionBoundaryBinding(binding.selectionBoundary);
   const questions = collected.map((result) => ({
     question_id: result.questionId,
     delivered_objects: result.deliveredObjects.map((object) => ({ ...object }))
@@ -62,10 +66,25 @@ export function renderRecallEvalRankIdentity(
     replay: {
       question_count: collected.length,
       question_id_digest: questionIdDigest,
-      full_snapshot_match: fullSnapshotMatch
+      full_snapshot_match: fullSnapshotMatch,
+      ...(binding.selectionBoundary === undefined
+        ? {}
+        : { selection_boundary: binding.selectionBoundary })
     },
     questions
   }, null, 2)}\n`;
+}
+
+function assertSelectionBoundaryBinding(
+  binding: RecallEvalSelectionBoundaryBinding | undefined
+): void {
+  if (binding === undefined) return;
+  if (binding.filename !== "selection-boundaries.ndjson.gz" ||
+      !/^[a-f0-9]{64}$/u.test(binding.sha256) ||
+      !Number.isSafeInteger(binding.bytes) || binding.bytes <= 0 ||
+      !Number.isSafeInteger(binding.record_count) || binding.record_count <= 0) {
+    throw new Error("recall-eval selection boundary binding is invalid");
+  }
 }
 
 export async function writeRecallEvalRankIdentity(

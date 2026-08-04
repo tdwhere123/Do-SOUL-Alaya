@@ -66,8 +66,12 @@ import {
   type RecallEvalRunContext
 } from "./recall-eval-run-context.js";
 import { renderRecallEvalReport } from "../../kpi/recall-eval-report.js";
-import { captureRecallEvalQuestion, finalizeRecallEvalSelectionBoundarySpool,
-  RECALL_EVAL_SELECTION_BOUNDARY_FILENAME } from "./recall-eval-selection-replay.js";
+import {
+  captureRecallEvalQuestion,
+  finalizeRecallEvalSelectionBoundarySpool,
+  RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
+  type RecallEvalSelectionBoundaryArtifact
+} from "./recall-eval-selection-replay.js";
 import { warmLongMemEvalEmbeddingCaches } from "../../provenance/embedding/embedding-cache-warmup.js";
 import { deriveLongMemEvalMemoryObjectIds } from "../../runner/runner-helpers.js";
 import type { SnapshotQuestionMeasurementOracle } from
@@ -163,7 +167,7 @@ async function executeRecallEvalRun(
 async function writeRecallEvalArtifacts(
   context: RecallEvalRunContext,
   collected: readonly RecallEvalQuestionResult[],
-  selectionArtifact: string | null
+  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
 ): Promise<RecallEvalResult> {
   const offset = context.options.offset ?? 0;
   const limit = context.options.limit ?? null;
@@ -223,7 +227,7 @@ async function persistRecallEvalArtifacts(
     expectedQuestionIdDigest: string;
     provenanceComplete: boolean;
   }>,
-  selectionArtifact: string | null
+  selectionArtifact: RecallEvalSelectionBoundaryArtifact | null
 ): Promise<RecallEvalResult> {
   const slug = buildRecallEvalArchiveSlug(context);
   const report = renderRecallEvalReport(payload, previous, diff);
@@ -245,7 +249,10 @@ async function persistRecallEvalArtifacts(
         }),
     ...(context.warmDerivedSnapshot === null
       ? {}
-      : { warmDerivedSnapshot: context.warmDerivedSnapshot })
+      : { warmDerivedSnapshot: context.warmDerivedSnapshot }),
+    ...(selectionArtifact === null
+      ? {}
+      : { selectionBoundary: selectionArtifact.binding })
   });
   const entry = await withPublishedDiagnosticsArtifact(
     bundle.diagnosticsArtifact,
@@ -257,7 +264,11 @@ async function persistRecallEvalArtifacts(
           sourcePath: bundle.diagnosticsArtifact.finalPath
         }, ...(selectionArtifact === null ? [] : [{
           filename: RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
-          sourcePath: selectionArtifact
+          sourcePath: selectionArtifact.sourcePath,
+          identity: {
+            sha256: selectionArtifact.binding.sha256,
+            bytes: selectionArtifact.binding.bytes
+          }
         }])]
       }
     ),

@@ -40,10 +40,18 @@ export interface LongMemEvalSelectionBoundaryQuestionCapture {
   commit(): Promise<void>;
 }
 
+export interface LongMemEvalSelectionBoundaryArtifactIdentity {
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly recordCount: number;
+}
+
 export interface LongMemEvalSelectionBoundarySpool {
   readonly rootPath: string;
   beginQuestion(questionId: string): LongMemEvalSelectionBoundaryQuestionCapture;
-  writeGzipArtifact(artifactPath: string): Promise<{ readonly recordCount: number }>;
+  writeGzipArtifact(
+    artifactPath: string
+  ): Promise<LongMemEvalSelectionBoundaryArtifactIdentity>;
   dispose(): Promise<void>;
 }
 
@@ -167,13 +175,14 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
 
   async writeGzipArtifact(
     artifactPath: string
-  ): Promise<{ readonly recordCount: number }> {
+  ): Promise<LongMemEvalSelectionBoundaryArtifactIdentity> {
     this.#assertWritable();
     const expectedSource = this.#seal();
     await mkdir(dirname(artifactPath), { recursive: true });
     const partialPath = `${artifactPath}.partial-${randomUUID()}`;
     try {
       const sourceMeter = new SourceIdentityMeter();
+      const artifactMeter = new ByteIdentityMeter();
       await pipeline(
         createReadStream(this.#spoolPath),
         sourceMeter,
@@ -182,6 +191,7 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
           this.maxArtifactBytes,
           SELECTION_REPLAY_ARTIFACT_ERRORS.gzipExceeded
         ),
+        artifactMeter,
         createWriteStream(partialPath, { flags: "wx" })
       );
       assertSourceIdentity(expectedSource, sourceMeter.identity());
@@ -191,7 +201,7 @@ class SelectionBoundarySpool implements LongMemEvalSelectionBoundarySpool {
       );
       assertVerifiedRecordCount(expectedSource, verified.recordCount);
       await rename(partialPath, artifactPath);
-      return verified;
+      return { ...artifactMeter.identity(), recordCount: verified.recordCount };
     } catch (error) {
       await rm(partialPath, { force: true });
       throw error;
@@ -281,6 +291,25 @@ class SourceIdentityMeter extends Transform {
       sha256: this.#hash.digest("hex"),
       recordCount: this.#recordCount
     };
+  }
+}
+
+class ByteIdentityMeter extends Transform {
+  readonly #hash = createHash("sha256");
+  #bytes = 0;
+
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null, data?: Buffer) => void
+  ): void {
+    this.#hash.update(chunk);
+    this.#bytes += chunk.byteLength;
+    callback(null, chunk);
+  }
+
+  identity(): Readonly<{ sha256: string; bytes: number }> {
+    return { sha256: this.#hash.digest("hex"), bytes: this.#bytes };
   }
 }
 

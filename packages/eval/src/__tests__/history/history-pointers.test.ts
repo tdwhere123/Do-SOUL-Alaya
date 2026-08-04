@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -329,7 +330,11 @@ describe("history archive", () => {
       {
         fileSidecars: [{
           filename: "longmemeval-diagnostics.json.gz",
-          sourcePath: stagedEvidence
+          sourcePath: stagedEvidence,
+          identity: {
+            sha256: createHash("sha256").update("bound gzip evidence").digest("hex"),
+            bytes: Buffer.byteLength("bound gzip evidence")
+          }
         }],
         pointerWriter: async () => { throw new Error("injected pointer failure"); }
       }
@@ -353,6 +358,29 @@ describe("history archive", () => {
     expect(JSON.parse(await readFile(
       path.join(root, "live", "latest-run.json"), "utf8"
     )).slug).toBe(slug);
+  });
+
+  it("does not publish a file sidecar whose copied identity mismatches", async () => {
+    const slug = "2026-05-15T134000Z-c0ffee0";
+    const stagedEvidence = path.join(root, "staged-evidence.gz");
+    await writeFile(stagedEvidence, "actual evidence");
+
+    await expect(writeEntry(
+      layout, "live", slug, buildPayload("c0ffee0"), "report\n", null, {
+        fileSidecars: [{
+          filename: "selection-boundaries.ndjson.gz",
+          sourcePath: stagedEvidence,
+          identity: {
+            sha256: createHash("sha256").update("different evidence").digest("hex"),
+            bytes: Buffer.byteLength("different evidence")
+          }
+        }]
+      }
+    )).rejects.toThrow(/file sidecar identity mismatch/u);
+
+    expect(await listEntries(layout, "live")).toEqual([]);
+    await expect(readFile(path.join(root, "live", "latest-run.json"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 
 

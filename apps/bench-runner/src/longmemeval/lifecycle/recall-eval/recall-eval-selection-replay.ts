@@ -9,6 +9,18 @@ import {
 export const RECALL_EVAL_SELECTION_BOUNDARY_FILENAME =
   "selection-boundaries.ndjson.gz";
 
+export interface RecallEvalSelectionBoundaryBinding {
+  readonly filename: typeof RECALL_EVAL_SELECTION_BOUNDARY_FILENAME;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly record_count: number;
+}
+
+export interface RecallEvalSelectionBoundaryArtifact {
+  readonly sourcePath: string;
+  readonly binding: RecallEvalSelectionBoundaryBinding;
+}
+
 export function createRecallEvalSelectionBoundarySpool(
   env: Readonly<Record<string, string | undefined>>
 ): Promise<LongMemEvalSelectionBoundarySpool | null> {
@@ -17,14 +29,22 @@ export function createRecallEvalSelectionBoundarySpool(
 
 export async function finalizeRecallEvalSelectionBoundarySpool(
   spool: LongMemEvalSelectionBoundarySpool | null
-): Promise<string | null> {
+): Promise<RecallEvalSelectionBoundaryArtifact | null> {
   if (spool === null) return null;
   const artifactPath = join(
     spool.rootPath,
     RECALL_EVAL_SELECTION_BOUNDARY_FILENAME
   );
-  await spool.writeGzipArtifact(artifactPath);
-  return artifactPath;
+  const identity = await spool.writeGzipArtifact(artifactPath);
+  return {
+    sourcePath: artifactPath,
+    binding: {
+      filename: RECALL_EVAL_SELECTION_BOUNDARY_FILENAME,
+      sha256: identity.sha256,
+      bytes: identity.bytes,
+      record_count: identity.recordCount
+    }
+  };
 }
 
 export async function captureRecallEvalQuestion<T>(

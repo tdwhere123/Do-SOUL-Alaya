@@ -92,7 +92,7 @@ describe("LongMemEval selection-boundary spool", () => {
     second.observer(boundary("third"));
     await second.commit();
 
-    await spool.writeGzipArtifact(artifactPath);
+    const identity = await spool.writeGzipArtifact(artifactPath);
     expect(replayBoundary).toHaveBeenCalledTimes(3);
     replayBoundary.mockClear();
 
@@ -109,6 +109,12 @@ describe("LongMemEval selection-boundary spool", () => {
     expect(records.every((row) => Object.keys(row).sort().join(",") ===
       "authoritative,boundary,invocation_index,question_id")).toBe(true);
     expect(JSON.stringify(records)).not.toMatch(/gold|answer|evaluator/u);
+    const artifact = await readFile(artifactPath);
+    expect(identity).toEqual({
+      sha256: createHash("sha256").update(artifact).digest("hex"),
+      bytes: artifact.byteLength,
+      recordCount: 3
+    });
 
     await expect(
       verifyLongMemEvalSelectionBoundaryArtifact(artifactPath)

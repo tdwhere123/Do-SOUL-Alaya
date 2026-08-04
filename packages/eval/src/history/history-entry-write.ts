@@ -1,6 +1,8 @@
 import {
   access, copyFile, link, mkdir, mkdtemp, rename, rm, writeFile
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import path from "node:path";
 import type { BenchName, KpiPayload } from "../schema/kpi-schema.js";
 import {
@@ -24,6 +26,10 @@ export interface HistorySidecar {
 export interface HistoryFileSidecar {
   readonly filename: string;
   readonly sourcePath: string;
+  readonly identity?: Readonly<{
+    readonly sha256: string;
+    readonly bytes: number;
+  }>;
 }
 
 export interface WriteEntryOptions {
@@ -162,7 +168,35 @@ async function stageEntryFiles(
     await writeFile(path.join(root, sidecar.filename), sidecar.contents, "utf8");
   }
   for (const sidecar of fileSidecars) {
-    await linkOrCopy(sidecar.sourcePath, path.join(root, sidecar.filename));
+    await stageFileSidecar(root, sidecar);
+  }
+}
+
+async function stageFileSidecar(
+  root: string,
+  sidecar: HistoryFileSidecar
+): Promise<void> {
+  const destination = path.join(root, sidecar.filename);
+  if (sidecar.identity === undefined) {
+    await linkOrCopy(sidecar.sourcePath, destination);
+    return;
+  }
+  await copyFile(sidecar.sourcePath, destination);
+  await assertFileIdentity(destination, sidecar.identity);
+}
+
+async function assertFileIdentity(
+  filePath: string,
+  expected: Readonly<{ readonly sha256: string; readonly bytes: number }>
+): Promise<void> {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+    bytes += chunk.length;
+  }
+  if (bytes !== expected.bytes || hash.digest("hex") !== expected.sha256) {
+    throw new Error("history file sidecar identity mismatch");
   }
 }
 

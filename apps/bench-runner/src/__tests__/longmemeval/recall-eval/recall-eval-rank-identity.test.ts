@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderRecallEvalRankIdentity } from "../../../longmemeval/provenance/recall-eval/recall-eval-rank-identity.js";
+import { RecallEvalRankIdentitySchema } from
+  "../../../longmemeval/promotion/schema/evidence-schema.js";
 import { snapshotQuestionIdDigest } from "../../../longmemeval/snapshot/materialize.js";
 
 describe("recall-eval rank identity", () => {
@@ -66,6 +68,31 @@ describe("recall-eval rank identity", () => {
     }], binding);
 
     expect(synthesis).not.toBe(memory);
+  });
+
+  it("binds the selection-boundary artifact into replay identity", () => {
+    const collected = [{ questionId: "q-1", deliveredObjects: [object("m-1")] }];
+    const binding = {
+      filename: "selection-boundaries.ndjson.gz" as const,
+      sha256: "a".repeat(64),
+      bytes: 123,
+      record_count: 4
+    };
+    const rendered = renderRecallEvalRankIdentity(collected, {
+      expectedQuestionCount: 1,
+      expectedQuestionIdDigest: snapshotQuestionIdDigest(collected),
+      requireFullSnapshotMatch: true,
+      selectionBoundary: binding
+    });
+
+    const parsed = RecallEvalRankIdentitySchema.parse(JSON.parse(rendered));
+    expect(parsed.replay.selection_boundary).toEqual(binding);
+    expect(() => renderRecallEvalRankIdentity(collected, {
+      expectedQuestionCount: 1,
+      expectedQuestionIdDigest: snapshotQuestionIdDigest(collected),
+      requireFullSnapshotMatch: true,
+      selectionBoundary: { ...binding, sha256: "invalid" }
+    })).toThrow(/selection boundary binding is invalid/u);
   });
 
   it("persists the complete derived snapshot identity in the bound rank artifact", () => {

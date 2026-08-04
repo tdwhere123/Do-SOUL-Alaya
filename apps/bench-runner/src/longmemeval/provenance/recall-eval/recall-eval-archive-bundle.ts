@@ -36,6 +36,8 @@ import {
 } from "../../measurement/artifact-transaction.js";
 import type { WarmDerivedSnapshotBinding } from
   "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
+import type { RecallEvalSelectionBoundaryBinding } from
+  "../../lifecycle/recall-eval/recall-eval-selection-replay.js";
 
 export interface RecallEvalArchiveBundle {
   readonly sidecars: readonly { readonly filename: string; readonly contents: string }[];
@@ -59,6 +61,7 @@ export async function buildRecallEvalArchiveBundle(input: {
   readonly provenanceComplete: boolean;
   readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
   readonly warmDerivedSnapshot?: WarmDerivedSnapshotBinding;
+  readonly selectionBoundary?: RecallEvalSelectionBoundaryBinding;
 }): Promise<RecallEvalArchiveBundle> {
   const rankIdentity = renderRankIdentity(input);
   const runProvenance = renderRunProvenance(input);
@@ -130,7 +133,10 @@ function renderRankIdentity(
         }),
     ...(input.warmDerivedSnapshot === undefined
       ? {}
-      : { warmDerivedSnapshot: input.warmDerivedSnapshot })
+      : { warmDerivedSnapshot: input.warmDerivedSnapshot }),
+    ...(input.selectionBoundary === undefined
+      ? {}
+      : { selectionBoundary: input.selectionBoundary })
   });
 }
 
