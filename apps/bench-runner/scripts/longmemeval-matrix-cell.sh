@@ -175,6 +175,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" 
   REBUILD_EVIDENCE_PROJECTIONS="$REBUILD_EVIDENCE_PROJECTIONS" \
   HISTORICAL_PROMPT_SHA256="$HISTORICAL_PROMPT_SHA256" \
   FACT_FRAME_LEDGER_SHA256="$FACT_FRAME_LEDGER_SHA256" \
+  WARM_DERIVED_RECEIPT_PATH="$WARM_DERIVED_RECEIPT" \
   WARM_DERIVED_RECEIPT_SHA256="$WARM_DERIVED_RECEIPT_SHA256" \
   SLICE_LIMIT="$SLICE_LIMIT" SLICE_OFFSET="$SLICE_OFFSET" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
@@ -213,9 +214,18 @@ payload = {
 if os.environ["HISTORICAL_PROMPT_SHA256"]:
   payload["treatment"]["historical_seed_prompt_sha256"] = \
     os.environ["HISTORICAL_PROMPT_SHA256"]
-if os.environ["FACT_FRAME_LEDGER_SHA256"]:
+fact_frame_ledger_sha256 = os.environ["FACT_FRAME_LEDGER_SHA256"]
+if not fact_frame_ledger_sha256 and os.environ["WARM_DERIVED_RECEIPT_PATH"]:
+  with open(os.environ["WARM_DERIVED_RECEIPT_PATH"], encoding="utf-8") as handle:
+    receipt = json.load(handle)
+  retrofit = receipt.get("derived_evidence_projection_rebuild", {}).get(
+    "fact_frame_retrofit"
+  )
+  if isinstance(retrofit, dict):
+    fact_frame_ledger_sha256 = retrofit.get("ledger_sha256", "")
+if fact_frame_ledger_sha256:
   payload["treatment"]["fact_frame_retrofit_ledger_sha256"] = \
-    os.environ["FACT_FRAME_LEDGER_SHA256"]
+    fact_frame_ledger_sha256
 if os.environ["WARM_DERIVED_RECEIPT_SHA256"]:
   payload["treatment"]["warm_derived_snapshot_receipt_sha256"] = \
     os.environ["WARM_DERIVED_RECEIPT_SHA256"]
