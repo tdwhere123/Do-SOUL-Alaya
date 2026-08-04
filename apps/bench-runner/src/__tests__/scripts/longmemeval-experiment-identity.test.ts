@@ -35,18 +35,31 @@ describe("LongMemEval experiment identity", () => {
   });
 
   it("proves A/B differ only by the embedding treatment on one snapshot", () => {
-    const cellA = cellIdentity("A", "disabled");
-    const cellB = cellIdentity("B", "env");
+    const report = rebuildReport(factFrameRetrofitReport());
+    const cellA = withFactFrameLedger(
+      rebuiltCellIdentity("A", "disabled", report)
+    );
+    const cellB = withFactFrameLedger(
+      rebuiltCellIdentity("B", "env", report)
+    );
 
     expect(buildExperimentPairIdentity(cellA, cellB)).toMatchObject({
       kind: "longmemeval_experiment_pair_identity",
       snapshot: cellA.snapshot,
       runner: cellA.runner,
       evaluation_slice: { offset: 100, limit: 100 },
-      derived_snapshot_identity: null,
+      derived_snapshot_identity: report,
       cells: {
-        A: { embedding_mode: "disabled", cross_encoder_enabled: false },
-        B: { embedding_mode: "env", cross_encoder_enabled: false }
+        A: {
+          embedding_mode: "disabled",
+          cross_encoder_enabled: false,
+          fact_frame_retrofit_ledger_sha256: "f".repeat(64)
+        },
+        B: {
+          embedding_mode: "env",
+          cross_encoder_enabled: false,
+          fact_frame_retrofit_ledger_sha256: "f".repeat(64)
+        }
       }
     });
   });
@@ -102,6 +115,27 @@ describe("LongMemEval experiment identity", () => {
       .toThrow(/experiment A\/B identity/u);
   });
 
+  it("rejects A/B cells with different Fact Frame ledger treatments", () => {
+    const cellA = withFactFrameLedger(
+      rebuiltCellIdentity(
+        "A",
+        "disabled",
+        rebuildReport(factFrameRetrofitReport())
+      )
+    );
+    const cellB = withFactFrameLedger(
+      rebuiltCellIdentity(
+        "B",
+        "env",
+        rebuildReport(factFrameRetrofitReport("a".repeat(64)))
+      ),
+      "a".repeat(64)
+    );
+
+    expect(() => buildExperimentPairIdentity(cellA, cellB))
+      .toThrow(/experiment A\/B identity/u);
+  });
+
   it("rejects a rebuild identity not derived from the frozen cell snapshot", () => {
     const cell = {
       ...cellIdentity("A", "disabled"),
@@ -119,6 +153,44 @@ describe("LongMemEval experiment identity", () => {
         }
       }
     })).toThrow(/rebuild input differs/u);
+  });
+
+  it("rejects a Fact Frame treatment that differs from the applied ledger", () => {
+    const identity = cellIdentity("A", "disabled");
+    const cell = withFactFrameLedger({
+      ...identity,
+      treatment: {
+        ...identity.treatment,
+        derived_evidence_projection_rebuild: true
+      }
+    });
+
+    expect(() => bindExperimentCellRebuildIdentity(cell, {
+      snapshot_binding: {
+        derived_evidence_projection_rebuild: rebuildReport(
+          factFrameRetrofitReport("a".repeat(64))
+        )
+      }
+    })).toThrow(/Fact Frame retrofit ledger differs/u);
+  });
+
+  it("rejects a Fact Frame report without a matching treatment", () => {
+    const identity = cellIdentity("A", "disabled");
+    const cell = {
+      ...identity,
+      treatment: {
+        ...identity.treatment,
+        derived_evidence_projection_rebuild: true
+      }
+    };
+
+    expect(() => bindExperimentCellRebuildIdentity(cell, {
+      snapshot_binding: {
+        derived_evidence_projection_rebuild: rebuildReport(
+          factFrameRetrofitReport()
+        )
+      }
+    })).toThrow(/Fact Frame retrofit ledger differs/u);
   });
 });
 
@@ -204,8 +276,21 @@ function rebuiltCellIdentity(
   };
 }
 
-function rebuildReport() {
+function withFactFrameLedger<T extends { treatment: object }>(
+  identity: T,
+  ledgerSha = "f".repeat(64)
+) {
   return {
+    ...identity,
+    treatment: {
+      ...identity.treatment,
+      fact_frame_retrofit_ledger_sha256: ledgerSha
+    }
+  };
+}
+
+function rebuildReport(factFrameRetrofit?: ReturnType<typeof factFrameRetrofitReport>) {
+  const report = {
     schema_version: 1,
     promotable: false,
     input_db_sha256: "1".repeat(64),
@@ -223,6 +308,21 @@ function rebuildReport() {
       { projection_kind: "user_assertion", child_count: 8 }
     ],
     projection_content_sha256: "e".repeat(64)
+  };
+  return factFrameRetrofit === undefined
+    ? report
+    : { ...report, fact_frame_retrofit: factFrameRetrofit };
+}
+
+function factFrameRetrofitReport(ledgerSha = "f".repeat(64)) {
+  return {
+    schema_version: 1,
+    ledger_sha256: ledgerSha,
+    ledger_record_count: 66,
+    rebuilt_owner_count: 66,
+    rejected_record_count: 0,
+    projection_count: 318,
+    projection_content_sha256: "c".repeat(64)
   };
 }
 

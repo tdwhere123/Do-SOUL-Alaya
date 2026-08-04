@@ -8,6 +8,7 @@
 #           MATRIX_EXPERIMENT=1 for the contract-free local path,
 #           MATRIX_LIMIT / MATRIX_OFFSET for experiment-only slices,
 #           MATRIX_SEED_EXTRACTION_SYSTEM_PROMPT for historical snapshot closure,
+#           MATRIX_FACT_FRAME_RETROFIT_LEDGER for a sealed Fact Frame treatment,
 #           MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS=1 for a derived rebuild.
 set -euo pipefail
 
@@ -27,6 +28,7 @@ EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
 }
 REBUILD_EVIDENCE_PROJECTIONS="${MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS:-0}"
 HISTORICAL_PROMPT="${MATRIX_SEED_EXTRACTION_SYSTEM_PROMPT:-}"
+FACT_FRAME_LEDGER="${MATRIX_FACT_FRAME_RETROFIT_LEDGER:-}"
 [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "0" ||
    "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]] || {
   echo "MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS must be 0 or 1" >&2; exit 64;
@@ -41,6 +43,14 @@ if [[ -n "$HISTORICAL_PROMPT" ]]; then
   }
   [[ -f "$HISTORICAL_PROMPT" ]] || {
     echo "missing historical seed prompt: $HISTORICAL_PROMPT" >&2; exit 65;
+  }
+fi
+if [[ -n "$FACT_FRAME_LEDGER" ]]; then
+  [[ "$EXPERIMENT" == "1" && "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]] || {
+    echo "Fact Frame retrofit requires experiment projection rebuild" >&2; exit 64;
+  }
+  [[ -f "$FACT_FRAME_LEDGER" ]] || {
+    echo "missing Fact Frame retrofit ledger: $FACT_FRAME_LEDGER" >&2; exit 65;
   }
 fi
 if [[ "$EXPERIMENT" == "1" && -n "${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" ]]; then
@@ -109,6 +119,10 @@ HISTORICAL_PROMPT_SHA256=""
 if [[ -n "$HISTORICAL_PROMPT" ]]; then
   HISTORICAL_PROMPT_SHA256="$(file_sha "$HISTORICAL_PROMPT")"
 fi
+FACT_FRAME_LEDGER_SHA256=""
+if [[ -n "$FACT_FRAME_LEDGER" ]]; then
+  FACT_FRAME_LEDGER_SHA256="$(file_sha "$FACT_FRAME_LEDGER")"
+fi
 
 HEAD_SHA="$(git -C "$WORKTREE" rev-parse HEAD)"
 PORCELAIN="$(git -C "$WORKTREE" status --porcelain=v1 --untracked-files=normal || true)"
@@ -143,6 +157,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" 
   EXTRACTION_MODEL="$EXTRACTION_MODEL" \
   REBUILD_EVIDENCE_PROJECTIONS="$REBUILD_EVIDENCE_PROJECTIONS" \
   HISTORICAL_PROMPT_SHA256="$HISTORICAL_PROMPT_SHA256" \
+  FACT_FRAME_LEDGER_SHA256="$FACT_FRAME_LEDGER_SHA256" \
   SLICE_LIMIT="$SLICE_LIMIT" SLICE_OFFSET="$SLICE_OFFSET" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
   python3 - "$IDENTITY_PATH" <<'PY'
@@ -179,6 +194,9 @@ payload = {
 if os.environ["HISTORICAL_PROMPT_SHA256"]:
   payload["treatment"]["historical_seed_prompt_sha256"] = \
     os.environ["HISTORICAL_PROMPT_SHA256"]
+if os.environ["FACT_FRAME_LEDGER_SHA256"]:
+  payload["treatment"]["fact_frame_retrofit_ledger_sha256"] = \
+    os.environ["FACT_FRAME_LEDGER_SHA256"]
 if os.environ["EXPERIMENT"] == "1":
   payload["mode"] = "experiment"
   payload["evaluation_slice"] = {
@@ -243,6 +261,9 @@ if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]]; then
 fi
 if [[ -n "$HISTORICAL_PROMPT" ]]; then
   CLI_ARGS+=(--seed-extraction-system-prompt "$HISTORICAL_PROMPT")
+fi
+if [[ -n "$FACT_FRAME_LEDGER" ]]; then
+  CLI_ARGS+=(--fact-frame-retrofit-ledger "$FACT_FRAME_LEDGER")
 fi
 if [[ -n "$SLICE_LIMIT" ]]; then
   CLI_ARGS+=(--limit "$SLICE_LIMIT" --offset "$SLICE_OFFSET")

@@ -77,6 +77,9 @@ export function bindExperimentCellRebuildIdentity(cell, rankIdentity) {
   if (report.input_db_sha256 !== cell.snapshot?.db_sha256) {
     throw new Error("derived rebuild input differs from the frozen experiment snapshot");
   }
+  if (!factFrameBindingMatches(cell.treatment, report)) {
+    throw new Error("Fact Frame retrofit ledger differs from the rebuild report");
+  }
   return { ...cell, derived_snapshot_identity: report };
 }
 
@@ -97,7 +100,8 @@ function assertCell(value, cell, embeddingMode) {
     (value.treatment.derived_evidence_projection_rebuild
       ? isRebuildReport(value.derived_snapshot_identity) &&
         value.derived_snapshot_identity.input_db_sha256 === value.snapshot.db_sha256
-      : value.derived_snapshot_identity === null);
+      : value.derived_snapshot_identity === null) &&
+    factFrameBindingMatches(value.treatment, value.derived_snapshot_identity);
   if (!valid) throw new Error(`experiment A/B identity has invalid cell ${cell}`);
 }
 
@@ -121,7 +125,33 @@ function isRebuildReport(value) {
     value.projection_kind_counts.every((row) =>
       isRecord(row) && typeof row.projection_kind === "string" &&
       isNonnegativeInteger(row.child_count)) &&
+    isSha256(value.projection_content_sha256) &&
+    (value.fact_frame_retrofit === undefined ||
+      isFactFrameRetrofitReport(value.fact_frame_retrofit));
+}
+
+function isFactFrameRetrofitReport(value) {
+  return isRecord(value) &&
+    value.schema_version === 1 &&
+    isSha256(value.ledger_sha256) &&
+    [
+      "ledger_record_count",
+      "rebuilt_owner_count",
+      "rejected_record_count",
+      "projection_count"
+    ].every((field) => isNonnegativeInteger(value[field])) &&
+    value.rejected_record_count === 0 &&
     isSha256(value.projection_content_sha256);
+}
+
+function factFrameBindingMatches(treatment, rebuildReport) {
+  const ledgerSha = treatment?.fact_frame_retrofit_ledger_sha256;
+  const retrofit = isRecord(rebuildReport)
+    ? rebuildReport.fact_frame_retrofit
+    : undefined;
+  if (ledgerSha === undefined && retrofit === undefined) return true;
+  return isSha256(ledgerSha) && isFactFrameRetrofitReport(retrofit) &&
+    retrofit.ledger_sha256 === ledgerSha;
 }
 
 function isSha256(value) {
