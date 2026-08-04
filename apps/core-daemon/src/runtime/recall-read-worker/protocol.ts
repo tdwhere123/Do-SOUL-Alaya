@@ -18,6 +18,7 @@ export type RecallReadWorkerOperation =
   | "evidence.searchManyByKeyword"
   | "evidence.findByIds"
   | "evidence.findRecallQualifiedByIds"
+  | "evidence.findRecallQualifiedFactKeysByIds"
   | "evidence.findSourceAnchorsByIds"
   | "synthesis.searchByKeyword"
   | "synthesis.findByIds"

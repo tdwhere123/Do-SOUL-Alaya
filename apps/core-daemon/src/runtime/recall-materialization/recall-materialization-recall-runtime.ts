@@ -111,6 +111,13 @@ function createRecallEvidenceSearchPort(
       workspaceId: string,
       matches: readonly EvidenceSearchMatch[]
     ) => await input.evidenceCapsuleRepo.findRecallQualifiedByIds(workspaceId, matches),
+    findRecallQualifiedFactKeysByIds: async (
+      workspaceId: string,
+      evidenceObjectIds: readonly string[]
+    ) => await input.evidenceCapsuleRepo.findRecallQualifiedFactKeysByIds(
+      workspaceId,
+      evidenceObjectIds
+    ),
     findSourceAnchorsByIds: async (workspaceId: string, evidenceObjectIds: readonly string[]) =>
       await input.evidenceCapsuleRepo.findSourceAnchorsByIds(workspaceId, evidenceObjectIds)
   };

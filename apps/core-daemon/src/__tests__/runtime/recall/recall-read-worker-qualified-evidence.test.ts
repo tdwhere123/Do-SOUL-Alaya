@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +11,8 @@ import {
   SoulSignalMaterializedPayloadSchema,
   WorkspaceKind,
   WorkspaceState,
+  buildVerifiedUserAssertionReceiptPreimage,
+  formatVerifiedUserAssertionSourceHash,
   type CandidateMemorySignal,
   type EvidenceCapsule,
   type EvidenceSearchProjection
@@ -36,6 +38,7 @@ const builtWorkerUrl = new URL("../../../../dist/runtime/recall/recall-read-work
 const createdAt = "2026-07-27T12:00:00.000Z";
 const userStatement = "I commute by bicycle.";
 const assistantObservation = "Use the TrailShell pack because its roll-top keeps a laptop dry.";
+const assertion = "I bought my bookshelf from IKEA.";
 
 beforeAll(() => {
   if (!existsSync(fileURLToPath(builtWorkerUrl))) {
@@ -73,6 +76,34 @@ describe("RecallReadWorkerClient qualified evidence", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("routes receipt-qualified fact-key reads through the worker", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "alaya-qualified-fact-key-worker-"));
+    const databasePath = join(directory, "alaya.db");
+    const fixture = await seedQualifiedFactKey(databasePath);
+    const client = createRecallReadWorkerClient({
+      databaseFilename: databasePath,
+      workerUrl: builtWorkerUrl
+    });
+    try {
+      if (client === null) throw new Error("file-backed recall worker client is unavailable");
+      const findFactKeys = client.evidenceSearchPort.findRecallQualifiedFactKeysByIds;
+      if (findFactKeys === undefined) throw new Error("qualified fact-key reader is unavailable");
+
+      await expect(findFactKeys("workspace-1", [fixture.capsule.object_id])).resolves.toEqual([{
+        capsule: fixture.capsule,
+        verified_user_projection: false,
+        matched_projection: fixture.projection,
+        matched_fact_key_forms: [{
+          kind: "leave_one_slot_out",
+          omitted_slot: { slot_index: 3, role: "qualifier" }
+        }]
+      }]);
+    } finally {
+      await client?.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 type TestDatabase = ReturnType<typeof initDatabase>;
@@ -92,6 +123,117 @@ async function seedQualifiedEvidence(databasePath: string): Promise<Readonly<{
   } finally {
     database.close();
   }
+}
+
+async function seedQualifiedFactKey(databasePath: string): Promise<Readonly<{
+  readonly capsule: Readonly<EvidenceCapsule>;
+  readonly projection: Readonly<EvidenceSearchProjection>;
+}>> {
+  const database = initDatabase({ filename: databasePath });
+  try {
+    await seedWorkspaceAndRun(database);
+    const signal = await seedAssertionSignal(database);
+    const projection = Object.freeze({
+      projection_id: 5,
+      projection_kind: "fact_key" as const,
+      content: "I bought my bookshelf"
+    });
+    const capsule = await new SqliteEvidenceCapsuleRepo(database).create(
+      buildAssertionCapsule(signal),
+      [projection]
+    );
+    appendMaterializationEvent(database, signal, capsule);
+    return { capsule, projection };
+  } finally {
+    database.close();
+  }
+}
+
+async function seedAssertionSignal(database: TestDatabase): Promise<CandidateMemorySignal> {
+  const signal = {
+    signal_id: "signal-assertion",
+    workspace_id: "workspace-1",
+    run_id: "run-1",
+    surface_id: null,
+    source: "garden_compile",
+    signal_kind: "potential_claim",
+    signal_state: "emitted",
+    object_kind: "fact",
+    scope_hint: null,
+    domain_tags: [],
+    confidence: 0.9,
+    evidence_refs: [],
+    source_memory_refs: [],
+    supersedes_refs: [],
+    exception_to_refs: [],
+    contradicts_refs: [],
+    incompatible_with_refs: [],
+    raw_payload: {
+      source_assertion: assertion,
+      distilled_fact: assertion,
+      source_grounding: {
+        version: 1,
+        status: "grounded",
+        content_basis: "source_assertion",
+        source_assertion: assertion,
+        proposed_matched_text: assertion,
+        reasons: []
+      },
+      fact_frame: {
+        schema_version: 1,
+        slots: [
+          { role: "subject", text: "I" },
+          { role: "relation", text: "bought" },
+          { role: "value", text: "my bookshelf" },
+          { role: "qualifier", text: "from IKEA" }
+        ]
+      }
+    },
+    created_at: createdAt
+  } as const satisfies CandidateMemorySignal;
+  await new SqliteSignalRepo(database).create(signal);
+  await new SqliteSignalRepo(database).updateState(signal.signal_id, SignalState.MATERIALIZED);
+  return { ...signal, signal_state: SignalState.MATERIALIZED };
+}
+
+function buildAssertionCapsule(signal: CandidateMemorySignal): EvidenceCapsule {
+  const sourceCorpus = `User: ${assertion}`;
+  const sourceHash = formatVerifiedUserAssertionSourceHash(
+    createHash("sha256")
+      .update(buildVerifiedUserAssertionReceiptPreimage({
+        workspace_id: signal.workspace_id,
+        run_id: signal.run_id,
+        surface_id: signal.surface_id,
+        source_assertion: assertion,
+        source_corpus: sourceCorpus
+      }), "utf8")
+      .digest("hex")
+  );
+  return {
+    object_id: randomUUID(),
+    object_kind: "evidence_capsule",
+    schema_version: 1,
+    lifecycle_state: "active",
+    created_at: createdAt,
+    updated_at: createdAt,
+    created_by: "garden_compile",
+    evidence_kind: "conversation_excerpt",
+    semantic_anchor: { topic: "source assertion", keywords: [], summary: assertion },
+    event_anchor: null,
+    physical_anchor: {
+      file_path: null,
+      line_range: null,
+      symbol_name: null,
+      artifact_ref: "msg-assertion"
+    },
+    evidence_health_state: "verified",
+    gist: sourceCorpus,
+    excerpt: assertion,
+    source_hash: sourceHash,
+    run_id: signal.run_id,
+    workspace_id: signal.workspace_id,
+    surface_id: signal.surface_id
+  };
 }
 
 async function seedWorkspaceAndRun(database: TestDatabase): Promise<void> {
