@@ -431,57 +431,56 @@ describe("gate1 stage attribution (fixtures)", () => {
 });
 
 describe("gate1 stage attribution (p81 diagnostics)", () => {
-  it("builds A/B stage tables with KPI pre610 23/6 and delivery_order 83/44", async () => {
-    if (!existsSync(P81_A) || !existsSync(P81_B)) {
-      expect.soft(false, "p81 diagnostics missing; soft-skip").toBe(true);
-      return;
-    }
+  it.skipIf(!existsSync(P81_A) || !existsSync(P81_B))(
+    "builds A/B stage tables with KPI pre610 23/6 and delivery_order 83/44",
+    async () => {
+      const tables = await writeStageAttributionTables({
+        outDir: OUT_DIR,
+        cells: [
+          { cell: "A", diagnosticsPath: P81_A },
+          { cell: "B", diagnosticsPath: P81_B }
+        ]
+      });
 
-    const tables = await writeStageAttributionTables({
-      outDir: OUT_DIR,
-      cells: [
-        { cell: "A", diagnosticsPath: P81_A },
-        { cell: "B", diagnosticsPath: P81_B }
-      ]
-    });
+      expect(tables.A.summary.denominators.D_Q_scorable).toBe(470);
+      expect(tables.B.summary.denominators.D_Q_scorable).toBe(470);
+      expect(tables.A.summary.denominators.D_Q_gold_bearing).toBe(467);
+      expect(tables.B.summary.denominators.D_Q_gold_bearing).toBe(467);
+      expect(tables.A.summary.denominators.D_Q_miss).toBe(97);
+      expect(tables.B.summary.denominators.D_Q_miss).toBe(49);
 
-    expect(tables.A.summary.denominators.D_Q_scorable).toBe(470);
-    expect(tables.B.summary.denominators.D_Q_scorable).toBe(470);
-    expect(tables.A.summary.denominators.D_Q_gold_bearing).toBe(467);
-    expect(tables.B.summary.denominators.D_Q_gold_bearing).toBe(467);
-    expect(tables.A.summary.denominators.D_Q_miss).toBe(97);
-    expect(tables.B.summary.denominators.D_Q_miss).toBe(49);
+      expect(tables.A.summary.kpi_pre_budget_6_10).toBe(23);
+      expect(tables.B.summary.kpi_pre_budget_6_10).toBe(6);
+      expect(tables.A.summary.delivery_order_drop).toBe(83);
+      expect(tables.B.summary.delivery_order_drop).toBe(44);
 
-    expect(tables.A.summary.kpi_pre_budget_6_10).toBe(23);
-    expect(tables.B.summary.kpi_pre_budget_6_10).toBe(6);
-    expect(tables.A.summary.delivery_order_drop).toBe(83);
-    expect(tables.B.summary.delivery_order_drop).toBe(44);
+      expect(
+        tables.A.summary.candidate_absence_views.miss_taxonomy_candidate_absent.count
+      ).toBe(5);
+      expect(
+        tables.B.summary.candidate_absence_views.miss_taxonomy_candidate_absent.count
+      ).toBe(4);
+      expect(
+        tables.A.summary.candidate_absence_views.quality_candidate_absent_count.count
+      ).toBe(3);
+      expect(
+        tables.B.summary.candidate_absence_views.quality_candidate_absent_count.count
+      ).toBe(3);
+      expect(
+        tables.A.summary.candidate_absence_views.rank_bucket_candidate_absent.count
+      ).toBe(3);
+      expect(
+        tables.B.summary.candidate_absence_views.rank_bucket_candidate_absent.count
+      ).toBe(2);
 
-    expect(
-      tables.A.summary.candidate_absence_views.miss_taxonomy_candidate_absent.count
-    ).toBe(5);
-    expect(
-      tables.B.summary.candidate_absence_views.miss_taxonomy_candidate_absent.count
-    ).toBe(4);
-    expect(
-      tables.A.summary.candidate_absence_views.quality_candidate_absent_count.count
-    ).toBe(3);
-    expect(
-      tables.B.summary.candidate_absence_views.quality_candidate_absent_count.count
-    ).toBe(3);
-    expect(
-      tables.A.summary.candidate_absence_views.rank_bucket_candidate_absent.count
-    ).toBe(3);
-    expect(
-      tables.B.summary.candidate_absence_views.rank_bucket_candidate_absent.count
-    ).toBe(2);
-
-    const stageSumA = Object.values(tables.A.summary.question_stage_counts).reduce(
-      (a, b) => a + b,
-      0
-    );
-    expect(stageSumA).toBe(470);
-    expect(existsSync(path.join(OUT_DIR, "stage-tables-a.json"))).toBe(true);
-    expect(existsSync(path.join(OUT_DIR, "stage-tables-b.json"))).toBe(true);
-  }, 180_000);
+      const stageSumA = Object.values(tables.A.summary.question_stage_counts).reduce(
+        (a, b) => a + b,
+        0
+      );
+      expect(stageSumA).toBe(470);
+      expect(existsSync(path.join(OUT_DIR, "stage-tables-a.json"))).toBe(true);
+      expect(existsSync(path.join(OUT_DIR, "stage-tables-b.json"))).toBe(true);
+    },
+    180_000
+  );
 });

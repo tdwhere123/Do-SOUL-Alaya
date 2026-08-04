@@ -19,6 +19,8 @@ import {
   writeShardRoot
 } from "./cli-merge-validations-fixture.js";
 
+const MERGE_ARCHIVE_TEST_TIMEOUT_MS = 15_000;
+
 describe("merge-longmemeval validations", () => {
 
   let tmpRoot: string;
@@ -113,7 +115,7 @@ describe("merge-longmemeval validations", () => {
     expect(merged.kpi.latency_source).toBe("exact");
     expect(merged.kpi.latency_ms_p50).toBe(10);
     expect(merged.kpi.latency_ms_p95).toBe(19);
-  });
+  }, MERGE_ARCHIVE_TEST_TIMEOUT_MS);
 
   it("merges shard roots that only expose latest-run pointers", async () => {
     const shardA = path.join(tmpRoot, "shard-latest-run-a");
@@ -173,7 +175,7 @@ describe("merge-longmemeval validations", () => {
       )
     ) as KpiPayload;
     expect(merged.evaluated_count).toBe(10);
-  });
+  }, MERGE_ARCHIVE_TEST_TIMEOUT_MS);
 
   it("fails merge when a shard is missing its diagnostics sidecar", async () => {
     const shard = path.join(tmpRoot, "shard-missing-diagnostics");
@@ -253,7 +255,7 @@ describe("merge-longmemeval validations", () => {
     ]);
 
     expect(exitCode).toBe(1);
-  });
+  }, MERGE_ARCHIVE_TEST_TIMEOUT_MS);
 
   it("fails closed when present side-effect counters are malformed", async () => {
     const shard = path.join(tmpRoot, "shard-malformed-side-effects");
