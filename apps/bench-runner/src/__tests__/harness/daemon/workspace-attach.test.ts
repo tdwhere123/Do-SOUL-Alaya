@@ -1,4 +1,6 @@
-import { stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MemorySearchResult } from "@do-soul/alaya-protocol";
 import {
@@ -229,6 +231,34 @@ describe("BenchDaemon attachWorkspace contract", () => {
       });
       handles.push(daemon2);
       expect(daemon2.dataDir).not.toBe(dataDir);
+    },
+    120_000
+  );
+
+  it(
+    "restarts against a restored dataDir with the default workspace already present",
+    async () => {
+      const dataDirRoot = await mkdtemp(join(tmpdir(), "bench-restored-default-"));
+      let active: BenchDaemonHandle | undefined;
+      try {
+        active = await startBenchDaemon({
+          dataDirRoot,
+          workspaceId: "restored-default-ws",
+          runId: "restored-default-run"
+        });
+        await active.shutdown();
+        active = undefined;
+
+        active = await startBenchDaemon({
+          dataDirRoot,
+          workspaceId: "restored-default-ws",
+          runId: "restored-default-run"
+        });
+        expect(active.dataDir).toBe(dataDirRoot);
+      } finally {
+        await active?.shutdown().catch(() => undefined);
+        await rm(dataDirRoot, { recursive: true, force: true });
+      }
     },
     120_000
   );

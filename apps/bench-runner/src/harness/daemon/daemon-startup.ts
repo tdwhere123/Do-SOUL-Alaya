@@ -8,7 +8,7 @@ import {
   applyBenchFastPragmaIfRequested,
   closeBenchDaemonResources,
   makeDispatchCli,
-  seedBenchWorkspaceAndRun,
+  seedBenchWorkspaceIfAbsent,
   type BenchDaemonLaunchConfig
 } from "./daemon-support.js";
 import type { BenchDaemonConfigDirectoryLease } from "./daemon-config-directory.js";
@@ -119,7 +119,7 @@ async function installBenchProfile(
 async function seedBenchDefaultWorkspace(
   input: BenchDaemonStartupInput
 ): Promise<void> {
-  await seedBenchWorkspaceAndRun(
+  await seedBenchWorkspaceIfAbsent(
     input.dataDir,
     input.defaultWorkspaceId,
     input.defaultRunId,
