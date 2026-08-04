@@ -1,8 +1,5 @@
-import { clamp01 } from "../../shared/clamp.js";
 import type { DeliverySelectionCandidate } from "../delivery/delivery-selection.js";
-import { hasQueryEvidenceContribution } from "../scoring/query-evidence-support.js";
 import {
-  answerEvidenceSignal,
   buildLightweightComponents,
   embeddingSignal,
   probabilisticOr
@@ -155,41 +152,34 @@ export function lightweightDeepHeadScore(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number {
-  const embedding = embeddingSignal(candidate, supplementaryData);
-  if (embedding === null) {
-    return coldEmbeddingDeepHeadScore(candidate, supplementaryData);
-  }
-  return probabilisticOr(
-    embedding,
-    answerEvidenceSignal(candidate, supplementaryData)
-  );
+  return resolveLightweightScore(
+    candidate,
+    buildLightweightComponents(candidate, supplementaryData)
+  ) ?? 0;
 }
 
 export function coldEmbeddingDeepHeadScore(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number {
-  const answerEvidence = answerEvidenceSignal(candidate, supplementaryData);
-  if (hasQueryEvidenceContribution(
-    candidate.fusion.fused_rank_contribution_per_stream,
-    supplementaryData.queryProbes
-  )) {
-    return probabilisticOr(clamp01(candidate.fusion.fused_score), answerEvidence);
-  }
-  return answerEvidence;
+  return resolveLightweightScore(
+    candidate,
+    buildLightweightComponents(candidate, supplementaryData)
+  ) ?? 0;
 }
 
 function resolveLightweightScore(
-  candidate: DeliverySelectionCandidate,
+  _candidate: DeliverySelectionCandidate,
   components: LightweightComponents
 ): number | null {
+  let score = components.resolvedEvidence;
   if (components.embedding !== null) {
-    return probabilisticOr(components.embedding, components.resolvedEvidence);
+    score = probabilisticOr(score, components.embedding);
   }
-  const fusionBaselineUsed = components.fusionBaselineEligible;
-  return fusionBaselineUsed
-    ? probabilisticOr(clamp01(candidate.fusion.fused_score), components.resolvedEvidence)
-    : components.resolvedEvidence;
+  if (components.fusionBaselineScore !== null) {
+    score = probabilisticOr(score, components.fusionBaselineScore);
+  }
+  return score;
 }
 
 function buildLightweightTrace(
@@ -200,21 +190,15 @@ function buildLightweightTrace(
   if (!active) {
     return buildDeepHeadTrace(components, null, "inactive", false);
   }
-  if (components.embedding !== null) {
-    return buildDeepHeadTrace(
-      components,
-      probabilisticOr(components.embedding, components.resolvedEvidence),
-      "embedding_evidence",
-      false
-    );
-  }
-  const fusionBaselineUsed = components.fusionBaselineEligible;
+  const fusionBaselineUsed = components.fusionBaselineScore !== null;
+  const resolvedScore = resolveLightweightScore(candidate, components)!;
+  const scoreSource: RecallDeepHeadScoreSource = components.embedding !== null
+    ? fusionBaselineUsed ? "fusion_embedding_evidence" : "embedding_evidence"
+    : fusionBaselineUsed ? "fusion_evidence" : "evidence_only";
   return buildDeepHeadTrace(
     components,
-    fusionBaselineUsed
-      ? probabilisticOr(clamp01(candidate.fusion.fused_score), components.resolvedEvidence)
-      : components.resolvedEvidence,
-    fusionBaselineUsed ? "fusion_evidence" : "evidence_only",
+    resolvedScore,
+    scoreSource,
     fusionBaselineUsed
   );
 }

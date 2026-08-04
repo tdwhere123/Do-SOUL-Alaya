@@ -279,13 +279,18 @@ function hasConsistentDeepHeadDecision(
   if (trace.score_source === "cross_encoder_unscored") {
     return candidate.answer_relevance_score === null;
   }
-  if (trace.score_source !== "fusion_evidence") return true;
-  return candidate.fused_score !== null &&
-    trace.resolved_score !== null &&
-    approximatelyEqual(
-      trace.resolved_score,
-      probabilisticOr(candidate.fused_score, trace.resolved_evidence)
-    );
+  if (
+    trace.score_source !== "fusion_evidence" &&
+    trace.score_source !== "fusion_embedding_evidence"
+  ) return true;
+  if (candidate.fused_score === null || trace.resolved_score === null) return false;
+  const resident = trace.score_source === "fusion_embedding_evidence"
+    ? probabilisticOr(candidate.fused_score, trace.embedding_signal ?? 0)
+    : candidate.fused_score;
+  return approximatelyEqual(
+    trace.resolved_score,
+    probabilisticOr(resident, trace.resolved_evidence)
+  );
 }
 
 function probabilisticOr(left: number, right: number): number {

@@ -178,6 +178,7 @@ const RecallDeepHeadTraceFieldsSchema = z
       "cross_encoder",
       "cross_encoder_unscored",
       "embedding_evidence",
+      "fusion_embedding_evidence",
       "fusion_evidence",
       "evidence_only",
       "inactive"
@@ -189,7 +190,7 @@ type DeepHeadTrace = z.infer<typeof RecallDeepHeadTraceFieldsSchema>;
 
 export const RecallDeepHeadTraceSchema = RecallDeepHeadTraceFieldsSchema
   .superRefine((trace, context) => {
-    const recomposedEvidence = probabilisticOr(
+    const recomposedEvidence = Math.max(
       trace.lexical_agreement,
       trace.evidence_agreement
     );
@@ -282,6 +283,9 @@ function validateLightweightSource(
   trace: DeepHeadTrace
 ): boolean {
   if (trace.resolved_score === null) return false;
+  if (trace.score_source === "fusion_embedding_evidence") {
+    return trace.embedding_signal !== null && trace.fusion_baseline_used;
+  }
   if (trace.score_source === "embedding_evidence") {
     return trace.embedding_signal !== null &&
       !trace.fusion_baseline_used &&

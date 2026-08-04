@@ -18,15 +18,19 @@ export function buildLightweightComponents(
 ): LightweightComponents {
   const lexicalAgreement = lexicalAgreementSignal(candidate, supplementaryData);
   const evidenceAgreement = evidenceAgreementSignal(candidate, supplementaryData);
+  const fusionBaselineEligible = hasQueryEvidenceContribution(
+    candidate.fusion.fused_rank_contribution_per_stream,
+    supplementaryData.queryProbes
+  );
   return Object.freeze({
     lexicalAgreement,
     evidenceAgreement,
-    resolvedEvidence: probabilisticOr(evidenceAgreement, lexicalAgreement),
+    resolvedEvidence: familyMaxEvidence(evidenceAgreement, lexicalAgreement),
     embedding: embeddingSignal(candidate, supplementaryData),
-    fusionBaselineEligible: hasQueryEvidenceContribution(
-      candidate.fusion.fused_rank_contribution_per_stream,
-      supplementaryData.queryProbes
-    )
+    fusionBaselineEligible,
+    fusionBaselineScore: fusionBaselineEligible
+      ? clamp01(candidate.fusion.fused_score)
+      : null
   });
 }
 
@@ -53,10 +57,16 @@ export function answerEvidenceSignal(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number {
-  return probabilisticOr(
+  return familyMaxEvidence(
     evidenceAgreementSignal(candidate, supplementaryData),
     lexicalAgreementSignal(candidate, supplementaryData)
   );
+}
+
+// Lexical FTS, trigram, and evidence-FTS views are correlated projections of
+// the same query-facing family; one family casts one ballot at max strength.
+function familyMaxEvidence(left: number, right: number): number {
+  return Math.max(left, right);
 }
 
 function evidenceAgreementSignal(

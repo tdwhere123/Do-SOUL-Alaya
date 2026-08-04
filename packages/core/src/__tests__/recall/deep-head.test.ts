@@ -126,11 +126,58 @@ describe("deep head", () => {
 
     expect(trace.lexical_agreement).toBeCloseTo(0.9);
     expect(trace.evidence_agreement).toBeCloseTo(0.5);
-    expect(trace.resolved_evidence).toBeCloseTo(0.95);
+    expect(trace.resolved_evidence).toBeCloseTo(0.9);
     expect(trace.embedding_signal).toBeCloseTo(0.4);
     expect(trace.fusion_baseline_used).toBe(false);
     expect(trace.score_source).toBe("embedding_evidence");
-    expect(trace.resolved_score).toBeCloseTo(0.97);
+    expect(trace.resolved_score).toBeCloseTo(0.94);
+    expect(assessment.scores.get(candidate.fusion.candidate_key))
+      .toBe(trace.resolved_score);
+  });
+
+  it("does not add correlated lexical evidence forms as independent probability", () => {
+    const candidate = fusedCandidate({
+      objectId: "correlated-lexical",
+      fusedScore: 0.2,
+      embedding: 0.4
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary({
+        ftsRanks: { "correlated-lexical": 0.81 },
+        trigramFtsRanks: { "correlated-lexical": 1 },
+        evidenceFtsRanks: { "correlated-lexical": 0.81 },
+        structuralScores: { "correlated-lexical": 1 }
+      }),
+      includeTraces: true
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(trace.lexical_agreement).toBeCloseTo(0.9);
+    expect(trace.evidence_agreement).toBeCloseTo(0.9);
+    expect(trace.resolved_evidence).toBeCloseTo(0.9);
+    expect(trace.resolved_score).toBeCloseTo(0.94);
+  });
+
+  it("keeps the fused opportunity channel beside observed embedding support", () => {
+    const candidate = fusedCandidate({
+      objectId: "resident-opportunity",
+      fusedScore: 0.2,
+      embedding: 0.4,
+      contributions: { lexical_fts: 0.02 }
+    });
+    const assessment = resolveDeepHeadAssessment({
+      candidates: [candidate],
+      answerRelevanceScores: new Map(),
+      supplementaryData: emptySupplementary(),
+      includeTraces: true
+    });
+    const trace = assessment.traceByCandidateKey.get(candidate.fusion.candidate_key)!;
+
+    expect(trace.fusion_baseline_used).toBe(true);
+    expect(trace.score_source).toBe("fusion_embedding_evidence");
+    expect(trace.resolved_score).toBeCloseTo(1 - (1 - 0.4) * (1 - 0.2));
     expect(assessment.scores.get(candidate.fusion.candidate_key))
       .toBe(trace.resolved_score);
   });
@@ -364,13 +411,13 @@ describe("deep head", () => {
 
     expect(scores.get(exactLexical.fusion.candidate_key)).toBeCloseTo(0.08);
     expect(scores.get(invalidVectorLexical.fusion.candidate_key)).toBeCloseTo(0.07);
-    expect(scores.get(zeroSimilarityLexical.fusion.candidate_key)).toBe(0);
+    expect(scores.get(zeroSimilarityLexical.fusion.candidate_key)).toBeCloseTo(0.09);
     expect(packed.map((candidate) => candidate.entry.object_id))
       .toEqual([
+        "zero-similarity-lexical",
         "exact-lexical",
         "invalid-vector-lexical",
-        "weak-semantic",
-        "zero-similarity-lexical"
+        "weak-semantic"
       ]);
   });
 
@@ -393,7 +440,7 @@ describe("deep head", () => {
     const scores = computeLightweightDeepHeadScores(candidates, emptySupplementary());
 
     expect(scores.size).toBe(2);
-    expect([...scores.values()]).toEqual([0, 0]);
+    expect([...scores.values()]).toEqual([0.09, 0.08]);
   });
 
   it("keeps missing and invalid embeddings cold beside an observed supplementary zero", () => {
@@ -424,11 +471,11 @@ describe("deep head", () => {
       supplementaryData: { evidenceGistsByMemoryId: {} }
     });
 
-    expect(scores.get(observedZero.fusion.candidate_key)).toBe(0);
+    expect(scores.get(observedZero.fusion.candidate_key)).toBeCloseTo(0.9);
     expect(scores.get(missing.fusion.candidate_key)).toBeCloseTo(0.08);
     expect(scores.get(invalid.fusion.candidate_key)).toBeCloseTo(0.07);
     expect(packed.map((candidate) => candidate.entry.object_id))
-      .toEqual(["missing", "invalid", "observed-zero"]);
+      .toEqual(["observed-zero", "missing", "invalid"]);
   });
 
   it("falls back from a non-finite factor to a finite supplementary embedding", () => {
@@ -446,7 +493,7 @@ describe("deep head", () => {
       })
     );
 
-    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.42);
+    expect(scores.get(candidate.fusion.candidate_key)).toBeCloseTo(0.4722);
   });
 
   it("does not leak memory-keyed signals into same-id synthesis or global candidates", () => {

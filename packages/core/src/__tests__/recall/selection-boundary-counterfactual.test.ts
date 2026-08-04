@@ -79,7 +79,7 @@ describe("independent embedding evidence operator", () => {
         fusion_baseline_used: false
       });
     expect(assessment.scores.get(embedded.fusion.candidate_key))
-      .toBeCloseTo(0.97);
+      .toBeCloseTo(0.94);
   });
 });
 

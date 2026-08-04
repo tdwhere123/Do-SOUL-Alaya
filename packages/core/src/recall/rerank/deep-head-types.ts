@@ -17,6 +17,7 @@ export type RecallDeepHeadScoreSource =
   | "cross_encoder"
   | "cross_encoder_unscored"
   | "embedding_evidence"
+  | "fusion_embedding_evidence"
   | "fusion_evidence"
   | "evidence_only"
   | "inactive";
@@ -50,6 +51,7 @@ export type LightweightComponents = Readonly<{
   readonly resolvedEvidence: number;
   readonly embedding: number | null;
   readonly fusionBaselineEligible: boolean;
+  readonly fusionBaselineScore: number | null;
 }>;
 
 export type DeepHeadAssessmentFormula = Readonly<{

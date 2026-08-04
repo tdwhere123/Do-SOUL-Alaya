@@ -478,10 +478,10 @@ describe("selectFineAssessmentCandidates", () => {
     const trace = Object.freeze({
       lexical_agreement: 0.9,
       evidence_agreement: 0.5,
-      resolved_evidence: 0.95,
+      resolved_evidence: 0.9,
       embedding_signal: 0.4,
       fusion_baseline_used: false,
-      resolved_score: 0.97,
+      resolved_score: 0.94,
       score_source: "embedding_evidence" as const
     });
     const deepHeadTraceByCandidateKey = new Map(

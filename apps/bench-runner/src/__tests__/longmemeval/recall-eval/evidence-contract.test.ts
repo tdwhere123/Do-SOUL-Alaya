@@ -322,10 +322,10 @@ describe("LongMemEval evidence contract", () => {
     const deepHeadTrace = {
       lexical_agreement: 0.9,
       evidence_agreement: 0.5,
-      resolved_evidence: 0.95,
+      resolved_evidence: 0.9,
       embedding_signal: 0.4,
       fusion_baseline_used: false,
-      resolved_score: 0.97,
+      resolved_score: 0.94,
       score_source: "embedding_evidence"
     };
     const row = diagnostic({
@@ -777,6 +777,15 @@ describe("LongMemEval evidence contract", () => {
       resolved_score: 0.2,
       score_source: "inactive"
     }).success).toBe(false);
+    expect(RecallDeepHeadTraceSchema.safeParse({
+      lexical_agreement: 0,
+      evidence_agreement: 0,
+      resolved_evidence: 0,
+      embedding_signal: 0.4,
+      fusion_baseline_used: true,
+      resolved_score: 0.52,
+      score_source: "fusion_embedding_evidence"
+    }).success).toBe(true);
   });
 
   it("binds effective ranking switches into paired provenance", () => {
