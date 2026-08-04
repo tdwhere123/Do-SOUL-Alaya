@@ -58,6 +58,9 @@ export function buildRecallEvalOptions(
     ...(opts.rebuildEvidenceSearchProjections === true
       ? { derivedEvidenceProjectionRebuild: true }
       : {}),
+    ...(opts.warmDerivedSnapshotReceipt === undefined
+      ? {}
+      : { warmDerivedSnapshotReceiptPath: opts.warmDerivedSnapshotReceipt }),
     ...(opts.factFrameRetrofitLedger === undefined
       ? {}
       : { factFrameRetrofitLedgerPath: opts.factFrameRetrofitLedger }),
@@ -69,6 +72,15 @@ export function buildRecallEvalOptions(
 }
 
 function assertExperimentFlags(opts: ParsedFlags): void {
+  if (opts.warmDerivedSnapshotReceipt !== undefined && opts.experiment !== true) {
+    throw new Error("--warm-derived-snapshot-receipt requires --experiment");
+  }
+  if (opts.warmDerivedSnapshotReceipt !== undefined &&
+      opts.rebuildEvidenceSearchProjections === true) {
+    throw new Error(
+      "--warm-derived-snapshot-receipt cannot be combined with projection rebuild"
+    );
+  }
   if (opts.seedExtractionSystemPrompt !== undefined && opts.experiment !== true) {
     throw new Error(
       "--seed-extraction-system-prompt requires --experiment"
@@ -112,6 +124,9 @@ function renderStart(opts: ParsedFlags): string {
     (opts.rebuildEvidenceSearchProjections === true
       ? " derived_projection_rebuild=true promotable=false"
       : "") +
+    (opts.warmDerivedSnapshotReceipt === undefined
+      ? ""
+      : " warm_derived_snapshot=true promotable=false") +
     (opts.factFrameRetrofitLedger === undefined ? "" : " fact_frame_retrofit=true") +
     (opts.seedExtractionSystemPrompt === undefined ? "" : " historical_prompt=true") +
     (opts.legacySnapshot ? " mode=legacy-v1-old-cache diagnostic_only=true" : "") +

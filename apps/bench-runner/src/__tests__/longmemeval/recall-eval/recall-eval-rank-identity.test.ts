@@ -93,12 +93,24 @@ describe("recall-eval rank identity", () => {
       expectedQuestionCount: 1,
       expectedQuestionIdDigest: snapshotQuestionIdDigest(collected),
       requireFullSnapshotMatch: true,
-      derivedEvidenceProjectionRebuild: report
+      derivedEvidenceProjectionRebuild: report,
+      warmDerivedSnapshot: {
+        receipt_sha256: "d".repeat(64),
+        database_sha256: "e".repeat(64),
+        database_schema_version: 110,
+        derived_rebuild_identity_sha256: "b".repeat(64)
+      }
     });
 
     expect(JSON.parse(rendered)).toMatchObject({
       snapshot_binding: {
-        derived_evidence_projection_rebuild: report
+        derived_evidence_projection_rebuild: report,
+        warm_derived_snapshot: {
+          receipt_sha256: "d".repeat(64),
+          database_sha256: "e".repeat(64),
+          database_schema_version: 110,
+          derived_rebuild_identity_sha256: "b".repeat(64)
+        }
       }
     });
   });

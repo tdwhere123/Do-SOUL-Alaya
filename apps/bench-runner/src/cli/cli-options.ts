@@ -20,6 +20,7 @@ import {
   readRequiredFlagValue
 } from "./options/flag-values.js";
 import { consumeBooleanFlags } from "./options/boolean-flags.js";
+import { consumeRecallEvalPathFlag } from "./options/recall-eval-flags.js";
 
 const DEFAULT_HISTORY_ROOT = path.resolve(process.cwd(), "docs/bench-history");
 
@@ -61,6 +62,7 @@ export interface ParsedFlags {
   readonly legacyDatasetSha256?: string;
   readonly experiment?: boolean;
   readonly rebuildEvidenceSearchProjections?: boolean;
+  readonly warmDerivedSnapshotReceipt?: string;
   readonly factFrameRetrofitLedger?: string;
   readonly seedExtractionSystemPrompt?: string;
   // --qa gates the end-to-end QA harness; default off means zero LLM calls/cost.
@@ -104,6 +106,7 @@ export interface ParsedFlagsState {
   legacyDatasetSha256?: string;
   experiment: boolean;
   rebuildEvidenceSearchProjections: boolean;
+  warmDerivedSnapshotReceipt?: string;
   factFrameRetrofitLedger?: string;
   seedExtractionSystemPrompt?: string;
   qa: boolean;
@@ -117,6 +120,7 @@ export function parseFlags(args: ReadonlyArray<string>): ParsedFlags {
   assertFlagAtMostOnce(args, "--catalog-refill-allowlist");
   assertFlagAtMostOnce(args, "--fact-frame-retrofit-ledger");
   assertFlagAtMostOnce(args, "--seed-extraction-system-prompt");
+  assertFlagAtMostOnce(args, "--warm-derived-snapshot-receipt");
   const state = createParsedFlagsState();
   for (let i = 0; i < args.length; i += 1) {
     i = consumeFlagToken(args, i, state);
@@ -282,6 +286,8 @@ function consumeOtherPathFlags(
   if (promotionEvidenceIndex !== undefined) return promotionEvidenceIndex;
   const legacyIdentityIndex = consumeLegacyIdentityFlags(args, index, token, state);
   if (legacyIdentityIndex !== undefined) return legacyIdentityIndex;
+  const recallEvalIndex = consumeRecallEvalPathFlag(args, index, token, state);
+  if (recallEvalIndex !== undefined) return recallEvalIndex;
   if (token === "--data-dir") {
     state.dataDir = args[index + 1];
     return index + 1;
@@ -344,20 +350,6 @@ function consumeOtherPathFlags(
   }
   if (matchFlagToken(token, "--snapshot")) {
     state.snapshot = readFlagValue(args, index, token, "--snapshot");
-    return nextIndex(index, token);
-  }
-  if (matchFlagToken(token, "--fact-frame-retrofit-ledger")) {
-    state.factFrameRetrofitLedger = readRequiredFlagValue(
-      args, index, token, "--fact-frame-retrofit-ledger",
-      "--fact-frame-retrofit-ledger requires an NDJSON path"
-    );
-    return nextIndex(index, token);
-  }
-  if (matchFlagToken(token, "--seed-extraction-system-prompt")) {
-    state.seedExtractionSystemPrompt = readRequiredFlagValue(
-      args, index, token, "--seed-extraction-system-prompt",
-      "--seed-extraction-system-prompt requires a text path"
-    );
     return nextIndex(index, token);
   }
   if (matchFlagToken(token, "--concurrency")) {
@@ -485,6 +477,7 @@ function finalizeParsedFlags(state: ParsedFlagsState): ParsedFlags {
     legacyDatasetSha256: state.legacyDatasetSha256,
     experiment: state.experiment,
     rebuildEvidenceSearchProjections: state.rebuildEvidenceSearchProjections,
+    warmDerivedSnapshotReceipt: state.warmDerivedSnapshotReceipt,
     factFrameRetrofitLedger: state.factFrameRetrofitLedger,
     seedExtractionSystemPrompt: state.seedExtractionSystemPrompt,
     qa: state.qa,

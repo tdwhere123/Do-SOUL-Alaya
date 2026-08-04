@@ -48,6 +48,12 @@ import {
   rebuildEvidenceSearchProjectionsOnWorkingCopy,
   type EvidenceSearchProjectionRebuildReport
 } from "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import {
+  buildWarmDerivedSnapshotBinding,
+  readWarmDerivedSnapshotReceipt,
+  type WarmDerivedSnapshotBinding,
+  type WarmDerivedSnapshotReceipt
+} from "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 
 export function recallEvalEmbeddingMode(
   env: Readonly<Record<string, string | undefined>> = process.env
@@ -306,45 +312,99 @@ export async function prepareRecallEvalDataRoot(
   plannedRoot?: OwnedTempRoot
 ): Promise<OwnedTempRoot & Readonly<{
   evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null;
+  warmDerivedSnapshot: WarmDerivedSnapshotBinding | null;
 }>> {
   const { manifest } = bundle;
+  const warmDerivedSnapshot = readWarmDerivedSnapshot(options, manifest);
   let evidenceProjectionRebuild: EvidenceSearchProjectionRebuildReport | null = null;
   const root = await prepareRecallEvalDataDir({
-    snapshotDbPath: bundle.snapshotDbPath,
+    ...buildRecallEvalRestoreInput(options, bundle, warmDerivedSnapshot),
     requestedRoot: options.dataDirRoot,
     plannedRoot,
-    ...(options.legacySnapshot === true
-      ? { restoreSnapshot: (dataDirRoot: string) => restoreLegacySnapshotToDataDir({
-          snapshotDbPath: bundle.snapshotDbPath,
-          dataDirRoot,
-          manifest
-        }) }
-      : { artifactIntegrity: manifest.artifact_integrity }),
     validateRestoredDb: async (dbPath) => {
-      prepareRecallEvalRestoredDb({
-        manifest,
-        restoredDbPath: dbPath,
-        legacySnapshot: options.legacySnapshot === true,
-        derivedEvidenceProjectionRebuild:
-          options.derivedEvidenceProjectionRebuild === true
-      });
-      if (options.derivedEvidenceProjectionRebuild === true) {
-        evidenceProjectionRebuild = await rebuildEvidenceSearchProjectionsOnWorkingCopy({
-          workingDbPath: dbPath,
-          ...(options.factFrameRetrofitLedgerPath === undefined
-            ? {}
-            : { factFrameRetrofitLedgerPath: options.factFrameRetrofitLedgerPath }),
-          ...(bundle.sourceExtractionSystemPromptSha256 === undefined
-            ? {}
-            : {
-                sourceExtractionSystemPromptSha256:
-                  bundle.sourceExtractionSystemPromptSha256
-              })
-        });
-      }
+      evidenceProjectionRebuild = await prepareRecallEvalWorkingDb(
+        dbPath, options, bundle, warmDerivedSnapshot
+      );
     }
   });
-  return Object.freeze({ ...root, evidenceProjectionRebuild });
+  return Object.freeze({
+    ...root,
+    evidenceProjectionRebuild,
+    warmDerivedSnapshot: warmDerivedSnapshot === null
+      ? null
+      : buildWarmDerivedSnapshotBinding(warmDerivedSnapshot)
+  });
+}
+
+function readWarmDerivedSnapshot(
+  options: RecallEvalOptions,
+  manifest: LongMemEvalSnapshotManifest
+): WarmDerivedSnapshotReceipt | null {
+  if (options.warmDerivedSnapshotReceiptPath === undefined) return null;
+  const sourceSnapshotDbSha256 = manifest.artifact_integrity?.db_sha256;
+  if (sourceSnapshotDbSha256 === undefined) {
+    throw new Error("warm derived snapshot requires source DB artifact integrity");
+  }
+  return readWarmDerivedSnapshotReceipt({
+    receiptPath: options.warmDerivedSnapshotReceiptPath,
+    sourceSnapshotDbSha256,
+    sourceSchemaVersion: manifest.schema_migration_version
+  });
+}
+
+function buildRecallEvalRestoreInput(
+  options: RecallEvalOptions,
+  bundle: RecallEvalSnapshotBundle,
+  warm: WarmDerivedSnapshotReceipt | null
+): Pick<Parameters<typeof prepareRecallEvalDataDir>[0],
+  "snapshotDbPath" | "artifactIntegrity" | "restoreSnapshot"> {
+  if (warm !== null) return {
+    snapshotDbPath: warm.databasePath,
+    restoreSnapshot: (dataDirRoot) => restoreSnapshotToDataDir({
+      snapshotDbPath: warm.databasePath,
+      dataDirRoot,
+      expectedSha256: warm.databaseSha256
+    })
+  };
+  if (options.legacySnapshot !== true) return {
+    snapshotDbPath: bundle.snapshotDbPath,
+    artifactIntegrity: bundle.manifest.artifact_integrity
+  };
+  return {
+    snapshotDbPath: bundle.snapshotDbPath,
+    restoreSnapshot: (dataDirRoot) => restoreLegacySnapshotToDataDir({
+      snapshotDbPath: bundle.snapshotDbPath,
+      dataDirRoot,
+      manifest: bundle.manifest
+    })
+  };
+}
+
+async function prepareRecallEvalWorkingDb(
+  dbPath: string,
+  options: RecallEvalOptions,
+  bundle: RecallEvalSnapshotBundle,
+  warm: WarmDerivedSnapshotReceipt | null
+): Promise<EvidenceSearchProjectionRebuildReport | null> {
+  prepareRecallEvalRestoredDb({
+    manifest: bundle.manifest,
+    restoredDbPath: dbPath,
+    legacySnapshot: options.legacySnapshot === true,
+    derivedEvidenceProjectionRebuild: options.derivedEvidenceProjectionRebuild === true,
+    ...(warm === null ? {} : { warmDerivedSnapshot: warm })
+  });
+  if (options.derivedEvidenceProjectionRebuild !== true) {
+    return warm?.rebuildReport ?? null;
+  }
+  return rebuildEvidenceSearchProjectionsOnWorkingCopy({
+    workingDbPath: dbPath,
+    ...(options.factFrameRetrofitLedgerPath === undefined
+      ? {}
+      : { factFrameRetrofitLedgerPath: options.factFrameRetrofitLedgerPath }),
+    ...(bundle.sourceExtractionSystemPromptSha256 === undefined
+      ? {}
+      : { sourceExtractionSystemPromptSha256: bundle.sourceExtractionSystemPromptSha256 })
+  });
 }
 
 export function planRecallEvalDataRoot(options: RecallEvalOptions): OwnedTempRoot {

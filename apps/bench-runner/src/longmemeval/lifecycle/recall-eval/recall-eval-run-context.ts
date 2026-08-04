@@ -51,6 +51,8 @@ import {
 } from "./recall-eval-selection-replay.js";
 import type { LongMemEvalSelectionBoundarySpool } from
   "../../selection-replay/selection-boundary-spool.js";
+import type { WarmDerivedSnapshotBinding } from
+  "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 
 export interface RecallEvalRunContext {
   readonly options: RecallEvalOptions;
@@ -73,6 +75,7 @@ export interface RecallEvalRunContext {
   readonly extractionAuthority: SnapshotExtractionAuthority | null;
   readonly derivedEvidenceProjectionRebuild:
     EvidenceSearchProjectionRebuildReport | null;
+  readonly warmDerivedSnapshot: WarmDerivedSnapshotBinding | null;
   readonly selectionBoundarySpool: LongMemEvalSelectionBoundarySpool | null;
 }
 
@@ -127,6 +130,18 @@ function assertDerivedProjectionRebuildBoundary(
       options.derivedEvidenceProjectionRebuild !== true) {
     throw new Error("fact-frame retrofit ledger requires derived evidence projection rebuild");
   }
+  if (options.warmDerivedSnapshotReceiptPath !== undefined &&
+      options.experiment !== true) {
+    throw new Error("warm derived snapshot restore requires experiment mode");
+  }
+  if (options.warmDerivedSnapshotReceiptPath !== undefined &&
+      options.derivedEvidenceProjectionRebuild === true) {
+    throw new Error("warm derived snapshot restore cannot be combined with projection rebuild");
+  }
+  if (options.warmDerivedSnapshotReceiptPath !== undefined &&
+      (options.legacySnapshot === true || options.expansionCapability !== undefined)) {
+    throw new Error("warm derived snapshot restore cannot use legacy or promotion inputs");
+  }
   if (options.derivedEvidenceProjectionRebuild !== true) return;
   if (options.experiment !== true) {
     throw new Error("derived evidence projection rebuild requires experiment mode");
@@ -173,7 +188,8 @@ async function prepareBoundRecallEvalRunContext(
       recallOptions,
       recallWeightOverrides,
       nonPromotableDerivedRebuild:
-        options.derivedEvidenceProjectionRebuild === true
+        options.derivedEvidenceProjectionRebuild === true ||
+        options.warmDerivedSnapshotReceiptPath !== undefined
     }
   );
   const dataDir = await prepareRecallEvalDataRoot(options, bundle, plannedDataDir);
@@ -197,6 +213,7 @@ async function prepareBoundRecallEvalRunContext(
     measurementForQuestion: bundle.measurementForQuestion,
     extractionAuthority: bundle.extractionAuthority,
     derivedEvidenceProjectionRebuild: dataDir.evidenceProjectionRebuild,
+    warmDerivedSnapshot: dataDir.warmDerivedSnapshot,
     selectionBoundarySpool:
       await createRecallEvalSelectionBoundarySpool(ambientEnv)
   };

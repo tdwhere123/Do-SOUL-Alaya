@@ -34,6 +34,8 @@ import {
   prepareDiagnosticsArtifactStagingPath,
   type StagedDiagnosticsArtifact
 } from "../../measurement/artifact-transaction.js";
+import type { WarmDerivedSnapshotBinding } from
+  "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 
 export interface RecallEvalArchiveBundle {
   readonly sidecars: readonly { readonly filename: string; readonly contents: string }[];
@@ -56,6 +58,7 @@ export async function buildRecallEvalArchiveBundle(input: {
   readonly expectedQuestionIdDigest: string;
   readonly provenanceComplete: boolean;
   readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
+  readonly warmDerivedSnapshot?: WarmDerivedSnapshotBinding;
 }): Promise<RecallEvalArchiveBundle> {
   const rankIdentity = renderRankIdentity(input);
   const runProvenance = renderRunProvenance(input);
@@ -124,7 +127,10 @@ function renderRankIdentity(
       : {
           derivedEvidenceProjectionRebuild:
             input.derivedEvidenceProjectionRebuild
-        })
+        }),
+    ...(input.warmDerivedSnapshot === undefined
+      ? {}
+      : { warmDerivedSnapshot: input.warmDerivedSnapshot })
   });
 }
 

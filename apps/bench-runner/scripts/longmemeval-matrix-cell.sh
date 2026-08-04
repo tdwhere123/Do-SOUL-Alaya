@@ -9,7 +9,8 @@
 #           MATRIX_LIMIT / MATRIX_OFFSET for experiment-only slices,
 #           MATRIX_SEED_EXTRACTION_SYSTEM_PROMPT for historical snapshot closure,
 #           MATRIX_FACT_FRAME_RETROFIT_LEDGER for a sealed Fact Frame treatment,
-#           MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS=1 for a derived rebuild.
+#           MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS=1 for a derived rebuild,
+#           MATRIX_WARM_DERIVED_SNAPSHOT_RECEIPT for a sealed derived DB replay.
 set -euo pipefail
 
 CELL="${1:-}"
@@ -29,6 +30,7 @@ EXPERIMENT="${MATRIX_EXPERIMENT:-0}"
 REBUILD_EVIDENCE_PROJECTIONS="${MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS:-0}"
 HISTORICAL_PROMPT="${MATRIX_SEED_EXTRACTION_SYSTEM_PROMPT:-}"
 FACT_FRAME_LEDGER="${MATRIX_FACT_FRAME_RETROFIT_LEDGER:-}"
+WARM_DERIVED_RECEIPT="${MATRIX_WARM_DERIVED_SNAPSHOT_RECEIPT:-}"
 [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "0" ||
    "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]] || {
   echo "MATRIX_REBUILD_EVIDENCE_SEARCH_PROJECTIONS must be 0 or 1" >&2; exit 64;
@@ -36,6 +38,17 @@ FACT_FRAME_LEDGER="${MATRIX_FACT_FRAME_RETROFIT_LEDGER:-}"
 if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" && "$EXPERIMENT" != "1" ]]; then
   echo "evidence search projection rebuild requires MATRIX_EXPERIMENT=1" >&2
   exit 64
+fi
+if [[ -n "$WARM_DERIVED_RECEIPT" ]]; then
+  [[ "$EXPERIMENT" == "1" ]] || {
+    echo "warm derived snapshot requires MATRIX_EXPERIMENT=1" >&2; exit 64;
+  }
+  [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "0" ]] || {
+    echo "warm derived snapshot cannot be combined with projection rebuild" >&2; exit 64;
+  }
+  [[ -f "$WARM_DERIVED_RECEIPT" ]] || {
+    echo "missing warm derived snapshot receipt: $WARM_DERIVED_RECEIPT" >&2; exit 65;
+  }
 fi
 if [[ -n "$HISTORICAL_PROMPT" ]]; then
   [[ "$EXPERIMENT" == "1" ]] || {
@@ -123,6 +136,10 @@ FACT_FRAME_LEDGER_SHA256=""
 if [[ -n "$FACT_FRAME_LEDGER" ]]; then
   FACT_FRAME_LEDGER_SHA256="$(file_sha "$FACT_FRAME_LEDGER")"
 fi
+WARM_DERIVED_RECEIPT_SHA256=""
+if [[ -n "$WARM_DERIVED_RECEIPT" ]]; then
+  WARM_DERIVED_RECEIPT_SHA256="$(file_sha "$WARM_DERIVED_RECEIPT")"
+fi
 
 HEAD_SHA="$(git -C "$WORKTREE" rev-parse HEAD)"
 PORCELAIN="$(git -C "$WORKTREE" status --porcelain=v1 --untracked-files=normal || true)"
@@ -158,6 +175,7 @@ CELL="$CELL" RUN_ROOT="$RUN_ROOT" HEAD_SHA="$HEAD_SHA" EXPERIMENT="$EXPERIMENT" 
   REBUILD_EVIDENCE_PROJECTIONS="$REBUILD_EVIDENCE_PROJECTIONS" \
   HISTORICAL_PROMPT_SHA256="$HISTORICAL_PROMPT_SHA256" \
   FACT_FRAME_LEDGER_SHA256="$FACT_FRAME_LEDGER_SHA256" \
+  WARM_DERIVED_RECEIPT_SHA256="$WARM_DERIVED_RECEIPT_SHA256" \
   SLICE_LIMIT="$SLICE_LIMIT" SLICE_OFFSET="$SLICE_OFFSET" \
   ALAYA_RECALL_WEIGHT_OVERRIDES="${ALAYA_RECALL_WEIGHT_OVERRIDES:-}" \
   python3 - "$IDENTITY_PATH" <<'PY'
@@ -186,7 +204,8 @@ payload = {
     "embedding_mode": os.environ["EMBEDDING_MODE"],
     "cross_encoder_enabled": os.environ["CROSS_ENABLED"] == "true",
     "derived_evidence_projection_rebuild":
-      os.environ["REBUILD_EVIDENCE_PROJECTIONS"] == "1",
+      os.environ["REBUILD_EVIDENCE_PROJECTIONS"] == "1" or
+      bool(os.environ["WARM_DERIVED_RECEIPT_SHA256"]),
   },
   "weight_overrides": None,
   "derived_snapshot_identity": None,
@@ -197,6 +216,9 @@ if os.environ["HISTORICAL_PROMPT_SHA256"]:
 if os.environ["FACT_FRAME_LEDGER_SHA256"]:
   payload["treatment"]["fact_frame_retrofit_ledger_sha256"] = \
     os.environ["FACT_FRAME_LEDGER_SHA256"]
+if os.environ["WARM_DERIVED_RECEIPT_SHA256"]:
+  payload["treatment"]["warm_derived_snapshot_receipt_sha256"] = \
+    os.environ["WARM_DERIVED_RECEIPT_SHA256"]
 if os.environ["EXPERIMENT"] == "1":
   payload["mode"] = "experiment"
   payload["evaluation_slice"] = {
@@ -265,6 +287,9 @@ fi
 if [[ -n "$FACT_FRAME_LEDGER" ]]; then
   CLI_ARGS+=(--fact-frame-retrofit-ledger "$FACT_FRAME_LEDGER")
 fi
+if [[ -n "$WARM_DERIVED_RECEIPT" ]]; then
+  CLI_ARGS+=(--warm-derived-snapshot-receipt "$WARM_DERIVED_RECEIPT")
+fi
 if [[ -n "$SLICE_LIMIT" ]]; then
   CLI_ARGS+=(--limit "$SLICE_LIMIT" --offset "$SLICE_OFFSET")
 fi
@@ -310,7 +335,7 @@ mapfile -d '' entries < <(
 [[ "${#entries[@]}" -eq 1 ]] || { echo "expected exactly one committed evidence entry" >&2; exit 65; }
 mkdir -p "$(dirname "$EVIDENCE_ROOT")"
 mv "${entries[0]}" "$EVIDENCE_ROOT"
-if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" ]]; then
+if [[ "$REBUILD_EVIDENCE_PROJECTIONS" == "1" || -n "$WARM_DERIVED_RECEIPT" ]]; then
   rtk node "$SCRIPT_DIR/longmemeval-experiment-identity.mjs" bind-rebuild \
     "$IDENTITY_PATH" \
     "$EVIDENCE_ROOT/recall-eval-rank-identity.json"

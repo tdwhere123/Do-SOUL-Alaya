@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { snapshotQuestionIdDigest } from "../../snapshot/materialize.js";
 import type { EvidenceSearchProjectionRebuildReport } from
   "../../snapshot/recall-eval/evidence-search-projection-rebuild.js";
+import type { WarmDerivedSnapshotBinding } from
+  "../../snapshot/recall-eval/warm-derived/warm-derived-snapshot-receipt.js";
 
 export const RECALL_EVAL_RANK_IDENTITY_FILENAME =
   "recall-eval-rank-identity.json";
@@ -20,6 +22,7 @@ export interface RecallEvalRankIdentityBinding {
   readonly expectedQuestionIdDigest: string | null;
   readonly requireFullSnapshotMatch: boolean;
   readonly derivedEvidenceProjectionRebuild?: EvidenceSearchProjectionRebuildReport;
+  readonly warmDerivedSnapshot?: WarmDerivedSnapshotBinding;
 }
 
 export function renderRecallEvalRankIdentity(
@@ -51,7 +54,10 @@ export function renderRecallEvalRankIdentity(
         : {
             derived_evidence_projection_rebuild:
               binding.derivedEvidenceProjectionRebuild
-          })
+          }),
+      ...(binding.warmDerivedSnapshot === undefined
+        ? {}
+        : { warm_derived_snapshot: binding.warmDerivedSnapshot })
     },
     replay: {
       question_count: collected.length,

@@ -54,6 +54,47 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
     });
   });
 
+  it("threads the explicit warm derived snapshot receipt into recall-eval options", () => {
+    const flags = parseFlags([
+      "--experiment",
+      "--warm-derived-snapshot-receipt",
+      "/tmp/warm-derived.json"
+    ]);
+
+    expect(buildRecallEvalOptions(flags, "/tmp/snapshot.db")).toMatchObject({
+      experiment: true,
+      warmDerivedSnapshotReceiptPath: "/tmp/warm-derived.json"
+    });
+  });
+
+  it("rejects warm restore unless recall-eval is explicitly experimental", async () => {
+    const exitCode = await runCli([
+      "recall-eval",
+      "--snapshot",
+      "/tmp/not-read.db",
+      "--warm-derived-snapshot-receipt",
+      "/tmp/warm-derived.json"
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/--warm-derived-snapshot-receipt requires --experiment/u);
+  });
+
+  it("rejects combining warm restore with an inline projection rebuild", async () => {
+    const exitCode = await runCli([
+      "recall-eval",
+      "--snapshot",
+      "/tmp/not-read.db",
+      "--experiment",
+      "--warm-derived-snapshot-receipt",
+      "/tmp/warm-derived.json",
+      "--rebuild-evidence-search-projections"
+    ]);
+
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/cannot be combined/u);
+  });
+
   it("rejects a retrofit ledger without the explicit rebuild boundary", async () => {
     const exitCode = await runCli([
       "recall-eval",
@@ -76,6 +117,15 @@ describe("recall-eval derived evidence projection rebuild boundary", () => {
       variant: "longmemeval_s",
       historyRoot: "/tmp/not-written",
       derivedEvidenceProjectionRebuild: true
+    }, undefined, {})).rejects.toThrow(/requires experiment mode/u);
+  });
+
+  it("rejects direct warm restore outside experiment mode", async () => {
+    await expect(prepareRecallEvalRunContext({
+      snapshotDbPath: "/tmp/not-read.db",
+      variant: "longmemeval_s",
+      historyRoot: "/tmp/not-written",
+      warmDerivedSnapshotReceiptPath: "/tmp/warm-derived.json"
     }, undefined, {})).rejects.toThrow(/requires experiment mode/u);
   });
 

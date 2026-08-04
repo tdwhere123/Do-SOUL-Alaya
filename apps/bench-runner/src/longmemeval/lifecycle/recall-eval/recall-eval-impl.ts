@@ -242,7 +242,10 @@ async function persistRecallEvalArtifacts(
       : {
           derivedEvidenceProjectionRebuild:
             context.derivedEvidenceProjectionRebuild
-        })
+        }),
+    ...(context.warmDerivedSnapshot === null
+      ? {}
+      : { warmDerivedSnapshot: context.warmDerivedSnapshot })
   });
   const entry = await withPublishedDiagnosticsArtifact(
     bundle.diagnosticsArtifact,
