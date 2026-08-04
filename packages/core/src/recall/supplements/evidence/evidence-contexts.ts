@@ -20,7 +20,9 @@ import {
 } from "../../runtime/recall-service-helpers.js";
 import type {
   RecallServiceDependencies,
-  RecallServiceWarnPort
+  RecallServiceWarnPort,
+  RecallEvidenceSemanticDocument,
+  RecallEvidenceSemanticProjectionReceipt
 } from "../../runtime/recall-service-types.js";
 import type { RecallQualifiedEvidence } from "../../runtime/recall-service-ports.js";
 
@@ -34,12 +36,6 @@ export interface RecallEvidenceContexts {
   readonly verifiedUserAssertionContextsByMemoryId: Readonly<
     Record<string, Readonly<RecallVerifiedUserAssertionContext>>
   >;
-}
-
-export interface RecallEvidenceSemanticDocument {
-  readonly evidenceRef: string;
-  readonly documentIdentity: string;
-  readonly content: string;
 }
 
 interface EvidenceRecord {
@@ -244,7 +240,8 @@ function semanticEvidenceDocuments(
         : [Object.freeze({
             evidenceRef: evidence.object_id,
             documentIdentity: "owner",
-            content
+            content,
+            projection: ownerProjectionReceipt()
           })];
       const factKeys = (factKeysByEvidenceId.get(evidence.object_id) ?? [])
         .flatMap((qualified) => {
@@ -252,11 +249,26 @@ function semanticEvidenceDocuments(
           return projection?.projection_kind !== "fact_key" ? [] : [Object.freeze({
             evidenceRef: evidence.object_id,
             documentIdentity: `fact_key:${projection.projection_id}`,
-            content: projection.content
+            content: projection.content,
+            projection: Object.freeze({
+              projection_id: projection.projection_id,
+              projection_kind: "fact_key" as const,
+              matched_fact_key_forms: Object.freeze([
+                ...(qualified.matched_fact_key_forms ?? [])
+              ])
+            })
           })];
         });
       return [...owner, ...factKeys];
     }));
+}
+
+function ownerProjectionReceipt(): Readonly<RecallEvidenceSemanticProjectionReceipt> {
+  return Object.freeze({
+    projection_id: null,
+    projection_kind: "owner",
+    matched_fact_key_forms: Object.freeze([])
+  });
 }
 
 function buildEvidenceById(

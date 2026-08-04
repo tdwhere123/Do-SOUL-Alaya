@@ -487,7 +487,16 @@ function evidenceScores(
 ): Readonly<EvidenceCandidateScoringResult> {
   const returned = status === "returned";
   return Object.freeze({
-    scores, status,
+    scores,
+    winnersByCandidateKey: new Map(params.candidates.flatMap((candidate) => {
+      const score = scores.get(candidate.candidateKey);
+      return score === undefined ? [] : [[candidate.candidateKey, Object.freeze({
+        score,
+        evidenceObjectId: candidate.evidenceObjectId,
+        documentIdentity: candidate.documentIdentity
+      })] as const];
+    })),
+    status,
     expectedCount: params.candidates.length,
     scoredCount: scores.size,
     inferenceCalls: returned ? 1 : 0,

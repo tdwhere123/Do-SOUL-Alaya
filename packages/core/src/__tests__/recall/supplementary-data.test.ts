@@ -7,7 +7,8 @@ import {
   buildVerifiedUserAssertionReceiptPreimage, formatVerifiedUserAssertionSourceHash
 } from "@do-soul/alaya-protocol";
 import { RecallService, type RecallServiceDependencies } from "../../recall/recall-service.js";
-import { withEmbeddingSimilarityScores } from "../../recall/coarse-filter/coarse-candidates.js";
+import { withEmbeddingSimilarityScores } from
+  "../../recall/coarse-filter/embedding/embedding-similarity-supplement.js";
 import { compileRecallQueryProbes } from "../../recall/query/recall-query-probes.js";
 import { collectSupplementaryData, SUPPLEMENTARY_DB_LOOKUP_CONCURRENCY } from "../../recall/supplements/supplementary-data.js";
 import { createDependencies, createMemoryEntry, createTaskSurface } from "./recall-service-test-fixtures.js";
@@ -111,7 +112,12 @@ describe("collectSupplementaryData", () => {
       .toEqual([{
         evidenceRef: evidence.object_id,
         documentIdentity: "owner",
-        content: evidence.excerpt
+        content: evidence.excerpt,
+        projection: {
+          projection_id: null,
+          projection_kind: "owner",
+          matched_fact_key_forms: []
+        }
       }]);
   });
 

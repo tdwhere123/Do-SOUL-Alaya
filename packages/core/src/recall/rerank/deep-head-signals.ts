@@ -1,8 +1,12 @@
 import { clamp01 } from "../../shared/clamp.js";
 import type { DeliverySelectionCandidate } from "../delivery/delivery-selection.js";
 import { isWorkspaceMemoryCandidate } from "../runtime/recall-service-helpers.js";
-import { readObservedUnitScore } from "../scoring/signals/observed-unit-score.js";
 import { hasQueryEvidenceContribution } from "../scoring/query-evidence-support.js";
+import {
+  resolveCandidateSemanticActivation,
+  resolveCandidateSemanticActivationScope
+} from
+  "../scoring/candidate-semantic-activation.js";
 import type {
   DeepHeadSupplementary,
   LightweightComponents
@@ -30,17 +34,19 @@ export function embeddingSignal(
   candidate: DeliverySelectionCandidate,
   supplementaryData: DeepHeadSupplementary
 ): number | null {
-  const evidenceScore = readObservedUnitScore(
-    supplementaryData.evidenceSemanticScoresByCandidateKey?.get(
-      candidate.fusion.candidate_key
-    )
-  );
-  if (evidenceScore !== null) return evidenceScore;
   const objectId = candidate.entry.object_id;
-  const factor = readObservedUnitScore(candidate.effectiveFactors.embedding_similarity);
-  if (factor !== null) return factor;
-  if (!isWorkspaceMemoryCandidate(candidate)) return null;
-  return readObservedUnitScore(supplementaryData.embeddingSimilarityScores[objectId]);
+  return resolveCandidateSemanticActivation({
+    scope: resolveCandidateSemanticActivationScope({
+      originPlane: candidate.originPlane,
+      objectKind: candidate.objectKind,
+      workspaceMemoryEligible: isWorkspaceMemoryCandidate(candidate)
+    }),
+    evidenceSemantic: supplementaryData.evidenceSemanticScoresByCandidateKey?.get(
+      candidate.fusion.candidate_key
+    ),
+    effectiveEmbedding: candidate.effectiveFactors.embedding_similarity,
+    objectEmbedding: supplementaryData.embeddingSimilarityScores[objectId]
+  }).score;
 }
 
 export function answerEvidenceSignal(

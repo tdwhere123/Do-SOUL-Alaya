@@ -1,6 +1,9 @@
 import type { MemoryEntry } from "@do-soul/alaya-protocol";
 import { describe, expect, it } from "vitest";
-import { buildEvidenceSemanticCandidates } from
+import {
+  attributeEvidenceSemanticWinners,
+  buildEvidenceSemanticCandidates
+} from
   "../../../recall/runtime/orchestration/evidence-semantic-candidates.js";
 import type { CoarseRecallCandidate } from
   "../../../recall/runtime/recall-service-types.js";
@@ -19,7 +22,8 @@ describe("evidence semantic candidate projection", () => {
         "memory-1": [{
           evidenceRef: "evidence-a",
           documentIdentity: "owner",
-          content: "grounded conversation evidence"
+          content: "grounded conversation evidence",
+          projection: OWNER_PROJECTION
         }]
       }
     })).toEqual([{
@@ -46,7 +50,8 @@ describe("evidence semantic candidate projection", () => {
         "memory-2": [{
           evidenceRef: "evidence-2",
           documentIdentity: "evidence-2",
-          content: "global evidence must not redefine local activation"
+          content: "global evidence must not redefine local activation",
+          projection: OWNER_PROJECTION
         }]
       }
     })).toEqual([{
@@ -56,6 +61,43 @@ describe("evidence semantic candidate projection", () => {
       content: direct.entry.content
     }]);
   });
+
+  it("retains unresolved winners and attributes resolved owner documents", () => {
+    const unresolved = {
+      score: 0.8,
+      evidenceObjectId: "evidence-missing",
+      documentIdentity: "fact_key:9"
+    };
+    const owner = {
+      score: 0.7,
+      evidenceObjectId: "evidence-owner",
+      documentIdentity: "owner"
+    };
+
+    expect([...attributeEvidenceSemanticWinners({
+      winners: new Map([
+        ["candidate:unresolved", unresolved],
+        ["candidate:owner", owner]
+      ]),
+      evidenceDocumentsByMemoryId: {
+        "memory-owner": [{
+          evidenceRef: "evidence-owner",
+          documentIdentity: "owner",
+          content: "grounded owner evidence",
+          projection: OWNER_PROJECTION
+        }]
+      }
+    })]).toEqual([
+      ["candidate:unresolved", { ...unresolved, projection: null }],
+      ["candidate:owner", { ...owner, projection: OWNER_PROJECTION }]
+    ]);
+  });
+});
+
+const OWNER_PROJECTION = Object.freeze({
+  projection_id: null,
+  projection_kind: "owner" as const,
+  matched_fact_key_forms: Object.freeze([])
 });
 
 function candidate(

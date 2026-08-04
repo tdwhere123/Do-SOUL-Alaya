@@ -4,6 +4,8 @@ import { fineAssess } from "../../recall/delivery/fine-assessment.js";
 import { buildDefaultPolicy } from "../../recall/runtime/orchestration.js";
 import type { FineAssessmentSelectionBoundaryCase } from
   "../../recall/delivery/selection-boundary/selection-boundary-types.js";
+import type { RecallSupplementaryData } from
+  "../../recall/runtime/recall-service-types.js";
 import { materializeFineAssessmentSelectionBoundary } from
   "../../recall/delivery/selection-boundary/selection-boundary-capture.js";
 import {
@@ -12,11 +14,12 @@ import {
 } from "./fine-assessment-selection-fixtures.js";
 
 export function captureFineAssessmentSelectionBoundary(
-  taskSurfaceRef: string
+  taskSurfaceRef: string,
+  supplementaryOverrides: Partial<RecallSupplementaryData> = {}
 ): FineAssessmentSelectionBoundaryCase {
   let boundary: FineAssessmentSelectionBoundaryCase | undefined;
   fineAssess({
-    ...buildLiveCaptureBase(taskSurfaceRef),
+    ...buildLiveCaptureBase(taskSurfaceRef, supplementaryOverrides),
     selectionBoundaryObserver: (pending) => {
       boundary = materializeFineAssessmentSelectionBoundary(pending);
       return undefined;
@@ -28,7 +31,10 @@ export function captureFineAssessmentSelectionBoundary(
   return boundary;
 }
 
-function buildLiveCaptureBase(taskSurfaceRef: string) {
+function buildLiveCaptureBase(
+  taskSurfaceRef: string,
+  supplementaryOverrides: Partial<RecallSupplementaryData>
+) {
   const candidates = buildLiveCaptureCandidates();
   return {
     candidates,
@@ -39,7 +45,10 @@ function buildLiveCaptureBase(taskSurfaceRef: string) {
       generateRuntimeId: () => "11111111-1111-4111-8111-111111111111"
     }),
     winnerMemoryIds: new Set<string>(),
-    supplementaryData: buildLiveCaptureSupplementary(candidates),
+    supplementaryData: buildLiveCaptureSupplementary(
+      candidates,
+      supplementaryOverrides
+    ),
     tokenEstimator: { estimate: () => 5 },
     now: () => "2026-07-29T00:00:00.000Z",
     warn: vi.fn(),
@@ -58,7 +67,8 @@ function buildLiveCaptureCandidates() {
 }
 
 function buildLiveCaptureSupplementary(
-  candidates: readonly ReturnType<typeof createRankedCandidate>[]
+  candidates: readonly ReturnType<typeof createRankedCandidate>[],
+  overrides: Partial<RecallSupplementaryData>
 ) {
   return createSupplementaryData({
     ftsRanks: Object.fromEntries(
@@ -78,6 +88,7 @@ function buildLiveCaptureSupplementary(
         candidate.entry.object_id,
         0.8 - index * 0.2
       ])
-    )
+    ),
+    ...overrides
   });
 }

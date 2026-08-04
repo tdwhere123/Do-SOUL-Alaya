@@ -31,7 +31,7 @@ async function collectReachableArtifacts(root, entrypoint) {
     visited.add(path);
     if (!SOURCE_EXTENSIONS.has(extname(path))) continue;
     const source = await readFile(path, "utf8");
-    for (const specifier of extractImportSpecifiers(source)) {
+    for (const specifier of extractArtifactSpecifiers(source)) {
       const dependency = resolveWorkspaceImport(root, path, specifier);
       if (dependency !== null && !visited.has(dependency)) pending.push(dependency);
     }
@@ -42,6 +42,15 @@ async function collectReachableArtifacts(root, entrypoint) {
 function extractImportSpecifiers(source) {
   const pattern = /(?:\b(?:import|export)\s+(?:[^'";]*?\s+from\s+)?|\bimport\s*\(\s*)["']([^"']+)["']/gu;
   return [...source.matchAll(pattern)].map((match) => match[1]);
+}
+
+function extractRuntimeUrlSpecifiers(source) {
+  const pattern = /\bnew\s+URL\s*\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/gu;
+  return [...source.matchAll(pattern)].map((match) => match[1]);
+}
+
+function extractArtifactSpecifiers(source) {
+  return [...extractImportSpecifiers(source), ...extractRuntimeUrlSpecifiers(source)];
 }
 
 function resolveWorkspaceImport(root, importer, specifier) {

@@ -7,12 +7,18 @@ import { resolveFineAssessmentDeepHead } from
   "../fine-assessment-deep-head.js";
 import { isWorkspaceMemoryCandidate } from
   "../../runtime/recall-service-helpers.js";
+import {
+  resolveCandidateSemanticActivation,
+  resolveCandidateSemanticActivationScope
+} from
+  "../../scoring/candidate-semantic-activation.js";
 import type {
   RecallDeepHeadTrace
 } from "../../rerank/deep-head.js";
 import type {
   IntegratedFloodCandidateDiagnostics,
   RecallFusionStreamContributions,
+  RecallEvidenceSemanticWinnerReceipt,
   RecallSupplementaryData
 } from "../../runtime/recall-service-types.js";
 import {
@@ -93,7 +99,12 @@ function buildCandidateLedger(
   const objectId = candidate.entry.object_id;
   const candidateKey = candidate.fusion.candidate_key;
   const sources = buildSources(candidate, supplementaryData, eligible, objectId);
-  const selectedEmbedding = selectEmbeddingSource(sources, eligible);
+  const selectedEmbedding = selectEmbeddingSource(
+    candidate,
+    sources,
+    eligible,
+    supplementaryData
+  );
   const fusion = buildFusionSlice(candidate);
   const flood = buildFloodTerms(candidate.fusion.flood_potential);
   return Object.freeze({
@@ -175,22 +186,47 @@ function buildSources(
 }
 
 function selectEmbeddingSource(
+  candidate: FineAssessmentCandidate,
   sources: ComponentLedgerCandidate["sources"],
-  eligible: boolean
+  eligible: boolean,
+  supplementaryData: RecallSupplementaryData
 ): ComponentLedgerCandidate["selected_embedding"] {
-  if (isObservedSource(sources.embedding_evidence_semantic)) {
-    return freezeSelected("evidence_semantic", sources.embedding_evidence_semantic);
-  }
-  if (isObservedSource(sources.embedding_effective_factor)) {
-    return freezeSelected("effective_factor", sources.embedding_effective_factor);
-  }
-  if (eligible && isObservedSource(sources.embedding_object_similarity)) {
+  const activation = resolveCandidateSemanticActivation({
+    scope: resolveCandidateSemanticActivationScope({
+      originPlane: candidate.originPlane,
+      objectKind: candidate.objectKind,
+      workspaceMemoryEligible: eligible
+    }),
+    evidenceSemantic: observedRaw(sources.embedding_evidence_semantic),
+    effectiveEmbedding: observedRaw(sources.embedding_effective_factor),
+    objectEmbedding: observedRaw(sources.embedding_object_similarity)
+  });
+  if (activation.source !== null) {
+    const winner = activation.source === "evidence_semantic"
+      ? supplementaryData.evidenceSemanticWinnersByCandidateKey?.get(
+        candidate.fusion.candidate_key
+      )
+      : undefined;
     return freezeSelected(
-      "object_embedding",
-      sources.embedding_object_similarity
+      activation.source,
+      sourceObservation(sources, activation.source),
+      winner?.score === activation.score ? winner : undefined
     );
   }
   return freezeSelected("none", unresolvedEmbeddingObservation(sources, eligible));
+}
+
+function observedRaw(observation: ComponentSourceObservation): number | undefined {
+  return isObservedSource(observation) ? observation.raw ?? undefined : undefined;
+}
+
+function sourceObservation(
+  sources: ComponentLedgerCandidate["sources"],
+  source: Exclude<SelectedEmbeddingSource, "none">
+): ComponentSourceObservation {
+  if (source === "evidence_semantic") return sources.embedding_evidence_semantic;
+  if (source === "effective_factor") return sources.embedding_effective_factor;
+  return sources.embedding_object_similarity;
 }
 
 function unresolvedEmbeddingObservation(
@@ -216,9 +252,19 @@ function unresolvedEmbeddingObservation(
 
 function freezeSelected(
   source: SelectedEmbeddingSource,
-  observation: ComponentSourceObservation
+  observation: ComponentSourceObservation,
+  winner?: Readonly<RecallEvidenceSemanticWinnerReceipt>
 ): ComponentLedgerCandidate["selected_embedding"] {
-  return Object.freeze({ source, observation });
+  return Object.freeze({
+    source,
+    observation,
+    winner: winner === undefined ? null : Object.freeze({
+      score: winner.score,
+      evidence_object_id: winner.evidenceObjectId,
+      document_identity: winner.documentIdentity,
+      projection: winner.projection
+    })
+  });
 }
 
 function buildFusionSlice(

@@ -42,6 +42,36 @@ describe("executed dist closure", () => {
     expect((await computeExecutedDistClosure(root)).sha256).not.toBe(first.sha256);
   });
 
+  it("includes a runtime sibling loaded through import.meta.url", async () => {
+    const root = await mkdtemp(join(tmpdir(), "executed-dist-worker-"));
+    roots.push(root);
+    const benchDist = join(root, "apps", "bench-runner", "dist");
+    const workerRuntime = join(root, "apps", "core-daemon", "dist", "runtime");
+    await mkdir(join(root, "apps", "bench-runner", "bin"), { recursive: true });
+    await mkdir(benchDist, { recursive: true });
+    await mkdir(join(workerRuntime, "recall-read-worker"), { recursive: true });
+    await mkdir(join(workerRuntime, "recall"), { recursive: true });
+    await writeFile(
+      join(root, "apps", "bench-runner", "bin", "alaya-bench-runner.mjs"),
+      'import "../dist/index.js";\n'
+    );
+    await writeFile(
+      join(benchDist, "index.js"),
+      'import "../../core-daemon/dist/runtime/recall-read-worker/client-config.js";\n'
+    );
+    await writeFile(
+      join(workerRuntime, "recall-read-worker", "client-config.js"),
+      'export const workerUrl = new URL("../recall/recall-read-worker.js", import.meta.url);\n'
+    );
+    const workerPath = join(workerRuntime, "recall", "recall-read-worker.js");
+    await writeFile(workerPath, "worker-v1\n");
+
+    const first = await computeExecutedDistClosure(root);
+    expect(first.file_count).toBe(4);
+    await writeFile(workerPath, "worker-v2\n");
+    expect((await computeExecutedDistClosure(root)).sha256).not.toBe(first.sha256);
+  });
+
   it("rejects symlinks in the measured artifact trees", async () => {
     const root = await mkdtemp(join(tmpdir(), "executed-dist-link-"));
     roots.push(root);

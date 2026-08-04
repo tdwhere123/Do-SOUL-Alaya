@@ -27,6 +27,10 @@ describe("recall evidence contexts for associative fact keys", () => {
           findRecallQualifiedFactKeysByIds: vi.fn(async () => [{
             capsule: evidence,
             verified_user_projection: false,
+            matched_fact_key_forms: [{
+              kind: "leave_one_slot_out",
+              omitted_slot: { slot_index: 2, role: "value" }
+            }],
             matched_projection: {
               projection_id: 5,
               projection_kind: "fact_key",
@@ -46,7 +50,15 @@ describe("recall evidence contexts for associative fact keys", () => {
       {
         evidenceRef: "evidence-1",
         documentIdentity: "fact_key:5",
-        content: "I bought my bookshelf"
+        content: "I bought my bookshelf",
+        projection: {
+          projection_id: 5,
+          projection_kind: "fact_key",
+          matched_fact_key_forms: [{
+            kind: "leave_one_slot_out",
+            omitted_slot: { slot_index: 2, role: "value" }
+          }]
+        }
       }
     ]);
   });

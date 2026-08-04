@@ -243,12 +243,22 @@ export type EvidenceCandidateScoringFailureClass =
 
 export interface EvidenceCandidateScoringResult {
   readonly scores: ReadonlyMap<string, number>;
+  readonly winnersByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<EvidenceCandidateScoringWinner>
+  >;
   readonly status: EvidenceCandidateScoringStatus;
   readonly expectedCount: number;
   readonly scoredCount: number;
   readonly inferenceCalls: number;
   readonly latencyMs: number;
   readonly failureClass: EvidenceCandidateScoringFailureClass | null;
+}
+
+export interface EvidenceCandidateScoringWinner {
+  readonly score: number;
+  readonly evidenceObjectId: string;
+  readonly documentIdentity: string;
 }
 
 export interface ScoreEvidenceCandidatesParams {

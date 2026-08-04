@@ -42,6 +42,26 @@ export interface RecallEvidenceProjectionMatchReceipt {
   readonly fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
 }
 
+export interface RecallEvidenceSemanticProjectionReceipt {
+  readonly projection_id: number | null;
+  readonly projection_kind: "owner" | "fact_key";
+  readonly matched_fact_key_forms: readonly Readonly<AssociativeFactKeyProjectionForm>[];
+}
+
+export interface RecallEvidenceSemanticDocument {
+  readonly evidenceRef: string;
+  readonly documentIdentity: string;
+  readonly content: string;
+  readonly projection: Readonly<RecallEvidenceSemanticProjectionReceipt>;
+}
+
+export interface RecallEvidenceSemanticWinnerReceipt {
+  readonly score: number;
+  readonly evidenceObjectId: string;
+  readonly documentIdentity: string;
+  readonly projection: Readonly<RecallEvidenceSemanticProjectionReceipt> | null;
+}
+
 export interface RecallResult {
   readonly candidates: readonly Readonly<RecallCandidate>[];
   readonly active_constraints: readonly Readonly<SoulActiveConstraint>[];
@@ -104,6 +124,10 @@ export interface RecallSupplementaryData {
   // Transient evidence previews are keyed by full candidate identity so a
   // colliding memory object id cannot inherit their semantic signal.
   readonly evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number>;
+  readonly evidenceSemanticWinnersByCandidateKey?: ReadonlyMap<
+    string,
+    Readonly<RecallEvidenceSemanticWinnerReceipt>
+  >;
   // Optional final query-to-candidate relevance owned by a local reranker.
   // Candidate-key identity preserves distinct provenance projections.
   readonly answerRelevanceScoresByCandidateKey?: ReadonlyMap<string, number>;
@@ -118,9 +142,7 @@ export interface RecallSupplementaryData {
   readonly evidenceGistsByMemoryId: Readonly<Record<string, string>>;
   readonly evidenceSemanticDocumentsByMemoryId?: Readonly<Record<
     string,
-    readonly Readonly<
-      import("../supplements/evidence/evidence-contexts.js").RecallEvidenceSemanticDocument
-    >[]
+    readonly Readonly<RecallEvidenceSemanticDocument>[]
   >>;
   readonly verifiedUserAssertionContextsByMemoryId?: Readonly<
     Record<

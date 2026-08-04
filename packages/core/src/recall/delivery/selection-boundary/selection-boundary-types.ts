@@ -89,11 +89,17 @@ export type SerializedRecallSupplementaryData = Readonly<
     RecallSupplementaryData,
     "evidenceSemanticDocumentsByMemoryId" |
     "evidenceSemanticScoresByCandidateKey" |
+    "evidenceSemanticWinnersByCandidateKey" |
     "answerRelevanceScoresByCandidateKey" |
     "routingKeysByOwnerIdentity" |
     "keyActivationByOwnerIdentity"
   > & {
     readonly evidenceSemanticScoresByCandidateKey: SelectionBoundaryNumberMap;
+    readonly evidenceSemanticWinnersByCandidateKey?: SelectionBoundaryMap<
+      MapValue<NonNullable<
+        RecallSupplementaryData["evidenceSemanticWinnersByCandidateKey"]
+      >>
+    >;
     readonly answerRelevanceScoresByCandidateKey?: SelectionBoundaryNumberMap;
     readonly routingKeysByOwnerIdentity?: SelectionBoundaryMap<
       MapValue<RecallSupplementaryData["routingKeysByOwnerIdentity"]>

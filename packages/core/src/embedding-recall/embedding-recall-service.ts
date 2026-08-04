@@ -25,6 +25,7 @@ export type {
   EvidenceCandidateScoringFailureClass,
   EvidenceCandidateScoringResult,
   EvidenceCandidateScoringStatus,
+  EvidenceCandidateScoringWinner,
   EvidenceDocumentEmbeddingRecord,
   EvidenceDocumentEmbeddingRef,
   EvidenceDocumentEmbeddingRepoPort,

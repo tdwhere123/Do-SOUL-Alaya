@@ -244,6 +244,7 @@ function emptyEvidenceScoring(
 ): Readonly<EvidenceCandidateScoringResult> {
   return Object.freeze({
     scores: new Map(),
+    winnersByCandidateKey: new Map(),
     status,
     expectedCount,
     scoredCount: 0,

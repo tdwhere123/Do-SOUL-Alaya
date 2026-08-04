@@ -1,13 +1,11 @@
 import type { MemoryEntry, RecallCandidate } from "@do-soul/alaya-protocol";
-import type { EmbeddingRecallSupplementResult } from "../../embedding-recall/embedding-recall-service.js";
 import type { RecallQueryProbes } from "../query/recall-query-probes.js";
 import { clamp01, compareMemoryEntries } from "../runtime/recall-service-helpers.js";
 import type {
   CoarseRecallCandidate,
   RecallAdmissionPlane,
   RecallPathExpansionSourceDiagnostic,
-  RecallServiceWarnPort,
-  RecallSupplementaryData
+  RecallServiceWarnPort
 } from "../runtime/recall-service-types.js";
 import { uniqueStrings } from "../expansion/path-relations.js";
 import { rankCoarseCandidateDrafts } from "./coarse-candidates-ranking.js";
@@ -68,47 +66,6 @@ export interface SourceProximitySeedScoreDiagnostic {
     | "object_probe"
     | "session_surface_cohort";
   readonly droppedBelowThreshold: boolean;
-}
-
-export function withEmbeddingSimilarityScores(
-  supplementaryData: RecallSupplementaryData,
-  hintsByObjectId: EmbeddingRecallSupplementResult["similarityHintsByObjectId"],
-  injectedSimilarityScores: Readonly<Record<string, number>>,
-  poolRescoreScores: Readonly<Record<string, number>> = {},
-  evidenceSemanticScoresByCandidateKey: ReadonlyMap<string, number> =
-    supplementaryData.evidenceSemanticScoresByCandidateKey
-): RecallSupplementaryData {
-  const merged = new Map<string, number>();
-  for (const [objectId, hint] of Object.entries(hintsByObjectId)) {
-    mergeObservedEmbeddingScore(merged, objectId, hint.normalized_similarity);
-  }
-  for (const [objectId, rawScore] of Object.entries(injectedSimilarityScores)) {
-    mergeObservedEmbeddingScore(merged, objectId, rawScore);
-  }
-  for (const [objectId, rawScore] of Object.entries(poolRescoreScores)) {
-    mergeObservedEmbeddingScore(merged, objectId, rawScore);
-  }
-  if (merged.size === 0 && evidenceSemanticScoresByCandidateKey.size === 0) {
-    return supplementaryData;
-  }
-
-  return Object.freeze({
-    ...supplementaryData,
-    embeddingSimilarityScores: merged.size === 0
-      ? supplementaryData.embeddingSimilarityScores
-      : Object.freeze(Object.fromEntries(merged)),
-    evidenceSemanticScoresByCandidateKey: new Map(evidenceSemanticScoresByCandidateKey)
-  });
-}
-
-function mergeObservedEmbeddingScore(
-  scores: Map<string, number>,
-  objectId: string,
-  rawScore: number
-): void {
-  if (!Number.isFinite(rawScore)) return;
-  const score = clamp01(rawScore);
-  scores.set(objectId, Math.max(scores.get(objectId) ?? 0, score));
 }
 
 // Deterministic OR-query of expanded lexical terms (morphology + synonym

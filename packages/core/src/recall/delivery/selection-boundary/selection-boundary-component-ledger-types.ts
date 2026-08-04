@@ -3,6 +3,8 @@ import type {
   RecallDeepHeadTrace
 } from "../../rerank/deep-head.js";
 import type { RecallFusionFamilyId } from "../fusion-delivery-families.js";
+import type { RecallEvidenceSemanticProjectionReceipt } from
+  "../../runtime/recall-service-types.js";
 import type {
   FloodAxisInactiveReason,
   RecallFusionStreamContributions,
@@ -110,6 +112,12 @@ export type ComponentLedgerCandidate = Readonly<{
   readonly selected_embedding: Readonly<{
     readonly source: SelectedEmbeddingSource;
     readonly observation: ComponentSourceObservation;
+    readonly winner: Readonly<{
+      readonly score: number;
+      readonly evidence_object_id: string;
+      readonly document_identity: string;
+      readonly projection: Readonly<RecallEvidenceSemanticProjectionReceipt> | null;
+    }> | null;
   }>;
   readonly fusion: ComponentLedgerFusionSlice;
   readonly flood: ComponentLedgerFloodTerms;

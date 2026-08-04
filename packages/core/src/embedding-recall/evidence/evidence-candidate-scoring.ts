@@ -13,6 +13,7 @@ import type {
   EmbeddingProviderPort,
   EvidenceCandidateScoringFailureClass,
   EvidenceCandidateScoringResult,
+  EvidenceCandidateScoringWinner,
   PreparedEmbeddingQueryHandle,
   ScoreEvidenceCandidatesParams
 } from "../types.js";
@@ -60,9 +61,19 @@ export async function scoreTransientEvidenceCandidates(
     const embeddings = documentBatch.embeddings;
     assertValidEmbeddingBatch(embeddings, candidates.length);
     const scoreCosine = createCosineBatchScorer(queryEmbedding);
-    const scores = aggregateCandidateScores(candidates, embeddings, scoreCosine);
+    const winners = aggregateCandidateScores(candidates, embeddings, scoreCosine);
+    const scores = new Map(
+      [...winners].map(([candidateKey, winner]) => [candidateKey, winner.score])
+    );
     return scoringResult(
-      "returned", candidates.length, candidates.length, inferenceCalls, startedAt, null, scores
+      "returned",
+      candidates.length,
+      candidates.length,
+      inferenceCalls,
+      startedAt,
+      null,
+      scores,
+      winners
     );
   } catch (error) {
     if (error instanceof EvidenceDocumentEmbeddingError) {
@@ -78,13 +89,36 @@ function aggregateCandidateScores(
   candidates: ScoreEvidenceCandidatesParams["candidates"],
   embeddings: readonly Float32Array[],
   scoreCosine: (embedding: Float32Array) => number
-): ReadonlyMap<string, number> {
-  const scores = new Map<string, number>();
+): ReadonlyMap<string, Readonly<EvidenceCandidateScoringWinner>> {
+  const winners = new Map<string, Readonly<EvidenceCandidateScoringWinner>>();
   candidates.forEach((candidate, index) => {
     const score = clamp01(scoreCosine(embeddings[index]!));
-    scores.set(candidate.candidateKey, Math.max(scores.get(candidate.candidateKey) ?? 0, score));
+    const winner = Object.freeze({
+      score,
+      evidenceObjectId: candidate.evidenceObjectId,
+      documentIdentity: candidate.documentIdentity
+    });
+    const current = winners.get(candidate.candidateKey);
+    if (current === undefined || compareWinners(winner, current) < 0) {
+      winners.set(candidate.candidateKey, winner);
+    }
   });
-  return scores;
+  return winners;
+}
+
+function compareWinners(
+  left: Readonly<EvidenceCandidateScoringWinner>,
+  right: Readonly<EvidenceCandidateScoringWinner>
+): number {
+  if (left.score !== right.score) return right.score - left.score;
+  const evidenceOrder = compareText(left.evidenceObjectId, right.evidenceObjectId);
+  return evidenceOrder !== 0
+    ? evidenceOrder
+    : compareText(left.documentIdentity, right.documentIdentity);
+}
+
+function compareText(left: string, right: string): number {
+  return left === right ? 0 : left < right ? -1 : 1;
 }
 
 async function resolveQueryEmbedding(
@@ -129,10 +163,15 @@ function scoringResult(
   inferenceCalls: number,
   startedAt: number,
   failureClass: EvidenceCandidateScoringFailureClass | null = null,
-  scores: ReadonlyMap<string, number> = new Map()
+  scores: ReadonlyMap<string, number> = new Map(),
+  winnersByCandidateKey: ReadonlyMap<
+    string,
+    Readonly<EvidenceCandidateScoringWinner>
+  > = new Map()
 ): EvidenceCandidateScoringResult {
   return Object.freeze({
     scores,
+    winnersByCandidateKey,
     status,
     expectedCount,
     scoredCount,

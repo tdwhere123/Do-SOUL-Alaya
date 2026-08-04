@@ -47,6 +47,10 @@ export function validateSelectionBoundary(
   for (const entries of serializedSupplementaryMaps(boundary.input)) {
     assertUniqueEntryKeys(entries);
   }
+  assertEvidenceSemanticWinners(
+    boundary.input.supplementary_data.evidenceSemanticWinnersByCandidateKey,
+    boundary.input.supplementary_data.evidenceSemanticScoresByCandidateKey
+  );
   assertFinalCandidateIdentity(boundary);
   if (boundary.expected.pre_projection !== undefined) {
     assertPreProjection(
@@ -54,6 +58,65 @@ export function validateSelectionBoundary(
       boundary.expected.candidate_keys
     );
   }
+}
+
+function assertEvidenceSemanticWinners(
+  entries: SerializedRecallSupplementaryData[
+    "evidenceSemanticWinnersByCandidateKey"
+  ],
+  scoreEntries: SelectionBoundaryNumberMap
+): void {
+  if (entries === undefined) {
+    if (scoreEntries.length !== 0) throwSelectionBoundaryFidelityMismatch();
+    return;
+  }
+  if (entries.length !== scoreEntries.length) {
+    throwSelectionBoundaryFidelityMismatch();
+  }
+  const scores = new Map(scoreEntries);
+  for (const [candidateKey, winner] of entries) {
+    assertEvidenceSemanticWinner(candidateKey, winner, scores);
+  }
+}
+
+function assertEvidenceSemanticWinner(
+  candidateKey: string,
+  winner: unknown,
+  scores: ReadonlyMap<string, number>
+): void {
+  if (!isRecord(winner) ||
+      !isUnitNumber(winner.score) ||
+      scores.get(candidateKey) !== winner.score ||
+      !isNonEmptyString(winner.evidenceObjectId) ||
+      !isNonEmptyString(winner.documentIdentity)) {
+    throwSelectionBoundaryFidelityMismatch();
+  }
+  const projection = winner.projection;
+  if (projection === null) {
+    if (winner.documentIdentity.startsWith("fact_key:")) {
+      throwSelectionBoundaryFidelityMismatch();
+    }
+    return;
+  }
+  if (!isRecord(projection)) throwSelectionBoundaryFidelityMismatch();
+  assertEvidenceSemanticProjection(winner.documentIdentity, projection);
+}
+
+function assertEvidenceSemanticProjection(
+  documentIdentity: string,
+  projection: Record<string, unknown>
+): void {
+  const forms = projection.matched_fact_key_forms;
+  if (!Array.isArray(forms) || forms.some((form) => !isRecord(form))) {
+    throwSelectionBoundaryFidelityMismatch();
+  }
+  const kind = projection.projection_kind;
+  const id = projection.projection_id;
+  const ownerValid = kind === "owner" && id === null && forms.length === 0;
+  const factKeyValid = kind === "fact_key" &&
+    Number.isInteger(id) && (id as number) > 0 &&
+    documentIdentity === `fact_key:${String(id)}`;
+  if (!ownerValid && !factKeyValid) throwSelectionBoundaryFidelityMismatch();
 }
 
 export function restoreSelectionParams(
@@ -104,6 +167,7 @@ export function restoreSupplementaryData(
 ): RecallSupplementaryData {
   const {
     evidenceSemanticScoresByCandidateKey,
+    evidenceSemanticWinnersByCandidateKey,
     answerRelevanceScoresByCandidateKey,
     routingKeysByOwnerIdentity,
     keyActivationByOwnerIdentity,
@@ -114,6 +178,11 @@ export function restoreSupplementaryData(
     evidenceSemanticScoresByCandidateKey: new Map(
       evidenceSemanticScoresByCandidateKey
     ),
+    ...(evidenceSemanticWinnersByCandidateKey === undefined ? {} : {
+      evidenceSemanticWinnersByCandidateKey: new Map(
+        evidenceSemanticWinnersByCandidateKey
+      )
+    }),
     ...(answerRelevanceScoresByCandidateKey === undefined ? {} : {
       answerRelevanceScoresByCandidateKey: new Map(
         answerRelevanceScoresByCandidateKey
@@ -167,6 +236,9 @@ function serializedSupplementaryMaps(
   input: FineAssessmentSelectionBoundaryInput
 ): readonly (readonly (readonly [string, unknown])[])[] {
   return [
+    ...(input.supplementary_data.evidenceSemanticWinnersByCandidateKey === undefined
+      ? []
+      : [input.supplementary_data.evidenceSemanticWinnersByCandidateKey]),
     ...(input.supplementary_data.routingKeysByOwnerIdentity === undefined
       ? []
       : [input.supplementary_data.routingKeysByOwnerIdentity]),
@@ -385,6 +457,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isNonNegativeFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isUnitNumber(value: unknown): value is number {
+  return isNonNegativeFinite(value) && value <= 1;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

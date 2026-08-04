@@ -107,6 +107,94 @@ describe("fine-assessment component ledger", () => {
       .toBe(false);
   });
 
+  it("reports an evidence winner only when evidence semantic activation wins", () => {
+    const baseline = captureLiveBoundary();
+    const [firstKey, secondKey] = baseline.input.ordered_candidates.map(
+      (candidate) => candidate.fusion.candidate_key
+    );
+    const winner = {
+      score: 0.9,
+      evidenceObjectId: "evidence-1",
+      documentIdentity: "fact_key:5",
+      projection: {
+        projection_id: 5,
+        projection_kind: "fact_key",
+        matched_fact_key_forms: [{
+          kind: "leave_one_slot_out",
+          omitted_slot: { slot_index: 2, role: "value" }
+        }]
+      }
+    };
+    const lowerWinner = {
+      score: 0.2,
+      evidenceObjectId: "evidence-2",
+      documentIdentity: "owner",
+      projection: {
+        projection_id: null,
+        projection_kind: "owner",
+        matched_fact_key_forms: []
+      }
+    };
+    const candidates = baseline.input.ordered_candidates.map((candidate, index) => ({
+      ...candidate,
+      effectiveFactors: {
+        ...candidate.effectiveFactors,
+        embedding_similarity: index === 0 ? 0.9 : index === 1 ? 0.8 : 0
+      }
+    }));
+    const boundary = {
+      ...baseline,
+      input: {
+        ...baseline.input,
+        ordered_candidates: candidates,
+        supplementary_data: {
+          ...baseline.input.supplementary_data,
+          evidenceSemanticScoresByCandidateKey: [
+            [firstKey!, 0.9],
+            [secondKey!, 0.2]
+          ],
+          evidenceSemanticWinnersByCandidateKey: [
+            [firstKey!, winner],
+            [secondKey!, lowerWinner]
+          ]
+        }
+      }
+    } as unknown as FineAssessmentSelectionBoundaryCase;
+
+    const ledger = buildFineAssessmentComponentLedger(boundary);
+    const byKey = new Map(
+      ledger.candidates.map((row) => [row.candidate_key, row] as const)
+    );
+    const evidenceSelected = byKey.get(firstKey!)!.selected_embedding as unknown as {
+      readonly source: string;
+      readonly winner?: Readonly<{
+        readonly score: number;
+        readonly evidence_object_id: string;
+        readonly document_identity: string;
+        readonly projection: unknown;
+      }> | null;
+    };
+    const effectiveSelected = byKey.get(secondKey!)!.selected_embedding as unknown as {
+      readonly source: string;
+      readonly winner?: unknown;
+    };
+
+    expect(evidenceSelected).toEqual({
+      source: "evidence_semantic",
+      observation: expect.objectContaining({ raw: 0.9 }),
+      winner: {
+        score: 0.9,
+        evidence_object_id: "evidence-1",
+        document_identity: "fact_key:5",
+        projection: winner.projection
+      }
+    });
+    expect(effectiveSelected).toMatchObject({
+      source: "effective_factor",
+      winner: null
+    });
+  });
+
   it("distinguishes absent evidence_fts from observed zero before ?? 0", () => {
     const boundary = withEvidenceFtsStates(captureLiveBoundary());
     const ledger = buildFineAssessmentComponentLedger(boundary);

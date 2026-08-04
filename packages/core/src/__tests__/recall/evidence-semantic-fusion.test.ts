@@ -10,7 +10,8 @@ import { createMemoryEntry } from "./recall-service-test-fixtures.js";
 
 function candidate(
   objectId: string,
-  objectKind: "memory_entry" | "evidence_capsule"
+  objectKind: "memory_entry" | "evidence_capsule",
+  embeddingSimilarity?: number
 ): RecallFusionCandidateInput {
   return {
     entry: createMemoryEntry({
@@ -20,7 +21,13 @@ function candidate(
     objectKind,
     originPlane: "workspace_local",
     effectiveScore: 0,
-    effectiveFactors: { activation: 0, relevance: 0 }
+    effectiveFactors: {
+      activation: 0,
+      relevance: 0,
+      ...(embeddingSimilarity === undefined
+        ? {}
+        : { embedding_similarity: embeddingSimilarity })
+    }
   };
 }
 
@@ -54,7 +61,63 @@ function supplementaryData(
 }
 
 describe("evidence semantic fusion", () => {
-  it("casts only the observed candidate-keyed evidence score into embedding fusion", () => {
+  it("uses the stronger candidate-keyed evidence semantic as memory embedding activation", () => {
+    const evidenceActivated = candidate(
+      "11111111-1111-4111-8111-111111111111",
+      "memory_entry",
+      0.4
+    );
+    const objectActivated = candidate(
+      "22222222-2222-4222-8222-222222222222",
+      "memory_entry",
+      0.7
+    );
+    const evidenceActivatedKey = buildRecallCandidateDedupeKey(evidenceActivated);
+    const objectActivatedKey = buildRecallCandidateDedupeKey(objectActivated);
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [evidenceActivated, objectActivated],
+      policy: {} as RecallPolicy,
+      supplementaryData: supplementaryData(new Map([[evidenceActivatedKey, 0.9]])),
+      nowIso: "2026-07-27T00:00:00.000Z"
+    });
+
+    expect(
+      fusion.get(evidenceActivatedKey)?.per_stream_rank.embedding_similarity
+    ).toBe(1);
+    expect(
+      fusion.get(objectActivatedKey)?.per_stream_rank.embedding_similarity
+    ).toBe(2);
+  });
+
+  it("does not let a weaker evidence semantic demote memory object activation", () => {
+    const objectActivated = candidate(
+      "11111111-1111-4111-8111-111111111111",
+      "memory_entry",
+      0.8
+    );
+    const comparison = candidate(
+      "22222222-2222-4222-8222-222222222222",
+      "memory_entry",
+      0.6
+    );
+    const objectActivatedKey = buildRecallCandidateDedupeKey(objectActivated);
+    const comparisonKey = buildRecallCandidateDedupeKey(comparison);
+
+    const fusion = buildRecallFusionDetails({
+      candidates: [objectActivated, comparison],
+      policy: {} as RecallPolicy,
+      supplementaryData: supplementaryData(new Map([[objectActivatedKey, 0.2]])),
+      nowIso: "2026-07-27T00:00:00.000Z"
+    });
+
+    expect(
+      fusion.get(objectActivatedKey)?.per_stream_rank.embedding_similarity
+    ).toBe(1);
+    expect(fusion.get(comparisonKey)?.per_stream_rank.embedding_similarity).toBe(2);
+  });
+
+  it("keeps candidate-keyed evidence semantic isolated across colliding identities", () => {
     const sharedObjectId = "11111111-1111-4111-8111-111111111111";
     const observedEvidence = candidate(sharedObjectId, "evidence_capsule");
     const unobservedEvidence = candidate(
@@ -69,11 +132,15 @@ describe("evidence semantic fusion", () => {
     const fusion = buildRecallFusionDetails({
       candidates: [observedEvidence, unobservedEvidence, collidingMemory],
       policy: {} as RecallPolicy,
-      supplementaryData: supplementaryData(new Map([[observedKey, 0.8]])),
+      supplementaryData: supplementaryData(new Map([
+        [observedKey, 0.8],
+        [collidingMemoryKey, 0.9]
+      ])),
       nowIso: "2026-07-27T00:00:00.000Z"
     });
 
-    expect(fusion.get(observedKey)?.per_stream_rank.embedding_similarity).toBe(1);
+    expect(fusion.get(collidingMemoryKey)?.per_stream_rank.embedding_similarity).toBe(1);
+    expect(fusion.get(observedKey)?.per_stream_rank.embedding_similarity).toBe(2);
     expect(
       fusion.get(observedKey)?.fused_rank_contribution_per_stream.embedding_similarity
     ).toBeGreaterThan(0);
@@ -81,9 +148,8 @@ describe("evidence semantic fusion", () => {
     expect(
       fusion.get(unobservedKey)?.fused_rank_contribution_per_stream.embedding_similarity
     ).toBe(0);
-    expect(fusion.get(collidingMemoryKey)?.per_stream_rank.embedding_similarity).toBeNull();
     expect(
       fusion.get(collidingMemoryKey)?.fused_rank_contribution_per_stream.embedding_similarity
-    ).toBe(0);
+    ).toBeGreaterThan(0);
   });
 });

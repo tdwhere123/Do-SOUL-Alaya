@@ -159,6 +159,39 @@ describe("EmbeddingRecallService evidence document cache", () => {
 
     expect(result).toMatchObject({ expectedCount: 2, scoredCount: 2 });
     expect([...result.scores]).toEqual([["memory:1", 1]]);
+    expect(readWinningDocuments(result).get("memory:1")).toEqual({
+      score: 1,
+      evidenceObjectId: "evidence-strong",
+      documentIdentity: "evidence-strong"
+    });
+  });
+
+  it("chooses the same attributed document on equal scores in either input order", async () => {
+    const candidates = [
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "fact-key:z",
+        content: "equal-z"
+      },
+      {
+        candidateKey: "memory:1",
+        evidenceObjectId: "evidence-1",
+        documentIdentity: "fact-key:a",
+        content: "equal-a"
+      }
+    ] as const;
+
+    const forward = await scoreEqualCandidates(candidates);
+    const reverse = await scoreEqualCandidates([...candidates].reverse());
+    const expected = {
+      score: 1,
+      evidenceObjectId: "evidence-1",
+      documentIdentity: "fact-key:a"
+    };
+
+    expect(readWinningDocuments(forward).get("memory:1")).toEqual(expected);
+    expect(readWinningDocuments(reverse).get("memory:1")).toEqual(expected);
   });
 
   it("persists linked documents under evidence identity while scoring memory identity", async () => {
@@ -291,4 +324,49 @@ function vectorFor(text: string): Float32Array {
   const first = text.charCodeAt(0) || 1;
   const last = text.charCodeAt(text.length - 1) || 1;
   return new Float32Array([first, last]);
+}
+
+type ExpectedWinningDocument = Readonly<{
+  score: number;
+  evidenceObjectId: string;
+  documentIdentity: string;
+}>;
+
+function readWinningDocuments(
+  result: unknown
+): ReadonlyMap<string, ExpectedWinningDocument> {
+  return (result as {
+    readonly winnersByCandidateKey: ReadonlyMap<
+      string,
+      ExpectedWinningDocument
+    >;
+  }).winnersByCandidateKey;
+}
+
+async function scoreEqualCandidates(
+  candidates: readonly Readonly<{
+    candidateKey: string;
+    evidenceObjectId: string;
+    documentIdentity: string;
+    content: string;
+  }>[]
+) {
+  const service = new EmbeddingRecallService({
+    embeddingRepo: { listByObjectIds: vi.fn(async () => []) },
+    provider: createProvider({
+      embedTexts: vi.fn(async (texts: readonly string[]) =>
+        texts.map(() => new Float32Array([1, 0])))
+    }),
+    eventLogRepo: {
+      append: vi.fn(),
+      queryByEntity: vi.fn(async () => [])
+    }
+  });
+  return await service.scoreEvidenceCandidates({
+    workspaceId: "workspace-1",
+    runId: null,
+    queryText: "query",
+    preparedQuery: null,
+    candidates
+  });
 }

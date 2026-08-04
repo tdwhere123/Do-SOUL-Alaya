@@ -1,4 +1,5 @@
-import { withEmbeddingSimilarityScores } from "../../coarse-filter/coarse-candidates.js";
+import { withEmbeddingSimilarityScores } from
+  "../../coarse-filter/embedding/embedding-similarity-supplement.js";
 import {
   deliverFineAssessment,
   prepareFineAssessment,
@@ -15,6 +16,8 @@ import type {
 import { shouldCaptureRecallAnswerFeatures } from "../recall-service-runner-types.js";
 import { collectCoarseFilterSupplementaryData } from "./coarse.js";
 import type { EmbeddingAssessmentData } from "./recall-embedding-assessment.js";
+import { attributeEvidenceSemanticWinners } from
+  "./evidence-semantic-candidates.js";
 import {
   asTimedSpan,
   instantTimedResult,
@@ -116,7 +119,8 @@ export function prepareLegacyReassessment(
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
     embeddingData.poolRescoreScores,
-    embeddingData.evidenceScoring.scores
+    embeddingData.evidenceScoring.scores,
+    attributedEvidenceWinners(initial.supplementaryData, embeddingData)
   );
   const reassessmentRequired = needsEmbeddingReassessment(embeddingData, coarse);
   return Object.freeze({
@@ -150,7 +154,8 @@ export function prepareSnapshotAssessment(
     embeddingData.supplement.similarityHintsByObjectId,
     coarse.embeddingCoarseInjection.similarityScores,
     embeddingData.poolRescoreScores,
-    embeddingData.evidenceScoring.scores
+    embeddingData.evidenceScoring.scores,
+    attributedEvidenceWinners(base.supplementaryData, embeddingData)
   );
   return Object.freeze({
     supplementaryData,
@@ -162,6 +167,20 @@ export function prepareSnapshotAssessment(
       coarse.combinedCoarseCandidates
     ))
   });
+}
+
+function attributedEvidenceWinners(
+  supplementaryData: FineAssessParams["supplementaryData"],
+  embeddingData: EmbeddingAssessmentData
+) {
+  const winners = embeddingData.evidenceScoring.winnersByCandidateKey;
+  if (winners.size === 0) return undefined;
+  const attributed = attributeEvidenceSemanticWinners({
+    winners,
+    evidenceDocumentsByMemoryId:
+      supplementaryData.evidenceSemanticDocumentsByMemoryId ?? {}
+  });
+  return attributed.size === 0 ? undefined : attributed;
 }
 
 export function deliverOrReuseAssessment(

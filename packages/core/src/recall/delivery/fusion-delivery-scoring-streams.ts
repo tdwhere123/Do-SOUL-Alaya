@@ -8,6 +8,8 @@ import {
   normalizeGraphSupport
 } from "../runtime/recall-service-helpers.js";
 import { normalizeEvidenceText } from "../scoring/query-evidence-scoring.js";
+import { resolveCandidateSemanticActivation } from
+  "../scoring/candidate-semantic-activation.js";
 import { scorePreferenceProfileAlignment } from "../scoring/preference-fusion-scoring.js";
 import {
   parseQueryTimeWindow,
@@ -31,10 +33,10 @@ export function scoreRecallFusionStream(
       return clamp01(supplementaryData.evidenceFtsRanks[candidate.entry.object_id] ?? 0);
     }
     if (stream === "embedding_similarity") {
-      return clamp01(
-        supplementaryData.evidenceSemanticScoresByCandidateKey.get(
-          buildRecallCandidateDedupeKey(candidate)
-        ) ?? 0
+      return resolveSemanticFusionActivation(
+        candidate,
+        supplementaryData,
+        "evidence_capsule"
       );
     }
     return 0;
@@ -82,7 +84,7 @@ function scoreGlobalFusionStream(
     case "existing_score":
       return clamp01(candidate.effectiveScore);
     case "embedding_similarity":
-      return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
+      return resolveSemanticFusionActivation(candidate, supplementaryData, "global");
     case "temporal_recency":
       return scoreTemporalFusion(candidate.entry, supplementaryData.queryProbes, nowIso);
     case "workspace_activation":
@@ -123,7 +125,11 @@ function scoreWorkspaceLocalFusionStream(
     case "existing_score":
       return clamp01(candidate.effectiveScore);
     case "embedding_similarity":
-      return clamp01(candidate.effectiveFactors.embedding_similarity ?? 0);
+      return resolveSemanticFusionActivation(
+        candidate,
+        supplementaryData,
+        "workspace_memory"
+      );
     case "graph_expansion":
       return clamp01(Math.max(
         supplementaryData.graphExpansionScores[objectId] ?? 0,
@@ -140,6 +146,22 @@ function scoreWorkspaceLocalFusionStream(
     case "facet_overlap":
       return scoreFacetOverlap(candidate.entry, supplementaryData.querySoughtFacets);
   }
+}
+
+function resolveSemanticFusionActivation(
+  candidate: RecallFusionCandidateInput,
+  supplementaryData: RecallSupplementaryData,
+  scope: "workspace_memory" | "evidence_capsule" | "global"
+): number {
+  const candidateKey = buildRecallCandidateDedupeKey(candidate);
+  return resolveCandidateSemanticActivation({
+    scope,
+    evidenceSemantic:
+      supplementaryData.evidenceSemanticScoresByCandidateKey.get(candidateKey),
+    effectiveEmbedding: candidate.effectiveFactors.embedding_similarity,
+    objectEmbedding:
+      supplementaryData.embeddingSimilarityScores[candidate.entry.object_id]
+  }).score ?? 0;
 }
 
 function scoreFacetOverlap(
